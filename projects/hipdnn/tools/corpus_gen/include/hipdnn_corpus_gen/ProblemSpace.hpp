@@ -15,6 +15,7 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <random>
 #include <set>
 #include <string>
@@ -187,12 +188,20 @@ namespace detail
 /// The cross product of every categorical parameter's declared values, at most @p limit of it
 /// plus whatever keeps every declared value present; @p total receives the full size.
 ///
-/// Past the limit the product is sampled evenly by index, not cut to a prefix (a prefix keeps
-/// only the first values of the earliest parameters), and each value the sample missed gets a
-/// combination of its own, so a model trained on the corpus has seen every value (§5.2).
-/// Declaration order keeps the result reproducible.
+/// Past the limit the product is sampled, not cut to a prefix (a prefix keeps only the first
+/// values of the earliest parameters), and each value the sample missed gets a combination of
+/// its own, so a model trained on the corpus has seen every value (§5.2). The sample steps
+/// through the product by a stride coprime to its size, so it visits distinct combinations in a
+/// fixed, scattered order: an even stride aliases with the mixed-radix index and leaves whole
+/// value triples out (sdpa_fwd's 6912 combinations at a stride of 6.75 have no kv_bhsd, jitter,
+/// local_4096 one). @p live, when given, says which combinations can hold a problem (see
+/// excludedByCategoricals): only those are sampled, so the limit is spent on combinations that
+/// count. Declaration order keeps the result reproducible.
 inline std::vector<ProblemPoint>
-    categoricalCombinations(const std::vector<Parameter>& parameters, size_t limit, size_t& total)
+    categoricalCombinations(const std::vector<Parameter>& parameters,
+                            size_t limit,
+                            size_t& total,
+                            const std::function<bool(const ProblemPoint&)>& live = {})
 {
     std::vector<std::pair<std::string, std::vector<ParameterValue>>> axes;
     total = 1;
@@ -232,12 +241,34 @@ inline std::vector<ProblemPoint>
         return combinations;
     }
 
-    combinations.reserve(limit);
-    const auto step = static_cast<double>(total) / static_cast<double>(limit);
-    for(size_t i = 0; i < limit; ++i)
+    // The stride nearest the golden ratio of the product that shares no factor with it, so the
+    // walk index * stride % total is a permutation of the product.
+    size_t stride
+        = std::max<size_t>(1, static_cast<size_t>(static_cast<double>(total) * 0.6180339887));
+    while(std::gcd(stride, total) != 1)
     {
-        combinations.push_back(at(static_cast<size_t>(static_cast<double>(i) * step)));
+        ++stride;
     }
+    // The walk's product index after @p step strides, by repeated addition modulo the total so
+    // a large product cannot overflow.
+    const auto next = [&](size_t index) {
+        return index >= total - stride ? index - (total - stride) : index + stride;
+    };
+    const auto counts = [&live](const ProblemPoint& point) { return !live || live(point); };
+
+    combinations.reserve(limit);
+    size_t visited = 0;
+    size_t cursor = 0;
+    for(; visited < total && combinations.size() < limit; ++visited, cursor = next(cursor))
+    {
+        auto point = at(cursor);
+        if(counts(point))
+        {
+            combinations.push_back(std::move(point));
+        }
+    }
+    // A value the sample missed gets the next combination of the walk that holds it, if any
+    // can; failing that, the first combination with the value swapped in.
     for(const auto& axis : axes)
     {
         const auto& name = axis.first;
@@ -247,7 +278,22 @@ inline std::vector<ProblemPoint>
                 = std::any_of(combinations.begin(), combinations.end(), [&](const auto& point) {
                       return point.at(name) == value;
                   });
-            if(!present)
+            if(present)
+            {
+                continue;
+            }
+            bool found = false;
+            auto ahead = cursor;
+            for(size_t step = visited; step < total && !found; ++step, ahead = next(ahead))
+            {
+                auto point = at(ahead);
+                if(point.at(name) == value && counts(point))
+                {
+                    combinations.push_back(std::move(point));
+                    found = true;
+                }
+            }
+            if(!found)
             {
                 auto point = combinations.front();
                 point[name] = value;
@@ -700,7 +746,12 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
 
     size_t totalCombinations = 0;
     const auto combinations = detail::categoricalCombinations(
-        metadata.parameters, request.maxCombinations, totalCombinations);
+        metadata.parameters,
+        request.maxCombinations,
+        totalCombinations,
+        [&metadata](const ProblemPoint& combination) {
+            return !detail::excludedByCategoricals(metadata, combination);
+        });
 
     if(totalCombinations > combinations.size())
     {

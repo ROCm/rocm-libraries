@@ -127,18 +127,16 @@ TEST(TestShippedGraphsValidate, EveryDeclarationBuildsGraphsTheFrontendValidates
     EXPECT_GT(operations, 0) << "no shipped declaration was found";
 }
 
-TEST(TestShippedGraphsValidate, EverySdpaLayoutScaleWindowAndSequenceRelationValidates)
+TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelationValidates)
 {
     // The sweep above draws a couple of points per combination; these are the corners the SDPA
     // facets add: cross attention (seqlen_q > seqlen_k, non-causal), the widest head, fp32, every
-    // layout, scale and window.
+    // form, layout, scale and window the declaration admits together.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation
-                           + ".opmeta.json");
-        ASSERT_TRUE(file.good()) << operation;
-        const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-        ASSERT_TRUE(parsed.ok()) << operation;
+        const auto metadata = test::shippedOperation(operation);
+        const auto* form = metadata.find("form");
+        ASSERT_NE(form, nullptr) << operation;
 
         struct Shape
         {
@@ -157,53 +155,125 @@ TEST(TestShippedGraphsValidate, EverySdpaLayoutScaleWindowAndSequenceRelationVal
         int64_t validated = 0;
         for(const auto& shape : shapes)
         {
-            for(const std::string layout : {"bshd", "bhsd", "kv_bhsd"})
+            for(const auto& formValue : form->values)
             {
-                for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
+                for(const std::string layout : {"bshd", "bhsd", "kv_bhsd"})
                 {
-                    for(const std::string dtype : {"fp16", "fp32"})
+                    for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
                     {
-                        for(const auto& window : windows)
+                        for(const std::string dtype : {"fp16", "fp32"})
                         {
-                            ProblemPoint point{{"batch", int64_t{2}},
-                                               {"heads", int64_t{8}},
-                                               {"heads_kv", int64_t{2}},
-                                               {"seqlen_q", shape.seqlenQ},
-                                               {"seqlen_k", shape.seqlenK},
-                                               {"head_dim", shape.headDim},
-                                               {"is_causal", shape.causal},
-                                               {"alignment", std::string("top_left")},
-                                               {"dtype", dtype},
-                                               {"layout", layout},
-                                               {"scale", scale}};
-                            if(operation == "sdpa_fwd")
+                            for(const auto& window : windows)
                             {
-                                point["generate_stats"] = false;
-                                point["window"] = window;
+                                ProblemPoint point{{"batch", int64_t{2}},
+                                                   {"heads", int64_t{8}},
+                                                   {"heads_kv", int64_t{2}},
+                                                   {"seqlen_q", shape.seqlenQ},
+                                                   {"seqlen_k", shape.seqlenK},
+                                                   {"head_dim", shape.headDim},
+                                                   {"is_causal", shape.causal},
+                                                   {"alignment", std::string("top_left")},
+                                                   {"dtype", dtype},
+                                                   {"form", formValue},
+                                                   {"layout", layout},
+                                                   {"scale", scale}};
+                                if(operation == "sdpa_fwd")
+                                {
+                                    point["generate_stats"] = false;
+                                    point["window"] = window;
+                                }
+                                const std::string where = operation + " " + detail::describe(point);
+                                if(!detail::satisfiesConstraints(metadata, point))
+                                {
+                                    // A point the declaration excludes (a window with more queries
+                                    // than keys leaves most rows with no key at all, a ragged form
+                                    // over head-major strides, a scale the form ignores) is not a
+                                    // problem the corpus would ever hold, so it is not certified.
+                                    continue;
+                                }
+                                ++validated;
+                                const auto built = buildGraphFor(metadata, point);
+                                ASSERT_TRUE(built.ok()) << where << ": " << built.error;
+                                hipdnn_frontend::graph::Graph graph;
+                                const auto restored = graph.deserialize(built.bytes);
+                                ASSERT_TRUE(restored.is_good())
+                                    << where << ": deserialize: " << restored.get_message();
+                                const auto valid = graph.validate();
+                                EXPECT_TRUE(valid.is_good())
+                                    << where << ": validate: " << valid.get_message();
                             }
-                            const std::string where = operation + " " + detail::describe(point);
-                            if(!detail::satisfiesConstraints(*parsed.metadata, point))
-                            {
-                                // A point the declaration excludes (a window with more queries
-                                // than keys leaves most rows with no key at all) is not a
-                                // problem the corpus would ever hold, so it is not certified.
-                                continue;
-                            }
-                            ++validated;
-                            const auto built = buildGraphFor(*parsed.metadata, point);
-                            ASSERT_TRUE(built.ok()) << where << ": " << built.error;
-                            hipdnn_frontend::graph::Graph graph;
-                            const auto restored = graph.deserialize(built.bytes);
-                            ASSERT_TRUE(restored.is_good())
-                                << where << ": deserialize: " << restored.get_message();
-                            const auto valid = graph.validate();
-                            EXPECT_TRUE(valid.is_good())
-                                << where << ": validate: " << valid.get_message();
                         }
                     }
                 }
             }
         }
         EXPECT_GT(validated, 0) << operation << " certified nothing";
+    }
+}
+
+TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
+{
+    // The sweep above reaches a form only by chance; this builds each declared one over a GQA
+    // shape at every element type, mask and diagonal anchor the declaration admits, with and
+    // without the training forward's statistics, at the default layout, scale and window.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+        const auto* form = metadata.find("form");
+        ASSERT_NE(form, nullptr) << operation;
+        ASSERT_FALSE(form->values.empty()) << operation;
+
+        size_t built = 0;
+        for(const auto& value : form->values)
+        {
+            for(const auto* dtype : {"fp16", "bf16"})
+            {
+                for(const bool causal : {true, false})
+                {
+                    for(const auto* alignment : {"top_left", "bottom_right"})
+                    {
+                        for(const bool stats : {true, false})
+                        {
+                            ProblemPoint point{{"batch", int64_t{2}},
+                                               {"heads", int64_t{4}},
+                                               {"heads_kv", int64_t{2}},
+                                               {"seqlen_q", int64_t{16}},
+                                               {"seqlen_k", int64_t{32}},
+                                               {"head_dim", int64_t{64}},
+                                               {"is_causal", causal},
+                                               {"alignment", std::string(alignment)},
+                                               {"generate_stats", stats},
+                                               {"dtype", std::string(dtype)},
+                                               {"form", value},
+                                               {"layout", std::string("bshd")},
+                                               {"scale", std::string("inv_sqrt_d")}};
+                            if(operation == "sdpa_fwd")
+                            {
+                                point["window"] = std::string("none");
+                            }
+                            // The declaration pins the anchor where it makes no difference.
+                            if(!detail::satisfiesConstraints(metadata, point))
+                            {
+                                continue;
+                            }
+                            auto where = operation;
+                            where.append(" ").append(detail::describe(point));
+                            const auto result = buildGraphFor(metadata, point);
+                            ASSERT_TRUE(result.ok()) << where << ": " << result.error;
+                            hipdnn_frontend::graph::Graph graph;
+                            const auto restored = graph.deserialize(result.bytes);
+                            ASSERT_TRUE(restored.is_good())
+                                << where << ": deserialize: " << restored.get_message();
+                            const auto valid = graph.validate();
+                            EXPECT_TRUE(valid.is_good())
+                                << where << ": validate: " << valid.get_message();
+                            ++built;
+                        }
+                    }
+                }
+            }
+        }
+        // Three admitted mask and anchor pairs, two element types, two statistics settings.
+        EXPECT_EQ(built, form->values.size() * 12U) << operation;
     }
 }

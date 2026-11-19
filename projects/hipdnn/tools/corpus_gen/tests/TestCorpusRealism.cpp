@@ -469,6 +469,7 @@ TEST(TestCorpusRealism, TheShippedSdpaArchetypesAnchorCrossAttentionAndTheHeadWi
                                        {"dtype", std::string("bf16")},
                                        {"generate_stats", false},
                                        {"is_causal", causal},
+                                       {"form", std::string("plain")},
                                        {"layout", std::string("bshd")},
                                        {"scale", std::string("inv_sqrt_d")},
                                        {"window", std::string("none")}};

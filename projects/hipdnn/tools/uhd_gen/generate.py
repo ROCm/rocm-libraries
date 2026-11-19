@@ -61,6 +61,12 @@ from .immediate import (
     training_binding,
     validate_signature,
 )
+from .optional import (
+    default_for,
+    optional_feature_of,
+    optional_features,
+    optional_guards,
+)
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 
 logger = logging.getLogger(__name__)
@@ -1712,21 +1718,30 @@ def exclusion_reason(name: str) -> str | None:
     return next((reason for reason, rule in EXCLUSIONS if rule(name)), None)
 
 
-def presence_flag(name: str) -> dict:
+def presence_flag(name: str, default=None) -> dict:
     """What a tensor identifier carries about the problem: whether the tensor is bound. Every
     hip-kernel-provider matcher binds an absent optional tensor's uid as -1 (NO_STATS,
     NO_BIAS, NO_UID, ...), so this is the matcher's own test; any other value, 0 included,
-    is a bound tensor."""
-    return {"!=": ["$" + name, -1]}
+    is a bound tensor.
+
+    An identifier a valid graph may leave unbound (an optional tensor's uid) is read through
+    value_or_default, with `default` (the -1 an absent tensor has), so the flag is still
+    never a read of the uid's value and an unbound row reads as absent."""
+    read = "$" + name
+    if default is not None:
+        read = {"value_or_default": [read, default]}
+    return {"!=": [read, -1]}
 
 
-def identifier_omissions(identifiers: list[str]) -> list:
-    """The `omitted_proposals` entries of the tensor identifiers read as presence flags."""
+def identifier_omissions(identifiers: list[str], guards: dict | None = None) -> list:
+    """The `omitted_proposals` entries of the tensor identifiers read as presence flags;
+    `guards` holds the default of each one that is optional."""
+    guards = guards or {}
     return [
         {
             "expression": "$" + name,
             "reason": "tensor_identifier",
-            "read_instead": presence_flag(name),
+            "read_instead": presence_flag(name, guards.get(name)),
         }
         for name in identifiers
     ]
@@ -1737,17 +1752,26 @@ def proposal_columns(
     published: set[str],
     kmd_fields: list[str] | None,
     knobs: list[str],
+    optional: tuple = (),
 ) -> tuple[list[str], list[str], set[str], list]:
     """What a proposal starts from: (scalar columns, tensor identifiers, offered kernel
-    fields, omitted). A column every training row binds as a scalar is a candidate unless an
-    exclusion rule names it or it is a tensor identifier (read only as a presence flag);
-    each exclusion is recorded in `omitted` with its reason."""
+    fields, omitted). A column every training row binds as a scalar is a candidate, and so
+    is one some rows leave unbound if it is one of hipDNN's `optional` features (read through
+    value_or_default); an exclusion rule names the others, and a tensor identifier is read
+    only as a presence flag. Each exclusion is recorded in `omitted` with its reason."""
     offered = {"kernel." + field for field in kmd_fields or () if field in knobs}
     scalar_columns = [
         name
         for name in sorted(published)
-        if train_frame[name].notna().all()
+        if (
+            train_frame[name].notna().all()
+            or (
+                train_frame[name].notna().any()
+                and optional_feature_of(name, optional) is not None
+            )
+        )
         and train_frame[name]
+        .dropna()
         .map(lambda value: isinstance(value, (str, int, float, bool)))
         .all()
     ]
@@ -1765,6 +1789,42 @@ def proposal_columns(
     return scalar_columns, identifiers, legal_kernel_fields, omitted
 
 
+def search_inputs(
+    frame: pd.DataFrame,
+    published: set[str],
+    kmd_fields: list[str] | None,
+    knobs: list[str],
+    metric: str | None,
+    executable: str | None,
+) -> tuple[list[str], list[str], dict, list]:
+    """What a feature search reads, from the training rows: (columns, tensor identifiers it
+    may read only as presence flags, guards, omitted).
+
+    `guards` maps each of those that is an optional feature (for a model of `metric`: the
+    evaluator's own lint decides which a valid graph may leave unbound and nothing guards)
+    to the default a model reads for it, so the search reads it through value_or_default and
+    scores the rows that leave it unbound with that default. An optional column that holds
+    strings cannot take a default and is left out."""
+    scalars, identifiers, legal, omitted = proposal_columns(
+        frame, published, kmd_fields, knobs, optional_features(executable)
+    )
+    columns = [
+        name for name in scalars if not name.startswith("kernel.") or name in legal
+    ]
+    guards = optional_guards([*columns, *identifiers], metric, executable)
+    categorical = {
+        name
+        for name in guards
+        if frame[name].map(lambda value: isinstance(value, str)).any()
+    }
+    for name in sorted(categorical):
+        del guards[name]
+        omitted.append({"expression": "$" + name, "reason": "optional_categorical"})
+    columns = [name for name in columns if name not in categorical]
+    omitted += identifier_omissions(identifiers, guards)
+    return columns, identifiers, guards, omitted
+
+
 def feature_recipe(
     train_frame: pd.DataFrame,
     published: set[str],
@@ -1772,26 +1832,36 @@ def feature_recipe(
     kmd_fields: list[str] | None,
     knobs: list[str],
     pairs: list[tuple[str, str]],
+    optional: tuple = (),
 ) -> tuple[list, list]:
     """(signature, omitted proposals): the authored recipe, or one proposed from the corpus.
 
     `kmd_fields` is None for an engine-level run. For a catalog run, `$kernel.*` axes must
     be shipping UED knobs, checked here before training rather than at promotion. A proposal
     reads a tensor identifier only through its `presence_flag`; an authored recipe is taken
-    as written.
+    as written. A column some rows leave unbound is proposed only if it is one of hipDNN's
+    `optional` features, which training reads through value_or_default; any other gap (a
+    rank some rows' tensor lacks) leaves the column out.
     """
     omitted = []
     if authored is not None:
         signature = authored
     else:
         scalar_columns, identifiers, legal_kernel_fields, excluded = proposal_columns(
-            train_frame, published, kmd_fields, knobs
+            train_frame, published, kmd_fields, knobs, optional
         )
         signature, omitted = propose_features(
             train_frame[scalar_columns], legal_kernel_fields, pairs
         )
-        signature = signature + [presence_flag(name) for name in identifiers]
-        omitted = excluded + omitted + identifier_omissions(identifiers)
+        guards = {
+            name: default_for("$" + name, found)
+            for name in identifiers
+            if (found := optional_feature_of(name, optional)) is not None
+        }
+        signature = signature + [
+            presence_flag(name, guards.get(name)) for name in identifiers
+        ]
+        omitted = excluded + omitted + identifier_omissions(identifiers, guards)
     if not isinstance(signature, list) or not signature:
         raise ValueError("the feature recipe must be a nonempty canonical array")
     if kmd_fields is not None:
@@ -2295,18 +2365,14 @@ def _search_recipe(
     )
 
     declared, target = label[0], label[1]
-    scalar_columns, identifiers, legal_kernel_fields, excluded = proposal_columns(
-        train_frame, published, kmd_fields, knobs
+    columns, identifiers, guards, omitted = search_inputs(
+        train_frame, published, kmd_fields, knobs, declared, args.feature_evaluator
     )
-    omitted = excluded + identifier_omissions(identifiers)
     report = search_features(
         train_frame,
-        columns=[
-            name
-            for name in scalar_columns
-            if not name.startswith("kernel.") or name in legal_kernel_fields
-        ],
+        columns=columns,
         presence_columns=identifiers,
+        guards=guards,
         target=target,
         objective=_label_objective(declared),
         # Folds hold whole graphs, as `train` validates: a graph's rows on several devices
@@ -2356,7 +2422,13 @@ def _feature_signature(
     else:
         authored = None
     signature, omitted = feature_recipe(
-        train_frame, published, authored, kmd_fields, knobs, pairs
+        train_frame,
+        published,
+        authored,
+        kmd_fields,
+        knobs,
+        pairs,
+        optional_features(args.feature_evaluator),
     )
     if searched is not None:
         omitted = searched["omitted"]

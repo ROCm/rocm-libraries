@@ -178,10 +178,6 @@ class _Term:
     def __init__(self, expr, values: np.ndarray) -> None:
         self.expr, self.values = expr, values
 
-    @classmethod
-    def column(cls, name: str, values: np.ndarray) -> "_Term":
-        return cls("$" + name, values)
-
     def ceil_div(self, divisor: float) -> "_Term":
         return _Term(
             {"ceil_div": [self.expr, _literal(divisor)]},
@@ -223,12 +219,19 @@ def _derived_candidates(
     catalog_values: dict[str, list[float]],
     tiles: list[int],
     stats: dict,
+    column_terms: dict[str, _Term],
 ) -> None:
-    """Add the pad, ratio, stride-order, grid and tier templates over the base columns' representatives."""
+    """Add the pad, ratio, stride-order, grid and tier templates over the base columns'
+    representatives.
+
+    A column's term is its signature entry: a bare `$name`, or `value_or_default` of it where
+    the column is an optional feature, so every expression built on it reads it guarded.
+    """
     by_name = {candidate.name: candidate for candidate in pool.candidates}
 
     def term(name: str) -> _Term:
-        return _Term.column(name, by_name["$" + name].values)
+        candidate = by_name[name]
+        return _Term(candidate.entry, candidate.values)
 
     # The dim columns: `...dims[<k>]` with integer values that vary, by tensor role. A dim
     # that duplicates another tensor's (q and o share B, H, Sq) is read through the
@@ -237,7 +240,7 @@ def _derived_candidates(
     for name in sorted(representative):
         match = _DIMS.fullmatch(name)
         if match:
-            values = by_name["$" + representative[name]].values
+            values = by_name[representative[name]].values
             if _is_integral(values):
                 roles.setdefault(match.group(1), []).append(
                     (int(match.group(2)), representative[name])
@@ -278,7 +281,7 @@ def _derived_candidates(
         # The column itself: a stride that collapsed into a dim's group is still a stride.
         if frame[name].map(lambda value: isinstance(value, str)).any():
             return None
-        return _Term.column(name, _column_values(frame, name))
+        return column_terms[name]
 
     for role, members in sorted(strides.items()):
         if len(members) < 3:
@@ -299,9 +302,7 @@ def _derived_candidates(
             frame[[c for c in ("device", "device.cu_count") if c in frame.columns]]
         )
         if coverage["fields"]["device.cu_count"]["varies"]:
-            cu = _Term.column(
-                "device.cu_count", frame["device.cu_count"].to_numpy(float)
-            )
+            cu = _Term("$device.cu_count", frame["device.cu_count"].to_numpy(float))
     # A grid: the tiles of one non-innermost axis times the extents of the tensor's other
     # non-innermost axes (the innermost axis is the contiguous one: it is read along, not
     # tiled across the launch).
@@ -315,7 +316,7 @@ def _derived_candidates(
             continue
         innermost = max(every_dim[role])
         for index, stride_column in strides.get(role, ()):
-            if np.all(_column_values(frame, stride_column) == 1):
+            if np.all(column_terms[stride_column].values == 1):
                 innermost = index
         members = sorted({name for index, name in dims if index != innermost})
         for name in members:
@@ -355,6 +356,33 @@ def _derived_candidates(
             pool.add("tier", fill.expr, fill.values)
 
 
+def _column_terms(
+    frame: pd.DataFrame,
+    names: list[str],
+    guards: dict[str, object],
+    executable: str | None,
+) -> dict[str, _Term]:
+    """Each published column as the signature reads it. A column in `guards` (an optional
+    feature, with the default a model reads for it when unbound) is
+    `value_or_default($name, default)`, and its values are the shared evaluator's on every
+    row, the ones that leave it unbound included; any other column is read bare."""
+    guarded = sorted(name for name in names if name in guards)
+    terms = {
+        name: _Term("$" + name, _column_values(frame, name))
+        for name in names
+        if name not in guards
+    }
+    if guarded:
+        entries = [{"value_or_default": ["$" + name, guards[name]]} for name in guarded]
+        _, values = evaluate_feature_rows(frame, entries, {}, executable)
+        matrix = np.asarray(values, dtype=np.float64).reshape(len(frame), len(entries))
+        terms.update(
+            (name, _Term(entry, matrix[:, place]))
+            for place, (name, entry) in enumerate(zip(guarded, entries))
+        )
+    return terms
+
+
 def build_candidates(
     frame: pd.DataFrame,
     columns: list[str],
@@ -362,24 +390,41 @@ def build_candidates(
     catalog_values: dict[str, list[float]] | None,
     max_candidates: int,
     tiles: list[int] = FALLBACK_TILES,
+    guards: dict[str, object] | None = None,
+    feature_evaluator: str | None = None,
 ) -> tuple[_Pool, dict]:
-    """(pool, details): the base columns and presence flags, then the derived templates."""
+    """(pool, details): the base columns and presence flags, then the derived templates.
+
+    `guards` maps an optional column to the default it is read with when unbound; every
+    candidate over it reads it through `value_or_default`."""
     pool = _Pool(max_candidates)
     details: dict = {}
     representative: dict[str, str] = {}
+    terms = _column_terms(
+        frame, [*columns, *presence_columns], guards or {}, feature_evaluator
+    )
     for name in sorted(columns):
-        kept = pool.add("base", "$" + name, _column_values(frame, name))
+        kept = pool.add("base", terms[name].expr, terms[name].values)
         if kept is not None:
-            representative[name] = kept[1:]
+            representative[name] = kept
     for name in sorted(presence_columns):
-        flag = {"!=": ["$" + name, -1]}
-        pool.add("presence", flag, (frame[name].to_numpy(float) != -1).astype(float))
+        # Whether the tensor is bound, never its identifier's value; a guarded identifier
+        # reads -1 (the sentinel an absent tensor has) where it is unbound.
+        flag = {"!=": [terms[name].expr, -1]}
+        pool.add("presence", flag, (terms[name].values != -1).astype(float))
     details["constant_columns"] = sorted(
         name for name in columns if name not in representative
     )
     details["grid_tiles"] = list(tiles)
     _derived_candidates(
-        pool, frame, columns, representative, catalog_values or {}, list(tiles), details
+        pool,
+        frame,
+        columns,
+        representative,
+        catalog_values or {},
+        list(tiles),
+        details,
+        terms,
     )
     return pool, details
 
@@ -822,12 +867,15 @@ def search_features(
     adapter: str = "tree",
     adapter_pass_budget: int = ADAPTER_PASS_BUDGET,
     mlp_options: dict | None = None,
+    guards: dict[str, object] | None = None,
 ) -> dict:
     """Search a recipe over the training rows `frame`; the report, whose `recipe` is the
     features signature.
 
     `columns` are the published columns the search may read (already past the exclusion
     rules), `presence_columns` the tensor identifiers it may read only as presence flags,
+    `guards` the optional ones among them with the default a model reads when unbound (rows
+    that leave them unbound stay in the frame and take it, as the runtime does),
     `groups` the graph each row belongs to: every fold holds whole graphs, so a graph's
     rows on several devices never fall on both sides. The target's log is the regression label for
     either objective: the search wants the features that explain it, not a ranking.
@@ -850,7 +898,14 @@ def search_features(
     tiers, skipped_fields = _tier_fields(catalog_values or {})
     tiles, tile_source = tile_sizes(catalog_values or {})
     pool, details = build_candidates(
-        frame, list(columns), list(presence_columns), tiers, max_candidates, tiles
+        frame,
+        list(columns),
+        list(presence_columns),
+        tiers,
+        max_candidates,
+        tiles,
+        guards,
+        feature_evaluator,
     )
     candidates = pool.candidates
     if not candidates:
@@ -1239,7 +1294,7 @@ def run_feature_search(args: argparse.Namespace) -> int:
     from .correctness import measured_rows
     from .corpus_io import read_corpus_frame
     from .evaluate import Grouping, resolve_grouping
-    from .generate import proposal_columns
+    from .generate import search_inputs
 
     try:
         output = Path(args.output_dir).resolve()
@@ -1269,8 +1324,10 @@ def run_feature_search(args: argparse.Namespace) -> int:
         )
         # Folds hold whole graphs: the grouping's first column is the benchmark.
         keys = frame[grouping.columns[0]].astype(str)
-        scalars, identifiers, _, omitted = proposal_columns(frame, published, None, [])
-        columns = [name for name in scalars if not name.startswith("kernel.")]
+        # No metric: every optional feature is guarded, whichever model reads the recipe.
+        columns, identifiers, guards, omitted = search_inputs(
+            frame, published, None, [], None, args.feature_evaluator
+        )
         if args.catalog_values:
             catalog = json.loads(Path(args.catalog_values).read_text(encoding="utf-8"))
             source = str(Path(args.catalog_values).resolve())
@@ -1283,6 +1340,7 @@ def run_feature_search(args: argparse.Namespace) -> int:
             frame,
             columns=columns,
             presence_columns=identifiers,
+            guards=guards,
             target=args.target,
             objective=args.objective,
             groups=keys,

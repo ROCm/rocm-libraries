@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "OperationsDir.hpp"
+#include <algorithm>
 #include <fstream>
 #include <map>
 #include <set>
@@ -173,7 +174,9 @@ TEST(TestProblemSpace, SaysSoWhenItDidNotExploreEveryCombination)
 
     const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
 
-    EXPECT_LE(corpus.combinations.size(), 5U);
+    // The bound, plus one combination for each declared value the scattered sample missed.
+    EXPECT_GE(corpus.combinations.size(), 5U);
+    EXPECT_LE(corpus.combinations.size(), 5U + 4U + 4U);
     ASSERT_FALSE(corpus.skippedCombinations.empty());
     EXPECT_NE(corpus.skippedCombinations.front().find("16"), std::string::npos);
 }
@@ -694,23 +697,66 @@ TEST(TestProblemSpace, AnchorScalingNeverShrinksTheFixedQuotasAndNeedsATarget)
 
 TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIsDropped)
 {
-    // Past maxCombinations the product is sampled; a facet added to SDPA must not push it over,
-    // or combinations (and so graphs) silently vanish from every corpus.
+    // Past maxCombinations the product is sampled, which the manifest reports as skipped
+    // combinations. The backward fits under it; the forward, with the optional forms crossed
+    // with every facet, does not, so what it must keep is every declared value of every
+    // categorical parameter, and every value pair of the weighted facets and the form: a model
+    // trained on the corpus has seen each one (RFC 0019 section 5.2), and `--form-floor` finds
+    // a form among them. The sample is drawn from the combinations that can hold a problem.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation
-                           + ".opmeta.json");
-        ASSERT_TRUE(file.good()) << operation;
-        const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-        ASSERT_TRUE(parsed.ok()) << operation;
+        const auto metadata = test::shippedOperation(operation);
 
         size_t total = 0;
-        const auto combinations = detail::categoricalCombinations(
-            parsed.metadata->parameters, ExplorationRequest{}.maxCombinations, total);
-        EXPECT_EQ(combinations.size(), total) << operation;
-        // is_causal 2 x alignment 2 x dtype 3 x layout 3 x scale 3, and for the forward
-        // generate_stats 2 x window 4.
-        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{864} : size_t{108}) << operation;
+        const auto all = detail::categoricalCombinations(metadata.parameters, 0, total);
+        EXPECT_EQ(all.size(), total) << operation;
+        // is_causal 2 x alignment 2 x dtype 3 x layout 3 x scale 3 x form 8, and for the
+        // forward generate_stats 2 x window 4 (the backward has 6 forms and no window).
+        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{6912} : size_t{648}) << operation;
+
+        size_t sampledTotal = 0;
+        const auto sampled = detail::categoricalCombinations(
+            metadata.parameters,
+            ExplorationRequest{}.maxCombinations,
+            sampledTotal,
+            [&metadata](const ProblemPoint& combination) {
+                return !detail::excludedByCategoricals(metadata, combination);
+            });
+        EXPECT_EQ(sampledTotal, total) << operation;
+        if(operation == "sdpa_bwd")
+        {
+            EXPECT_EQ(sampled.size(), total) << operation;
+        }
+        else
+        {
+            EXPECT_EQ(sampled.size(), ExplorationRequest{}.maxCombinations) << operation;
+            for(const auto& combination : sampled)
+            {
+                EXPECT_FALSE(detail::excludedByCategoricals(metadata, combination))
+                    << detail::describe(combination);
+            }
+            // No triple of the weighted facets is left out: a stride that aliases with the
+            // combination index leaves some (kv_bhsd, jitter, local_4096) with none.
+            std::set<std::string> triples;
+            for(const auto& combination : sampled)
+            {
+                triples.insert(std::get<std::string>(combination.at("layout")) + "/"
+                               + std::get<std::string>(combination.at("scale")) + "/"
+                               + std::get<std::string>(combination.at("window")));
+            }
+            EXPECT_EQ(triples.size(), 36U) << operation;
+        }
+        for(const auto& parameter : metadata.parameters)
+        {
+            for(const auto& value : parameter.enumerable())
+            {
+                EXPECT_TRUE(std::any_of(
+                    sampled.begin(),
+                    sampled.end(),
+                    [&](const ProblemPoint& point) { return point.at(parameter.name) == value; }))
+                    << operation << " dropped " << parameter.name;
+            }
+        }
     }
 }
 
@@ -743,6 +789,7 @@ TEST(TestProblemSpace, TheShippedSdpaConstraintsKeepOnlyProblemsThatAreDistinctA
                                  {"alignment", c.alignment},
                                  {"dtype", std::string("fp16")},
                                  {"generate_stats", false},
+                                 {"form", std::string("plain")},
                                  {"layout", c.layout},
                                  {"scale", std::string("inv_sqrt_d")},
                                  {"window", c.window}};
@@ -771,6 +818,120 @@ TEST(TestProblemSpace, TheShippedSdpaConstraintsKeepOnlyProblemsThatAreDistinctA
     EXPECT_TRUE(admits({2, 4096, 1, 1, true, "none", "kv_bhsd"}));
     EXPECT_FALSE(admits({1, 1, 8, 1, false, "none", "kv_bhsd"}));
     EXPECT_TRUE(admits({1, 1, 8, 1, false, "none", "bhsd"}));
+}
+
+TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndAdmitTheRest)
+{
+    struct Candidate
+    {
+        std::string form = "plain";
+        std::string layout = "bshd";
+        std::string scale = "inv_sqrt_d";
+        std::string window = "none";
+        int64_t seqlenQ = 2048;
+        int64_t seqlenK = 2048;
+        bool causal = false;
+    };
+    const auto admitsFor = [](const std::string& operation, const Candidate& c) {
+        ProblemPoint point{{"batch", int64_t{2}},
+                           {"heads", int64_t{8}},
+                           {"heads_kv", int64_t{2}},
+                           {"seqlen_q", c.seqlenQ},
+                           {"seqlen_k", c.seqlenK},
+                           {"head_dim", int64_t{64}},
+                           {"is_causal", c.causal},
+                           {"alignment", std::string("top_left")},
+                           {"dtype", std::string("fp16")},
+                           {"form", c.form},
+                           {"layout", c.layout},
+                           {"scale", c.scale}};
+        if(operation == "sdpa_fwd")
+        {
+            point["generate_stats"] = false;
+            point["window"] = c.window;
+        }
+        return detail::satisfiesConstraints(test::shippedOperation(operation), point);
+    };
+
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        // A form that states no scale value (scale_unset), or passes it as a tensor
+        // (scale_tensor), ignores the scale facet: three values would list one graph three times
+        // (or three tensors that differ only in their default), so only inv_sqrt_d is declared.
+        for(const std::string form : {"scale_unset", "scale_tensor"})
+        {
+            EXPECT_TRUE(admitsFor(operation, Candidate{form})) << operation << " " << form;
+            EXPECT_FALSE(admitsFor(operation, Candidate{form, "bshd", "unit"}))
+                << operation << " " << form;
+            EXPECT_FALSE(admitsFor(operation, Candidate{form, "bshd", "jitter"}))
+                << operation << " " << form;
+        }
+        // The forms that state the scale keep the whole facet, over every layout.
+        for(const std::string form : {"plain", "dropout", "padded", "bias"})
+        {
+            for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
+            {
+                for(const std::string layout : {"bshd", "bhsd", "kv_bhsd"})
+                {
+                    EXPECT_TRUE(admitsFor(operation, Candidate{form, layout, scale}))
+                        << operation << " " << form << " " << layout << " " << scale;
+                }
+            }
+        }
+    }
+
+    // Ragged packs tokens through offset tensors whose multiplier is the token stride, so it
+    // needs token-major strides: head-major Q, K or V would be addressed as if tokens were
+    // contiguous across heads.
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd"}));
+    EXPECT_FALSE(admitsFor("sdpa_fwd", Candidate{"ragged", "bhsd"}));
+    EXPECT_FALSE(admitsFor("sdpa_fwd", Candidate{"ragged", "kv_bhsd"}));
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd", "unit"}));
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd", "jitter", "local_128"}));
+
+    // Everything else crosses with a window and with the layouts, the frontend validators and
+    // references stating nothing against it and an engine's matcher declining what it does not
+    // serve (which the oracle filters): dropout, sink, bias and padded with every window.
+    for(const std::string form : {"plain", "dropout", "padded", "bias", "sink"})
+    {
+        for(const std::string window : {"local_128", "local_1024", "local_4096"})
+        {
+            for(const bool causal : {true, false})
+            {
+                EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", window}))
+                    << form << " " << window;
+                EXPECT_TRUE(admitsFor("sdpa_fwd",
+                                      Candidate{form, "bhsd", "unit", window, 2048, 2048, causal}))
+                    << form << " " << window << " causal " << causal;
+            }
+        }
+    }
+    EXPECT_TRUE(admitsFor("sdpa_fwd",
+                          Candidate{"sink", "bshd", "inv_sqrt_d", "local_128", 2048, 2048, true}));
+
+    // Cross attention (more queries than keys) is non-causal only, and never windowed, whatever
+    // the form: the forms that carry per-batch lengths (padded, ragged) keep the same bounds.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        for(const std::string form :
+            {"plain", "scale_unset", "scale_tensor", "dropout", "padded", "bias"})
+        {
+            EXPECT_TRUE(
+                admitsFor(operation, Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77}))
+                << operation << " " << form;
+            EXPECT_FALSE(
+                admitsFor(operation, Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77, true}))
+                << operation << " " << form;
+        }
+    }
+    for(const std::string form : {"padded", "ragged", "bias", "sink", "dropout"})
+    {
+        EXPECT_FALSE(
+            admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", "local_128", 4096, 77}))
+            << form;
+        EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77}))
+            << form;
+    }
 }
 
 namespace
@@ -931,7 +1092,10 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
 {
     // (alignment bottom_right, non-causal, window none) is empty by the declaration's own
     // constraints, while its windowed twins are not, so sizes taken as a product of weights over
-    // all 864 combinations leave window none at 43%, not its declared 50%.
+    // every combination leave window none under its declared 50%. The forms empty more: a scale
+    // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, and a ragged
+    // form over a layout that is not token-major. The raking has to hold all four weighted
+    // facets at once over what is left.
     std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
     ASSERT_TRUE(file.good());
     const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
@@ -939,22 +1103,26 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     const auto& metadata = *parsed.metadata;
 
     size_t total = 0;
-    const auto combinations = detail::categoricalCombinations(metadata.parameters, 1024, total);
-    ASSERT_EQ(combinations.size(), 864U);
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+    ASSERT_EQ(combinations.size(), 6912U);
     const auto sizes = detail::combinationSizes(metadata, combinations);
 
     double all = 0.0;
     std::map<std::string, double> window;
     std::map<std::string, double> layout;
     std::map<std::string, double> scale;
+    std::map<std::string, double> form;
     size_t empty = 0;
     for(size_t i = 0; i < combinations.size(); ++i)
     {
         const auto& c = combinations[i];
         const auto text = [&c](const char* name) { return std::get<std::string>(c.at(name)); };
-        const bool emptyByDeclaration = text("alignment") == "bottom_right"
-                                        && !std::get<bool>(c.at("is_causal"))
-                                        && text("window") == "none";
+        const bool scaleIgnored = text("form") == "scale_unset" || text("form") == "scale_tensor";
+        const bool emptyByDeclaration
+            = (text("alignment") == "bottom_right" && !std::get<bool>(c.at("is_causal"))
+               && text("window") == "none")
+              || (scaleIgnored && text("scale") != "inv_sqrt_d")
+              || (text("form") == "ragged" && text("layout") != "bshd");
         if(emptyByDeclaration)
         {
             EXPECT_EQ(sizes[i], 0.0) << detail::describe(c);
@@ -968,14 +1136,21 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
         window[text("window")] += sizes[i];
         layout[text("layout")] += sizes[i];
         scale[text("scale")] += sizes[i];
+        form[text("form")] += sizes[i];
     }
-    // A quarter of the non-causal, bottom_right half of the product: 864 / 2 / 2 / 4.
-    EXPECT_EQ(empty, 54U);
+    // Per form, 864 combinations: 54 are the bottom_right, non-causal, no-window quarter of the
+    // product. Five forms leave it at that; scale_unset and scale_tensor also lose the 576 whose
+    // scale is not inv_sqrt_d, and ragged the 576 whose layout is not bshd, each less the 36 of
+    // those already in the 54: 5 * 54 + 3 * (576 + 54 - 36) = 2052.
+    EXPECT_EQ(empty, 2052U);
     EXPECT_NEAR(window["none"] / all, 0.5, 1e-6);
     EXPECT_NEAR(window["local_128"] / all, 1.0 / 6.0, 1e-6);
     EXPECT_NEAR(layout["bshd"] / all, 0.5, 1e-6);
     EXPECT_NEAR(layout["kv_bhsd"] / all, 0.25, 1e-6);
     EXPECT_NEAR(scale["inv_sqrt_d"] / all, 0.5, 1e-6);
+    // plain 7 of 7 + 7 forms of 1.
+    EXPECT_NEAR(form["plain"] / all, 0.5, 1e-6);
+    EXPECT_NEAR(form["sink"] / all, 1.0 / 14.0, 1e-6);
     // The mean over combinations that can hold a problem is 1, as it is for unweighted ones.
     EXPECT_NEAR(all, static_cast<double>(combinations.size() - empty), 1e-6);
 }

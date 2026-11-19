@@ -747,3 +747,163 @@ def test_the_search_needs_enough_problems_for_its_folds():
             objective="max",
             groups=pd.Series(["x"] * 20 + ["y"] * 20, index=frame.index),
         )
+
+
+BIAS_UID = "graph.nodes[0].bias.uid"
+BIAS_DIM = "graph.nodes[0].bias.dims[1]"
+DROPOUT = "graph.nodes[0].dropout_probability"
+
+
+def _optional_rows(count=600, seed=11) -> pd.DataFrame:
+    """RMSNorm-like rows whose optional bias tensor and dropout attribute are unbound on
+    some of them (NaN: the row does not publish them). Time depends on whether the bias is
+    bound, on how full its padded dim is, and on the dropout probability."""
+    rng = np.random.default_rng(seed)
+    batch = rng.choice([1, 2, 4, 8], count)
+    seq = rng.integers(16, 1025, count)
+    bound = rng.random(count) < 0.6
+    bias_dim = rng.integers(1, 129, count)
+    dropout = rng.choice([0.1, 0.2, 0.5], count)
+    with_dropout = rng.random(count) < 0.5
+    fill = np.where(bound, bias_dim / (np.ceil(bias_dim / 8) * 8), 0.0)
+    log_time = (
+        0.5 * np.log(batch * seq)
+        + 0.9 * bound
+        + 1.2 * fill
+        + 2.0 * np.where(with_dropout, dropout, 0.0)
+        + 0.03 * rng.standard_normal(count)
+    )
+    frame = pd.DataFrame(
+        {
+            "benchmark": [str(i) for i in range(count)],
+            "device": "0",
+            "graph.nodes[0].x.dims[0]": batch,
+            "graph.nodes[0].x.dims[1]": seq,
+            BIAS_UID: np.where(bound, 12.0, np.nan),
+            BIAS_DIM: np.where(bound, bias_dim, np.nan),
+            DROPOUT: np.where(with_dropout, dropout, np.nan),
+        }
+    )
+    frame["tflops"] = np.exp(-log_time) * 100
+    return frame
+
+
+def _unguarded_reads(node, names: set) -> list:
+    """The reads of `names` in a signature entry outside value_or_default's first argument."""
+    if isinstance(node, str):
+        return [node] if node.startswith("$") and node[1:] in names else []
+    if isinstance(node, list):
+        return [read for item in node for read in _unguarded_reads(item, names)]
+    if not isinstance(node, dict):
+        return []
+    ((op, arguments),) = node.items()
+    if op == "value_or_default":
+        return _unguarded_reads(arguments[1:], names)
+    return _unguarded_reads(arguments, names)
+
+
+def _optional_inputs(frame):
+    from uhd_gen.generate import search_inputs
+
+    return search_inputs(
+        frame,
+        set(frame.columns) - {"benchmark", "device", "tflops"},
+        None,
+        [],
+        "tflops",
+        _evaluator_path(),
+    )
+
+
+def test_a_search_guards_every_optional_read_and_a_uid_stays_a_presence_flag():
+    from uhd_gen.generate import presence_flag
+    from uhd_gen.optional import lint
+
+    frame = _optional_rows()
+    columns, identifiers, guards, omitted = _optional_inputs(frame)
+    # The optional columns some rows leave unbound are searched, each with the default a
+    # model reads; the uid is only ever a presence flag.
+    assert guards == {BIAS_UID: -1, BIAS_DIM: -1, DROPOUT: 0.0}
+    assert sorted(columns) == sorted(
+        [BIAS_DIM, DROPOUT, "graph.nodes[0].x.dims[0]", "graph.nodes[0].x.dims[1]"]
+    )
+    assert identifiers == [BIAS_UID]
+    assert {
+        "expression": "$" + BIAS_UID,
+        "reason": "tensor_identifier",
+        "read_instead": presence_flag(BIAS_UID, -1),
+    } in omitted
+
+    report = search_features(
+        frame,
+        columns=columns,
+        presence_columns=identifiers,
+        guards=guards,
+        target="tflops",
+        objective="max",
+        groups=frame["benchmark"],
+        seeds=[0, 1],
+        feature_evaluator=_evaluator_path(),
+    )
+    recipe = report["recipe"]
+    # The unbound rows stayed in the frame and the evaluator scores every one of them.
+    assert report["rows"] == len(frame)
+    assert lint(recipe, "tflops", _evaluator_path()) == []
+    text = json.dumps(recipe)
+    assert "value_or_default" in text
+    # Each optional name is searched, and every read of one sits inside value_or_default,
+    # whatever template it is under.
+    assert {name for name in guards if name in text} >= {DROPOUT, BIAS_DIM}
+    assert all(_unguarded_reads(entry, set(guards)) == [] for entry in recipe), recipe
+    # The uid is never read by value: the only entry that names it is the presence flag.
+    uid_entries = [entry for entry in recipe if BIAS_UID in json.dumps(entry)]
+    assert uid_entries in ([], [presence_flag(BIAS_UID, -1)])
+    assert BIAS_UID not in [entry[1:] for entry in recipe if isinstance(entry, str)]
+
+
+def test_a_template_over_an_optional_dim_reads_it_guarded_and_matches_the_evaluator():
+    from uhd_gen.generate import presence_flag
+    from uhd_gen.optional import lint
+
+    frame = _optional_rows()
+    columns, identifiers, guards, _ = _optional_inputs(frame)
+    pool, _ = build_candidates(
+        frame,
+        columns,
+        identifiers,
+        {"head_dim_max": [64.0, 128.0, 256.0]},
+        2000,
+        feature_search.FALLBACK_TILES,
+        guards,
+        _evaluator_path(),
+    )
+    over_dim = [c for c in pool.candidates if BIAS_DIM in json.dumps(c.entry)]
+    assert {c.template for c in over_dim} >= {"base", "pad", "tier"}
+    assert all(_unguarded_reads(c.entry, {BIAS_DIM}) == [] for c in over_dim)
+    presence = [c for c in pool.candidates if c.template == "presence"]
+    assert [c.entry for c in presence] == [presence_flag(BIAS_UID, -1)]
+    # A guarded identifier is never a value column.
+    assert not any(
+        c.template == "base" and BIAS_UID in json.dumps(c.entry)
+        for c in pool.candidates
+    )
+    # Rows that leave the dim unbound read the default: the flag is 0 exactly there, and
+    # every candidate's numpy values are the shared evaluator's on every row.
+    unbound = frame[BIAS_DIM].isna().to_numpy()
+    assert unbound.any() and (~unbound).any()
+    np.testing.assert_array_equal(presence[0].values, (~unbound).astype(float))
+    verify_recipe(
+        [c.entry for c in pool.candidates], pool.candidates, frame, _evaluator_path()
+    )
+    assert lint([c.entry for c in pool.candidates], "tflops", _evaluator_path()) == []
+
+
+def test_an_optional_column_that_holds_strings_cannot_take_a_default_and_is_left_out():
+    frame = _optional_rows()
+    # An optional attribute published as a string: its default is a number, which the
+    # encoding of a categorical cannot take.
+    name = "graph.nodes[0].swish_beta"
+    frame[name] = np.where(frame[DROPOUT].isna(), None, "yes")
+    columns, _, guards, omitted = _optional_inputs(frame)
+    assert name not in columns and name not in guards
+    assert {"expression": "$" + name, "reason": "optional_categorical"} in omitted

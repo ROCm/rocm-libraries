@@ -950,6 +950,7 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"form", std::string("plain")},
                              {"layout", std::string("bshd")},
                              {"scale", std::string("inv_sqrt_d")},
                              {"window", std::string("none")},
@@ -1017,6 +1018,7 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
                                  {"is_causal", true},
                                  {"alignment", anchor},
                                  {"generate_stats", false},
+                                 {"form", std::string("plain")},
                                  {"layout", std::string("bshd")},
                                  {"scale", std::string("inv_sqrt_d")},
                                  {"window", std::string("none")},
@@ -1080,6 +1082,7 @@ TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", true},
+                             {"form", std::string("plain")},
                              {"layout", std::string("bshd")},
                              {"scale", std::string("inv_sqrt_d")},
                              {"window", std::string("none")},
@@ -1108,15 +1111,6 @@ TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
 
 namespace
 {
-
-OperationMetadata shipped(const std::string& operation)
-{
-    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation + ".opmeta.json");
-    EXPECT_TRUE(file.good()) << operation;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << operation;
-    return parsed.metadata.value_or(OperationMetadata{});
-}
 
 /// The tensor with @p uid, or null.
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensorWith(const GraphBytes& bytes,
@@ -1165,7 +1159,8 @@ TEST(TestGraphBuilderRegistry, TheTrainingNormForwardsWriteTheStatisticsTheirBac
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto layer = buildGraphFor(shipped("layernorm_fwd_training"), layerNormPoint("4"));
+    const auto layer
+        = buildGraphFor(test::shippedOperation("layernorm_fwd_training"), layerNormPoint("4"));
     ASSERT_TRUE(layer.ok()) << layer.error;
     const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormAttributes();
     ASSERT_NE(layerNode, nullptr);
@@ -1174,7 +1169,8 @@ TEST(TestGraphBuilderRegistry, TheTrainingNormForwardsWriteTheStatisticsTheirBac
     expectStatistics(
         layer.bytes, layerNode->inv_variance_tensor_uid(), {2, 16, 1, 1}, "layernorm inv_variance");
 
-    const auto rms = buildGraphFor(shipped("rmsnorm_fwd_training"), layerNormPoint("3"));
+    const auto rms
+        = buildGraphFor(test::shippedOperation("rmsnorm_fwd_training"), layerNormPoint("3"));
     ASSERT_TRUE(rms.ok()) << rms.error;
     const auto* rmsNode = firstNode(rms.bytes)->attributes_as_RMSNormAttributes();
     ASSERT_NE(rmsNode, nullptr);
@@ -1186,7 +1182,7 @@ TEST(TestGraphBuilderRegistry, TheInferenceNormForwardsStayInferenceWithoutStati
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto layer = buildGraphFor(shipped("layernorm_fwd"), layerNormPoint("3"));
+    const auto layer = buildGraphFor(test::shippedOperation("layernorm_fwd"), layerNormPoint("3"));
     ASSERT_TRUE(layer.ok()) << layer.error;
     const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormAttributes();
     ASSERT_NE(layerNode, nullptr);
@@ -1194,7 +1190,7 @@ TEST(TestGraphBuilderRegistry, TheInferenceNormForwardsStayInferenceWithoutStati
     EXPECT_FALSE(layerNode->mean_tensor_uid().has_value());
     EXPECT_FALSE(layerNode->inv_variance_tensor_uid().has_value());
 
-    const auto rms = buildGraphFor(shipped("rmsnorm_fwd"), layerNormPoint("3"));
+    const auto rms = buildGraphFor(test::shippedOperation("rmsnorm_fwd"), layerNormPoint("3"));
     ASSERT_TRUE(rms.ok()) << rms.error;
     const auto* rmsNode = firstNode(rms.bytes)->attributes_as_RMSNormAttributes();
     ASSERT_NE(rmsNode, nullptr);
@@ -1204,7 +1200,7 @@ TEST(TestGraphBuilderRegistry, TheInferenceNormForwardsStayInferenceWithoutStati
 
 TEST(TestGraphBuilderRegistry, TheNormBackwardsReadTheStatisticsTheTrainingForwardWrote)
 {
-    const auto layer = buildGraphFor(shipped("layernorm_bwd"), layerNormPoint("3"));
+    const auto layer = buildGraphFor(test::shippedOperation("layernorm_bwd"), layerNormPoint("3"));
     ASSERT_TRUE(layer.ok()) << layer.error;
     const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormBackwardAttributes();
     ASSERT_NE(layerNode, nullptr);
@@ -1220,7 +1216,7 @@ TEST(TestGraphBuilderRegistry, TheNormBackwardsReadTheStatisticsTheTrainingForwa
                                  {"D", int64_t{1}},
                                  {"layout", std::string("channels_first")},
                                  {"dtype", std::string("fp16")}};
-    const auto batch = buildGraphFor(shipped("batchnorm_bwd"), batchnorm);
+    const auto batch = buildGraphFor(test::shippedOperation("batchnorm_bwd"), batchnorm);
     ASSERT_TRUE(batch.ok()) << batch.error;
     const auto* batchNode = firstNode(batch.bytes)->attributes_as_BatchnormBackwardAttributes();
     ASSERT_NE(batchNode, nullptr);
@@ -1244,6 +1240,7 @@ ProblemPoint attentionPoint(const std::string& operation, const std::string& lay
                        {"is_causal", false},
                        {"alignment", std::string("top_left")},
                        {"dtype", std::string("fp16")},
+                       {"form", std::string("plain")},
                        {"layout", layout},
                        {"scale", std::string("inv_sqrt_d")}};
     if(operation == "sdpa_fwd")
@@ -1325,7 +1322,7 @@ TEST(TestGraphBuilderRegistry, EverySdpaLayoutStridesEachOperandAsItIsNamed)
 
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        const auto metadata = shipped(operation);
+        const auto metadata = test::shippedOperation(operation);
         const std::vector<std::string> queryTensors
             = operation == "sdpa_fwd" ? std::vector<std::string>{"q", "o"}
                                       : std::vector<std::string>{"q", "o", "dO", "dq"};
@@ -1359,7 +1356,7 @@ TEST(TestGraphBuilderRegistry, EverySdpaScaleWritesTheAttributeItNames)
     // 3, a factor of 0.95, and seqlen_k 37 gives r = 8, a factor of 1.7.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        const auto metadata = shipped(operation);
+        const auto metadata = test::shippedOperation(operation);
         const std::vector<std::tuple<std::string, int64_t, float>> cases{{"inv_sqrt_d", 32, 0.125F},
                                                                          {"inv_sqrt_d", 37, 0.125F},
                                                                          {"unit", 32, 1.0F},
@@ -1388,7 +1385,7 @@ TEST(TestGraphBuilderRegistry, JitterIsNeverTheStandardScaleAndSpreadsOverTheSha
     // graph under another name, which deduplicates away).
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        const auto metadata = shipped(operation);
+        const auto metadata = test::shippedOperation(operation);
         const auto scaleFor = [&](const ProblemPoint& base, const std::string& scale) {
             auto point = base;
             point["scale"] = scale;
@@ -1423,6 +1420,7 @@ TEST(TestGraphBuilderRegistry, JitterIsNeverTheStandardScaleAndSpreadsOverTheSha
             {
                 ProblemPoint categorical{{"alignment", std::string("top_left")},
                                          {"dtype", std::string("fp16")},
+                                         {"form", std::string("plain")},
                                          {"layout", std::string("bshd")}};
                 if(operation == "sdpa_fwd")
                 {
@@ -1448,7 +1446,7 @@ TEST(TestGraphBuilderRegistry, JitterIsNeverTheStandardScaleAndSpreadsOverTheSha
 
 TEST(TestGraphBuilderRegistry, ASlidingWindowWritesItsLeftBoundAndNoWindowWritesNone)
 {
-    const auto metadata = shipped("sdpa_fwd");
+    const auto metadata = test::shippedOperation("sdpa_fwd");
     const std::vector<std::pair<std::string, std::optional<int64_t>>> cases{
         {"none", std::nullopt}, {"local_128", 128}, {"local_1024", 1024}, {"local_4096", 4096}};
     for(const auto& [window, expected] : cases)
@@ -1471,7 +1469,7 @@ TEST(TestGraphBuilderRegistry, Fp32IsADeclaredSdpaDtypeAndBuildsFloatOperands)
 {
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        const auto metadata = shipped(operation);
+        const auto metadata = test::shippedOperation(operation);
         const auto* dtype = metadata.find("dtype");
         ASSERT_NE(dtype, nullptr) << operation;
         EXPECT_NE(std::find(dtype->values.begin(), dtype->values.end(), "fp32"),

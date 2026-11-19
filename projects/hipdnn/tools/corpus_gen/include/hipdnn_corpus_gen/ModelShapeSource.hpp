@@ -228,7 +228,6 @@ inline std::vector<PoolEntry> readModelShapes(const OperationMetadata& metadata,
             column = column.substr(2);
         }
     }
-
     const std::set<std::string> columns(header.begin(), header.end());
 
     std::vector<PoolEntry> entries;
