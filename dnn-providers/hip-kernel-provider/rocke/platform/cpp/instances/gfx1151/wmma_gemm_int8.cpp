@@ -393,7 +393,7 @@ rocke_kernel_def_t* rocke_build_wmma_gemm_int8(rocke_ir_builder_t* b,
             /* idx = b.add(b.mul(out_row, N), out_col) */
             idx = rocke_b_add(b, rocke_b_mul(b, out_row, Nparam), out_col);
             /* b.global_store(C, idx, h) */
-            rocke_b_global_store(b, C, idx, h, /*align=*/-1);
+            rocke_b_global_store(b, C, idx, h, /*align=*/0);
         }
 
         /* return b.kernel -- no explicit cf.return (added at lowering); matches Python IR. */

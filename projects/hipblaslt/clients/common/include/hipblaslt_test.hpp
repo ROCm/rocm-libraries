@@ -423,7 +423,13 @@ class thread_pool
 
 public:
     thread_pool();
-    ~thread_pool();
+    ~thread_pool()
+    {
+        shutdown();
+    }
+
+    // Call from the main thread after all submitted tests have completed.
+    void shutdown();
     void submit(std::function<void()> func, std::promise<void> promise);
 };
 

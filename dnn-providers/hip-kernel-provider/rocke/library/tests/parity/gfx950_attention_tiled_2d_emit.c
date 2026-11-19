@@ -794,7 +794,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_half_local_pv = true;
         break;
     /* idx52 (renumbered from 53; kept contiguous so the gate does not stop
-     * early on a hole; the ring-3 config is idx91): #69 K single-buffer
+     * early on a hole; the ring-3 config is idx93): #69 K single-buffer
      * at T=64 -- the d128 long-context 2-WG/CU win. tile_size=64 +
      * use_k_single_buffer (K_lds 2->1 slot, next-K deferred to after the PV-wait
      * barrier). Ported to the gfx950 C twin -> must be C/Python byte-identical. */
@@ -1207,11 +1207,38 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->lse_head_major = true;
         break;
 
-    /* ALiBi on the transposed 32x32 path without mask-once: the slope is
-     * loaded inline per lane. Case 75 is the multi-batch fp16 D128 spec
-     * _tiled_spec_from_problem selects, case 76 the bf16 combo spec (scalar
-     * state, still no mask-once). Case 77 takes the hoisted slope. */
+    /* --- idx75-76: fp8 K in LDS on each 32x32 QK path. */
+    /* fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
+     * non-transposed 32x32 QK path: K is read as fp8 and dequantized with
+     * k_scale before the bf16 MFMA, as on the transposed path. */
     case 75:
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "bf16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->kv_storage_dtype = "fp8e4m3";
+        s->use_fp8_mfma_qk = true;
+        s->use_mfma_32x32 = true;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        break;
+    /* The same fp8 K in LDS on the transposed 32x32 QK path, which reads K
+     * through the same shared reader. */
+    case 76:
+        make_spec(75, s);
+        s->use_transposed_qk_32x32 = true;
+        break;
+
+    /* ALiBi on the transposed 32x32 path without mask-once: the slope is
+     * loaded inline per lane. Case 77 is the multi-batch fp16 D128 spec
+     * _tiled_spec_from_problem selects, case 78 the bf16 combo spec (scalar
+     * state, still no mask-once). Case 79 takes the hoisted slope. */
+    case 77:
         s->head_size = 128;
         s->block_size = 16;
         s->num_query_heads = 8;
@@ -1233,7 +1260,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_half_local_pv = true;
         break;
 
-    case 76:
+    case 78:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1258,7 +1285,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_fast_paged_kv_desc = true;
         break;
 
-    case 77:
+    case 79:
         s->head_size = 128;
         s->block_size = 16;
         s->num_query_heads = 8;
@@ -1282,7 +1309,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_mask_once = true;
         break;
 
-    case 78:
+    case 80:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1309,7 +1336,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_fast_paged_kv_desc = true;
         break;
 
-    case 79:
+    case 81:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1336,7 +1363,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_mask_limit = true;
         break;
 
-    case 80:
+    case 82:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 8;
@@ -1350,7 +1377,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_v_double_buffer = true;
         break;
 
-    case 81:
+    case 83:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 8;
@@ -1367,7 +1394,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_staggered_iter_wait = true;
         break;
 
-    case 82:
+    case 84:
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 8;
@@ -1383,7 +1410,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_sched_barrier = true;
         break;
 
-    case 83:
+    case 85:
         s->head_size = 256;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1414,7 +1441,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mask_phase_split = true;
         break;
 
-    case 84:
+    case 86:
         s->head_size = 256;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1446,7 +1473,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_invariant_hoist = true;
         break;
 
-    case 85:
+    case 87:
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1469,7 +1496,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_q_direct_reg = true;
         break;
 
-    case 86:
+    case 88:
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1491,13 +1518,14 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_transposed_mask_limit = true;
         s->use_k_single_buffer = true;
         s->use_kq_lds_pad = true;
+        s->use_q_direct_reg = true;
         s->use_mask_phase_split = true;
         s->use_softmax_mfma_interleave = true;
         s->softmax_interleave_mode = 2;
         s->softmax_interleave_groups = 2;
         break;
 
-    case 87:
+    case 89:
         s->head_size = 256;
         s->block_size = 16;
         s->num_query_heads = 32;
@@ -1528,7 +1556,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_mask_phase_split = true;
         break;
 
-    case 88:
+    case 90:
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1550,11 +1578,11 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_fp8_mfma_qk = true;
         break;
 
-    /* Q re-read and the depth-3 deep K prefetch ring. idx89 re-reads Q on the
-     * transposed 32x32 combo, idx90 adds the grouped-KV2 second score tile,
-     * idx91 is the d128 small-tile ring with the two-phase mask peel, idx92
+    /* Q re-read and the depth-3 deep K prefetch ring. idx91 re-reads Q on the
+     * transposed 32x32 combo, idx92 adds the grouped-KV2 second score tile,
+     * idx93 is the d128 small-tile ring with the two-phase mask peel, idx94
      * combines both. */
-    case 89:
+    case 91:
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1577,7 +1605,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_q_reread = true;
         break;
 
-    case 90:
+    case 92:
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1598,7 +1626,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_q_reread = true;
         break;
 
-    case 91:
+    case 93:
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1622,7 +1650,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->kv_ring_depth = 3;
         break;
 
-    case 92:
+    case 94:
         s->head_size = 64;
         s->block_size = 16;
         s->num_query_heads = 16;
@@ -1644,7 +1672,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_q_reread = true;
         break;
 
-    case 93: /* selector spec: single-batch fp16 D128 SW prefill combo. */
+    case 95: /* selector spec: single-batch fp16 D128 SW prefill combo. */
         s->head_size = 128;
         s->block_size = 16;
         s->num_query_heads = 32;
@@ -1666,7 +1694,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_softmax_mfma_interleave = true;
         break;
 
-    case 94: /* config 50 with sched_barrier mask 8 (MFMA may cross). */
+    case 96: /* config 50 with sched_barrier mask 8 (MFMA may cross). */
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1692,7 +1720,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->sched_barrier_mask = 8;
         break;
 
-    case 95: /* top-left mask on the 16x16 body. */
+    case 97: /* top-left mask on the 16x16 body. */
         s->head_size = 64;
         s->block_size = 16;
         s->num_query_heads = 8;
@@ -1705,7 +1733,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->causal_top_left = true;
         break;
 
-    case 96: /* right_bound=5 + sliding window, MFMA 32x32. */
+    case 98: /* right_bound=5 + sliding window, MFMA 32x32. */
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 16;
@@ -1722,7 +1750,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->right_bound = 5;
         break;
 
-    case 97: /* unbounded band, transposed 32x32 without mask-limit. */
+    case 99: /* unbounded band, transposed 32x32 without mask-limit. */
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1743,7 +1771,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->right_bound = -1;
         break;
 
-    case 98: /* top-left + right_bound=3 + sliding window, transposed hoist. */
+    case 100: /* top-left + right_bound=3 + sliding window, transposed hoist. */
         s->head_size = 128;
         s->block_size = 32;
         s->num_query_heads = 64;
@@ -1767,7 +1795,7 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->right_bound = 3;
         break;
 
-    case 99: /* fp8 K/V cache with a top-left mask. */
+    case 101: /* fp8 K/V cache with a top-left mask. */
         s->head_size = 64;
         s->block_size = 32;
         s->num_query_heads = 32;
@@ -1781,29 +1809,29 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->causal_top_left = true;
         break;
 
-    /* --- idx100-104: the band on the transposed mask-limit path. --- */
-    case 100: /* config 44 (hoisted causal limit) with right_bound=4. */
+    /* --- idx104-106: the band on the transposed mask-limit path. --- */
+    case 102: /* config 44 (hoisted causal limit) with right_bound=4. */
         make_spec(44, s);
         s->right_bound = 4;
         break;
 
-    case 101: /* config 46 unbounded. */
+    case 103: /* config 46 unbounded. */
         make_spec(46, s);
         s->right_bound = -1;
         break;
 
-    case 102: /* D256 fast path (config 83, mask phase split) unbounded. */
-        make_spec(83, s);
+    case 104: /* D256 fast path (config 83, mask phase split) unbounded. */
+        make_spec(85, s);
         s->right_bound = -1;
         break;
 
-    case 103: /* D256 fast path with top-left + right_bound=7. */
-        make_spec(83, s);
+    case 105: /* D256 fast path with top-left + right_bound=7. */
+        make_spec(85, s);
         s->causal_top_left = true;
         s->right_bound = 7;
         break;
 
-    case 104: /* config 46, per-iteration causal limit, top-left + right_bound=2. */
+    case 106: /* config 46, per-iteration causal limit, top-left + right_bound=2. */
         make_spec(46, s);
         s->use_transposed_invariant_hoist = false;
         s->causal_top_left = true;

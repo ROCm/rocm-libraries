@@ -93,6 +93,33 @@ static void rocke_g950_reason(char* reason, size_t reason_cap, const char* m)
  * status + message on the builder, so the extern "C" ABI is unchanged.
  * [[noreturn]] keeps the existing `...; return false/NULL;` call sites valid --
  * the trailing return is simply never reached. */
+/* Python: spec.kq_lds_pad_slab_rows and spec.q_staged_in_k_lds, the two reads of
+ * the single-K __post_init__ refusal of a laid-out KQ pad under staged Q. */
+int rocke_gfx950_attention_tiled_2d_kq_pad_refusal(const rocke_attention_tiled_2d_spec_t* spec,
+                                                   char* msg,
+                                                   size_t msg_cap)
+{
+    const int hd = spec->head_size;
+    const int t = rocke_attention_tiled_2d_spec_tile_size_eff(spec);
+    /* One wave's async-DMA slab is 1024 B = 512 halves. */
+    const int slab_rows = (hd > 0 && 512 % hd == 0) ? 512 / hd : 0;
+    const bool pad_laid_out = spec->use_kq_lds_pad && !spec->use_fp8_mfma_qk
+                              && spec->kq_lds_pad_halves != 0 && slab_rows != 0
+                              && t % slab_rows == 0 && spec->kq_lds_pad_halves % 8 == 0
+                              && spec->use_k_single_buffer;
+    if(!pad_laid_out || spec->use_fp8_mfma_qk || spec->use_q_reread || spec->use_q_direct_reg)
+        return 0;
+    const int block_m = rocke_attention_tiled_2d_spec_block_m(spec);
+    if(block_m * hd * 2 > 2 * t * hd * 2)
+        return 0;
+    snprintf(msg,
+             msg_cap,
+             "KQ LDS pad failed - use_q_reread=False, use_q_direct_reg=False, expected one of "
+             "them True (transposed 32x32 path) or use_kq_lds_pad=False (Q staged in the "
+             "padded single K slot is read unpadded)");
+    return 1;
+}
+
 [[noreturn]] static void rocke_g950_fail(rocke_ir_builder_t* b, rocke_status_t st, const char* msg)
 {
     (void)b;
@@ -521,6 +548,9 @@ static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* 
         if(spec->use_staggered_iter_wait)
             rocke_g950_fail(
                 b, ROCKE_ERR_NOTIMPL, "use_k_single_buffer does not support staggered_iter_wait");
+        char kq_pad_msg[256];
+        if(rocke_gfx950_attention_tiled_2d_kq_pad_refusal(spec, kq_pad_msg, sizeof(kq_pad_msg)))
+            rocke_g950_fail(b, ROCKE_ERR_VALUE, kq_pad_msg);
     }
 
     /* gfx950 does NOT pre-resolve a catalog atom or ArchTarget in the prologue

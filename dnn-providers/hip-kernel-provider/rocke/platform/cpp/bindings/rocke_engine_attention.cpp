@@ -868,6 +868,19 @@ void t2d_read(const py::dict& d, Store& st, rocke_attention_tiled_2d_spec_t& s)
                     "attention_tiled_2d",
                     k_t2d_unported,
                     sizeof(k_t2d_unported) / sizeof(k_t2d_unported[0]));
+    /* The KQ XOR swizzle exists only in the Python builder; the C spec has no
+     * field for it, so lowering it here would silently emit an unswizzled K
+     * read. The spec is valid, the C++ path is not written:
+     * NotImplementedError, as the Python style guide assigns. Every set
+     * swizzle is refused: this binding sees only the knob dict. */
+    if(a_bool(d, "use_kq_xor_swizzle", false))
+    {
+        PyErr_SetString(PyExc_NotImplementedError,
+                        "rocke_engine tiled-2d: use_kq_xor_swizzle=True is not implemented in "
+                        "the C++ engine; build this spec with the Python engine or set it to "
+                        "False");
+        throw py::error_already_set();
+    }
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);
     s.num_query_heads = a_int(d, "num_query_heads", s.num_query_heads);

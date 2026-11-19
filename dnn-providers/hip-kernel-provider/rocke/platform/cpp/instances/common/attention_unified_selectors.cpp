@@ -27,6 +27,7 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
+#include "rocke/instance_gfx950_attention_tiled_2d.h"
 #include "rocke/ir.h"
 
 /* ------------------------------------------------------- arch resolution */
@@ -1796,6 +1797,8 @@ static std::string attn_gfx950_lever_rejection(const rocke_attention_tiled_2d_sp
                      t_eff);
             return msg;
         }
+        if(rocke_gfx950_attention_tiled_2d_kq_pad_refusal(s, msg, sizeof(msg)))
+            return msg;
     }
     if(s->has_tile_size && (s->tile_size <= 0 || s->tile_size % s->block_size != 0))
     {
