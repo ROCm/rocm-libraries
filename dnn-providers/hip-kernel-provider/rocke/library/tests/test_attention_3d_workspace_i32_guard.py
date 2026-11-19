@@ -105,7 +105,7 @@ class TestTheBound(unittest.TestCase):
     def test_max_index_matches_the_workspace_specs(self):
         """The index is a hand-written product, for speed: both the split rule
         and ``validate`` call it per candidate, and reading it off the specs
-        cost 400x more. This pins the fast form against the allocation it
+        is much more expensive. This pins the fast form against the allocation it
         describes, so a dropped factor or a layout change fails here."""
         for tq, hq, hd, seg in ((4096, 32, 128, 8), (1, 1, 64, 1), (65536, 32, 256, 4)):
             with self.subTest(shape=(tq, hq, hd, seg)):

@@ -5620,9 +5620,9 @@ def _workspace_f32():
     """The fp32 dtype the workspace specs carry, resolved once per process.
 
     A CPU-only or static caller has no torch, and a failed import is not cached
-    by Python: it re-walks every ``sys.path`` entry on each attempt, costing
-    roughly an order of magnitude more than a cached one, and more again where
-    the path is longer. Resolving it per call therefore put a filesystem walk
+    by Python: it re-walks every ``sys.path`` entry on each attempt, which is
+    much more expensive than a cached one, and more so where the path is
+    longer. Resolving it per call therefore put a filesystem walk
     on the split rule and the dispatcher's ``validate``, which run on every
     candidate. ``WorkspacePool.required_nbytes`` understands the string
     fallback through ``_dtype_element_size``.
@@ -5691,10 +5691,9 @@ def _3d_workspace_max_index(problem: UnifiedAttentionProblem, num_segments: int)
 
     The product is written out rather than read off
     ``_attention_3d_workspace_specs``, which would keep the two in step by
-    construction but costs about 400x more per call: it builds three
-    ``WorkspaceSpec`` objects and resolves the torch dtype every time, and both
-    the split rule and the dispatcher's ``validate`` call this on every
-    candidate. ``test_max_index_matches_the_workspace_specs`` pins the two
+    construction but is much more expensive per call: it builds three
+    ``WorkspaceSpec`` objects, and both the split rule and the dispatcher's
+    ``validate`` call this on every candidate. ``test_max_index_matches_the_workspace_specs`` pins the two
     forms together instead.
     """
     return (
