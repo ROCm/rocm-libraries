@@ -180,6 +180,9 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     // Get data stored in C matrix
     int64_t              rowsC, colsC, nnzC;
     void*                csrRowOffsetsC;
@@ -217,7 +220,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
                                                    nullptr,
                                                    to_rocsparse_const_spmat_descr(matC),
                                                    to_rocsparse_spmat_descr(matC),
-                                                   hipsparse::hipDataTypeToHCCDataType(computeType),
+                                                   backend_data_type,
                                                    hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg),
                                                    rocsparse_spgemm_stage_buffer_size,
                                                    bufferSize1,
@@ -241,6 +244,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
 
         // Compute number of non-zeros in C matrix
         size_t bufferSize = (spgemmDescr->bufferSize1 - byteOffset1);
+
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse_spgemm((rocsparse_handle)handle,
                              hipsparse::hipOperationToHCCOperation(opA),
@@ -251,7 +255,7 @@ hipsparseStatus_t hipsparseSpGEMM_workEstimation(hipsparseHandle_t          hand
                              nullptr,
                              to_rocsparse_const_spmat_descr(matC),
                              to_rocsparse_spmat_descr(matC),
-                             hipsparse::hipDataTypeToHCCDataType(computeType),
+                             backend_data_type,
                              hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg),
                              rocsparse_spgemm_stage_nnz,
                              &bufferSize,
@@ -280,6 +284,9 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
     {
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
+
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
 
     // Get data stored in C matrix
     int64_t              rowsC, colsC, nnzC;
@@ -351,6 +358,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
             matC, csrRowOffsetsCFromBuffer1, csrColIndCFromBuffer2, csrValuesCFromBuffer2));
 
         size_t bufferSize = (spgemmDescr->bufferSize1 - byteOffset1);
+
         RETURN_IF_ROCSPARSE_ERROR(
             rocsparse_spgemm((rocsparse_handle)handle,
                              hipsparse::hipOperationToHCCOperation(opA),
@@ -361,7 +369,7 @@ hipsparseStatus_t hipsparseSpGEMM_compute(hipsparseHandle_t          handle,
                              nullptr,
                              to_rocsparse_const_spmat_descr(matC),
                              to_rocsparse_spmat_descr(matC),
-                             hipsparse::hipDataTypeToHCCDataType(computeType),
+                             backend_data_type,
                              hipsparse::hipSpGEMMAlgToHCCSpGEMMAlg(alg),
                              rocsparse_spgemm_stage_compute,
                              &bufferSize,

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,9 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpMMAlg_t          alg,
                                            size_t*                     pBufferSizeInBytes)
 {
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spmm((rocsparse_handle)handle,
                        hipsparse::hipOperationToHCCOperation(opA),
@@ -51,7 +54,7 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
                        (rocsparse_const_dnmat_descr)matB,
                        beta,
                        (const rocsparse_dnmat_descr)matC,
-                       hipsparse::hipDataTypeToHCCDataType(computeType),
+                       backend_data_type,
                        hipsparse::hipSpMMAlgToHCCSpMMAlg(alg),
                        rocsparse_spmm_stage_buffer_size,
                        pBufferSizeInBytes,
@@ -70,7 +73,10 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
                                            hipsparseSpMMAlg_t          alg,
                                            void*                       externalBuffer)
 {
-    size_t bufferSize;
+    size_t              bufferSize;
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spmm((rocsparse_handle)handle,
                        hipsparse::hipOperationToHCCOperation(opA),
@@ -80,7 +86,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
                        (rocsparse_const_dnmat_descr)matB,
                        beta,
                        (const rocsparse_dnmat_descr)matC,
-                       hipsparse::hipDataTypeToHCCDataType(computeType),
+                       backend_data_type,
                        hipsparse::hipSpMMAlgToHCCSpMMAlg(alg),
                        rocsparse_spmm_stage_preprocess,
                        &bufferSize,
@@ -99,7 +105,10 @@ hipsparseStatus_t hipsparseSpMM(hipsparseHandle_t           handle,
                                 hipsparseSpMMAlg_t          alg,
                                 void*                       externalBuffer)
 {
-    size_t bufferSize;
+    size_t              bufferSize;
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spmm((rocsparse_handle)handle,
                        hipsparse::hipOperationToHCCOperation(opA),
@@ -109,7 +118,7 @@ hipsparseStatus_t hipsparseSpMM(hipsparseHandle_t           handle,
                        (rocsparse_const_dnmat_descr)matB,
                        beta,
                        (const rocsparse_dnmat_descr)matC,
-                       hipsparse::hipDataTypeToHCCDataType(computeType),
+                       backend_data_type,
                        hipsparse::hipSpMMAlgToHCCSpMMAlg(alg),
                        rocsparse_spmm_stage_compute,
                        &bufferSize,

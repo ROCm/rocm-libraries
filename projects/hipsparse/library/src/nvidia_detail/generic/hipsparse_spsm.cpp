@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -57,6 +57,10 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpSMDescr_t        spsmDescr,
                                            size_t*                     pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpSM_bufferSize((cusparseHandle_t)handle,
                                 hipsparse::hipOperationToCudaOperation(opA),
@@ -65,7 +69,7 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                 (cusparseConstSpMatDescr_t)matA,
                                 (cusparseConstDnMatDescr_t)matB,
                                 (const cusparseDnMatDescr_t)matC,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
+                                backend_data_type,
                                 hipsparse::hipSpSMAlgToCudaSpSMAlg(alg),
                                 (cusparseSpSMDescr_t)spsmDescr,
                                 pBufferSizeInBytes));
@@ -83,6 +87,10 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpSMDescr_t        spsmDescr,
                                            size_t*                     pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpSM_bufferSize((cusparseHandle_t)handle,
                                 hipsparse::hipOperationToCudaOperation(opA),
@@ -91,7 +99,7 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                 (const cusparseSpMatDescr_t)matA,
                                 (const cusparseDnMatDescr_t)matB,
                                 (const cusparseDnMatDescr_t)matC,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
+                                backend_data_type,
                                 hipsparse::hipSpSMAlgToCudaSpSMAlg(alg),
                                 (cusparseSpSMDescr_t)spsmDescr,
                                 pBufferSizeInBytes));
@@ -111,6 +119,10 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          hipsparseSpSMDescr_t        spsmDescr,
                                          void*                       externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpSM_analysis((cusparseHandle_t)handle,
                               hipsparse::hipOperationToCudaOperation(opA),
@@ -119,7 +131,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                               (cusparseConstSpMatDescr_t)matA,
                               (cusparseConstDnMatDescr_t)matB,
                               (const cusparseDnMatDescr_t)matC,
-                              hipsparse::hipDataTypeToCudaDataType(computeType),
+                              backend_data_type,
                               hipsparse::hipSpSMAlgToCudaSpSMAlg(alg),
                               (cusparseSpSMDescr_t)spsmDescr,
                               externalBuffer));
@@ -137,6 +149,10 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                          hipsparseSpSMDescr_t        spsmDescr,
                                          void*                       externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpSM_analysis((cusparseHandle_t)handle,
                               hipsparse::hipOperationToCudaOperation(opA),
@@ -145,7 +161,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                               (const cusparseSpMatDescr_t)matA,
                               (const cusparseDnMatDescr_t)matB,
                               (const cusparseDnMatDescr_t)matC,
-                              hipsparse::hipDataTypeToCudaDataType(computeType),
+                              backend_data_type,
                               hipsparse::hipSpSMAlgToCudaSpSMAlg(alg),
                               (cusparseSpSMDescr_t)spsmDescr,
                               externalBuffer));
@@ -165,6 +181,10 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseSpSMDescr_t        spsmDescr,
                                       void*                       externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpSM_solve((cusparseHandle_t)handle,
                            hipsparse::hipOperationToCudaOperation(opA),
@@ -173,7 +193,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                            (cusparseConstSpMatDescr_t)matA,
                            (cusparseConstDnMatDescr_t)matB,
                            (const cusparseDnMatDescr_t)matC,
-                           hipsparse::hipDataTypeToCudaDataType(computeType),
+                           backend_data_type,
                            hipsparse::hipSpSMAlgToCudaSpSMAlg(alg),
                            (cusparseSpSMDescr_t)spsmDescr));
 }
@@ -190,6 +210,10 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                                       hipsparseSpSMDescr_t        spsmDescr,
                                       void*                       externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpSM_solve((cusparseHandle_t)handle,
                            hipsparse::hipOperationToCudaOperation(opA),
@@ -198,7 +222,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                            (const cusparseSpMatDescr_t)matA,
                            (const cusparseDnMatDescr_t)matB,
                            (const cusparseDnMatDescr_t)matC,
-                           hipsparse::hipDataTypeToCudaDataType(computeType),
+                           backend_data_type,
                            hipsparse::hipSpSMAlgToCudaSpSMAlg(alg),
                            (cusparseSpSMDescr_t)spsmDescr));
 }

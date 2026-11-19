@@ -179,6 +179,9 @@ hipsparseStatus_t hipsparseCopyMatDescr(hipsparseMatDescr_t dest, const hipspars
  *  matrix types are \ref HIPSPARSE_MATRIX_TYPE_GENERAL,
  *  \ref HIPSPARSE_MATRIX_TYPE_SYMMETRIC, \ref HIPSPARSE_MATRIX_TYPE_HERMITIAN, or
  *  \ref HIPSPARSE_MATRIX_TYPE_TRIANGULAR.
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the matrix type was set.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p type is not one of the valid matrix types.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetMatType(hipsparseMatDescr_t descrA, hipsparseMatrixType_t type);
@@ -199,6 +202,9 @@ hipsparseMatrixType_t hipsparseGetMatType(const hipsparseMatDescr_t descrA);
  *  \p hipsparseSetMatFillMode sets the matrix fill mode of a matrix descriptor.
  *  Valid fill modes are \ref HIPSPARSE_FILL_MODE_LOWER or
  *  \ref HIPSPARSE_FILL_MODE_UPPER.
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the fill mode was set.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p fillMode is not one of the valid fill modes.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetMatFillMode(hipsparseMatDescr_t descrA, hipsparseFillMode_t fillMode);
@@ -219,6 +225,9 @@ hipsparseFillMode_t hipsparseGetMatFillMode(const hipsparseMatDescr_t descrA);
  *  \p hipsparseSetMatDiagType sets the matrix diagonal type of a matrix
  *  descriptor. Valid diagonal types are \ref HIPSPARSE_DIAG_TYPE_UNIT or
  *  \ref HIPSPARSE_DIAG_TYPE_NON_UNIT.
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the diagonal type was set.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p diagType is not one of the valid diagonal types.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetMatDiagType(hipsparseMatDescr_t descrA, hipsparseDiagType_t diagType);
@@ -239,6 +248,9 @@ hipsparseDiagType_t hipsparseGetMatDiagType(const hipsparseMatDescr_t descrA);
  *  \details
  *  \p hipsparseSetMatIndexBase sets the index base of a matrix descriptor. Valid
  *  options are \ref HIPSPARSE_INDEX_BASE_ZERO or \ref HIPSPARSE_INDEX_BASE_ONE.
+ *
+ *  \retval HIPSPARSE_STATUS_SUCCESS the index base was set.
+ *  \retval HIPSPARSE_STATUS_INVALID_VALUE \p base is not one of the valid index bases.
  */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseSetMatIndexBase(hipsparseMatDescr_t descrA, hipsparseIndexBase_t base);

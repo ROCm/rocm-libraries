@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -69,6 +69,9 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spsm((rocsparse_handle)handle,
                                              hipsparse::hipOperationToHCCOperation(opA),
                                              hipsparse::hipOperationToHCCOperation(opB),
@@ -76,7 +79,7 @@ hipsparseStatus_t hipsparseSpSM_bufferSize(hipsparseHandle_t           handle,
                                              to_rocsparse_const_spmat_descr(matA),
                                              (rocsparse_const_dnmat_descr)matB,
                                              (const rocsparse_dnmat_descr)matC,
-                                             hipsparse::hipDataTypeToHCCDataType(computeType),
+                                             backend_data_type,
                                              hipsparse::hipSpSMAlgToHCCSpSMAlg(alg),
                                              rocsparse_spsm_stage_buffer_size,
                                              pBufferSizeInBytes,
@@ -104,6 +107,9 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse_spsm((rocsparse_handle)handle,
                                              hipsparse::hipOperationToHCCOperation(opA),
                                              hipsparse::hipOperationToHCCOperation(opB),
@@ -111,7 +117,7 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
                                              to_rocsparse_const_spmat_descr(matA),
                                              (rocsparse_const_dnmat_descr)matB,
                                              (const rocsparse_dnmat_descr)matC,
-                                             hipsparse::hipDataTypeToHCCDataType(computeType),
+                                             backend_data_type,
                                              hipsparse::hipSpSMAlgToHCCSpSMAlg(alg),
                                              rocsparse_spsm_stage_preprocess,
                                              nullptr,
@@ -139,6 +145,9 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spsm((rocsparse_handle)handle,
                        hipsparse::hipOperationToHCCOperation(opA),
@@ -147,7 +156,7 @@ hipsparseStatus_t hipsparseSpSM_solve(hipsparseHandle_t           handle,
                        to_rocsparse_const_spmat_descr(matA),
                        (rocsparse_const_dnmat_descr)matB,
                        (const rocsparse_dnmat_descr)matC,
-                       hipsparse::hipDataTypeToHCCDataType(computeType),
+                       backend_data_type,
                        hipsparse::hipSpSMAlgToHCCSpSMAlg(alg),
                        rocsparse_spsm_stage_compute,
                        nullptr,

@@ -828,6 +828,10 @@ hipsparseStatus_t hipsparseSpMatSetAttribute(hipsparseSpMatDescr_t     spMatDesc
 *  \details
 *  \p hipsparseCreateDnVec creates a dense vector descriptor. It should be
 *  destroyed at the end using hipsparseDestroyDnVec().
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not support.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p valueType is not a \p hipDataType.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateDnVec(hipsparseDnVecDescr_t* dnVecDescr,
@@ -842,6 +846,10 @@ hipsparseStatus_t hipsparseCreateDnVec(hipsparseDnVecDescr_t* dnVecDescr,
 *  \details
 *  \p hipsparseCreateConstDnVec creates a dense vector descriptor. It should be
 *  destroyed at the end using hipsparseDestroyDnVec().
+*
+*  \retval HIPSPARSE_STATUS_SUCCESS the descriptor was created.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p valueType is a \p hipDataType that hipSPARSE does not support.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p valueType is not a \p hipDataType.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstDnVec(hipsparseConstDnVecDescr_t* dnVecDescr,

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,13 +38,16 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t          handle,
                                            hipDataType                computeType,
                                            size_t*                    pBufferSizeInBytes)
 {
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spvv((rocsparse_handle)handle,
                        hipsparse::hipOperationToHCCOperation(opX),
                        (rocsparse_const_spvec_descr)vecX,
                        (rocsparse_const_dnvec_descr)vecY,
                        result,
-                       hipsparse::hipDataTypeToHCCDataType(computeType),
+                       backend_data_type,
                        pBufferSizeInBytes,
                        nullptr));
 }
@@ -65,13 +68,16 @@ hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t          handle,
         return HIPSPARSE_STATUS_INVALID_VALUE;
     }
 
+    rocsparse_datatype_ backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &backend_data_type));
+
     return hipsparse::rocSPARSEStatusToHIPStatus(
         rocsparse_spvv((rocsparse_handle)handle,
                        hipsparse::hipOperationToHCCOperation(opX),
                        (rocsparse_const_spvec_descr)vecX,
                        (rocsparse_const_dnvec_descr)vecY,
                        result,
-                       hipsparse::hipDataTypeToHCCDataType(computeType),
+                       backend_data_type,
                        &bufferSize,
                        externalBuffer));
 }

@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -37,13 +37,17 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t          handle,
                                            hipDataType                computeType,
                                            size_t*                    pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpVV_bufferSize((cusparseHandle_t)handle,
                                 hipsparse::hipOperationToCudaOperation(opX),
                                 (cusparseConstSpVecDescr_t)vecX,
                                 (cusparseConstDnVecDescr_t)vecY,
                                 result,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
+                                backend_data_type,
                                 pBufferSizeInBytes));
 }
 #elif(CUDART_VERSION > 10010 || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -55,13 +59,17 @@ hipsparseStatus_t hipsparseSpVV_bufferSize(hipsparseHandle_t     handle,
                                            hipDataType           computeType,
                                            size_t*               pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpVV_bufferSize((cusparseHandle_t)handle,
                                 hipsparse::hipOperationToCudaOperation(opX),
                                 (cusparseSpVecDescr_t)vecX,
                                 (cusparseDnVecDescr_t)vecY,
                                 result,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
+                                backend_data_type,
                                 pBufferSizeInBytes));
 }
 #endif
@@ -75,13 +83,17 @@ hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t          handle,
                                 hipDataType                computeType,
                                 void*                      externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpVV((cusparseHandle_t)handle,
                      hipsparse::hipOperationToCudaOperation(opX),
                      (cusparseConstSpVecDescr_t)vecX,
                      (cusparseConstDnVecDescr_t)vecY,
                      result,
-                     hipsparse::hipDataTypeToCudaDataType(computeType),
+                     backend_data_type,
                      externalBuffer));
 }
 #elif(CUDART_VERSION > 10010 || (CUDART_VERSION == 10010 && CUDART_10_1_UPDATE_VERSION == 1))
@@ -93,13 +105,17 @@ hipsparseStatus_t hipsparseSpVV(hipsparseHandle_t     handle,
                                 hipDataType           computeType,
                                 void*                 externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpVV((cusparseHandle_t)handle,
                      hipsparse::hipOperationToCudaOperation(opX),
                      (cusparseSpVecDescr_t)vecX,
                      (cusparseDnVecDescr_t)vecY,
                      result,
-                     hipsparse::hipDataTypeToCudaDataType(computeType),
+                     backend_data_type,
                      externalBuffer));
 }
 #endif

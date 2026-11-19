@@ -102,7 +102,8 @@ namespace hipsparse
         rocsparse_spgeam_alg rocAlg    = hipsparse::hipSpGEAMAlgToHCCSpGEAMAlg(alg);
         rocsparse_operation  rocOpA    = hipsparse::hipOperationToHCCOperation(opA);
         rocsparse_operation  rocOpB    = hipsparse::hipOperationToHCCOperation(opB);
-        rocsparse_datatype   rocType   = hipsparse::hipDataTypeToHCCDataType(computeType);
+        rocsparse_datatype   rocType;
+        RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &rocType));
 
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_spgeam_set_input(
             rocHandle, descr->descr, rocsparse_spgeam_input_alg, &rocAlg, sizeof(rocAlg), nullptr));
@@ -535,9 +536,11 @@ hipsparseStatus_t hipsparseSpGEAM_nnz(hipsparseHandle_t          handle,
 
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::checkSpGEAMSupport(opA, opB, matA, matB, matC));
 
+    rocsparse_datatype rocType;
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &rocType));
+
     // Degenerate zero-scalar cases collapse to a scaled copy of a single operand (matching
     // cuSPARSE) and are handled without rocsparse_spgeam.
-    const rocsparse_datatype    rocType = hipsparse::hipDataTypeToHCCDataType(computeType);
     hipsparse::spgeam_zero_mode zeroMode;
     RETURN_IF_HIPSPARSE_ERROR(
         hipsparse::spgeamZeroMode((rocsparse_handle)handle, alpha, beta, rocType, &zeroMode));
@@ -590,9 +593,11 @@ hipsparseStatus_t hipsparseSpGEAM(hipsparseHandle_t          handle,
 
     RETURN_IF_HIPSPARSE_ERROR(hipsparse::checkSpGEAMSupport(opA, opB, matA, matB, matC));
 
+    rocsparse_datatype rocType;
+    RETURN_IF_HIPSPARSE_ERROR(hipsparse::hipDataTypeToHCCDataType(computeType, &rocType));
+
     // Degenerate zero-scalar cases collapse to a scaled copy of a single operand (matching
     // cuSPARSE) and are handled with rocsparse_spmat_scale instead of rocsparse_spgeam.
-    const rocsparse_datatype    rocType = hipsparse::hipDataTypeToHCCDataType(computeType);
     hipsparse::spgeam_zero_mode zeroMode;
     RETURN_IF_HIPSPARSE_ERROR(
         hipsparse::spgeamZeroMode((rocsparse_handle)handle, alpha, beta, rocType, &zeroMode));

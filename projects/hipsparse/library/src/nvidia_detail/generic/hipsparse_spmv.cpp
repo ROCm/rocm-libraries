@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -40,6 +40,10 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpMVAlg_t          alg,
                                            size_t*                     pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMV_bufferSize((cusparseHandle_t)handle,
                                 hipsparse::hipOperationToCudaOperation(opA),
@@ -48,7 +52,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                 (cusparseConstDnVecDescr_t)vecX,
                                 beta,
                                 (const cusparseDnVecDescr_t)vecY,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
+                                backend_data_type,
                                 hipsparse::hipSpMVAlgToCudaSpMVAlg(alg),
                                 pBufferSizeInBytes));
 }
@@ -64,6 +68,10 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                            hipsparseSpMVAlg_t          alg,
                                            size_t*                     pBufferSizeInBytes)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMV_bufferSize((cusparseHandle_t)handle,
                                 hipsparse::hipOperationToCudaOperation(opA),
@@ -72,7 +80,7 @@ hipsparseStatus_t hipsparseSpMV_bufferSize(hipsparseHandle_t           handle,
                                 (const cusparseDnVecDescr_t)vecX,
                                 beta,
                                 (const cusparseDnVecDescr_t)vecY,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
+                                backend_data_type,
                                 hipsparse::hipSpMVAlgToCudaSpMVAlg(alg),
                                 pBufferSizeInBytes));
 }
@@ -90,6 +98,10 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                            hipsparseSpMVAlg_t          alg,
                                            void*                       externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMV_preprocess((cusparseHandle_t)handle,
                                 hipsparse::hipOperationToCudaOperation(opA),
@@ -98,7 +110,7 @@ hipsparseStatus_t hipsparseSpMV_preprocess(hipsparseHandle_t           handle,
                                 (const cusparseDnVecDescr_t)vecX,
                                 beta,
                                 (const cusparseDnVecDescr_t)vecY,
-                                hipsparse::hipDataTypeToCudaDataType(computeType),
+                                backend_data_type,
                                 hipsparse::hipSpMVAlgToCudaSpMVAlg(alg),
                                 externalBuffer));
 }
@@ -166,6 +178,10 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                 hipsparseSpMVAlg_t          alg,
                                 void*                       externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMV((cusparseHandle_t)handle,
                      hipsparse::hipOperationToCudaOperation(opA),
@@ -174,7 +190,7 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                      (cusparseConstDnVecDescr_t)vecX,
                      beta,
                      (const cusparseDnVecDescr_t)vecY,
-                     hipsparse::hipDataTypeToCudaDataType(computeType),
+                     backend_data_type,
                      hipsparse::hipSpMVAlgToCudaSpMVAlg(alg),
                      externalBuffer));
 }
@@ -190,6 +206,10 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                                 hipsparseSpMVAlg_t          alg,
                                 void*                       externalBuffer)
 {
+    cudaDataType backend_data_type{};
+    RETURN_IF_HIPSPARSE_ERROR(
+        hipsparse::hipDataTypeToCudaDataType(computeType, &backend_data_type));
+
     return hipsparse::hipCUSPARSEStatusToHIPStatus(
         cusparseSpMV((cusparseHandle_t)handle,
                      hipsparse::hipOperationToCudaOperation(opA),
@@ -198,7 +218,7 @@ hipsparseStatus_t hipsparseSpMV(hipsparseHandle_t           handle,
                      (const cusparseDnVecDescr_t)vecX,
                      beta,
                      (const cusparseDnVecDescr_t)vecY,
-                     hipsparse::hipDataTypeToCudaDataType(computeType),
+                     backend_data_type,
                      hipsparse::hipSpMVAlgToCudaSpMVAlg(alg),
                      externalBuffer));
 }
