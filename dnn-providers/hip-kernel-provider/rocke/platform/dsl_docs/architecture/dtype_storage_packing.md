@@ -97,8 +97,10 @@ The client-facing transport is `rocke.helpers.tiling.load_fragment` /
 a `TensorWindow` positions the view, and a dtype-free `TileDesc` supplies the
 lane/register coordinates. `make_matrix_fragment_desc` composes an atom-owned
 contiguous-chunk layout with that surface. A fragment contains only live
-storage words. `prepare_scaled_mma_operand` validates the selected atom's
-logical format/count, bitcasts storage and adds its required ABI zero tail.
+storage words. The temporary `prepare_scaled_mma_operand` bridge validates
+logical format and count, and bitcasts storage and adds the selected atom's ABI
+zero tail as needed. Shared lowering operand forms are the long-term owner of
+these steps; see the [migration plan](../development/fragment_transport_migration.md#temporary-scaled-mma-abi-bridge).
 Padding is not a numerical conversion or a tensor-allocation extension.
 
 A stated `alignment_bytes` caps the layout-derived guarantee at the passed

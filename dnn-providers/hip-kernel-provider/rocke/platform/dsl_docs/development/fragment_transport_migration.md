@@ -37,15 +37,30 @@ requirements. Its old paths and line numbers refer to that starting revision.
 - Keep instruction selection, numerical conversions, scale semantics, tensor
   factors, prefetch policy, launch geometry, signatures, and kernel identity
   unchanged. No new instruction support or convolution LDS migration.
-- The fragment is logical data held in its live storage registers. Trailing
-  words required by an instruction ABI belong to operand preparation, never to
-  the memory descriptor or the fragment's storage capacity.
+- A fragment contains logical data in its live storage registers. Trailing
+  words required by an instruction ABI never belong to the memory descriptor
+  or the fragment's storage capacity.
 - Preserve bit ordering, lane/register mapping, signed address arithmetic,
   clipping and allocation safety, alignment guarantees, and input refusals.
 - Do not replace a native builder with a Python-authored serialized kernel.
 - Preserve existing accepted raw-storage contracts through a compatibility
   adapter until equivalent tests and migration exist. Do not erase their tests
   merely to remove the old module.
+
+## Temporary scaled-MMA ABI bridge
+
+`prepare_scaled_mma_operand` in both engines is a temporary bridge. It checks
+format and logical element count, then reinterprets and zero-pads the live
+payload as needed before issuing the MMA op. It preserves the current full-carrier
+requirements of gfx950 scaled MFMA and the gfx1250 scaled WMMA HIP route. The
+gfx1250 scaled WMMA LLVM route can already adapt live payloads.
+
+The long-term owner of reinterpretation and ABI zero-padding is the shared
+lowering operand forms. Remove the bridge once the builder and verifier admit
+the catalog-typed logical payload and an explicit full carrier, and the LLVM
+and HIP lowerers of both engines handle both forms. Wrong format and width
+must still be rejected. This migration does not change operand admission or
+require the lowering work to land first.
 
 ## Implementation inventory
 
@@ -54,9 +69,9 @@ Paths in the tables are relative to `platform/`.
 | Concern | Before migration | Ownership after migration |
 | --- | --- | --- |
 | Pointer, storage element, and storage vector types | `python/rocke/helpers/mma_io.py:31-59` | New `python/rocke/core/ir_storage.py` with native core counterpart; retain `core/storage.py` as the bit-storage rule owner |
-| MMA logical operand type | `python/rocke/helpers/mma_io.py:62-74` | `python/rocke/core/mma_operand.py`; keep lowering admission strict |
+| MMA logical operand type | `python/rocke/helpers/mma_io.py:62-74` | `python/rocke/core/mma_operand.py`; preserve existing admission in this migration |
 | Encoded-pattern packing | `python/rocke/helpers/mma_io.py:182-240`, `cpp/helpers/mma_io.cpp:159-240` | New `helpers/packing.py` and native helper/header; no numerical quantization |
-| Atom operand ABI bridge | Consumer-side carrier vectors | New `helpers/mma_operand.py` and native helper/header; validate logical count and derive carrier width from the selected atom |
+| Atom operand ABI bridge | Consumer-side carrier vectors | Temporary `helpers/mma_operand.py` and native helper/header; shared lowering forms are the long-term owner |
 | Descriptor and alignment contracts | `helpers/tiling/descriptors.py:52-180` | Add explicit conservative base-alignment support without changing existing default emission |
 | Load/store policy | `helpers/tiling/emit.py:508-725,958-1209` | One shared transport implementation; retain safe whole-group clipping and unsupported swizzle/repacking refusals |
 | Native fragment I/O | No tiling authoring twin | Add bounded descriptor/window/tile/fragment and load/store equivalents under `cpp/helpers/tiling/`; reuse distribution and IR primitives |
@@ -129,7 +144,7 @@ measurement. Investigate an added instruction/resource tax before accepting it.
 
 1. Capture baseline and make the existing contract matrix reproducible.
 2. Separate storage typing and encoded packing from matrix I/O, with tests.
-3. Add atom-owned ABI preparation and explicit transport alignment semantics.
+3. Add the temporary scaled-MMA ABI bridge and explicit transport alignment semantics.
 4. Add the minimal mirrored native descriptor-driven fragment transport.
 5. Migrate each Python/native consumer pair and its parity tests; keep numerical
    code and public kernel signatures stable.
