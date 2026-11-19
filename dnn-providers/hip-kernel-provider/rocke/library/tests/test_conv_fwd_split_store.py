@@ -568,6 +568,23 @@ class TestFwdSplitStoreSpec(unittest.TestCase):
         with mock.patch.dict(os.environ, {"ROCKE_AOT_FWD_SAA": "x"}):
             with self.assertRaises(ValueError):
                 aot_jobs._fwd_split_atomic_variants(kl, (2, False, False))
+        # ROCKE_AOT_FWD_SDET never asks for split_det 1 / 2 with the
+        # slice-major XCD remap outside split_hybrid (the validators refuse it).
+        with mock.patch.dict(
+            os.environ,
+            {
+                "ROCKE_AOT_FWD_SAA": "",
+                "ROCKE_AOT_FWD_SKX": "6",
+                "ROCKE_AOT_FWD_SHY": "24",
+                "ROCKE_AOT_FWD_SHY_SKX": "1",
+                "ROCKE_AOT_FWD_SDET": "1,2",
+            },
+        ):
+            got = aot_jobs._fwd_split_atomic_variants(kl, (2, False, False))
+            self.assertTrue(any(v.get("split_det") for v in got))
+            for v in got:
+                if v.get("split_det") in (1, 2) and v.get("split_xcd_remap"):
+                    self.assertTrue(v.get("split_hybrid"), v)
         # ROCKE_AOT_FWD_PSF: pp_split_fetch variants of the pp5 loops only
         pp5 = dict(kl, vmem_interleave=4)
         with mock.patch.dict(

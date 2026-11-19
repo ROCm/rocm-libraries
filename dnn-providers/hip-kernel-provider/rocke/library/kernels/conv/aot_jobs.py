@@ -1518,7 +1518,7 @@ def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
 # ROCKE_AOT_FWD_PP_PIPES (default "mem": the loop emits no scheduler hints, so
 # compv3/compv4 would only rebuild it) and only on the geometries of
 # ROCKE_AOT_FWD_PP_SCOPE ("<M>x<N>x<K>[w<wm>x<wn>][a<atom>],...", required).
-_FWD_PP_RE = re.compile(r"^p([1-5])(?:m(\d+))?(?:s([0-3]))?(?:v(\d))?(?:w(\d))?(b)?$")
+_FWD_PP_RE = re.compile(r"^p([145])(?:m(\d+))?(?:s([0-3]))?(?:v(\d))?(?:w(\d))?(b)?$")
 _FWD_PP_PLAIN_OFF = (
     "lds_ahead",
     "defer_mfma",
@@ -1546,7 +1546,7 @@ def _fwd_pp_variants() -> Tuple[dict, ...]:
         m = _FWD_PP_RE.match(tok)
         if m is None:
             raise ValueError(
-                f"ROCKE_AOT_FWD_PP: {tok!r} is not p<1-5>[m<n>][s<0-3>][v<n>][w<n>][b]"
+                f"ROCKE_AOT_FWD_PP: {tok!r} is not p<1|4|5>[m<n>][s<0-3>][v<n>][w<n>][b]"
             )
         v = dict(rpf_pingpong=int(m.group(1)), lds_kpack_read=True, uk_nopad=True)
         if m.group(2) and int(m.group(2)):
@@ -2445,6 +2445,11 @@ def _fwd_split_atomic_variants(kloop: dict, variant: tuple) -> Tuple[dict, ...]:
                 if not v.get("split_flag_store")
                 and not v.get("split_zero_first")
                 and not v.get("split_streamk")
+                and not (
+                    m in (1, 2)
+                    and v.get("split_xcd_remap")
+                    and not v.get("split_hybrid")
+                )
             ]
     return tuple(out)
 

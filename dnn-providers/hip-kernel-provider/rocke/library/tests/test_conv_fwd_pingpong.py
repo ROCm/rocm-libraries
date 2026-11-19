@@ -243,6 +243,8 @@ class TestFwdPingPongSpec(unittest.TestCase):
             )
             self.assertEqual(len(loops), 3)
             self.assertEqual(aot_jobs._fwd_pingpong_k_loops(loops, "compv3"), [])
-        with mock.patch.dict(os.environ, {"ROCKE_AOT_FWD_PP": "p9"}):
-            with self.assertRaises(ValueError):
-                aot_jobs._fwd_pp_variants()
+        # p9 is no mode; p2 / p3 are retired (the validators refuse them).
+        for tok in ("p9", "p2", "p3m1"):
+            with mock.patch.dict(os.environ, {"ROCKE_AOT_FWD_PP": tok}):
+                with self.assertRaises(ValueError):
+                    aot_jobs._fwd_pp_variants()
