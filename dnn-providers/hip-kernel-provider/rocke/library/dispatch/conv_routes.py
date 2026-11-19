@@ -202,6 +202,10 @@ def route_from_row(case: str, row: Mapping, source: str = "") -> ConvRoute:
             raise ValueError(
                 f"{source}: case {case}: padcopy_halo copies one 3-D image (N=1)"
             )
+        if names["C"] % 8:
+            raise ValueError(
+                f"{source}: case {case}: padcopy_halo needs C % 8 == 0 (16-byte units)"
+            )
     if kernel:
         why = label_mismatch(kernel, direction, dtype)
         if why:
@@ -477,17 +481,11 @@ def winograd_route_plan(route: ConvRoute, problem, direction: str, dtype: str = 
     spec_kw = route.spec_dict
     Di, Hi, Wi, C, K = sel._winograd_problem(problem, direction)
     spec = cw.WinogradYxSpec(Di=Di, Hi=Hi, Wi=Wi, C=C, K=K, **spec_kw)
-    ok, why = cw.is_valid_yx_spec(spec)
-    if not ok:
-        raise ValueError(f"{route.case}: invalid winograd spec: {why}")
     hz, h = sel._relayout_halos(problem, direction)
-    if spec.bps not in (0, 1) or spec.oscale or spec.yc8h:
-        raise ValueError(f"{route.case}: drop-in needs bps 0 / 1, no oscale / yc8h")
-    if spec.bps == 1 and (spec.bps_halo != h or cw._bps_hz(spec) != hz):
-        raise ValueError(
-            f"{route.case}: bps halo ({spec.bps_halo}, z {cw._bps_hz(spec)}) is not the "
-            f"relayout halo ({h}, z {hz})"
-        )
+    # The route's steps know the c8 relayout and the (X, U, Y[, E]) signature only.
+    why = cw.dropin_spec_error(spec, hz, h, ndhwc_ok=False)
+    if why:
+        raise ValueError(f"{route.case}: winograd route: {why}")
     return (
         sel.Winograd3dPlan(
             "yx",

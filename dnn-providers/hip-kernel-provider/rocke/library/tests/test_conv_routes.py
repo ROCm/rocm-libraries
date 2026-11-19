@@ -175,6 +175,10 @@ def test_loader_modes(tmp_path):
             },
             "N=1",
         ),
+        (
+            {"cmd": _cmd(C=4), "route": "padcopy_halo", "kernel": "k"},
+            "C % 8",
+        ),
     ],
 )
 def test_bad_rows_refused(row, msg):
@@ -321,6 +325,32 @@ def test_winograd_halo_mismatch_refused():
     )
     with pytest.raises(ValueError, match="relayout halo"):
         cr.dispatch_conv_route(_req("bad", r), r)
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        dict(xin="r8"),
+        dict(boff=True, xcd=0),
+        dict(frel=1, bps=0),
+        dict(dbg="nox"),
+        dict(xin="ndhwc", xpad=1, bps=3),
+    ],
+)
+def test_winograd_route_refuses_what_its_steps_cannot_run(extra):
+    # The route's steps know the c8 relayout and the (X, U, Y[, E]) call only.
+    spec = dict(ZSPEC, variant="yx", **extra)
+    r = _routes(
+        {
+            "fwd_s3_pad1": {
+                "cmd": _cmd(C=256, K=128, D=128, H=64, W=64),
+                "route": "winograd",
+                "winograd": {"spec": spec, "wtv": 4},
+            }
+        }
+    )
+    with pytest.raises(ValueError, match="winograd route"):
+        cr.dispatch_conv_route(_req("fwd_s3_pad1", r), r)
 
 
 def test_kernel_from_pins():
