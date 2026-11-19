@@ -1106,10 +1106,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             return std::nullopt;
         }
         // Widely dilated small filters (ASPP-class: at most 9 taps, dilation 6 or more on a
-        // filter axis): each tap gathers a far-apart window, and the BLAS path won on gfx950,
-        // gfx942 and gfx1201, so the generic loop only adds candidates there. On gfx11 BLAS is
-        // slow at these shapes and the generic loop serves them (deeplab 3x3 d12-d36 0.9-12x
-        // the BLAS path's speed on gfx1101, SSD's fp32 3x3 d6 1.3-2.2x).
+        // filter axis): each tap gathers a far-apart window. Measured against the BLAS path on
+        // deeplab 3x3 d12-d36 and SSD's fp32 3x3 d6 (best generic config against best BLAS):
+        // gfx1101 0.9-12x (fp32 FMA form 1.3-2.2x) and gfx1201 16-bit 0.8-3.3x (geomean 1.5x)
+        // serve them; gfx1201's FMA form (0.4-0.7x), gfx942 (geomean 0.64x) and gfx90a (0.73x)
+        // leave them to BLAS, as does every architecture not measured.
         int64_t dilation = 1;
         for(int axis = 0; axis < CONV_NAIVE_SPATIAL_DIMS; ++axis)
         {
@@ -1118,8 +1119,11 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
                 dilation = std::max<int64_t>(dilation, a.dilation[axis]);
             }
         }
+        const auto baseArch = hipdnn_plugin_sdk::stripArchFeatures(arch);
+        const bool servesSparse
+            = baseArch.rfind("gfx11", 0) == 0 || (baseArch.rfind("gfx120", 0) == 0 && !genericFma);
         if(problem.taps <= GENERIC_SPARSE_MAX_TAPS && dilation >= GENERIC_SPARSE_MIN_DILATION
-           && hipdnn_plugin_sdk::stripArchFeatures(arch).rfind("gfx11", 0) != 0)
+           && !servesSparse)
         {
             return std::nullopt;
         }

@@ -648,7 +648,8 @@ std::vector<DeviceCase> deviceCases()
     generic("Generic3x3x3Stride2Dilation2Ndhwc",
             conv(16, 32, {7, 9, 11}, {3, 3, 3}, {2, 2, 2}, {2, 2, 2}, {2, 2, 2}, {2, 2, 2}, true));
     // ASPP-class dilations no specialized config has (3x3 d18 and d30, 1x3 d12), in both layouts:
-    // the generic loop serves them on gfx11 only (elsewhere it declines them for BLAS).
+    // the generic loop serves them on gfx11 and on gfx12's matrix atoms (elsewhere it declines
+    // them for BLAS).
     const auto aspp = [&](const std::string& name, const ConvShape& shape) {
         DeviceCase deviceCase{name, shape};
         deviceCase.genericOnly = true;
@@ -1980,7 +1981,7 @@ TEST(TestConvWrwCatalog, EveryMatrixArchHasAGenericTierPerDtypeAndLayout)
 TEST(TestConvWrwCatalog, DilatedRowsHaveSpecializedConfigsInBothLayouts)
 {
     // A dilated filter row the specialized tier misses in one layout falls to the generic tier,
-    // which declines ASPP-class dilations except on gfx11, and then to the BLAS path
+    // which declines ASPP-class dilations except on gfx11 and gfx12, and then to the BLAS path
     // (30x slower on gfx1100 for channels-last fp16 deeplab). Every matrix-core arch serves every
     // deeplab / SSD 3x3 dilation and HiFi-GAN's dilated 1-D rows in both layouts with a
     // specialized config.

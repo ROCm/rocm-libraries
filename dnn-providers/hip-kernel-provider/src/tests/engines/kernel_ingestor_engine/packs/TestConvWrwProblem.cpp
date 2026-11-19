@@ -2916,8 +2916,8 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas
     EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({1, 10}, {1, 6})));
     EXPECT_TRUE(admits(genericFields(), "gfx942", dilated({2, 5}, {6, 1})));
     EXPECT_FALSE(admits(genericFields(), "gfx942", dilated({1, 9}, {1, 6})));
-    // gfx11 keeps them (BLAS is slow there): its WMMA config admits dilation 6 and 12, the
-    // same tile on gfx12's atom declines.
+    // gfx11 and gfx12's matrix atoms keep them (BLAS is slow there): dilation 6 and 12 admit.
+    // gfx12's FMA form (fp32) declines them, gfx11's admits.
     const auto wmma = [](const char* atom) {
         auto f = genericFields();
         f.atom = atom;
@@ -2929,8 +2929,16 @@ TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesWidelyDilatedSmallFiltersToBlas
     EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1101", dilated({3, 3}, {6, 6})));
     EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1100", dilated({3, 3}, {12, 12})));
     EXPECT_TRUE(admits(wmma("wmma11_f16"), "gfx1151", dilated({3, 3}, {6, 1})));
-    EXPECT_TRUE(admits(wmma("wmma12_f16"), "gfx1201", dilated({3, 3}, {5, 5})));
-    EXPECT_FALSE(admits(wmma("wmma12_f16"), "gfx1201", dilated({3, 3}, {6, 6})));
+    EXPECT_TRUE(admits(wmma("wmma12_f16"), "gfx1201", dilated({3, 3}, {6, 6})));
+    EXPECT_TRUE(admits(wmma("wmma12_f16"), "gfx1200", dilated({3, 3}, {12, 12})));
+    const auto fp32Dilated = [&](std::vector<int64_t> d) {
+        auto shape = dilated({3, 3}, std::move(d));
+        shape.dataType = DataType::FLOAT;
+        return shape;
+    };
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1201", fp32Dilated({5, 5})));
+    EXPECT_FALSE(admits(genericFmaFields(), "gfx1201", fp32Dilated({6, 6})));
+    EXPECT_TRUE(admits(genericFmaFields(), "gfx1100", fp32Dilated({6, 6})));
 }
 
 TEST(TestConvWrwKernelMatch, TheGenericLoopLeavesNarrowGroupsToTheVectorEngines)
