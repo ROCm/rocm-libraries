@@ -7,6 +7,8 @@ import copy
 import itertools
 import sys
 
+from tensilelite.Components.TDMStoreInst import _handoffBarriersLds
+
 import pytest
 
 from tensilelite.ExecutionPolicy import (
@@ -366,7 +368,7 @@ def test_inherited_streamk_cluster_payload_is_rederived_when_source_policy_chang
 @pytest.mark.parametrize("strategy, assignment, overrides, fences", [
     ("DataParallel", "StaticGrid", {}, True),
     ("DataParallel", "StaticGrid", {"enableTDMA": False, "enableTDMB": False}, False),
-    ("StreamK", "DynamicWorkQueue", {"enableTDMA": False, "enableTDMB": False}, True),
+    ("StreamK", "DynamicWorkQueue", {"enableTDMA": False, "enableTDMB": False}, False),
     ("StreamK", "Hybrid", {"enableTDMA": False, "enableTDMB": False}, False),
     ("DataParallel", "StaticGrid",
      {"enableTDMA": False, "enableTDMB": False, "_PersistentVectorEpilogueLds": True}, True),
@@ -374,17 +376,21 @@ def test_inherited_streamk_cluster_payload_is_rederived_when_source_policy_chang
 ], ids=["tdm", "no_tdm", "queue", "hybrid", "epilogue_lds", "one_wave"])
 def test_handoff_fences_lds(strategy, assignment, overrides, fences):
     """The persistent tile handoff ends with a workgroup barrier with TDM loads on more than one
-    wave, with the epilogue vectors in LDS, in a spatial cluster or in the DynamicWorkQueue
-    component; the TDM flush relies on it.
+    wave, with the epilogue vectors in LDS or in a spatial cluster; the TDM flush relies on it and
+    emits none of its own (_handoffBarriersLds).
 
-    DataParallel pairs only with StaticGrid -- resolve_policy rejects every other assignment -- so
-    the queue and hybrid rows exercise those assignments under StreamK.
+    This used to call WorkAssignment.handoffFencesLds, which develop's AIHPBLAS-5469 (#15103)
+    replaced with splitPersistentTileHandoff. _handoffBarriersLds mirrors that predicate, so the
+    rows below now pin it instead.
+
+    The DynamicWorkQueue row expects False where handoffFencesLds returned True: the queue's
+    barrier is emitted in beforeReentry, AFTER the exit check, so a workgroup leaving the loop
+    never executes it and the flush has to keep its own. DataParallel pairs only with StaticGrid --
+    resolve_policy rejects every other assignment -- so the queue and hybrid rows exercise those
+    assignments under StreamK.
     """
     kernel = {"TileProcessingStrategy": strategy, "WorkAssignment": assignment, "ClusterDim": [1, 1],
               "NumThreads": 128, "WavefrontSize": 32, "PrefetchAcrossPersistent": 0,
               "enableTDMA": True, "enableTDMB": True}
     kernel.update(overrides)
-    # The queue reason reads the component's own WorkAssignment rather than the kernel argument,
-    # so the component identity below is load-bearing.
-    component = getattr(sys.modules[StaticGrid.__module__], assignment)
-    assert component().handoffFencesLds(kernel) == fences
+    assert _handoffBarriersLds(kernel) == fences
