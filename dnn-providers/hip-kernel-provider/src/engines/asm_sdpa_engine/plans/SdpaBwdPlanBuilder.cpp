@@ -185,7 +185,7 @@ std::optional<fmha_v3_bwdConfig> findConfig(const CFG& registry,
         // for, because gfx950 ships only one kernel per (dtype, hdim, mask,
         // atomic, pssk, pddv, mode) tuple — there are no per-rounding-mode
         // variants to disambiguate.  Mirrors the equivalent special case
-        // in SdpaFwdPlanBuilder.cpp::getKernelNameKey for gfx950.
+        // in SdpaFwdPlanBuilder.cpp::fwdKernelNameKey for gfx950.
         if(archId != "gfx950" && cfg.bf16_cvt != bf16Cvt)
         {
             continue;
