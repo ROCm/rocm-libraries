@@ -4260,9 +4260,9 @@ static int _dgrad_b_load_vec(const rocke_dgrad_conv_spec_t* s)
     return out;
 }
 
-#ifndef ROCKE_DGRAD_PP_BOX_SPLIT_CUS
-#define ROCKE_DGRAD_PP_BOX_SPLIT_CUS 228 /* Python PP_BOX_SPLIT_CUS (ROCKE_PP_BOX_CUS) */
-#endif
+/* Python PP_BOX_SPLIT_CUS: the workgroups of one round, the window of the
+ * pp_box_order 2 tile order. Part of the emitted code, so not overridable. */
+#define ROCKE_DGRAD_PP_BOX_SPLIT_CUS 228
 
 static rocke_kernel_def_t*
     _build_tilde_dgrad(rocke_ir_builder_t* b, const rocke_dgrad_conv_spec_t* spec, const char* arch)

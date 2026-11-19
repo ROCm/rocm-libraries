@@ -28,7 +28,6 @@ index (``(n*Di + d)*Hi*Wi + h*Wi + w``) is word ``rows_word + r``.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, replace as dc_replace
 from typing import List, Tuple
 
@@ -108,12 +107,7 @@ def pp_box_det_pack(
                     slot0, step = sg.block_start + (n * S) * nm + m, nm
                 else:
                     slot0, step = sg.block_start + (m * nn + n) * S, 1
-                _S = S
-                if os.environ.get(
-                    "ROCKE_PBD_DEBUG_S"
-                ):  # timing experiments only: wrong dX
-                    _S = min(S, int(os.environ["ROCKE_PBD_DEBUG_S"]))
-                entries.append([slot0, _S, step, len(rows), n * tile_n, len(r), 0, 0])
+                entries.append([slot0, S, step, len(rows), n * tile_n, len(r), 0, 0])
                 rows.extend(r + [r[0]] * (tile_m - len(r)))
                 # (rows_word is made absolute below)
     tab_word = len(buf)

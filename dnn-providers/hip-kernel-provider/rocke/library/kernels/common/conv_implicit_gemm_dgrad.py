@@ -614,9 +614,12 @@ def enumerate_sub_gemms(
     return sub_gemms
 
 
-# CU budget of the pp_boxes split-K degrees (gfx942: 228 CUs); override with
-# ROCKE_PP_BOX_CUS.
-PP_BOX_SPLIT_CUS = int(os.environ.get("ROCKE_PP_BOX_CUS", "228"))
+# Workgroups of one round of the pp_boxes split-K launch: the default CU
+# budget of its split degrees and box plan, and the window of the pp_box_order
+# 2 tile order. Part of the emitted code (the window), so a plain constant,
+# mirrored by ROCKE_DGRAD_PP_BOX_SPLIT_CUS in the C++ engine; a kernel's own
+# launch budget is DgradConvSpec.pp_box_cus.
+PP_BOX_SPLIT_CUS = 228
 
 
 def pp_box_sub_gemms(

@@ -18,25 +18,41 @@ classes x 216 boxes) assigns the pixel classes to boxes that contain their
 offsets, minimising the MFMA K tiles with the launch's workgroups (tiles x N
 tiles x S_B) within the CU budget (``pp_box_cus``). Each candidate is scored
 by the simulated greedy dispatch of its blocks on the CUs; the lowest
-makespan wins, then the fewest K tiles. The plan is a deterministic function
-of the problem, the tile and the budget (cached per process). Without scipy
-(or a feasible plan) the launch falls back to the ``pp_boxes`` 7 packing.
+makespan wins, then the fewest K tiles. The MILPs of one plan share a
+deterministic branch-and-bound node budget (``PLAN_NODE_BUDGET``): once it
+is spent the best plan found so far stands, so a large problem cannot keep
+the host planning for long. The plan is computed on the first launch of a
+shape and cached per process.
+
+The plan is a deterministic function of the problem, the tile, the budget
+and the solver -- never of the environment. The solver is the MILP; it needs
+scipy >= 1.9 (``scipy.optimize.milp``). Without it no plan is made and the
+launch runs the ``pp_boxes`` 7 packing (a warning says so): with
+``pp_box_det`` the records fix the f32 summation order, so a host without the
+MILP must not run a different plan under the same binary. The pure-Python
+greedy twin (:func:`_solve_greedy`) runs only when asked for explicitly
+(``plan_boxes(..., solver="greedy")``).
 
 Pure host-side planning: the binary is the ``pp_boxes`` 7 pixel-list kernel.
 """
 
 from __future__ import annotations
 
-import os as _os
+import warnings
 from functools import lru_cache
-
-try:  # the exact assignment (HiGHS MILP); without scipy the greedy twin plans
-    import scipy.optimize as _sco  # noqa: F401
-
-    _SOLVER = _os.environ.get("ROCKE_PBX8_SOLVER", "milp")
-except ImportError:  # pragma: no cover
-    _SOLVER = "greedy"
 from typing import Dict, List, Sequence, Tuple
+
+try:  # the exact assignment: scipy >= 1.9's HiGHS MILP
+    from scipy.optimize import milp as _milp  # noqa: F401
+
+    HAVE_MILP = True
+except ImportError:  # pragma: no cover - planner falls back to pp_boxes 7
+    HAVE_MILP = False
+
+# Branch-and-bound nodes all the MILPs of one plan may explore together (a
+# deterministic work cap; a time limit would make the plan depend on the
+# machine's load). Far above what the pinned shapes use.
+PLAN_NODE_BUDGET = 128
 
 Box = Tuple[int, int, int, int, int, int]  # (zlo, zhi, ylo, yhi, xlo, xhi)
 
@@ -98,16 +114,18 @@ def _solve_milp(
     tile_m: int,
     n_tiles: int,
     budget: int,
+    node_limit: int = 4000,
 ):
     """Assign the class pixels to boxes containing them: minimise the MFMA K tiles
     (sum of tiles * K tiles of the box) with the launch's workgroups (sum of tiles *
-    split * N tiles) within ``budget``. A small MILP (scipy's HiGHS); None if
-    infeasible or scipy is missing."""
+    split * N tiles) within ``budget``. A small MILP (scipy's HiGHS) exploring at
+    most ``node_limit`` branch-and-bound nodes. ``(plan, nodes explored)``; the
+    plan is None if infeasible or scipy's MILP is missing."""
     try:
         import numpy as np
         from scipy.optimize import Bounds, LinearConstraint, milp
     except ImportError:  # pragma: no cover - planner falls back to pp_boxes 7
-        return None
+        return None, 0
     classes = sorted(counts)
     boxes = sorted(boxes)
     pairs = [
@@ -138,10 +156,11 @@ def _solve_milp(
         bounds=Bounds(0, np.inf),
         # Deterministic work limits only (a time limit would make the plan
         # depend on the machine's load): a node budget and a relative MIP gap.
-        options={"node_limit": 4000, "mip_rel_gap": 2e-3},
+        options={"node_limit": node_limit, "mip_rel_gap": 2e-3},
     )
+    nodes = int(getattr(res, "mip_node_count", 0) or 0)
     if res.x is None:
-        return None
+        return None, nodes
     x = np.round(res.x).astype(int)
     plan = []
     for bi, b in enumerate(boxes):
@@ -154,7 +173,7 @@ def _solve_milp(
             if bb == bi and x[k]
         ]
         plan.append((b, t, members))
-    return plan
+    return plan, nodes
 
 
 def _hull(a: Box, c: Box) -> Box:
@@ -314,9 +333,24 @@ def _makespan(plan, cost, taps_k, n_tiles: int, cus: int) -> int:
     return mk
 
 
+def _tight(plan, tile_m: int):
+    """The plan with every box's tile count ``ceil(rows / tile_m)`` and no box
+    without rows. A solver stopped by its node or gap limit may return a slack
+    incumbent (more tiles than its rows fill, or tiles with no row); lowering
+    a count only lowers the workgroups and the K tiles, so the plan stays
+    within the budget, and the launch's block ranges then match the records'
+    tile counts (``pack_sub_gemm_buffer`` sizes them from the rows)."""
+    out = []
+    for b, _t, members in plan:
+        rows = sum(n for _c, n in members)
+        if rows:
+            out.append((b, _ceil_div(rows, tile_m), members))
+    return out
+
+
 @lru_cache(maxsize=64)
 def _plan_cached(key) -> Tuple:
-    (counts_items, tile_m, n_tiles, kpt, max_split, budget, round_cus) = key
+    (counts_items, tile_m, n_tiles, kpt, max_split, budget, round_cus, solver) = key
     counts = dict(counts_items)
     classes = list(counts)
     # candidate boxes: per axis an interval [lo, hi] from the class bounds.
@@ -340,6 +374,7 @@ def _plan_cached(key) -> Tuple:
     min_wgs = _ceil_div(sum(counts.values()), tile_m) * n_tiles
     budget = max(budget, _ceil_div(min_wgs, round_cus) * round_cus)
     best = None
+    nodes_left = PLAN_NODE_BUDGET
     for T in cands:
         if best is not None and T >= best[0][0]:
             break  # the makespan is at least T
@@ -347,10 +382,25 @@ def _plan_cached(key) -> Tuple:
         cand = [b for b in boxes if cost[b] <= max_split]
         if not any(b in cand for b in full):
             continue  # every class needs a home: the full box must be allowed
-        solver = _solve_greedy if _SOLVER == "greedy" else _solve_milp
-        plan = solver(counts, cand, cost, taps_k, tile_m, n_tiles, budget)
+        if solver == "greedy":
+            plan = _solve_greedy(counts, cand, cost, taps_k, tile_m, n_tiles, budget)
+        else:
+            if nodes_left <= 0:
+                break  # the node budget is spent: the best plan so far stands
+            plan, nodes = _solve_milp(
+                counts,
+                cand,
+                cost,
+                taps_k,
+                tile_m,
+                n_tiles,
+                budget,
+                node_limit=min(4000, nodes_left),
+            )
+            nodes_left -= max(1, nodes)
         if plan is None:
             continue
+        plan = _tight(plan, tile_m)
         mk = _makespan(plan, cost, taps_k, n_tiles, round_cus)
         steps = sum(t * taps_k[b] for b, t, _ in plan)
         if best is None or (mk, steps) < best[0]:
@@ -391,15 +441,29 @@ def plan_boxes(
     cus: int,
     round_cus: int = 228,
     interior: int = 0,
+    solver: str = "milp",
 ):
     """``(T, [(box, tiles, split, [pixel rows])])`` of the ``pp_boxes`` 8 plan, or None.
-    ``interior``: as :func:`pixel_classes` (dx_interior: the shell gets no row)."""
+    ``interior``: as :func:`pixel_classes` (dx_interior: the shell gets no row).
+    ``round_cus``: the workgroups of one round (the dgrad builder passes its
+    PP_BOX_SPLIT_CUS). ``solver``: "milp" (the plan launches use; None without
+    scipy's MILP) or "greedy" (the pure-Python twin, for tests and studies)."""
+    if solver not in ("milp", "greedy"):
+        raise ValueError(f"pp_boxes 8 planner: unknown solver {solver!r}")
+    if solver == "milp" and not HAVE_MILP:
+        warnings.warn(
+            "pp_boxes 8 plans need scipy >= 1.9 (scipy.optimize.milp); the "
+            "launch runs the pp_boxes 7 records instead",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return None
     cl = pixel_classes(p, interior)
     counts = tuple(sorted((c, len(v)) for c, v in cl.items()))
     kpt = _ceil_div(p.kpg, tile_k)
     n_tiles = _ceil_div(p.cpg, tile_n)
     res = _plan_cached(
-        (counts, tile_m, n_tiles, kpt, max(1, max_split), cus, round_cus)
+        (counts, tile_m, n_tiles, kpt, max(1, max_split), cus, round_cus, solver)
     )
     if res is None:
         return None
