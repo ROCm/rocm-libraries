@@ -3373,6 +3373,8 @@ TEST_CASE("GEMM: gfx1250 ranking prices the WGM the host launches", "[gemm][gfx1
 // A TensileLite kernel launches with its own WorkGroupMapping (ContractionSolution::
 // calculateAutoWGM) unless it is persistent with WGM 0 and WGMXCC -1; only then is the mapping
 // picked per problem.  A spatial-cluster StreamK kernel always launches with WGM 1.
+// The model follows that on gfx1150/51/52/53 (and gfx1250, which has its own path); other
+// architectures opt in separately and keep the predicted mapping until then.
 // ---------------------------------------------------------------------------------------
 namespace {
 // bf16 TN MT128x112x32 as shipped for gfx1151.
@@ -3399,7 +3401,8 @@ origami::config_t fixed_wgm_config(int wgm, int wgm_xcc, int stream_k, bool pers
 }
 }  // namespace
 
-TEST_CASE("GEMM: a kernel is modeled with the workgroup mapping it launches with", "[gemm][wgm]") {
+TEST_CASE("GEMM: a gfx115x kernel is modeled with the workgroup mapping it launches with",
+          "[gemm][wgm]") {
   using arch_t       = origami::hardware_t::architecture_t;
   const auto problem = make_problem(16384, 779, 5376);  // 128 x 7 tiles of 128 x 112
 
@@ -3461,18 +3464,35 @@ TEST_CASE("GEMM: a kernel is modeled with the workgroup mapping it launches with
   REQUIRE(std::get<0>(rates) > 0.8);  // H_mem_l2_A
   REQUIRE(std::get<2>(rates) > 0.8);  // H_mem_mall_A
 
-  // Several L2 domains: WGMXCC -1 launches with one group per XCD.
-  const auto gfx942 = make_hardware(942);
-  REQUIRE(gfx942.NUM_XCD > 1);
-  const int gfx942_default_wgm =
-      static_cast<int>(std::ceil(std::sqrt(static_cast<double>(gfx942.N_CU / gfx942.NUM_XCD))));
-  for (int sk : {0, 3}) {
-    REQUIRE(mapping(gfx942, 6, -1, sk).wgm == 6);
-    REQUIRE(mapping(gfx942, 6, -1, sk).wgmxcc == gfx942.NUM_XCD);
-    REQUIRE(mapping(gfx942, 6, 1, sk).wgmxcc == 1);
-    REQUIRE(mapping(gfx942, 0, 8, sk).wgm == gfx942_default_wgm);
-    REQUIRE(mapping(gfx942, 0, 8, sk).wgmxcc == 8);
+  // The four gfx115x parts are opted in.
+  for (auto arch : {arch_t::gfx1150, arch_t::gfx1152, arch_t::gfx1153}) {
+    const auto hw =
+        origami::hardware_t::get_hardware_for_arch(arch, 16, 65536, 512 * 1024, 2 << 20, 2100000);
+    REQUIRE(mapping(hw, 8, 1, 0).wgm == 8);
+    REQUIRE(mapping(hw, 0, 1, 0).wgm == 4);  // ceil(sqrt(16 / 1))
+    REQUIRE(mapping(hw, 8, 1, 3).wgm == 8);
   }
-  REQUIRE(mapping(gfx942, 0, -1, 0).wgm == gfx942_default_wgm);
-  REQUIRE(same(mapping(gfx942, 0, -1, 3), picked(gfx942, 3)));
+
+  // Architectures that have not opted in keep the predicted mapping, whatever the kernel
+  // declares: one L2 domain (gfx1100, gfx1201) and several (gfx942, gfx950).
+  auto ignores_declared_mapping = [&](const origami::hardware_t& hw) {
+    for (int sk : {0, 3}) {
+      const auto predicted = mapping(hw, 0, -1, sk);
+      REQUIRE(same(mapping(hw, 6, -1, sk), predicted));
+      REQUIRE(same(mapping(hw, 8, 1, sk), predicted));
+      REQUIRE(same(mapping(hw, 0, 8, sk), predicted));
+    }
+  };
+  for (auto arch : {arch_t::gfx1100, arch_t::gfx1201}) {
+    const auto hw =
+        origami::hardware_t::get_hardware_for_arch(arch, 60, 65536, 512 * 1024, 6 << 20, 2500000);
+    REQUIRE(hw.NUM_XCD == 1);
+    ignores_declared_mapping(hw);
+    REQUIRE(mapping(hw, 8, 1, 0).wgm == 1);
+  }
+  for (int arch : {942, 950}) {
+    const auto hw = make_hardware(arch);
+    REQUIRE(hw.NUM_XCD > 1);
+    ignores_declared_mapping(hw);
+  }
 }

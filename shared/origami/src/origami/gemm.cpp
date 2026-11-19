@@ -334,6 +334,23 @@ static bool host_picks_workgroup_mapping(const problem_t& problem,
          tp.workgroup_mapping_xcc == -1;
 }
 
+// OPT-IN LIST: architectures whose kernels are modelled with the workgroup mapping they
+// launch with (see predict_workgroup_mapping).  Every other architecture keeps the predicted
+// mapping, so its rankings are unchanged.  The launch does the same on all architectures; add
+// one here only together with a check of its kernel selection.  gfx1250 has its own path
+// (predict_workgroup_mapping_cdna5) and is not listed.
+static bool models_launch_wgm(const hardware_t& hardware) {
+  switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1150:
+    case hardware_t::architecture_t::gfx1151:
+    case hardware_t::architecture_t::gfx1152:
+    case hardware_t::architecture_t::gfx1153:
+      return true;
+    default:
+      return false;
+  }
+}
+
 // The launch WGM for WGM 0 outside the per-problem pick, from the whole device whatever the
 // problem's CU budget.
 static int32_t default_launch_wgm(const hardware_t& hardware) {
@@ -390,8 +407,10 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   // Unless the host re-picks the mapping per problem, a TensileLite kernel launches with what
   // ContractionSolution::calculateAutoWGM derives from its own parameters: WGM 1 and WGMXCC 1
   // for a spatial-cluster StreamK kernel, else the fixed WorkGroupMapping (default_launch_wgm
-  // for 0) and the fixed WGMXCC (NUM_XCD for -1).
-  if (!host_picks_workgroup_mapping(problem, config, grid_m, grid_n, splitting_factor)) {
+  // for 0) and the fixed WGMXCC (NUM_XCD for -1).  Modelled for the architectures in
+  // models_launch_wgm() only; the others still get the prediction below.
+  if (models_launch_wgm(hardware) &&
+      !host_picks_workgroup_mapping(problem, config, grid_m, grid_n, splitting_factor)) {
     const tensile_params_t& tp = tparams(config);
     if (tp.stream_k_spatial_cluster) return {0, 0, 1, 1};
     const int xcc = tp.workgroup_mapping_xcc;
