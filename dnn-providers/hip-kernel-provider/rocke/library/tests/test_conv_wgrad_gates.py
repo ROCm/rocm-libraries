@@ -10,6 +10,11 @@ must refuse each one (``is_valid_wgrad_spec`` and, where the rule is spec-only,
 ``validate()``), and so must the C++ engine with the same reason, while the
 near twins that do build stay admitted. The Stage 2 fold refuses what its
 fixed-size C++ folds cannot hold.
+
+The last class checks two Stage 1 epilogues in the built IR: the ws_fuse final
+reader only clears slab elements it owns, and the ws_lc tile, which shares LDS
+bytes with the K loop's tiles, is written only after a barrier when the
+prefetch_regs=2 loop ends without one.
 """
 
 from __future__ import annotations
@@ -525,6 +530,86 @@ class TestWgradReduceGates(unittest.TestCase):
         ):
             with self.subTest(kw):
                 build_conv_wgrad_workspace_reduce(_reduce_spec(**kw), arch="gfx942")
+
+
+def _ops(region, ancestors=()):
+    """Every op under ``region`` in program order, with its ancestor op names."""
+    for op in region.ops:
+        yield op, ancestors
+        for r in op.regions:
+            yield from _ops(r, ancestors + (op.name,))
+
+
+class TestStage1EpilogueBarriers(unittest.TestCase):
+    def test_ws_fuse_clears_only_in_bounds_slab_elements(self):
+        # An out-of-bounds element's slab offset is clamped to 0, tile (0, 0)'s
+        # first element: the final reader of an edge tile must not zero it.
+        from kernels.common._conv_implicit_gemm_common import ConvProblem
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
+
+        p = ConvProblem(
+            N=1,
+            Di=8,
+            Hi=16,
+            Wi=16,
+            C=24,
+            K=72,
+            Z=3,
+            Y=3,
+            X=3,
+            sD=1,
+            pD=1,
+            pH=1,
+            pW=1,
+            dD=1,
+        )
+        spec = _xwin_spec(
+            problem=p,
+            tile_n=64,
+            warp_m=2,
+            warp_n=2,
+            xwin=0,
+            ws_replicas=1,
+            sep_addr=2,
+            ws_fuse=1,
+        )
+        k = build_implicit_gemm_conv_wgrad(spec, arch="gfx942")
+        zeroing = [
+            anc
+            for op, anc in _ops(k.body)
+            if op.name == "tile.inline_asm"
+            and "global_store_dword" in str(op.attrs.get("template", ""))
+        ]
+        self.assertTrue(zeroing)
+        for anc in zeroing:
+            # the final-arriver branch, then the element's own bounds branch
+            self.assertGreaterEqual(anc.count("scf.if"), 2)
+
+    def test_ws_lc_tile_is_written_after_a_barrier(self):
+        from kernels.common.conv_implicit_gemm_wgrad import (
+            build_implicit_gemm_conv_wgrad,
+        )
+
+        for pfr in (1, 2, 3):
+            with self.subTest(prefetch_regs=pfr):
+                k = build_implicit_gemm_conv_wgrad(
+                    _xwin_spec(prefetch_regs=pfr, ws_lc=1), arch="gfx942"
+                )
+                names = []
+                alloc = None
+                for op, _ in _ops(k.body):
+                    if (
+                        op.name == "tile.smem_alloc"
+                        and op.results
+                        and "ws_lc" in str(getattr(op.results[0], "name", ""))
+                    ):
+                        alloc = len(names)
+                    names.append(op.name)
+                self.assertIsNotNone(alloc)
+                last_mma = max(i for i in range(alloc) if names[i] == "tile.mma")
+                self.assertIn("tile.sync_lds_only", names[last_mma:alloc])
 
 
 if __name__ == "__main__":

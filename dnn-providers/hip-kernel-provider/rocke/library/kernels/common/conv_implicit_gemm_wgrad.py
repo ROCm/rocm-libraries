@@ -759,13 +759,14 @@ class WgradConvSpec:
     # two_stage with ws_replicas 1, one tile per workgroup: the Stage 1
     # epilogue does the whole reduction -- no scratch clear, no Stage 2. The
     # scratch slab is zero between launches (cleared once at allocation, left
-    # zero by every launch); per (M, N) tile two i32 counters in ``sk_flags``
-    # (likewise). Every slice but the last to arrive atomic-adds its partial
-    # and counts itself done; the last waits for them, reads the slab back
-    # with atomics, stores dW = slab + its own partial and zeroes what it
-    # read. Only atomics touch the slab (no L2 write-back / invalidate), and
-    # a slice only waits on slices that already arrived. Appends the
-    # ``sk_flags`` kernarg. Tags ``wsf1``. Default 0: byte-identical.
+    # zero by every launch); so is the one i32 arrival counter per (M, N)
+    # tile at ``sk_flags[4 * tile]`` (16 bytes per tile). Every slice
+    # atomic-adds its partial into the slab, drains its atomics and takes a
+    # ticket; the slice drawing ticket split_k - 1 reads the slab back with
+    # device-coherent (sc1) loads, stores dW, zeroes the slab elements of its
+    # tile and resets the counter. Only atomics and sc1 loads / stores touch
+    # the slab (no L2 write-back / invalidate), and nothing waits. Appends
+    # the ``sk_flags`` kernarg. Tags ``wsf1``. Default 0: byte-identical.
     ws_fuse: int = 0
     # two_stage: Stage 1 stores its partial plainly into slab z % ws_replicas
     # instead of atomic-adding it -- a launch needs split_k <= ws_replicas
@@ -842,7 +843,9 @@ class WgradConvSpec:
     xwin_aq: int = 0
     # xwin_pp schedule variants: 1 = [mem A]'s offset ALU interleaved
     # with the fragment reads (sched_group_barrier DS read 1 / ALU k)
-    # instead of issued after all of them. Default 0: byte-identical.
+    # instead of issued after all of them; 2 = that schedule without the
+    # phase priorities; 3 = 1 with the priorities inverted (compute phases
+    # at s_setprio 1, memory at 0). Default 0: byte-identical.
     xwin_pps: int = 0
     # xwin_pp under split-K: each slice runs its K tiles rotated to
     # start at the first output-plane boundary inside it (wrapping to its
@@ -7752,7 +7755,11 @@ def _emit_ws_lc_atomics(
     written to a wave-private LDS tile (row stride W + 4) and read back with
     lane l on column l % W of rows l // W + R k (R = 64 / W), so every atomic
     instruction lands on R whole rows of W contiguous floats. The wave's own
-    LDS ops are in order: no barrier."""
+    LDS ops are in order, so its private tile needs no barrier between the
+    store and the read-back. The tile is a pool allocation that may share
+    bytes with the K loop's A/B tiles, though: prefetch_regs=2's loop ends on
+    its last MFMA reads without a barrier, so it gets one here, before any wave
+    writes the tile (prefetch_regs 1/3 end theirs with one already)."""
     X = spec.xwin
     mfmas_m = spec.mfmas_per_warp_m
     mfmas_n = spec.mfmas_per_warp_n
@@ -7761,6 +7768,8 @@ def _emit_ws_lc_atomics(
     R = 64 // W
     S = W + 4
     n_waves = spec.block_size // spec.wave_size
+    if spec.prefetch_regs == 2:
+        b.sync_lds_only()
     lds = b.smem_alloc(F32, (n_waves * 16, S), name_hint="ws_lc")
     row0 = b.mul(lc_wave, b.const_i32(16))
     rd_col = b.mod(lane, b.const_i32(W))
@@ -7823,7 +7832,10 @@ def _emit_ws_fused_reduction(
     c_eb = b.const_i32(4 if spec.data.dtype_d == "fp32" else 2)
 
     # Branch-free per element: an out-of-bounds element adds 0.0 at slot 0
-    # (harmless) and its dW store goes to the buffer's OOB sentinel.
+    # (harmless) and its dW store goes to the buffer's OOB sentinel. Slot 0 is
+    # tile (0, 0)'s first element, which that tile may still be accumulating,
+    # so the final reader's zeroing store is predicated on the element being
+    # in bounds.
     def _el(opaque=False):
         for c_m, c_n, v in elems(opaque):
             ok = b.land(b.cmp_lt(c_m, wg_M_v), b.cmp_lt(c_n, wg_N_v))
@@ -7855,7 +7867,7 @@ def _emit_ws_fused_reduction(
         # Device-coherent (sc1) loads, which the slab's atomics are visible
         # to without an L2 invalidate. Inline asm, so the counter wait is
         # explicit: one asm drains vmcnt and re-defines every loaded value.
-        ptrs = [b.global_ptr_add(ws_ptr, b.mul(soff, c4)) for soff, _ in chunk]
+        ptrs = [b.global_ptr_add(ws_ptr, b.mul(soff, c4)) for soff, _, _ in chunk]
         raw = [
             b.inline_asm("global_load_dword $0, $1, off sc1", "=v,v", [pt], F32)
             for pt in ptrs
@@ -7867,16 +7879,17 @@ def _emit_ws_fused_reduction(
             raw,
             result_types=[F32] * n,
         )
-        for (soff, safe), pt, part in zip(chunk, ptrs, parts):
+        for (soff, safe, ok), pt, part in zip(chunk, ptrs, parts):
             _store_dw(safe, part)
-            b.inline_asm(
-                "global_store_dword $0, $1, off sc1", "v,v", [pt, f_zero], None
-            )
+            with b.scf_if(ok):
+                b.inline_asm(
+                    "global_store_dword $0, $1, off sc1", "v,v", [pt, f_zero], None
+                )
 
     with b.scf_if(b.cmp_eq(ticket, b.sub(fz["ks_count"], c1))):
         chunk = []
         for ok, soff, off, _ in _el(True):
-            chunk.append((soff, b.select(ok, b.mul(off, c_eb), oob)))
+            chunk.append((soff, b.select(ok, b.mul(off, c_eb), oob), ok))
             if len(chunk) == _WS_FUSE_CHUNK:
                 _fold_chunk(chunk)
                 chunk = []
