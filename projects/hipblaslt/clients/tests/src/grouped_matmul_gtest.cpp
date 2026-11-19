@@ -1311,6 +1311,20 @@ namespace
         EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
                       regular, HIPBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY, &rowsArray, sizeof(rowsArray)),
                   HIPBLAS_STATUS_INVALID_VALUE);
+        // Out-of-range batch modes are rejected and leave the mode unchanged.
+        for(int32_t badMode : {3, 7, -1})
+            EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                          regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &badMode, sizeof(badMode)),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtMatrixLayoutGetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &mode, sizeof(mode), &written),
+                  HIPBLAS_STATUS_SUCCESS);
+        EXPECT_EQ(mode, HIPBLASLT_BATCH_MODE_STRIDED);
+        // Pointer-array mode is still accepted on a regular layout.
+        int32_t ptrArray = HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
+        EXPECT_EQ(hipblasLtMatrixLayoutSetAttribute(
+                      regular, HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE, &ptrArray, sizeof(ptrArray)),
+                  HIPBLAS_STATUS_SUCCESS);
         hipblasLtMatrixLayoutDestroy(regular);
 
         // Alpha/beta batch strides accept only 0 or 1; a valid stride reads back.
