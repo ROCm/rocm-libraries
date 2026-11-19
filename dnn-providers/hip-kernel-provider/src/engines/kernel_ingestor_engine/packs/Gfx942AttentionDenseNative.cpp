@@ -227,7 +227,6 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     arch.tokens.stats = "gfx942_attention_dense.stats.uid";
     arch.tokens.alibi = "gfx942_attention_dense.alibi";
     // The head fields of the KMD are canonical build inputs, never compared.
-    arch.matchesHeadCounts = false;
     arch.isSupportedTile = &isSupportedGfx942AttentionDenseTile;
     arch.geometry = &gfx942Geometry;
     arch.windowReachesKeys = &gfx942AttentionDenseWindowReachesKeys;

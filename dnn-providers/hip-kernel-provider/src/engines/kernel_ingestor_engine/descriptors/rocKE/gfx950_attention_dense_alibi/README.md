@@ -7,9 +7,10 @@ engine, dispatch and KMD (the descriptors live there), with a KDP of its own. Bu
 ## Coverage
 
 - Architecture: gfx950 only.
-- Variants: 66, one per head configuration of the home catalog and dtype (33 x BF16/FP16), on the `qb_minor` grid
-  at the 128/64 tile, KMD `use_alibi` 1. The tile serves every seqlen_q a 256 tile serves, plus the odd multiples
-  of 128.
+- Variants: 26, the home catalog's causal variants built with ALiBi (BF16/FP16 x head_size 64 with 7 tiles, 128 with
+  6), on the `qb_minor` grid, KMD `use_alibi` 1. Head counts are kernargs, as in the home, so every head
+  configuration is served; the tiles serve the same seqlen_q and seqlen_kv as the home's causal variants, and the
+  native scorer picks among them as it does there.
 - ALiBi (`alibi_mask`): hipDNN's slopes (SdpaSemanticsRegister SEM-021), computed in the kernel from the query head
   count; the launch passes a null `alibi_slopes_ptr`. Top-left causal mask only, the one mask hipDNN defines ALiBi
   for; no window, no stats output.
@@ -20,7 +21,7 @@ engine, dispatch and KMD (the descriptors live there), with a KDP of its own. Bu
 
 | File | In | Notes |
 |---|---|---|
-| `artifacts/gfx950_attention_dense.kdp.json` | DVC | 0.1 MB, the 66 variants; same KDP name as the home's, its own ids. Pointer: `artifacts.dvc` |
+| `artifacts/gfx950_attention_dense.kdp.json` | DVC | 40 KB, the 26 variants; same KDP name as the home's, its own ids. Pointer: `artifacts.dvc` |
 
 ## Notes
 

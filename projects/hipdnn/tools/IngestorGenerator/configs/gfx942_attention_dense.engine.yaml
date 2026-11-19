@@ -67,6 +67,14 @@ engine:
   - use_exp2_fast
   - lds_k_group_pad
   heuristic: native
+  # The trained gfx942 kernel ranker (L2), installed by `uhd_gen promote` (other arches keep
+  # native; the L1 is held). What it reads, when to retrain it and how: the bundle README
+  # (descriptors/rocKE/gfx942_attention_dense/README.md, "Models").
+  heuristics:
+    sort_kernel_catalog:
+      gfx942: [18bb432e-d871-4290-9ae8-f5111aaf2ffe]
+  trained_catalog_sha256:
+    gfx942: 380a508ad8566e3be17143aae7cec238e5f796bce2538a11c409a1075b5539e4
 kmd_fields:
 - name: dtype
   type: string
@@ -419,8 +427,8 @@ launch_surface:
       isSupportedGfx942AttentionDenseTile() admits, the candidate is ragged,
       Sq % block_m or Skv % block_n is non-zero, or the window leaves the last
       query block no key tile (gfx942AttentionDenseWindowReachesKeys()). Head
-      counts, batch and sequence lengths are runtime kernel arguments and are never
-      compared (matchesHeadCounts is false for gfx942). graph_match maps a causal
+      counts, batch and sequence lengths are runtime kernel arguments and are
+      never compared. graph_match maps a causal
       band of left_bound L to sliding_window L, declines every non-causal band, and
       declines a window that leaves query rows no key (seqlen_q - seqlen_kv >= W),
       with or without stats. It binds the stats output when stats_tensor_uid is
