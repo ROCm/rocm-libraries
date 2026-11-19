@@ -105,6 +105,9 @@ namespace hipblaslt_bench
         void*                            dRefB                                  = nullptr;
         void*                            dRefD                                  = nullptr;
 
+        void* dFlags                                    = nullptr;
+        void* flagPtrs[HIPBLASLT_DEVICE_COMM_MAX_WORLD] = {};
+
         hipblasLtSdmaQueue_t queues[HIPBLASLT_DEVICE_COMM_MAX_WORLD]   = {};
         std::vector<std::unique_ptr<TensileLite::Client::SdmaQueue>> ownedQueues;
         TcpRendezvous*                                               rendezvous = nullptr;
@@ -153,6 +156,13 @@ namespace hipblaslt_bench
             ownedQueues.clear();
             if(handle != nullptr)
                 static_cast<void>(hipblasLtDestroy(handle));
+
+            // The handle borrowed these; flagPtrs[rank] aliases dFlags.
+            for(void* p : flagPtrs)
+                if(p != nullptr && p != dFlags)
+                    static_cast<void>(hipIpcCloseMemHandle(p));
+            static_cast<void>(hipFree(dFlags));
+
             if(stream != nullptr)
                 static_cast<void>(hipStreamDestroy(stream));
         }
@@ -466,6 +476,13 @@ namespace hipblaslt_bench
             }
         }
 
+        // Fine-grained, because peers' copy engines write it while this device polls.
+        size_t bytesFlags = 0;
+        CHECK_LT_RC(hipblasLtDeviceCommFlagBytes(kCommChannels, &bytesFlags));
+        CHECK_HIP_RC(hipExtMallocWithFlags(&res.dFlags, bytesFlags, hipDeviceMallocFinegrained));
+        CHECK_HIP_RC(hipMemset(res.dFlags, 0, bytesFlags));
+        CHECK_HIP_RC(hipDeviceSynchronize());
+
         try
         {
             const uint32_t srcNode = TensileLite::Client::sdmaNodeIdForDevice(env.local_rank);
@@ -507,12 +524,10 @@ namespace hipblaslt_bench
             return false;
         }
 
-        CHECK_LT_RC(hipblasLtSetDeviceComm(res.handle,
-                                           env.rank,
-                                           env.world,
-                                           kCommChannels,
-                                           rendezvous_allgather_trampoline,
-                                           res.rendezvous));
+        if(!exchange_ipc_pointers(env, *res.rendezvous, res.dFlags, res.flagPtrs))
+            return false;
+        CHECK_LT_RC(
+            hipblasLtSetDeviceComm(res.handle, env.rank, env.world, kCommChannels, res.flagPtrs));
 
         const bool a2aGemm = res.collective == Collective::A2AGemm;
         if(a2aGemm)

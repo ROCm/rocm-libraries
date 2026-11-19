@@ -15,14 +15,10 @@
 #include <hipblaslt/hipblaslt-ext.hpp>
 #include <hipblaslt/hipblaslt.h>
 
-#include <chrono>
-#include <condition_variable>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -35,86 +31,31 @@ namespace
         return hipGetDeviceCount(&deviceCount) == hipSuccess && deviceCount > 0;
     }
 
-    // With one rank an allgather is exactly a memcpy.
-    hipblasStatus_t
-        memcpyAllgather(void* /*userData*/, const void* sendbuf, void* recvbuf, size_t bytesPerRank)
+    // A zeroed, fine-grained flag region on the current device, sized for
+    // nChannels, as hipblasLtSetDeviceComm requires of the caller.
+    struct FlagRegion
     {
-        memcpy(recvbuf, sendbuf, bytesPerRank);
-        return HIPBLAS_STATUS_SUCCESS;
-    }
-
-    hipblasStatus_t failingAllgather(void* /*userData*/,
-                                     const void* /*sendbuf*/,
-                                     void* /*recvbuf*/,
-                                     size_t /*bytesPerRank*/)
-    {
-        return HIPBLAS_STATUS_INTERNAL_ERROR;
-    }
-
-    // Leaves the second slot zeroed, which no real contribution can look like.
-    hipblasStatus_t silentPeerAllgather(void* /*userData*/,
-                                        const void* sendbuf,
-                                        void*       recvbuf,
-                                        size_t      bytesPerRank)
-    {
-        memcpy(recvbuf, sendbuf, bytesPerRank);
-        memset(static_cast<char*>(recvbuf) + bytesPerRank, 0, bytesPerRank);
-        return HIPBLAS_STATUS_SUCCESS;
-    }
-
-    // Both slots claim to be rank 0, so rank 1's contribution is missing.
-    hipblasStatus_t duplicatingAllgather(void* /*userData*/,
-                                         const void* sendbuf,
-                                         void*       recvbuf,
-                                         size_t      bytesPerRank)
-    {
-        memcpy(recvbuf, sendbuf, bytesPerRank);
-        memcpy(static_cast<char*>(recvbuf) + bytesPerRank, sendbuf, bytesPerRank);
-        return HIPBLAS_STATUS_SUCCESS;
-    }
-
-    // Registration cannot return until every peer has contributed, so ranks that
-    // are threads of one process need this rendezvous to register at all. The
-    // wait is bounded so a rank that never arrives fails the test, not hangs it.
-    struct Rendezvous
-    {
-        std::mutex              mutex;
-        std::condition_variable arrival;
-        std::vector<char>       slots;
-        uint32_t                arrived = 0;
-        uint32_t                world   = 0;
-    };
-
-    struct RendezvousRank
-    {
-        Rendezvous* shared;
-        uint32_t    rank;
-    };
-
-    hipblasStatus_t
-        rendezvousAllgather(void* userData, const void* sendbuf, void* recvbuf, size_t bytesPerRank)
-    {
-        RendezvousRank& self   = *static_cast<RendezvousRank*>(userData);
-        Rendezvous&     shared = *self.shared;
-
-        std::unique_lock<std::mutex> lock(shared.mutex);
-        if(shared.slots.empty())
-            shared.slots.resize(bytesPerRank * shared.world);
-        memcpy(shared.slots.data() + bytesPerRank * self.rank, sendbuf, bytesPerRank);
-
-        if(++shared.arrived == shared.world)
+        explicit FlagRegion(uint32_t nChannels)
         {
-            shared.arrival.notify_all();
-        }
-        else if(!shared.arrival.wait_for(
-                    lock, std::chrono::seconds(30), [&] { return shared.arrived == shared.world; }))
-        {
-            return HIPBLAS_STATUS_INTERNAL_ERROR;
+            size_t bytes = 0;
+            if(hipblasLtDeviceCommFlagBytes(nChannels, &bytes) != HIPBLAS_STATUS_SUCCESS
+               || hipExtMallocWithFlags(&ptr, bytes, hipDeviceMallocFinegrained) != hipSuccess)
+                ptr = nullptr;
+            else if(hipMemset(ptr, 0, bytes) != hipSuccess)
+                ADD_FAILURE() << "hipMemset failed";
         }
 
-        memcpy(recvbuf, shared.slots.data(), bytesPerRank * shared.world);
-        return HIPBLAS_STATUS_SUCCESS;
-    }
+        ~FlagRegion()
+        {
+            if(ptr)
+                (void)hipFree(ptr);
+        }
+
+        FlagRegion(const FlagRegion&)            = delete;
+        FlagRegion& operator=(const FlagRegion&) = delete;
+
+        void* ptr = nullptr;
+    };
 
     // Four plausible-looking addresses. The library stores a queue's fields
     // without interpreting them, so a test only needs them to be non-null.
@@ -504,6 +445,7 @@ namespace
             if(!gpuAvailable())
                 GTEST_SKIP() << "No GPU available";
             ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_NE(flags.ptr, nullptr);
         }
 
         void TearDown() override
@@ -513,77 +455,88 @@ namespace
         }
 
         hipblasLtHandle_t handle = nullptr;
+        // Sized for the most channels any test below registers.
+        FlagRegion flags{4};
     };
+
+    TEST(FusedA2ACommFlagBytes_pre_checkin, RejectsZeroChannelsAndNullOut)
+    {
+        size_t bytes = 0;
+        EXPECT_EQ(hipblasLtDeviceCommFlagBytes(0, &bytes), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtDeviceCommFlagBytes(1, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    // Channel c's block sits at c * one block, so a region aligned to the public
+    // constant keeps every channel aligned only if the block size is a multiple of it.
+    TEST(FusedA2ACommFlagBytes_pre_checkin, ScalesWithChannelsInAlignedBlocks)
+    {
+        size_t one = 0, four = 0;
+        ASSERT_EQ(hipblasLtDeviceCommFlagBytes(1, &one), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipblasLtDeviceCommFlagBytes(4, &four), HIPBLAS_STATUS_SUCCESS);
+        EXPECT_GT(one, 0u);
+        EXPECT_EQ(four, 4 * one);
+        EXPECT_EQ(one % HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT, 0u);
+    }
 
     TEST_F(FusedA2AComm_pre_checkin, RejectsInvalidRankAndWorld)
     {
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 1, 1, 1, memcpyAllgather, nullptr),
+        void* const one[1] = {flags.ptr};
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 1, 1, 1, one), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 0, 1, one), HIPBLAS_STATUS_INVALID_VALUE);
+        const std::vector<void*> tooMany(HIPBLASLT_DEVICE_COMM_MAX_WORLD + 1, flags.ptr);
+        EXPECT_EQ(hipblasLtSetDeviceComm(
+                      handle, 0, HIPBLASLT_DEVICE_COMM_MAX_WORLD + 1, 1, tooMany.data()),
                   HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 0, 1, memcpyAllgather, nullptr),
-                  HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle,
-                                         0,
-                                         HIPBLASLT_DEVICE_COMM_MAX_WORLD + 1,
-                                         1,
-                                         memcpyAllgather,
-                                         nullptr),
-                  HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 0, memcpyAllgather, nullptr),
-                  HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, nullptr, nullptr),
-                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 0, one), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, nullptr), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
     TEST(FusedA2ACommHandle_pre_checkin, RejectsNullHandle)
     {
-        EXPECT_EQ(hipblasLtSetDeviceComm(nullptr, 0, 1, 1, memcpyAllgather, nullptr),
-                  HIPBLAS_STATUS_NOT_INITIALIZED);
+        void* const one[1] = {reinterpret_cast<void*>(HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT)};
+        EXPECT_EQ(hipblasLtSetDeviceComm(nullptr, 0, 1, 1, one), HIPBLAS_STATUS_NOT_INITIALIZED);
     }
 
     TEST_F(FusedA2AComm_pre_checkin, RegistersOnceAndOnlyOnce)
     {
-        ASSERT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, memcpyAllgather, nullptr),
-                  HIPBLAS_STATUS_SUCCESS);
+        void* const one[1] = {flags.ptr};
+        ASSERT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, one), HIPBLAS_STATUS_SUCCESS);
         // A second call fails whether or not its arguments match, which is what
         // makes world immutable.
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, memcpyAllgather, nullptr),
-                  HIPBLAS_STATUS_INVALID_VALUE);
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 4, memcpyAllgather, nullptr),
-                  HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, one), HIPBLAS_STATUS_INVALID_VALUE);
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 4, one), HIPBLAS_STATUS_INVALID_VALUE);
     }
 
-    TEST_F(FusedA2AComm_pre_checkin, PropagatesAllgatherFailure)
+    // Every entry is checked, the peer's as well as this rank's own, and a
+    // rejected call leaves nothing registered.
+    TEST_F(FusedA2AComm_pre_checkin, RejectsNullOrMisalignedEntries)
     {
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, failingAllgather, nullptr),
-                  HIPBLAS_STATUS_INTERNAL_ERROR);
-        // The failed attempt left nothing registered.
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, memcpyAllgather, nullptr),
-                  HIPBLAS_STATUS_SUCCESS);
-    }
+        char* const base = static_cast<char*>(flags.ptr);
 
-    TEST_F(FusedA2AComm_pre_checkin, RejectsRanksThatDisagree)
-    {
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 2, 1, silentPeerAllgather, nullptr),
-                  HIPBLAS_STATUS_INVALID_VALUE);
-    }
+        void* const nullPeer[2] = {base, nullptr};
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 2, 1, nullPeer), HIPBLAS_STATUS_INVALID_VALUE);
 
-    TEST_F(FusedA2AComm_pre_checkin, RejectsMisorderedAllgather)
-    {
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 2, 1, duplicatingAllgather, nullptr),
+        void* const misalignedOwn[2] = {base + 8, base};
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 2, 1, misalignedOwn),
                   HIPBLAS_STATUS_INVALID_VALUE);
+
+        void* const misalignedPeer[2] = {base, base + HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT / 2};
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 2, 1, misalignedPeer),
+                  HIPBLAS_STATUS_INVALID_VALUE);
+
+        void* const one[1] = {base};
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, one), HIPBLAS_STATUS_SUCCESS);
     }
 
     TEST_F(FusedA2AComm_pre_checkin, MultipleChannelsRegister)
     {
-        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 4, memcpyAllgather, nullptr),
-                  HIPBLAS_STATUS_SUCCESS);
+        void* const one[1] = {flags.ptr};
+        EXPECT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 4, one), HIPBLAS_STATUS_SUCCESS);
     }
 
-    // Two ranks rendezvous, each finding the other's flag region among the
-    // payloads; destroying both then frees a rank's own region and leaves its
-    // peer's. One shared device keeps this on the branch that needs no peer
-    // access - the cross-device one is the multi_gpu test below, split out
-    // because `rank % deviceCount` let a single-GPU host pass it unexecuted.
+    // Two handles, each a rank owning one region, register against the same pair
+    // of addresses. The handles only borrow the regions, so destroying them
+    // leaves both regions to the caller, which frees them afterwards.
     TEST(FusedA2ACommPeers_pre_checkin, TwoRanksOneDeviceRegister)
     {
         if(!gpuAvailable())
@@ -591,100 +544,18 @@ namespace
 
         constexpr uint32_t kWorld = 2;
 
-        Rendezvous shared;
-        shared.world = kWorld;
-
-        RendezvousRank  args[kWorld] = {{&shared, 0}, {&shared, 1}};
-        hipblasStatus_t status[kWorld]
-            = {HIPBLAS_STATUS_NOT_INITIALIZED, HIPBLAS_STATUS_NOT_INITIALIZED};
-        std::thread ranks[kWorld];
+        FlagRegion  region0{1}, region1{1};
+        void* const peers[kWorld] = {region0.ptr, region1.ptr};
+        ASSERT_NE(peers[0], nullptr);
+        ASSERT_NE(peers[1], nullptr);
 
         for(uint32_t r = 0; r < kWorld; ++r)
         {
-            ranks[r] = std::thread([&, r] {
-                if(hipSetDevice(0) != hipSuccess)
-                    return;
-                hipblasLtHandle_t handle = nullptr;
-                if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
-                    return;
-                status[r]
-                    = hipblasLtSetDeviceComm(handle, r, kWorld, 1, rendezvousAllgather, &args[r]);
-                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
-            });
-        }
-        for(std::thread& rank : ranks)
-            rank.join();
-
-        for(uint32_t r = 0; r < kWorld; ++r)
-            EXPECT_EQ(status[r], HIPBLAS_STATUS_SUCCESS) << "rank " << r;
-    }
-
-    // The cross-device branch: rank r takes device r, so a peer's flag region
-    // must be reachable from another device - registration has to enable peer
-    // access, not just record the address. Nothing public reads those addresses
-    // back, so each rank disables access first and then asserts on the side
-    // effect: a request reporting already-enabled can only be registration's
-    // work, where pre-fix it reported plain success.
-    TEST(FusedA2ACommPeers_multi_gpu, TwoRanksTwoDevicesEnablePeerAccess)
-    {
-        int deviceCount = 0;
-        ASSERT_EQ(hipGetDeviceCount(&deviceCount), hipSuccess);
-        if(deviceCount < 2)
-            GTEST_SKIP() << "cross-device registration needs 2 devices, found " << deviceCount;
-
-        constexpr uint32_t kWorld = 2;
-
-        Rendezvous shared;
-        shared.world = kWorld;
-
-        RendezvousRank  args[kWorld] = {{&shared, 0}, {&shared, 1}};
-        hipblasStatus_t status[kWorld]
-            = {HIPBLAS_STATUS_NOT_INITIALIZED, HIPBLAS_STATUS_NOT_INITIALIZED};
-        // Seeded with a code neither call returns, so an entry no thread reached
-        // cannot read as a pass.
-        hipError_t  reEnable[kWorld] = {hipErrorUnknown, hipErrorUnknown};
-        std::thread ranks[kWorld];
-
-        for(uint32_t r = 0; r < kWorld; ++r)
-        {
-            ranks[r] = std::thread([&, r] {
-                const int peerDevice = (int)(kWorld - 1 - r);
-                if(hipSetDevice((int)r) != hipSuccess)
-                    return;
-                // Whether this returns success or hipErrorPeerAccessNotEnabled,
-                // access from this device to the peer's is disabled afterwards,
-                // which is all the assertion below needs.
-                (void)hipDeviceDisablePeerAccess(peerDevice);
-
-                hipblasLtHandle_t handle = nullptr;
-                if(hipblasLtCreate(&handle) != HIPBLAS_STATUS_SUCCESS)
-                    return;
-                status[r]
-                    = hipblasLtSetDeviceComm(handle, r, kWorld, 1, rendezvousAllgather, &args[r]);
-                // Asked while this rank's device is still current and before the
-                // handle is destroyed: the direction under test is from device r
-                // to the peer's, and that is the one registration enabled.
-                if(status[r] == HIPBLAS_STATUS_SUCCESS)
-                    reEnable[r] = hipDeviceEnablePeerAccess(peerDevice, 0);
-                EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
-            });
-        }
-        for(std::thread& rank : ranks)
-            rank.join();
-
-        // A host whose two devices cannot reach each other is a topology this
-        // test has nothing to say about, and NOT_SUPPORTED is registration
-        // answering correctly rather than failing.
-        for(uint32_t r = 0; r < kWorld; ++r)
-            if(status[r] == HIPBLAS_STATUS_NOT_SUPPORTED)
-                GTEST_SKIP() << "devices 0 and 1 cannot reach each other";
-
-        for(uint32_t r = 0; r < kWorld; ++r)
-        {
-            EXPECT_EQ(status[r], HIPBLAS_STATUS_SUCCESS) << "rank " << r;
-            EXPECT_EQ(reEnable[r], hipErrorPeerAccessAlreadyEnabled)
-                << "rank " << r << ": registration recorded the peer's region without making it "
-                << "reachable from this device";
+            hipblasLtHandle_t handle = nullptr;
+            ASSERT_EQ(hipblasLtCreate(&handle), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipblasLtSetDeviceComm(handle, r, kWorld, 1, peers), HIPBLAS_STATUS_SUCCESS)
+                << "rank " << r;
+            EXPECT_EQ(hipblasLtDestroy(handle), HIPBLAS_STATUS_SUCCESS);
         }
     }
 
@@ -781,8 +652,9 @@ namespace
 
         void registerOneRank()
         {
-            ASSERT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, memcpyAllgather, nullptr),
-                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_NE(flags.ptr, nullptr);
+            void* const one[1] = {flags.ptr};
+            ASSERT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, 1, one), HIPBLAS_STATUS_SUCCESS);
         }
 
         // A descriptor a one-rank group can actually run, so each test can move
@@ -857,6 +729,7 @@ namespace
         hipblasLtMatrixLayout_t            Adesc      = nullptr;
         hipblasLtMatrixLayout_t            Bdesc      = nullptr;
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
+        FlagRegion                         flags{1};
     };
 
     TEST_F(FusedA2ADispatch_pre_checkin, DetachRestoresThePlainHeuristic)
@@ -1464,8 +1337,10 @@ namespace
 
         void registerOneRank(uint32_t channels = 1)
         {
-            ASSERT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, channels, memcpyAllgather, nullptr),
-                      HIPBLAS_STATUS_SUCCESS);
+            flags = std::make_unique<FlagRegion>(channels);
+            ASSERT_NE(flags->ptr, nullptr);
+            void* const one[1] = {flags->ptr};
+            ASSERT_EQ(hipblasLtSetDeviceComm(handle, 0, 1, channels, one), HIPBLAS_STATUS_SUCCESS);
         }
 
         hipblasStatus_t setPeerBPtrs(const std::vector<void*>& ptrs)
@@ -1601,6 +1476,7 @@ namespace
         hipblasLtMatrixLayout_t            Adesc      = nullptr;
         hipblasLtMatrixLayout_t            Bdesc      = nullptr;
         hipblasLtMatrixLayout_t            Ddesc      = nullptr;
+        std::unique_ptr<FlagRegion>        flags;
     };
 
     TEST_F(FusedA2APrologueDispatch_pre_checkin, CompleteDescriptorPassesTheHeuristicGate)

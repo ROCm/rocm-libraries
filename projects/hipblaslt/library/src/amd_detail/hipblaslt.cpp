@@ -41,12 +41,6 @@
 #include <string>
 #include <vector>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
-
 #include "Debug.hpp"
 
 #define TO_STR2(x) #x
@@ -573,55 +567,6 @@ namespace
         }
         return HIPBLAS_STATUS_SUCCESS;
     }
-
-    /****************************************************************************
-     * Device communicator.
-     ***************************************************************************/
-
-    // What each rank contributes to the registration allgather. Opaque to the
-    // caller, which must neither interpret nor reorder it. A peer in this process
-    // is reached through its raw device pointer, once peer access to its device
-    // is enabled, which is what the ordinal is for; one in another process is
-    // reached through the IPC handle. All of it travels because which case a peer
-    // falls into is only known once the payloads are in hand.
-    struct DeviceCommExchange
-    {
-        uint32_t          magic;
-        uint32_t          rank;
-        uint32_t          world;
-        uint32_t          nChannels;
-        int32_t           device;
-        uint64_t          pid;
-        void*             flags;
-        uint32_t          ipcValid;
-        hipIpcMemHandle_t ipc;
-    };
-
-    constexpr uint32_t kDeviceCommMagic = 0x41324131u; // "1A2A"
-
-    // Undoes whatever hipblasLtSetDeviceComm managed to put on the handle, from
-    // any point in it, and leaves the handle unregistered. Each of the three
-    // kinds of entry is released the way it was acquired, and a peer in this
-    // process is another handle's allocation, so it is left alone.
-    void release_device_comm(rocblaslt_handle handle)
-    {
-        for(uint32_t j = 0; j < HIPBLASLT_DEVICE_COMM_MAX_WORLD; ++j)
-        {
-            void* region = handle->device_comm_peer_flags[j];
-            if(region != nullptr)
-            {
-                if(j == handle->device_comm_rank)
-                    static_cast<void>(hipFree(region));
-                else if(handle->device_comm_peer_flags_mapped[j])
-                    static_cast<void>(hipIpcCloseMemHandle(region));
-            }
-            handle->device_comm_peer_flags[j]        = nullptr;
-            handle->device_comm_peer_flags_mapped[j] = false;
-        }
-        handle->device_comm_rank     = 0;
-        handle->device_comm_channels = 0;
-        handle->device_comm_world    = 0;
-    }
 }
 
 // The pointers alias the descriptor's own storage; they stay valid only as long as
@@ -771,12 +716,6 @@ try
     {
         CHECK_HIP_ERROR(hipFree((*(rocblaslt_handle)handle).StreamKFlags));
     }
-#if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    if(handle != nullptr)
-    {
-        release_device_comm((rocblaslt_handle)handle);
-    }
-#endif
 
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_destroy((const rocblaslt_handle)handle));
     rocblaslt::Debug::Instance().markerStop();
@@ -1305,14 +1244,27 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-// TODO(#11940): Move communicator and peer-transport setup to RCCL or a shared
-// transport layer; keep the fused GEMM handoff in hipBLASLt.
-hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t              handle,
-                                       uint32_t                       rank,
-                                       uint32_t                       world,
-                                       uint32_t                       nChannels,
-                                       hipblasLtDeviceCommAllgatherFn allgather,
-                                       void*                          userData)
+hipblasStatus_t hipblasLtDeviceCommFlagBytes(uint32_t nChannels, size_t* bytes)
+try
+{
+    if(nChannels == 0 || bytes == nullptr)
+        return HIPBLAS_STATUS_INVALID_VALUE;
+
+    // The kernel owns the flag region's layout, so its size is asked for rather
+    // than recomputed here; that keeps one definition of it.
+    *bytes = (size_t)nChannels * rocblaslt_device_comm_flag_block_bytes();
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtSetDeviceComm(hipblasLtHandle_t handle,
+                                       uint32_t          rank,
+                                       uint32_t          world,
+                                       uint32_t          nChannels,
+                                       void* const*      peerFlags)
 try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtSetDeviceComm");
@@ -1326,7 +1278,7 @@ try
     rocblaslt_handle h = (rocblaslt_handle)handle;
 
     if(world < 1 || world > HIPBLASLT_DEVICE_COMM_MAX_WORLD || rank >= world || nChannels == 0
-       || allgather == nullptr)
+       || peerFlags == nullptr)
     {
         log_error(__func__, "invalid communicator arguments; world", (int)world);
         rocblaslt::Debug::Instance().markerStop();
@@ -1342,110 +1294,20 @@ try
         return HIPBLAS_STATUS_INVALID_VALUE;
     }
 
-    // Travels in the payload: a peer in this process is reached from here only
-    // once peer access to its device is enabled, and that call names the ordinal.
-    int myDevice = 0;
-    if(hipGetDevice(&myDevice) != hipSuccess)
-    {
-        log_error(__func__, "could not resolve this rank's device ordinal");
-        rocblaslt::Debug::Instance().markerStop();
-        return HIPBLAS_STATUS_NOT_SUPPORTED;
-    }
-
-    // The kernel owns the flag region's layout, so its size is asked for rather
-    // than recomputed here; that keeps one definition of it.
-    void*        flags = nullptr;
-    const size_t bytes = (size_t)nChannels * rocblaslt_device_comm_flag_block_bytes();
-    // Fine-grained, because a peer's copy engine updates these lines.
-    if(hipExtMallocWithFlags(&flags, bytes, hipDeviceMallocFinegrained) != hipSuccess
-       || flags == nullptr)
-    {
-        log_error(__func__, "could not allocate the communicator's flag regions");
-        rocblaslt::Debug::Instance().markerStop();
-        return HIPBLAS_STATUS_ALLOC_FAILED;
-    }
-    if(hipMemset(flags, 0, bytes) != hipSuccess)
-    {
-        static_cast<void>(hipFree(flags));
-        rocblaslt::Debug::Instance().markerStop();
-        return HIPBLAS_STATUS_ALLOC_FAILED;
-    }
-
-    DeviceCommExchange mine{};
-    mine.magic     = kDeviceCommMagic;
-    mine.rank      = rank;
-    mine.world     = world;
-    mine.nChannels = nChannels;
-    mine.device    = myDevice;
-    mine.pid       = (uint64_t)getpid();
-    mine.flags     = flags;
-    // Only needed by a peer in another process; a failure here is reported when
-    // such a peer is actually found, not before.
-    mine.ipcValid = (hipIpcGetMemHandle(&mine.ipc, flags) == hipSuccess) ? 1u : 0u;
-
-    std::vector<DeviceCommExchange> all(world);
-    hipblasStatus_t                 status
-        = allgather(userData, &mine, all.data(), sizeof(DeviceCommExchange));
-    if(status != HIPBLAS_STATUS_SUCCESS)
-    {
-        static_cast<void>(hipFree(flags));
-        rocblaslt::Debug::Instance().markerStop();
-        return status;
-    }
-
-    // The handle owns the allocation from here on: it is this rank's own entry,
-    // and rank is what release_device_comm looks at to tell it from the peers.
-    h->device_comm_rank             = rank;
-    h->device_comm_peer_flags[rank] = flags;
-
     for(uint32_t j = 0; j < world; ++j)
     {
-        const DeviceCommExchange& peer = all[j];
-        if(peer.magic != kDeviceCommMagic || peer.rank != j || peer.world != world
-           || peer.nChannels != nChannels || peer.flags == nullptr)
+        if(peerFlags[j] == nullptr
+           || reinterpret_cast<uintptr_t>(peerFlags[j]) % HIPBLASLT_DEVICE_COMM_FLAG_ALIGNMENT != 0)
         {
-            log_error(__func__, "ranks disagree about the communicator; rank", (int)j);
-            release_device_comm(h);
+            log_error(__func__, "null or misaligned flag region for rank", (int)j);
             rocblaslt::Debug::Instance().markerStop();
             return HIPBLAS_STATUS_INVALID_VALUE;
         }
-
-        if(j == rank || peer.pid == mine.pid)
-        {
-            // A pointer from this process is addressable as it stands only on
-            // this device; reaching another one takes peer access, or the copy
-            // engine faults on a region it was handed. Already-enabled is a
-            // success, since in one process the W handles enable each other
-            // pairwise and either direction may be established first.
-            if(j != rank && peer.device != mine.device)
-            {
-                const hipError_t peerAccess = hipDeviceEnablePeerAccess(peer.device, 0);
-                if(peerAccess != hipSuccess && peerAccess != hipErrorPeerAccessAlreadyEnabled)
-                {
-                    log_error(__func__, "cannot reach a peer's device from this one; rank", (int)j);
-                    release_device_comm(h);
-                    rocblaslt::Debug::Instance().markerStop();
-                    return HIPBLAS_STATUS_NOT_SUPPORTED;
-                }
-            }
-            h->device_comm_peer_flags[j]        = peer.flags;
-            h->device_comm_peer_flags_mapped[j] = false;
-            continue;
-        }
-
-        void* mapped = nullptr;
-        if(!peer.ipcValid
-           || hipIpcOpenMemHandle(&mapped, peer.ipc, hipIpcMemLazyEnablePeerAccess) != hipSuccess)
-        {
-            log_error(__func__, "cannot map a peer's flag region into this process; rank", (int)j);
-            release_device_comm(h);
-            rocblaslt::Debug::Instance().markerStop();
-            return HIPBLAS_STATUS_NOT_SUPPORTED;
-        }
-        h->device_comm_peer_flags[j]        = mapped;
-        h->device_comm_peer_flags_mapped[j] = true;
     }
 
+    for(uint32_t j = 0; j < world; ++j)
+        h->device_comm_peer_flags[j] = peerFlags[j];
+    h->device_comm_rank     = rank;
     h->device_comm_channels = nChannels;
     // Last, and what makes the handle registered: every peer's region is in hand.
     h->device_comm_world = world;

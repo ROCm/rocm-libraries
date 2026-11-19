@@ -7,12 +7,13 @@
 // compile-time constants; edit them to reach 4 x 1, 1 x 4 or 8 x 1.
 //
 // At the default 2 x 2 one communicator carries a self peer, a same-process peer
-// and two cross-process peers, and the recv pointer for each kind is resolved a
-// different way -- the buffer itself, a raw pointer valid process-wide, and an
-// IPC mapping.
+// and two cross-process peers, and the recv and flag pointers for each kind are
+// resolved a different way -- the buffer itself, a raw pointer valid
+// process-wide, and an IPC mapping.
 //
-// Only the recv buffers are the caller's to exchange; the flag buffer's IPC
-// round trip belongs to hipblasLtSetDeviceComm.
+// The caller owns both exchanges. The flag regions travel through the same IPC
+// round as the recv buffers; RCCL symmetric windows or rocSHMEM would serve
+// equally, since hipblasLtSetDeviceComm only records the addresses.
 //
 // Axis naming follows the fused-A2A contract rather than GEMM habit: M / free0
 // is the FEATURE axis, contiguous in a column-major D, and N / free1 is the
@@ -190,12 +191,14 @@ namespace
         void* dC         = nullptr;
         void* dD         = nullptr;
         void* dRecv      = nullptr;
+        void* dFlags     = nullptr;
         void* dWorkspace = nullptr;
 
-        // Entry j addresses rank j: the queue this rank pushes over, and the
-        // buffer it pushes into.
+        // Entry j addresses rank j: the queue this rank pushes over, the buffer
+        // it pushes into, and the flag region it signals.
         hipblasLtSdmaQueue_t queues[kWorld]   = {};
         void*                recvPtrs[kWorld] = {};
+        void*                flagPtrs[kWorld] = {};
 
         std::vector<uint16_t> hD;
         std::vector<uint16_t> hRecv;
@@ -223,6 +226,12 @@ namespace
         }
     };
 
+    struct PeerHandles
+    {
+        hipIpcMemHandle_t recv;
+        hipIpcMemHandle_t flags;
+    };
+
     struct ProcessContext
     {
         int      sock     = -1;
@@ -230,56 +239,14 @@ namespace
 
         Rank ranks[kRanksPerProcess];
 
-        // Every rank's recv handle once the coordinator has been round; this
-        // process fills its own kRanksPerProcess entries at ctx.rankBase first.
-        hipIpcMemHandle_t handles[kWorld] = {};
-
-        std::mutex        recordMutex;
-        std::vector<char> records;
-        Rendezvous        allgather;
+        // Every rank's handles once the coordinator has been round; this process
+        // fills its own kRanksPerProcess entries at ctx.rankBase first.
+        PeerHandles handles[kWorld] = {};
 
         Rendezvous verdictSwap;
         char       localVerdicts[kRanksPerProcess] = {};
         char       verdict                         = kGo;
     };
-
-    struct AllgatherSlot
-    {
-        ProcessContext* ctx  = nullptr;
-        uint32_t        rank = 0;
-    };
-
-    // The other workers contribute the rest of the record array; this process
-    // fills its own kRanksPerProcess entries before arriving.
-    hipblasStatus_t mixedAllgather(void*       userData,
-                                   const void* sendbuf,
-                                   void*       recvbuf,
-                                   size_t      bytesPerRank)
-    {
-        auto*           slot = static_cast<AllgatherSlot*>(userData);
-        ProcessContext& ctx  = *slot->ctx;
-
-        {
-            std::lock_guard<std::mutex> lock(ctx.recordMutex);
-            if(ctx.records.empty())
-                ctx.records.resize(bytesPerRank * kWorld);
-            if(ctx.records.size() != bytesPerRank * kWorld)
-                return HIPBLAS_STATUS_INVALID_VALUE;
-            std::memcpy(ctx.records.data() + bytesPerRank * slot->rank, sendbuf, bytesPerRank);
-        }
-
-        const bool swapped = ctx.allgather.arrive([&ctx, bytesPerRank] {
-            return exchange(ctx.sock,
-                            ctx.records.data() + bytesPerRank * ctx.rankBase,
-                            ctx.records.data(),
-                            bytesPerRank);
-        });
-        if(!swapped)
-            return HIPBLAS_STATUS_INTERNAL_ERROR;
-
-        std::memcpy(recvbuf, ctx.records.data(), ctx.records.size());
-        return HIPBLAS_STATUS_SUCCESS;
-    }
 
     void reportVerdict(ProcessContext& ctx, uint32_t rank, char verdict)
     {
@@ -327,25 +294,31 @@ namespace
 
 namespace
 {
-    char runRank(ProcessContext& ctx, uint32_t rank, AllgatherSlot& slot)
+    char runRank(ProcessContext& ctx, uint32_t rank)
     {
         Rank&         self = ctx.ranks[rank - ctx.rankBase];
         MatmulHandles handles;
 
         CHECK_HIP(hipSetDevice(int(rank)));
 
-        CHECK_LT(hipblasLtCreate(&self.handle));
-        CHECK_LT(hipblasLtSetDeviceComm(
-            self.handle, rank, kWorld, kChannels, mixedAllgather, &slot));
-
         for(uint32_t j = 0; j < kWorld; ++j)
         {
             if(j >= ctx.rankBase && j < ctx.rankBase + kRanksPerProcess)
+            {
                 self.recvPtrs[j] = ctx.ranks[j - ctx.rankBase].dRecv;
+                self.flagPtrs[j] = ctx.ranks[j - ctx.rankBase].dFlags;
+            }
             else
+            {
                 CHECK_HIP(hipIpcOpenMemHandle(
-                    &self.recvPtrs[j], ctx.handles[j], hipIpcMemLazyEnablePeerAccess));
+                    &self.recvPtrs[j], ctx.handles[j].recv, hipIpcMemLazyEnablePeerAccess));
+                CHECK_HIP(hipIpcOpenMemHandle(
+                    &self.flagPtrs[j], ctx.handles[j].flags, hipIpcMemLazyEnablePeerAccess));
+            }
         }
+
+        CHECK_LT(hipblasLtCreate(&self.handle));
+        CHECK_LT(hipblasLtSetDeviceComm(self.handle, rank, kWorld, kChannels, self.flagPtrs));
 
         auto& fused = handles.fused;
         CHECK_LT(hipblasLtFusionCreate(&fused));
@@ -490,7 +463,15 @@ namespace
         CHECK_HIP(hipMemset(self.dD, 0, bytesCD));
         CHECK_HIP(hipMemset(self.dRecv, 0, bytesRecv));
 
-        CHECK_HIP(hipIpcGetMemHandle(&ctx.handles[rank], self.dRecv));
+        // Fine-grained, because peers' copy engines write it while this device polls.
+        size_t bytesFlags = 0;
+        CHECK_LT(hipblasLtDeviceCommFlagBytes(kChannels, &bytesFlags));
+        CHECK_HIP(hipExtMallocWithFlags(&self.dFlags, bytesFlags, hipDeviceMallocFinegrained));
+        CHECK_HIP(hipMemset(self.dFlags, 0, bytesFlags));
+        CHECK_HIP(hipDeviceSynchronize());
+
+        CHECK_HIP(hipIpcGetMemHandle(&ctx.handles[rank].recv, self.dRecv));
+        CHECK_HIP(hipIpcGetMemHandle(&ctx.handles[rank].flags, self.dFlags));
         return kGo;
     }
 }
@@ -693,26 +674,18 @@ namespace
             if(allocateRank(ctx, ctx.rankBase + slot) != kGo)
                 return kStatusFailed;
 
-        if(!exchange(ctx.sock,
-                     &ctx.handles[ctx.rankBase],
-                     ctx.handles,
-                     sizeof(hipIpcMemHandle_t)))
+        if(!exchange(ctx.sock, &ctx.handles[ctx.rankBase], ctx.handles, sizeof(PeerHandles)))
         {
-            std::printf("failed: recv handle exchange\n");
+            std::printf("failed: IPC handle exchange\n");
             return kStatusFailed;
         }
 
-        AllgatherSlot            slots[kRanksPerProcess];
-        char                     verdicts[kRanksPerProcess];
+        char verdicts[kRanksPerProcess];
         std::fill_n(verdicts, kRanksPerProcess, kFail);
         std::vector<std::thread> threads;
         for(uint32_t slot = 0; slot < kRanksPerProcess; ++slot)
-        {
-            slots[slot] = {&ctx, ctx.rankBase + slot};
-            threads.emplace_back([&ctx, &slots, &verdicts, slot] {
-                verdicts[slot] = runRank(ctx, ctx.rankBase + slot, slots[slot]);
-            });
-        }
+            threads.emplace_back(
+                [&ctx, &verdicts, slot] { verdicts[slot] = runRank(ctx, ctx.rankBase + slot); });
         for(auto& thread : threads)
             thread.join();
 
@@ -737,33 +710,40 @@ namespace
             Rank& rank = ctx.ranks[slot];
             static_cast<void>(hipSetDevice(int(ctx.rankBase + slot)));
 
+            if(rank.handle != nullptr)
+                hipblasLtDestroy(rank.handle);
+
             // Only the peer process's buffers were mapped in; ours are plain
             // allocations that hipFree below owns.
             for(uint32_t j = 0; j < kWorld; ++j)
-                if(rank.recvPtrs[j] != nullptr
-                   && !(j >= ctx.rankBase && j < ctx.rankBase + kRanksPerProcess))
+            {
+                if(j >= ctx.rankBase && j < ctx.rankBase + kRanksPerProcess)
+                    continue;
+                if(rank.recvPtrs[j] != nullptr)
                     static_cast<void>(hipIpcCloseMemHandle(rank.recvPtrs[j]));
+                if(rank.flagPtrs[j] != nullptr)
+                    static_cast<void>(hipIpcCloseMemHandle(rank.flagPtrs[j]));
+            }
 
             static_cast<void>(hipFree(rank.dA));
             static_cast<void>(hipFree(rank.dB));
             static_cast<void>(hipFree(rank.dC));
             static_cast<void>(hipFree(rank.dD));
             static_cast<void>(hipFree(rank.dRecv));
+            static_cast<void>(hipFree(rank.dFlags));
             static_cast<void>(hipFree(rank.dWorkspace));
-            if(rank.handle != nullptr)
-                hipblasLtDestroy(rank.handle);
         }
         return status;
     }
 
-    // Three collectives in a fixed order: recv IPC handles, the registration
-    // allgather, then the verdict.
+    // Two collectives in a fixed order: the recv and flag IPC handles, then the
+    // verdict.
     bool coordinate(const std::vector<int>& socks)
     {
         std::vector<char> all;
         size_t            bytesPerRank = 0;
 
-        for(int step = 0; step < 3; ++step)
+        for(int step = 0; step < 2; ++step)
             if(!gather(socks, all, bytesPerRank) || !broadcast(socks, all))
                 return false;
         return true;
