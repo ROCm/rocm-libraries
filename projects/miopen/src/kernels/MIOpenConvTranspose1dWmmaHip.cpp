@@ -62,7 +62,7 @@ typedef float f32x8 __attribute__((ext_vector_type(8)));
 #if CT_DTYPE == 1
 typedef _Float16 frag_t __attribute__((ext_vector_type(CT_FRAG_N)));
 #else
-typedef __bf16 frag_t __attribute__((ext_vector_type(CT_FRAG_N)));
+typedef short frag_t __attribute__((ext_vector_type(CT_FRAG_N))); // bf16 bits
 #endif
 
 __device__ static inline u16 to_storage(float v)
