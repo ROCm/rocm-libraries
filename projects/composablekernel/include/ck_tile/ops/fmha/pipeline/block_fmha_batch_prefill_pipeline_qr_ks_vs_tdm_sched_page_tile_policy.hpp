@@ -34,12 +34,16 @@ inline constexpr bool fmha_page_tile_d64_quad_reads_v =
     Geometry::kM == 128 && Geometry::kN == 128 && Geometry::kHeadDimQK == 64 &&
     Geometry::kDv == 64 && !fmha_tdm_is_split_partial_v<Problem>;
 
-// D128 M128 page tiles without prepared tile bases: the guarded problems whose code spills on
-// gfx1250 (VGPR spills in 288 of their 354 generated instances, none in any other guarded
-// instance). They keep the shared grouped-drain placement: the full drain that
-// FmhaBatchPrefillPageTileGroupedDrainPlacement adds at the end of each QK stage moved their
-// register allocation, and spill refills of Q fragments then landed on the operands of WMMAs in
-// flight (100 instances; devlog O1 of bp-review-fixes).
+// D128 M128 page tiles without prepared tile bases: the shape class whose code spills on gfx1250.
+// Of its 354 generated instances (production flags), 280 spill, 40 more spill once the stage-end
+// drain of FmhaBatchPrefillPageTileGroupedDrainPlacement is added, 8 (the P16 elementwise-bias
+// tiles with sink tokens) spill without their pairwise drains, and 26 (D128 P16 without bias or
+// sink tokens; two P64 KV-split partials) spill in no build; no guarded instance outside the class
+// spills. A type-level rule cannot single out the 26, so the whole class is excluded. These tiles
+// keep the shared grouped-drain placement: the stage-end drain moved their register allocation, and
+// spill refills of Q fragments then landed on the operands of WMMAs in flight (in 100 instances
+// instead of 24). Their stage-end release relies on the waits that expert scheduling adds, which
+// CK_TILE_FMHA_PAGE_TILE_EXPERT_SCHEDULING makes a requirement of the build.
 template <typename Problem, typename Geometry>
 inline constexpr bool fmha_page_tile_d128_m128_spills_v =
     Geometry::kHeadDimQK == 128 && Geometry::kM == 128 &&
@@ -50,7 +54,7 @@ inline constexpr bool fmha_page_tile_d128_m128_spills_v =
 // few registers: it split a V operand's live range and refilled spilled slices into the operand
 // registers of WMMAs still in flight (scratch_load and v_mov writers, a WAR the guard does not
 // see). Groups of two keep fewer slices allocated; on gfx1250 that removed every such site and cut
-// the spills from 24-32 to 0-8 VGPR slots (devlog E1 of bp-review-fixes).
+// the spills from 24-32 to 0-8 VGPR slots (the family's 24 generated instances, production flags).
 template <typename Problem, typename Geometry>
 inline constexpr bool fmha_page_tile_d128_p16_bias_pair_drains_v =
     Geometry::kHeadDimQK == 128 && Geometry::kM == 128 && Problem::kPageBlockSize == 16 &&
@@ -191,8 +195,11 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
     }
 
     // PV stage 0's V fragments (V0) are read in the softmax when the schedule's QK tail stage reads
-    // nothing (FmhaBatchPrefillPageTileScheduleFor): after that stage's RAW fence, with no WMMA in
-    // flight, so they need no drain of the WMMA operand guard.
+    // nothing (FmhaBatchPrefillPageTileScheduleFor). They need no drain of the WMMA operand guard:
+    // the softmax's first part (the row maxima, RunSplitSoftmaxPart01) reads the result of every QK
+    // WMMA before LoadV0InSoftmax issues them, so every QK WMMA has completed and none can still
+    // read a register the loads fill. The QK stage's RAW fence alone would not show it: it waits
+    // for its own WMMA's result only.
     static constexpr bool kReadsV0InSoftmax =
         !kFmhaTdmSchedQkTailReads<typename Base::Schedule::LocalPlacement>;
 
