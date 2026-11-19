@@ -179,7 +179,7 @@
   "test_config[tensilelite/Tests/common/gemm/gfx12/xfp32_gfx1250.yaml]": 47,
   "test_config[tensilelite/Tests/common/gemm/gfx12/xfp32_inf_support_gfx1250.yaml]": 4,
   "test_config[tensilelite/Tests/common/gemm/gfx12/zgemm_gfx1250.yaml]": 35,
-  "test_config[tensilelite/Tests/common/gemm/gfx1250/cluster_entry_handoff.yaml]": 10800,
+  "test_config[tensilelite/Tests/common/gemm/gfx1250/cluster_entry_handoff.yaml]": 12052,
   "test_config[tensilelite/Tests/common/gradient/gfx1250/bbs_bgrada_gfx1250.yaml]": 15,
   "test_config[tensilelite/Tests/common/gradient/gfx1250/bbs_bgradb_gfx1250.yaml]": 15,
   "test_config[tensilelite/Tests/common/gradient/gfx1250/bbs_bgradd_gfx1250.yaml]": 15,
