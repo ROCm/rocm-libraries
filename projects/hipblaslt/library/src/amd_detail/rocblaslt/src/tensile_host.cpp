@@ -7675,9 +7675,10 @@ inline void recordOnlineTuningWinner(const RocblasltContractionProblem&      pro
         const TensileLite::TuningSearch search = TuningPolicy::onlineSearch(record.workspaceBytes);
         entry.search                           = search;
 
-        const bool persisted = TensileLite::appendTunedEntry(tuning.cachePath(), prob, entry);
-
+        // In memory first, so the winner is replayed even if the append throws.
         static_cast<void>(TensileLite::OverrideMap::getMap().addIfAbsent(key, entry));
+
+        const bool persisted = TensileLite::appendTunedEntry(tuning.cachePath(), prob, entry);
 
         // Matched whether or not the append reached the file; tuned counts
         // the rows that did.

@@ -101,6 +101,9 @@ namespace rocblaslt
                                      bool                    mayProbe,
                                      Record*                 record)
     {
+        // Whatever this thread was offered before is stale.
+        t_offer = {};
+
         if(rankedSolutionIndices.empty())
             return -1;
 
@@ -119,11 +122,7 @@ namespace rocblaslt
                 // without the write lock, as the exclusive path below would.
                 if(!state.m_candidates.empty() && state.m_problemHash != problemHash
                    && state.m_coldCalls >= m_coldCalls)
-                {
-                    if(mayProbe)
-                        t_offer.m_candidate = -1;
                     return -1;
-                }
             }
         }
 
@@ -131,9 +130,6 @@ namespace rocblaslt
         // never be measured; it does not spend the budget.
         if(!mayProbe)
             return -1;
-
-        // Whatever this thread was offered before is stale.
-        t_offer.m_candidate = -1;
 
         std::unique_lock<std::shared_timed_mutex> lock(m_mutex);
 
