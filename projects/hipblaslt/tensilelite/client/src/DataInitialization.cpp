@@ -1921,22 +1921,26 @@ namespace TensileLite
             if(useMXGenerator)
                 initializeMXData(problem);
 
+            // A MAF mode keeps its own non-block-scaled data, so its side stays on initArray.
             bool const generateNonMXAB = !useMXGenerator && m_mxDataGenerator == 1;
-            if(generateNonMXAB)
-            {
-                if(problem.sparse())
-                    throw std::runtime_error("mx-data-generator=1 does not support sparse problems");
+            bool const generateNonMXA
+                = generateNonMXAB && !IsMaf(m_vdata[ContractionProblemGemm::TENSOR::A].init);
+            bool const generateNonMXB
+                = generateNonMXAB && !IsMaf(m_vdata[ContractionProblemGemm::TENSOR::B].init);
+            if((generateNonMXA || generateNonMXB) && problem.sparse())
+                throw std::runtime_error("mx-data-generator=1 does not support sparse problems");
+            if(generateNonMXA)
                 initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::A,
                                              ContractionProblemGemm::TENSOR::MXSA,
                                              problem.a(),
                                              problem.transA(),
                                              /*isMatrixA=*/true);
+            if(generateNonMXB)
                 initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::B,
                                              ContractionProblemGemm::TENSOR::MXSB,
                                              problem.b(),
                                              problem.transB(),
                                              /*isMatrixA=*/false);
-            }
 
             auto& tensors = problem.tensors();
             for(size_t i = 0; i < m_vdata.size(); i++)
@@ -1951,8 +1955,8 @@ namespace TensileLite
                                       || i == ContractionProblemGemm::TENSOR::MXSB))
                     continue;
 
-                if(generateNonMXAB && (i == ContractionProblemGemm::TENSOR::A
-                                       || i == ContractionProblemGemm::TENSOR::B))
+                if((generateNonMXA && i == ContractionProblemGemm::TENSOR::A)
+                   || (generateNonMXB && i == ContractionProblemGemm::TENSOR::B))
                     continue;
 
                 if(m_problemDependentData)
@@ -2678,7 +2682,8 @@ namespace TensileLite
             {
                 // A is non-MX: seed via the default initArray path so it doesn't
                 // get skipped by the MX-aware default loop.
-                if(m_mxDataGenerator == 1)
+                if(m_mxDataGenerator == 1
+                   && !IsMaf(m_vdata[ContractionProblemGemm::TENSOR::A].init))
                     initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::A,
                                                  ContractionProblemGemm::TENSOR::MXSA,
                                                  problem.a(),
@@ -2708,7 +2713,8 @@ namespace TensileLite
             else
             {
                 // B is non-MX: same fallback as the A side.
-                if(m_mxDataGenerator == 1)
+                if(m_mxDataGenerator == 1
+                   && !IsMaf(m_vdata[ContractionProblemGemm::TENSOR::B].init))
                     initNonMXSideWithMXGenerator(ContractionProblemGemm::TENSOR::B,
                                                  ContractionProblemGemm::TENSOR::MXSB,
                                                  problem.b(),

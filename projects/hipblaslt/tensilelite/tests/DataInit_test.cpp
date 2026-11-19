@@ -587,6 +587,56 @@ TEST(DataInitializationMXReuse, NoSwizzleSolutionDoesNotLeakIntoNextPreswizzle)
     EXPECT_TRUE(dataInit.preswizzledA());
     dataInit.postProblem();
 }
+
+namespace
+{
+    // Exposes the CPU initialization and the pristine CPU copy of a tensor.
+    class CPUInputProbe : public TensileLite::Client::DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+        using DataInitialization::initializeCPUInputs;
+
+        std::vector<uint8_t> cpuBytes(int tensor, rocisa::DataType type, size_t bytes) const
+        {
+            auto const* data = static_cast<uint8_t const*>(
+                m_vdata[tensor].pristine.at(type).cpuInput.valid.get());
+            return {data, data + bytes};
+        }
+    };
+
+    template <typename T>
+    std::vector<uint8_t> asBytes(std::vector<T> const& values)
+    {
+        auto const* data = reinterpret_cast<uint8_t const*>(values.data());
+        return {data, data + values.size() * sizeof(T)};
+    }
+}
+
+// mx-data-generator=1 fills non-MX FP8 A/B through generateMXInput, which writes codes meant for
+// a block scale and drops the scale. The MAF modes prescribe non-block-scaled FP8 data of their
+// own, so those sides must come out exactly as initArray writes them.
+TEST(DataInitializationMafNonMX, GeneratorFlagKeepsTheMafData)
+{
+    using namespace TensileLite::Client;
+    auto args = makeMinimalClientArgs(/*mxScaleFormat=*/0); // non-MX FP8 A and B
+    setOption(args, "mx-data-generator", 1);
+    setOption(args, "init-a", InitMode::Maf2_0);
+    setOption(args, "init-b", InitMode::Maf1_0);
+    ClientProblemFactory factory(args);
+    CPUInputProbe        dataInit(args, factory);
+    auto const&          gemm = dynamic_cast<ContractionProblemGemm const&>(*factory.problems()[0]);
+    dataInit.initializeCPUInputs(gemm);
+
+    std::vector<TensileLite::Float8> a(gemm.a().totalAllocatedElements());
+    std::vector<TensileLite::Float8> b(gemm.b().totalAllocatedElements());
+    DataInitialization::initArrayMaf2_0(a.data(), a.size(), ContractionProblemGemm::TENSOR::A);
+    DataInitialization::initArrayMaf1_0(
+        b.data(), gemm.b().sizes(), gemm.b().strides(), ContractionProblemGemm::TENSOR::B);
+    auto const f8 = rocisa::DataType::Float8;
+    EXPECT_EQ(dataInit.cpuBytes(ContractionProblemGemm::TENSOR::A, f8, a.size()), asBytes(a));
+    EXPECT_EQ(dataInit.cpuBytes(ContractionProblemGemm::TENSOR::B, f8, b.size()), asBytes(b));
+}
 #endif
 
 // =============================================================================
