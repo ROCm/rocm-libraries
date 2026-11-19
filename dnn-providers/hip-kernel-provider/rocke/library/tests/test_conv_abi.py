@@ -2770,11 +2770,12 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
     ok, why = cache.supports_problem(dgrad, depthwise)
     assert not ok and "depthwise" in why
 
-    # A split-K binary serves the same problems: grouped is still accepted and
-    # depthwise is still refused. The even-cpg rule for a split-K 16-bit dX
-    # atomic is checked by the spec validator and by dgrad_split_k_available
-    # (the latter is covered by test_conv_split_k.py); supports_problem does
-    # not check it.
+    # A split-K binary serves the same problems: grouped (even cpg) is still
+    # accepted. The even-cpg rule for a split-K 16-bit dX atomic is also
+    # checked here, because a grouped binary takes cpg at run time: an odd
+    # cpg is refused with the builder's own reason. Depthwise (cpg == 1) is
+    # odd, so a split-K binary refuses it on that rule; the unsplit binary
+    # above covers the separate depthwise rule.
     split_k_dgrad = KernelIdentity(
         direction="dgrad",
         tile_m=64,
@@ -2787,6 +2788,9 @@ def test_cache_applies_runtime_launch_limits(tmp_path):
         split_k=2,
         **common,
     )
+    odd_cpg = ConvProblem(N=2, Hi=16, Wi=16, **dict(shape, C=12, K=12), groups=4)
     assert cache.supports_problem(split_k_dgrad, grouped)[0]
+    ok, why = cache.supports_problem(split_k_dgrad, odd_cpg)
+    assert not ok and "even channels-per-group" in why
     ok, why = cache.supports_problem(split_k_dgrad, depthwise)
-    assert not ok and "depthwise" in why
+    assert not ok and "even channels-per-group" in why
