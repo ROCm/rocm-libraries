@@ -809,11 +809,11 @@ comment and its ticket (RFC 0022 §6). Before #14346 only 11 of them had a verdi
 SKIP whatever the engine did.
 
 *Non-normative:* on gfx942 (2026-11-04) ASM_SDPA_ENGINE declined 15 of the 21 and accepted six. #14684
-adds the declines for PRB-U01 and PRB-U03 (ALMIOPEN-3039) and PRB-U13 (ALMIOPEN-3038). The other three,
-which `ASM_SDPA_ENGINE_test_categories_integration.yaml` quarantines, are PRB-T04 and PRB-T04n, an O
-dtype that differs from Q's (ALMIOPEN-3050), and PRB-R05, `dropout_scale_inv` without a mask
-(ALMIOPEN-3051). Run alone, each of the three fails: "Engine ASM_SDPA_ENGINE accepted
-expected-rejection bundle".
+adds the declines for PRB-U01 and PRB-U03 (ALMIOPEN-3039) and PRB-U13 (ALMIOPEN-3038). Of the other
+three, ASM_SDPA_ENGINE now declines PRB-R05, `dropout_scale_inv` without a mask (ALMIOPEN-3051). The
+last two, PRB-T04 and PRB-T04n, carry an O dtype that differs from Q's (ALMIOPEN-3050).
+`ASM_SDPA_ENGINE_test_categories_integration.yaml` lists the probes still quarantined; run alone, each
+fails: "Engine ASM_SDPA_ENGINE accepted expected-rejection bundle".
 
 **Regressions** sit in the lowest level that affords them, shrunk only when the defect does not
 depend on the shape; a regression whose reference is shared with the engines also has a G-C case.
