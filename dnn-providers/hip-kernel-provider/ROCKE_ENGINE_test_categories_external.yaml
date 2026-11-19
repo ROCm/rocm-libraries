@@ -279,6 +279,10 @@ test_categories:
       - "rocke_library_gdn_pytest"
       # Its host tests are too slow for the single-shard quick tier.
       - "rocke_library_conv_fwd_aot_packaging_pytest"
+      # The standard-tier cases of the oracle-free masked-token poisoning
+      # relation (rocke/library/tests/oracle_free/README.md): gfx942 launches
+      # of two more dense code objects than the quick tier's budget takes.
+      - "rocke_oracle_free_masked_poison_standard_pytest"
     labels:
       - "standard"
       - "comprehensive"

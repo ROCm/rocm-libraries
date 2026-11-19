@@ -17,13 +17,29 @@
 # fails for any other pytest entry that does not.
 
 # Oracle-free launches of the shipped dense kernels: the uniform-probability
-# gate and the key-permutation relation. Only the GPU modules run here; their
-# CPU contracts run in the attention CPU lane.
+# gate, the key-permutation relation and the quick cases of the masked-token
+# poisoning relation. Only the GPU modules run here; their CPU contracts run in
+# the attention CPU lane.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_permutation_dense.py\" -v -rs)\n")
+       "add_test(rocke_oracle_free_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_analytical_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_permutation_dense.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_masked_poison_dense.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_oracle_free_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;gpu\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 300)\n")
+
+# The other mask and dtype pairing of the masked-token poisoning relation
+# (tests/oracle_free/README.md): the same lane on two more code objects, one of
+# them the three-loop sliding-window kernel. It starts at the standard tier (the
+# python-standard category of ROCKE_ENGINE_test_categories_external.yaml) and
+# bakes in the standard label so `ctest -L standard` finds it without that
+# file's labelling; the quick tier keeps its budget. Its CPU contracts cover
+# all four cases and run in the attention CPU lane.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_oracle_free_masked_poison_standard_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/oracle_free/test_masked_poison_dense_standard.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_oracle_free_masked_poison_standard_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;gpu\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 300)\n")
 
@@ -271,6 +287,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_bwd_memo_bound.py"
     "tests/library/tests/oracle_free/test_contracts.py"
     "tests/library/tests/oracle_free/test_permutation_contracts.py"
+    "tests/library/tests/oracle_free/test_masked_poison_contracts.py"
     "tests/library/tests/test_attention_dense_gfx942.py"
     "tests/library/tests/test_attention_combo_sweep_fp8.py"
     "tests/library/tests/test_dense_prefill_emit_shapes.py"

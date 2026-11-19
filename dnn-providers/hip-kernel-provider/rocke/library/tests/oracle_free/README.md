@@ -1,12 +1,13 @@
 # Oracle-free attention tests
 
 This suite launches the shipped dense attention kernels and checks them without
-a complete attention oracle. It has two lanes:
+a complete attention oracle. It has three lanes:
 
 | Lane | Checks | Verdict |
 |---|---|---|
 | Uniform probabilities ([Exposures](#exposures) to [Scope](#scope)) | masked attention on zero Q | every stored bit equals a closed form |
 | [Key-permutation relation](#key-permutation-relation) | unmasked attention on nonuniform scores | two launches agree within a derived bound |
+| [Masked-token poisoning relation](#masked-token-poisoning-relation) | masked attention on nonuniform scores | rows that cannot see a changed token agree bit for bit |
 
 The uniform-probability lane sets Q to zero. Zero Q makes every legal score
 equal, so the softmax row for query `q` is uniform over its legal key set
@@ -446,6 +447,196 @@ rational bound, and applies the artifact checks of `_permutation_path.py` to the
 lowered quick kernels of every compiler lane and to edited copies that each
 check must reject.
 
+## Masked-token poisoning relation
+
+Row `q` of masked attention depends on K and V only through its legal keys.
+Changing K and V at tokens that are masked for row `q` therefore leaves that row
+unchanged:
+
+`O'(q) = O(q)` for every row `q` whose legal keys hold no changed token.
+
+This lane launches the subject on a baseline and on inputs whose masked tokens
+carry a large key and a large value, the poison. Rows that cannot see a poisoned
+token are compared bit for bit, with no tolerance. Rows that can see one must be
+taken over by it, which shows that the poison was delivered and that the
+comparison can see it. There is no expected output and no reference.
+
+The other lanes cannot tell when the mask is applied: zero Q hides the scores,
+and the key-permutation relation is unmasked. Here a mask applied after the row
+maximum, after the normalizer or after the value product changes a row that must
+not change.
+
+### Inputs
+
+- K and V are `+1` or `-1` per element, from the element hash of the
+  key-permutation fixture. Key tokens are checked to be pairwise distinct per
+  batch element and KV head; a collision moves to the next seed.
+- Query head `h` of row `q` copies key `max(q - h mod G, 0)` of its KV head,
+  `G = Hq / Hkv`. That key scores `D` and every other key at most `D - 2`, so
+  every row has a known strict maximum and nonuniform scores.
+- An anchor key `k0` defines `G` target rows, `k0 .. k0 + G - 1`: head offset
+  `d` copies the anchor key at row `k0 + d`.
+- The poisoned tokens get key `16 * K[k0]` and value `16 * w`, with `w` one sign
+  row per KV head. On a target row the poisoned key outscores the row maximum
+  by `15 sqrt(D)` nats.
+
+| Mask | Poisoned tokens | What they probe |
+|---|---|---|
+| causal | `k0 + G`, `Sk - 1` | the first future key of the last target row, and the last key |
+| window `W` | `k0 - W`, `k0 + G` | the key just below the first target row's window, and the first future key |
+
+Anchors are 127 and 200. The target rows of the first straddle a query-block
+and a key-tile boundary; the second is interior.
+
+Three row sets follow from the mask rule and from integer arithmetic on the
+launched signs:
+
+- *unaffected* rows see no poisoned token; the target rows are among them;
+- *activity* rows see a poisoned token and score at least 8 against the anchor
+  key, so the poison outscores every other legal key by at least 8 nats;
+- the remaining rows see a poisoned token that need not dominate. They are
+  checked for finiteness only.
+
+A fixture with a target row that sees a poisoned token, or a head without an
+activity row, is refused.
+
+### Verdicts
+
+Four verdicts are kept apart, so a failure names its kind:
+
+| Verdict | Requirement |
+|---|---|
+| input validity | checked before any launch, on the encoded bits: the poisoned K and V equal the baseline outside the poisoned tokens and hold the intended values there; the kernel is the modeled path (below); the baseline, launched twice, repeats bit for bit |
+| sanity | every stored value of both outputs is finite; no baseline magnitude exceeds the derived ceiling |
+| relation | every coordinate of every unaffected row holds the same bits in both outputs; `+0` and `-0` are different |
+| activity | every coordinate of every activity row, multiplied by the poison's sign, is at least 8 |
+
+A target row that changed is labelled from its stored bits (non-finite, all
+zero, poison-dominated, other). The label is a diagnostic and asserts no
+mechanism.
+
+### Why bit equality
+
+The gfx942 dense kernel masks with a finite sentinel: each score is replaced by
+`-1e30` when its key is illegal, before the row maximum and before both
+exponentials read it. A masked token then stays out of a row in one of three
+ways, and each launch logs which one every (target row, poisoned token) pair
+takes:
+
+| Mechanism | What the kernel does |
+|---|---|
+| unvisited tile | the row's key-tile loop never reaches the token's tile |
+| masked lane | under a legal row maximum `m` the weight is `exp2(-1e30 - m) = +0`, so the token adds nothing to the normalizer and a zero product to the accumulator |
+| tile before the first legal key | while a row has seen no legal key its maximum is still `-1e30`, every masked lane has weight `exp2(0) = 1`, and the tile's values are summed; the first tile with a legal key rescales that state by `exp2(-1e30 - m) = +0` |
+
+In all three the row's stored bits do not depend on the token, provided the
+state built before the first legal key is finite. The fixture's magnitudes keep
+it finite; masked values large enough to overflow that FP32 state are outside
+this lane.
+
+### Scope checked before a launch
+
+Bit equality holds for one masked path. The GPU lane establishes it for the
+kernel under test before it launches anything, and fails, never skips, when a
+check does not hold:
+
+- The kernel is compiled as the launcher compiles it, and the checks below run
+  on the LLVM IR of that artifact.
+- Every score is read only by its mask selects, whose false value is `-1e30`
+  and whose conditions are integer compares; the maximum, the weights and the
+  rescale read the masked scores; one rescale multiplies the normalizer and
+  every accumulator element; the running state starts at `(-1e30, 0, 0)` and is
+  handed unchanged from one key loop to the next. No fast-math flag or
+  floating-point mode attribute appears.
+- Nothing computed from Q, K or V steers the kernel: every operand of a
+  compare, every branch and select condition and every address is position
+  arithmetic on the integer arguments, the thread and work-group coordinates
+  and the loop counters.
+- Every MFMA operand is traced to its tensor, per key loop, as in the
+  key-permutation lane.
+- The kernel's position arithmetic is executed on the host for every work
+  group, thread, key-tile iteration and lane of the launch, with the grid and
+  block the launcher uses. The keys each row leaves unmasked must be exactly its
+  legal keys, each once. A key loop without mask selects must not run at all.
+- The kernel descriptor selects round-to-nearest-even and keeps subnormals.
+
+The lane prints the SHA-256 of the code object, the compiler, the launch
+geometry and the key loops with their masks. It does not disassemble the code
+object, and it does not prove which lane of a tile a key token occupies: a
+mask that compares the right positions for the wrong lanes is what the relation
+itself detects.
+
+### Derived limits
+
+The sanity ceiling and the activity threshold are derived from the path, in
+exact rational arithmetic, and depend on no observed output:
+
+| Case | Baseline ceiling | Takeover floor |
+|---|---:|---:|
+| FP16 causal | 1.00111 | 14.615 |
+| BF16 causal | 1.00795 | 14.565 |
+| FP16 window 64 | 1.00110 | 15.628 |
+| BF16 window 64 | 1.00795 | 15.575 |
+
+In exact arithmetic a baseline output is at most 1; the ceiling adds the
+weight cast, the FP32 accumulation and the store. The floor is the least an
+activity row can store: the poison has weight exactly one and every other
+legal key at most `2^-11.5`. The threshold 8 lies between them, so a correct
+kernel can fail neither check. A case whose limits do not separate, or whose
+poison does not outscore a target row's maximum by at least 150 base-2 units
+(where `exp2` returns zero), is refused.
+
+### Controls
+
+- *Boundary controls.* One poisoned token is moved a single key into the legal
+  set of one target row: the last target row's own key for the future bound,
+  the first key of the first target row's window for the window bound. That
+  row must change and be taken over in the head that copies the anchor key, in
+  every KV head, and no other unaffected row may change.
+- *Undelivered poison.* The baseline output is analyzed in the poisoned
+  output's place; the activity verdict must reject it.
+
+### What the relation cannot see
+
+- A defect applied identically to both launches cancels.
+- Only the poisoned tokens are probed. A mask defect at another key, or a wrong
+  legal set that still excludes every poisoned token, passes the relation. The
+  position check above covers the mask predicate and the tile ranges of the IR
+  for every row, but not the lane a key token occupies.
+- Rows that see a poisoned token without being activity rows are not judged.
+- The far key of the causal fixture, `Sk - 1`, is legal only on the last row,
+  which also sees `k0 + G`, so the activity verdict does not show its delivery
+  separately.
+
+### Cases
+
+| Arch | Tier | Dtype | Case | Key loops |
+|---|---|---|---|---|
+| gfx942 | quick | FP16 | `B1,Sq256,Sk256,H8/2,D64`, sliding window 64 | one, causal and window bound |
+| gfx942 | quick | BF16 | `B1,Sq256,Sk256,H8/2,D64`, top-left causal | one, causal bound |
+| gfx942 | standard | FP16 | `B1,Sq256,Sk256,H8/2,D64`, top-left causal | one, causal bound |
+| gfx942 | standard | BF16 | `B1,Sq256,Sk256,H8/2,D64`, sliding window 64 | three: window bound, mask-free (does not run), causal bound |
+
+A causal case is six launches (baseline twice, one per anchor, one control per
+anchor); a window case is eight. `MASKED_POISON_QUICK_SUBJECT_CASES` and
+`MASKED_POISON_STANDARD_SUBJECT_CASES` in `_dense_subject.py` list the
+`(arch, case)` pairs of `test_masked_poison_dense.py` and
+`test_masked_poison_dense_standard.py`; the skip and failure semantics are
+those of the uniform lane.
+
+The CPU contracts in `test_masked_poison_contracts.py` cover all four cases.
+They exercise the analyzer and the lane's controls on an FP32 model of the
+masked online softmax, and on the same model with one mask defect each: a
+future key or an old window key left legal, a tile masked with its neighbour's
+keys, the mask applied after the maximum, on the normalizer only or on the
+values only, and the state before the first legal key left unrescaled. Every
+defect fails the relation with the stored-bit signature its kind predicts. A
+finite sentinel far below the scores gives masked lanes a nonzero weight that
+rounds away and passes; that is why the path check pins the sentinel. The
+contracts also apply the artifact checks to the lowered kernels of every
+compiler lane and to edited copies that each check must reject. The model lives
+only in those contracts.
+
 ## Oracle prohibition
 
 Verdicts may use only deterministic profile construction, independent legal-key
@@ -453,8 +644,8 @@ arithmetic, exact rational rounding, a tolerance derived from the kernel's
 arithmetic path and input statistics, and diagnostic reductions. They must not
 call Torch SDPA, rocKE numeric references, SDPA reference helpers, or a
 pinned-reference bundle. A CPU source contract checks the suite for those
-dependencies. The kernel model in the key-permutation contracts takes part in no
-GPU verdict.
+dependencies. The kernel models in the key-permutation and masked-token
+poisoning contracts take part in no GPU verdict.
 
 The whole suite is Torch-free, and CPU contracts enforce it in two ways:
 
@@ -474,15 +665,20 @@ From the `rocke/library` directory (NumPy and pytest only; Torch is not needed):
 ```bash
 # CPU contracts: rounding, encoding, mutations, policy, vectorized-versus-scalar
 # analyzer agreement, proof scope, adapter ABI, Torch-free and oracle-free
-# source policy; then the key-permutation maps, inputs, bound and analyzer.
+# source policy; then the key-permutation maps, inputs, bound and analyzer; then
+# the masked-token poisoning fixture, limits, analyzer and artifact checks.
 python -m pytest tests/oracle_free/test_contracts.py \
-  tests/oracle_free/test_permutation_contracts.py -vv
+  tests/oracle_free/test_permutation_contracts.py \
+  tests/oracle_free/test_masked_poison_contracts.py -vv
 
-# Uniform-probability and key-permutation production launches on a visible
-# gfx942 device.
+# Uniform-probability, key-permutation and masked-token poisoning production
+# launches on a visible gfx942 device; the last module holds the standard-tier
+# cases.
 HIP_VISIBLE_DEVICES=0 python -m pytest \
   tests/oracle_free/test_analytical_dense.py \
-  tests/oracle_free/test_permutation_dense.py -vv -rs
+  tests/oracle_free/test_permutation_dense.py \
+  tests/oracle_free/test_masked_poison_dense.py \
+  tests/oracle_free/test_masked_poison_dense_standard.py -vv -rs
 ```
 
 From the installed `bin/hip_kernel_provider` directory, the GPU launches and the
@@ -490,5 +686,6 @@ CPU contracts are separate entries:
 
 ```bash
 ctest -R '^rocke_oracle_free_pytest$' --output-on-failure --no-tests=error
+ctest -R '^rocke_oracle_free_masked_poison_standard_pytest$' --output-on-failure --no-tests=error
 ctest -R '^rocke_library_attention_cpu_pytest$' --output-on-failure --no-tests=error
 ```
