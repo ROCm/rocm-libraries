@@ -54,6 +54,14 @@ Properties:
   are confined to this venv.
 - **Inherits system torch.** The venv is created with `--system-site-packages`,
   so the ROCm PyTorch you already have is reused, not reinstalled.
+- **No package index in provider mode.** When rocKE is built as part of the
+  hip-kernel-provider, the build runs `pip` with `--no-deps --no-build-isolation`
+  and never upgrades pip/setuptools, so it works offline. `setuptools>=61` must
+  already be installed for the Python interpreter CMake finds (configure fails
+  with a message otherwise). The wheels are built from temporary copies, so no
+  `build/` or `*.egg-info` is written into the source tree. Set
+  `SOURCE_DATE_EPOCH` to stamp the engine version with a reproducible date;
+  without it the version is just `1.0.0`.
 
 Toggle off with `-DROCKE_BUILD_PYENV=OFF` if you manage the environment yourself.
 
