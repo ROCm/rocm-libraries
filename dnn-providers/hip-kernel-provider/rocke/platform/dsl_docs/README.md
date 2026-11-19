@@ -18,6 +18,10 @@ changes.
 > stack. AUTO queries the loaded COMGR compiler’s LLVM version; select an
 > explicit flavor for offline emission, not from the ROCm release label.
 
+> **Numerics.** How each data type treats NaN, infinity, rounding, saturation
+> and its per-target encoding: [`numerics/README.md`](./numerics/README.md),
+> with a lookup table from every dtype name to its file.
+
 ## Two engines at a glance
 
 rocke has two interchangeable engines (Python authoring + a peer C++ runtime
