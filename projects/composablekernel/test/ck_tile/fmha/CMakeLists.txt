@@ -354,6 +354,7 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
             "p16_d64_causal_sink_vec:CK_TILE_FMHA_PAGE_TILE_TEST_SINK=1"
             "p128_d128_causal_sink_vec:CK_TILE_FMHA_PAGE_TILE_TEST_SINK=1"
             "p128_d128_causal_bias_vec:CK_TILE_FMHA_PAGE_TILE_TEST_BIAS=1"
+            "p16_d128_causal_bias_vec:CK_TILE_FMHA_PAGE_TILE_TEST_BIAS=1"
             "p64_d128_causal_alibi_vec:CK_TILE_FMHA_PAGE_TILE_TEST_BIAS=2"
             "p128_d64_causal_softcap_vec:CK_TILE_FMHA_PAGE_TILE_TEST_SOFTCAP=1"
             "p128_d128_dense_lse_vec:CK_TILE_FMHA_PAGE_TILE_TEST_LSE=1"

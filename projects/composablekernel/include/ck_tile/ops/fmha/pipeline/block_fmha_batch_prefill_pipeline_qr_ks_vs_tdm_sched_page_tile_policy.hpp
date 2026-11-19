@@ -44,6 +44,17 @@ template <typename Problem, typename Geometry>
 inline constexpr bool fmha_page_tile_d128_m128_spills_v =
     Geometry::kHeadDimQK == 128 && Geometry::kM == 128 &&
     !fmha_page_tile_d128_prepared_bases_v<Problem, Geometry>;
+
+// D128 P16 page tiles with an elementwise bias (spilling D128 M128 tiles): grouped drains in groups
+// of two. With groups of four the kept K slices (KeepOperandLive) leave the register allocator too
+// few registers: it split a V operand's live range and refilled spilled slices into the operand
+// registers of WMMAs still in flight (scratch_load and v_mov writers, a WAR the guard does not
+// see). Groups of two keep fewer slices allocated; on gfx1250 that removed every such site and cut
+// the spills from 24-32 to 0-8 VGPR slots (devlog E1 of bp-review-fixes).
+template <typename Problem, typename Geometry>
+inline constexpr bool fmha_page_tile_d128_p16_bias_pair_drains_v =
+    Geometry::kHeadDimQK == 128 && Geometry::kM == 128 && Problem::kPageBlockSize == 16 &&
+    Problem::BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS;
 } // namespace detail
 
 // Policy of the gfx1250 batch-prefill page-tile pipeline: the scheduled-TDM policy and the
@@ -514,7 +525,8 @@ inline constexpr bool
 // stage (D128 P64: 20 instead of 27 full drains per KV tile). With V0 read in the QK tail stage it
 // stays alive across that stage and the softmax, and whole-stage groups spill it (32 VGPRs): the
 // kept operands take the low 256 registers. The D64 M128 tiles read in groups of four. The spilling
-// D128 M128 tiles keep the shared placement (fmha_page_tile_d128_m128_spills_v).
+// D128 M128 tiles keep the shared placement (fmha_page_tile_d128_m128_spills_v), the P16
+// elementwise-bias ones in groups of two (fmha_page_tile_d128_p16_bias_pair_drains_v).
 template <typename Problem, typename Geometry = FmhaBatchPrefillPageTileGeometryFor<Problem>>
 using FmhaBatchPrefillPageTileGroupedDrainFor = std::conditional_t<
     detail::fmha_page_tile_d128_prepared_bases_v<Problem, Geometry>,
@@ -531,9 +543,13 @@ using FmhaBatchPrefillPageTileGroupedDrainFor = std::conditional_t<
             4,
             true,
             FmhaBatchPrefillPageTileQuadD64N128ReadSchedule<Geometry>>,
-        std::conditional_t<detail::fmha_page_tile_d128_m128_spills_v<Problem, Geometry>,
-                           FmhaTdmSchedGroupedDrainPlacement<Geometry>,
-                           FmhaBatchPrefillPageTileGroupedDrainPlacement<Geometry>>>>;
+        std::conditional_t<
+            detail::fmha_page_tile_d128_m128_spills_v<Problem, Geometry>,
+            std::conditional_t<
+                detail::fmha_page_tile_d128_p16_bias_pair_drains_v<Problem, Geometry>,
+                FmhaTdmSchedGroupedDrainPlacement<Geometry, 2, 2>,
+                FmhaTdmSchedGroupedDrainPlacement<Geometry>>,
+            FmhaBatchPrefillPageTileGroupedDrainPlacement<Geometry>>>>;
 
 // Schedule of a page-tile problem: with the WMMA operand guard (the vectorized KV layout) the
 // WMMA-first rows run with grouped drains; otherwise the shared default schedule.
