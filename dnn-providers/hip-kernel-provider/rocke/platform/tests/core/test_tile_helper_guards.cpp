@@ -4,6 +4,7 @@
 #include "rocke/error.hpp"
 #include "rocke/helper_rocke.helpers.io.h"
 #include "rocke/helper_rocke.helpers.loads.h"
+#include "rocke/helper_rocke.helpers.tiling.mma.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -83,11 +84,44 @@ static bool check_empty_fragment()
     return passed;
 }
 
+static bool check_staged_grid(rocke_tile_mma_grid_t grid, size_t count, const char* error)
+{
+    rocke_ir_builder_t b{};
+    if(rocke_ir_builder_init(&b, "staged_grid") != ROCKE_OK)
+        return false;
+    auto* zero = rocke_b_const_i32(&b, 0);
+    rocke_value_t* acc[] = {zero};
+    rocke_value_t* out[] = {nullptr};
+    int reads = 0;
+    const auto read = [](rocke_ir_builder_t* b, int, int, void* user) {
+        ++*static_cast<int*>(user);
+        return rocke_b_const_i32(b, 1);
+    };
+    const auto issue
+        = [](rocke_ir_builder_t*, rocke_value_t*, rocke_value_t*, rocke_value_t* acc, void*) {
+              return acc;
+          };
+    const rocke_tile_mma_readers_t readers{read, read, issue, nullptr, nullptr, nullptr, &reads};
+    const int before = rocke_b_current_region(&b)->num_ops;
+    rocke_tile_mma_accumulate_staged(&b, grid, acc, count, &readers, out);
+    const bool passed = error == nullptr ? rocke_ir_builder_ok(&b) && reads == 2 && out[0] == zero
+                                         : rocke_ir_builder_status(&b) == ROCKE_ERR_VALUE
+                                               && reads == 0 && out[0] == nullptr
+                                               && std::strstr(rocke_ir_builder_error(&b), error)
+                                               && rocke_b_current_region(&b)->num_ops == before;
+    rocke_ir_builder_free(&b);
+    return passed;
+}
+
 int main()
 {
-    return check_empty_fragment() && check_layout() && check_geometry(0, 64, false)
-                   && check_geometry(2, 0, false) && check_geometry(-1, 64, false)
-                   && check_geometry(2, -1, false) && check_geometry(2, 64, true)
+    return check_staged_grid({1, 1, 0}, 1, "positive grid and one accumulator per output atom")
+                   && check_staged_grid(
+                       {2, 1, 1}, 1, "positive grid and one accumulator per output atom")
+                   && check_staged_grid({1, 1, 1}, 1, nullptr) && check_empty_fragment()
+                   && check_layout() && check_geometry(0, 64, false) && check_geometry(2, 0, false)
+                   && check_geometry(-1, 64, false) && check_geometry(2, -1, false)
+                   && check_geometry(2, 64, true)
                ? 0
                : 1;
 }

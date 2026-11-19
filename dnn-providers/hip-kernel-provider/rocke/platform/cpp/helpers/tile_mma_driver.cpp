@@ -103,11 +103,18 @@ void rocke_tile_mma_accumulate_staged(rocke_ir_builder_t* b,
 {
     if(b == nullptr || b->status != ROCKE_OK)
         return;
-    if(!rocke_tile_mma_valid_grid(grid, count) || readers == nullptr || readers->read_a == nullptr
-       || readers->read_b == nullptr || readers->mma == nullptr)
+    if(!rocke_tile_mma_valid_grid(grid, count))
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "staged MMA needs a positive grid and one accumulator per output atom");
+        return;
+    }
+    if(readers == nullptr || readers->read_a == nullptr || readers->read_b == nullptr
+       || readers->mma == nullptr)
     {
         rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "staged MMA needs a valid grid and both operand readers");
+            b, ROCKE_ERR_VALUE, "staged MMA needs both operand readers and an MMA callback");
         return;
     }
     rocke_tile_mma_stage stage{
