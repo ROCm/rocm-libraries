@@ -106,6 +106,10 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
   - Rows recompute lane-derived values from an opaque, masked lane id, so the compiler does not hoist dozens of invariants into live registers.
   - Rows use `s_barrier` without fences, so DMA into the next stage stays in flight. Each stage is its own `__shared__` object, so waits track the right DMA.
   - gfx950 rounds bf16 pairs with the hardware convert, which is bit-identical to the software round for every non-NaN input (checked exhaustively).
+  - Halo tiles keep the compiler's memory waits exact. The halo loader selects its offsets by masks rather than lane-varying branches, and an empty asm with a memory clobber keeps the loads where they are issued. The `xpf` tail loads the cursor's next chunk on every path; past the last chunk the cursor is back at the first chunk, which is in range. A branch on either test splits the loads into paths, and the waits merge to `vmcnt(0)` at every chunk boundary, which also waits for the previous plane's output stores. Measured against the same tree without them (autotuned, engine alone, two interleaved rounds):
+    - MI300A 3x3x3 bf16, large and mid planes: 1.06x forward and 1.07x backward (roofline efficiency 42% -> 45% and 37% -> 40%);
+    - the K2-won corpus graphs: MI325X 1.03x forward and 1.02x backward geomean, gfx950 neutral.
+  - The kernel bodies are always inlined into their entry points: the largest register-path fp32 tiles otherwise compile to a call that spills to scratch.
 
 ## Fusion
 
