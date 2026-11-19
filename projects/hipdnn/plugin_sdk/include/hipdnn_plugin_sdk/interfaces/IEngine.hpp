@@ -59,6 +59,14 @@ public:
      *
      * Typically this is implemented by checking all the engine's plan builders.
      *
+     * Return false to decline a graph; that is the supported way to opt out. A std::exception
+     * thrown from here is skipped with a warning for this engine; any other exception type is not
+     * caught by the SDK and ends this plugin's applicability query. The host skips the plugin in
+     * that case, except for an explicitly pinned engine, where the owning plugin's error is
+     * reported. Accepting a graph means the engine can build a plan for it; an engine that
+     * accepted a graph but fails to build its plan has a bug (the frontend tolerates it by trying
+     * another ranked engine, but that is not a way to decline).
+     *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph to check.
      * @return true if this engine can handle the graph, false otherwise.
@@ -139,7 +147,9 @@ public:
      * @brief Returns the maximum workspace size required for the given graph.
      *
      * This is typically a pass-through to the applicable plan builders, taking
-     * the maximum of all workspaces queried.
+     * the maximum of all workspaces queried. For a config with `global.benchmarking` enabled it
+     * SHOULD cover the workspace of the priming plan compiled from that config: the frontend
+     * sizes its autotune workspace estimate from this query.
      *
      * @param handle The engine plugin handle.
      * @param opGraph The operation graph.
@@ -165,8 +175,9 @@ public:
      * @param opGraph The operation graph.
      * @param engineConfig The engine configuration settings.
      * @param executionContext The execution context to initialize with a plan.
-     * @throws HipdnnPluginException if no applicable plan builder is found or
-     *         if plan creation fails.
+     * @throws HipdnnPluginException if no applicable plan builder is found or if plan creation
+     *         fails. Every failure is reported to the host as a plan failure; NOT_APPLICABLE has no
+     *         special meaning here.
      */
     // NOLINTNEXTLINE(portability-template-virtual-member-function)
     virtual void initializeExecutionContext(

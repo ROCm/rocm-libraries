@@ -190,10 +190,12 @@ static rocke_status_t rocke_h_op_arith_sitofp_f32(rocke_h_lowerer_t* lw, const r
 
 /* def _op_arith_uitofp_f32(self, op):
  *     # u8 -> f32: a uint8_t converts exactly.
+ *     _refuse_non_u8_source(op)
  *     (v,) = op.operands
  *     self._emit(f"float {_name(op.result)} = (float){_name(v)};") */
 static rocke_status_t rocke_h_op_arith_uitofp_f32(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    rocke_i_refuse_non_u8_source(op);
     const rocke_value_t* v = op->operands[0];
     const rocke_value_t* r = h_res(op);
     rocke_h_emitf(lw, "float %s = (float)%s;", rocke_h_name(lw, r), rocke_h_name(lw, v));

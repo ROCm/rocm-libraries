@@ -449,7 +449,33 @@ std::vector<int64_t>
     EnginePluginResourceManager::getApplicableEngineIds(const GraphDescriptor* graphDesc,
                                                         bool findFirst) const
 {
+    return queryApplicableEngineIds(graphDesc, findFirst, std::nullopt);
+}
+
+bool EnginePluginResourceManager::isEngineApplicable(int64_t engineId,
+                                                     const GraphDescriptor* graphDesc) const
+{
+    const auto engineIds = queryApplicableEngineIds(graphDesc, false, engineId);
+    return std::find(engineIds.begin(), engineIds.end(), engineId) != engineIds.end();
+}
+
+std::vector<int64_t> EnginePluginResourceManager::queryApplicableEngineIds(
+    const GraphDescriptor* graphDesc, bool findFirst, std::optional<int64_t> pinnedEngineId) const
+{
     THROW_IF_NULL(graphDesc, HIPDNN_STATUS_INTERNAL_ERROR, "Graph descriptor cannot be null");
+
+    // A pinned engine is answered by its owning plugin alone; an engine no loaded
+    // plugin owns is not applicable.
+    std::optional<hipdnnEnginePluginHandle_t> ownerHandle;
+    if(pinnedEngineId.has_value())
+    {
+        const auto ownerIt = _engineIdToHandle.find(*pinnedEngineId);
+        if(ownerIt == _engineIdToHandle.end())
+        {
+            return {};
+        }
+        ownerHandle = ownerIt->second;
+    }
 
     auto serializedGraphData = graphDesc->getSerializedGraph();
 
@@ -457,22 +483,18 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const bool isRuntimePBV = graphDesc->isRuntimePassByValueEnabled();
-    const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
-    const bool hasNonDefaultTensorAlignment = graphDesc->hasNonDefaultTensorAlignment();
-    const bool isRaggedOffsetMultiplier = graphDesc->hasRaggedOffsetMultiplier();
-
-    const auto& requiredVersion
-        = hipdnn_plugin_sdk::computeMinimumEnginePluginApiVersion(isOverrideShapeEnabled,
-                                                                  isRuntimePBV,
-                                                                  isRaggedTensorEnabled,
-                                                                  hasNonDefaultTensorAlignment,
-                                                                  isRaggedOffsetMultiplier);
+    const auto& requiredVersion = graphDesc->requiredEngineApiVersion(
+        isOverrideShapeEnabled, graphDesc->isRuntimePassByValueEnabled());
 
     std::vector<int64_t> engineIds;
 
     for(const auto& [handle, plugin] : _handleToPlugin)
     {
+        if(ownerHandle.has_value() && handle != *ownerHandle)
+        {
+            continue;
+        }
+
         // Safe to deref: validateBeforeAdding rejected plugins with
         // unparseable versions at load time.
         const auto pluginVersion = *plugin->parsedApiVersion();
@@ -495,7 +517,37 @@ std::vector<int64_t>
             continue;
         }
 
-        const auto ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
+        // A plugin that cannot answer for this graph (it threw, or returned a malformed
+        // list) offers no engines; the remaining plugins must still be consulted. When
+        // the owner of a pinned engine cannot answer, its error is the real reason the
+        // pin fails and propagates unchanged.
+        std::vector<int64_t> ids;
+        if(ownerHandle.has_value())
+        {
+            ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
+        }
+        else
+        {
+            try
+            {
+                ids = plugin->getApplicableEngineIds(handle, &serializedGraphData);
+            }
+            catch(const std::exception& e)
+            {
+                HIPDNN_BACKEND_LOG_WARN(
+                    "Skipping plugin '{}': querying its applicable engines failed: {}",
+                    plugin->cachedName(),
+                    e.what());
+                continue;
+            }
+            catch(...)
+            {
+                HIPDNN_BACKEND_LOG_WARN("Skipping plugin '{}': querying its applicable engines "
+                                        "threw an unknown exception",
+                                        plugin->cachedName());
+                continue;
+            }
+        }
 
         for(const auto& id : ids)
         {
@@ -1128,7 +1180,8 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
                                       /*isRuntimePassByValue=*/false,
                                       /*isRaggedTensorEnabled=*/false,
                                       /*hasNonDefaultTensorAlignment=*/false,
-                                      /*isRaggedOffsetMultiplier=*/false),
+                                      /*isRaggedOffsetMultiplier=*/false,
+                                      /*hasCuSeqLen=*/false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

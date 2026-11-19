@@ -23,6 +23,8 @@
 
 #pragma once
 
+#include <algorithm>
+#include <array>
 #include <cassert>
 #include <cstdint>
 #include <limits>
@@ -46,8 +48,8 @@ class STINKYTOFU_EXPORT ArchHelper {
     struct ArchInfo {
         ArchInfo(std::string name, uint32_t major, uint32_t minor, uint32_t stepping,
                  uint32_t waveFrontSize, uint32_t totalVgprPerSimd = 0,
-                 uint32_t vgprAllocGranule = 0, uint32_t maxVGPR = 0, uint32_t maxSGPR = 0,
-                 uint32_t maxAGPR = 0)
+                 uint32_t vgprAllocGranule = 0, uint32_t maxWavesPerSimd = 0, uint32_t maxVGPR = 0,
+                 uint32_t maxSGPR = 0, uint32_t maxAGPR = 0, uint32_t packedWorkitemId = 0)
             : name(std::move(name)),
               major(major),
               minor(minor),
@@ -55,9 +57,11 @@ class STINKYTOFU_EXPORT ArchHelper {
               waveFrontSize(waveFrontSize),
               totalVgprPerSimd(totalVgprPerSimd),
               vgprAllocGranule(vgprAllocGranule),
+              maxWavesPerSimd(maxWavesPerSimd),
               maxVGPR(maxVGPR),
               maxSGPR(maxSGPR),
-              maxAGPR(maxAGPR) {}
+              maxAGPR(maxAGPR),
+              packedWorkitemId(packedWorkitemId) {}
 
         virtual ~ArchInfo() = default;
 
@@ -86,6 +90,11 @@ class STINKYTOFU_EXPORT ArchHelper {
         const uint32_t totalVgprPerSimd;
         const uint32_t vgprAllocGranule;
 
+        // Waves the hardware will run on one SIMD however few registers a
+        // kernel uses. Registers stop being the limit at this point, so an
+        // occupancy figure without it grows without bound.
+        const uint32_t maxWavesPerSimd;
+
         // Directly addressable registers per class, from DEF_ARCH in
         // <Arch>Formats.def. maxVGPR is the range an operand can name without
         // VGPR-MSB, which is smaller than totalVgprPerSimd: the physical file can
@@ -93,6 +102,12 @@ class STINKYTOFU_EXPORT ArchHelper {
         const uint32_t maxVGPR;
         const uint32_t maxSGPR;
         const uint32_t maxAGPR;
+
+        // Nonzero when the dispatch packs the work-item ID dimensions into v0
+        // (X in bits 0:9, Y in 10:19, Z in 20:29), so one VGPR arrives filled
+        // whatever .amdhsa_system_vgpr_workitem_id says. Zero means the
+        // unpacked convention, one VGPR per enabled dimension from v0 upward.
+        const uint32_t packedWorkitemId;
     };
 
    public:
@@ -138,6 +153,29 @@ inline GfxArchID getGfxArchID(const std::string& name) {
     return ArchHelper::getInstance().getGfxArchID(name);
 }
 
+// Resolve the concrete GfxArchID for a kernel, honoring an optional concrete
+// stepping identity name. Steppings that share an ISA triple (e.g. gfx1250 v1
+// vs gfx1250v0) resolve to the first-registered stepping when keyed on the
+// triple alone; @p archName disambiguates within the same triple. The name is
+// honored only when the named arch's triple matches @p arch, so a build-wide
+// name set for a different arch (e.g. a gfx942;gfx1250v0 build) never retags a
+// kernel of another triple. This is the single definition of the disambiguation
+// used by both lowering paths (rocisa native toStinkyTofuModule and the
+// logical-IR ToStinkyAsmPass), keeping their per-arch cost-table selection in
+// sync.
+inline GfxArchID resolveArchId(const std::array<int, 3>& arch, const std::string& archName) {
+    GfxArchID archId = getGfxArchID(arch[0], arch[1], arch[2]);
+    if (!archName.empty()) {
+        const auto* namedInfo = ArchHelper::getInstance().getArchInfo(archName);
+        if (namedInfo && namedInfo->major == static_cast<uint32_t>(arch[0]) &&
+            namedInfo->minor == static_cast<uint32_t>(arch[1]) &&
+            namedInfo->stepping == static_cast<uint32_t>(arch[2])) {
+            archId = ArchHelper::getInstance().getGfxArchID(archName);
+        }
+    }
+    return archId;
+}
+
 inline uint32_t getWaveFrontSize(GfxArchID archID) {
     const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
     assert(archInfo && "Invalid GfxArchID");
@@ -158,6 +196,21 @@ inline uint32_t getVgprAllocGranule(GfxArchID archID) {
     const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
     assert(archInfo && "Invalid GfxArchID");
     return archInfo->vgprAllocGranule;
+}
+
+inline uint32_t getMaxWavesPerSimd(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    assert(archInfo && "Invalid GfxArchID");
+    return archInfo->maxWavesPerSimd;
+}
+
+// True when the dispatch delivers all work-item ID dimensions in v0, so the
+// enabled-dimension count in the kernel descriptor says nothing about how many
+// VGPRs arrive filled -- the answer is one.
+inline bool hasPackedWorkitemId(GfxArchID archID) {
+    const auto* archInfo = ArchHelper::getInstance().getArchInfo(archID);
+    assert(archInfo && "Invalid GfxArchID");
+    return archInfo->packedWorkitemId != 0;
 }
 
 // Addressable registers per class, from the architecture's DEF_ARCH. Scalars
@@ -186,6 +239,13 @@ inline uint32_t getMaxAGPR(GfxArchID archID) {
 // Returns std::numeric_limits<int>::max() for inputs without enough information
 // to compute occupancy: unknown arch caps, unknown allocation (`kernelVgprs == 0`),
 // or a kernel that asks for more VGPRs than the SIMD physically has.
+//
+// Registers round up to the allocation granule first: the hardware reserves
+// whole granules, so a kernel occupies the SIMD as though it used them all.
+//
+// The result is then capped at the wave limit. A small enough kernel stops
+// being register-bound, and without the cap this reports occupancy the chip
+// cannot reach.
 inline int getWavesPerSimd(GfxArchID archID, int kernelVgprs) {
     assert(kernelVgprs >= 0 && "kernelVgprs must be non-negative");
     const uint32_t total = getTotalVgprPerSimd(archID);
@@ -194,7 +254,12 @@ inline int getWavesPerSimd(GfxArchID archID, int kernelVgprs) {
     if (kernelVgprs <= 0) return std::numeric_limits<int>::max();
     const uint32_t rounded = ((kernelVgprs + granule - 1) / granule) * granule;
     if (rounded > total) return std::numeric_limits<int>::max();
-    return static_cast<int>(total / rounded);
+
+    const uint32_t byRegisters = total / rounded;
+    const uint32_t cap = getMaxWavesPerSimd(archID);
+    // An arch that does not declare a cap keeps the old register-only answer,
+    // rather than silently reporting one wave.
+    return static_cast<int>(cap == 0 ? byRegisters : std::min(byRegisters, cap));
 }
 
 inline std::string getArchName(GfxArchID archID) {

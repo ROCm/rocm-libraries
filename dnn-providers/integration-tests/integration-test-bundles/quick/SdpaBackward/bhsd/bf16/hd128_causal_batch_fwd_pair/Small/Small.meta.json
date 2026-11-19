@@ -1,0 +1,37 @@
+{
+    "format_version": 1,
+    "generator": "generate_sdpa_bwd_golden.py",
+    "generator_version": "1.2.0",
+    "generator_sha256": "87f342429fdac345ffbc1b95d80994bf6a537282ff1253af6b766bd326e7442f",
+    "generated_at": "2026-10-23T16:36:25Z",
+    "reference_source": "PyTorch 2.10.0+rocm7.13.0a20260513",
+    "reference_backend": "pytorch_math_backend",
+    "reference_strategy": "matched_precision",
+    "rocm_version": "7.13.0a20260513",
+    "direction": "forward",
+    "seed": 42,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "intermediate_rounding": "none",
+    "config": {
+        "batch": 1,
+        "num_heads_q": 1,
+        "num_heads_kv": 1,
+        "seq_q": 256,
+        "seq_kv": 256,
+        "head_dim_qk": 128,
+        "head_dim_v": 128,
+        "dtype": "bf16",
+        "layout": "bhsd",
+        "scale": 0.08838834764831843,
+        "left_bound": null,
+        "right_bound": 0,
+        "diagonal_alignment": "bottom_right",
+        "additive_mask": false
+    },
+    "generation_precision": "like-for-like: BF16 inputs, FP32 intermediates",
+    "notes": "Forward half of a single SDPA forward+backward generation run; its O and LSE are the inputs of the paired backward bundle."
+}

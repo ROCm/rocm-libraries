@@ -26,6 +26,7 @@
 #include "rocsparse-complex-types.h"
 #include "rocsparse_common.hpp"
 #include "rocsparse_floating_data_t.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_numeric_boost.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -205,7 +206,8 @@ namespace rocsparse
 
                 if(boost && rocsparse::abs(d_i) <= boost_tol)
                 {
-                    d_i = boost_val;
+                    // |boost_val| with the sign of the pivot, so the inertia of A is kept.
+                    d_i = rocsparse::assign_ilu0_boost_value(d_i, boost_val);
                 }
 
                 // Publish D_i before the done flag below so dependent rows can read it.
@@ -226,7 +228,8 @@ namespace rocsparse
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void csrildlt0_kernel_binsearch(J m,
+    void csrildlt0_kernel_binsearch(J       m,
+                                    int64_t batch_count,
                                     const I* __restrict__ csr_row_ptr,
                                     const J* __restrict__ csr_col_ind,
                                     T*      csr_val,
@@ -271,40 +274,46 @@ namespace rocsparse
 
         ROCSPARSE_SCALAR_HOST_DEVICE_GET_IF(boost, is_boost_val_host_mode, boost_val);
 
-        const auto batch_index = hipBlockIdx_y;
-        rocsparse::csrildlt0_device_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>(
-            m,
-            csr_row_ptr,
-            csr_col_ind,
-            csr_val + batch_index * csr_val_stride,
-            csr_diag_ind,
-            done + batch_index * done_stride,
-            map,
-            zero_pivot + batch_index * zero_pivot_stride,
-            singular_pivot + batch_index * singular_pivot_stride,
-            tolerance,
-            idx_base,
-            boost,
-            b_tol,
-            boost_val);
+        for(int64_t batch_index = hipBlockIdx_y; batch_index < batch_count;
+            batch_index += hipGridDim_y)
+        {
+            rocsparse::csrildlt0_device_binsearch<SLEEP, BLOCKSIZE, WF_SIZE, T, I, J>(
+                m,
+                csr_row_ptr,
+                csr_col_ind,
+                rocsparse::load_pointer(csr_val, batch_index, csr_val_stride),
+                csr_diag_ind,
+                rocsparse::load_pointer(done, batch_index, done_stride),
+                map,
+                rocsparse::load_pointer(zero_pivot, batch_index, zero_pivot_stride),
+                rocsparse::load_pointer(singular_pivot, batch_index, singular_pivot_stride),
+                tolerance,
+                idx_base,
+                boost,
+                b_tol,
+                boost_val);
+        }
     }
 
     template <bool SLEEP, uint32_t BLOCKSIZE, uint32_t WF_SIZE, typename T, typename I, typename J>
     static rocsparse_status
-        csrildlt0_kernel_binsearch_launch(rocsparse_handle         handle,
-                                          rocsparse_csrildlt0_info csrildlt0_info,
-                                          rocsparse_spmat_descr    A,
-                                          void*                    diag,
-                                          size_t                   buffer_size,
-                                          void*                    buffer)
+        csrildlt0_kernel_binsearch_launch(rocsparse_handle                handle,
+                                          rocsparse_csrildlt0_info        csrildlt0_info,
+                                          rocsparse_spmat_descr           A,
+                                          const rocsparse::numeric_boost* boost,
+                                          void*                           diag,
+                                          size_t                          buffer_size,
+                                          void*                           buffer)
     {
         auto trm_info = csrildlt0_info->get(rocsparse_operation_none, rocsparse_fill_mode_lower);
 
         int32_t* done_array = reinterpret_cast<int32_t*>(reinterpret_cast<char*>(buffer) + 256);
         const int64_t done_array_stride = A->rows;
+        // A zero value stride aliases every instance onto the same values.
+        const int64_t A_batch_count = (A->batch_stride == 0) ? 1 : A->batch_count;
 
         const dim3 csrildlt0_blocks((A->rows * handle->wavefront_size - 1) / BLOCKSIZE + 1,
-                                    A->batch_count);
+                                    rocsparse::get_grid_size_y(handle, A_batch_count));
         const dim3 csrildlt0_threads(BLOCKSIZE);
 
         auto numeric_exact = csrildlt0_info->get_singularity_numeric_exact();
@@ -318,7 +327,6 @@ namespace rocsparse
             = reinterpret_cast<const double*>(numeric_near->get_tolerance_pointer());
 
         // Boost parameters
-        auto                     boost              = A->info->get_boost();
         const int                boost_enable       = boost->get_enable();
         const rocsparse_datatype boost_tol_datatype = boost->get_tol_datatype();
         const auto               boost_tol_size = rocsparse::datatype_sizeof(boost_tol_datatype);
@@ -340,6 +348,7 @@ namespace rocsparse
             0,
             handle->stream,
             A->rows,
+            A_batch_count,
             reinterpret_cast<const I*>(A->const_row_data),
             reinterpret_cast<const J*>(A->const_col_data),
             reinterpret_cast<T*>(A->val_data),
@@ -378,9 +387,11 @@ namespace rocsparse
 // clang-format off
 #define INST_ALL_BINSEARCH(WF, T, I, J)                                                          \
     template rocsparse_status csrildlt0_kernel_binsearch_launch<false, 256, WF, T, I, J>(        \
-        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr, void*, size_t, void*); \
+        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr,                        \
+        const rocsparse::numeric_boost*, void*, size_t, void*);                                   \
     template rocsparse_status csrildlt0_kernel_binsearch_launch<true,  256, WF, T, I, J>(        \
-        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr, void*, size_t, void*);
+        rocsparse_handle, rocsparse_csrildlt0_info, rocsparse_spmat_descr,                        \
+        const rocsparse::numeric_boost*, void*, size_t, void*);
 
     // Explicit instantiations
     INST_ALL_BINSEARCH(64, float,                    int32_t, int32_t);

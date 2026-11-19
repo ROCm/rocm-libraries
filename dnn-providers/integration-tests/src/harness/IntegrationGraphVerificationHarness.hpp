@@ -12,7 +12,6 @@
 #include <memory>
 #include <sstream>
 
-#include <hipdnn_data_sdk/utilities/Workspace.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_frontend/Graph.hpp>
@@ -30,8 +29,11 @@
 #include <random>
 #include <vector>
 
+#include "harness/GraphBenchmark.hpp"
 #include "harness/GraphDescription.hpp"
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
+#include "harness/PlanWorkspace.hpp"
 #include "harness/ReferenceGraphExecutorFactory.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
@@ -169,22 +171,23 @@ protected:
 
     virtual void runGraphTest() = 0;
 
-    // Resolve tolerance for an output tensor via ToleranceResolver (max-across-nodes + TOML override).
-    float getTolerance(const hipdnn_frontend::graph::Graph& graph,
-                       const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
+    // Resolve tolerance for an output tensor via ToleranceResolver, with the TOML override.
+    tolerance::Tolerance
+        getTolerance(const hipdnn_frontend::graph::Graph& graph,
+                     const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
     {
         ToleranceMode mode = TestConfig::get().getToleranceMode();
         if(mode != ToleranceMode::DEFAULT)
         {
             ADD_FAILURE() << "getTolerance: unhandled tolerance mode";
-            return 0.0f;
+            return {0.0f, 0.0f};
         }
 
         auto [serialized, serErr] = graph.to_binary();
         if(serErr.code != hipdnn_frontend::ErrorCode::OK || serialized.empty())
         {
             ADD_FAILURE() << "getTolerance: graph serialization failed";
-            return 0.0f;
+            return {0.0f, 0.0f};
         }
 
         const auto wrapper
@@ -193,7 +196,7 @@ protected:
         if(!wrapper.isValid())
         {
             ADD_FAILURE() << "getTolerance: serialized graph failed verification";
-            return 0.0f;
+            return {0.0f, 0.0f};
         }
 
         const auto& tensorMap = wrapper.getTensorMap();
@@ -202,16 +205,13 @@ protected:
         {
             ADD_FAILURE() << "getTolerance: output tensor uid " << output->get_uid()
                           << " not found in serialized graph";
-            return 0.0f;
+            return {0.0f, 0.0f};
         }
 
-        float atol = 0.0f;
-        float rtol = 0.0f;
+        tolerance::Tolerance resolved{0.0f, 0.0f};
         tolerance::resolveTolerance(
-            wrapper, it->second->data_type(), currentTestName(), atol, rtol);
-        // getTolerance's single-float contract predates split atol/rtol; under the
-        // current resolver the two are equal (same default, same override).
-        return atol;
+            wrapper, it->second->data_type(), currentTestName(), resolved.atol, resolved.rtol);
+        return resolved;
     }
 
     // Delegates to the free hipdnn_integration_tests::checkEngineSupportOrSkip(),
@@ -248,24 +248,40 @@ protected:
         auto initResult = initializeBundle(graph, gpuBundle);
         if(!initResult.filled)
         {
-            GTEST_SKIP() << initResult.reason;
+            reportFillFailure(initResult);
+            return;
         }
         initResult = initializeBundle(graph, refBundle);
         if(!initResult.filled)
         {
-            GTEST_SKIP() << initResult.reason;
+            reportFillFailure(initResult);
+            return;
         }
 
         ASSERT_NO_FATAL_FAILURE(executeGpuGraph(getSharedHandle(), graph, gpuBundle));
         ASSERT_NO_FATAL_FAILURE(executeReferenceGraph(graph, refBundle));
 
         ASSERT_NO_FATAL_FAILURE(validateOutputs(gpuBundle, refBundle));
+
+        // Only a verified graph is timed.
+        const auto& benchmark = TestConfig::get().benchmarkSettings();
+        if(benchmark.has_value() && !::testing::Test::HasFailure())
+        {
+            auto variantPack = gpuBundle.toDeviceVariantPack();
+            reportBenchmark(benchmarkGraph(graph, getSharedHandle(), variantPack, *benchmark));
+        }
     }
 
     void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
                            float tolerance)
     {
         registerValidator(attr, tolerance, tolerance);
+    }
+
+    void registerValidator(const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes> attr,
+                           const tolerance::Tolerance& tolerance)
+    {
+        registerValidator(attr, tolerance.atol, tolerance.rtol);
     }
 
     // Registers the comparison for one output tensor. allclose at the resolved
@@ -437,6 +453,17 @@ protected:
         }
     }
 
+    // A recipe that cannot fill its tensor is an error in the test, so it fails. A
+    // graph whose inputs the harness cannot fill skips.
+    static void reportFillFailure(const FillResult& result)
+    {
+        if(result.status == FillResult::Status::INVALID)
+        {
+            FAIL() << "input fill failed: " << result.reason;
+        }
+        GTEST_SKIP() << result.reason;
+    }
+
     FillResult fillGraphInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& fb,
                                hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
@@ -450,8 +477,10 @@ protected:
         }
 
         // No device filler: these tests read the tensors on the host through const
-        // accessors, which cannot migrate device-generated data.
-        auto fillResult = fillInputs(fb, bundle.tensors, leafInputUids, _inputFillRecipes, nullptr);
+        // accessors, which cannot migrate device-generated data. An input derived from a
+        // forward is computed on the CPU reference executor.
+        auto fillResult = fillInputs(
+            fb, bundle.tensors, leafInputUids, _inputFillRecipes, referenceExecutors(), nullptr);
         if(!fillResult.filled)
         {
             return fillResult;
@@ -517,7 +546,7 @@ public:
         }
 
         nlohmann::json meta;
-        meta["format_version"] = 1;
+        meta["format_version"] = requiredFormatVersion(_inputFillRecipes);
         meta["operation"] = suiteName;
         meta["generator"] = "capture-bundles";
         meta["generator_version"] = "1.0.0";
@@ -548,14 +577,12 @@ public:
                          hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        int64_t workspaceSize;
-        auto result = graph.get_workspace_size(workspaceSize);
-        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
-        ASSERT_GE(workspaceSize, 0) << result.err_msg;
-        utilities::Workspace workspace(static_cast<size_t>(workspaceSize));
+        std::string error;
+        auto workspace = allocatePlanWorkspace(graph, error);
+        ASSERT_TRUE(workspace.has_value()) << error;
 
         auto variantPack = bundle.toDeviceVariantPack();
-        result = graph.execute(handle, variantPack, workspace.get());
+        auto result = graph.execute(handle, variantPack, workspace->get());
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
     }
 
@@ -574,10 +601,37 @@ public:
         executor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
+    // The reference executors of these tests, each built on first use: the one TestConfig
+    // names runs the reference graph, and fillInputs() runs the forwards it derives inputs
+    // from on the CPU one. Built from the factory, not taken from the bundle harness's
+    // pool, which the unit-test binary does not link.
+    class ReferenceExecutors : public IReferenceExecutors
+    {
+    public:
+        IReferenceGraphExecutor& get(ReferenceExecutorType type) override
+        {
+            auto& executor = type == ReferenceExecutorType::GPU ? _gpu : _cpu;
+            if(executor == nullptr)
+            {
+                executor = ReferenceGraphExecutorFactory::create(type);
+            }
+            return *executor;
+        }
+
+    private:
+        std::unique_ptr<IReferenceGraphExecutor> _cpu;
+        std::unique_ptr<IReferenceGraphExecutor> _gpu;
+    };
+
+    static ReferenceExecutors& referenceExecutors()
+    {
+        static ReferenceExecutors s_executors;
+        return s_executors;
+    }
+
     static IReferenceGraphExecutor& getReferenceExecutor()
     {
-        static auto executor = ReferenceGraphExecutorFactory::createFromConfig();
-        return *executor;
+        return referenceExecutors().get(TestConfig::get().getReferenceExecutorType());
     }
 
     std::string getOutputTensorName(int64_t tensorId)

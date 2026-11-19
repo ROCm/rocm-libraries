@@ -65,7 +65,7 @@ try:
     import yaml
 except ImportError:
     printExit(
-        "You must install PyYAML to use Tensile (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
+        "You must install PyYAML to use TensileLite (to parse config files). See http://pyyaml.org/wiki/PyYAML for installation instructions."
     )
 
 try:
@@ -438,7 +438,7 @@ def parseSolutionsData(
 
     versionString = data[0]["MinimumRequiredVersion"]
     if not versionIsCompatible(versionString):
-        printWarning("Version = {} in solution file {} does not match Tensile version = {}" \
+        printWarning("Version = {} in solution file {} does not match TensileLite version = {}" \
                 .format(srcFile, versionString, __version__) )
 
     if "ProblemSizes" not in data[1]:
@@ -551,8 +551,7 @@ def parseLibraryLogicFile(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool,
-        archRenames: Optional[Dict[str, str]] = None,
+        lazyLibraryLoading: bool
     ):
     """Wrapper function to read and parse a library logic file."""
     return parseLibraryLogicData(
@@ -563,8 +562,7 @@ def parseLibraryLogicFile(
                printSolutionRejectionReason,
                printIndexAssignmentInfo,
                isaInfoMap,
-               lazyLibraryLoading,
-               archRenames,
+               lazyLibraryLoading
            )
 
 
@@ -681,14 +679,9 @@ def parseLibraryLogicData(
         printSolutionRejectionReason: bool,
         printIndexAssignmentInfo: bool,
         isaInfoMap: Dict[str, IsaInfo],
-        lazyLibraryLoading: bool,
-        archRenames: Optional[Dict[str, str]] = None,
+        lazyLibraryLoading: bool
     ):
-    """Parses the data of a library logic file.
-
-    ``archRenames`` maps a declared ArchitectureName to the name the library is
-    keyed and its files are named by, for a build alias (see ARCH_BUILD_ALIASES).
-    """
+    """Parses the data of a library logic file."""
     # Reset the type mismatch collector at the start to capture all type
     # mismatches from both ProblemType and Solution constructors
     resetTypeMismatchCollector()
@@ -698,14 +691,12 @@ def parseLibraryLogicData(
     elif isinstance(data, dict):
         prepareLibraryLogicDict(data)
 
-    if archRenames:
-        data["ArchitectureName"] = archRenames.get(data["ArchitectureName"], data["ArchitectureName"])
     if "CUCount" not in data:
         data["CUCount"] = None
     normalizeLogicProblemType(data["ProblemType"])
 
     if not versionIsCompatible(data["MinimumRequiredVersion"]):
-        printWarning("Version = {} in library logic file {} does not match Tensile version = {}" \
+        printWarning("Version = {} in library logic file {} does not match TensileLite version = {}" \
                 .format(srcFile, data["MinimumRequiredVersion"], __version__) )
 
     # unpack problemType
@@ -980,7 +971,7 @@ def createLibraryLogic(
     Args:
         schedulePrefix: Schedule name string (e.g. ``"tensilelite"``).
         architectureName: Lowercase GPU architecture tag (e.g. ``"gfx950"``).
-        deviceNames: ROCm / Tensile device name strings for this logic file.
+        deviceNames: ROCm / TensileLite device name strings for this logic file.
         libraryType: Library tuning mode (e.g. ``"GridBased"``, ``"Equality"``).
         logicTuple: ``(problemType, solutions, indexOrder, exactLogic, rangeLogic,
             optional tileSelectionSolutions, optional tileSelectionIndices,

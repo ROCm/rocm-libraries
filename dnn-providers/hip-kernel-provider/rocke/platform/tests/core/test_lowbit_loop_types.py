@@ -169,7 +169,12 @@ class TestLowbitLoopTypes(unittest.TestCase):
                 cases = [
                     (
                         "extra",
-                        [{"name": "%extra", "type": "i8"}] * (num_carries + 1),
+                        # Distinct names: the parsers refuse a loop that names
+                        # two of its values alike before the count is checked.
+                        [
+                            {"name": f"%extra{index}", "type": "i8"}
+                            for index in range(num_carries + 1)
+                        ],
                         f"scf.for declares {num_carries} iter_args but has {num_carries + 1} metadata entries",
                     ),
                     (

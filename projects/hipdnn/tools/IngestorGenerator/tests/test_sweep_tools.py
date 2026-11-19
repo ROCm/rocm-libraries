@@ -201,24 +201,29 @@ raise SystemExit(scenario.get("rc", 0))
 #: Marks a case that drives a sweep far enough to execute a staged fixture. Narrower
 #: than the file: staging a fixture and refusing a config work anywhere, so the
 #: refusal, device-probe and field-audit cases stay live on every platform.
-_needs_posix_exec = pytest.mark.skipif(
-    os.name != "posix",
-    reason=(
-        "driving a sweep to a result needs POSIX execution semantics: sweep.py "
-        "selects the benchmark interpreter from its shebang and runs the benchmark "
-        "directly. sweep.py targets an allocated device host."
-    ),
+def _skip_off_posix(reason: str):
+    """Skip off POSIX, and stay allowed to skip in a strict run: the platform cannot run
+    the case, which no build can fix."""
+
+    def mark(obj):
+        obj = pytest.mark.skipif(os.name != "posix", reason=reason)(obj)
+        return pytest.mark.allow_skip(reason=reason)(obj)
+
+    return mark
+
+
+_needs_posix_exec = _skip_off_posix(
+    "driving a sweep to a result needs POSIX execution semantics: sweep.py "
+    "selects the benchmark interpreter from its shebang and runs the benchmark "
+    "directly. sweep.py targets an allocated device host."
 )
 
 
 #: Marks a case that withdraws write access to drive an operational error. `chmod`
 #: does not deny directory writes on Windows, so the condition never holds there.
-_needs_posix_permissions = pytest.mark.skipif(
-    os.name != "posix",
-    reason=(
-        "making a directory unwritable needs POSIX permission semantics: chmod does "
-        "not withdraw directory write access on Windows"
-    ),
+_needs_posix_permissions = _skip_off_posix(
+    "making a directory unwritable needs POSIX permission semantics: chmod does "
+    "not withdraw directory write access on Windows"
 )
 
 

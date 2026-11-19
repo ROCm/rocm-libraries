@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -189,7 +189,8 @@ namespace rocalution
         /** \brief Set the values of the vector to given argument */
         ROCALUTION_EXPORT
         virtual void SetValues(ValueType val);
-        /** \brief Set the values of the vector to random uniformly distributed values (between -1 and 1) */
+        /** \brief Set the values of the vector to random uniformly distributed values from the
+      * interval [a,b], for integer types (on the host only) the integers from a to b */
         ROCALUTION_EXPORT
         virtual void SetRandomUniform(unsigned long long seed,
                                       ValueType          a = static_cast<ValueType>(-1),
@@ -578,6 +579,10 @@ namespace rocalution
         /**@}*/
 
         /** \brief Compute absolute value sum of vector components
+      * \details
+      * In the case of complex types, this is the sum of the moduli |z| of the components,
+      * returned with a zero imaginary part, and not the sum of |re| + |im| of BLAS scasum.
+      *
       * \par Example
       * \code{.cpp}
       * // rocALUTION structures
@@ -596,6 +601,14 @@ namespace rocalution
         virtual ValueType Asum(void) const;
 
         /** \brief Compute maximum absolute value component of vector
+      * \details
+      * Returns the zero based index of the component with the largest absolute value, and
+      * stores that absolute value in \p value. Ties resolve to the smallest index, and an empty
+      * vector returns -1 with \p value 0. In the case of complex types, the absolute value is
+      * the modulus |z|, and not |re| + |im| as in BLAS icamax, and \p value has a zero
+      * imaginary part. Components with a NaN modulus are skipped. A nonempty complex vector
+      * without a component of positive modulus returns 0 with \p value 0.
+      *
       * \par Example
       * \code{.cpp}
       * // rocALUTION structures
@@ -606,7 +619,8 @@ namespace rocalution
       *
       * y.Ones();
       *
-      * T max = y.Amax();
+      * T       max;
+      * int64_t index = y.Amax(max);
       * \endcode
       */
         ROCALUTION_EXPORT
