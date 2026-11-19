@@ -3124,12 +3124,11 @@ double compute_parallel_reduction_latency(const problem_t& problem,
 
   // Bandwidth based on occupancy of the reduction kernel.  Workspace
   // partials are served at MALL bandwidth (mem2) regardless of the
-  // main-kernel cache_hints_d setting; gfx1250 has no MALL, so they come from DRAM there.
-  const double bw_per_cu      = compute_mem_bw_from_occupancy(hardware, active_wgs);
-  const double partials_ratio = (hardware.is_cdna5() && !hardware.has_MALL())
-                                    ? hardware.mem3_perf_ratio
-                                    : hardware.mem2_perf_ratio;
-  double read_bw              = std::max(partials_ratio * bw_per_cu, 1e-12);
+  // main-kernel cache_hints_d setting; without a MALL they come from DRAM.
+  const double bw_per_cu = compute_mem_bw_from_occupancy(hardware, active_wgs);
+  const double partials_ratio =
+      hardware.has_MALL() ? hardware.mem2_perf_ratio : hardware.mem3_perf_ratio;
+  double read_bw = std::max(partials_ratio * bw_per_cu, 1e-12);
 
   // Total data movement per timestep:
   //   Read:  active_wgs × threads_per_wg × VW × splitting_factor × compute_bytes
