@@ -726,6 +726,77 @@ def test_xpf_option_plans():
                 assert px.spec_dict.get("xpf") == 1, (form, k)
 
 
+# --- buffer range: every kernel addresses < BUFFER_LIMIT bytes per buffer ----------------
+def _cp_pad1(D, H, W, C, K):
+    from kernels.common._conv_implicit_gemm_common import ConvProblem
+
+    return ConvProblem(
+        N=1, Hi=H, Wi=W, C=C, K=K, Y=3, X=3, Di=D, Z=3, sD=1, pD=1, dD=1, pH=1, pW=1
+    )
+
+
+def test_buffer_limit_refuses_large_problems():
+    """A problem whose relayouted input reaches BUFFER_LIMIT bytes takes the direct path:
+    32-bit buffer descriptors would wrap and the kernels return garbage."""
+    from kernels.common import conv_winograd3d_select as sel
+
+    big = _cp_pad1(256, 256, 256, 128, 128)  # X8: 258^3 * 128 * 2 bytes > 2^32
+    for d in ("fwd", "dgrad"):
+        why = sel.winograd3d_ineligible_reason(big, d)
+        assert why and "buffer" in why, why
+        plan = sel.select_winograd3d(big, d)
+        assert plan.kind == "direct" and "buffer" in plan.reason
+        assert sel.winograd3d_candidates(big, d) == []
+    s = cw.WinogradYxSpec(Di=258, Hi=258, Wi=258, C=128, K=128, **ZSPEC)
+    ok, why = cw.is_valid_yx_spec(s)
+    assert not ok and "buffer X" in why
+    with pytest.raises(ValueError, match="buffer"):
+        cw.build_winograd_yx(s)
+    # split-K: the f32 workspace is ksplit times the output
+    s = cw.WinogradYxSpec(Di=130, Hi=258, Wi=258, C=256, K=256, **dict(ZSPEC, ksplit=4))
+    assert "buffer Y" in cw.is_valid_yx_spec(s)[1]
+    assert cw.yx_buffer_bytes(s)["Y"] == 4 * 128 * 256 * 256 * 256 * 4
+    # the auxiliary kernels refuse on their own (direct API / benchmark callers)
+    for build in (
+        lambda: cw.build_pad_copy(256, 256, 256, 128),
+        lambda: cw.build_yx_aux(256, 256, 256, 128, 128, halo=1),
+        lambda: cw.build_x_to_c8_lds(256, 256, 256, 128),
+        lambda: cw.build_x_to_c8(256, 256, 256, 128),
+        lambda: cw.build_x_to_c8_range(256, 256, 256, 128),
+        lambda: cw.build_ks_reduce(256 * 256 * 256 * 128, 4),
+    ):
+        with pytest.raises(ValueError, match="buffer"):
+            build()
+    # the older variants' validators too
+    assert not cw.is_valid_spec(
+        cw.Winograd3dSpec(Di=258, Hi=258, Wi=258, C=128, K=128)
+    )[0]
+
+
+def test_buffer_limit_keeps_the_route_and_table_problems():
+    """Every shipped route problem and decision-table cell stays eligible."""
+    from kernels.common import conv_winograd3d_select as sel
+
+    assert cw.BUFFER_LIMIT == 1 << 31
+    for sid in range(1, 10):
+        for d in ("fwd", "dgrad"):
+            assert sel.winograd3d_ineligible_reason(_cp(sid), d) is None
+            assert sel.winograd3d_ineligible_reason(_cp_adapter(sid), d) is None
+    p = _cp_pad1(128, 128, 128, 128, 128)  # X8 130^3 * 256 bytes, well inside
+    assert sel.winograd3d_ineligible_reason(p, "fwd") is None
+    assert cw.build_pad_copy(128, 64, 64, 64).name.startswith("pad_copy_D128H64W64C64")
+
+
+@pytest.mark.parametrize("C", [4, 12, 0])
+def test_pad_copy_refuses_partial_units(C):
+    """The pad copy moves 16-byte units: C must be a multiple of 8 bf16 channels (C=4
+    would write every voxel one position early, C=12 half a voxel early)."""
+    with pytest.raises(ValueError, match="multiple of 8"):
+        cw.build_pad_copy(4, 4, 4, C)
+    with pytest.raises(ValueError, match="multiple of 8"):
+        cw.pad_copy_grid(4, 4, 4, C)
+
+
 # --- selector: decision tables only, chained output contract, producer geometry ------------
 def test_selector_has_no_analytic_fallback():
     """Problems without a decision table entry get the direct plan (no estimate)."""

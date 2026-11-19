@@ -647,6 +647,19 @@ def winograd3d_ineligible_reason(
         )
     if p.C % 8 or p.K % 32 or (direction == "dgrad" and (p.K % 8 or p.C % 32)):
         return "channels: C % 8 and K % 32 (of the conv the kernel runs)"
+    # 32-bit buffers: the caller's input / output, the relayouted input and the output of
+    # the conv the kernel runs (cw.is_valid_yx_spec also checks each spec's own buffers)
+    from kernels.common import conv_winograd3d as cw
+
+    Di, Hi, Wi, C, K = _winograd_problem(p, direction)
+    why = cw._buffer_error(
+        X=p.Di * p.Hi * p.Wi * p.C * 2,
+        Y=p.Do * p.Ho * p.Wo * p.K * 2,
+        X8=Di * Hi * Wi * C * 2,
+        Yk=(Di - 2) * (Hi - 2) * (Wi - 2) * K * 2,
+    )
+    if why:
+        return why
     return None
 
 

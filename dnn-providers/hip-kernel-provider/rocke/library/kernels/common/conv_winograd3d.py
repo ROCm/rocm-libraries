@@ -35,6 +35,11 @@ The weight transform ``U = s_a * (G (x) G (x) G) g`` is a separate (small) step,
 Accuracy (bf16 transformed operands, f32 transforms and accumulation): peak-normalised
 max error 5-6e-3 on uniform(-1,1) data, against 2-4e-3 for the direct conv (the
 benchmark's bf16 tolerance is 5e-2).
+
+Buffer range: every kernel here addresses its tensors through 32-bit buffer descriptors and
+32-bit offsets, so each buffer it touches must stay below ``BUFFER_LIMIT`` bytes; the
+validators (``is_valid_yx_spec`` / ``is_valid_spec`` / ``is_valid_x_spec``) and the builders
+of the auxiliary kernels refuse larger problems.
 """
 
 from __future__ import annotations
@@ -45,6 +50,30 @@ from typing import Tuple
 from rocke.core.ir import BF16, F32, I32, IRBuilder, KernelDef, PtrType, VectorType
 from rocke.helpers.atoms import MfmaAtom
 from rocke.helpers.spec import SignatureBuilder, kernel_name_join
+
+# Largest buffer (bytes, exclusive) a kernel of this module may address: offsets and
+# buffer-descriptor sizes are 32-bit, and index arithmetic is signed i32.
+BUFFER_LIMIT = 1 << 31
+
+
+def _buffer_error(**buffers) -> str:
+    """'' when every named buffer (bytes) is below BUFFER_LIMIT, else why not."""
+    big = {k: v for k, v in buffers.items() if v >= BUFFER_LIMIT}
+    if not big:
+        return ""
+    k, v = max(big.items(), key=lambda kv: kv[1])
+    return (
+        f"buffer {k} of {v} bytes: the kernels address < {BUFFER_LIMIT} bytes "
+        "(32-bit buffer descriptors and offsets)"
+    )
+
+
+def _check_buffers(kernel: str, **buffers) -> None:
+    """Raise ValueError when a buffer of ``kernel`` reaches BUFFER_LIMIT bytes."""
+    why = _buffer_error(**buffers)
+    if why:
+        raise ValueError(f"{kernel}: {why}")
+
 
 # Winograd F(2,3) matrices.
 BT = ((1, 0, -1, 0), (0, 1, 1, 0), (0, -1, 1, 0), (0, 1, 0, -1))
@@ -182,6 +211,13 @@ def is_valid_spec(spec: Winograd3dSpec) -> Tuple[bool, str]:
         return False, "pipe 'pf' needs layout 'c8'"
     if spec.K % spec.n_tile or spec.C % spec.c_chunk:
         return False, "K / C not multiples of the tile"
+    why = _buffer_error(
+        X=spec.Di * spec.Hi * spec.Wi * spec.C * 2,
+        Y=spec.Do * spec.Ho * spec.Wo * spec.K * 2,
+        U=64 * spec.C * spec.K * 2,
+    )
+    if why:
+        return False, why
     return True, "ok"
 
 
@@ -1261,7 +1297,33 @@ def is_valid_yx_spec(spec: WinogradYxSpec) -> Tuple[bool, str]:
             return False, "lds stage: staged planes exceed 64 KiB"
     if not 0 <= spec.pf_planes <= spec.z_tile + 1:
         return False, "pf_planes out of range"
+    why = _buffer_error(**yx_buffer_bytes(spec))
+    if why:
+        return False, why
     return True, "ok"
+
+
+def yx_buffer_bytes(spec: WinogradYxSpec) -> dict:
+    """Bytes of every buffer a yx call touches: X (the c8 / r8 relayout or the NDHWC
+    input), Y (the NDHWC output, its yc8h c8 form, or the f32 split-K workspace), U (the
+    transformed weights) and, with ``frel``, the NDHWC source Xn."""
+    op = 2  # f16 / bf16 operands
+    x = spec.Di * spec.Hi * spec.Wi * spec.C * 2
+    if spec.xin == "ndhwc":
+        hz, h = _xpad(spec)
+        x = (spec.Di - 2 * hz) * (spec.Hi - 2 * h) * (spec.Wi - 2 * h) * spec.C * 2
+    out = spec.Do * spec.Ho * spec.Wo * spec.K
+    if spec.yc8h:
+        hh = 2 * spec.yc8h_halo
+        y = (spec.Do + hh) * (spec.Ho + hh) * (spec.Wo + hh) * spec.K * 2
+    elif spec.ksplit > 1:
+        y = spec.ksplit * out * 4
+    else:
+        y = out * 2
+    b = {"X": x, "Y": y, "U": 3 * spec.nbp * 4 * spec.C * spec.K * op}
+    if spec.frel:
+        b["Xn"] = x
+    return b
 
 
 def _frel_plan(spec):
@@ -4582,6 +4644,7 @@ def build_x_to_c8(D: int, H: int, W: int, C: int, rows: bool = False) -> KernelD
     """X [D][H][W][C] bf16 -> X8 [C/8][D][H][W][8]. Grid (ceil(V/64), 1, 1), block 256:
     thread (v = lane, q = wave) copies 16 B chunks cb = q, q+4, ... of voxel v."""
     V = D * H * W
+    _check_buffers("x_to_c8", X=V * C * 2)
     b = IRBuilder(f"wino_x_to_c8{'r' if rows else ''}_V{V}C{C}")
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
@@ -4626,6 +4689,7 @@ def build_x_to_c8_range(D: int, H: int, W: int, C: int) -> KernelDef:
     (ceil((V1 - V0) / 64)), block 256: thread (lane, wave q) copies chunks q, q+4, ...
     """
     V = D * H * W
+    _check_buffers("x_to_c8_range", X=V * C * 2)
     b = IRBuilder(f"wino_x_to_c8rng_V{V}C{C}")
     b.kernel.attrs["max_workgroup_size"] = 256
     X = b.param("X", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
@@ -4678,6 +4742,7 @@ def build_x_to_c8_lds(
     E[block] = max of the |x| bf16 bit patterns of the block's voxels (the bps=1 map).
     """
     V = D * H * W
+    _check_buffers("x_to_c8_lds", X=V * C * 2, X8=_relayout_bytes(D, H, W, C, halo))
     b = IRBuilder(
         f"wino_x_to_c8l_V{V}C{C}"
         + (f"_bb{block_bytes}" if block_bytes else "")
@@ -4720,6 +4785,12 @@ def _halo_tag(halo) -> str:
     """Kernel-name tag of a relayout halo: an int as is, a per-axis (hz, hy, hx) tuple as
     its three digits."""
     return "".join(str(v) for v in halo) if isinstance(halo, tuple) else str(halo)
+
+
+def _relayout_bytes(D: int, H: int, W: int, C: int, halo=0) -> int:
+    """Bytes of the c8 relayout of a [D][H][W][C] bf16 tensor with a zero halo."""
+    hz, hy, hx = halo if isinstance(halo, tuple) else (halo,) * 3
+    return (D + 2 * hz) * (H + 2 * hy) * (W + 2 * hx) * C * 2
 
 
 X8_BLOCK_BYTES = 16384  # input bytes per relayout block (LDS-transposed relayout)
@@ -4883,6 +4954,7 @@ def build_pad_copy(
     bounds. ``halo``: an int or a per-axis (hz, hy, hx) tuple. Grid :func:`pad_copy_grid`.
     """
     hz_, hy_, hx_ = halo if isinstance(halo, tuple) else (halo,) * 3
+    _check_pad_copy(D, H, W, C, halo)
     V = D * H * W
     RW = W * C // 8  # 16-byte units per (d, h) row
     n16 = V * C // 8
@@ -4924,7 +4996,20 @@ def build_pad_copy(
     return b.kernel
 
 
+def _check_pad_copy(D, H, W, C, halo=1) -> None:
+    """Raise ValueError for a pad copy the kernel cannot run: it moves 16-byte units (C a
+    multiple of 8 bf16 channels) through 32-bit buffers."""
+    if C % 8 or min(D, H, W, C) <= 0:
+        raise ValueError(
+            f"pad_copy moves 16-byte units: C={C} must be a positive multiple of 8"
+        )
+    _check_buffers(
+        "pad_copy", X=D * H * W * C * 2, Xp=_relayout_bytes(D, H, W, C, halo)
+    )
+
+
 def pad_copy_grid(D, H, W, C, unroll: int = PAD_COPY_UNROLL):
+    _check_pad_copy(D, H, W, C, 0)
     return (-(-(D * H * W * C // 8) // (256 * unroll)), 1, 1)
 
 
@@ -5279,6 +5364,7 @@ def build_yx_aux(
     from rocke.core.ir import F16
 
     odt = F16 if out_dtype == "f16" else BF16
+    _check_buffers("yx_aux", X=D * H * W * C * 2, X8=_relayout_bytes(D, H, W, C, halo))
     nx = x_to_c8_lds_grid(D, H, W, C)[0]
     b = IRBuilder(
         f"wino_yx_aux_V{D * H * W}C{C}K{K}_{out_dtype}{'_fold' if fold else ''}"
@@ -5383,6 +5469,7 @@ def build_yx_frel_aux(spec: WinogradYxSpec) -> KernelDef:
 
 def build_ks_reduce(nel: int, ks: int) -> KernelDef:
     """Split-K reduction: P [ks][nel] f32 -> Y [nel] bf16 (8 elements per thread)."""
+    _check_buffers("ks_reduce", P=ks * nel * 4, Y=nel * 2)
     b = IRBuilder(f"wino_ks_reduce_n{nel}_k{ks}")
     b.kernel.attrs["max_workgroup_size"] = 256
     P = b.param("P", PtrType(F32, "global"), noalias=True, readonly=True, align=16)
@@ -5538,6 +5625,13 @@ def is_valid_x_spec(spec: WinogradXSpec) -> Tuple[bool, str]:
         return False, "too many accumulators per wave"
     if max(2 * _x_buf_words(spec), 2 * 4 * 16 * 64) * 4 > 65536:
         return False, "LDS staging exceeds 64 KiB"
+    why = _buffer_error(
+        X=spec.Di * spec.Hi * spec.Wi * spec.C * 2,
+        Y=spec.Do * spec.Ho * spec.Wo * spec.K * 2,
+        U=36 * spec.C * spec.K * 2,
+    )
+    if why:
+        return False, why
     return True, "ok"
 
 
@@ -5950,6 +6044,8 @@ __all__ = [
     "build_winograd_yx_lds16_fwd",
     "build_winograd_yx_wlds_fwd",
     "is_valid_yx_spec",
+    "yx_buffer_bytes",
+    "BUFFER_LIMIT",
     "winograd_yx_grid",
     "winograd_yx_weight_transform",
     "winograd3d_x_to_c8",
