@@ -1300,8 +1300,83 @@ static void test_wmma_wgrad_empty_problems(void)
           reason);
 }
 
+/* The WMMA wgrad validators' remaining refusals with the Python validators'
+ * texts and inputs (test_direct_wgrad_wmma.py, test_direct_grouped_wgrad_wmma.py,
+ * test_direct_dw_wgrad_wmma.py): a negative PAD, the wave counts, the fp32
+ * dW / partial-slot / replicated-scratch buffers past 32 bits. */
+template <typename Spec, typename Valid>
+static void expect_wgrad_reason(const char* what, const Spec& spec, Valid is_valid, const char* want)
+{
+    char reason[ERR_CAP];
+    reason[0] = '\0';
+    CHECK(!is_valid(&spec, "gfx1250", reason, sizeof(reason)), "%s accepted", what);
+    CHECK(strstr(reason, want) == reason, "%s reason: %s (want %s)", what, reason, want);
+}
+
+static void test_wmma_wgrad_remaining_refusals(void)
+{
+    rocke_direct_wgrad_wmma_spec_t d = rocke_direct_wgrad_wmma_spec_default();
+    d.problem = dense_problem(12, 40, 64, 96);
+    d.problem.PAD = -1;
+    d.tdm = 1;
+    expect_wgrad_reason("dense PAD -1", d, rocke_direct_wgrad_wmma_is_valid_spec, "PAD >= 0 (got -1)");
+    d.problem = dense_problem(13, 40, 64, 96);
+    d.tdm = rocke_direct_wgrad_wmma_spec_default().tdm;
+    d.waves_k = -1;
+    d.waves_c = -2;
+    expect_wgrad_reason(
+        "dense waves -1 x -2", d, rocke_direct_wgrad_wmma_is_valid_spec, "waves_k and waves_c >= 1");
+    d.waves_k = 0;
+    d.waves_c = 4;
+    expect_wgrad_reason(
+        "dense waves_k 0", d, rocke_direct_wgrad_wmma_is_valid_spec, "waves_k and waves_c >= 1");
+    d.waves_k = 4;
+    d.waves_c = 0;
+    expect_wgrad_reason(
+        "dense waves_c 0", d, rocke_direct_wgrad_wmma_is_valid_spec, "waves_k and waves_c >= 1");
+    /* Both rules hit: the dW-size rule comes first, as in Python. */
+    d.problem = dense_problem(13, 40, 8192, 8192);
+    d.waves_k = 0;
+    d.waves_c = 2;
+    expect_wgrad_reason("dense fp32 dW past 32 bits",
+                        d,
+                        rocke_direct_wgrad_wmma_is_valid_spec,
+                        "fp32 dW of 2415919104 B exceeds the 32-bit");
+
+    rocke_grouped_wgrad_wmma_spec_t g = rocke_grouped_wgrad_wmma_spec_default();
+    g.problem = dense_problem(19, 45, 4, 4);
+    g.problem.groups = 16;
+    g.problem.PAD = -1;
+    expect_wgrad_reason(
+        "grouped PAD -1", g, rocke_grouped_wgrad_wmma_is_valid_spec, "PAD >= 0 (got -1)");
+    g.problem = dense_problem(32, 32, 8, 8);
+    g.problem.N = 64;
+    g.problem.groups = 2048;
+    g.rows_per_chunk = 1;
+    g.target_blocks = 1048576;
+    expect_wgrad_reason(
+        "grouped partial slots",
+        g,
+        rocke_grouped_wgrad_wmma_is_valid_spec,
+        "fp32 partial slots of 9663676416 B exceeds the 32-bit buffer size");
+
+    rocke_direct_dw_wgrad_wmma_spec_t dw = rocke_direct_dw_wgrad_wmma_spec_default();
+    dw.problem = dw_problem(7, 7, 0, -1);
+    dw.problem.dtype = "bf16";
+    dw.problem.N = 1;
+    dw.problem.H = 7;
+    dw.problem.W = 7;
+    dw.problem.groups = 342400;
+    expect_wgrad_reason(
+        "depthwise replicated scratch",
+        dw,
+        rocke_direct_dw_wgrad_wmma_is_valid_spec,
+        "fp32 replicated scratch of 4295065600 B exceeds the 32-bit buffer size");
+}
+
 int main(void)
 {
+    test_wmma_wgrad_remaining_refusals();
     test_wmma_wgrad_empty_problems();
     test_problem_dims_refused();
     test_channel_totals_refused();
