@@ -64,11 +64,8 @@ void rocsolver_orm2r_unm2r_getMemorySize(const rocblas_side side,
     *size_diag = sizeof(T) * batch_count;
 
     // extra memory requirements for calling LARF
-    const bool left = (side == rocblas_side_left);
-    rocsolver_larf_getMemorySize_seq<BATCHED, T>(
-        side, k, batch_count,
-        [=](auto i) { return left ? std::pair{m - i, n} : std::pair{m, n - i}; }, size_scalars,
-        size_Abyx, size_workArr);
+    rocsolver_larf_getMemorySize<BATCHED, T>(side, m, n, batch_count, size_scalars, size_Abyx,
+                                             size_workArr);
 }
 
 template <bool COMPLEX, typename T, typename U>

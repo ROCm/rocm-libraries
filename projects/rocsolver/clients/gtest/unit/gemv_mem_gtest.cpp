@@ -25,48 +25,65 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include <algorithm>
 #include <gtest/gtest.h>
+#include <vector>
 
 // Compiled with the internal API enabled (see clients/gtest/CMakeLists.txt) so that the
-// size query is the one rocSOLVER uses.
+// bound is the one rocSOLVER uses.
 #include "rocblas.hpp"
 
-// The larf callers size their workspace by querying each (m, n) their own loop will use
-// (rocsolver_larf_getMemorySize_seq). A blocked routine such as geqrf sizes geqr2 once and
-// then runs it on a smaller trailing matrix, so the actual larf calls can be smaller in one
-// dimension than the shapes that were queried: m for a left larf, whose gemv is transposed,
-// and n for a right larf. That is only safe if the rocBLAS gemv scratch does not decrease
-// as that dimension grows, which these tests check.
+// rocblasCall_gemv_mem_max must be at least the rocBLAS gemv scratch of every smaller
+// shape, since larf callers size their workspace once and then run on smaller matrices.
+// It copies constants from rocBLAS, so this compares it with the rocBLAS query, maximized
+// over all grid points (m', n') <= (m, n). The grid is dense for small sizes and includes
+// the sizes where the rocBLAS kernel selection changes.
+static std::vector<rocblas_int> grid()
+{
+    std::vector<rocblas_int> g;
+    for(rocblas_int v = 1; v <= 1100; ++v)
+        g.push_back(v);
+    for(rocblas_int k = 1; k <= 300; ++k)
+    {
+        g.insert(g.end(), {1024 * k + 1, 2048 * k - 1, 2048 * k, 4096 * k, 4096 * k + 1});
+    }
+    std::sort(g.begin(), g.end());
+    g.erase(std::unique(g.begin(), g.end()), g.end());
+    return g;
+}
+
 template <typename T>
-static void expect_nondecreasing(rocblas_operation transA, bool vary_m, rocblas_int fixed)
+static void expect_bound(rocblas_operation transA)
 {
-    size_t prev = 0;
-    for(rocblas_int k = 1; k <= 300000; ++k)
+    const std::vector<rocblas_int> g = grid();
+    std::vector<size_t> box(g.size(), 0); // max of the query over m' <= m, n' <= g[j]
+    for(rocblas_int m : g)
     {
-        size_t w = 0;
-        rocsolver::rocblasCall_gemv_mem<false, T>(transA, vary_m ? k : fixed, vary_m ? fixed : k, 1,
-                                                  &w);
-        ASSERT_GE(w, prev) << "transA=" << transA << (vary_m ? " n=" : " m=") << fixed
-                           << " decreases at " << (vary_m ? "m=" : "n=") << k;
-        prev = w;
+        size_t row = 0; // max over n' <= g[j] for this m
+        for(size_t j = 0; j < g.size(); ++j)
+        {
+            row = std::max(row, rocblas_internal_gemv_kernel_workspace_size<T>(transA, m, g[j], 1));
+            box[j] = std::max(box[j], row);
+
+            size_t bound;
+            rocsolver::rocblasCall_gemv_mem_max<false, T>(transA, m, g[j], 1, &bound);
+            ASSERT_GE(bound, box[j]) << "transA=" << transA << " m=" << m << " n=" << g[j];
+        }
     }
 }
 
-TEST(checkin_lapack, GEMV_MEM_left_larf_nondecreasing_in_m)
+TEST(checkin_lapack, GEMV_MEM_MAX_transposed)
 {
-    for(rocblas_int n : {1, 8, 127, 128, 300})
-    {
-        expect_nondecreasing<float>(rocblas_operation_transpose, true, n);
-        constexpr rocblas_operation conj_trans = rocblas_operation_conjugate_transpose;
-        expect_nondecreasing<rocblas_double_complex>(conj_trans, true, n);
-    }
+    expect_bound<float>(rocblas_operation_transpose);
+    expect_bound<double>(rocblas_operation_transpose);
+    expect_bound<rocblas_float_complex>(rocblas_operation_conjugate_transpose);
+    expect_bound<rocblas_double_complex>(rocblas_operation_conjugate_transpose);
 }
 
-TEST(checkin_lapack, GEMV_MEM_right_larf_nondecreasing_in_n)
+TEST(checkin_lapack, GEMV_MEM_MAX_not_transposed)
 {
-    for(rocblas_int m : {1, 64, 512, 1024, 4096})
-    {
-        expect_nondecreasing<float>(rocblas_operation_none, false, m);
-        expect_nondecreasing<rocblas_double_complex>(rocblas_operation_none, false, m);
-    }
+    expect_bound<float>(rocblas_operation_none);
+    expect_bound<double>(rocblas_operation_none);
+    expect_bound<rocblas_float_complex>(rocblas_operation_none);
+    expect_bound<rocblas_double_complex>(rocblas_operation_none);
 }
