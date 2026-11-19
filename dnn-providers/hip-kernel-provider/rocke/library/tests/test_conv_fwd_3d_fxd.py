@@ -1,3 +1,5 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Forward x-halo loop with direct-to-LDS staging (``fxh_dma``, tag ``fxd<n>``).
 
 GPU: against the fp32 reference -- x-halo workgroups (Wo 64 / 128: the

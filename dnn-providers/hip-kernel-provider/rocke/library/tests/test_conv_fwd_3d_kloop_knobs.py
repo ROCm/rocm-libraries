@@ -22,6 +22,7 @@ import ctypes
 import importlib.util
 import unittest
 
+import pytest
 from rocke.runtime.hip_module import get_device_arch
 
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
@@ -193,6 +194,7 @@ def _cpp_is_valid(spec, arch: str):
     )
 
 
+@pytest.mark.gpu
 @unittest.skipIf(_SKIP, _SKIP)
 class TestFwd3dKLoopKnobs(unittest.TestCase):
     def _check(self, problem, **kw):

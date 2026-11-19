@@ -1,3 +1,5 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Forward x-halo DMA loop on padded problems (``xh_pad``, tag ``xpd``).
 
 GPU: against the fp32 reference -- the wave-private DMA loop (fxh_dma >= 1000)

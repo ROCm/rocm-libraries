@@ -1,3 +1,5 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Forward x-halo input-row ring over the y taps (``xh_yring``, tag ``xyr<n>``).
 
 GPU: against the fp32 reference -- ring workgroups (Wo 128 with 2 rows per
