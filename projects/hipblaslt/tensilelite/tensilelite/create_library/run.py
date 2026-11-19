@@ -577,6 +577,7 @@ def _setSolutionState(solution, key, value):
 def _compileKey(kernel, splitGSU: bool) -> str:
     """getKernelCompileKey, served from the summary for a CompactSolution."""
     if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
         return kernel.kernelNameMin
     return getKernelCompileKey(kernel, splitGSU)
 
@@ -584,6 +585,7 @@ def _compileKey(kernel, splitGSU: bool) -> str:
 def _symbolName(kernel, splitGSU: bool) -> str:
     """getKernelNameMin, served from the summary for a CompactSolution."""
     if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
         return kernel.kernelNameMin
     return getKernelNameMin(kernel, splitGSU)
 
@@ -591,6 +593,7 @@ def _symbolName(kernel, splitGSU: bool) -> str:
 def _fileBase(splitGSU: bool, kernel) -> str:
     """getKernelFileBase, served from the summary for a CompactSolution."""
     if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
         return kernel.baseName
     return getKernelFileBase(splitGSU, kernel)
 
@@ -598,6 +601,7 @@ def _fileBase(splitGSU: bool, kernel) -> str:
 def _dedupeKey(kernel, splitGSU: bool) -> str:
     """getKeyNoInternalArgs, served from the summary for a CompactSolution."""
     if isinstance(kernel, CompactSolution):
+        kernel.checkSplitGSU(splitGSU)
         return kernel.dedupeKey()
     return getKeyNoInternalArgs(kernel, splitGSU)
 

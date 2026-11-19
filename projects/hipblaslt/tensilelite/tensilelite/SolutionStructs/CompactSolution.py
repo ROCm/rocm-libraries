@@ -78,6 +78,7 @@ class CompactSolution(Mapping):
         "_blob",
         "_summary",
         "_present",
+        "_splitGSU",
         "_overlay",
         "_hydrated",
         "_misses",
@@ -96,6 +97,7 @@ class CompactSolution(Mapping):
         blob,
         summary,
         present,
+        splitGSU,
         nameFull,
         baseName,
         kernelNameMin,
@@ -107,6 +109,7 @@ class CompactSolution(Mapping):
         self._blob = blob
         self._summary = summary
         self._present = present
+        self._splitGSU = splitGSU
         self._overlay = {}
         self._hydrated = None
         self._misses = 0
@@ -125,12 +128,15 @@ class CompactSolution(Mapping):
     ):
         """Compact ``solution``.
 
+        Cached names use ``splitGSU``; later naming requests must use that mode.
+
         ``helperNameCallables`` is ``KernelHelperNaming.kernelObjectNameCallables()``
         (passed in to avoid an import cycle); when given, the helper-kernel
         names each callable derives from the solution are precomputed so the
         parent can deduplicate helper kernels without hydrating.
         """
         if isinstance(solution, CompactSolution):
+            solution.checkSplitGSU(splitGSU)
             return solution
         # Same object the kernel list will hold; getKernels() marks it a kernel.
         kernel = solution.getKernels()[0]
@@ -171,6 +177,7 @@ class CompactSolution(Mapping):
             blob,
             summary,
             present,
+            splitGSU,
             nameFull,
             baseName,
             kernelNameMin,
@@ -247,10 +254,17 @@ class CompactSolution(Mapping):
         return list(self._fallback()._state.keys())
 
     # --------------------------------------------------------- Solution look
+    def checkSplitGSU(self, splitGSU: bool) -> None:
+        """Reject a naming mode that differs from the cached names."""
+        if splitGSU != self._splitGSU:
+            raise ValueError(
+                f"splitGSU={splitGSU} differs from compaction mode {self._splitGSU}"
+            )
+
     def dedupeKey(self) -> str:
         """getKeyNoInternalArgs(self): masked name + codeObjectFile + DeviceNames, with current values."""
         if self._baseDedupeKey is None:
-            return getKeyNoInternalArgs(self.hydrate(), False)
+            return getKeyNoInternalArgs(self.hydrate(), self._splitGSU)
         return (
             self._baseDedupeKey
             + (self.get("codeObjectFile") or "")
@@ -287,6 +301,7 @@ class CompactSolution(Mapping):
             self._blob,
             self._summary,
             self._present,
+            self._splitGSU,
             self._overlay,
             self._nameFull,
             self.baseName,
@@ -302,6 +317,7 @@ class CompactSolution(Mapping):
             self._blob,
             self._summary,
             self._present,
+            self._splitGSU,
             self._overlay,
             self._nameFull,
             self.baseName,

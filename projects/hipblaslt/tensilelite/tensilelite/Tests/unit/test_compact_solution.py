@@ -21,7 +21,7 @@ from tensilelite.SolutionStructs.CompactSolution import (
 )
 from tensilelite.SolutionStructs.Naming import getKernelFileBase, getKeyNoInternalArgs
 from tensilelite.SolutionStructs.Solution import Solution
-from tensilelite.create_library.run import _dedupeKey, _fileBase
+from tensilelite.create_library import run
 
 _LOGIC_YAML = (
     Path(__file__).parent
@@ -91,17 +91,40 @@ def test_names_and_keys_match_the_naming_helpers(parsed):
     kernel = real.getKernels()[0]
     assert str(compact) == str(real)
     assert compact.baseName == getKernelFileBase(False, kernel)
-    assert _fileBase(False, compact) == _fileBase(False, real)
+    assert run._fileBase(False, compact) == run._fileBase(False, real)
     assert compact.dedupeKey() == getKeyNoInternalArgs(kernel, False)
-    assert _dedupeKey(compact, False) == _dedupeKey(real, False)
+    assert run._dedupeKey(compact, False) == run._dedupeKey(real, False)
     # codeObjectFile is assigned by the parent after compaction and is part of the key.
     compact["codeObjectFile"] = "lib_z"
     real._state["codeObjectFile"] = "lib_z"
-    assert _dedupeKey(compact, False) == getKeyNoInternalArgs(kernel, False)
-    assert _dedupeKey(compact, False).endswith(
+    assert run._dedupeKey(compact, False) == getKeyNoInternalArgs(kernel, False)
+    assert run._dedupeKey(compact, False).endswith(
         "lib_z" + str(real._state.get("DeviceNames", ""))
     )
     assert compact.helperNames == [(t, c(real)) for t, c in kernelObjectNameCallables()]
+
+
+@pytest.mark.parametrize("splitGSU", [False, True])
+@pytest.mark.parametrize("gsu", [1, 2])
+def test_cached_names_require_the_compaction_mode(parsed, splitGSU, gsu):
+    real, _ = _realAndCompact(parsed)
+    real = copy.deepcopy(real)
+    real["GlobalSplitU"] = gsu
+    compact = CompactSolution.fromSolution(real, splitGSU)
+    for record in (compact, pickle.loads(pickle.dumps(compact))):
+        assert CompactSolution.fromSolution(record, splitGSU) is record
+        for naming in (run._compileKey, run._symbolName, run._dedupeKey):
+            assert naming(record, splitGSU) == naming(real, splitGSU)
+            with pytest.raises(ValueError, match="splitGSU"):
+                naming(record, not splitGSU)
+        assert run._fileBase(splitGSU, record) == run._fileBase(splitGSU, real)
+        with pytest.raises(ValueError, match="splitGSU"):
+            run._fileBase(not splitGSU, record)
+        with pytest.raises(ValueError, match="splitGSU"):
+            CompactSolution.fromSolution(record, not splitGSU)
+        # An unrecognized key suffix uses the full naming helper with the same mode.
+        record._baseDedupeKey = None
+        assert record.dedupeKey() == getKeyNoInternalArgs(real, splitGSU)
 
 
 def test_hash_and_eq_follow_solution_semantics(parsed):
