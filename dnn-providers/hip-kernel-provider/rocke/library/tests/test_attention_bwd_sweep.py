@@ -27,6 +27,7 @@ from kernels.common.attention_bwd import (
 )
 from kernels.common.attention_bwd_dq import validate_attn_bwd_dq_spec
 
+from ._attention_bwd_stage_sample import sampled_geometry_stage
 from ._attention_bwd_test_utils import fake_bench_ok
 
 REL1 = sw.Release(frozenset({1}))
@@ -86,9 +87,10 @@ def test_candidate_spec_adapter_and_record_roundtrip():
 # --------------------------------------------------------------------------- legality
 def test_legality_is_the_validator_plus_the_emission_check():
     sl = _sl("gfx950", 128)
-    g = sw.geometry_stage(sl, REL1).candidates
+    # default-legal and fallback candidates of the gfx950 d128 stage
+    g = sampled_geometry_stage(sl, REL1, n_default=1, n_fallback=1).candidates
     n = 0
-    for c in g[:6]:
+    for c in g:
         for x in sw._structure_cands(c, sw.Release(sw.ALL_RELEASED))[::5]:
             lg = sw.legality(x)
             try:
@@ -139,8 +141,26 @@ def test_rule_tokens(msg, tok):
 @pytest.mark.parametrize("arch", ["gfx942", "gfx950", "gfx1151", "gfx1201"])
 @pytest.mark.parametrize("d", [64, 128])
 def test_geometry_stage_builds_every_candidate(arch, d):
-    """Every geometry-stage candidate is legal and built (portable paths)."""
-    gs = sw.geometry_stage(_sl(arch, d), REL1)
+    """Every geometry-stage candidate is legal and built (portable paths).
+    On gfx950, whose fallback search checks about 1.4 million structures at
+    d128, a spread sample of the geometries (every geometry: the exhaustive
+    test below)."""
+    if arch == "gfx950":
+        gs = sampled_geometry_stage(_sl(arch, d), REL1, n_default=4, n_fallback=3)
+    else:
+        gs = sw.geometry_stage(_sl(arch, d), REL1)
+    _check_stage_candidates(gs)
+
+
+@pytest.mark.exhaustive
+@pytest.mark.parametrize("d", [64, 128])
+def test_geometry_stage_builds_every_gfx950_candidate(d):
+    """:func:`test_geometry_stage_builds_every_candidate` on every gfx950
+    geometry."""
+    _check_stage_candidates(sw.geometry_stage(_sl("gfx950", d), REL1))
+
+
+def _check_stage_candidates(gs):
     assert len(gs.candidates) > 1
     for c in gs.candidates:
         lg = sw.legality(c)
@@ -318,15 +338,29 @@ def test_tuning_knobs_leave_head_pack_to_the_plan():
 
 def test_fallback_structure_order_is_meaningful_before_the_key():
     """Fewest arch VGPRs, then AGPRs, then the structure nearest the default,
-    then LDS; the key only breaks exact ties."""
+    then LDS; the key only breaks exact ties. Three fallback geometries of
+    each gfx942 primary slice, checked against the full structure set (the
+    exhaustive test below checks every fallback geometry of every slice)."""
+    checked = want = 0
+    for sl in (_sl("gfx942", d) for d in (64, 128)):
+        gs = sampled_geometry_stage(sl, REL1, n_fallback=3)
+        checked += _check_fallbacks(sl, gs)
+        want += gs.fallback
+    assert checked == want >= 1
+
+
+@pytest.mark.exhaustive
+def test_fallback_structure_order_on_every_fallback_geometry():
+    """:func:`test_fallback_structure_order_is_meaningful_before_the_key` on
+    every fallback geometry of the gfx942 and gfx950 primary slices (about
+    15 million structures)."""
     checked = 0
     for sl in (_sl(a, d) for a in ("gfx942", "gfx950") for d in (64, 128)):
-        checked += _check_fallbacks(sl)
+        checked += _check_fallbacks(sl, sw.geometry_stage(sl, REL1))
     assert checked >= 1
 
 
-def _check_fallbacks(sl):
-    gs = sw.geometry_stage(sl, REL1)
+def _check_fallbacks(sl, gs):
     base = sw.default_knobs(sl)
     checked = 0
     for g in gs.candidates:
