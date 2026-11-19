@@ -398,7 +398,9 @@ struct BundleTreeListing
         return parentsOfGraphFiles.count(contentsKey(directory)) != 0;
     }
 
-    // The same test as isSweepBundleRoot(), from the walked entries.
+    // The test of isSweepBundleRoot(), applied to the walked entries. The walk skips a
+    // control file that is a directory symlink cycle or a directory it cannot list, so
+    // such a folder is not a sweep root here, but isSweepBundleRoot() accepts it.
     bool isSweepRoot(const std::filesystem::path& directory) const
     {
         const auto key = contentsKey(directory);
@@ -456,10 +458,10 @@ inline std::vector<std::filesystem::path> sweepRootsIn(const BundleTreeListing& 
 
 } // namespace detail
 
-// A sweep root is any directory with both graph.template.json and sweep.json.
-// It registers one logical test per cases[].id, and normal graph discovery skips
-// every JSON file below it so templates, manifests, and golden metadata do not
-// become direct tests.
+// A sweep root is any directory where the walk finds both graph.template.json and
+// sweep.json, by the rule of BundleTreeListing::isSweepRoot(). It registers one
+// logical test per cases[].id, and normal graph discovery skips every JSON file
+// below it so templates, manifests, and golden metadata do not become direct tests.
 inline std::vector<std::filesystem::path>
     findSweepDirectories(const std::filesystem::path& bundleDir)
 {
