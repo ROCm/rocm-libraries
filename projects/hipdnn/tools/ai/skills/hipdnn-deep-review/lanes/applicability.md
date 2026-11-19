@@ -46,6 +46,13 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
    the device check that would settle it under **Approval requests**. Never lower the tier because
    the kernel cannot be read. Such a finding's verdict stays `UNVERIFIED` until the device check under **Approval requests**
    runs.
+9. **Launch geometry.** For every kernel launch the changed engine issues (each direction and each helper kernel: a second kernel of a
+   backward pass, a conversion, a workspace fill), read the launch code and write the grid and block formulas as functions of the
+   graph's dims. Evaluate them at the smallest legal graph that exceeds each launch limit of *Launch geometry* in the property
+   checklist, and compare with the bound applicability enforces. Each launch needs its own check: a second kernel with a different
+   block size reaches the limit at a different size. The limits come from the device (`hipDeviceProp_t` `maxGridSize`,
+   `maxThreadsDim`, `maxThreadsPerBlock`), not from a constant the engine hardcodes; an engine that hardcodes one names its source.
+   A bound that exists in plan build but not in applicability is `accept-then-fail`; one that is missing is the hazard.
 
 ## Hazard classes
 
@@ -71,6 +78,7 @@ served graph change only the property, assert decline, and assert the unchanged 
 |---|---|---|---|
 | Tensor `data_type` | 1.0 | Every operand, aux and virtual intermediate dtype is in the served set and consistent; node `compute_data_type` supported | One row per unsupported dtype per role |
 | Dims and extents | 1.0 | Rank, cross-tensor relations (`Hq % Hkv`), head-dim tables, divisibility; 32-bit narrowing of dims, strides and products range-checked; backend does not check positivity | Faulting shape; rows at 2^31 and 2^32 |
+| Launch geometry | none | Every launch's grid axes and block size, derived from the graph's dims in width-safe (64-bit) arithmetic, are checked before accept against the device's grid and block limits, and against HIP's total-thread rule: a launch whose blocks times threads per block is `>= 2^32` is rejected at `hipModuleLaunchKernel` even when each axis fits (seen with layernorm, RMSNorm and resample plans that passed `check_support` and `build_plans`). Block size, dynamic LDS and kernarg size stay within the device limits for every accepted shape. A launch value narrowed to 32 bits is range-checked, never truncated | Per launch, the smallest legal graph over each limit: grid axis at limit - 1, limit and limit + 1; element or row count at `2^32 / threads_per_block`; a product of two dims that are each below their limits. Accept then launch failure is `accept-then-fail`; accept then a truncated grid that runs with part of the tensor unwritten is `loose-check` with wrong results. A multi-GB tensor needs host-level proof from the formula; the device run settles it and goes under **Approval requests** |
 | Strides and layout | 1.0 | The kernel's addressing formula: innermost stride, packing, order, 0 strides, pitch, derived strides, output overlap | Stride 0, short row, padded pitch, permuted order |
 | `alignment` | 1.3 if any `!= 16` | Declines every value that is not a multiple of what the kernel needs, including 0 and negatives, on every operand incl. aux | 1, 2, 4, 8, 24 decline; 16, 32, 256 serve |
 | `virtual` | 1.0 | Operands the engine reads or writes are non-virtual; intermediates it does not write are virtual | Flip per role |
