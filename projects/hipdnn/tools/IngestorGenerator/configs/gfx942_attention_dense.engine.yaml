@@ -396,11 +396,12 @@ launch_surface:
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestAttentionDenseGeometry.cpp
 
   # The tile rules and the window translation are restated by hand from the rocKE Python.
-  # The sliding-window zero-trip guard and the empty-row rule are this engine's own policy,
-  # not restated Python (windowLeavesRowsWithoutKeys in AttentionDenseNative.cpp says why).
+  # The empty-row rule (a window that leaves the last query rows no key, for a graph that
+  # binds stats) is this engine's own policy, not restated Python
+  # (windowLeavesRowsWithoutKeys in AttentionDenseNative.cpp says why).
   # The LDS budget is not restated. Matching and dispatch are shared with gfx950
   # (AttentionDenseNative.cpp); Gfx942AttentionDenseNative.cpp binds them to the gfx942
-  # tile, geometry, window, stats (LSE) and launch-grid hooks.
+  # tile, geometry, stats (LSE) and launch-grid hooks, and the servesWindows flag.
   - name: matcher
     python_source: kernels/gfx942/attention_dense.py:supports_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
@@ -409,13 +410,12 @@ launch_surface:
       kernelMatches() returns false (no panic) if dtype, head_size, causal or
       sliding_window disagrees with the graph, the candidate's tile is not one
       isSupportedGfx942AttentionDenseTile() admits, the candidate is ragged,
-      Sq % block_m or Skv % block_n is non-zero, or the window leaves the last
-      query block no key tile (gfx942AttentionDenseWindowReachesKeys()). Head
-      counts, batch and sequence lengths are runtime kernel arguments and are
-      never compared. graph_match maps a causal
-      band of left_bound L to sliding_window L, declines every non-causal band, and
-      declines a window that leaves query rows no key (seqlen_q - seqlen_kv >= W),
-      with or without stats. It binds the stats output when stats_tensor_uid is
+      Sq % block_m or Skv % block_n is non-zero. Head counts, batch and sequence
+      lengths are runtime kernel arguments and are never compared. graph_match maps
+      a causal band of left_bound L to sliding_window L, declines every non-causal
+      band, and declines a window that leaves query rows no key (seqlen_q - seqlen_kv
+      >= W) only for a graph that binds stats. It binds the stats output when
+      stats_tensor_uid is
       set and generate_stats is not false (stats_flag declines the uid with false
       and true without a uid), and declines Max, Sum_exp and the RNG dump
       (stats_rowstats), a stats tensor that is not FLOAT (stats_dtype), and one

@@ -411,15 +411,16 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractRefusesTheEigh
 }
 
 // The matching signature passes: the plan reaches the launch-value check, which a block_m
-// gfx942 does not build, or a window that leaves query rows no key, then refuses. No case
-// reaches the module load, so no device is needed.
+// gfx942 does not build, or a window that leaves query rows no key in a plan with a stats
+// output, then refuses. No case reaches the module load, so no device is needed.
 TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractAcceptsItsOwnSignature)
 {
     auto unbuiltTile = gfx942AttentionDensePayload(/*withHeads=*/true);
     unbuiltTile.launchValues["block_m"] = int64_t{48};
     expectRefusal(unbuiltTile, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
 
-    auto keylessRows = gfx942AttentionDensePayload(/*withHeads=*/true);
+    auto keylessRows
+        = gfx942AttentionDensePayload(/*withHeads=*/true, /*stats=*/7, /*writesLse=*/true);
     keylessRows.launchValues["seqlen_kv"] = int64_t{256};
     keylessRows.launchValues["sliding_window"] = int64_t{256};
     expectRefusal(
