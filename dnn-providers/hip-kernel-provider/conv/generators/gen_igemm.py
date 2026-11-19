@@ -715,8 +715,9 @@ def kernels_for(catalog, direction, tag, priority=1000):
             ]
         # flex 1: the flex tile (ConvIgemmFlex.h, gfx950): 256 flattened output positions x 256,
         # 192 (whole tiles of Wan VAE's 192 and 384 channels) or 128 channels, both operands by
-        # LDS DMA in 64-channel k-steps, eight waves in two ping-pong groups, one-round split-K
-        # by default. Appended after every other config, with its split_policy twins.
+        # LDS DMA in 64-channel k-steps, eight waves in two ping-pong groups, its default split
+        # the auto plan's tail split. Appended after every other config, with its split_policy
+        # twins.
         if catalog is CATALOG and dtype in FLEX_ATOMS:
             cfgs += withSplitPolicy(
                 [
