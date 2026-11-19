@@ -21,6 +21,8 @@ Output row layout (matches CK Tile's reference)::
  yscale[out_row] = dynamic per-row scale
  where i_expert = topk_ids[i_token, i_topk]
 
+An infinite input: see "Dynamic scales" in :mod:`rocke.helpers.quant`.
+
 The kernel launches one CTA per output row; ``block_id_x`` ranges
 over ``[0, topk * tokens)`` and we decode ``(i_topk, i_token)`` from
 the linear index. The expert id is read once per CTA (``tid == 0``

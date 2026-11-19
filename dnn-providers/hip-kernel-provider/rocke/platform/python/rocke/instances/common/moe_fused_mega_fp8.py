@@ -14,6 +14,8 @@ MoE per-expert path with fp8 e4m3 operands and per-128-block f32 scales:
          scale amax / the largest value of the target's fp8 encoding), stage
          into a PERSISTENT LDS Hidden_smem,
          and stash the per-block dynamic scales in an LDS scratch.
+         An infinite Hidden value: see "Dynamic scales" in
+         :mod:`rocke.helpers.quant`.
       -> GEMM2 (down) -- fp8 Hidden . fp8 W_down -> f32 acc, dequant by
          (hidden_dyn_scale * down_scale) -> weighted atomic reduce into Y.
 
@@ -34,7 +36,8 @@ STAGING STATUS (incremental implementation, in stages):
     - the gate+up fp8 GEMM via ``_emit_fp8_gateup_fused_kloop`` (fp8 atom,
       fp8 operand loads, per-128-block scale dequant of BOTH accumulators).
     - SiLU(gate)*up in f32.
-    - ``_emit_hidden_dyn_quant_stage``: per-(row, 128-inter-block) amax ->
+    - the dynamic-quant stage: one amax per 128-inter-block over every row of
+      the M tile ->
       dynamic scale -> quantize the f32 Hidden to fp8 and stage into the
       persistent LDS ``Hidden_smem`` + stash the per-block scales in
       ``HiddenScale_smem``.

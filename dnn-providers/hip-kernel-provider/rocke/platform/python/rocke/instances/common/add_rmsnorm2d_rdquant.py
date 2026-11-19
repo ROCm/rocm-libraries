@@ -16,7 +16,8 @@ quantised RMSNorm output in one pass over global memory::
  yscale[m] = max(amax_y, eps_q) / quant_max
  qy[m, n] = quantise(y[m, n], 1 / yscale[m])
 
-with ``amax_y = inv_rms * max_n(|x * gamma|)``.
+with ``amax_y = inv_rms * max_n(|x * gamma|)``. An infinite input: see
+"Dynamic scales" in :mod:`rocke.helpers.quant`.
 
 Two output paths:
 

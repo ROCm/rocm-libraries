@@ -34,6 +34,24 @@ This module exposes the small set of helpers every quantised op needs:
 * :func:`dequantize_scalar_to_f32` — the dual; auto-dispatches on the
   input value's IR type.
 
+Dynamic scales: a kernel that derives its scale from the data does not bound
+an infinite scaled value (``x * smscale`` in SmoothQuant and MoE-SmoothQuant,
+``x * gamma`` in add + RMSNorm + RDQuant, the f32 Hidden in the fused fp8
+MoE), whatever the clamp does:
+
+* SmoothQuant, MoE-SmoothQuant and the fused fp8 MoE: the ``amax`` is +inf,
+  so the stored scale is +inf and ``1 / scale`` is 0. The inf element becomes
+  ``inf * 0`` = NaN (-127 for i8) and every finite element 0, over the row
+  (the fused MoE: over the 128-column block, for every row of the M tile).
+  Dequantizing with the stored +inf scale gives NaN for all of them.
+* add + RMSNorm + RDQuant: ``1 / rms`` is 0, which multiplies every element
+  of the row, so again the inf element becomes NaN (-127 for i8) and the
+  finite ones 0, as long as ``eps_q / quant_max`` is a normal f32 (a zero or
+  subnormal one makes every element of the row NaN).
+
+``platform/dsl_docs/numerics/`` describes each dtype's NaN and infinity
+handling.
+
 Authoring style mirrors :mod:`rocke.helpers.io`: every helper takes
 the dtype as a *string* alias so call sites read naturally
 (``quantize_scalar_f32(b, v, inv_scale=inv, qdtype="i8", arch=arch)``), with
@@ -182,6 +200,9 @@ def quantize_scalar_f32(
     where ``scale = amax / quant_max``). Pre-computing the reciprocal
     outside the inner loop is the same trick CK Tile uses; it amortises
     one ``v_rcp_f32`` over the whole row.
+
+    A scale the kernel derives from the data does not bound an infinite
+    scaled value (see "Dynamic scales" in the module docstring).
 
     Returns a value whose IR type is the quant dtype (i8 / fp8e4m3 /
     bf8e5m2). Caller stores it via the standard ``global_store``. Raises

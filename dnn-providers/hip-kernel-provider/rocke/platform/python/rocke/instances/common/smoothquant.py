@@ -58,6 +58,8 @@ Implementation notes:
 * ``eps`` (passed as an f32 kernel arg) guards the
  ``yscale = amax / quant_max`` division against pathological rows
  where ``amax == 0``. Matches the CK Tile reference's ``eps`` arg.
+ It does not guard an infinite input: see "Dynamic scales" in
+ :mod:`rocke.helpers.quant`.
 
 Pass-2 vector-store recipe:
 
