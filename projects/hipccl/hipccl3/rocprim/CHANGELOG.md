@@ -4,6 +4,10 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 ## rocPRIM 5.1.0 for ROCm 10.3.0
 
+### Optimizations
+
+* Optimize `warp_reduce` for less than full wavefront size.
+
 ### Changed
 
 * Renamed the CMake option `BUILD_CODE_COVERAGE` to `ROCPRIM_ENABLE_COVERAGE`. The test-only preprocessor define `CODE_COVERAGE` is now `ROCPRIM_ENABLE_COVERAGE`.
