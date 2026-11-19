@@ -33,7 +33,8 @@
 // convolution's).
 //
 // Split-K (a.splits > 1): as the flex tile, split z runs a contiguous range of the steps and
-// writes fp32 partials that ConvIgemmReduce adds in split order.
+// writes fp32 partials that ConvIgemmReduce adds in split order. A launch of the trailing row
+// tiles only (the tail split) indexes its partials from row tile a.partialTile.
 #pragma once
 
 template <class T, class Atom, int DIR, int BN>
@@ -387,7 +388,8 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
             for(int j = 0; j < FN; ++j)
             {
                 const int n = nl + j * DIM;
-                float* o = partial + m * outChans + chanBase + n;
+                float* o = partial + (m - static_cast<long long>(a.partialTile) * BM) * outChans
+                           + chanBase + n;
                 if(vec && n + 3 < ncols)
                     *reinterpret_cast<typename Atom::acc*>(o) = acc[i][j];
                 else

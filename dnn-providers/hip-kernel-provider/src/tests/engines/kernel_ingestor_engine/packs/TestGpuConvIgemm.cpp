@@ -861,6 +861,14 @@ std::vector<FlexCase> flexCases()
     cases.push_back({"Ndhwc3x3x3ConvolutionMode", convolution, true});
     cases.push_back(
         {"Ncdhw3x3x3Staged", dense(32, 40, {6, 7, 5}, {3, 3, 3}, {1, 1, 1}, false), true});
+    // A few row tiles past whole rounds of 228 and of 304 units (MI300A, MI325X): the
+    // register-staged form splits only those (the tail split) on the matching device.
+    for(const int64_t rows : {236, 310})
+    {
+        auto tail = dense(128, 16, {rows, 256}, {3, 3}, {1, 1}, true);
+        tail.n = 1;
+        cases.push_back({"Nhwc3x3TailSplit" + std::to_string(rows) + "RowTiles", tail, false});
+    }
     return cases;
 }
 
@@ -2506,6 +2514,37 @@ TEST(TestConvIgemmSplitPlan, FlexSplitsWithinOneRoundIntoTheFewestStepsPerSplit)
         conv_igemm::splitPlanFor(problem, 256, 256, 64, deviceOf("gfx950", 256), 0, false, 0, true)
             .splits,
         conv_igemm::flexSplits(1, 216, 256));
+}
+
+TEST(TestConvIgemmSplitPlan, FlexTailSplitSplitsTheRowTilesPastTheWholeRounds)
+{
+    // 256 row tiles of 2 tiles, 216 k-steps, 228 units: 228 row tiles fill two rounds and the
+    // other 56 tiles split 4 ways into one more round (2 x 216 + 54 + 14 k-steps).
+    const auto tail = conv_igemm::flexTailSplit(256, 2, 216, 228, true);
+    EXPECT_EQ(tail.splitRowTile, 228);
+    EXPECT_EQ(tail.splits, 4);
+    // With the tail kept in the launch (a fused epilogue), every row tile splits or none does:
+    // 7 rounds of 72 + 14 beat 3 rounds of 216.
+    const auto whole = conv_igemm::flexTailSplit(256, 2, 216, 228, false);
+    EXPECT_EQ(whole.splitRowTile, 0);
+    EXPECT_EQ(whole.splits, 3);
+    // 128 tiles under one round of 228 units, 432 k-steps: 5 splits run 3 rounds of 87 + 14.
+    const auto under = conv_igemm::flexTailSplit(32, 4, 432, 228, true);
+    EXPECT_EQ(under.splitRowTile, 0);
+    EXPECT_EQ(under.splits, 5);
+    // Whole rounds exactly, or a reduction too short to pay a split: unsplit.
+    EXPECT_EQ(conv_igemm::flexTailSplit(228, 2, 216, 228, true).splits, 1);
+    EXPECT_EQ(conv_igemm::flexTailSplit(32, 4, 16, 228, true).splits, 1);
+    // The register-staged plan of a single row tile splits all of it, partials of the whole
+    // output.
+    auto deep = dense(512, 256, {3, 4, 5}, {3, 3, 3}, {1, 1, 1}, true);
+    deep.n = 1;
+    const auto problem = parsedProblem(deep, ConvDirection::FORWARD);
+    const auto plan
+        = conv_igemm::splitPlanFor(problem, 256, 128, 64, deviceOf("gfx942", 228), 0, false, 0, 2);
+    EXPECT_GT(plan.splits, 1);
+    EXPECT_EQ(plan.splitRowTile, 0);
+    EXPECT_EQ(plan.partialElems, plan.outElems);
 }
 
 TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950TilesThatDeclineEveryOtherKnob)

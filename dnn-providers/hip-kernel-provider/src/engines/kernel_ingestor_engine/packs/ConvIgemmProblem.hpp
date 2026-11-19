@@ -232,6 +232,11 @@ struct SplitPlan
     long long outElems = 0;
     size_t partialOffset = 0;
     size_t workspaceBytes = 0; ///< staged operands and partials
+    /// The tail split (register-staged flex tile): the row tiles before this one run unsplit in
+    /// a launch of their own and only the rest split; 0 splits every row tile.
+    long long splitRowTile = 0;
+    /// Elements of one split's partials: the output's past row tile splitRowTile.
+    long long partialElems = 0;
 };
 
 /// The analytic default: split only when the tiles leave the device under-filled, at most 16
@@ -246,8 +251,10 @@ struct SplitPlan
 /// under-filled grid.
 /// @p splitPolicy: 0 uses the analytic default; 1 explicitly disables split-K for the qualified
 /// gfx1250 HALF backward-data configs, independently of patch configs' @p noSplit.
-/// @p flex (flex tiles, one block per CU): split only within one round of the device's units,
-/// into the count whose k-steps per split plus a fixed split cost is least (flexSplits).
+/// @p flex (flex tiles, one block per CU): 1, the LDS-DMA form, splits only within one round
+/// of the device's units, into the count whose k-steps per split plus a fixed split cost is
+/// least (flexSplits); 2, the register-staged form, splits the row tiles past the whole rounds
+/// or all of them, whichever the launch rounds make shortest (flexTailSplit).
 SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t bm,
                        int64_t bn,
@@ -256,12 +263,29 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t pack = 0,
                        bool noSplit = false,
                        int64_t splitPolicy = 0,
-                       bool flex = false);
+                       int64_t flex = 0);
 
 /// The flex tile's split count: the tiles times the splits stay within one block per unit, and
 /// among those counts the one whose k-steps per split plus FLEX_SPLIT_COST is least; 1 when the
 /// tiles already fill the units or no split saves steps.
 long long flexSplits(long long tiles, long long kSteps, long long units);
+
+/// The register-staged flex tile's split: the first row tile that splits (0: all) and the
+/// split count (1: none).
+struct FlexTailSplit
+{
+    long long splitRowTile = 0;
+    long long splits = 1;
+};
+
+/// The register-staged flex tile's split of @p rowTiles row tiles of @p rowWidth tiles each,
+/// @p kSteps k-steps a tile, one block a unit: the row tiles that fill whole rounds of @p units
+/// run unsplit and the rest split S ways, or all of them split S ways, for the plan with the
+/// fewest k-steps along the launch rounds, a split block paying FLEX_SPLIT_COST more. Rounds
+/// are ceil(blocks / units) of the longest block. @p tailAlone false (a fused epilogue, which
+/// the reduce applies over the whole output) leaves only the all-split plans.
+FlexTailSplit flexTailSplit(
+    long long rowTiles, long long rowWidth, long long kSteps, long long units, bool tailAlone);
 
 /// The flex tile's fixed cost of one more split, in its 64-channel k-steps (the partials'
 /// round trip and the reduce launch).
