@@ -1481,7 +1481,7 @@ def identity_supports_problem(
 
 #: Fields of :class:`KernelIdentity` that :func:`identity_supports_problem`
 #: reads (directly, or through ``_grid_fits`` / ``_group_merge_fits`` /
-#: :func:`dgrad_sub_gemms`). ``is_direct`` is a property over ``algorithm``
+#: :func:`dgrad_sub_gemms` / ``fwd_launch_problem_reason``). ``is_direct`` is a property over ``algorithm``
 #: and stands in for it.
 IDENTITY_CAPABILITY_FIELDS = (
     "llvm_flavor",
@@ -1543,6 +1543,11 @@ IDENTITY_CAPABILITY_FIELDS = (
     "tapk_pingpong",
     "epi_quad_xpose",
     "split_k_cluster",
+    "split_zero_first",
+    "split_streamk",
+    "split_hybrid",
+    "xh_fast_a",
+    "xh_dlds",
 )
 
 #: Problem attributes the predicate reads when the identity is a *direct* one.
