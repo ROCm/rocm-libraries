@@ -1670,8 +1670,11 @@ def main() -> int:
             "split-K resolver picks for each kernel, "
             "1 = disabled, "
             ">1 = fixed degree, "
-            "-1 = auto (the resolver dispatch uses, per kernel, resolved "
-            "for the device being timed; the cached atomic forward split, "
+            "-1 = auto (the split-K resolver, per kernel; the benchmark "
+            "resolves it for the CU count of the device being timed, while "
+            "the builders and conv dispatch resolve for the arch's default "
+            "part, so on a part with fewer CUs the two can differ; the "
+            "cached atomic forward split, "
             "split_tail and stream-K / hybrid binaries have no forward cost "
             "model, so for them -1 sweeps as 0 does). "
             "Applies to --run-from-cache too, where the degree is a kernarg "
@@ -2558,11 +2561,11 @@ def _build_wgrad_one(args_tuple):
     )
     from kernels.common.conv_split_k import resolve_conv_split_k
 
-    # The dispatcher's resolver: an auto (-1) degree comes out as dispatch
-    # would launch it on the device being timed (its CU count, as the
-    # --run-from-cache path resolves it), and an explicit one is held inside
-    # gridDim.z. A combo it cannot serve is skipped, like any other invalid
-    # combo.
+    # The dispatcher's resolver, sized for the device being timed (its CU
+    # count, resolved once in the parent and seeded into the build workers,
+    # as the --run-from-cache path resolves it; builders and dispatch use the
+    # arch default). An explicit degree is held inside gridDim.z. A combo it
+    # cannot serve is skipped, like any other invalid combo.
     try:
         resolved_split_k = resolve_conv_split_k(
             "wgrad",
@@ -3035,7 +3038,15 @@ def _worker_pool(max_workers: int):
         ctx = multiprocessing.get_context("forkserver")
     except ValueError:  # platform without forkserver
         ctx = multiprocessing.get_context("spawn")
-    return ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx)
+    # A CU count the parent already resolved is handed to the workers, so no
+    # build worker initialises the HIP runtime just to read it.
+    seed = {}
+    if _DEVICE_NUM_CUS:
+        seed = {
+            "initializer": _seed_device_num_cus,
+            "initargs": (_DEVICE_NUM_CUS[0],),
+        }
+    return ProcessPoolExecutor(max_workers=max_workers, mp_context=ctx, **seed)
 
 
 def _build_ir_parallel(work, worker_fn, jobs: int) -> list:
@@ -3842,6 +3853,9 @@ def _run_wgrad_sweep(
             flush=True,
         )
     work = [(combo, problem, dtype, arch) for combo in combos]
+    # Resolve the device CU count here, once; the build workers are seeded
+    # with it (_worker_pool) instead of each querying the device.
+    _device_num_cus()
     pending = _build_ir_parallel(work, _build_and_compile_wgrad_one, jobs)
     # Re-sort: group by config (all combo dims except split_k), then split_k descending
     # so the descending degree order is preserved for --split-k-prune.
@@ -6757,6 +6771,13 @@ def _device_num_cus():
     return _DEVICE_NUM_CUS[0]
 
 
+def _seed_device_num_cus(num_cus) -> None:
+    """Pool initializer: take the parent's resolved CU count (see
+    :func:`_worker_pool`), so :func:`_device_num_cus` never queries a device
+    in a worker."""
+    _DEVICE_NUM_CUS[:] = [num_cus]
+
+
 def _split_k_degrees(
     problem,
     *,
@@ -6922,17 +6943,19 @@ def _runtime_split_ks(
     ``requested`` is ``--split-k``, with the same meaning it has on the JIT
     sweep: 0 sweeps ``degrees`` (``--split-k-degrees``) plus the resolver's
     pick, -1 launches at the resolver's pick only, and a positive value pins
-    that degree. The resolver resolves for the device being timed
-    (:func:`_device_num_cus`). -1 means "resolver only" for wgrad and the
-    two-stage (WMMA) forward split; where the forward policy does not split
-    the problem it yields no degree, so the plain forward binary alone is
-    timed. The atomic (MFMA) forward split, ``split_tail`` and stream-K /
-    ``split_hybrid`` binaries have no forward cost model, so for them -1 acts
-    as 0: the binary is swept over ``degrees`` plus the wave-filling degrees
-    (or its tail launches / stream-K workgroup counts). The cache records ``split_k=2`` only as a
-    marker that the binary is the split-K one -- the degree itself is a
-    kernarg -- so nothing here is baked in and every mode is reachable at
-    launch.
+    that degree. The benchmark resolves for the device being timed
+    (:func:`_device_num_cus`); builders and conv dispatch resolve for the
+    arch's default part, so on a part of the arch with fewer CUs an auto
+    degree here can differ from the one they build. -1 means "resolver only"
+    for wgrad and the two-stage (WMMA) forward split; where the forward policy
+    does not split the problem it yields no degree, so the plain forward
+    binary alone is timed. The atomic (MFMA) forward split, ``split_tail`` and
+    stream-K / ``split_hybrid`` binaries have no forward cost model, so for
+    them -1 acts as 0: the binary is swept over ``degrees`` plus the
+    wave-filling degrees (or its tail launches / stream-K workgroup counts).
+    The cache records ``split_k=2`` only as a marker that the binary is the
+    split-K one -- the degree itself is a kernarg -- so nothing here is baked
+    in and every mode is reachable at launch.
 
     Degree 1 is not among them: that is the separate non-atomic kernel, a
     different binary, so ``--split-k 1`` yields no degree and the caller skips
