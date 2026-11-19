@@ -89,7 +89,7 @@ pre-commit run -c "$cfg" --from-ref origin/develop --to-ref HEAD
 | Setting | Where |
 |---|---|
 | which files are checked | no paths: every tracked `.py` under rocke (`git ls-files`), no list to maintain; pyright also skips hidden directories and `node_modules` |
-| hook definitions and stages | `rocke/tools/static_analysis/pre-commit-config.yaml` |
+| hook definitions | `rocke/tools/static_analysis/pre-commit-config.yaml` |
 | pyright rules and import roots | `rocke/tools/static_analysis/pyrightconfig.json` |
 | radon report thresholds, vulture confidence | top of `rocke/tools/static_analysis/static_analysis_checks.py` |
 | Suggested tool versions | `rocke/tools/static_analysis/requirements.txt` |

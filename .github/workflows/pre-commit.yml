@@ -114,8 +114,8 @@ jobs:
           fi
 
       # Lint results must not depend on the rocKE wrapper-test step above: it also
-      # runs when any project edits this file or the shared hook config, and a
-      # failure there (a package download, its timeout) fails the job on its own.
+      # runs when any project edits this workflow, and a failure there (a package
+      # download, its timeout) fails the job on its own.
       - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
         if: ${{ !cancelled() && steps.prep.outcome == 'success' }}
         with:
