@@ -466,14 +466,15 @@ public:
                 entry = REDUCE_FOLD_ENTRY_POINT;
             }
             reduceKernel.source.entryPoint = std::string(entry);
-            reduce = buildIngestorKernelCode(_kernelCompiler,
-                                             _kpackLoader,
-                                             context,
-                                             reduceKernel,
-                                             options,
-                                             launch->fold       ? reduceFoldSignature()
-                                             : launch->accurate ? accurateReduceSignature()
-                                                                : reduceSignature());
+            const auto& reduceArgs = [&]() -> const std::vector<KernelArgument>& {
+                if(launch->fold)
+                {
+                    return reduceFoldSignature();
+                }
+                return launch->accurate ? accurateReduceSignature() : reduceSignature();
+            }();
+            reduce = buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, reduceKernel, options, reduceArgs);
             reduce->setBlockSize(launch->reduceBlock, 1, 1);
             reduce->setGridSize(launch->reduceGrid, 1, 1);
         }

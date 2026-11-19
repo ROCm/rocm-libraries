@@ -1234,7 +1234,8 @@ TEST(TestConvIgemmCatalog, EveryPlainNativeConfigHasAFlatReductionTwin)
                                 ? kernel.getStringMetadata(name)
                                 : std::to_string(kernel.getIntMetadata(name)));
             }
-            return tuple;
+            // Split-policy twins have flat twins of their own policy.
+            return tuple + "|" + std::to_string(kernel.getIntMetadata("split_policy"));
         };
         int flat = 0;
         for(const auto& kernel : kernels)
@@ -1508,8 +1509,10 @@ TEST(TestConvIgemmCatalog, DmaConfigsAreSwizzledAndServeOnlyGfx950)
             EXPECT_EQ(kernel.getIntMetadata("swz"), 1);
             EXPECT_GE(kernel.getIntMetadata("dma"), 2);
             EXPECT_LE(kernel.getIntMetadata("dma"), 4);
+            // (Split-policy twins are served only where their plan differs from the default's.)
             if(kernel.getStringMetadata("dtype") != "HALF" || kernel.getIntMetadata("cf") != 0
-               || kernel.getIntMetadata("bk") != 32 || kernel.getIntMetadata("patch") != 0)
+               || kernel.getIntMetadata("bk") != 32 || kernel.getIntMetadata("patch") != 0
+               || kernel.getIntMetadata("split_policy") != 0)
             {
                 continue;
             }
@@ -1686,6 +1689,7 @@ TEST(TestConvIgemmCatalog, ChannelsFirstOutputConfigsServeOnlyChannelsFirstOutpu
                    || kernel.getIntMetadata("wdirect") != 0 || kernel.getIntMetadata("pack") != 0
                    || kernel.getIntMetadata("fuse") != 0 || kernel.getIntMetadata("large") != 0
                    || kernel.getIntMetadata("patch") != 0
+                   || kernel.getIntMetadata("split_policy") != 0
                    || !conv_igemm::blockOrderServes(kernel.getIntMetadata("bm"),
                                                     kernel.getIntMetadata("bn"),
                                                     0,
@@ -2485,7 +2489,7 @@ TEST(TestConvIgemmCatalog, SplittableMatrixCoreConfigsHaveSplitPolicyTwins)
             };
             EXPECT_EQ(twin(1), 1);
             nosplit += 1;
-            if(kernel.getIntMetadata("bm") * kernel.getIntMetadata("bn") >= 256 * 128)
+            if(kernel.getIntMetadata("bm") * kernel.getIntMetadata("bn") >= int64_t{256} * 128)
             {
                 EXPECT_EQ(twin(32), 1);
                 ++wide;

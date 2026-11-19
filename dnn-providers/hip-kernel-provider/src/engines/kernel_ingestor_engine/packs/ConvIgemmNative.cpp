@@ -1068,8 +1068,15 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     const bool wgps = device_units::reportsWorkgroupProcessors(device.gcnArchName);
     const bool gfx1250 = hipdnn_plugin_sdk::stripArchFeatures(device.gcnArchName) == "gfx1250";
     // gfx9: the config's resident blocks a CU where known (residentBlocksOf), at most 2.
-    const long long blocksPerUnit
-        = wgps || gfx1250 ? 1 : (residentBlocks > 0 ? std::min<long long>(residentBlocks, 2) : 2);
+    long long blocksPerUnit = 2;
+    if(wgps || gfx1250)
+    {
+        blocksPerUnit = 1;
+    }
+    else if(residentBlocks > 0)
+    {
+        blocksPerUnit = std::min<long long>(residentBlocks, 2);
+    }
     const long long minIterations = [&]() -> long long {
         if(gfx1250)
         {
