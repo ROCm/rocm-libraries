@@ -6222,8 +6222,7 @@ def _ws_slabs_used(problem, ident, split_k) -> int:
     the binary's replica count ``R`` never writes slabs ``split_k .. R-1``.
     Zeroing and folding just the first ``min(R, split_k)`` slabs gives the
     same dW bit for bit (the skipped slabs only ever add +0.0) and saves
-    ``(R - split_k)`` dW-sized f32 clears and reads -- at split_k 2 and R 8,
-    ~3/4 of a two-stage launch's memory traffic outside Stage 1. Grouped /
+    ``(R - split_k)`` dW-sized f32 clears and reads. Grouped /
     group-merged launches index slabs by group too and keep all ``R``.
     ``ROCKE_WGRAD_WS_ALL_SLABS=1`` restores the full clear and fold.
     """
@@ -6243,6 +6242,77 @@ def _ws_slabs_used(problem, ident, split_k) -> int:
 def _wgrad_s2_rezero() -> bool:
     """ROCKE_WGRAD_S2_REZERO=1: self-clearing two-stage scratch (see _stage2_reduce)."""
     return os.environ.get("ROCKE_WGRAD_S2_REZERO", "0") not in ("", "0")
+
+
+# The canonical Stage 2 of a cached two-stage wgrad launch (what every pin and
+# route of a two-stage wgrad kernel is verified and timed with): a 4-wide
+# vector fold where the dW row length allows, and above STAGE2_FOLD_MIN slabs
+# the looped slab-parallel fold STAGE2_FOLD. The ROCKE_WGRAD_S2_* variables
+# (:data:`STAGE2_ENV`) override it for experiments only;
+# :func:`stage2_env_overrides` lists the ones set, so replay / route checks can
+# refuse them.
+STAGE2_VEC = 4
+STAGE2_FOLD_MIN = 16
+STAGE2_FOLD = {"fold_loop": 4, "slab_par": 4, "tile_m": 1}
+STAGE2_ENV = (
+    "ROCKE_WGRAD_S2_VEC",
+    "ROCKE_WGRAD_S2_REZERO",
+    "ROCKE_WGRAD_S2_FOLD_MIN",
+    "ROCKE_WGRAD_S2_FOLD_U",
+    "ROCKE_WGRAD_S2_FOLD_P",
+    "ROCKE_WGRAD_S2_FOLD_TM",
+    "ROCKE_WGRAD_WS_ALL_SLABS",
+    "ROCKE_PBD_S2_MSPLIT",
+    "ROCKE_PBD_S2_MCH",
+    "ROCKE_PBD_S2_UNROLL",
+    "ROCKE_PBD_S2_WWG",
+    "ROCKE_PBD_S2_LOAD_AUX",
+    "ROCKE_PBD_S2_PIXPRE",
+)
+
+
+def stage2_env_overrides() -> dict:
+    """``{name: value}`` of the Stage-2 override variables set in the environment."""
+    return {k: os.environ[k] for k in STAGE2_ENV if os.environ.get(k, "") != ""}
+
+
+def stage2_policy(
+    problem,
+    ws_replicas: int,
+    *,
+    vec: int = STAGE2_VEC,
+    rezero: bool = False,
+    ws_bf16: bool = False,
+    fold_min: int = STAGE2_FOLD_MIN,
+    fold: "dict | None" = None,
+) -> dict:
+    """``WgradReduceSpec`` fields (beyond problem / dtype / groups / replicas)
+    of the Stage 2 folding ``ws_replicas`` slabs. Pure: the defaults are the
+    canonical Stage 2; :func:`_stage2_reduce` passes the env overrides."""
+    from kernels.common.conv_wgrad_workspace_reduce import _wg_N as _s2_wg_N
+
+    if vec <= 1 or _s2_wg_N(problem) % vec:
+        vec = 1
+    # rezero (opt-in): the fold leaves the scratch zero
+    # (WgradReduceSpec.rezero) and the launcher skips its per-launch clear.
+    rz = 1 if (vec > 1 and rezero) else 0
+    if ws_bf16 and vec <= 1:
+        raise ValueError(
+            "bf16 scratch slabs (ws_store 2) need the vector Stage 2 (wg_N % 4 == 0)"
+        )
+    # Many slabs (ws_store at a large split degree, the deterministic wgrad):
+    # a looped, slab-parallel ordered fold instead of the flat R-load unroll.
+    # Only above fold_min slabs, so binaries folding fewer are unchanged.
+    out = {}
+    if vec > 1:
+        out["vec"] = vec
+    if rz:
+        out["rezero"] = rz
+    if ws_bf16:
+        out["ws_bf16"] = True
+    if vec > 1 and not rz and max(1, problem.groups) == 1 and ws_replicas > fold_min:
+        out.update(STAGE2_FOLD if fold is None else fold)
+    return out
 
 
 def _stage2_reduce(
@@ -6270,45 +6340,38 @@ def _stage2_reduce(
         wgrad_reduce_signature,
     )
 
-    # 4 N elements per thread (16-byte f32 loads, 8-byte bf16 stores) when the
-    # dW row length allows; ROCKE_WGRAD_S2_VEC=1 keeps the scalar fold.
-    vec = int(os.environ.get("ROCKE_WGRAD_S2_VEC", "4") or 4)
-    from kernels.common.conv_wgrad_workspace_reduce import _wg_N as _s2_wg_N
-
-    if vec <= 1 or _s2_wg_N(problem) % vec:
-        vec = 1
-    # ROCKE_WGRAD_S2_REZERO=1 (opt-in): the fold leaves the scratch zero
-    # (WgradReduceSpec.rezero) and the launcher skips its per-launch clear.
-    rz = 1 if (vec > 1 and rezero_ok and _wgrad_s2_rezero()) else 0
-    if ws_bf16 and vec <= 1:
-        raise ValueError(
-            "bf16 scratch slabs (ws_store 2) need the vector Stage 2 (wg_N % 4 == 0)"
-        )
-    # Many slabs (ws_store at a large split degree): a looped,
-    # slab-parallel ordered fold instead of the flat R-load unroll. Only
-    # above ROCKE_WGRAD_S2_FOLD_MIN slabs (default 16; every existing
-    # binary folds <= 8), so existing launches are unchanged.
-    _fold = {}
-    if (
-        vec > 1
-        and not rz
-        and max(1, problem.groups) == 1
-        and ws_replicas > int(os.environ.get("ROCKE_WGRAD_S2_FOLD_MIN", "16") or 16)
-    ):
-        _fold = {
-            "fold_loop": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_U", "4") or 4),
-            "slab_par": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_P", "4") or 4),
-            "tile_m": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_TM", "1") or 1),
-        }
+    # The canonical Stage 2 (stage2_policy), with the ROCKE_WGRAD_S2_*
+    # experiment overrides applied: 4 N elements per thread (16-byte f32
+    # loads, 8-byte bf16 stores) when the dW row length allows
+    # (ROCKE_WGRAD_S2_VEC=1 keeps the scalar fold), the opt-in rezero, and the
+    # looped fold above ROCKE_WGRAD_S2_FOLD_MIN slabs.
+    fields = stage2_policy(
+        problem,
+        ws_replicas,
+        vec=int(os.environ.get("ROCKE_WGRAD_S2_VEC", str(STAGE2_VEC)) or STAGE2_VEC),
+        rezero=rezero_ok and _wgrad_s2_rezero(),
+        ws_bf16=ws_bf16,
+        fold_min=int(
+            os.environ.get("ROCKE_WGRAD_S2_FOLD_MIN", str(STAGE2_FOLD_MIN))
+            or STAGE2_FOLD_MIN
+        ),
+        fold={
+            "fold_loop": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_U", "") or 0)
+            or STAGE2_FOLD["fold_loop"],
+            "slab_par": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_P", "") or 0)
+            or STAGE2_FOLD["slab_par"],
+            "tile_m": int(os.environ.get("ROCKE_WGRAD_S2_FOLD_TM", "") or 0)
+            or STAGE2_FOLD["tile_m"],
+        },
+    )
+    vec, rz = fields.get("vec", 1), fields.get("rezero", 0)
+    _fold = {k: fields[k] for k in STAGE2_FOLD if k in fields}
     spec = WgradReduceSpec(
         problem=problem,
         dtype_d=dtype_d,
         groups=problem.groups,
         ws_replicas=ws_replicas,
-        **({"vec": vec} if vec > 1 else {}),
-        **({"rezero": rz} if rz else {}),
-        **({"ws_bf16": True} if ws_bf16 else {}),
-        **_fold,
+        **fields,
     )
     key = (
         (dtype_d, ws_replicas, vec, rz)

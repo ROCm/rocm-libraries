@@ -15,6 +15,10 @@ gets from dispatch -- then:
 * ``--det-runs N``: N more calls, each into a re-poisoned output, compared bitwise
   with the first; the output's sha256 goes into the result row, so runs on two GPUs
   can be compared (``--against <jsonl>``).
+* The two-stage Stage 2 kernels are the canonical ones
+  (:func:`benchmark_implicit_gemm_conv.stage2_policy`); a run with a
+  ``ROCKE_WGRAD_S2_*`` / ``ROCKE_PBD_S2_*`` override set is refused unless
+  ``--allow-stage2-env``.
 * ``--rounds R``: staged per-call timing (``time_launches_staged``, median of
   ``--iters``) of the whole routed call, R interleaved rounds over the cases. With
   ``--parts`` the route's steps are also timed alone (pad copy, pinned kernel,
@@ -137,6 +141,12 @@ def main(argv=None) -> int:
         help="results jsonl of another run: compare output sha256",
     )
     ap.add_argument("--results", default=None)
+    ap.add_argument(
+        "--allow-stage2-env",
+        action="store_true",
+        help="run although ROCKE_WGRAD_S2_* / ROCKE_PBD_S2_* Stage-2 overrides are set "
+        "(the routes are then checked with a Stage 2 other than the canonical one)",
+    )
     a = ap.parse_args(argv)
 
     import os
@@ -155,6 +165,16 @@ def main(argv=None) -> int:
     from rocke.runtime.hip_module import Runtime
     from rocke.runtime.stall_gate import time_launches_staged
     from pathlib import Path
+
+    s2_env = B.stage2_env_overrides()
+    if s2_env and not a.allow_stage2_env:
+        print(
+            f"error: Stage-2 overrides set {s2_env}: the routes would be checked with a "
+            "Stage 2 other than the one they are pinned with (unset them, or "
+            "--allow-stage2-env)",
+            file=sys.stderr,
+        )
+        return 2
 
     file, _, mode = a.routes.partition("#")
     routes = load_conv_routes(file, mode or None)

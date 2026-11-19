@@ -697,6 +697,15 @@ def main(argv=None) -> int:
         missing = sorted(k for k in need if k not in pins)
         if missing:
             raise SystemExit(f"step mode needs pins for {missing}")
+    s2_env = B.stage2_env_overrides()
+    if s2_env:
+        # The base (and every non-env variant) binds its two-stage Stage 2
+        # under these: not the canonical Stage 2 the pins were made with.
+        print(
+            f"[replay] warning: Stage-2 overrides set for every case: {s2_env}",
+            file=sys.stderr,
+            flush=True,
+        )
     rt = Runtime()
     cache = KernelCache(Path(args.cache), args.arch)
     max_bytes = 0
@@ -936,6 +945,7 @@ def main(argv=None) -> int:
         "cache": args.cache,
         "gpu": gpu,
         "time": time.strftime("%H:%M:%S"),
+        "stage2_env": s2_env,
     }
 
     if "b2b" in modes:
