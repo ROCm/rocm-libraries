@@ -3013,8 +3013,9 @@ void case_ldexp()
 /* grid_dim: the C++ builder's op reads the dispatch packet's grid size for its
  * axis (bytes 12/16/20) and divides by block_size when it is above 1, declares
  * llvm.amdgcn.dispatch.ptr once, reads the same packet words through
- * __builtin_amdgcn_dispatch_ptr in HIP source; it is pure; the builder refuses a bad axis or block_size with the
- * Python engine's texts (tests/core/test_grid_dim.py). */
+ * __builtin_amdgcn_dispatch_ptr in HIP source; it is pure; the builder refuses
+ * a bad axis or block_size with the Python engine's texts
+ * (tests/core/test_grid_dim.py). */
 void build_grid_dim(rocke_ir_builder_t* b)
 {
     rocke_value_t* y = rocke_b_param(b, "Y", rocke_ptr_type(b, rocke_i32(), "global"), nullptr);

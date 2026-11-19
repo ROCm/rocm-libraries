@@ -69,9 +69,10 @@ _DEFAULT_TILE_M = 4
 _DEFAULT_TILE_N = 64  # block_size = tile_m * tile_n = 256
 
 # The widest ``vec`` (an f32 slab load of at most 8 elements) and the deepest
-# ``fold_loop`` a spec may ask for. The C++ twin holds one value per vector lane and per looped slab load in fixed
-# arrays of these sizes (ROCKE_WGRAD_REDUCE_MAX_VEC / _MAX_FOLD_LOOP), so both
-# engines refuse anything past them.
+# ``fold_loop`` a spec may ask for. The C++ twin holds one value per vector
+# lane and per looped slab load in fixed arrays of these sizes
+# (ROCKE_WGRAD_REDUCE_MAX_VEC / _MAX_FOLD_LOOP), so both engines refuse
+# anything past them.
 _MAX_VEC = 8
 _MAX_FOLD_LOOP = 64
 
