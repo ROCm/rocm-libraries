@@ -5,6 +5,8 @@
 // Windows runs exercise the MAX_PATH workaround; other platforms open these
 // paths without conversion.
 
+#include "client_process.hpp"
+
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/Tensile.hpp>
@@ -21,12 +23,6 @@
 #include <system_error>
 #include <utility>
 #include <vector>
-
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
 
 namespace fs = std::filesystem;
 
@@ -98,11 +94,7 @@ namespace
 
         void SetUp() override
         {
-#ifdef _WIN32
-            auto const pid = _getpid();
-#else
-            auto const pid = getpid();
-#endif
+            auto const pid = hipblaslt_clients::processId();
             root = fs::temp_directory_path()
                    / ("hipblaslt-long-path-" + std::to_string(pid) + "-"
                       + ::testing::UnitTest::GetInstance()->current_test_info()->name());

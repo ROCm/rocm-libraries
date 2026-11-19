@@ -3,6 +3,7 @@
 
 #include "client_reporting.hpp"
 #include <gtest/gtest-spi.h>
+#include <string>
 
 namespace
 {

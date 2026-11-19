@@ -5,6 +5,8 @@
 #undef GOOGLE_TEST
 #include "client_reporting.hpp"
 #include <gtest/gtest.h>
+#include <string>
+#include <utility>
 
 namespace
 {

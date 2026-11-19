@@ -1912,12 +1912,7 @@ void testing_matmul(const Arguments& arg)
                                       + " bounds |alpha * D| by " + std::to_string(bound)
                                       + ", which is not below 2^24, so the exact host check "
                                         "does not hold";
-#ifdef GOOGLE_TEST
-                    FAIL() << why;
-#else
-                    hipblaslt_cerr << why << std::endl;
-                    return;
-#endif
+                    HIPBLASLT_FAIL(why);
                 }
             }
         }
@@ -3421,11 +3416,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && integer_exact_mx_element_type(TiA)))
             {
-                HIPBLASLT_SKIP(
-                    "Initialization of microscaling data only allows hpl, trig_float, "
-                    "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
-                    "or integer_exact with fp8 or fp6 elements, not "
-                    << hipblaslt_initialization2string(arg.initialization));
+                HIPBLASLT_SKIP("Initialization of microscaling data only allows hpl, trig_float, "
+                               "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                               "or integer_exact with fp8 or fp6 elements, not "
+                               << hipblaslt_initialization2string(arg.initialization));
             }
             if(arg.algo_method == 1)
             {
@@ -3518,11 +3512,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && integer_exact_mx_element_type(TiB)))
             {
-                HIPBLASLT_SKIP(
-                    "Initialization of microscaling data only allows hpl, trig_float, "
-                    "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
-                    "or integer_exact with fp8 or fp6 elements, not "
-                    << hipblaslt_initialization2string(arg.initialization));
+                HIPBLASLT_SKIP("Initialization of microscaling data only allows hpl, trig_float, "
+                               "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                               "or integer_exact with fp8 or fp6 elements, not "
+                               << hipblaslt_initialization2string(arg.initialization));
             }
             if(arg.algo_method == 1)
             {

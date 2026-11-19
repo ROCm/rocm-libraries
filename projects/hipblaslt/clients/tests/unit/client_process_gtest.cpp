@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "client_process.hpp"
+#include <cstdlib>
 #include <gtest/gtest.h>
 #include <optional>
 #include <string>
