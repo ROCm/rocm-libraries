@@ -11561,7 +11561,7 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceAllPlansFailReturnsAggregatedError)
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false, false}));
 }
 
-TEST_F(TestGraph, BuildPlansHeuristicsChoiceRepeatedCallOnFinalizedPlanReturnsItsError)
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceRepeatedCallOnFinalizedPlanReturnsOk)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
@@ -11569,15 +11569,13 @@ TEST_F(TestGraph, BuildPlansHeuristicsChoiceRepeatedCallOnFinalizedPlanReturnsIt
     graph.injectValidCompiledPlan(/*engineId=*/20, /*workspaceSize=*/-1, /*barred=*/false);
     graph.setActivePlanFinalizedForTest(0);
 
-    // The backend refuses to finalize the already finalized plan again. That is not an engine
-    // failure: the error is returned and no other plan is activated.
-    mockPlanFinalize(10, HIPDNN_STATUS_BAD_PARAM, Exactly(1), "already finalized");
+    // The plan is built: the call succeeds without finalizing it again and no other plan is
+    // activated.
+    mockPlanFinalize(10, HIPDNN_STATUS_BAD_PARAM, Exactly(0), "already finalized");
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
     auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
-    ASSERT_TRUE(result.is_bad());
-    EXPECT_NE(result.err_msg.find("already finalized"), std::string::npos) << result.err_msg;
-    EXPECT_NE(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
 
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
@@ -12392,26 +12390,37 @@ TEST_F(TestGraph, BuildPlanAtIndexSafetyNetRejectsPlanFinalizedOverLimit)
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
 }
 
-TEST_F(TestGraph, BuildPlansHeuristicsChoiceAfterBuildDoesNotWalkPastNewFilterOnActivePlan)
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceAfterBuildReturnsOkAndIgnoresNewFilterOnActivePlan)
 {
     ::testing::FLAGS_gmock_verbose = "error";
     hipdnn_frontend::GraphTestUtils graph;
     prepareBuiltGraph(graph);
     graph.deselect_engines(std::vector<int64_t>{10});
 
-    // The backend refuses to finalize the built plan again; that error is returned, no filter
-    // is evaluated and no other plan is tried.
-    mockPlanFinalize(10, HIPDNN_STATUS_BAD_PARAM, Exactly(1), "already finalized", 16);
+    // A repeated call succeeds without finalizing again, evaluating a filter or trying
+    // another plan.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
     mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
 
     auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
-    ASSERT_TRUE(result.is_bad());
-    EXPECT_NE(result.err_msg.find("already finalized"), std::string::npos) << result.err_msg;
-    EXPECT_NE(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
     EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_TRUE(graph.isExecutionPlanFinalized());
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
     expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, BuildPlansHeuristicsChoiceOnDeserializedPlanReturnsOk)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.installDeserializedPlanForTest();
+
+    // The deserialized plan was finalized at load and has no engine config; a build call
+    // succeeds and leaves it active.
+    auto result = graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_NE(graph.getActiveExecutionPlanPtr(), nullptr);
 }
 
 TEST_F(TestGraph, CheckSupportAfterBuildMarksNothingAndKeepsActivePlanExecutable)
@@ -12427,10 +12436,146 @@ TEST_F(TestGraph, CheckSupportAfterBuildMarksNothingAndKeepsActivePlanExecutable
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
     expectActivePlanExecutable(graph, 16);
 
+    // The second call replaces the first, so engine 10 is eligible again.
     graph.deselect_engines(std::vector<int64_t>{20});
+    EXPECT_TRUE(graph.check_support().is_good());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    expectActivePlanExecutable(graph, 16);
+
+    graph.deselect_engines(std::vector<int64_t>{10, 20});
     auto result = graph.check_support();
     ASSERT_TRUE(result.is_bad());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, DeselectEnginesNameThenIdBarsOnlyTheIdEngine)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(10)});
+    graph.deselect_engines(std::vector<int64_t>{20});
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+}
+
+TEST_F(TestGraph, DeselectEnginesIdThenNameBarsOnlyTheNamedEngine)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    graph.deselect_engines(std::vector<int64_t>{10});
+    graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(20)});
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, true}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+}
+
+TEST_F(TestGraph, DeselectEnginesEmptyNameListClearsTheFilterBeforeAnyEvaluation)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
+
+    graph.deselect_engines({hipdnn_data_sdk::utilities::formatEngineIdHex(10)});
+    graph.deselect_engines(std::vector<std::string>{});
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+}
+
+TEST_F(TestGraph, DeselectEnginesEmptyListClearsTheFilterBeforeAnyEvaluation)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
+
+    graph.deselect_engines(std::vector<int64_t>{10});
+    graph.deselect_engines(std::vector<int64_t>{});
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+}
+
+TEST_F(TestGraph, DeselectEnginesEmptyListDoesNotReadmitAPlanAnEvaluationBarred)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0));
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
+
+    graph.deselect_engines(std::vector<int64_t>{10});
+    ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::ALL).is_good());
+    ASSERT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+
+    // The mark is sticky: clearing the filter does not re-admit the plan.
+    graph.deselect_engines(std::vector<int64_t>{});
+    EXPECT_TRUE(graph.build_plans(BuildPlanPolicy::ALL).is_good());
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{true, false}));
+    EXPECT_EQ(graph.getActivePlanIndex(), 1u);
+}
+
+TEST_F(TestGraph, BuildPlansAllAfterHeuristicsChoiceBuildsOnlyTheOtherPlans)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0));
+
+    ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+    ASSERT_EQ(graph.getActivePlanIndex(), 0u);
+
+    // Plan 0 is not finalized again; plan 1 is, and does not become active.
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
+    EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
+    expectActivePlanExecutable(graph, 16);
+}
+
+TEST_F(TestGraph, BuildPlansAllAfterAllFinalizesNoPlanAgain)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareFilterGraph(graph, {10, 20});
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(1), "", 8);
+
+    ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::ALL).is_good());
+    ASSERT_EQ(graph.getActivePlanIndex(), 0u);
+
+    mockPlanFinalize(10, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 16);
+    mockPlanFinalize(20, HIPDNN_STATUS_SUCCESS, Exactly(0), "", 8);
+
+    auto result = graph.build_plans(BuildPlanPolicy::ALL);
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.getActivePlanIndex(), 0u);
     EXPECT_EQ(graph.getCompiledPlanBarredFlags(), (std::vector<bool>{false, false}));
     expectActivePlanExecutable(graph, 16);
 }

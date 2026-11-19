@@ -447,12 +447,13 @@ Each row is a separate plan spec. All share the fixed `REDUCTION_MODE=1`, while 
 // create_execution_plan_ext(), rebuilding the operation graph, deserialization or plan-spec autotune()).
 Graph& deselect_workspace_greater_than(int64_t workspace);
 
-// Store engine names for exclusion. Plans matching these engines are filtered. Accumulates
-// across calls (set union with previous calls) and persists until the Graph is destroyed.
+// Store engine names for exclusion. Plans matching these engines are filtered. Replaces the
+// list (the last call of either overload wins), and an empty list clears it. It persists until
+// changed or the Graph is destroyed.
 Graph& deselect_engines(const std::vector<std::string>& engine_names);
 
-// Store engine IDs for exclusion. Plans matching these engines are filtered. Accumulates
-// across calls (set union with previous calls) and persists until the Graph is destroyed.
+// Store engine IDs for exclusion. Plans matching these engines are filtered. Replaces the
+// list the name overload shares; an empty list clears it.
 Graph& deselect_engines(const std::vector<int64_t>& engine_ids);
 
 // Note filters (RFC 0025 §2). Each appends to a list, and an engine passes when it reports
@@ -1357,7 +1358,7 @@ Status tags: **existing** = already in hipDNN, unchanged; **RFC** = new, propose
 | `graph.check_support()` | _(inside `autotune()`)_ (plan-spec) or `graph.check_support()` (compiled-plan) | **RFC** / **existing** | Plan-spec: unsupported engines filtered at compilation. Compiled-plan: as in cuDNN |
 | `graph.build_plans(BuildPlanPolicy_t::ALL)` | `graph.add_engine_configs(configs)` (plan-spec) or `graph.build_plans(BuildPlanPolicy::ALL)` (compiled-plan) | **RFC** / **existing** | Plan-spec: stores without compiling (`add_all_engines()` as shortcut). Compiled-plan: compiles all, `autotune()` benchmarks directly |
 | `graph.deselect_workspace_greater_than(n)` | `graph.deselect_workspace_greater_than(n)` | **RFC** | Stores the workspace threshold; `check_support()`, `build_plans()`, `build_plan_at_index()` and `autotune()` judge it on the engine-config workspace. Persists until changed; a plan barred by an earlier evaluation stays barred until the plans are recreated (`create_execution_plans()`, `create_execution_plan_ext()`, rebuilding the operation graph, deserialization or plan-spec `autotune()`) |
-| `graph.deselect_engines(barred)` | `graph.deselect_engines(barred)` | **RFC** | Filters by engine name or ID; accumulates and persists (cuDNN replaces its list and matches name substrings) |
+| `graph.deselect_engines(barred)` | `graph.deselect_engines(barred)` | **RFC** | Filters by engine name or ID; a later call replaces the list and an empty list clears it, as in cuDNN; matching is by exact engine ID (cuDNN matches name substrings); persists until changed |
 | `graph.select_behavior_notes(notes)`, `graph.deselect_behavior_notes(notes)`, `graph.select_numeric_notes(notes)`, `graph.deselect_numeric_notes(notes)` | Same | **RFC** | Filter by the notes an engine reports; accumulate and persist; a plan barred by an earlier evaluation stays barred until the plans are recreated (`create_execution_plans()`, `create_execution_plan_ext()`, rebuilding the operation graph, deserialization or plan-spec `autotune()`) ([RFC 0025](./0025_NumericalNotes.md) §2) |
 | `graph.get_autotune_workspace_size()` | `graph.get_estimated_max_workspace_size(maxSize)` (plan-spec) or `graph.get_autotune_workspace_size()` (compiled-plan) | **RFC** / **RFC** | Plan-spec: pre-compile estimate from the engine configs (an upper bound on a compiled plan's workspace under the plugin contract). Compiled-plan: queries pre-compiled plans |
 | `graph.autotune(handle, variant_pack, workspace)` | `graph.autotune(handle, variant_pack, workspace, ...)` | **RFC** | Three tiers (see § 6.3) |

@@ -367,10 +367,11 @@ void graphBindings(nb::module_& m)
              "moves on. If no plan is built, an error with code "
              "GRAPH_EXECUTION_PLAN_CREATION_FAILED lists every skipped or failed engine and "
              "its reason, and the active plan is unchanged. A repeated HEURISTICS_CHOICE call "
-             "returns the backend's already-finalized error and leaves the active plan "
-             "unchanged. ALL evaluates every plan's filters, then compiles "
-             "the plans that pass, skipping any that fail; it succeeds whenever a plan is "
-             "active afterwards, even if a new filter removes that plan.")
+             "after a plan is built returns success and leaves the active plan unchanged. "
+             "ALL evaluates every plan's filters, then compiles the plans that pass, "
+             "skipping any that fail; a plan built earlier stays active and is not built "
+             "again. It succeeds whenever a plan is active afterwards, even if a new filter "
+             "removes that plan.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {
@@ -598,14 +599,20 @@ void graphBindings(nb::module_& m)
              nb::overload_cast<const std::vector<std::string>&>(&graph::Graph::deselect_engines),
              nb::arg("engine_names"),
              nb::rv_policy::reference_internal,
-             "Bar plans belonging to these engine names. Accumulates across calls, persists "
-             "until the Graph is destroyed, and applies to plans created later.")
+             "Bar plans belonging to these engine names. Replaces the list it shares with the "
+             "ID overload (the last call of either kind wins) and an empty list clears it. "
+             "Persists until changed or the Graph is destroyed, and applies to plans created "
+             "later. A plan an earlier evaluation barred stays barred until the plans are "
+             "recreated.")
         .def("deselect_engines",
              nb::overload_cast<const std::vector<int64_t>&>(&graph::Graph::deselect_engines),
              nb::arg("engine_ids"),
              nb::rv_policy::reference_internal,
-             "Bar plans belonging to these engine IDs. Accumulates across calls, persists "
-             "until the Graph is destroyed, and applies to plans created later.")
+             "Bar plans belonging to these engine IDs. Replaces the list it shares with the "
+             "name overload (the last call of either kind wins) and an empty list clears it. "
+             "Persists until changed or the Graph is destroyed, and applies to plans created "
+             "later. A plan an earlier evaluation barred stays barred until the plans are "
+             "recreated.")
         .def("select_numeric_notes",
              &graph::Graph::select_numeric_notes,
              nb::arg("notes"),

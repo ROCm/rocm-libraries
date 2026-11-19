@@ -249,7 +249,7 @@ protected:
     // Last-write-wins semantics.
     std::unordered_set<int64_t> _barredEngineIds; // Engine ID exclusion set.
     // Set by deselect_engines().
-    // Accumulates across calls.
+    // Each call replaces it; an empty call clears it.
 
     // Note filters, one list per family and direction. An engine passes when it reports
     // every selected note and none of the deselected ones, in each family.
@@ -3799,12 +3799,13 @@ public:
      *     plan is built, ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED is returned with a
      *     message listing every skipped or failed engine and its reason, and the active
      *     plan is unchanged. This applies to a single-plan graph too. A repeated call after a
-     *     plan is finalized returns the backend's already-finalized error, evaluates no
+     *     plan is finalized, or for a deserialized plan, returns ErrorCode::OK, evaluates no
      *     filter, walks no plan, and leaves the active plan unchanged.
      *   - ALL: evaluate every plan's filters, with every note read, before finalizing any
      *     plan, then compile the plans that pass, setting _activePlanIndex to the first
-     *     that compiles successfully. A plan built earlier stays active: a filter that
-     *     removes it is logged as skipped, never marks it, and does not fail the call.
+     *     that compiles successfully. A plan built earlier stays active and is never
+     *     finalized again: a filter that removes it is logged as skipped, never marks it,
+     *     and does not fail the call, and a repeated call builds only the other plans.
      *
      * @return ErrorCode::OK on success, including when a plan built earlier is still active;
      *         ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED when no plan is built under
@@ -3831,7 +3832,6 @@ public:
         {
             const bool filterWasSet = filterSet();
             const bool activeFinalized = _executionPlanFinalized;
-            bool activeFiltered = false;
             std::string failures;
             std::vector<size_t> candidates;
             std::vector<size_t> toBar;
@@ -3865,7 +3865,6 @@ public:
                 // The finalized active plan stays active and executable: skipped, not marked.
                 if(isFinalizedActivePlan(i))
                 {
-                    activeFiltered = true;
                     continue;
                 }
                 toBar.push_back(i);
@@ -3882,6 +3881,13 @@ public:
             for(const size_t i : candidates)
             {
                 auto& plan = _compiledPlans[i];
+
+                // The active plan, and any plan an earlier ALL or build_plan_at_index()
+                // finalized, is already built: finalizing it again fails in the backend.
+                if(isFinalizedActivePlan(i) || plan.workspaceSize != -1)
+                {
+                    continue;
+                }
 
                 // Set the engine config, finalize the plan, and cache its workspace size,
                 // then apply the safety net. On failure log and skip to the next plan.
@@ -3922,7 +3928,7 @@ public:
                         "Failed to finalize any execution plan (policy=ALL)."};
             }
 
-            if(anySucceeded && !activeFiltered)
+            if(anySucceeded && !activeFinalized)
             {
                 setActivePlanState(firstSuccessIndex, detail::ActivePlanFinalization::FINALIZED);
             }
@@ -3932,21 +3938,18 @@ public:
         // HEURISTICS_CHOICE path: compile the active plan. If a filter removes it or it fails
         // to finalize, the other plans are tried in ranked order from the top of the list and
         // the first one that passes the filters and finalizes becomes active.
+        //
+        // A repeated call after a plan was finalized, or for a deserialized plan, succeeds
+        // and leaves the active plan unchanged. No filter is evaluated and no plan is walked.
+        if(_executionPlanFinalized)
+        {
+            return {ErrorCode::OK, ""};
+        }
+
         auto& activePlan = _compiledPlans[_activePlanIndex];
         if(!activePlan.engineConfigDesc || !activePlan.executionPlanDesc)
         {
             return {ErrorCode::INVALID_VALUE, "No active execution plan / engine config"};
-        }
-
-        // A repeated call after a plan was already finalized fails here because the backend
-        // refuses to finalize it again; that is returned as is, not treated as an engine
-        // failure to fall back from (which would silently activate a second plan). No filter
-        // is evaluated and the active plan is unchanged.
-        if(_executionPlanFinalized)
-        {
-            HIPDNN_CHECK_ERROR(finalizePlanDescriptor(activePlan));
-            setActivePlanState(_activePlanIndex, detail::ActivePlanFinalization::FINALIZED);
-            return {ErrorCode::OK, ""};
         }
 
         // Failures and skips in attempt order, the active plan first.
@@ -5252,11 +5255,13 @@ public:
     /**
      * @brief Store engine names for deferred plan barring
      *
-     * Resolves each name to an engine ID and adds it to the barred engine ID
+     * Resolves each name to an engine ID and stores it in the barred engine ID
      * set. Plans whose engine matches are filtered: @c check_support(),
-     * @c build_plans(), @c build_plan_at_index() and @c autotune() skip them. Accumulates
-     * across calls (set union) and persists until the @c Graph is destroyed: creating plans
-     * does not reset it, it applies to plans created later, and it cannot be removed.
+     * @c build_plans(), @c build_plan_at_index() and @c autotune() skip them. Replaces the
+     * barred engine ID set, which the ID overload shares: the last call of either kind
+     * wins, and an empty list clears it. It persists until changed or the @c Graph is
+     * destroyed: creating plans does not reset it, and it applies to plans created later.
+     * A plan an earlier evaluation marked barred stays barred until the plans are recreated.
      *
      * Resolution goes through @c engineNameOrIdToId, so a registered name, a
      * name a plugin declared, and the hexadecimal ID an unnamed engine displays
@@ -5268,10 +5273,11 @@ public:
      */
     Graph& deselect_engines(const std::vector<std::string>& engine_names)
     {
-        if(engine_names.empty())
+        if(engine_names.empty() && !_barredEngineIds.empty())
         {
-            return *this;
+            HIPDNN_FE_LOG_INFO("deselect_engines(): cleared engine filter");
         }
+        _barredEngineIds.clear();
         for(const auto& name : engine_names)
         {
             const int64_t engineId = hipdnn_data_sdk::utilities::engineNameOrIdToId(name);
@@ -5282,33 +5288,40 @@ public:
                                << hipdnn_data_sdk::utilities::formatEngineIdHex(engineId));
             _barredEngineIds.insert(engineId);
         }
-        HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter (" << _barredEngineIds.size()
-                                                                        << " engine(s))");
+        if(!engine_names.empty())
+        {
+            HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter ("
+                               << _barredEngineIds.size() << " engine(s))");
+        }
         return *this;
     }
 
     /**
      * @brief Store engine IDs for deferred plan barring
      *
-     * Adds the given engine IDs to the barred engine ID set. Plans matching
-     * barred engine IDs are filtered like those named by the overload above. Accumulates
-     * across calls (set union) and persists until the @c Graph is destroyed.
+     * Replaces the barred engine ID set with the given IDs, which share it with the name
+     * overload above: the last call of either kind wins, and an empty argument clears it.
+     * Plans matching barred engine IDs are filtered like those named by the overload above.
      *
      * @param engine_ids Engine IDs to deselect
      * @return Reference to @c *this for method chaining
      */
     Graph& deselect_engines(const std::vector<int64_t>& engine_ids)
     {
-        if(engine_ids.empty())
+        if(engine_ids.empty() && !_barredEngineIds.empty())
         {
-            return *this;
+            HIPDNN_FE_LOG_INFO("deselect_engines(): cleared engine filter");
         }
+        _barredEngineIds.clear();
         for(const int64_t id : engine_ids)
         {
             _barredEngineIds.insert(id);
         }
-        HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter (" << _barredEngineIds.size()
-                                                                        << " engine(s))");
+        if(!engine_ids.empty())
+        {
+            HIPDNN_FE_LOG_INFO("deselect_engines(): stored engine filter ("
+                               << _barredEngineIds.size() << " engine(s))");
+        }
         return *this;
     }
 

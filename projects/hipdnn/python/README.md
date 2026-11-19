@@ -324,6 +324,9 @@ Remaining differences from `cudnn.pygraph`:
 - The `cudnn.graph` context manager and the `cudnn.jit` / `cudnn.graph_cache`
   decorators are not provided.
 
+Like cuDNN, a later `deselect_engines()` call replaces the engine list, and `[]`
+clears it.
+
 ## Running the Samples
 
 Sample scripts are source-tree utilities and are not included in the wheel.
