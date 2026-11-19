@@ -156,7 +156,7 @@ void hipblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t
         x -= (N - 1) * incx;
 
     hipblas_parallel_fill_seeder seeder;
-    int64_t           blocks = (N + hipblas_fill_block_size - 1) / hipblas_fill_block_size;
+    int64_t blocks = (N + hipblas_fill_block_size - 1) / hipblas_fill_block_size;
 
 #ifdef _OPENMP
 #pragma omp parallel for
@@ -371,7 +371,7 @@ void hipblas_init_vector(T rand_gen(), T* x, int64_t N, int64_t incx)
         x -= (N - 1) * incx;
 
     hipblas_parallel_fill_seeder seeder;
-    int64_t           blocks = (N + hipblas_fill_block_size - 1) / hipblas_fill_block_size;
+    int64_t blocks = (N + hipblas_fill_block_size - 1) / hipblas_fill_block_size;
 
 #ifdef _OPENMP
 #pragma omp parallel for
