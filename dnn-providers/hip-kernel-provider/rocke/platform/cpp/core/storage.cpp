@@ -12,6 +12,7 @@
 
 #include "rocke/dtypes_internal.h"
 #include "rocke/error.hpp"
+#include "rocke/storage_internal.h"
 
 static bool valid(const rocke_bit_packing_t* p)
 {
@@ -244,6 +245,16 @@ static void require_at_least(const char* name, int64_t value, int64_t minimum)
     if(value < minimum)
         throw ckc::ValueError(ckc::format_error(
             "%s must be at least %" PRId64 ", got %" PRId64, name, minimum, value));
+}
+
+int64_t rocke_i_elements_to_storage(int encoded_bits, int64_t elements)
+{
+    require_at_least("element count", elements, 0);
+    if(encoded_bits >= 8)
+        return elements;
+    // Split before multiplying so even the largest valid count cannot overflow.
+    return (elements / k_register_bits) * encoded_bits
+           + ((elements % k_register_bits) * encoded_bits + k_register_bits - 1) / k_register_bits;
 }
 
 /* Run `body` and report its outcome through the C API: true, or false with the

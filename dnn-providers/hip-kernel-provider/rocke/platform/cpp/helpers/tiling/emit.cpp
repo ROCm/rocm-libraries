@@ -9,6 +9,7 @@
 #include "rocke/dtypes.h"
 #include "rocke/error_boundary.hpp"
 #include "rocke/ir_storage.h"
+#include "rocke/storage_internal.h"
 #include "rocke/tiling_internal.h"
 #include "rocke/tiling_transport_internal.h"
 
@@ -41,16 +42,6 @@ static int gcd(int a, int c)
 static int cap_alignment(int derived, int stated)
 {
     return stated && stated < derived ? stated : derived;
-}
-
-static int64_t storage_count(const access_info& access, int64_t elements)
-{
-    if(elements < 0)
-        throw ckc::ValueError(
-            ckc::format_error("element count must be at least 0, got %lld", (long long)elements));
-    return access.packed ? (elements / access.group) * access.group_words
-                               + (elements % access.group * access.bits + 31) / 32
-                         : elements;
 }
 
 static rocke_value_t*
@@ -232,14 +223,16 @@ static access_info prepare_access(rocke_ir_builder_t* b,
     {
         if(access.packed)
         {
-            const int64_t run_words = storage_count(access, run_length);
+            const int64_t run_words = rocke_i_elements_to_storage(access.bits, run_length);
             const int widths[] = {4, 3, 2, 1};
             for(int width : widths)
             {
                 bool divides = width % access.group_words == 0 && run_words % width == 0;
                 for(int axis = 0; axis < tensor->rank; ++axis)
                     if(axis != run_axis)
-                        divides &= storage_count(access, tensor->strides[axis]) % width == 0;
+                        divides &= rocke_i_elements_to_storage(access.bits, tensor->strides[axis])
+                                       % width
+                                   == 0;
                 if(divides)
                 {
                     access.width = width;
@@ -276,10 +269,12 @@ static access_info prepare_access(rocke_ir_builder_t* b,
         const int paired_words = access.group_words * 2;
         bool bundle = rocke_i_tiling_constant_index(window->origin[run_axis], &origin)
                       && origin % (access.group * 2) == 0
-                      && storage_count(access, run_length) % paired_words == 0;
+                      && rocke_i_elements_to_storage(access.bits, run_length) % paired_words == 0;
         for(int axis = 0; axis < tensor->rank; ++axis)
             if(axis != run_axis)
-                bundle &= storage_count(access, tensor->strides[axis]) % paired_words == 0;
+                bundle &= rocke_i_elements_to_storage(access.bits, tensor->strides[axis])
+                              % paired_words
+                          == 0;
         if(bundle)
             access.width = paired_words;
     }
@@ -340,7 +335,7 @@ rocke_status_t rocke_h_load_fragment(rocke_ir_builder_t* b,
                     b, rocke_i_tiling_address(b, window, tile->rank, positions), access);
                 mask = rocke_i_tiling_clip_mask(b, window, tile, positions);
             }
-            const int first_slot = int(storage_count(access, reg));
+            const int first_slot = int(rocke_i_elements_to_storage(access.bits, reg));
             if(!mask && access.width > 1)
             {
                 rocke_value_t* pieces[16];
@@ -438,7 +433,7 @@ rocke_status_t rocke_h_store_fragment(rocke_ir_builder_t* b,
                                 ? rocke_b_add(b, base_index, rocke_b_const_i32(b, unit_offset))
                                 : base_index;
             rocke_value_t* units[3];
-            const int first_slot = int(storage_count(access, reg));
+            const int first_slot = int(rocke_i_elements_to_storage(access.bits, reg));
             for(int i = 0; i < access.width; ++i)
             {
                 auto* value = rocke_b_vec_extract(b, fragment->value, first_slot + i);

@@ -8,6 +8,7 @@
 
 #include "rocke/dtypes.h"
 #include "rocke/error.hpp"
+#include "rocke/storage_internal.h"
 
 static int gcd(int a, int b)
 {
@@ -128,10 +129,7 @@ int64_t rocke_i_tiling_storage_displacement(const rocke_tiling_window_t* window,
     for(int axis = 0; axis < tile->rank; ++axis)
         elements += coordinates[axis] * window->tensor->strides[lead + axis];
     const int bits = rocke_dtype_info(window->tensor->dtype->name)->encoded_bits;
-    if(bits >= 8)
-        return elements;
-    if(elements < 0)
-        throw ckc::ValueError(
-            ckc::format_error("element count must be at least 0, got %lld", (long long)elements));
-    return (elements / 32) * bits + ((elements % 32) * bits + 31) / 32;
+    // Byte-or-wider displacements may be signed (reversed views). Packed
+    // admission still requires nonnegative, whole-word offsets.
+    return bits >= 8 ? elements : rocke_i_elements_to_storage(bits, elements);
 }

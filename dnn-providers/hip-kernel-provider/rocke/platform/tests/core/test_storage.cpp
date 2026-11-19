@@ -27,6 +27,7 @@
 #include "rocke/ir_serialize.h"
 #include "rocke/ir_storage.h"
 #include "rocke/lower_hip.h"
+#include "rocke/storage_internal.h"
 #include "rocke/tiling_compat.h"
 #include "rocke/wmma_scale_internal.h"
 
@@ -359,6 +360,28 @@ static int test_fragment_offset_bounds()
     return 0;
 }
 
+static int test_elements_to_storage()
+{
+    CHECK(rocke_i_elements_to_storage(6, 0) == 0);
+    CHECK(rocke_i_elements_to_storage(4, 8) == 1);
+    CHECK(rocke_i_elements_to_storage(4, 9) == 2);
+    CHECK(rocke_i_elements_to_storage(6, 16) == 3);
+    CHECK(rocke_i_elements_to_storage(6, 17) == 4);
+    CHECK(rocke_i_elements_to_storage(16, 17) == 17);
+    CHECK(rocke_i_elements_to_storage(6, INT64_MAX) == (INT64_C(3) << 59));
+    try
+    {
+        (void)rocke_i_elements_to_storage(16, -1);
+        CHECK(false);
+    }
+    catch(const ckc::Error& error)
+    {
+        CHECK(error.code() == ROCKE_ERR_VALUE);
+        CHECK(strcmp(error.what(), "element count must be at least 0, got -1") == 0);
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc == 3 && strcmp(argv[1], "--emit") == 0)
@@ -415,6 +438,7 @@ int main(int argc, char** argv)
         CHECK(b.kernel->body->num_ops == 0);
         rocke_ir_builder_free(&b);
     }
+    CHECK(test_elements_to_storage() == 0);
     CHECK(test_fragment_inputs() == 0);
     CHECK(test_fragment_offset_bounds() == 0);
     CHECK(test_register_packing() == 0);
