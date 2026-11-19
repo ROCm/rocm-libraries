@@ -30,9 +30,10 @@
 // the step after next, so each memory phase carries part of the DMA and W, read from L2, has a
 // whole step to land.
 //
-// Waves: two groups of four, the BN / 2-channel halves of the block (ping-pong). Within a group
-// a wave owns 128 positions x BN / 4 channels: 8 x BN / 64 MMAs per 32 channels from 8 X and
-// BN / 64 W fragments. A step is two halves of 32 channels, each "memory phase | barrier | MMAs
+// Waves: two groups of four, the BN / 2-channel halves of the block (ping-pong). A group's four
+// waves split the 256 positions, so a wave owns 64 positions x BN / 2 channels: 4 x BN / 32 MMAs
+// per 32 channels from 4 X and BN / 32 W fragments (the squarest wave tile reads the fewest LDS
+// bytes for its MMAs, and its accumulators leave BN 256 room without spills). A step is two halves of 32 channels, each "memory phase | barrier | MMAs
 // at raised priority | barrier"; the second group runs one barrier behind the first, so on every
 // SIMD one wave multiplies while the other reads LDS and issues DMA.
 //
@@ -40,7 +41,8 @@
 // channels (direct 8-byte stores where the channels are not whole runs).
 //
 // Split-K (a.splits > 1): split z runs a contiguous range of the steps and writes fp32 partials
-// indexed like the output, which ConvIgemmReduce adds in split order.
+// indexed like the output, which ConvIgemmReduce adds in split order. A launch of the trailing row
+// tiles only (the tail split) indexes its partials from row tile a.partialTile.
 #pragma once
 
 /// s_barrier without the fences of __syncthreads: the in-flight LDS DMA of the next stage must stay
@@ -70,8 +72,8 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
     constexpr int NG = BM * GR, NGW = BN * GR; // granules of the X and W tiles
     constexpr int RPI = WAVE / GR; // rows a DMA instruction (8)
     constexpr int IPW = BM / RPI / 8, IPWW = BN / RPI / 8; // DMA instructions a wave: X, W
-    constexpr int WN = BN / 4; // a wave's output channels
-    constexpr int FM = 128 / DIM, FN = WN / DIM; // a wave's position x channel fragments
+    constexpr int WM = BM / 4, WN = BN / 2; // a wave's output positions and channels
+    constexpr int FM = WM / DIM, FN = WN / DIM; // a wave's position x channel fragments
     static_assert(sizeof(T) == 2 && Atom::KA == 32 && Atom::KPL == 8 && Atom::WAVE == WAVE,
                   "16-bit, 16x16x32 atoms");
     static_assert((BN == 256 || BN == 192 || BN == 128) && IPW == 4, "tile");
@@ -101,7 +103,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
     const int tid = threadIdx.x;
     const int lane = tid % WAVE;
     const int wave = __builtin_amdgcn_readfirstlane(tid / WAVE);
-    const int grp = wave / 4, wx = wave % 2, wk = (wave / 2) % 2;
+    const int grp = wave / 4, wx = wave % 4;
 
     // Steps: slices (outer) x taps (t, r, s, inner), over the depth and height taps that reach
     // the input for some row of the tile (tapRange): where the input is padded, as in backward
@@ -332,7 +334,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
     // Fragment reads: lane l takes row base + l % 16 (base a multiple of 16), granule
     // 4 half + l / 16, at slot granule ^ (l % 8).
     const int fr16 = lane % DIM, fg = lane / DIM;
-    const int xRow0 = wx * 128 + fr16, wRow0 = grp * (BN / 2) + wk * WN + fr16;
+    const int xRow0 = wx * WM + fr16, wRow0 = grp * WN + fr16;
     auto at = [&](int r, int hf) __attribute__((always_inline))
     {
         return r * GR + ((4 * hf + fg) ^ (fr16 % 8));
@@ -407,7 +409,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
     // of fragment row i.
     const long long outChans = DIR == K1_FORWARD ? a.k : a.c;
     const long long chanBase = static_cast<long long>(g) * ncols;
-    const int nl = n0 + grp * (BN / 2) + wk * WN + 4 * fg;
+    const int nl = n0 + grp * WN + 4 * fg;
     const bool vec = (ncols & 3) == 0;
     if(splits > 1)
     {
@@ -415,14 +417,15 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
 #pragma unroll
         for(int i = 0; i < FM; ++i)
         {
-            const long long m = m0 + wx * 128 + i * DIM + fr16;
+            const long long m = m0 + wx * WM + i * DIM + fr16;
             if(m >= gather.rows)
                 continue;
 #pragma unroll
             for(int j = 0; j < FN; ++j)
             {
                 const int n = nl + j * DIM;
-                float* o = partial + m * outChans + chanBase + n;
+                float* o = partial + (m - static_cast<long long>(a.partialTile) * BM) * outChans
+                           + chanBase + n;
                 if(vec && n + 3 < ncols)
                     *reinterpret_cast<typename Atom::acc*>(o) = acc[i][j];
                 else
@@ -459,18 +462,19 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
 #endif
         return o;
     };
-    // Whole 16-byte runs of output channels: each wave stages its 128 positions x WN channels in
+    // Whole 16-byte runs of output channels: each wave stages its 64 positions x WN channels in
     // LDS (the stages are free: every read and DMA is done), granule g of position p at slot
-    // g ^ key(p), then stores each position's channels with GO lanes of 16 bytes.
-    // (A wave's 48 channels of BN 192 are 6 granules a row: such tiles store directly.)
+    // g ^ key(p), then stores each position's channels with GO lanes of 16 bytes. The key spreads
+    // a store instruction's 16 positions over distinct bank slots.
+    // (A wave's 96 channels of BN 192 are 12 granules a row: such tiles store directly.)
     constexpr bool STAGED = BN != 192;
     if(STAGED && (ncols & 7) == 0 && (outChans & 7) == 0 && (chanBase & 7) == 0)
     {
-        constexpr int GO = STAGED ? WN * 2 / 16 : 8; // granules a staged row (8 or 4)
+        constexpr int GO = STAGED ? WN * 2 / 16 : 8; // granules a staged row (16 or 8)
         constexpr int PO = WAVE / GO; // positions a store instruction
         auto key = [](int p) __attribute__((always_inline))
         {
-            return GO == 8 ? p % 8 : (p / 2) % 4;
+            return GO == 16 ? (p % 8) * 2 + (p / 8) % 2 : p % 8;
         };
         Raw16* region = BN == 256 ? (wave < 2   ? sx0
                                      : wave < 4 ? sx1
@@ -494,12 +498,12 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "wavefront");
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "wavefront");
         const int gl = lane % GO, pl = lane / GO;
-        const int nn = n0 + grp * (BN / 2) + wk * WN + gl * 8;
+        const int nn = n0 + grp * WN + gl * 8;
 #pragma unroll
-        for(int q = 0; q < 128 / PO; ++q)
+        for(int q = 0; q < WM / PO; ++q)
         {
             const int p = q * PO + pl;
-            const long long m = m0 + wx * 128 + p;
+            const long long m = m0 + wx * WM + p;
             const Raw16 v = region[p * GO + (gl ^ key(p))];
             if(m < gather.rows && nn < ncols)
                 *reinterpret_cast<Raw16*>(out + m * outChans + chanBase + nn) = v;
@@ -509,7 +513,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlex(const K1Args& a CONV_E
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
-        const long long m = m0 + wx * 128 + i * DIM + fr16;
+        const long long m = m0 + wx * WM + i * DIM + fr16;
         if(m >= gather.rows)
             continue;
 #pragma unroll
