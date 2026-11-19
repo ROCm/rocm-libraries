@@ -57,7 +57,8 @@ constexpr float K_DESCALE_V_FILL = 0.75f;
 // so every batch spans at least two Q-tiles of every group row and the causal tile
 // merging (tgDiv) changes the launch grid. Every K/V length is at least its Q length,
 // so bottom-right causal masks no row out fully. A shared-offset-table case uses the Q
-// lengths on both sides; a cu_seq_len case writes them into its cumulative tables.
+// lengths on both sides; a cu_seq_len case writes them into its cumulative tables, of which
+// a shared cu_seq_len case has only the Q one.
 constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_Q = {401, 260};
 constexpr std::array<int32_t, 2> K_GROUP_SEQ_LENS_KV = {483, 299};
 
@@ -244,11 +245,13 @@ protected:
                       testCase.config.ts_qo);
             if(testCase.cuSeqLens)
             {
+                // A shared cu_seq_len table gives K/V the Q lengths.
+                const auto& kvLengths
+                    = testCase.sharedCuSeqLen ? K_GROUP_SEQ_LENS_Q : K_GROUP_SEQ_LENS_KV;
                 ASSERT_NO_FATAL_FAILURE(assertGappedSlots(
                     K_GROUP_PHYSICAL_STARTS_Q, K_GROUP_SEQ_LENS_Q, testCase.batch * testCase.seqQ));
-                ASSERT_NO_FATAL_FAILURE(assertGappedSlots(K_GROUP_PHYSICAL_STARTS_KV,
-                                                          K_GROUP_SEQ_LENS_KV,
-                                                          testCase.batch * testCase.seqKv));
+                ASSERT_NO_FATAL_FAILURE(assertGappedSlots(
+                    K_GROUP_PHYSICAL_STARTS_KV, kvLengths, testCase.batch * testCase.seqKv));
             }
         }
 
@@ -664,8 +667,11 @@ std::vector<GraphTestCase> getGroupStatsTestCases()
 }
 
 // Every group row with cu_seq_len_q/kv over gapped physical slots
-// (K_GROUP_PHYSICAL_STARTS_*), and each hd128 causal group row with stats as well, so the
-// LSE of a gapped layout is checked on each architecture.
+// (K_GROUP_PHYSICAL_STARTS_*), without and with stats: each row is its own kernel object,
+// and each must start a batch's LSE at the physical Q start, not the logical one. Each
+// causal group row also runs under a top-left causal mask with one cu_seq_len table for
+// both sides and separate K/V offsets, so the per-batch lengths are equal while the K/V
+// slots differ from the Q slots.
 std::vector<GraphTestCase> getGroupCuSeqLenTestCases()
 {
     std::vector<GraphTestCase> cases;
@@ -675,16 +681,22 @@ std::vector<GraphTestCase> getGroupCuSeqLenTestCases()
         {
             continue;
         }
-        auto padded = configToTestCase(config);
-        padded.cuSeqLens = true;
-        padded.name += "CuSeqLen";
-        cases.push_back(padded);
-        if(config.hdim_q == 128 && isBottomRightCausalRow(config))
+        for(const bool withStats : {false, true})
         {
-            auto paddedStats = configToTestCase(config, /*withStats=*/true);
-            paddedStats.cuSeqLens = true;
-            paddedStats.name += "CuSeqLen";
-            cases.push_back(paddedStats);
+            auto padded = configToTestCase(config, withStats);
+            padded.cuSeqLens = true;
+            padded.name += "CuSeqLen";
+            cases.push_back(padded);
+        }
+        if(isBottomRightCausalRow(config))
+        {
+            auto topLeftConfig = config;
+            topLeftConfig.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+            auto topLeft = configToTestCase(topLeftConfig);
+            topLeft.cuSeqLens = true;
+            topLeft.sharedCuSeqLen = true;
+            topLeft.name += "SharedCuSeqLen";
+            cases.push_back(topLeft);
         }
     }
     return cases;

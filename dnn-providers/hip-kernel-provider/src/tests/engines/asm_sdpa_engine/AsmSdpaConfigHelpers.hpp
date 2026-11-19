@@ -44,6 +44,9 @@ struct GraphTestCase
     /// padding_mask, so the ragged offset tables hold each batch's physical start and the
     /// cumulative tables its logical length.
     bool cuSeqLens = false;
+    /// cuSeqLens only: cu_seq_len_q and cu_seq_len_kv name one table (K_CU_SEQ_LEN_Q_NAME),
+    /// so every batch's Q and K/V lengths are equal while K/V keep their own ragged offsets.
+    bool sharedCuSeqLen = false;
 
     std::string name;
     std::string arch;
@@ -124,12 +127,12 @@ inline constexpr const char* K_QO_RAGGED_OFFSET_NAME = "qo_ragged_offset";
 inline constexpr const char* K_KV_RAGGED_OFFSET_NAME = "kv_ragged_offset";
 
 /// Names of the INT32 [B+1, 1, 1, 1] cumulative length tables a GraphTestCase::cuSeqLens
-/// graph carries.
+/// graph carries (only the first, with GraphTestCase::sharedCuSeqLen).
 inline constexpr const char* K_CU_SEQ_LEN_Q_NAME = "cu_seq_len_q";
 inline constexpr const char* K_CU_SEQ_LEN_KV_NAME = "cu_seq_len_kv";
 
 /// Names of the INT32 [B, 1, 1, 1] per-batch lengths buildSdpaFwdReferenceGraph gives in
-/// place of the cumulative tables.
+/// place of the cumulative tables (only the first, with GraphTestCase::sharedCuSeqLen).
 inline constexpr const char* K_SEQ_LEN_Q_NAME = "seq_len_q";
 inline constexpr const char* K_SEQ_LEN_KV_NAME = "seq_len_kv";
 

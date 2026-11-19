@@ -21,6 +21,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -201,7 +202,7 @@ protected:
             ASSERT_TRUE(error.is_good()) << error.get_message();
             run.referenceGraph = std::move(serialized);
             ASSERT_NO_FATAL_FAILURE(
-                addReferenceGraphTensors(*referenceGraph, outputs, run.cpuBundle));
+                addReferenceGraphTensors(graph, *referenceGraph, outputs, run.cpuBundle));
         }
 
         initializeBundle(graph, run.gpuBundle, seed);
@@ -429,32 +430,96 @@ protected:
     }
 
     // Adds to the CPU bundle the nonvirtual tensors only @p referenceGraph names, and checks
-    // that it writes every output of the executed graph under the same uid.
-    static void addReferenceGraphTensors(hipdnn_frontend::graph::Graph& referenceGraph,
+    // that it writes every output of @p graph under the same uid. The CPU tensor of a uid both
+    // graphs name is sized from @p graph, and the reference reads it through its own
+    // attributes, so the two must describe it alike.
+    static void addReferenceGraphTensors(hipdnn_frontend::graph::Graph& graph,
+                                         hipdnn_frontend::graph::Graph& referenceGraph,
                                          const std::vector<OutputTensor>& outputs,
                                          hipdnn_test_sdk::utilities::GraphTensorBundle& cpuBundle)
     {
-        std::unordered_set<int64_t> referenceOutputUids;
-        referenceGraph.visit([&](const hipdnn_frontend::graph::INode& node) {
-            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
-            {
-                if(!tensorAttr->get_is_virtual())
-                {
-                    referenceOutputUids.insert(tensorAttr->get_uid());
-                    tryAddTensorToBundle(tensorAttr, cpuBundle);
-                }
-            }
-            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
-            {
-                tryAddTensorToBundle(tensorAttr, cpuBundle);
-            }
+        std::unordered_map<int64_t, std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>>
+            executedTensors;
+        visitNonVirtualTensors(graph, [&](const auto& tensorAttr, bool /*isOutput*/) {
+            executedTensors.emplace(tensorAttr->get_uid(), tensorAttr);
         });
+
+        std::unordered_set<int64_t> referenceOutputUids;
+        bool tensorsAgree = true;
+        visitNonVirtualTensors(referenceGraph, [&](const auto& tensorAttr, bool isOutput) {
+            if(isOutput)
+            {
+                referenceOutputUids.insert(tensorAttr->get_uid());
+            }
+            const auto executed = executedTensors.find(tensorAttr->get_uid());
+            if(executed != executedTensors.end())
+            {
+                tensorsAgree &= expectSameTensor(*executed->second, *tensorAttr);
+            }
+            tryAddTensorToBundle(tensorAttr, cpuBundle);
+        });
+        ASSERT_TRUE(tensorsAgree)
+            << "The reference graph describes a tensor of the executed graph differently";
         for(const auto& output : outputs)
         {
             ASSERT_EQ(referenceOutputUids.count(output.uid), 1U)
                 << "The reference graph does not write output " << output.uid << " ("
                 << output.attr->get_name() << ")";
         }
+    }
+
+    // Calls @p visit(tensor, isOutput) for every nonvirtual input, output and ragged offset
+    // table of @p graph's nodes; a tensor several nodes name is visited once per name.
+    template <typename Visitor>
+    static void visitNonVirtualTensors(hipdnn_frontend::graph::Graph& graph, const Visitor& visit)
+    {
+        const auto visitTensor = [&](const auto& tensorAttr, bool isOutput) {
+            if(tensorAttr->get_is_virtual())
+            {
+                return;
+            }
+            visit(tensorAttr, isOutput);
+            if(tensorAttr->has_ragged_offset())
+            {
+                visit(tensorAttr->get_ragged_offset(), false);
+            }
+        };
+        graph.visit([&](const hipdnn_frontend::graph::INode& node) {
+            for(const auto& tensorAttr : node.getNodeOutputTensorAttributes())
+            {
+                visitTensor(tensorAttr, true);
+            }
+            for(const auto& tensorAttr : node.getNodeInputTensorAttributes())
+            {
+                visitTensor(tensorAttr, false);
+            }
+        });
+    }
+
+    // Returns whether @p reference describes the tensor @p executed describes, adding a
+    // failure that shows both when it does not.
+    // get_ragged_offset() is not const, so both tensors are taken by mutable reference.
+    static bool expectSameTensor(hipdnn_frontend::graph::TensorAttributes& executed,
+                                 hipdnn_frontend::graph::TensorAttributes& reference)
+    {
+        const auto describe = [](hipdnn_frontend::graph::TensorAttributes& t) {
+            const int64_t offsetUid = t.has_ragged_offset() ? t.get_ragged_offset()->get_uid() : -1;
+            const int64_t multiplier = t.has_ragged_offset() ? t.get_ragged_offset_multiplier() : 0;
+            return std::make_tuple(t.get_dim(),
+                                   t.get_stride(),
+                                   static_cast<int>(t.get_data_type()),
+                                   offsetUid,
+                                   multiplier);
+        };
+        if(describe(reference) == describe(executed))
+        {
+            return true;
+        }
+        ADD_FAILURE() << "Tensor " << executed.get_uid() << " (" << executed.get_name()
+                      << ") as (dims, strides, data type, ragged offset uid, multiplier): "
+                      << "executed graph " << ::testing::PrintToString(describe(executed))
+                      << ", reference graph " << ::testing::PrintToString(describe(reference));
+        return false;
     }
 
     /// Seeds every tensor in @p bundle alike. A suite whose operation can confuse two

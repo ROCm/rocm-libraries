@@ -185,6 +185,10 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
         throw std::invalid_argument("sharedOffsetTable and cuSeqLens need a group-mode config ("
                                     + testCase.name + ")");
     }
+    if(testCase.sharedCuSeqLen && !testCase.cuSeqLens)
+    {
+        throw std::invalid_argument("sharedCuSeqLen needs cuSeqLens (" + testCase.name + ")");
+    }
 
     const int64_t batch = testCase.batch;
     const int64_t numHeads = testCase.numHeads;
@@ -269,15 +273,22 @@ SdpaFwdGraph buildGraph(const GraphTestCase& testCase, LengthInputs lengthInputs
         attributes.set_padding_mask(true);
         if(lengthInputs == LengthInputs::CUMULATIVE)
         {
-            attributes.set_cu_seq_len_q(
-                makeTokenTable(K_CU_SEQ_LEN_Q_UID, K_CU_SEQ_LEN_Q_NAME, batch + 1));
+            const auto cuSeqLenQ
+                = makeTokenTable(K_CU_SEQ_LEN_Q_UID, K_CU_SEQ_LEN_Q_NAME, batch + 1);
+            attributes.set_cu_seq_len_q(cuSeqLenQ);
             attributes.set_cu_seq_len_kv(
-                makeTokenTable(K_CU_SEQ_LEN_KV_UID, K_CU_SEQ_LEN_KV_NAME, batch + 1));
+                testCase.sharedCuSeqLen
+                    ? cuSeqLenQ
+                    : makeTokenTable(K_CU_SEQ_LEN_KV_UID, K_CU_SEQ_LEN_KV_NAME, batch + 1));
         }
         else
         {
-            attributes.set_seq_len_q(makeTokenTable(K_SEQ_LEN_Q_UID, K_SEQ_LEN_Q_NAME, batch));
-            attributes.set_seq_len_kv(makeTokenTable(K_SEQ_LEN_KV_UID, K_SEQ_LEN_KV_NAME, batch));
+            const auto seqLenQ = makeTokenTable(K_SEQ_LEN_Q_UID, K_SEQ_LEN_Q_NAME, batch);
+            attributes.set_seq_len_q(seqLenQ);
+            attributes.set_seq_len_kv(
+                testCase.sharedCuSeqLen
+                    ? seqLenQ
+                    : makeTokenTable(K_SEQ_LEN_KV_UID, K_SEQ_LEN_KV_NAME, batch));
         }
     }
 
