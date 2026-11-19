@@ -36,7 +36,7 @@ listed. Other GPU tests added after the inventory are not listed here.
 - [Full attention shape matrix](#full-attention-shape-matrix)
 - [Full recurrent shape matrix](#full-recurrent-shape-matrix)
 
-The matrices contain 235 attention and 109 recurrent configuration/shape rows.
+The matrices contain 236 attention and 109 recurrent configuration/shape rows.
 They describe source declarations, including cases that skip in the observed CI.
 
 Rows are not unique shapes or pytest pass counts. Binary-reuse tests have two
@@ -406,6 +406,7 @@ not executed GPU-kernel counts. All filenames below are relative to
 | [test_attention_kv_tail_numeric.py](../library/tests/test_attention_kv_tail_numeric.py) :: test_kv_tail_reads_in_bounds | gfx942, gfx950 | bf16 | 4 | 1 | 1001/777/130/1500 (ragged) | 32 | 8 | 128 | paged tiled 2D decode; page size=64; poison NaN slots and far page ids | Missing |
 | [test_attention_kv_tail_numeric.py](../library/tests/test_attention_kv_tail_numeric.py) :: test_kv_tail_reads_in_bounds | gfx942, gfx950 | bf16 | 4 | 1 | 1001/777/130/1500 (ragged) | 16 | 2 | 256 | paged tiled 2D decode; page size=16; poison NaN slots and far page ids | Missing |
 | [test_attention_kv_tail_numeric.py](../library/tests/test_attention_kv_tail_numeric.py) :: test_kv_tail_reads_in_bounds | gfx942, gfx950 | bf16 | 1 | 1000 | 1000 | 32 | 8 | 128 | paged tiled 2D prefill; i64 K/V addressing (num_kv_blocks overstated); page size=16; poison NaN slots and far page ids | Missing |
+| [test_attention_kv_tail_numeric.py](../library/tests/test_attention_kv_tail_numeric.py) :: test_kv_tail_reads_in_bounds | gfx942 | bf16 | 4 | 1 | 1001/777/130/1500 (ragged) | 32 | 8 | 128 | paged tiled 2D decode; i64 K/V addressing (num_kv_blocks overstated); K through global_load_lds; page size=16; poison NaN slots and far page ids | Missing |
 | [test_attention_kv_tail_numeric.py](../library/tests/test_attention_kv_tail_numeric.py) :: test_kv_tail_reads_in_bounds | gfx942, gfx950 | bf16 | 1 | 1000 | 1000 | 64 | 8 | 64 | paged tiled 2D prefill; page size=32; poison NaN slots and far page ids | Missing |
 | [test_attention_kv_tail_numeric.py](../library/tests/test_attention_kv_tail_numeric.py) :: test_kv_tail_reads_in_bounds | gfx942, gfx950 | bf16 | 1 | 1000 | 1000 | 64 | 8 | 64 | paged tiled 2D prefill; fast paged-KV descriptor, tile 64, 4 warps; page size=32; poison NaN slots and far page ids | Missing |
 | [test_attention_kv_tail_numeric.py](../library/tests/test_attention_kv_tail_numeric.py) :: test_kv_tail_reads_in_bounds | gfx950 | bf16 Q, fp8 K/V | 1 | 1000 | 1000 | 32 | 8 | 128 | paged tiled 2D prefill; page size=16; poison NaN slots and far page ids | Missing |
