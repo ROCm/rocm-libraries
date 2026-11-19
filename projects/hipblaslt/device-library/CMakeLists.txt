@@ -59,6 +59,7 @@ endif()
 
 create_device_library(
     TARGET tensilelite-device-libraries
+    GENERATOR tensilelite-generator
     LOGIC_PATH "${HIPBLASLT_LIBLOGIC_PATH}"
     OUTPUT_DIR "${HIPBLASLT_TENSILE_LIBPATH}"
     # The unstripped targets: TensileCreateLibrary keys its capability overrides

@@ -104,7 +104,7 @@ def _stamped_revision(archive: zipfile.ZipFile, names: set[str]):
 
 def validate(
     wheel: Path,
-    source_root: Path,
+    source_root: Path | None,
     expected_version: str,
     expected_source_revision: str | None = None,
 ) -> list[str]:
@@ -170,17 +170,28 @@ def validate(
         ):
             if resource not in names:
                 problems.append(f"missing resource: {resource}")
-        custom_kernel_root = source_root / "tensilelite/CustomKernels"
-        source_kernels = {
-            "tensilelite/CustomKernels/"
-            + path.relative_to(custom_kernel_root).as_posix()
-            for path in custom_kernel_root.rglob("*.s")
-        }
         wheel_kernels = {
             name for name in names if name.startswith("tensilelite/CustomKernels/")
         }
-        if source_kernels != wheel_kernels:
-            problems.append("custom-kernel resource set does not match the source tree")
+        if not wheel_kernels:
+            problems.append("missing custom-kernel resources")
+        if source_root is not None:
+            custom_kernel_root = source_root / "tensilelite/CustomKernels"
+            source_kernels = {
+                "tensilelite/CustomKernels/" + path.relative_to(custom_kernel_root).as_posix()
+                for path in custom_kernel_root.rglob("*.s")
+            }
+            if source_kernels != wheel_kernels:
+                problems.append("custom-kernel resource set does not match the source tree")
+        for module in (
+            "tensilelite/__init__.py",
+            "tensilelite/__main__.py",
+            "tensilelite/cli.py",
+            "tensilelite/logic/run.py",
+            "tensilelite/create_library/run.py",
+        ):
+            if module not in names:
+                problems.append(f"missing generator module: {module}")
         rocisa = [req for req in requirements if canonicalize_name(req.name) == "rocisa"]
         if rocisa:
             problems.append(

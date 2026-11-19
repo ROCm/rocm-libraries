@@ -77,7 +77,8 @@ target_include_directories(rocisa-cpp
 # Device generation and test artifacts require the in-tree extension.
 # ROCISA_BUILD_PYTHON retains a root-project rocisa-only configuration; the
 # standalone project remains independently buildable by Python packaging.
-if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
+if(HIPBLASLT_ENABLE_DEVICE OR HIPBLASLT_PREPARE_TENSILELITE_GENERATOR
+        OR HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS
         OR ROCISA_BUILD_PYTHON OR ROCISA_STANDALONE)
     # nanobind requires Python to be found first.
     if(ROCISA_USE_STABLE_ABI)

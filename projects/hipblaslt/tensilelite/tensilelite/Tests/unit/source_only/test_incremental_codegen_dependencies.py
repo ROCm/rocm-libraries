@@ -63,40 +63,26 @@ def _generator_package(root, runs, identity):
 
 @pytest.mark.parametrize(
     "command_mode",
-    ["source", "source_override", "source_root_override", "interpreter_override", "wheel"],
+    ["source", "source_root_override", "interpreter_override", "inherited_root"],
 )
 def test_codegen_tracks_inputs_used_by_selected_command(tmp_path, command_mode):
     runs = tmp_path / "runs"
     source = tmp_path / "source"
     package = _generator_package(source, runs, "source")
-    wheel = tmp_path / "wheel"
-    _generator_package(wheel, runs, "wheel")
-    stamp = tmp_path / "wheel.stamp"
-    stamp.touch()
     logic = tmp_path / "logic"
     logic.mkdir()
     (logic / "fixture.yaml").write_text("{}\n", encoding="utf-8")
-    configuration = []
-    if command_mode != "source":
-        configuration = [
-            "set(HIPBLASLT_PYTHON_COMMAND",
-            '  "${CMAKE_COMMAND}" -E env',
-            f'  "PYTHONPATH={wheel.as_posix()}" "{Path(sys.executable).as_posix()}")',
-            f'set(HIPBLASLT_PYTHON_INPUTS "{stamp.as_posix()}")',
-        ]
     overrides = []
-    if command_mode in ("source", "source_override", "source_root_override"):
+    if command_mode in ("source", "source_root_override"):
         overrides.append(f'CODEGEN_ROOT "{source.as_posix()}"')
-    if command_mode in ("source", "source_override", "interpreter_override"):
+    if command_mode in ("source", "interpreter_override"):
         overrides.append(f'PYTHON_EXECUTABLE "{Path(sys.executable).as_posix()}"')
     (tmp_path / "CMakeLists.txt").write_text(
         "\n".join(
             [
                 "cmake_minimum_required(VERSION 3.25)",
                 "project(generator_dependencies NONE)",
-                *configuration,
-                # The normal hipBLASLt wheel caller inherits its source root;
-                # only a per-call root explicitly selects source generation.
+                # Both explicit and inherited source selections stay supported.
                 f'set(HIPBLASLT_CODEGEN_ROOT "{source.as_posix()}")',
                 f'include("{_CODEGEN.as_posix()}")',
                 "create_device_library(",
@@ -112,23 +98,21 @@ def test_codegen_tracks_inputs_used_by_selected_command(tmp_path, command_mode):
     _run("cmake", "-G", "Ninja", "-S", str(tmp_path), "-B", str(build))
     target = "tensilelite-device-libraries"
     _build(build, target)
-    identity = "wheel" if command_mode == "wheel" else "source"
-    commands = [f"{identity}:logic", f"{identity}:create-library"]
+    commands = ["source:logic", "source:create-library"]
     expected = commands.copy()
     assert _runs(runs) == expected
     _build(build, target)
     assert _runs(runs) == expected
 
     # Python and both types of packaged generator resource invalidate source
-    # consumers, including a root or interpreter overriding a configured wheel.
+    # consumers, including explicit source and interpreter selections.
     for relative in ("__main__.py", "header.h", "kernel.s"):
         _next_change()
         path = package / relative
         with path.open("a", encoding="utf-8") as out:
             out.write("# changed\n" if path.suffix == ".py" else "// changed\n")
         _build(build, target)
-        if command_mode != "wheel":
-            expected += commands
+        expected += commands
         assert _runs(runs) == expected
 
     # Adding an old resource and removing it must invalidate membership even
@@ -138,22 +122,14 @@ def test_codegen_tracks_inputs_used_by_selected_command(tmp_path, command_mode):
     added.write_text("// added\n", encoding="utf-8")
     os.utime(added, (1, 1))
     _build(build, target)
-    if command_mode != "wheel":
-        expected += commands
+    expected += commands
     assert _runs(runs) == expected
     _next_change()
     added.unlink()
     _build(build, target)
-    if command_mode != "wheel":
-        expected += commands
+    expected += commands
     assert _runs(runs) == expected
 
-    _next_change()
-    stamp.touch()
-    _build(build, target)
-    if command_mode == "wheel":
-        expected += commands
-    assert _runs(runs) == expected
     _build(build, target)
     assert _runs(runs) == expected
 
@@ -185,12 +161,11 @@ def test_extops_regenerate_after_native_or_wheel_change(tmp_path, changed_input)
                 "add_library(_rocisa SHARED native.cpp)",
                 'file(GENERATE OUTPUT "${CMAKE_BINARY_DIR}/native-path"',
                 '  CONTENT "$<TARGET_FILE:_rocisa>")',
-                "add_custom_target(tensilelite-python-build-environment",
-                f'  DEPENDS _rocisa "{stamp.as_posix()}")',
-                "set(HIPBLASLT_PYTHON_DEPS tensilelite-python-build-environment)",
-                f'set(HIPBLASLT_PYTHON_INPUTS "{stamp.as_posix()}")',
-                "set(HIPBLASLT_PYTHON_COMMAND",
-                f'  "{Path(sys.executable).as_posix()}" "{runner.as_posix()}")',
+                f'include("{(_ROOT / "tensilelite/cmake/TensileLiteGenerator.cmake").as_posix()}")',
+                "add_custom_target(tensilelite-generator)",
+                "set_target_properties(tensilelite-generator PROPERTIES",
+                f'  TENSILELITE_GENERATOR_INPUTS "{stamp.as_posix()};_rocisa"',
+                f'  TENSILELITE_GENERATOR_COMMAND "{Path(sys.executable).as_posix()};{runner.as_posix()}")',
                 "set(GPU_TARGETS gfx942)",
                 f'set(HIPBLASLT_TENSILE_LIBPATH "{(tmp_path / "out").as_posix()}")',
                 "function(tensilelite_offload_target output arch)",

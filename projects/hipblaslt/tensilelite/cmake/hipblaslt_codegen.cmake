@@ -133,14 +133,14 @@ endfunction()
 function(create_device_library)
     set(_opts HOST_ASAN HOST_TSAN)
     set(_one
-        TARGET LOGIC_PATH OUTPUT_DIR CODEGEN_ROOT PYTHON_EXECUTABLE CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
+        TARGET GENERATOR LOGIC_PATH OUTPUT_DIR CODEGEN_ROOT PYTHON_EXECUTABLE CXX_COMPILER OFFLOAD_BUNDLER JOBS LOGIC_FILTER
         ASAN YAML_FORMAT NO_COMPRESS EXPERIMENTAL GEMM_A2A_FUSION LAZY_LOAD ASM_COMMENTS
         KEEP_BUILD_TMP ASM_DEBUG EMIT_OCCUPANCY_PROBE)
     set(_multi ARCHES)
     cmake_parse_arguments(_cdl "${_opts}" "${_one}" "${_multi}" ${ARGN})
 
     if(_cdl_UNPARSED_ARGUMENTS)
-        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted options: HOST_ASAN, HOST_TSAN; single-value keywords: TARGET, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, GEMM_A2A_FUSION, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG, EMIT_OCCUPANCY_PROBE; multi-value keyword: ARCHES)")
+        message(FATAL_ERROR "create_device_library: unexpected arguments: ${_cdl_UNPARSED_ARGUMENTS} (permitted options: HOST_ASAN, HOST_TSAN; single-value keywords: TARGET, GENERATOR, LOGIC_PATH, OUTPUT_DIR, CODEGEN_ROOT, PYTHON_EXECUTABLE, CXX_COMPILER, OFFLOAD_BUNDLER, JOBS, LOGIC_FILTER, ASAN, YAML_FORMAT, NO_COMPRESS, EXPERIMENTAL, GEMM_A2A_FUSION, LAZY_LOAD, ASM_COMMENTS, KEEP_BUILD_TMP, ASM_DEBUG, EMIT_OCCUPANCY_PROBE; multi-value keyword: ARCHES)")
     endif()
     if(NOT _cdl_LOGIC_PATH)
         message(FATAL_ERROR "create_device_library: LOGIC_PATH is required")
@@ -149,26 +149,34 @@ function(create_device_library)
         message(FATAL_ERROR "create_device_library: OUTPUT_DIR is required")
     endif()
 
-    if(_cdl_CODEGEN_ROOT)
-        set(_codegen_dir "${_cdl_CODEGEN_ROOT}")
-    elseif(HIPBLASLT_CODEGEN_ROOT)
-        set(_codegen_dir "${HIPBLASLT_CODEGEN_ROOT}")
-    else()
-        message(FATAL_ERROR
-            "create_device_library: CODEGEN_ROOT is required; pass the TensileLite source root "
-            "or set HIPBLASLT_CODEGEN_ROOT.")
-    endif()
-    set(_known_bugs_resource "${_codegen_dir}/tensilelite/logic/known_bugs.yaml")
-    foreach(_required_path
-            "${_codegen_dir}/tensilelite/__main__.py"
-            "${_codegen_dir}/tensilelite/cli.py"
-            "${_codegen_dir}/tensilelite/logic/run.py"
-            "${_codegen_dir}/tensilelite/create_library/run.py"
-            "${_known_bugs_resource}")
-        if(NOT EXISTS "${_required_path}")
-            message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
+    if(_cdl_GENERATOR)
+        if(_cdl_CODEGEN_ROOT OR _cdl_PYTHON_EXECUTABLE)
+            message(FATAL_ERROR "GENERATOR cannot be combined with CODEGEN_ROOT or PYTHON_EXECUTABLE")
         endif()
-    endforeach()
+        include("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/TensileLiteGenerator.cmake")
+        tensilelite_generator_command("${_cdl_GENERATOR}" _python_command _generator_dependencies)
+    else()
+        if(_cdl_CODEGEN_ROOT)
+            set(_codegen_dir "${_cdl_CODEGEN_ROOT}")
+        elseif(HIPBLASLT_CODEGEN_ROOT)
+            set(_codegen_dir "${HIPBLASLT_CODEGEN_ROOT}")
+        else()
+            message(FATAL_ERROR
+                "create_device_library: CODEGEN_ROOT is required; pass the TensileLite source root "
+                "or set HIPBLASLT_CODEGEN_ROOT.")
+        endif()
+        set(_known_bugs_resource "${_codegen_dir}/tensilelite/logic/known_bugs.yaml")
+        foreach(_required_path
+                "${_codegen_dir}/tensilelite/__main__.py"
+                "${_codegen_dir}/tensilelite/cli.py"
+                "${_codegen_dir}/tensilelite/logic/run.py"
+                "${_codegen_dir}/tensilelite/create_library/run.py"
+                "${_known_bugs_resource}")
+            if(NOT EXISTS "${_required_path}")
+                message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
+            endif()
+        endforeach()
+    endif()
     if(NOT IS_DIRECTORY "${_cdl_LOGIC_PATH}")
         message(FATAL_ERROR "create_device_library: LOGIC_PATH is not a directory: ${_cdl_LOGIC_PATH}")
     endif()
@@ -232,52 +240,47 @@ function(create_device_library)
         set(_cdl_LAZY_LOAD ON)
     endif()
 
-    set(_python_path_dirs "${_codegen_dir}")
-    set(_runtime_lib_dirs "")
-    if(TARGET _rocisa)
-        list(APPEND _python_path_dirs "$<TARGET_FILE_DIR:_rocisa>/..")
-        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:_rocisa>")
-    elseif(TARGET roc::tensilelite-host)
-        set(_installed_python_root "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt>")
-        list(APPEND _python_path_dirs "${_installed_python_root}")
-        list(APPEND _runtime_lib_dirs "${_installed_python_root}/rocisa")
-        list(APPEND _runtime_lib_dirs "${_installed_python_root}/tensilelite")
-        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::tensilelite-host>")
-    endif()
-    if(TARGET tensilelite-host)
-        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite-host>")
-    endif()
-    if(TARGET roc::origami)
-        list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::origami>")
-    endif()
+    if(NOT _cdl_GENERATOR)
+        set(_python_path_dirs "${_codegen_dir}")
+        set(_runtime_lib_dirs "")
+        if(TARGET _rocisa)
+            list(APPEND _python_path_dirs "$<TARGET_FILE_DIR:_rocisa>/..")
+            list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:_rocisa>")
+        elseif(TARGET roc::tensilelite-host)
+            set(_installed_python_root "$<IF:$<PLATFORM_ID:Windows>,$<TARGET_FILE_DIR:roc::tensilelite-host>/../lib/hipblaslt,$<TARGET_FILE_DIR:roc::tensilelite-host>/hipblaslt>")
+            list(APPEND _python_path_dirs "${_installed_python_root}")
+            list(APPEND _runtime_lib_dirs "${_installed_python_root}/rocisa")
+            list(APPEND _runtime_lib_dirs "${_installed_python_root}/tensilelite")
+            list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::tensilelite-host>")
+        endif()
+        if(TARGET tensilelite-host)
+            list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:tensilelite-host>")
+        endif()
+        if(TARGET roc::origami)
+            list(APPEND _runtime_lib_dirs "$<TARGET_FILE_DIR:roc::origami>")
+        endif()
 
-    set(_tool_bin_dirs "")
-    if(hip_DIR)
-        get_filename_component(_hip_bindir "${hip_DIR}/../../../bin" ABSOLUTE)
-        list(APPEND _tool_bin_dirs "${_hip_bindir}")
-    endif()
-    get_filename_component(_cxx_bindir "${_cdl_CXX_COMPILER}" DIRECTORY)
-    list(APPEND _tool_bin_dirs "${_cxx_bindir}")
+        set(_tool_bin_dirs "")
+        if(hip_DIR)
+            get_filename_component(_hip_bindir "${hip_DIR}/../../../bin" ABSOLUTE)
+            list(APPEND _tool_bin_dirs "${_hip_bindir}")
+        endif()
+        get_filename_component(_cxx_bindir "${_cdl_CXX_COMPILER}" DIRECTORY)
+        list(APPEND _tool_bin_dirs "${_cxx_bindir}")
 
-    set(_python_flags "")
-    if(_cdl_HOST_ASAN)
-        list(APPEND _python_flags ASAN)
-    elseif(_cdl_HOST_TSAN)
-        list(APPEND _python_flags TSAN)
-    endif()
-    hipblaslt_make_python_command(_python_command
-        PYTHON_EXECUTABLE "${_cdl_PYTHON_EXECUTABLE}"
-        PYTHONPATH_DIRS ${_python_path_dirs}
-        RUNTIME_LIB_DIRS ${_runtime_lib_dirs}
-        TOOL_BIN_DIRS ${_tool_bin_dirs}
-        ${_python_flags}
-    )
-    set(_uses_configured_python FALSE)
-    # Explicit per-call source or interpreter selections override the wheel.
-    # An inherited HIPBLASLT_CODEGEN_ROOT still permits the default wheel command.
-    if(HIPBLASLT_PYTHON_COMMAND AND NOT _cdl_PYTHON_EXECUTABLE AND NOT _cdl_CODEGEN_ROOT)
-        set(_python_command ${HIPBLASLT_PYTHON_COMMAND})
-        set(_uses_configured_python TRUE)
+        set(_python_flags "")
+        if(_cdl_HOST_ASAN)
+            list(APPEND _python_flags ASAN)
+        elseif(_cdl_HOST_TSAN)
+            list(APPEND _python_flags TSAN)
+        endif()
+        hipblaslt_make_python_command(_python_command
+            PYTHON_EXECUTABLE "${_cdl_PYTHON_EXECUTABLE}"
+            PYTHONPATH_DIRS ${_python_path_dirs}
+            RUNTIME_LIB_DIRS ${_runtime_lib_dirs}
+            TOOL_BIN_DIRS ${_tool_bin_dirs}
+            ${_python_flags}
+        )
     endif()
 
     file(MAKE_DIRECTORY "${_cdl_OUTPUT_DIR}/library")
@@ -334,25 +337,23 @@ function(create_device_library)
     if(_cdl_LOGIC_FILTER)
         list(APPEND _tensile_logic_args "--logic-filter=**/${_cdl_LOGIC_FILTER}.yaml")
     endif()
-    set(_codegen_dependencies "${_known_bugs_resource}")
-    if(TARGET _rocisa)
-        list(APPEND _codegen_dependencies _rocisa)
-    endif()
-    if(HIPBLASLT_PYTHON_DEPS)
-        list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_DEPS})
+    set(_codegen_dependencies ${_generator_dependencies})
+    if(NOT _cdl_GENERATOR)
+        list(APPEND _codegen_dependencies "${_known_bugs_resource}")
+        if(TARGET _rocisa)
+            list(APPEND _codegen_dependencies _rocisa)
+        endif()
     endif()
 
     # Both codegen steps glob their logic inputs at run time, so without an
     # explicit file list nothing invalidates the stamps and edits ship stale
     # kernels. CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches
-    # edits. The configured wheel command uses its unpack stamp; source-based
-    # commands, including explicit interpreter overrides, track source resources.
+    # edits. Packaged commands use their unpack stamp; source-based commands
+    # track source resources.
     file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
          "${_cdl_LOGIC_PATH}/*.yaml")
     set(_codegen_sources "")
-    if(_uses_configured_python AND HIPBLASLT_PYTHON_INPUTS)
-        list(APPEND _codegen_dependencies ${HIPBLASLT_PYTHON_INPUTS})
-    else()
+    if(NOT _cdl_GENERATOR)
         file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
              "${_codegen_dir}/tensilelite/*.py"
              "${_codegen_dir}/tensilelite/*.h"

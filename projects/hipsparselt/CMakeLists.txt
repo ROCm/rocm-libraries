@@ -74,6 +74,8 @@ option(HIPSPARSELT_BUILD_TESTING "Build test client." ON)
 option(HIPSPARSELT_BUILD_COVERAGE "Build tests with coverage enabled." OFF)
 
 option(HIPSPARSELT_ENABLE_DEVICE "Build hipSPARSELt device libraries." ON)
+option(HIPSPARSELT_USE_PACKAGED_TENSILELITE "Use the shared packaged TensileLite generator." OFF)
+set(TENSILELITE_GENERATOR_WHEEL "" CACHE FILEPATH "Explicit TensileLite generator wheel (required for staged builds).")
 set(TENSILELITE_LIBLOGIC_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/library/src/hcc_detail/rocsparselt/src/spmm/Tensile/Logic/asm_full"
     CACHE PATH "Path to the hipSPARSELt TensileLite logic files."
@@ -192,6 +194,12 @@ if(HIPSPARSELT_ENABLE_HIP)
         list(APPEND CMAKE_MODULE_PATH "${_hipblaslt_source_dir}/tensilelite/cmake")
         block()
             set(HIPBLASLT_ENABLE_TENSILELITE_ONLY ON)
+            if(HIPSPARSELT_USE_PACKAGED_TENSILELITE AND HIPSPARSELT_ENABLE_DEVICE)
+                set(HIPBLASLT_PREPARE_TENSILELITE_GENERATOR ON)
+                if(HIPSPARSELT_ENABLE_ASAN)
+                    set(HIPBLASLT_ENABLE_ASAN ON)
+                endif()
+            endif()
             set(HIPBLASLT_ENABLE_MXDATAGENERATOR OFF)
             set(CMAKE_SKIP_INSTALL_RULES ON)
             if(TENSILELITE_LIBRARY_FORMAT STREQUAL "yaml")
@@ -232,11 +240,41 @@ if(HIPSPARSELT_ENABLE_HIP)
         if(Tensile_NO_LAZY_LIBRARY_LOADING)
             list(APPEND _hipsparselt_codegen_product_args LAZY_LOAD OFF)
         endif()
+        if(HIPSPARSELT_USE_PACKAGED_TENSILELITE)
+            include(TensileLiteGenerator)
+            if(HIPSPARSELT_ENABLE_THEROCK)
+                if(NOT TENSILELITE_GENERATOR_WHEEL)
+                    message(FATAL_ERROR "Packaged staged generation requires TENSILELITE_GENERATOR_WHEEL")
+                endif()
+                set(_generator_environment
+                    "ROCM_VERSION=${hip_VERSION}" "TENSILELITE_ROCM_ADAPTER=therock-ci")
+                if(THEROCK_PACKAGE_VERSION AND NOT THEROCK_PACKAGE_VERSION STREQUAL "git")
+                    list(APPEND _generator_environment "THEROCK_PACKAGE_VERSION=${THEROCK_PACKAGE_VERSION}")
+                endif()
+                set(_generator_sanitizer "")
+                if(_hipsparselt_codegen_host_sanitizer_args STREQUAL "HOST_ASAN")
+                    set(_generator_sanitizer ASAN)
+                elseif(_hipsparselt_codegen_host_sanitizer_args STREQUAL "HOST_TSAN")
+                    set(_generator_sanitizer TSAN)
+                endif()
+                get_filename_component(_generator_tool_dir "${CMAKE_CXX_COMPILER}" DIRECTORY)
+                tensilelite_prepare_generator(TARGET tensilelite-generator
+                    WHEEL "${TENSILELITE_GENERATOR_WHEEL}"
+                    PYTHON_EXECUTABLE "${Python3_EXECUTABLE}"
+                    TOOL_BIN_DIRS "${_generator_tool_dir}"
+                    ENVIRONMENT ${_generator_environment}
+                    ${_generator_sanitizer})
+            endif()
+            set(_generator_selection GENERATOR tensilelite-generator)
+        else()
+            set(_generator_selection
+                CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
+                PYTHON_EXECUTABLE "${Python_EXECUTABLE}")
+        endif()
         create_device_library(
             LOGIC_PATH "${TENSILELITE_LIBLOGIC_PATH}"
             OUTPUT_DIR "${_hipsparselt_tensile_out}"
-            CODEGEN_ROOT "${HIPBLASLT_TENSILELITE_PATH}"
-            PYTHON_EXECUTABLE "${Python_EXECUTABLE}"
+            ${_generator_selection}
             # The unstripped targets: TensileCreateLibrary keys its capability
             # overrides on the xnack suffix, which GPU_TARGETS has had removed
             # for hip::device. Stated here rather than left to the default in
