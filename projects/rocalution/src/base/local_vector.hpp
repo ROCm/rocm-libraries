@@ -338,11 +338,41 @@ namespace rocalution
         ROCALUTION_EXPORT
         void PermuteBackward(const LocalVector<int>& permutation);
 
-        /** \brief Restriction operator based on restriction mapping vector */
+        /** \brief Restriction operator based on restriction mapping vector
+      * \details
+      * Sums the entries of a fine vector into this coarse vector: entry i of this vector
+      * is the sum of the entries j of \p vec_fine with map[j] = i, or zero if there are
+      * none. Fine entries with map[j] = -1 are skipped.
+      *
+      * This vector must already be allocated with at least max(map) + 1 entries, which
+      * is not checked, and its size does not change. If it has no entries, nothing is
+      * computed. \p map must have one entry per entry of \p vec_fine, and this vector,
+      * \p vec_fine and \p map must be on the same backend.
+      *
+      * @param[in]
+      * vec_fine    fine vector to restrict.
+      * @param[in]
+      * map         index of the coarse entry of each fine entry, or -1.
+      */
         ROCALUTION_EXPORT
         void Restriction(const LocalVector<ValueType>& vec_fine, const LocalVector<int>& map);
 
-        /** \brief Prolongation operator based on restriction mapping vector */
+        /** \brief Prolongation operator based on restriction mapping vector
+      * \details
+      * Copies the entries of a coarse vector into this fine vector: entry i of this
+      * vector is set to entry map[i] of \p vec_coarse, or to zero if map[i] = -1. \p map
+      * is the mapping that Restriction() takes.
+      *
+      * This vector must already be allocated with one entry per entry of \p map, and
+      * \p vec_coarse must have at least max(map) + 1 entries, which is not checked. If
+      * this vector has no entries, nothing is computed. This vector, \p vec_coarse and
+      * \p map must be on the same backend.
+      *
+      * @param[in]
+      * vec_coarse  coarse vector to prolongate.
+      * @param[in]
+      * map         index of the coarse entry of each fine entry, or -1.
+      */
         ROCALUTION_EXPORT
         void Prolongation(const LocalVector<ValueType>& vec_coarse, const LocalVector<int>& map);
 
