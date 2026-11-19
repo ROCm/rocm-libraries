@@ -10,7 +10,10 @@ import textwrap
 
 import pytest
 
-from tensilelite.SgprHazards import SgprHazardError, analyze, insertSgprHazardWaits, waitText
+from tensilelite.SgprHazards import (SgprHazardError, analyze, insertSgprHazardWaits, waitText,
+                                     withSgprHazardWaits)
+
+pytestmark = pytest.mark.unit
 
 SA = "s_wait_alu depctr_sa_sdst(0)"
 VA = "s_wait_alu depctr_va_sdst(0)"
@@ -323,6 +326,14 @@ def test_objdump_branch_targets_come_from_the_encoding():
         \tv_mov_b32_e32 v2, s4                // 00000000010C: 7E040204
         \ts_endpgm                            // 000000000110: BFB00000
         """) == [("v_mov_b32_e32 v2, s4", SA)]
+
+
+def test_with_waits_follows_the_cap():
+    asm = "v_mov_b32 v1, s4\ns_mov_b32 s4, 1\nv_mov_b32 v2, s4\ns_endpgm"
+    assert SA in withSgprHazardWaits(asm, {"HasVALUReadSGPRHazard": 1})
+    assert withSgprHazardWaits(asm, {"HasVALUReadSGPRHazard": 0}) == asm
+    with pytest.raises(KeyError):
+        withSgprHazardWaits(asm, {})
 
 
 def test_insert_is_idempotent_and_keeps_indentation():
