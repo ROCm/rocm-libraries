@@ -214,6 +214,42 @@ inline std::pair<int32_t, int32_t> computeMaskCoordinates(
 }
 
 // =============================================================================
+// Operand shape consistency
+// =============================================================================
+
+// The forward kernel's head-group arithmetic and tensor addressing assume the shapes of Q,
+// K, V and O describe one attention problem: Q [B, Hq, Sq, Dqk], K [B, Hkv, Skv, Dqk],
+// V [B, Hkv, Skv, Dv], O [B, Hq, Sq, Dv] with Hq a multiple of Hkv. Ranks are already 4.
+// The kernel takes the QK head size from Q alone, so K must agree with it.
+inline bool hasConsistentFwdShapes(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
+                                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& o)
+{
+    for(const auto* tensor : {&q, &k, &v, &o})
+    {
+        for(const auto dim : *tensor->dims())
+        {
+            if(dim <= 0)
+            {
+                return false;
+            }
+        }
+    }
+
+    const auto* qd = q.dims();
+    const auto* kd = k.dims();
+    const auto* vd = v.dims();
+    const auto* od = o.dims();
+    const int64_t headsQ = qd->Get(1);
+    const int64_t headsKv = kd->Get(1);
+    return kd->Get(0) == qd->Get(0) && kd->Get(3) == qd->Get(3) && vd->Get(0) == qd->Get(0)
+           && vd->Get(1) == headsKv && vd->Get(2) == kd->Get(2) && headsQ % headsKv == 0
+           && od->Get(0) == qd->Get(0) && od->Get(1) == headsQ && od->Get(2) == qd->Get(2)
+           && od->Get(3) == vd->Get(3);
+}
+
+// =============================================================================
 // Kernarg range primitives
 // =============================================================================
 //
