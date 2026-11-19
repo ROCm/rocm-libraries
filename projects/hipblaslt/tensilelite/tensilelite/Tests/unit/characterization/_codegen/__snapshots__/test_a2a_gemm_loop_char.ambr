@@ -283,3 +283,19 @@
     }),
   ])
 # ---
+# name: test_a2a_gemm_gfx950_golden[6]
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_A2AGemm_UserArgs_MT256x256MCmBCNF6vIA4cRkKb9uZ6hcBgI4LZoJ2lv3LnVs4QTE=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_A2AGemm_UserArgs_MT256x256XF6LZ59DTDmGYaR6mRtcCAVj8G8RVKOkGIl68wktCsE=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_BBS_BH_A2AGemm_UserArgs_MT256x256feIPfeiouXLKMVAefACgS0Pi5IHMRlsf-sTMNA8pgis=',
+      'err': 0,
+    }),
+  ])
+# ---

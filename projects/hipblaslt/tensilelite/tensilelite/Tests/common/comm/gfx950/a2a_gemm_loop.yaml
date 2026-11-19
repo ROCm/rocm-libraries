@@ -233,6 +233,49 @@ BenchmarkProblems:
           - Exact: {sizes: [3072, 2048, 1, 3072], world: 3}
           - Exact: {sizes: [3072, 2048, 1, 320], world: 5}
 
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1, 8, 8,  2, 2]   # MT 256x256
+        - DepthU: [64]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ExpandPointerSwap: [False]
+        - DirectToLds: [1]
+        - UseSubtileImpl: [True]
+        - StaggerU: [0]
+        - WorkGroupMapping: [1]
+        - A2ASubRounds: [1, 2, 4]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          # Batches of 22, 21 and 1 token blocks; a short last group at W 3-8.
+          - Exact: {sizes: [3072, 11264, 1, 1024], world: 2}
+          - Exact: {sizes: [3072, 11264, 1, 1536], world: 3}
+          - Exact: {sizes: [3072, 11264, 1, 2048], world: 4}
+          - Exact: {sizes: [3072, 11264, 1, 2560], world: 5}
+          - Exact: {sizes: [3072, 11264, 1, 3072], world: 6}
+          - Exact: {sizes: [3072, 11264, 1, 3584], world: 7}
+          - Exact: {sizes: [3072, 11264, 1, 4096], world: 8}
+          # One batch of 8 blocks: groups of 3/3/2, and 4 groups of 2 for 7 queues.
+          - Exact: {sizes: [8192, 2048, 1, 8192], world: 4}
+          - Exact: {sizes: [8192, 2048, 1, 8192], world: 8}
+          # Two batches of 16 blocks: groups of 3/3/3/3/3/1.
+          - Exact: {sizes: [4096, 8192, 1, 4096], world: 8}
+          # 7 blocks at odd worlds: groups of 4/3 and 2/2/2/1.
+          - Exact: {sizes: [2816, 1792, 1, 1536], world: 3}
+          - Exact: {sizes: [2816, 1792, 1, 2560], world: 5}
+          - Exact: {sizes: [2816, 1792, 1, 3584], world: 7}
+          # Fewer token blocks than peer queues.
+          - Exact: {sizes: [3072, 300, 1, 3072], world: 6}
+          - Exact: {sizes: [3072, 300, 1, 3584], world: 7}
+          - Exact: {sizes: [3072, 300, 1, 4096], world: 8}
+          # One batch of 128 blocks, 2 groups of 64: two passes per group.
+          - Exact: {sizes: [512, 32768, 1, 768], world: 3}
+
 LibraryLogic:
   ScheduleName: "a2a_gemm_loop_gfx950"
   DeviceNames: ["Device 75a0"]

@@ -12,9 +12,13 @@ segment switches touch no VGPR but lane 0 of Serial under EXEC=1 and restore it,
 no LDS or barrier, that the drain-send wait runs right before s_endpgm, and that
 the result assembles for gfx950. UseSubtileImpl kernels switch before the PGR=2
 batch-1 skip and after the loop exit label, never inside the loop body, leave
-the fixed Srd+2 window alone, and count the work-group out after the loop.
+the fixed Srd+2 window alone, and count the work-group out after the loop. The
+enqueuer's lanes stop at the group start, and a2aBatchSpan, run on a grid of
+shapes, leaves the batch, the group's first block and the first gathered segment
+in the A2A registers.
 """
 
+import itertools
 import math
 import os
 import re
@@ -22,6 +26,7 @@ import re
 import pytest
 
 from config_harness import assert_assembles, emit_kernels_from_config
+from tensilelite.Components.Signature import fusedA2AKernArgLayout
 
 pytestmark = pytest.mark.unit
 
@@ -43,7 +48,7 @@ _EPS = re.compile(r"\.amdhsa_kernel \S*_EPS(\d+)_")
 _ULSGRO = re.compile(r"\.amdhsa_kernel \S*_ULSGRO(\d+)_")
 _USI = re.compile(r"\.amdhsa_kernel \S*_USI(\d+)_")
 _DEPTHU = re.compile(r"\.amdhsa_kernel \S*_MT\d+x\d+x(\d+)_")
-_GROUPS = [0, 1, 2, 3, 4, 5]
+_GROUPS = [0, 1, 2, 3, 4, 5, 6]
 _LIMIT = 24
 
 _A2A_GEMM_MARKERS = (
@@ -65,7 +70,7 @@ def _sub_round_lines(subRounds, switches):
         rf"s_lshl_b32 s\[sgprA2AShardCounter\], s\[sgprA2AShardCounter\], {int(math.log2(subRounds))} +// \(W-1\) \* S": int(split),
         r"s_add_u32 s\[sgprA2AShardCounter\], s\[sgprA2AShardCounter\], 1 +// rounds = 1 \+ \(W-1\) \* S": int(split),
         r"s_lshl_b32 (s\d+), \1, 2 +// flag slot byte offset": subRounds + switches,
-        rf"s_lshl_b32 (s\d+), \1, {int(math.log2(subRounds))} +// \(bLast\*\(W-1\) \+ i\) \* S": subRounds if split else 0,
+        rf"s_lshl_b32 (s\d+), \1, {int(math.log2(subRounds))} +// \(gLo\*\(W-1\) \+ i\) \* S": subRounds if split else 0,
         rf"s_lshl_b32 (s\d+), \1, {int(math.log2(subRounds))} +// slot \* S": switches if split else 0,
         r"s_add_u32 (s\d+), \1, s\d+ +// \+ sub-round": switches if split else 0,
         rf"s_and_b32 (s\d+), \1, {subRounds - 1} +// sub-round = \(1 - rounds left\) mod S": switches if split else 0,
@@ -87,6 +92,52 @@ _SERIAL_LANE0 = re.compile(
     r"^(?:v_readfirstlane_b32 s\d+, v\[vgprSerial\]"
     r"|v_mov_b32 v\[vgprSerial\], s\d+"
     r"|global_load_dword v\[vgprSerial\], v\[vgprSerial\], s\[sgprFusedCounterPtr:sgprFusedCounterPtr\+1\] .*\bsc0 sc1\b)")
+
+_BATCH_SPAN_OPS = {
+    "s_mul_i32": lambda a, b: a * b,
+    "s_add_u32": lambda a, b: a + b,
+    "s_sub_u32": lambda a, b: a - b,
+    "s_min_u32": min,
+    "s_max_u32": max,
+    "v_cvt_f64_u32": float,
+    "v_rcp_f64": lambda a: 1.0 / a,
+    "v_mul_f64": lambda a, b: a * b,
+    "v_cvt_u32_f64": int,
+    "v_mul_lo_u32": lambda a, b: a * b,
+    "v_sub_u32": lambda a, b: a - b,
+    "v_add_u32": lambda a, b: a + b,
+    "v_readfirstlane_b32": lambda a: a,
+}
+
+
+def _batch_span(src):
+    """The FusedNumCu register and the (op, operands) of a2aBatchSpan from b * F through
+    the first gathered segment."""
+    layout = fusedA2AKernArgLayout()
+    wOff = int(re.search(r"^s_load_dword s\[sgprA2AW\], \S+, (\w+)", src, re.M).group(1), 0)
+    cuOff = wOff + layout["FusedNumCu"] - layout["FusedW"]
+    [numCu] = re.findall(rf"^s_load_dword (s\d+), \S+, {cuOff:#x}\b", src, re.M)
+    [first] = re.finditer(r"^.*// b \* F *$", src, re.M)
+    start = first.start()
+    end = src.index("\n", src.index("// first gathered segment = G + 1", start))
+    lines = [line.split("//")[0].strip() for line in src[start:end].splitlines()]
+    return numCu, [(op, [re.sub(r"v\[(\d+)(?::\d+)?\]", r"v\1", a) for a in args.split(", ")])
+                   for op, _, args in (line.partition(" ") for line in lines if line)]
+
+
+def _run_batch_span(insts, regs):
+    """regs after running insts on one lane."""
+    lane = True
+    for op, args in insts:
+        if op == "v_cmpx_ge_u32":
+            lane = regs[args[1]] >= regs[args[2]]
+        elif op == "s_mov_b64":
+            assert args == ["exec", "-1"], args
+            lane = True
+        elif op != "s_nop" and (op != "v_add_u32" or lane):
+            v = _BATCH_SPAN_OPS[op](*(regs[a] if a in regs else int(a, 0) for a in args[1:]))
+            regs[args[0]] = v & 0xFFFFFFFF if isinstance(v, int) else v
+    return regs
 
 
 @pytest.mark.parametrize("group", _GROUPS)
@@ -155,9 +206,34 @@ def test_a2a_gemm_gfx950_emits_assembly(group):
         counts = {p: sum(1 for line in lines if re.fullmatch(p, line)) for p in expected}
         assert counts == expected, f"Kernel {base!r}: A2ASubRounds lines {counts} != {expected}"
         assert "label_SkipTailLoopL:" not in src, f"Kernel {base!r}: tail loop emitted"
+        row = re.search(r"^s_add_u32 (\S+), \1, \S+ +// first block of group i$", src, re.M)
+        bounds = set(re.findall(r"^v_cmp_le_i32 vcc, (\S+), v\d+ +// inside the group\?$", src, re.M))
+        assert row and bounds == {row.group(1)}, \
+            f"Kernel {base!r}: lanes bounded by {bounds}, not the group start"
         assert src.count("label_a2a_drain_send_end:") == 1 and \
             re.search(r"^label_a2a_drain_send_end:\n^s_endpgm\b", src, re.M), \
             f"Kernel {base!r}: drain-send wait does not end the kernel"
+
+
+def test_a2a_gemm_gfx950_batch_span():
+    [(base, src, _err)] = emit_kernels_from_config(_CONFIG, limit=1, arch=_ARCH,
+                                                   size_group_index=_GROUPS[-1])
+    numCuReg, insts = _batch_span(src)
+    for numCu, W, F, T in itertools.product((32, 256), (2, 3, 4, 7, 8), (2, 11, 12, 32, 44),
+                                            (2, 7, 8, 44)):
+        for b in range(T):
+            regs = _run_batch_span(insts, {numCuReg: numCu, "s[sgprA2AW]": W,
+                                           "s[sgprWorkGroup1]": b, "s[sgprNumWorkGroups0]": F,
+                                           "s[sgprNumWorkGroups1]": T})
+            iB = b * F // numCu
+            bLo = -(-iB * numCu // F)
+            bHi = min(-(-(iB + 1) * numCu // F), T)
+            gk = -(-(bHi - bLo) // max(W - 1, 1))
+            g = (b - bLo) // gk
+            got = [regs[f"s[sgpr{r}]"] for r in ("A2ABlockLo", "A2ABlockCount", "A2AShardIdx",
+                                                 "A2AShardCounter")]
+            assert got == [bLo, bHi - bLo, g + 1, bLo + g * gk], \
+                f"Kernel {base!r}: numCu={numCu} W={W} F={F} T={T} b={b} -> {got}"
 
 
 @pytest.mark.parametrize("group", _GROUPS)
@@ -172,3 +248,4 @@ def test_a2a_gemm_gfx950_golden(snapshot, group):
         key=lambda d: d["basename"],
     )
     assert digest == snapshot
+
