@@ -707,9 +707,9 @@ tracked as a gap.
 
 **Informational.** Worth reading, cannot block a merge.
 
-- The hipBLASLt ASAN lane runs host-only ASAN quick tests on relevant pull requests, standard
-  tests nightly, and the selected test type manually. Multi-Arch CI ASAN (host-only ASAN on
-  gfx94X and gfx950) runs on every pull request. Neither is a required check
+- The hipBLASLt ASAN lane runs host-only ASAN quick tests on relevant pull requests and pushes
+  to `develop`, standard tests nightly, and the selected test type manually. Multi-Arch CI ASAN
+  (host-only ASAN on gfx94X and gfx950) runs on every pull request. Neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
 
@@ -903,7 +903,7 @@ the set of architectures the library supports or builds for.
 | Linux, gfx94X-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx950-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | On the pull-request path since the TheRock pin of 2026-10-02. Also covered per PR by Math CI |
 | Linux, gfx90a | Partial | TheRock nightly | Per-PR client testing remains in Math CI |
-| Linux, gfx942 / gfx950 | Partial | PR (host-only ASAN, quick tier); nightly (standard tier); manual (selected tier); not a required check | Separate hipBLASLt and hipSPARSELt GPU jobs share one build per architecture |
+| Linux, gfx942 / gfx950 | Partial | Relevant PRs and pushes to `develop` (host-only ASAN, quick tier); nightly (standard tier); manual (selected tier); not a required check | Separate hipBLASLt and hipSPARSELt GPU jobs share one build per architecture |
 | Windows, gfx110X | Partial | PR, via TheRock Multi-Arch CI | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
