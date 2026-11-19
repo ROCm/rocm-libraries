@@ -23,32 +23,81 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "rocke/helper_rocke.helpers.tiling.mma.h"
 #include "rocke/instance_gemm_internal.h"
 
-/* Reuse each A fragment across atom columns and each B fragment across atom
- * rows. Mirrors the cluster emission in _gemm_compute_tile.py. */
-static void rocke_gemm_accumulate_mfma_fragments(rocke_gemm_build_ctx_t* ctx,
-                                                 rocke_value_t* const* a_rows,
-                                                 rocke_value_t* const* b_cols,
-                                                 rocke_value_t** accs)
+/* Bind the current LDS slot and lane geometry for the staged TileMma readers. */
+struct rocke_gemm_mfma_operand
 {
-    rocke_ir_builder_t* b = ctx->b;
-    const bool prioritize = ctx->swz && ctx->sched_hints;
-    for(int mi = 0; mi < ctx->mfmas_m; ++mi)
-    {
-        if(prioritize)
-            rocke_b_s_setprio(b, 1);
-        for(int ni = 0; ni < ctx->mfmas_n; ++ni)
-        {
-            const int flat = mi * ctx->mfmas_n + ni;
-            accs[flat] = rocke_gemm_emit_mma(b, ctx->op, a_rows[mi], b_cols[ni], accs[flat]);
-        }
-        if(prioritize)
-        {
-            rocke_b_s_setprio(b, 0);
-            rocke_b_sched_barrier(b, 0);
-        }
-    }
+    rocke_value_t* src;
+    rocke_value_t* warp_off;
+    rocke_value_t* lane_off;
+    rocke_value_t* slot_off;
+    int static_slot_off;
+    int atom_rows;
+    int frag_len;
+};
+
+struct rocke_gemm_mfma_tile
+{
+    rocke_gemm_build_ctx_t* ctx;
+    rocke_value_t* k_base;
+    rocke_gemm_mfma_operand a;
+    rocke_gemm_mfma_operand b;
+};
+
+static rocke_value_t* rocke_gemm_read_mfma_operand(rocke_ir_builder_t* b,
+                                                   const rocke_gemm_mfma_tile& tile,
+                                                   const rocke_gemm_mfma_operand& operand,
+                                                   int ki,
+                                                   int atom)
+{
+    auto* ctx = tile.ctx;
+    auto* col = rocke_b_add(b, tile.k_base, rocke_b_const_i32(b, ki * ctx->spec->tile.warp_tile_k));
+    auto* row = rocke_b_add(
+        b,
+        operand.warp_off,
+        rocke_b_add(b,
+                    rocke_b_const_i32(b, atom * operand.atom_rows + operand.static_slot_off),
+                    operand.lane_off));
+    if(operand.slot_off != nullptr)
+        row = rocke_b_add(b, row, operand.slot_off);
+    return rocke_gemm_emit_smem_load(b,
+                                     operand.src,
+                                     row,
+                                     rocke_gemm_swz_col(ctx, col, row),
+                                     operand.frag_len,
+                                     ctx->storage_dtype);
+}
+
+static rocke_value_t* rocke_gemm_read_mfma_a(rocke_ir_builder_t* b, int ki, int mi, void* user)
+{
+    const auto& tile = *static_cast<rocke_gemm_mfma_tile*>(user);
+    return rocke_gemm_read_mfma_operand(b, tile, tile.a, ki, mi);
+}
+
+static rocke_value_t* rocke_gemm_read_mfma_b(rocke_ir_builder_t* b, int ki, int ni, void* user)
+{
+    const auto& tile = *static_cast<rocke_gemm_mfma_tile*>(user);
+    return rocke_gemm_read_mfma_operand(b, tile, tile.b, ki, ni);
+}
+
+static rocke_value_t* rocke_gemm_issue_mfma(
+    rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* bb, rocke_value_t* acc, void* user)
+{
+    const auto& tile = *static_cast<rocke_gemm_mfma_tile*>(user);
+    return rocke_gemm_emit_mma(b, tile.ctx->op, a, bb, acc);
+}
+
+static void rocke_gemm_start_mfma_row(rocke_ir_builder_t* b, void*)
+{
+    rocke_b_s_setprio(b, 1);
+}
+
+static void rocke_gemm_finish_mfma_row(rocke_ir_builder_t* b, void*)
+{
+    rocke_b_s_setprio(b, 0);
+    rocke_b_sched_barrier(b, 0);
 }
 
 /* ===================================================================== *
@@ -94,9 +143,6 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
     rocke_value_t* warp_n_off;
     rocke_value_t* k_blk_kbase;
 
-    int i;
-    int kk;
-
     if(ctx->is_wmma)
     {
         rocke_gemm_emit_wmma_phase(
@@ -141,60 +187,35 @@ void rocke_gemm_emit_mfma_phase(rocke_gemm_build_ctx_t* ctx,
     /* Lane-local K base inside the current K-tile, hoisted once. */
     k_blk_kbase = rocke_b_mul(b, k_blk, rocke_b_const_i32(b, ctx->a_per_lane));
 
-    /* new_accs = list(iter_vars) */
-    for(i = 0; i < num_iter_vars; ++i)
-        out_accs[i] = iter_vars[i];
-
-    for(kk = 0; kk < k_atoms; ++kk)
-    {
-        /* a_rows[mi] = _read_a(kk, mi); b_cols[ni] = _read_b(kk, ni). */
-        rocke_value_t* a_rows[ROCKE_GEMM_MAX_ACCS];
-        rocke_value_t* b_cols[ROCKE_GEMM_MAX_ACCS];
-        int mi;
-        int ni;
-
-        for(mi = 0; mi < mfmas_m; ++mi)
-        {
-            /* _read_a(kk, mi) */
-            rocke_value_t* col_base
-                = rocke_b_add(b, k_blk_kbase, rocke_b_const_i32(b, kk * t->warp_tile_k));
-            rocke_value_t* a_row = rocke_b_add(
-                b,
-                warp_m_off,
-                rocke_b_add(
-                    b, rocke_b_const_i32(b, mi * t->warp_tile_m + a_row_parity_off), m_in_atom));
-            if(a_par_row_v != NULL)
-                a_row = rocke_b_add(b, a_row, a_par_row_v);
-            a_rows[mi] = rocke_gemm_emit_smem_load(b,
-                                                   A_src,
-                                                   a_row,
-                                                   rocke_gemm_swz_col(ctx, col_base, a_row),
-                                                   ctx->a_per_lane,
-                                                   ctx->storage_dtype);
-        }
-
-        for(ni = 0; ni < mfmas_n; ++ni)
-        {
-            /* _read_b(kk, ni) */
-            rocke_value_t* col_base
-                = rocke_b_add(b, k_blk_kbase, rocke_b_const_i32(b, kk * t->warp_tile_k));
-            rocke_value_t* b_row = rocke_b_add(
-                b,
-                warp_n_off,
-                rocke_b_add(
-                    b, rocke_b_const_i32(b, ni * t->warp_tile_n + b_row_parity_off), n_in_atom));
-            if(b_par_row_v != NULL)
-                b_row = rocke_b_add(b, b_row, b_par_row_v);
-            b_cols[ni] = rocke_gemm_emit_smem_load(b,
-                                                   B_src,
-                                                   b_row,
-                                                   rocke_gemm_swz_col(ctx, col_base, b_row),
-                                                   ctx->b_per_lane,
-                                                   ctx->storage_dtype);
-        }
-
-        rocke_gemm_accumulate_mfma_fragments(ctx, a_rows, b_cols, out_accs);
-    }
+    rocke_gemm_mfma_tile tile{ctx,
+                              k_blk_kbase,
+                              {A_src,
+                               warp_m_off,
+                               m_in_atom,
+                               a_par_row_v,
+                               a_row_parity_off,
+                               t->warp_tile_m,
+                               ctx->a_per_lane},
+                              {B_src,
+                               warp_n_off,
+                               n_in_atom,
+                               b_par_row_v,
+                               b_row_parity_off,
+                               t->warp_tile_n,
+                               ctx->b_per_lane}};
+    const bool prioritize = ctx->swz && ctx->sched_hints;
+    const rocke_tile_mma_readers_t readers{rocke_gemm_read_mfma_a,
+                                           rocke_gemm_read_mfma_b,
+                                           rocke_gemm_issue_mfma,
+                                           prioritize ? rocke_gemm_start_mfma_row : nullptr,
+                                           prioritize ? rocke_gemm_finish_mfma_row : nullptr,
+                                           &tile};
+    rocke_tile_mma_accumulate_staged(b,
+                                     {mfmas_m, mfmas_n, k_atoms},
+                                     iter_vars,
+                                     static_cast<size_t>(num_iter_vars),
+                                     &readers,
+                                     out_accs);
 
     /* Quantitative two-stage HotLoop schedule, issued ONCE per K-tile.
      * Suppressed when _sched_hints is off (gfx950 default). */

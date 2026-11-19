@@ -247,11 +247,12 @@ slot and carries the accumulators across a runtime `scf_for_iter`.
   and LDS wait followed by a workgroup barrier *before* issuing the next copy.
   TDM retains a separate loop and completion policy.
 
-Inside one K tile, [`accumulate_mfma_tile`](../../python/rocke/instances/common/_gemm_compute_tile.py)
-reads each A atom row once for reuse across N, and each B atom column once for
-reuse across M. Lane and LDS addressing stay in the bound fragment readers.
-The inner atom loops are unrolled at build time. WMMA still uses its own
-fragment-loading contract.
+Inside one K tile, [`TileMmaDriver.accumulate_staged`](../../python/rocke/helpers/tiling/mma/driver.py)
+uses the same atom-grid walker as `TileMma`. It reads each A atom row and B
+atom column once per K atom, then reuses them across N and M respectively.
+UniversalGemm binds the lane and LDS addresses and supplies its row priority
+hints. Both engines unroll the atom traversal at build time. WMMA still uses
+its own fragment-loading contract.
 
 `scheduler in ("intrawave", "interwave")` selects the `SchedulePolicy` flavor (intra-wave or inter-wave overlap groups).
 

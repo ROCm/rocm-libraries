@@ -77,7 +77,7 @@ from ...helpers.io import io_ir_type
 from ...helpers.loads import CoalescedTileLoader, TdmSourceWindow2D, TdmTileLoader2D
 from ...helpers.spec import WarpTileBlockSizeMixin, choose_load_vec
 from ...helpers.tensor_view import make_global_view, make_tile_window
-from ._gemm_compute_tile import accumulate_mfma_tile
+from ...helpers.tiling import TileMmaDriver
 from ._gemm_kloop import GemmKLoop
 from ._gemm_kloop_tdm import TdmKLoop
 
@@ -2497,16 +2497,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 b, B_src, b_row, _swz_col(col_base, swz_row), b_per_lane, storage_dtype
             )
 
-        new_accs = accumulate_mfma_tile(
-            b,
-            k_atoms=k_atoms,
-            m_atoms=mfmas_m,
-            n_atoms=mfmas_n,
+        def _finish_mma_row():
+            b.s_setprio(0)
+            b.sched_barrier(0)
+
+        prioritize = _SWZ and _sched_hints
+        new_accs = TileMmaDriver.accumulate_staged(
+            subtiles=(mfmas_m, mfmas_n, k_atoms),
             accs=iter_vars,
             read_a=_read_a,
             read_b=_read_b,
             mma=lambda a, bb, acc: _emit_mma(b, op, a, bb, acc),
-            prioritize_clusters=_SWZ and _sched_hints,
+            before_row=(lambda: b.s_setprio(1)) if prioritize else None,
+            after_row=_finish_mma_row if prioritize else None,
         )
 
         # Quantitative two-stage HotLoop schedule (E3, E6 L1).

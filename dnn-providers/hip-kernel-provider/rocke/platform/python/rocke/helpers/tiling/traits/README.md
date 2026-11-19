@@ -293,8 +293,8 @@ A dtype an instruction takes as A, B, C or D has one spelling per layer, and eac
    form, `UNSIGNED_TWIN` (`mma_traits.py`).
 4. Add the rows that take it (Editing the catalog), then regenerate the backend coverage record.
 
-The catalog has no C++ counterpart: the tiling layer is Python only, and the C++ engine does not
-read this file.
+The C++ engine mirrors the staged atom-grid driver but does not use this catalog.
+Target resolution and fragment layout construction in `TileMmaPlan` remain Python-only.
 
 ## Backend coverage (`data/backend_coverage.json`)
 
