@@ -65,6 +65,66 @@ _WGRAD = (10, 17, 18, 20, 22, 33, 114, 117, 133, 139, 140, 141, 142, 143, 144)
 _REDUCE = tuple(range(16))
 _REDUCE_REFUSED = (16, 17, 18, 19, 20, 21)
 
+# Non-default spec fields some emitter config sets but no config of the cover
+# above does: they are set only by configs left out of the cover (configs
+# that do not lower at both llvm20 and llvm22). A field missing from both the
+# cover and this list fails test_the_cover_reaches_every_emitter_knob.
+_NOT_IN_COVER = {
+    "conv_implicit_gemm_emit": {
+        "acc_epilogue.bias",
+        "data.mma_dtype",
+        "lds_k_pad",
+        "split_atomic",
+        "split_k_cluster",
+    },
+    "conv_implicit_gemm_dgrad_emit": {
+        "async_dma",
+        "chiplet_swizzle",
+        "data.mma_dtype",
+        "unroll_k",
+    },
+    "conv_implicit_gemm_wgrad_emit": {
+        "data.mma_dtype",
+        "prefetch_global_regs",
+        "register_prefetch",
+    },
+}
+
+
+def _set_fields(spec, prefix: str = "") -> set:
+    """The non-default fields of a spec dataclass (nested ones dotted)."""
+    out = set()
+    for f in dataclasses.fields(spec):
+        if f.name == "problem":
+            continue
+        v = getattr(spec, f.name)
+        if dataclasses.is_dataclass(v) and not isinstance(v, type):
+            out |= _set_fields(v, prefix + f.name + ".")
+            continue
+        if f.default is not dataclasses.MISSING:
+            default = f.default
+        elif f.default_factory is not dataclasses.MISSING:
+            default = f.default_factory()
+        else:
+            continue
+        if v != default:
+            out.add(prefix + f.name)
+    return out
+
+
+def _emitter_configs(module: str):
+    if _PARITY not in sys.path:
+        sys.path.insert(0, _PARITY)
+    mod = importlib.import_module(module)
+    idx = 0
+    while True:
+        try:
+            spec, _ = mod._spec(idx)
+        except (SystemExit, IndexError, KeyError, ValueError):
+            return
+        yield idx, spec
+        idx += 1
+
 
 def _engine():
     from rocke.core.backend import BackendError, import_engine
@@ -259,6 +319,25 @@ class TestConvBindingForwardsKnobs(unittest.TestCase):
                     call(dict(d, acc_epilogue=relu), arch)
                 with self.assertRaisesRegex(ValueError, "lds_layout"):
                     call(dict(d, lds_layout="xor_swizzled"), arch)
+
+    def test_the_cover_reaches_every_emitter_knob(self):
+        """The index tuples are a cover of the emitters' knob fields; an
+        emitter config inserted before them shifts what they select. Every
+        non-default field some config sets is set by a covered config, or is
+        listed in _NOT_IN_COVER."""
+        for module, cover in (
+            ("conv_implicit_gemm_emit", _FWD),
+            ("conv_implicit_gemm_dgrad_emit", _DGRAD),
+            ("conv_implicit_gemm_wgrad_emit", _WGRAD),
+        ):
+            with self.subTest(module=module):
+                every, covered = set(), set()
+                for idx, spec in _emitter_configs(module):
+                    fields = _set_fields(spec)
+                    every |= fields
+                    if idx in cover:
+                        covered |= fields
+                self.assertEqual(every - covered, _NOT_IN_COVER[module])
 
     def test_3d_problem_without_is_3d_key(self):
         # dataclasses.asdict(ConvProblem) has no is_3d key: the depth fields
