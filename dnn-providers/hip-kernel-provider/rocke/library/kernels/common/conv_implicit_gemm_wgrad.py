@@ -1853,11 +1853,12 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
             or spec.epilogue != "default"
             or spec.xwin
             or spec.group_merge > 1
+            or spec.wave_size != 64
             or (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) != (16, 16, 16)
             or spec.data.dtype_d not in ("bf16", "fp16")
         )
     ):
-        return "epi_quad_xpose (wgrad) is 0 or 1: unsplit default epilogue, 16x16x16 atoms, 16-bit dW"
+        return "epi_quad_xpose (wgrad) is 0 or 1: unsplit default epilogue, 16x16x16 wave64 MFMA atoms, 16-bit dW"
     if spec.epi_store_fast and (
         spec.split_k > 1
         or spec.two_stage
@@ -1866,6 +1867,7 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         or spec.xwin
         or spec.group_merge > 1
         or spec.epi_quad_xpose
+        or spec.wave_size != 64
         or (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k) != (16, 16, 16)
         or spec.data.dtype_d not in ("bf16", "fp16")
     ):
@@ -1907,8 +1909,19 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
         or spec.xwin_groups != 1
         or spec.xwin_pp
         or spec.xwin_mrow != 1
+        or spec.xwin_gn
+        or spec.xwin_bq
+        or spec.xwin_aq
+        or spec.xwin_pps
+        or spec.xwin_rot
+        or spec.xwin_kord
     ):
-        return "xwin_rows / xwin_groups / xwin_pp / xwin_mrow need xwin"
+        # Every xwin sub-knob is a no-op without xwin: refused rather than
+        # renaming the plain kernel.
+        return (
+            "xwin_rows / xwin_groups / xwin_pp / xwin_mrow / xwin_gn / xwin_bq / "
+            "xwin_aq / xwin_pps / xwin_rot / xwin_kord need xwin"
+        )
     if spec.sep_addr not in (0, 1, 2):
         return f"sep_addr must be 0, 1 or 2 (got {spec.sep_addr})"
     if spec.sep_addr and (spec.group_merge > 1 or spec.problem.is_pointwise):
@@ -1918,6 +1931,9 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
     if spec.kp_line:
         if spec.kp_line != 8 or spec.lds_kpack < 2 or not spec.prefetch_regs:
             return "kp_line=8 re-decodes the k-packed reads of the prefetch_regs loops"
+        _why = _kp_line_conflict(spec)
+        if _why:
+            return _why
     if spec.lds_bswz:
         if spec.lds_bswz != 1 or spec.prefetch_regs not in (1, 3):
             return "lds_bswz=1 swizzles the B tile of the prefetch_regs=1/3 loop"
@@ -1925,9 +1941,20 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
             return "lds_bswz needs the M-outer synchronous tile"
         if spec.tile_k not in (16, 32, 64) or spec.lds_kpack not in (2, 4):
             return "lds_bswz needs tile_k 16/32/64 and lds_kpack 2/4"
+        _ops = _sync_kpack_operands(spec)
+        if _ops is not None and _ops[1][4] not in (2, 4):
+            return (
+                "lds_bswz needs the k-packed row-mode B store (the B tile must "
+                "split into whole lds_kpack chunks per thread)"
+            )
     if spec.pfr_sched:
         if spec.pfr_sched < 0 or spec.prefetch_regs not in (1, 3):
             return "pfr_sched schedules the prefetch_regs=1/3 loop's reads (>= 0)"
+        if spec.xwin_pp:
+            return (
+                "pfr_sched schedules the plain prefetch_regs loop's reads, not the "
+                "xwin_pp ping-pong"
+            )
         if spec.pfr_sched > 1 and spec.pipeline != "mem":
             return "pfr_sched interleave (>1) needs the plain mem pipeline"
     if spec.lds_kpack != 1:
@@ -1945,6 +1972,11 @@ def _prefetch_addr_conflict(spec: "WgradConvSpec") -> str:
                 "prefetch_regs rewrites the single-buffer synchronous K loop; it "
                 "cannot combine with async_dma, unroll_k or prefetch_addr"
             )
+        # The prefetch_regs loops carry the next tile's global loads as loop
+        # values, like prefetch_global_regs.
+        _why = _staged_chunks_conflict(spec, "prefetch_regs")
+        if _why:
+            return _why
     if not spec.prefetch_addr:
         return ""
     if spec.async_dma:
@@ -2012,22 +2044,105 @@ def _prefetch_global_regs_conflict(spec: "WgradConvSpec") -> str:
             "prefetch_global_regs is not supported with prefetch_addr: the "
             "carried-offset K loop has its own schedule"
         )
+    return _staged_chunks_conflict(spec, "prefetch_global_regs")
+
+
+# The register-prefetch loops carry every global load of the next tile as a
+# loop value. The C++ engine stages them in ROCKE_CTL_MAX_VECS_PER_THREAD slots
+# per operand (helper_rocke.helpers.loads.h); both engines refuse more.
+_PGR_MAX_STAGED_CHUNKS = 32
+
+
+def _staged_chunks_conflict(spec: "WgradConvSpec", label: str) -> str:
+    """Why the ``label`` loop cannot stage the tile's global loads, or ``""``."""
     chunks = _sync_staged_chunks(spec)
     if chunks is not None:
         for operand, n in zip("AB", chunks):
             if n > _PGR_MAX_STAGED_CHUNKS:
                 return (
-                    f"prefetch_global_regs carries at most {_PGR_MAX_STAGED_CHUNKS} "
+                    f"{label} carries at most {_PGR_MAX_STAGED_CHUNKS} "
                     f"global loads per thread per operand; the {operand} tile "
                     f"needs {n} (use a wider vector or a smaller tile)"
                 )
     return ""
 
 
-# The register-prefetch loop carries every global load of the next tile as a
-# loop value. The C++ engine stages them in ROCKE_CTL_MAX_VECS_PER_THREAD slots
-# per operand (helper_rocke.helpers.loads.h); both engines refuse more.
-_PGR_MAX_STAGED_CHUNKS = 32
+def _sync_kpack_operands(spec: "WgradConvSpec"):
+    """The synchronous M-outer tile loaders as the builder makes them.
+
+    ``((rows, cols, threads, load_vec, row_kpack), ...)`` for A then B:
+    the row-mode width ``choose_vec`` picks (1 = the scalar column path) and
+    the ``row_kpack`` the builder gives the store (``lds_kpack`` where
+    ``CoalescedTileLoader.kpack_ok`` admits it, else 1). ``None`` when the
+    builder makes no such loaders (async_dma, lds_k_outer, xwin_rows > 1) or
+    the tile admits no width at all (the builder reports that itself).
+    """
+    if spec.async_dma or spec.lds_k_outer or (spec.xwin and spec.xwin_rows > 1):
+        return None
+    p = spec.merged_problem
+    threads = spec.group_block_size
+    ops = []
+    for rows, chan, dtype, cap in (
+        (spec.tile_m, p.kpg, spec.data.dtype_a, spec.vector_size_a),
+        (spec.tile_n, p.cpg, spec.data.dtype_b, spec.vector_size_b),
+    ):
+        try:
+            vec = CoalescedTileLoader.choose_vec(
+                tile_rows=rows,
+                tile_cols=spec.tile_k,
+                block_size=threads,
+                max_vec=_wgrad_free_axis_vec(chan, dtype, cap),
+                vector_axis="row",
+            )
+        except ValueError:
+            return None
+        kp = 1
+        if (
+            vec > 1
+            and spec.lds_kpack > 1
+            and CoalescedTileLoader.kpack_ok(
+                tile_rows=rows,
+                tile_cols=spec.tile_k,
+                block_size=threads,
+                load_vec=vec,
+                kpack=spec.lds_kpack,
+            )
+        ):
+            kp = spec.lds_kpack
+        ops.append((rows, spec.tile_k, threads, vec, kp))
+    return tuple(ops)
+
+
+def _kp_line_conflict(spec: "WgradConvSpec") -> str:
+    """Why ``spec.kp_line`` cannot take the tile's k-packed loaders, or ``""``.
+
+    The builder gives the line decode to every operand it k-packs; the loader
+    (``CoalescedTileLoader``) then needs whole 64-lane groups and a line of
+    row chunks dividing the rows. With no k-packed operand the knob would only
+    rename the kernel.
+    """
+    ops = _sync_kpack_operands(spec)
+    if ops is None:
+        return ""
+    packed = [op for op in ops if op[4] > 1]
+    if not packed:
+        return (
+            "kp_line=8 needs an operand the tile k-packs (lds_kpack chunks per thread)"
+        )
+    cgl = 64 // spec.kp_line
+    for rows, cols, threads, vec, kp in packed:
+        ncg = cols // kp
+        if (
+            ncg % cgl
+            or (rows // vec) % spec.kp_line
+            or threads % 64
+            or (threads // 64) % (ncg // cgl)
+        ):
+            return (
+                "kp_line=8 needs whole 64-lane groups and a line of row chunks "
+                "dividing the rows of every k-packed operand"
+            )
+    return ""
 
 
 def _sync_staged_chunks(spec: "WgradConvSpec") -> Optional[Tuple[int, int]]:
@@ -2040,7 +2155,9 @@ def _sync_staged_chunks(spec: "WgradConvSpec") -> Optional[Tuple[int, int]]:
     that itself.
     """
     p = spec.merged_problem
-    threads = spec.block_size
+    # The loaders split one group's tile over its threads (xwin_groups > 1
+    # gives every group its own loaders).
+    threads = spec.group_block_size
     caps = (
         _wgrad_free_axis_vec(p.kpg, spec.data.dtype_a, spec.vector_size_a),
         _wgrad_free_axis_vec(p.cpg, spec.data.dtype_b, spec.vector_size_b),
@@ -2951,16 +3068,17 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     ) * _ab_dtype_bytes
     if spec.xwin and (spec.xwin_groups > 1 or spec.xwin_mrow > 1):
         # The builder's xwin tiles (the window, not a tile_n-row B tile), one
-        # pair per group.
+        # pair per group; xwin_gn 2 shares the dY (A) tile over three slots
+        # (two slots and a trash slot) instead of one per group.
         _b_shape = (
             spec.tile_n // spec.xwin + 8,
             xwin_window_stride(spec.tile_k, spec.xwin, spec.xwin_mrow),
         )
+        _a_slots = 3 if spec.xwin_gn == 2 else spec.xwin_groups
         _ab_bytes = (
-            (_a_shape[0] * _a_shape[1] + _b_shape[0] * _b_shape[1])
-            * _ab_dtype_bytes
-            * spec.xwin_groups
-        )
+            _a_slots * _a_shape[0] * _a_shape[1]
+            + spec.xwin_groups * _b_shape[0] * _b_shape[1]
+        ) * _ab_dtype_bytes
     # Only async_dma and unroll_k reach a K-loop that actually alternates between
     # the two LDS buffers: async_dma takes the SoftwarePipeline branch and
     # unroll_k hand-rolls a ping-pong. "compv4" on its own shares the plain
@@ -2989,6 +3107,14 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
         return False, (
             f"LDS budget {_total_lds} bytes "
             f"(A/B={'x2 ' if _double else ''}{_ab_bytes}, C={_c_lds}, aliased) "
+            f"> {target.lds_capacity_bytes} cap on {arch}"
+        )
+    # The Stage 1 epilogue tiles of ws_lc / ws_gred alias the A/B pool too
+    # (allocated after the K loop), so they only have to fit on their own.
+    _epi_lds = _wgrad_epilogue_lds_bytes(spec)
+    if not target.fits_lds(_epi_lds):
+        return False, (
+            f"LDS budget {_epi_lds} bytes (the ws_lc / ws_gred epilogue tile) "
             f"> {target.lds_capacity_bytes} cap on {arch}"
         )
 
@@ -3029,6 +3155,23 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
                 return False, _async_why
 
     return True, "ok"
+
+
+def _wgrad_epilogue_lds_bytes(spec: WgradConvSpec) -> int:
+    """LDS bytes of the ws_lc / ws_gred epilogue tile (0 when neither is on).
+
+    The shapes :func:`_emit_ws_lc_atomics` / :func:`_emit_ws_gred_atomics`
+    allocate (f32): ws_lc one (16, W + 4) tile per wave of the workgroup, W
+    the wave's channel run; ws_gred two pairs of 64-lane accumulator rows per
+    wave of both groups (xwin's atoms hold 4 accumulators per lane).
+    """
+    n = 0
+    if spec.ws_lc:
+        w = 16 * (spec.mfmas_per_warp_n // spec.xwin)
+        n = max(n, (spec.block_size // spec.wave_size) * 16 * (w + 4) * 4)
+    if spec.ws_gred:
+        n = max(n, 2 * (spec.warp_m * spec.warp_n) * 2 * 64 * 4 * 4)
+    return n
 
 
 def _wgrad_mma_family(arch: str) -> str:

@@ -89,6 +89,14 @@
  *  108    the same base at split_k = 1 with vector_size_c = 2: the cshuffle
  *         store epilogue honours the explicit dW width (C = 64 alone would
  *         pick 8). Must match the Python _ATOMIC_VEC_C_BASES.
+ *  109-142 gfx942 3-D grid-per-group configs (make_cfg_3d_any, numbered 55-88
+ *         there): bf16 grouped tiles (112, the split_k=2 bf16 atomics on a
+ *         1-wide dW store, both engines must reject), the register-prefetch,
+ *         addressing, workspace and xwin knobs on them, and the grouped
+ *         cshuffle epilogues. Must match the Python _gfx942_3d_any.
+ *  143-153 make_gate_cfg: the grouped cshuffle store and split-K atomic at an
+ *         explicit dW width (143-144), then specs both engines must reject
+ *         (145-153). Must match the Python _GATE_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -562,8 +570,83 @@ static int make_cfg_3d_any(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec,
     return -1;
 }
 
+static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch);
+
+/* Configs 143-153 (Python _GATE_CFGS): an explicit dW width on the grouped
+ * cshuffle epilogues (143-144), then specs both engines must reject. */
+static int make_gate_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
+{
+    static const int base[11] = {140, 141, 109, 110, 21, 11, 16, 111, 127, 5, 16};
+    if(make_cfg(base[idx - 143], spec, arch) != 0)
+        return -1;
+    switch(idx)
+    {
+    case 143:
+    case 144:
+        spec->has_vector_size_c = true;
+        spec->vector_size_c = 2;
+        return 0;
+    case 145: /* prefetch_regs=2: two stacked A/B tiles over the LDS cap */
+        spec->prefetch_regs = 2;
+        return 0;
+    case 146: /* xwin_gn 2's three shared dY slots over the LDS cap */
+        spec->tile_m = 256;
+        spec->warp_m = 4;
+        spec->warp_n = 1;
+        spec->xwin = 3;
+        spec->xwin_groups = 2;
+        spec->xwin_pp = 8;
+        spec->xwin_gn = 2;
+        spec->prefetch_regs = 1;
+        spec->lds_kpack = 2;
+        return 0;
+    case 147: /* stream-K never reaches the prefetch_regs K loop */
+        spec->prefetch_regs = 1;
+        return 0;
+    case 148: /* prefetch_regs carrying 64 scalar loads per thread */
+        spec->tile_k = 256;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 1;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 1;
+        spec->prefetch_regs = 1;
+        return 0;
+    case 149: /* two-stage stores through the f32 scratch, not cshuffle */
+        spec->epilogue = "cshuffle";
+        return 0;
+    case 150: /* an xwin sub-knob without xwin */
+        spec->xwin_kord = 1;
+        return 0;
+    case 151: /* pfr_sched does not schedule the xwin_pp ping-pong */
+        spec->pfr_sched = 1;
+        return 0;
+    case 152: /* the fast dW store is a wave64 MFMA epilogue */
+        spec->epi_store_fast = true;
+        return 0;
+    case 153: /* kp_line its k-packed operand cannot decode */
+        spec->tile_m = 32;
+        spec->tile_n = 64;
+        spec->warp_m = 1;
+        spec->warp_n = 2;
+        spec->has_vector_size_a = true;
+        spec->vector_size_a = 4;
+        spec->has_vector_size_b = true;
+        spec->vector_size_b = 4;
+        spec->prefetch_regs = 1;
+        spec->lds_kpack = 2;
+        spec->kp_line = 8;
+        spec->split_k = 1;
+        spec->two_stage = false;
+        return 0;
+    default:
+        return -1;
+    }
+}
+
 static int make_cfg(int idx, rocke_implicit_gemm_conv_wgrad_spec_t* spec, const char** arch)
 {
+    if(idx >= 143 && idx <= 153)
+        return make_gate_cfg(idx, spec, arch);
     if(idx >= 73 && idx <= 88)
         return make_cfg_tf32(idx, spec, arch);
     if(idx >= 89 && idx <= 105)

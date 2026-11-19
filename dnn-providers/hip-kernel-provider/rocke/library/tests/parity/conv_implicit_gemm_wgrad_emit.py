@@ -114,10 +114,23 @@
 #   108 -- the same base at split_k = 1 with vector_size_c = 2: the cshuffle
 #         store epilogue must honour the explicit dW width (C = 64 alone
 #         would pick 8) in both engines.
-#   (Grouped wgrad reaches the C++ engine only through stream-K. The
-#    async loop's copy carries no element type, only its zero-fill does. The stream-K
-#    partition and CTA pool are kernargs, so no case varies them. async_dma is
-#    rejected with stream-K, and so is prefetch_addr.)
+#   109-142 -- gfx942 3-D grid-per-group configs, numbered 55-88 by
+#         _gfx942_3d_spec (_GFX942_3D_OFFSET = 54): bf16 grouped tiles
+#         (109-112; 112 is 110 with split_k=2 bf16 atomics on a 1-wide dW
+#         store, which both engines must reject), the register-prefetch,
+#         addressing, workspace and xwin knobs on them (113-139, see
+#         _GFX942_3D_KNOBS) and the grouped cshuffle epilogues (140-142).
+#   143-153 -- see _GATE_CFGS: the grouped cshuffle store and split-K atomic
+#         at an explicit dW width (143-144), then specs both engines must
+#         reject (145-153): LDS over the cap with prefetch_regs=2 and with
+#         xwin_gn 2, prefetch_regs with stream-K or past the staged-load
+#         limit, two-stage with cshuffle, an xwin sub-knob without xwin,
+#         pfr_sched with xwin_pp, the fast store on wave32, and kp_line on a
+#         tile its k-packed operand cannot decode.
+#   (The async loop's copy carries no element type, only its zero-fill does.
+#    The stream-K partition and CTA pool are kernargs, so no case varies them.
+#    async_dma is rejected with stream-K, and so are prefetch_addr and
+#    prefetch_regs.)
 #
 # Negative cases (configs 200+) verify that invalid specs are rejected:
 #   200 -- odd C with fp16 split-K (must raise ValueError)
@@ -129,7 +142,7 @@
 #   207 -- streamk with unroll_k (must raise ValueError)
 #   208 -- streamk atomic reduction into fp16 dW (must raise ValueError)
 # (These illustrate the validator contract. The C emitter defines only cases
-# 0-108, so run_diff.py stops at the shared END before reaching 200+; these
+# 0-153, so run_diff.py stops at the shared END before reaching 200+; these
 # configs are not exercised by the differential gate.)
 from kernels.common.conv_implicit_gemm_wgrad import (
     WgradConvSpec,
@@ -234,6 +247,67 @@ _ATOMIC_VEC_C_BASES = {
 }
 
 
+# Configs 143-153 (index -> (base, overrides)): an explicit dW width on the
+# grouped cshuffle epilogues, then specs both engines must reject. Keep in
+# lockstep with make_gate_cfg() in conv_implicit_gemm_wgrad_emit.c.
+_GATE_CFGS = {
+    # grouped (cpg = 12) cshuffle store, and its packed fp16 split-K atomic,
+    # at an explicit dW width 2 (the channel run alone would pick 4)
+    143: (140, {"vector_size_c": 2}),
+    144: (141, {"vector_size_c": 2}),
+    # must reject: prefetch_regs=2 stacks two A/B tiles, 73728 LDS bytes
+    145: (109, {"prefetch_regs": 2}),
+    # must reject: xwin_gn 2's three shared dY slots overrun the LDS
+    146: (
+        110,
+        {
+            "tile_m": 256,
+            "warp_m": 4,
+            "warp_n": 1,
+            "xwin": 3,
+            "xwin_groups": 2,
+            "xwin_pp": 8,
+            "xwin_gn": 2,
+            "prefetch_regs": 1,
+            "lds_kpack": 2,
+        },
+    ),
+    # must reject: stream-K never reaches the prefetch_regs K loop
+    147: (21, {"prefetch_regs": 1}),
+    # must reject: prefetch_regs carrying 64 scalar loads per thread
+    148: (
+        11,
+        {"tile_k": 256, "vector_size_a": 1, "vector_size_b": 1, "prefetch_regs": 1},
+    ),
+    # must reject: two-stage stores through the f32 scratch, not cshuffle
+    149: (16, {"epilogue": "cshuffle"}),
+    # must reject: an xwin sub-knob without xwin
+    150: (111, {"xwin_kord": 1}),
+    # must reject: pfr_sched does not schedule the xwin_pp ping-pong
+    151: (127, {"pfr_sched": 1}),
+    # must reject: the fast dW store is a wave64 MFMA epilogue
+    152: (5, {"epi_store_fast": True}),
+    # must reject: kp_line on a tile whose k-packed operand cannot take the
+    # line decode (2 waves, 4 column-group blocks)
+    153: (
+        16,
+        {
+            "tile_m": 32,
+            "tile_n": 64,
+            "warp_m": 1,
+            "warp_n": 2,
+            "vector_size_a": 4,
+            "vector_size_b": 4,
+            "prefetch_regs": 1,
+            "lds_kpack": 2,
+            "kp_line": 8,
+            "split_k": 1,
+            "two_stage": False,
+        },
+    ),
+}
+
+
 def _spec(idx: int):
     """Return (spec, arch) for config index `idx`.
 
@@ -242,6 +316,13 @@ def _spec(idx: int):
     illustrative of the validator contract; no differential harness consumes
     them (see the module header).
     """
+    if idx in _GATE_CFGS:
+        from dataclasses import replace
+
+        base_idx, extra = _GATE_CFGS[idx]
+        spec, arch = _spec(base_idx)
+        return replace(spec, **extra), arch
+
     if idx in _ATOMIC_VEC_C_BASES:
         from dataclasses import replace
 
@@ -1216,7 +1297,9 @@ def _grouped_cshuffle_spec(idx: int):
 #   56: bf16, groups=2, t128x192x32 w1x4, split_k=2 two-stage (1024 slabs),
 #       lds_k_pad=4, waves_per_eu=2
 #   57: 55 with fp16 operands, groups=1
-#   58: 56 with split_k=2 atomics (no two-stage), ws_replicas default
+#   58: 56 with split_k=2 atomics (no two-stage), ws_replicas default: both
+#       engines must reject it (bf16 dW atomics on the 1-wide dW store leave
+#       no pair partner)
 def _gfx942_3d_spec(idx: int):
     from kernels.common._conv_implicit_gemm_common import ConvDataSpec
 

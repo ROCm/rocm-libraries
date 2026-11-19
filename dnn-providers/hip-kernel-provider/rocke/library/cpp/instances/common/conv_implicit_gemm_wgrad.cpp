@@ -640,10 +640,10 @@ static bool wgrad_streamk_gates(const rocke_implicit_gemm_conv_wgrad_spec_t* s,
                         reason_cap,
                         "streamk runs one plain K loop per work item; async_dma/unroll_k "
                         "pipeline the K loop across items");
-    if(s->prefetch_addr)
+    if(s->prefetch_addr || s->prefetch_regs)
         ROCKE_SPEC_FAIL(reason,
                         reason_cap,
-                        "streamk runs its own K loop per work item; prefetch_addr rewrites "
+                        "streamk runs its own K loop per work item; prefetch_addr/regs rewrites "
                         "the data-parallel K loop, which stream-K never reaches");
     if(s->prefetch_global_regs)
         ROCKE_SPEC_FAIL(reason,
@@ -787,6 +787,53 @@ static bool wgrad_sync_staged_chunks(const rocke_implicit_gemm_conv_wgrad_spec_t
         out[i] = frees[i] * s->tile_k / (vec * threads);
     }
     return true;
+}
+
+/* Python _kp_line_conflict: kp_line re-decodes the k-packed row-mode store of
+ * the synchronous M-outer loaders, so at least one operand must take
+ * row_kpack (the builder's kpack_ok choice) and every operand that does must
+ * take the line decode (whole 64-lane groups, a line of row chunks dividing
+ * the rows). NULL when it can, else the reason. */
+static const char* wgrad_kp_line_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s)
+{
+    if(s->async_dma || s->lds_k_outer)
+        return NULL; /* refused with lds_kpack by the gates that follow */
+    const int threads = s->warp_m * s->warp_n * s->wave_size;
+    const int gm = s->group_merge > 1 ? s->group_merge : 1;
+    const int caps[2] = {wgrad_free_axis_vec(rocke_conv_problem_kpg(&s->problem) * gm,
+                                             s->dtype_a,
+                                             s->has_vector_size_a,
+                                             s->vector_size_a),
+                         wgrad_free_axis_vec(rocke_conv_problem_cpg(&s->problem) * gm,
+                                             s->dtype_b,
+                                             s->has_vector_size_b,
+                                             s->vector_size_b)};
+    const int rows[2] = {s->tile_m, s->tile_n};
+    const int kp = s->lds_kpack;
+    int packed = 0;
+    if(threads <= 0)
+        return NULL;
+    for(int i = 0; i < 2; ++i)
+    {
+        int vec = 0;
+        if(rocke_coalesced_tile_loader_choose_vec_axis(
+               rows[i], s->tile_k, threads, caps[i], /*row=*/true, &vec)
+               != ROCKE_OK
+           || vec <= 0)
+            return NULL; /* the builder reports an inadmissible tile itself */
+        if(vec <= 1 || !rocke_coalesced_tile_loader_kpack_ok(rows[i], s->tile_k, threads, vec, kp))
+            continue;
+        ++packed;
+        const int cgl = 64 / s->kp_line;
+        const int ncg = s->tile_k / kp;
+        if(ncg % cgl || (rows[i] / vec) % s->kp_line || threads % 64
+           || (threads / 64) % (ncg / cgl))
+            return "kp_line=8 needs whole 64-lane groups and a line of row chunks dividing "
+                   "the rows of every k-packed operand";
+    }
+    if(packed == 0)
+        return "kp_line=8 needs an operand the tile k-packs (lds_kpack chunks per thread)";
+    return NULL;
 }
 
 /* Mirrors Python _wmma_async_available: whether a wave32 spec can take the
@@ -937,22 +984,6 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
     if(s->xwin_rows != 1 || s->xwin_mrow != 1 || s->xwin_kband)
         BR_REJECT("wgrad xwin_rows / xwin_mrow / xwin_kband are "
                   "Python-only (no C++ twin yet)");
-    if(s->xwin_bq && s->xwin)
-    {
-        const int X = s->xwin;
-        const int nq = (s->tile_k + X - 1 + 3) / 4;
-        int wst = s->tile_k + X - 1;
-        while(wst % 4 || (wst / 2) % 4 != 2)
-            ++wst;
-        if(s->xwin_bq < 1 || s->xwin_bq > 2 || !s->xwin_pp || (s->tile_n / X) % 32)
-            BR_REJECT("xwin_bq is 0, 1 or 2 and needs xwin_pp (one filter row, xwin_mrow 1)");
-        if(4 * nq > wst)
-            BR_REJECT("xwin_bq: the quads overrun the window stride");
-    }
-    if(s->xwin_aq && (s->xwin_aq < 1 || s->xwin_aq > 2 || s->xwin_gn != 2))
-        BR_REJECT("xwin_aq is 0, 1 or 2 and needs xwin_gn 2");
-    if(s->xwin_kord && (s->xwin_kord != 1 || (s->tile_k & (s->tile_k - 1))))
-        BR_REJECT("xwin_kord is 0 or 1 (xwin_mrow 1, no xwin_kband, power-of-two tile_k)");
     if(s->xwin)
     {
         /* Python _xwin_conflict, for the ported subset (one filter row). */
@@ -1007,8 +1038,23 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
             BR_REJECT("xwin_groups needs prefetch_regs=1 and xwin_rows=1");
         if(s->xwin_pp != 0 && s->xwin_pp != 8)
             BR_REJECT("xwin_pp must be 0 or 8 (got %d)", s->xwin_pp);
+        if(s->xwin_bq)
+        {
+            const int nq = (s->tile_k + X - 1 + 3) / 4;
+            int wst = s->tile_k + X - 1;
+            while(wst % 4 || (wst / 2) % 4 != 2)
+                ++wst;
+            if(s->xwin_bq < 1 || s->xwin_bq > 2 || !s->xwin_pp || (s->tile_n / X) % 32)
+                BR_REJECT("xwin_bq is 0, 1 or 2 and needs xwin_pp (one filter row, xwin_mrow 1)");
+            if(4 * nq > wst)
+                BR_REJECT("xwin_bq: the quads overrun the window stride");
+        }
+        if(s->xwin_aq && (s->xwin_aq < 1 || s->xwin_aq > 2 || s->xwin_gn != 2))
+            BR_REJECT("xwin_aq is 0, 1 or 2 and needs xwin_gn 2");
         if(s->xwin_pps && (s->xwin_pps < 1 || s->xwin_pps > 3 || !s->xwin_pp))
             BR_REJECT("xwin_pps is 0..3 and needs xwin_pp");
+        if(s->xwin_kord && (s->xwin_kord != 1 || (s->tile_k & (s->tile_k - 1))))
+            BR_REJECT("xwin_kord is 0 or 1 (xwin_mrow 1, no xwin_kband, power-of-two tile_k)");
         if(s->xwin_rot && (s->xwin_rot != 1 || s->m_band))
             BR_REJECT("xwin_rot is 0 or 1 (xwin_mrow 1, no xwin_kband / m_band)");
         if(s->xwin_pp && ((G % 2 && G != 1) || G * s->warp_m * s->warp_n != 8 || katoms % 2))
@@ -1019,8 +1065,12 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
             /* Python raises at build when the A store is not the plain row mode. */
         }
     }
-    else if(s->xwin_groups != 1 || s->xwin_pp)
-        BR_REJECT("xwin_rows / xwin_groups / xwin_pp / xwin_mrow need xwin");
+    else if(s->xwin_groups != 1 || s->xwin_pp || s->xwin_gn || s->xwin_bq || s->xwin_aq
+            || s->xwin_pps || s->xwin_rot || s->xwin_kord)
+        /* Every xwin sub-knob is a no-op without xwin: refused rather than
+         * renaming the plain kernel (xwin_rows / xwin_mrow are refused above). */
+        BR_REJECT("xwin_rows / xwin_groups / xwin_pp / xwin_mrow / xwin_gn / xwin_bq / xwin_aq / "
+                  "xwin_pps / xwin_rot / xwin_kord need xwin");
     if(s->xcd_remap != 0 && s->xcd_remap != 1
        && (s->xcd_remap < 0 || sk || s->chiplet_swizzle || s->group_merge > 1))
         BR_REJECT("xcd_remap needs the grid-per-tile kernel (no stream-K, chiplet_swizzle or "
@@ -1036,7 +1086,7 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
         const char* epi = s->epilogue ? s->epilogue : "default";
         const char* dd = s->dtype_d ? s->dtype_d : "fp16";
         if(s->split_k > 1 || two || sk || strcmp(epi, "default") != 0 || s->xwin
-           || s->group_merge > 1 || s->epi_quad_xpose || s->warp_tile_m != 16
+           || s->group_merge > 1 || s->epi_quad_xpose || s->wave_size != 64 || s->warp_tile_m != 16
            || s->warp_tile_n != 16 || s->warp_tile_k != 16
            || (strcmp(dd, "bf16") != 0 && strcmp(dd, "fp16") != 0))
             BR_REJECT("epi_store_fast (wgrad): unsplit default epilogue, 16x16x16 MFMA atoms, "
@@ -1058,10 +1108,19 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
             "sep_addr=2 carries the address across the prefetch_regs loop with lds_kpack > 1");
     if(s->kp_line && (s->kp_line != 8 || s->lds_kpack < 2 || !s->prefetch_regs))
         BR_REJECT("kp_line=8 re-decodes the k-packed reads of the prefetch_regs loops");
+    if(s->kp_line)
+    {
+        const char* why = wgrad_kp_line_conflict(s);
+        if(why)
+            BR_REJECT("%s", why);
+    }
     if(s->pfr_sched)
     {
         if(s->pfr_sched < 0 || (s->prefetch_regs != 1 && s->prefetch_regs != 3))
             BR_REJECT("pfr_sched schedules the prefetch_regs=1/3 loop's reads (>= 0)");
+        if(s->xwin_pp)
+            BR_REJECT("pfr_sched schedules the plain prefetch_regs loop's reads, not the xwin_pp "
+                      "ping-pong");
         if(s->pfr_sched > 1 && (s->pipeline == NULL || strcmp(s->pipeline, "mem") != 0))
             BR_REJECT("pfr_sched interleave (>1) needs the plain mem pipeline");
     }
@@ -1081,6 +1140,22 @@ static bool wgrad_branch_conflict(const rocke_implicit_gemm_conv_wgrad_spec_t* s
     if(s->prefetch_regs && (s->async_dma || s->unroll_k || s->prefetch_addr))
         BR_REJECT("prefetch_regs rewrites the single-buffer synchronous K loop; it cannot "
                   "combine with async_dma, unroll_k or prefetch_addr");
+    if(s->prefetch_regs)
+    {
+        /* The prefetch_regs loops carry the next tile's global loads as loop
+         * values, staged in ROCKE_CTL_MAX_VECS_PER_THREAD slots per operand,
+         * as prefetch_global_regs does. Python _staged_chunks_conflict. */
+        int chunks[2];
+        if(wgrad_sync_staged_chunks(s, chunks))
+            for(int i = 0; i < 2; ++i)
+                if(chunks[i] > ROCKE_CTL_MAX_VECS_PER_THREAD)
+                    BR_REJECT("prefetch_regs carries at most %d global loads per thread per "
+                              "operand; the %s tile needs %d (use a wider vector or a smaller "
+                              "tile)",
+                              ROCKE_CTL_MAX_VECS_PER_THREAD,
+                              i == 0 ? "A" : "B",
+                              chunks[i]);
+    }
     if(s->prefetch_regs && s->wave_size == 32)
         BR_REJECT("WMMA wgrad does not support prefetch_regs");
     return false;
@@ -1387,6 +1462,17 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
                              dt);
                 return false;
             }
+        }
+        /* The two-stage scratch-atomic epilogue replaces the requested one, so
+         * cshuffle would only rename the kernel. Mirrors Python. */
+        if(effective_two_stage_v && s->epilogue && strcmp(s->epilogue, "cshuffle") == 0)
+        {
+            if(reason && reason_cap)
+                snprintf(reason,
+                         reason_cap,
+                         "two_stage wgrad uses an f32 scratch-atomic epilogue; "
+                         "epilogue='cshuffle' is invalid (use epilogue='default')");
+            return false;
         }
     }
 
@@ -1804,10 +1890,15 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
         }
     }
 
-    /* Python is_valid_wgrad_spec charges the xwin tiles (the window, not a
-     * tile_n-row B tile, one A/B pair per group) and prefetch_regs 2's second
-     * buffer; the forward adapter above charges neither. */
-    if(s->xwin && s->xwin_groups > 1 && !s->lds_k_outer)
+    /* Python is_valid_wgrad_spec charges the A/B tiles twice for
+     * prefetch_regs 2 (two stacked M-outer tiles) and, for xwin with several
+     * groups, the xwin tiles: the window instead of a tile_n-row B tile, one
+     * pair per group, and xwin_gn 2's three shared dY slots (two slots and a
+     * trash slot) instead of one A tile per group. The forward adapter above
+     * charges none of these. (lds_k_outer and wave32 are charged above;
+     * prefetch_regs 2 refuses lds_k_outer, async_dma and unroll_k.) */
+    const bool xwin_tiles = s->xwin && s->xwin_groups > 1;
+    if(!is_wave32 && !s->lds_k_outer && (xwin_tiles || s->prefetch_regs == 2))
     {
         rocke_implicit_gemm_conv_spec_t lf = fwd;
         lf.has_lds_k_pad = s->has_lds_k_pad;
@@ -1819,11 +1910,17 @@ bool rocke_implicit_gemm_conv_wgrad_is_valid_spec(const rocke_implicit_gemm_conv
            && rocke_implicit_gemm_conv_spec_effective_lds_layout(&lf, &lay, lr, sizeof lr))
         {
             const long eb = (s->dtype_a && strcmp(s->dtype_a, "fp32") == 0) ? 4 : 2;
-            const long b0 = s->tile_n / s->xwin + 8;
-            long st = s->tile_k + s->xwin - 1;
-            while(st % 4 || (st / 2) % 4 != 2)
-                ++st;
-            const long ab = ((long)s->tile_m * lay.row_stride + b0 * st) * eb * s->xwin_groups;
+            const long a_tile = (long)s->tile_m * lay.row_stride;
+            long ab = (a_tile + (long)s->tile_n * lay.row_stride) * eb;
+            if(xwin_tiles)
+            {
+                const long b0 = s->tile_n / s->xwin + 8;
+                long st = s->tile_k + s->xwin - 1;
+                while(st % 4 || (st / 2) % 4 != 2)
+                    ++st;
+                const long a_slots = s->xwin_gn == 2 ? 3 : s->xwin_groups;
+                ab = (a_slots * a_tile + (long)s->xwin_groups * b0 * st) * eb;
+            }
             const bool dbl = s->async_dma || s->unroll_k || s->prefetch_regs == 2;
             const long abl = ab * (dbl ? 2 : 1);
             const long cb = (s->dtype_d && strcmp(s->dtype_d, "fp32") == 0) ? 4 : 2;
