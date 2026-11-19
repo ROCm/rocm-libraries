@@ -10,6 +10,7 @@
  */
 #include "rocke/helper_rocke.helpers.loads.h"
 
+#include <stdint.h>
 #include <string.h>
 
 #include "rocke/ir_internal.h" /* rocke_i_set_err */
@@ -375,33 +376,27 @@ rocke_status_t rocke_coalesced_tile_loader_set_col_xor(rocke_coalesced_tile_load
 rocke_status_t
     rocke_coalesced_tile_loader_vecs_per_thread(const rocke_coalesced_tile_loader_t* self, int* out)
 {
-    int total_vecs;
-
-    if(self == NULL || self->load_vec <= 0 || self->block_size <= 0)
-    {
+    if(self == NULL || self->load_vec <= 0 || self->block_size <= 0 || self->tile_rows <= 0
+       || self->tile_cols <= 0)
         return ROCKE_ERR_VALUE;
-    }
-    /* Python:
-     *   total_vecs = (tile_rows * tile_cols) // load_vec
-     *   if total_vecs % block_size: raise ValueError(...)
-     *   return total_vecs // block_size
-     */
-    total_vecs = (self->tile_rows * self->tile_cols) / self->load_vec;
-    if(total_vecs % self->block_size)
-    {
+    const int axis = self->vector_axis_row ? self->tile_rows : self->tile_cols;
+    const int outer = self->vector_axis_row ? self->tile_cols : self->tile_rows;
+    if(axis % self->load_vec != 0)
         return ROCKE_ERR_VALUE;
-    }
+    /* Traversal materializes the linear chunk ID in i32. Widen the product
+     * so malformed geometry cannot overflow before the check. */
+    const int64_t total_vecs = static_cast<int64_t>(axis / self->load_vec) * outer;
+    if(total_vecs > INT32_MAX || total_vecs % self->block_size != 0)
+        return ROCKE_ERR_VALUE;
     if(out != NULL)
-    {
-        *out = total_vecs / self->block_size;
-    }
+        *out = static_cast<int>(total_vecs / self->block_size);
     return ROCKE_OK;
 }
 
 int rocke_coalesced_tile_loader_cols_per_vec(const rocke_coalesced_tile_loader_t* self)
 {
-    /* Python: return tile_cols // load_vec */
-    if(self == NULL)
+    /* Python: return tile_cols // load_vec for valid geometry. */
+    if(self == NULL || self->load_vec <= 0)
     {
         return 0;
     }
@@ -707,6 +702,11 @@ void rocke_coalesced_tile_loader_load(rocke_ir_builder_t* b,
     const int elem_bytes = ctl_elem_bytes_or_err(b, self);
     if(elem_bytes == 0)
         return;
+    if(rocke_coalesced_tile_loader_vecs_per_thread(self, NULL) != ROCKE_OK)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: invalid chunk geometry");
+        return;
+    }
     const rocke_coalesced_chunk_grid_t grid{rocke_b_const_i32(b, self->block_size),
                                             rocke_b_const_i32(b, self->load_vec),
                                             rocke_b_const_i32(b, ctl_span(self)),
@@ -775,18 +775,17 @@ void rocke_coalesced_tile_loader_load_global(rocke_ir_builder_t* b,
     const int elem_bytes = ctl_elem_bytes_or_err(b, self);
     if(elem_bytes == 0)
         return;
+    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: bad vecs_per_thread");
+        return;
+    }
     c_threads = rocke_b_const_i32(b, self->block_size);
     c_load_vec = rocke_b_const_i32(b, self->load_vec);
     c_span = rocke_b_const_i32(b, ctl_span(self));
     c_half_bytes = rocke_b_const_i32(b, elem_bytes);
     c0 = rocke_b_const_i32(b, 0);
     c_oob = rocke_b_const_i32(b, self->oob_sentinel);
-
-    if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
-    {
-        rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: bad vecs_per_thread");
-        return;
-    }
     if(vecs_per_thread > ROCKE_CTL_MAX_VECS_PER_THREAD)
     {
         rocke_i_set_err(
@@ -873,20 +872,16 @@ void rocke_coalesced_tile_loader_plan_slots(rocke_ir_builder_t* b,
         return;
     }
 
-    /* Python:
-     *   c_threads  = b.const_i32(self.block_size)
-     *   c_load_vec = b.const_i32(self.load_vec)
-     *   c_span     = b.const_i32(rows_per_vec if row else cols_per_vec) */
-    rocke_value_t* c_threads = rocke_b_const_i32(b, self->block_size);
-    rocke_value_t* c_load_vec = rocke_b_const_i32(b, self->load_vec);
-    rocke_value_t* c_span = rocke_b_const_i32(b, ctl_span(self));
-
     int vecs_per_thread = 0;
     if(rocke_coalesced_tile_loader_vecs_per_thread(self, &vecs_per_thread) != ROCKE_OK)
     {
         rocke_i_set_err(b, ROCKE_ERR_VALUE, "CoalescedTileLoader: bad vecs_per_thread");
         return;
     }
+    /* Python: c_span is rows_per_vec in row mode, cols_per_vec otherwise. */
+    rocke_value_t* c_threads = rocke_b_const_i32(b, self->block_size);
+    rocke_value_t* c_load_vec = rocke_b_const_i32(b, self->load_vec);
+    rocke_value_t* c_span = rocke_b_const_i32(b, ctl_span(self));
     if(vecs_per_thread > ROCKE_CTL_MAX_VECS_PER_THREAD)
     {
         rocke_i_set_err(

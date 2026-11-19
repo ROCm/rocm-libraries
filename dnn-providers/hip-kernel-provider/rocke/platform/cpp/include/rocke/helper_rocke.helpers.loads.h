@@ -193,7 +193,9 @@ typedef void (*rocke_coalesced_chunk_fn)(rocke_ir_builder_t* b,
                                          void* user);
 
 /* Visit coalesced chunks; the emitter owns source and destination addressing.
- * `grid` may be NULL to materialize the tile's iteration constants here. */
+ * Reject invalid or uneven geometry before emitting any traversal IR. The
+ * vector width must divide the vectorized axis. `grid` may be NULL to
+ * materialize the tile's iteration constants here. */
 void rocke_coalesced_tile_loader_visit_chunks(rocke_ir_builder_t* b,
                                               const rocke_coalesced_tile_loader_t* self,
                                               rocke_value_t* tid,

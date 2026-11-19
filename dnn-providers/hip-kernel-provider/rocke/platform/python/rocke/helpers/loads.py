@@ -402,7 +402,9 @@ class CoalescedTileLoader:
                     f"chunks of {chunk} columns, but a {self.tile_cols}-column "
                     "row does not hold whole groups"
                 )
-            if self.vector_axis == "col" and chunk % self.load_vec:
+            if self.vector_axis == "col" and (
+                self.load_vec <= 0 or chunk % self.load_vec
+            ):
                 raise ValueError(
                     f"CoalescedTileLoader: col_xor needs load_vec ({self.load_vec}) "
                     f"to divide its {chunk}-column chunk"
@@ -490,7 +492,17 @@ class CoalescedTileLoader:
             raise ValueError(
                 "CoalescedTileLoader: load_vec and block_size must be positive"
             )
+        if self.tile_rows <= 0 or self.tile_cols <= 0:
+            raise ValueError("CoalescedTileLoader: tile dimensions must be positive")
+        axis = self.tile_rows if self.vector_axis == "row" else self.tile_cols
+        if axis % self.load_vec:
+            raise ValueError(
+                "CoalescedTileLoader: load_vec must divide the vector axis"
+            )
         total_vecs = (self.tile_rows * self.tile_cols) // self.load_vec
+        i32_max = (1 << 31) - 1
+        if max(total_vecs, self.tile_rows, self.tile_cols, self.block_size) > i32_max:
+            raise ValueError("CoalescedTileLoader: chunk geometry exceeds i32")
         if total_vecs % self.block_size:
             raise ValueError(
                 f"tile {self.tile_rows}x{self.tile_cols} / {self.load_vec} = "
@@ -546,6 +558,7 @@ class CoalescedTileLoader:
         ``before_decode(chunk_id)`` can emit linear address arithmetic in the
         same order as an existing packed copy.
         """
+        count = self.vecs_per_thread
         if grid is None:
             grid = (
                 b.const_i32(self.block_size),
@@ -557,7 +570,7 @@ class CoalescedTileLoader:
                 ),
             )
         c_threads, c_load_vec, c_span = grid
-        for e in range(self.vecs_per_thread):
+        for e in range(count):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             if before_decode is not None:
                 before_decode(vec_idx)
@@ -622,6 +635,7 @@ class CoalescedTileLoader:
                 f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
             )
 
+        count = self.vecs_per_thread
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_span = b.const_i32(
@@ -632,7 +646,7 @@ class CoalescedTileLoader:
         c_oob = b.const_i32(self.oob_sentinel)
 
         staged = []
-        for e in range(self.vecs_per_thread):
+        for e in range(count):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             row, col = self._decode_row_col(
                 b, vec_idx, c_span=c_span, c_load_vec=c_load_vec
@@ -693,13 +707,14 @@ class CoalescedTileLoader:
         The decode depends only on ``tid``, so a K loop can emit it once ahead
         of the loop and reuse the slots in every iteration.
         """
+        count = self.vecs_per_thread
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_span = b.const_i32(
             self.rows_per_vec if self.vector_axis == "row" else self.cols_per_vec
         )
         slots: List[Tuple[Value, Value]] = []
-        for e in range(self.vecs_per_thread):
+        for e in range(count):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             slots.append(
                 self._decode_row_col(b, vec_idx, c_span=c_span, c_load_vec=c_load_vec)
@@ -797,6 +812,8 @@ class CoalescedTileLoader:
                 f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
             )
 
+        # This caller prebinds a grid to preserve the order of emitted constants.
+        _ = self.vecs_per_thread
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_span = b.const_i32(
@@ -922,6 +939,7 @@ class CoalescedTileLoader:
                 f"CoalescedTileLoader: unsupported elem_dtype {dtype.name!r}"
             )
 
+        count = self.vecs_per_thread
         c_threads = b.const_i32(self.block_size)
         c_load_vec = b.const_i32(self.load_vec)
         c_span = b.const_i32(
@@ -934,7 +952,7 @@ class CoalescedTileLoader:
         # Each entry is (row, col, reg_value) so store_fetched can reconstruct
         # the LDS address without re-running the descriptor.
         fetched = []
-        for e in range(self.vecs_per_thread):
+        for e in range(count):
             vec_idx = b.add(b.mul(b.const_i32(e), c_threads), tid)
             row, col = self._decode_row_col(
                 b, vec_idx, c_span=c_span, c_load_vec=c_load_vec

@@ -31,29 +31,41 @@ static void
     ++*static_cast<int*>(user);
 }
 
-static bool check_geometry(int load_vec, int block_size, bool valid)
+static bool check_geometry(int rows,
+                           int cols,
+                           int load_vec,
+                           int block_size,
+                           bool row_axis,
+                           int expected,
+                           bool prebound = false)
 {
     rocke_coalesced_tile_loader_t loader{};
-    loader.tile_rows = 16;
-    loader.tile_cols = 16;
+    loader.tile_rows = rows;
+    loader.tile_cols = cols;
     loader.load_vec = load_vec;
     loader.block_size = block_size;
+    loader.vector_axis_row = row_axis;
     int per_thread = -1;
     const auto status = rocke_coalesced_tile_loader_vecs_per_thread(&loader, &per_thread);
     rocke_ir_builder_t b{};
     if(rocke_ir_builder_init(&b, "loader_geometry") != ROCKE_OK)
         return false;
     auto* tid = rocke_b_const_i32(&b, 0);
-    const int before = rocke_b_current_region(&b)->num_ops;
     int visited = 0;
+    const rocke_coalesced_chunk_grid_t bogus_grid{
+        nullptr, nullptr, nullptr, [](rocke_ir_builder_t*, rocke_value_t*, void*) {
+            std::abort();
+        }};
+    const int before = rocke_b_current_region(&b)->num_ops;
     const auto visit = [&] {
-        rocke_coalesced_tile_loader_visit_chunks(&b, &loader, tid, nullptr, count_chunk, &visited);
+        rocke_coalesced_tile_loader_visit_chunks(
+            &b, &loader, tid, prebound ? &bogus_grid : nullptr, count_chunk, &visited);
     };
     bool passed;
-    if(valid)
+    if(expected >= 0)
     {
         visit();
-        passed = status == ROCKE_OK && per_thread == 2 && visited == per_thread
+        passed = status == ROCKE_OK && per_thread == expected && visited == per_thread
                  && rocke_ir_builder_ok(&b);
     }
     else
@@ -62,9 +74,12 @@ static bool check_geometry(int load_vec, int block_size, bool valid)
                  && rocke_b_current_region(&b)->num_ops == before;
     if(!passed)
         std::fprintf(stderr,
-                     "unexpected chunk geometry result for load_vec=%d block_size=%d\n",
+                     "unexpected %dx%d chunk geometry for load_vec=%d block_size=%d row_axis=%d\n",
+                     rows,
+                     cols,
                      load_vec,
-                     block_size);
+                     block_size,
+                     row_axis);
     rocke_ir_builder_free(&b);
     return passed;
 }
@@ -149,9 +164,17 @@ int main()
                    && check_staged_grid(
                        {2, 1, 1}, 1, "positive grid and one accumulator per output atom")
                    && check_staged_grid({1, 1, 1}, 1, nullptr) && check_empty_fragment()
-                   && check_layout() && check_geometry(0, 64, false) && check_geometry(2, 0, false)
-                   && check_geometry(-1, 64, false) && check_geometry(2, -1, false)
-                   && check_geometry(2, 64, true)
+                   && check_layout() && check_geometry(16, 16, 0, 64, false, -1)
+                   && check_geometry(16, 16, 2, 0, false, -1)
+                   && check_geometry(16, 16, -1, 64, false, -1)
+                   && check_geometry(16, 16, 2, -1, false, -1)
+                   && check_geometry(4, 6, 4, 3, false, -1)
+                   && check_geometry(4, 6, 4, 3, false, -1, true)
+                   && check_geometry(6, 4, 4, 3, true, -1) && check_geometry(4, 2, 4, 2, false, -1)
+                   && check_geometry(0, 8, 2, 4, false, -1) && check_geometry(8, -8, 2, 4, true, -1)
+                   && check_geometry(8, 8, 2, 3, false, -1)
+                   && check_geometry(65536, 65536, 1, 4, false, -1)
+                   && check_geometry(5, 8, 4, 5, false, 2) && check_geometry(8, 5, 4, 5, true, 2)
                ? 0
                : 1;
 }
