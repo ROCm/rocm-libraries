@@ -35,6 +35,15 @@ struct GraphTestCase
 
     std::optional<float> attnScale;
     bool withStats = false;
+    /// The graph's mma_core_mode; the attribute stays unset when this is unset.
+    std::optional<hipdnn_frontend::DataType> mmaCoreMode;
+    /// Group mode only: Q, K, V and O read one ragged offset table (K_QO_RAGGED_OFFSET_NAME),
+    /// so every batch's Q and K/V lengths are equal.
+    bool sharedOffsetTable = false;
+    /// Group mode only: the graph carries cu_seq_len_q/kv (K_CU_SEQ_LEN_*_NAME) with
+    /// padding_mask, so the ragged offset tables hold each batch's physical start and the
+    /// cumulative tables its logical length.
+    bool cuSeqLens = false;
 
     std::string name;
     std::string arch;
@@ -109,9 +118,20 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
 /// Names of the INT32 [B+1, 1, 1, 1] token offset tables buildSdpaFwdGraph gives a
-/// group-mode graph: Q and O share the first, K and V the second.
+/// group-mode graph: Q and O share the first, K and V the second (or the first too, with
+/// GraphTestCase::sharedOffsetTable).
 inline constexpr const char* K_QO_RAGGED_OFFSET_NAME = "qo_ragged_offset";
 inline constexpr const char* K_KV_RAGGED_OFFSET_NAME = "kv_ragged_offset";
+
+/// Names of the INT32 [B+1, 1, 1, 1] cumulative length tables a GraphTestCase::cuSeqLens
+/// graph carries.
+inline constexpr const char* K_CU_SEQ_LEN_Q_NAME = "cu_seq_len_q";
+inline constexpr const char* K_CU_SEQ_LEN_KV_NAME = "cu_seq_len_kv";
+
+/// Names of the INT32 [B, 1, 1, 1] per-batch lengths buildSdpaFwdReferenceGraph gives in
+/// place of the cumulative tables.
+inline constexpr const char* K_SEQ_LEN_Q_NAME = "seq_len_q";
+inline constexpr const char* K_SEQ_LEN_KV_NAME = "seq_len_kv";
 
 /// An SDPA forward graph together with its STATS output attribute.
 struct SdpaFwdGraph
@@ -123,7 +143,14 @@ struct SdpaFwdGraph
 
 /// Builds the SDPA forward graph topology described by @p testCase, enabling stats when
 /// testCase.withStats is set and returning that output's attribute alongside the graph so
-/// callers can address it by identity.
+/// callers can address it by identity. Every tensor has a fixed uid. A group-mode stats
+/// output is AITER's varlen LSE [H, B * S_q]: element (b, h, s) at qoOffset[b] + h * B * S_q
+/// + s, ragged on the Q/O offset table with a multiplier of 1.
 SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase);
+
+/// Builds the graph the hipDNN CPU reference runs for a GraphTestCase::cuSeqLens case, whose
+/// cumulative length tables it does not take: buildSdpaFwdGraph's graph with the same uids,
+/// except that seq_len_q/kv (K_SEQ_LEN_*_NAME) replace cu_seq_len_q/kv.
+SdpaFwdGraph buildSdpaFwdReferenceGraph(const GraphTestCase& testCase);
 
 } // namespace asm_sdpa_engine
