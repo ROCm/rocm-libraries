@@ -4,10 +4,14 @@
 #pragma once
 
 #include <hipdnn_data_sdk/types/Bfloat16.hpp>
+#include <hipdnn_data_sdk/types/Fp4E2M1.hpp>
+#include <hipdnn_data_sdk/types/Fp6E2M3.hpp>
+#include <hipdnn_data_sdk/types/Fp6E3M2.hpp>
 #include <hipdnn_data_sdk/types/Fp8E4M3.hpp>
 #include <hipdnn_data_sdk/types/Fp8E4M3Fnuz.hpp>
 #include <hipdnn_data_sdk/types/Fp8E5M2.hpp>
 #include <hipdnn_data_sdk/types/Fp8E5M2Fnuz.hpp>
+#include <hipdnn_data_sdk/types/Fp8E8M0.hpp>
 #include <hipdnn_data_sdk/types/Half.hpp>
 
 #include <cstdint>
@@ -65,27 +69,51 @@ struct HipRtcTypeName<int32_t>
 template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e4m3>
 {
-    static constexpr const char* VALUE = "GpuRefFp8E4M3";
+    static constexpr const char* VALUE = "gpu_ref::GpuRefFp8E4M3";
 };
 
 // fp8 E4M3 FNUZ (gfx942) maps to gpu_ref::GpuRefFp8E4M3Fnuz, as above.
 template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e4m3_fnuz>
 {
-    static constexpr const char* VALUE = "GpuRefFp8E4M3Fnuz";
+    static constexpr const char* VALUE = "gpu_ref::GpuRefFp8E4M3Fnuz";
 };
 
 // fp8 E5M2 (OCP) and E5M2 FNUZ map to gpu_ref::GpuRefFp8E5M2 / GpuRefFp8E5M2Fnuz, as above.
 template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e5m2>
 {
-    static constexpr const char* VALUE = "GpuRefFp8E5M2";
+    static constexpr const char* VALUE = "gpu_ref::GpuRefFp8E5M2";
 };
 
 template <>
 struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e5m2_fnuz>
 {
-    static constexpr const char* VALUE = "GpuRefFp8E5M2Fnuz";
+    static constexpr const char* VALUE = "gpu_ref::GpuRefFp8E5M2Fnuz";
+};
+
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp4_e2m1>
+{
+    static constexpr const char* VALUE = "__hip_fp4_e2m1";
+};
+
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp6_e2m3>
+{
+    static constexpr const char* VALUE = "__hip_fp6_e2m3";
+};
+
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp6_e3m2>
+{
+    static constexpr const char* VALUE = "__hip_fp6_e3m2";
+};
+
+template <>
+struct HipRtcTypeName<hipdnn_data_sdk::types::fp8_e8m0>
+{
+    static constexpr const char* VALUE = "__hip_fp8_e8m0";
 };
 
 } // namespace hipdnn_gpu_ref::detail

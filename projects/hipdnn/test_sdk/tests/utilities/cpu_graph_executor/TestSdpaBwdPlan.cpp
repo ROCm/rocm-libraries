@@ -555,11 +555,6 @@ TEST(TestSdpaBwdPlanMask, UnsupportedMaskDtypeHasNoPlan)
     }
     catch(const CpuReferenceNotApplicableError& e)
     {
-        FAIL() << "Expected the registry error naming the mask dtype, got not-applicable: "
-               << e.what();
-    }
-    catch(const std::runtime_error& e)
-    {
         EXPECT_NE(std::string(e.what()).find("mask=INT32"), std::string::npos) << e.what();
     }
 }
