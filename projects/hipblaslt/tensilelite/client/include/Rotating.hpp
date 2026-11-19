@@ -63,4 +63,25 @@ namespace TensileLite
         size_t m_size;
         size_t m_largestUnitSize;
     };
+
+    /// Clamp the requested number of extra rotating-buffer copies to the number
+    /// that actually fits in the allocated rotating pool.
+    ///
+    /// The requested count is derived from the user-requested rotating buffer
+    /// size, which can slightly exceed what RotatingMemory actually allocated
+    /// (e.g. beta==0 tensors dropped, guard-page rounding), so the two size
+    /// computations diverge and the naive count can over-provision.
+    ///
+    /// @param rotatingNum           Requested number of extra rotating copies.
+    /// @param rotatingSize          Size in bytes of one rotating copy.
+    /// @param rotatingAllocatedSize Bytes available for rotating copies, i.e.
+    ///                              RotatingMemory::getDataSize() minus
+    ///                              getDataLargestUnitSize().
+    /// @return min(rotatingNum, rotatingAllocatedSize / rotatingSize), never
+    ///         negative. All arithmetic is 64-bit on purpose:
+    ///         rotatingNum * rotatingSize exceeds INT32_MAX once the rotating
+    ///         buffer is >= ~2 GiB, which previously overflowed a signed 32-bit
+    ///         accumulator and spuriously aborted the benchmark.
+    int32_t
+        clampRotatingNum(int32_t rotatingNum, size_t rotatingSize, size_t rotatingAllocatedSize);
 }
