@@ -1047,6 +1047,8 @@ def _rule_frame():
             "graph.nodes[0].q.numel": [16, 32, 64, 128],
             "graph.nodes[0].attn_scale_value": [0.5, 0.25, 0.125, 0.0625],
             "flydsl_sdpa_rdna.scale": [1056964608, 1048576000, 1040187392, 1031798784],
+            "gfx1151_wmma_attention.scale_bits": [7, 8, 9, 10],
+            "flydsl_sdpa_rdna.scale_source": [0, 1, 0, 1],
             "device.total_global_mem": [2**36] * 4,
             "graph.nodes[0].q.strides[1]": [8, 8, 8, 8],
             "flydsl_sdpa_rdna.dropout_p": [0, 0, 1036831949, 1036831949],
@@ -1066,6 +1068,7 @@ def _rule_frame():
         ("graph.nodes[0].q.numel", "derived_numel"),
         ("graph.nodes[0].attn_scale_value", "caller_value"),
         ("flydsl_sdpa_rdna.scale", "caller_value"),
+        ("gfx1151_wmma_attention.scale_bits", "caller_value"),
         ("device.total_global_mem", "board_identity"),
     ],
 )
@@ -1089,6 +1092,7 @@ def test_a_proposal_keeps_strides_dropout_virtual_and_the_columns_the_rules_rese
         "graph.nodes[0].dropout_probability",
         "graph.nodes[0].q.virtual",
         "graph.nodes[0].scale.dims[0]",
+        "flydsl_sdpa_rdna.scale_source",
     ):
         assert "$" + kept in signature
         assert kept not in [e["expression"][1:] for e in omitted]
@@ -1199,6 +1203,41 @@ def test_an_authored_recipe_skips_the_search_and_trains_as_written(
     ]
     assert manifest["feature_search"] is None
     assert not (output / "feature_search").exists()
+
+
+def test_the_search_never_sees_the_evaluation_benchmarks(
+    monkeypatch, tmp_path, evaluator
+):
+    import uhd_gen.feature_search as feature_search
+
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    _bench_publishing_excluded_columns(monkeypatch, snapshot_provenance(tree))
+    held = [f"graph-{index}" for index in range(4)]
+    listing = tmp_path / "eval.json"
+    listing.write_text(json.dumps(held), encoding="utf-8")
+    seen = []
+    real = feature_search.search_features
+
+    def spy(frame, **options):
+        seen.append((frame, options["groups"]))
+        return real(frame, **options)
+
+    monkeypatch.setattr("uhd_gen.feature_search.search_features", spy)
+    command = _search_args(
+        _graphs(tmp_path / "graphs"),
+        tree,
+        tmp_path / "out",
+        evaluator,
+        "--eval-benchmarks",
+        str(listing),
+    )
+    assert main([*command, "--feature-search"]) == 0
+    [(frame, groups)] = seen
+    trained = set(frame["benchmark"])
+    assert trained and not trained & set(held)
+    # Folds hold whole graphs: the group of a row is its benchmark.
+    assert groups.tolist() == frame["benchmark"].astype(str).tolist()
 
 
 def test_feature_search_trains_on_its_recipe_and_records_the_report(

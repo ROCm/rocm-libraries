@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Tests for `uhd_gen feature-search`: the candidates, the search, and its recipe."""
 import json
+import types
 
 import numpy as np
 import pytest
@@ -117,8 +118,9 @@ def test_the_search_keeps_the_pad_and_grid_features_and_drops_the_noise(searched
         for entry in kept
     )
     assert "$g.noise" not in names
-    # Every kept feature says what removing it would cost.
-    assert all(entry["removal_cost"] is not None for entry in kept)
+    # Every kept feature costs more than the noise to remove.
+    noise = max(report["final"]["spread"], 0.002)
+    assert all(entry["removal_cost"] > noise for entry in kept), kept
     assert json.loads((searched["output"] / "recipe.json").read_text("utf-8")) == (
         report["recipe"]
     )
@@ -330,13 +332,14 @@ def _signal_search(**options):
     )
 
 
-def test_the_final_pass_removes_what_the_score_does_not_need():
+def test_the_prune_removes_a_feature_that_survives_elimination_but_costs_nothing():
     report = _signal_search()
-    # Six features is under the floor, so the rounds stop at once; the one-at-a-time pass
-    # is what leaves the signal alone.
+    # Six features is under the floor, so the rounds stop at once with the noise columns
+    # still in; the prune is what leaves the signal alone.
     assert len(report["rounds"]) == 1
     assert report["recipe"] == ["$s.x"]
-    assert sum(step["removed"] for step in report["final_pass"]) == 5
+    assert sum(step["removed"] for step in report["prune"]) == 5
+    assert all(step["cost"] <= 0.002 for step in report["prune"] if step["removed"])
 
 
 def test_a_round_drops_the_least_important_features_first():
@@ -367,6 +370,279 @@ def test_the_rounds_stop_after_two_worse_than_the_best():
     # 15% of eight is two, then one a round. Three left and two left are each worse than
     # four, so the search stops there instead of going on to the floor of one.
     assert [round_["features"] for round_ in report["rounds"]] == [8, 6, 5, 4, 3, 2]
+
+
+def test_grid_tiles_come_from_the_catalogs_tile_fields_else_64_and_128():
+    from uhd_gen.feature_search import tile_sizes
+
+    catalog = {
+        "block_m": [64, 128],
+        "block_n": [32],
+        "tile_k": [1, 16],
+        "head_dim_max": [96, 256],
+        "has_bias": [0, 1],
+    }
+    assert tile_sizes(catalog) == ([16, 32, 64, 128], "catalog")
+    assert tile_sizes({"head_dim_max": [96, 256]}) == ([64, 128], "fallback")
+
+
+def test_a_grid_tiles_one_non_innermost_axis_and_multiplies_all_the_others():
+    frame = _catalog_frame()
+    columns = [name for name in frame.columns if name.startswith("t.q.")]
+    pool, details = build_candidates(frame, columns, [], None, 2000, tiles=[16, 32])
+    grids = [
+        c.entry["*"] for c in pool.candidates if c.template == "grid" and "*" in c.entry
+    ]
+    assert details["grid_tiles"] == [16, 32]
+    assert grids
+    for factors in grids:
+        # B, H and S are the non-innermost axes (D has stride 1): one tiled, two whole.
+        text = json.dumps(factors)
+        assert len(factors) == 3 and text.count("ceil_div") == 1
+        assert "dims[3]" not in text
+    tiles = {
+        factor["ceil_div"][1]
+        for factors in grids
+        for factor in factors
+        if isinstance(factor, dict)
+    }
+    assert tiles == {16, 32}
+
+
+def test_the_contiguous_axis_is_the_one_with_stride_one_not_the_last_index():
+    rng = np.random.default_rng(2)
+    frame = pd.DataFrame(
+        {
+            "t.q.dims[0]": rng.integers(1, 9, 100),
+            "t.q.dims[1]": rng.integers(100, 900, 100),
+            "t.q.dims[2]": rng.integers(1, 33, 100),
+            "t.q.dims[3]": rng.integers(100, 900, 100),
+            "t.q.strides[1]": 1,
+        }
+    )
+    pool, _ = build_candidates(frame, list(frame.columns), [], None, 2000)
+    grids = [json.dumps(c.entry) for c in pool.candidates if c.template == "grid"]
+    assert grids and not any("dims[1]" in grid for grid in grids)
+    assert any('{"ceil_div": ["$t.q.dims[3]"' in grid for grid in grids)
+
+
+def _adapter_frame(count=300):
+    """Time depends on `x` alone; the head dim only has a remainder an MLP might want."""
+    rng = np.random.default_rng(4)
+    frame = pd.DataFrame(
+        {"s.x": rng.random(count), "g.q.dims[3]": rng.integers(1, 129, count)}
+    )
+    frame["benchmark"] = [str(i) for i in range(count)]
+    frame["tflops"] = np.exp(-3 * frame["s.x"])
+    return frame
+
+
+def _adapter_search(**options):
+    frame = _adapter_frame()
+    return frame, search_features(
+        frame,
+        columns=["s.x", "g.q.dims[3]"],
+        target="tflops",
+        objective="max",
+        groups=frame["benchmark"],
+        seeds=[0, 1],
+        feature_evaluator=_evaluator_path(),
+        **options,
+    )
+
+
+def test_the_adapter_pass_adds_what_the_mlp_scores_better_and_records_each_delta(
+    monkeypatch,
+):
+    frame = _adapter_frame()
+    remainder = (frame["g.q.dims[3]"] % 8).to_numpy(float)
+
+    def mlp_that_wants_the_remainder(self, columns, folds):
+        useful = any(
+            np.array_equal(self.scorer.matrix[:, column], remainder)
+            for column in columns
+        )
+        return np.full(
+            len(self.scorer.seeds) * len(folds),
+            0.5 - (0.1 if useful else 0.0) + 0.0001 * len(columns),
+        )
+
+    monkeypatch.setattr(
+        feature_search._MlpScorer, "cells", mlp_that_wants_the_remainder
+    )
+    _, tree = _adapter_search()
+    _, mlp = _adapter_search(adapter="mlp_data", adapter_pass_budget=40)
+    assert tree["adapter_pass"] is None and tree["recipe"] == ["$s.x"]
+    remainder_entry = {"%": ["$g.q.dims[3]", 8]}
+    assert mlp["recipe"] == ["$s.x", remainder_entry]
+    assert mlp["adapter_pass"]["added"] == [
+        json.dumps(remainder_entry, separators=(",", ":"))
+    ]
+    tried = {entry["feature"]: entry for entry in mlp["adapter_pass"]["candidates"]}
+    assert tried[json.dumps(remainder_entry, separators=(",", ":"))]["mlp_delta"] > 0.09
+    # Every other candidate was tried, scored, and left out.
+    assert all(
+        not entry["added"] and entry["mlp_delta"] < 0.002
+        for name, entry in tried.items()
+        if name != json.dumps(remainder_entry, separators=(",", ":"))
+    )
+    [added] = [f for f in mlp["final"]["features"] if f["mlp_removal_cost"]]
+    assert added["mlp_removal_cost"] > 0.09 and added["removal_cost"] is None
+
+
+def _signal_columns(count=400):
+    """`_signal_search`'s frame: the columns by name, for a stub MLP to prefer one."""
+    rng = np.random.default_rng(5)
+    frame = pd.DataFrame({"s.x": rng.random(count)})
+    for index in range(5):
+        frame[f"s.n{index}"] = rng.random(count)
+    return frame
+
+
+def test_the_mlp_keeps_the_pre_prune_set_when_it_scores_better(monkeypatch, tmp_path):
+    """LightGBM sees `n0` as noise and the prune removes it; the stub MLP uses it."""
+    n0 = _signal_columns()["s.n0"].to_numpy()
+
+    def mlp_that_uses_n0(self, columns, folds):
+        useful = any(np.array_equal(self.scorer.matrix[:, c], n0) for c in columns)
+        return np.full(
+            len(self.scorer.seeds) * len(folds), 0.5 - (0.1 if useful else 0.0)
+        )
+
+    monkeypatch.setattr(feature_search._MlpScorer, "cells", mlp_that_uses_n0)
+    report = _signal_search(adapter="mlp_data")
+    choice = report["adapter_pass"]["set_choice"]
+    assert report["prune"] and sum(step["removed"] for step in report["prune"]) == 5
+    assert choice["chosen"] == "pre_prune"
+    assert choice["pre_prune_mlp_score"] < choice["pruned_mlp_score"]
+    assert choice["pruned_features"] == 1 and choice["pre_prune_features"] == 6
+    assert "$s.n0" in report["recipe"] and len(report["recipe"]) == 6
+    # The manifest summary describes the set that shipped, not the pruned one.
+    summary = feature_search.search_summary(
+        report, feature_search.write_search(report, tmp_path / "out")
+    )
+    assert summary["set_choice"]["chosen"] == "pre_prune"
+    assert summary["mlp_score"] == report["adapter_pass"]["final_score"]
+
+
+def test_the_mlp_keeps_the_pruned_set_when_it_scores_better(monkeypatch):
+    def mlp_that_prefers_fewer_features(self, columns, folds):
+        return np.full(len(self.scorer.seeds) * len(folds), 0.5 + 0.01 * len(columns))
+
+    monkeypatch.setattr(
+        feature_search._MlpScorer, "cells", mlp_that_prefers_fewer_features
+    )
+    report = _signal_search(adapter="mlp_data")
+    choice = report["adapter_pass"]["set_choice"]
+    assert choice["chosen"] == "pruned"
+    assert choice["pruned_mlp_score"] < choice["pre_prune_mlp_score"]
+    assert report["recipe"] == ["$s.x"]
+    assert report["final"]["features"][0]["removal_cost"] is None
+
+
+def _scorer_over(columns, groups=None, count=400):
+    rng = np.random.default_rng(6)
+    matrix = rng.random((count, 3))
+    target = -3 * matrix[:, 0]
+    groups = np.arange(count) if groups is None else groups
+    return feature_search._Scorer(matrix, target, groups, [0, 1], 5), matrix
+
+
+def test_the_real_mlp_scores_the_column_time_depends_on_far_better():
+    scorer, _ = _scorer_over(None)
+    mlp = feature_search._MlpScorer(scorer)
+    signal, noise = mlp.cells([0], (0,)), mlp.cells([1], (0,))
+    assert len(signal) == len(noise) == 2
+    assert (noise - signal).min() > 0.1
+    delta, error = feature_search._paired(noise, signal)
+    assert delta > 0.1 and error >= 0
+
+
+def test_the_mlp_pass_fits_with_the_callers_options_and_whole_graphs(monkeypatch):
+    seen = []
+
+    def fit(matrix, target, **options):
+        seen.append(options)
+        return types.SimpleNamespace(predict=lambda rows: np.zeros(len(rows))), {}
+
+    monkeypatch.setattr("uhd_gen.mlp.fit_mlp", fit)
+    groups = np.arange(400) // 4
+    scorer, _ = _scorer_over(None, groups)
+    feature_search._MlpScorer(scorer, {"hidden": (8,), "epochs": 7}).cells([0], (0, 1))
+    assert len(seen) == 4
+    for options in seen:
+        assert options["hidden"] == (8,) and options["epochs"] == 7
+        assert options["members"] == 1
+    # Early stopping holds out whole graphs: the groups are the training rows' graphs.
+    assert np.array_equal(seen[0]["groups"], groups[scorer.fold_of[0] != 0])
+
+
+def test_no_graph_falls_in_two_folds_even_across_devices(monkeypatch):
+    """Two boards measure each graph: the search groups by graph, so both rows are on one
+    side of every split (grouping by graph and device would split 'one graph's rows').
+    """
+    recorded = []
+    real = feature_search._folds
+
+    def spy(group_ids, seed, folds):
+        result = real(group_ids, seed, folds)
+        recorded.append((np.asarray(group_ids), result))
+        return result
+
+    monkeypatch.setattr(feature_search, "_folds", spy)
+    rng = np.random.default_rng(8)
+    count = 400
+    frame = pd.DataFrame({"s.x": np.repeat(rng.random(count // 2), 2)})
+    frame["s.n0"] = rng.random(count)
+    frame["benchmark"] = [str(i // 2) for i in range(count)]
+    frame["device"] = [str(i % 2) for i in range(count)]
+    frame["tflops"] = np.exp(-3 * frame["s.x"])
+    search_features(
+        frame,
+        columns=["s.x", "s.n0"],
+        target="tflops",
+        objective="max",
+        groups=frame["benchmark"],
+        seeds=[0, 1],
+        feature_evaluator=_evaluator_path(),
+    )
+    assert len(recorded) == 2
+    for group_ids, folds in recorded:
+        assert len(set(folds)) == 5
+        for graph in np.unique(group_ids):
+            assert len(set(folds[group_ids == graph])) == 1
+
+
+def test_the_stride_order_flag_reads_the_stride_even_when_it_equals_a_dim():
+    rng = np.random.default_rng(1)
+    count = 60
+    batch = rng.integers(2, 9, count)
+    frame = pd.DataFrame(
+        {
+            "t.q.dims[0]": batch,
+            "t.q.strides[0]": rng.integers(1000, 2000, count),
+            # Equal to the batch dim on every row, so it collapses into that group.
+            "t.q.strides[1]": batch,
+            "t.q.strides[2]": rng.integers(1, 9, count),
+            "t.q.strides[3]": 1,
+        }
+    )
+    pool, _ = build_candidates(frame, list(frame.columns), [], None, 2000)
+    flags = [c.entry for c in pool.candidates if c.template == "stride_order"]
+    assert {">": ["$t.q.strides[1]", "$t.q.strides[2]"]} in flags
+
+
+def test_a_tier_ladder_of_flags_or_out_of_range_values_is_not_crossed_with_the_dims():
+    frame = _catalog_frame()
+    columns = [name for name in frame.columns if name.startswith("t.")]
+    pool, _ = build_candidates(
+        frame,
+        columns,
+        [],
+        {"has_bias": [0.0, 1.0], "far": [5000.0, 6000.0], "one_big": [1.0, 64.0]},
+        2000,
+    )
+    assert "tier" not in pool.stats
 
 
 def test_a_pad_multiple_at_or_above_the_dim_is_not_a_candidate():
@@ -401,7 +677,9 @@ def test_the_tier_template_needs_a_catalog_and_says_so_when_it_has_none(tmp_path
     without, _ = build_candidates(frame, columns, [], None, 2000)
     assert "tier" not in without.stats
     with_tiers, _ = build_candidates(frame, columns, [], {"tile": [64.0, 128.0]}, 2000)
-    chain = next(c for c in with_tiers.candidates if c.template == "tier")
+    chain = next(
+        c for c in with_tiers.candidates if c.template == "tier" and "/" in c.entry
+    )
     # Rounded up to the next catalog value; past the last one it stays as it is.
     assert chain.entry["/"][1]["if"][-1] == chain.entry["/"][0]
     assert set(with_tiers.stats["tier"]) >= {"generated", "kept"}

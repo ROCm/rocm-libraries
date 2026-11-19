@@ -38,7 +38,10 @@ REPORT = "feature_search_report.json"
 SUMMARY = "feature_search_report.md"
 
 PAD_MULTIPLES = (8, 16, 32, 64, 128)
-GRID_TILES = (16, 32, 64, 128, 256)
+#: Grid tiles when the catalog names no tile-like field.
+FALLBACK_TILES = (64, 128)
+#: A catalog field that names a tile: block_m, tile_n, ...
+_TILE_FIELD = re.compile(r"(^|_)(block|tile)(_|$)")
 #: Distinct numeric values a catalog field may hold and still name tiers.
 TIER_VALUES = (2, 64)
 #: More candidates than this are refused, not sampled.
@@ -54,6 +57,19 @@ FLOOR = 8
 #: Columns this correlated carry the same information and leave a round together.
 CLUSTER_CORRELATION = 0.999
 BOOST_ROUNDS = 150
+#: The adapter pass tries at most this many candidates, and fits the real MLP on this many
+#: held-out folds of each seed.
+ADAPTER_PASS_BUDGET = 60
+#: The adapter pass reads disjoint folds of each seed: it picks candidates on DISCOVERY,
+#: confirms each pick on CONFIRM, checks removals on REMOVAL, and chooses between the
+#: pruned and pre-prune sets on CONFIRM + REMOVAL.
+ADAPTER_DISCOVERY = (0, 1)
+ADAPTER_CONFIRM = (2, 3)
+ADAPTER_REMOVAL = (4,)
+#: A paired difference counts when it exceeds this many standard errors.
+ADAPTER_Z = 2.0
+#: The order templates are offered to the adapter pass.
+ADAPTER_TEMPLATES = ("tier", "grid", "pad", "ratio")
 #: Sets of at most this many features are fit on every feature at every split.
 SUBSAMPLE_ABOVE = 32
 LGBM_PARAMS = {
@@ -205,6 +221,7 @@ def _derived_candidates(
     columns: list[str],
     representative: dict[str, str],
     catalog_values: dict[str, list[float]],
+    tiles: list[int],
     stats: dict,
 ) -> None:
     """Add the pad, ratio, stride-order, grid and tier templates over the base columns' representatives."""
@@ -258,8 +275,7 @@ def _derived_candidates(
             strides.setdefault(match.group(1), []).append((int(match.group(2)), name))
 
     def stride(name: str) -> _Term | None:
-        if name in representative:
-            return term(representative[name])
+        # The column itself: a stride that collapsed into a dim's group is still a stride.
         if frame[name].map(lambda value: isinstance(value, str)).any():
             return None
         return _Term.column(name, _column_values(frame, name))
@@ -286,33 +302,46 @@ def _derived_candidates(
             cu = _Term.column(
                 "device.cu_count", frame["device.cu_count"].to_numpy(float)
             )
+    # A grid: the tiles of one non-innermost axis times the extents of the tensor's other
+    # non-innermost axes (the innermost axis is the contiguous one: it is read along, not
+    # tiled across the launch).
+    every_dim: dict[str, set[int]] = {}
+    for name in columns:
+        match = _DIMS.fullmatch(name)
+        if match:
+            every_dim.setdefault(match.group(1), set()).add(int(match.group(2)))
     for role, dims in sorted(roles.items()):
-        members = sorted({name for _, name in dims})
-        if len(dims) < 3:
+        if len(every_dim[role]) < 3:
             continue
+        innermost = max(every_dim[role])
+        for index, stride_column in strides.get(role, ()):
+            if np.all(_column_values(frame, stride_column) == 1):
+                innermost = index
+        members = sorted({name for index, name in dims if index != innermost})
         for name in members:
             dim = term(name)
-            others = [other for other in members if other != name]
-            for size in (1, 2):
-                for subset in itertools.combinations(others, size):
-                    for tile in GRID_TILES:
-                        if tile >= dim.values.max():
-                            continue
-                        grid = _product(
-                            [term(other) for other in subset] + [dim.ceil_div(tile)]
-                        )
-                        pool.add("grid", grid.expr, grid.values)
-                        if cu is not None:
-                            waves = grid.over(cu)
-                            pool.add("grid", waves.expr, waves.values)
+            others = [term(other) for other in members if other != name]
+            for tile in tiles:
+                if tile >= dim.values.max():
+                    continue
+                grid = _product(others + [dim.ceil_div(tile)])
+                pool.add("grid", grid.expr, grid.values)
+                if cu is not None:
+                    waves = grid.over(cu)
+                    pool.add("grid", waves.expr, waves.values)
     stats["grid_per_cu"] = (
         "added" if cu is not None else "skipped: device.cu_count absent or constant"
     )
 
     for field, values in sorted(catalog_values.items()):
+        # A 0/1 flag, or a ladder with one value above 1, rounds to nothing but itself.
         ladder = sorted(values)
+        if sum(1 for value in ladder if value > 1) < 2:
+            continue
         for name in all_dims:
             dim = term(name)
+            if ladder[-1] < dim.values.min() or ladder[0] >= dim.values.max():
+                continue
             chain: list = []
             for value in ladder:
                 chain += [{"<=": [dim.expr, _literal(value)]}, _literal(value)]
@@ -332,6 +361,7 @@ def build_candidates(
     presence_columns: list[str],
     catalog_values: dict[str, list[float]] | None,
     max_candidates: int,
+    tiles: list[int] = FALLBACK_TILES,
 ) -> tuple[_Pool, dict]:
     """(pool, details): the base columns and presence flags, then the derived templates."""
     pool = _Pool(max_candidates)
@@ -347,10 +377,29 @@ def build_candidates(
     details["constant_columns"] = sorted(
         name for name in columns if name not in representative
     )
+    details["grid_tiles"] = list(tiles)
     _derived_candidates(
-        pool, frame, columns, representative, catalog_values or {}, details
+        pool, frame, columns, representative, catalog_values or {}, list(tiles), details
     )
     return pool, details
+
+
+def tile_sizes(catalog_values: dict) -> tuple[list[int], str]:
+    """(tiles, source): the integer values of the catalog's tile-like fields (block_m, tile_n,
+    ...), else FALLBACK_TILES."""
+    found = sorted(
+        {
+            int(value)
+            for field, values in catalog_values.items()
+            if _TILE_FIELD.search(field)
+            for value in values
+            if isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and float(value).is_integer()
+            and value > 1
+        }
+    )
+    return (found, "catalog") if found else (list(FALLBACK_TILES), "fallback")
 
 
 def _tier_fields(catalog_values: dict) -> tuple[dict, dict]:
@@ -410,6 +459,7 @@ class _Scorer:
         import lightgbm
 
         self.lightgbm = lightgbm
+        self.groups = groups
         self.matrix, self.target = matrix, target
         self.seeds, self.folds = list(seeds), folds
         self.fold_of = [_folds(groups, seed, folds) for seed in self.seeds]
@@ -484,6 +534,276 @@ def _clusters(matrix: np.ndarray) -> list[list[int]]:
     return sorted(members.values())
 
 
+def _prune(
+    scorer: "_Scorer",
+    current: list[int],
+    names: list[str],
+    estimate: dict,
+    dropped: list,
+) -> tuple[list[int], dict, float, float, list]:
+    """Remove features until each one left costs more than the noise to remove: refit
+    without it and the held-out score must rise by more than max(spread, MIN_TOLERANCE).
+
+    The weakest feature by its last known cost (to begin with, `estimate`: its permutation
+    importance) is refit without; it goes if the cost is within the noise, else its cost is
+    updated. Costs are exact only on a sweep of the whole set, so a sweep follows any removal
+    and ends the pass when it finds nothing weak. Returns (features, their exact costs,
+    score, spread, steps)."""
+    current = sorted(current)
+    score, spread, _ = scorer.score(current)
+    costs = dict(estimate)
+    steps = []
+    fresh = False
+    while True:
+        while len(current) > 1:
+            threshold = max(spread, MIN_TOLERANCE)
+            weak = [c for c in current if costs[c] <= threshold]
+            if not weak:
+                break
+            worst = min(weak, key=lambda c: (costs[c], names[c]))
+            trial = [c for c in current if c != worst]
+            trial_score, trial_spread, _ = scorer.score(trial)
+            cost = trial_score - score
+            removed = cost <= threshold
+            steps.append({"feature": names[worst], "cost": cost, "removed": removed})
+            logger.info(
+                "feature search prune: %s %s (cost %+.5f, tolerance %.5f, %d left)",
+                "removed" if removed else "kept",
+                names[worst],
+                cost,
+                threshold,
+                len(current) - removed,
+            )
+            if removed:
+                current, score, spread = trial, trial_score, trial_spread
+                del costs[worst]
+                fresh = False
+                dropped.append(
+                    {
+                        "feature": names[worst],
+                        "reason": f"prune: removal cost {cost:+.5f} within the noise "
+                        f"{threshold:.5f}",
+                    }
+                )
+            else:
+                costs[worst] = cost
+        if fresh or len(current) == 1:
+            break
+        costs = {
+            c: scorer.score([x for x in current if x != c])[0] - score for c in current
+        }
+        fresh = True
+    if len(current) == 1:
+        costs = {current[0]: None}
+    return current, costs, score, spread, steps
+
+
+class _MlpScorer:
+    """Held-out error of the real MLP trainer (`mlp.fit_mlp`, one ensemble member, early
+    stopping on whole graphs as `train` does, `options` its hidden/epochs/max_rows) per
+    (seed, fold) cell: the cells of a set are paired with another set's."""
+
+    def __init__(self, scorer: "_Scorer", options: dict | None = None) -> None:
+        self.scorer = scorer
+        self.options = dict(options or {})
+        self.fits = 0
+        self._cells: dict = {}
+
+    def cells(self, columns: list[int], folds: tuple[int, ...]) -> np.ndarray:
+        key = (tuple(columns), folds)
+        if key in self._cells:
+            return self._cells[key]
+        from .mlp import fit_mlp
+
+        scorer = self.scorer
+        errors = []
+        for seed, fold_of in zip(scorer.seeds, scorer.fold_of):
+            for fold in folds:
+                train = np.flatnonzero(fold_of != fold)
+                test = np.flatnonzero(fold_of == fold)
+                ensemble, _ = fit_mlp(
+                    scorer.matrix[np.ix_(train, columns)],
+                    scorer.target[train],
+                    **{**self.options, "members": 1, "seed": seed},
+                    groups=scorer.groups[train],
+                )
+                self.fits += 1
+                predicted = ensemble.predict(scorer.matrix[np.ix_(test, columns)])
+                errors.append(float(np.abs(predicted - scorer.target[test]).mean()))
+        self._cells[key] = np.array(errors)
+        return self._cells[key]
+
+
+def _paired(worse: np.ndarray, better: np.ndarray) -> tuple[float, float]:
+    """(mean, standard error) of the per-cell fall in error from `worse` to `better`."""
+    difference = worse - better
+    return float(difference.mean()), float(
+        difference.std(ddof=1) / math.sqrt(len(difference))
+    )
+
+
+def _adapter_candidates(
+    scorer: "_Scorer", candidates: list[Candidate], current: list[int], budget: int
+) -> list[tuple[int, float]]:
+    """The derived features the adapter pass tries, as (index, LightGBM gain): per template
+    (tier, grid, pad, ratio) those not already kept, best gain first, dealt out across the
+    templates in that order until `budget` are chosen, so no template takes the whole pass.
+    The gain comes from a fit on the rows the first seed's discovery folds train on."""
+    pool = [
+        index
+        for index, candidate in enumerate(candidates)
+        if candidate.template in ADAPTER_TEMPLATES and index not in current
+    ]
+    if not pool:
+        return []
+    columns = sorted(set(current) | set(pool))
+    rows = np.flatnonzero(scorer.fold_of[0] > max(ADAPTER_DISCOVERY))
+    booster = scorer.lightgbm.train(
+        {**LGBM_PARAMS, "seed": scorer.seeds[0]},
+        scorer.lightgbm.Dataset(
+            scorer.matrix[np.ix_(rows, columns)],
+            scorer.target[rows],
+            params={"max_bin": LGBM_PARAMS["max_bin"], "verbose": -1},
+        ),
+        num_boost_round=BOOST_ROUNDS,
+    )
+    gain = dict(zip(columns, booster.feature_importance("gain")))
+    queues = [
+        sorted(
+            (index for index in pool if candidates[index].template == template),
+            key=lambda index: (-gain[index], candidates[index].name),
+        )
+        for template in ADAPTER_TEMPLATES
+    ]
+    chosen = []
+    while len(chosen) < budget and any(queues):
+        for queue in queues:
+            if queue and len(chosen) < budget:
+                index = queue.pop(0)
+                chosen.append((index, float(gain[index])))
+    return chosen
+
+
+def _adapter_pass(
+    scorer: "_Scorer",
+    candidates: list[Candidate],
+    current: list[int],
+    budget: int,
+    alternative: list[int] | None = None,
+    options: dict | None = None,
+) -> tuple[list[int], dict, dict]:
+    """Forward pass scored by the MLP the model will be trained as, on paired per-fold
+    differences: a derived feature is picked if the held-out error on the DISCOVERY folds
+    falls by more than max(ADAPTER_Z standard errors, MIN_TOLERANCE), and kept only if the
+    CONFIRM folds agree (by more than one standard error); an added feature is dropped
+    again if the REMOVAL fold finds it costs no more than that. The LightGBM prune can remove
+    what the MLP uses, so `alternative` (the set before the prune) plus the added features is
+    scored too, and kept only if it beats the pruned set by that margin on the CONFIRM and
+    REMOVAL folds. Returns (features, report, the kept added features' removal costs).
+    """
+    started = time.monotonic()
+    mlp = _MlpScorer(scorer, options)
+    current = list(current)
+    discovery, confirm = ADAPTER_DISCOVERY, ADAPTER_CONFIRM
+    base = float(mlp.cells(sorted(current), discovery).mean())
+    tried, added = [], []
+    for index, gain in _adapter_candidates(scorer, candidates, current, budget):
+        before = mlp.cells(sorted(current), discovery)
+        after = mlp.cells(sorted(current + [index]), discovery)
+        delta, error = _paired(before, after)
+        picked = delta > max(ADAPTER_Z * error, MIN_TOLERANCE)
+        entry = {
+            "feature": candidates[index].name,
+            "template": candidates[index].template,
+            "lightgbm_gain": gain,
+            "mlp_score": float(after.mean()),
+            "mlp_delta": delta,
+            "mlp_delta_se": error,
+            "picked": picked,
+            "confirm_delta": None,
+            "added": False,
+        }
+        if picked:
+            entry["confirm_delta"], confirm_error = _paired(
+                mlp.cells(sorted(current), confirm),
+                mlp.cells(sorted(current + [index]), confirm),
+            )
+            entry["added"] = entry["confirm_delta"] > max(confirm_error, MIN_TOLERANCE)
+        tried.append(entry)
+        logger.info(
+            "feature search adapter pass: %s %s (delta %+.5f +- %.5f, confirm %s)",
+            "added" if entry["added"] else "tried",
+            candidates[index].name,
+            delta,
+            error,
+            entry["confirm_delta"],
+        )
+        if entry["added"]:
+            current.append(index)
+            added.append(index)
+    checks, costs = [], {}
+    for index in reversed(added):
+        without = sorted(c for c in current if c != index)
+        cost, error = _paired(
+            mlp.cells(without, ADAPTER_REMOVAL),
+            mlp.cells(sorted(current), ADAPTER_REMOVAL),
+        )
+        # Fewer cells than the other folds: one standard error is the bar, as in confirm.
+        kept = cost > max(error, MIN_TOLERANCE)
+        checks.append(
+            {"feature": candidates[index].name, "mlp_removal_cost": cost, "kept": kept}
+        )
+        if kept:
+            costs[index] = cost
+        else:
+            current.remove(index)
+    choice = None
+    if alternative is not None:
+        wider = sorted(set(alternative) | set(costs))
+        if wider != sorted(current):
+            held = ADAPTER_CONFIRM + ADAPTER_REMOVAL
+            gain, error = _paired(
+                mlp.cells(sorted(current), held), mlp.cells(wider, held)
+            )
+            keep_wider = gain > max(ADAPTER_Z * error, MIN_TOLERANCE)
+            choice = {
+                "pruned_features": len(current),
+                "pruned_mlp_score": float(mlp.cells(sorted(current), held).mean()),
+                "pre_prune_features": len(wider),
+                "pre_prune_mlp_score": float(mlp.cells(wider, held).mean()),
+                "pre_prune_gain": gain,
+                "pre_prune_gain_se": error,
+                "chosen": "pre_prune" if keep_wider else "pruned",
+            }
+            if keep_wider:
+                current = wider
+        else:
+            choice = {"chosen": "pruned", "pre_prune_equals_pruned": True}
+    final = sorted(current)
+    report = {
+        "adapter": "mlp_data",
+        "set_choice": choice,
+        "budget": budget,
+        "members": 1,
+        "folds": {
+            "discovery": list(ADAPTER_DISCOVERY),
+            "confirm": list(ADAPTER_CONFIRM),
+            "removal": list(ADAPTER_REMOVAL),
+        },
+        "options": {
+            k: list(v) if isinstance(v, tuple) else v for k, v in mlp.options.items()
+        },
+        "base_score": base,
+        "final_score": float(mlp.cells(final, discovery).mean()),
+        "candidates": tried,
+        "removal_check": checks,
+        "added": [candidates[index].name for index in sorted(costs)],
+        "mlp_fits": mlp.fits,
+        "wall_seconds": time.monotonic() - started,
+    }
+    return final, report, costs
+
+
 def search_features(
     frame: pd.DataFrame,
     *,
@@ -499,14 +819,21 @@ def search_features(
     floor: int = FLOOR,
     omitted: list = (),
     feature_evaluator: str | None = None,
+    adapter: str = "tree",
+    adapter_pass_budget: int = ADAPTER_PASS_BUDGET,
+    mlp_options: dict | None = None,
 ) -> dict:
     """Search a recipe over the training rows `frame`; the report, whose `recipe` is the
     features signature.
 
     `columns` are the published columns the search may read (already past the exclusion
     rules), `presence_columns` the tensor identifiers it may read only as presence flags,
-    `groups` the problem each row belongs to. The target's log is the regression label for
-    either objective: the search wants the features that explain it, not a ranking."""
+    `groups` the graph each row belongs to: every fold holds whole graphs, so a graph's
+    rows on several devices never fall on both sides. The target's log is the regression label for
+    either objective: the search wants the features that explain it, not a ranking.
+
+    `adapter` is the model the recipe will train: with `mlp_data` a forward pass scored by
+    the MLP follows the LightGBM elimination."""
     started = time.monotonic()
     measured = pd.to_numeric(frame[target], errors="coerce").to_numpy(dtype=np.float64)
     rows = np.isfinite(measured) & (measured > 0)
@@ -521,8 +848,9 @@ def search_features(
             f"validation; got {group_ids.max() + 1}"
         )
     tiers, skipped_fields = _tier_fields(catalog_values or {})
+    tiles, tile_source = tile_sizes(catalog_values or {})
     pool, details = build_candidates(
-        frame, list(columns), list(presence_columns), tiers, max_candidates
+        frame, list(columns), list(presence_columns), tiers, max_candidates, tiles
     )
     candidates = pool.candidates
     if not candidates:
@@ -611,38 +939,19 @@ def search_features(
     )
     survivors = sorted(c for index in chosen["active"] for c in clusters[index])
     rank = {c: chosen["importance"][cluster_of[c]] for c in survivors}
-    current = sorted(survivors, key=lambda c: (rank[c], names[c]))
-    anchor, allowed = chosen["score"], tolerance(chosen["spread"])
-    greedy = []
-    for column in list(current):
-        if len(current) == 1:
-            break
-        trial = [c for c in current if c != column]
-        score, _, _ = scorer.score(sorted(trial))
-        accepted = score <= anchor + allowed
-        greedy.append({"feature": names[column], "score": score, "removed": accepted})
-        logger.info(
-            "feature search final pass: %s %s (score %.5f, %d left)",
-            "removed" if accepted else "kept",
-            names[column],
-            score,
-            len(current) - accepted,
+    current, costs, final_score, final_spread, pruned = _prune(
+        scorer,
+        survivors,
+        names,
+        {c: float(rank[c]) for c in survivors},
+        dropped,
+    )
+    adapter_report, mlp_costs = None, {}
+    if adapter == "mlp_data":
+        current, adapter_report, mlp_costs = _adapter_pass(
+            scorer, candidates, current, adapter_pass_budget, survivors, mlp_options
         )
-        if accepted:
-            current = trial
-            dropped.append(
-                {
-                    "feature": names[column],
-                    "reason": f"final pass: score {score:.5f} within {allowed:.5f} of "
-                    f"{anchor:.5f}",
-                }
-            )
     final = sorted(current)
-    final_score, final_spread, _ = scorer.score(final)
-    costs = {}
-    for column in final:
-        without = [c for c in final if c != column]
-        costs[column] = scorer.score(without)[0] - final_score if without else None
     recipe = [candidates[c].entry for c in final]
     verify_recipe(recipe, [candidates[c] for c in final], frame, feature_evaluator)
     return {
@@ -677,6 +986,7 @@ def search_features(
                 for kept, collapsed in sorted(pool.duplicates.items())
             ],
             "grid_per_cu": details["grid_per_cu"],
+            "grid_tiles": {"tiles": details["grid_tiles"], "source": tile_source},
             "correlated_clusters": [
                 [names[column] for column in cluster]
                 for cluster in clusters
@@ -698,15 +1008,23 @@ def search_features(
             "best_round": best["round"],
             "best_score": best["score"],
         },
-        "final_pass": greedy,
+        "prune": pruned,
+        "adapter_pass": adapter_report,
+        # The score and removal costs are LightGBM's, on the pruned set; a feature the
+        # adapter pass added carries the MLP's removal cost instead. When the adapter
+        # pass kept the pre-prune set, its extra features have neither.
         "final": {
             "score": final_score,
             "spread": final_spread,
+            "mlp_score": (
+                None if adapter_report is None else adapter_report["final_score"]
+            ),
             "features": [
                 {
                     "feature": names[c],
                     "template": candidates[c].template,
-                    "removal_cost": costs[c],
+                    "removal_cost": costs.get(c),
+                    "mlp_removal_cost": mlp_costs.get(c),
                 }
                 for c in final
             ],
@@ -770,6 +1088,10 @@ def search_summary(report: dict, paths: dict[str, Path]) -> dict:
         },
         "rounds": len(report["rounds"]),
         "features": len(report["recipe"]),
+        "adapter": report["adapter_pass"] and report["adapter_pass"]["adapter"],
+        "set_choice": report["adapter_pass"] and report["adapter_pass"]["set_choice"],
+        "mlp_score": report["adapter_pass"] and report["adapter_pass"]["final_score"],
+        "adapter_added": report["adapter_pass"] and report["adapter_pass"]["added"],
         "score": report["final"]["score"],
         "spread": report["final"]["spread"],
         "wall_seconds": report["wall_seconds"],
@@ -806,14 +1128,27 @@ def _summary(report: dict) -> str:
         f"{report['final']['score']:.5f} +- {report['final']['spread']:.5f}",
         f"- wall time: {report['wall_seconds']:.0f} s, {report['model_fits']} model fits",
     ]
+    adapter = report["adapter_pass"]
+    if adapter:
+        lines.append(
+            f"- adapter pass ({adapter['adapter']}): tried {len(adapter['candidates'])}, "
+            f"kept {len(adapter['added'])}; MLP score {adapter['base_score']:.5f} -> "
+            f"{adapter['final_score']:.5f}; set kept: "
+            f"{(adapter['set_choice'] or {}).get('chosen', 'pruned')}"
+        )
     if report["catalog"]["note"]:
         lines.append(f"- catalog: {report['catalog']['note']}")
-    lines += ["", "| feature | template | removal cost |", "|---|---|---|"]
+    lines += [
+        "",
+        "| feature | template | removal cost | MLP removal cost |",
+        "|---|---|---|---|",
+    ]
     for entry in report["final"]["features"]:
-        cost = entry["removal_cost"]
+        costs = [entry["removal_cost"], entry["mlp_removal_cost"]]
         lines.append(
             f"| `{entry['feature']}` | {entry['template']} | "
-            f"{'' if cost is None else f'{cost:+.5f}'} |"
+            + " | ".join("" if cost is None else f"{cost:+.5f}" for cost in costs)
+            + " |"
         )
     return "\n".join(lines) + "\n"
 
@@ -877,6 +1212,20 @@ def add_feature_search_arguments(parser: argparse.ArgumentParser) -> None:
         help=f"Refuse a search over more candidates (default: {MAX_CANDIDATES})",
     )
     parser.add_argument(
+        "--adapter",
+        choices=("tree", "mlp_data"),
+        default="tree",
+        help="The model the recipe will train: mlp_data adds a forward pass scored by the "
+        "MLP trainer after the LightGBM elimination (default: tree)",
+    )
+    parser.add_argument(
+        "--adapter-pass-budget",
+        type=int,
+        default=ADAPTER_PASS_BUDGET,
+        help="Derived features the adapter pass tries, dealt out across the tier, grid, "
+        f"pad and ratio templates (default: {ADAPTER_PASS_BUDGET})",
+    )
+    parser.add_argument(
         "--feature-evaluator", help="Shared hipdnn_uhd_features executable"
     )
     parser.add_argument(
@@ -889,7 +1238,7 @@ def add_feature_search_arguments(parser: argparse.ArgumentParser) -> None:
 def run_feature_search(args: argparse.Namespace) -> int:
     from .correctness import measured_rows
     from .corpus_io import read_corpus_frame
-    from .evaluate import Grouping, problem_keys, resolve_grouping
+    from .evaluate import Grouping, resolve_grouping
     from .generate import proposal_columns
 
     try:
@@ -918,7 +1267,8 @@ def run_feature_search(args: argparse.Namespace) -> int:
             if args.group_by
             else resolve_grouping(frame)
         )
-        keys = problem_keys(frame, grouping)
+        # Folds hold whole graphs: the grouping's first column is the benchmark.
+        keys = frame[grouping.columns[0]].astype(str)
         scalars, identifiers, _, omitted = proposal_columns(frame, published, None, [])
         columns = [name for name in scalars if not name.startswith("kernel.")]
         if args.catalog_values:
@@ -942,6 +1292,8 @@ def run_feature_search(args: argparse.Namespace) -> int:
             max_candidates=args.max_candidates,
             omitted=omitted,
             feature_evaluator=args.feature_evaluator,
+            adapter=args.adapter,
+            adapter_pass_budget=args.adapter_pass_budget,
         )
         paths = write_search(report, output)
     except (OSError, TypeError, ValueError, KeyError) as error:

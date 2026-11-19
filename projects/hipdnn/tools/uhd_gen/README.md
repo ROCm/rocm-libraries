@@ -695,7 +695,7 @@ that does learns the corpus rather than the cost; each is listed in `omitted_pro
 |---|---|
 | `positional_tensor` | `graph.tensors[<i>].*`: positional copies of a node's tensor roles, which are role-ambiguous (the node-role columns stay) |
 | `derived_numel` | names ending `.numel`: the product of the published dims |
-| `caller_value` | `graph.nodes[<i>].attn_scale_value` and a matcher's `<namespace>.scale`: caller-chosen multipliers, often `1/sqrt(head_dim)`, so a second head_dim to a model |
+| `caller_value` | `graph.nodes[<i>].attn_scale_value` and a matcher's `<namespace>.scale`, `.scale_bits`, `.scale_value`, `.sm_scale` (not `scale_source`, a mode): caller-chosen multipliers, often `1/sqrt(head_dim)`, so a second head_dim to a model |
 | `board_identity` | `device.total_global_mem`: varies only between the pooled boards |
 
 Strides, `dropout_p`/`dropout_probability` and `virtual` are kept. An authored recipe
@@ -715,25 +715,45 @@ expressions over them: padding (`ceil_div(d, m) * m`, `d / (ceil_div(d, m) * m)`
 m in 8..128), ratios of dims of different tensor roles, stride order
 (`{">": ["$q.strides[1]", "$q.strides[2]"]}`: head-major or token-major, for each adjacent pair
 before a tensor's innermost stride; raw strides stay candidates), grid counts
-(`prod(S) * ceil_div(d, t)` over the other dims of a role, also divided by `$device.cu_count` when
-that field varies) and, given catalog values, `d` rounded up to each catalog field's tiers
+(`ceil_div(d, t)` of one non-innermost axis of a tensor times the extents of its other
+non-innermost axes, `t` one of the catalog's tile-like integer fields (`block_*`, `tile_*`;
+64 and 128 when it has none), also divided by `$device.cu_count` when that field varies;
+the innermost axis is the one with stride 1, else the last) and, given catalog values, `d` rounded up to each catalog field's tiers
 (`--catalog-values file.json` with `{"field": [values...]}`, or the metadata of the engine's KDP
 kernels in `--descriptor-tree`, which `generate` always reads). More than `--max-candidates`
 (2000) candidates are refused, not sampled. The search is backward elimination scored by
 LightGBM on the log target with 5-fold validation by problem, repeated over three seeds: each round
 drops the least important 15% (permutation importance; near-duplicate clusters, |corr| > 0.999,
 leave together), it stops after two rounds worse than the best by more than
-`max(spread, 0.002)` or at 8 features, keeps the smallest round within that tolerance of the
-best, then removes features one at a time while the score stays within it of that round's. Every recipe
-entry is checked against `hipdnn_uhd_features` on every row before it is written. The same
-rows and seeds give the same recipe.
+`max(spread, 0.002)` or at 8 features, and keeps the smallest round within that tolerance of the
+best. A prune then refits without each feature, weakest first, and removes it unless the score
+rises by more than `max(spread, 0.002)`, until every feature left costs more than that.
+
+Folds hold whole graphs (the first column of the problem identity, `benchmark`), so a graph
+measured on two boards is never on both sides of a split.
+
+With `--adapter mlp_data` (`generate` passes its own adapter and `--mlp-hidden/--mlp-epochs/
+--mlp-max-rows`; the default is `tree`) a forward pass follows, scored by the MLP trainer the model
+will be fitted with (one ensemble member, early stopping on whole graphs) on paired per-fold
+differences. Up to `--adapter-pass-budget` (60, also a `generate` flag) tier, grid, pad and ratio
+features the prune did not keep, best LightGBM gain first (on rows the first seed's discovery
+folds train on) and dealt out across those templates, are tried one at a time: a feature is picked
+if the held-out error on folds 0-1 of each seed falls by more than `max(2 standard errors of the
+paired differences, 0.002)`, added only if folds 2-3 agree by more than one standard error, and
+removed again if fold 4 finds it costs no more than that. The LightGBM prune can remove what the
+MLP uses, so the set before the prune (plus the added features) is scored too, on folds 2-4, and
+replaces the pruned set only if it wins by the same margin; the report records both scores and the
+choice, and the removal-cost guarantee holds for the pruned set. The report lists every
+candidate's MLP delta and standard error.
+Every recipe entry is checked against `hipdnn_uhd_features` on every row before it is written. The
+same rows and seeds give the same recipe.
 
 The output directory (`feature_search/` beside the model for `generate`, whose
 `generation_manifest.json` records the report path and a summary under `feature_search`)
 holds `recipe.json`, a features-signature array; `feature_search_report.json`, with the
 candidate counts per template, the exclusions, every round (features kept, score and spread),
-the final features with each one's removal cost, and what was dropped and why; and a Markdown
-summary.
+the prune's steps, the adapter pass, the final features with each one's removal cost (the MLP's
+for a feature the adapter pass added), and what was dropped and why; and a Markdown summary.
 
 **Overriding.** `--features` or `--feature-signature` is taken as written and skips the
 search. To choose a subset of what the search found, edit `recipe.json` and pass it back as

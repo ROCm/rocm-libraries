@@ -35,6 +35,7 @@ from .correctness import (
 from .bench_env import bench_environment
 from .corpus_io import graph_key
 from .coverage import device_field_coverage, enforce_device_coverage, propose_features
+from .feature_search import ADAPTER_PASS_BUDGET
 from .evaluate import (
     BENCHMARK_COLUMN,
     finite_values,
@@ -198,6 +199,13 @@ def add_generate_arguments(parser: argparse.ArgumentParser) -> None:
         "is written beside the model and summarised in generation_manifest.json. Edit "
         "feature_search/recipe.json and pass it as --feature-signature to choose a subset. "
         "Not with --features or --feature-signature",
+    )
+    parser.add_argument(
+        "--adapter-pass-budget",
+        type=int,
+        default=ADAPTER_PASS_BUDGET,
+        help="With --feature-search and --adapter mlp_data: the derived features the "
+        f"MLP-scored pass tries (default: {ADAPTER_PASS_BUDGET})",
     )
     parser.add_argument(
         "--dim-tile",
@@ -1672,12 +1680,15 @@ def is_derived_numel(name: str) -> bool:
 
 def is_caller_value(name: str) -> bool:
     """A multiplier the caller chose, with no path to kernel time: a node's
-    `attn_scale_value`, or a matcher's `<namespace>.scale` token. A corpus that sets it to
+    `attn_scale_value`, or a matcher's `<namespace>.scale` token (also `scale_bits`,
+    `scale_value`, `sm_scale`; `scale_source` is a mode, and stays). A corpus that sets it to
     1/sqrt(head_dim) makes it a second head_dim to a model."""
     if re.fullmatch(r"graph\.nodes\[\d+\]\.attn_scale_value", name):
         return True
     namespace, _, token = name.partition(".")
-    return token == "scale" and namespace not in ("graph", "device", "kernel")
+    return namespace not in ("graph", "device", "kernel") and (
+        re.fullmatch(r"(sm_|softmax_)?scale(_bits|_value)?", token) is not None
+    )
 
 
 def is_board_identity(name: str) -> bool:
@@ -2246,6 +2257,21 @@ def _split_for_training(
     return held, eval_corpora, train_frames
 
 
+def _mlp_options(args: argparse.Namespace) -> dict:
+    """The `fit_mlp` options the caller gave `--mlp-*`, for the search's MLP pass; the pass
+    always fits one member, and seeds each fit itself."""
+    from .__main__ import _parse_mlp_hidden
+
+    options = {}
+    if args.mlp_hidden is not None:
+        options["hidden"] = _parse_mlp_hidden(args.mlp_hidden)
+    if args.mlp_epochs is not None:
+        options["epochs"] = args.mlp_epochs
+    if args.mlp_max_rows is not None:
+        options["max_rows"] = args.mlp_max_rows
+    return options
+
+
 def _search_recipe(
     args: argparse.Namespace,
     train_frame: pd.DataFrame,
@@ -2283,12 +2309,17 @@ def _search_recipe(
         presence_columns=identifiers,
         target=target,
         objective=_label_objective(declared),
-        groups=problem_keys(train_frame, grouping),
+        # Folds hold whole graphs, as `train` validates: a graph's rows on several devices
+        # stay on one side.
+        groups=train_frame[grouping.columns[0]].astype(str),
         catalog_values=catalog_values_from_tree(tree, args.engine),
         catalog_source=str(tree),
         seeds=[args.seed + offset for offset in range(len(DEFAULT_SEEDS))],
         omitted=omitted,
         feature_evaluator=args.feature_evaluator,
+        adapter="mlp_data" if args.adapter == "mlp_data" else "tree",
+        adapter_pass_budget=args.adapter_pass_budget,
+        mlp_options=_mlp_options(args),
     )
     paths = write_search(report, stage / "feature_search")
     return {
