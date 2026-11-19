@@ -3040,10 +3040,10 @@ CK_TILE_DEVICE void amd_tdm_load_uniform(const TDMDescriptor<DataType, TensorRan
 
     auto tdm_desc_grp = descriptor.getUniformResourceDescriptorGroup();
     __builtin_amdgcn_tensor_load_to_lds(bit_cast<uint32x4_t>(tdm_desc_grp.get(I0)),
-                                        tdm_desc_grp.get(I1),
-                                        tdm_desc_grp.get(I2),
-                                        tdm_desc_grp.get(I3),
-                                        tdm_desc_grp.get(I4),
+                                        bit_cast<uint32x8_t>(tdm_desc_grp.get(I1)),
+                                        bit_cast<uint32x4_t>(tdm_desc_grp.get(I2)),
+                                        bit_cast<uint32x4_t>(tdm_desc_grp.get(I3)),
+                                        bit_cast<uint32x8_t>(tdm_desc_grp.get(I4)),
                                         static_cast<index_t>(coherence));
 #else
     ignore = descriptor;
