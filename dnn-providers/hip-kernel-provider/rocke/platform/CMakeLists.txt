@@ -275,10 +275,17 @@ target_sources(rocke_core_objects PRIVATE "${_rocke_cxx_keywords_inc}")
 # TU includes it, so LLVM-IR stays byte-identical.
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocke_build_id.cmake")
 rocke_compute_build_id(ROCKE_CONFIGURE_BUILD_ID "${CMAKE_CURRENT_SOURCE_DIR}")
-# Human-readable version. Bump the leading semver when the IR contract changes;
-# the date keeps successive builds from the same version distinguishable.
-string(TIMESTAMP ROCKE_BUILD_DATE "%Y%m%d" UTC)
-set(ROCKE_ENGINE_VERSION "1.0.0+${ROCKE_BUILD_DATE}")
+# Human-readable version. Bump the leading semver when the IR contract changes.
+# The date is taken from SOURCE_DATE_EPOCH (https://reproducible-builds.org/specs/
+# source-date-epoch/) so the same commit built with the same value reports the
+# same version; without it the date is omitted rather than stamped with the
+# configure time, which would make two builds of one commit differ. The
+# content-hash build id (ROCKE_CONFIGURE_BUILD_ID) is what tells builds apart.
+set(ROCKE_ENGINE_VERSION "1.0.0")
+if(DEFINED ENV{SOURCE_DATE_EPOCH} AND NOT "$ENV{SOURCE_DATE_EPOCH}" STREQUAL "")
+  string(TIMESTAMP ROCKE_BUILD_DATE "%Y%m%d" UTC)
+  set(ROCKE_ENGINE_VERSION "${ROCKE_ENGINE_VERSION}+${ROCKE_BUILD_DATE}")
+endif()
 message(STATUS
         "portable-IR build-id: ${ROCKE_CONFIGURE_BUILD_ID}  version: ${ROCKE_ENGINE_VERSION}")
 set(ROCKE_BUILD_ID_HEADER
