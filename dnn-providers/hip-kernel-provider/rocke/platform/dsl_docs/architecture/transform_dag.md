@@ -11,7 +11,7 @@ simple bijective linear permutation of the underlying memory layout.
 
 This doc walks through every transform with worked examples, ending
 with the full implicit-GEMM convolution descriptor used in
-[`rocke/examples/common/bake_off_implicit_gemm.py`](../../python/rocke/examples/common/bake_off_implicit_gemm.py).
+[`library/builders/common/bake_off_implicit_gemm.py`](../../../library/builders/common/bake_off_implicit_gemm.py).
 
 ## The core idea
 

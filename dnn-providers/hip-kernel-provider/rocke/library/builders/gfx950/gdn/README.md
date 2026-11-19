@@ -5,7 +5,7 @@ single-token decode emitter. The device-code emitter lives at
 [`library/kernels/gfx950/gdn_decode.py`](../../../kernels/gfx950/gdn_decode.py).
 
 **GDN prefill** is driven from
-[`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) and runs
+[`library/builders/gfx950/kda/gdn_prefill.py`](../kda/gdn_prefill.py) and runs
 the shared KDA chunkwise kernels in `gate_kind="gdn"` mode, so its tools live in
 the `kda/` directory rather than here. Its commands are in [Prefill](#prefill)
 below.
@@ -60,7 +60,7 @@ retune either decode mode or the GDN prefill path.
 | [`library/tests/test_gdn_decode_table_sweep.py`](../../../tests/test_gdn_decode_table_sweep.py) | CPU contract of `decode_table_sweep.py`: walks, shards, stage 1 / stage 2 files, summaries, exit codes and refused flags, and that a configuration whose verdict fails is never timed or ranked |
 | [`library/tests/test_gdn_decode_defaults_report.py`](../../../tests/test_gdn_decode_defaults_report.py) | CPU contract of `decode_defaults_report.py`: the selection rule, the tie band, withheld proposals, exit codes |
 | [`library/tests/test_kda_decode_benchmark.py`](../../../tests/test_kda_decode_benchmark.py) | CPU contract of `benchmark_kda_decode.py`: variant parsing, `--batches` validation (also of `benchmark_gdn_decode.py`), failure collection, exit code, and that both benchmarks never time a launch whose verdict fails (no torch needed) |
-| [`library/builders/gfx950/kda/gdn_prefill.py`](../../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
+| [`library/builders/gfx950/kda/gdn_prefill.py`](../kda/gdn_prefill.py) | Drive chunkwise prefill (the KDA chunkwise kernels in `gate_kind="gdn"` mode) and hold its fp64 oracle |
 | [`library/benchmarks/gfx950/gdn/sweep_prefill_value_splits.py`](../../../benchmarks/gfx950/gdn/sweep_prefill_value_splits.py) | Sweep `value_splits` for prefill at a given `batch_heads` |
 | [`library/tests/dispatch/gdn/test_gfx950_prefill_wiring.py`](../../../tests/dispatch/gdn/test_gfx950_prefill_wiring.py) | Prefill dispatch: candidate selection, the two-launch guard, launch geometry |
 | [`library/tests/test_kda_chunkwise_spec.py`](../../../tests/test_kda_chunkwise_spec.py) | CPU chunkwise KDA spec coverage: the prep, fused and scan specs' admission and rejection rules, kernel naming, and each builder's code object against the resource budget (no GPU) |

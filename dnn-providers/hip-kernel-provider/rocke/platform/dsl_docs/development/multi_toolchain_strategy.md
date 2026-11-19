@@ -7,8 +7,7 @@ strategy** for scaling to more toolchains and more targets.
 
 > **Lifecycle.** This is a design/working note, not reference documentation.
 > Fold §1–§2 into `dsl_docs/architecture/` once they stop changing, and delete
-> the rest as §4's items land. Related: the decl-table half of this problem is
-> tracked in [`f8f6f4_and_decl_validation_plan.md`](f8f6f4_and_decl_validation_plan.md).
+> the rest as §4's items land.
 
 > **Historical survey environment.** The original probes used AMD clang
 > 23.0.0git and COMGR package metadata reporting ROCm 7.13. That recorded

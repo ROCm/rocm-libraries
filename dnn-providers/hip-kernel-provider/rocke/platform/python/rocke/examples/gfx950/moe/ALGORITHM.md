@@ -6,7 +6,7 @@ This is the algorithm the `FusedMoeForward` pipeline computes, and *why* it is a
 optimization history; this file is the specification, the data layout, and the
 precise per-stage steps.
 
-> A different example, [`examples/gfx950/fused_mega_moe/`](../../fused_mega_moe/),
+> A different example, [`examples/gfx950/fused_mega_moe/`](../fused_mega_moe/),
 > computes the **same math** as a single fused kernel. The two are deliberate
 > opposites: that one keeps the intermediate in LDS across one launch; this one
 > streams it through HBM across a chain of composable launches. The README's
