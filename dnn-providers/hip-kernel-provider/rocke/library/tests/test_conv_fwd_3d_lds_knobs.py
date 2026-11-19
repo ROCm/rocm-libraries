@@ -112,7 +112,7 @@ class TestFwd3dXHalo(unittest.TestCase):
                     uk_tap_fast=True,
                     uk_chunk_group=2,
                 ),
-                # partial waits (xws), interleaved loads, row-keyed swizzle.
+                # Partial waits (xws), interleaved loads, row-keyed swizzle.
                 dict(
                     uk_xhalo=20,
                     defer_mfma=2,
@@ -473,7 +473,7 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
         self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, xh_dpp=True)), "")
         self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, defer_mfma=1)), "")
         self.assertEqual(_fwd_kloop_conflict(self._spec(uk_xhalo=8, rpf_setprio=1)), "")
-        # the x-halo loop places its loads with vmem_interleave too.
+        # The x-halo loop places its loads with vmem_interleave too.
         self.assertEqual(
             _fwd_kloop_conflict(self._spec(uk_xhalo=8, vmem_interleave=2)), ""
         )

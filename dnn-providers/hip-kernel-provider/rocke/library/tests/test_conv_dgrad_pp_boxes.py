@@ -173,7 +173,7 @@ class TestPixelLists(unittest.TestCase):
         self.assertGreater(max(sg.b_x_stride for sg in sgs), 1)
 
     def test_cheap_tail(self):
-        # pp_boxes 77: same cover; s10's 8-pixel partial tile runs 3 taps
+        # pp_boxes 77: same cover; an 8-pixel partial tile runs 3 taps
         # (a depth-interior H/W corner column), not the packer's union box.
         for p in (_p3(), _p3(N=2, D=7, H=12, W=9), _p3(C=1024, K=1024)):
             self._check(p, code=77)
@@ -248,7 +248,7 @@ class TestSmallGridSpecs(unittest.TestCase):
             (dict(pp_boxes=7, tapk_pp_epi=2, xcd_remap=6, pp_box_order=2), "pbl"),
             (dict(pp_boxes=77, split_k=8, pp_box_order=1, tapk_pp_sched=7), "pbl"),
             (dict(tapk_pp_sched=7), "pps7"),
-            # lane-contiguous pair atomics on the box / pixel-list split store
+            # Lane-contiguous pair atomics on the box / pixel-list split store
             (
                 dict(pp_boxes=113, split_k=8, pp_box_order=1, split_atomic_pairs=True),
                 "sapl",

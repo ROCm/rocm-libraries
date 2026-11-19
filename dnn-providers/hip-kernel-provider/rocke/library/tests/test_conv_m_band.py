@@ -14,10 +14,10 @@ from kernels.common.conv_m_band import python_m_band_order
 class TestMBandOrder(unittest.TestCase):
     def test_bijection(self):
         cases = [
-            (16384, 128 * 128, 256, 16),  # fwd s1/s2: 64 tiles per plane
+            (16384, 128 * 128, 256, 16),  # 64 tiles per plane
             (16384, 128 * 128, 256, 32),
             (4096, 64 * 64, 256, 4),
-            (258 * 16900 // 256 + 1, 16900, 256, 16),  # dgrad s1: 66.02 tiles per plane
+            (258 * 16900 // 256 + 1, 16900, 256, 16),  # 66.02 tiles per plane
             (258 * 16900 // 512 + 1, 16900, 512, 11),
             (50, 30, 8, 3),
             (7, 100, 256, 4),  # fewer tiles than a row: identity

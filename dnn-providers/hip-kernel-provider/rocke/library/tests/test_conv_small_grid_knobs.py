@@ -146,7 +146,7 @@ class TestDgradBoxEpiLdsBarriers(unittest.TestCase):
         )
         return [
             dict(),  # split pixel lists, sapl, mch2
-            dict(_t128, tapk_pp_sched=2, split_k=8, pp_box_order=1),  # s10 set
+            dict(_t128, tapk_pp_sched=2, split_k=8, pp_box_order=1),  # split-K set
             dict(
                 _t128,
                 tapk_pp_sched=2,
@@ -154,7 +154,7 @@ class TestDgradBoxEpiLdsBarriers(unittest.TestCase):
                 split_k=1,
                 split_atomic_pairs=False,
                 pp_box_order=2,
-            ),  # s6 non-split set
+            ),  # non-split set
         ]
 
     def test_valid_named_and_builds(self):
