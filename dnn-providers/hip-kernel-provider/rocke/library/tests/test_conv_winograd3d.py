@@ -558,7 +558,7 @@ def test_selector_plans_are_valid_specs(sid, mode):
             )
             assert cw.is_valid_yx_spec(s)[0]
             assert plan.prescale == "bps" and s.bps in (1, 2)
-            assert plan.source == "tuned" or plan.est_ms < plan.est_ms_direct
+            assert plan.source == "tuned"  # Winograd is only chosen from a table
         else:
             assert plan.reason
 
@@ -585,11 +585,11 @@ def test_selector_tuned_table(monkeypatch):
     # chained: does not beat the direct kernel by the margin -> direct
     p = sel.select_winograd3d(_cp(3), "fwd", mode="chained")
     assert p.kind == "direct" and p.source == "tuned"
-    # range-safe data reads the no-prescale entry; chained has none -> the model decides
+    # range-safe data reads the no-prescale entry; chained has none -> direct (untuned)
     p = sel.select_winograd3d(_cp(3), "fwd", mode="dropin", range_safe=True)
     assert p.kind == "yx" and "bps" not in p.spec_dict
     p = sel.select_winograd3d(_cp(3), "fwd", mode="chained", range_safe=True)
-    assert p.source == "model"
+    assert p.kind == "direct" and p.source == "untuned"
 
 
 def test_dropin_wrapper_rejects_direct_plans():
@@ -724,3 +724,85 @@ def test_xpf_option_plans():
             px = withx[k]
             if px.kind == "yx" and not px.spec_dict.get("lin"):  # lin: no xpf variant
                 assert px.spec_dict.get("xpf") == 1, (form, k)
+
+
+# --- selector: decision tables only, chained output contract, producer geometry ------------
+def test_selector_has_no_analytic_fallback():
+    """Problems without a decision table entry get the direct plan (no estimate)."""
+    from kernels.common import conv_winograd3d_select as sel
+
+    assert not hasattr(sel, "Winograd3dCostModel")
+    p = sel.select_winograd3d(_cp(10), "dgrad")  # valid tiling, no table cell
+    assert p.kind == "direct" and p.source == "untuned"
+    # padded problems on range-safe data: the tables hold no no-prescale decision
+    p = sel.select_winograd3d(_cp_adapter(3), "fwd", range_safe=True)
+    assert p.kind == "direct" and p.source == "untuned"
+    for form in ("halo", "adapter", "adapter011"):
+        for mode in ("dropin", "chained"):
+            for pl in sel.unet3d_plans(mode, form=form, range_safe=True).values():
+                assert pl.kind == "direct" or pl.source == "tuned"
+
+
+def test_selector_never_substitutes_the_tuned_candidate(monkeypatch):
+    from kernels.common import conv_winograd3d_select as sel
+
+    key = ("fwd",) + UNET3D_SHAPES[3]
+    monkeypatch.setitem(
+        sel.TUNED, key, {"baselines": ("direct",), "dropin": ("Z+lin", ("direct",))}
+    )
+    p = sel.select_winograd3d(_cp(3), "fwd")  # Z+lin is no fwd candidate
+    assert p.kind == "direct" and "not a valid candidate" in p.reason
+
+
+def test_chained_plans_state_their_output():
+    """chained names the input: a split-K chained plan writes NDHWC and no map (it ends
+    the chain); every other chained yx plan writes c8 and, with the prescale, the map.
+    """
+    from kernels.common import conv_winograd3d_select as sel
+
+    plans = sel.unet3d_plans("chained")
+    p8 = plans[("fwd", 8)]
+    assert p8.kind == "yx" and p8.spec_dict.get("ksplit") == 4
+    assert p8.out_layout == "ndhwc" and not p8.out_map
+    n = 0
+    for pl in plans.values():
+        if pl.kind == "yx" and not pl.spec_dict.get("ksplit"):
+            assert pl.out_layout == "c8" and pl.out_map, pl.label
+            n += 1
+    assert n
+    for pl in sel.unet3d_plans("dropin").values():
+        assert pl.out_layout == "ndhwc" and not pl.out_map
+
+
+def test_chained_producer_geometry(monkeypatch):
+    """bps=2 indexes the producer's map: a B consumer (z_tile 2, n_tile 64) behind a Z
+    producer (z_tile 4, n_tile 32) carries the producer's geometry; a producer that writes
+    no c8 output / no map cannot feed a chained plan."""
+    from kernels.common import conv_winograd3d_select as sel
+
+    key = ("fwd",) + UNET3D_SHAPES[9]  # a B consumer its decision table selects
+    monkeypatch.setitem(
+        sel.TUNED, key, {"baselines": ("direct",), "chained": ("B+xcd6", ("direct",))}
+    )
+    prod = sel.select_winograd3d(_cp(4), "fwd", mode="chained")  # Z + yc8h + bps_out
+    assert prod.kind == "yx" and prod.out_layout == "c8" and prod.out_map
+    alone = sel.select_winograd3d(_cp(9), "fwd", mode="chained")  # B+xcd6
+    assert alone.kind == "yx" and "bps_pz" not in alone.spec_dict
+    p = sel.select_winograd3d(_cp(9), "fwd", mode="chained", producer=prod)
+    s = p.spec_dict
+    C = UNET3D_SHAPES[9][3]
+    assert p.kind == "yx" and s["bps"] == 2
+    assert s["bps_pz"] == 4 and s["bps_pn"] == C // 32
+    assert "bps_pmy" not in s and "bps_pw" not in s  # same my / waves
+    # a producer of the same geometry changes nothing
+    same = sel.select_winograd3d(_cp(9), "fwd", mode="chained", producer=alone)
+    assert same.spec == alone.spec
+    for bad in (
+        sel.select_winograd3d(_cp(4), "fwd"),  # drop-in: NDHWC output
+        sel.unet3d_plans("chained")[("fwd", 8)],  # split-K: NDHWC output
+        sel.select_winograd3d(_cp(4), "dgrad", mode="chained"),  # other direction
+    ):
+        p = sel.select_winograd3d(_cp(9), "fwd", mode="chained", producer=bad)
+        assert p.kind == "direct" and "producer" in p.reason
+    with pytest.raises(ValueError):
+        sel.select_winograd3d(_cp(9), "fwd", producer=prod)  # drop-in takes none

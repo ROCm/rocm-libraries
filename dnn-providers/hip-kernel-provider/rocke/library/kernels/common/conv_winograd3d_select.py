@@ -25,7 +25,14 @@ Modes (what a call costs besides the main kernel):
   ``direct_pad_copy=True`` (CLI ``--pad-copy``) the tables compare against that path instead.
 * ``"chained"`` -- the input already arrives in the c8 layout (the previous conv's ``yc8h``
   epilogue wrote it): weight transform + main kernel. Requires the activations between the
-  convs to stay in c8 (BN / activation kernels must read and write it).
+  convs to stay in c8 (BN / activation kernels must read and write it). ``chained`` names
+  the plan's input; its output is :attr:`Winograd3dPlan.out_layout` (``"c8"`` with the
+  ``yc8h`` epilogue, ``"ndhwc"`` for a split-K plan, whose f32 slices ``build_ks_reduce``
+  sums into NDHWC) and :attr:`Winograd3dPlan.out_map` (whether it writes the next conv's
+  prescale map, ``bps_out``): a plan whose output is NDHWC ends the chain. With the
+  prescale a chained plan reads the producer's map (``bps=2``), indexed by the producer's
+  geometry: pass the producer's plan (``producer=``) so the map indexing follows it; without
+  one, the producer is assumed to tile like this plan.
 
 Numerics: the transformed operands are f16 (11 significant bits; the record's bf16 operands
 carry 8): inside the f16 range the yx path is as accurate as the direct bf16 conv (mean
@@ -42,12 +49,11 @@ tuned against the best direct route of each cell (``TUNED_PAD1_XPF`` / ``TUNED_P
 Determinism: every yx plan is deterministic (no atomics; split-K partials go to f32 slices
 that ``build_ks_reduce`` sums in a fixed order).
 
-Cost: per-cell decision tables (``TUNED*``: same-session A/B on gfx942 against the
-deterministic direct kernels, reduced to the selected candidate and the direct baselines it
-beats by ``TUNED_MARGIN``) when the problem is one of them; otherwise an analytic estimate
-(:class:`Winograd3dCostModel`, effective throughputs fitted to the same A/B runs) that only
-selects Winograd for large grids and channel counts. Winograd must beat the direct estimate
-by ``margin`` (near-ties go to the direct kernel: better accuracy, no range caveat).
+Selection: per-cell decision tables only (``TUNED*``: same-session comparisons on gfx942
+against the deterministic direct kernels, reduced to the selected candidate and the direct
+baselines it beats by ``TUNED_MARGIN``; near-ties go to the direct kernel: better accuracy,
+no range caveat). A problem, mode or prescale without a table entry gets the direct plan
+(``source="untuned"``): Winograd is never chosen without a comparison on the target.
 
 F(4x2,3x3) (``my=4``) and F(4x4,3x3) are never selected: F(4x2) is correct (mean error
 2.0e-3) but not selected on gfx942 (6 waves in one group leave the SIMDs unbalanced at
@@ -57,13 +63,12 @@ exceed 64 KiB of LDS without double buffering, and its f16 error exceeds the dir
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from typing import Dict, Optional, Tuple
 
 from kernels.common._conv_implicit_gemm_common import ConvProblem
 
 __all__ = [
-    "Winograd3dCostModel",
     "Winograd3dPlan",
     "select_winograd3d",
     "winograd3d_candidates",
@@ -542,39 +547,6 @@ _ERR_CLASS = {"yx_f2": 1.50e-3, "yx_f42": 2.0e-3}  # mean rel error, training-li
 
 
 @dataclass(frozen=True)
-class Winograd3dCostModel:
-    """Analytic estimate (ms) for problems without a decision table entry.
-
-    Effective throughputs count the direct conv's FLOPs (2 C K 27 Do Ho Wo); they
-    are model coefficients fitted on gfx942: ``eff_direct_*`` for the deterministic direct
-    kernels (scaled by ``small_eff`` below ``small_flops``), ``eff_wino_*`` for the yx main
-    kernel (scaled by ``small_c_eff`` below ``small_c`` channels). Below ``min_gens``
-    generations of workgroups on ``num_cus`` CUs (or with split-K) no Winograd estimate is
-    trusted (small grids go to the direct kernels). ``copy_tbs``: relayout bandwidth (read +
-    write); ``wt_tbs``: weight transform.
-    """
-
-    num_cus: int = 228
-    eff_direct_fwd: float = 510.0
-    eff_direct_dgrad: float = 460.0
-    eff_wino_fwd: float = 590.0
-    eff_wino_dgrad: float = 495.0
-    small_c: int = 128
-    small_c_eff: float = 0.84
-    small_flops: float = 2.5e11
-    small_eff: float = 0.87
-    min_gens: float = 4.0
-    copy_tbs: float = 3.0
-    wt_tbs: float = 1.2
-    launch_ms: float = 0.004
-    # padded (adapter-form) problems: the direct kernels' efficiency relative to the halo
-    # form (the best halo-form kernels refuse padding; FWD is affected more than BWD-data, whose
-    # x-halo kernels serve the padded problems too)
-    pad_direct_eff_fwd: float = 0.8
-    pad_direct_eff_dgrad: float = 0.97
-
-
-@dataclass(frozen=True)
 class Winograd3dPlan:
     kind: str  # "yx" | "direct"
     spec: Tuple[Tuple[str, object], ...] = ()
@@ -582,9 +554,7 @@ class Winograd3dPlan:
     mode: str = "dropin"
     direction: str = "fwd"
     prescale: str = "none"  # "bps" | "none"
-    est_ms: float = float("inf")
-    est_ms_direct: float = float("inf")
-    source: str = ""  # "tuned" | "model"
+    source: str = ""  # "tuned" | "untuned" | "route table"
     err_class: float = 0.0
     reason: str = ""
     alternatives: Tuple[Tuple[str, str], ...] = field(default=(), compare=False)
@@ -592,6 +562,17 @@ class Winograd3dPlan:
     @property
     def spec_dict(self) -> dict:
         return dict(self.spec)
+
+    @property
+    def out_layout(self) -> str:
+        """Layout of the plan's output: "c8" (the ``yc8h`` epilogue, the next chained
+        conv's input) or "ndhwc" (drop-in plans, split-K plans, direct)."""
+        return "c8" if self.kind == "yx" and self.spec_dict.get("yc8h") else "ndhwc"
+
+    @property
+    def out_map(self) -> bool:
+        """Whether the plan writes the next chained conv's prescale map (``bps_out``)."""
+        return self.kind == "yx" and bool(self.spec_dict.get("bps_out"))
 
     @property
     def label(self) -> str:
@@ -686,15 +667,43 @@ def _specs(direction: str, mode: str, pad: int = 0):
     ]
 
 
+def _producer_geometry(producer, C: int) -> dict:
+    """bps=2 map geometry of a chained producer plan (its z_tile, n blocks, my, waves);
+    only the fields that differ from the consumer's own are set by the caller."""
+    from kernels.common import conv_winograd3d as cw
+
+    s = producer.spec_dict
+    dflt = {f.name: f.default for f in fields(cw.WinogradYxSpec)}
+    return {
+        "z_tile": s.get("z_tile", dflt["z_tile"]),
+        "nb": C // s.get("n_tile", dflt["n_tile"]),
+        "my": s.get("my", dflt["my"]),
+        "waves": s.get("waves", dflt["waves"]),
+    }
+
+
+def _producer_error(producer, direction: str, prescale: str) -> Optional[str]:
+    """Why ``producer`` cannot feed a chained plan (None if it can)."""
+    if producer.kind != "yx" or producer.out_layout != "c8":
+        return f"producer writes {producer.out_layout}, not the c8 layout chained reads"
+    if producer.direction != direction:
+        return f"producer is a {producer.direction} conv, this one {direction}"
+    if prescale == "bps" and not producer.out_map:
+        return "producer writes no prescale map (bps_out) for bps=2"
+    return None
+
+
 def winograd3d_candidates(
     p: ConvProblem,
     direction: str,
     mode: str = "dropin",
     prescale: str = "bps",
     xpf: bool = False,
+    producer: Optional[Winograd3dPlan] = None,
 ):
     """Valid yx specs (WinogradYxSpec) for the problem, with their names and wtv
-    (``xpf``: the unrolled-prefetch main loop where valid)."""
+    (``xpf``: the unrolled-prefetch main loop where valid; ``producer``: the chained
+    producer's plan, whose geometry indexes the bps=2 map)."""
     from kernels.common import conv_winograd3d as cw
 
     Di, Hi, Wi, C, K = _winograd_problem(p, direction)
@@ -706,6 +715,19 @@ def winograd3d_candidates(
         if prescale == "bps":
             if mode == "chained":
                 kw.update(bps=2, bps_halo=1)
+                if producer is not None:
+                    g = _producer_geometry(producer, C)
+                    own = _producer_geometry(
+                        Winograd3dPlan("yx", tuple(sorted(kw.items()))), C
+                    )
+                    for fld, key in (
+                        ("bps_pz", "z_tile"),
+                        ("bps_pn", "nb"),
+                        ("bps_pmy", "my"),
+                        ("bps_pw", "waves"),
+                    ):
+                        if g[key] != own[key]:
+                            kw[fld] = g[key]
             else:
                 hz, h = _relayout_halos(p, direction)
                 kw.update(bps=1, bps_halo=h, **({"bps_halo_z": hz} if hz != h else {}))
@@ -726,42 +748,6 @@ def winograd3d_candidates(
     return out
 
 
-def _flops(p: ConvProblem) -> float:
-    return 2.0 * p.C * p.K * 27 * p.Do * p.Ho * p.Wo
-
-
-def _est(p: ConvProblem, direction: str, mode: str, spec, cm: Winograd3dCostModel):
-    """(t_direct, t_wino) analytic, ms; t_wino = inf where the model is not trusted."""
-    from kernels.common import conv_winograd3d as cw
-
-    fl = _flops(p)
-    fwd = direction == "fwd"
-    eff_d = cm.eff_direct_fwd if fwd else cm.eff_direct_dgrad
-    if fl < cm.small_flops:
-        eff_d *= cm.small_eff
-    t_dir = fl / (eff_d * 1e9)
-    gens = cw.winograd_yx_grid(spec)[0] / cm.num_cus
-    if gens < cm.min_gens or getattr(spec, "ksplit", 1) > 1:
-        return t_dir, float("inf")
-    eff = cm.eff_wino_fwd if fwd else cm.eff_wino_dgrad
-    if spec.C < cm.small_c:
-        eff *= cm.small_c_eff
-    t_w = fl / (eff * 1e9)
-    wt_bytes = 27 * spec.C * spec.K * 2 + 48 * spec.C * spec.K * 2
-    t_w += wt_bytes / (cm.wt_tbs * 1e9) + cm.launch_ms
-    if _pad(p) and not fwd:
-        t_dir /= cm.pad_direct_eff_dgrad
-    elif _pad(p):
-        t_dir /= cm.pad_direct_eff_fwd
-    if mode == "dropin":
-        hz, h = _relayout_halos(p, direction)
-        x_bytes = (
-            (spec.Di - 2 * hz) * (spec.Hi - 2 * h) * (spec.Wi - 2 * h) * spec.C * 2
-        )
-        t_w += 2 * x_bytes / (cm.copy_tbs * 1e9) + cm.launch_ms
-    return t_dir, t_w
-
-
 def select_winograd3d(
     problem: ConvProblem,
     direction: str = "fwd",
@@ -770,17 +756,16 @@ def select_winograd3d(
     dtype: str = "bf16",
     prescale: str = "auto",
     range_safe: bool = False,
-    margin: float = 0.02,
-    cost: Optional[Winograd3dCostModel] = None,
     use_measured: bool = True,
     direct_pad_copy: bool = False,
     xpf: bool = False,
+    producer: Optional[Winograd3dPlan] = None,
 ) -> Winograd3dPlan:
     """The yx Winograd plan for ``problem`` or ``kind="direct"`` with the reason.
 
     Problems with a decision table entry (``use_measured``) take its decision (taken at
-    ``TUNED_MARGIN``; ``margin`` applies to the model estimate); the plan's ``est_ms`` /
-    ``est_ms_direct`` are model estimates only (``inf`` for table decisions).
+    ``TUNED_MARGIN``); every other problem, mode or prescale gets the direct plan
+    (``source="untuned"``).
 
     ``xpf`` (opt-in): plan the unrolled-prefetch main loop (``WinogradYxSpec.xpf``) and, for
     padded drop-in problems, decide on its tables (``TUNED_PAD1_XPF`` / ``TUNED_PAD011_XPF``,
@@ -788,9 +773,13 @@ def select_winograd3d(
 
     ``direct_pad_copy``: for a padded (adapter-form) FWD problem, Winograd must also beat
     "zero-pad copy + halo-form direct kernel" (``pad_copy_torch``: torch strided copy;
-    ``pad_copy``: conv_winograd3d.build_pad_copy, at copy bandwidth -- the realistic direct
-    path for adapter-form FWD on gfx942)."""
-    cm = cost or Winograd3dCostModel()
+    ``pad_copy``: conv_winograd3d.build_pad_copy -- the realistic direct path for
+    adapter-form FWD on gfx942).
+
+    ``producer`` (chained mode): the plan of the conv whose ``yc8h`` output this one reads;
+    the bps=2 map is indexed by its geometry, and a producer that writes no c8 output (or,
+    with the prescale, no map) gets the direct plan. Without it the producer is assumed
+    to tile like this plan (see the module doc)."""
     if mode not in ("dropin", "chained"):
         raise ValueError("mode: dropin | chained")
     why = winograd3d_ineligible_reason(problem, direction, dtype)
@@ -812,7 +801,15 @@ def select_winograd3d(
             direction=direction,
             reason="f16 operands without prescale need range_safe=True",
         )
-    cands = winograd3d_candidates(problem, direction, mode, prescale, xpf=xpf)
+    if producer is not None:
+        if mode != "chained":
+            raise ValueError("producer: chained mode only")
+        why = _producer_error(producer, direction, prescale)
+        if why:
+            return Winograd3dPlan("direct", mode=mode, direction=direction, reason=why)
+    cands = winograd3d_candidates(
+        problem, direction, mode, prescale, xpf=xpf, producer=producer
+    )
     if not cands:
         return Winograd3dPlan(
             "direct",
@@ -831,49 +828,38 @@ def select_winograd3d(
             )
     tuned = table.get(key) if use_measured else None
     mkey = mode + ("" if prescale == "bps" else "_nops")
-    if tuned is not None and mkey in tuned:
-        name, beats = tuned[mkey]
-        # padded FWD: the direct alternative may copy X into a zero-haloed buffer and run the
-        # halo-form kernel (torch strided pad copy, or the rocKE pad copy kernel
-        # build_pad_copy, which runs at copy bandwidth)
-        need = [
-            b
-            for b in tuned["baselines"]
-            if b == "direct" or (direct_pad_copy and b.startswith("pad_copy"))
-        ]
-        pick = [c for c in cands if c[0] == name] or cands[:1]
-        name, spec, wtv = pick[0]
-        alts = tuple((k, v[0]) for k, v in tuned.items() if k != "baselines")
-        lost = [b for b in need if b not in beats]
-        if not lost:
-            return Winograd3dPlan(
-                "yx",
-                tuple(sorted(_spec_fields(spec).items())),
-                wtv,
-                mode,
-                direction,
-                prescale,
-                source="tuned",
-                err_class=_ERR_CLASS["yx_f2"],
-                reason=f"{name}: tuned, beats {', '.join(need)} " f"by {TUNED_MARGIN}",
-                alternatives=alts,
-            )
+    if tuned is None or mkey not in tuned:
+        return Winograd3dPlan(
+            "direct",
+            mode=mode,
+            direction=direction,
+            source="untuned",
+            reason=f"no decision table entry for {key} {mkey}",
+        )
+    name, beats = tuned[mkey]
+    alts = tuple((k, v[0]) for k, v in tuned.items() if k != "baselines")
+    # padded FWD: the direct alternative may copy X into a zero-haloed buffer and run the
+    # halo-form kernel (torch strided pad copy, or the rocKE pad copy kernel
+    # build_pad_copy)
+    need = [
+        b
+        for b in tuned["baselines"]
+        if b == "direct" or (direct_pad_copy and b.startswith("pad_copy"))
+    ]
+    pick = [c for c in cands if c[0] == name]
+    if not pick:
+        # the decision was taken for that candidate only: never substitute another one
         return Winograd3dPlan(
             "direct",
             mode=mode,
             direction=direction,
             source="tuned",
-            reason=f"tuned {name} does not beat {', '.join(lost)} "
-            f"by {TUNED_MARGIN}",
+            reason=f"tuned {name} is not a valid candidate here",
             alternatives=alts,
         )
-    best = None
-    for name, spec, wtv in cands:
-        t_dir, t_w = _est(problem, direction, mode, spec, cm)
-        if best is None or t_w < best[1]:
-            best = (name, t_w, t_dir, spec, wtv)
-    name, t_w, t_dir, spec, wtv = best
-    if t_w < t_dir * (1.0 - margin):
+    name, spec, wtv = pick[0]
+    lost = [b for b in need if b not in beats]
+    if not lost:
         return Winograd3dPlan(
             "yx",
             tuple(sorted(_spec_fields(spec).items())),
@@ -881,27 +867,23 @@ def select_winograd3d(
             mode,
             direction,
             prescale,
-            t_w,
-            t_dir,
-            "model",
-            _ERR_CLASS["yx_f2"],
-            f"{name}: est {t_w:.3f} vs direct {t_dir:.3f} ms",
+            source="tuned",
+            err_class=_ERR_CLASS["yx_f2"],
+            reason=f"{name}: tuned, beats {', '.join(need)} " f"by {TUNED_MARGIN}",
+            alternatives=alts,
         )
     return Winograd3dPlan(
         "direct",
         mode=mode,
         direction=direction,
-        est_ms=t_w,
-        est_ms_direct=t_dir,
-        source="model",
-        reason=f"est {name} {t_w:.3f} ms >= direct {t_dir:.3f} ms x (1 - {margin})",
+        source="tuned",
+        reason=f"tuned {name} does not beat {', '.join(lost)} " f"by {TUNED_MARGIN}",
+        alternatives=alts,
     )
 
 
 def _spec_fields(spec) -> dict:
     """Non-default WinogradYxSpec fields (the benchmark's --spec JSON, minus the shape)."""
-    from dataclasses import fields
-
     out = {}
     for f in fields(spec):
         if f.name in ("Di", "Hi", "Wi", "C", "K", "name"):
@@ -987,14 +969,6 @@ if (
                     "form": fm,
                     "kind": pl.kind,
                     "label": pl.label,
-                    "est_ms": (
-                        round(pl.est_ms, 4) if pl.est_ms != float("inf") else None
-                    ),
-                    "direct_ms": (
-                        round(pl.est_ms_direct, 4)
-                        if pl.est_ms_direct != float("inf")
-                        else None
-                    ),
                     "source": pl.source,
                     "wtv": pl.wtv,
                     "spec": pl.spec_dict,
