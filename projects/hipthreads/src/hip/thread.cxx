@@ -163,11 +163,16 @@ __device__ WorkNode_Header **WorkNode_Header::lock() {
     return copy_of_lts;
 }
 
-// For use in functions like get_width where the WorkNode hasn't moved anywhere, and we know *link_to_self == nullptr.
-__device__ void WorkNode_Header::unlockActive() {
+// Unlock a WorkNode by putting it at location without updating link_to_self. For use when the WorkNode goes back to
+// where it was locked from (e.g. get_width), or when link_to_self must not change (e.g. a detached WorkNode). Use
+// moveAndUnlock instead when the WorkNode is moving somewhere new.
+__device__ void WorkNode_Header::restoreAndUnlock(WorkNode_Header **location) {
+    // assert(location != nullptr);
+    // Make everything that was written while holding the lock visible before anyone else can lock the WorkNode again.
     __threadfence();
     // I think this might be a strict aliasing violation, but it's kind of unavoidable
-    atomicExch(reinterpret_cast<uintptr_t*>(&currentWorkNode[blockIdx.x]), reinterpret_cast<uintptr_t>(this));
+    [[maybe_unused]] WorkNode_Header *oldValue = reinterpret_cast<WorkNode_Header*>(
+        atomicExch(reinterpret_cast<uintptr_t*>(location), reinterpret_cast<uintptr_t>(this)));
     // assert(oldValue == nullptr);
 }
 __device__ void WorkNode_Header::moveAndUnlock(WorkNode_Header **new_location) {
@@ -179,9 +184,8 @@ __device__ void WorkNode_Header::moveAndUnlock(WorkNode_Header **new_location) {
     if (atomicAdd(reinterpret_cast<uintptr_t*>(&this->link_to_self), 0) != 0)
         atomicExch(reinterpret_cast<uintptr_t*>(&this->link_to_self), reinterpret_cast<uintptr_t>(new_location));
 
-    __threadfence();
     // Complete the unlock process by setting *new_location = this;
-    atomicExch(reinterpret_cast<uintptr_t*>(new_location), reinterpret_cast<uintptr_t>(this));
+    restoreAndUnlock(new_location);
 }
 // Signal that the caller is abdicating any responsability for freeing the WorkNode, unless the caller is the last one
 // to do so, in which case, in which case, we free ourself. Note that it is legal to call `delete this`:
@@ -525,20 +529,27 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     }
 
     oldWorkNode->link_to_self = nullptr;
+
+    // If there is a waiting worknode, lock it before the memcpy. That way oldWorkNode->next is already nullptr when
+    // it's copied, so the waiting worknode is never reachable from both oldWorkNode->next and newWorkNode->next.
+    WorkNode_Header *next = nullptr;
+    if (oldWorkNode->hasWaiting) {
+        // Lock next in case it's also in the middle of being detached.
+        next = WorkNode_Header::lockAndFetch(&oldWorkNode->next);
+    }
+
     // TODO: Technically this is not standards compliant. Even though WorkNode<T> is TriviallyCopyable, it is not a
     // StandardLayoutType, so WorkNode_Header and WorkNode<T> pointers are not interchangeable.
     hip::memcpy(newWorkNode, oldWorkNode, oldWorkNode->worknodeSize);
 
     // If there is a waiting worknode, update its link_to_self value so it points at newWorkNode->next.
     if (oldWorkNode->hasWaiting) {
-        // Lock next in case it's also in the middle of being detached.
-        WorkNode_Header *next = WorkNode_Header::lockAndFetch(&oldWorkNode->next);
         next->moveAndUnlock(&newWorkNode->next);
     }
 
-    // This does an extra unnecessary load of newWorkNode->link_to_self to check if it's null, but that's unlikely to
-    // have a major performance impact.
-    newWorkNode->moveAndUnlock(link_to_self);
+    // newWorkNode->link_to_self was copied after oldWorkNode->link_to_self was set to nullptr, which marks newWorkNode
+    // as detached. Put it where oldWorkNode was without touching link_to_self.
+    newWorkNode->restoreAndUnlock(link_to_self);
 }
 
 } // namespace internal
@@ -562,7 +573,7 @@ __device__ hip::wthread::id get_id() noexcept {
     if (threadIdx.x == 0) {
         WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
         base_vtid = current->tdata.vthread_id;
-        current->unlockActive();
+        current->restoreAndUnlock(&currentWorkNode[blockIdx.x]);
     }
     // TODO: What if only some of the fibers call this_thread::get_id()? This could deadlock. Also, what if the fiber
     // with threadIdx.x == 0 isn't one of the calling fibers?
@@ -578,7 +589,7 @@ __device__ hip::wthread::id get_id() noexcept {
     //     WorkNode_Header *current = WorkNode_Header::tryLockAndFetch(&currentWorkNode[blockIdx.x]);
     //     if (current != nullptr) {
     //         base_vtid = current->tdata.vthread_id;
-    //         current->unlockActive();
+    //         current->restoreAndUnlock(&currentWorkNode[blockIdx.x]);
     //     }
     //     __syncthreads();
     // } while (base_vtid == 0);
@@ -602,7 +613,7 @@ __device__ unsigned int get_width() noexcept {
     if (threadIdx.x == 0) {
         WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
         width = current->tdata.width;
-        current->unlockActive();
+        current->restoreAndUnlock(&currentWorkNode[blockIdx.x]);
     }
     // TODO: What if only some of the fibers call this_thread::get_width()? This could deadlock. Also, what if the fiber
     // with threadIdx.x == 0 isn't one of the calling fibers?
