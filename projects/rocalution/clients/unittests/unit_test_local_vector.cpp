@@ -1194,6 +1194,11 @@ TYPED_TEST(local_vector_coarse, extract_coarse_mapping_numbers_the_aggregates)
     EXPECT_EQ(map, (std::vector<int>{0, -1, 0, 1, 2}));
     EXPECT_EQ(backend_of(*aggregates), this->here());
     expect_host_fallback(log, "ExtractCoarseMapping", this->backend());
+
+    std::vector<int> whole(7, -7);
+    aggregates->ExtractCoarseMapping(0, 7, index.data(), 4, &size, whole.data());
+    EXPECT_EQ(size, 7);
+    EXPECT_EQ(whole, (std::vector<int>{0, 1, -1, 1, 2, 0, 3}));
 }
 
 // Appends the aggregates of index[start, end), each once, skipping -1
@@ -1230,13 +1235,16 @@ namespace
         return where == backend_name(b);
     }
 
+    // The entries through the mutable operator[], which must give the same as the const one
     template <typename T>
-    std::vector<T> entries_of(const LocalVector<T>& v)
+    std::vector<T> entries_of(LocalVector<T>& v)
     {
-        std::vector<T> e(v.GetSize());
+        const LocalVector<T>& c = v;
+        std::vector<T>        e(v.GetSize());
         for(int64_t i = 0; i < v.GetSize(); ++i)
         {
             e[i] = v[i];
+            EXPECT_EQ(c[i], e[i]) << "entry " << i;
         }
         return e;
     }
@@ -1324,6 +1332,9 @@ TEST(local_vector_moves, sync_after_move_to_accelerator_async_ends_on_the_accele
 
 namespace
 {
+    // The destruction follows the device synchronization, so the transfer has ended and
+    // only the backend switch of Sync() is missing. This does not destroy a vector during a
+    // pending transfer.
     template <typename T>
     void destroy_after_async_moves(const std::vector<T>& a)
     {
@@ -1361,6 +1372,8 @@ TEST(local_vector_moves, a_vector_can_be_destroyed_after_an_async_move_without_s
 
 // Only LeakSanitizer shows the leak, at the exit of the child. The child stops rocALUTION
 // first, as LeakSanitizer can hang at the exit of a process whose HIP backend still runs.
+// LeakSanitizer reports every leak of the child, so the case also fails on a HIP runtime
+// that leaks at exit, whatever the destructor does.
 TEST(local_vector_moves, a_vector_destroyed_after_an_async_move_without_sync_frees_both_objects)
 {
     REQUIRE_BACKEND(Backend::Accelerator);
@@ -1469,6 +1482,29 @@ TEST(local_vector_moves, without_an_accelerator_async_calls_keep_the_entries_rea
             EXPECT_EQ(location_of(*v), backend_name(Backend::Host));
             EXPECT_EQ(values_of(*v), a);
         }
+    });
+}
+
+// The destruction runs in a child, so a destructor that rejects the pending Sync() fails
+// this case rather than the whole binary. It also runs in builds without an accelerator.
+TEST(local_vector_moves, a_copy_from_async_destination_can_be_destroyed_without_sync)
+{
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const std::vector<T> a = x<T>();
+        EXPECT_EXIT(
+            {
+                death_test_watchdog();
+                auto src = make_local_vector(Backend::Host, a);
+                auto v   = std::make_unique<LocalVector<T>>();
+                v->CopyFromAsync(*src);
+                rocalution::_rocalution_sync();
+                v.reset();
+                std::_Exit(0);
+            },
+            testing::ExitedWithCode(0),
+            "");
     });
 }
 
