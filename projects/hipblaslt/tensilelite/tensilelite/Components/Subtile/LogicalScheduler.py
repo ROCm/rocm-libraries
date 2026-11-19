@@ -5577,6 +5577,14 @@ class LogicalScheduler:
             # its captured reads and gaps to perform 4d-3b latency hiding.
             writer.states.subtileHoistedStoreInit = None
             _packSlot0 = getattr(writer.states, "subtilePairPackSlot", 0)
+            # With the woven store cacheline align the store is emitted twice (a lease-planning
+            # pass, then the real one). The first emit must not consume the write indices
+            # hoisted into NGLL or release their registers: the second emit has to start
+            # from them too, or it recomputes the indices at the store and the hoisted
+            # ones are wasted. The store defers both while this is set.
+            _twoPass = weaveGroups is not None and self._wovenCachelineAlignOn()
+            writer.states.subtileKeepHoistedWriteIndices = _twoPass
+            writer.states.subtileHoistedCleanupDeferred = False
             storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
             if weaveGroups is not None:
                 _mfmaLatency = int(writer.states.archCaps.get("MfmaToAccReadLatency", 0))
@@ -5609,6 +5617,8 @@ class LogicalScheduler:
                     writer.states.subtileWeaveCaptureCurrent = None
                     writer.states.subtileHoistedStoreInit = None
                     writer.states.subtilePairPackSlot = _packSlot0
+                    writer.states.subtileKeepHoistedWriteIndices = False
+                    writer.states.subtileHoistedCleanupDeferred = False
                     storeModule = writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB)
                     self._pinToPass1 = True
                     self._activePackPlan = _packPlan
@@ -5629,6 +5639,7 @@ class LogicalScheduler:
                     self._planCapturedTerminalMfmas(
                         fusedEmitted, writer.states.subtileWeaveCaptureInstances,
                         storeModule, _mfmaLatency, applyMoves=True)
+                    self._finishDeferredHoistedCleanup(writer, kernel)
                 # Planner appends the gap MFMAs after Phase1 (mfma, mfma, step-1,
                 # mfma, mfma, step-2). Spread the convert VALU into those MFMA
                 # issue shadows (2 v_cvt_pk per gap), matching main-loop ds_read.
@@ -5869,6 +5880,16 @@ class LogicalScheduler:
     # Most terminal MFMAs the banded reorder puts in one store gap (develop's ALAP order
     # gives 2; more than 3 piles the weave up at the front of the store).
     WOVEN_CACHELINE_ALIGN_BAND_CAP = 3
+
+    @staticmethod
+    def _finishDeferredHoistedCleanup(writer, kernel):
+        """The store was emitted once after all: release the hoisted write-index registers
+        its only emit kept for a second one."""
+        writer.states.subtileKeepHoistedWriteIndices = False
+        if getattr(writer.states, "subtileHoistedCleanupDeferred", False):
+            writer.states.subtileHoistedCleanupDeferred = False
+            writer.states.subtileHoistedWriteIndices = None
+            writer.cleanupGlobalWrite(kernel)
 
     def _wovenCachelineAlignOn(self):
         """StoreCachelineAlign on the woven fused store: turns on the dead-register pack lease,

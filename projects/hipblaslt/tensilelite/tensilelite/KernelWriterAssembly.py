@@ -18192,7 +18192,10 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprs.coord1InMT     = _hoistedIdx["coord1InMT"]
       self.vgprs.coutRowPtrE    = _hoistedIdx["coutRowPtrE"]
       self.vgprs.coutRowPtrBias = _hoistedIdx["coutRowPtrBias"]
-      self.states.subtileHoistedWriteIndices = None
+      # A planning emit that a second emit will replace keeps the hoisted indices
+      # (and, below, their registers) for that second emit.
+      if not self.states.subtileKeepHoistedWriteIndices:
+        self.states.subtileHoistedWriteIndices = None
       # PLSIN numIter<PGR (the fused-store gate sits at 1, below PGR): the PGR>=2
       # preloop takes SkipToNLL for numIter<PGR (e.g. K==DepthU), so
       # the NGLL init-hoist never ran and the hoisted coord VGPRs hold garbage -> the
@@ -18335,7 +18338,10 @@ class KernelWriterAssembly(KernelWriter):
     self.states.subtileStoreTt1PerStage = 0
     self.states.subtileStoreTt0PerStage = 0
     module.add(storeModule)
-    self.cleanupGlobalWrite(kernel)
+    if _hoistedIdx and self.states.subtileKeepHoistedWriteIndices:
+      self.states.subtileHoistedCleanupDeferred = True
+    else:
+      self.cleanupGlobalWrite(kernel)
     self.states.bpeCexternal = savedBpeCext
 
     # --- release NLL-local transient SrdD + guard SGPRs, restore PLAIN store state ---
