@@ -8,7 +8,7 @@
 // The NHWC Winograd solvers wrap an NCHW Winograd solver with transpose kernels. A wrapper that
 // reports IsDynamic() == false is dropped from the Find that runs on a find-db miss in the default
 // (dynamic hybrid) find mode, and from immediate mode, so NHWC problems that are missing from the
-// system db never get Winograd even though the inner solver is dynamic (ROCM-34577).
+// system db never get Winograd even though the inner solver is dynamic.
 namespace {
 
 template <class Wrapper, class Inner>
