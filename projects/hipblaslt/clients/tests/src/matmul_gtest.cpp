@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include "hipBuffer.hpp"
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"

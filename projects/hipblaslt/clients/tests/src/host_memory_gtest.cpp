@@ -16,6 +16,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -320,6 +321,7 @@ namespace
     {
         for(bool preflight : {false, true})
         {
+            SCOPED_TRACE(preflight);
             EXPECT_FALSE(hipblaslt_memory_stop_fails(
                 "0", "_/matmul_test.matmul/pre_checkin_gemm", preflight));
             EXPECT_TRUE(

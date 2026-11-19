@@ -52,6 +52,7 @@
 #include <functional>
 #include <future>
 #include <hipblaslt/hipblaslt.h>
+#include <initializer_list>
 #include <iostream>
 #include <mutex>
 #include <queue>
