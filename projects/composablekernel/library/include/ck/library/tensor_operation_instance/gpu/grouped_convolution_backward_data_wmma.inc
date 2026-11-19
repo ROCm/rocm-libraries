@@ -371,6 +371,38 @@ void add_device_grouped_conv3d_bwd_data_wmma_v3_ndhwgk_gkzyxc_ndhwgc_f16_16_16_i
                                                                   PassThrough>>>& instances);
 #endif
 
+// Tuned instances (f16, tuned_v1)
+#ifdef CK_ENABLE_FP16
+void add_device_grouped_conv2d_bwd_data_wmma_v3_tuned_v1_nhwgk_gkyxc_nhwgc_f16_instances_part1(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdDataMultipleD<2,
+                                                                  NHWGK,
+                                                                  GKYXC,
+                                                                  Empty_Tuple,
+                                                                  NHWGC,
+                                                                  F16,
+                                                                  F16,
+                                                                  Empty_Tuple,
+                                                                  F16,
+                                                                  PassThrough,
+                                                                  PassThrough,
+                                                                  PassThrough>>>& instances);
+
+void add_device_grouped_conv2d_bwd_data_wmma_v3_tuned_v1_nhwgk_gkyxc_nhwgc_f16_instances_part2(
+    std::vector<std::unique_ptr<DeviceGroupedConvBwdDataMultipleD<2,
+                                                                  NHWGK,
+                                                                  GKYXC,
+                                                                  Empty_Tuple,
+                                                                  NHWGC,
+                                                                  F16,
+                                                                  F16,
+                                                                  Empty_Tuple,
+                                                                  F16,
+                                                                  PassThrough,
+                                                                  PassThrough,
+                                                                  PassThrough>>>& instances);
+
+#endif
+
 } // namespace instance
 } // namespace device
 } // namespace tensor_operation

@@ -13,6 +13,8 @@ set(GROUPED_CONV2D_BWD_DATA_NHWGC
    wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_bf16_large_tiles_instance.cpp
    wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_f16_16_16_instance.cpp
    wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_f16_instance.cpp
+   wmma/device_grouped_conv2d_bwd_data_wmma_v3_tuned_v1_nhwgc_gkyxc_nhwgk_f16_instance_part1.cpp
+   wmma/device_grouped_conv2d_bwd_data_wmma_v3_tuned_v1_nhwgc_gkyxc_nhwgk_f16_instance_part2.cpp
    # xdl
    xdl/device_grouped_conv2d_bwd_data_xdl_nhwgc_gkyxc_nhwgk_bf16_16_16_instance.cpp
    xdl/device_grouped_conv2d_bwd_data_xdl_nhwgc_gkyxc_nhwgk_bf16_instance.cpp

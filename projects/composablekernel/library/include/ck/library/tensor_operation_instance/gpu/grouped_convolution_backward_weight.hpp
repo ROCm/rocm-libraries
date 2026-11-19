@@ -941,6 +941,10 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_two_stage_wmma_nhwgc_gkyxc_nhwgk_f16_pipev1_instances(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_wmma_tuned_v1_nhwgc_gkyxc_nhwgk_f16_instances(
+                        op_ptrs);
+                    add_device_grouped_conv2d_bwd_weight_two_stage_wmma_tuned_v1_nhwgc_gkyxc_nhwgk_f16_instances(
+                        op_ptrs);
                     // Explicit GEMM
                     add_device_grouped_convnd_bwd_weight_wmma_f16_f16_f16_exp_comp_default_instances(
                         op_ptrs);
