@@ -617,43 +617,34 @@ TEST(pre_checkin_partitioned_gemm_ext, OnePartitionMatchesGemm)
     expectSlicesMatch(gemm, parts, buffers, ref, SplitDim::N);
 }
 
-// Only gfx1250 has kernels that store a second D. On any other architecture a problem with
-// storePeerD must find no algorithm, and a plain GEMM's algorithm must be refused for it (not run
-// as a kernel that never writes the second D). This runs on one device of any other architecture.
-TEST(pre_checkin_partitioned_gemm_ext, PeerDHasNoKernelWithoutOutputPeerDSupport)
+// PartitionedGemm is supported on gfx1250 only. On any other architecture setProblem must return
+// NOT_SUPPORTED, with and without storePeerD, and leave the object without a problem. This runs
+// on one device of any other architecture, so that CI lanes that are not gfx1250 cover it.
+TEST(pre_checkin_partitioned_gemm_ext, NotSupportedOffGfx1250)
 {
     if(isGfx1250())
-        GTEST_SKIP() << "gfx1250 has kernels that store a second D";
+        GTEST_SKIP() << "PartitionedGemm is supported on gfx1250";
     auto              parts = onDeviceZero(2);
     auto              gemm  = makeGemm(parts);
     Operands          op;
     ReplicatedBuffers buffers(parts, op);
+    EXPECT_EQ(gemm.getPartitionCount(), 2u);
 
-    GemmPreference pref;
-    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
-    gemm.setMaxWorkspaceBytes(Partitions::kWorkspace);
-
-    // A plain problem finds an algorithm.
-    ASSERT_EQ(setReplicated(gemm, SplitDim::N, buffers.inputs()), HIPBLAS_STATUS_SUCCESS);
-    std::vector<hipblasLtMatmulHeuristicResult_t> plain;
-    ASSERT_EQ(gemm.algoGetHeuristic(1, pref, plain), HIPBLAS_STATUS_SUCCESS);
-    if(plain.empty())
-        GTEST_SKIP() << "no algorithm for the test problem on this device";
-
-    // With a peer D there is none.
+    for(SplitDim dim : {SplitDim::N, SplitDim::M})
+        EXPECT_EQ(setReplicated(gemm, dim, buffers.inputs()), HIPBLAS_STATUS_NOT_SUPPORTED);
     auto in       = buffers.inputs();
     in.storePeerD = true;
-    ASSERT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_SUCCESS);
-    std::vector<hipblasLtMatmulHeuristicResult_t> withPeer;
-    EXPECT_EQ(gemm.algoGetHeuristic(1, pref, withPeer), HIPBLAS_STATUS_SUCCESS);
-    EXPECT_TRUE(withPeer.empty());
+    EXPECT_EQ(setReplicated(gemm, SplitDim::N, in), HIPBLAS_STATUS_NOT_SUPPORTED);
 
-    // The plain algorithm is refused both by the support check and when the arguments are made.
-    auto                algo = plain[0].algo;
-    std::vector<size_t> workspaces;
-    EXPECT_NE(gemm.isAlgoSupported(algo, workspaces), HIPBLAS_STATUS_SUCCESS);
-    EXPECT_NE(gemm.initialize(plain[0].algo, parts.workspaces(), true, parts.streams),
-              HIPBLAS_STATUS_SUCCESS);
+    // No problem was set: nothing can be queried, initialized or launched.
+    int64_t offset = 0, size = 0;
+    EXPECT_EQ(gemm.getSlice(0, offset, size), HIPBLAS_STATUS_INVALID_VALUE);
+    GemmPreference pref;
+    pref.setMaxWorkspaceBytes(Partitions::kWorkspace);
+    std::vector<hipblasLtMatmulHeuristicResult_t> heuristic;
+    EXPECT_NE(gemm.algoGetHeuristic(1, pref, heuristic), HIPBLAS_STATUS_SUCCESS);
+    EXPECT_TRUE(heuristic.empty());
+    EXPECT_EQ(gemm.run(parts.streams), HIPBLAS_STATUS_INVALID_VALUE);
 }
 
 // ---------------------------------------------------------------------------------------------
