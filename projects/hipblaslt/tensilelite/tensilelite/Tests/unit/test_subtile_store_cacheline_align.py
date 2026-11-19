@@ -89,6 +89,16 @@ def test_parameter_is_registered_and_on_by_default():
     assert storeCachelineAlignEnabled({"StoreCachelineAlign": True}) is True
 
 
+@pytest.mark.parametrize("miWaveTile, expected", [
+    ([2, 2], False), ([2, 16], False),      # one pair per column: never both halves of a line
+    ([4, 2], True), ([6, 4], True), ([10, 8], True),
+])
+def test_parameter_acts_only_where_a_wave_holds_two_pairs(miWaveTile, expected):
+    k = {"StoreCachelineAlign": True, "MIWaveTile": miWaveTile}
+    assert storeCachelineAlignEnabled(k) is expected
+    assert storeCachelineAlignEnabled(dict(k, StoreCachelineAlign=False)) is False
+
+
 def test_name_token_only_on_the_eligible_path(monkeypatch):
     base = {
         "ProblemType": {"DataType": 0, "GroupedGemm": False},
@@ -107,6 +117,11 @@ def test_name_token_only_on_the_eligible_path(monkeypatch):
     otherIsa = Naming.getKernelNameMin(dict(base, ISA=(9, 4, 0)), splitGSU=True)
     otherIsaOn = Naming.getKernelNameMin(dict(base, ISA=(9, 4, 0), StoreCachelineAlign=True), splitGSU=True)
     assert otherIsaOn == otherIsa and "_SCA1" not in otherIsaOn
+    # a wave that holds one pair per column cannot be aligned: its name does not change either
+    shortWave = dict(base, ISA=(9, 5, 0), MIWaveTile=[2, 4])
+    assert "_SCA1" not in Naming.getKernelNameMin(dict(shortWave, StoreCachelineAlign=True), splitGSU=True)
+    assert "_SCA1" in Naming.getKernelNameMin(dict(shortWave, StoreCachelineAlign=True, MIWaveTile=[4, 4]),
+                                              splitGSU=True)
 
     monkeypatch.setattr(Naming, "isMxf4SubtilePath", lambda state: False)
     notSubtile = Naming.getKernelNameMin(dict(base, ISA=(9, 5, 0), StoreCachelineAlign=True), splitGSU=True)

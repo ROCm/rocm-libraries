@@ -115,6 +115,32 @@ def test_mt320x256_store_cacheline_align_puts_the_plain_store_on_permlane16():
         )
 
 
+def test_one_pair_wave_is_untouched_by_the_store_cacheline_align(tmp_path):
+    """A wave two MFMA tiles tall holds one paired store per column, never both halves of
+    a line, so the align has nothing to blend. Such a kernel must come out the same with
+    the parameter on (the default) as with it off: same code, and no SCA token in its
+    name. Same problem as above with the wave tile cut to [2, 2] (MT64x64)."""
+    with open(_CONFIG) as f:
+        text = f.read()
+    tile = "          - [16, 16, 128, 1,  1, 10, 8,  2, 2]  # MT 320x256, MIWT=[10,8]\n"
+    gate = "        - PostLoopStoreInNll: [true]\n"
+    assert tile in text and gate in text, f"{_CONFIG}: fork lines this test rewrites have moved"
+    small = text.replace(tile, "          - [16, 16, 128, 1,  1, 2, 2,  2, 2]\n")
+    on = tmp_path / "mt64x64_align_default.yaml"
+    off = tmp_path / "mt64x64_align_off.yaml"
+    on.write_text(small)
+    off.write_text(small.replace(gate, gate + "        - StoreCachelineAlign: [false]\n"))
+
+    r_on = emit_kernels_from_config(str(on), limit=1, arch=_ARCH, canonical=True)
+    r_off = emit_kernels_from_config(str(off), limit=1, arch=_ARCH, canonical=True)
+    assert r_on and r_off and all(e == 0 for _b, _s, e in r_on + r_off)
+    (base_on, src_on, _), (base_off, src_off, _) = r_on[0], r_off[0]
+    assert "_MIWT2_2_" in src_on, f"{base_on}: not the one-pair wave this test is about"
+    assert "_SCA1" not in src_on, f"{base_on}: named as aligned though nothing can be aligned"
+    assert base_on == base_off
+    assert src_on == src_off
+
+
 # ── PGR=2: the NGLL arms ──────────────────────────────────────────────────
 #
 # Problem group 1 is the same tile at PrefetchGlobalRead 2. It matters because
