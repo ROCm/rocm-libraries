@@ -46,11 +46,30 @@ def fake_kernel(plan, req):
     for b, n in enumerate(used):
         k_pages.append(kt["k"][table[b].long()].reshape(-1, *kt["k"].shape[2:])[:n])
         v_pages.append(kt["v"][table[b].long()].reshape(-1, *kt["v"].shape[2:])[:n])
+    bias = None
+    if plan.bias is not None:
+        args = plan.bias.kernel_args()
+        db, dh, dq, _ = plan.bias.src.shape
+        bias = (
+            torch.as_strided(
+                args["additive_bias"],
+                (db, dh, dq, req.s_kv),
+                (
+                    args["additive_bias_batch_stride"],
+                    args["additive_bias_head_stride"],
+                    args["additive_bias_sq_stride"],
+                    1,
+                ),
+            )
+            .double()
+            .numpy()
+        )
     o, lse = sdpa_reference(
         kt["q"].double().numpy(),
         torch.cat(k_pages).double().numpy(),
         torch.cat(v_pages).double().numpy(),
         scale=float(req.scale),
+        bias=bias,
         left_bound=hipdnn_left_to_window(req.left_bound),
         right_bound=req.right_bound,
         top_left=req.diagonal == "top_left",

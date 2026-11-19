@@ -99,6 +99,8 @@ SDPA_UNIFIED_FEATURES = frozenset(
         "padded",
         "ragged",
         "lse",
+        "bias",
+        "bias_broadcast",
         "mma_core_mode",
         "implementation_hint",
     }
@@ -114,8 +116,6 @@ _DECLINED = declined_table(
         "dtype_mixed",
         "compute_dtype",
         "scale_tensor",
-        "bias",
-        "bias_broadcast",
         "alibi",
         "sinks",
         "dropout",
@@ -183,6 +183,40 @@ def _scale_reject(req: SdpaRequest) -> tuple[bool, str] | None:
     return None
 
 
+# The kernels index the bias in i32 (``_validate_additive_bias`` in
+# ``kernels/common/attention_unified.py``).
+_BIAS_INDEX_LIMIT = 2**31
+_BIAS_DTYPES = ("fp32", "fp16", "bf16")
+
+
+def _bias_reject(req: SdpaRequest) -> tuple[bool, str] | None:
+    """Decline a bias the launch cannot hand the kernels.
+
+    The kernels read an f32 bias at ``seq * batch_stride + head * head_stride +
+    row * sq_stride + key``, so a bias in another float dtype is converted into
+    a workspace, one whose key dim is 1 is expanded into it, and the workspace
+    must stay addressable in i32. A ragged bias has no per-sequence offsets in
+    that formula.
+    """
+    if req.bias is None:
+        return None
+    bias = req.bias.tensor
+    if bias.ragged_offset is not None:
+        return False, "bias: a ragged bias is not carried by the unified kernels"
+    if bias.dtype not in _BIAS_DTYPES:
+        return False, (
+            f"bias: the unified kernels take an f32 bias; {bias.dtype} cannot be "
+            f"converted (supported: {', '.join(_BIAS_DTYPES)})"
+        )
+    b, h, sq, _ = bias.dims
+    if b * h * sq * req.s_kv >= _BIAS_INDEX_LIMIT:
+        return False, (
+            f"bias: dims {bias.dims} expand to {b * h * sq * req.s_kv} f32 "
+            f"elements, past the kernels' i32 bias addressing (2**31)"
+        )
+    return None
+
+
 def _sdpa_unified_rejects(req: SdpaRequest) -> tuple[bool, str] | None:
     """Return ``(False, reason)`` if this request cannot be served, else ``None``.
 
@@ -204,6 +238,9 @@ def _sdpa_unified_rejects(req: SdpaRequest) -> tuple[bool, str] | None:
         if feature in features:
             return False, reason
 
+    rejected = _bias_reject(req)
+    if rejected is not None:
+        return rejected
     rejected = value_rejects(req, "unified")
     if rejected is not None:
         return rejected
@@ -242,7 +279,9 @@ def sdpa_unified_admits(req: SdpaRequest) -> tuple[bool, str]:
         return rejected
     if _unified_supported(req):
         return True, "ok"
-    path = "LSE " if req.stats is not None else ""
+    path = ("LSE " if req.stats is not None else "") + (
+        "bias " if req.bias is not None else ""
+    )
     return False, (
         f"no unified {path}candidate covers arch={req.arch!r} "
         f"dtype={req.dtype!r} d_qk={req.d_qk} d_v={req.d_v} "
@@ -290,6 +329,82 @@ def _lengths(given, key: str, operand: Operand, batch: int, extent: int):
     return values
 
 
+class _BiasPlan:
+    """The f32 additive bias the kernels read, from the request's ``bias``.
+
+    The kernels address ``bias[seq * batch_stride + head * head_stride + row *
+    sq_stride + key]`` with the key axis contiguous, and a stride of 0 for a
+    broadcast axis. A caller's bias that is already f32, key-contiguous and
+    ``s_kv`` wide, with a row pitch the kernels accept and an in-range base, is
+    read in place. Any other is copied each launch into a contiguous f32
+    workspace of the same broadcast shape, which converts the dtype and
+    expands a key dim of 1.
+    """
+
+    def __init__(self, req: SdpaRequest, tensor: Any, device: Any) -> None:
+        import torch
+
+        desc = req.bias.tensor
+        check_dtype("bias", tensor, desc)
+        if tensor.device != device:
+            raise ValueError(
+                f"bias: expected a tensor on {device}, got {tensor.device}"
+            )
+        if tensor.dim() < 4:
+            tensor = tensor[(None,) * (4 - tensor.dim())]
+        if tuple(tensor.shape) != tuple(desc.dims):
+            raise ValueError(
+                f"bias: tensor shape {tuple(tensor.shape)} is not the request's "
+                f"dims {desc.dims}"
+            )
+        for n, got, want in zip(desc.dims, tensor.stride(), desc.strides):
+            if n > 1 and got != want:
+                raise ValueError(
+                    f"bias: tensor strides {tuple(tensor.stride())} are not the "
+                    f"request's strides {desc.strides}"
+                )
+        s_kv = req.s_kv
+        dims = desc.dims
+        strides = tuple(0 if n == 1 else st for n, st in zip(dims, tensor.stride()))
+        reach = sum((n - 1) * st for n, st in zip(dims[:3], strides[:3])) + s_kv - 1
+        in_place = (
+            tensor.dtype == torch.float32
+            and dims[3] == s_kv
+            and (s_kv == 1 or strides[3] == 1)
+            and (strides[2] == 0 or strides[2] >= s_kv)
+            and reach < _BIAS_INDEX_LIMIT
+            and tensor.data_ptr() % 16 == 0
+        )
+        self.src = tensor
+        if in_place:
+            self.ws = None
+            self.tensor = tensor
+            self.strides = strides[:3]
+            return
+        self.ws = empty_workspace(
+            (dims[0], dims[1], dims[2], s_kv),
+            dtype=torch_dtype("float32"),
+            device=device,
+        )
+        self.tensor = self.ws
+        self.expand = (dims[0], dims[1], dims[2], s_kv)
+        compact = (dims[1] * dims[2] * s_kv, dims[2] * s_kv, s_kv)
+        self.strides = tuple(0 if n == 1 else st for n, st in zip(dims[:3], compact))
+
+    def pack(self) -> None:
+        if self.ws is not None:
+            self.ws.copy_(self.src.expand(self.expand))
+
+    def kernel_args(self) -> dict[str, Any]:
+        batch, head, sq = self.strides
+        return {
+            "additive_bias": self.tensor,
+            "additive_bias_batch_stride": batch,
+            "additive_bias_head_stride": head,
+            "additive_bias_sq_stride": sq,
+        }
+
+
 class _LaunchPlan:
     """The unified paged ABI for one bound request.
 
@@ -305,6 +420,8 @@ class _LaunchPlan:
 
         dtype = torch_dtype(TORCH_DTYPES[req.dtype])
         device = tensors["q"].device
+        if req.bias is not None and "bias" not in tensors:
+            raise ValueError("the request has a bias, but tensors has no 'bias'")
         for name in ("k", "v", "o", "stats"):
             if name in tensors and tensors[name].device != device:
                 raise ValueError(
@@ -395,6 +512,9 @@ class _LaunchPlan:
         )
         self.cu_seqlens_q = device_tensor(cu, dtype=int32, device=device)
         self.seqused_k = device_tensor(self.kv_len, dtype=int32, device=device)
+        self.bias = (
+            None if req.bias is None else _BiasPlan(req, tensors["bias"], device)
+        )
         self.lse = (
             None
             if self.stats is None
@@ -416,6 +536,8 @@ class _LaunchPlan:
 
     def pack(self) -> None:
         cu = self.cu
+        if self.bias is not None:
+            self.bias.pack()
         if not self.q_inplace:
             for b, n in enumerate(self.q_len):
                 if n:
@@ -450,9 +572,10 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
     """Bind an admitted request and its device tensors to a unified launch.
 
     ``tensors`` holds ``q``, ``k``, ``v``, ``o`` and, when the request sets
-    them, ``stats``, ``seq_len_q`` / ``seq_len_kv`` and
+    them, ``bias``, ``stats``, ``seq_len_q`` / ``seq_len_kv`` and
     ``ragged_offset_<operand>`` (V, O and stats fall back to K's, Q's and Q's
-    offsets). A dense operand is its logical BHSD tensor with the request's
+    offsets). A bias is read in place when it is already f32 and key-contiguous;
+    any other is converted into an f32 workspace on each launch. A dense operand is its logical BHSD tensor with the request's
     strides; a ragged one is its contiguous packed buffer. Every tensor's
     dtype must be the one its request descriptor names. The launch runs on
     Torch's current stream through the production route
@@ -491,6 +614,7 @@ def sdpa_unified_bind(req: SdpaRequest, tensors: Mapping[str, Any]) -> TorchBind
                 backend="auto",
                 stream=launch_on,
                 lse=plan.lse,
+                **({} if plan.bias is None else plan.bias.kernel_args()),
             )
         plan.unpack()
 
