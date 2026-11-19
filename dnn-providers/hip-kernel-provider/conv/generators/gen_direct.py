@@ -294,12 +294,6 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 128, 16, 2, 2, 8, ring=0, split=1, xpf=1),
             M(f"mfma16_{e}", F333, 128, 64, 32, 2, 2, 8, ring=0, split=1, xpf=1),
             M(f"mfma16_{e}", F333, 128, 128, 16, 1, 4, 8, ring=0, split=1, xpf=1),
-            # Chunk weights in LDS (bl 2): one 16-byte load stream a block instead of a fragment
-            # stream a wave; 8-wave blocks at one block a CU.
-            M(f"mfma16_{e}", F333, 128, 128, 16, 2, 4, 8, ring=0, bl=2),
-            M(f"mfma16_{e}", F333, 128, 64, 16, 2, 4, 8, ring=0, bl=2),
-            M(f"mfma16_{e}", F333, 128, 64, 16, 2, 2, 8, ring=0, bl=2),
-            M(f"mfma16_{e}", F333, 256, 64, 16, 4, 2, 8, ring=0, bl=2),
             # 2-D 3x3: the xpf twins of the gfx942 halo tiles.
             M(f"mfma16_{e}", F33, 128, 64, 32, 2, 2, 8, xpf=1),
             M(f"mfma16_{e}", F33, 128, 64, 16, 2, 2, 8, xpf=1),
@@ -626,7 +620,6 @@ add(
     [
         M("mfma16_f32", F333, 128, 64, 16, 2, 2, 4, ring=0, xpf=1),
         M("mfma16_f32", F333, 128, 128, 16, 2, 2, 4, ring=0, xpf=1),
-        M("mfma16_f32", F333, 128, 32, 16, 4, 1, 4, ring=0, bl=2),
     ],
 )
 # gfx942 (MI325X) takes the fp32 rows tile alone: 1.05-1.17x over every fp32 halo tile on 9 of 11

@@ -566,10 +566,7 @@ std::optional<Config> configOf(const KernelDefinition& kernel)
               return f[0] == config.kd && f[1] == config.r && f[2] == config.s;
           });
     if(!known || config.bc < 1 || config.vec < 1 || config.bc % config.vec != 0
-       || (config.ring != 0 && config.ring != 1) || config.bl < 0 || config.bl > 2
-       || (config.bl == 2
-           && (config.ring != 0 || config.rows || config.atom == "fma"
-               || std::getenv("HKP_K2_NO_BL2") != nullptr)) // A/B only
+       || (config.ring != 0 && config.ring != 1) || (config.bl != 0 && config.bl != 1)
        || (config.split != 0 && config.split != 1) || (config.pipe != 0 && config.pipe != 1))
     {
         return std::nullopt;

@@ -342,15 +342,20 @@ struct K2Block
         col = blockIdx.y;
         if(a.xcds > 1 && gridDim.z == 1)
         {
-            // XCD x holds the blocks of launch index x mod X; give it the logical range
-            // [start(x), start(x + 1)), its blocks in launch order, column blocks fastest.
+            // XCD x holds the blocks of launch index x mod X. Its i-th block takes logical tile
+            // ((i / G) X + x) G + i % G: runs of G consecutive tiles per XCD, the XCDs' runs side
+            // by side, column blocks fastest; the tiles past the last whole round keep their index.
             const unsigned gx = gridDim.x, gy = gridDim.y, x = static_cast<unsigned>(a.xcds);
+            const unsigned g = static_cast<unsigned>(a.xcdRun);
             const unsigned total = gx * gy;
             const unsigned id = blockIdx.x + gx * blockIdx.y;
-            const unsigned per = total / x, rem = total % x;
-            const unsigned xcd = id % x, local = id / x;
-            const unsigned logical
-                = xcd < rem ? xcd * (per + 1) + local : rem * (per + 1) + (xcd - rem) * per + local;
+            const unsigned round = x * g;
+            unsigned logical = id;
+            if(id < total / round * round)
+            {
+                const unsigned xcd = id % x, local = id / x;
+                logical = ((local / g) * x + xcd) * g + local % g;
+            }
             col = static_cast<int>(logical % gy);
             bx = static_cast<int>(logical / gy);
         }
@@ -838,9 +843,6 @@ __device__ inline void k2Drive(const K2Block& b,
 // formatted with ka = Atom::KA. BL 1: per in-plane tap, the block stages the tap's BN x BC weight
 // tile (one per depth set) in LDS, double-buffered across taps with one barrier per tap, like the
 // halo; weights formatted with ka = BC, so each (tap, chunk) tile is contiguous in global.
-// BL 2 (tap mode): the block stages a chunk's R x S weight tiles in one LDS stage with 16-byte
-// loads shared by all waves (double-buffered where the LDS holds two stages, else a second
-// barrier a chunk); weights formatted with ka = BC.
 // TO: output type (T, or fp32 for the three-bf16 form whose operands are bf16).
 // SPLIT 1: split-C config; the block reduces chunks [z cps, (z+1) cps) and the epilogue writes fp32
 // partials to ws[z] (k2SplitReduce finishes). SPLIT 0 writes TO to y and needs splits = 1.
@@ -899,31 +901,13 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         = (WM * WN * STRIP * static_cast<int>(sizeof(TS)) + static_cast<int>(sizeof(T)) - 1)
           / static_cast<int>(sizeof(T)); // in T
     constexpr int SLOT = STAGE > STRIPS ? STAGE : STRIPS;
-    // BL 1: two weight stages of NBT tiles [BN][BLD].
+    // BL: two weight stages of NBT tiles [BN][BLD].
     constexpr int NBT = RING ? KD : 1;
     constexpr int BLD = BC + 16 / static_cast<int>(sizeof(T));
     constexpr int BTILE = BN * BLD;
-    constexpr int BSTAGE = BL == 1 ? NBT * BTILE : 0;
-    // BL 2: one stage of the chunk's R x S weight tiles [rs][BN][BC], filled once per chunk by
-    // 16-byte loads shared by every wave. A row's fragment-sized pieces are XOR-swizzled by the
-    // row (piece g of row n at g ^ key(n)), so the 16 rows of a fragment read cover the banks
-    // once with no padding.
-    constexpr int PIECE
-        = sizeof(typename Atom::frag) < 4 ? 4 : static_cast<int>(sizeof(typename Atom::frag));
-    constexpr int PE = PIECE / static_cast<int>(sizeof(T)); // elements a piece
-    constexpr int WG = BC / PE; // pieces a row
-    constexpr int ROWB = BC * static_cast<int>(sizeof(T)); // bytes a row
-    constexpr int WP = ROWB >= 128 ? 1 : 128 / ROWB; // rows a 32-bank pass
-    constexpr int BLW = BC;
-    constexpr int WTILE = BN * BLW;
-    constexpr int WSTAGE = BL == 2 ? R * S * WTILE : 0;
-    // Two weight stages where they fit the LDS (one barrier a chunk, like the halo), else one
-    // (a second barrier before the next chunk's weights overwrite it).
-    constexpr int WSTAGES = (2 * SLOT + 2 * WSTAGE) * static_cast<int>(sizeof(T)) <= 65536 ? 2 : 1;
-    static_assert(BL != 2 || (RING == 0 && XPF == 0 && CF == 0), "chunk weights: tap mode");
-    __shared__ __attribute__((aligned(16))) T lds[2 * SLOT + 2 * BSTAGE + WSTAGES * WSTAGE];
+    constexpr int BSTAGE = BL ? NBT * BTILE : 0;
+    __shared__ __attribute__((aligned(16))) T lds[2 * SLOT + 2 * BSTAGE];
     T* const bls = lds + 2 * SLOT;
-    T* const wls = lds + 2 * SLOT + 2 * BSTAGE;
 
     K2Block b;
     b.init(a, R, S);
@@ -1205,8 +1189,8 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         };
     // BL: weight tiles through LDS. Per thread LOADS vectors of VB elements per tile.
     constexpr int VB = 16 / static_cast<int>(sizeof(T));
-    constexpr int LOADS = BL == 1 ? (BN * BC) / (VB * THREADS) : 1;
-    static_assert(BL != 1 || (BN * BC) % (VB * THREADS) == 0, "weight tile loads");
+    constexpr int LOADS = BL ? (BN * BC) / (VB * THREADS) : 1;
+    static_assert(!BL || (BN * BC) % (VB * THREADS) == 0, "weight tile loads");
     typedef typename K1Raw<16>::type RawB;
     RawB rb[NBT][LOADS];
     int bstage = 0;
@@ -1307,124 +1291,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
             bstage ^= 1;
         }
     };
-    // BL 2: the chunk's weights, (depth tap, chunk) -> R S tiles of BN x BC, through registers
-    // (16-byte pieces, LOADS2 a thread) into the single LDS stage.
-    constexpr int WV = BN * BC / VB; // 16-byte vectors a tile
-    constexpr int LOADS2 = BL == 2 ? (R * S * WV + THREADS - 1) / THREADS : 1;
-    RawB rw[LOADS2];
-    auto loadW = [&](int dt, int c) {
-#pragma unroll
-        for(int l = 0; l < LOADS2; ++l)
-        {
-            const int v = l * THREADS + tid;
-            if(R * S * WV % THREADS == 0 || v < R * S * WV)
-            {
-                const int rs = v / WV, e = (v - rs * WV) * VB;
-                rw[l] = *reinterpret_cast<const RawB*>(
-                    wf
-                    + ((static_cast<long long>(dt * R * S + rs) * a.ca + cb + c) * a.kpad + n0) * BC
-                    + e);
-            }
-        }
-    };
-    int wst = 0; // the weight stage the current chunk reads
-    auto commitW = [&](int st) {
-        typedef typename K1Raw<PIECE>::type Piece;
-        constexpr int PIECES = 16 / PIECE;
-        constexpr int WORDS = PIECE / 4;
-#pragma unroll
-        for(int l = 0; l < LOADS2; ++l)
-        {
-            const int v = l * THREADS + tid;
-            if(R * S * WV % THREADS == 0 || v < R * S * WV)
-            {
-                const int rs = v / WV, e = (v - rs * WV) * VB;
-                const int n = e / BC, key = (n / WP) % WG;
-                T* row = wls + st * WSTAGE + rs * WTILE + n * BLW;
-#pragma unroll
-                for(int p = 0; p < PIECES; ++p)
-                {
-                    Piece pc;
-                    if constexpr(WORDS == 1)
-                        pc = rw[l][p];
-                    else
-                    {
-#pragma unroll
-                        for(int w = 0; w < WORDS; ++w)
-                            pc[w] = rw[l][p * WORDS + w];
-                    }
-                    const int g = (e % BC) / PE + p;
-                    *reinterpret_cast<Piece*>(row + (g ^ key) * PE) = pc;
-                }
-            }
-        }
-    };
-    // The lane's fragment offsets in a tile, per column fragment and k step (swizzled pieces).
-    constexpr int KSTEPS = BC / KA;
-    int wOff[FN][KSTEPS];
-#pragma unroll
-    for(int j = 0; j < FN; ++j)
-    {
-        const int n = wn * WTN + j * DIM + lane % DIM;
-#pragma unroll
-        for(int q = 0; q < KSTEPS; ++q)
-        {
-            const int k = q * KA + kb;
-            wOff[j][q] = n * BLW + ((k / PE) ^ ((n / WP) % WG)) * PE + k % PE;
-        }
-    }
-    // One chunk: the next chunk's weights to registers, the halo prefetch, the MMAs (weights from
-    // LDS), then the weights to the other stage (one stage: after a barrier); the driver's next
-    // barrier orders them.
-    auto chunkW = [&](int stage, int cc, auto&& pf, auto&& nx) {
-        const T* halo = lds + stage * SLOT;
-        int tn = 0, cn = 0;
-        const bool next = nx(tn, cn);
-        if(next)
-            loadW(tn, cn);
-        pf();
-        (void)cc;
-#pragma unroll
-        for(int q = 0; q < KSTEPS; ++q)
-        {
-            const int kk = q * KA;
-#pragma unroll
-            for(int rs = 0; rs < R * S; ++rs)
-            {
-                const int r = rs / S, s = rs % S;
-                Frag af[FM];
-#pragma unroll
-                for(int i = 0; i < FM; ++i)
-                    af[i] = k1Frag<Atom>(halo + aOff[i] + r * rowStep + s * LDC + kk);
-                Frag bf[FN];
-#pragma unroll
-                for(int j = 0; j < FN; ++j)
-                    bf[j] = k1Frag<Atom>(wls + wst * WSTAGE + rs * WTILE + wOff[j][q]);
-#pragma unroll
-                for(int i = 0; i < FM; ++i)
-#pragma unroll
-                    for(int j = 0; j < FN; ++j)
-                        acc[0][i][j] = Atom::mma(af[i], bf[j], acc[0][i][j]);
-            }
-        }
-        if(next)
-        {
-            if constexpr(WSTAGES == 1)
-                __syncthreads();
-            commitW(WSTAGES == 1 ? 0 : wst ^ 1);
-            if constexpr(WSTAGES == 2)
-                wst ^= 1;
-        }
-    };
-    if constexpr(BL == 2)
-    {
-        // Prologue: the first chunk's weights (the driver's first barrier orders them).
-        K2CursorTaps c0;
-        c0.init(b.dsEff, KD, nChL, b.od0 - a.pd, a.di);
-        loadW(c0.more() ? c0.t : 0, 0);
-        commitW(0);
-    }
-    if constexpr(BL == 1)
+    if constexpr(BL)
     {
         // Prologue: the first step's tap-0 tiles (the driver's first barrier orders them).
         int d0[NBT];
@@ -1446,7 +1313,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
 
     auto ring = [&](int stage, int cc, int jj, auto U, auto&& pf, auto&& nx) {
         constexpr int u = decltype(U)::value;
-        if constexpr(BL == 1)
+        if constexpr(BL)
         {
             int dts[NBT];
 #pragma unroll
@@ -1483,12 +1350,7 @@ __device__ void k2ConvMma(const K2Args& a CONV_EPI_FN_PARAM)
         }
     };
     auto tap = [&](int stage, int cc, int t0, auto&& pf, auto&& nx) {
-        if constexpr(BL == 2)
-        {
-            (void)t0;
-            chunkW(stage, cc, pf, nx);
-        }
-        else if constexpr(BL == 1)
+        if constexpr(BL)
         {
             const int dts[1] = {t0};
             chunkL(stage, cc, pf, nx, dts, [&](int) { return true; }, [&](int) { return 0; });
