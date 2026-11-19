@@ -713,7 +713,8 @@ bool isBatchShapeSupported(const std::string& archId, int64_t headDimQk, int64_t
     // hdim_v` and `hdim_q >= 64 and hdim_q <= 192`. gfx950 ships hd64 and
     // hd192 rows for the same range (the gfx942 kernels rebuilt, `_recompile`),
     // and fmha_v3_bwd(), which mha_bwd() calls before its CK fallback, has no
-    // head-dim gate besides `% 8`. Only the Python gate
+    // head-dim gate for D <= 192 besides `% 8` (its other one is gfx950 hd256).
+    // Only the Python gate
     // can_impl_fmha_v3_bwd_gfx950() (:2851-2854) sends them to CK, as a routing
     // choice. gfx950 also serves D_qk = 192 with D_v = 128.
     if(!isSupportedArch(archId))

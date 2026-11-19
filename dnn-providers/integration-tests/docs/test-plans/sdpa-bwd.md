@@ -987,7 +987,7 @@ purpose: Sq ≤ 16 on gfx942 and gfx950 (AITER's choice there is for speed, not 
 bands with left bound 0 and right bound 0 or unbounded (AITER's Python gate does not count them as
 windows; the band kernel computes them); and on gfx950 Dqk = Dv = 64 and 128 < D ≤ 192, whose
 kernels are the gfx942 ones rebuilt for gfx950 and which AITER's C++ `fmha_v3_bwd()` runs, since it
-has no head-dim gate besides `% 8`.
+has no head-dim gate for D ≤ 192 besides `% 8`.
 
 A dispatch outside the
 [Verified Kernel Matrix](../../../hip-kernel-provider/src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#verified-kernel-matrix)

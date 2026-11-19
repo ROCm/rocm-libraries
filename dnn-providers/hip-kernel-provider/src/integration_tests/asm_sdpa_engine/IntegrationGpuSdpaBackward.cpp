@@ -93,8 +93,8 @@ struct SdpaBwdTestCase
         return *this;
     }
 
-    // Build the plan on the ASM SDPA engine with the a16 accumulator knob
-    // instead of letting the heuristics pick the engine and its defaults.
+    // Set the a16 accumulator knob on the ASM SDPA engine plan instead of the
+    // a32 default.
     SdpaBwdTestCase& withA16()
     {
         a16 = true;
@@ -259,13 +259,13 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}),
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true),
         // S_q = 1 on the hd64 and hd192 rows, which gfx950 runs as the gfx942
-        // kernels rebuilt. hd64 takes the atol of the other S_q = 1 cases. At hd192
-        // the bf16 dQ reaches 6.25, where one bf16 ulp (0.03125) used 88% of a 1e-2
-        // atol on gfx942, so the case uses 6.25e-2. Over seeds 0-7 on an MI325X
-        // (gfx942) and an MI355X (gfx950) the worst ratio is 0.18 at hd64 and 0.06
-        // at hd192, and at hd192 the smallest largest |dV|, |dK| and |dQ| are 0.25,
-        // 0.38 and 0.80. A halved or all-zero output fails once its largest |ref|
-        // exceeds 0.16, so each of them fails.
+        // kernels rebuilt. hd64 takes the atol of the other S_q = 1 cases. At a
+        // 1e-2 atol the hd192 bf16 case reached a worst ratio of 0.885 on gfx942
+        // (seeds 0-3), above the 0.5 limit, so it uses 6.25e-2. Over seeds 0-7 on
+        // an MI325X (gfx942) and an MI355X (gfx950) the worst ratio is 0.18 at hd64
+        // and 0.06 at hd192, and at hd192 the smallest largest |dV|, |dK| and |dQ|
+        // are 0.25, 0.38 and 0.80. A halved or all-zero output fails once its
+        // largest |ref| exceeds 0.16, so each of them fails.
         SdpaBwdTestCase({1, 2, 1, 64}, {1, 2, 256, 64}).withAbsoluteTolerance(1e-2f),
         SdpaBwdTestCase({1, 2, 1, 192}, {1, 2, 256, 192}).withAbsoluteTolerance(6.25e-2f),
         // D_qk = 192 with D_v = 128: the hd128 odo, the 192 x 128 dqdkdv and the
@@ -426,10 +426,10 @@ protected:
         // The backward pass requires O and stats (LSE) that are mathematically consistent
         // with Q, K, V — random values would cause GPU vs CPU divergence.
         //
-        // UIDs are resolved here (not in runGraphTest) because graph.build() —
-        // called by verifyGraph() before initializeBundle() — is what assigns
-        // UIDs via assignUnsetTensorUids().  Querying get_uid() before build()
-        // returns the default (0) for all tensors.
+        // UIDs are resolved here (not in runGraphTest) because
+        // graph.build_operation_graph(), called by buildPlansForEngine() before
+        // initializeBundle(), is what assigns UIDs via assignUnsetTensorUids().
+        // Querying get_uid() before that returns the default (0) for all tensors.
         auto& qTensor = bundle.getTensor(_qAttr->get_uid());
         auto& kTensor = bundle.getTensor(_kAttr->get_uid());
         auto& vTensor = bundle.getTensor(_vAttr->get_uid());
@@ -562,11 +562,11 @@ protected:
         auto validationResult = graph.validate();
         EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
-        // Store tensor attribute pointers — NOT UIDs.  UIDs are assigned by
-        // graph.build() (via assignUnsetTensorUids()), which runs inside
-        // verifyGraph().  Storing get_uid() here would return 0 for all tensors
-        // because validate() does not assign UIDs.  initializeBundle() resolves
-        // UIDs lazily via _qAttr->get_uid() after build() has run.
+        // Store tensor attribute pointers, not UIDs. UIDs are assigned by
+        // graph.build_operation_graph() (via assignUnsetTensorUids()), which runs
+        // inside buildPlansForEngine(). Storing get_uid() here would return 0 for
+        // all tensors because validate() does not assign UIDs. initializeBundle()
+        // resolves UIDs lazily via _qAttr->get_uid() after the build has run.
         _qAttr = q;
         _kAttr = k;
         _vAttr = v;

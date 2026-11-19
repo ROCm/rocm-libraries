@@ -88,7 +88,7 @@ follows AITER's choice of kernel (the gate in `aiter/ops/mha.py` and
   Sq ≤ 16; gfx942 bands with left bound 0 and right bound 0 or unbounded; and
   on gfx950 the hd64 and 128 < D ≤ 192 (D_qk = D_v) head dims, whose rows are
   the gfx942 kernels rebuilt (`_recompile`) and which AITER's C++
-  `fmha_v3_bwd()` runs, since it has no head-dim gate besides `% 8`
+  `fmha_v3_bwd()` runs, since it has no head-dim gate for D ≤ 192 besides `% 8`
   ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
 
 A dispatch whose kernel has been checked on a GPU against the CPU backward
