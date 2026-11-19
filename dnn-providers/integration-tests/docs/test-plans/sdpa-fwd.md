@@ -926,12 +926,14 @@ that the engine is correct for it. Examples:
   and every case with a Stats layout that the kernel cannot address. The
   result depends on the input data and on the memory contents.
 
-ALMIOPEN-3124 is an exception to this rule: its entries cover the cases
-observed to fail, not every case with the trigger. The uncovered cases keep
-running, and the engine declines them. ALMIOPEN-3124 has 313 trigger cases
-with no entry, all declined on gfx942 and gfx950.
+ALMIOPEN-3123, ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 have no entry.
+Since rocm-libraries #15768, `ASM_SDPA_ENGINE` declines the 1,526 cases that
+the ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 entries skipped (628
+`standard`, 257 `comprehensive` and 601 `full`). With those entries removed,
+the engine declined every one of these cases on gfx942 and on gfx950, in
+3 runs with each fill.
 
-ALMIOPEN-3123 has no entry. With its fix (rocm-libraries #15768),
+With the ALMIOPEN-3123 fix (#15768), With its fix (rocm-libraries #15768),
 `ASM_SDPA_ENGINE` declines a graph that has a block mask, or a dropout mask
 and a dropout scale. The engine declines, on gfx942 and gfx950 with both
 fills, the 445 trigger cases that failed before the fix (207 `standard`, 111
@@ -946,12 +948,16 @@ tier (each tier's own cases), with the GPU reference and the default fill:
 | Tier | Cases | gfx942 passed / declined / skipped | gfx950 passed / declined / skipped |
 |---|---|---|---|
 | quick | 1,500 | 170 / 1,204 / 126 | 150 / 1,342 / 8 |
-| standard | 9,519 | 320 / 7,832 / 1,367 | 302 / 8,287 / 930 |
-| comprehensive | 4,622 | 151 / 3,954 / 517 | 137 / 4,153 / 332 |
+| standard | 9,519 | 320 / 8,440 / 759 | 302 / 8,915 / 302 |
+| comprehensive | 4,622 | 151 / 4,207 / 264 | 137 / 4,410 / 75 |
 
 No case failed. A skipped case matches a `[[test_skips]]` entry of
 `ASM_SDPA_ENGINE.toml`. The skips differ by GPU because the `FP8_E4M3_FNUZ`
-entry applies on gfx942 only.
+entry applies on gfx942 only. That run still had the ALMIOPEN-3124,
+ALMIOPEN-3126 and ALMIOPEN-3211 entries. The table counts the cases that they
+skipped as declined: 608 `standard` and 253 `comprehensive` cases on gfx942,
+and 628 and 257 on gfx950. gfx942 has 24 fewer because the `FP8_E4M3_FNUZ`
+entry comes first and still skips them.
 
 Use a list of exact names from measured failures only for a defect that has no
 known trigger. For example, the ALMIOPEN-3212 entry names the one case that
