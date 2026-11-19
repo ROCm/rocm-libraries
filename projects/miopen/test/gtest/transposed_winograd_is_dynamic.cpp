@@ -37,8 +37,8 @@ TEST(CPU_TransposedWinogradIsDynamic_NONE, MatchesInnerSolver)
                        conv::ConvMPBidirectWinograd<2, 3>>();
     ExpectSameDynamism<conv::TransposedConvWinograd3x3MultipassWrW<3, 2>,
                        conv::ConvWinograd3x3MultipassWrW<3, 2>>();
-    ExpectSameDynamism<conv::TransposedConvMPBidirectWinograd_xdlops<2, 3>,
-                       conv::ConvMPBidirectWinograd_xdlops<2, 3>>();
+    // ConvMPBidirectWinograd_xdlops is not covered: its explicit instantiations are not exported
+    // from the Windows DLL, so a test cannot reference them. BinWinoRxS covers the tunable wrapper.
 }
 
 // Guards the premise of the test above: these inner solvers are dynamic, so their wrappers must
