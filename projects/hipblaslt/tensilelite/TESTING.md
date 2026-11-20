@@ -567,8 +567,8 @@ The advisory [`rocjitsu TensileLite` sidecar](../../../.github/workflows/therock
 runs `Tests/common/test_config.py -m gfx1250` on a CPU runner for hipBLASLt changes or the
 `test:hipblaslt` label. It uses up to 16 pytest-xdist workers and a 45-minute per-test timeout,
 matching the FFM lane. It builds rocjitsu from `rocm-systems` develop and records the exact
-revision in its reports. The gfx1250 generator explicitly selects the stinkytofu backend and
-loads its native binding before starting the suite. This sidecar does not gate a merge;
+revision in its reports. It loads the native rocisa binding before starting the suite;
+gfx1250 code generation uses that binding's StinkyTofu integration. This sidecar does not gate a merge;
 its uploaded reports provide numerical outcomes and timings for the emulation comparison.
 
 Other Math CI jobs post checks without gating. The one worth knowing is

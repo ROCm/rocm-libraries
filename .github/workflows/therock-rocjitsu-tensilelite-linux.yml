@@ -152,9 +152,8 @@ jobs:
           source, destination, budget = sys.argv[1:]
           config = json.load(open(source))
           config["cpu_thread_budget"] = int(budget)
-          # With more than one engine thread, a StreamK ready flag is sometimes
-          # left set after the kernel (caught by the Synchronizer check), so pin
-          # one even when a larger runner's budget would allocate two.
+          # Keep the engine count fixed across FFM comparison runs; the CPU
+          # budget still limits the emulator's dispatch helpers.
           config["num_threads"] = 1
           json.dump(config, open(destination, "w"), indent=2)
           PY
@@ -174,20 +173,11 @@ jobs:
           done
           [[ -n "${llvm_lib_path:-}" ]] || { echo "::error::libomp.so not found under ${llvm_lib}"; exit 1; }
 
-          # CPU runners cannot auto-detect the gfx1250 code generation backend.
-          export ROCISA_BACKEND=rocisa
-          if [[ "${target}" == gfx1250 ]]; then export ROCISA_BACKEND=stinkytofu; fi
           export PYTHONPATH="${SCRIPTS_DIR}:${tensilelite_root}${PYTHONPATH:+:${PYTHONPATH}}"
           export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${llvm_lib_path}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
-          python - "${target}" <<'PY'
-          import sys
-          import rocisa
-          if sys.argv[1] == "gfx1250":
-              import stinkytofu._stinkytofu
-              if rocisa._BACKEND != "stinkytofu":
-                  raise RuntimeError("gfx1250 requires the stinkytofu backend")
-              print(f"stinkytofu binding: {stinkytofu._stinkytofu.__file__}")
-          print(f"rocisa backend: {rocisa._BACKEND}, module: {rocisa.__file__}")
+          python - <<'PY'
+          import rocisa._rocisa
+          print(f"rocisa binding: {rocisa._rocisa.__file__}")
           PY
 
           {
@@ -201,7 +191,6 @@ jobs:
             echo "TENSILELITE_ROOT=${tensilelite_root}"
             echo "TENSILELITE_CLIENT=${client}"
             echo "CU=${cu_count}"
-            echo "ROCISA_BACKEND=${ROCISA_BACKEND}"
             echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
             echo "PYTHONPATH=${PYTHONPATH}"
           } >> "${GITHUB_ENV}"
