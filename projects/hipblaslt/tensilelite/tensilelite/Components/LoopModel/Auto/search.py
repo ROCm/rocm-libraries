@@ -28,7 +28,7 @@ import time
 from collections import Counter
 from typing import NamedTuple
 
-from . import evaluate, hw, perf, space
+from . import evaluate, hw, perf, resources, space
 from .report import AutoResult, Ranked
 
 
@@ -82,11 +82,14 @@ def _lcm(a, b):
   return a * b // gcd(a, b)
 
 
-def _tier0(state, free, costs, budget):
-  """Every order's best joint register choices, best first: `[(score, vgpr, order, regs)]`."""
-  pt = state["ProblemType"]
-  mx = bool(pt.get("MXBlockA") or pt.get("MXBlockB"))
-  rejected, examples, out, nests = Counter(), {}, [], set()
+def _walks(state, free, rejected, examples):
+  """One `(order, kernel, walk)` per distinct nest, in canonical order.
+
+  Two spellings of one nest (a factor whose other part is 1) are one candidate.  A spelling
+  with an extent-1 axis gives θ a degenerate unit, which it may widen into more registers
+  than the walk counts, so a spelling without one represents the nest when it has one.
+  """
+  nests = {}
   for order in space.orderChoices(state, free, state):
     kernel, reason = evaluate.applyOrder(state, order)
     if kernel is None:
@@ -94,19 +97,28 @@ def _tier0(state, free, costs, budget):
       examples.setdefault("order", reason)
       continue
     try:
-      shapes = space.registerShapes(kernel)
-      walk = perf.NestWalk(kernel, shapes)
+      walk = perf.NestWalk(kernel, space.registerShapes(kernel))
     except (ValueError, RuntimeError) as error:
       rejected["order"] += 1
       examples.setdefault("order", str(error))
       continue
-    # Two spellings of one nest (a factor whose other part is 1) are one candidate; the
-    # canonical order meets the smaller spelling first.
     nest = tuple((name[0], extent) for name, extent in walk.axes if extent > 1)
-    if nest in nests:
-      continue
-    nests.add(nest)
+    degenerate = any(extent == 1 for _name, extent in walk.axes)
+    held = nests.get(nest)
+    if held is None or (held[0] and not degenerate):
+      nests[nest] = (degenerate, order, kernel, walk)
+  return sorted(((order, kernel, walk) for _degenerate, order, kernel, walk in nests.values()),
+                key=lambda item: item[0])
+
+
+def _tier0(state, free, costs, budget, keep=PER_ORDER):
+  """Every order's best joint register choices, best first: `[(score, vgpr, order, regs)]`."""
+  pt = state["ProblemType"]
+  mx = bool(pt.get("MXBlockA") or pt.get("MXBlockB"))
+  rejected, examples, out = Counter(), {}, []
+  for order, kernel, walk in _walks(state, free, rejected, examples):
     cWmma, cLds, rho, loads = perf.orderCore(kernel, walk, costs)
+    tdm = perf.tensorLoads(kernel) * costs.tdmIssueCycles
     sideA = _sideOptions(kernel, walk, "A", free, state, costs, rho, mx)
     sideB = _sideOptions(kernel, walk, "B", free, state, costs, rho, mx)
     joint = []
@@ -118,7 +130,8 @@ def _tier0(state, free, costs, budget):
         copies = _lcm(costA.copies, costB.copies)
         body = (walk.wmmas + loads) * copies
         icache = max(0.0, body - costs.icacheBodyInstructions) / copies * 0.25
-        score = max(cWmma, cLds) + costA.exposed + costB.exposed + costs.tripOverhead + icache
+        score = (max(cWmma, cLds) + costA.exposed + costB.exposed + tdm
+                 + perf.tdmExposed(cWmma, cLds, copies, costs) + costs.tripOverhead + icache)
         joint.append(Tier0(score, costA.units + costB.units, copies, regs, order,
                            space.RegisterChoice(choiceA, choiceB)))
     if not joint:
@@ -127,16 +140,22 @@ def _tier0(state, free, costs, budget):
                           % (kernel["LoopOrder"], budget))
       continue
     joint.sort()
-    out.extend(joint[:PER_ORDER])
+    out.extend(joint[:keep])
   out.sort()
   return out, rejected, examples
 
 
-def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT):
+def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT,
+           perOrder=TIER2_PER_ORDER, band=None, maxLowerings=MAX_LOWERINGS, tier0PerOrder=PER_ORDER):
   """Pick the free LoopModel parameters of `state` (a resolved Solution state).
 
   `free` names the parameters the user left at -1; every other searched parameter keeps the
   value `state` already has.  Returns an `AutoResult`; its `ranked[0]` is the winner.
+
+  `perOrder` caps the candidates one loop order sends on and `tier0PerOrder` the register
+  choices it scores (None: no cap).  With `band` set the
+  search keeps every candidate whose tier-0 score is within that fraction of the best, rather
+  than stopping at `topK`; `maxLowerings` still bounds it.
   """
   from ..Theta import loopModelTargetFor
   costs = costs or hw.costsFor(state.get("ISA")) or hw.GFX1250
@@ -144,24 +163,28 @@ def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT):
   pt = state["ProblemType"]
   accumulator = int(state["MIWaveTile"][0]) * int(state["MIWaveTile"][1]) * max(
       1, int(state["MatrixInstM"]) * int(state["MatrixInstN"]) // int(state["WavefrontSize"]))
-  budget = costs.maxVgpr - costs.fixedVgpr - accumulator
-  candidates, rejected, examples = _tier0(state, free, costs, budget)
+  budget = costs.maxVgpr - resources.fixedVgpr(state, costs) - accumulator
+  candidates, rejected, examples = _tier0(state, free, costs, budget, tier0PerOrder)
   result = AutoResult(None, rejected=rejected, examples=examples)
   result.searched = len(candidates) + sum(rejected.values())
 
   target = loopModelTargetFor(state, asmCaps)
-  lowered, ranked, perOrder = 0, [], Counter()
+  lowered, ranked, perOrderCount = 0, [], Counter()
+  ceiling = candidates[0].score * (1.0 + band) if band is not None and candidates else None
   for candidate in candidates[:MAX_TIER1]:
     order, registers = candidate.order, candidate.registers
-    if lowered >= MAX_LOWERINGS:
+    if lowered >= maxLowerings:
       break
+    if ceiling is not None:
+      if candidate.score > ceiling:
+        break
     # Ties with the last place go on: the ranking breaks them on the exact VGPR count, which
     # only tier 1 knows, so a smaller `topK` keeps the same leaders.
-    if len(ranked) >= topK and candidate[:3] > max((r.score, r.units, r.copies) for r in ranked):
+    elif len(ranked) >= topK and candidate[:3] > max((r.score, r.units, r.copies) for r in ranked):
       break
     # The slots are spread over loop orders rather than spent on one order's register
     # variants; an order's first candidates are its best, so the winner is unaffected.
-    if perOrder[order] >= TIER2_PER_ORDER:
+    if perOrder is not None and perOrderCount[order] >= perOrder:
       continue
     ev = evaluate.tier1(state, order, registers, costs, asmCaps)
     if not ev.feasible:
@@ -178,7 +201,7 @@ def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT):
                                    % ev.perf.extra["copies"])
         continue
       lowered += 1
-      perOrder[order] += 1
+      perOrderCount[order] += 1
       try:
         program = perf.lower(ev.theta)
         timeline = perf.simulate(ev.kernel, program, costs)
@@ -192,7 +215,7 @@ def search(state, free, asmCaps, costs=None, tier2=True, topK=TIER2_COUNT):
         result.examples.setdefault("gir", item.note)
         continue
     else:
-      perOrder[order] += 1
+      perOrderCount[order] += 1
     ranked.append(item)
 
   ranked.sort(key=Ranked.key)

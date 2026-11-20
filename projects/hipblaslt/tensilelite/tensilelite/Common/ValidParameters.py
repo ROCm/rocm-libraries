@@ -1275,7 +1275,8 @@ validParameters = { # we need to make sure this matches develop
     # had named them, so the kernel name and the logic yaml record them and not this switch.
     # 0 : off
     # 1 : on (requires UseLoopModel)
-    "LoopModelAutoSelect": [0, 1],
+    # N > 1 : benchmark the N best candidates the search ranks, each as stated parameters
+    "LoopModelAutoSelect": list(range(0, 65)),
     # Axis order of wmma loop
     # -1: LoopModelAutoSelect picks it; 1 without it
     # 1 : KMN

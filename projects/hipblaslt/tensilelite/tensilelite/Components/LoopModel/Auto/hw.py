@@ -47,8 +47,12 @@ class Gfx1250Costs:
   #: steady loop's load.  Charged per unit whatever its size: a smaller VgprGroup sub-unit does
   #: not land sooner on hardware.  CALIBRATED (see `calibration`).
   dsEffectiveLatency: int = 300
-  #: tensor_load_to_lds latency from issue to data in LDS.  CALIBRATED (uncalibrated default).
-  tdmLatency: int = 1500
+  #: Tiers 0 and 2: tensor_load_to_lds issue to data in LDS, timed from where GIR places the
+  #: load -- later than StinkyTofu schedules it, so below the hardware latency.  CALIBRATED.
+  tdmLatency: int = 800
+  #: Tiers 0 and 2: issue cycles of one tensor_load_to_lds, its descriptor's scalar setup
+  #: (~70 SALU per load) included.  CALIBRATED (see `calibration`).
+  tdmIssueCycles: int = 40
   #: Tier 3 (`asmsim`): ds_load and tensor_load_to_lds latency when timing the emitted loop.
   #: CALIBRATED (see `calibration`).
   asmDsLatency: int = 250
@@ -61,10 +65,12 @@ class Gfx1250Costs:
   #: Register file.  VGPRs are counted without alignment: StinkyTofuRegisterAllocation packs.
   maxVgpr: int = 1024
   maxSgpr: int = 106
-  #: VGPRs the kernel holds outside the LoopModel operand rings and the accumulator after
-  #: StinkyTofu allocation: addresses, store and epilogue temporaries, the tail-loop reserve.
-  #: CALIBRATED on the gfx1250 MXF8 TN DU256 MT256x320 family (see `calibration`).
-  fixedVgpr: int = 10
+  #: Bytes one LDS address register reaches through ds instruction offsets (regCaps
+  #: maxLDSConstOffset); each further 64 KiB of a tensor's LDS extent takes one more.
+  ldsConstOffsetReach: int = 65536
+  #: The writer moves the B ring off A's VGPR bank (archCaps VgprBank on ISA 12.5): one or two
+  #: registers after an unpacked A ring.
+  vgprBankPadsB: bool = True
   #: SGPRs that do not depend on the searched parameters, and those each split operand adds.
   fixedSgpr: int = 86
   sgprPerSplitOperand: int = 2
@@ -80,11 +86,10 @@ GFX1250 = Gfx1250Costs()
 
 #: Where each calibrated constant came from, so a refit knows what to rerun.
 calibration = {
-    "fixedVgpr": (
+    "fixedSgpr": (
         "config/maf/mxf8_loop_model.yaml and register variants, emitted CPU-only with "
-        "StinkyTofuRegisterAllocation=3 (2026-11-17): rings + accumulator 1014 -> "
-        ".amdhsa_next_free_vgpr 1023; VA_A=2/PLR_A=1 950 -> 956"),
-    "fixedSgpr": "same kernels: .amdhsa_next_free_sgpr 86 for every register variant",
+        "StinkyTofuRegisterAllocation=3 (2026-11-17): .amdhsa_next_free_sgpr 86 for every "
+        "register variant"),
     "dsEffectiveLatency": (
         "17 kernels of the same family measured on one gfx1250 card (4096x5120x65536, "
         "2026-11-17): the tuned config, the search's first top-8 and a one-factor sweep around "
@@ -114,7 +119,27 @@ calibration = {
         "the tensorcnt depth of the steady loop, model it in tier 0, and price ds with "
         "StinkyTofu's numbers (perf.drainLatency is its computeDynamicDrainLatency already).  "
         "Prototype: ~/loopmodel-autoselect-scratch/queue_fit.py; ablation over bodies_*.pkl."),
-    "tdmLatency": "not yet calibrated on hardware; P5",
+    "tdmIssueCycles": (
+        "40 kernels of the same family measured on one gfx1250 card (4096x5120x65536, "
+        "2026-11-19): 27 unsplit and 13 TDMSplitA/B variants of 7 loop configurations.  12 of "
+        "the 13 splits are slower than their unsplit kernel; the median slowdown per extra "
+        "tensor_load per trip is 43 cycles at tier 0's scale and 42 at tier 2's.  The emitted "
+        "loops agree: each extra load adds ~70 scalar instructions.  Any value > 0 orders the "
+        "22 same-configuration split pairs 75% right at tier 0 (ties 50% without it)."),
+    "tdmLatency": (
+        "Same 40 kernels, tier 2 swept 0-2000 at tdmIssueCycles 40: 600-1000 is a plateau "
+        "where only the two slowest kernels (WOO0 WFN1, a tensor_load GIR places 31 WMMAs "
+        "before its first ds_load) wait, raising Spearman from -0.06 to +0.05; from 1100 most "
+        "kernels wait and it falls to -0.30 at 2000.  The emitted slack (tensor_load to the "
+        "s_wait_tensorcnt that retires it) ranks GFLOPS at +0.57 but GIR's does not predict it "
+        "(-0.21): StinkyTofu hoists the loads and StinkyWaitCntInsertionPass sets the counts "
+        "on the scheduled loop, e.g. tensorcnt 0 every trip for a one-copy body.  Only tier 3 "
+        "(+0.82 on these 40) sees that.  With both TDM terms tier 0 ranks them +0.52 (+0.54 "
+        "without, its split pairs tied) and tier 2 +0.05 (-0.07 without).  Tier 0's "
+        "`perf.tdmExposed` reuses it: 6 variants (MXF8/F8 16x16x128 8x10 and 4x4, F8 16x16x64 "
+        "8x10, BF16 16x16x32 8x8 and 4x4; 14-24 kernels each, measured twice, 2026-11-19) "
+        "rank at a mean +0.41 within-variant Spearman (+0.19 without), flat from 600 up, "
+        "and the 40 above stay at +0.51."),
     "icacheBodyInstructions": "not yet calibrated on hardware; P5",
 }
 

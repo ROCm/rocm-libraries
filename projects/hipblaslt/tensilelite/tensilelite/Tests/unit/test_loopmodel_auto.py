@@ -3,7 +3,7 @@
 """LoopModelAutoSelect on the hand-tuned MX-F8 kernel (`loopmodel_mxf8_autoselect.yaml`).
 
 The tuned kernel's numbers are measured, not modelled: its emitted kernel uses 1023 VGPRs after
-allocation (the count is 1024 with the fixed registers), a ring one buffer shorter than
+allocation (the search's lower bound is 1009), a ring one buffer shorter than
 `VgprAllocA=3` overwrites a tile a WMMA still reads, and GIR refuses exactly those rings.
 """
 
@@ -13,7 +13,7 @@ import os
 
 import pytest
 
-from tensilelite.Components.LoopModel.Auto import asmsim, evaluate, hw, perf, search, space
+from tensilelite.Components.LoopModel.Auto import asmsim, evaluate, hw, perf, resources, search, space
 
 pytestmark = pytest.mark.unit
 
@@ -43,8 +43,8 @@ def tuned():
   return dict(states[0])
 
 
-def _walk(state):
-  kernel, reason = evaluate.applyOrder(state, _TUNED_ORDER)
+def _walk(state, order=_TUNED_ORDER):
+  kernel, reason = evaluate.applyOrder(state, order)
   assert kernel is not None, reason
   return kernel, perf.NestWalk(kernel, space.registerShapes(kernel))
 
@@ -69,20 +69,117 @@ def test_a_ring_too_short_for_the_walk_is_refused_as_gir_refuses_it(tuned):
   assert walk.distances("B", 1, 1, 2) == [40, 40, 40, 40]
 
 
-def test_the_tuned_kernel_takes_exactly_the_vgpr_budget(tuned):
+def test_a_burst_of_late_refills_waits_about_one_latency(tuned):
+  # KNNMM sweeps A's four Mo units every N step, so a ring of four has no slot to read the
+  # next K step ahead into: all four refills land 6 WMMAs before use, issued 2 WMMAs apart.
+  kernel, walk = _walk(tuned, space.OrderChoice(inner=2, outer=0, factorM=4, factorN=2,
+                                                factorK=1))
+  assert kernel["LoopOrder"] == "KNM"
+  assert walk.distances("A", 1, 3, 4) == [6] * 8
+  latency, perWmma = 300.0, 8.0
+  # The first refill of each K step waits; the next three drain through that wait.
+  assert walk.exposure("A", 1, 3, 4, latency, perWmma) == 2 * (latency - 6 * perWmma)
+  # Refills far enough ahead expose nothing, the same as their distances say.
+  _kernel, tunedWalk = _walk(tuned)
+  assert tunedWalk.exposure("A", 1, 2, 3, latency, perWmma) == 0.0
+
+
+def test_a_rotating_ring_is_offered_only_longer_than_its_read_ahead(tuned):
+  kernel, walk = _walk(tuned)
+  for side in "AB":
+    choices = space.sideChoices(walk.shapes[side], side, _SEARCHED_FREE, kernel)
+    assert choices
+    assert all(c.va > c.plr for c in choices if c.clr == 0), side
+  # B at PLR 2 / VA 2 reads a tile its slot no longer holds (GIR: WRONG SOURCE).
+  assert space.SideChoice(2, 0, 1, 2) not in space.sideChoices(
+      walk.shapes["B"], "B", _SEARCHED_FREE, kernel)
+  # Stated by the config, PLR = VA is kept for Solution and GIR to judge.
+  pinned = dict(kernel, PrefetchLocalReadB=2, VgprAllocB=2, ClusterLocalReadB=0, VgprGroupB=1)
+  free = _SEARCHED_FREE - {"PrefetchLocalReadB", "VgprAllocB", "ClusterLocalReadB", "VgprGroupB"}
+  assert space.sideChoices(walk.shapes["B"], "B", free, pinned) == [space.SideChoice(2, 0, 1, 2)]
+
+
+def test_a_nest_is_represented_by_a_spelling_without_an_extent_1_axis(tuned):
+  from collections import Counter
+  walks = search._walks(tuned, _SEARCHED_FREE, Counter(), {})
+  nests = [tuple((name[0], extent) for name, extent in walk.axes if extent > 1)
+           for _order, _kernel, walk in walks]
+  assert len(nests) == len(set(nests)) == 150
+  degenerate = [kernel["LoopOrder"] for _order, kernel, walk in walks
+                if any(extent == 1 for _name, extent in walk.axes)]
+  # Only the nests no clean spelling reaches stay degenerate: with LoopIters 2, any word with
+  # two K letters splits K into 2 x 1.
+  assert len(degenerate) == 16
+  assert all(word.count("K") == 2 for word in degenerate)
+  # MMKNKN (M1, N10, K1) walks Mi8 Ko2 No2 Ki1 Ni5; MKN walks the same tiles cleanly.
+  axes = [(kernel["LoopOrder"], walk.axes) for _order, kernel, walk in walks]
+  assert ("MMKNKN", [("Mi", 8), ("Ko", 2), ("No", 2), ("Ki", 1), ("Ni", 5)]) not in axes
+  assert ("MKN", [("Mi", 8), ("Ki", 2), ("No", 2), ("Ni", 5)]) in axes
+
+
+def test_tier3_rejects_a_candidate_it_cannot_emit():
+  from tensilelite.Components.LoopModel.Auto.report import AutoResult, Ranked
+  from tensilelite.Utilities.loopmodel_autoselect import tier3
+
+  ranked = [Ranked({"VgprAllocA": va}, 1297.0) for va in (3, 4, 5)]
+  result = AutoResult(ranked[0], ranked=list(ranked))
+  tier3({}, result, lambda _state: None, None, 2, hw.GFX1250)
+  # The two it tried are rejected, not kept after the timed ones; the untried one stays.
+  assert result.ranked == [ranked[2]] and result.winner is ranked[2]
+  assert result.refused == ranked[:2]
+  assert result.rejected["emit"] == 2
+  assert result.examples["emit"] == "Solution refuses it"
+
+
+def test_an_include_leaving_out_a_derived_parameter_matches_the_ranked_kernel():
+  from tensilelite.Components.LoopModel.Auto.report import AutoResult, Ranked
+  from tensilelite.Utilities.loopmodel_autoselect import expand, resolveInclude
+
+  free = ("WmmaFactorK", "VgprAllocA")
+  derived = lambda state: dict(state, WmmaFactorK=1)
+  tuned = resolveInclude({"WmmaFactorK": -1}, free, {"VgprAllocA": 3}, derived)
+  assert tuned == {"WmmaFactorK": 1, "VgprAllocA": 3}
+  # Refused by Solution, a group is kept as given.
+  assert resolveInclude({}, free, {"VgprAllocA": 3}, lambda _state: None) == {"VgprAllocA": 3}
+
+  config = {"BenchmarkProblems": [[{}, {"ForkParameters": [{"VgprAllocA": [-1]}]}]]}
+  ranked = [Ranked({"WmmaFactorK": 1, "VgprAllocA": va}, 1297.0) for va in (4, 3)]
+  out = expand(config, [({}, free, AutoResult(ranked[0], ranked=ranked))], include=[tuned])
+  groups = out["BenchmarkProblems"][0][1]["ForkParameters"][-1]["Groups"][0]
+  assert groups == [{"VgprAllocA": [4], "WmmaFactorK": [1]}, {"VgprAllocA": [3], "WmmaFactorK": [1]}]
+
+
+def test_the_tuned_kernel_is_counted_at_or_below_its_emitted_vgprs(tuned):
   ev = evaluate.tier1(tuned, _TUNED_ORDER, _TUNED, hw.GFX1250, _asm_caps())
   assert ev.feasible, ev.reason
-  assert ev.gpr.operands == {"A": 192, "B": 160, "MXSA": 12, "MXSB": 10}
+  # The rings as the writer sizes them: MXSB's unit is 5 VGPRs, not its 10-VGPR K-step.
+  assert ev.gpr.operands == {"A": 192, "B": 160, "MXSA": 12, "MXSB": 5}
+  # A+B already hold the tail loop's 128 + 160 slabs.
+  assert ev.gpr.tailReserve == 0
   assert ev.gpr.accumulator == 640
-  assert ev.gpr.vgpr == 1024
-  # One more A buffer is over.
+  # Under StinkyTofu allocation nothing is added: a lower bound of the emitted 1023.
+  assert ev.gpr.fixedVgpr == 0
+  assert ev.gpr.vgpr == 1009
+  # One more A buffer is over even as a lower bound.
   wider = space.RegisterChoice(space.SideChoice(2, 0, 1, 4), _TUNED.b)
   over = evaluate.tier1(tuned, _TUNED_ORDER, wider, hw.GFX1250, _asm_caps())
   assert over.stage == "budget" and over.gpr.vgpr > 1024
-  # WmmaFactorN=1 holds every B tile: 1193 VGPRs after allocation on the real kernel.
+  # WmmaFactorN=1 holds every B tile: the real kernel needs 1193 VGPRs and is refused.
   single = dataclasses.replace(_TUNED_ORDER, factorN=1)
   over = evaluate.tier1(tuned, single, _TUNED, hw.GFX1250, _asm_caps())
-  assert over.stage == "budget" and over.gpr.vgpr == 1184
+  assert over.stage == "budget" and over.gpr.vgpr == 1174
+
+
+def test_without_vgpr_allocation_the_writer_blocks_outside_the_rings_are_counted(tuned):
+  state = dict(tuned, StinkyTofuRegisterAllocation=0)
+  ev = evaluate.tier1(state, _TUNED_ORDER, _TUNED, hw.GFX1250, _asm_caps())
+  assert resources.nonRingVgprs(ev.kernel, hw.GFX1250, ev.gpr.operands) == {
+      "Serial": 1, "BankPadB": 2, "GL2PrefetchAddr": 4,
+      "LocalReadAddrA": 2, "LocalReadAddrB": 2, "LocalReadAddrMXSA": 1, "LocalReadAddrMXSB": 1,
+      "SwapAddrA": 1, "SwapAddrB": 1, "SwapAddrMXSA": 1, "SwapAddrMXSB": 1}
+  # Nothing is folded into the rings, so the tuned kernel no longer fits.
+  assert ev.gpr.fixedVgpr == 17 and ev.gpr.vgpr == 1026
+  assert ev.stage == "budget"
 
 
 def test_a_search_with_nothing_free_returns_the_stated_kernel(tuned):
@@ -111,6 +208,54 @@ def test_a_search_for_the_winner_alone_picks_the_same_winner(tuned):
   alone = search.search(copy.deepcopy(tuned), _SEARCHED_FREE, _asm_caps(), topK=1)
   assert alone.winner.params == wide.winner.params
   assert sum(1 for r in alone.ranked if r.lowered) < sum(1 for r in wide.ranked if r.lowered)
+
+
+def test_each_storage_region_is_one_tensor_load_per_trip(tuned):
+  # The MX scales ride A's and B's descriptors (TDMFuse), so they add no load of their own.
+  counts = {}
+  for split in ((0, 0), (1, 0), (0, 1), (1, 1)):
+    kernel = dict(tuned, TDMSplitA=split[0], TDMSplitB=split[1])
+    counts[split] = perf.tensorLoads(kernel)
+  assert counts == {(0, 0): 2, (1, 0): 3, (0, 1): 3, (1, 1): 4}
+
+
+def test_tier0_charges_every_tensor_load_of_the_trip(tuned):
+  budget = hw.GFX1250.maxVgpr
+  free = dataclasses.replace(hw.GFX1250, tdmIssueCycles=0)
+  (priced, *_), _rejected, _examples = search._tier0(tuned, set(), hw.GFX1250, budget)
+  (bare, *_), _rejected, _examples = search._tier0(tuned, set(), free, budget)
+  assert priced.score - bare.score == 2 * hw.GFX1250.tdmIssueCycles
+
+
+def test_tier0_exposes_the_tensor_load_latency_of_a_one_copy_body(tuned):
+  budget = hw.GFX1250.maxVgpr
+  free = set(space.SIDE_REGISTER_PARAMS)
+  ranked, _rejected, _examples = search._tier0(tuned, free, hw.GFX1250, budget, keep=None)
+  hidden, _rejected, _examples = search._tier0(
+      tuned, free, dataclasses.replace(hw.GFX1250, tdmLatency=0), budget, keep=None)
+  scores = {t.registers: t.score for t in ranked}
+  both = [t for t in hidden if t.registers in scores]
+  assert {t.copies == 1 for t in both} == {True, False}
+  # A longer body's trip (1280 WMMA cycles) covers the latency; a one-copy body drains it.
+  for t in both:
+    assert scores[t.registers] - t.score == (hw.GFX1250.tdmLatency if t.copies == 1 else 0)
+  assert hidden[0].copies == 1
+  assert ranked[0].registers == _TUNED
+
+
+def test_tier2_waits_for_the_tensor_load_filling_an_lds_generation(tuned):
+  ev = evaluate.tier1(tuned, _TUNED_ORDER, _TUNED, hw.GFX1250, _asm_caps())
+  assert ev.feasible, ev.reason
+  program = perf.lower(ev.theta)
+  landed = dataclasses.replace(hw.GFX1250, tdmLatency=0)
+  late = dataclasses.replace(hw.GFX1250, tdmLatency=4000)
+  timeline = perf.simulate(ev.kernel, program, landed)
+  assert timeline.tdmWait == 0
+  assert timeline.tdmIssue == perf.tensorLoads(ev.kernel) * hw.GFX1250.tdmIssueCycles
+  # A load landing after its trip's ds_loads read it holds issue up.
+  slow = perf.simulate(ev.kernel, program, late)
+  assert slow.tdmWait > 0 and slow.cycles > timeline.cycles
+  assert perf.simulate(ev.kernel, program, hw.GFX1250).tdmWait == 0
 
 
 def test_tier3_charges_a_load_where_the_schedule_waits_for_it():
@@ -157,7 +302,7 @@ def test_every_lowered_candidate_passes_gir(tuned):
   assert result.rejected["gir"] <= 2, result.refused
 
 
-def test_auto_select_states_its_choice_in_the_solution(tmp_path):
+def _free_config(tmp_path, autoSelect):
   from tensilelite import LibraryIO
   import yaml
 
@@ -167,11 +312,14 @@ def test_auto_select_states_its_choice_in_the_solution(tmp_path):
     for name in list(entry):
       if name in _SEARCHED_FREE:
         entry[name] = [-1]
-  forks.append({"LoopModelAutoSelect": [1]})
-  path = tmp_path / "auto.yaml"
+  forks.append({"LoopModelAutoSelect": [autoSelect]})
+  path = tmp_path / ("auto%d.yaml" % autoSelect)
   path.write_text(yaml.safe_dump(config, default_flow_style=None))
+  return str(path)
 
-  states = _derive(str(path))
+
+def test_auto_select_states_its_choice_in_the_solution(tmp_path):
+  states = _derive(_free_config(tmp_path, 1))
   assert len(states) == 1
   state = states[0]
   assert state["LoopModelAutoSelect"] == 0
@@ -179,3 +327,16 @@ def test_auto_select_states_its_choice_in_the_solution(tmp_path):
     assert int(state[name]) != -1, name
   # Stated values: the no-load loop is dropped, as for a config that names them.
   assert state["SuppressNoLoadLoop"] is True
+
+
+def test_auto_select_n_benchmarks_the_n_best_candidates(tmp_path):
+  states = _derive(_free_config(tmp_path, 3))
+  assert len(states) == 3
+  chosen = [tuple(int(state[name]) for name in sorted(_SEARCHED_FREE)) for state in states]
+  assert len(set(chosen)) == 3
+  for state in states:
+    assert state["LoopModelAutoSelect"] == 0
+    assert state["SuppressNoLoadLoop"] is True
+  # The best of the N is the kernel Derive mode picks alone.
+  single = _derive(_free_config(tmp_path, 1))[0]
+  assert chosen[0] == tuple(int(single[name]) for name in sorted(_SEARCHED_FREE))

@@ -17,6 +17,11 @@ Tier 1, `estimate`, prices θ analytically and is cheap enough for every candida
 Tier 2, `simulate`, walks the lowered GIR steady body -- the real ds_load placement -- through
 an in-order issue clock with a WMMA queue, the LDS return queue and the RAW/WAR register
 dependences.  StinkyTofu's scheduler still reorders after GIR, so this prices the GIR intent.
+
+Both tiers charge each tensor_load_to_lds its issue (`tdmIssueCycles`, `tensorLoads` per trip);
+tier 2 also makes a ds_load of an LDS generation wait for the tensor_load filling it, and that
+load wait for the last read of the buffer's previous generation.  The s_wait_tensorcnt depth
+StinkyTofu emits is set on the scheduled loop, so neither tier sees it; tier 3 does.
 """
 
 from dataclasses import dataclass, field
@@ -65,6 +70,32 @@ def _readBytesPerLane(kernel, operand):
   if lrvw <= 0:
     lrvw = int(kernel.get("LocalReadVectorWidth", 0) or 0)
   return max(4, min(16, int(lrvw * dataType.numBytes()))) if lrvw > 0 else 16
+
+
+def tensorLoads(kernel):
+  """tensor_load_to_lds instructions per trip: one per storage region of each descriptor set
+  (a fused set -- A with its MX scales -- is one walk)."""
+  from ...TDMFuse import tdmFusedGroups
+  from ...TDMSplit import set_regions
+  operands = [tc for tc in ("A", "B", "MXSA", "MXSB") if kernel.get("enableTDM" + tc)]
+  sets, seen = [], set()
+  for tc in operands:
+    if tc in seen:
+      continue
+    members = next((g for g in tdmFusedGroups(kernel) if tc in g), (tc,))
+    seen.update(members)
+    sets.append(set_regions(kernel, tc))
+  return sum(sets)
+
+
+def tdmExposed(cWmma, cLds, copies, costs):
+  """tensor_load_to_lds latency a trip leaves exposed, from its steady-body copies.
+
+  The wait depth is set after scheduling (StinkyWaitCntInsertionPass): a one-copy body waits
+  for s_wait_tensorcnt 0 every trip, a fraction of a trip after the load it retires issued, so
+  nearly all the latency shows; a longer body keeps each load in flight about one trip.
+  """
+  return max(0.0, costs.tdmLatency - (max(cWmma, cLds) if copies > 1 else 0.0))
 
 
 def drainLatency(costs, latency, loads, waves):
@@ -206,6 +237,33 @@ class NestWalk:
     A slot not free by the unit's own first use is the plan's WRONG SOURCE.  `buffers=None` is
     a resident (CLR=1) operand, whose units never share a slot.
     """
+    stream = self._stream(side, vg, steps, buffers)
+    if stream is None:
+      return None
+    n = len(stream) // 3
+    return [first - issued for issued, first in stream[2 * n:]]
+
+  def exposure(self, side, vg, steps, buffers, latency, perWmma):
+    """Cycles per trip the matrix queue waits on `side`'s ds_loads, or None like `distances`.
+
+    One in-order clock over three trips laid end to end, keeping the third: a unit's wait
+    delays every later WMMA, and a load issued before that wait keeps draining through it, so a
+    burst of refills that are all short of `latency` pays about one latency, not one each.
+    """
+    stream = self._stream(side, vg, steps, buffers)
+    if stream is None:
+      return None
+    n = len(stream) // 3
+    waits, total = [], 0.0
+    for g, (issued, first) in enumerate(stream):
+      before = sum(wait for at, wait in waits if at < issued)
+      wait = max(0.0, issued * perWmma + before + latency - (first * perWmma + total))
+      waits.append((first, wait))
+      total += wait
+    return sum(wait for _at, wait in waits[2 * n:])
+
+  def _stream(self, side, vg, steps, buffers):
+    """`[(issued, first)]` WMMA positions of the units of three consecutive trips."""
     uses = self.uses(side, vg)
     n = len(uses)
     if n == 0:
@@ -217,7 +275,7 @@ class NestWalk:
       return first + shift, last + shift
 
     out = []
-    for g in range(2 * n, 3 * n):
+    for g in range(3 * n):
       first, _last = at(g)
       issued = at(g - steps)[0] if steps > 0 else first
       if buffers is not None:
@@ -225,7 +283,7 @@ class NestWalk:
         if free > first:
           return None
         issued = max(issued, free)
-      out.append(first - issued)
+      out.append((issued, first))
     return out
 
 
@@ -256,11 +314,12 @@ def sideCost(kernel, walk, side, choice, costs, rho, mx):
                 drainLatency(costs, costs.dsLoadLatency(bytesPerLane), perBuffer * perTile,
                              waves))
   steps = choice.plr if choice.clr else max(0, min(choice.plr, choice.va - 1))
-  distances = walk.distances(side, choice.vg, steps, None if choice.clr else choice.va)
+  perWmma = wmmaCycles(kernel, costs)
+  buffers = None if choice.clr else choice.va
+  distances = walk.distances(side, choice.vg, steps, buffers)
   if distances is None:
     return None
-  perWmma = wmmaCycles(kernel, costs)
-  exposed = sum(max(0.0, latency - distance * perWmma) for distance in distances)
+  exposed = walk.exposure(side, choice.vg, steps, buffers, latency, perWmma)
   from math import gcd
   copies = 1 if choice.clr else choice.va // gcd(choice.va, max(1, shape.positions))
   return SideCost(regs, exposed, copies, steps, len(distances))
@@ -297,10 +356,13 @@ class Timeline:
   warWait: float         #: cycles per trip refills waited on the WMMA still reading their slot
   dsQueueWait: float     #: cycles per trip issue waited on a full LDS return queue
   copies: int
+  tdmWait: float = 0.0   #: cycles per trip issue waited on a tensor_load (landing, or its buffer)
+  tdmIssue: float = 0.0  #: cycles per trip spent issuing tensor_loads
 
   def summary(self):
-    return ("%.0f cyc/trip (wmma busy %.0f, raw %.0f, war %.0f, dsq %.0f)"
-            % (self.cycles, self.wmmaBusy, self.rawWait, self.warWait, self.dsQueueWait))
+    return ("%.0f cyc/trip (wmma busy %.0f, raw %.0f, war %.0f, dsq %.0f, tdm %.0f+%.0f)"
+            % (self.cycles, self.wmmaBusy, self.rawWait, self.warWait, self.dsQueueWait,
+               self.tdmIssue, self.tdmWait))
 
 
 def _tileKey(ref):
@@ -309,6 +371,13 @@ def _tileKey(ref):
 
 def _slotKey(ref):
   return (ref.tile.operand, ref.group, ref.slot)
+
+
+def _bufferKey(ref, shift):
+  """`(generation id, absolute generation)` of a shared ref; steady copies step `gdelta`."""
+  if ref.tile.space != "shared" or ref.gen is None:
+    return None
+  return (ref.gen.id, int(ref.gdelta) + shift)
 
 
 def simulate(kernel, program, costs, rounds=3, wmmaQueue=4):
@@ -331,7 +400,12 @@ def simulate(kernel, program, costs, rounds=3, wmmaQueue=4):
   inflight = []       # completion times of outstanding ds_loads, oldest first
   ready = {}          # tile key -> ready time
   lastRead = {}       # slot key -> time the last WMMA reading it started
-  raw = war = dsq = busy = 0.0
+  # A tensor_load fills one LDS generation; a ds_load of it waits for the landing, and the next
+  # fill of the same buffer (`ring` generations on) waits for the last ds_load of this one.  A
+  # generation the simulated rounds never fill came from the prologue and is ready at 0.
+  landed = {}         # buffer key -> time its tensor_load lands in LDS
+  drained = {}        # buffer key -> time the last ds_load reading it returned
+  raw = war = dsq = busy = tdm = tdmIssue = 0.0
   counters = []
   blockStarts = set()
   index = 0
@@ -339,10 +413,12 @@ def simulate(kernel, program, costs, rounds=3, wmmaQueue=4):
     for label in steady:
       blockStarts.add(index)
       index += len(program.block(label).body)
+  roundLength = max(1, index // rounds)
   for position, inst in enumerate(body):
     if position in blockStarts:
       marks.append(clock)
-      counters.append((raw, war, dsq, busy))
+      counters.append((raw, war, dsq, busy, tdm, tdmIssue))
+    shift = (position // roundLength) * trip
     if isinstance(inst, Mma):
       srcReady = max([ready.get(_tileKey(ref), 0.0) for ref in inst.srcs
                       if ref.tile.space == "register"] or [0.0])
@@ -361,6 +437,11 @@ def simulate(kernel, program, costs, rounds=3, wmmaQueue=4):
       clock = max(clock, srcReady) + 1
     elif isinstance(inst, Move) and inst.op == "ds_load":
       dst = inst.dsts[0]
+      buffers = [key for key in (_bufferKey(ref, shift) for ref in inst.srcs) if key]
+      gate = max([landed.get(key, 0.0) for key in buffers] or [0.0])
+      if gate > clock:
+        tdm += gate - clock
+        clock = gate
       gate = lastRead.get(_slotKey(dst), 0.0)
       if gate > clock:
         war += gate - clock
@@ -388,15 +469,29 @@ def simulate(kernel, program, costs, rounds=3, wmmaQueue=4):
         inflight.append(done)
         clock += 1
       ready[_tileKey(dst)] = done
+      for key in buffers:
+        drained[key] = max(drained.get(key, 0.0), done)
+    elif isinstance(inst, Move) and inst.op == "tensor_load":
+      buffers = [(key, ref.gen.ring) for key, ref in
+                 ((_bufferKey(ref, shift), ref) for ref in inst.dsts) if key]
+      gate = max([drained.get((key[0], key[1] - ring), 0.0) for key, ring in buffers] or [0.0])
+      if gate > clock:
+        tdm += gate - clock
+        clock = gate
+      for key, _ring in buffers:
+        landed[key] = clock + costs.tdmLatency
+      clock += costs.tdmIssueCycles
+      tdmIssue += costs.tdmIssueCycles
     elif isinstance(inst, Move):
       clock += 1
   marks.append(max(clock, pipeEnd))
-  counters.append((raw, war, dsq, busy))
+  counters.append((raw, war, dsq, busy, tdm, tdmIssue))
   # The LAST round is the steady state: the first ones fill the queues.
   first, last = (rounds - 1) * trip, rounds * trip
   span = (marks[last] - marks[first]) / float(trip)
-  delta = [(counters[last][i] - counters[first][i]) / float(trip) for i in range(4)]
-  return Timeline(span + costs.tripOverhead, delta[3], delta[0], delta[1], delta[2], trip)
+  delta = [(counters[last][i] - counters[first][i]) / float(trip) for i in range(6)]
+  return Timeline(span + costs.tripOverhead, delta[3], delta[0], delta[1], delta[2], trip,
+                  delta[4], delta[5])
 
 
 def lower(theta):

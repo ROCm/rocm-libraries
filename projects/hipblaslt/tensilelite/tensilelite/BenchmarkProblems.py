@@ -311,9 +311,58 @@ def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, s
             print(f"Error processing permutation: {e}")
     return None
 
+def _expand_auto_select(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap,
+                        rocIsaData=None):
+    """The forks `LoopModelAutoSelect: N` (N > 1) benchmarks in place of `perm`: the search's N
+    best candidates that build and emit, stated.  Other forks, and a fork with no such
+    candidate, are kept as given; the latter is left to Derive mode, which rejects it with the
+    search's reason."""
+    from .Components.LoopModel.Auto import expand
+
+    n = expand.count(dict(constantParams, **perm))
+    if n <= 1:
+        return [perm]
+    if rocIsaData is not None:
+        rocisa.rocIsa.getInstance().setData(rocIsaData)
+    isa = next(iter(isaInfoMap.keys()))
+    pristine = {"ProblemType": deepcopy(problemType.state), "ISA": isa}
+    pristine.update(constantParams)
+    pristine.update(perm)
+
+    def build(state):
+        return _build_and_validate_solution(state, assembler, debugConfig, isaInfoMap, silent=True)
+
+    def emits(solution):
+        return expand.emittedLoop(solution, assembler)[0] is not None
+
+    choices, result = expand.expandFork(pristine, n, build, isaInfoMap[isa].asmCaps, emits)
+    if result is not None:
+        print1(result.summary(top=n))
+    if not choices:
+        return [dict(perm, **{expand.KEY: 1})]
+    return [dict(perm, **chosen, **{expand.KEY: 0}) for chosen in choices]
+
+
 def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler,
                              debugConfig: DebugConfig, isaInfoMap: Dict[IsaVersion, IsaInfo]):
     """Creates a list with a Solution object for each parameter combination in forkPermutations using parallel processing"""
+    from .Components.LoopModel.Auto import expand
+
+    if expand.wanted(constantParams, forkPermutations):
+        print1("# Expanding LoopModelAutoSelect into its best candidates")
+        expandIters = zip(
+            forkPermutations,
+            itertools.repeat(problemType),
+            itertools.repeat(constantParams),
+            itertools.repeat(assembler),
+            itertools.repeat(debugConfig),
+            itertools.repeat(isaInfoMap),
+            itertools.repeat(rocisa.rocIsa.getInstance().getData())
+        )
+        expanded = ParallelMap2(_expand_auto_select, expandIters, "LoopModelAutoSelect",
+                                return_as="list")
+        forkPermutations = [perm for perms in expanded for perm in perms]
+
     print1("# Enumerating Solutions (Parallel)")
 
     forkIters = zip(

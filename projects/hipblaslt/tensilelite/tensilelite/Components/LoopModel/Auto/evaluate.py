@@ -89,7 +89,11 @@ def tier1(state, order, registers, costs, asmCaps, orderedKernel=None):
   if refusals:
     ev.stage, ev.reason = "prefetch", "; ".join(str(r) for r in refusals)
     return ev
-  gpr = gprCount(kernel, theta, S, costs)
+  try:
+    gpr = gprCount(kernel, theta, S, costs)
+  except RuntimeError as error:
+    ev.stage, ev.reason = "registers", str(error)
+    return ev
   ev.kernel, ev.theta, ev.S, ev.gpr = kernel, theta, S, gpr
   if not gpr.fits:
     ev.stage, ev.reason = "budget", gpr.reason()

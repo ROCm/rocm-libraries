@@ -9,7 +9,9 @@
 Each fork of the selected problem group is derived with its free LoopModel parameters (-1, as
 `LoopModelAutoSelect` reads them) at their defaults, searched, and its top-k candidates written
 as one `Groups:` fork in OUT.yaml in place of the free parameters, so a Tensile run of OUT.yaml
-ranks them on the GPU.  `--include` adds a group of its own -- a hand-tuned reference, say.
+ranks them on the GPU.  `--include` adds a group of its own -- a hand-tuned reference, say;
+the free parameters it leaves out are filled with what Solution derives for them, so it is not
+listed twice when the search ranks the same kernel.
 With `--tier3 N` the first N candidates are emitted (CPU-only, a few seconds each) and re-ranked
 by the steady loop StinkyTofu produced for them (`LoopModel.Auto.asmsim`).  The ranking, with
 each tier's cycles, is printed.
@@ -49,47 +51,29 @@ def _forks(config, problem, sizeGroup):
   return process.problemType, step.constantParams, perms
 
 
-def _emittedLoop(solution, assembler):
-  """The steady loop StinkyTofu emits for `solution`'s kernel, or None when it emits none."""
-  import shutil
-  import rocisa
-  from ..Common.Types import DebugConfig
-  from ..Components.LoopModel.Auto.asmsim import loopBody
-  from ..KernelWriterAssembly import KernelWriterAssembly
-  from ..SolutionStructs.Naming import getKernelFileBase
-  from ..create_library.run import processKernelSource
-
-  kernel = solution.getKernels()[0]
-  isa = tuple(kernel["ISA"])
-  instance = rocisa.rocIsa.getInstance()
-  instance.init(isa, shutil.which("amdclang++") or "/usr/bin/amdclang++")
-  instance.setKernel(isa, kernel["WavefrontSize"])
-  kernel["BaseName"] = getKernelFileBase(False, kernel)
-  writer = KernelWriterAssembly(assembler, DebugConfig())
-  result = processKernelSource(writer, instance.getData(), instance.getOutputOptions(), False,
-                               kernel)
-  source = result.src
-  if isinstance(source, (bytes, bytearray)):
-    source = source.decode(errors="replace")
-  return None if result.err or not source else loopBody(source)
-
-
 def tier3(pristine, result, build, assembler, count, costs):
   """Re-rank `result`'s first `count` candidates by their emitted loop (`asmsim`), best first.
 
-  `build(state)` returns the Solution for a state, or None.  Candidates it cannot emit keep
-  their tier-0 place after the timed ones.
+  `build(state)` returns the Solution for a state, or None.  A candidate Solution refuses or
+  the writer cannot emit is rejected at stage `emit`; candidates past `count` keep their tier-0
+  place after the timed ones.
   """
   from ..Components.LoopModel.Auto.asmsim import loopCycles
+  from ..Components.LoopModel.Auto.expand import emittedLoop
 
   head, tail = result.ranked[:count], result.ranked[count:]
+  timed = []
   for item in head:
     state = copy.deepcopy(pristine)
     state.update(item.params)
     solution = build(state)
-    body = None if solution is None else _emittedLoop(solution, assembler)
+    body, reason = (None, "Solution refuses it") if solution is None \
+        else emittedLoop(solution, assembler)
     if body is None:
-      item.note = "tier3: not emitted"
+      item.note = "tier3: %s" % reason
+      result.refused.append(item)
+      result.rejected["emit"] += 1
+      result.examples.setdefault("emit", reason)
       continue
     mi = solution["MatrixInstruction"]
     wmmasPerTrip = solution["MIWaveTile"][0] * solution["MIWaveTile"][1] \
@@ -97,13 +81,34 @@ def tier3(pristine, result, build, assembler, count, costs):
     item.tier3 = loopCycles(body, costs, costs.wmma(mi[0], mi[1], mi[2],
                                                     bool(solution["ProblemType"].get("MX"))),
                             wmmasPerTrip)
-  timed = sorted((item for item in head if item.tier3 is not None), key=lambda i: i.tier3Key())
-  result.ranked = timed + [item for item in head if item.tier3 is None] + tail
+    timed.append(item)
+  result.ranked = sorted(timed, key=lambda i: i.tier3Key()) + tail
   result.winner = result.ranked[0] if result.ranked else None
 
 
-def rank(configPath, topK=8, problem=0, sizeGroup=0, arch="gfx1250", tier2=True, tier3Count=0):
-  """`[(fork, free, AutoResult)]` for every fork of the problem group that leaves one free."""
+def resolveInclude(pristine, free, extra, deriveProbe):
+  """`extra` with each free parameter it leaves out set to what Solution derives for it.
+
+  A parameter left out derives (`WmmaFactorK: -1` is the factor a TDM split pins, else 1),
+  so the same kernel written with and without it must compare equal.  When Solution refuses
+  `extra`, it is returned as given.
+  """
+  state = copy.deepcopy(pristine)
+  state.update(extra)
+  derived = deriveProbe(state)
+  if derived is None:
+    print("--include %s: Solution refuses it; kept as given" % json.dumps(extra), file=sys.stderr)
+    return dict(extra)
+  resolved = {name: int(derived[name]) for name in free if derived.get(name) is not None}
+  resolved.update(extra)
+  return resolved
+
+
+def rank(configPath, topK=8, problem=0, sizeGroup=0, arch="gfx1250", tier2=True, tier3Count=0,
+         include=()):
+  """`(config, [(fork, free, AutoResult)], includes)`: the search of every fork of the problem
+  group that leaves a parameter free, and the `include` groups resolved against those forks
+  (`resolveInclude`)."""
   from .. import LibraryIO
   from ..BenchmarkProblems import _build_and_validate_solution
   from ..Common.GlobalParameters import assignGlobalParameters
@@ -126,7 +131,7 @@ def rank(configPath, topK=8, problem=0, sizeGroup=0, arch="gfx1250", tier2=True,
     built = build(state)
     return None if built is None else dict(built._state)
 
-  out = []
+  out, includes = [], []
   for perm in perms:
     pristine = {"ProblemType": copy.deepcopy(problemType.state),
                 "ISA": next(iter(isaInfoMap.keys()))}
@@ -136,6 +141,10 @@ def rank(configPath, topK=8, problem=0, sizeGroup=0, arch="gfx1250", tier2=True,
     free = space.freeParams(pristine)
     if not free:
       continue
+    for extra in include:
+      resolved = resolveInclude(pristine, free, extra, deriveProbe)
+      if resolved not in includes:
+        includes.append(resolved)
     result = rankSplits(pristine, set(free), deriveProbe, asmCaps, tier2=tier2, topK=topK)
     costs = costsFor(pristine["ISA"])
     if tier3Count and costs is not None and result.ranked:
@@ -143,7 +152,7 @@ def rank(configPath, topK=8, problem=0, sizeGroup=0, arch="gfx1250", tier2=True,
     if not result.ranked:
       print("fork %s: nothing buildable -- %s" % (perm, result.reason()), file=sys.stderr)
     out.append((perm, free, result))
-  return config, out
+  return config, out, includes or [dict(extra) for extra in include]
 
 
 def expand(config, ranked, problem=0, sizeGroup=0, topK=8, include=()):
@@ -185,8 +194,8 @@ def main(argv=None):
   parser.add_argument("--include", action="append", default=[], type=json.loads)
   args = parser.parse_args(argv)
 
-  config, ranked = rank(args.config, args.top_k, args.problem, args.size_group, args.arch,
-                        not args.no_tier2, args.tier3)
+  config, ranked, includes = rank(args.config, args.top_k, args.problem, args.size_group,
+                                  args.arch, not args.no_tier2, args.tier3, args.include)
   for perm, _free, result in ranked:
     print("fork %s" % json.dumps(perm, default=str))
     print(result.summary(top=args.top_k))
@@ -194,7 +203,7 @@ def main(argv=None):
     raise SystemExit("no fork has a buildable candidate")
   with open(args.out, "w") as handle:
     yaml.safe_dump(expand(config, ranked, args.problem, args.size_group, args.top_k,
-                          args.include), handle, sort_keys=False, default_flow_style=None)
+                          includes), handle, sort_keys=False, default_flow_style=None)
   print("wrote %s" % args.out)
 
 

@@ -24,6 +24,8 @@ SEARCHED_PARAMS = ORDER_PARAMS + SIDE_REGISTER_PARAMS + SPLIT_PARAMS
 MAX_FACTOR = 16
 MAX_PLR = 8
 MAX_VA = 16
+#: `ValidParameters` accepts VgprGroup 1 to 8.
+MAX_VG = 8
 
 
 @dataclass(frozen=True, order=True)
@@ -135,7 +137,7 @@ def orderChoices(kernel, free, pinned):
 
 def sideChoices(shape, side, free, pinned, maxPlr=MAX_PLR, maxVa=MAX_VA):
   """Register tuples one operand may take under one loop order (`Registers.RegisterShape`)."""
-  vgs = _domain("VgprGroup" + side, free, pinned, _divisors(shape.unit, shape.unit))
+  vgs = _domain("VgprGroup" + side, free, pinned, _divisors(shape.unit, MAX_VG))
   clrs = _domain("ClusterLocalRead" + side, free, pinned, (0, 1))
   out = []
   for vg in vgs:
@@ -153,11 +155,14 @@ def sideChoices(shape, side, free, pinned, maxPlr=MAX_PLR, maxVa=MAX_VA):
           resident = max(1, shape.residentTiles // shape.unit * vg)
           vas = _domain("VgprAlloc" + side, free, pinned, (resident,))
         else:
-          # A ring shorter than its read-ahead cannot hold what PLR asks for; one longer than
-          # the positions it walks (times the groups) only repeats slots.
-          low = max(1, plr)
+          # A ring must hold its read-ahead plus the unit in use: PLR >= VA lowers to a
+          # different loop than tier 0 scores, and GIR refuses some as WRONG SOURCE.  One
+          # longer than the positions it walks (times the groups) only repeats slots.
+          low = plr + 1
           high = max(low, max(shape.positions, plr + 1) * vg)
           vas = _domain("VgprAlloc" + side, free, pinned, range(low, min(high, maxVa) + 1))
+          if "PrefetchLocalRead" + side in free or "VgprAlloc" + side in free:
+            vas = [va for va in vas if int(va) > plr]
         for va in vas:
           out.append(SideChoice(plr, clr, vg, int(va)))
   return out

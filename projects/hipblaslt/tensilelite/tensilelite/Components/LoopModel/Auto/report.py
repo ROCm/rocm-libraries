@@ -30,7 +30,7 @@ class Ranked:
 class AutoResult:
   winner: Optional[Ranked]
   ranked: List[Ranked] = field(default_factory=list)     #: best first
-  refused: List[Ranked] = field(default_factory=list)    #: tier-1 survivors GIR refused
+  refused: List[Ranked] = field(default_factory=list)    #: tier-1 survivors GIR or tier 3 refused
   rejected: Counter = field(default_factory=Counter)      #: {stage: count}
   examples: dict = field(default_factory=dict)            #: {stage: one reason}
   searched: int = 0
