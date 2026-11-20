@@ -288,6 +288,13 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                 {
                     add_device_grouped_conv1d_bwd_weight_xdl_gnwc_gkxc_gnwk_f16_instances(op_ptrs);
                 }
+                if constexpr(is_same_v<InDataType, half_t> && is_same_v<WeiDataType, float> &&
+                             is_same_v<OutDataType, half_t> && is_same_v<ComputeTypeA, half_t> &&
+                             is_same_v<ComputeTypeB, half_t>)
+                {
+                    add_device_grouped_conv1d_bwd_weight_xdl_gnwc_gkxc_gnwk_f16_f32_f16_instances(
+                        op_ptrs);
+                }
 #endif
 #ifdef CK_ENABLE_BF16
                 if constexpr(is_same_v<InDataType, ck::bhalf_t> && is_same_v<WeiDataType, float> &&
@@ -331,6 +338,13 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_conv2d_bwd_weight_xdl_gnhwc_gkyxc_gnhwk_f16_default_pipev1_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_weight_xdl_gnhwc_gkyxc_gnhwk_f16_pad0_pipev1_instances(
+                        op_ptrs);
+                }
+                if constexpr(is_same_v<InDataType, half_t> && is_same_v<WeiDataType, float> &&
+                             is_same_v<OutDataType, half_t> && is_same_v<ComputeTypeA, half_t> &&
+                             is_same_v<ComputeTypeB, half_t>)
+                {
+                    add_device_grouped_conv2d_bwd_weight_xdl_gnhwc_gkyxc_gnhwk_f16_f32_f16_instances(
                         op_ptrs);
                 }
 #endif
@@ -463,6 +477,13 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_convnd_bwd_weight_xdl_f16_f16_f16_exp_odd_n_instances(
                         op_ptrs);
                     add_device_grouped_convnd_bwd_weight_xdl_f16_f16_f16_exp_odd_m_instances(
+                        op_ptrs);
+                }
+                if constexpr(is_same_v<InDataType, half_t> && is_same_v<WeiDataType, float> &&
+                             is_same_v<OutDataType, half_t> && is_same_v<ComputeTypeA, half_t> &&
+                             is_same_v<ComputeTypeB, half_t>)
+                {
+                    add_device_grouped_conv2d_bwd_weight_xdl_nhwgc_gkyxc_nhwgk_f16_f32_f16_instances(
                         op_ptrs);
                 }
 #endif
@@ -657,6 +678,13 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_conv3d_bwd_weight_xdl_gndhwc_gkzyxc_gndhwk_f16_instances(
                         op_ptrs);
                 }
+                if constexpr(is_same_v<InDataType, half_t> && is_same_v<WeiDataType, float> &&
+                             is_same_v<OutDataType, half_t> && is_same_v<ComputeTypeA, half_t> &&
+                             is_same_v<ComputeTypeB, half_t>)
+                {
+                    add_device_grouped_conv3d_bwd_weight_xdl_gndhwc_gkzyxc_gndhwk_f16_f32_f16_instances(
+                        op_ptrs);
+                }
 #endif
 #ifdef CK_ENABLE_BF16
                 if constexpr(is_same_v<InDataType, ck::bhalf_t> && is_same_v<WeiDataType, float> &&
@@ -778,6 +806,13 @@ struct DeviceOperationInstanceFactory<ck::tensor_operation::device::DeviceGroupe
                     add_device_grouped_convnd_bwd_weight_xdl_f16_f16_f16_exp_odd_n_instances(
                         op_ptrs);
                     add_device_grouped_convnd_bwd_weight_xdl_f16_f16_f16_exp_odd_m_instances(
+                        op_ptrs);
+                }
+                if constexpr(is_same_v<InDataType, half_t> && is_same_v<WeiDataType, float> &&
+                             is_same_v<OutDataType, half_t> && is_same_v<ComputeTypeA, half_t> &&
+                             is_same_v<ComputeTypeB, half_t>)
+                {
+                    add_device_grouped_conv3d_bwd_weight_xdl_ndhwgc_gkzyxc_ndhwgk_f16_f32_f16_instances(
                         op_ptrs);
                 }
 #endif

@@ -5,6 +5,7 @@
 set(GROUPED_CONV1D_BWD_WEIGHT_GNWC
    # xdl
    xdl/device_grouped_conv1d_bwd_weight_xdl_gnwc_gkxc_gnwk_bf16_f32_bf16_instance.cpp
+   xdl/device_grouped_conv1d_bwd_weight_xdl_gnwc_gkxc_gnwk_f16_f32_f16_instance.cpp
    xdl/device_grouped_conv1d_bwd_weight_xdl_gnwc_gkxc_gnwk_f16_instance.cpp
    xdl/device_grouped_conv1d_bwd_weight_xdl_gnwc_gkxc_gnwk_f32_instance.cpp
 )
