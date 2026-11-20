@@ -196,7 +196,7 @@ TEST(TestGfx950AttentionUnified3DGeometry, RefusesAWorkspaceItCannotLayOut)
     EXPECT_FALSE(gfx950Unified3DWorkspaceLayout(2, 0, 256, 16, 8, 128, 16).has_value());
     EXPECT_FALSE(gfx950Unified3DWorkspaceLayout(2, 1, 256, 16, 0, 128, 16).has_value());
     EXPECT_FALSE(gfx950Unified3DWorkspaceLayout(2, 1, 256, 16, 8, 128, 0).has_value());
-    // segm_output past 2^31 - 1 elements, which the kernels index in 32 bits.
+    // segm_output far past 2^31 elements (2^34), which the kernels cannot index in 32 bits.
     EXPECT_FALSE(gfx950Unified3DWorkspaceLayout(4096, 1, 256, 16, 128, 256, 128).has_value());
 }
 

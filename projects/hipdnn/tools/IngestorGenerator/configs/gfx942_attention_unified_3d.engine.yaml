@@ -373,8 +373,8 @@ launch_surface:
       requires num_queries_per_kv to equal the graph's Hq / Hkv (one kernel
       serves every head pair of its ratio) and sliding_window 0; never batch,
       Skv or the head counts as cell fields. It declines a candidate whose
-      num_segments would take segm_output, segm_max/expsum, Q or O to 2^31
-      elements at the graph's batch (i32 offsets). A record missing a field,
+      num_segments would put segm_output past 2^31 elements at the graph's batch (i32
+      offsets; segm_max/expsum, Q and O are never larger). A record missing a field,
       with block_size outside {16,32,64}, num_segments <= 0, or a
       tile_size_override other than rocKE's gfx942 rule is declined. The
       admission table is generated from rocKE at build time and never
