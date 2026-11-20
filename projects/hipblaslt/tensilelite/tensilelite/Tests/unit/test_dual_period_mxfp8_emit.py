@@ -50,8 +50,10 @@ def _emit_dual_period_kernel(plr=1, mi=_MI_8X4):
     return src
 
 
-def _codegen_kernel(plr=1, mx=True, mi=_MI_8X4):
-    """Run codegen on the dual-period geometry, or a plain-FP8 kernel when not mx."""
+def _codegen_kernel(plr=1, mx=True, mi=_MI_8X4, extra=None):
+    """Run codegen on the dual-period geometry, or a plain-FP8 kernel when not mx.
+
+    ``extra`` overrides solution parameters, e.g. to make the kernel persistent."""
     from tensilelite.Common.Architectures import gfxToIsa
     from tensilelite.Common.Capabilities import makeIsaInfoMap
     from tensilelite.Toolchain.Assembly import makeAssemblyToolchain
@@ -92,6 +94,7 @@ def _codegen_kernel(plr=1, mx=True, mi=_MI_8X4):
         "UseSubtileImpl": True, "StoreRemapVectorWidth": 0,
         "DirectToVgprA": False, "DirectToVgprB": False,
         "DirectToVgprSparseMetadata": False, "WorkGroupMapping": 4}
+    params.update(extra or {})
     params.update(matrixInstructionToMIParameters(
         mi, isa, 64, pt, params["WorkGroup"], iim))
     sol = Solution(params, False, True, False, asm, iim)
@@ -640,3 +643,81 @@ def test_8x10_balance_keeps_the_vmcnt_sequence(balanced_8x10, unbalanced_8x10_sr
     assert balanced
     assert balanced == _vmcnt_sequence(unbalanced_8x10_src)
     assert "balanced current-cell" not in "\n".join(_mainloop_lines(unbalanced_8x10_src))
+
+
+# The library's dual-period kernels are persistent StreamK kernels.
+_PERSISTENT = {"TileProcessingStrategy": "StreamK", "StreamK": 3}
+
+
+@pytest.fixture(scope="module")
+def persistent_src():
+    res = _codegen_kernel(extra=_PERSISTENT)
+    assert res.err == 0, "kernel codegen failed (err=%s)" % res.err
+    src = res.src
+    return src.decode(errors="replace") if isinstance(src, (bytes, bytearray)) else src
+
+
+def _persistent_back_edge(src):
+    """Code of the persistent loop close: (taken side, exit side).
+
+    The taken side runs from the exit test's branch to the jump back to
+    label_PersistentLoopStart; the exit side from its target to the next jump."""
+    code = [ln.split("//")[0].strip()
+            for ln in src[src.index("label_PersistentLoopClose:"):].splitlines()]
+    code = [c for c in code if c and not c.startswith("/*")]
+    branch = next(i for i, c in enumerate(code)
+                  if c.startswith("s_cbranch_scc1 label_StaticGrid_CloseDone"))
+    exit_at = code.index(code[branch].split()[1] + ":")
+    exit_end = next(i for i in range(exit_at, len(code)) if code[i].startswith("s_setpc_b64"))
+    return code[branch + 1:exit_at], code[exit_at + 1:exit_end + 1]
+
+
+def test_persistent_back_edge_drains_lds_reads_and_syncs_before_reentry(persistent_src):
+    """The next tile's preloop DirectToLds loads overwrite LDS a slower wave may
+    still be reading in this tile's tail, so the taken back edge drains this
+    wave's LDS reads and meets the other waves first."""
+    taken, _exit = _persistent_back_edge(persistent_src)
+    ops = [c.split()[0] for c in taken]
+    assert ops.count("s_barrier") == 1, taken
+    barrier = ops.index("s_barrier")
+    assert "s_waitcnt lgkmcnt(0)" in taken[:barrier], taken
+    assert any("label_PersistentLoopStart" in c for c in taken[barrier + 1:]), taken
+    assert ops[-1] == "s_setpc_b64", taken
+
+
+def test_persistent_exit_path_skips_the_back_edge_sync(persistent_src):
+    _taken, exit_side = _persistent_back_edge(persistent_src)
+    assert not [c for c in exit_side if c.startswith(("s_barrier", "s_waitcnt"))], exit_side
+
+
+def test_back_edge_sync_stays_out_of_the_main_loop(persistent_src, dual_src):
+    def barriers(src):
+        return sum(1 for ln in _mainloop_lines(src) if ln.split("//")[0].strip() == "s_barrier")
+    assert barriers(persistent_src) == barriers(dual_src)
+    assert persistent_src.count("Sync before persistent re-entry") == 1
+
+
+def test_nonpersistent_kernel_has_no_back_edge_sync(dual_src):
+    assert "label_PersistentLoopClose:" not in dual_src
+    assert "Sync before persistent re-entry" not in dual_src
+
+
+@pytest.mark.parametrize("override,gated", [
+    ({}, True),
+    ({"DirectToLdsA": False}, True),
+    ({"DirectToLdsA": False, "DirectToLdsB": False}, False),
+    ({"UseSubtileImpl": False}, False),
+    ({"TileProcessingStrategy": "None"}, False),
+    ({"_PrefetchAcrossPersistentEnabled": True}, False),
+    ({"WorkAssignment": "DynamicWorkQueue"}, True),
+])
+def test_back_edge_sync_gate(override, gated):
+    """Only persistent Subtile kernels with DirectToLds and no PAP: the classic
+    preloop already syncs before its first DirectToLds load, and PAP issues the
+    next tile's loads behind its own barrier."""
+    from tensilelite.Components.PersistentLoop import PersistentKernelState
+    kernel = {"UseSubtileImpl": True, "TileProcessingStrategy": "StreamK",
+              "WorkAssignment": "StaticGrid", "DirectToLdsA": True, "DirectToLdsB": True,
+              "PrefetchAcrossPersistent": 0}
+    kernel.update(override)
+    assert PersistentKernelState().persistentBackEdgeSyncsLds(kernel) is gated
