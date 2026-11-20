@@ -124,6 +124,20 @@ namespace
         return a;
     }
 
+    // Square upper triangle: row r has lens[r] <= n - r columns starting at the
+    // diagonal.
+    Csr make_upper(const std::vector<int64_t>& lens)
+    {
+        Csr a;
+        a.n = static_cast<int64_t>(lens.size());
+        for(size_t r = 0; r < lens.size(); ++r)
+        {
+            const int64_t len = std::min<int64_t>(lens[r], a.n - static_cast<int64_t>(r));
+            a.add_row(static_cast<int64_t>(r), len);
+        }
+        return a;
+    }
+
     cd value_of(int64_t k)
     {
         static const int re[7] = {1, 2, -1, 1, -2, 1, -1};
@@ -215,6 +229,7 @@ namespace
         bool                 use_ids   = false;
         bool                 device    = false;
         bool                 symmetric = false;
+        rocsparse_fill_mode  fill      = rocsparse_fill_mode_lower;
         double               alpha     = 2.0;
         double               beta      = 3.0;
         int                  repeat    = 1;
@@ -281,12 +296,20 @@ namespace
                 case rocsparse_operation_transpose:
                 {
                     y[static_cast<size_t>(c)] += mul(mul(alpha, v), x[static_cast<size_t>(r)]);
+                    if(o.symmetric && r != c)
+                    {
+                        y[static_cast<size_t>(r)] += mul(mul(alpha, v), x[static_cast<size_t>(c)]);
+                    }
                     break;
                 }
                 case rocsparse_operation_conjugate_transpose:
                 {
-                    y[static_cast<size_t>(c)]
-                        += mul(mul(alpha, std::conj(v)), x[static_cast<size_t>(r)]);
+                    const cd w = std::conj(v);
+                    y[static_cast<size_t>(c)] += mul(mul(alpha, w), x[static_cast<size_t>(r)]);
+                    if(o.symmetric && r != c)
+                    {
+                        y[static_cast<size_t>(r)] += mul(mul(alpha, w), x[static_cast<size_t>(c)]);
+                    }
                     break;
                 }
                 }
@@ -339,17 +362,24 @@ namespace
         }
 
         // The CSC matrix is the transpose of the pattern, so its product is
-        // the opposite one of the pattern read as CSR.
+        // the opposite one of the pattern read as CSR. A symmetric matrix is
+        // its own transpose, so its conjugate transpose stays one.
         Opt ro = o;
         if(o.csc)
         {
-            if(o.symmetric || o.op == rocsparse_operation_conjugate_transpose)
+            if(o.op == rocsparse_operation_conjugate_transpose && !o.symmetric)
             {
                 report(what + ": the reference does not cover this CSC case");
                 return out;
             }
-            ro.op = (o.op == rocsparse_operation_none) ? rocsparse_operation_transpose
-                                                       : rocsparse_operation_none;
+            if(o.op == rocsparse_operation_none)
+            {
+                ro.op = rocsparse_operation_transpose;
+            }
+            else if(o.op == rocsparse_operation_transpose)
+            {
+                ro.op = rocsparse_operation_none;
+            }
         }
 
         const int64_t b    = (o.base == rocsparse_index_base_one) ? 1 : 0;
@@ -459,7 +489,7 @@ namespace
         if(o.symmetric)
         {
             const rocsparse_matrix_type type = rocsparse_matrix_type_symmetric;
-            const rocsparse_fill_mode   fill = rocsparse_fill_mode_lower;
+            const rocsparse_fill_mode   fill = o.fill;
             if(rocsparse_spmat_set_attribute(mat, rocsparse_spmat_matrix_type, &type, sizeof(type))
                    != rocsparse_status_success
                || rocsparse_spmat_set_attribute(mat, rocsparse_spmat_fill_mode, &fill, sizeof(fill))
@@ -732,6 +762,19 @@ namespace
         a.ind = {1, 0, 2, 2};
         a.val = {cd(2, 0), cd(3, 0), cd(1, 0), cd(4, 0)};
         a.x   = {cd(nan, 0), cd(1, 0), cd(2, 0)};
+        return a;
+    }
+
+    // [[1, 2], [2, 3]] stored as its upper triangle, which is also the lower
+    // triangle of a CSC matrix with the same arrays. Row 0 holds two of the
+    // three nonzeros. y = 2 A x + 3 y0 = [13, 22], not [23, 22], under every
+    // operation.
+    Csr make_symmetric_upper_2x2()
+    {
+        Csr a = make_upper({2, 1});
+        a.val = {cd(1, 0), cd(2, 0), cd(3, 0)};
+        a.x   = {cd(1, 0), cd(2, 0)};
+        a.y0  = {cd(1, 0), cd(2, 0)};
         return a;
     }
 
@@ -1706,6 +1749,129 @@ TEST_F(CsrmvNnzsplit, symmetric_matrices)
             o.beta  = 0.0;
             run_f64(handle, a, o, what + " symmetric f64 beta=0");
         });
+    }
+}
+
+// A symmetric matrix runs the forward kernel under every operation, so an
+// upper triangle, whose row 0 can hold more than one nonzero, reaches the
+// first-row bug as a transposed CSR product and as a non-transposed CSC
+// product too.
+TEST_F(CsrmvNnzsplit, symmetric_upper_first_row)
+{
+    const Csr a = make_symmetric_upper_2x2();
+    for(bool csc : {false, true})
+    {
+        for(rocsparse_operation op : {rocsparse_operation_none,
+                                      rocsparse_operation_transpose,
+                                      rocsparse_operation_conjugate_transpose})
+        {
+            each_mode([&](Opt o, const std::string& mode) {
+                o.symmetric = true;
+                o.csc       = csc;
+                o.fill      = csc ? rocsparse_fill_mode_lower : rocsparse_fill_mode_upper;
+                o.op        = op;
+                const std::string what = std::string(csc ? "csc lower " : "csr upper ") + mode
+                                         + " op=" + std::to_string(op);
+                const Out out = run_f32(handle, a, o, what + " f32");
+                ASSERT_TRUE(out.ran) << what;
+                ASSERT_EQ(out.y.size(), 2u) << what;
+                EXPECT_EQ(out.y[0], cd(13, 0)) << what;
+                EXPECT_EQ(out.y[1], cd(22, 0)) << what;
+                if(!o.v2)
+                {
+                    expect_npt(out, 1, what);
+                }
+                run_f64(handle, a, o, what + " f64");
+                run<int32_t,
+                    int32_t,
+                    rocsparse_float_complex,
+                    rocsparse_float_complex,
+                    rocsparse_float_complex,
+                    rocsparse_float_complex>(handle, a, o, what + " c32");
+            });
+        }
+    }
+}
+
+// Upper triangles at 1 and 8 nonzeros per thread, as CSR upper and as CSC
+// lower with the same arrays, under every operation. At 8 nonzeros per
+// thread the long row 0 ends in the wavefront that holds the last nonzero,
+// and the empty rows keep the mean low enough for the skew guard.
+TEST_F(CsrmvNnzsplit, symmetric_upper_shapes)
+{
+    struct Shape
+    {
+        std::string name;
+        Csr         a;
+        uint32_t    npt;
+    };
+    const int64_t      W = wavefront();
+    std::vector<Shape> shapes;
+    shapes.push_back({"upper_first_row_full", make_upper({5, 1, 0, 2, 1}), 1});
+    {
+        std::vector<int64_t> lens(static_cast<size_t>(W), 0);
+        lens[0] = W / 2;
+        std::fill(lens.end() - 3, lens.end(), 1);
+        shapes.push_back({"upper_first_row_reaches_tail", make_upper(lens), 1});
+    }
+    {
+        std::vector<int64_t> lens;
+        uint32_t             state = 12345u;
+        for(int i = 0; i < 40; ++i)
+        {
+            state = state * 1664525u + 1013904223u;
+            lens.push_back((state >> 16) % 31);
+        }
+        lens[0] = 40;
+        shapes.push_back({"upper_irregular", make_upper(lens), 1});
+    }
+    for(int64_t head : {9 * W + W / 2, 8 * static_cast<int64_t>(block) + W / 2})
+    {
+        for(int64_t tail : {int64_t(1), int64_t(3)})
+        {
+            std::vector<int64_t> lens(static_cast<size_t>(head + 100), 0);
+            lens[0] = head;
+            std::fill(lens.end() - tail, lens.end(), 1);
+            shapes.push_back({"upper_skew_head_reaches_tail_" + std::to_string(head) + "_"
+                                  + std::to_string(tail),
+                              make_upper(lens),
+                              8});
+        }
+    }
+
+    for(const Shape& shape : shapes)
+    {
+        ASSERT_GT(shape.a.ptr[1], 1) << shape.name;
+        for(bool csc : {false, true})
+        {
+            for(rocsparse_operation op : {rocsparse_operation_none,
+                                          rocsparse_operation_transpose,
+                                          rocsparse_operation_conjugate_transpose})
+            {
+                each_mode([&](Opt o, const std::string& mode) {
+                    o.symmetric = true;
+                    o.csc       = csc;
+                    o.fill      = csc ? rocsparse_fill_mode_lower : rocsparse_fill_mode_upper;
+                    o.op        = op;
+                    const std::string what = shape.name + (csc ? " csc lower " : " csr upper ")
+                                             + mode + " op=" + std::to_string(op);
+                    const Out out = run_f32(handle, shape.a, o, what + " f32");
+                    if(!o.v2)
+                    {
+                        expect_npt(out, shape.npt, what);
+                    }
+                    o.alpha  = 1.0;
+                    o.beta   = 0.0;
+                    o.device = true;
+                    run<int64_t,
+                        int32_t,
+                        rocsparse_double_complex,
+                        rocsparse_double_complex,
+                        rocsparse_double_complex,
+                        rocsparse_double_complex>(handle, shape.a, o, what + " c64 device beta=0");
+                });
+            }
+        }
     }
 }
 
