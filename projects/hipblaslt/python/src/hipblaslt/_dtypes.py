@@ -4,7 +4,7 @@
 
 nanobind only accepts NumPy's own scalar types, so an ml_dtypes array (bfloat16, the fp8 formats)
 crosses into C++ as a same-width unsigned view, with its dtype name alongside. The C++ side
-(src/device_array.cpp) does every check, so this module only does the viewing.
+(csrc/device_array.cpp) does every check, so this module only does the viewing.
 """
 
 from __future__ import annotations
