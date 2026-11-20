@@ -51,8 +51,8 @@ public:
                                     const std::vector<int64_t>& statTensorIds);
 
     // Affine tensors align to x's trailing dims, stat tensors to x's leading dims.
-    // Each must be packed with no two indices sharing an element and, over its dims of
-    // size > 1, ordered in memory as x is.
+    // Each must be a device buffer, not pass-by-value, packed with no two indices sharing an
+    // element and, over its dims of size > 1, ordered in memory as x is.
     void checkTensorMemoryOrderSupported(int64_t xTensorId,
                                          const std::vector<NamedTensorId>& affineTensors,
                                          const std::vector<NamedTensorId>& statTensors);

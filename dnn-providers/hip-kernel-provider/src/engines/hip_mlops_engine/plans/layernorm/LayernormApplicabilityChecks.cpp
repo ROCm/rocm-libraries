@@ -277,7 +277,9 @@ void LayernormValidator::checkTensorMemoryOrderSupported(
         const auto& attr = findTensorAttributes(_tensorMap, named.second);
         if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&attr))
         {
-            return;
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string("Layernorm ") + named.first + " tensor must not be pass-by-value.");
         }
 
         const std::vector<int64_t> dims(attr.dims()->begin(), attr.dims()->end());
@@ -350,11 +352,6 @@ void LayernormValidator::checkOperandDimsMatchNormalizedDims(
 
     const auto check = [&](const NamedTensorId& named, bool isAffine) {
         const auto& attr = findTensorAttributes(_tensorMap, named.second);
-        if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&attr))
-        {
-            return;
-        }
-
         const std::vector<int64_t> dims(attr.dims()->begin(), attr.dims()->end());
         const size_t offset = isAffine ? xRank - dims.size() : 0;
         for(size_t i = 0; i < xRank; ++i)

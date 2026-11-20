@@ -7,6 +7,8 @@
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <string>
+#include <unordered_set>
 
 using namespace hip_kernel_provider::layernorm;
 
@@ -442,6 +444,38 @@ TEST(TestLayernormValidator, InvalidEpsilonTypeBprop)
 namespace
 {
 
+// An operand named in passByValue carries a host value in place of a device buffer.
+flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>
+    createFloatOperand(flatbuffers::FlatBufferBuilder& builder,
+                       int64_t uid,
+                       const char* name,
+                       const std::vector<int64_t>& strides,
+                       const std::vector<int64_t>& dims,
+                       const std::unordered_set<std::string>& passByValue)
+{
+    if(passByValue.count(name) == 0)
+    {
+        return hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+            builder,
+            uid,
+            name,
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            &strides,
+            &dims);
+    }
+    const hipdnn_flatbuffers_sdk::data_objects::Float32Value value(1.0f);
+    return hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+        builder,
+        uid,
+        name,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        &strides,
+        &dims,
+        false,
+        hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
+        builder.CreateStruct(value).Union());
+}
+
 flatbuffers::FlatBufferBuilder
     createInvalidShapeLayernormFpropGraph(const std::vector<int64_t>& xDims,
                                           const std::vector<int64_t>& xStrides,
@@ -456,7 +490,8 @@ flatbuffers::FlatBufferBuilder
                                           const std::vector<int64_t>& meanDims,
                                           const std::vector<int64_t>& meanStrides,
                                           const std::vector<int64_t>& invVarianceDims,
-                                          const std::vector<int64_t>& invVarianceStrides)
+                                          const std::vector<int64_t>& invVarianceStrides,
+                                          const std::unordered_set<std::string>& passByValue = {})
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -469,21 +504,11 @@ flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        3,
-        "scale",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &scaleStrides,
-        &scaleDims));
+    tensorAttributes.push_back(
+        createFloatOperand(builder, 3, "scale", scaleStrides, scaleDims, passByValue));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        4,
-        "bias",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &biasStrides,
-        &biasDims));
+    tensorAttributes.push_back(
+        createFloatOperand(builder, 4, "bias", biasStrides, biasDims, passByValue));
 
     // Epsilon (pass-by-value)
     const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
@@ -498,21 +523,11 @@ flatbuffers::FlatBufferBuilder
         hipdnn_flatbuffers_sdk::data_objects::TensorValue::Float32Value,
         builder.CreateStruct(epsilonVal).Union()));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        6,
-        "mean",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &meanStrides,
-        &meanDims));
+    tensorAttributes.push_back(
+        createFloatOperand(builder, 6, "mean", meanStrides, meanDims, passByValue));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        7,
-        "inv_variance",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &invVarianceStrides,
-        &invVarianceDims));
+    tensorAttributes.push_back(createFloatOperand(
+        builder, 7, "inv_variance", invVarianceStrides, invVarianceDims, passByValue));
 
     auto layernormAttributes = hipdnn_flatbuffers_sdk::data_objects::CreateLayernormAttributes(
         builder,
@@ -565,7 +580,8 @@ flatbuffers::FlatBufferBuilder
                                         const std::vector<int64_t>& meanDims,
                                         const std::vector<int64_t>& meanStrides,
                                         const std::vector<int64_t>& invVarianceDims,
-                                        const std::vector<int64_t>& invVarianceStrides)
+                                        const std::vector<int64_t>& invVarianceStrides,
+                                        const std::unordered_set<std::string>& passByValue = {})
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -591,45 +607,20 @@ flatbuffers::FlatBufferBuilder
         &dxStrides,
         &dxDims));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        4,
-        "scale",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &scaleStrides,
-        &scaleDims));
+    tensorAttributes.push_back(
+        createFloatOperand(builder, 4, "scale", scaleStrides, scaleDims, passByValue));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        7,
-        "dscale",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &dscaleStrides,
-        &dscaleDims));
+    tensorAttributes.push_back(
+        createFloatOperand(builder, 7, "dscale", dscaleStrides, dscaleDims, passByValue));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        8,
-        "dbias",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &dbiasStrides,
-        &dbiasDims));
+    tensorAttributes.push_back(
+        createFloatOperand(builder, 8, "dbias", dbiasStrides, dbiasDims, passByValue));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        5,
-        "mean",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &meanStrides,
-        &meanDims));
+    tensorAttributes.push_back(
+        createFloatOperand(builder, 5, "mean", meanStrides, meanDims, passByValue));
 
-    tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder,
-        6,
-        "inv_variance",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
-        &invVarianceStrides,
-        &invVarianceDims));
+    tensorAttributes.push_back(createFloatOperand(
+        builder, 6, "inv_variance", invVarianceStrides, invVarianceDims, passByValue));
 
     // Epsilon (pass-by-value)
     const hipdnn_flatbuffers_sdk::data_objects::Float32Value epsilonVal(1e-5f);
@@ -997,6 +988,8 @@ struct LayoutCase
     std::vector<int64_t> statDims = {2, 1, 1, 1};
     std::vector<int64_t> meanStrides = {1, 1, 1, 1};
     std::vector<int64_t> invVarianceStrides = {1, 1, 1, 1};
+    // Operands, by name, that carry a host value in place of a device buffer.
+    std::unordered_set<std::string> passByValue;
 };
 
 LayoutCase makeNhwcCase()
@@ -1026,7 +1019,8 @@ void expectFprop(const LayoutCase& layout, bool declined)
                                                          layout.statDims,
                                                          layout.meanStrides,
                                                          layout.statDims,
-                                                         layout.invVarianceStrides);
+                                                         layout.invVarianceStrides,
+                                                         layout.passByValue);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& attr = *graph.getNode(0).attributes_as_LayernormAttributes();
@@ -1063,7 +1057,8 @@ void expectBprop(const LayoutCase& layout, bool declined)
                                                        layout.statDims,
                                                        layout.meanStrides,
                                                        layout.statDims,
-                                                       layout.invVarianceStrides);
+                                                       layout.invVarianceStrides,
+                                                       layout.passByValue);
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
     const auto& attr = *graph.getNode(0).attributes_as_LayernormBackwardAttributes();
@@ -1287,6 +1282,43 @@ TEST(TestLayernormValidator, DxDataTypeDifferentFromXDeclinedBprop)
     expectBpropDxType(DT::FLOAT, DT::HALF, true);
     expectBpropDxType(DT::FLOAT, DT::BFLOAT16, true);
     expectBpropDxType(DT::HALF, DT::FLOAT, true);
+}
+
+TEST(TestLayernormValidator, PassByValueOperandDeclinedFprop)
+{
+    // The kernels read every affine and stat operand as a device buffer.
+    expectFprop(LayoutCase{}, false);
+    for(const char* name : {"scale", "mean"})
+    {
+        SCOPED_TRACE(name);
+        LayoutCase layout;
+        layout.passByValue = {name};
+        expectFprop(layout, true);
+    }
+}
+
+TEST(TestLayernormValidator, PassByValueMeanDeclinedBprop)
+{
+    expectBprop(LayoutCase{}, false);
+
+    LayoutCase layout;
+    layout.passByValue = {"mean"};
+    expectBprop(layout, true);
+}
+
+TEST(TestLayernormValidator, HigherRankPassByValueAffineDeclinedFprop)
+{
+    // Declined before the normalized-dim checks, which index x's dims by the operand's rank.
+    // Bias is pass-by-value as well, so no rank-5 device operand reaches the rank check, and
+    // [1,8,4,4,2] read against x [2,8,4,4] gives no normalized-dim conflict with the stats.
+    expectFprop(LayoutCase{}, false);
+
+    LayoutCase layout;
+    layout.affineDims = {1, 8, 4, 4, 2};
+    layout.scaleStrides = {256, 32, 8, 2, 1};
+    layout.biasStrides = {256, 32, 8, 2, 1};
+    layout.passByValue = {"scale", "bias"};
+    expectFprop(layout, true);
 }
 
 namespace
