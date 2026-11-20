@@ -292,6 +292,53 @@ namespace
             }
     }
 
+    TEST_F(L2DeviceCsrmv, non_square_symmetric_or_triangular_is_rejected)
+    {
+        // A symmetric or triangular matrix must be square; the shape check comes
+        // before the quick return for an empty matrix, so no product is run.
+        mat_descr general, symmetric, triangular;
+        ASSERT_TRUE(general.d && symmetric.d && triangular.d);
+        ASSERT_EQ(rocsparse_set_mat_type(symmetric, rocsparse_matrix_type_symmetric),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_set_mat_type(triangular, rocsparse_matrix_type_triangular),
+                  rocsparse_status_success);
+        device_vector<float> val(std::vector<float>(4, 1.0f)), x(std::vector<float>(8, 1.0f)),
+            y(std::vector<float>(8, 1.0f));
+        device_vector<rocsparse_int> ptr(std::vector<rocsparse_int>(9, 0)),
+            ind(std::vector<rocsparse_int>(4, 0));
+        ASSERT_TRUE(val.ptr && x.ptr && y.ptr && ptr.ptr && ind.ptr);
+        const float alpha = 1.0f;
+        const float beta  = 1.0f;
+
+        auto call = [&](const mat_descr& descr, rocsparse_int m, rocsparse_int n) {
+            return csrmv<float>(handle,
+                                rocsparse_operation_none,
+                                m,
+                                n,
+                                0,
+                                &alpha,
+                                descr.d,
+                                val.ptr,
+                                ptr.ptr,
+                                ind.ptr,
+                                nullptr,
+                                x.ptr,
+                                &beta,
+                                y.ptr);
+        };
+        for(const auto& shape :
+            std::vector<std::pair<rocsparse_int, rocsparse_int>>{{5, 3}, {3, 5}, {8, 0}, {0, 8}})
+        {
+            SCOPED_TRACE(::testing::Message() << "m=" << shape.first << " n=" << shape.second);
+            EXPECT_EQ(call(general, shape.first, shape.second), rocsparse_status_success);
+            EXPECT_EQ(call(symmetric, shape.first, shape.second), rocsparse_status_invalid_size);
+            EXPECT_EQ(call(triangular, shape.first, shape.second), rocsparse_status_invalid_size);
+        }
+        // Square shapes pass the check.
+        EXPECT_EQ(call(symmetric, 4, 4), rocsparse_status_success);
+        EXPECT_EQ(call(triangular, 4, 4), rocsparse_status_success);
+    }
+
     TEST_F(L2DeviceCsrmv, empty_matrix_scales_y)
     {
         for(const bool device : {false, true})
