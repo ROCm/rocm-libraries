@@ -301,6 +301,32 @@ def test_too_many_outliers_are_refused(tmp_path):
     assert not report["passed"] and "changed by more than" in report["problems"][0]
 
 
+def test_a_loosened_outlier_limit_is_recorded_in_the_model(tmp_path):
+    """A limit loosened for noisy hardware is the restamp's evidence too: the model records
+    what its parity was judged against."""
+    before, after = _native_pair()
+    model = _model(tmp_path, before["selector_revision"])
+    now = _same()
+    for index in range(3):  # 7.5% of 40 graphs: over the default 5%, under 10%
+        now[index] *= 1.5
+
+    report = _run(
+        tmp_path,
+        model,
+        before,
+        after,
+        _rows(tmp_path, before, after, now),
+        max_outlier_fraction=0.10,
+    )
+
+    assert report["passed"]
+    entry = json.loads(model.read_text(encoding="utf-8"))["trained_against"][
+        "x-restamps"
+    ][0]
+    assert entry["parity"]["outlier_fraction"] == 3 / GRAPHS
+    assert entry["parity"]["thresholds"] == {**THRESHOLDS, "max_outlier_fraction": 0.10}
+
+
 def test_parity_on_too_few_graphs_is_refused(tmp_path):
     before, after = _native_pair()
     model = _model(tmp_path, before["selector_revision"])

@@ -268,6 +268,8 @@ def measure_parity(
         "newly_declined": len(valid_before & (after.keys() - valid_after)),
         "newly_served": len(newly_served),
         "unmatched": len(after.keys() - before.keys()),
+        # What the proof was judged against, so a loosened limit stays visible in the model.
+        "thresholds": dict(thresholds),
     }
 
     problems = []

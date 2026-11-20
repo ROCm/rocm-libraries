@@ -1065,7 +1065,8 @@ of the model's label, by default median <= 0.03, at most 5% of graphs over 0.10,
 graphs), and no graph may be served at the new revision that was not at the old. A graph
 served before and declined after is allowed and counted. A pass sets
 `trained_against.selector_revision` and appends `{from, to, proof, changes, parity}` to the
-ignored `trained_against["x-restamps"]`; without `--write` it only judges, and `--report`
+ignored `trained_against["x-restamps"]`, `parity` including the thresholds it was judged
+against, so a limit loosened on the command line stays visible in the model; without `--write` it only judges, and `--report`
 writes the verdict as `uhd_gen.restamp_report/1`. The runtime rule is unchanged: the loaded
 model must still match the engine's revision exactly.
 
