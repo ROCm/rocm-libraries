@@ -66,7 +66,7 @@ from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
 from rocke.helpers.grid import chiplet_transform_chunked_runtime
-from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
+from rocke.helpers.layouts import LdsLayout
 from rocke.helpers.loads import CoalescedTileLoader
 from rocke.helpers.magic_division import (
     calculate_magic_numbers,
@@ -85,6 +85,7 @@ from rocke.helpers.transforms import (
     unmerge_magic_dynamic,
 )
 from kernels.common.conv_abi import conv_arg_names
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -1706,6 +1707,18 @@ def is_valid_dgrad_spec(spec: DgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             f"channels-per-group (packed <2 x dtype> atomic pairs on the innermost "
             f"NHWC dimension must stay within one group's slab); got cpg={p.cpg}"
         )
+    if (
+        sk > 1
+        and spec.epilogue == "cshuffle"
+        and spec.data.dtype_d in ("bf16", "fp16")
+        and _dgrad_split_k_cshuffle_store_vec(spec) % 2 != 0
+    ):
+        return False, (
+            f"split_k > 1 with the cshuffle epilogue and dtype_d="
+            f"{spec.data.dtype_d!r} needs an even dX store width (packed "
+            f"<2 x dtype> atomic pairs); got "
+            f"{_dgrad_split_k_cshuffle_store_vec(spec)}"
+        )
 
     atom = (spec.warp_tile_m, spec.warp_tile_n, spec.warp_tile_k)
     if not target.mma.has_shape(
@@ -2678,7 +2691,9 @@ def _build_tilde_dgrad(
     # Materialised only on the K-outer path: emitting these unconditionally
     # would add IR ops to every existing config and move every dgrad golden.
     if spec.lds_k_outer:
-        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size).bind(b, lane)
+        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size, arch=arch).bind(
+            b, lane
+        )
 
     def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
         """One MMA operand fragment from a K-outer tile via transpose reads.
@@ -2872,7 +2887,18 @@ def _build_tilde_dgrad(
         use_cshuffle = spec.epilogue == "cshuffle"
         is_wmma = op.family == "wmma"
 
-        if spec.split_k > 1:
+        if spec.split_k > 1 and use_cshuffle and not is_wmma:
+            _emit_dgrad_tilde_cshuffle_epilogue(
+                b,
+                spec,
+                atom,
+                grid,
+                final_accs,
+                dx_rsrc,
+                atomic_dx_ptr=dX,
+                **_tilde_kwargs,
+            )
+        elif spec.split_k > 1:
             _emit_dgrad_tilde_atomic_epilogue(
                 b,
                 spec,
@@ -3768,6 +3794,21 @@ def _dgrad_store_vec(spec: DgradConvSpec) -> int:
     return vec_c
 
 
+def _dgrad_split_k_cshuffle_store_vec(spec: DgradConvSpec) -> int:
+    """The dX width the split-K cshuffle epilogue atomic-adds with.
+
+    ``CShuffleEpilogue.from_grid``'s pick for ``_dgrad_store_vec``. A 16-bit dX
+    needs it even (packed atomic pairs).
+    """
+    return CShuffleEpilogue.pick_store_vec(
+        tile_m=spec.tile_m,
+        tile_n=spec.tile_n,
+        block_size=spec.warp_m * spec.warp_n * spec.wave_size,
+        max_store_vec=_dgrad_store_vec(spec),
+        out_dtype=spec.data.dtype_d,
+    )
+
+
 def _dgrad_stride1_dx_addr(
     b: IRBuilder,
     spec: DgradConvSpec,
@@ -3988,8 +4029,14 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
     c_C: Value,
     c_group_base: Optional[Value] = None,
     patch_cols: Optional[Tuple[Value, Value]] = None,
+    atomic_dx_ptr: Optional[Value] = None,
 ) -> None:
-    """LDS-staged wide store for the tilde non-atomic path.
+    """LDS-staged wide store for the tilde path.
+
+    With ``atomic_dx_ptr`` (split-K, MFMA) the staged tile is atomic-added into
+    dX instead: each thread reads a ``vector_size_c``-wide run of one row and
+    issues packed ``<2 x dtype>`` atomics, so a width of 2 puts a wave's
+    atomics on consecutive dwords of the channel run.
 
     Mirrors _emit_dgrad_cshuffle_epilogue for the strided (tilde) case.
     The N dimension (channel index) is contiguous in dX for fixed m, so
@@ -4029,6 +4076,15 @@ def _emit_dgrad_tilde_cshuffle_epilogue(
     else:
         epi = CShuffleEpilogue.from_grid(atom=atom, grid=grid, **_cshuffle_kwargs)
     epi = dc_replace(epi, war_barriers=_war_barriers)
+    if atomic_dx_ptr is not None:
+        epi.atomic_store(
+            b,
+            accs=accs,
+            dw_ptr=atomic_dx_ptr,
+            addr_fn=dx_addr,
+            bounds=(bounds_m, bounds_n),
+        )
+        return
     epi.store(
         b,
         accs=accs,

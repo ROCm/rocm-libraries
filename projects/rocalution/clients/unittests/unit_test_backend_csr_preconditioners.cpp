@@ -636,10 +636,33 @@ TYPED_TEST(backend_csr_preconditioners,
     const Csr<T> G = csr_of(*A);
     ASSERT_EQ(G.row_offset, diagonal.row_offset);
     EXPECT_NEAR(G.val[0], static_cast<T>(1) / std::sqrt(dense(ref)[0]), tol<T>());
-
-    KNOWN_BUG("a row with only the diagonal in the pattern is set to 1 / a_ii only if the "
-              "diagonal is the first entry of the row of A");
     expect_near(G, fsai(ref, diagonal), tol<T>());
+}
+
+// A pattern row whose one entry is left of the diagonal is no valid FSAI pattern, but
+// its entry in column j comes from a_jj, which is what the general formula gives for a
+// single entry; the rows of A from the second on start left of the diagonal, and the
+// diagonal entries of A differ
+TYPED_TEST(backend_csr_preconditioners,
+           fsai_of_a_one_entry_pattern_row_uses_the_diagonal_of_its_column)
+{
+    using T = typename TypeParam::value_type;
+    REQUIRE_APPROXIMATE_INVERSE(this->backend());
+
+    const Csr<T> ref = spd<T>(10);
+    const Csr<T> subdiagonal
+        = pattern_of<T>(ref.n, [](int i, int j) { return i == 0 ? j == 0 : j == i - 1; });
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto P = this->make(subdiagonal);
+    ASSERT_NE(P, nullptr);
+    ASSERT_TRUE(A->FSAI(1, P.get()));
+
+    const Csr<T> G = csr_of(*A);
+    ASSERT_EQ(G.row_offset, subdiagonal.row_offset);
+    EXPECT_NEAR(G.val[1], static_cast<T>(1) / std::sqrt(dense(ref)[0]), tol<T>());
+    expect_near(G, fsai(ref, subdiagonal), tol<T>());
 }
 
 // Column i of the result minimizes ||A m - e_i|| over the pattern of column i of A
@@ -697,9 +720,7 @@ TYPED_TEST(backend_csr_preconditioners,
 
 // With L = [B 0 0; 0 B 0; 0 B 1], the first sweep of the L^T solve leaves the
 // residual 1 in row 1 and 2^-10 in row 2, so a tolerance of 2^-9 needs more
-// sweeps. The L solve converges in 3 sweeps, which bounds the L^T solve on the host
-// (a known bug), but 3 suffice here. B is 2^20, or 2^12 in float, where B + 2^-10 must be
-// exact.
+// sweeps. B is 2^20, or 2^12 in float, where B + 2^-10 must be exact.
 TYPED_TEST(backend_csr_preconditioners,
            iterative_ll_solve_stops_once_every_residual_is_below_the_tolerance)
 {
@@ -729,11 +750,6 @@ TYPED_TEST(backend_csr_preconditioners,
     ASSERT_TRUE(A->ItLLSolve(10, std::ldexp(1.0, -9), true, *in, out.get()));
     A->ItLLAnalyseClear();
 
-    if(this->backend() == Backend::Host)
-    {
-        KNOWN_BUG("the stopping test of the transposed solve takes the largest correction of "
-                  "the previous rows instead of the largest residual");
-    }
     expect_near(values_of(*out), expected, tol<T>());
 }
 
@@ -1033,15 +1049,13 @@ TYPED_TEST(backend_csr_preconditioners, cmk_numbers_each_component_from_its_firs
     const std::vector<int> p = values_of(*perm);
     ASSERT_TRUE(is_permutation(p));
     EXPECT_EQ((std::vector<int>{p[0], p[2], p[4]}), (std::vector<int>{0, 1, 2}));
-
-    KNOWN_BUG("the restart for the next component numbers every remaining node in index order");
     EXPECT_EQ(p, (std::vector<int>{0, 3, 1, 5, 2, 4, 6}));
     EXPECT_EQ(bandwidth(permuted(ref, p)), 1);
 }
 
-// The nodes of a level are numbered as they are found; the next level is searched
-// from the nodes of lower degree first
-TYPED_TEST(backend_csr_preconditioners, cmk_searches_every_level_by_increasing_degree)
+// The nodes are searched in the order of their numbers, and each one numbers its
+// unnumbered neighbours by increasing degree
+TYPED_TEST(backend_csr_preconditioners, cmk_numbers_the_neighbours_by_increasing_degree)
 {
     using T = typename TypeParam::value_type;
     REQUIRE_NATIVE(this->backend(), rocalution::CSR, "CMK");
@@ -1058,13 +1072,86 @@ TYPED_TEST(backend_csr_preconditioners, cmk_searches_every_level_by_increasing_d
 
     const std::vector<int> p = values_of(*perm);
     ASSERT_TRUE(is_permutation(p));
-    // 2 has a lower degree than 1, so its child 4 comes before 3 and 9
-    EXPECT_EQ((std::vector<int>{p[0], p[1], p[2], p[4], p[3], p[9]}),
+    // 2 (degree 2) before 1 (degree 3), then the child 4 of 2 before the children of 1,
+    // of which 9 (degree 1) comes before 3 (degree 2)
+    EXPECT_EQ((std::vector<int>{p[0], p[2], p[1], p[4], p[9], p[3]}),
               (std::vector<int>{0, 1, 2, 3, 4, 5}));
 
-    KNOWN_BUG("the flag of the degree sort is never reset, so only the first level is sorted");
-    // 9 (degree 1) before 3 (degree 2) before 4 (degree 4): 8 comes before 5, 6 and 7
-    EXPECT_EQ(p, (std::vector<int>{0, 1, 2, 4, 3, 7, 8, 9, 6, 5}));
+    // Then the children 5, 6 and 7 of 4 before the child 8 of 3
+    EXPECT_EQ(p, (std::vector<int>{0, 2, 1, 5, 3, 6, 7, 8, 9, 4}));
+    EXPECT_EQ(bandwidth(permuted(ref, p)), 5);
+}
+
+// The degree of a row without a stored diagonal counts all its entries
+TYPED_TEST(backend_csr_preconditioners, cmk_degree_of_a_row_without_diagonal)
+{
+    using T = typename TypeParam::value_type;
+    REQUIRE_NATIVE(this->backend(), rocalution::CSR, "CMK");
+
+    // 0 has the children 1 and 2, and 1 has 3. Row 1 stores no diagonal.
+    const Csr<T> ref = filtered(graph<T>(4, {{0, 1}, {0, 2}, {1, 3}}),
+                                [](int i, int j, T) { return i != 1 || j != 1; });
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto perm = make_vector(this->backend(), std::vector<int>{});
+    ASSERT_TRUE(A->CMK(perm.get()));
+
+    // 2 (degree 1) before 1 (degree 2)
+    EXPECT_EQ(values_of(*perm), (std::vector<int>{0, 2, 1, 3}));
+}
+
+// The first component also starts from node 0 when row 0 stores no diagonal, so that its
+// first entry is in another column
+TYPED_TEST(backend_csr_preconditioners, cmk_starts_from_node_0_without_its_diagonal)
+{
+    using T = typename TypeParam::value_type;
+    REQUIRE_NATIVE(this->backend(), rocalution::CSR, "CMK");
+
+    // The path 0-1-2-3
+    const Csr<T> ref = filtered(graph<T>(4, {{0, 1}, {1, 2}, {2, 3}}),
+                                [](int i, int j, T) { return i != 0 || j != 0; });
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto perm = make_vector(this->backend(), std::vector<int>{});
+    ASSERT_TRUE(A->CMK(perm.get()));
+    EXPECT_EQ(values_of(*perm), (std::vector<int>{0, 1, 2, 3}));
+}
+
+// A node with many unnumbered neighbours sorts them by increasing degree too, keeping the
+// column order of equal degrees
+TYPED_TEST(backend_csr_preconditioners, cmk_numbers_many_neighbours_by_increasing_degree)
+{
+    using T = typename TypeParam::value_type;
+    REQUIRE_NATIVE(this->backend(), rocalution::CSR, "CMK");
+
+    // 0 has the children 1 to 20, and each child c up to 10 has the child 20 + c
+    std::vector<std::pair<int, int>> edges;
+    for(int c = 1; c <= 20; ++c)
+    {
+        edges.push_back({0, c});
+    }
+    for(int c = 1; c <= 10; ++c)
+    {
+        edges.push_back({c, 20 + c});
+    }
+    const Csr<T> ref = graph<T>(31, edges);
+
+    auto A = this->make(ref);
+    ASSERT_NE(A, nullptr);
+    auto perm = make_vector(this->backend(), std::vector<int>{});
+    ASSERT_TRUE(A->CMK(perm.get()));
+
+    // 11 to 20 (degree 1) before 1 to 10 (degree 2), then the children of 1 to 10
+    std::vector<int> expected(31, 0);
+    for(int k = 0; k < 10; ++k)
+    {
+        expected[11 + k] = 1 + k;
+        expected[1 + k]  = 11 + k;
+        expected[21 + k] = 21 + k;
+    }
+    EXPECT_EQ(values_of(*perm), expected);
 }
 
 TYPED_TEST(backend_csr_preconditioners, key_depends_on_the_signs_of_the_values)

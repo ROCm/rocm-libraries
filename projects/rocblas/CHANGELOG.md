@@ -3,11 +3,12 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
-## rocBLAS 5.9.0
+## (Unreleased) rocBLAS 5.9.0
 
 ### Added
 
 * `ROCBLAS_LAYER=0x10` (`rocblas_layer_mode_log_kernel_select`) writes one `rocblas-bench`-replayable line to the trace log for each internal GEMM sub-problem that launches a kernel. Use it to break higher-level Level 3 calls such as `trsm`, `trmm`, and `syrk` into kernels that can be benchmarked individually. The bench function is `gemm_ex`, `gemm_batched_ex`, or `gemm_strided_batched_ex`, matching the sub-problem layout. A trailing comment names the path that ran it (`hipblaslt`, `tensile`, `source`, or `gemv`), the selected kernel or launcher (except for hipBLASLt), the backends it fell back from, and the calling API.
+* CMake `ROCBLAS_TENSILE_ARCH_SKIPLIST` to skip GPU targets during Tensile library generation while still compiling the rocBLAS library for all `GPU_TARGETS`. If every `GPU_TARGETS` entry is skipped, Tensile is invoked with its stub `gfx000` target when that logic exists, but `gfx000` catalogs are never packaged. GEMM on a skipped architecture uses hipBLASLt or source kernels instead of aborting Tensile initialization.
 
 ### Changed
 
@@ -29,7 +30,7 @@ rocBLAS documentation is available at
 * Fix a crash on Windows when rocBLAS cannot find its Tensile library file and the deployment directory name contains a regex escape, such as `x-deploy`. The diagnostic that lists the library files built a `std::regex` from that path and threw `std::regex_error` instead of returning a status. Library filenames are now matched directly, and a missing directory no longer throws from the diagnostic itself.
 * Fix the rocBLAS library build on Python 3.12 when setuptools is not installed. `library/src/merge_archives.py` imported `distutils.spawn`, which that Python release removed from the standard library, so the archive merge step failed before parsing its arguments. The script now locates `ar` with `shutil.which`.
 
-## rocBLAS 5.8.0 
+## rocBLAS 5.8.0 for ROCm 10.2.0
 
 ### Added
 

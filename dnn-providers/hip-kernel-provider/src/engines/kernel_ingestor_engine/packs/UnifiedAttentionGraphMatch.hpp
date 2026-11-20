@@ -14,31 +14,36 @@
 #include <utility>
 #include <variant>
 
+#include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelDefinition.hpp>
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
-#include "engines/kernel_ingestor_engine/packs/Gfx950AttentionUnified2DGeometry.hpp"
 #include "engines/kernel_ingestor_engine/packs/PackFeatures.hpp"
 #include "engines/kernel_ingestor_engine/packs/SdpaGraphMatch.hpp"
+#include "engines/kernel_ingestor_engine/packs/UnifiedAttentionGeometry.hpp"
 
 /**
  * @file UnifiedAttentionGraphMatch.hpp
- * @brief The graph match and record-reading helpers the gfx950 unified-attention packs
- *        (hipkernel:Gfx950AttentionUnified2D and hipkernel:Gfx950AttentionUnified3D) share.
+ * @brief The graph match and record-reading helpers the unified-attention packs share
+ *        (hipkernel:Gfx950AttentionUnified2D, hipkernel:Gfx950AttentionUnified3D and
+ *        hipkernel:Gfx942AttentionUnified2D).
  *
- * Both packs serve a single dense BSHD SDPA-forward node through the same paged-KV kernel
+ * The packs serve a single dense BSHD SDPA-forward node through the same paged-KV kernel
  * family, so their graph matches run the same steps around a few engine rules:
  *
  *   matchOperands()   node, operands, layout, dtype and shape consistency
  *   (engine rules)    GQA group, head size, seqlen_q, and anything else the engine adds
  *   matchAttributes() whole paged-KV blocks, 32-bit addressing, the mask, every optional
- *                     attribute the kernels cannot honour, and the scale
- *   bindGraph()       the bound tokens, with the engine's catalog mask key
+ *                     attribute the kernels cannot honour, the stats output (matchStats(), for
+ *                     an arch that ships LSE-on kernels; any other declines it) and the scale
+ *   bindGraph()       the bound tokens, with the engine's catalog mask key and stats uid
  *
  * A matcher fix is one edit here; decline lines name their engine through DeclinedBy.
  */
@@ -61,8 +66,8 @@ using sdpa_graph::HEAD_SIZE_AXIS;
 using sdpa_graph::isWellFormedOperand;
 using sdpa_graph::problemFor;
 using sdpa_graph::sdpaNode;
+using sdpa_graph::SdpaShape;
 using sdpa_graph::SEQ_AXIS;
-using sdpa_graph::UnifiedAttentionProblem;
 
 /// Why @p tensor is not one the kernels can address: they read Q and write O as
 /// `[total_q, Hq, D]` rows and read K/V as a paged cache `[blocks, block_size, Hkv, D]`,
@@ -76,6 +81,32 @@ inline std::string notBshdReason(std::string_view role,
            "[tokens, heads, head_size] and K/V as a gap-free paged cache and takes no stride "
            "arguments";
     return out.str();
+}
+
+/// The bound stats uid of a graph that asks for no softmax statistics.
+inline constexpr int64_t NO_STATS = -1;
+
+/**
+ * @brief Is this stats tensor head-major [B, H, S, 1] and gap-free, the layout the LSE-on
+ *        kernels write? Callers must have checked isWellFormedOperand().
+ *
+ * hipDNN's stats layout. Unit-extent axes are exempt, as in hasBshdStrides(): at decode
+ * (S == 1) the token-major [B, S, H, 1] strides describe the same memory and pass too.
+ */
+inline bool hasHeadMajorStatsStrides(const data_objects::TensorAttributes& tensor)
+{
+    const auto* dims = tensor.dims();
+    const auto* strides = tensor.strides();
+
+    const int64_t heads = dims->Get(HEAD_AXIS);
+    const int64_t sequence = dims->Get(SEQ_AXIS);
+
+    const auto axisOk = [&](uint32_t axis, std::optional<int64_t> expected) {
+        return dims->Get(axis) == 1 || (expected.has_value() && strides->Get(axis) == *expected);
+    };
+
+    return axisOk(BATCH_AXIS, pack_features::checkedProduct({heads, sequence}))
+           && axisOk(HEAD_AXIS, sequence) && axisOk(SEQ_AXIS, 1) && axisOk(HEAD_SIZE_AXIS, 1);
 }
 
 /// The mask kinds these engines serve, in the numbering of rocKE's AttentionMaskType and of
@@ -196,7 +227,7 @@ inline std::optional<std::string> stringMetadata(const KernelDefinition& kernel,
 struct MatchedOperands
 {
     const data_objects::SdpaAttributes* attributes = nullptr;
-    UnifiedAttentionProblem problem;
+    SdpaShape problem;
 };
 
 /**
@@ -329,34 +360,94 @@ inline std::optional<MatchedOperands> matchOperands(const MatchContext& context,
     return MatchedOperands{attributes, problem};
 }
 
-/// The smallest paged-KV block any candidate of either engine is built with: a Skv no block
-/// divides cannot be served by any candidate, so graph_match declines it instead of emptying
-/// nothing.
-inline constexpr int64_t SMALLEST_BLOCK_SIZE = GFX950_UNIFIED_2D_BLOCK_SIZE_SMALL;
-
 /// What matchAttributes() derives from the node for the bind.
 struct MatchedAttributes
 {
     MaskType mask = MaskType::NO_MASK;
     float scale = 0.0F;
+    /// The stats output's uid, or NO_STATS. Only an LSE-on kernel serves a graph with one.
+    int64_t stats = NO_STATS;
 };
 
 /**
+ * @brief The stats output's uid, NO_STATS for a graph that asks for none, or nullopt (with
+ *        the cause logged) for one these kernels cannot write.
+ *
+ * The LSE-on kernels write the natural-log LSE, FP32, head-major [B, Hq, Sq, 1] (see
+ * hasHeadMajorStatsStrides()). generate_stats and the stats tensor must come together; the
+ * max, sum_exp and rng_dump outputs are never written.
+ */
+inline std::optional<int64_t> matchStats(const MatchContext& context,
+                                         const data_objects::SdpaAttributes& attributes,
+                                         const SdpaShape& problem,
+                                         std::string_view engine)
+{
+    if(attributes.max_tensor_uid().has_value() || attributes.sum_exp_tensor_uid().has_value()
+       || attributes.rng_dump_tensor_uid().has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << "softmax max, sum_exp and rng_dump outputs are not supported");
+        return std::nullopt;
+    }
+    // generate_stats is optional<bool>; explicit false is no request.
+    const bool generateStats
+        = attributes.generate_stats().has_value() && attributes.generate_stats().value();
+    const auto statsUid = attributes.stats_tensor_uid();
+    if(!generateStats && !statsUid.has_value())
+    {
+        return NO_STATS;
+    }
+    if(!generateStats || !statsUid.has_value())
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << "generate_stats and a stats tensor must come together");
+        return std::nullopt;
+    }
+
+    const auto* stats = findTensor(context, statsUid.value());
+    if(stats == nullptr || !isWellFormedOperand(*stats))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << "the stats output (uid " << statsUid.value()
+                               << ") is missing, virtual, or not a rank-4 tensor with positive "
+                                  "dims");
+        return std::nullopt;
+    }
+    const auto* dims = stats->dims();
+    if(stats->data_type() != data_objects::DataType::FLOAT || dims->Get(BATCH_AXIS) != problem.batch
+       || dims->Get(HEAD_AXIS) != problem.numQueryHeads || dims->Get(SEQ_AXIS) != problem.seqLenQ
+       || dims->Get(HEAD_SIZE_AXIS) != 1 || !hasHeadMajorStatsStrides(*stats))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
+                               << describeOperand("stats", *stats)
+                               << " is not FP32 head-major [B, Hq, Sq, 1]; the kernel writes the "
+                                  "LSE in that layout and takes no stride arguments");
+        return std::nullopt;
+    }
+    return statsUid;
+}
+
+/**
  * @brief Whole paged-KV blocks, 32-bit addressing, the mask, every optional attribute these
- *        kernels cannot honour, and the scale. Logs each decline under @p engine.
+ *        kernels cannot honour, the stats output and the scale. Logs each decline under
+ *        @p engine; the block sizes, the 32-bit bound and whether the arch serves a stats
+ *        output at all (UnifiedAttentionArchTraits::servesStats) are @p traits'.
  */
 inline std::optional<MatchedAttributes>
-    matchAttributes(const data_objects::SdpaAttributes& attributes,
-                    const UnifiedAttentionProblem& problem,
-                    std::string_view engine)
+    matchAttributes(const MatchContext& context,
+                    const data_objects::SdpaAttributes& attributes,
+                    const SdpaShape& problem,
+                    std::string_view engine,
+                    const UnifiedAttentionArchTraits& traits)
 {
-    // The identity cache is cut into whole blocks, and the smallest block is 16: a Skv that
-    // 16 does not divide is not a whole number of blocks at any block size.
-    if(problem.seqLenKv % SMALLEST_BLOCK_SIZE != 0)
+    // The identity cache is cut into whole blocks: a Skv the smallest block does not divide
+    // is not a whole number of blocks at any block size, so no candidate can serve it.
+    const int64_t smallestBlock = unifiedAttentionSmallestBlockSize(traits);
+    if(problem.seqLenKv % smallestBlock != 0)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "seqlen_kv"})
                                << "seqlen_kv " << problem.seqLenKv << " is not a multiple of "
-                               << SMALLEST_BLOCK_SIZE
+                               << smallestBlock
                                << ", so K/V cannot be addressed as whole paged-KV blocks");
         return std::nullopt;
     }
@@ -366,10 +457,10 @@ inline std::optional<MatchedAttributes>
     constexpr int64_t BYTES_PER_ELEMENT = 2; // bf16 and fp16 only
     const auto kvBytes = pack_features::checkedProduct(
         {problem.batch, problem.seqLenKv, problem.numKvHeads, problem.headSize, BYTES_PER_ELEMENT});
-    if(!kvBytes.has_value() || *kvBytes > GFX950_UNIFIED_2D_KV_BUFFER_BYTES)
+    if(!kvBytes.has_value() || *kvBytes > traits.kvBufferBytes)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "size_limit"})
-                               << "K or V is larger than " << GFX950_UNIFIED_2D_KV_BUFFER_BYTES
+                               << "K or V is larger than " << traits.kvBufferBytes
                                << " bytes; the kernel addresses K/V with 32-bit byte offsets");
         return std::nullopt;
     }
@@ -378,10 +469,10 @@ inline std::optional<MatchedAttributes>
                                                        problem.numQueryHeads,
                                                        problem.headSize,
                                                        BYTES_PER_ELEMENT});
-    if(!qBytes.has_value() || *qBytes > GFX950_UNIFIED_2D_KV_BUFFER_BYTES)
+    if(!qBytes.has_value() || *qBytes > traits.kvBufferBytes)
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "size_limit"})
-                               << "Q or O is larger than " << GFX950_UNIFIED_2D_KV_BUFFER_BYTES
+                               << "Q or O is larger than " << traits.kvBufferBytes
                                << " bytes; the kernel addresses them with 32-bit offsets");
         return std::nullopt;
     }
@@ -417,11 +508,13 @@ inline std::optional<MatchedAttributes>
     // Ragged operands: the engine derives query_start_len and seq_lens itself, from uniform
     // lengths.
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "varlen"})
-                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not supported");
+                               << "variable sequence lengths (seq_len_q/seq_len_kv or "
+                                  "cu_seq_len_q/cu_seq_len_kv tensors) are not supported");
         return std::nullopt;
     }
     // Dropout.
@@ -470,11 +563,22 @@ inline std::optional<MatchedAttributes>
                                   "supported");
         return std::nullopt;
     }
-    // Auxiliary softmax outputs. generate_stats is optional<bool>; explicit false is fine.
-    if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
-       || attributes.sum_exp_tensor_uid().has_value()
-       || attributes.rng_dump_tensor_uid().has_value()
-       || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
+    // Auxiliary softmax outputs. An arch that ships no LSE-on kernel declines every one by
+    // name; one that does serves the stats output only.
+    int64_t statsUid = NO_STATS;
+    if(traits.servesStats)
+    {
+        const auto stats = matchStats(context, attributes, problem, engine);
+        if(!stats.has_value())
+        {
+            return std::nullopt;
+        }
+        statsUid = *stats;
+    }
+    else if(attributes.stats_tensor_uid().has_value() || attributes.max_tensor_uid().has_value()
+            || attributes.sum_exp_tensor_uid().has_value()
+            || attributes.rng_dump_tensor_uid().has_value()
+            || (attributes.generate_stats().has_value() && attributes.generate_stats().value()))
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "stats"})
                                << "softmax statistics outputs (stats, max, sum_exp, rng_dump or "
@@ -505,6 +609,15 @@ inline std::optional<MatchedAttributes>
                                << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
         return std::nullopt;
     }
+    // The kernels accumulate and keep the softmax statistics in FLOAT.
+    if(!sdpa_graph::computesInFloat(context))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "compute_data_type"})
+                               << "compute data type "
+                               << context.graph.getNodeWrapper(0).computeDataType()
+                               << " is not supported; the kernels accumulate in FLOAT");
+        return std::nullopt;
+    }
     // `implementation` is an execution-strategy hint. AUTO leaves the choice to the provider.
     if(attributes.implementation() != data_objects::AttentionImplementation::AUTO)
     {
@@ -526,7 +639,7 @@ inline std::optional<MatchedAttributes>
         return std::nullopt;
     }
 
-    return MatchedAttributes{*mask, scale};
+    return MatchedAttributes{*mask, scale, statsUid};
 }
 
 /// An engine's bound-token names: each engine prefixes its own, so two engines' bindings
@@ -544,6 +657,9 @@ struct BoundTokenNames
     std::string_view slidingWindow;
     /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
     std::string_view scaleBits;
+    /// The stats output's uid, or NO_STATS: kernelMatches pairs it with the candidate's
+    /// emit_lse.
+    std::string_view stats;
     std::string_view dispatchLabel;
 };
 
@@ -553,6 +669,7 @@ struct BoundTokenNames
 inline BoundTokens bindGraph(const data_objects::SdpaAttributes& attributes,
                              MaskType maskKey,
                              float scale,
+                             int64_t stats,
                              const BoundTokenNames& names)
 {
     BoundTokens bound;
@@ -569,6 +686,7 @@ inline BoundTokens bindGraph(const data_objects::SdpaAttributes& attributes,
     static_assert(sizeof(scaleBits) == sizeof(scale), "float must be 32-bit to round-trip");
     std::memcpy(&scaleBits, &scale, sizeof(scale));
     bound[std::string(names.scaleBits)] = static_cast<int64_t>(scaleBits);
+    bound[std::string(names.stats)] = stats;
     return bound;
 }
 
@@ -582,6 +700,8 @@ struct UnifiedAttentionBinding
     int64_t maskType = 0;
     int64_t slidingWindow = 0;
     float scale = 0.0F;
+    /// The stats output's uid, or NO_STATS.
+    int64_t stats = NO_STATS;
 };
 
 /// Re-reads the bindings bindGraph() established. Throws if one is missing.
@@ -606,6 +726,7 @@ inline UnifiedAttentionBinding readBinding(const BoundTokens& bound, const Bound
     binding.o = read(names.o);
     binding.maskType = read(names.maskType);
     binding.slidingWindow = read(names.slidingWindow);
+    binding.stats = read(names.stats);
 
     const auto scaleBits = static_cast<int32_t>(read(names.scaleBits));
     std::memcpy(&binding.scale, &scaleBits, sizeof(binding.scale));

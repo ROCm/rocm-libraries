@@ -97,12 +97,10 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
 
     using ElemT = ::ToType<DT>;
 
-    namespace bn           = bunnies;
-    using arch             = bn::arch_mi400;
-    constexpr bool is_tf32 = DT == hipconv::DataType::tf32;
-    constexpr bn::fpfmt data_fpfmt =
-        is_tf32 ? bn::fpfmt::e8m10
-                : (DT == hipconv::DataType::bf16 ? bn::fpfmt::e8m7 : bn::fpfmt::e5m10);
+    namespace bn                      = bunnies;
+    using arch                        = bn::arch_mi400;
+    constexpr bool is_tf32            = DT == hipconv::DataType::tf32;
+    constexpr bn::fpfmt data_fpfmt    = bn::fpfmt_of<DT>;
     constexpr bn::fpfmt compute_fpfmt = is_tf32 ? bn::fpfmt::e8m10_e8m7x2split : data_fpfmt;
     using MatA                        = arch::matrix<data_fpfmt, 16, 32, bn::use::A>;
     using MatB                        = arch::matrix<data_fpfmt, 32, 16, bn::use::B>;
@@ -125,8 +123,8 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
 
     // LDS staging: plain [col][CIN] row-major, 16 channels per col.
     constexpr int PER_COL_BYTES  = CIN * (int)sizeof(ElemT); // 32, tf32 64
-    constexpr int IN_SLOT_BYTES  = divup(BLOCK_W * PER_COL_BYTES, 16) * 16;
-    constexpr int DEL_SLOT_BYTES = divup(DEL_COLS * PER_COL_BYTES, 16) * 16;
+    constexpr int IN_SLOT_BYTES  = BLOCK_W * PER_COL_BYTES;
+    constexpr int DEL_SLOT_BYTES = DEL_COLS * PER_COL_BYTES;
     constexpr int PF             = cfg.prefetch_depth;
     constexpr int PER_WAVE_BYTES = PF * (IN_SLOT_BYTES + DEL_SLOT_BYTES);
     static_assert(PF >= 2, "prefetch_depth must be >= 2 (double buffer)");
@@ -164,13 +162,6 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
     const int mn  = lane & 15;
     const int blk = lane >> 4;
 
-    auto zero_slot = [&](unsigned char* base, int bytes) {
-        auto* u4        = reinterpret_cast<uint4*>(base);
-        const int nvecs = bytes / (int)sizeof(uint4);
-        for(int i = lane; i < nvecs; i += WAVE_SIZE)
-            u4[i] = uint4{0, 0, 0, 0};
-    };
-
     // Channel extent is loop-invariant per wave: for G<=16 input/delta share
     // base_chan (a tail leaves <CIN channels, TDM zero-fills the rest); for
     // G=32 every valid (it,dt) tile spans a full CIN channels. So set the TDM
@@ -186,9 +177,10 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
              /*row_stride_elems=*/(unsigned long long)C_total);
 
     // TDM-load a [num_cols][CIN] row tile of `src` at (n, row, col_base..) with
-    // global channel base `chan_base` into the LDS slot, zero-filling W-edge /
-    // row OOB. The channel extent is clamped so an odd-count tail (G<=16) never
-    // reads past C_total; the engine zero-fills the missing channels.
+    // global channel base `chan_base` into the LDS slot. The TDM zero-fills the
+    // columns past the right W edge, a row outside the image and the channels
+    // past C_total. It does not write the columns left of the image, which the
+    // kernel zeroes once before the first load.
     //
     // An active wave issues one TDM per call, row in range or not: the relaxed
     // s_wait_tensorcnt below counts issues, and input and delta leave the image
@@ -203,10 +195,7 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
                         int col_base,
                         int num_cols,
                         int chan_base,
-                        unsigned char* slot_base,
-                        unsigned slot_off,
-                        int slot_bytes) {
-        zero_slot(slot_base, slot_bytes);
+                        unsigned slot_off) {
         if(!wave_active) // wave-uniform, so it skips every call or none of them
             return;
         const int clamp_lo      = max(0, -col_base);
@@ -219,12 +208,12 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
                                   (size_t)col0 * (size_t)C_total + (size_t)chan_base;
         const unsigned long long gaddr =
             reinterpret_cast<uintptr_t>(src) + addr_elems * sizeof(ElemT);
-        const unsigned lds_off = slot_off + (exists ? (unsigned)(clamp_lo * PER_COL_BYTES) : 0u);
+        const unsigned lds_off = slot_off + (unsigned)(clamp_lo * PER_COL_BYTES);
 
         tdm.load(gaddr,
                  lds_off,
                  /*tensor_dim1=*/exists ? (unsigned)tile_w : 0u,
-                 /*tile_dim1=*/exists ? (unsigned)tile_w : 1u);
+                 /*tile_dim1=*/(unsigned)(num_cols - clamp_lo));
     };
 
     auto load_input_row = [&](int y, int slot) {
@@ -235,9 +224,7 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
                  q_base - px,
                  BLOCK_W,
                  input_chan_base,
-                 in_ring + slot * IN_SLOT_BYTES,
-                 in_ring_off + (unsigned)(slot * IN_SLOT_BYTES),
-                 IN_SLOT_BYTES);
+                 in_ring_off + (unsigned)(slot * IN_SLOT_BYTES));
     };
     auto load_delta_row = [&](int p, int slot) {
         load_row(delta,
@@ -247,9 +234,7 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
                  q_base,
                  DEL_COLS,
                  delta_chan_base,
-                 del_ring + slot * DEL_SLOT_BYTES,
-                 del_ring_off + (unsigned)(slot * DEL_SLOT_BYTES),
-                 DEL_SLOT_BYTES);
+                 del_ring_off + (unsigned)(slot * DEL_SLOT_BYTES));
     };
 
     using OpLoad =
@@ -276,11 +261,28 @@ __device__ void conv2d_grouped_multi_g_wgrad_nhwc_cdna5_impl(const ::ToType<DT>*
     bn::reg_tile<MatAcc, KW, KH> acc{}; // block(S, R) = tap (R, S) accumulator
     MatBCompute delta_regs[KH];
 
+    // Zero the input slots' columns left of the image, which no TDM load writes.
+    //
+    // No TDM load overlaps them; the wait keeps every TDM load issued with no DS instruction
+    // outstanding, since the two are unordered (CDNA 5 shader programming guide, 10.11.1).
+    if(wave_active)
+    {
+        constexpr int COL_VECS = PER_COL_BYTES / (int)sizeof(uint4);
+        const int halo_vecs    = max(0, px - q_base) * COL_VECS;
+        auto* ring_u4          = reinterpret_cast<uint4*>(in_ring);
+        for(int i = lane; i < PF * halo_vecs; i += WAVE_SIZE)
+            ring_u4[i / halo_vecs * (IN_SLOT_BYTES / (int)sizeof(uint4)) + i % halo_vecs] =
+                uint4{0, 0, 0, 0};
+    }
+    llvm_amdgcn_s_wait_dscnt(0);
+
     for(int r = 0; r < KH - 1; r++)
         load_delta_row(py - (KH - 1) + r, r);
     __builtin_amdgcn_s_wait_tensorcnt(0);
     for(int r = 0; r < KH - 1; r++)
         delta_regs[r] = build_delta_frag(del_ring + r * DEL_SLOT_BYTES, 0);
+    // The prefetch below TDM-loads the delta slots these reads access.
+    llvm_amdgcn_s_wait_dscnt(0);
 
     for(int i = 0; i < PF - 1 && i < hi; i++)
     {
@@ -401,6 +403,7 @@ __global__ __launch_bounds__(cfg.block_size()) void conv2d_grouped_multi_g_wgrad
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const Device&,
                  const ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -480,7 +483,7 @@ public:
     // The base GroupedWgradConvKernel::is_applicable pins channels_per_group to
     // one group_channels(); here the span mixes G in {4,8,16,32}, so we accept
     // any of those at the family level and let is_valid_config pick the exact G.
-    bool is_applicable(const ConvParams& par) const override
+    bool is_applicable(const Device& /*dev*/, const ConvParams& par) const override
     {
         using namespace hipconv;
         const bool ok_fp16bf16 =
@@ -519,7 +522,7 @@ public:
         return true;
     }
 
-    bool is_valid_config(const ConvParams& par) const override
+    bool is_valid_config(const Device& dev, const ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -527,10 +530,10 @@ public:
         // handle any group count, so no waves divisibility requirement.
         if(par.channels_per_group() != cfg_.group_size)
             return false;
-        return get_launch_params(par).dynamic_shared_bytes <= kMaxDynamicLds;
+        return get_launch_params(dev, par).dynamic_shared_bytes <= kMaxDynamicLds;
     }
 
-    size_t get_workspace_size(const ConvParams& par) const override
+    size_t get_workspace_size(const Device& /*dev*/, const ConvParams& par) const override
     {
         if(!cfg_.split_k)
             return 0;
@@ -543,7 +546,15 @@ public:
         return (size_t)num_partitions * dW_total * sizeof(float);
     }
 
-    LaunchParams get_launch_params(const ConvParams& par) const override
+    // Without split_k, launch_impl adds every partition into dW atomically; with it, a second
+    // kernel sums the partitions from the workspace.
+    bool is_deterministic(const Device& dev, const ConvParams& par) const override
+    {
+        const LaunchParams lp = get_launch_params(dev, par);
+        return cfg_.split_k || lp.grid.y * lp.grid.z <= 1;
+    }
+
+    LaunchParams get_launch_params(const Device& /*dev*/, const ConvParams& par) const override
     {
         constexpr int Q_TILE   = 16;
         constexpr int DEL_COLS = 2 * Q_TILE;
@@ -555,8 +566,8 @@ public:
         // against this, and an under-estimate hands the kernel less LDS than the
         // staging writes into. 32B at fp16/bf16, 64B at tf32's 4-byte elements.
         const int per_col  = TILE * (int)sizeof_data_type(par.input_type);
-        const int in_slot  = divup(BLOCK_W * per_col, 16) * 16;
-        const int del_slot = divup(DEL_COLS * per_col, 16) * 16;
+        const int in_slot  = BLOCK_W * per_col;
+        const int del_slot = DEL_COLS * per_col;
         const int per_wave = cfg_.prefetch_depth * (in_slot + del_slot);
 
         // One wave per (group_set, it, dt) work unit.

@@ -29,6 +29,7 @@ from __future__ import annotations
 from rocke.dispatch.core import CandidateRegistry, KernelCandidate
 
 from .candidate import make_dense_candidate
+from .dense_rules import dense_paged_fields, dense_paged_tile_fits
 from .common import (
     AttentionMaskType,
     AttentionRequest,
@@ -92,7 +93,8 @@ def _default_block_m(req: AttentionRequest) -> int:
     diagonal no item gets shorter, and the doubled work only adds a second
     persistent round. Window requests keep the shared tile (narrow windows have
     their own geometry below), and so do bottom-right (chunked) requests, whose
-    KV split below is sized for it.
+    KV split below is sized for it, and paged requests whose pages do not fit the
+    128-row tile.
     """
     from kernels.common.attention_dense_spec import DENSE_TILE_GEOMETRIES
 
@@ -104,7 +106,7 @@ def _default_block_m(req: AttentionRequest) -> int:
         return bm
     num_cus = int(req.num_cus) or _GFX942_NUM_PERSISTENT
     work = -(-int(req.seqlen_q) // bm) * int(req.nhead_q) * int(req.batch)
-    if work < num_cus:
+    if work < num_cus and dense_paged_tile_fits(req, bm // 2, _DENSE_BLOCK_N):
         return bm // 2
     return bm
 
@@ -157,12 +159,13 @@ def tuned_base_spec(req: AttentionRequest):
         )
     head_size = int(req.hdim_q)
     # The persistent grid measured ahead at D128 for every batch and mask; at
-    # D64 the non-persistent grid did.
+    # D64 the non-persistent grid did. Paged K/V runs on the default grid.
+    paged = bool(dense_paged_fields(req))
     spec = _make_spec(
         req,
         _default_block_m(req),
         _DENSE_BLOCK_N,
-        persistent=head_size == 128,
+        persistent=head_size == 128 and not paged,
     )
     if spec.causal_bottom_right:
         from kernels.common.attention_dense_kv_split import (
@@ -187,10 +190,11 @@ def tuned_base_spec(req: AttentionRequest):
             spec = split
     if 0 < int(req.sliding_window) <= _NARROW_WINDOW:
         bm, bn, skip = _narrow_window_geometry(head_size, req.dtype.lower())
-        narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
         # Keep the default geometry for any request the narrow one cannot serve.
-        if _supports(narrow, arch="gfx942")[0]:
-            spec = narrow
+        if dense_paged_tile_fits(req, bm, bn):
+            narrow = _make_spec(req, bm, bn, persistent=False, window_wave_skip=skip)
+            if _supports(narrow, arch="gfx942")[0]:
+                spec = narrow
     return spec
 
 
@@ -301,6 +305,7 @@ def _make_spec(
         causal_bottom_right=bottom_right,
         causal_diag_split=diag_split,
         window_wave_skip=window_wave_skip,
+        **dense_paged_fields(req),
     )
 
 
@@ -337,10 +342,17 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         base_spec=tuned_base_spec,
         supports=_supports,
         # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
-        # or combined), optional LSE output. Head size stays out: D64/D128 coverage
-        # is ``supports_attention_dense``'s call.
+        # or combined), optional LSE output, paged K/V. Head size stays out: D64/D128
+        # coverage is ``supports_attention_dense``'s call.
         features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
+            {
+                "causal",
+                "causal_bottom_right",
+                "sliding_window",
+                "sinks",
+                "lse",
+                "layout_paged",
+            }
         ),
         # tuned_base_spec picks these from the dtype, head size, work count and window.
         recorded=frozenset(

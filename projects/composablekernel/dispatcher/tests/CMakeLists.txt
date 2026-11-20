@@ -320,7 +320,7 @@ set_tests_properties(dispatcher_test_gemm_driver_verify PROPERTIES
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
 )
 
-# gfx1250 comp_async / comp_tdm / comp_tdm_v2 pipelines and the tdm epilogue:
+# gfx1250 comp_async / comp_tdm / comp_tdm_v2 pipelines and the tdm / tdmstaged epilogues:
 # ArchFilter, codegen and gemm_utils gates, LDS budget and codegen output.
 # CPU-only.
 add_test(
@@ -344,6 +344,21 @@ add_test(
 )
 
 set_tests_properties(dispatcher_test_gfx1250_gate_equivalence PROPERTIES
+    LABELS "dispatcher;python;codegen;validation"
+    TIMEOUT 120
+    ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
+)
+
+# Stream-K on the gfx1250 comp_tdm / comp_tdm_v2 pipelines: the reduction x
+# epilogue x pad x persistent gate, its agreement across codegen, arch_filter
+# and expand_sweep, and the generated kernel header. CPU-only.
+add_test(
+    NAME dispatcher_test_streamk_tdm_gfx1250
+    COMMAND ${Python3_EXECUTABLE} -m pytest -q ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_tdm_gfx1250.py
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+set_tests_properties(dispatcher_test_streamk_tdm_gfx1250 PROPERTIES
     LABELS "dispatcher;python;codegen;validation"
     TIMEOUT 120
     ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/../python:${CMAKE_CURRENT_SOURCE_DIR}/../codegen:${CMAKE_CURRENT_SOURCE_DIR}/../scripts"
@@ -780,8 +795,8 @@ set_tests_properties(dispatcher_test_streamk_registry PROPERTIES
 # these exits 77 (Skipped, not Passed) when no GPU is present or the detected
 # arch is not the one the operator supports.
 
-# Stream-K: atomic / linear / tree reduction through the ctypes bridge (gfx942).
-# 12 hipcc builds plus a 4096-cubed reference, hence the larger timeout.
+# Stream-K: atomic / linear / tree on gfx942/gfx950/gfx1250. gfx1250 builds
+# 72 bridge kernels plus four 16-wave workspace drivers, hence the larger timeout.
 add_test(
     NAME dispatcher_test_streamk_gpu_correctness
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/test_streamk_gpu_correctness.py

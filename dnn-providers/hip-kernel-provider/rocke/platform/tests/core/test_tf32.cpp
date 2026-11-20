@@ -343,7 +343,8 @@ static int test_invalid_store_alignment()
         auto* value = rocke_b_bitcast(&b, zero, rocke_tf32());
         rocke_value_t* lanes[] = {value, value, value, value};
         auto* values = rocke_b_vec_pack(&b, lanes, 4, rocke_tf32());
-        rocke_b_global_store_vN(&b, p, zero, values, 4, align);
+        /* The builder refuses these; serialized IR can contain them literally. */
+        rocke_b_global_store_vN(&b, p, zero, values, 4, 0);
         auto* body = b.kernel->body;
         rocke_attr_set_int(&b, &body->ops[body->num_ops - 1]->attrs, "align", align);
         rocke_b_ret(&b);

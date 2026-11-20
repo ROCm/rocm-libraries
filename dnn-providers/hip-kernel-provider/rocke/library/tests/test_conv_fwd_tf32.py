@@ -318,13 +318,13 @@ class TestConvFwdTf32Name(unittest.TestCase):
 class TestConvFwdTf32SpecDict(unittest.TestCase):
     """The dict the C++ engine builds from carries ``spec.data``'s dtypes.
 
-    Host-only (no ``rocke_engine``), so it runs in CI where the engine tests
-    skip: a dict that dropped them would make the engine build its fp16
-    default under the spec's name.
+    Host-only (no ``rocke_library_engine``), so it runs in CI where the
+    engine tests skip: a dict that dropped them would make the engine build
+    its fp16 default under the spec's name.
     """
 
     def test_tf32_dict_carries_storage_and_mma_dtype(self):
-        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
 
         d = conv_implicit_gemm_spec_to_dict(_spec(16, 32))
         self.assertEqual(
@@ -333,7 +333,7 @@ class TestConvFwdTf32SpecDict(unittest.TestCase):
         self.assertEqual(d["mma_dtype"], "tf32")
 
     def test_storage_dtypes_without_tf32(self):
-        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
 
         for dt in ("fp32", "bf16"):
             with self.subTest(dtype=dt):
@@ -423,8 +423,8 @@ class TestConvFwdTf32Isa(unittest.TestCase):
 
 
 @unittest.skipIf(
-    importlib.util.find_spec("rocke_engine") is None,
-    "rocke_engine extension not importable",
+    importlib.util.find_spec("rocke_library_engine") is None,
+    "rocke_library_engine extension not importable",
 )
 class TestConvFwdTf32CrossEngine(unittest.TestCase):
     """The C++ conv builder builds TF32 specs too: every TF32 atom, pipeline,
@@ -434,6 +434,7 @@ class TestConvFwdTf32CrossEngine(unittest.TestCase):
     not matter), and the C++ kernel issues the TF32 atom, not a 16-bit one."""
 
     def test_python_and_cpp_builders_agree(self):
+        from kernels.conv.engine_bridge import lower_conv_implicit_gemm
         from rocke.core import backend as bk
 
         n = 0
@@ -449,10 +450,10 @@ class TestConvFwdTf32CrossEngine(unittest.TestCase):
                         with self.subTest(
                             arch=arch, m=m, problem=problem, pipe=pipe, epi=epi, **extra
                         ):
-                            py = bk.lower_conv_implicit_gemm(
+                            py = lower_conv_implicit_gemm(
                                 spec, arch=arch, backend="python"
                             )
-                            cpp = bk.lower_conv_implicit_gemm(
+                            cpp = lower_conv_implicit_gemm(
                                 spec, arch=arch, backend="cpp"
                             )
                             self.assertEqual(

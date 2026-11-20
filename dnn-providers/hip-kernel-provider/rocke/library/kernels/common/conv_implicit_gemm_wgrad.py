@@ -99,7 +99,7 @@ from rocke.core.ir import (
 from rocke.helpers.atoms import MfmaAtom, mfma_atom
 from rocke.helpers.epilogues import CShuffleEpilogue, DirectEpilogue
 from rocke.helpers.geometry import WarpGrid
-from rocke.helpers.layouts import ConvKOuterFragmentReader, LdsLayout
+from rocke.helpers.layouts import LdsLayout
 from rocke.helpers.loads import AsyncTileLoader, CoalescedTileLoader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.pipeline import SoftwarePipeline
@@ -113,7 +113,7 @@ from rocke.helpers.transforms import (
     unmerge_magic,
 )
 from kernels.common.conv_abi import conv_arg_names
-
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 from kernels.common._conv_implicit_gemm_common import (
     ConvAccumulatorEpilogue,
     ConvDataSpec,
@@ -570,6 +570,22 @@ class WgradConvSpec:
     # keeps its kernel name.
     register_prefetch: bool = False
 
+    # Register prefetch in the single-buffer synchronous K loop of every
+    # pipeline that takes it (mem/compv3/compv4/basic), without carried
+    # offsets: tile k+1's global reads are issued right after the barrier that
+    # publishes tile k, stay in VGPRs under tile k's MFMAs, and are written to
+    # LDS at the top of the next iteration. Both barriers of that loop are
+    # LDS-only: a full barrier would also drain the outstanding global reads
+    # and serialise them with the MFMAs again. The read issued in the last
+    # iteration is never stored. async_dma, unroll_k, prefetch_addr and
+    # stream-K have their own K loops and reject it. Not the same loop as
+    # ``register_prefetch`` above (tag ``rpf``, the compv3 + prefetch_addr
+    # loop with carried offsets); this one is tagged ``pgr``.
+    #
+    # Default False: strictly additive, so every existing config emits
+    # byte-identical IR and keeps its kernel name.
+    prefetch_global_regs: bool = False
+
     chiplet_swizzle: bool = False
     chiplet_wgm: int = 8
     chiplet_num_xcds: int = 8
@@ -793,6 +809,8 @@ class WgradConvSpec:
                 # unless prefetch_addr and pipeline="compv3" both hold, so the
                 # flag alone is enough to tag it here.
                 "rpf": self.register_prefetch,
+                # A different K-loop body; only tagged when set.
+                "pgr": self.prefetch_global_regs,
                 # Stream-K changes the grid decode, the K ranges and the
                 # epilogue, and the launch mode and the reduction both change
                 # the emitted body. The CTA pool does not: like the split-K
@@ -991,6 +1009,9 @@ class WgradConvSpec:
         _rpf_why = _register_prefetch_conflict(self)
         if _rpf_why:
             raise ValueError(_rpf_why)
+        _pgr_why = _prefetch_global_regs_conflict(self)
+        if _pgr_why:
+            raise ValueError(_pgr_why)
         layout = self.effective_lds_layout()
         if self.async_dma:
             layout.validate_for_async()
@@ -1327,6 +1348,91 @@ def _register_prefetch_conflict(spec: "WgradConvSpec") -> str:
     return ""
 
 
+def _prefetch_global_regs_conflict(spec: "WgradConvSpec") -> str:
+    """Why ``spec.prefetch_global_regs`` cannot be honoured, or ``""`` if it can.
+
+    The flag rewrites the plain single-buffer synchronous K loop. The
+    async_dma ping-pong, the unroll_k double-buffered loop and the
+    prefetch_addr carried-offset loop are separate bodies that never reach
+    it, so accepting the flag there would only rename a kernel whose code it
+    does not change. Shared by ``validate`` and ``is_valid_wgrad_spec`` so the
+    hard and soft gates cannot drift apart.
+    """
+    if not spec.prefetch_global_regs:
+        return ""
+    if spec.async_dma:
+        return (
+            "prefetch_global_regs is not supported with async_dma: the direct "
+            "global->LDS ping-pong has its own K loop"
+        )
+    if spec.unroll_k:
+        return (
+            "prefetch_global_regs is not supported with unroll_k: the double-buffered "
+            "K loop has its own prefetch"
+        )
+    if spec.prefetch_addr:
+        return (
+            "prefetch_global_regs is not supported with prefetch_addr: the "
+            "carried-offset K loop has its own schedule"
+        )
+    chunks = _sync_staged_chunks(spec)
+    if chunks is not None:
+        for operand, n in zip("AB", chunks):
+            if n > _PGR_MAX_STAGED_CHUNKS:
+                return (
+                    f"prefetch_global_regs carries at most {_PGR_MAX_STAGED_CHUNKS} "
+                    f"global loads per thread per operand; the {operand} tile "
+                    f"needs {n} (use a wider vector or a smaller tile)"
+                )
+    return ""
+
+
+# The register-prefetch loop carries every global load of the next tile as a
+# loop value. The C++ engine stages them in ROCKE_CTL_MAX_VECS_PER_THREAD slots
+# per operand (helper_rocke.helpers.loads.h); both engines refuse more.
+_PGR_MAX_STAGED_CHUNKS = 32
+
+
+def _sync_staged_chunks(spec: "WgradConvSpec") -> Optional[Tuple[int, int]]:
+    """The (A, B) global loads per thread of the synchronous tile loaders.
+
+    The same widths the builder picks for ``a_sync_loader`` / ``b_sync_loader``
+    when async_dma is off: the free-axis width along the row on an M-outer
+    tile (scalar when no width above 1 fits), along the column on a K-outer
+    one. ``None`` when the tile admits no width at all; the builder reports
+    that itself.
+    """
+    p = spec.merged_problem
+    threads = spec.block_size
+    caps = (
+        _wgrad_free_axis_vec(p.kpg, spec.data.dtype_a, spec.vector_size_a),
+        _wgrad_free_axis_vec(p.cpg, spec.data.dtype_b, spec.vector_size_b),
+    )
+    chunks = []
+    for free, cap in zip((spec.tile_m, spec.tile_n), caps):
+        try:
+            if spec.lds_k_outer:
+                vec = CoalescedTileLoader.choose_vec(
+                    tile_rows=spec.tile_k,
+                    tile_cols=free,
+                    block_size=threads,
+                    max_vec=cap,
+                    vector_axis="col",
+                )
+            else:
+                vec = CoalescedTileLoader.choose_vec(
+                    tile_rows=free,
+                    tile_cols=spec.tile_k,
+                    block_size=threads,
+                    max_vec=cap,
+                    vector_axis="row",
+                )
+        except ValueError:
+            return None
+        chunks.append(free * spec.tile_k // (vec * threads))
+    return chunks[0], chunks[1]
+
+
 # Group-merge degrees the merged-tile index math is written for. Powers of two
 # keep the group split (`m // kpg`, `(n // cpg) % Gm`) and the diagonal test to
 # shifts and an xor; CK constrains its own Gm to the same set.
@@ -1577,6 +1683,11 @@ def wgrad_streamk_available(spec: "WgradConvSpec") -> Tuple[bool, str]:
             "streamk runs its own K loop per work item; prefetch_addr rewrites "
             "the data-parallel K loop, which stream-K never reaches"
         )
+    if spec.prefetch_global_regs:
+        return False, (
+            "streamk runs its own K loop per work item; prefetch_global_regs rewrites "
+            "the data-parallel K loop, which stream-K never reaches"
+        )
     if spec.epilogue != "default":
         return False, (
             f"streamk requires epilogue='default' (got {spec.epilogue!r}): the "
@@ -1639,9 +1750,9 @@ def wgrad_streamk_default_pool(reduction: str, arch: str) -> int:
     Lets selection policy size the pool a launch will use before any spec
     exists.
     """
-    from rocke.helpers.split_k import _ARCH_NUM_CUS, _DEFAULT_NUM_CUS
+    from rocke.helpers.split_k import num_cus as arch_num_cus
 
-    num_cus = _ARCH_NUM_CUS.get(arch, _DEFAULT_NUM_CUS)
+    num_cus = arch_num_cus(arch)
     if reduction in ("linear", "tree"):
         return num_cus
     return num_cus * _STREAMK_CTAS_PER_CU
@@ -2144,6 +2255,9 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
     _rpf_why = _register_prefetch_conflict(spec)
     if _rpf_why:
         return False, _rpf_why
+    _pgr_why = _prefetch_global_regs_conflict(spec)
+    if _pgr_why:
+        return False, _pgr_why
     # The wgrad builder has no load/math wave split, so a "wavelet" spec built
     # silently as "mem" under another name. Reject it instead of benchmarking
     # one kernel twice.
@@ -2252,6 +2366,7 @@ def is_valid_wgrad_spec(spec: WgradConvSpec, arch: str = "gfx950") -> Tuple[bool
             (spec.unroll_k, "unroll_k"),
             (spec.chiplet_swizzle, "chiplet_swizzle"),
             (spec.prefetch_addr, "prefetch_addr"),
+            (spec.prefetch_global_regs, "prefetch_global_regs"),
         ):
             if flag:
                 return False, f"WMMA wgrad does not support {label} on {arch}"
@@ -3062,7 +3177,9 @@ def build_implicit_gemm_conv_wgrad(
     # unconditionally would add IR ops to every existing config and move the
     # golden. Guarded so the default path stays byte-identical.
     if spec.lds_k_outer:
-        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size).bind(b, lane)
+        _tr_reader = ConvKOuterFragmentReader(wave_size=spec.wave_size, arch=arch).bind(
+            b, lane
+        )
 
     def _tr_frag(smem: Value, mn_base: Value, k_base: Value, mn_atom: int, n: int):
         """One MMA operand fragment from a K-outer tile via transpose reads.
@@ -3512,6 +3629,51 @@ def build_implicit_gemm_conv_wgrad(
 
             b.scf_yield(*accs_b)
         final_accs = list(for_op_uk.results)
+    elif spec.prefetch_global_regs:
+        # Register-prefetch K loop. The prologue issues tile k_lo's global
+        # reads into VGPRs. Each iteration writes the tile it carries to LDS,
+        # publishes it, and only then issues tile k+1's reads, which stay in
+        # flight under tile k's MFMAs and arrive as the next iteration's
+        # carried values. Both barriers are LDS-only: a full barrier would
+        # wait for those reads too. validate()/is_valid_wgrad_spec() keep
+        # async_dma, unroll_k and prefetch_addr off this branch. The reads
+        # issued in the last iteration lie past _k_upper and are never
+        # stored (past the tensor they read zero: buffer loads).
+        _a_fn, _b_fn = _split_desc_fns()
+
+        def _load_regs(k_off: Value):
+            k_off_capture[0] = k_off
+            a_st = a_sync_loader.load_global(b, tid=tid, descriptor=_a_fn, rsrc=dy_rsrc)
+            b_st = b_sync_loader.load_global(b, tid=tid, descriptor=_b_fn, rsrc=x_rsrc)
+            return a_st, b_st
+
+        _a0, _b0 = _load_regs(k_lo)
+        _n_acc = len(accs)
+        _n_a = len(_a0)
+        _iter = (
+            list(accs)
+            + [(f"pgra{i}", v) for i, (_, _, v) in enumerate(_a0)]
+            + [(f"pgrb{i}", v) for i, (_, _, v) in enumerate(_b0)]
+        )
+        for_op = b.scf_for_iter(k_lo, _k_upper, c_block_k, _iter, iv_name="k0")
+        with for_op as (k0, iter_vars):
+            # The (row, col) of each chunk depends only on tid, so the
+            # prologue's slots address the carried values of every tile.
+            _av = iter_vars[_n_acc : _n_acc + _n_a]
+            _bv = iter_vars[_n_acc + _n_a :]
+            a_sync_loader.store_lds(
+                b, smem_dst=A_smem, staged=[(r, c, v) for (r, c, _), v in zip(_a0, _av)]
+            )
+            b_sync_loader.store_lds(
+                b, smem_dst=B_smem, staged=[(r, c, v) for (r, c, _), v in zip(_b0, _bv)]
+            )
+            b.sync_lds_only()
+            _an, _bn = _load_regs(b.add(k0, c_block_k))
+            k_off_capture[0] = k0
+            new_accs = emit_mfma_phase(A_smem, B_smem, list(iter_vars[:_n_acc]))
+            b.sync_lds_only()
+            b.scf_yield(*new_accs, *[v for _, _, v in _an], *[v for _, _, v in _bn])
+        final_accs = list(for_op.results)[:_n_acc]
     elif spec.prefetch_addr:
         # Same loop as below, with the global byte offsets of the current tile
         # carried as iteration arguments. Each iteration issues every buffer

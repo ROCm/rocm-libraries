@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 
 #include <hip/hip_runtime_api.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
@@ -179,6 +180,16 @@ inline hipdnn_plugin_sdk::ingestor::DeviceProperties testDeviceProperties()
     return properties;
 }
 
+/// A gfx950 (or @p arch) warp-64 device, by value: matcher tests of the gfx950 engines
+/// run on CPU-only and non-gfx950 hosts.
+inline hipdnn_plugin_sdk::ingestor::DeviceProperties gfx950Properties(std::string arch = "gfx950")
+{
+    hipdnn_plugin_sdk::ingestor::DeviceProperties properties;
+    properties.gcnArchName = std::move(arch);
+    properties.warpSize = 64;
+    return properties;
+}
+
 /// The real current device's properties, queried once; zeroed if no device is current.
 inline hipdnn_plugin_sdk::ingestor::DeviceProperties currentDeviceProperties()
 {
@@ -275,6 +286,41 @@ public:
     {
     }
 };
+
+/// A catalog kernel's integer metadata field, or nullopt when it is absent or another type: the
+/// records an engine's candidateFor() declines.
+inline std::optional<int64_t>
+    integerField(const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel, const char* field)
+{
+    const auto it = kernel.metadata.find(field);
+    if(it == kernel.metadata.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<int64_t>(&it->second);
+    if(value == nullptr)
+    {
+        return std::nullopt;
+    }
+    return *value;
+}
+
+/// A catalog kernel's string metadata field, or nullopt when it is absent or another type.
+inline std::optional<std::string>
+    stringField(const hipdnn_plugin_sdk::ingestor::KernelDescriptor& kernel, const char* field)
+{
+    const auto it = kernel.metadata.find(field);
+    if(it == kernel.metadata.end())
+    {
+        return std::nullopt;
+    }
+    const auto* value = std::get_if<std::string>(&it->second);
+    if(value == nullptr)
+    {
+        return std::nullopt;
+    }
+    return *value;
+}
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

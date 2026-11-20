@@ -234,8 +234,11 @@ from .grid import (
     python_chiplet_transform_chunked,
     python_chiplet_transform_chunked_runtime,
     python_super_tile_swizzle,
+    python_xcd_remap,
     super_tile_swizzle,
     super_tile_swizzle_dynamic,
+    xcd_remap,
+    xcd_remap_plane,
 )
 from .io import (
     concat_tree,
@@ -253,7 +256,7 @@ from .io import (
     store_vec,
     vector_row_copy,
 )
-from .layouts import ConvKOuterFragmentReader, LdsLayout, TransposeLdsReader
+from .layouts import LdsLayout, TransposeLdsReader
 from .loads import (
     AsyncPingPongLoader,
     AsyncTileLoader,
@@ -327,11 +330,10 @@ from .mx_scale import (
     FP8_E4M3_FNUZ,
     FP8_E4M3_OCP,
     MxElementFormat,
-    MxScaleSplit,
+    add_mx_scaled_dot,
     apply_mx_scale,
     decode_mx_scale_e8m0,
-    exact_mx_scale_split,
-    fma_with_mx_scale_pair,
+    largest_safe_mx_scale_code,
     load_and_decode_mx_scale_byte,
 )
 from .preshuffle import (
@@ -497,11 +499,13 @@ __all__ = [
     "python_chiplet_transform_chunked",
     "python_chiplet_transform_chunked_runtime",
     "python_super_tile_swizzle",
+    "python_xcd_remap",
     "super_tile_swizzle",
     "super_tile_swizzle_dynamic",
+    "xcd_remap",
+    "xcd_remap_plane",
     # Loads
     "LdsLayout",
-    "ConvKOuterFragmentReader",
     "TransposeLdsReader",
     "AsyncPingPongLoader",
     "AsyncTileLoader",
@@ -685,11 +689,10 @@ __all__ = [
     "FP8_E4M3_FNUZ",
     "FP8_E4M3_OCP",
     "MxElementFormat",
-    "MxScaleSplit",
+    "add_mx_scaled_dot",
     "apply_mx_scale",
     "decode_mx_scale_e8m0",
-    "exact_mx_scale_split",
-    "fma_with_mx_scale_pair",
+    "largest_safe_mx_scale_code",
     "load_and_decode_mx_scale_byte",
     # preshuffled-B layout
     "PreshuffleBSpec",

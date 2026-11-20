@@ -484,16 +484,27 @@ rocblas_local_handle::rocblas_local_handle(const Arguments& arg)
     {
         auto hipblaslt_env = getenv("ROCBLAS_USE_HIPBLASLT");
         if(hipblaslt_env)
+        {
             m_hipblaslt_saved_status = std::string(hipblaslt_env);
+            m_hipblaslt_env_existed  = true;
+        }
         m_hipblaslt_env_set = true;
         setenv("ROCBLAS_USE_HIPBLASLT", std::to_string(arg.use_hipblaslt).c_str(), true);
     }
 
-    if(arg.graph_test)
+    // graph_test enables stream-ordered allocation so rocBLAS-managed workspace can be
+    // captured. When combined with user_allocated_workspace the workspace is user-owned,
+    // so stream-ordered allocation is not needed and is left as is (default: off). That
+    // combination also verifies the captured graph holds no memory nodes, see
+    // rocblas_stream_end_capture().
+    if(arg.graph_test && !arg.user_allocated_workspace)
     {
         auto stream_order_env = getenv("ROCBLAS_STREAM_ORDER_ALLOC");
         if(stream_order_env)
+        {
             m_stream_order_saved_status = std::string(stream_order_env);
+            m_stream_order_env_existed  = true;
+        }
         m_stream_order_env_set = true;
         setenv("ROCBLAS_STREAM_ORDER_ALLOC", "1", true);
     }
@@ -568,14 +579,20 @@ rocblas_local_handle::~rocblas_local_handle()
 
     if(m_hipblaslt_env_set)
     {
-        setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
+        if(m_hipblaslt_env_existed)
+            setenv("ROCBLAS_USE_HIPBLASLT", m_hipblaslt_saved_status.c_str(), true);
+        else
+            unsetenv("ROCBLAS_USE_HIPBLASLT");
     }
 
     PRINT_IF_ROCBLAS_ERROR(rocblas_destroy_handle(m_handle));
 
     if(m_stream_order_env_set)
     {
-        setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
+        if(m_stream_order_env_existed)
+            setenv("ROCBLAS_STREAM_ORDER_ALLOC", m_stream_order_saved_status.c_str(), true);
+        else
+            unsetenv("ROCBLAS_STREAM_ORDER_ALLOC");
     }
 }
 
@@ -604,6 +621,34 @@ void rocblas_local_handle::rocblas_stream_end_capture()
 
     // END GRAPH CAPTURE
     CHECK_HIP_ERROR(hipStreamEndCapture(m_graph_stream, &graph));
+
+    // With a user-owned workspace (user_allocated_workspace) rocBLAS must take all device
+    // memory from that workspace. Stream-ordered allocations would be captured as
+    // mem_alloc/mem_free nodes, which make every hipGraphLaunch block the host.
+    if(m_memory)
+    {
+        size_t num_nodes = 0;
+        CHECK_HIP_ERROR(hipGraphGetNodes(graph, nullptr, &num_nodes));
+        std::vector<hipGraphNode_t> nodes(num_nodes);
+        CHECK_HIP_ERROR(hipGraphGetNodes(graph, nodes.data(), &num_nodes));
+
+        size_t mem_nodes = 0;
+        for(auto node : nodes)
+        {
+            hipGraphNodeType type;
+            CHECK_HIP_ERROR(hipGraphNodeGetType(node, &type));
+            if(type == hipGraphNodeTypeMemAlloc || type == hipGraphNodeTypeMemFree)
+                mem_nodes++;
+        }
+#ifdef GOOGLE_TEST
+        EXPECT_EQ(mem_nodes, 0u) << "captured graph has memory nodes with user-owned workspace";
+#else
+        if(mem_nodes)
+            rocblas_cerr << "error: captured graph has " << mem_nodes
+                         << " memory nodes with user-owned workspace" << std::endl;
+#endif
+    }
+
     CHECK_HIP_ERROR(hipGraphInstantiate(&instance, graph, NULL, NULL, 0));
 
     CHECK_HIP_ERROR(hipGraphDestroy(graph));

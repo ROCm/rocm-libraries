@@ -1,10 +1,13 @@
 #pragma once
 
+#include "hipconv/device.hpp"
+#include "internal_api.h"
 #include "kv_descriptor.h"
 #include "tolerance.h"
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <span>
 #include <string>
 #include <string_view>
@@ -19,10 +22,27 @@ namespace hipconv
 
 class ConvKernel;
 
-// A non-owning view over a contiguous array of ConvKernel pointers.
-// Each kernel TU exposes its kernels[] this way so per-arch backends
-// can iterate kernels uniformly without templating on each TU's count.
-using ConvKernelSpan = std::span<ConvKernel* const>;
+class RepresentationHashPair
+{
+public:
+    RepresentationHashPair(std::string_view repr);
+    inline auto repr() const { return repr_; }
+    inline auto hash() const { return hash_; }
+
+private:
+    std::string_view repr_;
+    std::uint32_t hash_;
+};
+
+// A non-owning view over a contiguous array of ConvKernel pointers and a pointer to a function that
+// looks up kernels by a string representation of its config. Each kernel TU exposes its kernels[]
+// this way so per-arch backends can iterate kernels uniformly without templating on each TU's
+// count.
+struct ConvKernelGroup
+{
+    std::span<ConvKernel* const> kernels;
+    ConvKernel* (*get_kernel_by_config)(RepresentationHashPair const& cfg);
+};
 
 // One kernel and what it scored on a layer.
 struct ScoredKernel
@@ -49,10 +69,11 @@ inline void keep_top_ranked(std::vector<ScoredKernel>& scored, std::size_t max_r
         scored.resize(max_ranked);
 }
 
-class ConvKernel
+class HIPCONV_INTERNAL_API ConvKernel
 {
 public:
     using LaunchFn = void (*)(const LaunchParams&,
+                              const hipconv::Device&,
                               const hipconv::ConvParams&,
                               const void*,
                               const void*,
@@ -96,33 +117,32 @@ public:
 
     // Does this kernel family support the given parameters?
     //
-    // Must read `par` alone, never cfg_: the dispatcher asks the first kernel in
-    // a span and takes the answer for the whole span.
-    virtual bool is_applicable(const hipconv::ConvParams& par) const = 0;
+    // Must not read cfg_: the dispatcher asks the first kernel in a span and takes the answer
+    // for the whole span.
+    virtual bool is_applicable(const hipconv::Device& dev,
+                               const hipconv::ConvParams& par) const = 0;
 
     // Does this kernel family support the given number of dimensions?
     //
-    // Every kernel in the tree today is two-dimensional; a conv3d or conv1d
-    // family overrides this. Same span contract as is_applicable.
+    // Two-dimensional unless a family overrides this; direct_l1 does, for conv3d.
+    // Same span contract as is_applicable, which is why the answer must not depend
+    // on the config: a family serving both dimensionalities answers for both and
+    // lets is_valid_config pick the config.
     virtual bool supports_dims(int dims) const { return dims == 2; }
 
     // Does this specific kernel configuration support the given parameters?
-    virtual bool is_valid_config(const hipconv::ConvParams& par) const = 0;
+    virtual bool is_valid_config(const hipconv::Device& dev,
+                                 const hipconv::ConvParams& par) const = 0;
 
-    // Can the current device run this kernel on the given parameters?
-    //
-    // Asked when binding a launch, never during selection, which stays a function of `par`
-    // and the architecture. True unless the kernel launches through a runtime library that
-    // may have no algorithm for `par` on this device.
-    virtual bool runs_on_current_device(const hipconv::ConvParams& /*par*/) const { return true; }
-
-    virtual LaunchParams get_launch_params(const hipconv::ConvParams& par) const = 0;
+    virtual LaunchParams get_launch_params(const hipconv::Device& dev,
+                                           const hipconv::ConvParams& par) const = 0;
 
     // Enqueue the kernel; throw on a launch-time failure.
     //
     // Defined out-of-line in conv_kernel.cpp so this header stays free of HIP
     // headers, since every kernel translation unit includes it.
     void launch(const LaunchParams& lp,
+                const hipconv::Device& dev,
                 const hipconv::ConvParams& par,
                 const void* in,
                 const void* wei,
@@ -130,7 +150,20 @@ public:
                 void* workspace,
                 hipStream_t stream) const;
 
-    virtual size_t get_workspace_size(const hipconv::ConvParams& /*par*/) const { return 0; }
+    virtual size_t get_workspace_size(const hipconv::Device& /*dev*/,
+                                      const hipconv::ConvParams& /*par*/) const
+    {
+        return 0;
+    }
+
+    // Whether two launches on the same inputs write bitwise-identical outputs.
+    //
+    // A family whose workgroups add into one output element atomically overrides this.
+    virtual bool is_deterministic(const hipconv::Device& /*dev*/,
+                                  const hipconv::ConvParams& /*par*/) const
+    {
+        return true;
+    }
 
     // Weighted throughput index for `par`; larger is better.
     //
@@ -138,11 +171,15 @@ public:
     // host uses to rank providers without benchmarking). Queried only on a kernel
     // already selected for `par`, so it need not report inapplicability; each
     // family answers for its own tuning story.
-    virtual float get_weighted_throughput_index(const hipconv::ConvParams& par) const = 0;
+    virtual float get_weighted_throughput_index(const hipconv::Device& dev,
+                                                const hipconv::ConvParams& par) const = 0;
 
     // The error bound this kernel admits on `par`, or TOLERANCE_UNAVAILABLE when none applies.
     // A family whose accumulation is blocked overrides this to pass its own depth.
-    virtual void get_tolerance(const hipconv::ConvParams& par, float& atol, float& rtol) const
+    virtual void get_tolerance(const hipconv::Device& /*dev*/,
+                               const hipconv::ConvParams& par,
+                               float& atol,
+                               float& rtol) const
     {
         hipconv::get_mixed_precision_tolerance(par, atol, rtol);
     }

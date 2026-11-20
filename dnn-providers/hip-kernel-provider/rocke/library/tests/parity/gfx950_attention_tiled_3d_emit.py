@@ -17,8 +17,9 @@
 # Each kernel is lowered with _native_lower(kernel, arch="gfx950") and
 # the two .ll texts are concatenated (segment first, then reduce) to stdout so
 # they can be byte-compared with the C emitter gfx950_attention_tiled_3d_emit.c.
-# prove_parity_binding keeps a copy of _CONFIGS (with emit_lse set for the
-# _REDUCE_LSE configs) in platform/cpp/bindings/attention_tiled_parity_configs.py;
+# prove_parity_binding keeps a copy of _CONFIGS (reduce_emit_lse for the
+# reduce-only _REDUCE_LSE configs, emit_lse where the segment writes LSE too) in
+# platform/cpp/bindings/attention_tiled_parity_configs.py;
 # update it in step.
 import sys
 
@@ -326,10 +327,28 @@ _CONFIGS = {
         has_softcap=False,
         kv_storage_dtype=None,
     ),
+    20: dict(
+        # Segment AND reduce with emit_lse (see _REDUCE_LSE): the real catalog
+        # pairing, where the segment's own kernel name also gains the trailing
+        # "lse". Same fields as config 1.
+        head_size=128,
+        block_size=32,
+        num_query_heads=16,
+        num_kv_heads=16,
+        dtype="bf16",
+        num_segments=16,
+        use_sinks=False,
+        sliding_window=0,
+        has_softcap=False,
+        kv_storage_dtype=None,
+        emit_lse=True,
+    ),
 }
 
-# Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
-_REDUCE_LSE = frozenset({18, 19})
+# Configs whose REDUCE kernel is built with emit_lse=True. 18 and 19 leave the
+# segment unchanged (reduce-only emit_lse); 20's cfg dict also carries
+# emit_lse=True into the segment spec, pairing both kernels as production does.
+_REDUCE_LSE = frozenset({18, 19, 20})
 
 
 def _emit(idx: int) -> str:

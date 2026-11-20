@@ -382,13 +382,16 @@ namespace
     {
         using namespace Predicates::Contraction;
 
-        BufferLoadCheckPacket packet{0, 8, 64, 128};
+        BufferLoadCheckPacket       packet{0, 8, 64, 128};
+        GL2PrefetchSAddrCheckPacket gl2Packet{
+            true, false, 64, 128, 256, 512, 256, 128, 32, 32, 1, 128, true, true, 64, 512};
 
         auto operation   = std::make_shared<OperationIdentifierEqual>();
         operation->value = gemmOperation();
 
         return std::make_shared<Predicates::And<Gemm>>(std::initializer_list<ProblemPredicatePtr>{
             std::make_shared<BufferLoadOffsetLimitCheck>(packet),
+            std::make_shared<GL2PrefetchSAddrOffsetLimitCheck>(gl2Packet),
             std::make_shared<Free0SizeMultiple>(0, 8),
             std::make_shared<Predicates::Not<Gemm>>(
                 std::make_shared<Predicates::Or<Gemm>>(std::initializer_list<ProblemPredicatePtr>{
