@@ -46,10 +46,13 @@ struct EstimateAsmCyclesAnalysis {
 /// Cycle totals split around the primary LoopBeginL natural loop.
 ///
 /// The loop body runs from label_LoopBeginL through the block that branches
-/// back to it, and mainLoopCycles sums that one iteration. preLoopCycles and
-/// postLoopCycles are the longest path through the blocks before and after that
-/// range. A back-edge counts one iteration. The global-write edge fork always
-/// takes NonEdge; other exclusive edges keep the heavier side.
+/// back to it, or to label_LoopBeginL_CBWave0 after the cluster-barrier wave
+/// split. mainLoopCycles sums that one iteration. The other wave's copy is the
+/// same iteration and is not added again. preLoopCycles and postLoopCycles are
+/// the longest path through the blocks before and after that range. A back-edge
+/// counts one iteration. The global-write edge fork always takes NonEdge; other
+/// exclusive edges keep the heavier side. Issue state carries across blocks, so
+/// a wait sees a load issued in an earlier block.
 struct EstimateAsmCyclePhases {
     uint32_t preLoopCycles = 0;
     uint32_t mainLoopCycles = 0;
