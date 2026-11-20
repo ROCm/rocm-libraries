@@ -31,6 +31,7 @@
 
 #include "unit_test_device_precond_common.hpp"
 
+#include <limits>
 #include <string>
 
 using namespace precond_ut;
@@ -104,6 +105,26 @@ namespace
         int32_t        swap_rows = 0; // rows with |dl| > |d|
     };
 
+    // Right-hand side A * x of a system whose dl, d, du and x are set.
+    template <typename T>
+    void set_rhs(system_t<T>& s, int32_t m, int32_t n)
+    {
+        s.b.resize(static_cast<size_t>(m) * n);
+        for(int32_t c = 0; c < n; ++c)
+        {
+            for(int32_t i = 0; i < m; ++i)
+            {
+                const size_t         k = static_cast<size_t>(c) * m + i;
+                std::complex<double> v = to_cd(s.d[i]) * to_cd(s.x[k]);
+                if(i > 0)
+                    v += to_cd(s.dl[i]) * to_cd(s.x[k - 1]);
+                if(i + 1 < m)
+                    v += to_cd(s.du[i]) * to_cd(s.x[k + 1]);
+                s.b[k] = from_cd<T>(v);
+            }
+        }
+    }
+
     template <typename T>
     system_t<T> make_system(int32_t m, int32_t n, int seed, bool swaps = false)
     {
@@ -128,7 +149,6 @@ namespace
             s.d[i]  = make_value<T>(d, im_part);
         }
         s.x.resize(static_cast<size_t>(m) * n);
-        s.b.resize(static_cast<size_t>(m) * n);
         for(int32_t c = 0; c < n; ++c)
         {
             for(int32_t i = 0; i < m; ++i)
@@ -138,26 +158,74 @@ namespace
                                     is_cplx<T> ? 0.02 * ((i + c) % 5) : 0.0);
             }
         }
+        set_rhs(s, m, n);
+        return s;
+    }
+
+    // A system that a solver cannot handle without pivoting. The rows (2j, 2j + 1) form
+    // 2x2 blocks
+    //
+    //     | 0    U_j |        U_j = du[2j]     in [20, 32]
+    //     | L_j  e_j |        L_j = dl[2j + 1] in [17, 32],  e_j = d[2j + 1] in [1, 2]
+    //
+    // coupled to the neighbouring blocks by dl[2j] and du[2j + 1] in [0.25, 0.6]. The
+    // matrix is nonsingular and well conditioned (block determinants -U_j * L_j of a few
+    // hundred against couplings below one), but every even row has a zero diagonal:
+    //
+    //  * gtsv (SPIKE, 2x2 diagonal blocks (2j, 2j + 1) for these sizes) fails the 1x1
+    //    Bunch-Kaufman test |b_k| * sigma >= kappa * |a_k+1 * c_k| at the top of every
+    //    block (0 >= kappa * L_j * U_j is false) and has to take its 2x2 pivot, whose
+    //    determinant is b_k * b_k+1 - a_k+1 * c_k = -L_j * U_j;
+    //  * the interleaved LU swaps the rows whenever |b_k| < |a_k+1|, which is 0 < L_j,
+    //    and without the swap divides by the zero diagonal.
+    //
+    // An odd m leaves a trailing row with a regular diagonal. Complex types carry
+    // imaginary parts on the couplings and the known solution.
+    template <typename T>
+    system_t<T> make_pivoting_system(int32_t m, int32_t n, int seed)
+    {
+        system_t<T> s;
+        s.dl.resize(m);
+        s.d.resize(m);
+        s.du.resize(m);
+        for(int32_t i = 0; i < m; ++i)
+        {
+            const int32_t j         = i / 2;
+            const bool    paired    = (i % 2 == 0) && (i + 1 < m);
+            const bool    strong_dl = (i % 2 == 1);
+            const double  im_part   = is_cplx<T> ? 0.1 * (((i + seed) % 3) - 1) : 0.0;
+            const double  dl        = strong_dl ? 17.0 + ((j * 5 + seed) % 16) // L_j
+                                                : 0.25 + 0.05 * ((j * 3 + seed) % 8); // coupling
+            const double  du        = strong_dl ? 0.25 + 0.05 * ((j * 7 + seed) % 8) // coupling
+                                                : 20.0 + ((j * 11 + seed) % 13); // U_j
+            const double  d         = paired ? 0.0 : 1.0 + 0.1 * ((j + seed) % 11);
+            s.dl[i] = (i == 0) ? make_value<T>(0.0) : make_value<T>(dl, strong_dl ? 0.0 : im_part);
+            s.du[i]
+                = (i == m - 1) ? make_value<T>(0.0) : make_value<T>(du, strong_dl ? -im_part : 0.0);
+            s.d[i] = make_value<T>(d, 0.0);
+            if(paired)
+                ++s.swap_rows;
+        }
+        s.x.resize(static_cast<size_t>(m) * n);
         for(int32_t c = 0; c < n; ++c)
         {
             for(int32_t i = 0; i < m; ++i)
             {
-                std::complex<double> v = to_cd(s.d[i]) * to_cd(s.x[static_cast<size_t>(c) * m + i]);
-                if(i > 0)
-                    v += to_cd(s.dl[i]) * to_cd(s.x[static_cast<size_t>(c) * m + i - 1]);
-                if(i + 1 < m)
-                    v += to_cd(s.du[i]) * to_cd(s.x[static_cast<size_t>(c) * m + i + 1]);
-                s.b[static_cast<size_t>(c) * m + i] = from_cd<T>(v);
+                s.x[static_cast<size_t>(c) * m + i]
+                    = make_value<T>(1.0 + 0.01 * ((i * 13 + c * 7 + seed) % 17),
+                                    is_cplx<T> ? 0.02 * ((i + c) % 5) : 0.0);
             }
         }
+        set_rhs(s, m, n);
         return s;
     }
 
     // Absolute error of the solution entries (about 1.0 .. 1.2), and residual relative to
-    // max|b|: about ten times the largest measured on gfx1201 over all tests of this
-    // file. Solution error: float/cfloat 1.31e-6 (the systems that force row swaps),
-    // double/cdouble 2.7e-15. Residual / max|b|: float/cfloat 1.36e-6, double/cdouble
-    // 2.25e-15.
+    // max|b|: about ten times the largest measured on gfx1201 over the diagonally dominant
+    // and row-swap systems of this file (the zero-diagonal and infinite-entry systems added
+    // later run under the same bound without a new measurement). Solution error:
+    // float/cfloat 1.31e-6 (the systems that force row swaps), double/cdouble 2.7e-15.
+    // Residual / max|b|: float/cfloat 1.36e-6, double/cdouble 2.25e-15.
     template <typename T>
     double solve_tolerance()
     {
@@ -217,17 +285,13 @@ namespace
         EXPECT_LE(res, solve_tolerance<T>() * norm_b);
     }
 
-    // Multi-RHS solve through gtsv_no_pivot or gtsv; ldb >= m. `swaps` makes the
-    // systems need row exchanges (see make_system).
+    // Multi-RHS solve of the system `s` (m rows, n right-hand sides) through
+    // gtsv_no_pivot or gtsv; ldb >= m. The solution is checked against the known one,
+    // the residual against the right-hand side.
     template <Solver S, typename T>
-    void run_multi_rhs(
-        rocsparse_handle handle, int32_t m, int32_t n, int32_t ldb_extra = 0, bool swaps = false)
+    void solve_multi_rhs(
+        rocsparse_handle handle, const system_t<T>& s, int32_t m, int32_t n, int32_t ldb_extra)
     {
-        SCOPED_TRACE(std::string(S == Solver::no_pivot ? "no_pivot" : "pivot") + " m="
-                     + std::to_string(m) + " n=" + std::to_string(n) + (swaps ? " swaps" : ""));
-        const system_t<T> s = make_system<T>(m, n, m % 7, swaps);
-        if(swaps)
-            ASSERT_GT(s.swap_rows, 0);
         const int32_t  ldb = m + ldb_extra;
         std::vector<T> hb(static_cast<size_t>(ldb) * n, make_value<T>(0.0));
         for(int32_t c = 0; c < n; ++c)
@@ -269,11 +333,42 @@ namespace
             }
     }
 
-    // gtsv_no_pivot_strided_batch: batch_count systems of order m, batch_stride apart.
-    template <typename T>
-    void run_strided(rocsparse_handle handle, int32_t m, int32_t batch_count, int32_t extra)
+    // Multi-RHS solve of a generated system. `swaps` makes the system need row
+    // exchanges (see make_system).
+    template <Solver S, typename T>
+    void run_multi_rhs(
+        rocsparse_handle handle, int32_t m, int32_t n, int32_t ldb_extra = 0, bool swaps = false)
     {
-        SCOPED_TRACE("strided m=" + std::to_string(m) + " batch=" + std::to_string(batch_count));
+        SCOPED_TRACE(std::string(S == Solver::no_pivot ? "no_pivot" : "pivot") + " m="
+                     + std::to_string(m) + " n=" + std::to_string(n) + (swaps ? " swaps" : ""));
+        const system_t<T> s = make_system<T>(m, n, m % 7, swaps);
+        if(swaps)
+            ASSERT_GT(s.swap_rows, 0);
+        solve_multi_rhs<S, T>(handle, s, m, n, ldb_extra);
+    }
+
+    // gtsv on a system whose even rows have a zero diagonal (see make_pivoting_system).
+    template <typename T>
+    void run_pivoting_multi_rhs(rocsparse_handle handle, int32_t m, int32_t n)
+    {
+        SCOPED_TRACE("pivot zero-diagonal m=" + std::to_string(m) + " n=" + std::to_string(n));
+        const system_t<T> s = make_pivoting_system<T>(m, n, m % 5);
+        ASSERT_GT(s.swap_rows, 0);
+        solve_multi_rhs<Solver::pivot, T>(handle, s, m, n, 0);
+    }
+
+    // gtsv_no_pivot_strided_batch: batch_count systems of order m, batch_stride apart.
+    // The entries the API ignores (dl[0] and du[m - 1] of every system) are filled with
+    // `ignored` (see the test that uses a non-finite value there).
+    template <typename T>
+    void run_strided(rocsparse_handle handle,
+                     int32_t          m,
+                     int32_t          batch_count,
+                     int32_t          extra,
+                     double           ignored = 0.0)
+    {
+        SCOPED_TRACE("strided m=" + std::to_string(m) + " batch=" + std::to_string(batch_count)
+                     + (ignored != 0.0 ? " ignored=" + std::to_string(ignored) : ""));
         const int32_t  stride = m + extra;
         std::vector<T> dl(static_cast<size_t>(stride) * batch_count, make_value<T>(0.0));
         std::vector<T> d = dl, du = dl, b = dl;
@@ -288,6 +383,11 @@ namespace
                 du[static_cast<size_t>(k) * stride + i] = s.du[i];
                 b[static_cast<size_t>(k) * stride + i]  = s.b[i];
             }
+            // The sign alternates with the batch so that every system holds a different
+            // ignored value.
+            const double sign                           = (k % 2 == 0) ? 1.0 : -1.0;
+            dl[static_cast<size_t>(k) * stride]         = make_value<T>(sign * ignored, ignored);
+            du[static_cast<size_t>(k) * stride + m - 1] = make_value<T>(sign * ignored, ignored);
             want.push_back(s.x);
         }
         device_vector<T> ddl{dl}, dd{d}, ddu{du}, dx{b};
@@ -467,6 +567,23 @@ TEST_F(PrecondTridiagonal, pivot_large_block_dimension)
     run_multi_rhs<Solver::pivot, float>(handle, 700000, 1);
 }
 
+// Every even row has a zero diagonal (make_pivoting_system), so the 1x1 Bunch-Kaufman
+// test fails at the top of every 2x2 diagonal block of the SPIKE factorization and the
+// solver has to take its 2x2 pivot. The row-swap systems above never get there: their
+// |d_k| * sigma stays above kappa * |dl_k+1 * du_k| because the row below has a large
+// diagonal.
+TEST_F(PrecondTridiagonal, pivot_zero_diagonal_blocks)
+{
+    for_all_types([&](auto tag) {
+        using T = decltype(tag);
+        for(const int32_t m : {7, 25, 128, 513})
+        {
+            run_pivoting_multi_rhs<T>(handle, m, 1);
+            run_pivoting_multi_rhs<T>(handle, m, 4);
+        }
+    });
+}
+
 TEST_F(PrecondTridiagonal, strided_batch_small_sizes)
 {
     for_all_types([&](auto tag) {
@@ -476,6 +593,36 @@ TEST_F(PrecondTridiagonal, strided_batch_small_sizes)
             run_strided<T>(handle, m, 3, 0);
         }
         run_strided<T>(handle, 17, 5, 4);
+    });
+}
+
+// dl[0] and du[m - 1] of every system are not part of the matrix (the documentation asks
+// for zeros there; the functional tests store infinity) and the kernels mask them out
+// instead of reading them. The wavefront PCR kernel (17 <= m <= 32) loads the entry of
+// lane `lid` as c = (lid != m - 1) ? du[lid] : 0; without the mask, lane m - 1 of a system
+// with m < 32 computes, with b_right = 1 and a_right = x_right = 0 for the lanes past m,
+//   k2 = c / b_right = inf,  b_new = b - c_left * k1 - a_right * k2 = b - 0 * inf = NaN,
+//   x_new = x - x_left * k1 - x_right * k2 = x - 0 * inf = NaN,
+// and the NaN reaches every unknown of that system in the following reduction steps.
+// For m = 32 lane 31 has no right neighbour, k2 is masked to 0 and its c is only read by
+// lane 31 - stride as c_right: the infinity moves to c_new of lanes 30, 28, 24 and 16,
+// each of which again has no live consumer (their right neighbour would be lane 32, and
+// the final 2x2 solve reads a, b and x of lane 16 but not its c), so m = 32 does not
+// detect a missing mask; 31 is the largest size that does. The entries hold +-inf
+// (alternating with the batch) and, for complex types, an infinite imaginary part.
+TEST_F(PrecondTridiagonal, strided_batch_ignores_first_dl_and_last_du)
+{
+    const double inf = std::numeric_limits<double>::infinity();
+    for_all_types([&](auto tag) {
+        using T = decltype(tag);
+        // Wavefront PCR sizes: the smallest, one in the middle, the largest that detects
+        // the mask (31) and the largest (32, a clean-library check only, see above), with
+        // the neighbouring Thomas (16) and shared-memory PCR (33) kernels.
+        for(const int32_t m : {16, 17, 24, 31, 32, 33})
+        {
+            run_strided<T>(handle, m, 3, 0, inf);
+            run_strided<T>(handle, m, 2, 5, inf);
+        }
     });
 }
 
@@ -601,22 +748,28 @@ TEST_F(PrecondTridiagonal, strided_batch_argument_validation)
 // ---------------------------------------------------------------------------
 namespace
 {
+    // `pivoting` selects the zero-diagonal systems of make_pivoting_system.
     template <typename T>
     void run_interleaved(rocsparse_handle               handle,
                          rocsparse_gtsv_interleaved_alg alg,
                          int32_t                        m,
                          int32_t                        batch_count,
-                         int32_t                        extra)
+                         int32_t                        extra,
+                         bool                           pivoting = false)
     {
         SCOPED_TRACE("interleaved alg=" + std::to_string(static_cast<int>(alg))
-                     + " m=" + std::to_string(m) + " batch=" + std::to_string(batch_count));
+                     + " m=" + std::to_string(m) + " batch=" + std::to_string(batch_count)
+                     + (pivoting ? " zero-diagonal" : ""));
         const int32_t               stride = batch_count + extra;
         const size_t                total  = static_cast<size_t>(m) * stride;
         std::vector<T>              dl(total, make_value<T>(0.0)), d = dl, du = dl, b = dl;
         std::vector<std::vector<T>> want;
         for(int32_t k = 0; k < batch_count; ++k)
         {
-            const system_t<T> s = make_system<T>(m, 1, k + 1);
+            const system_t<T> s
+                = pivoting ? make_pivoting_system<T>(m, 1, k + 1) : make_system<T>(m, 1, k + 1);
+            if(pivoting)
+                ASSERT_GT(s.swap_rows, 0);
             for(int32_t i = 0; i < m; ++i)
             {
                 const size_t pos = static_cast<size_t>(i) * stride + k;
@@ -665,6 +818,23 @@ TEST_F(PrecondTridiagonal, interleaved_batch_algorithms)
             run_interleaved<T>(handle, alg, 9, 130, 3);
         });
         run_interleaved<double>(handle, alg, 33, 257, 0);
+    }
+}
+
+// Zero-diagonal systems (make_pivoting_system): the LU algorithm has to swap rows k and
+// k + 1 whenever |d_k| < |dl_k+1| (0 < L_j on every even row; the row-swap branch divides
+// by dl_k+1 instead of the zero d_k), and the QR algorithm has to rotate them. The Thomas
+// algorithm (also the default) has no pivoting and is not applicable to these systems.
+TEST_F(PrecondTridiagonal, interleaved_batch_zero_diagonal_pivoting)
+{
+    for(const auto alg : {rocsparse_gtsv_interleaved_alg_lu, rocsparse_gtsv_interleaved_alg_qr})
+    {
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            run_interleaved<T>(handle, alg, 7, 3, 0, true);
+            run_interleaved<T>(handle, alg, 25, 27, 2, true);
+        });
+        run_interleaved<double>(handle, alg, 128, 5, 0, true);
     }
 }
 
