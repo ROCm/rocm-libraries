@@ -35,13 +35,14 @@
 
 #include "Debug.hpp"
 #include "alpha_mode_logging.hpp"
-#include "include/check_numerics_matrix.hpp"
-#include "rocblaslt-types.h"
-#include "mx_scale_format.hpp"
-#include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
+#include "gemm_scheduling_for_test.hpp"
 #include "get_all_search_type_for_test.hpp"
 #include "grouped_predicate_problem.hpp"
+#include "include/check_numerics_matrix.hpp"
+#include "mx_scale_format.hpp"
+#include "rocblaslt-types.h"
+#include "rocblaslt_fused_a2a_peers.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -82,6 +83,7 @@
 #include <atomic>
 #include <chrono>
 #include <complex>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
@@ -4084,17 +4086,56 @@ TensileLite::ContractionProblemGemm* ExtractProblemGemm(std::shared_ptr<void> ge
     return &data->problem;
 }
 
-// Apply the GemmPreference-supplied StreamK tile scheduling mode onto every
-// contraction problem currently carried by gemmData. Called from
-// rocblaslt_algo_get_heuristic_cpp before solution ranking so the SK5
-// arg-pack and the heuristic-selection paths see the same mode value.
-// Defined here because gemmData's concrete type (TensileDataGemm /
-// TensileDataGroupedGemm) only exists in this translation unit.
+extern "C" HIPBLASLT_EXPORT bool hipblaslt_gemm_scheduling_for_test(
+    std::shared_ptr<void> gemmData, bool grouped, size_t index, int32_t* smCount, int32_t* mode)
+{
+    if(!gemmData || !smCount || !mode)
+        return false;
+    const TensileLite::ContractionProblemGemm* problem = nullptr;
+    if(grouped)
+    {
+        const auto data = std::static_pointer_cast<TensileDataGroupedGemm>(gemmData);
+        if(index >= data->problem.gemms.size())
+            return false;
+        problem = &data->problem.gemms[index];
+    }
+    else
+    {
+        if(index != 0)
+            return false;
+        problem = ExtractProblemGemm(gemmData);
+    }
+    *smCount = problem->getParams().smCountTarget();
+    *mode    = problem->getParams().streamKTileSchedulingMode();
+    return true;
+}
+
+extern "C" HIPBLASLT_EXPORT bool hipblaslt_gemm_argument_for_test(std::shared_ptr<void> gemmData,
+                                                                  const char*           name,
+                                                                  uint32_t*             value)
+{
+    if(!gemmData || !name || !value)
+        return false;
+    const auto data = std::static_pointer_cast<TensileDataGemm>(gemmData);
+    for(const auto& kernel : data->kernels)
+    {
+        const TensileLite::KernelArguments::const_iterator arg(kernel.args, name);
+        if(arg != kernel.args.end() && arg->second == sizeof(*value))
+        {
+            std::memcpy(value, arg->first, sizeof(*value));
+            return true;
+        }
+    }
+    return false;
+}
+
+// The concrete GEMM data types only exist here. A negative mode inherits the
+// setting resolved when the problem was created from its descriptor or defaults.
 void applyStreamKTileSchedulingMode(std::shared_ptr<void>  gemmData,
                                 rocblaslt::RocGemmType gemmType,
                                 int32_t                mode)
 {
-    if(!gemmData)
+    if(!gemmData || mode < 0)
         return;
     if(gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM)
     {

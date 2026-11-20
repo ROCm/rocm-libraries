@@ -18,6 +18,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
   Added `hipblaslt-bench --partitions N --split_dim M|N|B` (which runs `testing_matmul` through
   `PartitionedGemm` with the same data, reference and verification), the `partitioned_gemm_ext`
   tests in `hipblaslt-test` and `samples/31_hipblaslt_gemm_partitioned_ext`.
+* Added `GemmInstance::setStreamKTileSchedulingMode()` to select Hybrid scheduling.
 * Device scalar alpha on gfx1250 through
   `HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT`, Extension API
   `GemmInputs::setScaleAlphaScalar()` / `getScaleAlphaScalar()`, and
@@ -37,6 +38,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 
 ### Resolved issues
 
+* Fixed C++ GEMMs losing descriptor scheduling settings and the benchmark ignoring C++ scheduling options.
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.
 * Fixed `hipblasLtMatmul` and `hipblaslt_ext::Gemm::initialize` accepting an algo for a grouped GEMM solution, and `hipblaslt_ext::GroupedGemm::initialize` accepting one for a non-grouped solution. They now return `HIPBLAS_STATUS_INVALID_VALUE`.
 * Fixed `hipblaslt_ext::GroupedGemm::initialize` with `useUserArgs = false` accepting an algo for a hand-written kernel (gfx942 only) whose problem predicates a GEMM of the group fails. It now returns `HIPBLAS_STATUS_INVALID_VALUE`, as `hipblaslt_ext::Gemm::initialize` does. With `useUserArgs = true` the sizes come from device memory and are not checked.

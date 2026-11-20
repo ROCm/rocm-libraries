@@ -170,7 +170,7 @@ namespace TensileLite
         friend class const_iterator;
 
         using ArgPair = std::pair<void const*, size_t>;
-        class const_iterator
+        class TENSILELITEHOST_EXPORT const_iterator
         {
         public:
             // iterator traits

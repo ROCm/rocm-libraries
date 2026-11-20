@@ -18,10 +18,11 @@ struct Arguments;
 // stream during timed runs (0 disables it); cotenant_max_occupancy caps its
 // workgroups per CU through LDS reservation.
 //
-// sm_count_target maps to HIPBLASLT_MATMUL_DESC_SM_COUNT_TARGET and
-// streamk_tile_scheduling_mode maps to HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT
-// as a tri-state {0=OFF, 1=ON, 2=AUTO}. The resolved mode defaults to -1
-// ("unset"): a negative value tells the bench to leave the attribute untouched
+// sm_count_target sets the handle's compute-unit target for both C and C++ problems.
+// streamk_tile_scheduling_mode sets the matmul descriptor, C++ GEMM instance,
+// and C++ heuristic preference as a tri-state {0=OFF, 1=ON, 2=AUTO}.
+// The resolved mode defaults to -1
+// ("unset"): a negative value tells the bench to leave the setting untouched
 // so the library default applies. streamk_tile_scheduling_mode_str() holds the raw
 // CLI token (off|on|auto or 0|1|2) before client.cpp resolves it.
 //
