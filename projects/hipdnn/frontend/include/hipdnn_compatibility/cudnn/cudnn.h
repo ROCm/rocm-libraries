@@ -56,11 +56,16 @@ inline cudnnStatus_t cudnnCreate(cudnnHandle_t* handle)
         hipdnn_frontend::detail::hipdnnBackend()->create(handle));
 }
 
-/// @brief Destroys a handle. During process exit, once the backend instance may be gone, the
-/// handle is left to the operating system and the call succeeds.
+/// @brief Destroys a handle; a null handle is CUDNN_STATUS_BAD_PARAM. During process exit, once
+/// the backend instance may be gone, the handle is left to the operating system and the call
+/// succeeds.
 inline cudnnStatus_t cudnnDestroy(cudnnHandle_t handle)
 {
-    if(handle != nullptr && hipdnn_frontend::detail::IHipdnnBackend::isShutdown())
+    if(handle == nullptr)
+    {
+        return CUDNN_STATUS_BAD_PARAM;
+    }
+    if(hipdnn_frontend::detail::IHipdnnBackend::isShutdown())
     {
         return CUDNN_STATUS_SUCCESS;
     }

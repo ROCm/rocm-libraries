@@ -15,6 +15,7 @@
 
 #ifndef _WIN32
 #include <fstream>
+#include <sys/wait.h>
 #include <unistd.h>
 #endif
 
@@ -66,8 +67,11 @@ inline bool isLibraryLoaded(const std::filesystem::path& libraryPath)
 }
 
 /// Runs the current test again in a child process of this executable, filtered to that test,
-/// and returns the std::system status: 0 when the child exits with status 0. The child
-/// inherits this process's environment; set what it needs before calling.
+/// and returns the child's exit code, so 0 when the child exits with status 0. On POSIX a child
+/// killed by a signal returns minus the signal number (a shell between the two may instead
+/// report 128 plus the signal number as its own exit code); on Windows a crash returns the
+/// exception code. The child inherits this process's environment; set what it needs before
+/// calling.
 inline int runCurrentTestInChild()
 {
     const auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
@@ -77,7 +81,20 @@ inline int runCurrentTestInChild()
     }
     const std::string command = "\"" + currentExecutablePath().string() + "\" --gtest_filter="
                                 + info->test_suite_name() + "." + info->name();
-    return std::system(command.c_str());
+    const int status = std::system(command.c_str());
+#ifdef _WIN32
+    return status;
+#else
+    if(status == -1)
+    {
+        throw std::runtime_error("runCurrentTestInChild: could not start the child");
+    }
+    if(WIFSIGNALED(status))
+    {
+        return -WTERMSIG(status);
+    }
+    return WEXITSTATUS(status);
+#endif
 }
 
 } // namespace hipdnn_test_sdk::utilities

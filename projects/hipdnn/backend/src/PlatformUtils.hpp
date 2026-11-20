@@ -29,7 +29,9 @@ std::string getSystemInfo();
 std::array<uint8_t, 16> generateUuidV4();
 
 /// True while the process is exiting and the loader is unloading libraries. On Windows,
-/// ExitProcess has terminated every other thread by then, so nothing may wait for one.
+/// ExitProcess has terminated every other thread by then, so nothing may wait for one; the
+/// answer comes from RtlDllShutdownInProgress, an undocumented ntdll export, and is false
+/// when ntdll or the export is missing, which keeps the normal, waiting logger teardown.
 /// Always false on Linux, where exit handlers run while the other threads are still alive.
 bool isProcessTerminating();
 

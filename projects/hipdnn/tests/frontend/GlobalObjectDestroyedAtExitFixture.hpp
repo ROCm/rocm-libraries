@@ -119,11 +119,14 @@ protected:
             "ASAN_OPTIONS",
             asanOptions.empty() ? "detect_leaks=0" : asanOptions + ":detect_leaks=0");
 
-        const int status = hipdnn_test_sdk::utilities::runCurrentTestInChild();
-        EXPECT_EQ(status, 0) << "the child did not exit cleanly (exit " << PLUGIN_RELEASED_AT_EXIT
-                             << ": the engine plugin was released during exit; "
-                             << DESTROY_FAILED_AT_EXIT
-                             << ": a destroy failed during exit; otherwise a crash)";
+        const int exitCode = hipdnn_test_sdk::utilities::runCurrentTestInChild();
+        EXPECT_EQ(exitCode, 0) << "the child did not exit cleanly. Exit code "
+                               << PLUGIN_RELEASED_AT_EXIT
+                               << ": the engine plugin was released during exit; "
+                               << PROBE_FAILED_AT_EXIT << ": the plugin check itself failed; "
+                               << DESTROY_FAILED_AT_EXIT
+                               << ": a destroy failed, or reached the backend, during exit; "
+                                  "negative: killed by that signal; anything else: a crash";
     }
 };
 

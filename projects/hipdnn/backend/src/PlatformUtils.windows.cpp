@@ -153,8 +153,10 @@ std::array<uint8_t, 16> generateUuidV4()
 
 bool isProcessTerminating()
 {
-    // RtlDllShutdownInProgress reports whether the loader is detaching DLLs because the
-    // process is exiting (as opposed to a FreeLibrary).
+    // RtlDllShutdownInProgress, an undocumented ntdll export, reports whether the loader is
+    // detaching DLLs because the process is exiting (as opposed to a FreeLibrary). A missing
+    // ntdll or export deliberately reports false, which keeps the normal, waiting logger
+    // teardown.
     typedef BOOLEAN(WINAPI * RtlDllShutdownInProgressPtr)();
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if(ntdll == nullptr)

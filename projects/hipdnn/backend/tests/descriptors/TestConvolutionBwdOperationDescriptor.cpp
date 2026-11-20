@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "ConvolutionTestUtils.hpp"
 #include "DescriptorTestUtils.hpp"
 #include "HipdnnException.hpp"
 #include "TensorDescriptorTestUtils.hpp"
@@ -182,27 +183,8 @@ void finalizeDgrad(DgradShape shape)
                        1,
                        static_cast<const void*>(&dxPtr));
 
-    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_PRE_PADDINGS,
-                       HIPDNN_TYPE_INT64,
-                       static_cast<int64_t>(shape.prePadding.size()),
-                       shape.prePadding.data());
-    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_POST_PADDINGS,
-                       HIPDNN_TYPE_INT64,
-                       static_cast<int64_t>(shape.postPadding.size()),
-                       shape.postPadding.data());
-    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_FILTER_STRIDES,
-                       HIPDNN_TYPE_INT64,
-                       static_cast<int64_t>(shape.stride.size()),
-                       shape.stride.data());
-    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_DILATIONS,
-                       HIPDNN_TYPE_INT64,
-                       static_cast<int64_t>(shape.dilation.size()),
-                       shape.dilation.data());
-    auto computeType = HIPDNN_DATA_FLOAT;
-    desc->setAttribute(HIPDNN_ATTR_CONVOLUTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &computeType);
-    auto convMode = HIPDNN_CROSS_CORRELATION;
-    desc->setAttribute(
-        HIPDNN_ATTR_CONVOLUTION_CONV_MODE, HIPDNN_TYPE_CONVOLUTION_MODE, 1, &convMode);
+    setConvolutionParameters(
+        *desc, shape.prePadding, shape.postPadding, shape.stride, shape.dilation);
 
     desc->finalize();
 }
