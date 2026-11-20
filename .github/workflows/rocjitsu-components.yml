@@ -11,6 +11,11 @@ name: rocJITsu Component Tests
 # used by the hipRAND rocJITsu parity workflow.
 
 on:
+  push:
+    branches:
+      - users/dileepr1/rocjitsu-components-dispatch
+    paths:
+      - .github/rocjitsu-oneshot-hipsolver
   workflow_dispatch:
     inputs:
       components:
@@ -80,7 +85,7 @@ jobs:
 
       - name: Install pinned gfx94X runtime and tests
         env:
-          ROCM_VERSION: ${{ inputs.rocm_version }}
+          ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
         run: |
           set -euo pipefail
           root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
@@ -98,8 +103,8 @@ jobs:
       - name: List selected components
         id: list
         env:
-          CTEST_LABEL: ${{ inputs.ctest_label }}
-          COMPONENTS: ${{ inputs.components }}
+          CTEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
+          COMPONENTS: ${{ github.event_name == 'push' && 'hipsolver' || inputs.components }}
         run: |
           set -euo pipefail
           args=(
@@ -131,8 +136,8 @@ jobs:
     container:
       image: ubuntu:24.04
     env:
-      ROCM_VERSION: ${{ inputs.rocm_version }}
-      CTEST_LABEL: ${{ inputs.ctest_label }}
+      ROCM_VERSION: ${{ inputs.rocm_version || '10.2.0a20260928' }}
+      CTEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
       ROCJITSU_ARG: ${{ inputs.rocjitsu_arg }}
       COMPONENT: ${{ matrix.component }}
       BUILD_RUNS_ON: ${{ needs.prepare.outputs.build_runs_on }}
