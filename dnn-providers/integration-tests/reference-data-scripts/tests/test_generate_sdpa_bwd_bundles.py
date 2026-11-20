@@ -343,8 +343,9 @@ TOML_SECTION_KEYS = {
     "test_skips": {"filters", "reason", "archs", "platforms"},
     "tolerance_overrides": {"filters", "atol", "rtol"},
     "validator_overrides": {"filters", "tensors", "validator", "rms_threshold"},
+    "conv_fwd_tolerance.float": {"summation_order"},
 }
-_TOML_HEADER = re.compile(r"^\[\[?([A-Za-z_]+)\]\]?$")
+_TOML_HEADER = re.compile(r"^\[\[?([A-Za-z_]+(?:\.[A-Za-z_]+)*)\]\]?$")
 _TOML_KEY = re.compile(r"^([A-Za-z_][A-Za-z0-9_-]*)\s*=")
 
 
