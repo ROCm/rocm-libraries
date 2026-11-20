@@ -83,6 +83,8 @@ struct GraphSpec
     int64_t kvLength = 65;
     int64_t headSize = 96;
     data_objects::DataType dtype = data_objects::DataType::HALF;
+    // The SDPA node's compute_data_type.
+    data_objects::DataType computeDataType = data_objects::DataType::FLOAT;
     bool bhsd = false;
     bool returnLse = true;
     data_objects::DataType lseDtype = data_objects::DataType::FLOAT;
@@ -313,7 +315,7 @@ flatbuffers::FlatBufferBuilder buildSdpaGraph(const GraphSpec& spec)
     const std::vector<flatbuffers::Offset<data_objects::Node>> nodes{
         data_objects::CreateNodeDirect(builder,
                                        "sdpa",
-                                       data_objects::DataType::FLOAT,
+                                       spec.computeDataType,
                                        data_objects::NodeAttributes::SdpaAttributes,
                                        attributes.Finish().Union())};
 
@@ -1585,6 +1587,30 @@ TEST(TestGfx1151WmmaAttentionSignature, RefusesEachExchangeOfTwoLikeDecodeSlots)
                 prepareFailure(decodeGraph(), kpackKernel(decodeKernel(128), exchanged)),
                 what.c_str());
         }
+    }
+}
+
+TEST(TestGfx1151WmmaAttentionMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(matchGraph(spec).has_value()) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(matchGraph(spec).has_value()) << data_objects::EnumNameDataType(computeType);
     }
 }
 

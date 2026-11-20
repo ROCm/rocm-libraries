@@ -13,8 +13,19 @@
 {% endblock %}
 
 
+{% block primbench_settings %}
+{{ super() }}
+    // Match benchmark_device_find_first_of.cpp.
+    settings.min_gpu_ms_per_batch    = 1000;
+    settings.batch_window_size       = 3;
+    settings.noise_tolerance_percent = 4;
+{% endblock %}
+
 {% block benchmark_queue %}
-    std::vector<size_t> keys_sizes{1, 10, 100, 1000};
-    std::vector<double> first_occurrences{0.1, 0.5, 1.0};
-    executor.queue<benchmark_type>(keys_sizes, first_occurrences);
+    // One benchmark per keys size, so each counts equally in the score.
+    for(size_t keys_size : {1, 10, 100, 1000, 10000})
+    {
+        executor.queue<benchmark_type>(std::vector<size_t>{keys_size},
+                                       std::vector<double>{0.1, 0.5, 1.0});
+    }
 {% endblock %}

@@ -487,9 +487,6 @@ TYPED_TEST(backend_pairwise_amg, initial_pass_pairs_only_strong_negative_couplin
     expect_valid_pairwise(A, agg, 2);
     EXPECT_EQ(agg.G[0], 0);
     EXPECT_EQ(agg.G[1], 0);
-
-    KNOWN_BUG("the threshold is -beta times the largest signed coupling, which is "
-              "positive when all couplings are negative, so every coupling passes");
     EXPECT_EQ(agg.nc, 3);
     EXPECT_NE(agg.G[2], agg.G[3]);
 }
@@ -562,18 +559,76 @@ TYPED_TEST(backend_pairwise_amg, cmk_orderings_pair_a_scrambled_path_along_the_p
         Aggregation agg;
         ASSERT_IN_LOOP(this->initial(A, 0.25, ordering, &agg));
         expect_valid_pairwise(A, agg, 2);
+        EXPECT_EQ(agg.nc, 6);
     }
+}
 
-    KNOWN_BUG("the CMK, RCMK, MIS and multicoloring permutations map a node to its "
-              "position, but the node visited at step k is taken as perm[k]");
+// The orderings map each node to its position, and the passes visit the nodes by increasing
+// position. On path(6), MIS and multicoloring both give the positions 0, 3, 1, 4, 2, 5, so
+// the aggregates start from the nodes 0, 2 and 4, which are the first members in rG.
+TYPED_TEST(backend_pairwise_amg, mis_and_multicoloring_orderings_visit_the_nodes_by_position)
+{
+    using T              = typename TypeParam::value_type;
+    const Csr<T> A       = path<T>(6);
+    const Csr<T> fine    = doubled(A);
+    const Csr<T> none    = without_entries<T>(A.n, 3);
+    const Csr<T> no_fine = without_entries<T>(fine.n, 3);
 
-    for(int ordering : {2, 3})
+    for(int ordering : {4, 5})
     {
-        SCOPED_TRACE(ordering == 2 ? "CMK" : "RCMK");
+        for(bool with_ghost : {false, true})
+        {
+            SCOPED_TRACE(std::string(ordering == 4 ? "MIS" : "multicoloring")
+                         + (with_ghost ? ", with a ghost part" : ""));
+
+            Aggregation agg;
+            ASSERT_IN_LOOP(this->initial(A, 0.25, ordering, &agg, with_ghost ? &none : nullptr));
+            expect_valid_pairwise(A, agg, 2);
+            EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 1, 1, 2, 2}));
+            EXPECT_EQ(std::vector<int>(agg.rG, agg.rG + agg.nc), (std::vector<int>{0, 2, 4}));
+
+            // A is also the coarse matrix of the pairs of fine, so the further pass on A visits
+            // its nodes in the same order
+            Aggregation pairs;
+            ASSERT_IN_LOOP(this->initial(fine, 0.25, 0, &pairs, with_ghost ? &no_fine : nullptr));
+            ASSERT_IN_LOOP(pairs.G == (std::vector<int>{0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5}));
+            ASSERT_IN_LOOP(dense(galerkin(fine, pairs.G, pairs.nc)) == dense(A));
+
+            ASSERT_IN_LOOP(this->further(A, 0.25, ordering, &pairs, with_ghost ? &none : nullptr));
+            expect_valid_pairwise(fine, pairs, 4);
+            EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2}));
+            EXPECT_EQ(std::vector<int>(pairs.rG, pairs.rG + pairs.nc), (std::vector<int>{0, 4, 8}));
+        }
+    }
+}
+
+// Row i + 1 of the lower bidiagonal matrix couples to row i, but row i not to row i + 1. Its
+// MIS is {0, 2, 4}, so the passes visit the nodes 0, 2, 4, 1, 3, 5: row 0 is dominant, 2 and 4
+// take their lower neighbours, and 5 stays alone. The coarse matrix is lower bidiagonal too,
+// and its MIS {0, 2} leaves aggregate 0 alone and pairs 2 with 1.
+TYPED_TEST(backend_pairwise_amg, mis_ordering_of_a_nonsymmetric_pattern)
+{
+    using T           = typename TypeParam::value_type;
+    const Csr<T> A    = transformed(filtered(path<T>(6), [](int i, int j, T) { return j <= i; }),
+                                 [](int i, int j, T v) { return i == j ? T(4) : v; });
+    const Csr<T> none = without_entries<T>(A.n, 3);
+
+    for(bool with_ghost : {false, true})
+    {
+        SCOPED_TRACE(with_ghost ? "with a ghost part" : "without a ghost part");
 
         Aggregation agg;
-        ASSERT_IN_LOOP(this->initial(A, 0.25, ordering, &agg));
-        EXPECT_EQ(agg.nc, 6);
+        ASSERT_IN_LOOP(this->initial(A, 0.25, 4, &agg, with_ghost ? &none : nullptr));
+        expect_valid_pairwise(A, agg, 2);
+        EXPECT_EQ(agg.G, (std::vector<int>{-1, 0, 0, 1, 1, 2}));
+        EXPECT_EQ(std::vector<int>(agg.rG, agg.rG + agg.nc), (std::vector<int>{2, 4, 5}));
+        EXPECT_EQ(agg.unaggregated(), dominant_rows(A));
+
+        const Csr<T> Ac        = galerkin(A, agg.G, agg.nc);
+        const Csr<T> no_coarse = without_entries<T>(Ac.n, 3);
+        ASSERT_IN_LOOP(this->further(Ac, 0.25, 4, &agg, with_ghost ? &no_coarse : nullptr));
+        expect_valid_pairwise(A, agg, 4);
+        EXPECT_EQ(agg.G, (std::vector<int>{-1, 0, 0, 1, 1, 1}));
     }
 }
 
@@ -638,9 +693,6 @@ TYPED_TEST(backend_pairwise_amg, further_pass_pairs_only_strong_negative_couplin
     ASSERT_TRUE(this->further(coarse, 0.25, 0, &agg));
     expect_valid_pairwise(A, agg, 4);
     EXPECT_EQ(agg.G[0], agg.G[2]);
-
-    KNOWN_BUG("the threshold is -beta times the smallest coupling, which is positive "
-              "when it is negative, so every coupling passes");
     EXPECT_EQ(agg.nc, 3);
     EXPECT_NE(agg.G[4], agg.G[6]);
 }
@@ -799,12 +851,18 @@ TYPED_TEST(backend_pairwise_amg, ghost_couplings_count_in_the_strength_threshold
     ASSERT_TRUE(this->further(galerkin(A, agg.G, agg.nc), 0.25, 0, &agg, &coarse_weak));
     EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 0, 0}));
 
-    KNOWN_BUG("the ghost couplings enter the threshold with their sign, as a maximum");
-
     const Csr<T> strong = column_ghost<T>(4, -8.0);
     Aggregation  alone;
     ASSERT_TRUE(this->initial(A, 0.25, 0, &alone, &strong));
     EXPECT_EQ(alone.G, (std::vector<int>{0, 1, 2, 3}));
+
+    const Csr<T> coarse_strong = column_ghost<T>(2, -8.0);
+    Aggregation  pairs;
+    ASSERT_TRUE(this->initial(A, 0.25, 0, &pairs));
+    ASSERT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
+    ASSERT_TRUE(this->further(galerkin(A, pairs.G, pairs.nc), 0.25, 0, &pairs, &coarse_strong));
+    EXPECT_EQ(pairs.nc, 2);
+    EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
 }
 
 // For a negative diagonal the signs of the row, its ghost couplings included, are flipped
@@ -825,6 +883,53 @@ TYPED_TEST(backend_pairwise_amg, ghost_couplings_of_a_negated_matrix)
         ASSERT_TRUE(this->further(galerkin(A, agg.G, agg.nc), 0.25, 0, &agg, &coarse_ghost));
         EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 0, 0}));
         EXPECT_EQ(agg.nc, 1);
+
+        // A strong ghost coupling makes the local couplings weak
+        const Csr<T> strong = sign(column_ghost<T>(4, -8.0));
+        Aggregation  alone;
+        ASSERT_IN_LOOP(this->initial(A, 0.25, 0, &alone, &strong));
+        EXPECT_EQ(alone.G, (std::vector<int>{0, 1, 2, 3}));
+
+        const Csr<T> coarse_strong = sign(column_ghost<T>(2, -8.0));
+        Aggregation  pairs;
+        ASSERT_IN_LOOP(this->initial(A, 0.25, 0, &pairs));
+        ASSERT_IN_LOOP(pairs.G == (std::vector<int>{0, 0, 1, 1}));
+        ASSERT_IN_LOOP(
+            this->further(galerkin(A, pairs.G, pairs.nc), 0.25, 0, &pairs, &coarse_strong));
+        EXPECT_EQ(pairs.nc, 2);
+        EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
+    }
+}
+
+// The orderings are 0 to 5
+TYPED_TEST(backend_pairwise_amg, unknown_orderings_are_rejected)
+{
+    using T                   = typename TypeParam::value_type;
+    const Csr<T> A            = path<T>(4);
+    const Csr<T> ghost        = column_ghost<T>(4, -0.1);
+    const Csr<T> coarse_ghost = column_ghost<T>(2, -0.1);
+
+    Aggregation pairs;
+    ASSERT_TRUE(this->initial(A, 0.25, 0, &pairs));
+    const Csr<T> Ac = galerkin(A, pairs.G, pairs.nc);
+
+    for(int ordering : {-1, 6})
+    {
+        SCOPED_TRACE("ordering " + std::to_string(ordering));
+
+        Aggregation agg;
+        EXPECT_FALSE(this->initial(A, 0.25, ordering, &agg));
+        EXPECT_EQ(agg.G, std::vector<int>(4, 7));
+        EXPECT_FALSE(this->initial(A, 0.25, ordering, &agg, &ghost));
+        EXPECT_EQ(agg.nc, -1);
+        EXPECT_EQ(agg.Gsize, -1);
+        EXPECT_EQ(agg.rG, nullptr);
+        EXPECT_EQ(agg.G, std::vector<int>(4, 7));
+
+        EXPECT_FALSE(this->further(Ac, 0.25, ordering, &pairs));
+        EXPECT_FALSE(this->further(Ac, 0.25, ordering, &pairs, &coarse_ghost));
+        EXPECT_EQ(pairs.Gsize, 2);
+        EXPECT_EQ(pairs.G, (std::vector<int>{0, 0, 1, 1}));
     }
 }
 
@@ -870,6 +975,49 @@ TYPED_TEST(backend_pairwise_amg, positive_couplings_are_never_strong)
         expect_valid_pairwise(A, agg, 4);
         EXPECT_EQ(agg.nc, 3);
         EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 0, 0, 1, 1, 2, 2}));
+    }
+}
+
+// Node 0 of M couples by -1 to 1 and by +8 to 2. Only the negative couplings set the
+// threshold, -beta max_{a_0k < 0} |a_0k| = -0.25, so 0 pairs with 1, locally and with
+// negative or positive ghost couplings
+TYPED_TEST(backend_pairwise_amg, positive_couplings_do_not_count_in_the_strength_threshold)
+{
+    using T = typename TypeParam::value_type;
+    Csr<T> M(3);
+    M.add(0, 9.0);
+    M.add(1, -1.0);
+    M.add(2, 8.0);
+    M.end_row();
+    M.add(0, -1.0);
+    M.add(1, 1.0);
+    M.end_row();
+    M.add(0, 8.0);
+    M.add(2, 8.0);
+    M.end_row();
+    const Csr<T> A = doubled(M);
+
+    for(double v : {0.0, -0.1, 8.0})
+    {
+        SCOPED_TRACE(v == 0.0 ? std::string("local") : "ghost couplings " + std::to_string(v));
+        const bool   with_ghost    = v != 0.0;
+        const Csr<T> ghost         = column_ghost<T>(3, v);
+        const Csr<T> doubled_ghost = column_ghost<T>(A.n, v);
+
+        Aggregation initial;
+        ASSERT_IN_LOOP(this->initial(M, 0.25, 0, &initial, with_ghost ? &ghost : nullptr));
+        EXPECT_EQ(initial.nc, 2);
+        EXPECT_EQ(initial.G, (std::vector<int>{0, 0, 1}));
+
+        Aggregation agg;
+        ASSERT_IN_LOOP(this->initial(A, 0.25, 0, &agg, with_ghost ? &doubled_ghost : nullptr));
+        ASSERT_IN_LOOP(agg.G == (std::vector<int>{0, 0, 1, 1, 2, 2}));
+        ASSERT_IN_LOOP(dense(galerkin(A, agg.G, agg.nc)) == dense(M));
+
+        ASSERT_IN_LOOP(this->further(M, 0.25, 0, &agg, with_ghost ? &ghost : nullptr));
+        expect_valid_pairwise(A, agg, 4);
+        EXPECT_EQ(agg.nc, 2);
+        EXPECT_EQ(agg.G, (std::vector<int>{0, 0, 0, 0, 1, 1}));
     }
 }
 

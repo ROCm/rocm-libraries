@@ -68,7 +68,7 @@ class TestTraitParse(unittest.TestCase):
 
     def test_multi_token_pipelines(self):
         for pipeline in MULTI_TOKEN_PIPELINES:
-            for epilogue in ("cshuffle", "default", "tdm"):
+            for epilogue in ("cshuffle", "default", "tdm", "tdmstaged"):
                 trait = f"{pipeline}_{epilogue}_intrawave_True_False_True_False"
                 parts = split_trait(trait)
                 self.assertEqual(parts[0], pipeline)
@@ -112,6 +112,8 @@ class TestTraitParse(unittest.TestCase):
             "comp_tdm_pc_tdm_intrawave_False_False_False_False",
             "comp_tdm_pc_s2l1_tdm_intrawave_False_False_False_False",
             "comp_tdm_pc_s5l4_cshuffle_intrawave_False_False_False",
+            "comp_tdm_pc_tdmstaged_intrawave_False_False_False_False",
+            "comp_tdm_v2_tdmstaged_intrawave_False_False_False",
             "comp_tdm_v3_cshuffle_intrawave_False_False_False_False",
             "comp_async_eight_waves_cshuffle_intrawave_False_False_False",
             "weight_preshuffle_default_intrawave_False_False_False",
@@ -860,8 +862,9 @@ def _v3_tile_ok(
 
 
 class TestCompTdmV3(unittest.TestCase):
-    """comp_tdm_v3: [4, 4, 1] and the CShuffle epilogue for it only, fp8/bf8
-    A/B, gemm_universal only, plain row-major tile partitioner."""
+    """comp_tdm_v3: [4, 4, 1] and the CShuffle epilogue for it only, fp8/bf8 A/B
+    (rcr) or fp16/bf16 A/B (any A/B layout), gemm_universal only, plain row-major
+    tile partitioner."""
 
     OTHER_PIPELINES = (
         "comp_tdm",
@@ -899,10 +902,29 @@ class TestCompTdmV3(unittest.TestCase):
             )
         )
         self.assertTrue(_v3_tile_ok("comp_tdm_v3", dtype="bf8"))
+        # 16-bit A/B on the 16x16x32 warp tile, both wave maps.
+        tile16 = dict(tile_k=64, warp_tile_m=16, warp_tile_n=16, warp_tile_k=32)
         for dtype in ("fp16", "bf16"):
-            self.assertFalse(
-                _v3_tile_ok("comp_tdm_v3", dict(warp_tile_k=32), dtype=dtype), dtype
+            self.assertTrue(_v3_tile_ok("comp_tdm_v3", tile16, dtype=dtype), dtype)
+            self.assertTrue(
+                _v3_tile_ok(
+                    "comp_tdm_v3", dict(tile16, tile_m=128, tile_n=128, warp_m=2, warp_n=2),
+                    dtype=dtype,
+                ),
+                dtype,
             )
+        self.assertIn(
+            "fp8/bf8 or fp16/bf16",
+            vu.gfx1250_tdm_v3_reject_reason("comp_tdm_v3", "fp32", "fp32", 4, 4, 1),
+        )
+        # tile_k / warp_tile_k must be a power of two (no 192 with a 32 K step).
+        self.assertFalse(_v3_tile_ok("comp_tdm_v3", dict(tile16, tile_k=192), dtype="bf16"))
+        self.assertIn(
+            "power of two",
+            vu.gfx1250_tdm_v3_reject_reason(
+                "comp_tdm_v3", "bf16", "bf16", 4, 4, 1, tile_k=192, warp_tile_k=32
+            ),
+        )
         # Shared-table wave maps outside 2x2x1 / 4x4x1 are not v3 maps.
         self.assertFalse(_v3_tile_ok("comp_tdm_v3", dict(warp_m=4, warp_n=2)))
         self.assertFalse(_v3_tile_ok("comp_tdm_v3", prefix="batched_gemm"))
@@ -915,8 +937,13 @@ class TestCompTdmV3(unittest.TestCase):
             vu.gfx1250_tdm_v3_reject_reason("comp_tdm", "fp16", "fp16", 4, 2, 1), ""
         )
 
-    def test_v3_rcr_only(self):
+    def test_v3_8bit_rcr_only(self):
         self.assertTrue(_v3_tile_ok("comp_tdm_v3", layout="rcr"))
+        tile16 = dict(tile_k=64, warp_tile_m=16, warp_tile_n=16, warp_tile_k=32)
+        for layout in ("rrr", "crr", "ccr"):
+            self.assertTrue(
+                _v3_tile_ok("comp_tdm_v3", tile16, dtype="bf16", layout=layout), layout
+            )
         for layout in ("rrr", "crr", "ccr", "rcc"):
             self.assertFalse(_v3_tile_ok("comp_tdm_v3", layout=layout), layout)
             self.assertIn(
@@ -1001,8 +1028,28 @@ class TestCompTdmV3(unittest.TestCase):
                 self.assertEqual(
                     ok(p, "cshuffle", "intrawave", False, prefix), allowed, (p, prefix)
                 )
-                self.assertEqual(vu.tdm_pipeline_epilogue(p), "tdm")
-        self.assertEqual(vu.tdm_pipeline_epilogue("comp_tdm_v3"), "cshuffle")
+                self.assertEqual(vu.tdm_pipeline_epilogues(p), ("tdm", "tdmstaged"))
+        self.assertEqual(vu.tdm_pipeline_epilogues("comp_tdm_v3"), ("cshuffle",))
+
+    def test_tdm_staged_trait_rules(self):
+        ok = vu.is_trait_combination_valid
+        for p in ("comp_tdm", "comp_tdm_v2", "comp_tdm_pc"):
+            self.assertTrue(ok(p, "tdmstaged", "intrawave", False, "gemm_universal"))
+            self.assertFalse(ok(p, "tdmstaged", "interwave", False, "gemm_universal"))
+            self.assertFalse(ok(p, "tdmstaged", "intrawave", True, "gemm_universal"))
+            self.assertFalse(
+                ok(p, "tdmstaged", "intrawave", False, "gemm_universal", pad_m=True)
+            )
+            self.assertFalse(
+                ok(p, "tdmstaged", "intrawave", False, "gemm_universal", "rrc")
+            )
+        self.assertFalse(ok("comp_tdm_v3", "tdmstaged", "intrawave", False))
+        self.assertFalse(ok("compv3", "tdmstaged", "intrawave", False))
+        # MX GEMM and the quant ops have no staged TDM epilogue.
+        self.assertFalse(ok("comp_tdm", "tdmstaged", "intrawave", False, "mx_gemm"))
+        self.assertFalse(ok("compv3", "tdmstaged", "intrawave", False, "gemm_aquant"))
+        with self.assertRaisesRegex(ValueError, "tdmstaged epilogue"):
+            vu.reject_async_tdm_traits("grouped_gemm_rowcolquant", None, "tdmstaged")
 
     def test_config_lists_only_the_v3_instance(self):
         with open(_V3_CONFIG) as f:
@@ -1024,6 +1071,26 @@ class TestCompTdmV3(unittest.TestCase):
         combo, tile = kernels[0]
         self.assertEqual(tuple(combo[:3]), ("comp_tdm_v3", "cshuffle", "intrawave"))
         self.assertEqual(tile, _V3_TILE)
+
+    def test_bf16_config_lists_the_16bit_v3_instances(self):
+        path = os.path.join(_HERE, "gemm_universal", "configs", "gfx1250_bf16_comp_tdm_v3.json")
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for layout in ("rcr", "ccr"):
+            b = GemmKernelBuilder("gemm_universal", tmp, "gfx1250", "bf16", layout, path)
+            b.USE_OP_WARP_TILE_ROWS = True  # as GemmUniversalKernelBuilder
+            kernels = [
+                (c[:3], t["tile_k"])
+                for t in b._get_tile_configs()
+                for c in b._generate_trait_combinations()
+                if b._validate_tile_config(*[t[k] for k in _V3_TILE], c[0])
+            ]
+            self.assertEqual(
+                sorted(kernels),
+                [(("comp_tdm_v3", "cshuffle", "intrawave"), 64),
+                 (("comp_tdm_v3", "cshuffle", "intrawave"), 128)],
+                layout,
+            )
 
     def test_default_configs_do_not_list_v3(self):
         for path in (
@@ -1083,7 +1150,9 @@ class TestBuilderCompTdmV3(_BuilderCase):
             self._gen_v3(prefix="batched_gemm")
         # comp_tdm_pc is left out: it also takes cshuffle on gemm_universal (split-K).
         for pipeline in ("comp_tdm", "comp_tdm_v2"):
-            with self.assertRaisesRegex(ValueError, "requires the tdm epilogue"):
+            with self.assertRaisesRegex(
+                ValueError, "requires the tdm or tdmstaged epilogue"
+            ):
                 self._gen_v3(pipeline=pipeline)
 
 

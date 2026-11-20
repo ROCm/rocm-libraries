@@ -53,9 +53,11 @@
 #include <cstdlib>
 #include <cstring>
 #include <iomanip>
+#include <limits>
 #include <mutex>
 #include <numeric>
 #include <random>
+#include <stdexcept>
 #include <unordered_map>
 
 #include <sstream>
@@ -117,6 +119,46 @@ namespace TensileLite
                 " requires mxDataGenerator; rebuild with HIPBLASLT_ENABLE_MXDATAGENERATOR=ON"));
 #endif
         }
+    }
+
+    // A byte stride must fit the integer kernarg the kernel declares for it, because appendCustomType
+    // truncates silently.
+    static size_t checkedByteStride(size_t value, CustomArgType type, std::string const& name)
+    {
+        size_t limit = 0;
+        switch(type)
+        {
+        case CustomArgType::int8:
+            limit = std::numeric_limits<int8_t>::max();
+            break;
+        case CustomArgType::uint8:
+            limit = std::numeric_limits<uint8_t>::max();
+            break;
+        case CustomArgType::int16:
+            limit = std::numeric_limits<int16_t>::max();
+            break;
+        case CustomArgType::uint16:
+            limit = std::numeric_limits<uint16_t>::max();
+            break;
+        case CustomArgType::int32:
+            limit = std::numeric_limits<int32_t>::max();
+            break;
+        case CustomArgType::uint32:
+            limit = std::numeric_limits<uint32_t>::max();
+            break;
+        case CustomArgType::int64:
+            limit = std::numeric_limits<int64_t>::max();
+            break;
+        case CustomArgType::uint64:
+            limit = std::numeric_limits<uint64_t>::max();
+            break;
+        default:
+            throw std::runtime_error(concatenate(name, " needs an integer kernel argument"));
+        }
+        if(value > limit)
+            throw std::runtime_error(
+                concatenate(name, " ", value, " does not fit its kernel argument type"));
+        return value;
     }
 
     std::string toString(CustomArgSemantic arg)
@@ -965,6 +1007,7 @@ namespace TensileLite
         static const std::map<ContractionSolution::MatchingTag, const char*> MatchingTag2String
             = {{TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Equal)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::GridBased)},
+               {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::MeshBased)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Range)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::FreeSize)},
                {TENSILELITE_ENUMSTR(ContractionSolution::MatchingTag::Prediction)},
@@ -1086,17 +1129,6 @@ namespace TensileLite
         // magu.s << "\n";
 
         return magu.M;
-    }
-
-    uint32_t
-        ContractionSolution::magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const
-    {
-        if(magicDivAlg == 1)
-            return magicNumberAlg1(x, magicShift);
-        else if(magicDivAlg == 2)
-            return magicNumberAlg2(x, magicShift);
-        else
-            throw std::runtime_error("bad magicDivAlg");
     }
 
     uint32_t ContractionSolution::smallMagicNumber(uint32_t x) const
@@ -1221,8 +1253,7 @@ namespace TensileLite
             // The flat space is in padded tiles here too, so that a solution with
             // a K unit keeps one convention across every path it can take.
             uint32_t magicShift = 0;
-            const uint32_t magic = solution.magicNumber(
-                2,
+            const uint32_t magic = solution.magicNumberAlg2(
                 static_cast<uint32_t>(
                     skPaddedItersPerTile(itersPerTile, solution.skKGranularity())),
                 &magicShift);
@@ -1631,8 +1662,8 @@ namespace TensileLite
                         = skPaddedItersPerTile(sk3_itersPerTile, skKGranularity());
                     uint32_t magicNumberItersPerTile;
                     uint32_t magicShiftItersPerTile;
-                    magicNumberItersPerTile = magicNumber(
-                        2, sk3_paddedIters, &magicShiftItersPerTile);
+                    magicNumberItersPerTile
+                        = magicNumberAlg2(sk3_paddedIters, &magicShiftItersPerTile);
                     // Bit 30 = SK5 mode bit, bit 29 = uniform summation order.
                     // Both are stolen from the always-zero 5..30 window of
                     // magicNumberAlg2's shift field; bit 31 stays the "add"
@@ -1705,7 +1736,7 @@ namespace TensileLite
                 uint32_t magicNumberItersPerTile;
                 uint32_t magicShiftItersPerTile;
                 magicNumberItersPerTile
-                    = magicNumber(2, paddedItersPerTile, &magicShiftItersPerTile);
+                    = magicNumberAlg2(paddedItersPerTile, &magicShiftItersPerTile);
 
                 // MagicShiftItersPerTile wire format:
                 //   31    = magicNumberAlg2's "add" indicator (abit)
@@ -3209,7 +3240,7 @@ namespace TensileLite
                 = static_cast<uint32_t>(skPaddedItersPerTile(itersPerTile, skKGranularity()));
             skTotalIters    = static_cast<uint32_t>(numTiles * paddedItersPerTile);
             skMagicNumberItersPerTile
-                = magicNumber(2, paddedItersPerTile, &skMagicShiftItersPerTile);
+                = magicNumberAlg2(paddedItersPerTile, &skMagicShiftItersPerTile);
 
             bool twoTileStreamK = sizeMapping.isStreamK()
                                   || customKernel.workspaceType == CustomWorkspaceType::StreamK
@@ -3639,21 +3670,34 @@ namespace TensileLite
                 case CustomArgSemantic::StrideScaleB2:
                     rv.args.appendCustomType("StrideScaleB2", problem.mxsb().strides().at(descriptorStrideAB + 2), arg.type);
                     break;
+                // Computed in integers: a float product rounds to 24 bits and corrupts large strides.
                 case CustomArgSemantic::StrideA0Bytes:
                     rv.args.appendCustomType("StrideA0Bytes",
-                        descriptorA.strides()[1] * descriptorA.elementBytes(), arg.type);
+                        checkedByteStride(multiplyElementSize(descriptorA.strides()[1], descriptorA.elementBytes()),
+                                          arg.type,
+                                          "StrideA0Bytes"),
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideB0Bytes:
                     rv.args.appendCustomType("StrideB0Bytes",
-                        descriptorB.strides()[1] * descriptorB.elementBytes(), arg.type);
+                        checkedByteStride(multiplyElementSize(descriptorB.strides()[1], descriptorB.elementBytes()),
+                                          arg.type,
+                                          "StrideB0Bytes"),
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideC0Bytes:
                     rv.args.appendCustomType("StrideC0Bytes",
-                        problem.c().strides()[1] * problem.c().elementBytes(), arg.type);
+                        checkedByteStride(multiplyElementSize(problem.c().strides()[1], problem.c().elementBytes()),
+                                          arg.type,
+                                          "StrideC0Bytes"),
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideD0Bytes:
                     rv.args.appendCustomType("StrideD0Bytes",
-                        problem.d().strides()[1] * problem.d().elementBytes(), arg.type);
+                        checkedByteStride(multiplyElementSize(problem.d().strides()[1], problem.d().elementBytes()),
+                                          arg.type,
+                                          "StrideD0Bytes"),
+                        arg.type);
                     break;
                 case CustomArgSemantic::StrideMetadata0:
                     rv.args.appendCustomType("StrideMetadata0", problem.metadata().strides()[descriptorStrideAB], arg.type);
@@ -3978,27 +4022,34 @@ namespace TensileLite
                 // ---- Packed batch dimension divisors ----
                 // arg.index comes from the kernel's custom.config, so it is untrusted;
                 // fall back to a dimension of 1 rather than indexing out of bounds.
-                case CustomArgSemantic::MagicNumberSize:
+                case CustomArgSemantic::MagicNumberSizeAlg1:
+                case CustomArgSemantic::MagicShiftSizeAlg1:
                 {
                     uint32_t dimSize = arg.index < problem.problemSizes().size()
                                            ? problem.problemSizes()[arg.index]
                                            : 1;
                     uint32_t magicShift;
-                    uint32_t magicNum = magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
-                    rv.args.template append<uint32_t>("MagicNumberSize", magicNum);
+                    uint32_t magicNum = magicNumberAlg1(dimSize, &magicShift);
+                    rv.args.template append<uint32_t>(
+                        toString(arg.semantic),
+                        arg.semantic == CustomArgSemantic::MagicNumberSizeAlg1 ? magicNum
+                                                                               : magicShift);
                     break;
                 }
-                case CustomArgSemantic::MagicShiftSize:
+                case CustomArgSemantic::MagicNumberSizeAlg2:
+                case CustomArgSemantic::MagicShiftSizeAlg2:
                 {
                     uint32_t dimSize = arg.index < problem.problemSizes().size()
                                            ? problem.problemSizes()[arg.index]
                                            : 1;
                     uint32_t magicShift;
-                    magicNumber(sizeMapping.magicDivAlg, dimSize, &magicShift);
-                    rv.args.template append<uint32_t>("MagicShiftSize", magicShift);
+                    uint32_t magicNum = magicNumberAlg2(dimSize, &magicShift);
+                    rv.args.template append<uint32_t>(
+                        toString(arg.semantic),
+                        arg.semantic == CustomArgSemantic::MagicNumberSizeAlg2 ? magicNum
+                                                                               : magicShift);
                     break;
                 }
-
                 // ---- Epilogue control args ----
                 case CustomArgSemantic::BiasType:
                     rv.args.template append<uint32_t>("BiasType", static_cast<uint32_t>(problem.bias().dataType()));
@@ -4087,7 +4138,7 @@ namespace TensileLite
 
                 // rocRoller workgroup mapping. libdivide branchfree magics of
                 // the WGM integer, numTilesN, the tail, and the main block,
-                // plus the two signed quotients. Not Tensile magicNumber().
+                // plus the two signed quotients. Not Tensile's magicNumberAlg1/2().
                 case CustomArgSemantic::RR_WorkgroupMapping:
                     rv.args.appendCustomType("RR_WorkgroupMapping", wgmKernarg().workgroupMapping, arg.type);
                     break;

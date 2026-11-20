@@ -12,7 +12,7 @@
  * extents, groups, stride, dilation on either axis, the square odd filter of
  * at least 3x3, the "same" padding on both axes, the channel granules, the
  * block_k set, the LDS budget and the i32 limits of the buffer descriptors
- * and the block id.
+ * and the byte-count kernargs.
  */
 #include <stdio.h>
 #include <string.h>
@@ -178,13 +178,24 @@ static void test_problem_refusals(void)
              p->kpg = 1 << 14;
          },
          "filter exceeds 2147483647 B, the i32 buffer range"},
-        {"block id",
+        {"input",
          [](rocke_direct_conv_problem_t* p) {
-             p->N = 1 << 25;
+             p->N = 32;
              p->H = 256;
              p->W = 256;
+             p->cpg = 1024;
+             p->kpg = 1024;
          },
-         "17179869184 workgroups exceed the i32 block id"},
+         "input exceeds 2147483647 B, the i32 byte-count kernarg"},
+        {"output",
+         [](rocke_direct_conv_problem_t* p) {
+             p->N = 32;
+             p->H = 256;
+             p->W = 256;
+             p->cpg = 8;
+             p->kpg = 1024;
+         },
+         "output exceeds 2147483647 B, the i32 byte-count kernarg"},
     };
     for(const auto& c : cases)
     {

@@ -536,15 +536,172 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGolden)
     };
     AppendExpectedRawFeatures(expected, metadata, golden_raw);
 
-    const auto derived = common::EngineeredConvFeatures(
-        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, metadata.GetNumCu(), common::ConvDirection::Forward);
+    // Emit the derived block in the order the model's metadata lists it (18 base features, or 33
+    // when the model opts into the divfeat GEMM-tile-divisibility set), using the same production
+    // helper the runtime does. The derived-feature math itself is pinned by
+    // CPU_ConvAiEngineeredConvFeatures_NONE.Golden.
+    const auto derived = common::EngineeredConvFeaturesByName(1,
+                                                              64,
+                                                              64,
+                                                              56,
+                                                              56,
+                                                              56,
+                                                              56,
+                                                              3,
+                                                              3,
+                                                              1,
+                                                              metadata.GetNumCu(),
+                                                              common::ConvDirection::Forward,
+                                                              /*spatial_dim=*/2,
+                                                              /*D_in=*/1,
+                                                              /*D_out=*/1,
+                                                              /*K_d=*/1,
+                                                              /*phys_in_channels=*/64,
+                                                              miopenFloat,
+                                                              metadata.GetDerivedFeatureNames());
     expected.insert(expected.end(), derived.begin(), derived.end());
 
-    ASSERT_EQ(metadata.GetEngineeredNumInputs(), 47u);
+    // 29 metadata-driven one-hot/raw slots + however many derived features the model lists.
+    ASSERT_EQ(metadata.GetEngineeredNumInputs(), 29u + metadata.GetDerivedFeatureNames().size());
     ASSERT_EQ(features.size(), metadata.GetEngineeredNumInputs());
     ASSERT_EQ(features.size(), expected.size());
     for(size_t i = 0; i < expected.size(); ++i)
         EXPECT_FLOAT_EQ(features[i], expected[i]) << "TunaNet feature mismatch at index " << i;
+}
+
+// Backward counterpart of ExtractTunaNet2dFeaturesGolden, built end to end through the production
+// extractor on a problem with C (256) != K (64) for both BackwardData and BackwardWeights. The
+// expected derived block is assembled with the physical C_in (= C), so if the call site regressed
+// to problem.GetInChannels() (= K for a backward problem) the divfeat log_cpg_in / is_depthwise
+// would use K/g and this fails. ExtractTunaNet2dFeaturesGolden uses a Forward C = K = 64 problem
+// and cannot catch that. divfeat terms are present only on the gfx950 2D model; on gfx942 (no
+// divfeat) this still pins the backward direction-normalized raw block. 3x3 pad 1 stride 1 keeps
+// in/out spatial equal so only the channel roles swap.
+TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesGoldenBackward)
+{
+    if(spatial_dim != 2)
+        GTEST_SKIP() << "Engineered input features are 2D-only";
+
+    immed_mode::MetadataND metadata(device_name, spatial_dim);
+    ASSERT_TRUE(metadata.IsValid());
+
+    const int c = 256, k = 64, hw = 56;
+    struct Case
+    {
+        miopen::conv::Direction dir;
+        common::ConvDirection gemm_dir;
+    };
+    const std::vector<Case> cases = {
+        {miopen::conv::Direction::BackwardData, common::ConvDirection::BackwardData},
+        {miopen::conv::Direction::BackwardWeights, common::ConvDirection::BackwardWeights},
+    };
+
+    for(const auto& tc : cases)
+    {
+        const auto problem =
+            Create2DProblem(1, c, hw, hw, k, 3, 3, 1, 1, 1, 1, 1, 1, tc.dir, miopenFloat);
+        const auto features =
+            immed_mode::ExtractTunaNetNDFeatures(problem, /*isFwd=*/false, metadata);
+
+        std::vector<float> expected;
+        const auto append_one_hot = [&](size_t index, size_t width) {
+            std::vector<float> one_hot(width, 0.0f);
+            if(index < width)
+                one_hot.at(index) = 1.0f;
+            expected.insert(expected.end(), one_hot.begin(), one_hot.end());
+        };
+        append_one_hot(metadata.EncodeInLayout(problem.GetInLayout()),
+                       metadata.GetInLayoutClassCount());
+        append_one_hot(metadata.EncodeFilLayout(problem.GetWeightsLayout()),
+                       metadata.GetFilLayoutClassCount());
+        append_one_hot(metadata.EncodeOutLayout(problem.GetOutLayout()),
+                       metadata.GetOutLayoutClassCount());
+        append_one_hot(metadata.EncodePrecision(problem.GetInDataType()),
+                       metadata.GetPrecisionClassCount());
+        append_one_hot(metadata.EncodeDirection(problem.GetDirection()),
+                       metadata.GetDirectionClassCount());
+
+        // Direction-normalized raw values: for backward the in_channels feature is the physical C
+        // (GetOutChannels), out_channels is K; spatial dims are symmetric here.
+        const std::map<std::string, float> golden_raw = {
+            {"in_channels", static_cast<float>(c)},
+            {"in_h", static_cast<float>(hw)},
+            {"in_w", static_cast<float>(hw)},
+            {"out_channels", static_cast<float>(k)},
+            {"out_h", static_cast<float>(hw)},
+            {"out_w", static_cast<float>(hw)},
+            {"fil_h", 3.0f},
+            {"fil_w", 3.0f},
+            {"pad_h", 1.0f},
+            {"pad_w", 1.0f},
+            {"conv_stride_h", 1.0f},
+            {"conv_stride_w", 1.0f},
+            {"dilation_h", 1.0f},
+            {"dilation_w", 1.0f},
+            {"batchsize", 1.0f},
+            {"group_count", 1.0f},
+        };
+        AppendExpectedRawFeatures(expected, metadata, golden_raw);
+
+        // phys_in_channels is the physical C (= c), NOT K: this is the crux of the backward fix.
+        const auto derived =
+            common::EngineeredConvFeaturesByName(1,
+                                                 c,
+                                                 k,
+                                                 hw,
+                                                 hw,
+                                                 hw,
+                                                 hw,
+                                                 3,
+                                                 3,
+                                                 1,
+                                                 metadata.GetNumCu(),
+                                                 tc.gemm_dir,
+                                                 /*spatial_dim=*/2,
+                                                 /*D_in=*/1,
+                                                 /*D_out=*/1,
+                                                 /*K_d=*/1,
+                                                 /*phys_in_channels=*/c,
+                                                 miopenFloat,
+                                                 metadata.GetDerivedFeatureNames());
+        expected.insert(expected.end(), derived.begin(), derived.end());
+
+        ASSERT_EQ(features.size(), expected.size());
+        for(size_t i = 0; i < expected.size(); ++i)
+            EXPECT_FLOAT_EQ(features[i], expected[i])
+                << "backward TunaNet feature mismatch at index " << i << " (direction "
+                << static_cast<int>(tc.dir) << ")";
+    }
+}
+
+// Each shipped model must accept Forward, BackwardData and BackwardWeights problems end to end:
+// ToFeatures -> ExtractTunaNetNDFeatures -> fdeep.predict. This pins that the engineered input
+// width equals the fdeep model's input width (predict throws on a mismatch) and that every
+// direction yields a valid feature vector, not just Forward. Calls model->Forward directly (not
+// PredictSolver) so a TunaNet failure cannot be hidden by the LGBM fallback.
+TEST_P(GPU_ConvNDAIHeuristics_FP32, ModelND_Forward_AllDirections)
+{
+    auto model = immed_mode::GetNDModel(device_name, spatial_dim);
+    ASSERT_NE(model, nullptr);
+    const auto& solver_map = model->GetSolverMap();
+    ASSERT_FALSE(solver_map.empty());
+
+    for(const auto dir : {miopen::conv::Direction::Forward,
+                          miopen::conv::Direction::BackwardData,
+                          miopen::conv::Direction::BackwardWeights})
+    {
+        const auto problem =
+            (spatial_dim == 2)
+                ? Create2DProblem(1, 64, 16, 16, 64, 3, 3, 1, 1, 1, 1, 1, 1, dir)
+                : Create3DProblem(1, 64, 16, 16, 16, 64, 3, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1, 1, dir);
+        ASSERT_TRUE(model->IsProblemSupported(problem, ctx))
+            << "direction " << static_cast<int>(dir);
+        std::vector<float> predictions;
+        ASSERT_NO_THROW(predictions = model->Forward(problem))
+            << "Forward threw for direction " << static_cast<int>(dir)
+            << " (engineered width vs fdeep input width mismatch?)";
+        EXPECT_EQ(predictions.size(), solver_map.size()) << "direction " << static_cast<int>(dir);
+    }
 }
 
 TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet3dFeaturesGolden)
@@ -700,11 +857,29 @@ TEST_P(GPU_ConvNDAIHeuristics_FP32, ExtractTunaNet2dFeaturesHardcoded)
                                     1.0f,
                                     1.0f};
     expected.insert(expected.end(), raw.begin(), raw.end());
-    const auto derived = common::EngineeredConvFeatures(
-        1, 64, 64, 56, 56, 56, 56, 3, 3, 1, expected_num_cu, common::ConvDirection::Forward);
+    const auto derived = common::EngineeredConvFeaturesByName(1,
+                                                              64,
+                                                              64,
+                                                              56,
+                                                              56,
+                                                              56,
+                                                              56,
+                                                              3,
+                                                              3,
+                                                              1,
+                                                              expected_num_cu,
+                                                              common::ConvDirection::Forward,
+                                                              /*spatial_dim=*/2,
+                                                              /*D_in=*/1,
+                                                              /*D_out=*/1,
+                                                              /*K_d=*/1,
+                                                              /*phys_in_channels=*/64,
+                                                              miopenFloat,
+                                                              metadata.GetDerivedFeatureNames());
     expected.insert(expected.end(), derived.begin(), derived.end());
 
-    ASSERT_EQ(metadata.GetEngineeredNumInputs(), 47u);
+    // 13 hand-written one-hots + 16 raw params = 29 slots, plus the model's derived features.
+    ASSERT_EQ(metadata.GetEngineeredNumInputs(), 29u + metadata.GetDerivedFeatureNames().size());
     ASSERT_EQ(features.size(), metadata.GetEngineeredNumInputs());
     ASSERT_EQ(features.size(), expected.size());
     for(size_t i = 0; i < expected.size(); ++i)
