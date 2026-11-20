@@ -20,7 +20,7 @@
 //   - Added static_assert on sizeof to catch ABI drift
 //   - Added detailed field documentation for all three backward kernels
 //   - Organized by pipeline: odo → dqdkdv → dq_convert or dq_shuffle (no post
-//     stage for gfx942 A16)
+//     stage for gfx942 A16, and gfx950 A16 at D_qk = 64)
 // =============================================================================
 
 #pragma once
@@ -263,9 +263,10 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
 // v0.1.29 runs one of two kernels with these arguments (mha_bwd.cu
 // fmha_v3_bwd(), :327-355):
 // - DQ_CONVERT for the A32 accumulator: dq_acc is FP32 [B, H_q, S_q, D_qk].
-// - DQ_SHUFFLE for the gfx950 A16 accumulator: dq_acc is in the Q dtype,
-//   [B, H_q, ceil16(S_q), 128 or 192].
-// The gfx942 A16 kernels write dQ directly and have no post stage.
+// - DQ_SHUFFLE for the gfx950 A16 accumulator at D_qk != 64: dq_acc is in the
+//   Q dtype, [B, H_q, ceil16(S_q), 128 or 192].
+// The gfx942 A16 kernels, and the gfx950 hd64 A16 ones, write dQ directly and
+// have no post stage.
 //
 // Outputs: dQ [B, H_q, S_q, D_qk] in the Q dtype
 //

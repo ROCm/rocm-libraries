@@ -948,27 +948,28 @@ the next run changes these counts. No gfx950 run of the bundles is recorded yet.
 *Non-normative.* What ASM_SDPA_ENGINE serves decides which cases it runs; every other case is a
 decline (a SKIP). The engine runs the prebuilt assembly backward kernels of AITER (AI Tensor Engine
 for ROCm) v0.1.29 on gfx942 (MI300X) and gfx950 (MI355X). It follows AITER's choice between those
-kernels and CK (Composable Kernel): a graph AITER sends to CK, the engine declines. Its support
-claims name gfx942 only; gfx950 claims wait for a gfx950 run.
+kernels and CK (Composable Kernel): a graph AITER sends to CK, the engine declines, except the three
+cases served on purpose below. Its support claims name gfx942 only; gfx950 claims wait for a gfx950
+run.
 
 | Item | gfx942 | gfx950 |
 |---|---|---|
 | Mode | batch | batch |
 | IO dtype | BF16 or FP16, equal on the eight IO tensors; Stats FLOAT | same |
 | Heads | Hq = Hk = Hv | same |
-| Head dims | Dqk = Dv, a multiple of 8, 64 ≤ D ≤ 192 | Dqk = Dv, a multiple of 8, 64 < D ≤ 128; or Dqk 192 with Dv 128 |
+| Head dims | Dqk = Dv, a multiple of 8, 64 ≤ D ≤ 192 | Dqk = Dv, a multiple of 8, 64 ≤ D ≤ 192; or Dqk 192 with Dv 128 |
 | Masks (kernel ordinals) | 0 none; 1 causal TL; 2 causal BR; 3 band (sliding window), TL or BR | 0 none; 1 causal TL; 2 causal BR; 3 band TL; 4 band BR |
-| Bands | 64 < Dqk ≤ 128 | Dqk ≤ 128 |
+| Bands | 64 < Dqk ≤ 128 | same |
 | dQ accumulator | A32 (FP32, default); A16 (16-bit) by knob | same |
 
 The accumulator comes from the engine knob `hipkernel.sdpa.bwd.accumulator_type` (`a32` or `a16`).
 The bundles run the default, A32. The provider GPU test `IntegrationGpuSdpaBackward.cpp` runs A32 and
 A16 on both architectures against the CPU backward reference (Out of scope here). It fills each input
 tensor from its own seed, checks each accumulator against its own tolerance, and has Smoke and
-Comprehensive tiers. The A16 kernels serve fewer graphs: on gfx942 they need Sq = Skv, Skv a multiple
-of 64, matching Q/dO and K/V strides, and every Q, K, V, dO, dK and dV tensor within 2^32 bytes, and
-neither arch ships A16 kernels for every mask and head dim. Plan build fails with BAD_PARAM for an A16
-request those kernels cannot serve.
+Comprehensive tiers. The A16 kernels serve fewer graphs: on gfx942, and on gfx950 at Dqk = 64, they
+need Sq = Skv, Skv a multiple of 64, matching Q/dO and K/V strides, and every Q, K, V, dO, dK and dV
+tensor within 2^32 bytes, and neither arch ships A16 kernels for every mask and head dim. Plan build
+fails with BAD_PARAM for an A16 request those kernels cannot serve.
 
 The engine declines:
 
@@ -977,19 +978,24 @@ The engine declines:
 - dropout: a non-zero `dropout_probability`, a dropout mask, seed and offset;
 - bias (`attn_mask_tensor_uid`) and dBias;
 - ALiBi;
-- the head dims and bands AITER sends to CK: every head-dim pair and band outside the table;
+- every head-dim pair and band outside the table;
 - the graphs of DEF-01, -02, -04 and -05 (§4.2) and a non-positive scale (DEF-06).
 
 Deterministic mode has no backward schema field (Out of scope), so no graph requests it; AITER's
-assembly backward serves it on gfx1250 only. Two cases AITER sends to CK are served on purpose: Sq ≤ 16
-on gfx942 and gfx950 (AITER's choice there is for speed, not correctness), and gfx942 bands with left
-bound 0 and right bound 0 or unbounded (AITER's Python gate does not count them as windows; the band
-kernel computes them).
+assembly backward serves it on gfx1250 only. Three cases AITER's Python layer sends to CK are served on
+purpose: Sq ≤ 16 on gfx942 and gfx950 (AITER's choice there is for speed, not correctness); gfx942
+bands with left bound 0 and right bound 0 or unbounded (AITER's Python gate does not count them as
+windows; the band kernel computes them); and on gfx950 Dqk = Dv = 64 and 128 < D ≤ 192, whose
+kernels are the gfx942 ones rebuilt for gfx950 and which AITER's C++ `fmha_v3_bwd()` runs, since it
+has no head-dim gate for D ≤ 192 besides `% 8`.
 
 A dispatch outside the
 [Verified Kernel Matrix](../../../hip-kernel-provider/src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#verified-kernel-matrix)
-(kernels that passed the provider's backward GPU tests on MI300X and MI355X in PR #15484, run at
-their own head dims) logs a WARN on its first dispatch.
+(kernels that passed the provider's backward GPU tests on MI300X and MI355X in PR #15484, and the
+gfx950 hd64 and hd192 × hd192 ones on MI355X in PR #16337, run at their own head dims) logs a WARN on
+its first dispatch. AITER's Python users send the three cases served on purpose above to CK, so
+AITER's own use does not validate the kernels on those graphs: the provider's GPU tests against the
+CPU reference are their validation.
 
 *Non-normative, 2026-11-10,* the HF census PR: two MI300X GPUs (gfx942) of one node, two GTest
 shards, otherwise configured as above, with O and Stats derived by the reference executors
