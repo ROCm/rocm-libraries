@@ -795,6 +795,36 @@ suites:
     tickets: []
     workstreams: [cadence]
 
+  - id: tensilelite-cpu-reference-driver
+    product: tensilelite
+    kind: host_unit
+    mode: default
+    oracle: "Independent scalar GEMM for D and AMAX-D"
+    source: projects/hipblaslt/tensilelite/client/cpu_gemm_driver.cpp
+    categories_file: projects/hipblaslt/tensilelite/tests/cpu_gemm_test_categories.yaml
+    current:
+      - system: therock
+        lane: "multi-arch-ci (tensilelite job, installed CPUGemm cases)"
+        cadence: presubmit
+        tier: standard
+        gates: true
+        required_check: Multi-Arch CI Summary
+        notes: "One registration per ordinary driver case; AMAX-D runs at limits 1, 3 and 8. The C++ stage is omitted in quick-tier jobs."
+        evidence: ["repo:projects/hipblaslt/tensilelite/tests/CMakeLists.txt", "therock:build_tools/github_actions/fetch_test_configurations.py"]
+        action: keep
+      - system: math_ci
+        lane: tensilelite-unit-codecov
+        cadence: presubmit
+        gates: false
+        notes: "coverage-cpp runs the build-tree registrations with coverage instrumentation, including AMAX-D's thread configurations."
+        evidence: ["repo:projects/hipblaslt/tensilelite/tox.ini"]
+        action: keep
+    target: []
+    disposition: keep
+    rationale: "Keep numerical coverage from the instrumented build and required validation of the installed artifact. Multiple tier labels do not duplicate a driver entry within one CTest run."
+    tickets: [AIHPBLAS-5257]
+    workstreams: [cadence]
+
   - id: rocisa-tests
     product: tensilelite
     kind: host_unit

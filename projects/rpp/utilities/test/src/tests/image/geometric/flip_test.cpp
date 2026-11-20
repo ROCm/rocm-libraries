@@ -97,12 +97,6 @@ class FlipTest : public SkipListTest<WithParams<FlipParams>> {};
 
 TEST_P(FlipTest, Correctness) {
     const auto& p = GetParam();
-    // The HIP vertical flip reads out of bounds when the ROI does not reach the bottom row, and the
-    // fault poisons the HIP context for the rest of the process. Remove once the kernel is fixed.
-    if (p.cfg.backend == RPP_HIP_BACKEND && p.cfg.roi == Roi::Partial && p.op.vertical)
-        GTEST_SKIP() << "HIP flip reads out of bounds on a vertical flip with a partial ROI and "
-                        "faults the device";
-
     dispatch_dtype<DType::U8, DType::F16, DType::F32, DType::I8>(
         p.cfg.dtype, [&](auto tag) { run_flip<Element<decltype(tag)>>(p.cfg, p.op); });
 }

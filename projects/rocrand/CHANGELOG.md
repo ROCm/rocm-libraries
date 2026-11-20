@@ -12,6 +12,11 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed race condition inside `poisson` distribution.
+* Fixed a compilation error when calling `operator()(result_type* output, size_t size)` on the C++ wrapper engines in `rocrand.hpp`. An unused `template<class Generator>` parameter that could not be deduced from the arguments has been removed.
+
+### Added
+
+* New unit tests in `test/test_rocrand_cpp_wrapper.cpp` that call `operator()` on each C++ wrapper engine and compare the output distribution with a reference using a two-sample Kolmogorov-Smirnov test.
 
 ### Changed
 

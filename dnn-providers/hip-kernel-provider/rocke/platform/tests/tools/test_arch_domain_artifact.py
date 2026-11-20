@@ -11,10 +11,10 @@ table is worse than none because it is trusted.
 
 Artifact checks and the real-toolchain gate have separate responsibilities:
 
-* **Structure** is the pytest coverage in this file. It needs no LLVM, GPU, or
-  built C++ engine. It reads the committed JSON and checks it against the decl
-  table it claims to describe, catching an intrinsic key added, renamed, or
-  removed while the artifact still looks authoritative.
+* **Structure** is the source and installed pytest coverage in
+  ``test_arch_domain_support.py``. It reads every committed column, checks its
+  records, wired architecture inventory, declaration coverage and single-line
+  contract layout. These checks need no GPU or built C++ engine.
 
 * **Regeneration** is the dedicated ``rocke_arch_domain_reproducibility`` CTest.
   With a matching LLVM flavor, it re-probes the toolchain and checks monotonic
@@ -31,10 +31,11 @@ recorded as "the answer is no". Same reason the artifact distinguishes
 ``arch_absent`` (the target genuinely cannot lower it) from ``target_unsupported``,
 ``toolchain_crash`` and ``toolchain_timeout`` (no data).
 
-This file contains **source-tree** unit and structure tests and is excluded
-from the installed test tree by ``CMakeLists.txt``. Host-only comparison-policy
-controls live in ``test_arch_domain_support.py`` and run in source and installed
-pytest without a compiler sweep. The regeneration CTest has
+This file contains **source-tree** generator and compiler-probe unit tests and
+is excluded from the installed test tree by ``CMakeLists.txt``. Column-structure
+checks and host-only comparison-policy controls live in
+``test_arch_domain_support.py`` and run in source and installed pytest without a
+compiler sweep. The regeneration CTest has
 both build-tree and installed-artifact registrations; CMake stages a test-only
 copy of the generator and its discovery helpers for the latter. Keep both
 registrations and the packaged helper list in step if either path is renamed.
@@ -59,7 +60,6 @@ from importlib.resources import files as resource_files
 from pathlib import Path
 from unittest import mock
 
-from rocke.core.isa.backend import wired_arches
 from rocke.core.lower_llvm import _datalayout_for_flavor, _resolve_llvm_flavor
 from rocke.tests.arch_marks import COVERED_ARCHES
 
@@ -83,20 +83,6 @@ import _bounded_run as B
 import gen_arch_domain as G
 from _hostcaps import available_cpus
 
-_STATUSES = {
-    G.STATUS_OK,
-    G.STATUS_NAME_ABSENT,
-    G.STATUS_ARCH_ABSENT,
-    G.STATUS_TARGET_UNSUPPORTED,
-    G.STATUS_TOOLCHAIN_CRASH,
-    G.STATUS_TOOLCHAIN_TIMEOUT,
-    G.STATUS_PROBE_ERROR,
-}
-
-# Every status except `ok` is a claim about something that went wrong, and a
-# claim with no diagnostic behind it cannot be acted on by whoever hits it.
-_NEEDS_EVIDENCE = _STATUSES - {G.STATUS_OK}
-
 
 def _columns() -> list[tuple[str, Path]]:
     """Committed artifacts as ``(flavor, path)``, flavor taken from the name."""
@@ -106,64 +92,8 @@ def _columns() -> list[tuple[str, Path]]:
     return out
 
 
-class ArchDomainArtifactStructureTest(unittest.TestCase):
-    """Checks that need no toolchain, so they run on every host."""
-
-    def test_at_least_one_column_is_committed(self):
-        self.assertTrue(_columns(), f"no arch-domain artifact under {_DATA}")
-
-    def test_columns_are_well_formed(self):
-        for flavor, path in _columns():
-            with self.subTest(flavor=flavor):
-                doc = json.loads(path.read_text())
-                self.assertEqual(G._validate_column(doc, "baseline"), [])
-                self.assertEqual(doc.get("schema"), G.SCHEMA)
-
-                # Provenance must agree with the filename: a column filed under
-                # the wrong LLVM vintage is a real measurement attributed to a
-                # toolchain that never produced it, and nothing downstream can
-                # tell.
-                tc = doc.get("toolchain", {})
-                self.assertEqual(tc.get("flavor"), flavor)
-                self.assertIsInstance(tc.get("clang"), str)
-                self.assertTrue(tc["clang"].strip(), "no compiler identity")
-                clang_flavor = G.flavor_of_clang(tc["clang"])
-                if clang_flavor is not None:
-                    self.assertEqual(clang_flavor, flavor, tc.get("clang"))
-
-                self.assertEqual(sorted(tc.get("arches", [])), sorted(wired_arches()))
-
-    def test_every_positive_key_has_a_contract(self):
-        for flavor, path in _columns():
-            doc = json.loads(path.read_text())
-            positive = {
-                key
-                for key, row in doc["keys"].items()
-                if any(cell["status"] == G.STATUS_OK for cell in row.values())
-            }
-            with self.subTest(flavor=flavor):
-                self.assertFalse(
-                    positive - set(doc["probe_contracts"]),
-                    "new positive keys must carry their historical contracts",
-                )
-
-    def test_committed_contract_records_are_canonical_and_single_line(self):
-        for flavor, path in _columns():
-            text = path.read_text()
-            doc = json.loads(text)
-            with self.subTest(flavor=flavor):
-                self.assertEqual(G._serialize_column(doc), text)
-                lines = text.splitlines()
-                start = lines.index('  "probe_contracts": {')
-                end = lines.index("  },", start)
-                records = lines[start + 1 : end]
-                self.assertEqual(len(records), len(doc["probe_contracts"]))
-                parsed = {}
-                for line in records:
-                    self.assertTrue(line.startswith('    "'))
-                    parsed.update(json.loads("{" + line.strip().rstrip(",") + "}"))
-                self.assertEqual(parsed, doc["probe_contracts"])
-                self.assertEqual(list(parsed), sorted(parsed))
+class DeclarationTableTest(unittest.TestCase):
+    """Generator declaration merging is separate from column structure."""
 
     def test_llvm24_changes_only_the_named_barrier_declarations(self):
         llvm23 = G._decl_table("llvm23")
@@ -180,131 +110,6 @@ class ArchDomainArtifactStructureTest(unittest.TestCase):
             },
         )
         self.assertTrue(all("addrspace(15)" in llvm24[key] for key in changed))
-
-    def test_every_decl_key_is_covered_on_every_wired_arch(self):
-        """The drift this file exists to catch: a decl key the artifact has no
-        opinion on, in JSON that is still valid and still looks authoritative.
-
-        Enforced asymmetrically, for the same reason the artifact separates
-        ``arch_absent`` from ``target_unsupported``:
-
-        * a **stale** key -- in the artifact, gone from the decl table -- is
-          always a defect, caught on every column from any host.
-        * an **unmeasured** key can only be answered on a host running that
-          flavor's toolchain, so full coverage is required of this host's
-          flavor and reported as a named skip for the rest.
-        """
-        host = _resolve_llvm_flavor()
-        arches = sorted(wired_arches())
-        for flavor, path in _columns():
-            with self.subTest(flavor=flavor):
-                doc = json.loads(path.read_text())
-                expected = set(G._decl_table(flavor))
-                got = set(doc["keys"])
-                for key, row in doc["keys"].items():
-                    self.assertEqual(sorted(row), arches, key)
-                self.assertEqual(
-                    sorted(got - expected),
-                    [],
-                    f"{path.name} measures keys the decl table no longer has "
-                    "-- re-run tools/gen_arch_domain.py and commit the result",
-                )
-                missing = sorted(expected - got)
-                if not missing:
-                    continue
-                why = (
-                    f"{path.name} has no answer for {len(missing)} decl "
-                    f"key(s): {missing} -- re-run tools/gen_arch_domain.py on "
-                    f"a {flavor} toolchain and commit the result"
-                )
-                # Raised *inside* `subTest`, which records against this column
-                # without re-raising, so every later column is still checked --
-                # a stale key must not be masked by an earlier column's missing
-                # measurement.
-                if flavor == host:
-                    self.fail(why)
-                self.skipTest(why)
-
-    def test_every_cell_carries_an_actionable_answer(self):
-        for flavor, path in _columns():
-            doc = json.loads(path.read_text())
-            for key, row in doc["keys"].items():
-                for arch, cell in row.items():
-                    with self.subTest(flavor=flavor, key=key, arch=arch):
-                        status = cell.get("status")
-                        self.assertIn(status, _STATUSES)
-                        # `probe_error` means our own probe module was
-                        # malformed -- a defect in the generator rather than a
-                        # fact about the toolchain, so it must never survive
-                        # into a committed column.
-                        self.assertNotEqual(status, G.STATUS_PROBE_ERROR)
-                        self.assertEqual(cell.get("verified_on"), flavor)
-                        if status == G.STATUS_OK:
-                            self.assertIn(key, doc["probe_contracts"])
-                            contract = doc["probe_contracts"][key]
-                            self.assertEqual(
-                                contract["version"], G.PROBE_CONTRACT_VERSION
-                            )
-                            self.assertIsInstance(contract["return_type"], str)
-                            self.assertIsInstance(contract["operands"], list)
-                        if status in _NEEDS_EVIDENCE:
-                            self.assertIsInstance(cell.get("evidence"), str)
-                            self.assertTrue(cell["evidence"].strip(), "no diagnostic")
-                        if "probe_imm" in cell:
-                            self.assertEqual(status, G.STATUS_OK)
-                            self.assertIs(type(cell["probe_imm"]), int)
-
-    def test_every_column_records_how_it_was_measured(self):
-        """`clang` says which compiler answered, not which question it was asked.
-
-        One toolchain build reports ``ok`` or not for the same key depending on
-        the probe's optimisation level, because -O3 can delete the call being
-        probed -- so a column carrying only the compiler identity cannot be
-        told apart from one measured the wrong way. Asserted on the committed
-        artifact, so a host with no toolchain can still make the check.
-        """
-        for flavor, path in _columns():
-            with self.subTest(flavor=flavor):
-                tc = json.loads(path.read_text())["toolchain"]
-                self.assertIsInstance(tc.get("generator"), int)
-                self.assertGreaterEqual(tc["generator"], G.GENERATOR)
-                self.assertIn(
-                    "-O0",
-                    tc.get("probe_cflags", []),
-                    "column measured without -O0: the IR pipeline can delete "
-                    "the probed call, so its `ok` cells prove nothing",
-                )
-                self.assertGreater(tc.get("probe_timeout_s", 0), 0)
-
-
-class ArchDomainProcessorSupportTest(unittest.TestCase):
-    """Each column says, per target, whether its compiler accepts the name."""
-
-    def test_every_column_records_which_processor_names_its_compiler_accepts(self):
-        for flavor, path in _columns():
-            with self.subTest(flavor=flavor):
-                doc = json.loads(path.read_text())
-                processors = doc.get("processors", {})
-                self.assertEqual(sorted(processors), sorted(doc["toolchain"]["arches"]))
-                for arch, entry in processors.items():
-                    self.assertIsInstance(entry.get("accepted"), bool, arch)
-                    if not entry["accepted"]:
-                        self.assertIsInstance(entry.get("evidence"), str, arch)
-                        self.assertTrue(entry["evidence"].strip(), arch)
-
-    def test_a_processor_its_compiler_rejects_has_no_measured_cell(self):
-        """The two answers agree: a name the compiler rejects was never probed
-        successfully for any declaration."""
-        for flavor, path in _columns():
-            doc = json.loads(path.read_text())
-            for arch, entry in doc.get("processors", {}).items():
-                if entry["accepted"]:
-                    continue
-                for key, row in doc["keys"].items():
-                    with self.subTest(flavor=flavor, arch=arch, key=key):
-                        self.assertNotIn(
-                            row[arch]["status"], (G.STATUS_OK, G.STATUS_ARCH_ABSENT)
-                        )
 
 
 class AvailableCpusTest(unittest.TestCase):
@@ -1114,52 +919,6 @@ class ProbeWitnessTest(unittest.TestCase):
                     self.assertEqual(text.count(call), 1)
                     self.assertIn("float %a0, i32 %a1)", text)
                     self.assertIn("store volatile float %r", text)
-
-    def test_recorded_witnesses_match_every_positive_special_cell(self):
-        for flavor, path in _columns():
-            doc = json.loads(path.read_text())
-            expected = {
-                (key, arch)
-                for key, witness in G._IMMARG_WITNESSES.items()
-                for arch, cell in doc["keys"].get(key, {}).items()
-                if cell["status"] == G.STATUS_OK
-            }
-            actual = {
-                (key, arch)
-                for key, row in doc["keys"].items()
-                for arch, cell in row.items()
-                if "probe_imm" in cell
-            }
-            self.assertEqual(actual, expected, flavor)
-            for key, arch in sorted(actual):
-                cell = doc["keys"][key][arch]
-                self.assertEqual(cell["probe_imm"], G._IMMARG_WITNESSES[key])
-
-    def test_global_load_lds_is_available_on_cdna_and_not_on_rdna(self):
-        """The case that motivated the sweep, pinned in both directions.
-
-        The intrinsic takes a per-lane transfer size, legal at 1/2/4 on CDNA
-        and also 16 on gfx950, and it is on a live path (builder entry point,
-        handler in both engines, production instance), so an all-`arch_absent`
-        row is a false negative. RDNA really cannot lower it, and must still
-        say so after the full sweep.
-        """
-        for flavor, path in _columns():
-            row = json.loads(path.read_text())["keys"].get("global.load.lds")
-            if row is None:
-                continue
-            for arch, cell in sorted(row.items()):
-                if cell["status"] in (
-                    G.STATUS_TARGET_UNSUPPORTED,
-                    G.STATUS_TOOLCHAIN_CRASH,
-                    G.STATUS_TOOLCHAIN_TIMEOUT,
-                ):
-                    continue  # no data, not an answer
-                expect = (
-                    G.STATUS_OK if arch.startswith("gfx9") else G.STATUS_ARCH_ABSENT
-                )
-                with self.subTest(flavor=flavor, arch=arch):
-                    self.assertEqual(cell["status"], expect)
 
 
 class RefusalTest(unittest.TestCase):

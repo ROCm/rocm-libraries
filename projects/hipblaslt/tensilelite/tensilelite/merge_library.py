@@ -275,6 +275,12 @@ def loadData(filename: str) -> list[Any]:
     normalized = False
     wasList = isinstance(data, list)
     data = convertToDict(data, filename)
+    lib_type = data.get("LibraryType")
+    if lib_type == "MeshBased":
+        sys.exit(
+            f"[Error] {filename}: MeshBased library type is not yet supported "
+            f"by TensileMergeLibrary."
+        )
     layoutUpdated = normalizeDictLibraryLayout(data)
     normalized = wasList or layoutUpdated
     return [filename, data, normalized]
@@ -473,6 +479,17 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
             outputFile = os.path.join(outputPath, os.path.split(file)[-1])
             shutil.copyfile(file, outputFile)
             msg("Copied", file, "to", outputFile)
+            companionSrc = file + ".csv.xz"
+            if os.path.isfile(companionSrc):
+                shutil.copyfile(companionSrc, outputFile + ".csv.xz")
+                msg("Copied", companionSrc, "to", outputFile + ".csv.xz")
+            else:
+                data = load_yaml_stream(file, yaml.CSafeLoader)
+                if isinstance(data, dict) and data.get("LibraryType") == "MeshBased":
+                    sys.exit(
+                        f"[Error] {file}: MeshBased logic requires a companion "
+                        f".csv.xz but {companionSrc} was not found."
+                    )
 
     incrementalFiles = incrementalFilesTemp
 

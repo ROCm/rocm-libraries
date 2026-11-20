@@ -1,7 +1,7 @@
 # Proposal: give intrinsic resolution an arch axis
 
 **Status:** S1 implemented (`tools/gen_arch_domain.py`, committed columns,
-structure-tested by `tests/tools/test_arch_domain_artifact.py` and regenerated
+structure-tested by `tests/tools/test_arch_domain_support.py` and regenerated
 by the `rocke_arch_domain_reproducibility` CTest); S2 is implemented as a
 Python warning/corpus gate but not hard rejection; S3 is implemented; S4's
 in-engine C++ mirror remains proposed.
@@ -248,7 +248,7 @@ Two further findings from the sweep, neither visible to a 15-probe sample:
 
 `tools/gen_arch_domain.py`, for each decl key × each wired arch, emits a minimal
 module, compiles **and links** it in a **subprocess**, and classifies the
-outcome. Commit the result; `tests/tools/test_arch_domain_artifact.py` checks
+outcome. Commit the result; `tests/tools/test_arch_domain_support.py` checks
 its structure and the `rocke_arch_domain_reproducibility` CTest checks a
 monotonic support floor with compatible flavor, scope, and probe methodology.
 Previously working cells and accepted processor names must remain working.
@@ -467,8 +467,8 @@ subprocess, and classify stderr by the §3 taxonomy.
 
 Acceptance for the change itself, from `platform/` with a configured build:
 
-- `python -m pytest tests/tools/test_arch_domain_artifact.py` green for the
-  source-only structure and generator unit coverage
+- `python -m pytest tests/tools/test_arch_domain_support.py tests/tools/test_arch_domain_artifact.py`
+  passes the packaged-column checks and the source-only generator/probe units
 - `ctest --test-dir <build> -R '^rocke_arch_domain_reproducibility$' -V` passes,
   or reports a named skip when this host cannot validate a committed flavor
 - `python tools/check_byte_identity.py` GREEN at each flavor (S4)

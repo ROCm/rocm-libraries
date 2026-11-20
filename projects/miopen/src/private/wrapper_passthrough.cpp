@@ -2,23 +2,25 @@
 // SPDX-License-Identifier: MIT
 //
 // GENERATED FILE. Do not edit.
-// Source: projects/miopen/include/miopen/miopen.h
+// Source: projects/miopen/include/miopen/miopen.h and
+//         projects/miopen/src/include/miopen/miopen_internal.h
 // Regenerate: python3 projects/miopen/script/generate_wrapper_sources.py
 //
 // Pass-through stubs for the public wrapper of the MIOpen public/private split,
-// compiled into libMIOpen.so next to wrapper.cpp. Each public C entry point in
-// <miopen/miopen.h> has an extern "C" stub, either here or in wrapper.cpp. Every
-// stub opens with MIOPEN_WRAPPER_DISPATCH (routing.hpp), which forwards the call
-// to hipDNN when MIOPEN_HIPDNN_FORWARDING and the compile-time forwarding set
-// say so; otherwise the stub calls the matching _impl symbol in the private
-// library (declared in miopen_impl.h).
+// compiled into libMIOpen.so next to wrapper.cpp. Each C entry point declared in
+// <miopen/miopen.h> or <miopen/miopen_internal.h> has an extern "C" stub, either
+// here or in wrapper.cpp. Every stub opens with MIOPEN_WRAPPER_DISPATCH
+// (routing.hpp), which forwards the call to hipDNN when
+// MIOPEN_HIPDNN_FORWARDING and the compile-time forwarding set say so;
+// otherwise the stub calls the matching _impl symbol in the private library
+// (declared in miopen_impl.h).
 //
 // A stub that needs more than a pass-through belongs in wrapper.cpp. The
 // generator skips every entry point wrapper.cpp defines, so move the stub there,
 // edit it, and rerun the generator.
 //
 // This file is compiled without the rename header, so it sees the public names
-// from <miopen/miopen.h>.
+// declared in <miopen/miopen.h> and <miopen/miopen_internal.h>.
 
 // If the rename header ever reached this file (say, because -include or
 // MIOPEN_BUILDING_PRIVATE were widened from PRIVATE to PUBLIC on the private
@@ -31,6 +33,9 @@
 #endif
 
 #include <miopen/miopen.h>
+// Also declares, with MIOPEN_EXPORT, the entry points that miopen.h does not, so
+// their stubs are exported. miopen_impl.h includes it too.
+#include <miopen/miopen_internal.h>
 
 #include "hipdnn_graph.hpp"
 #include "miopen_impl.h"
@@ -4035,4 +4040,77 @@ extern "C" miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle, miopenTun
 {
     MIOPEN_WRAPPER_DISPATCH(miopenGetTuningPolicy);
     return miopenGetTuningPolicy_impl(handle, value);
+}
+
+extern "C" miopenStatus_t
+miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t alpha_beta_case,
+                                                   const miopenTensorDescriptor_t inputTensorDesc,
+                                                   const miopenTensorDescriptor_t outputTensorDesc,
+                                                   const miopenTensorDescriptor_t weightsTensorDesc,
+                                                   const miopenConvolutionDescriptor_t convDesc,
+                                                   size_t* buffer_size)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionABBackwardWeightsGetWorkSpaceSize);
+    return miopenConvolutionABBackwardWeightsGetWorkSpaceSize_impl(alpha_beta_case,
+                                                                   inputTensorDesc,
+                                                                   outputTensorDesc,
+                                                                   weightsTensorDesc,
+                                                                   convDesc,
+                                                                   buffer_size);
+}
+
+extern "C" miopenStatus_t
+miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                              miopenTensorDescriptor_t wDesc,
+                                              miopenTensorDescriptor_t xDesc,
+                                              miopenConvolutionDescriptor_t convDesc,
+                                              miopenTensorDescriptor_t yDesc,
+                                              size_t* minWorkspaceSize,
+                                              size_t* maxWorkspaceSize)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionForwardGetWorkSpaceSizeRange);
+    return miopenConvolutionForwardGetWorkSpaceSizeRange_impl(
+        handle, wDesc, xDesc, convDesc, yDesc, minWorkspaceSize, maxWorkspaceSize);
+}
+
+extern "C" miopenStatus_t
+miopenConvolutionBackwardDataGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                   miopenTensorDescriptor_t dyDesc,
+                                                   miopenTensorDescriptor_t wDesc,
+                                                   miopenConvolutionDescriptor_t convDesc,
+                                                   miopenTensorDescriptor_t dxDesc,
+                                                   size_t* minWorkspaceSize,
+                                                   size_t* maxWorkspaceSize)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionBackwardDataGetWorkSpaceSizeRange);
+    return miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl(
+        handle, dyDesc, wDesc, convDesc, dxDesc, minWorkspaceSize, maxWorkspaceSize);
+}
+
+extern "C" miopenStatus_t
+miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
+                                                      miopenTensorDescriptor_t dyDesc,
+                                                      miopenTensorDescriptor_t xDesc,
+                                                      miopenConvolutionDescriptor_t convDesc,
+                                                      miopenTensorDescriptor_t dwDesc,
+                                                      size_t* minWorkspaceSize,
+                                                      size_t* maxWorkspaceSize)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange);
+    return miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl(
+        handle, dyDesc, xDesc, convDesc, dwDesc, minWorkspaceSize, maxWorkspaceSize);
+}
+
+extern "C" miopenStatus_t miopenHiddenSetConvolutionFindMode(miopenConvolutionDescriptor_t convDesc,
+                                                             int findMode)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenHiddenSetConvolutionFindMode);
+    return miopenHiddenSetConvolutionFindMode_impl(convDesc, findMode);
+}
+
+extern "C" miopenStatus_t miopenHiddenGetConvolutionFindMode(miopenConvolutionDescriptor_t convDesc,
+                                                             int* findMode)
+{
+    MIOPEN_WRAPPER_DISPATCH(miopenHiddenGetConvolutionFindMode);
+    return miopenHiddenGetConvolutionFindMode_impl(convDesc, findMode);
 }

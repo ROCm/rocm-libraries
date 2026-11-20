@@ -47,8 +47,10 @@ class UniformMutation(str, Enum):
 
 
 @dataclass(frozen=True)
-class UniformCase:
-    """Logical dense-attention shape and semantics for one uniform-probability case."""
+class DenseCaseShape:
+    """Logical dense-attention shape and dtype every oracle-free case shares.
+
+    A lane's case adds its mask semantics and the scope its derivation covers."""
 
     batch: int
     seqlen_q: int
@@ -57,8 +59,6 @@ class UniformCase:
     nhead_k: int
     head_dim: int
     dtype: str
-    mask: str
-    window: int = 0
 
     def __post_init__(self) -> None:
         for name in (
@@ -73,19 +73,8 @@ class UniformCase:
                 raise ValueError(f"{name} must be positive")
         if self.nhead_q % self.nhead_k:
             raise ValueError("nhead_q must be a multiple of nhead_k")
-        if self.nhead_k > _MAX_KV_HEADS:
-            raise ValueError(
-                f"nhead_k must be at most {_MAX_KV_HEADS} for distinct head scales"
-            )
         if self.dtype not in _DTYPES:
             raise ValueError(f"dtype must be one of {sorted(_DTYPES)}")
-        if self.mask not in _MASKS:
-            raise ValueError(f"mask must be one of {sorted(_MASKS)}")
-        if self.mask == "window":
-            if self.window <= 0:
-                raise ValueError("window mask requires window > 0")
-        elif self.window:
-            raise ValueError("window must be zero unless mask='window'")
 
     @property
     def output_shape(self) -> tuple[int, int, int, int]:
@@ -96,6 +85,35 @@ class UniformCase:
     def key_shape(self) -> tuple[int, int, int, int]:
         """Return the runner's logical ``[B, Sk, Hkv, D]`` K/V shape."""
         return (self.batch, self.seqlen_k, self.nhead_k, self.head_dim)
+
+    def _shape_id(self, mask: str) -> str:
+        """Return the case identifier for one mask tag."""
+        return (
+            f"{self.dtype}-{mask}-b{self.batch}-sq{self.seqlen_q}-"
+            f"sk{self.seqlen_k}-hq{self.nhead_q}-hk{self.nhead_k}-d{self.head_dim}"
+        )
+
+
+@dataclass(frozen=True)
+class UniformCase(DenseCaseShape):
+    """Logical dense-attention shape and semantics for one uniform-probability case."""
+
+    mask: str
+    window: int = 0
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.nhead_k > _MAX_KV_HEADS:
+            raise ValueError(
+                f"nhead_k must be at most {_MAX_KV_HEADS} for distinct head scales"
+            )
+        if self.mask not in _MASKS:
+            raise ValueError(f"mask must be one of {sorted(_MASKS)}")
+        if self.mask == "window":
+            if self.window <= 0:
+                raise ValueError("window mask requires window > 0")
+        elif self.window:
+            raise ValueError("window must be zero unless mask='window'")
 
     @property
     def head_scale_exponents(self) -> tuple[int, ...]:
@@ -108,11 +126,13 @@ class UniformCase:
     @property
     def case_id(self) -> str:
         """Return a stable identifier for test ids and resolved-subject checks."""
-        mask = f"window{self.window}" if self.mask == "window" else self.mask
-        return (
-            f"{self.dtype}-{mask}-b{self.batch}-sq{self.seqlen_q}-"
-            f"sk{self.seqlen_k}-hq{self.nhead_q}-hk{self.nhead_k}-d{self.head_dim}"
+        return self._shape_id(
+            f"window{self.window}" if self.mask == "window" else self.mask
         )
+
+    def require_scope(self) -> None:
+        """Refuse a case outside the zero-ULP theorem's range."""
+        require_proven_scope(self)
 
 
 # GQA (four query heads per KV head), so a kernel that drops the group divisor

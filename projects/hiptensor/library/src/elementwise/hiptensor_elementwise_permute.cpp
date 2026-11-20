@@ -47,7 +47,6 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
 
     using hiptensor::PlancacheAutotuneMgr;
     auto& autotuneMgr = PlancacheAutotuneMgr::instance();
-    autotuneMgr->startAutotune(hiptensor::AutotuneOps::Autotune_Permutation);
 
     hiptensorOperationDescriptor_t    opDes      = plan->mOpDesc;
     const hiptensorTensorDescriptor_t descA      = opDes->mDescA;
@@ -118,40 +117,45 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
         alphaD = hiptensor::readVal<double>(alpha, hiptensor::convertToComputeType(typeScalar));
     }
 
-    autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
+    auto trial = autotuneMgr->setAutotune<hiptensor::ElementwiseSolution>(
         hiptensor::AutotuneOps::Autotune_Permutation, handle, plan);
 
-    std::vector<hiptensor::ElementwiseSolution*> solutions;
-    if(plan->mPref->mSolution != nullptr)
-        solutions.push_back((hiptensor::ElementwiseSolution*)plan->mPref->mSolution);
-    else
-    {
+    auto querySolutions = [&]() {
         auto& instances = hiptensor::ElementwiseSolutionInstances::instance();
-        solutions       = instances->query({alphaD},
-                                     descA->mLengths,
-                                           {descA->mType},
-                                           {descB->mType},
-                                           {{modeA, modeA + descA->mLengths.size()}},
-                                           {{modeB, modeB + descB->mLengths.size()}},
-                                           {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB},
-                                     hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
-    }
+        return instances->query({alphaD},
+                                descA->mLengths,
+                                {descA->mType},
+                                {descB->mType},
+                                {{modeA, modeA + descA->mLengths.size()}},
+                                {{modeB, modeB + descB->mLengths.size()}},
+                                {plan->mOpDesc->mOpA, plan->mOpDesc->mOpB},
+                                hiptensor::ElementwiseExecutionSpaceType_t::DEVICE);
+    };
 
-    bool canRun = false;
-    for(auto pSolution : solutions)
+    std::vector<hiptensor::ElementwiseSolution*> solutions;
+    // Use the trial's solution: another thread sharing this plan may update the plan's.
+    auto* planSolution = trial.solution();
+    if(planSolution != nullptr)
+        solutions.push_back(planSolution);
+    else
+        solutions = querySolutions();
+
+    for(std::size_t i = 0; i < solutions.size(); i++)
     {
-        canRun = pSolution->initArgs({alphaD},
-                                     {descA->mLengths},
-                                     {descA->mStrides},
-                                     {std::vector<int32_t>(modeA, modeA + descA->mLengths.size())},
-                                     {descB->mLengths},
-                                     {descB->mStrides},
-                                     {std::vector<int32_t>(modeB, modeB + descB->mLengths.size())},
-                                     {plan->mOpDesc->mOpA},
-                                     {A},
-                                     {B});
+        auto* pSolution = solutions[i];
+        auto args
+            = pSolution->makeArgs({alphaD},
+                                  {descA->mLengths},
+                                  {descA->mStrides},
+                                  {std::vector<int32_t>(modeA, modeA + descA->mLengths.size())},
+                                  {descB->mLengths},
+                                  {descB->mStrides},
+                                  {std::vector<int32_t>(modeB, modeB + descB->mLengths.size())},
+                                  {plan->mOpDesc->mOpA},
+                                  {A},
+                                  {B});
 
-        if(canRun)
+        if(args.mValid)
         {
             float time = 0.0f;
             // Perform permutation with LOG_LEVEL_PERF_TRACE
@@ -160,22 +164,23 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
                 using hiptensor::HiptensorOptions;
                 auto& options = HiptensorOptions::instance();
 
-                time = (*pSolution)(StreamConfig{
-                    stream, // stream id
-                    true, // time_kernel
-                    0, // log_level
-                    options->coldRuns(), // cold_niters
-                    options->hotRuns(), // nrepeat
-                });
+                time = pSolution->run(args,
+                                      StreamConfig{
+                                          stream, // stream id
+                                          true, // time_kernel
+                                          0, // log_level
+                                          options->coldRuns(), // cold_niters
+                                          options->hotRuns(), // nrepeat
+                                      });
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
                 }
 
-                auto flops = std::size_t(2) * pSolution->problemSize();
+                auto flops = std::size_t(2) * args.mSize;
                 auto bytes = (hiptensor::hiptensorDataTypeSize(descA->mType)
                               + hiptensor::hiptensorDataTypeSize(descB->mType))
-                             * pSolution->problemSize();
+                             * args.mSize;
 
                 hiptensor::PerfMetrics metrics = {
                     pSolution->uid(), // id
@@ -199,18 +204,25 @@ hiptensorStatus_t hiptensorPermute(const hiptensorHandle_t handle,
             // Perform permutation without timing
             else
             {
-                time = (*pSolution)(StreamConfig{stream, false});
+                time = pSolution->run(args, StreamConfig{stream, false});
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
                 }
             }
 
-            plan->mPref->mSolution = pSolution;
-            autotuneMgr->saveAutotune<hiptensor::ElementwiseSolution>(
-                hiptensor::AutotuneOps::Autotune_Permutation, time, handle, plan);
+            plan->mPref->mSolution.store(pSolution);
+            trial.save(pSolution, time);
 
             return HIPTENSOR_STATUS_SUCCESS;
+        }
+
+        // The plan's solution may not fit this call: the pass-through kernel kept from a call
+        // with alpha 1 cannot scale. Fall back to the kernels selected for this call.
+        if(planSolution != nullptr && i == 0)
+        {
+            auto more = querySolutions();
+            solutions.insert(solutions.end(), more.begin(), more.end());
         }
     }
 

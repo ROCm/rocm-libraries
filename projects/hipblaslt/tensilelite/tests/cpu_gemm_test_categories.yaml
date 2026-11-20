@@ -1,0 +1,22 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# Native CTest patterns are regular expressions; the gtest categories use globs.
+# Each driver registration runs once in the selected tier, regardless of how
+# many labels it carries. AMAX-D has explicit configurations for limits 1/3/8.
+test_categories:
+  standard:
+    description: "CPU reference GEMM driver tests"
+    test_patterns:
+      - 'CPUGemm\..*'
+    labels: [standard, pr, precheckin]
+  comprehensive:
+    description: "CPU reference GEMM driver tests (nightly)"
+    test_patterns:
+      - 'CPUGemm\..*'
+    labels: [comprehensive, nightly, extended]
+  full:
+    description: "Complete CPU reference GEMM driver suite"
+    test_patterns:
+      - 'CPUGemm\..*'
+    labels: [full, weekly]

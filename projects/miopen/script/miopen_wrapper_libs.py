@@ -101,3 +101,15 @@ def resolve_pair(lib_dirs, windows=ON_WINDOWS):
             ],
         )
     return wrapper_lib, private_lib, []
+
+
+def find_ck_plugins(lib_dir, windows=ON_WINDOWS):
+    """Return the CK grouped-convolution plugins installed beside the libraries.
+
+    Empty when MIOpen was built without CK, when CK is on but no plugin was built
+    or installed beside the libraries, and always on Windows: the ABI check reads
+    ELF plugins only, since a DLL's missing import fails the link.
+    """
+    if windows:
+        return []
+    return sorted(p for p in lib_dir.glob("libMIOpenCKGroupedConv_*.so") if p.is_file())

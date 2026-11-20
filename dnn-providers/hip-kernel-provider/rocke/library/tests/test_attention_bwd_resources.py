@@ -18,6 +18,16 @@ import struct
 import pytest
 
 from tests import _attention_bwd_resources as res
+from tests._compiler_test_utils import require_tools_or_skip
+
+# Flavors measured to compile ``agpr_alloc=(128, 128)`` to zero AGPRs. Measured
+# 2026-11-18: llvm20 (comgr3.0, ROCm 7.1) gives agpr == 0, and its plain build
+# of this kernel also spills (vgpr_spill_count 17 at vgpr_count 256), which the
+# ``r0`` spill check below would report; the skip covers both. A newer compiler
+# honours the attribute on gfx942 and gfx950 (its flavor
+# reads "unknown" there). llvm22 is not measured, so it is not listed and every
+# assertion stays active there.
+_AGPR_ALLOC_IGNORED = frozenset({"llvm20"})
 
 
 # --------------------------------------------------------------------------- builders
@@ -368,6 +378,11 @@ def test_compiled_code_object_resources_and_loop_copies():
     r0 = res.read_code_object_resources(plain, arch="gfx942")
     r1 = res.read_code_object_resources(forced, arch="gfx942")
     assert r0.agpr == 0 and r0.arch_vgpr == r0.vgpr_total
+    if r1.agpr == 0 and res.current_flavor() in _AGPR_ALLOC_IGNORED:
+        require_tools_or_skip(
+            f"{res.current_flavor()} compiles agpr_alloc=(128, 128) to 0 AGPRs "
+            "and its plain build spills (measured)"
+        )
     assert r1.agpr > 0 and r1.arch_vgpr + r1.agpr <= r1.vgpr_total
     assert r0.scratch_bytes == 0 and r0.vgpr_spill == 0
     for blob, expect_copies in ((plain, False), (forced, True)):

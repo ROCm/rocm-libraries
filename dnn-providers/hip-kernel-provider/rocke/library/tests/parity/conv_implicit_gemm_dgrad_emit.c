@@ -80,6 +80,63 @@ static int make_cfg_tf32(int idx, rocke_dgrad_conv_spec_t* spec, const char** ar
     return 0;
 }
 
+/* Split-K with the cshuffle epilogue on gfx950: the staged tile is atomic-added
+ * into dX through the tilde address function. Keep in lockstep with
+ * _split_k_cshuffle_spec() in conv_implicit_gemm_dgrad_emit.py (which lists
+ * what each index covers). */
+static int make_cfg_split_k_cshuffle(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
+{
+    const int stride = (idx == 67) ? 2 : 1;
+    const int groups = (idx == 68) ? 2 : 1;
+    spec->problem = rocke_conv_problem_make(
+        2, 16, 16, 64 * groups, 128 * groups, 3, 3, stride, stride, 1, 1, 1, 1);
+    spec->problem.groups = groups;
+    spec->tile_m = 64;
+    spec->tile_n = 64;
+    spec->tile_k = 64;
+    spec->warp_m = 2;
+    spec->warp_n = 4;
+    spec->warp_tile_m = 16;
+    spec->warp_tile_n = 16;
+    spec->warp_tile_k = 32;
+    spec->pipeline = "mem";
+    spec->epilogue = "cshuffle";
+    spec->lds_k_outer = true;
+    spec->has_vector_size_a = true;
+    spec->vector_size_a = 8;
+    spec->has_vector_size_b = true;
+    spec->vector_size_b = 8;
+    spec->has_vector_size_c = true;
+    spec->vector_size_c = 2;
+    spec->split_k = 2;
+    switch(idx)
+    {
+    case 67:
+        spec->tile_m = 32;
+        spec->tile_n = 128;
+        spec->split_k = 4;
+        break;
+    case 68:
+        spec->dtype_a = "bf16";
+        spec->dtype_b = "bf16";
+        spec->dtype_d = "bf16";
+        spec->pipeline = "compv3";
+        break;
+    case 69:
+        spec->tile_n = 128;
+        spec->split_k = 8;
+        spec->vector_size_c = 8;
+        break;
+    case 70:
+        spec->vector_size_c = 1;
+        break;
+    default:
+        return -1;
+    }
+    *arch = "gfx950";
+    return 0;
+}
+
 static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 {
     *spec = rocke_dgrad_conv_spec_default();
@@ -96,6 +153,8 @@ static int make_cfg(int idx, rocke_dgrad_conv_spec_t* spec, const char** arch)
 
     if(idx >= 57 && idx <= 66)
         return make_cfg_tf32(idx, spec, arch);
+    if(idx >= 67 && idx <= 70)
+        return make_cfg_split_k_cshuffle(idx, spec, arch);
 
     switch(idx)
     {

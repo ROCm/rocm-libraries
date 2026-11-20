@@ -215,12 +215,9 @@ static bool hasAiterCompatibleRaggedAddressing(
 // The gfx950 bf16 head-dim-256 kernels index K/V by the query head, so they compute only
 // equal Q and KV head counts. AITER sends GQA/MQA for them to CK.
 //
-// Known limitation, not declined: these kernels round Q * scale * log2(e) to bf16 before
-// Q*K^T, where the hd128 and hd192x128 kernels keep that factor in fp32, so their error
-// grows with the attention scale. At 1/sqrt(256) they meet the bf16 tolerance (1e-2); at
-// scale 1.0, which a graph gets when it sets no scale, a group-mode case reaches an error
-// of about 0.016. The limit is in AITER's kernels, which AITER launches at any scale too, so
-// the engine adds no precision bound on the scale for them.
+// Known limitation, not declined: these kernels round Q * scale * log2(e) to bf16, so
+// their error grows with the attention scale. AITER launches them at any scale too.
+// See "Forward precision" in asm/asm_kernels/README.md.
 static bool kernelServesHeadCounts(const std::string& archId,
                                    const std::string& dataTypeId,
                                    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
@@ -546,7 +543,6 @@ static bool
 
     return true;
 }
-
 bool SdpaFwdPlanBuilder::isApplicable(
     const Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -744,21 +740,25 @@ bool SdpaFwdPlanBuilder::isApplicable(
             + ") and input tensors must have datatype BFLOAT16 or FP8_E4M3_FNUZ (Actual type: "
             + EnumNameDataType(qTensor->data_type()) + ")");
 
-    // mma_core_mode is the MMA operand precision. The bf16 kernels run 16-bit MFMA on
-    // the graph's own bf16 inputs, so UNSET (the provider's choice), HALF and BFLOAT16
-    // all describe them. HALF is accepted on bf16 graphs because the cuDNN frontend,
-    // and hipDNN's cuDNN-compatibility shim, write HALF into Graph::sdpa() whenever
-    // the caller leaves the field unset. The fp8 kernels run fp8 MFMA, which no 16-bit
-    // mode describes, so they still require UNSET. An allow-list, so an enum value
-    // added later declines until judged.
+    // mma_core_mode selects the MMA path of the attention matmuls (cuDNN semantics); it is
+    // not the element or the accumulator type. The bf16 kernels run the 16-bit path, which
+    // cuDNN's Graph::sdpa() and hipDNN's cuDNN shim write as HALF for fp16 and bf16 alike;
+    // BFLOAT16 is accepted as its equivalent. The fp8 kernels run the FP8 path, which cuDNN
+    // spells FP8_E4M3 (the sdpa_fp8() default) or FP8_E5M2 and treats as one path. The mode
+    // does not name the input encoding or the precision: that comes from the tensor types,
+    // checked above (FP8_E4M3_FNUZ only). UNSET leaves the choice to the engine. An
+    // allow-list, so an enum value added later declines until judged.
     const auto mmaCoreMode = attrs.mma_core_mode();
     const bool isSixteenBitMmaMode
         = mmaCoreMode == DataType::HALF || mmaCoreMode == DataType::BFLOAT16;
     const bool mmaCoreModeSupported
-        = mmaCoreMode == DataType::UNSET || (dataTypeId == "bf16" && isSixteenBitMmaMode);
+        = mmaCoreMode == DataType::UNSET || (dataTypeId == "bf16" && isSixteenBitMmaMode)
+          || (dataTypeId == "fp8bf16"
+              && (mmaCoreMode == DataType::FP8_E4M3 || mmaCoreMode == DataType::FP8_E5M2));
     HIP_KERNEL_RETURN_FALSE_IF(
         !mmaCoreModeSupported,
-        "mma_core_mode must be UNSET, or HALF/BFLOAT16 for bf16 inputs (Actual value: "
+        "mma_core_mode must be UNSET, or HALF or BFLOAT16 for bf16 inputs, or FP8_E4M3 or "
+        "FP8_E5M2 for FP8_E4M3_FNUZ inputs (Actual value: "
             + EnumNameDataType(mmaCoreMode) + ", inputs: " + EnumNameDataType(qTensor->data_type())
             + ")");
 
