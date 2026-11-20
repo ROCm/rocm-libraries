@@ -18,6 +18,10 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 
 - The standalone handle and backend-macro tests under `test/` have been merged into the GoogleTest suite in `utilities/test/`, and the `test/` directory has been removed. The HIP allocation-failure fault-injection cases were not carried over.
 
+### Resolved issues
+
+- Fixed the HIP tensor kernels sizing their grid from `handle.GetBatchSize()` instead of the descriptor batch size `n`. A handle reused with a different batch size could access memory out of bounds, or leave images unprocessed while returning `RPP_SUCCESS`.
+
 ## RPP 3.2.0 for ROCm 10.2.0
 
 ### Added
