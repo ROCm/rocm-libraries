@@ -16,7 +16,7 @@
 # Per-PR: on pull_request, for non-draft PRs by ROCm org members (forks included)
 # that touch hipBLASLt/TensileLite or this workflow outside docs; the TensileLite
 # tests are skipped when only hipBLASLt's library and clients change
-# (gfx1250_blas_tests.py select). The org label comes from
+# (.github/gfx1250-hw-ci-paths.toml). The org label comes from
 # pr-org-label.yml, so a PR opened before it is labelled runs once the label lands.
 # PR code runs on the self-hosted runner only after that gate.
 # Nightly: develop at 03:00 UTC (7 pm PST, 8 pm PDT; GitHub cron is UTC).
@@ -69,17 +69,21 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      run: ${{ steps.g.outputs.run }}
-      tensilelite: ${{ steps.g.outputs.tensilelite }}
+      run: ${{ steps.gate.outputs.run }}
+      skip_tensilelite: ${{ steps.gate.outputs.skip_tensilelite }}
     steps:
-      - name: Checkout the job's scripts
-        if: github.event_name == 'pull_request'
+      # Only the gate's script and its path rules: the gate runs no PR code.
+      - name: Checkout the gate's script and path rules
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/scripts
-          sparse-checkout-cone-mode: true
+          sparse-checkout: |
+            .github/scripts/configure_gfx1250_hw_ci.py
+            .github/scripts/ci_utils.py
+            .github/gfx1250-hw-ci-paths.toml
+          sparse-checkout-cone-mode: false
           persist-credentials: false
-      - id: g
+      - name: Decide whether to run the job and its TensileLite tests
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -89,25 +93,16 @@ jobs:
           PR: ${{ github.event.pull_request.number }}
           DRAFT: ${{ github.event.pull_request.draft }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        # Locally: git diff --name-only origin/develop... | python3 .github/scripts/configure_gfx1250_hw_ci.py
         run: |
           set -euo pipefail
-          skip() { echo "::notice::Skipping: $*"; echo "run=false" >> "$GITHUB_OUTPUT"; exit 0; }
-          if [ "$EVENT" = "workflow_dispatch" ] || [ "$EVENT" = "schedule" ]; then
-            printf 'run=true\ntensilelite=true\n' >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          ORG_LABELS='["organization: ROCm","organization: streamhpc"]'
-          # A label event only matters when it is the org label arriving.
-          if [ "$ACTION" = "labeled" ]; then
-            jq -e --arg l "$LABEL" 'index($l) != null' <<<"$ORG_LABELS" >/dev/null \
-              || skip "label '$LABEL' does not affect this workflow"
-          fi
-          [ "$DRAFT" != "true" ] || skip "PR #$PR is a draft"
-          # Org members only, including their forks: pr-org-label.yml sets these
-          # labels from org membership; non-members never get them.
-          jq -e --argjson org "$ORG_LABELS" 'any(.[]; . as $x | $org | index($x) != null)' <<<"$LABELS" >/dev/null \
-            || skip "PR #$PR has no ROCm org label"
-          gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' \
-            | python3 .github/scripts/gfx1250_blas_tests.py select
+          if [ "$EVENT" = "pull_request" ]; then
+            # The files API lists at most 3000 files and rejects very large diffs; the script
+            # then sees fewer files than CHANGED_FILES and runs both suites.
+            gh api --paginate "repos/$REPO/pulls/$PR/files" --jq '.[].filename' \
+              || echo "::warning::could not list PR #$PR's changed files" >&2
+          fi | python3 .github/scripts/configure_gfx1250_hw_ci.py
 
   gfx1250-tests:
     name: gfx1250-strict hipBLASLt + TensileLite
@@ -288,7 +283,7 @@ jobs:
         id: tensilelite
         timeout-minutes: 350
         # Runs even if the hipBLASLt build or tests failed, but not if setup did.
-        if: ${{ !cancelled() && steps.strict.outcome == 'success' && needs.gate.outputs.tensilelite == 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
+        if: ${{ !cancelled() && steps.strict.outcome == 'success' && needs.gate.outputs.skip_tensilelite != 'true' && (github.event_name != 'workflow_dispatch' || inputs.run_tensilelite) }}
         env:
           TL_PYTEST_K: ${{ inputs.tensilelite_pytest_k }}
         run: |

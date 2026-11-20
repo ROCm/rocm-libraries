@@ -92,7 +92,9 @@ common = [
     ".github/workflows/pre-commit.yml",
     ".github/workflows/shared-ctest-ci.yml",
     ".github/workflows/update-docs.yml",
+    ".github/gfx1250-hw-ci-paths.toml",
     # Scripts only those workflows run.
+    ".github/scripts/configure_gfx1250_hw_ci.py",
     ".github/scripts/gfx1250_blas_tests.py",
     ".github/scripts/scrub_test_log.py",
 ]
