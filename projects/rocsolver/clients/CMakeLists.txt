@@ -74,6 +74,7 @@ if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     common/auxiliary/testing_larfg.cpp
     common/auxiliary/testing_lange.cpp
     common/auxiliary/testing_gecon.cpp
+    common/auxiliary/testing_geequ.cpp
     common/auxiliary/testing_larf.cpp
     common/auxiliary/testing_larft.cpp
     common/auxiliary/testing_larfb.cpp
