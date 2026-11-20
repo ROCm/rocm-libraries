@@ -1,13 +1,23 @@
 {
   "version": "1.0",
   "id": "5f2a7c14-9d3b-4e86-b0a1-6c4f21d8e370",
-  "name": "ASM_SDPA_ENGINE (gfx942, 336 contribution(s))",
-  "adapter": "tree_data",
+  "name": "ASM_SDPA_ENGINE (gfx942, 507 contribution(s))",
+  "adapter": "mlp_data",
   "features_signature": [
+    "$device.memory_clock_rate",
+    "$device.peak_memory_bandwidth",
+    "$device.total_global_mem",
     "$graph.arithmetic_intensity",
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
     "$graph.logical_bytes",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].attn_scale_value",
+        1.0
+      ]
+    },
+    "$graph.nodes[0].data_dependent",
     "$graph.nodes[0].diagonal_alignment",
     "$graph.nodes[0].flops",
     {
@@ -34,6 +44,156 @@
     "$graph.nodes[0].q.numel",
     "$graph.nodes[0].q.strides[0]",
     "$graph.nodes[0].q.strides[2]",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].right_bound",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stats.virtual",
+        -1
+      ]
+    },
     "$graph.nodes[0].v.dims[0]",
     "$graph.nodes[0].v.dims[1]",
     "$graph.nodes[0].v.dims[2]",
@@ -46,20 +206,26 @@
     "$graph.tensors[0].dims[2]",
     "$graph.tensors[0].strides[0]",
     "$graph.tensors[0].strides[2]",
+    "$graph.tensors[1].data_type",
     "$graph.tensors[1].dims[0]",
     "$graph.tensors[1].dims[1]",
     "$graph.tensors[1].dims[2]",
+    "$graph.tensors[1].dims[3]",
     "$graph.tensors[1].strides[0]",
+    "$graph.tensors[1].strides[1]",
     "$graph.tensors[1].strides[2]",
     "$graph.tensors[2].dims[0]",
     "$graph.tensors[2].dims[1]",
     "$graph.tensors[2].dims[2]",
     "$graph.tensors[2].strides[0]",
     "$graph.tensors[2].strides[2]",
+    "$graph.tensors[3].data_type",
     "$graph.tensors[3].dims[0]",
     "$graph.tensors[3].dims[1]",
     "$graph.tensors[3].dims[2]",
+    "$graph.tensors[3].dims[3]",
     "$graph.tensors[3].strides[0]",
+    "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]",
     {
       "if": [
@@ -301,40 +467,10 @@
       ]
     }
   ],
-  "features_hash": "sha256:a6d5dbf72459a929",
+  "features_hash": "sha256:338ab8d3ecc3126f",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/c64baaf0b167b621",
-    "feature_semantics_revision": 1,
-    "x-restamps": [
-      {
-        "from": "hip-kernel-provider/asm-sdpa-fwd/d8a0ad8b4e8ddd5a",
-        "to": "hip-kernel-provider/asm-sdpa-fwd/b269f7e20e9b944d",
-        "proof": "reviewed-diff",
-        "changes": [
-          "AsmSdpaEngine.cpp",
-          "AsmSdpaEngine.hpp",
-          "plans/SdpaFwdPlan.cpp",
-          "plans/SdpaFwdPlanBuilder.cpp",
-          "plans/SdpaPlanUtils.hpp"
-        ]
-      },
-      {
-        "from": "hip-kernel-provider/asm-sdpa-fwd/b269f7e20e9b944d",
-        "to": "hip-kernel-provider/asm-sdpa-fwd/c64baaf0b167b621",
-        "proof": "measured-parity",
-        "changes": [
-          "plans/SdpaFwdPlanBuilder.cpp"
-        ],
-        "parity": {
-          "graphs": 1800,
-          "median_change": 0.009080911747072904,
-          "outlier_fraction": 0.012777777777777779,
-          "newly_declined": 0,
-          "newly_served": 0,
-          "unmatched": 0
-        }
-      }
-    ]
+    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/3e14e0ee3c968bb9",
+    "feature_semantics_revision": 1
   },
   "objective": "max",
   "score": {
@@ -342,8 +478,8 @@
     "calibrated": true,
     "transform": "log"
   },
-  "tree_data": {
+  "mlp_data": {
     "artifact": "asm_sdpa_engine_tflops.bin",
-    "hash": "d575e0ad6deaee0ea8d7a616e733d9ed3fc2f0a6c738bf6a8d65d4160c8bf8bd"
+    "hash": "738ef597615deb44a33c8e1dabe6b2b87ebd3eccd0b10c06e8f1c507686dad13"
   }
 }
