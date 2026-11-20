@@ -50,14 +50,30 @@ namespace hipblaslt_jit_test
 
     // FP16 A, B, C and D with FP32 alpha, beta and accumulation, as the
     // committed kernels' entries expect.
-    inline TensileLite::ContractionProblemGemm fp16Gemm(bool transA, size_t K)
+    inline TensileLite::ContractionProblemGemm
+        fp16Gemm(bool transA, size_t K, size_t M = 256, size_t N = 128, size_t batch = 1)
     {
-        constexpr size_t M = 256, N = 128;
-        const auto       half = rocisa::DataType::Half;
-        const size_t     lda  = transA ? K : M;
-        auto             problem = TensileLite::ContractionProblemGemm::GEMM_Strides(
-            transA, false, half, half, half, half, M, N, K, 1, lda, lda * (transA ? M : K), K,
-            K * N, M, M * N, M, M * N, 0.5);
+        const auto   half    = rocisa::DataType::Half;
+        const size_t lda     = transA ? K : M;
+        auto         problem = TensileLite::ContractionProblemGemm::GEMM_Strides(transA,
+                                                                         false,
+                                                                         half,
+                                                                         half,
+                                                                         half,
+                                                                         half,
+                                                                         M,
+                                                                         N,
+                                                                         K,
+                                                                         batch,
+                                                                         lda,
+                                                                         lda * (transA ? M : K),
+                                                                         K,
+                                                                         K * N,
+                                                                         M,
+                                                                         M * N,
+                                                                         M,
+                                                                         M * N,
+                                                                         0.5);
         problem.setComputeInputTypeA(half);
         problem.setComputeInputTypeB(half);
         problem.setAlphaType(rocisa::DataType::Float);
