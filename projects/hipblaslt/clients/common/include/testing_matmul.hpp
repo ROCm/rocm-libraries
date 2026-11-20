@@ -2327,6 +2327,12 @@ public:
                 hipStream_t stream = nullptr;
                 check(hipStreamCreate(&stream), "hipStreamCreate");
                 m_streams.push_back(stream);
+                // An event belongs to the device that is current when it is created: create
+                // this partition's here, so that run() only records it.
+                hipEvent_t done = nullptr;
+                check(hipEventCreateWithFlags(&done, hipEventDisableTiming),
+                      "hipEventCreateWithFlags");
+                m_done.push_back(done);
                 if(anyShared && m_devices[i] != previous) // reach the caller's buffers
                 {
                     hipError_t peer = hipDeviceEnablePeerAccess(previous, 0);
@@ -2570,25 +2576,11 @@ public:
         auto status = m_gemm->run(m_streams);
         if(status != HIPBLAS_STATUS_SUCCESS)
             return status;
-        // An event belongs to the device that is current when it is created, and is recorded on
-        // a stream of that device.
-        int previous = 0;
-        check(hipGetDevice(&previous), "hipGetDevice");
         for(size_t i = 1; i < m_streams.size(); i++)
         {
-            check(hipSetDevice(m_devices[i]), "hipSetDevice");
-            if(m_done.size() < i)
-            {
-                hipEvent_t event = nullptr;
-                check(hipEventCreateWithFlags(&event, hipEventDisableTiming),
-                      "hipEventCreateWithFlags");
-                m_done.push_back(event);
-            }
             check(hipEventRecord(m_done[i - 1], m_streams[i]), "hipEventRecord");
-        }
-        check(hipSetDevice(previous), "hipSetDevice");
-        for(size_t i = 1; i < m_streams.size(); i++)
             check(hipStreamWaitEvent(m_streams[0], m_done[i - 1], 0), "hipStreamWaitEvent");
+        }
         return status;
     }
 

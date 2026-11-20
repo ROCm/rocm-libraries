@@ -54,6 +54,7 @@ int main(int argc, char** argv)
     // ---- one handle, stream, workspace and set of matrices per partition ----
     std::vector<hipblasLtHandle_t> handles(partitions);
     std::vector<hipStream_t>       streams(partitions);
+    std::vector<hipEvent_t>        done(partitions); // recorded after each partition's slice
     std::vector<void*>             workspaces(partitions);
     std::vector<const void*>       a(partitions), b(partitions), c(partitions);
     std::vector<void*>             d(partitions);
@@ -64,6 +65,9 @@ int main(int argc, char** argv)
         CHECK_HIP_ERROR(hipSetDevice(i)); // the handle belongs to the device that is current
         CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handles[i]));
         CHECK_HIP_ERROR(hipStreamCreate(&streams[i]));
+        // An event belongs to the device that is current when it is created. Create it here, with
+        // the stream, so that nothing is created after run().
+        CHECK_HIP_ERROR(hipEventCreateWithFlags(&done[i], hipEventDisableTiming));
         CHECK_HIP_ERROR(hipMalloc(&workspaces[i], workspaceBytes));
         void *dc, *dd;
         CHECK_HIP_ERROR(hipMalloc(&dc, ldc * n * 2));
@@ -154,21 +158,13 @@ int main(int argc, char** argv)
     // run() does not order anything after the partitions. To queue work on a partition's stream
     // that needs the whole result, record an event on every stream after its slice and make the
     // other streams wait for it. After this, work queued on any of the streams starts only when
-    // every partition has finished.
-    std::vector<hipEvent_t> done(partitions);
+    // every partition has finished. The events were created at setup, so this only enqueues.
     for(int i = 0; i < partitions; i++)
-    {
-        CHECK_HIP_ERROR(hipSetDevice(i));
-        CHECK_HIP_ERROR(hipEventCreateWithFlags(&done[i], hipEventDisableTiming));
         CHECK_HIP_ERROR(hipEventRecord(done[i], streams[i]));
-    }
     for(int j = 0; j < partitions; j++)
-    {
-        CHECK_HIP_ERROR(hipSetDevice(j));
         for(int i = 0; i < partitions; i++)
             if(i != j)
                 CHECK_HIP_ERROR(hipStreamWaitEvent(streams[j], done[i], 0));
-    }
 
     // The host reads D next, so it waits for the streams.
     for(int i = 0; i < partitions; i++)
