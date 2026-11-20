@@ -29,7 +29,7 @@ def _vw8_state(**ovr):
              ISA=(12, 5, 0),
              LdsOffsetA=0, LdsBlockSizePerPadA=2048, LdsBlockSizePerPadB=2048,
              LdsPadA=8, LdsPadB=8, VectorWidthA=8, VectorWidthB=8,
-             MatrixInstM=16, MatrixInstN=16, MIWaveGroup=[2, 2], MIWaveTile=[8, 8], TDMSplit=0, enableTDMA=1, enableTDMB=1,
+             MatrixInstM=16, MatrixInstN=16, MatrixInstK=128, MIWaveGroup=[2, 2], MIWaveTile=[8, 8], TDMSplit=0, enableTDMA=1, enableTDMB=1,
              UnrollMajorLDSA=1, UnrollMajorLDSB=1,
              ProblemType=dict(Sparse=0, DataType=_FakeDataType(), MXBlockA=0, MXBlockB=0))
     s["ProblemType"] = {**s["ProblemType"], **ovr.pop("ProblemType", {})}
