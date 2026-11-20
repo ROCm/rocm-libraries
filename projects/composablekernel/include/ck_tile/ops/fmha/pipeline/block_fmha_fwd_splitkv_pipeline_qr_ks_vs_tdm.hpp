@@ -1260,6 +1260,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmWave
     static constexpr index_t kD        = BlockFmhaShape::kQKHeaddim;
     static constexpr index_t kN1       = BlockFmhaShape::kN1;
     static constexpr index_t kNumWaves = BlockFmhaShape::NumWarps;
+    // P is exp2(score - m + kPShiftLog2): its largest element, 2^(kRebaseLog2 + kPShiftLog2),
+    // stays inside e4m3's range (448) while small elements keep e4m3's low exponents
+    static constexpr float kRebaseLog2 = 0.0f;
+    static constexpr float kPShiftLog2 = 8.0f;
 
     static_assert(kM0 == 16 && kD == kN1 && BlockFmhaShape::kK0 == kD &&
                       BlockFmhaShape::kK1 == kNw && BlockFmhaShape::kSubQKHeaddim == kD,
@@ -1533,15 +1537,38 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmWave
             auto m_local = block_tile_reduce<SMPLComputeDataType>(
                 s, sequence<1>{}, f_max, -numeric<SMPLComputeDataType>::infinity());
             block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
-            const auto m_old = m;
-            tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m, m_local);
+            // o_acc, l and l_quant stay in the frame of m and move only when a row's score
+            // outgrows it by more than 2^kRebaseLog2, so P is cast with no per-block scale
+            constexpr auto o_spans = OaccTile::get_distributed_spans();
+            bool need_rebase       = false;
+            sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                need_rebase |= scale_s * (m_local[i_idx] - m[i_idx]) > kRebaseLog2;
+            });
+            if(need_rebase)
+            {
+                sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+                    const auto gap       = scale_s * (m_local[i_idx] - m[i_idx]);
+                    if(gap > kRebaseLog2)
+                    {
+                        // a row still at -inf has nothing accumulated: exp2(-inf) clears it
+                        const auto tmp = exp2(-gap);
+                        l(i_idx) *= tmp;
+                        l_quant(i_idx) *= tmp;
+                        m(i_idx) = m_local[i_idx];
+                        sweep_tile_span(o_spans[I1],
+                                        [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= tmp; });
+                    }
+                });
+            }
 
             auto p_compute =
                 make_static_distributed_tensor<SMPLComputeDataType>(s.get_tile_distribution());
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                const auto row_max   = scale_s * validated(m[i_idx]);
+                const auto row_max   = scale_s * validated(m[i_idx]) - kPShiftLog2;
                 sweep_tile_span(p_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     p_compute(i_j_idx)     = exp2(scale_s * s[i_j_idx] - row_max);
@@ -1551,34 +1578,25 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmWave
                 p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
             block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
 
-            // gemm_0's C and gemm_1's A lanes align, so P is repacked within each lane;
-            // p_compute is left holding the dequantized q(P)
-            auto p_tile = make_static_distributed_tensor<PDataType>(
+            // gemm_0's C and gemm_1's A lanes align and each holds one block of both, so the
+            // cast P is gemm_1's A operand as is; l_quant sums the q(P) gemm_1 multiplies
+            const auto p_q = cast_tile<PDataType>(p_compute);
+            auto p_tile    = make_static_distributed_tensor<PDataType>(
                 make_static_tile_distribution(decltype(gemm_1)::MakeABlockDistributionEncode()));
-            using WG          = typename Gemm1::WarpGemm;
-            const auto packed = cast_tile_mx_wmma<Inner::kPScaleGranularity,
-                                                  WG::WarpGemmAttribute::Impl::kAMLane,
-                                                  WG::WarpGemmAttribute::Impl::kABKLane,
-                                                  true>(p_tile, p_compute);
-            auto rowsum_q     = block_tile_reduce<SMPLComputeDataType>(
-                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+            static_assert(decltype(p_tile)::get_thread_buffer_size() ==
+                          decltype(p_q)::get_thread_buffer_size());
+            p_tile.get_thread_buffer() = p_q.get_thread_buffer();
+            auto rowsum_q              = block_tile_reduce<SMPLComputeDataType>(
+                cast_tile<SMPLComputeDataType>(p_q), sequence<1>{}, f_sum, SMPLComputeDataType{0});
             block_tile_reduce_sync(rowsum_q, f_sum, bool_constant<false>{});
 
-            constexpr auto o_spans = OaccTile::get_distributed_spans();
             sweep_tile_span(o_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                const auto tmp       = exp2(scale_s * m_old[i_idx] - scale_s * validated(m[i_idx]));
-                l(i_idx)             = tmp * l[i_idx] + rowsum_p[i_idx];
-                l_quant(i_idx)       = tmp * l_quant[i_idx] + rowsum_q[i_idx];
-                sweep_tile_span(o_spans[I1],
-                                [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= tmp; });
+                l(i_idx) += rowsum_p[i_idx];
+                l_quant(i_idx) += rowsum_q[i_idx];
             });
 
-            gemm_1(o_acc,
-                   p_tile,
-                   load_tile_transpose(v_lds_read_window),
-                   Inner::template make_gemm1_scale<Gemm1>(packed[I0]),
-                   Inner::template make_gemm1_scale<Gemm1>(Inner::e8m0_one()));
+            gemm_1(o_acc, p_tile, load_tile_transpose(v_lds_read_window));
 
             // the stage is free once this wave's reads of it are done
             if(j + 2 < wave_tiles)
@@ -1660,7 +1678,7 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmWave
                 o_out(i_j_idx) = acc * inv;
             });
             lse_out(i_idx) = l_all == 0 ? -numeric<SMPLComputeDataType>::infinity()
-                                        : m_all * scale_s / C_LOG2E + log(l_all);
+                                        : (m_all * scale_s - kPShiftLog2) / C_LOG2E + log(l_all);
         });
         store_tile(lse_acc_dram_window_tmp, lse_out);
         return o_out;
