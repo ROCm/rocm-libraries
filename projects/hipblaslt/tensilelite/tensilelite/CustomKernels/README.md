@@ -126,9 +126,12 @@ A custom kernel skips code generation, so nothing derives its `CUOccupancy`
 Prediction library. A logic entry that uses a custom kernel can declare it:
 a positive `CUOccupancy` there is kept on any architecture. Without one, gfx9
 kernels get it computed from the resources their `.s` declares, and other
-kernels keep `-1`, which the host treats as 1. The gfx1151 W4A16 kernels
-declare the value the generator computed for them, and every logic entry of a
-kernel must declare the same value.
+kernels keep `-1`, which the host treats as 1. The gfx1151 and gfx1150 W4A16
+kernels declare the value TensileLite's gfx11 occupancy rule gives for the
+resources of their `.s` on that architecture (gfx1150 has a smaller VGPR file
+than gfx1151, so the same kernel has a lower occupancy there). Every logic
+entry of a kernel must declare that value: `test_custom_kernel_occupancy.py`
+recomputes it with `OccupancyMeasure.compute_gfx11_occupancy_from_asm_source`.
 
 ## Adding a new external kernel
 

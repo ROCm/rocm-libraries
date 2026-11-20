@@ -513,7 +513,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT3qEQi07iaupib0gqQn2mx2lIBAYq47HpBTr_0PwJ0J_M=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -744,7 +744,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT3exUQmDP8bQfovahx_QSdetZzaavJoUo19DCPZJKaVE4=
   CUCount: null
-  CUOccupancy: 3
+  CUOccupancy: 7
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1441,7 +1441,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT3V-xOl3vdQ_1rP-MIenZFBU1lGu-QBZBJ6mb1XezWajc=
   CUCount: null
-  CUOccupancy: 3
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1903,7 +1903,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT6nAk42TCxkOfjzyNV8VGyy5H7xQBR7FnyZpe2z-wuJ_8=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2366,7 +2366,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT43pWpnCYH-YrsGRDb3sdh9YDR2pw--t1558Vi6Fn_pOU=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 3
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2600,7 +2600,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZPU8_UserArgs_MT3bfjI0xtnFAA-ZSH3etP1oPy2B6uatz_e0VcA_5QHuZA=
   CUCount: null
-  CUOccupancy: 4
+  CUOccupancy: 8
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -3512,7 +3512,7 @@ Solutions:
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -3762,7 +3762,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 8
+  CUOccupancy: 16
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false
@@ -3982,7 +3982,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 8
+  CUOccupancy: 16
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -4202,7 +4202,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 7
+  CUOccupancy: 16
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -4422,7 +4422,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 4
+  CUOccupancy: 10
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false
@@ -4642,7 +4642,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 5
+  CUOccupancy: 16
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -4862,7 +4862,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 3
+  CUOccupancy: 9
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false
@@ -5082,7 +5082,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 4
+  CUOccupancy: 10
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -5302,7 +5302,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 3
+  CUOccupancy: 9
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false
@@ -5522,7 +5522,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 4
+  CUOccupancy: 10
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -5742,7 +5742,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 2
+  CUOccupancy: 5
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false

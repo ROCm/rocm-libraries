@@ -468,6 +468,30 @@ class TestGfx11W4A16LogicDeclaresOccupancy:
         inconsistent = {n: v for n, v in values.items() if len(v) > 1}
         assert not inconsistent, f"kernels declared with different values: {inconsistent}"
 
+    @pytest.mark.parametrize("arch", ["gfx1151", "gfx1150"])
+    def test_declared_value_is_the_occupancy_rule(self, arch):
+        """The declared CUOccupancy is what the gfx11 occupancy rule gives for the kernel's .s on
+        its own architecture: gfx1150 has a smaller VGPR file than gfx1151, so a value copied
+        from the other target (or computed with another rule) is wrong."""
+        import yaml
+        from tensilelite.OccupancyMeasure import compute_gfx11_occupancy_from_asm_source
+
+        wrong = []
+        isa = {"gfx1151": (11, 5, 1), "gfx1150": (11, 5, 0)}[arch]
+        for f in sorted(require_asm_full_root().glob(f"{arch}/*/{arch}_*I4*.yaml")):
+            text = f.read_text()
+            data = yaml.load(text, Loader=yaml.CSafeLoader) if hasattr(yaml, "CSafeLoader") else yaml.safe_load(text)
+            for sol in data["Solutions"]:
+                name = sol.get("CustomKernelName")
+                if not name:
+                    continue
+                asm = _find_custom_kernel(name)
+                assert asm is not None, f"{name}.s not found"
+                expected = compute_gfx11_occupancy_from_asm_source(asm.read_text(), isa)
+                if sol.get("CUOccupancy") != expected:
+                    wrong.append(f"{f.name}: {name} declares {sol.get('CUOccupancy')}, rule {expected}")
+        assert not wrong, f"{len(wrong)} entries, e.g. {wrong[:3]}"
+
 
 class TestPythonDebugWarning:
     """Verify the print2-gated CUOccupancy<=0 warning in processKernelSource (create_library/run.py).

@@ -164,3 +164,46 @@ def compute_occupancy_from_asm_source(
         )
     except Exception:
         return None
+
+
+def compute_gfx11_occupancy_from_asm_source(asm_source: str, isa, num_threads: Optional[int] = None,
+                                            wavefront_size: Optional[int] = None) -> Optional[int]:
+    """CUOccupancy of a gfx11 custom kernel from the .amdhsa_ directives of its .s.
+
+    Mirrors KernelWriterAssembly.getOccupancy for gfx11 (not gfx117x): the per-SIMD VGPR file
+    in wave32 registers (1536 on gfx1100/gfx1101/gfx1151, 1024 on the others, half for wave64)
+    split into 64 allocation blocks, a workgroup's waves spread over the 4 SIMDs of the WGP,
+    16 waves per SIMD, and the WGP's 128 KB LDS pool in 1 KB granules.  The logic entries of
+    custom kernels declare this value (they skip code generation), so a test compares them.
+
+    The workgroup size and the wavefront size default to the kernel's own metadata
+    (.max_flat_workgroup_size, .wavefront_size).  Returns None if a directive is missing.
+    """
+    import re as _re
+
+    def _parse(directive: str) -> Optional[int]:
+        m = _re.search(r'\.' + directive + r':?\s+(\d+)', asm_source)
+        return int(m.group(1)) if m else None
+
+    num_threads    = num_threads if num_threads else _parse('max_flat_workgroup_size')
+    wavefront_size = wavefront_size if wavefront_size else _parse('wavefront_size')
+    if num_threads is None or wavefront_size is None:
+        return None
+
+    vgprs, sgprs, lds = (_parse('amdhsa_next_free_vgpr'), _parse('amdhsa_next_free_sgpr'),
+                         _parse('amdhsa_group_segment_fixed_size'))
+    if vgprs is None or sgprs is None or lds is None:
+        return None
+    isa = tuple(isa)
+    physical_vgpr = 1536 if isa in {(11, 0, 0), (11, 0, 1), (11, 5, 1)} else 1024
+    if wavefront_size == 64:
+        physical_vgpr //= 2
+    waves_per_simd = int(ceil(num_threads / float(wavefront_size * 4)))
+    max_workgroups = 16 // waves_per_simd
+    block          = physical_vgpr // 64
+    vgprs_aligned  = int(ceil(max(vgprs, 1) / block)) * block * waves_per_simd
+    vgpr_occ       = 0 if vgprs_aligned > physical_vgpr else min(physical_vgpr // vgprs_aligned, max_workgroups)
+    lds_pool, granule = 2 * 65536, 1024
+    lds_occ = lds_pool // granule if lds == 0 else lds_pool // (min(lds + granule - 1, lds_pool) & ~(granule - 1))
+    sgpr_occ = 1696 // max(sgprs, 1)
+    return max(1, min(vgpr_occ, lds_occ, sgpr_occ))

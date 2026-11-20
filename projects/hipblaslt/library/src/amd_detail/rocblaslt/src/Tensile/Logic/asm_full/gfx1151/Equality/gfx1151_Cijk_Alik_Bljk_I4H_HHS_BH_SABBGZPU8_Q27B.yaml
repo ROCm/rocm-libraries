@@ -852,7 +852,7 @@ Solutions:
   WorkGroupMapping: 4
 - SolutionIndex: 2
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151
-  CUOccupancy: 4
+  CUOccupancy: 12
   BaseName: RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_LinearK_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
@@ -1118,7 +1118,7 @@ Solutions:
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
-  CUOccupancy: 1
+  CUOccupancy: 2
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1369,7 +1369,7 @@ Solutions:
   1LDSBuffer: 1
 - SolutionIndex: 5
   CustomKernelName: RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151
-  CUOccupancy: 8
+  CUOccupancy: 16
   BaseName: RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_U1_A4_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false
@@ -1378,7 +1378,7 @@ Solutions:
   ConvertAfterDS: false
 - SolutionIndex: 6
   CustomKernelName: RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151
-  CUOccupancy: 4
+  CUOccupancy: 12
   BaseName: RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151
   KernelNameMin: RuntimeGroup_Decode_W4_NativePerm_UnsignedBias8_gfx1151
   EnableMatrixInstruction: false

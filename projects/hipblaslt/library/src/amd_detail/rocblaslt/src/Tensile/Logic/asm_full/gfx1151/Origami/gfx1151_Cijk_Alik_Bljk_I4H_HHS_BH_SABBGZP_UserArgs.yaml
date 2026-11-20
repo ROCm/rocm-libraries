@@ -513,7 +513,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZP_UserArgs_MT64xNkcAxq_6L7Cbo5SFuUEZQT8_lavKmZ9Um9BUr6tHuwQ=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -972,7 +972,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZP_UserArgs_MT32xZlzoI4x60Wj0P54tXR3IRoLGo7RPSUAb2XRE7_O-JHI=
   CUCount: null
-  CUOccupancy: 4
+  CUOccupancy: 9
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1429,7 +1429,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZP_UserArgs_MT32xJPYvTFEtZAhQVvH76jIeATYicHIlEP02Amz8rjZvbAc=
   CUCount: null
-  CUOccupancy: 3
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2121,7 +2121,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZP_UserArgs_MT32xAAodzd9FTI-iv7KDLcf56NDL7sYjIf0BI9XsS2jCu-Q=
   CUCount: null
-  CUOccupancy: 4
+  CUOccupancy: 8
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2352,7 +2352,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGZP_UserArgs_MT32xvJQy2wlRXXN3fNnMMfZezWZjGoKfAhzi83VO25PV_rY=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -3952,7 +3952,7 @@ Solutions:
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -4243,7 +4243,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 8
+  CUOccupancy: 16
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -4464,7 +4464,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 3
+  CUOccupancy: 9
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -4685,7 +4685,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 9
+  CUOccupancy: 16
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -4906,7 +4906,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 7
+  CUOccupancy: 16
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -5127,7 +5127,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 6
+  CUOccupancy: 16
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -5348,7 +5348,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 2
+  CUOccupancy: 5
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -5569,7 +5569,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 5
+  CUOccupancy: 16
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -5790,7 +5790,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 3
+  CUOccupancy: 9
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -6011,7 +6011,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 4
+  CUOccupancy: 10
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -6232,7 +6232,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 2
+  CUOccupancy: 5
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0

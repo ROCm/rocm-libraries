@@ -512,7 +512,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x48W0qgAiQ7taKbUiG8f3Ewo2d1eNlwqkLLZDMQv2Y0HyM=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -973,7 +973,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x32RfE9c5mdd_nzwimusiobSJZNr8FgGyYmHT7K1wh93gw=
   CUCount: null
-  CUOccupancy: 3
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1432,7 +1432,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT32x48PHouq-MaMOXwTmSD5HFhPOepRUpcubiyo4YMT8lhi1A=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1662,7 +1662,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT32x16Bv5cFNzFUmf6PjF7OtM0DOW3HRBBhtJ55NOiv-Slxxw=
   CUCount: null
-  CUOccupancy: 4
+  CUOccupancy: 9
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1890,7 +1890,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT64x12pzlK8ZVJgQSsCrl1ksKTX7SzNPq_gzLSU6g8Ni8i4wM=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2121,7 +2121,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBG_UserArgs_MT32x12aRex0mTTsHxr66Bcv2hI5vPLmrVG-KoNnzNmZkqtNvU=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -4060,7 +4060,7 @@ Solutions:
   ThreadTileA: 1
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 3
+  CUOccupancy: 9
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -4281,7 +4281,7 @@ Solutions:
   ThreadTileA: 1
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 2
+  CUOccupancy: 5
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -4502,7 +4502,7 @@ Solutions:
   ThreadTileA: 1
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 2
+  CUOccupancy: 5
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -4723,7 +4723,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 6
+  CUOccupancy: 16
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -4944,7 +4944,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 8
+  CUOccupancy: 16
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -5165,7 +5165,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 6
+  CUOccupancy: 16
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -5386,7 +5386,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 5
+  CUOccupancy: 16
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -5607,7 +5607,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 4
+  CUOccupancy: 10
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false

@@ -513,7 +513,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT32x9ptGf-qB1jkuO5FsiedIgAcF1-eZPdlKdEbp1OTJhKo=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -744,7 +744,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT32xzRst12soWxFLl-IEawWijY6swD6iZouQLqXYBgJy6p8=
   CUCount: null
-  CUOccupancy: 3
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1441,7 +1441,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT32xcektmADI18T92CRUxPdtDcbBr4RD77u-UqXxjBIDaEQ=
   CUCount: null
-  CUOccupancy: 3
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1903,7 +1903,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT64xFttJZ0zV4e_rDAK6HKrQMJtmRDy5ew0YZnJlzqSOYHY=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2366,7 +2366,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT48xLbciPUMOkegpEhvY1azemu6qT4a1N18xd-6Vm8TzfQc=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 3
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2600,7 +2600,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBGZP_UserArgs_MT32xj6VAhrbOLIrxNVPqH9WgJ3XA7mAtZLkRyFPvkjkb6Zg=
   CUCount: null
-  CUOccupancy: 4
+  CUOccupancy: 8
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -3512,7 +3512,7 @@ Solutions:
   AssignedDerivedParameters: true
   AssignedProblemIndependentDerivedParameters: true
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -3739,7 +3739,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 8
+  CUOccupancy: 16
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -3959,7 +3959,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 8
+  CUOccupancy: 16
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -4179,7 +4179,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 7
+  CUOccupancy: 12
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -4399,7 +4399,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 4
+  CUOccupancy: 8
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -4619,7 +4619,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 5
+  CUOccupancy: 10
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -4839,7 +4839,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 3
+  CUOccupancy: 5
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -5059,7 +5059,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 4
+  CUOccupancy: 8
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -5279,7 +5279,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 3
+  CUOccupancy: 5
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -5499,7 +5499,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 4
+  CUOccupancy: 8
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true
@@ -5719,7 +5719,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 2
+  CUOccupancy: 4
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 0]
   NoLdsWriteCode: true

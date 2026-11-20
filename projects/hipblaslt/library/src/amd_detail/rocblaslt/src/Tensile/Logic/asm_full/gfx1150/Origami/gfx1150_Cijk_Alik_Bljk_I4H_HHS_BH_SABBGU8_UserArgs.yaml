@@ -512,7 +512,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64xvbXeMhdf_KqAjZ3eHvXWoAD2HClqWHj4HXs1VMzN69Q=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -973,7 +973,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64xpWcwVzjsE6xdxGeRDrKiavzBODepdUTu1o2XBECEPvI=
   CUCount: null
-  CUOccupancy: 3
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1432,7 +1432,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT32x9K0Ef-e1xFv-0PbFube4VJ381wi33nol985pOw-qZ08=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1662,7 +1662,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT32xZlzoI4x60Wj0P54tXR3IRoLGo7RPSUAb2XRE7_O-JHI=
   CUCount: null
-  CUOccupancy: 4
+  CUOccupancy: 8
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1890,7 +1890,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT64xmFYMbGvzi9zW3ZNb9hDr0VrL3B8onqZmgEGRkSLcMiE=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2121,7 +2121,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4H_HHS_BH_SABBGU8_UserArgs_MT32xPKPiR8abfwwozfgvNywQq9SvkYewK3l8IMbjs-qrqyI=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -3975,7 +3975,7 @@ Solutions:
   LdsOffsetA_Blk: 0
   MatrixInstruction: []
   LdsOffsetBiasGSU: 0
-  CUOccupancy: 3
+  CUOccupancy: 5
   StaggerUStride: 0
   PackedC1IdxChars: [J]
   NumLoadsB: 4
@@ -4196,7 +4196,7 @@ Solutions:
   LdsOffsetA_Blk: 0
   MatrixInstruction: []
   LdsOffsetBiasGSU: 0
-  CUOccupancy: 2
+  CUOccupancy: 4
   StaggerUStride: 0
   PackedC1IdxChars: [J]
   NumLoadsB: 6
@@ -4417,7 +4417,7 @@ Solutions:
   LdsOffsetA_Blk: 0
   MatrixInstruction: []
   LdsOffsetBiasGSU: 0
-  CUOccupancy: 2
+  CUOccupancy: 4
   StaggerUStride: 0
   PackedC1IdxChars: [J]
   NumLoadsB: 8
@@ -4638,7 +4638,7 @@ Solutions:
   LdsOffsetA_Blk: 0
   MatrixInstruction: []
   LdsOffsetBiasGSU: 0
-  CUOccupancy: 6
+  CUOccupancy: 12
   StaggerUStride: 0
   PackedC1IdxChars: [J]
   NumLoadsB: 1
@@ -4859,7 +4859,7 @@ Solutions:
   LdsOffsetA_Blk: 0
   MatrixInstruction: []
   LdsOffsetBiasGSU: 0
-  CUOccupancy: 8
+  CUOccupancy: 16
   StaggerUStride: 0
   PackedC1IdxChars: [J]
   NumLoadsB: 2
@@ -5080,7 +5080,7 @@ Solutions:
   LdsOffsetA_Blk: 0
   MatrixInstruction: []
   LdsOffsetBiasGSU: 0
-  CUOccupancy: 6
+  CUOccupancy: 12
   StaggerUStride: 0
   PackedC1IdxChars: [J]
   NumLoadsB: 3
@@ -5301,7 +5301,7 @@ Solutions:
   LdsOffsetA_Blk: 0
   MatrixInstruction: []
   LdsOffsetBiasGSU: 0
-  CUOccupancy: 5
+  CUOccupancy: 10
   StaggerUStride: 0
   PackedC1IdxChars: [J]
   NumLoadsB: 4
@@ -5522,7 +5522,7 @@ Solutions:
   LdsOffsetA_Blk: 0
   MatrixInstruction: []
   LdsOffsetBiasGSU: 0
-  CUOccupancy: 4
+  CUOccupancy: 8
   StaggerUStride: 0
   PackedC1IdxChars: [J]
   NumLoadsB: 5

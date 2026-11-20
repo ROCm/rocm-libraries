@@ -284,7 +284,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT32x48vJCEoqO-sib0yDhiYKYWOl-0i9vLBz8_omkqEI0nG38=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -516,7 +516,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x32dxDD6QbKoPazgesOjNzNADtB1ydGfSAh-ZMvKVDR-3Y=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -979,7 +979,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT32x160Qh5ZckpLKgf8g723xGLew_Nm5nuBf5v_87-shxLdco=
   CUCount: null
-  CUOccupancy: 4
+  CUOccupancy: 9
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1440,7 +1440,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT64x481RBpbakSnYFV91HxZVVSAKLK8wOTxK4Z80Eh76QFjT8=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -1670,7 +1670,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT32x64L18_mtLV8zKZ7U5wEUhW5KBbpchnZyXkIywa2Ke8yMk=
   CUCount: null
-  CUOccupancy: 4
+  CUOccupancy: 8
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2134,7 +2134,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT32x12261XdvwdogllT2hLe_IwLssT0blT9KM1wtbHHp5R3R0=
   CUCount: null
-  CUOccupancy: 3
+  CUOccupancy: 5
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -2366,7 +2366,7 @@ Solutions:
   AssignedProblemIndependentDerivedParameters: true
   BaseName: Cijk_Alik_Bljk_I4B_BBS_BH_SABBG_UserArgs_MT48x122N_9CQo-zxM-gz1b4BfeKf7YeUwCTGfjKL5W9g9bXi4=
   CUCount: null
-  CUOccupancy: 2
+  CUOccupancy: 4
   ClusterBarrier: false
   ClusterLocalRead: 0
   CodeObjectVersion: '4'
@@ -4716,7 +4716,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 1
-  CUOccupancy: 9
+  CUOccupancy: 16
   NumGlobalWriteVectorsPerThread: 1
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -4937,7 +4937,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 3
-  CUOccupancy: 2
+  CUOccupancy: 4
   NumGlobalWriteVectorsPerThread: 3
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -5158,7 +5158,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 1
-  CUOccupancy: 9
+  CUOccupancy: 16
   NumGlobalWriteVectorsPerThread: 2
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -5379,7 +5379,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 2
-  CUOccupancy: 7
+  CUOccupancy: 12
   NumGlobalWriteVectorsPerThread: 4
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -5600,7 +5600,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 3
-  CUOccupancy: 6
+  CUOccupancy: 12
   NumGlobalWriteVectorsPerThread: 6
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -5821,7 +5821,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 4
-  CUOccupancy: 5
+  CUOccupancy: 10
   NumGlobalWriteVectorsPerThread: 8
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -6042,7 +6042,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 5
-  CUOccupancy: 4
+  CUOccupancy: 8
   NumGlobalWriteVectorsPerThread: 10
   enableLDSTrMXSB: false
   UseDotInstruction: true
