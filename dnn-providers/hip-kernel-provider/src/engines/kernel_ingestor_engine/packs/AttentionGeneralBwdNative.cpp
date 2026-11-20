@@ -706,6 +706,12 @@ std::variant<general_bwd::Plan, std::string> mainCandidatePlanOf(const GraphPlan
         return std::string(
             "its fields are not those of the catalog row its tuning key and head pack name");
     }
+    // hipdnn_bench cannot time THD candidates (it fills the ragged offset tables with its input
+    // pattern), so no trained ranker has seen one: a THD graph keeps the engine's own pick.
+    if(in->thd && plan.row != graphPlan.plan.row)
+    {
+        return std::string("a THD graph admits only the engine's own pick");
+    }
     return std::move(plan);
 }
 

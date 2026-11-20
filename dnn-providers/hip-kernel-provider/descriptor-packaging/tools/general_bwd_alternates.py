@@ -15,10 +15,13 @@ an alternate when
 * its main KMD fields equal the row's (the tuning key apart, which the forced policy
   carries as a hook rather than a table entry).
 
-rocKE builds more rows than the engine offers. Two engine rules are narrower than the
+rocKE builds more rows than the engine offers. Three engine rules are narrower than the
 planner, and a row the planner builds that breaks one is recorded under ``declined``
 with its reason instead of ``alternates``:
 
+* ``thd_pick_only``: a THD (ragged) graph admits only the engine's own pick.
+  hipdnn_bench fills ragged offset tables with its input pattern, so THD candidates
+  cannot be timed and no trained ranker has seen one.
 * ``tuned_class``: a tuned entry serves only graphs of the performance class it was tuned
   on (arch, head size, dtype, mask kind, stage vec); its head mode, length relation,
   length mode and buckets may differ. The planner applies any entry's knobs.
@@ -116,6 +119,8 @@ def _prep_launch(record: dict) -> dict:
 
 def _declined_reason(req, arch: str, row: C.CatalogRow, pick_fields: dict):
     """Why the engine does not offer ``row`` though the planner builds it, or None."""
+    if pick_fields["seq_mode"] == "thd":
+        return "thd_pick_only"
     if row.tuning_key:
         pclass = attn_bwd_perf_class(req, arch)
         if any(row.tuning_key[i] != pclass[i] for i in CLASS_SERVED_BY_ENTRY):

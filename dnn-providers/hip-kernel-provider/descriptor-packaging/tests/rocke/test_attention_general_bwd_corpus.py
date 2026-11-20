@@ -136,7 +136,14 @@ def test_alternates_shape(arch):
             for got, want in zip(alternate["launches"], main):
                 assert len(got["values"]) == len(want["kernargs"])
         for refused in record["declined"]:
-            assert refused["reason"] in ("tuned_class", "head_pack_group")
+            assert refused["reason"] in (
+                "thd_pick_only",
+                "tuned_class",
+                "head_pack_group",
+            )
+        # A THD graph keeps the engine's own pick (no trained ranker has seen THD).
+        if pick_main["attention_general_bwd.main.seq_mode"] == 1:
+            assert not record["alternates"], record["id"]
 
 
 def test_constants_headers_are_current(rocke_sources):
