@@ -19,7 +19,6 @@ endforeach()
 target_sources(tensilelite-tests
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/AlmostEqual_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/BenchmarkTimer_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/CachingLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ContractionSelectionLibrary_test.cpp"
@@ -39,12 +38,8 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/HybridAssignmentPolicy_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/../../clients/common/src/hipblaslt_bench_options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/ClientArgsTestUtils.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/GEMMKernelTest_impl.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/RunGEMMKernelTest_impl.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/HostNumericsBridge_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/TestData.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/TestUtils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/LaunchDimGuard_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/MagicDivision_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionAdapterModuleLoad_test.cpp"
@@ -56,15 +51,14 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/W4A16Encoding_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/PredictionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceGemm_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceInt8Accumulation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidatorLifecycle_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReadMostlyMap_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBuffer_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RocRollerWgmKernargs_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXGemm_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIteratorSelection_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionValidation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/StreamKLaunchSummary_test.cpp"
@@ -129,14 +123,6 @@ target_link_libraries(tensilelite-tests
         ${hipblaslt_msgpack_target}
         ZLIB::ZLIB
 )
-
-if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
-    target_sources(tensilelite-tests
-        PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/MXDataGen_test.cpp"
-    )
-    target_link_libraries(tensilelite-tests PRIVATE hipblaslt::mxdatagen)
-endif()
 
 target_link_libraries(tensilelite-tests PUBLIC GTest::gtest)
 
@@ -294,7 +280,10 @@ macro(get_trans_flags TRANS OUT_FLAGS)
     endif()
 endmacro()
 
-# Run all tests against both fast and slow paths
+# The driver checks the HostNumerics reference against its own golden GEMM.
+# `fast_` tests pass --tryFastPath, which selects the Blocked backend
+# explicitly; `slow_` tests let the reference select a backend. Both use the
+# Blocked backend unless a BLAS backend is configured.
 foreach(PATH fast slow)
     if("${PATH}" STREQUAL "fast")
         set(PATH_FLAGS --tryFastPath)
@@ -610,13 +599,13 @@ if(NOT WIN32)
         endforeach()
     endforeach()
 
-    # Fast-path-only: mxBlock=16 (tests non-hardcoded mxBlock; 16 % BLOCK_K=8 == 0)
+    # mxBlock=16 (tests non-hardcoded mxBlock; 16 % BLOCK_K=8 == 0)
     add_cpu_gemm_test(fast_f4_MX16_NN
         ARGS ${F4_SIZES_32} --type f4 --mxBlockA 16 --mxBlockB 16 --validate --tryFastPath
     )
 
     # Batched mxfp4 (batchCount > 1) — exercises strideBatchMxsa/strideBatchMxsb
-    # in the fast path's MX loop (the site of a previous .a / .b typo bug).
+    # in the reference's MX loop.
     foreach(PATH fast slow)
         if("${PATH}" STREQUAL "fast")
             set(PATH_FLAGS --tryFastPath)
@@ -633,19 +622,14 @@ if(NOT WIN32)
 
     # Asymmetric MX (mxBlockA != mxBlockB). K must be a multiple of
     # lcm(mxBlockA, mxBlockB) — here lcm(32, 64) = 64, which F4_SIZES_64
-    # already satisfies (K=192). Fast path only: the production slow path
-    # collapses the smaller side's per-segment scales (see driver rejection
-    # in runGemm).
+    # already satisfies (K=192).
     add_cpu_gemm_test(fast_f4_MX_A32_B64_NN
         ARGS ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate --tryFastPath
     )
     add_cpu_gemm_test(fast_f4_MX_A64_B32_NN
         ARGS ${F4_SIZES_64} --type f4 --mxBlockA 64 --mxBlockB 32 --validate --tryFastPath
     )
-
-    # Negative test: slow path must reject asymmetric MX.
-    add_cpu_gemm_test(slow_f4_MX_A32_B64_Rejected
-        WILL_FAIL
+    add_cpu_gemm_test(slow_f4_MX_A32_B64_NN
         ARGS ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate
     )
 
@@ -710,10 +694,7 @@ endif()
 #     AMAX-D output tests                       #
 #################################################
 # --outputAmaxD makes the reference also write AMAX-D (max |D| over every
-# batch); the driver checks it against max |D| of the golden GEMM, so the
-# check does not depend on which CPU path ran. The fast path does not support
-# AMAX-D (isFastPathEligible rejects "amaxD"), so these run without
-# --tryFastPath, on the slow path.
+# batch); the driver checks it against max |D| of the golden GEMM.
 foreach(TYPE f32 f16 bf16)
     get_test_sizes(${TYPE} SIZES)
     add_cpu_gemm_test(slow_${TYPE}_AmaxD
@@ -754,18 +735,16 @@ if(NOT WIN32)
 endif()
 
 #################################################
-#     Int8 input tests (slow path)              #
+#     Int8 input tests                          #
 #################################################
 # A/B are Int8 drawn from [-128, 127]. Each combination is one of the
-# reference's TypedGemm_I8_* ids: C/D type (--typeCD) x alpha/beta type
+# Int8 kernel types: C/D type (--typeCD) x alpha/beta type
 # (--typeAlpha), which is also the reference's epilogue type. The golden GEMM
 # accumulates exactly in integers, applies the epilogue in that type and casts
-# to C/D with the reference's SaturateCast rules, so D must match exactly.
-# The fast path does not support Int8 inputs yet (isFastPathEligible rejects
-# them), so these run on the slow path only.
+# to C/D with the reference's output conversion rules, so D must match exactly.
 #
-# The slow reference reduces in integers before converting once to the
-# alpha/beta type (#15765). Float precision no longer limits K. The large-K
+# The reference reduces in integers before converting once to the
+# alpha/beta type. Float precision does not limit K. The large-K
 # cases allow sums above 2^24; the golden still requires the completed sum and
 # integer epilogue intermediates to fit Int32. Output-range constraints below
 # also apply. Dedicated ReferenceInt8Accumulation gtests check exact boundary

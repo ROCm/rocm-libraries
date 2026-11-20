@@ -8,6 +8,7 @@
 
 #include <roc/hostnumerics/index_range.hpp>
 #include <roc/hostnumerics/sampling.hpp>
+#include <roc/hostnumerics/shape.hpp>
 #include <string>
 
 namespace nb = nanobind;
@@ -16,6 +17,7 @@ using namespace roc::hostnumerics;
 
 namespace roc::hostnumerics::python_bindings {
 void registerIndexRangeBindings(nb::module_& module) {
+    nb::class_<LastDimensionFastest>(module, "LastDimensionFastest").def(nb::init<>());
     nb::class_<IndexRange>(module, "IndexRange", R"doc(
 Flat indices start + ordinal * stride, all less than the exclusive stop, as in
 range(start, stop, stride). All three constructor arguments are required, and

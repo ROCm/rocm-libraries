@@ -29,7 +29,7 @@ void operator delete(void* memory, std::size_t) noexcept {
 bool layoutAssignmentPreservesValue() {
     using namespace roc::hostnumerics;
     const Layout source(Shape{2, 3}, {3, 1}, 0);
-    Layout target;
+    Layout target(Shape{}, {}, 0);
     bool copyFailed = false;
     // Allow the shape copy, then fail the stride allocation.
     allocationBudget = 1;
@@ -39,7 +39,7 @@ bool layoutAssignmentPreservesValue() {
         copyFailed = true;
     }
     allocationBudget = -1;
-    return target == (copyFailed ? Layout{} : source);
+    return target == (copyFailed ? Layout(Shape{}, {}, 0) : source);
 }
 
 bool reshapePermutationAssignmentPreservesValue() {

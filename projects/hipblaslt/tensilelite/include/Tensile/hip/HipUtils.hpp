@@ -195,10 +195,10 @@ namespace TensileLite
                               sizes.begin() + contiguousDimensions,
                               sizes.end());
 
-                auto     beginOffset = desc.index(coord);
-                size_t   bytesOffset = multiplyElementSize(beginOffset, desc.elementBytes());
-                uint8_t* dstBytes    = (uint8_t*)dst + bytesOffset;
-                uint8_t* srcBytes    = (uint8_t*)src + bytesOffset;
+                auto           beginOffset = desc.index(coord);
+                size_t         bytesOffset = multiplyElementSize(beginOffset, desc.elementBytes());
+                uint8_t*       dstBytes    = (uint8_t*)dst + bytesOffset;
+                const uint8_t* srcBytes    = static_cast<const uint8_t*>(src) + bytesOffset;
 
                 HIP_CHECK_EXC(hipMemcpyAsync(dstBytes, srcBytes, copyBytes, direction, stream));
             }

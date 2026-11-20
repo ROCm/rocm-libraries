@@ -3,9 +3,9 @@
 
 #include <gtest/gtest.h>
 
-#include <Reference.hpp>
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <TensileLite/Client/hostnumerics/Reference.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -66,6 +66,16 @@ namespace
         problem.setBetaType(alphaType);
         return problem;
     }
+
+    // `blocked` selects the Blocked backend explicitly; otherwise the reference chooses one.
+    void solve(ContractionProblemGemm const& problem, ContractionInputs const& inputs, bool blocked)
+    {
+        executeReferenceGemm(problem,
+                             inputs,
+                             ReferenceElements::all(),
+                             blocked ? roc::hostnumerics::GemmBackend::Blocked
+                                     : roc::hostnumerics::GemmBackend::Automatic);
+    }
 } // namespace
 
 TEST(ContractionProblemGemm, InnerProductUsesPackedVectorsAndScalarOutput)
@@ -108,8 +118,8 @@ class ReferenceInt8Accumulation : public ::testing::TestWithParam<std::tuple<Dot
 
 TEST_P(ReferenceInt8Accumulation, IntegerDotProductBeforeEpilogue)
 {
-    const auto& [test, tryFastPath] = GetParam();
-    const size_t        k           = test.prefixCount + test.extraTerms;
+    const auto& [test, blocked] = GetParam();
+    const size_t        k       = test.prefixCount + test.extraTerms;
     std::vector<int8_t> a(k, -128);
     std::vector<int8_t> b(k, test.prefixB);
     const int8_t        tailB = test.prefixB > 0 ? -1 : 1;
@@ -136,12 +146,12 @@ TEST_P(ReferenceInt8Accumulation, IntegerDotProductBeforeEpilogue)
     if(test.floatAlpha)
     {
         ContractionInputs inputs(a.data(), b.data(), &c, &d, test.alpha, test.beta);
-        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+        solve(problem, inputs, blocked);
     }
     else
     {
         ContractionInputs inputs(a.data(), b.data(), &c, &d, int32_t(1), int32_t(0));
-        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+        solve(problem, inputs, blocked);
     }
 
     EXPECT_EQ(d, test.expected) << "K=" << k << ", exact integer dot product=" << integerDot;
@@ -152,9 +162,9 @@ INSTANTIATE_TEST_SUITE_P(
     ReferenceInt8Accumulation,
     ::testing::Combine(::testing::ValuesIn(cases), ::testing::Bool()),
     [](const ::testing::TestParamInfo<ReferenceInt8Accumulation::ParamType>& info) {
-        const auto& test        = std::get<0>(info.param);
-        const bool  tryFastPath = std::get<1>(info.param);
-        return std::string(test.name) + (tryFastPath ? "TryFastPath" : "SlowPath");
+        const auto& test    = std::get<0>(info.param);
+        const bool  blocked = std::get<1>(info.param);
+        return std::string(test.name) + (blocked ? "Blocked" : "Automatic");
     });
 
 class ReferenceInt8MX : public ::testing::TestWithParam<std::tuple<bool, bool, bool>>
@@ -163,18 +173,16 @@ class ReferenceInt8MX : public ::testing::TestWithParam<std::tuple<bool, bool, b
 
 TEST_P(ReferenceInt8MX, RejectsMXScalesBeforeWritingOutput)
 {
-    const auto [floatAlpha, scaleA, tryFastPath] = GetParam();
-    constexpr size_t    k                        = 32;
+    const auto [floatAlpha, oneSided, blocked] = GetParam();
+    constexpr size_t    k                      = 32;
     std::vector<int8_t> a(k, 1);
     std::vector<int8_t> b(k, 1);
     auto                problem = makeInt8DotProductProblem(k, floatAlpha);
-    if(scaleA)
-        problem.setMXScaleA(rocisa::DataType::E8, k, {}, /*padScaleTensor=*/false);
-    else
+    problem.setMXScaleA(rocisa::DataType::E8, k, {}, /*padScaleTensor=*/false);
+    if(!oneSided)
         problem.setMXScaleB(rocisa::DataType::E8, k, {}, /*padScaleTensor=*/false);
 
-    auto const&       scaleTensor = scaleA ? problem.mxsa() : problem.mxsb();
-    std::vector<E8>   scales(scaleTensor.totalAllocatedElements(), E8(0.125f));
+    std::vector<E8>   scales(problem.mxsa().totalAllocatedElements(), E8(0.125f));
     int32_t           c = 0;
     int32_t           d = -1;
     ContractionInputs inputs(a.data(), b.data(), &c, &d, 1.0f, 0.0f);
@@ -183,19 +191,20 @@ TEST_P(ReferenceInt8MX, RejectsMXScalesBeforeWritingOutput)
         inputs.alpha = int32_t(1);
         inputs.beta  = int32_t(0);
     }
-    if(scaleA)
-        inputs.mxsa = scales.data();
-    else
+    inputs.mxsa = scales.data();
+    if(!oneSided)
         inputs.mxsb = scales.data();
 
     try
     {
-        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+        solve(problem, inputs, blocked);
         ADD_FAILURE() << "Expected MX-scaled Int8 to be rejected";
     }
     catch(std::runtime_error const& error)
     {
-        EXPECT_STREQ(error.what(), "Int8 CPU reference does not support MX scales");
+        const std::string expected = oneSided ? "One-sided MX block scaling is unsupported."
+                                              : "Int8 CPU reference does not support MX scales";
+        EXPECT_NE(std::string(error.what()).find(expected), std::string::npos) << error.what();
     }
     EXPECT_EQ(d, -1);
 }
@@ -206,8 +215,8 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(::testing::Bool(), ::testing::Bool(), ::testing::Bool()),
     [](const ::testing::TestParamInfo<ReferenceInt8MX::ParamType>& info) {
         return std::string(std::get<0>(info.param) ? "FloatAlpha" : "IntegerAlpha")
-               + (std::get<1>(info.param) ? "ScaleA" : "ScaleB")
-               + (std::get<2>(info.param) ? "TryFastPath" : "SlowPath");
+               + (std::get<1>(info.param) ? "ScaleAOnly" : "ScaleAB")
+               + (std::get<2>(info.param) ? "Blocked" : "Automatic");
     });
 
 template <typename Tuple>
@@ -237,7 +246,7 @@ TYPED_TEST(ReferenceInt8Output, AmaxPreservesFloatEpilogueBeforeOutputCast)
     float             amaxD = -1.0f;
     ContractionInputs inputs(a.data(), b.data(), &c, &d, 0x1p-19f, 0.0f);
     inputs.amaxD = &amaxD;
-    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/false);
+    solve(problem, inputs, /*blocked=*/false);
 
     // (2^24 + 2) * 2^-19 = 32 + 2^-18, exactly one float ULP above 32.
     // Every output type rounds/truncates D to 32, but float AMAX-D retains it.
@@ -255,12 +264,12 @@ TEST(ReferenceInt8Wrapping, CompletedSumIsSignedInt32BeforeFloatEpilogue)
     auto                problem = makeInt8DotProductProblem(k, true);
     int32_t             c       = 0;
 
-    for(bool tryFastPath : {false, true})
+    for(bool blocked : {false, true})
     {
-        SCOPED_TRACE(tryFastPath);
+        SCOPED_TRACE(blocked);
         int32_t           d = -1;
         ContractionInputs inputs(a.data(), b.data(), &c, &d, 0.5f, 0.0f);
-        SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+        solve(problem, inputs, blocked);
         EXPECT_EQ(d, -1073741824);
     }
 }
@@ -293,14 +302,14 @@ TYPED_TEST(ReferenceInt8IntegerWrapping, BothOverflowDirectionsBeforeIntegerEpil
         SCOPED_TRACE(test.k);
         std::vector<int8_t> a(test.k, -128);
         std::vector<int8_t> b(test.k, test.b);
-        auto problem = makeInt8DotProductProblem(test.k, false, TypeInfo<OutputT>::Enum);
-        OutputT             c       = 0;
-        for(bool tryFastPath : {false, true})
+        auto    problem = makeInt8DotProductProblem(test.k, false, TypeInfo<OutputT>::Enum);
+        OutputT c       = 0;
+        for(bool blocked : {false, true})
         {
-            SCOPED_TRACE(tryFastPath);
+            SCOPED_TRACE(blocked);
             OutputT           d = 0;
             ContractionInputs inputs(a.data(), b.data(), &c, &d, int32_t(1), int32_t(0));
-            SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, tryFastPath);
+            solve(problem, inputs, blocked);
             if constexpr(std::is_same_v<OutputT, int8_t>)
                 EXPECT_EQ(d,
                           test.expected < 0 ? std::numeric_limits<int8_t>::min()

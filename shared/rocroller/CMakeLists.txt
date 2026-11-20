@@ -276,6 +276,60 @@ if(ROCROLLER_EMBED_ARCH_DEF)
     target_compile_definitions(rocroller PRIVATE ROCROLLER_EMBED_ARCH_DEF)
 endif()
 
+set(_rocroller_needs_hostnumerics OFF)
+if(ROCROLLER_ENABLE_CLIENT OR ROCROLLER_BUILD_TESTING)
+    set(_rocroller_needs_hostnumerics ON)
+endif()
+
+if(_rocroller_needs_hostnumerics AND NOT TARGET roc::hostnumerics)
+    set(_rocroller_hostnumerics_source
+        "${CMAKE_CURRENT_SOURCE_DIR}/../hostnumerics"
+    )
+    if(EXISTS "${_rocroller_hostnumerics_source}/CMakeLists.txt")
+        block(SCOPE_FOR VARIABLES)
+            set(HOSTNUMERICS_BUILD_TESTING OFF)
+            set(HOSTNUMERICS_BUILD_BLAS_BACKEND ON)
+            add_subdirectory(
+                "${_rocroller_hostnumerics_source}"
+                "${CMAKE_CURRENT_BINARY_DIR}/hostnumerics"
+                EXCLUDE_FROM_ALL
+            )
+        endblock()
+    else()
+        find_package(
+            HostNumerics
+            CONFIG
+            REQUIRED
+            COMPONENTS Operations BLAS AMDGPULayout
+        )
+    endif()
+endif()
+
+if(_rocroller_needs_hostnumerics
+   AND TARGET roc::hostnumerics
+   AND NOT TARGET roc::hostnumerics-blas
+   AND COMMAND hostnumerics_enable_blas_backend)
+    hostnumerics_enable_blas_backend()
+endif()
+
+if(_rocroller_needs_hostnumerics
+   AND NOT TARGET roc::hostnumerics-amd-gpu-layout)
+    message(FATAL_ERROR
+        "rocRoller clients require the roc::hostnumerics-amd-gpu-layout target."
+    )
+endif()
+
+if(_rocroller_needs_hostnumerics AND NOT TARGET roc::hostnumerics-blas)
+    message(FATAL_ERROR
+        "rocRoller HostNumerics require the roc::hostnumerics-blas target. "
+        "Install HostNumerics with its BLAS component or include shared/hostnumerics."
+    )
+endif()
+
+if(_rocroller_needs_hostnumerics)
+    add_subdirectory(host)
+endif()
+
 if(ROCROLLER_BUILD_TESTING)
     add_subdirectory(test)
 endif()

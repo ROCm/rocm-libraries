@@ -285,7 +285,7 @@ inline void hipblaslt_expect_status(hipblasStatus_t status, hipblasStatus_t expe
 // drop such parameters before they register as tests.
 bool is_known_bug_for_platform(const Arguments& arg);
 
-// fast_check cases in the stress category need tens of GiB, and those in sdc_hunt run for many
+// freivalds cases in the stress category need tens of GiB, and those in sdc_hunt run for many
 // minutes. A run whose filter selects nothing in particular (no filter, "*", or exclusions only,
 // as in Math CI's unfiltered precheckin) skips both. A stress case runs under any other filter,
 // and a memory shortfall skips it with the amounts. An sdc_hunt case runs only when a positive
@@ -319,22 +319,22 @@ inline bool hipblaslt_gtest_filter_names(const char* category)
 
 inline bool hipblaslt_skip_on_demand_case(const Arguments& arg)
 {
-    if(!arg.fast_check || !hipblaslt_category_needs_a_filter(arg.category))
+    if(!arg.freivalds || !hipblaslt_category_needs_a_filter(arg.category))
         return false;
     if(hipblaslt_category_needs_its_name_in_the_filter(arg.category))
         return !hipblaslt_gtest_filter_names(arg.category);
     return !hipblaslt_gtest_filter_given();
 }
 
-#define SKIP_UNLESS_SELECTED_BY_FILTER()                                          \
-    do                                                                            \
-    {                                                                             \
-        const auto& _sf_arg = GetParam();                                         \
-        if(hipblaslt_skip_on_demand_case(_sf_arg))                                \
-            GTEST_SKIP() << "the " << _sf_arg.category                            \
-                         << " fast_check cases run only on request, for example " \
-                            "--gtest_filter=*"                                    \
-                         << _sf_arg.category << "*";                              \
+#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                     \
+    do                                                                                       \
+    {                                                                                        \
+        const auto& _sf_arg = GetParam();                                                    \
+        if(hipblaslt_skip_on_demand_case(_sf_arg))                                           \
+            GTEST_SKIP() << "the " << _sf_arg.category                                       \
+                         << " freivalds cases run only on request, for example "             \
+                            "--gtest_filter=*"                                               \
+                         << _sf_arg.category << "*";                                         \
     } while(0)
 
 // The tests are instantiated by filtering through the RocBlasLt_Data stream

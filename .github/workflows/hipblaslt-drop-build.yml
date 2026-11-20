@@ -141,7 +141,7 @@ jobs:
             projects/hipblaslt
             projects/hipsparse
             projects/hipsparselt
-            shared/mxdatagenerator
+            shared/hostnumerics
             shared/origami
             shared/rocroller
             shared/stinkytofu

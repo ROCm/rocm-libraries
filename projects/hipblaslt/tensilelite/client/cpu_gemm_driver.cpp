@@ -37,10 +37,10 @@
 #include <vector>
 
 #include "ProgramOptions.hpp"
-#include "Reference.hpp"
 #include "rocisa/include/enum.hpp"
 #include <Tensile/Activation.hpp>
 #include <Tensile/DataTypes.hpp>
+#include <TensileLite/Client/hostnumerics/Reference.hpp>
 
 /*
  * CPU GEMM Driver and Validator
@@ -53,7 +53,7 @@
  * The driver performs the following steps:
  * 1. Sets up a contraction problem based on user arguments (M, N, K, Transpose, etc).
  * 2. Initializes input matrices (A, B) with random data.
- * 3. Executes the "Device Under Test" (the optimized CPU solve).
+ * 3. Executes the "Device Under Test" (the HostNumerics CPU reference).
  * 4. Optionally validates the result against a simple, golden reference implementation.
  *
  * Usage Examples:
@@ -63,11 +63,11 @@
  * # BF16 run with validation enabled
  * ./cpu_gemm_driver --type bf16 --M 512 --N 512 --K 256 --validate 1
  *
- * # Int8 inputs, Int8 output, float alpha/beta (slow path)
+ * # Int8 inputs, Int8 output, float alpha/beta
  * ./cpu_gemm_driver --type i8 --typeCD i8 --typeAlpha f32 --alpha 0.001953125 --validate
  *
  * # Benchmark mode (validation disabled)
- * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0 --tryFastPath 1
+ * ./cpu_gemm_driver --M 2048 --N 2048 --K 2048 --validate 0
  *
  * # Help messnage
  * ./cpu_gemm_driver --help
@@ -117,8 +117,8 @@ namespace
     // I8_I8_I32 and I8_I32_I32 use TypeAlpha = int32_t. I8_I32_S,
     // I8_I8_S, I8_H_S and I8_B_S use TypeAlpha = float. The int64_t dot
     // product lets the oracle detect overflow before the TypeAlpha cast.
-    // The slow reference also reduces in integers, interpreting its 32-bit
-    // result as signed Int32 before converting once to TypeAlpha (#15765).
+    // The reference also reduces in integers, interpreting its 32-bit
+    // result as signed Int32 before converting once to TypeAlpha.
     // The oracle rejects sums outside Int32 rather than validating wrapping.
     //
     // An int32_t epilogue is computed in int64_t and every intermediate is
@@ -342,7 +342,7 @@ namespace
                 }
 
                 // alpha * sum, beta * C and bias are added in separate steps,
-                // each rounded on its own, as in the slow path.
+                // each rounded on its own, as in the reference.
                 WideT effectiveAlpha = alpha;
                 if(scaleAVec)
                     effectiveAlpha
@@ -377,7 +377,7 @@ namespace
     }
 
     // Converts a golden epilogue value to the C/D storage type the way the
-    // reference's SaturateCast<DType> (client/src/Reference.cpp) does:
+    // CPU reference converts its epilogue result:
     //   int8_t:  from a floating-point epilogue, round to nearest even, then
     //            clamp to [-128, 127]; from an int32_t epilogue, clamp only.
     //   int32_t: plain static_cast (truncation from floating point, no clamp).
@@ -515,21 +515,6 @@ int runGemm(size_t         m,
         };
         if(int rc = checkSide("mxBlockA", mxBlockA)) return rc;
         if(int rc = checkSide("mxBlockB", mxBlockB)) return rc;
-
-        // Asymmetric MX (mxBlockA != mxBlockB) is only supported on the fast
-        // path. The production slow path's MX inner loop uses a single scale
-        // per max(mxBlockA, mxBlockB)-sized segment, which collapses the
-        // smaller-blocked side's per-segment scales onto the first one and
-        // produces wrong results. Reject the combination at the driver rather
-        // than ship a known-wrong slow path.
-        if(mxBlockA != mxBlockB && !tryFastPath)
-        {
-            std::cerr << "Error: asymmetric MX (mxBlockA=" << mxBlockA
-                      << " != mxBlockB=" << mxBlockB
-                      << ") is only supported on the fast path "
-                      << "(use --tryFastPath)." << std::endl;
-            return 1;
-        }
     }
 
     // Calculate strides assuming standard column-major packed storage
@@ -636,10 +621,8 @@ int runGemm(size_t         m,
         // Pack 2 logical FP4 values per byte (Float4x2). When the logical
         // element count is odd, the second slot of the last byte has no
         // element behind it — it's padding. We must still initialize that
-        // slot to a valid FP4 value (we use 0), because the fast-path
-        // ShadowBuffer FP4 decoder unconditionally reads both slots of every
-        // byte (the guard is on the *write* back, not the read), and reading
-        // uninitialized memory would be UB.
+        // slot to a valid FP4 value (we use 0): a packed FP4 reader may decode
+        // both slots of every byte, and reading uninitialized memory would be UB.
         auto initFp4Operand = [&](auto& vec, size_t numLogical) {
             const size_t storage    = vec.size();
             const bool   hasOddTail = (numLogical % 2 != 0);
@@ -698,8 +681,8 @@ int runGemm(size_t         m,
     }
     std::generate(c.begin(), c.end(), [&]() { return static_cast<OutputT>(randomGen()); });
 
-    // Optional feature buffers — typed as AccumulateT so the slow path's
-    // GetValue(alphaType, ...) reads the correct byte width.
+    // Optional feature buffers — typed as AccumulateT, the alpha type the
+    // reference uses to read them.
     std::vector<AccumulateT> biasVec;
     std::vector<AccumulateT> scaleAlphaVecBuf;
 
@@ -829,18 +812,13 @@ int runGemm(size_t         m,
 
     auto start = std::chrono::high_resolution_clock::now();
 
-    if(tryFastPath && !TensileLite::Client::isFastPathEligible(contraction))
-    {
-        throw std::runtime_error(
-            "--tryFastPath was requested but the problem is not eligible "
-            "for the fast CPU GEMM path.");
-    }
-
-    // Execute the 'device under test'.
-    // passing -1 for elementsToValidate ensures that the 'fast path' which we
-    // currently want to test is maybe taken.
-    int elementsToValidate = -1;
-    TensileLite::Client::SolveGemmCPU(contraction, inputs, elementsToValidate, tryFastPath);
+    // Execute the 'device under test' for every output element.
+    TensileLite::Client::executeReferenceGemm(contraction,
+                                              inputs,
+                                              TensileLite::Client::ReferenceElements::all(),
+                                              tryFastPath
+                                                  ? roc::hostnumerics::GemmBackend::Blocked
+                                                  : roc::hostnumerics::GemmBackend::Automatic);
 
     auto                                      end      = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
@@ -908,7 +886,7 @@ int runGemm(size_t         m,
         std::vector<AccumulateT> dRef(d.size());
 
         // If the storage type is wider than the compute-input type, the GPU
-        // (and slow-path validator) quantize the operand down before the MAC.
+        // (and the reference) quantize the operand down before the MAC.
         // Mirror that here so the golden GEMM reflects the same model.
         QuantizeFn quantA = (computeInputA != dtypeEnumA) ? quantizerFor(computeInputA) : nullptr;
         QuantizeFn quantB = (computeInputB != dtypeEnumB) ? quantizerFor(computeInputB) : nullptr;
@@ -1099,7 +1077,7 @@ int main(int argc, char* argv[])
         "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
         "injectValidationFailure", po::value<bool>()->default_value(false), "Perturb D before validation (negative-test hook)")(
-        "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
+        "tryFastPath", po::value<bool>()->default_value(false), "Select the Blocked backend instead of automatic selection")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
@@ -1307,14 +1285,14 @@ int main(int argc, char* argv[])
               << " TypeA=" << typeAStr << " TypeB=" << typeBStr
               << " TypeCD=" << typeCDStr << " TypeAlpha=" << typeAlphaStr
               << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
-              << " FastPath=" << tryFastPath;
+              << " BlockedBackend=" << tryFastPath;
     if(isTF32)
         std::cout << " MathOp=XFloat32";
     std::cout << std::endl;
 
     // Dispatcher: pick A storage type, then B storage type. Each leaf calls
-    // runGemm<A,B>(...). Asymmetric A/B is required to repro mixed-precision
-    // bugs in the fast-path validator (e.g. F8N x Half).
+    // runGemm<A,B>(...). Asymmetric A/B covers mixed-precision inputs
+    // (e.g. F8N x Half).
     // tf32 = float storage + XFloat32 math-op. Dispatched as float with isTF32 flag.
     auto resolveAccumStorage = [](std::string& s) {
         if(s == "tf32") s = "f32";

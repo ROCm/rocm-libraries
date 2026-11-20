@@ -69,9 +69,6 @@ int run_bench_test(Arguments&         arg,
     hipblaslt_cout << std::setiosflags(std::ios::fixed)
                    << std::setprecision(7); // Set precision to 7 digits
 
-    // disable unit_check in client benchmark, it is only used in gtest unit test
-    arg.unit_check = 0;
-
     hipblaslt_bench_options::apply_to(arg);
 
     // enable timing check,otherwise no performance data collected
@@ -317,12 +314,11 @@ try
     std::string api_method_str  = "";
     std::string algo_method_str = "";
 
-    int         partitions_opt = 1;
-    std::string split_dim_str  = "N";
+    int         partitions_opt    = 1;
+    std::string split_dim_str     = "N";
     std::string part_place_str[4] = {"shared", "shared", "shared", "shared"};
 
-    bool verify = 0;
-    bool ulp    = 0;
+    bool ulp = 0;
 
     bool                  grouped_gemm;
     std::vector<int64_t>  m, n, k;
@@ -330,7 +326,8 @@ try
     std::vector<int64_t>  stride_a, stride_b, stride_c, stride_d, stride_e;
     std::vector<uint32_t> gsu_vector, wgm_vector;
     arg.init(); // set all defaults
-    const char* tuningEnv          = getenv("HIPBLASLT_TUNING_FILE");
+    arg.unit_check        = 0; // Direct benchmarks validate only when explicitly requested.
+    const char* tuningEnv = getenv("HIPBLASLT_TUNING_FILE");
     const char* tuningMaxWorkSpace = getenv("HIPBLASLT_TUNING_USER_MAX_WORKSPACE");
     if(tuningEnv)
     {
@@ -487,10 +484,6 @@ try
         ("HMM",
          value<bool>(&arg.HMM)->default_value(false),
          "Parameter requesting the use of HipManagedMemory")
-
-        ("verify,v",
-         value<bool>(&verify)->default_value(false),
-         "Validate GPU results with CPU?")
 
         ("verify_strict",
          value<bool>(&hipblaslt_bench_options::verify_strict())->default_value(false),
@@ -888,15 +881,31 @@ try
         }
     }
 
-    hipblaslt_print_version();
-
     if(vm.find("version") != vm.end())
     {
+        hipblaslt_print_version();
         return 0;
     }
 
     if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
         return EXIT_FAILURE;
+
+    if(auto parsed = string2hipblaslt_initialization(initialization))
+    {
+        arg.initialization = *parsed;
+    }
+    else
+    {
+        throw std::invalid_argument("Invalid value for --initialization " + initialization);
+    }
+
+    if(grouped_gemm
+       && (arg.initialization == hipblaslt_initialization::maf2_0
+           || arg.initialization == hipblaslt_initialization::maf2_0_unit_scale
+           || arg.initialization == hipblaslt_initialization::maf1_0))
+        throw std::invalid_argument("MAF initialization is not supported for grouped GEMM.");
+
+    hipblaslt_print_version();
 
     if(api_method_str.compare("c") == 0)
     {
@@ -1127,7 +1136,6 @@ try
                 = stride_e.size() >= length ? stride_e[i] : stride_e[stride_e.size() - 1];
     }
 
-    // Device Query
     hipDeviceProp_t props;
     int64_t         device_count = query_device_property(device_id, props);
 
@@ -1212,15 +1220,6 @@ try
         throw std::invalid_argument("Invalid value for --bias_type " + bias_type);
     else
         arg.bias_type = string_to_hip_datatype(bias_type);
-
-    if(auto parsed = string2hipblaslt_initialization(initialization))
-    {
-        arg.initialization = *parsed;
-    }
-    else
-    {
-        throw std::invalid_argument("Invalid value for --initialization " + initialization);
-    }
 
     if(vm["initialization"].defaulted()
        && (arg.a_type == HIP_R_4F_E2M1 || arg.b_type == HIP_R_4F_E2M1))
@@ -1423,7 +1422,7 @@ try
                                     "a nonzero beta, since each launch then reads the D the "
                                     "previous launch wrote");
 
-    if(verify || ulp || hipblaslt_bench_options::post_bench_verify_iters() > 0)
+    if(ulp || hipblaslt_bench_options::post_bench_verify_iters() > 0)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
@@ -1457,12 +1456,7 @@ try
     arg.norm_check_assert = false;
     return verification_exit(run_bench_test(arg, filter, any_stride, props));
 }
-catch(const std::invalid_argument& exp)
-{
-    hipblaslt_cerr << exp.what() << std::endl;
-    return -1;
-}
-catch(const std::runtime_error& exp)
+catch(const std::exception& exp)
 {
     hipblaslt_cerr << exp.what() << std::endl;
     return -1;
