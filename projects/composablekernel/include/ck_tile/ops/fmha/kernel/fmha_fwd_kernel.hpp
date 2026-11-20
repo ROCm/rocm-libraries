@@ -3649,8 +3649,14 @@ struct FmhaFwdKernel
                 // Keep vector stores for aligned heads, and predicate individual
                 // elements for arbitrary tails and row strides.
                 constexpr index_t alignment = FmhaPipeline::kAlignmentOacc;
-                if(kargs.hdim_v % alignment == 0 && kargs.stride_o % alignment == 0 &&
-                   reinterpret_cast<uintptr_t>(o_ptr) % (alignment * sizeof(ODataType)) == 0)
+                auto aligned                = static_cast<index_t>(
+                    kargs.hdim_v % alignment == 0 && kargs.stride_o % alignment == 0 &&
+                    reinterpret_cast<uintptr_t>(o_ptr) % (alignment * sizeof(ODataType)) == 0);
+                // hdim_v, stride_o and o_ptr are workgroup-uniform.
+                // Scalarize only the causal specialization to preserve other masks' prefill speed.
+                if constexpr(std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>)
+                    aligned = amd_wave_read_first_lane(aligned);
+                if(aligned)
                     store_output(number<alignment>{});
                 else
                     store_output(number<1>{});
