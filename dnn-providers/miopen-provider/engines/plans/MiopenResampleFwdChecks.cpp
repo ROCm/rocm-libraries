@@ -405,6 +405,21 @@ ResampleFwdConfig resolve(const IGraph& opGraph)
                 "pooling kernels; their tile size estimate overflows");
     }
 
+    // Workaround for ALMIOPEN-3449 (see Workarounds.hpp): MIOpen's 2D tiled kernel sizes its grid
+    // from the output height and width in int.
+    if(spatialRank == 2)
+    {
+        for(size_t i = 0; i < spatialRank; ++i)
+        {
+            if(WORKAROUND_ALMIOPEN_3449_DECLINES_OUTPUT(y.dims[i + 2]))
+            {
+                decline("the output size at spatial dimension " + std::to_string(i)
+                        + " is too large for MIOpen's 2D pooling kernels; their grid size "
+                          "overflows");
+            }
+        }
+    }
+
     config.xUid = x.uid;
     config.xDims = x.dims;
     config.xStrides = packedStrides(x.dims, layout);

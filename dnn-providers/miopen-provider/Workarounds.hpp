@@ -287,3 +287,33 @@ inline bool tileEstimateOverflows(size_t elementSize,
 #define WORKAROUND_ALMIOPEN_3419_DECLINES_TILE(elementSize, window, stride) \
     (::miopen_plugin::workaround_almiopen_3419::tileEstimateOverflows(      \
         (elementSize), (window), (stride)))
+
+// ----------------------------------------------------------------------------
+// ALMIOPEN-3449 — MIOpen's 2D tiled pooling forward solver (PoolingForward2d,
+// src/solver/pooling/forward2d.cpp), which MIOpen tries first for 4D pooling,
+// sizes its grid from the output height and width plus its tile span in int.
+// For an output height or width near INT_MAX the sum wraps, the global work size
+// exceeds 32 bits, and miopenPoolingForward fails with miopenStatusInternalError.
+// With the default configuration it fails from INT_MAX - 6; tuned
+// configurations span up to 128 outputs, so the worst case fails from
+// INT_MAX - 126.
+//
+// WORKAROUND_ALMIOPEN_3449_DECLINES_OUTPUT(outputExtent) is true for the output
+// heights and widths the resample forward checks decline in 4D graphs until the
+// fix lands: above INT_MAX - 127. A channels-last graph that large exceeds the
+// element count limit unless it has a single channel, and then it is pooled as
+// channels-first.
+//
+// To remove after the fix: delete this section and its macro, its call site in
+// engines/plans/MiopenResampleFwdChecks.cpp (and that file's
+// `#include "Workarounds.hpp"` once no workaround there remains), and the tests
+// tagged ALMIOPEN-3449 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp;
+// drop the 2D output size rule from the Resample Forward notes in
+// docs/OperationSupport.md and
+// projects/hipdnn/docs/user-guides/reference/miopen-plugin.rst. `git grep
+// ALMIOPEN.3449` finds the code sites.
+// ----------------------------------------------------------------------------
+
+#define WORKAROUND_ALMIOPEN_3449_DECLINES_OUTPUT(outputExtent) \
+    (static_cast<int64_t>(outputExtent)                        \
+     > static_cast<int64_t>(::std::numeric_limits<int>::max()) - 127)
