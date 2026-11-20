@@ -1,0 +1,3086 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+.amdgcn_target "amdgcn-amd-amdhsa--gfx950"
+.set .amdgcn.next_free_vgpr, 0
+.set .amdgcn.next_free_sgpr, 0
+.text
+.globl RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+.p2align 8
+.type RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2,@function
+RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2:
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+s_nop 0
+RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_exec_begin:
+
+
+s_load_dwordx2 s[20:21], s[0:1], 56 // Load scalar value
+s_load_dwordx2 s[22:23], s[0:1], 64 // Load scalar value
+s_load_dwordx2 s[24:25], s[0:1], 72 // Load scalar value
+s_load_dwordx2 s[26:27], s[0:1], 80 // Load scalar value
+s_load_dwordx2 s[28:29], s[0:1], 88 // Load scalar value
+s_load_dwordx2 s[30:31], s[0:1], 96 // Load scalar value
+s_load_dwordx2 s[32:33], s[0:1], 104 // Load scalar value
+s_load_dwordx2 s[34:35], s[0:1], 112 // Load scalar value
+s_load_dwordx2 s[36:37], s[0:1], 120 // Load scalar value
+
+v_bfe_u32 v1, v0, 0, 10
+v_bfe_u32 v2, v0, 10, 10
+
+
+v_and_b32 v0, 63, v1 // (op 2859) 
+v_and_b32 v3, 48, v1 // (op 2859) 
+v_sub_u32 v4, v0, v3 // (op 2859) 
+
+v_lshrrev_b32 v3, 5, v0 // (op 2859) 
+v_lshl_add_u32 v5, v3, 5, v4 // (op 2859) 
+
+
+v_lshrrev_b32 v3, 4, v0 // (op 2859) 
+
+v_and_b32 v0, -2, v3 // (op 2859) 
+v_sub_u32 v4, v3, v0 // (op 2859) 
+
+
+v_lshlrev_b32 v0, 4, v4 // (op 2859) 
+
+v_lshrrev_b32 v3, 6, v1 // (op 2859) 
+v_and_b32 v4, 1, v3 // (op 2859) 
+
+v_lshl_add_u32 v3, v4, 5, v0 // (op 2859) 
+
+
+v_lshl_add_u32 v0, v5, 6, v3 // (op 2859) 
+
+
+v_mul_lo_u32 v3, v0, 6 // (op 2859) 
+v_lshrrev_b32 v4, 3, v3 // (op 2859) 
+
+v_lshrrev_b32 v3, 4, v0 // (op 2859) 
+
+v_lshlrev_b32 v0, 2, v3 // (op 2859) 
+
+v_add_u32 v3, v4, v0 // (op 2859) 
+
+
+v_lshrrev_b32 v0, 6, v1 // (op 2970) 
+v_and_b32 v4, 1, v0 // (op 2970) 
+
+v_and_b32 v0, 31, v1 // (op 2970) 
+v_lshl_add_u32 v5, v4, 5, v0 // (op 2970) 
+
+
+v_and_b32 v0, 63, v1 // (op 2970) 
+v_lshrrev_b32 v4, 5, v0 // (op 2970) 
+
+v_lshl_add_u32 v0, v4, 6, v5 // (op 2970) 
+
+
+v_and_b32 v4, 63, v1 // (op 3041) 
+v_and_b32 v5, 48, v1 // (op 3041) 
+v_sub_u32 v6, v4, v5 // (op 3041) 
+
+v_lshrrev_b32 v5, 5, v4 // (op 3041) 
+v_lshl_add_u32 v7, v5, 5, v6 // (op 3041) 
+
+
+v_lshrrev_b32 v5, 4, v4 // (op 3041) 
+
+v_and_b32 v4, -2, v5 // (op 3041) 
+v_sub_u32 v6, v5, v4 // (op 3041) 
+
+
+v_lshlrev_b32 v4, 4, v6 // (op 3041) 
+
+v_lshrrev_b32 v5, 6, v1 // (op 3041) 
+v_and_b32 v6, 1, v5 // (op 3041) 
+
+v_lshl_add_u32 v5, v6, 5, v4 // (op 3041) 
+
+
+v_lshl_add_u32 v4, v7, 6, v5 // (op 3041) 
+
+
+v_mul_lo_u32 v5, v4, 6 // (op 3041) 
+v_lshrrev_b32 v6, 3, v5 // (op 3041) 
+
+v_lshrrev_b32 v5, 4, v4 // (op 3041) 
+
+v_lshlrev_b32 v4, 2, v5 // (op 3041) 
+
+v_add_u32 v5, v6, v4 // (op 3041) 
+
+
+v_lshrrev_b32 v4, 6, v1 // (op 3094) 
+v_and_b32 v6, 1, v4 // (op 3094) 
+
+v_and_b32 v4, 31, v1 // (op 3094) 
+v_lshl_add_u32 v7, v6, 5, v4 // (op 3094) 
+
+
+v_and_b32 v4, 63, v1 // (op 3094) 
+v_lshrrev_b32 v6, 5, v4 // (op 3094) 
+
+v_lshl_add_u32 v4, v6, 6, v7 // (op 3094) 
+
+
+v_lshrrev_b32 v6, 7, v1 // (op 2744) 
+v_and_b32 v7, 63, v1 // (op 2744) 
+v_lshrrev_b32 v8, 5, v7 // (op 2744) 
+v_lshlrev_b32 v9, 2, v8 // (op 2744) 
+
+v_lshl_add_u32 v8, v6, 5, v9 // (op 2744) 
+
+
+v_lshl_add_u32 v6, s16, 8, v8 // (op 2744) 
+
+v_lshrrev_b32 v8, 2, v7 // (op 2744) 
+
+v_and_b32 v7, 7, v8 // (op 2744) 
+
+v_and_b32 v8, 3, v1 // (op 2744) 
+v_lshl_add_u32 v9, v7, 2, v8 // (op 2744) 
+
+
+v_lshrrev_b32 v7, 6, v1 // (op 2744) 
+v_and_b32 v8, 1, v7 // (op 2744) 
+
+v_lshl_add_u32 v7, v8, 5, v9 // (op 2744) 
+
+
+v_lshl_add_u32 v8, s17, 6, v7 // (op 2744) 
+
+v_mul_lo_u32 v7, v8, s2 // (op 2744) 
+
+v_add_lshl_u32 v8, v6, v7, 1 // (op 2744) 
+
+
+v_and_b32 v6, 63, v1 // (op 2806) 
+v_and_b32 v7, 48, v1 // (op 2806) 
+v_sub_u32 v9, v6, v7 // (op 2806) 
+
+v_lshrrev_b32 v7, 5, v6 // (op 2806) 
+s_mul_i32 s1, s2, s9 // (op 2746) most significant: low of low * high
+s_mul_i32 s18, s3, s8 // (op 2746) most significant: low of high * low
+s_mul_i32 s0, s2, s8 // (op 2746) least significant
+s_mul_hi_u32 s19, s2, s8 // (op 2746) most significant: high of low * low
+s_add_u32 s1, s1, s18 // (op 2746) most significant: sum
+s_add_u32 s1, s1, s19 // (op 2746) most significant: sum
+
+
+s_lshl_b64 s[18:19], s[0:1], 1 // (op 2746) 
+
+v_lshl_add_u32 v10, v7, 5, v9 // (op 2806) 
+
+
+v_lshrrev_b32 v7, 4, v6 // (op 2806) 
+
+v_and_b32 v6, -2, v7 // (op 2806) 
+v_sub_u32 v9, v7, v6 // (op 2806) 
+
+
+v_lshlrev_b32 v6, 4, v9 // (op 2806) 
+
+v_lshrrev_b32 v7, 7, v1 // (op 2806) 
+v_lshl_add_u32 v9, v7, 5, v6 // (op 2806) 
+
+
+v_lshl_add_u32 v6, v10, 8, v9 // (op 2806) 
+
+
+v_lshlrev_b32 v7, 2, v6 // (op 2806) 
+
+v_lshrrev_b32 v6, 3, v7 // (op 2806) 
+
+v_lshrrev_b32 v7, 7, v1 // (op 2917) 
+v_and_b32 v9, 31, v1 // (op 2917) 
+v_lshl_add_u32 v10, v7, 5, v9 // (op 2917) 
+
+
+v_and_b32 v7, 63, v1 // (op 2917) 
+v_lshrrev_b32 v9, 5, v7 // (op 2917) 
+
+v_lshl_add_u32 v7, v9, 8, v10 // (op 2917) 
+
+
+v_lshrrev_b32 v9, 7, v1 // (op 2986) 
+v_and_b32 v10, 63, v1 // (op 2986) 
+v_lshrrev_b32 v11, 5, v10 // (op 2986) 
+v_lshlrev_b32 v12, 2, v11 // (op 2986) 
+
+v_lshl_add_u32 v11, v9, 5, v12 // (op 2986) 
+
+
+v_lshl_add_u32 v9, s16, 8, v11 // (op 2986) 
+
+v_lshrrev_b32 v11, 2, v10 // (op 2986) 
+
+v_and_b32 v10, 7, v11 // (op 2986) 
+
+v_and_b32 v11, 3, v1 // (op 2986) 
+v_lshl_add_u32 v12, v10, 2, v11 // (op 2986) 
+
+
+v_lshrrev_b32 v10, 6, v1 // (op 2986) 
+v_and_b32 v11, 1, v10 // (op 2986) 
+
+v_lshl_add_u32 v10, v11, 5, v12 // (op 2986) 
+
+
+v_lshl_add_u32 v11, s17, 6, v10 // (op 2986) 
+
+v_mul_lo_u32 v10, v11, s4 // (op 2986) 
+
+v_add_lshl_u32 v11, v9, v10, 1 // (op 2986) 
+
+
+v_and_b32 v9, 63, v1 // (op 3017) 
+v_and_b32 v10, 48, v1 // (op 3017) 
+v_sub_u32 v12, v9, v10 // (op 3017) 
+
+v_lshrrev_b32 v10, 5, v9 // (op 3017) 
+s_mul_i32 s1, s4, s9 // (op 2988) most significant: low of low * high
+v_lshl_add_u32 v13, v10, 5, v12 // (op 3017) 
+
+
+v_lshrrev_b32 v10, 4, v9 // (op 3017) 
+
+v_and_b32 v9, -2, v10 // (op 3017) 
+v_sub_u32 v12, v10, v9 // (op 3017) 
+
+
+v_lshlrev_b32 v9, 4, v12 // (op 3017) 
+
+v_lshrrev_b32 v10, 7, v1 // (op 3017) 
+v_lshl_add_u32 v12, v10, 5, v9 // (op 3017) 
+
+
+v_lshl_add_u32 v9, v13, 8, v12 // (op 3017) 
+
+
+v_lshlrev_b32 v10, 2, v9 // (op 3017) 
+
+v_lshrrev_b32 v9, 3, v10 // (op 3017) 
+
+v_lshrrev_b32 v10, 7, v1 // (op 3070) 
+v_and_b32 v12, 31, v1 // (op 3070) 
+v_lshl_add_u32 v13, v10, 5, v12 // (op 3070) 
+
+
+v_and_b32 v10, 63, v1 // (op 3070) 
+v_lshrrev_b32 v12, 5, v10 // (op 3070) 
+
+v_lshl_add_u32 v10, v12, 8, v13 // (op 3070) 
+
+
+s_mul_i32 s38, s5, s8 // (op 2988) most significant: low of high * low
+s_mul_i32 s0, s4, s8 // (op 2988) least significant
+s_mul_hi_u32 s39, s4, s8 // (op 2988) most significant: high of low * low
+s_add_u32 s1, s1, s38 // (op 2988) most significant: sum
+s_add_u32 s1, s1, s39 // (op 2988) most significant: sum
+
+
+s_lshl_b64 s[38:39], s[0:1], 1 // (op 2988) 
+
+s_mov_b32 s40, s6 // (op 2746) reg expression
+s_mov_b32 s41, s7 // (op 2746) reg expression
+s_mov_b32 s42, s18 // (op 2746) reg expression
+s_mov_b32 s43, 131072 // (op 2746) call()
+
+s_mov_b32 s44, s10 // (op 2988) reg expression
+
+s_mov_b32 s45, s11 // (op 2988) reg expression
+s_mov_b32 s46, s38 // (op 2988) reg expression
+s_mov_b32 s47, 131072 // (op 2988) call()
+
+
+
+v_mov_b32 v12, s14 // (op 2) Move value
+v_mov_b32 v13, s15 // (op 43) Move value
+
+
+v_accvgpr_write a0, 0.00000 // (op 65) call()
+v_accvgpr_write a1, 0.00000 // (op 65) call()
+v_accvgpr_write a2, 0.00000 // (op 65) call()
+v_accvgpr_write a3, 0.00000 // (op 65) call()
+v_accvgpr_write a4, 0.00000 // (op 65) call()
+v_accvgpr_write a5, 0.00000 // (op 65) call()
+v_accvgpr_write a6, 0.00000 // (op 65) call()
+v_accvgpr_write a7, 0.00000 // (op 65) call()
+v_accvgpr_write a8, 0.00000 // (op 65) call()
+v_accvgpr_write a9, 0.00000 // (op 65) call()
+v_accvgpr_write a10, 0.00000 // (op 65) call()
+v_accvgpr_write a11, 0.00000 // (op 65) call()
+v_accvgpr_write a12, 0.00000 // (op 65) call()
+v_accvgpr_write a13, 0.00000 // (op 65) call()
+v_accvgpr_write a14, 0.00000 // (op 65) call()
+v_accvgpr_write a15, 0.00000 // (op 65) call()
+v_accvgpr_write a16, 0.00000 // (op 405) call()
+v_accvgpr_write a17, 0.00000 // (op 405) call()
+v_accvgpr_write a18, 0.00000 // (op 405) call()
+v_accvgpr_write a19, 0.00000 // (op 405) call()
+v_accvgpr_write a20, 0.00000 // (op 405) call()
+v_accvgpr_write a21, 0.00000 // (op 405) call()
+v_accvgpr_write a22, 0.00000 // (op 405) call()
+v_accvgpr_write a23, 0.00000 // (op 405) call()
+v_accvgpr_write a24, 0.00000 // (op 405) call()
+v_accvgpr_write a25, 0.00000 // (op 405) call()
+v_accvgpr_write a26, 0.00000 // (op 405) call()
+v_accvgpr_write a27, 0.00000 // (op 405) call()
+v_accvgpr_write a28, 0.00000 // (op 405) call()
+v_accvgpr_write a29, 0.00000 // (op 405) call()
+v_accvgpr_write a30, 0.00000 // (op 405) call()
+v_accvgpr_write a31, 0.00000 // (op 405) call()
+v_accvgpr_write a32, 0.00000 // (op 645) call()
+v_accvgpr_write a33, 0.00000 // (op 645) call()
+v_accvgpr_write a34, 0.00000 // (op 645) call()
+v_accvgpr_write a35, 0.00000 // (op 645) call()
+v_accvgpr_write a36, 0.00000 // (op 645) call()
+v_accvgpr_write a37, 0.00000 // (op 645) call()
+v_accvgpr_write a38, 0.00000 // (op 645) call()
+v_accvgpr_write a39, 0.00000 // (op 645) call()
+v_accvgpr_write a40, 0.00000 // (op 645) call()
+v_accvgpr_write a41, 0.00000 // (op 645) call()
+v_accvgpr_write a42, 0.00000 // (op 645) call()
+v_accvgpr_write a43, 0.00000 // (op 645) call()
+v_accvgpr_write a44, 0.00000 // (op 645) call()
+v_accvgpr_write a45, 0.00000 // (op 645) call()
+v_accvgpr_write a46, 0.00000 // (op 645) call()
+v_accvgpr_write a47, 0.00000 // (op 645) call()
+v_accvgpr_write a48, 0.00000 // (op 885) call()
+v_accvgpr_write a49, 0.00000 // (op 885) call()
+v_accvgpr_write a50, 0.00000 // (op 885) call()
+v_accvgpr_write a51, 0.00000 // (op 885) call()
+v_accvgpr_write a52, 0.00000 // (op 885) call()
+v_accvgpr_write a53, 0.00000 // (op 885) call()
+v_accvgpr_write a54, 0.00000 // (op 885) call()
+v_accvgpr_write a55, 0.00000 // (op 885) call()
+v_accvgpr_write a56, 0.00000 // (op 885) call()
+v_accvgpr_write a57, 0.00000 // (op 885) call()
+v_accvgpr_write a58, 0.00000 // (op 885) call()
+v_accvgpr_write a59, 0.00000 // (op 885) call()
+v_accvgpr_write a60, 0.00000 // (op 885) call()
+v_accvgpr_write a61, 0.00000 // (op 885) call()
+v_accvgpr_write a62, 0.00000 // (op 885) call()
+v_accvgpr_write a63, 0.00000 // (op 885) call()
+v_and_b32 v14, -8, v1 // (op 2511) 
+v_sub_u32 v15, v1, v14 // (op 2511) 
+
+v_lshlrev_b32 v14, 5, v15 // (op 2511) 
+
+v_lshl_add_u32 v15, s16, 8, v14 // (op 2511) 
+
+v_mov_b32 v17, 0 // (op 2511) convert
+v_mov_b32 v16, v15 // (op 2511) convert
+
+v_lshrrev_b32 v14, 3, v1 // (op 2511) 
+v_lshlrev_b32 v15, 2, v14 // (op 2511) 
+
+v_mul_lo_u32 v19, v15, s13 // (op 2511) most significant: low of low * high
+v_mul_hi_u32 v14, v15, s12 // (op 2511) most significant: high of low * low
+v_mul_lo_u32 v18, v15, s12 // (op 2511) least significant: low of low * low
+v_add_u32 v19, v19, v14 // (op 2511) most significant: sum
+
+
+v_add_co_u32 v14, s[0:1], v16, v18 // (op 2511) least significant half
+v_addc_co_u32 v15, s[0:1], v17, v19, s[0:1] // (op 2511) most significant half
+
+v_lshlrev_b64 v[14:15], 2, v[14:15] // (op 2511) 
+
+
+v_lshrrev_b64 v[16:17], 3, v[14:15] // (op 2511) 
+
+v_mov_b32 v14, v16 // (op 2511) convert
+
+
+s_waitcnt lgkmcnt(0)
+s_mul_i32 s1, s12, s23 // (op 2513) most significant: low of low * high
+s_mul_i32 s6, s13, s22 // (op 2513) most significant: low of high * low
+s_mul_i32 s0, s12, s22 // (op 2513) least significant
+s_mul_hi_u32 s7, s12, s22 // (op 2513) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2513) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2513) most significant: sum
+
+
+s_lshl_b64 s[14:15], s[0:1], 2 // (op 2513) 
+
+s_ashr_i64 s[0:1], s[14:15], 3 // (op 2513) 
+
+s_mov_b32 s8, s20 // (op 2513) reg expression
+s_mov_b32 s9, s21 // (op 2513) reg expression
+s_mov_b32 s10, s0 // (op 2513) reg expression
+s_mov_b32 s11, 131072 // (op 2513) call()
+
+v_and_b32 v15, -8, v1 // (op 2530) 
+v_sub_u32 v16, v1, v15 // (op 2530) 
+
+v_lshlrev_b32 v15, 5, v16 // (op 2530) 
+
+v_lshl_add_u32 v16, s16, 8, v15 // (op 2530) 
+
+v_mov_b32 v19, 0 // (op 2530) convert
+v_mov_b32 v18, v16 // (op 2530) convert
+
+v_lshrrev_b32 v15, 3, v1 // (op 2530) 
+v_lshlrev_b32 v16, 2, v15 // (op 2530) 
+
+v_mul_lo_u32 v21, v16, s13 // (op 2530) most significant: low of low * high
+v_mul_hi_u32 v15, v16, s12 // (op 2530) most significant: high of low * low
+v_mul_lo_u32 v20, v16, s12 // (op 2530) least significant: low of low * low
+v_add_u32 v21, v21, v15 // (op 2530) most significant: sum
+
+
+v_add_co_u32 v16, s[0:1], v18, v20 // (op 2530) least significant half
+v_addc_co_u32 v17, s[0:1], v19, v21, s[0:1] // (op 2530) most significant half
+
+v_lshlrev_b64 v[16:17], 2, v[16:17] // (op 2530) 
+
+
+v_lshrrev_b64 v[18:19], 3, v[16:17] // (op 2530) 
+
+v_mov_b32 v15, v18 // (op 2530) convert
+
+s_mul_i32 s1, s12, s23 // (op 2532) most significant: low of low * high
+s_mul_i32 s6, s13, s22 // (op 2532) most significant: low of high * low
+s_mul_i32 s0, s12, s22 // (op 2532) least significant
+s_mul_hi_u32 s7, s12, s22 // (op 2532) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2532) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2532) most significant: sum
+
+
+s_lshl_b64 s[6:7], s[0:1], 2 // (op 2532) 
+
+s_ashr_i64 s[0:1], s[6:7], 3 // (op 2532) 
+
+s_mov_b32 s8, s20 // (op 2532) reg expression
+s_mov_b32 s9, s21 // (op 2532) reg expression
+s_mov_b32 s10, s0 // (op 2532) reg expression
+s_mov_b32 s11, 131072 // (op 2532) call()
+
+v_and_b32 v16, -2, v1 // (op 2575) 
+v_sub_u32 v17, v1, v16 // (op 2575) 
+
+v_lshlrev_b32 v16, 5, v17 // (op 2575) 
+
+v_lshl_add_u32 v17, s17, 6, v16 // (op 2575) 
+
+v_mov_b32 v19, 0 // (op 2575) convert
+v_mov_b32 v18, v17 // (op 2575) convert
+
+v_lshrrev_b32 v16, 1, v1 // (op 2575) 
+v_mul_lo_u32 v21, v16, s25 // (op 2575) most significant: low of low * high
+v_mul_hi_u32 v17, v16, s24 // (op 2575) most significant: high of low * low
+v_mul_lo_u32 v20, v16, s24 // (op 2575) least significant: low of low * low
+v_add_u32 v21, v21, v17 // (op 2575) most significant: sum
+
+v_add_co_u32 v20, s[0:1], v20, v18 // (op 2575) least significant half
+v_addc_co_u32 v21, s[0:1], v21, v19, s[0:1] // (op 2575) most significant half
+
+
+
+v_mul_lo_u32 v17, v21, 6 // (op 2575) most significant: low of high * low
+v_mul_hi_u32 v18, v20, 6 // (op 2575) most significant: high of low * low
+v_mul_lo_u32 v16, v20, 6 // (op 2575) least significant: low of low * low
+v_add_u32 v17, v17, v18 // (op 2575) most significant: sum
+
+
+v_lshrrev_b64 v[18:19], 3, v[16:17] // (op 2575) 
+
+v_mov_b32 v16, v18 // (op 2575) convert
+
+s_mul_i32 s1, s23, 6 // (op 2577) most significant: low of high * low
+s_mul_i32 s0, s22, 6 // (op 2577) least significant
+s_mul_hi_u32 s6, s22, 6 // (op 2577) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2577) most significant: sum
+
+s_mul_i32 s7, s24, s1 // (op 2577) most significant: low of low * high
+s_mul_i32 s14, s25, s0 // (op 2577) most significant: low of high * low
+s_mul_i32 s6, s24, s0 // (op 2577) least significant
+s_mul_hi_u32 s15, s24, s0 // (op 2577) most significant: high of low * low
+s_add_u32 s7, s7, s14 // (op 2577) most significant: sum
+s_add_u32 s7, s7, s15 // (op 2577) most significant: sum
+
+
+
+s_ashr_i64 s[0:1], s[6:7], 3 // (op 2577) 
+
+s_mov_b32 s48, s26 // (op 2577) reg expression
+s_mov_b32 s49, s27 // (op 2577) reg expression
+s_mov_b32 s50, s0 // (op 2577) reg expression
+s_mov_b32 s51, 131072 // (op 2577) call()
+
+v_and_b32 v17, -2, v1 // (op 2594) 
+v_sub_u32 v18, v1, v17 // (op 2594) 
+
+v_lshlrev_b32 v17, 5, v18 // (op 2594) 
+
+v_lshl_add_u32 v18, s17, 6, v17 // (op 2594) 
+
+v_mov_b32 v21, 0 // (op 2594) convert
+v_mov_b32 v20, v18 // (op 2594) convert
+
+v_lshrrev_b32 v17, 1, v1 // (op 2594) 
+v_mul_lo_u32 v19, v17, s25 // (op 2594) most significant: low of low * high
+v_mul_hi_u32 v22, v17, s24 // (op 2594) most significant: high of low * low
+v_mul_lo_u32 v18, v17, s24 // (op 2594) least significant: low of low * low
+v_add_u32 v19, v19, v22 // (op 2594) most significant: sum
+
+v_add_co_u32 v18, s[0:1], v18, v20 // (op 2594) least significant half
+v_addc_co_u32 v19, s[0:1], v19, v21, s[0:1] // (op 2594) most significant half
+
+
+
+v_mul_lo_u32 v21, v19, 6 // (op 2594) most significant: low of high * low
+v_mul_hi_u32 v17, v18, 6 // (op 2594) most significant: high of low * low
+v_mul_lo_u32 v20, v18, 6 // (op 2594) least significant: low of low * low
+v_add_u32 v21, v21, v17 // (op 2594) most significant: sum
+
+
+v_lshrrev_b64 v[18:19], 3, v[20:21] // (op 2594) 
+
+v_mov_b32 v17, v18 // (op 2594) convert
+
+s_mul_i32 s1, s23, 6 // (op 2596) most significant: low of high * low
+s_mul_i32 s0, s22, 6 // (op 2596) least significant
+s_mul_hi_u32 s6, s22, 6 // (op 2596) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2596) most significant: sum
+
+s_mul_i32 s7, s24, s1 // (op 2596) most significant: low of low * high
+s_mul_i32 s14, s25, s0 // (op 2596) most significant: low of high * low
+s_mul_i32 s6, s24, s0 // (op 2596) least significant
+s_mul_hi_u32 s15, s24, s0 // (op 2596) most significant: high of low * low
+s_add_u32 s7, s7, s14 // (op 2596) most significant: sum
+s_add_u32 s7, s7, s15 // (op 2596) most significant: sum
+
+
+
+s_ashr_i64 s[0:1], s[6:7], 3 // (op 2596) 
+
+s_mov_b32 s48, s26 // (op 2596) reg expression
+s_mov_b32 s49, s27 // (op 2596) reg expression
+s_mov_b32 s50, s0 // (op 2596) reg expression
+s_mov_b32 s51, 131072 // (op 2596) call()
+
+v_and_b32 v18, -64, v1 // (op 2639) 
+v_sub_u32 v19, v1, v18 // (op 2639) 
+
+v_lshlrev_b32 v18, 2, v19 // (op 2639) 
+
+v_lshl_add_u32 v19, s16, 8, v18 // (op 2639) 
+
+v_lshrrev_b32 v18, 6, v1 // (op 2639) 
+v_mul_lo_u32 v20, v18, s28 // (op 2639) 
+
+v_add_u32 v18, v19, v20 // (op 2639) 
+
+
+s_mul_i32 s1, s28, s33 // (op 2641) most significant: low of low * high
+s_mul_i32 s6, s29, s32 // (op 2641) most significant: low of high * low
+s_mul_i32 s0, s28, s32 // (op 2641) least significant
+s_mul_hi_u32 s7, s28, s32 // (op 2641) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2641) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2641) most significant: sum
+
+
+s_mov_b32 s52, s30 // (op 2641) reg expression
+s_mov_b32 s53, s31 // (op 2641) reg expression
+s_mov_b32 s54, s0 // (op 2641) reg expression
+s_mov_b32 s55, 131072 // (op 2641) call()
+
+v_and_b32 v19, -64, v1 // (op 2658) 
+v_sub_u32 v20, v1, v19 // (op 2658) 
+
+v_lshlrev_b32 v19, 2, v20 // (op 2658) 
+
+v_lshl_add_u32 v20, s16, 8, v19 // (op 2658) 
+
+v_lshrrev_b32 v19, 6, v1 // (op 2658) 
+v_mul_lo_u32 v21, v19, s28 // (op 2658) 
+
+v_add_u32 v19, v20, v21 // (op 2658) 
+
+
+s_mul_i32 s1, s28, s33 // (op 2660) most significant: low of low * high
+s_mul_i32 s6, s29, s32 // (op 2660) most significant: low of high * low
+s_mul_i32 s0, s28, s32 // (op 2660) least significant
+s_mul_hi_u32 s7, s28, s32 // (op 2660) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2660) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2660) most significant: sum
+
+
+s_mov_b32 s52, s30 // (op 2660) reg expression
+s_mov_b32 s53, s31 // (op 2660) reg expression
+s_mov_b32 s54, s0 // (op 2660) reg expression
+s_mov_b32 s55, 131072 // (op 2660) call()
+
+v_and_b32 v20, -64, v1 // (op 2703) 
+v_sub_u32 v21, v1, v20 // (op 2703) 
+
+v_lshl_add_u32 v20, s17, 6, v21 // (op 2703) 
+
+v_lshrrev_b32 v21, 6, v1 // (op 2703) 
+v_mul_lo_u32 v22, v21, s34 // (op 2703) 
+v_add_u32 v22, v22, v20 // (op 2703) 
+
+
+s_mul_i32 s1, s34, s33 // (op 2705) most significant: low of low * high
+s_mul_i32 s6, s35, s32 // (op 2705) most significant: low of high * low
+s_mul_i32 s0, s34, s32 // (op 2705) least significant
+s_mul_hi_u32 s7, s34, s32 // (op 2705) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2705) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2705) most significant: sum
+
+
+s_mov_b32 s56, s36 // (op 2705) reg expression
+s_mov_b32 s57, s37 // (op 2705) reg expression
+s_mov_b32 s58, s0 // (op 2705) reg expression
+s_mov_b32 s59, 131072 // (op 2705) call()
+
+v_and_b32 v20, -64, v1 // (op 2722) 
+v_sub_u32 v21, v1, v20 // (op 2722) 
+
+v_lshl_add_u32 v20, s17, 6, v21 // (op 2722) 
+
+v_lshrrev_b32 v21, 6, v1 // (op 2722) 
+v_mul_lo_u32 v23, v21, s34 // (op 2722) 
+v_add_u32 v23, v23, v20 // (op 2722) 
+
+
+s_mul_i32 s1, s34, s33 // (op 2724) most significant: low of low * high
+s_mul_i32 s6, s35, s32 // (op 2724) most significant: low of high * low
+s_mul_i32 s0, s34, s32 // (op 2724) least significant
+s_mul_hi_u32 s7, s34, s32 // (op 2724) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2724) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2724) most significant: sum
+
+
+s_mov_b32 s56, s36 // (op 2724) reg expression
+s_mov_b32 s57, s37 // (op 2724) reg expression
+s_mov_b32 s58, s0 // (op 2724) reg expression
+s_mov_b32 s59, 131072 // (op 2724) call()
+
+
+
+v_mov_b32 v20, v16 // (op 2249) reg expression
+
+buffer_load_dwordx3 v[24:26], v20, s[48:51], 0 offen // (op 2249) Load value
+buffer_load_dwordx3 v[28:30], v20, s[48:51], 0 offen offset:12 // (op 2249) Load value
+
+
+
+v_mov_b32 v27, v22 // (op 2252) reg expression
+
+buffer_load_ubyte v20, v27, s[56:59], 0 offen offset: 0 // (op 2252) Load value
+
+
+s_lshl_b64 s[0:1], s[12:13], 2 // (op 2255) 
+v_lshrrev_b64 v[32:33], 3, s[0:1] // (op 2255) 
+
+
+v_mov_b32 v21, v14 // (op 2255) reg expression
+buffer_load_dwordx4 v[34:37], v21, s[8:11], 0 offen // (op 2255) Load value
+v_add_u32 v21, v21, v32 // (op 2255) 
+buffer_load_dwordx4 v[38:41], v21, s[8:11], 0 offen // (op 2255) Load value
+v_add_u32 v21, v21, v32 // (op 2255) 
+buffer_load_dwordx4 v[42:45], v21, s[8:11], 0 offen // (op 2255) Load value
+v_add_u32 v21, v21, v32 // (op 2255) 
+buffer_load_dwordx4 v[46:49], v21, s[8:11], 0 offen // (op 2255) Load value
+
+
+
+
+v_mov_b32 v21, v18 // (op 2258) reg expression
+
+buffer_load_dword v27, v21, s[52:55], 0 offen // (op 2258) Load value
+
+
+
+s_lshl_b64 s[0:1], s[24:25], 7 // (op 2261) 
+s_mul_i32 s7, s1, 6 // (op 2261) most significant: low of high * low
+s_mul_i32 s6, s0, 6 // (op 2261) least significant
+s_mul_hi_u32 s14, s0, 6 // (op 2261) most significant: high of low * low
+s_add_u32 s7, s7, s14 // (op 2261) most significant: sum
+
+
+s_lshr_b64 s[0:1], s[6:7], 3 // (op 2261) 
+
+v_add_u32 v21, v16, s0 // (op 2261) 
+
+
+buffer_load_dwordx3 v[50:52], v21, s[48:51], 0 offen // (op 2261) Load value
+buffer_load_dwordx3 v[54:56], v21, s[48:51], 0 offen offset:12 // (op 2261) Load value
+
+
+
+
+s_lshl_b32 s0, s34, 2 // (op 2264) 
+v_add_u32 v16, v22, s0 // (op 2264) 
+
+
+buffer_load_ubyte v21, v16, s[56:59], 0 offen offset: 0 // (op 2264) Load value
+
+
+
+s_lshl_b64 s[0:1], s[12:13], 2 // (op 2267) 
+v_lshrrev_b64 v[32:33], 3, s[0:1] // (op 2267) 
+
+
+s_lshl_b64 s[0:1], s[12:13], 7 // (op 2267) 
+s_lshl_b64 s[6:7], s[0:1], 2 // (op 2267) 
+
+s_lshr_b64 s[0:1], s[6:7], 3 // (op 2267) 
+
+v_add_u32 v16, v14, s0 // (op 2267) 
+
+buffer_load_dwordx4 v[58:61], v16, s[8:11], 0 offen // (op 2267) Load value
+v_add_u32 v16, v16, v32 // (op 2267) 
+buffer_load_dwordx4 v[62:65], v16, s[8:11], 0 offen // (op 2267) Load value
+v_add_u32 v16, v16, v32 // (op 2267) 
+buffer_load_dwordx4 v[66:69], v16, s[8:11], 0 offen // (op 2267) Load value
+v_add_u32 v16, v16, v32 // (op 2267) 
+buffer_load_dwordx4 v[70:73], v16, s[8:11], 0 offen // (op 2267) Load value
+
+
+
+
+
+s_lshl_b32 s0, s28, 2 // (op 2270) 
+v_add_u32 v14, v18, s0 // (op 2270) 
+
+
+buffer_load_dword v16, v14, s[52:55], 0 offen // (op 2270) Load value
+
+
+v_and_b32 v14, -2, v1 // (op 2847) 
+v_sub_u32 v18, v1, v14 // (op 2847) 
+
+v_lshlrev_b32 v14, 5, v18 // (op 2847) 
+
+v_lshrrev_b32 v18, 1, v1 // (op 2847) 
+v_lshl_add_u32 v22, v18, 6, v14 // (op 2847) 
+
+
+v_mul_lo_u32 v14, v22, 6 // (op 2847) 
+v_lshrrev_b32 v18, 3, v14 // (op 2847) 
+
+v_lshrrev_b32 v14, 4, v22 // (op 2847) 
+
+v_lshlrev_b32 v22, 2, v14 // (op 2847) 
+
+v_add_u32 v14, v18, v22 // (op 2847) 
+
+
+
+
+
+s_waitcnt vmcnt(15)
+ds_write_b96 v14, v[24:26] // (op 2272) Store local data 
+s_waitcnt vmcnt(14)
+ds_write_b96 v14, v[28:30] offset:16 // (op 2272) Store local data 
+
+v_and_b32 v14, -64, v1 // (op 2958) 
+v_sub_u32 v18, v1, v14 // (op 2958) 
+
+v_and_b32 v14, 4294967232, v1 // (op 2958) 
+v_add_u32 v22, v14, v18 // (op 2958) 
+
+
+
+
+
+s_waitcnt vmcnt(13)
+ds_write_b8 v22, v20 offset:8192 // (op 2273) Store local data 
+
+v_and_b32 v14, -8, v1 // (op 2789) 
+v_sub_u32 v18, v1, v14 // (op 2789) 
+
+v_lshlrev_b32 v14, 5, v18 // (op 2789) 
+
+v_lshrrev_b32 v18, 3, v1 // (op 2789) 
+v_lshl_add_u32 v22, v18, 10, v14 // (op 2789) 
+
+
+v_lshlrev_b32 v14, 2, v22 // (op 2789) 
+
+v_lshrrev_b32 v18, 3, v14 // (op 2789) 
+
+
+
+
+s_waitcnt vmcnt(12)
+ds_write_b128 v18, v[34:37] offset:8448 // (op 2274) Store local data 
+s_waitcnt vmcnt(11)
+ds_write_b128 v18, v[38:41] offset:8576 // (op 2274) Store local data 
+s_waitcnt vmcnt(10)
+ds_write_b128 v18, v[42:45] offset:8704 // (op 2274) Store local data 
+s_waitcnt vmcnt(9)
+ds_write_b128 v18, v[46:49] offset:8832 // (op 2274) Store local data 
+
+v_and_b32 v14, -64, v1 // (op 2900) 
+v_sub_u32 v18, v1, v14 // (op 2900) 
+
+v_lshlrev_b32 v14, 2, v18 // (op 2900) 
+
+v_lshrrev_b32 v18, 6, v1 // (op 2900) 
+v_lshl_add_u32 v22, v18, 8, v14 // (op 2900) 
+
+
+
+
+
+s_waitcnt vmcnt(8)
+ds_write_b32 v22, v27 offset:24832 // (op 2275) Store local data 
+
+s_waitcnt lgkmcnt(6)
+s_barrier  // (op 3176) 
+
+
+
+ds_read_b96_tr_b6 v[74:76], v3 // (op 2309) Transpose load local data 
+ds_read_b96_tr_b6 v[77:79], v3 offset:1024 // (op 2309) Transpose load local data 
+s_waitcnt lgkmcnt(7)
+s_barrier  // (op 3217) 
+
+
+ds_read_u8 v14, v0 offset:8192 // (op 2332) Load local data 
+s_waitcnt lgkmcnt(4)
+s_barrier  // (op 3157) 
+
+
+
+ds_read_b64_tr_b4 v[80:81], v6 offset:8448 // (op 2290) Transpose load local data 
+ds_read_b64_tr_b4 v[82:83], v6 offset:10496 // (op 2290) Transpose load local data 
+s_waitcnt lgkmcnt(5)
+s_barrier  // (op 3197) 
+
+
+ds_read_u8 v18, v7 offset:24832 // (op 2313) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[84:85], v6 offset:8480 // (op 2295) Transpose load local data 
+ds_read_b64_tr_b4 v[86:87], v6 offset:10528 // (op 2295) Transpose load local data 
+
+
+ds_read_u8 v22, v7 offset:24896 // (op 2318) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[88:89], v6 offset:8512 // (op 2300) Transpose load local data 
+ds_read_b64_tr_b4 v[90:91], v6 offset:10560 // (op 2300) Transpose load local data 
+
+
+ds_read_u8 v53, v7 offset:24960 // (op 2323) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[92:93], v6 offset:8544 // (op 2305) Transpose load local data 
+ds_read_b64_tr_b4 v[94:95], v6 offset:10592 // (op 2305) Transpose load local data 
+
+
+ds_read_u8 v57, v7 offset:25024 // (op 2328) Load local data 
+v_and_b32 v31, -8, v1 // (op 2760) 
+v_sub_u32 v32, v1, v31 // (op 2760) 
+
+v_lshlrev_b32 v31, 5, v32 // (op 2760) 
+
+v_lshrrev_b32 v32, 3, v1 // (op 2760) 
+v_lshl_add_u32 v33, v32, 10, v31 // (op 2760) 
+
+
+v_lshlrev_b32 v31, 2, v33 // (op 2760) 
+
+v_lshrrev_b32 v32, 3, v31 // (op 2760) 
+
+v_and_b32 v31, -2, v1 // (op 2818) 
+v_sub_u32 v33, v1, v31 // (op 2818) 
+
+v_lshlrev_b32 v31, 5, v33 // (op 2818) 
+
+v_lshrrev_b32 v33, 1, v1 // (op 2818) 
+v_lshl_add_u32 v96, v33, 6, v31 // (op 2818) 
+
+
+v_mul_lo_u32 v31, v96, 6 // (op 2818) 
+v_lshrrev_b32 v33, 3, v31 // (op 2818) 
+
+v_lshrrev_b32 v31, 4, v96 // (op 2818) 
+
+v_lshlrev_b32 v96, 2, v31 // (op 2818) 
+
+v_add_u32 v31, v33, v96 // (op 2818) 
+
+
+v_and_b32 v33, -64, v1 // (op 2871) 
+v_sub_u32 v96, v1, v33 // (op 2871) 
+
+v_lshlrev_b32 v33, 2, v96 // (op 2871) 
+
+v_lshrrev_b32 v96, 6, v1 // (op 2871) 
+v_lshl_add_u32 v97, v96, 8, v33 // (op 2871) 
+
+
+v_and_b32 v33, -64, v1 // (op 2929) 
+v_sub_u32 v96, v1, v33 // (op 2929) 
+
+v_and_b32 v33, 4294967232, v1 // (op 2929) 
+v_add_u32 v98, v33, v96 // (op 2929) 
+
+
+v_and_b32 v33, -8, v1 // (op 3000) 
+v_sub_u32 v96, v1, v33 // (op 3000) 
+
+v_lshlrev_b32 v33, 5, v96 // (op 3000) 
+
+v_lshrrev_b32 v96, 3, v1 // (op 3000) 
+v_lshl_add_u32 v99, v96, 10, v33 // (op 3000) 
+
+
+v_lshlrev_b32 v33, 2, v99 // (op 3000) 
+
+v_lshrrev_b32 v96, 3, v33 // (op 3000) 
+
+v_and_b32 v33, -2, v1 // (op 3029) 
+v_sub_u32 v99, v1, v33 // (op 3029) 
+
+v_lshlrev_b32 v33, 5, v99 // (op 3029) 
+
+v_lshrrev_b32 v99, 1, v1 // (op 3029) 
+v_lshl_add_u32 v100, v99, 6, v33 // (op 3029) 
+
+
+v_mul_lo_u32 v33, v100, 6 // (op 3029) 
+v_lshrrev_b32 v99, 3, v33 // (op 3029) 
+
+v_lshrrev_b32 v33, 4, v100 // (op 3029) 
+
+v_lshlrev_b32 v100, 2, v33 // (op 3029) 
+
+v_add_u32 v33, v99, v100 // (op 3029) 
+
+
+v_and_b32 v99, -64, v1 // (op 3053) 
+v_sub_u32 v100, v1, v99 // (op 3053) 
+
+v_lshlrev_b32 v99, 2, v100 // (op 3053) 
+
+v_lshrrev_b32 v100, 6, v1 // (op 3053) 
+v_lshl_add_u32 v101, v100, 8, v99 // (op 3053) 
+
+
+v_and_b32 v99, -64, v1 // (op 3082) 
+v_sub_u32 v100, v1, v99 // (op 3082) 
+
+v_and_b32 v99, 4294967232, v1 // (op 3082) 
+v_add_u32 v102, v99, v100 // (op 3082) 
+
+
+s_mov_b32 s0, 0 // (op 887) call()
+s_ashr_i64 s[6:7], s[22:23], 7 // (op 886) 
+s_mov_b32 s1, s6 // (op 886) convert
+
+s_and_b32 s6, s1, 4294967294 // (op 886) 
+
+s_cmp_lt_u32 s0, s6 // (op 886) 
+
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_scc0 RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopBottom_KLoop_886 // (op 886) Condition: Top (jump to RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopBottom_KLoop_886 if false)
+RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopTop_KLoop_886:
+
+
+s_waitcnt lgkmcnt(9)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[80:83], v[74:79], a[0:15], v18, v14 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 90) 
+s_add_u32 s0, s0, 2 // (op 888) 
+v_mov_b32 v99, v17 // (op 10) 
+s_lshl_b64 s[6:7], s[24:25], 7 // (op 10) 
+s_mul_i32 s15, s7, 6 // (op 10) most significant: low of high * low
+s_mul_i32 s14, s6, 6 // (op 10) least significant
+s_mul_hi_u32 s1, s6, 6 // (op 10) most significant: high of low * low
+s_add_u32 s15, s15, s1 // (op 10) most significant: sum
+
+
+s_lshr_b64 s[6:7], s[14:15], 3 // (op 10) 
+
+s_lshl_b32 s1, s6, 1 // (op 10) 
+
+v_add_u32 v100, v99, s1 // (op 10) 
+
+
+buffer_load_dwordx3 v[24:26], v100, s[48:51], 0 offen // (op 10) Load value
+buffer_load_dwordx3 v[28:30], v100, s[48:51], 0 offen offset:12 // (op 10) Load value
+
+s_waitcnt lgkmcnt(1)
+s_barrier  // (op 3166) 
+
+
+
+
+
+ds_read_b64_tr_b4 v[80:81], v6 offset:16640 // (op 93) Transpose load local data 
+ds_read_b64_tr_b4 v[82:83], v6 offset:18688 // (op 93) Transpose load local data 
+v_mov_b32 v100, v23 // (op 25) 
+s_barrier  // (op 3186) 
+s_lshl_b32 s1, s34, 3 // (op 25) 
+
+
+
+v_add_u32 v103, v100, s1 // (op 25) 
+
+
+buffer_load_ubyte v20, v103, s[56:59], 0 offen offset: 0 // (op 25) Load value
+
+ds_read_b96_tr_b6 v[104:106], v3 offset:4096 // (op 97) Transpose load local data 
+
+s_lshl_b64 s[6:7], s[12:13], 2 // (op 4) 
+v_lshrrev_b64 v[110:111], 3, s[6:7] // (op 4) 
+
+
+v_mov_b32 v103, v15 // (op 4) 
+s_lshl_b64 s[6:7], s[12:13], 7 // (op 4) 
+s_lshl_b64 s[14:15], s[6:7], 2 // (op 4) 
+
+s_lshr_b64 s[6:7], s[14:15], 3 // (op 4) 
+
+s_lshl_b32 s1, s6, 1 // (op 4) 
+
+v_add_u32 v112, v103, s1 // (op 4) 
+
+ds_read_b96_tr_b6 v[107:109], v3 offset:5120 // (op 97) Transpose load local data 
+buffer_load_dwordx4 v[34:37], v112, s[8:11], 0 offen // (op 4) Load value
+v_add_u32 v112, v112, v110 // (op 4) 
+buffer_load_dwordx4 v[38:41], v112, s[8:11], 0 offen // (op 4) Load value
+v_add_u32 v112, v112, v110 // (op 4) 
+buffer_load_dwordx4 v[42:45], v112, s[8:11], 0 offen // (op 4) Load value
+v_add_u32 v112, v112, v110 // (op 4) 
+s_waitcnt lgkmcnt(4)
+s_barrier  // (op 3207) 
+buffer_load_dwordx4 v[46:49], v112, s[8:11], 0 offen // (op 4) Load value
+
+
+
+
+
+
+ds_read_u8 v18, v7 offset:25344 // (op 101) Load local data 
+v_mov_b32 v110, v19 // (op 17) 
+s_barrier  // (op 3227) 
+s_lshl_b32 s1, s28, 3 // (op 17) 
+
+
+ds_read_u8 v111, v0 offset:8320 // (op 105) Load local data 
+v_add_u32 v112, v110, s1 // (op 17) 
+
+
+buffer_load_dword v27, v112, s[52:55], 0 offen // (op 17) Load value
+
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[80:83], v[104:109], a[0:15], v18, v111 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 107) 
+s_barrier  // (op 3247) 
+
+
+
+v_mfma_scale_f32_32x32x64_f8f6f4 a[16:31], v[84:87], v[74:79], a[16:31], v22, v14 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 454) 
+s_waitcnt vmcnt(15)
+ds_write_b96 v33, v[50:52] offset:25856 // (op 306) Store local data 
+
+
+
+ds_read_b64_tr_b4 v[80:81], v6 offset:16672 // (op 456) Transpose load local data 
+ds_read_b64_tr_b4 v[82:83], v6 offset:18720 // (op 456) Transpose load local data 
+s_waitcnt vmcnt(14)
+ds_write_b96 v33, v[54:56] offset:25872 // (op 306) Store local data 
+
+
+ds_read_u8 v18, v7 offset:25408 // (op 460) Load local data 
+s_barrier  // (op 3259) 
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[16:31], v[80:83], v[104:109], a[16:31], v18, v111 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 463) 
+
+
+
+s_waitcnt vmcnt(13)
+ds_write_b8 v102, v21 offset:34048 // (op 308) Store local data 
+v_mfma_scale_f32_32x32x64_f8f6f4 a[32:47], v[88:91], v[74:79], a[32:47], v53, v14 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 694) 
+
+
+
+s_barrier  // (op 3240) 
+ds_read_b64_tr_b4 v[80:81], v6 offset:16704 // (op 696) Transpose load local data 
+
+
+
+ds_read_b64_tr_b4 v[82:83], v6 offset:18752 // (op 696) Transpose load local data 
+s_waitcnt vmcnt(12)
+ds_write_b128 v96, v[58:61] offset:34304 // (op 287) Store local data 
+
+
+ds_read_u8 v18, v7 offset:25472 // (op 700) Load local data 
+s_waitcnt vmcnt(11)
+ds_write_b128 v96, v[62:65] offset:34432 // (op 287) Store local data 
+s_waitcnt lgkmcnt(1)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[32:47], v[80:83], v[104:109], a[32:47], v18, v111 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 703) 
+s_waitcnt vmcnt(10)
+ds_write_b128 v96, v[66:69] offset:34560 // (op 287) Store local data 
+s_waitcnt vmcnt(9)
+ds_write_b128 v96, v[70:73] offset:34688 // (op 287) Store local data 
+v_mfma_scale_f32_32x32x64_f8f6f4 a[48:63], v[92:95], v[74:79], a[48:63], v57, v14 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 934) 
+
+
+
+s_barrier  // (op 3253) 
+ds_read_b64_tr_b4 v[92:93], v6 offset:16736 // (op 936) Transpose load local data 
+
+
+
+ds_read_b64_tr_b4 v[94:95], v6 offset:18784 // (op 936) Transpose load local data 
+s_waitcnt vmcnt(8)
+ds_write_b32 v101, v16 offset:50688 // (op 307) Store local data 
+
+
+ds_read_u8 v57, v7 offset:25536 // (op 940) Load local data 
+s_barrier  // (op 3243) 
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[48:63], v[92:95], v[104:109], a[48:63], v57, v111 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 943) 
+
+
+
+
+
+ds_read_b96_tr_b6 v[74:76], v5 offset:25856 // (op 291) Transpose load local data 
+ds_read_b96_tr_b6 v[77:79], v5 offset:26880 // (op 291) Transpose load local data 
+s_barrier  // (op 3256) 
+
+
+ds_read_u8 v14, v4 offset:34048 // (op 295) Load local data 
+s_barrier  // (op 3237) 
+
+
+
+ds_read_b64_tr_b4 v[80:81], v9 offset:34304 // (op 289) Transpose load local data 
+ds_read_b64_tr_b4 v[82:83], v9 offset:36352 // (op 289) Transpose load local data 
+s_barrier  // (op 3250) 
+
+
+ds_read_u8 v18, v10 offset:50688 // (op 293) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[84:85], v9 offset:34336 // (op 475) Transpose load local data 
+ds_read_b64_tr_b4 v[86:87], v9 offset:36384 // (op 475) Transpose load local data 
+
+
+ds_read_u8 v22, v10 offset:50752 // (op 479) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[88:89], v9 offset:34368 // (op 715) Transpose load local data 
+ds_read_b64_tr_b4 v[90:91], v9 offset:36416 // (op 715) Transpose load local data 
+
+
+ds_read_u8 v53, v10 offset:50816 // (op 719) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[104:105], v9 offset:34400 // (op 955) Transpose load local data 
+ds_read_b64_tr_b4 v[106:107], v9 offset:36448 // (op 955) Transpose load local data 
+
+
+ds_read_u8 v108, v10 offset:50880 // (op 959) Load local data 
+
+
+s_waitcnt lgkmcnt(9)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[80:83], v[74:79], a[0:15], v18, v14 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 296) 
+s_lshl_b64 s[6:7], s[24:25], 7 // (op 309) 
+s_mul_i32 s15, s7, 6 // (op 309) most significant: low of high * low
+
+
+
+s_mul_i32 s14, s6, 6 // (op 309) least significant
+s_mul_hi_u32 s1, s6, 6 // (op 309) most significant: high of low * low
+s_add_u32 s15, s15, s1 // (op 309) most significant: sum
+
+
+s_lshr_b64 s[6:7], s[14:15], 3 // (op 309) 
+
+s_waitcnt lgkmcnt(6)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[16:31], v[84:87], v[74:79], a[16:31], v22, v14 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 464) 
+s_mul_i32 s1, 3, s6 // (op 309) 
+
+v_add_u32 v109, v99, s1 // (op 309) 
+
+
+buffer_load_dwordx3 v[50:52], v109, s[48:51], 0 offen // (op 309) Load value
+buffer_load_dwordx3 v[54:56], v109, s[48:51], 0 offen offset:12 // (op 309) Load value
+
+s_waitcnt lgkmcnt(3)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[32:47], v[88:91], v[74:79], a[32:47], v53, v14 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 704) 
+
+
+
+s_lshl_b32 s1, s34, 2 // (op 311) 
+s_mul_i32 s6, 3, s1 // (op 311) 
+
+v_add_u32 v99, v100, s6 // (op 311) 
+
+
+buffer_load_ubyte v21, v99, s[56:59], 0 offen offset: 0 // (op 311) Load value
+
+s_lshl_b64 s[6:7], s[24:25], 7 // (op 2586) 
+
+s_mul_i32 s15, s7, 6 // (op 2586) most significant: low of high * low
+
+s_mul_i32 s14, s6, 6 // (op 2586) least significant
+s_mul_hi_u32 s1, s6, 6 // (op 2586) most significant: high of low * low
+s_add_u32 s15, s15, s1 // (op 2586) most significant: sum
+
+
+s_lshl_b32 s1, s34, 3 // (op 2714) 
+v_add_u32 v23, v23, s1 // (op 2714) 
+
+s_lshr_b64 s[6:7], s[14:15], 3 // (op 2586) 
+
+s_lshl_b32 s1, s6, 1 // (op 2586) 
+
+v_add_u32 v17, v17, s1 // (op 2586) 
+
+s_lshl_b64 s[6:7], s[12:13], 2 // (op 286) 
+v_lshrrev_b64 v[112:113], 3, s[6:7] // (op 286) 
+
+
+s_lshl_b64 s[6:7], s[12:13], 7 // (op 286) 
+s_lshl_b64 s[14:15], s[6:7], 2 // (op 286) 
+
+s_lshr_b64 s[6:7], s[14:15], 3 // (op 286) 
+
+s_mul_i32 s1, 3, s6 // (op 286) 
+
+v_add_u32 v109, v103, s1 // (op 286) 
+
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[48:63], v[104:107], v[74:79], a[48:63], v108, v14 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 944) 
+ds_read_b64_tr_b4 v[114:115], v9 offset:42496 // (op 298) Transpose load local data 
+
+
+ds_read_b64_tr_b4 v[116:117], v9 offset:44544 // (op 298) Transpose load local data 
+buffer_load_dwordx4 v[58:61], v109, s[8:11], 0 offen // (op 286) Load value
+
+
+
+v_add_u32 v109, v109, v112 // (op 286) 
+buffer_load_dwordx4 v[62:65], v109, s[8:11], 0 offen // (op 286) Load value
+v_add_u32 v109, v109, v112 // (op 286) 
+ds_read_b96_tr_b6 v[118:120], v5 offset:29952 // (op 300) Transpose load local data 
+ds_read_b96_tr_b6 v[121:123], v5 offset:30976 // (op 300) Transpose load local data 
+buffer_load_dwordx4 v[66:69], v109, s[8:11], 0 offen // (op 286) Load value
+v_add_u32 v109, v109, v112 // (op 286) 
+
+
+s_barrier  // (op 3308) 
+ds_read_u8 v111, v10 offset:51200 // (op 302) Load local data 
+buffer_load_dwordx4 v[70:73], v109, s[8:11], 0 offen // (op 286) Load value
+
+
+
+
+
+ds_read_u8 v99, v4 offset:34176 // (op 304) Load local data 
+
+
+s_lshl_b32 s1, s28, 2 // (op 310) 
+
+
+
+s_barrier  // (op 3312) 
+s_mul_i32 s6, 3, s1 // (op 310) 
+
+v_add_u32 v100, v110, s6 // (op 310) 
+
+
+buffer_load_dword v16, v100, s[52:55], 0 offen // (op 310) Load value
+
+s_lshl_b64 s[6:7], s[12:13], 7 // (op 2522) 
+
+s_lshl_b64 s[14:15], s[6:7], 2 // (op 2522) 
+
+s_barrier  // (op 3179) 
+s_lshl_b32 s1, s28, 3 // (op 2650) 
+
+
+
+v_add_u32 v19, v19, s1 // (op 2650) 
+
+s_lshr_b64 s[6:7], s[14:15], 3 // (op 2522) 
+
+s_lshl_b32 s1, s6, 1 // (op 2522) 
+
+v_add_u32 v15, v15, s1 // (op 2522) 
+
+ds_read_b64_tr_b4 v[104:105], v9 offset:42528 // (op 466) Transpose load local data 
+ds_read_b64_tr_b4 v[106:107], v9 offset:44576 // (op 466) Transpose load local data 
+s_waitcnt lgkmcnt(2)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[114:117], v[118:123], a[0:15], v111, v99 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 305) 
+
+
+
+
+ds_read_u8 v100, v10 offset:51264 // (op 470) Load local data 
+s_waitcnt vmcnt(15)
+ds_write_b96 v31, v[24:26] // (op 13) Store local data 
+
+
+
+ds_read_b64_tr_b4 v[108:109], v9 offset:42560 // (op 706) Transpose load local data 
+s_waitcnt lgkmcnt(2)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[16:31], v[104:107], v[118:123], a[16:31], v100, v99 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 473) 
+ds_read_b64_tr_b4 v[110:111], v9 offset:44608 // (op 706) Transpose load local data 
+
+
+
+
+ds_read_u8 v100, v10 offset:51328 // (op 710) Load local data 
+s_waitcnt vmcnt(14)
+ds_write_b96 v31, v[28:30] offset:16 // (op 13) Store local data 
+
+
+
+s_waitcnt lgkmcnt(1)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[32:47], v[108:111], v[118:123], a[32:47], v100, v99 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 713) 
+
+
+s_barrier  // (op 3220) 
+ds_read_b64_tr_b4 v[114:115], v9 offset:42592 // (op 946) Transpose load local data 
+
+
+
+ds_read_b64_tr_b4 v[116:117], v9 offset:44640 // (op 946) Transpose load local data 
+s_waitcnt vmcnt(13)
+ds_write_b8 v98, v20 offset:8192 // (op 30) Store local data 
+
+
+s_barrier  // (op 3368) 
+s_barrier  // (op 3160) 
+ds_read_u8 v100, v10 offset:51392 // (op 950) Load local data 
+
+
+
+s_waitcnt vmcnt(12)
+ds_write_b128 v32, v[34:37] offset:8448 // (op 6) Store local data 
+s_barrier  // (op 3372) 
+s_waitcnt lgkmcnt(1)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[48:63], v[114:117], v[118:123], a[48:63], v100, v99 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 953) 
+s_waitcnt vmcnt(11)
+ds_write_b128 v32, v[38:41] offset:8576 // (op 6) Store local data 
+
+
+
+
+s_waitcnt vmcnt(10)
+ds_write_b128 v32, v[42:45] offset:8704 // (op 6) Store local data 
+s_waitcnt vmcnt(9)
+ds_write_b128 v32, v[46:49] offset:8832 // (op 6) Store local data 
+s_barrier  // (op 3200) 
+
+
+
+s_waitcnt vmcnt(8)
+ds_write_b32 v97, v27 offset:24832 // (op 21) Store local data 
+s_barrier  // (op 3189) 
+
+
+
+ds_read_b96_tr_b6 v[74:76], v3 // (op 77) Transpose load local data 
+ds_read_b96_tr_b6 v[77:79], v3 offset:1024 // (op 77) Transpose load local data 
+s_barrier  // (op 3230) 
+
+
+ds_read_u8 v14, v0 offset:8192 // (op 87) Load local data 
+s_waitcnt lgkmcnt(4)
+s_barrier  // (op 3169) 
+
+
+
+ds_read_b64_tr_b4 v[80:81], v6 offset:8448 // (op 72) Transpose load local data 
+ds_read_b64_tr_b4 v[82:83], v6 offset:10496 // (op 72) Transpose load local data 
+s_waitcnt lgkmcnt(5)
+s_barrier  // (op 3210) 
+
+
+ds_read_u8 v18, v7 offset:24832 // (op 82) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[84:85], v6 offset:8480 // (op 447) Transpose load local data 
+ds_read_b64_tr_b4 v[86:87], v6 offset:10528 // (op 447) Transpose load local data 
+
+
+ds_read_u8 v22, v7 offset:24896 // (op 451) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[88:89], v6 offset:8512 // (op 687) Transpose load local data 
+ds_read_b64_tr_b4 v[90:91], v6 offset:10560 // (op 687) Transpose load local data 
+
+
+ds_read_u8 v53, v7 offset:24960 // (op 691) Load local data 
+
+
+
+ds_read_b64_tr_b4 v[92:93], v6 offset:8544 // (op 927) Transpose load local data 
+ds_read_b64_tr_b4 v[94:95], v6 offset:10592 // (op 927) Transpose load local data 
+
+
+ds_read_u8 v57, v7 offset:25024 // (op 931) Load local data 
+s_ashr_i64 s[6:7], s[22:23], 7 // (op 886) 
+s_mov_b32 s1, s6 // (op 886) convert
+
+s_and_b32 s6, s1, 4294967294 // (op 886) 
+
+s_cmp_lt_u32 s0, s6 // (op 886) 
+
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_scc1 RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopTop_KLoop_886 // (op 886) Condition: Bottom (jump to RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopTop_KLoop_886 if true)
+RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopBottom_KLoop_886:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+v_and_b32 v15, -8, v1 // (op 2482) 
+s_ashr_i64 s[0:1], s[22:23], 7 // (op 2482) 
+v_sub_u32 v17, v1, v15 // (op 2482) 
+
+s_lshr_b32 s6, s0, 1 // (op 2482) 
+
+v_lshlrev_b32 v15, 5, v17 // (op 2482) 
+
+v_lshl_add_u32 v17, s16, 8, v15 // (op 2482) 
+
+v_mov_b32 v49, 0 // (op 2482) convert
+v_mov_b32 v48, v17 // (op 2482) convert
+
+v_lshrrev_b32 v15, 3, v1 // (op 2482) 
+v_lshlrev_b32 v17, 2, v15 // (op 2482) 
+
+v_lshl_add_u32 v15, s6, 8, v17 // (op 2482) 
+
+
+v_mul_lo_u32 v47, v15, s13 // (op 2482) most significant: low of low * high
+v_mul_hi_u32 v17, v15, s12 // (op 2482) most significant: high of low * low
+v_mul_lo_u32 v46, v15, s12 // (op 2482) least significant: low of low * low
+v_add_u32 v47, v47, v17 // (op 2482) most significant: sum
+
+
+v_add_co_u32 v44, s[0:1], v48, v46 // (op 2482) least significant half
+v_addc_co_u32 v45, s[0:1], v49, v47, s[0:1] // (op 2482) most significant half
+
+v_lshlrev_b64 v[44:45], 2, v[44:45] // (op 2482) 
+
+
+v_lshrrev_b64 v[42:43], 3, v[44:45] // (op 2482) 
+
+v_mov_b32 v15, v42 // (op 2482) convert
+
+s_mul_i32 s1, s12, s23 // (op 2484) most significant: low of low * high
+s_mul_i32 s6, s13, s22 // (op 2484) most significant: low of high * low
+s_mul_i32 s0, s12, s22 // (op 2484) least significant
+s_mul_hi_u32 s7, s12, s22 // (op 2484) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2484) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2484) most significant: sum
+
+
+s_lshl_b64 s[6:7], s[0:1], 2 // (op 2484) 
+
+s_ashr_i64 s[0:1], s[6:7], 3 // (op 2484) 
+
+s_mov_b32 s8, s20 // (op 2484) reg expression
+s_mov_b32 s9, s21 // (op 2484) reg expression
+s_mov_b32 s10, s0 // (op 2484) reg expression
+s_mov_b32 s11, 131072 // (op 2484) call()
+
+v_lshrrev_b32 v17, 1, v1 // (op 2552) 
+s_ashr_i64 s[0:1], s[22:23], 7 // (op 2552) 
+v_and_b32 v19, -2, v1 // (op 2552) 
+s_lshr_b32 s6, s0, 1 // (op 2552) 
+
+v_sub_u32 v20, v1, v19 // (op 2552) 
+
+v_lshl_add_u32 v19, s6, 8, v17 // (op 2552) 
+
+
+v_lshlrev_b32 v17, 5, v20 // (op 2552) 
+
+v_lshl_add_u32 v20, s17, 6, v17 // (op 2552) 
+
+v_mov_b32 v49, 0 // (op 2552) convert
+v_mov_b32 v48, v20 // (op 2552) convert
+
+v_mul_lo_u32 v47, v19, s25 // (op 2552) most significant: low of low * high
+v_mul_hi_u32 v17, v19, s24 // (op 2552) most significant: high of low * low
+v_mul_lo_u32 v46, v19, s24 // (op 2552) least significant: low of low * low
+v_add_u32 v47, v47, v17 // (op 2552) most significant: sum
+
+v_add_co_u32 v46, s[0:1], v46, v48 // (op 2552) least significant half
+v_addc_co_u32 v47, s[0:1], v47, v49, s[0:1] // (op 2552) most significant half
+
+
+
+v_mul_lo_u32 v49, v47, 6 // (op 2552) most significant: low of high * low
+v_mul_hi_u32 v17, v46, 6 // (op 2552) most significant: high of low * low
+v_mul_lo_u32 v48, v46, 6 // (op 2552) least significant: low of low * low
+v_add_u32 v49, v49, v17 // (op 2552) most significant: sum
+
+
+v_lshrrev_b64 v[46:47], 3, v[48:49] // (op 2552) 
+
+v_mov_b32 v17, v46 // (op 2552) convert
+
+s_mul_i32 s1, s23, 6 // (op 2554) most significant: low of high * low
+s_mul_i32 s0, s22, 6 // (op 2554) least significant
+s_mul_hi_u32 s6, s22, 6 // (op 2554) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2554) most significant: sum
+
+s_mul_i32 s7, s24, s1 // (op 2554) most significant: low of low * high
+s_mul_i32 s14, s25, s0 // (op 2554) most significant: low of high * low
+s_mul_i32 s6, s24, s0 // (op 2554) least significant
+s_mul_hi_u32 s15, s24, s0 // (op 2554) most significant: high of low * low
+s_add_u32 s7, s7, s14 // (op 2554) most significant: sum
+s_add_u32 s7, s7, s15 // (op 2554) most significant: sum
+
+
+
+s_ashr_i64 s[0:1], s[6:7], 3 // (op 2554) 
+
+s_mov_b32 s48, s26 // (op 2554) reg expression
+s_mov_b32 s49, s27 // (op 2554) reg expression
+s_mov_b32 s50, s0 // (op 2554) reg expression
+s_mov_b32 s51, 131072 // (op 2554) call()
+
+v_and_b32 v19, -64, v1 // (op 2616) 
+s_ashr_i64 s[0:1], s[22:23], 7 // (op 2616) 
+v_sub_u32 v20, v1, v19 // (op 2616) 
+
+s_lshr_b32 s6, s0, 1 // (op 2616) 
+
+v_lshlrev_b32 v19, 2, v20 // (op 2616) 
+
+v_lshl_add_u32 v20, s16, 8, v19 // (op 2616) 
+
+v_lshrrev_b32 v19, 6, v1 // (op 2616) 
+v_lshl_add_u32 v23, s6, 3, v19 // (op 2616) 
+
+
+v_mul_lo_u32 v19, v23, s28 // (op 2616) 
+
+v_add_u32 v23, v20, v19 // (op 2616) 
+
+
+s_mul_i32 s1, s28, s33 // (op 2618) most significant: low of low * high
+s_mul_i32 s6, s29, s32 // (op 2618) most significant: low of high * low
+s_mul_i32 s0, s28, s32 // (op 2618) least significant
+s_mul_hi_u32 s7, s28, s32 // (op 2618) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2618) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2618) most significant: sum
+
+
+s_mov_b32 s52, s30 // (op 2618) reg expression
+s_mov_b32 s53, s31 // (op 2618) reg expression
+s_mov_b32 s54, s0 // (op 2618) reg expression
+s_mov_b32 s55, 131072 // (op 2618) call()
+
+v_lshrrev_b32 v19, 6, v1 // (op 2680) 
+s_ashr_i64 s[0:1], s[22:23], 7 // (op 2680) 
+v_and_b32 v20, -64, v1 // (op 2680) 
+s_lshr_b32 s6, s0, 1 // (op 2680) 
+
+v_sub_u32 v24, v1, v20 // (op 2680) 
+
+v_lshl_add_u32 v20, s6, 3, v19 // (op 2680) 
+
+
+v_lshl_add_u32 v19, s17, 6, v24 // (op 2680) 
+
+v_mul_lo_u32 v24, v20, s34 // (op 2680) 
+v_add_u32 v24, v24, v19 // (op 2680) 
+
+
+s_mul_i32 s1, s34, s33 // (op 2682) most significant: low of low * high
+s_mul_i32 s6, s35, s32 // (op 2682) most significant: low of high * low
+s_mul_i32 s0, s34, s32 // (op 2682) least significant
+s_mul_hi_u32 s7, s34, s32 // (op 2682) most significant: high of low * low
+s_add_u32 s1, s1, s6 // (op 2682) most significant: sum
+s_add_u32 s1, s1, s7 // (op 2682) most significant: sum
+
+
+s_mov_b32 s56, s36 // (op 2682) reg expression
+s_mov_b32 s57, s37 // (op 2682) reg expression
+s_mov_b32 s58, s0 // (op 2682) reg expression
+s_mov_b32 s59, 131072 // (op 2682) call()
+
+v_and_b32 v19, -8, v1 // (op 2773) 
+v_sub_u32 v20, v1, v19 // (op 2773) 
+
+v_lshlrev_b32 v19, 5, v20 // (op 2773) 
+
+v_lshrrev_b32 v20, 3, v1 // (op 2773) 
+v_lshl_add_u32 v25, v20, 10, v19 // (op 2773) 
+
+
+v_lshlrev_b32 v19, 2, v25 // (op 2773) 
+
+v_lshrrev_b32 v20, 3, v19 // (op 2773) 
+
+v_and_b32 v19, -2, v1 // (op 2831) 
+v_sub_u32 v25, v1, v19 // (op 2831) 
+
+v_lshlrev_b32 v19, 5, v25 // (op 2831) 
+
+v_lshrrev_b32 v25, 1, v1 // (op 2831) 
+v_lshl_add_u32 v26, v25, 6, v19 // (op 2831) 
+
+
+v_mul_lo_u32 v19, v26, 6 // (op 2831) 
+v_lshrrev_b32 v25, 3, v19 // (op 2831) 
+
+v_lshrrev_b32 v19, 4, v26 // (op 2831) 
+
+v_lshlrev_b32 v26, 2, v19 // (op 2831) 
+
+v_add_u32 v19, v25, v26 // (op 2831) 
+
+
+v_and_b32 v25, -64, v1 // (op 2884) 
+v_sub_u32 v26, v1, v25 // (op 2884) 
+
+v_lshlrev_b32 v25, 2, v26 // (op 2884) 
+
+v_lshrrev_b32 v26, 6, v1 // (op 2884) 
+v_lshl_add_u32 v27, v26, 8, v25 // (op 2884) 
+
+
+v_and_b32 v25, -64, v1 // (op 2942) 
+v_sub_u32 v26, v1, v25 // (op 2942) 
+
+v_and_b32 v25, 4294967232, v1 // (op 2942) 
+v_add_u32 v28, v25, v26 // (op 2942) 
+
+
+s_ashr_i64 s[0:1], s[22:23], 7 // (op 892) 
+s_and_b32 s6, s0, 4294967294 // (op 892) 
+
+s_ashr_i64 s[0:1], s[22:23], 7 // (op 891) 
+s_mov_b32 s7, s0 // (op 891) convert
+
+s_cmp_lt_u32 s6, s7 // (op 891) 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before branching into Bottom of TailLoop!
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_scc0 RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopBottom_KLoopTail_891 // (op 891) Condition: Top (jump to RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopBottom_KLoopTail_891 if false)
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before falling through to TailLoop!
+RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopTop_KLoopTail_891:
+
+s_add_u32 s6, s6, 1 // (op 893) 
+s_lshl_b64 s[0:1], s[12:13], 2 // (op 202) 
+v_lshrrev_b64 v[30:31], 3, s[0:1] // (op 202) 
+
+
+v_mov_b32 v14, v15 // (op 202) 
+v_mov_b32 v16, v14 // (op 202) reg expression
+buffer_load_dwordx4 v[32:35], v16, s[8:11], 0 offen // (op 202) Load value
+v_add_u32 v16, v16, v30 // (op 202) 
+buffer_load_dwordx4 v[36:39], v16, s[8:11], 0 offen // (op 202) Load value
+v_add_u32 v16, v16, v30 // (op 202) 
+buffer_load_dwordx4 v[40:43], v16, s[8:11], 0 offen // (op 202) Load value
+v_add_u32 v16, v16, v30 // (op 202) 
+buffer_load_dwordx4 v[44:47], v16, s[8:11], 0 offen // (op 202) Load value
+
+
+
+s_lshl_b64 s[0:1], s[12:13], 7 // (op 2472) 
+s_lshl_b64 s[14:15], s[0:1], 2 // (op 2472) 
+
+s_lshr_b64 s[0:1], s[14:15], 3 // (op 2472) 
+
+v_add_u32 v15, v15, s0 // (op 2472) 
+
+
+
+s_barrier  // (op 3163) 
+v_mov_b32 v14, v17 // (op 225) 
+
+
+
+v_mov_b32 v16, v14 // (op 225) reg expression
+
+buffer_load_dwordx3 v[48:50], v16, s[48:51], 0 offen // (op 225) Load value
+buffer_load_dwordx3 v[52:54], v16, s[48:51], 0 offen offset:12 // (op 225) Load value
+
+
+s_lshl_b64 s[0:1], s[24:25], 7 // (op 2544) 
+s_mul_i32 s15, s1, 6 // (op 2544) most significant: low of high * low
+s_mul_i32 s14, s0, 6 // (op 2544) least significant
+s_mul_hi_u32 s7, s0, 6 // (op 2544) most significant: high of low * low
+s_add_u32 s15, s15, s7 // (op 2544) most significant: sum
+
+
+s_lshr_b64 s[0:1], s[14:15], 3 // (op 2544) 
+
+v_add_u32 v17, v17, s0 // (op 2544) 
+
+s_waitcnt vmcnt(5)
+ds_write_b128 v20, v[32:35] offset:8448 // (op 203) Store local data 
+
+
+v_mov_b32 v14, v23 // (op 226) 
+v_mov_b32 v16, v14 // (op 226) reg expression
+
+s_waitcnt vmcnt(4)
+ds_write_b128 v20, v[36:39] offset:8576 // (op 203) Store local data 
+s_waitcnt vmcnt(3)
+ds_write_b128 v20, v[40:43] offset:8704 // (op 203) Store local data 
+s_waitcnt vmcnt(2)
+ds_write_b128 v20, v[44:47] offset:8832 // (op 203) Store local data 
+buffer_load_dword v18, v16, s[52:55], 0 offen // (op 226) Load value
+
+
+
+s_lshl_b32 s7, s28, 2 // (op 2608) 
+s_barrier  // (op 3182) 
+v_add_u32 v23, v23, s7 // (op 2608) 
+
+
+
+
+
+
+v_mov_b32 v14, v24 // (op 227) 
+v_mov_b32 v16, v14 // (op 227) reg expression
+
+buffer_load_ubyte v51, v16, s[56:59], 0 offen offset: 0 // (op 227) Load value
+
+
+s_lshl_b32 s7, s34, 2 // (op 2672) 
+v_add_u32 v24, v24, s7 // (op 2672) 
+
+s_waitcnt vmcnt(3)
+ds_write_b96 v19, v[48:50] // (op 222) Store local data 
+s_waitcnt lgkmcnt(1)
+s_barrier  // (op 3172) 
+s_waitcnt vmcnt(2)
+ds_write_b96 v19, v[52:54] offset:16 // (op 222) Store local data 
+
+
+
+
+ds_read_b64_tr_b4 v[30:31], v6 offset:8448 // (op 205) Transpose load local data 
+s_barrier  // (op 3203) 
+ds_read_b64_tr_b4 v[32:33], v6 offset:10496 // (op 205) Transpose load local data 
+
+
+
+s_waitcnt lgkmcnt(2)
+s_barrier  // (op 3193) 
+s_waitcnt vmcnt(1)
+ds_write_b32 v27, v18 offset:24832 // (op 223) Store local data 
+
+
+
+
+ds_read_b96_tr_b6 v[34:36], v3 // (op 207) Transpose load local data 
+s_barrier  // (op 3223) 
+ds_read_b96_tr_b6 v[37:39], v3 offset:1024 // (op 207) Transpose load local data 
+
+
+
+s_waitcnt lgkmcnt(2)
+s_barrier  // (op 3213) 
+s_waitcnt vmcnt(0)
+ds_write_b8 v28, v51 offset:8192 // (op 224) Store local data 
+
+
+
+ds_read_u8 v14, v7 offset:24832 // (op 209) Load local data 
+s_waitcnt lgkmcnt(1)
+s_barrier  // (op 3233) 
+
+
+ds_read_u8 v16, v0 offset:8192 // (op 211) Load local data 
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[30:33], v[34:39], a[0:15], v14, v16 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 212) 
+
+
+
+
+
+ds_read_b64_tr_b4 v[30:31], v6 offset:16640 // (op 214) Transpose load local data 
+ds_read_b64_tr_b4 v[32:33], v6 offset:18688 // (op 214) Transpose load local data 
+
+
+
+ds_read_b96_tr_b6 v[40:42], v3 offset:4096 // (op 216) Transpose load local data 
+ds_read_b96_tr_b6 v[43:45], v3 offset:5120 // (op 216) Transpose load local data 
+
+
+ds_read_u8 v14, v7 offset:25344 // (op 218) Load local data 
+
+
+ds_read_u8 v18, v0 offset:8320 // (op 220) Load local data 
+
+
+
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[0:15], v[30:33], v[40:45], a[0:15], v14, v18 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 221) 
+ds_read_b64_tr_b4 v[46:47], v6 offset:8480 // (op 417) Transpose load local data 
+
+
+ds_read_b64_tr_b4 v[48:49], v6 offset:10528 // (op 417) Transpose load local data 
+
+
+ds_read_u8 v14, v7 offset:24896 // (op 421) Load local data 
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[16:31], v[46:49], v[34:39], a[16:31], v14, v16 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 424) 
+
+
+
+
+
+ds_read_b64_tr_b4 v[30:31], v6 offset:16672 // (op 426) Transpose load local data 
+ds_read_b64_tr_b4 v[32:33], v6 offset:18720 // (op 426) Transpose load local data 
+
+
+ds_read_u8 v14, v7 offset:25408 // (op 430) Load local data 
+
+
+
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[16:31], v[30:33], v[40:45], a[16:31], v14, v18 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 433) 
+ds_read_b64_tr_b4 v[46:47], v6 offset:8512 // (op 657) Transpose load local data 
+
+
+ds_read_b64_tr_b4 v[48:49], v6 offset:10560 // (op 657) Transpose load local data 
+
+
+ds_read_u8 v14, v7 offset:24960 // (op 661) Load local data 
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[32:47], v[46:49], v[34:39], a[32:47], v14, v16 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 664) 
+
+
+
+
+
+ds_read_b64_tr_b4 v[30:31], v6 offset:16704 // (op 666) Transpose load local data 
+ds_read_b64_tr_b4 v[32:33], v6 offset:18752 // (op 666) Transpose load local data 
+
+
+ds_read_u8 v14, v7 offset:25472 // (op 670) Load local data 
+
+
+
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[32:47], v[30:33], v[40:45], a[32:47], v14, v18 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 673) 
+ds_read_b64_tr_b4 v[46:47], v6 offset:8544 // (op 897) Transpose load local data 
+
+
+ds_read_b64_tr_b4 v[48:49], v6 offset:10592 // (op 897) Transpose load local data 
+
+
+ds_read_u8 v14, v7 offset:25024 // (op 901) Load local data 
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[48:63], v[46:49], v[34:39], a[48:63], v14, v16 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 904) 
+
+
+
+
+
+
+
+ds_read_b64_tr_b4 v[36:37], v6 offset:16736 // (op 906) Transpose load local data 
+ds_read_b64_tr_b4 v[38:39], v6 offset:18784 // (op 906) Transpose load local data 
+
+
+ds_read_u8 v14, v7 offset:25536 // (op 910) Load local data 
+s_waitcnt lgkmcnt(0)
+v_mfma_scale_f32_32x32x64_f8f6f4 a[48:63], v[36:39], v[40:45], a[48:63], v14, v18 op_sel:[0,0] op_sel_hi:[0,0] cbsz:0b100 blgp:0b011 // (op 913) 
+
+
+
+
+s_ashr_i64 s[0:1], s[22:23], 7 // (op 891) 
+s_mov_b32 s7, s0 // (op 891) convert
+
+s_cmp_lt_u32 s6, s7 // (op 891) 
+
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_scc1 RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopTop_KLoopTail_891 // (op 891) Condition: Bottom (jump to RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopTop_KLoopTail_891 if true)
+RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ForLoopBottom_KLoopTail_891:
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+s_barrier  // (op 3354) 
+
+
+
+
+
+
+
+
+v_cmp_eq_f32 vcc, 0.00000, v12 // (op 157) 
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before branching into conditional label!
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_cbranch_vccz RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ConditionalFalse_0_beta_157 // (op 157) Condition: False, jump to RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ConditionalFalse_0_beta_157
+v_accvgpr_read v14, a0 // (op 50) 
+v_accvgpr_read v15, a1 // (op 50) 
+v_accvgpr_read v16, a2 // (op 50) 
+v_accvgpr_read v17, a3 // (op 50) 
+v_accvgpr_read v18, a4 // (op 50) 
+v_accvgpr_read v19, a5 // (op 50) 
+v_accvgpr_read v20, a6 // (op 50) 
+v_accvgpr_read v21, a7 // (op 50) 
+v_accvgpr_read v22, a8 // (op 50) 
+v_accvgpr_read v23, a9 // (op 50) 
+v_accvgpr_read v24, a10 // (op 50) 
+v_accvgpr_read v25, a11 // (op 50) 
+v_accvgpr_read v26, a12 // (op 50) 
+v_accvgpr_read v27, a13 // (op 50) 
+v_accvgpr_read v28, a14 // (op 50) 
+v_accvgpr_read v29, a15 // (op 50) 
+v_mul_f32 v30, v13, v14 // (op 50) 
+v_mul_f32 v31, v13, v15 // (op 50) 
+v_mul_f32 v32, v13, v16 // (op 50) 
+v_mul_f32 v33, v13, v17 // (op 50) 
+v_mul_f32 v34, v13, v18 // (op 50) 
+v_mul_f32 v35, v13, v19 // (op 50) 
+v_mul_f32 v36, v13, v20 // (op 50) 
+v_mul_f32 v37, v13, v21 // (op 50) 
+v_mul_f32 v38, v13, v22 // (op 50) 
+v_mul_f32 v39, v13, v23 // (op 50) 
+v_mul_f32 v40, v13, v24 // (op 50) 
+v_mul_f32 v41, v13, v25 // (op 50) 
+v_mul_f32 v42, v13, v26 // (op 50) 
+v_mul_f32 v43, v13, v27 // (op 50) 
+v_mul_f32 v44, v13, v28 // (op 50) 
+v_mul_f32 v45, v13, v29 // (op 50) 
+
+v_lshrrev_b32 v14, 16, v30 // (op 56) 
+v_lshrrev_b32 v15, 16, v31 // (op 56) 
+v_lshrrev_b32 v16, 16, v32 // (op 56) 
+v_lshrrev_b32 v17, 16, v33 // (op 56) 
+v_lshrrev_b32 v18, 16, v34 // (op 56) 
+v_lshrrev_b32 v19, 16, v35 // (op 56) 
+v_lshrrev_b32 v20, 16, v36 // (op 56) 
+v_lshrrev_b32 v21, 16, v37 // (op 56) 
+v_lshrrev_b32 v22, 16, v38 // (op 56) 
+v_lshrrev_b32 v23, 16, v39 // (op 56) 
+v_lshrrev_b32 v24, 16, v40 // (op 56) 
+v_lshrrev_b32 v25, 16, v41 // (op 56) 
+v_lshrrev_b32 v26, 16, v42 // (op 56) 
+v_lshrrev_b32 v27, 16, v43 // (op 56) 
+v_lshrrev_b32 v28, 16, v44 // (op 56) 
+v_lshrrev_b32 v29, 16, v45 // (op 56) 
+
+
+v_pack_b32_f16 v30, v14, v15 // (op 58) 
+v_pack_b32_f16 v31, v16, v17 // (op 58) 
+v_pack_b32_f16 v32, v18, v19 // (op 58) 
+v_pack_b32_f16 v33, v20, v21 // (op 58) 
+v_pack_b32_f16 v34, v22, v23 // (op 58) 
+v_pack_b32_f16 v35, v24, v25 // (op 58) 
+v_pack_b32_f16 v36, v26, v27 // (op 58) 
+v_pack_b32_f16 v37, v28, v29 // (op 58) 
+
+
+buffer_store_dwordx2 v[30:31], v11, s[44:47], 0 offen // (op 58) Store value
+buffer_store_dwordx2 v[32:33], v11, s[44:47], 0 offen offset:16 // (op 58) Store value
+buffer_store_dwordx2 v[34:35], v11, s[44:47], 0 offen offset:32 // (op 58) Store value
+buffer_store_dwordx2 v[36:37], v11, s[44:47], 0 offen offset:48 // (op 58) Store value
+
+
+v_accvgpr_read v14, a16 // (op 1283) 
+v_accvgpr_read v15, a17 // (op 1283) 
+v_accvgpr_read v16, a18 // (op 1283) 
+v_accvgpr_read v17, a19 // (op 1283) 
+v_accvgpr_read v18, a20 // (op 1283) 
+v_accvgpr_read v19, a21 // (op 1283) 
+v_accvgpr_read v20, a22 // (op 1283) 
+v_accvgpr_read v21, a23 // (op 1283) 
+v_accvgpr_read v22, a24 // (op 1283) 
+v_accvgpr_read v23, a25 // (op 1283) 
+v_accvgpr_read v24, a26 // (op 1283) 
+v_accvgpr_read v25, a27 // (op 1283) 
+v_accvgpr_read v26, a28 // (op 1283) 
+v_accvgpr_read v27, a29 // (op 1283) 
+v_accvgpr_read v28, a30 // (op 1283) 
+v_accvgpr_read v29, a31 // (op 1283) 
+v_mul_f32 v30, v13, v14 // (op 1283) 
+v_mul_f32 v31, v13, v15 // (op 1283) 
+v_mul_f32 v32, v13, v16 // (op 1283) 
+v_mul_f32 v33, v13, v17 // (op 1283) 
+v_mul_f32 v34, v13, v18 // (op 1283) 
+v_mul_f32 v35, v13, v19 // (op 1283) 
+v_mul_f32 v36, v13, v20 // (op 1283) 
+v_mul_f32 v37, v13, v21 // (op 1283) 
+v_mul_f32 v38, v13, v22 // (op 1283) 
+v_mul_f32 v39, v13, v23 // (op 1283) 
+v_mul_f32 v40, v13, v24 // (op 1283) 
+v_mul_f32 v41, v13, v25 // (op 1283) 
+v_mul_f32 v42, v13, v26 // (op 1283) 
+v_mul_f32 v43, v13, v27 // (op 1283) 
+v_mul_f32 v44, v13, v28 // (op 1283) 
+v_mul_f32 v45, v13, v29 // (op 1283) 
+
+v_lshrrev_b32 v14, 16, v30 // (op 1285) 
+v_lshrrev_b32 v15, 16, v31 // (op 1285) 
+v_lshrrev_b32 v16, 16, v32 // (op 1285) 
+v_lshrrev_b32 v17, 16, v33 // (op 1285) 
+v_lshrrev_b32 v18, 16, v34 // (op 1285) 
+v_lshrrev_b32 v19, 16, v35 // (op 1285) 
+v_lshrrev_b32 v20, 16, v36 // (op 1285) 
+v_lshrrev_b32 v21, 16, v37 // (op 1285) 
+v_lshrrev_b32 v22, 16, v38 // (op 1285) 
+v_lshrrev_b32 v23, 16, v39 // (op 1285) 
+v_lshrrev_b32 v24, 16, v40 // (op 1285) 
+v_lshrrev_b32 v25, 16, v41 // (op 1285) 
+v_lshrrev_b32 v26, 16, v42 // (op 1285) 
+v_lshrrev_b32 v27, 16, v43 // (op 1285) 
+v_lshrrev_b32 v28, 16, v44 // (op 1285) 
+v_lshrrev_b32 v29, 16, v45 // (op 1285) 
+
+
+v_pack_b32_f16 v30, v14, v15 // (op 1286) 
+v_pack_b32_f16 v31, v16, v17 // (op 1286) 
+v_pack_b32_f16 v32, v18, v19 // (op 1286) 
+v_pack_b32_f16 v33, v20, v21 // (op 1286) 
+v_pack_b32_f16 v34, v22, v23 // (op 1286) 
+v_pack_b32_f16 v35, v24, v25 // (op 1286) 
+v_pack_b32_f16 v36, v26, v27 // (op 1286) 
+v_pack_b32_f16 v37, v28, v29 // (op 1286) 
+
+
+buffer_store_dwordx2 v[30:31], v11, s[44:47], 0 offen offset:128 // (op 1286) Store value
+buffer_store_dwordx2 v[32:33], v11, s[44:47], 0 offen offset:144 // (op 1286) Store value
+buffer_store_dwordx2 v[34:35], v11, s[44:47], 0 offen offset:160 // (op 1286) Store value
+buffer_store_dwordx2 v[36:37], v11, s[44:47], 0 offen offset:176 // (op 1286) Store value
+
+
+v_accvgpr_read v14, a32 // (op 1303) 
+v_accvgpr_read v15, a33 // (op 1303) 
+v_accvgpr_read v16, a34 // (op 1303) 
+v_accvgpr_read v17, a35 // (op 1303) 
+v_accvgpr_read v18, a36 // (op 1303) 
+v_accvgpr_read v19, a37 // (op 1303) 
+v_accvgpr_read v20, a38 // (op 1303) 
+v_accvgpr_read v21, a39 // (op 1303) 
+v_accvgpr_read v22, a40 // (op 1303) 
+v_accvgpr_read v23, a41 // (op 1303) 
+v_accvgpr_read v24, a42 // (op 1303) 
+v_accvgpr_read v25, a43 // (op 1303) 
+v_accvgpr_read v26, a44 // (op 1303) 
+v_accvgpr_read v27, a45 // (op 1303) 
+v_accvgpr_read v28, a46 // (op 1303) 
+v_accvgpr_read v29, a47 // (op 1303) 
+v_mul_f32 v30, v13, v14 // (op 1303) 
+v_mul_f32 v31, v13, v15 // (op 1303) 
+v_mul_f32 v32, v13, v16 // (op 1303) 
+v_mul_f32 v33, v13, v17 // (op 1303) 
+v_mul_f32 v34, v13, v18 // (op 1303) 
+v_mul_f32 v35, v13, v19 // (op 1303) 
+v_mul_f32 v36, v13, v20 // (op 1303) 
+v_mul_f32 v37, v13, v21 // (op 1303) 
+v_mul_f32 v38, v13, v22 // (op 1303) 
+v_mul_f32 v39, v13, v23 // (op 1303) 
+v_mul_f32 v40, v13, v24 // (op 1303) 
+v_mul_f32 v41, v13, v25 // (op 1303) 
+v_mul_f32 v42, v13, v26 // (op 1303) 
+v_mul_f32 v43, v13, v27 // (op 1303) 
+v_mul_f32 v44, v13, v28 // (op 1303) 
+v_mul_f32 v45, v13, v29 // (op 1303) 
+
+v_lshrrev_b32 v14, 16, v30 // (op 1305) 
+v_lshrrev_b32 v15, 16, v31 // (op 1305) 
+v_lshrrev_b32 v16, 16, v32 // (op 1305) 
+v_lshrrev_b32 v17, 16, v33 // (op 1305) 
+v_lshrrev_b32 v18, 16, v34 // (op 1305) 
+v_lshrrev_b32 v19, 16, v35 // (op 1305) 
+v_lshrrev_b32 v20, 16, v36 // (op 1305) 
+v_lshrrev_b32 v21, 16, v37 // (op 1305) 
+v_lshrrev_b32 v22, 16, v38 // (op 1305) 
+v_lshrrev_b32 v23, 16, v39 // (op 1305) 
+v_lshrrev_b32 v24, 16, v40 // (op 1305) 
+v_lshrrev_b32 v25, 16, v41 // (op 1305) 
+v_lshrrev_b32 v26, 16, v42 // (op 1305) 
+v_lshrrev_b32 v27, 16, v43 // (op 1305) 
+v_lshrrev_b32 v28, 16, v44 // (op 1305) 
+v_lshrrev_b32 v29, 16, v45 // (op 1305) 
+
+
+v_pack_b32_f16 v30, v14, v15 // (op 1306) 
+v_pack_b32_f16 v31, v16, v17 // (op 1306) 
+v_pack_b32_f16 v32, v18, v19 // (op 1306) 
+v_pack_b32_f16 v33, v20, v21 // (op 1306) 
+v_pack_b32_f16 v34, v22, v23 // (op 1306) 
+v_pack_b32_f16 v35, v24, v25 // (op 1306) 
+v_pack_b32_f16 v36, v26, v27 // (op 1306) 
+v_pack_b32_f16 v37, v28, v29 // (op 1306) 
+
+
+buffer_store_dwordx2 v[30:31], v11, s[44:47], 0 offen offset:256 // (op 1306) Store value
+buffer_store_dwordx2 v[32:33], v11, s[44:47], 0 offen offset:272 // (op 1306) Store value
+buffer_store_dwordx2 v[34:35], v11, s[44:47], 0 offen offset:288 // (op 1306) Store value
+buffer_store_dwordx2 v[36:37], v11, s[44:47], 0 offen offset:304 // (op 1306) Store value
+
+
+v_accvgpr_read v14, a48 // (op 1323) 
+v_accvgpr_read v15, a49 // (op 1323) 
+v_accvgpr_read v16, a50 // (op 1323) 
+v_accvgpr_read v17, a51 // (op 1323) 
+v_accvgpr_read v18, a52 // (op 1323) 
+v_accvgpr_read v19, a53 // (op 1323) 
+v_accvgpr_read v20, a54 // (op 1323) 
+v_accvgpr_read v21, a55 // (op 1323) 
+v_accvgpr_read v22, a56 // (op 1323) 
+v_accvgpr_read v23, a57 // (op 1323) 
+v_accvgpr_read v24, a58 // (op 1323) 
+v_accvgpr_read v25, a59 // (op 1323) 
+v_accvgpr_read v26, a60 // (op 1323) 
+v_accvgpr_read v27, a61 // (op 1323) 
+v_accvgpr_read v28, a62 // (op 1323) 
+v_accvgpr_read v29, a63 // (op 1323) 
+v_mul_f32 v30, v13, v14 // (op 1323) 
+v_mul_f32 v31, v13, v15 // (op 1323) 
+v_mul_f32 v32, v13, v16 // (op 1323) 
+v_mul_f32 v33, v13, v17 // (op 1323) 
+v_mul_f32 v34, v13, v18 // (op 1323) 
+v_mul_f32 v35, v13, v19 // (op 1323) 
+v_mul_f32 v36, v13, v20 // (op 1323) 
+v_mul_f32 v37, v13, v21 // (op 1323) 
+v_mul_f32 v38, v13, v22 // (op 1323) 
+v_mul_f32 v39, v13, v23 // (op 1323) 
+v_mul_f32 v40, v13, v24 // (op 1323) 
+v_mul_f32 v41, v13, v25 // (op 1323) 
+v_mul_f32 v42, v13, v26 // (op 1323) 
+v_mul_f32 v43, v13, v27 // (op 1323) 
+v_mul_f32 v44, v13, v28 // (op 1323) 
+v_mul_f32 v45, v13, v29 // (op 1323) 
+
+v_lshrrev_b32 v14, 16, v30 // (op 1325) 
+v_lshrrev_b32 v15, 16, v31 // (op 1325) 
+v_lshrrev_b32 v16, 16, v32 // (op 1325) 
+v_lshrrev_b32 v17, 16, v33 // (op 1325) 
+v_lshrrev_b32 v18, 16, v34 // (op 1325) 
+v_lshrrev_b32 v19, 16, v35 // (op 1325) 
+v_lshrrev_b32 v20, 16, v36 // (op 1325) 
+v_lshrrev_b32 v21, 16, v37 // (op 1325) 
+v_lshrrev_b32 v22, 16, v38 // (op 1325) 
+v_lshrrev_b32 v23, 16, v39 // (op 1325) 
+v_lshrrev_b32 v24, 16, v40 // (op 1325) 
+v_lshrrev_b32 v25, 16, v41 // (op 1325) 
+v_lshrrev_b32 v26, 16, v42 // (op 1325) 
+v_lshrrev_b32 v27, 16, v43 // (op 1325) 
+v_lshrrev_b32 v28, 16, v44 // (op 1325) 
+v_lshrrev_b32 v29, 16, v45 // (op 1325) 
+
+
+v_pack_b32_f16 v30, v14, v15 // (op 1326) 
+v_pack_b32_f16 v31, v16, v17 // (op 1326) 
+v_pack_b32_f16 v32, v18, v19 // (op 1326) 
+v_pack_b32_f16 v33, v20, v21 // (op 1326) 
+v_pack_b32_f16 v34, v22, v23 // (op 1326) 
+v_pack_b32_f16 v35, v24, v25 // (op 1326) 
+v_pack_b32_f16 v36, v26, v27 // (op 1326) 
+v_pack_b32_f16 v37, v28, v29 // (op 1326) 
+
+
+buffer_store_dwordx2 v[30:31], v11, s[44:47], 0 offen offset:384 // (op 1326) Store value
+buffer_store_dwordx2 v[32:33], v11, s[44:47], 0 offen offset:400 // (op 1326) Store value
+buffer_store_dwordx2 v[34:35], v11, s[44:47], 0 offen offset:416 // (op 1326) Store value
+buffer_store_dwordx2 v[36:37], v11, s[44:47], 0 offen offset:432 // (op 1326) Store value
+
+
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before conditional label!
+s_waitcnt vmcnt(63) lgkmcnt(15) expcnt(7)// Keep queues within max waitcnt limit
+s_branch RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ConditionalBottom_0_beta_157 // (op 157) Condition: Done, jump to RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ConditionalBottom_0_beta_157
+RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ConditionalFalse_0_beta_157:
+
+
+
+buffer_load_dwordx2 v[14:15], v8, s[40:43], 0 offen offset:384 // (op 1406) Load value
+buffer_load_dwordx2 v[16:17], v8, s[40:43], 0 offen offset:400 // (op 1406) Load value
+buffer_load_dwordx2 v[18:19], v8, s[40:43], 0 offen offset:416 // (op 1406) Load value
+v_accvgpr_read v22, a48 // (op 1402) 
+v_accvgpr_read v23, a49 // (op 1402) 
+v_accvgpr_read v24, a50 // (op 1402) 
+v_accvgpr_read v25, a51 // (op 1402) 
+v_accvgpr_read v26, a52 // (op 1402) 
+v_accvgpr_read v27, a53 // (op 1402) 
+v_accvgpr_read v28, a54 // (op 1402) 
+v_accvgpr_read v29, a55 // (op 1402) 
+v_accvgpr_read v30, a56 // (op 1402) 
+v_accvgpr_read v31, a57 // (op 1402) 
+v_accvgpr_read v32, a58 // (op 1402) 
+v_accvgpr_read v33, a59 // (op 1402) 
+v_accvgpr_read v34, a60 // (op 1402) 
+v_accvgpr_read v35, a61 // (op 1402) 
+v_accvgpr_read v36, a62 // (op 1402) 
+v_accvgpr_read v37, a63 // (op 1402) 
+v_mul_f32 v38, v13, v22 // (op 1402) 
+v_mul_f32 v39, v13, v23 // (op 1402) 
+v_mul_f32 v40, v13, v24 // (op 1402) 
+v_mul_f32 v41, v13, v25 // (op 1402) 
+v_mul_f32 v42, v13, v26 // (op 1402) 
+v_mul_f32 v43, v13, v27 // (op 1402) 
+v_mul_f32 v44, v13, v28 // (op 1402) 
+v_mul_f32 v45, v13, v29 // (op 1402) 
+v_mul_f32 v46, v13, v30 // (op 1402) 
+v_mul_f32 v47, v13, v31 // (op 1402) 
+v_mul_f32 v48, v13, v32 // (op 1402) 
+v_mul_f32 v49, v13, v33 // (op 1402) 
+v_mul_f32 v50, v13, v34 // (op 1402) 
+v_mul_f32 v51, v13, v35 // (op 1402) 
+v_mul_f32 v52, v13, v36 // (op 1402) 
+v_mul_f32 v53, v13, v37 // (op 1402) 
+
+buffer_load_dwordx2 v[20:21], v8, s[40:43], 0 offen offset:432 // (op 1406) Load value
+s_waitcnt vmcnt(3)
+v_and_b32 v6, 65535, v14 // (op 1407) 
+v_lshrrev_b32 v7, 16, v14 // (op 1407) 
+v_lshlrev_b32 v6, 16, v6 // (op 1407) 
+v_lshlrev_b32 v7, 16, v7 // (op 1407) 
+v_mul_f32 v22, v12, v6 // (op 1407) 
+v_mul_f32 v23, v12, v7 // (op 1407) 
+v_and_b32 v6, 65535, v15 // (op 1407) 
+v_lshrrev_b32 v7, 16, v15 // (op 1407) 
+v_lshlrev_b32 v6, 16, v6 // (op 1407) 
+v_lshlrev_b32 v7, 16, v7 // (op 1407) 
+v_mul_f32 v24, v12, v6 // (op 1407) 
+v_mul_f32 v25, v12, v7 // (op 1407) 
+s_waitcnt vmcnt(2)
+v_and_b32 v6, 65535, v16 // (op 1407) 
+v_lshrrev_b32 v7, 16, v16 // (op 1407) 
+v_lshlrev_b32 v6, 16, v6 // (op 1407) 
+v_lshlrev_b32 v7, 16, v7 // (op 1407) 
+v_mul_f32 v26, v12, v6 // (op 1407) 
+v_mul_f32 v27, v12, v7 // (op 1407) 
+v_and_b32 v6, 65535, v17 // (op 1407) 
+v_lshrrev_b32 v7, 16, v17 // (op 1407) 
+v_lshlrev_b32 v6, 16, v6 // (op 1407) 
+v_lshlrev_b32 v7, 16, v7 // (op 1407) 
+v_mul_f32 v28, v12, v6 // (op 1407) 
+v_mul_f32 v29, v12, v7 // (op 1407) 
+s_waitcnt vmcnt(1)
+v_and_b32 v6, 65535, v18 // (op 1407) 
+v_lshrrev_b32 v7, 16, v18 // (op 1407) 
+v_lshlrev_b32 v6, 16, v6 // (op 1407) 
+v_lshlrev_b32 v7, 16, v7 // (op 1407) 
+v_mul_f32 v30, v12, v6 // (op 1407) 
+v_mul_f32 v31, v12, v7 // (op 1407) 
+v_and_b32 v6, 65535, v19 // (op 1407) 
+v_lshrrev_b32 v7, 16, v19 // (op 1407) 
+v_lshlrev_b32 v6, 16, v6 // (op 1407) 
+v_lshlrev_b32 v7, 16, v7 // (op 1407) 
+v_mul_f32 v32, v12, v6 // (op 1407) 
+v_mul_f32 v33, v12, v7 // (op 1407) 
+s_waitcnt vmcnt(0)
+v_and_b32 v6, 65535, v20 // (op 1407) 
+v_lshrrev_b32 v7, 16, v20 // (op 1407) 
+v_lshlrev_b32 v6, 16, v6 // (op 1407) 
+v_lshlrev_b32 v7, 16, v7 // (op 1407) 
+v_mul_f32 v34, v12, v6 // (op 1407) 
+v_mul_f32 v35, v12, v7 // (op 1407) 
+v_and_b32 v6, 65535, v21 // (op 1407) 
+v_lshrrev_b32 v7, 16, v21 // (op 1407) 
+v_lshlrev_b32 v6, 16, v6 // (op 1407) 
+v_lshlrev_b32 v7, 16, v7 // (op 1407) 
+v_mul_f32 v36, v12, v6 // (op 1407) 
+v_mul_f32 v37, v12, v7 // (op 1407) 
+
+
+v_add_f32 v54, v22, v38 // (op 1403) 
+v_add_f32 v55, v23, v39 // (op 1403) 
+v_add_f32 v56, v24, v40 // (op 1403) 
+v_add_f32 v57, v25, v41 // (op 1403) 
+v_add_f32 v58, v26, v42 // (op 1403) 
+v_add_f32 v59, v27, v43 // (op 1403) 
+v_add_f32 v60, v28, v44 // (op 1403) 
+v_add_f32 v61, v29, v45 // (op 1403) 
+v_add_f32 v62, v30, v46 // (op 1403) 
+v_add_f32 v63, v31, v47 // (op 1403) 
+v_add_f32 v64, v32, v48 // (op 1403) 
+v_add_f32 v65, v33, v49 // (op 1403) 
+v_add_f32 v66, v34, v50 // (op 1403) 
+v_add_f32 v67, v35, v51 // (op 1403) 
+v_add_f32 v68, v36, v52 // (op 1403) 
+v_add_f32 v69, v37, v53 // (op 1403) 
+
+
+v_lshrrev_b32 v14, 16, v54 // (op 1404) 
+v_lshrrev_b32 v15, 16, v55 // (op 1404) 
+v_lshrrev_b32 v16, 16, v56 // (op 1404) 
+v_lshrrev_b32 v17, 16, v57 // (op 1404) 
+v_lshrrev_b32 v18, 16, v58 // (op 1404) 
+v_lshrrev_b32 v19, 16, v59 // (op 1404) 
+v_lshrrev_b32 v20, 16, v60 // (op 1404) 
+v_lshrrev_b32 v21, 16, v61 // (op 1404) 
+v_lshrrev_b32 v22, 16, v62 // (op 1404) 
+v_lshrrev_b32 v23, 16, v63 // (op 1404) 
+v_lshrrev_b32 v24, 16, v64 // (op 1404) 
+v_lshrrev_b32 v25, 16, v65 // (op 1404) 
+v_lshrrev_b32 v26, 16, v66 // (op 1404) 
+v_lshrrev_b32 v27, 16, v67 // (op 1404) 
+v_lshrrev_b32 v28, 16, v68 // (op 1404) 
+v_lshrrev_b32 v29, 16, v69 // (op 1404) 
+
+
+v_pack_b32_f16 v30, v14, v15 // (op 1405) 
+v_pack_b32_f16 v31, v16, v17 // (op 1405) 
+v_pack_b32_f16 v32, v18, v19 // (op 1405) 
+v_pack_b32_f16 v33, v20, v21 // (op 1405) 
+v_pack_b32_f16 v34, v22, v23 // (op 1405) 
+v_pack_b32_f16 v35, v24, v25 // (op 1405) 
+v_pack_b32_f16 v36, v26, v27 // (op 1405) 
+v_pack_b32_f16 v37, v28, v29 // (op 1405) 
+
+
+buffer_store_dwordx2 v[30:31], v11, s[44:47], 0 offen offset:384 // (op 1405) Store value
+buffer_store_dwordx2 v[32:33], v11, s[44:47], 0 offen offset:400 // (op 1405) Store value
+buffer_store_dwordx2 v[34:35], v11, s[44:47], 0 offen offset:416 // (op 1405) Store value
+buffer_store_dwordx2 v[36:37], v11, s[44:47], 0 offen offset:432 // (op 1405) Store value
+
+
+
+
+
+buffer_load_dwordx2 v[14:15], v8, s[40:43], 0 offen offset:256 // (op 1386) Load value
+buffer_load_dwordx2 v[16:17], v8, s[40:43], 0 offen offset:272 // (op 1386) Load value
+v_accvgpr_read v22, a32 // (op 1382) 
+v_accvgpr_read v23, a33 // (op 1382) 
+v_accvgpr_read v24, a34 // (op 1382) 
+v_accvgpr_read v25, a35 // (op 1382) 
+v_accvgpr_read v26, a36 // (op 1382) 
+v_accvgpr_read v27, a37 // (op 1382) 
+v_accvgpr_read v28, a38 // (op 1382) 
+v_accvgpr_read v29, a39 // (op 1382) 
+v_accvgpr_read v30, a40 // (op 1382) 
+v_accvgpr_read v31, a41 // (op 1382) 
+v_accvgpr_read v32, a42 // (op 1382) 
+v_accvgpr_read v33, a43 // (op 1382) 
+v_accvgpr_read v34, a44 // (op 1382) 
+v_accvgpr_read v35, a45 // (op 1382) 
+v_accvgpr_read v36, a46 // (op 1382) 
+v_accvgpr_read v37, a47 // (op 1382) 
+v_mul_f32 v38, v13, v22 // (op 1382) 
+v_mul_f32 v39, v13, v23 // (op 1382) 
+v_mul_f32 v40, v13, v24 // (op 1382) 
+v_mul_f32 v41, v13, v25 // (op 1382) 
+v_mul_f32 v42, v13, v26 // (op 1382) 
+v_mul_f32 v43, v13, v27 // (op 1382) 
+v_mul_f32 v44, v13, v28 // (op 1382) 
+v_mul_f32 v45, v13, v29 // (op 1382) 
+v_mul_f32 v46, v13, v30 // (op 1382) 
+v_mul_f32 v47, v13, v31 // (op 1382) 
+v_mul_f32 v48, v13, v32 // (op 1382) 
+v_mul_f32 v49, v13, v33 // (op 1382) 
+v_mul_f32 v50, v13, v34 // (op 1382) 
+v_mul_f32 v51, v13, v35 // (op 1382) 
+v_mul_f32 v52, v13, v36 // (op 1382) 
+v_mul_f32 v53, v13, v37 // (op 1382) 
+
+buffer_load_dwordx2 v[18:19], v8, s[40:43], 0 offen offset:288 // (op 1386) Load value
+buffer_load_dwordx2 v[20:21], v8, s[40:43], 0 offen offset:304 // (op 1386) Load value
+s_waitcnt vmcnt(3)
+v_and_b32 v6, 65535, v14 // (op 1387) 
+v_lshrrev_b32 v7, 16, v14 // (op 1387) 
+v_lshlrev_b32 v6, 16, v6 // (op 1387) 
+v_lshlrev_b32 v7, 16, v7 // (op 1387) 
+v_mul_f32 v22, v12, v6 // (op 1387) 
+v_mul_f32 v23, v12, v7 // (op 1387) 
+v_and_b32 v6, 65535, v15 // (op 1387) 
+v_lshrrev_b32 v7, 16, v15 // (op 1387) 
+v_lshlrev_b32 v6, 16, v6 // (op 1387) 
+v_lshlrev_b32 v7, 16, v7 // (op 1387) 
+v_mul_f32 v24, v12, v6 // (op 1387) 
+v_mul_f32 v25, v12, v7 // (op 1387) 
+s_waitcnt vmcnt(2)
+v_and_b32 v6, 65535, v16 // (op 1387) 
+v_lshrrev_b32 v7, 16, v16 // (op 1387) 
+v_lshlrev_b32 v6, 16, v6 // (op 1387) 
+v_lshlrev_b32 v7, 16, v7 // (op 1387) 
+v_mul_f32 v26, v12, v6 // (op 1387) 
+v_mul_f32 v27, v12, v7 // (op 1387) 
+v_and_b32 v6, 65535, v17 // (op 1387) 
+v_lshrrev_b32 v7, 16, v17 // (op 1387) 
+v_lshlrev_b32 v6, 16, v6 // (op 1387) 
+v_lshlrev_b32 v7, 16, v7 // (op 1387) 
+v_mul_f32 v28, v12, v6 // (op 1387) 
+v_mul_f32 v29, v12, v7 // (op 1387) 
+s_waitcnt vmcnt(1)
+v_and_b32 v6, 65535, v18 // (op 1387) 
+v_lshrrev_b32 v7, 16, v18 // (op 1387) 
+v_lshlrev_b32 v6, 16, v6 // (op 1387) 
+v_lshlrev_b32 v7, 16, v7 // (op 1387) 
+v_mul_f32 v30, v12, v6 // (op 1387) 
+v_mul_f32 v31, v12, v7 // (op 1387) 
+v_and_b32 v6, 65535, v19 // (op 1387) 
+v_lshrrev_b32 v7, 16, v19 // (op 1387) 
+v_lshlrev_b32 v6, 16, v6 // (op 1387) 
+v_lshlrev_b32 v7, 16, v7 // (op 1387) 
+v_mul_f32 v32, v12, v6 // (op 1387) 
+v_mul_f32 v33, v12, v7 // (op 1387) 
+s_waitcnt vmcnt(0)
+v_and_b32 v6, 65535, v20 // (op 1387) 
+v_lshrrev_b32 v7, 16, v20 // (op 1387) 
+v_lshlrev_b32 v6, 16, v6 // (op 1387) 
+v_lshlrev_b32 v7, 16, v7 // (op 1387) 
+v_mul_f32 v34, v12, v6 // (op 1387) 
+v_mul_f32 v35, v12, v7 // (op 1387) 
+v_and_b32 v6, 65535, v21 // (op 1387) 
+v_lshrrev_b32 v7, 16, v21 // (op 1387) 
+v_lshlrev_b32 v6, 16, v6 // (op 1387) 
+v_lshlrev_b32 v7, 16, v7 // (op 1387) 
+v_mul_f32 v36, v12, v6 // (op 1387) 
+v_mul_f32 v37, v12, v7 // (op 1387) 
+
+
+v_add_f32 v54, v22, v38 // (op 1383) 
+v_add_f32 v55, v23, v39 // (op 1383) 
+v_add_f32 v56, v24, v40 // (op 1383) 
+v_add_f32 v57, v25, v41 // (op 1383) 
+v_add_f32 v58, v26, v42 // (op 1383) 
+v_add_f32 v59, v27, v43 // (op 1383) 
+v_add_f32 v60, v28, v44 // (op 1383) 
+v_add_f32 v61, v29, v45 // (op 1383) 
+v_add_f32 v62, v30, v46 // (op 1383) 
+v_add_f32 v63, v31, v47 // (op 1383) 
+v_add_f32 v64, v32, v48 // (op 1383) 
+v_add_f32 v65, v33, v49 // (op 1383) 
+v_add_f32 v66, v34, v50 // (op 1383) 
+v_add_f32 v67, v35, v51 // (op 1383) 
+v_add_f32 v68, v36, v52 // (op 1383) 
+v_add_f32 v69, v37, v53 // (op 1383) 
+
+
+v_lshrrev_b32 v14, 16, v54 // (op 1384) 
+v_lshrrev_b32 v15, 16, v55 // (op 1384) 
+v_lshrrev_b32 v16, 16, v56 // (op 1384) 
+v_lshrrev_b32 v17, 16, v57 // (op 1384) 
+v_lshrrev_b32 v18, 16, v58 // (op 1384) 
+v_lshrrev_b32 v19, 16, v59 // (op 1384) 
+v_lshrrev_b32 v20, 16, v60 // (op 1384) 
+v_lshrrev_b32 v21, 16, v61 // (op 1384) 
+v_lshrrev_b32 v22, 16, v62 // (op 1384) 
+v_lshrrev_b32 v23, 16, v63 // (op 1384) 
+v_lshrrev_b32 v24, 16, v64 // (op 1384) 
+v_lshrrev_b32 v25, 16, v65 // (op 1384) 
+v_lshrrev_b32 v26, 16, v66 // (op 1384) 
+v_lshrrev_b32 v27, 16, v67 // (op 1384) 
+v_lshrrev_b32 v28, 16, v68 // (op 1384) 
+v_lshrrev_b32 v29, 16, v69 // (op 1384) 
+
+
+v_pack_b32_f16 v30, v14, v15 // (op 1385) 
+v_pack_b32_f16 v31, v16, v17 // (op 1385) 
+v_pack_b32_f16 v32, v18, v19 // (op 1385) 
+v_pack_b32_f16 v33, v20, v21 // (op 1385) 
+v_pack_b32_f16 v34, v22, v23 // (op 1385) 
+v_pack_b32_f16 v35, v24, v25 // (op 1385) 
+v_pack_b32_f16 v36, v26, v27 // (op 1385) 
+v_pack_b32_f16 v37, v28, v29 // (op 1385) 
+
+
+buffer_store_dwordx2 v[30:31], v11, s[44:47], 0 offen offset:256 // (op 1385) Store value
+buffer_store_dwordx2 v[32:33], v11, s[44:47], 0 offen offset:272 // (op 1385) Store value
+buffer_store_dwordx2 v[34:35], v11, s[44:47], 0 offen offset:288 // (op 1385) Store value
+buffer_store_dwordx2 v[36:37], v11, s[44:47], 0 offen offset:304 // (op 1385) Store value
+
+
+
+
+
+buffer_load_dwordx2 v[14:15], v8, s[40:43], 0 offen offset:128 // (op 1366) Load value
+buffer_load_dwordx2 v[16:17], v8, s[40:43], 0 offen offset:144 // (op 1366) Load value
+v_accvgpr_read v22, a16 // (op 1362) 
+v_accvgpr_read v23, a17 // (op 1362) 
+v_accvgpr_read v24, a18 // (op 1362) 
+v_accvgpr_read v25, a19 // (op 1362) 
+v_accvgpr_read v26, a20 // (op 1362) 
+v_accvgpr_read v27, a21 // (op 1362) 
+v_accvgpr_read v28, a22 // (op 1362) 
+v_accvgpr_read v29, a23 // (op 1362) 
+v_accvgpr_read v30, a24 // (op 1362) 
+v_accvgpr_read v31, a25 // (op 1362) 
+v_accvgpr_read v32, a26 // (op 1362) 
+v_accvgpr_read v33, a27 // (op 1362) 
+v_accvgpr_read v34, a28 // (op 1362) 
+v_accvgpr_read v35, a29 // (op 1362) 
+v_accvgpr_read v36, a30 // (op 1362) 
+v_accvgpr_read v37, a31 // (op 1362) 
+v_mul_f32 v38, v13, v22 // (op 1362) 
+v_mul_f32 v39, v13, v23 // (op 1362) 
+v_mul_f32 v40, v13, v24 // (op 1362) 
+v_mul_f32 v41, v13, v25 // (op 1362) 
+v_mul_f32 v42, v13, v26 // (op 1362) 
+v_mul_f32 v43, v13, v27 // (op 1362) 
+v_mul_f32 v44, v13, v28 // (op 1362) 
+v_mul_f32 v45, v13, v29 // (op 1362) 
+v_mul_f32 v46, v13, v30 // (op 1362) 
+v_mul_f32 v47, v13, v31 // (op 1362) 
+v_mul_f32 v48, v13, v32 // (op 1362) 
+v_mul_f32 v49, v13, v33 // (op 1362) 
+v_mul_f32 v50, v13, v34 // (op 1362) 
+v_mul_f32 v51, v13, v35 // (op 1362) 
+v_mul_f32 v52, v13, v36 // (op 1362) 
+v_mul_f32 v53, v13, v37 // (op 1362) 
+
+buffer_load_dwordx2 v[18:19], v8, s[40:43], 0 offen offset:160 // (op 1366) Load value
+buffer_load_dwordx2 v[20:21], v8, s[40:43], 0 offen offset:176 // (op 1366) Load value
+s_waitcnt vmcnt(3)
+v_and_b32 v6, 65535, v14 // (op 1367) 
+v_lshrrev_b32 v7, 16, v14 // (op 1367) 
+v_lshlrev_b32 v6, 16, v6 // (op 1367) 
+v_lshlrev_b32 v7, 16, v7 // (op 1367) 
+v_mul_f32 v22, v12, v6 // (op 1367) 
+v_mul_f32 v23, v12, v7 // (op 1367) 
+v_and_b32 v6, 65535, v15 // (op 1367) 
+v_lshrrev_b32 v7, 16, v15 // (op 1367) 
+v_lshlrev_b32 v6, 16, v6 // (op 1367) 
+v_lshlrev_b32 v7, 16, v7 // (op 1367) 
+v_mul_f32 v24, v12, v6 // (op 1367) 
+v_mul_f32 v25, v12, v7 // (op 1367) 
+s_waitcnt vmcnt(2)
+v_and_b32 v6, 65535, v16 // (op 1367) 
+v_lshrrev_b32 v7, 16, v16 // (op 1367) 
+v_lshlrev_b32 v6, 16, v6 // (op 1367) 
+v_lshlrev_b32 v7, 16, v7 // (op 1367) 
+v_mul_f32 v26, v12, v6 // (op 1367) 
+v_mul_f32 v27, v12, v7 // (op 1367) 
+v_and_b32 v6, 65535, v17 // (op 1367) 
+v_lshrrev_b32 v7, 16, v17 // (op 1367) 
+v_lshlrev_b32 v6, 16, v6 // (op 1367) 
+v_lshlrev_b32 v7, 16, v7 // (op 1367) 
+v_mul_f32 v28, v12, v6 // (op 1367) 
+v_mul_f32 v29, v12, v7 // (op 1367) 
+s_waitcnt vmcnt(1)
+v_and_b32 v6, 65535, v18 // (op 1367) 
+v_lshrrev_b32 v7, 16, v18 // (op 1367) 
+v_lshlrev_b32 v6, 16, v6 // (op 1367) 
+v_lshlrev_b32 v7, 16, v7 // (op 1367) 
+v_mul_f32 v30, v12, v6 // (op 1367) 
+v_mul_f32 v31, v12, v7 // (op 1367) 
+v_and_b32 v6, 65535, v19 // (op 1367) 
+v_lshrrev_b32 v7, 16, v19 // (op 1367) 
+v_lshlrev_b32 v6, 16, v6 // (op 1367) 
+v_lshlrev_b32 v7, 16, v7 // (op 1367) 
+v_mul_f32 v32, v12, v6 // (op 1367) 
+v_mul_f32 v33, v12, v7 // (op 1367) 
+s_waitcnt vmcnt(0)
+v_and_b32 v6, 65535, v20 // (op 1367) 
+v_lshrrev_b32 v7, 16, v20 // (op 1367) 
+v_lshlrev_b32 v6, 16, v6 // (op 1367) 
+v_lshlrev_b32 v7, 16, v7 // (op 1367) 
+v_mul_f32 v34, v12, v6 // (op 1367) 
+v_mul_f32 v35, v12, v7 // (op 1367) 
+v_and_b32 v6, 65535, v21 // (op 1367) 
+v_lshrrev_b32 v7, 16, v21 // (op 1367) 
+v_lshlrev_b32 v6, 16, v6 // (op 1367) 
+v_lshlrev_b32 v7, 16, v7 // (op 1367) 
+v_mul_f32 v36, v12, v6 // (op 1367) 
+v_mul_f32 v37, v12, v7 // (op 1367) 
+
+
+v_add_f32 v54, v22, v38 // (op 1363) 
+v_add_f32 v55, v23, v39 // (op 1363) 
+v_add_f32 v56, v24, v40 // (op 1363) 
+v_add_f32 v57, v25, v41 // (op 1363) 
+v_add_f32 v58, v26, v42 // (op 1363) 
+v_add_f32 v59, v27, v43 // (op 1363) 
+v_add_f32 v60, v28, v44 // (op 1363) 
+v_add_f32 v61, v29, v45 // (op 1363) 
+v_add_f32 v62, v30, v46 // (op 1363) 
+v_add_f32 v63, v31, v47 // (op 1363) 
+v_add_f32 v64, v32, v48 // (op 1363) 
+v_add_f32 v65, v33, v49 // (op 1363) 
+v_add_f32 v66, v34, v50 // (op 1363) 
+v_add_f32 v67, v35, v51 // (op 1363) 
+v_add_f32 v68, v36, v52 // (op 1363) 
+v_add_f32 v69, v37, v53 // (op 1363) 
+
+
+v_lshrrev_b32 v14, 16, v54 // (op 1364) 
+v_lshrrev_b32 v15, 16, v55 // (op 1364) 
+v_lshrrev_b32 v16, 16, v56 // (op 1364) 
+v_lshrrev_b32 v17, 16, v57 // (op 1364) 
+v_lshrrev_b32 v18, 16, v58 // (op 1364) 
+v_lshrrev_b32 v19, 16, v59 // (op 1364) 
+v_lshrrev_b32 v20, 16, v60 // (op 1364) 
+v_lshrrev_b32 v21, 16, v61 // (op 1364) 
+v_lshrrev_b32 v22, 16, v62 // (op 1364) 
+v_lshrrev_b32 v23, 16, v63 // (op 1364) 
+v_lshrrev_b32 v24, 16, v64 // (op 1364) 
+v_lshrrev_b32 v25, 16, v65 // (op 1364) 
+v_lshrrev_b32 v26, 16, v66 // (op 1364) 
+v_lshrrev_b32 v27, 16, v67 // (op 1364) 
+v_lshrrev_b32 v28, 16, v68 // (op 1364) 
+v_lshrrev_b32 v29, 16, v69 // (op 1364) 
+
+
+v_pack_b32_f16 v30, v14, v15 // (op 1365) 
+v_pack_b32_f16 v31, v16, v17 // (op 1365) 
+v_pack_b32_f16 v32, v18, v19 // (op 1365) 
+v_pack_b32_f16 v33, v20, v21 // (op 1365) 
+v_pack_b32_f16 v34, v22, v23 // (op 1365) 
+v_pack_b32_f16 v35, v24, v25 // (op 1365) 
+v_pack_b32_f16 v36, v26, v27 // (op 1365) 
+v_pack_b32_f16 v37, v28, v29 // (op 1365) 
+
+
+buffer_store_dwordx2 v[30:31], v11, s[44:47], 0 offen offset:128 // (op 1365) Store value
+buffer_store_dwordx2 v[32:33], v11, s[44:47], 0 offen offset:144 // (op 1365) Store value
+buffer_store_dwordx2 v[34:35], v11, s[44:47], 0 offen offset:160 // (op 1365) Store value
+buffer_store_dwordx2 v[36:37], v11, s[44:47], 0 offen offset:176 // (op 1365) Store value
+
+
+
+
+
+buffer_load_dwordx2 v[14:15], v8, s[40:43], 0 offen // (op 170) Load value
+buffer_load_dwordx2 v[16:17], v8, s[40:43], 0 offen offset:16 // (op 170) Load value
+v_accvgpr_read v22, a0 // (op 166) 
+v_accvgpr_read v23, a1 // (op 166) 
+v_accvgpr_read v24, a2 // (op 166) 
+v_accvgpr_read v25, a3 // (op 166) 
+v_accvgpr_read v26, a4 // (op 166) 
+v_accvgpr_read v27, a5 // (op 166) 
+v_accvgpr_read v28, a6 // (op 166) 
+v_accvgpr_read v29, a7 // (op 166) 
+v_accvgpr_read v30, a8 // (op 166) 
+v_accvgpr_read v31, a9 // (op 166) 
+v_accvgpr_read v32, a10 // (op 166) 
+v_accvgpr_read v33, a11 // (op 166) 
+v_accvgpr_read v34, a12 // (op 166) 
+v_accvgpr_read v35, a13 // (op 166) 
+v_accvgpr_read v36, a14 // (op 166) 
+v_accvgpr_read v37, a15 // (op 166) 
+v_mul_f32 v38, v13, v22 // (op 166) 
+v_mul_f32 v39, v13, v23 // (op 166) 
+v_mul_f32 v40, v13, v24 // (op 166) 
+v_mul_f32 v41, v13, v25 // (op 166) 
+v_mul_f32 v42, v13, v26 // (op 166) 
+v_mul_f32 v43, v13, v27 // (op 166) 
+v_mul_f32 v44, v13, v28 // (op 166) 
+v_mul_f32 v45, v13, v29 // (op 166) 
+v_mul_f32 v46, v13, v30 // (op 166) 
+v_mul_f32 v47, v13, v31 // (op 166) 
+v_mul_f32 v48, v13, v32 // (op 166) 
+v_mul_f32 v49, v13, v33 // (op 166) 
+v_mul_f32 v50, v13, v34 // (op 166) 
+v_mul_f32 v51, v13, v35 // (op 166) 
+v_mul_f32 v52, v13, v36 // (op 166) 
+v_mul_f32 v53, v13, v37 // (op 166) 
+
+buffer_load_dwordx2 v[18:19], v8, s[40:43], 0 offen offset:32 // (op 170) Load value
+buffer_load_dwordx2 v[20:21], v8, s[40:43], 0 offen offset:48 // (op 170) Load value
+s_waitcnt vmcnt(3)
+v_and_b32 v6, 65535, v14 // (op 171) 
+v_lshrrev_b32 v7, 16, v14 // (op 171) 
+v_lshlrev_b32 v6, 16, v6 // (op 171) 
+v_lshlrev_b32 v7, 16, v7 // (op 171) 
+v_mul_f32 v22, v12, v6 // (op 171) 
+v_mul_f32 v23, v12, v7 // (op 171) 
+v_and_b32 v6, 65535, v15 // (op 171) 
+v_lshrrev_b32 v7, 16, v15 // (op 171) 
+v_lshlrev_b32 v6, 16, v6 // (op 171) 
+v_lshlrev_b32 v7, 16, v7 // (op 171) 
+v_mul_f32 v24, v12, v6 // (op 171) 
+v_mul_f32 v25, v12, v7 // (op 171) 
+s_waitcnt vmcnt(2)
+v_and_b32 v6, 65535, v16 // (op 171) 
+v_lshrrev_b32 v7, 16, v16 // (op 171) 
+v_lshlrev_b32 v6, 16, v6 // (op 171) 
+v_lshlrev_b32 v7, 16, v7 // (op 171) 
+v_mul_f32 v26, v12, v6 // (op 171) 
+v_mul_f32 v27, v12, v7 // (op 171) 
+v_and_b32 v6, 65535, v17 // (op 171) 
+v_lshrrev_b32 v7, 16, v17 // (op 171) 
+v_lshlrev_b32 v6, 16, v6 // (op 171) 
+v_lshlrev_b32 v7, 16, v7 // (op 171) 
+v_mul_f32 v28, v12, v6 // (op 171) 
+v_mul_f32 v29, v12, v7 // (op 171) 
+s_waitcnt vmcnt(1)
+v_and_b32 v6, 65535, v18 // (op 171) 
+v_lshrrev_b32 v7, 16, v18 // (op 171) 
+v_lshlrev_b32 v6, 16, v6 // (op 171) 
+v_lshlrev_b32 v7, 16, v7 // (op 171) 
+v_mul_f32 v30, v12, v6 // (op 171) 
+v_mul_f32 v31, v12, v7 // (op 171) 
+v_and_b32 v6, 65535, v19 // (op 171) 
+v_lshrrev_b32 v7, 16, v19 // (op 171) 
+v_lshlrev_b32 v6, 16, v6 // (op 171) 
+v_lshlrev_b32 v7, 16, v7 // (op 171) 
+v_mul_f32 v32, v12, v6 // (op 171) 
+v_mul_f32 v33, v12, v7 // (op 171) 
+s_waitcnt vmcnt(0)
+v_and_b32 v6, 65535, v20 // (op 171) 
+v_lshrrev_b32 v7, 16, v20 // (op 171) 
+v_lshlrev_b32 v6, 16, v6 // (op 171) 
+v_lshlrev_b32 v7, 16, v7 // (op 171) 
+v_mul_f32 v34, v12, v6 // (op 171) 
+v_mul_f32 v35, v12, v7 // (op 171) 
+v_and_b32 v6, 65535, v21 // (op 171) 
+v_lshrrev_b32 v7, 16, v21 // (op 171) 
+v_lshlrev_b32 v6, 16, v6 // (op 171) 
+v_lshlrev_b32 v7, 16, v7 // (op 171) 
+v_mul_f32 v36, v12, v6 // (op 171) 
+v_mul_f32 v37, v12, v7 // (op 171) 
+
+
+v_add_f32 v54, v22, v38 // (op 167) 
+v_add_f32 v55, v23, v39 // (op 167) 
+v_add_f32 v56, v24, v40 // (op 167) 
+v_add_f32 v57, v25, v41 // (op 167) 
+v_add_f32 v58, v26, v42 // (op 167) 
+v_add_f32 v59, v27, v43 // (op 167) 
+v_add_f32 v60, v28, v44 // (op 167) 
+v_add_f32 v61, v29, v45 // (op 167) 
+v_add_f32 v62, v30, v46 // (op 167) 
+v_add_f32 v63, v31, v47 // (op 167) 
+v_add_f32 v64, v32, v48 // (op 167) 
+v_add_f32 v65, v33, v49 // (op 167) 
+v_add_f32 v66, v34, v50 // (op 167) 
+v_add_f32 v67, v35, v51 // (op 167) 
+v_add_f32 v68, v36, v52 // (op 167) 
+v_add_f32 v69, v37, v53 // (op 167) 
+
+
+v_lshrrev_b32 v14, 16, v54 // (op 168) 
+v_lshrrev_b32 v15, 16, v55 // (op 168) 
+v_lshrrev_b32 v16, 16, v56 // (op 168) 
+v_lshrrev_b32 v17, 16, v57 // (op 168) 
+v_lshrrev_b32 v18, 16, v58 // (op 168) 
+v_lshrrev_b32 v19, 16, v59 // (op 168) 
+v_lshrrev_b32 v20, 16, v60 // (op 168) 
+v_lshrrev_b32 v21, 16, v61 // (op 168) 
+v_lshrrev_b32 v22, 16, v62 // (op 168) 
+v_lshrrev_b32 v23, 16, v63 // (op 168) 
+v_lshrrev_b32 v24, 16, v64 // (op 168) 
+v_lshrrev_b32 v25, 16, v65 // (op 168) 
+v_lshrrev_b32 v26, 16, v66 // (op 168) 
+v_lshrrev_b32 v27, 16, v67 // (op 168) 
+v_lshrrev_b32 v28, 16, v68 // (op 168) 
+v_lshrrev_b32 v29, 16, v69 // (op 168) 
+
+
+v_pack_b32_f16 v30, v14, v15 // (op 169) 
+v_pack_b32_f16 v31, v16, v17 // (op 169) 
+v_pack_b32_f16 v32, v18, v19 // (op 169) 
+v_pack_b32_f16 v33, v20, v21 // (op 169) 
+v_pack_b32_f16 v34, v22, v23 // (op 169) 
+v_pack_b32_f16 v35, v24, v25 // (op 169) 
+v_pack_b32_f16 v36, v26, v27 // (op 169) 
+v_pack_b32_f16 v37, v28, v29 // (op 169) 
+
+
+buffer_store_dwordx2 v[30:31], v11, s[44:47], 0 offen // (op 169) Store value
+buffer_store_dwordx2 v[32:33], v11, s[44:47], 0 offen offset:16 // (op 169) Store value
+buffer_store_dwordx2 v[34:35], v11, s[44:47], 0 offen offset:32 // (op 169) Store value
+buffer_store_dwordx2 v[36:37], v11, s[44:47], 0 offen offset:48 // (op 169) Store value
+
+
+s_waitcnt vmcnt(0) lgkmcnt(0) expcnt(0)// REMOVEME: Wait before conditional label!
+RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_ConditionalBottom_0_beta_157:
+
+
+
+
+
+
+
+
+
+
+
+
+s_endpgm  // End of RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+.LRR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_end:
+.size RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2, .LRR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2_end-RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+.rodata
+.p2align 6
+.amdhsa_kernel RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+  .amdhsa_next_free_vgpr 188
+  .amdhsa_next_free_sgpr .amdgcn.next_free_sgpr
+  .amdhsa_group_segment_fixed_size 51712 // lds bytes
+  .amdhsa_accum_offset 124
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_user_sgpr_kernarg_preload_length 14
+  .amdhsa_user_sgpr_kernarg_preload_offset 0
+.amdhsa_system_sgpr_workgroup_id_x 1
+.amdhsa_system_sgpr_workgroup_id_y 1
+.amdhsa_system_sgpr_workgroup_id_z 0
+.amdhsa_system_sgpr_workgroup_info 0
+.amdhsa_system_vgpr_workitem_id 1
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+---
+custom.config:
+  Source:
+    Origin: rocroller
+  Version: 1.0.0
+  Features:
+    SupportsUserArgs: false
+    SupportsBias: false
+    SupportsActivation: false
+    SupportsScaleAlpha: false
+    SupportsGSU: false
+  InternalSupportParams:
+    KernArgsVersion: 0
+  MXScaleFormat: NoSwizzle
+  ProblemType:
+    OperationType: GEMM
+    DataType: F4
+    DataTypeA: F4
+    DataTypeB: B6
+    DestDataType: b
+    ComputeDataType: s
+    HighPrecisionAccumulate: True
+    TransposeA: False
+    TransposeB: True
+    UseBeta: True
+    Batched: True
+    UseBias: 0
+    Activation: False
+    UseScaleAlphaVec: 0
+    MXBlockA: 32
+    MXBlockB: 32
+  CustomKernel:
+    args: [ { type: int64, semantic: StrideC0 },
+            { type: int64, semantic: StrideD0 },
+            { type: address, semantic: AddressC },
+            { type: int64, semantic: SizeFree1 },
+            { type: address, semantic: AddressD },
+            { type: int64, semantic: StrideA0 },
+            { type: float32, semantic: Beta },
+            { type: float32, semantic: Alpha },
+            { type: address, semantic: AddressA },
+            { type: int64, semantic: SizeSum },
+            { type: int64, semantic: StrideB0 },
+            { type: address, semantic: AddressB },
+            { type: int64, semantic: StrideScaleA0 },
+            { type: address, semantic: AddressMXScaleA },
+            { type: int64, semantic: SizeSumScaleA },
+            { type: int64, semantic: StrideScaleB0 },
+            { type: address, semantic: AddressMXScaleB } ]
+    macrotile: [256, 64, 128]
+    threads: [256, 1, 1]
+    grid: [TilesX, TilesY, Batch]
+    unroll: 2
+    uniformSummationOrder: true
+  MatrixInstruction: [32, 32, 64, 1]
+  StaggerU: 0
+  EnableMatrixInstruction: True
+  MIWaveTile: [4, 1]
+  WavefrontSize: 64
+amdhsa.version: [1, 2]
+amdhsa.kernels:
+  - .name: RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2
+    .symbol: RR_GEMM_NT_FP4_BF6_BFloat16_BFloat16_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_256x64x128_UR_2.kd
+    .kernarg_segment_size: 128
+    .group_segment_fixed_size: 51712
+    .private_segment_fixed_size: 0
+    .kernarg_segment_align: 8
+    .sgpr_count: 60
+    .vgpr_count: 124
+    .agpr_count: 64
+    .max_flat_workgroup_size: 256
+    .wavefront_size: 64
+    .args:
+      - .name: Tensor_10_stride_1_10
+        .size: 8
+        .offset: 0
+        .value_kind: by_value
+      - .name: Tensor_21_stride_1_16
+        .size: 8
+        .offset: 8
+        .value_kind: by_value
+      - .name: Tensor_10_pointer
+        .size: 8
+        .offset: 16
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_2_size_1_11
+        .size: 8
+        .offset: 24
+        .value_kind: by_value
+      - .name: Tensor_21_pointer
+        .size: 8
+        .offset: 32
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_0_stride_1_0
+        .size: 8
+        .offset: 40
+        .value_kind: by_value
+      - .name: user_Float_Value_14
+        .size: 4
+        .offset: 48
+        .value_kind: by_value
+      - .name: user_Float_Value_12
+        .size: 4
+        .offset: 52
+        .value_kind: by_value
+      - .name: Tensor_0_pointer
+        .size: 8
+        .offset: 56
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_0_size_1_1
+        .size: 8
+        .offset: 64
+        .value_kind: by_value
+      - .name: Tensor_2_stride_0_3
+        .size: 8
+        .offset: 72
+        .value_kind: by_value
+      - .name: Tensor_2_pointer
+        .size: 8
+        .offset: 80
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_4_stride_1_5
+        .size: 8
+        .offset: 88
+        .value_kind: by_value
+      - .name: Tensor_4_pointer
+        .size: 8
+        .offset: 96
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+      - .name: Tensor_4_size_1_6
+        .size: 8
+        .offset: 104
+        .value_kind: by_value
+      - .name: Tensor_7_stride_0_8
+        .size: 8
+        .offset: 112
+        .value_kind: by_value
+      - .name: Tensor_7_pointer
+        .size: 8
+        .offset: 120
+        .address_space: global
+        .actual_access: read_write
+        .value_kind: global_buffer
+...
+
+.end_amdgpu_metadata
+
