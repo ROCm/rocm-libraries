@@ -146,6 +146,6 @@ For instance, to build and run the SIMD-optimized SAXPY example on Linux:
 
 On Windows, use the same Ninja, clang, and ``-DCMAKE_HIP_ARCHITECTURES`` flags as the library build above.
 The exact configure, build, and run commands for each step, on both Linux and Windows, are recorded in a comment at the bottom of that step's ``CMakeLists.txt``.
-Some examples need extra setup — for example, the sparse matrix multiply data is pulled with ``git lfs``, and llama3.c takes a model path as an argument — so check the ``CMakeLists.txt`` footer for the step you are building.
+Some examples need extra setup — for example, the sparse matrix multiply data is left out of clones and must be pulled with ``git lfs``, and llama3.c takes a model path as an argument — so check the ``CMakeLists.txt`` footer for the step you are building.
 
 After installing, see :doc:`../how-to/hipThreads-in-a-project` to consume hipThreads from your own CMake project.

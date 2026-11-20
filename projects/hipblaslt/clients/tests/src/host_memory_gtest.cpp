@@ -206,6 +206,35 @@ namespace
         memory_pool<h_memory>::ReleaseCached();
     }
 
+    TEST(HostMemory_pre_checkin, released_buffer_goes_back_to_the_pool_once)
+    {
+        if(memory_pool<h_memory>::FreesBeforeEachGet())
+            GTEST_SKIP() << "the pool on this host frees its idle buffers before every request";
+        ScopedLimit no_limit(nullptr);
+        memory_pool<h_memory>::ReleaseCached();
+        const void* first  = nullptr;
+        size_t      cached = 0;
+        {
+            HipHostBuffer released(HIP_R_8I, kSmall);
+            SKIP_UNLESS_PINNED(released.buf());
+            first = released.buf();
+            released.release();
+            EXPECT_EQ(released.buf(), nullptr);
+            EXPECT_EQ(released.memcheck(), hipErrorOutOfMemory);
+            cached = memory_pool<h_memory>::CachedBytes();
+            EXPECT_GE(cached, kSmall);
+        }
+        // The destructor does not hand the memory back a second time.
+        EXPECT_EQ(memory_pool<h_memory>::CachedBytes(), cached);
+        {
+            // The next buffer of the same size takes the released memory, not a new allocation.
+            HipHostBuffer again(HIP_R_8I, kSmall);
+            EXPECT_EQ(again.buf(), first);
+            EXPECT_EQ(memory_pool<h_memory>::CachedBytes(), 0u);
+        }
+        memory_pool<h_memory>::ReleaseCached();
+    }
+
     TEST(HostMemory_pre_checkin, failed_host_allocation_is_reported_not_used)
     {
         // Far beyond any host: the allocation fails and leaves a null buffer.

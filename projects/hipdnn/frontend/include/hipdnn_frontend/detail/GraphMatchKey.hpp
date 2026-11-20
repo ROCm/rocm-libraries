@@ -188,6 +188,10 @@ inline std::optional<PrioritizedAutotuneConfigMatchKey>
         appendOptionalMatchTensor(key, config_tensor::DESCALE_S, sdpa.attributes.get_descale_s());
         appendOptionalMatchTensor(key, config_tensor::SCALE_S, sdpa.attributes.get_scale_s());
         appendOptionalMatchTensor(key, config_tensor::SCALE_O, sdpa.attributes.get_scale_o());
+        appendOptionalMatchTensor(
+            key, config_tensor::CU_SEQ_LEN_Q, sdpa.attributes.get_cu_seq_len_q());
+        appendOptionalMatchTensor(
+            key, config_tensor::CU_SEQ_LEN_KV, sdpa.attributes.get_cu_seq_len_kv());
         return PrioritizedAutotuneConfigMatchKey{match_priority::SDPA, std::move(key)};
     }
     case graph::NodeType::SDPA_BWD:

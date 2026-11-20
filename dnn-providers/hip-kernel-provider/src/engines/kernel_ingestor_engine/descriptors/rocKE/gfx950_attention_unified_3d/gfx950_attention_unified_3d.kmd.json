@@ -46,6 +46,11 @@
       "name": "use_decode_grid",
       "type": "int",
       "default_value": 1
+    },
+    {
+      "name": "emit_lse",
+      "type": "int",
+      "default_value": 0
     }
   ]
 }

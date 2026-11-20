@@ -25,15 +25,15 @@
 ################################################################################
 
 try:
-    from tensilelite import TensileBenchmarkCluster
+    from tensilelite import benchmark_cluster
 except ImportError:
     import os.path
     import sys
     parentdir = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", ".."))
     sys.path.append(parentdir)
 
-    from tensilelite import TensileBenchmarkCluster
+    from tensilelite import benchmark_cluster
 
 # script run from commandline
 if __name__ == "__main__":
-    TensileBenchmarkCluster.main()
+    benchmark_cluster.main()

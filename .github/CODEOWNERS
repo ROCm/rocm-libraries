@@ -12,6 +12,7 @@
 
 # Team specific CI ownership
 /.github/workflows/*docs*.yml                       @ROCm/rocm-documentation
+/.github/workflows/fortran-bindings*.yml            @ROCm/rocm-fortran-maintainers
 /.github/workflows/*hipblaslt*.yml                  @ROCm/hipblaslt-reviewers
 /.github/workflows/*hipdnn*.yml                     @ROCm/hipdnn-reviewers
 /.github/workflows/*miopen*.yml                     @ROCm/miopen-reviewers
@@ -33,7 +34,7 @@
 
 # Individual contributors
 /.github/workflows/auto-retry-failed.yml            @ROCm/rocm-libraries-reviewers @tony-davis
-/.github/workflows/pr-base-freshness.yml            @ROCm/rocm-libraries-reviewers @tony-davis
+/.github/workflows/pr-ci-freshness.yml              @ROCm/rocm-libraries-reviewers @tony-davis
 /.github/workflows/libraries-pr-bot.yml             @samathew121 @amd-shiraz
 /.github/workflows/issue-import.yml                 @jayhawk-commits @ammallya
 /.github/workflows/multiple_pr_import.yml           @jayhawk-commits @ammallya
@@ -41,7 +42,6 @@
 /.github/workflows/pr-merge-sync-patches-manual.yml @ROCm/rocm-libraries-reviewers @jayhawk-commits
 /.github/workflows/pr-merge-sync-patches.yml        @ROCm/rocm-libraries-reviewers @jayhawk-commits
 /.github/workflows/pr-org-label.yml                 @ROCm/rocm-libraries-reviewers @jayhawk-commits
-/.github/workflows/update-subtrees.yml              @ROCm/rocm-libraries-reviewers @jayhawk-commits
 
 # GitHub Copilot custom review instructions
 /.github/instructions/                                           @ROCm/rocm-math-lib-build-infra
@@ -118,6 +118,7 @@
 /projects/rocwmma/                                  @ROCm/rocwmma-reviewers
 /projects/rpp/                                      @ROCm/rpp-reviewers
 /shared/origami/                                    @ROCm/origami-reviewers
+/shared/mosaic/                                     @ROCm/mosaic-reviewers
 /shared/mxdatagenerator/                            @ROCm/rocroller-developers
 /shared/hostnumerics/                               @newling
 /shared/rocroller/                                  @ROCm/rocroller-developers
@@ -147,6 +148,8 @@
 
 /shared/origami/**/*.cmake                          @ROCm/rocm-math-lib-build-infra
 /shared/origami/**/CMakeLists.txt                   @ROCm/rocm-math-lib-build-infra
+/shared/mosaic/**/*.cmake                           @ROCm/rocm-math-lib-build-infra
+/shared/mosaic/**/CMakeLists.txt                    @ROCm/rocm-math-lib-build-infra
 
 /shared/rocroller/**/*.cmake                        @ROCm/rocm-math-lib-build-infra
 /shared/rocroller/**/CMakeLists.txt                 @ROCm/rocm-math-lib-build-infra

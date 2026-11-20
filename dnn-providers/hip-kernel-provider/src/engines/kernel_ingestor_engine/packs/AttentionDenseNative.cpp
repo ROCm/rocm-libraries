@@ -74,8 +74,6 @@ namespace
 // read here.
 constexpr std::string_view DTYPE_FIELD = "dtype";
 constexpr std::string_view HEAD_SIZE_FIELD = "head_size";
-constexpr std::string_view NUM_QUERY_HEADS_FIELD = "num_query_heads";
-constexpr std::string_view NUM_KV_HEADS_FIELD = "num_kv_heads";
 constexpr std::string_view CAUSAL_FIELD = "causal";
 constexpr std::string_view SLIDING_WINDOW_FIELD = "sliding_window";
 constexpr std::string_view RAGGED_FIELD = "ragged";
@@ -104,6 +102,16 @@ using sdpa_graph::SEQ_AXIS;
 // Every product of graph-controlled extents goes through this: an unchecked product is
 // signed overflow. Every factor here is an extent isWellFormedOperand already held positive.
 using pack_features::checkedProduct;
+
+/// The base alignment every dense operand must declare. Both arches' builders declare the
+/// q/k/v/o kernel parameters `align=16` (rocke/library/kernels/gfx9{42,50}/attention_dense.py),
+/// which lowers to a literal `align 16` LLVM parameter attribute, so the promise is made about
+/// the base pointer itself and does not depend on which kernel variant dispatch picks. The
+/// backend enforces only the alignment a graph declares, so a graph declaring less would hand
+/// the kernel a pointer it has already told LLVM cannot arrive: that is UB, not a fault, so it
+/// has to be refused here rather than left to misbehave. 16 is also the schema default, so only
+/// a graph that explicitly under-declares is turned away.
+constexpr int64_t OPERAND_ALIGNMENT_BYTES = 16;
 
 /// sdpa_graph::isWellFormedOperand, and no ragged offset tensor: a ragged tensor packs the
 /// sequences back to back, and the dense kernels index the buffer as (B, S, H, D), so they
@@ -192,12 +200,29 @@ std::optional<std::string> supportedDataTypeName(data_objects::DataType dataType
 
 /// Whether a top-left causal window of @p slidingWindow keys leaves the last query rows no
 /// key: row q sees (q - W, q], and q - W + 1 >= seqlen_kv once seqlen_q - seqlen_kv >= W.
-/// Only the kernel's LSE path zeroes such rows; otherwise every score of such a row is the
-/// mask value, so it averages V over the tiles it visits. A zero window (no window) leaves
-/// none.
+/// The kernel zeroes such rows, with or without a stats output, and a pack built from it
+/// compiles every variant that way, so a graph without stats is served. A graph that binds
+/// stats is not yet served: the keyless rows are graded only against an infinite LSE, which
+/// no device-site validator compares. A zero window (no window) leaves none. This is the one
+/// place the reason is stated; every other site names this function.
 bool windowLeavesRowsWithoutKeys(int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
 {
     return slidingWindow > 0 && seqLenQ - seqLenKv >= slidingWindow;
+}
+
+/// The decline reason for windowLeavesRowsWithoutKeys, shared by the graph match's log and
+/// the saved-plan reader's refusal. @p bindsStats picks the cause: a stats output, or an arch
+/// that serves no window.
+std::string
+    keylessWindowReason(int64_t slidingWindow, int64_t seqLenQ, int64_t seqLenKv, bool bindsStats)
+{
+    const std::string cause
+        = bindsStats ? "not yet supported with a stats output (no device-site check of the "
+                       "infinite LSE)"
+                     : "this arch serves no sliding window";
+    return "sliding_window " + std::to_string(slidingWindow) + " over seqlen_q "
+           + std::to_string(seqLenQ) + " and seqlen_kv " + std::to_string(seqLenKv)
+           + " leaves the last query rows no key; " + cause;
 }
 
 /// head_size is 64 or 128 (AttentionDenseSpec.__post_init__).
@@ -295,11 +320,9 @@ struct AttentionDenseMask
  * An arch that serves no window (servesSlidingWindow() false) declines every windowed
  * band: its catalog carries no non-zero sliding_window.
  *
- * A top-left window that leaves the last query rows no key (windowLeavesRowsWithoutKeys)
- * is declined. This restates supports_attention_dense's row rule without its sink and LSE
- * exemptions: both packs decline sinks, and a graph that binds stats is declined here too,
- * because the rows such a window leaves keyless are graded only against an infinite LSE,
- * which no device-site validator compares.
+ * A top-left window that leaves the last query rows no key is served: the kernel zeroes
+ * them. graphMatches declines it only for a graph that binds stats
+ * (windowLeavesRowsWithoutKeys says why). Both packs decline sinks.
  */
 std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& attributes,
                                           const AttentionDenseProblem& problem,
@@ -371,16 +394,6 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
             return std::nullopt;
         }
         const int64_t window = band.leftBound + 1;
-        if(windowLeavesRowsWithoutKeys(problem.seqLenQ, problem.seqLenKv, window))
-        {
-            HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mask")
-                                   << "a " << window << "-key window over seqlen_q "
-                                   << problem.seqLenQ << " and seqlen_kv " << problem.seqLenKv
-                                   << " leaves the last query rows no key; not yet supported "
-                                      "by this pack (only the kernel's LSE path zeroes such "
-                                      "rows)");
-            return std::nullopt;
-        }
         return AttentionDenseMask{1, window};
     }
     default:
@@ -520,6 +533,15 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                       "extents, not virtual, not ragged and not pass-by-value");
             return std::nullopt;
         }
+        if(!sdpa_graph::declaresAlignment(*tensor, OPERAND_ALIGNMENT_BYTES))
+        {
+            HIPDNN_PLUGIN_LOG_INFO(
+                declined(arch, "alignment")
+                << describeOperand(role, *tensor) << " declares " << tensor->alignment()
+                << "-byte alignment, which does not guarantee the " << OPERAND_ALIGNMENT_BYTES
+                << " these kernels declare on their pointer parameters");
+            return std::nullopt;
+        }
     }
 
     // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
@@ -654,13 +676,16 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                   "as a host value (attn_scale_value)");
         return std::nullopt;
     }
-    // varlen, both spellings.
+    // varlen: per-batch lengths (seq_len_*) and cumulative lengths (cu_seq_len_*).
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "varlen")
-                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not implemented in the kernel");
+                               << "variable sequence lengths (seq_len_q/seq_len_kv or "
+                                  "cu_seq_len_q/cu_seq_len_kv tensors) are not implemented in the "
+                                  "kernel");
         return std::nullopt;
     }
     // Dropout.
@@ -729,6 +754,16 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "stats")
                                << "softmax statistics outputs (stats, max, sum_exp, rng_dump or "
                                   "generate_stats) are not supported");
+        return std::nullopt;
+    }
+    // A window that leaves the last query rows no key is served, but not with a stats
+    // output: windowLeavesRowsWithoutKeys says why.
+    if(statsUid != ATTENTION_DENSE_NO_STATS
+       && windowLeavesRowsWithoutKeys(problem.seqLenQ, problem.seqLenKv, mask->slidingWindow))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(
+            declined(arch, "mask") << keylessWindowReason(
+                mask->slidingWindow, problem.seqLenQ, problem.seqLenKv, /*bindsStats=*/true));
         return std::nullopt;
     }
     // ALiBi slopes and padding masks.
@@ -915,13 +950,11 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel,
  * A served candidate receives batch, both sequence lengths and both head counts as
  * runtime kernel arguments, so one binary serves any valid shape for the same
  * dtype/head size/mask/window; the metadata's shape fields are canonical build inputs and
- * are not compared. An arch whose catalog lists each head configuration as its own entry
- * (matchesHeadCounts) still compares the head counts.
+ * are not compared, and no arch's catalog carries head counts to compare.
  *
  * Divisibility is against the candidate's OWN tile -- `Sq % block_m == 0` and
  * `Skv % block_n == 0` -- so one graph can admit some tiles of a cohort and not others.
- * So is the sliding-window zero-trip guard of an arch that serves windows, which reads the
- * same tile.
+ * That is all a candidate's window adds: a block that sees no key tile is not checked here.
  *
  * On an arch that serves stats, LSE is baked at compile time: a candidate that writes it
  * takes a trailing lse_ptr and serves exactly the graphs that bind a stats output, and
@@ -989,12 +1022,6 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    if(arch.matchesHeadCounts
-       && (intField(NUM_QUERY_HEADS_FIELD) != problem.numQueryHeads
-           || intField(NUM_KV_HEADS_FIELD) != problem.numKvHeads))
-    {
-        return false;
-    }
 
     const auto causal = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.tokens.causal);
     if(!causal.has_value() || intField(CAUSAL_FIELD) != *causal)
@@ -1022,10 +1049,10 @@ bool kernelMatches(const MatchContext& context,
         }
     }
 
-    if(!tileDivides(*tile, problem)
-       || (arch.servesSlidingWindow()
-           && !arch.windowReachesKeys(
-               tile->blockM, tile->blockN, problem.seqLenQ, problem.seqLenKv, *slidingWindow)))
+    // No per-block check here: a block that sees no key tile runs a zero-trip key loop and the
+    // kernel zeroes its rows. A graph that binds stats and has such rows is declined by the
+    // graph match (windowLeavesRowsWithoutKeys says why), before any candidate is matched.
+    if(!tileDivides(*tile, problem))
     {
         return false;
     }
@@ -1504,11 +1531,14 @@ private:
 }
 
 // Refuses a saved causal flag or window outside maskFor's rules, without asking whether the
-// arch serves a window (see readLaunchInputs for gfx950's exception). Both are baked into the
-// code object and the launch does not read them, so these are checks of the plan's integrity,
-// not of the launch.
+// arch serves a window (see readLaunchInputs for gfx950's exception). The one exception is a
+// window that leaves the last query rows no key: an arch that serves windows restores it for
+// a plan without a stats output, and every other plan is refused (windowLeavesRowsWithoutKeys
+// says why). Both are baked into the code object and the launch does not read them, so these
+// are checks of the plan's integrity, not of the launch.
 void requireServedSavedMask(const SavedLaunchInputs& inputs,
-                            const AttentionDenseLaunchInputs& launch)
+                            const AttentionDenseLaunchInputs& launch,
+                            const AttentionDenseArch& arch)
 {
     const auto& binding = launch.binding;
     const auto& problem = launch.problem;
@@ -1533,15 +1563,20 @@ void requireServedSavedMask(const SavedLaunchInputs& inputs,
             SLIDING_WINDOW_VALUE,
             "must be 0 unless 'causal' is 1; the kernel's window is causal");
     }
-    if(windowLeavesRowsWithoutKeys(problem.seqLenQ, problem.seqLenKv, binding.slidingWindow))
+    // A window that leaves the last query rows no key is served only where the arch serves
+    // windows and the plan binds no stats output.
+    const bool keylessWindowServed
+        = arch.servesSlidingWindow() && binding.stats == ATTENTION_DENSE_NO_STATS;
+    if(!keylessWindowServed
+       && windowLeavesRowsWithoutKeys(problem.seqLenQ, problem.seqLenKv, binding.slidingWindow))
     {
-        refuseAttentionDenseLaunchValue(inputs,
-                                        SLIDING_WINDOW_VALUE,
-                                        "leaves the last query rows no key over seqlen_q "
-                                            + std::to_string(problem.seqLenQ) + " and seqlen_kv "
-                                            + std::to_string(problem.seqLenKv)
-                                            + "; not yet supported by this pack (only the "
-                                              "kernel's LSE path zeroes such rows)");
+        refuseAttentionDenseLaunchValue(
+            inputs,
+            SLIDING_WINDOW_VALUE,
+            keylessWindowReason(binding.slidingWindow,
+                                problem.seqLenQ,
+                                problem.seqLenKv,
+                                binding.stats != ATTENTION_DENSE_NO_STATS));
     }
 }
 
@@ -1768,7 +1803,7 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
     problem.headSize = requireLaunchInt(inputs, HEAD_SIZE_VALUE, 1, INT32_LIMIT);
     launch.blockM = requireLaunchInt(inputs, BLOCK_M_VALUE);
 
-    requireServedSavedMask(inputs, launch);
+    requireServedSavedMask(inputs, launch, arch);
 
     // The kernel takes the scale as a float. A double that a float cannot hold exactly was
     // not written from one.

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Node.hpp"
+#include <array>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
@@ -210,6 +211,51 @@ public:
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
+        }
+
+        // Rule 6c: cu_seq_len_q / cu_seq_len_kv (cuDNN 9.24+; the mixed per-side form 9.25+).
+        // - Each side (Q, KV) uses either seq_len_* or cu_seq_len_*, never both. The sides may
+        //   differ (cuDNN 9.24 required cu on both).
+        // - If either side is cumulative: padding_mask is required, both sides need a length
+        //   tensor, and each cu tensor is INT32 (B+1,1,1,1) prefix sums starting at 0.
+        // - A 1-D (B+1) tensor is promoted to that shape here, so the setter call order does
+        //   not matter (cuDNN promotes later, in infer_properties_node).
+        const auto cuSeqLenQ = attributes.get_cu_seq_len_q();
+        const auto cuSeqLenKv = attributes.get_cu_seq_len_kv();
+        detail::promoteIndexTensorTo4d(cuSeqLenQ);
+        detail::promoteIndexTensorTo4d(cuSeqLenKv);
+        const auto seqLenQ = attributes.get_seq_len_q();
+        const auto seqLenKv = attributes.get_seq_len_kv();
+        HIPDNN_RETURN_IF_TRUE(cuSeqLenQ && seqLenQ,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: seq_len_q and cu_seq_len_q cannot both be set");
+        HIPDNN_RETURN_IF_TRUE(cuSeqLenKv && seqLenKv,
+                              ErrorCode::INVALID_VALUE,
+                              "SdpaFwdNode: seq_len_kv and cu_seq_len_kv cannot both be set");
+        if(cuSeqLenQ || cuSeqLenKv)
+        {
+            HIPDNN_RETURN_IF_FALSE(
+                attributes.padding_mask,
+                ErrorCode::INVALID_VALUE,
+                std::string("SdpaFwdNode: cu_seq_len_q/kv require padding_mask=true"));
+            HIPDNN_RETURN_IF_TRUE(
+                static_cast<bool>(cuSeqLenQ || seqLenQ)
+                    != static_cast<bool>(cuSeqLenKv || seqLenKv),
+                ErrorCode::INVALID_VALUE,
+                "SdpaFwdNode: a Q-side and a KV-side sequence length tensor must be provided "
+                "together (each side via seq_len_* or cu_seq_len_*)");
+
+            const auto expectedFirstDim = qDims[0] + 1;
+            if(cuSeqLenQ)
+            {
+                HIPDNN_CHECK_ERROR(detail::validateIndexTensor(
+                    cuSeqLenQ, "SdpaFwdNode", "cu_seq_len_q", expectedFirstDim, "batch + 1"));
+            }
+            if(cuSeqLenKv)
+            {
+                HIPDNN_CHECK_ERROR(detail::validateIndexTensor(
+                    cuSeqLenKv, "SdpaFwdNode", "cu_seq_len_kv", expectedFirstDim, "batch + 1"));
+            }
         }
 
         // Rule 7: If O has dims already set, validate them

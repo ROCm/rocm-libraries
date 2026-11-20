@@ -33,8 +33,19 @@ constexpr int kDefaultLogLevel = 0;
 constexpr int kErrorLogLevel   = 3;
 constexpr int kInfo2LogLevel   = 6;
 
-// Entry points redirected to hipDNN when forwarding is enabled. To add one, list
-// it here and bump the array size.
+// Entry points redirected to hipDNN when forwarding is enabled.
+//
+// To add one:
+//   1. List it here and bump the array size.
+//   2. Give it a hipDNN implementation. Until then its generated stub fails with
+//      miopenStatusNotImplemented. Move the stub from wrapper_passthrough.cpp to
+//      wrapper.cpp and call the new function through MIOPEN_WRAPPER_FORWARD, as the
+//      convolution stubs do, then rerun script/generate_wrapper_sources.py.
+//   3. Add a HipdnnShim test (suite name contains HipdnnShim) that reaches the entry
+//      point through the public miopen.h API only and checks the result against a CPU
+//      reference (see "hipDNN shim surface" in test/gtest/README.md). Without one, the
+//      parity run replays nothing for it, so a swap that changes results goes unnoticed.
+//   4. Update DefaultSetIsTheConvolutionFamily in test/gtest/wrapper_routing.cpp.
 //
 // The forwarding parity tests (script/run_forwarding_parity.py) run the shim
 // tests once with forwarding disabled and once enabled and require the two runs
@@ -77,7 +88,16 @@ const char* ModeName(ForwardingMode mode)
     return mode == ForwardingMode::Enabled ? "enabled" : "disabled";
 }
 
-const char* RouteName(Route route) { return route == Route::Hipdnn ? "hipdnn" : "miopen"; }
+const char* RouteName(Route route)
+{
+    switch(route)
+    {
+    case Route::Miopen: return "miopen";
+    case Route::Hipdnn: return "hipdnn";
+    case Route::Rejected: return "rejected";
+    }
+    return "unknown";
+}
 
 const char* ReasonName(RouteReason reason)
 {
@@ -88,6 +108,7 @@ const char* ReasonName(RouteReason reason)
     case RouteReason::DisabledByEnv: return "disabled-by-env";
     case RouteReason::HipdnnUnavailable: return "hipdnn-unavailable";
     case RouteReason::InForwardingSet: return "in-forwarding-set";
+    case RouteReason::ReentrantFromHipdnn: return "reentrant-from-hipdnn";
     }
     return "unknown";
 }

@@ -29,6 +29,7 @@
 
 #include <miopen/config.hpp>
 #include <miopen/filesystem.hpp>
+#include <iosfwd>
 #include <memory>
 #include <string_view>
 #include <map>
@@ -43,10 +44,16 @@ struct MIOPEN_INTERNALS_EXPORT Process
     Process(const fs::path& cmd);
     ~Process() noexcept;
 
+    /// Runs the command directly (no shell) and waits for it to exit. args is split on
+    /// whitespace; quotes and shell metacharacters are passed to the command literally.
+    /// out, if set, receives the command's stdout and stderr. in, if set, is written to its
+    /// stdin (not together with out; not supported on Windows). Returns the exit code, or
+    /// 128 + signal number if the command was killed by a signal.
     int operator()(std::string_view args                                       = "",
                    const fs::path& cwd                                         = "",
                    std::ostream* out                                           = nullptr,
-                   const ProcessEnvironmentMap& additionalEnvironmentVariables = {});
+                   const ProcessEnvironmentMap& additionalEnvironmentVariables = {},
+                   std::istream* in                                            = nullptr);
 
 private:
     std::unique_ptr<ProcessImpl> impl;

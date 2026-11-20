@@ -137,6 +137,48 @@ NO_BUFFER_OOB_KERNELS = {
     "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x128x128_UR_2_WGM_": "rocRoller",
     "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x256x128_UR_2_WGM_": "rocRoller",
     "RR_GEMM_TN_FP8_FP4_Half_Half_Float_SA_BE8M0_32_SB_BE8M0_32_WGT_32x64x128_UR_2_WGM_": "rocRoller",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x65536_c0c1_k4b371438f4": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x131584_c0c1": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x65536_c0c1_Acanonical_k21f5fa872a": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x65536_c0c1_k4b371438f4": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x131584_c0c1": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x2048_c0c1_kbd6c3ec4bc": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x6144_c0c1_ke767b25fce": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "32768x4096x2048_c0c1_kd369500cb3": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "32768x4096x6144_c0c1_k3063b64df0": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x2048_c0c1_kbd6c3ec4bc": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "4096x4096x6144_c0c1_ke767b25fce": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "32768x4096x2048_c0c1_kd369500cb3": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "32768x4096x6144_c0c1_k3063b64df0": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_"
+    "4096x4096x2048_c0c1_Acanonical_kc922a7f4be": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_"
+    "4096x4096x6144_c0c1_Acanonical_kb952f38bb6": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "32768x4096x2048_c0c1_Acanonical_k20ef87951c": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e2m3_e2m3_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_"
+    "32768x4096x6144_c0c1_Acanonical_kc908ab1de2": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_"
+    "4096x4096x2048_c0c1_Acanonical_kc922a7f4be": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_"
+    "4096x4096x6144_c0c1_Acanonical_kb952f38bb6": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s3_"
+    "32768x4096x2048_c0c1_Acanonical_k20ef87951c": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
+    "rocke_gemm_mx_e3m2_e3m2_e8m0b32_f32acc_bf16_rcr_256x256x128_w2x2_16x16x128_s2_"
+    "32768x4096x6144_c0c1_Acanonical_kc908ab1de2": "rocKE, buffer_store with constant num_records 0x7ffffff0; AssertSizeEqual pins D",
     "wave_bf16_gemm_256x256x64": "Wave, global_store only",
     "wvSpltK_bf16_tn_m1": "rocBLAS wvSpltK, global_store only",
     "wvSpltK_bf16_tn_m2": "rocBLAS wvSpltK, global_store only",

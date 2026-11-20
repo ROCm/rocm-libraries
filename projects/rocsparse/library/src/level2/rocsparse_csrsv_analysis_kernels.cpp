@@ -43,23 +43,32 @@ rocsparse_status launch_csrsv_analysis_upper_kernel(rocsparse_handle    handle,
                                                     rocsparse_index_base idx_base,
                                                     rocsparse_diag_type  diag_type)
 {
-    dim3 csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1);
     dim3 csrsv_threads(BLOCKSIZE);
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        (rocsparse::csrsv_analysis_upper_kernel<BLOCKSIZE, WF_SIZE, SLEEP>),
-        csrsv_blocks,
-        csrsv_threads,
-        0,
-        handle->stream,
-        static_cast<J>(m),
-        reinterpret_cast<const I*>(csr_row_ptr),
-        reinterpret_cast<const J*>(csr_col_ind),
-        reinterpret_cast<I*>(diag_ind),
-        done_array,
-        reinterpret_cast<I*>(max_nnz),
-        reinterpret_cast<J*>(zero_pivot),
-        idx_base,
-        diag_type);
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+        handle,
+        rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
+        BLOCKSIZE,
+        [&](auto chunked, uint32_t grid) -> rocsparse_status {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::csrsv_analysis_upper_kernel<BLOCKSIZE,
+                                                        WF_SIZE,
+                                                        SLEEP,
+                                                        decltype(chunked)::value>),
+                dim3(grid),
+                csrsv_threads,
+                0,
+                handle->stream,
+                static_cast<J>(m),
+                reinterpret_cast<const I*>(csr_row_ptr),
+                reinterpret_cast<const J*>(csr_col_ind),
+                reinterpret_cast<I*>(diag_ind),
+                done_array,
+                reinterpret_cast<I*>(max_nnz),
+                reinterpret_cast<J*>(zero_pivot),
+                idx_base,
+                diag_type);
+            return rocsparse_status_success;
+        }));
     return rocsparse_status_success;
 }
 
@@ -78,23 +87,32 @@ rocsparse_status launch_csrsv_analysis_lower_kernel(rocsparse_handle    handle,
                                                     rocsparse_index_base idx_base,
                                                     rocsparse_diag_type  diag_type)
 {
-    dim3 csrsv_blocks((m * handle->wavefront_size - 1) / BLOCKSIZE + 1);
     dim3 csrsv_threads(BLOCKSIZE);
-    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
-        (rocsparse::csrsv_analysis_lower_kernel<BLOCKSIZE, WF_SIZE, SLEEP>),
-        csrsv_blocks,
-        csrsv_threads,
-        0,
-        handle->stream,
-        static_cast<J>(m),
-        reinterpret_cast<const I*>(csr_row_ptr),
-        reinterpret_cast<const J*>(csr_col_ind),
-        reinterpret_cast<I*>(diag_ind),
-        done_array,
-        reinterpret_cast<I*>(max_nnz),
-        reinterpret_cast<J*>(zero_pivot),
-        idx_base,
-        diag_type);
+    RETURN_IF_ROCSPARSE_ERROR(rocsparse::dispatch_grid_stride_x(
+        handle,
+        rocsparse::ceil_div(m, BLOCKSIZE / WF_SIZE),
+        BLOCKSIZE,
+        [&](auto chunked, uint32_t grid) -> rocsparse_status {
+            RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+                (rocsparse::csrsv_analysis_lower_kernel<BLOCKSIZE,
+                                                        WF_SIZE,
+                                                        SLEEP,
+                                                        decltype(chunked)::value>),
+                dim3(grid),
+                csrsv_threads,
+                0,
+                handle->stream,
+                static_cast<J>(m),
+                reinterpret_cast<const I*>(csr_row_ptr),
+                reinterpret_cast<const J*>(csr_col_ind),
+                reinterpret_cast<I*>(diag_ind),
+                done_array,
+                reinterpret_cast<I*>(max_nnz),
+                reinterpret_cast<J*>(zero_pivot),
+                idx_base,
+                diag_type);
+            return rocsparse_status_success;
+        }));
 
     return rocsparse_status_success;
 }

@@ -94,6 +94,11 @@ def _emit(mod: Module, name: str) -> str:
     return st.emitAssembly()
 
 
+def test_gfx1250_memory_type_capability():
+    # Keep the native rocisa table and the StinkyTofu capability bridge aligned.
+    assert rocisa.rocIsa.getInstance().getArchCaps()["MTypeNC"] == 0
+
+
 # ---------------------------------------------------------------------------
 # s_wait_xcnt
 # ---------------------------------------------------------------------------
@@ -135,14 +140,18 @@ def test_global_wb_scope_dev_emits_to_stinkytofu():
     )
 
 
-def test_global_inv_scope_dev_emits_to_stinkytofu():
-    mod = Module("global_inv_scope_dev")
-    mod.add(GlobalInv(scope=CacheScope.SCOPE_DEV))
+@pytest.mark.parametrize("scope_enum,scope_text", [
+    (CacheScope.SCOPE_DEV, "SCOPE_DEV"),
+    (CacheScope.SCOPE_SE, "SCOPE_SE"),
+])
+def test_global_inv_scope_emits_to_stinkytofu(scope_enum, scope_text):
+    mod = Module(f"global_inv_{scope_text.lower()}")
+    mod.add(GlobalInv(scope=scope_enum))
 
-    asm = _emit(mod, "global_inv_scope_dev")
+    asm = _emit(mod, f"global_inv_{scope_text.lower()}")
 
-    assert re.search(r"global_inv scope:SCOPE_DEV", asm), (
-        f"expected 'global_inv scope:SCOPE_DEV' in emitted assembly, got:\n{asm}"
+    assert re.search(rf"global_inv scope:{scope_text}", asm), (
+        f"expected 'global_inv scope:{scope_text}' in emitted assembly, got:\n{asm}"
     )
 
 

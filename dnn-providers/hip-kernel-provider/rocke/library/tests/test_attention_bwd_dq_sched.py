@@ -59,6 +59,8 @@ from kernels.common.attention_bwd_dq import (
     validate_attn_bwd_dq_spec,
 )
 
+from ._attention_bwd_lds_model import is_lds_access as _is_lds
+from ._attention_bwd_lds_model import lds_hazards
 from .test_attention_bwd_dq import ARCHS, HEADS, _key_loops
 from .test_attention_bwd_dq import VARIANTS as DQ_VARIANTS
 from .test_attention_bwd_dq import _walk
@@ -421,8 +423,6 @@ def traced_dq(spec, arch):
     private)`` (the view's span in allocation elements)."""
     from kernels.common._attention_bwd_frag import LdsView
 
-    from .test_attention_bwd_ir import _is_lds
-
     tags = {}
     orig = {n: getattr(LdsView, n) for n in ("load", "store", "tr16_load")}
 
@@ -457,8 +457,6 @@ _HAZARD_VARS = ("default", "prefetch", "group_edge", "prefetch_group_edge",
 @pytest.mark.parametrize("sched", DQ_SCHEDS)
 @pytest.mark.parametrize("arch", ARCHS)
 def test_lds_accesses_do_not_race(arch, sched):
-    from .test_attention_bwd_ir import lds_hazards
-
     n = 0
     for d in HEADS:
         for var in _HAZARD_VARS:
@@ -479,8 +477,6 @@ def test_lds_accesses_do_not_race(arch, sched):
 def test_hazard_replay_sees_the_key_step_barriers():
     """Mutants: without the key step's barriers the next tile's K / V writes
     race the step's reads (the replay is not vacuous)."""
-    from .test_attention_bwd_ir import lds_hazards
-
     for var in ("default", "prefetch"):
         row = ("gfx950", 64, "fp16", "batched", "band", 8, var)
         kernel, tags = traced_dq(_spec(*row, "stage_table"), "gfx950")

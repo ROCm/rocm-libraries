@@ -447,16 +447,12 @@ namespace
             return;
         }
 
-        SCOPED_TRACE("wide");
-        const Csr<T> wide = full<T>(6, 12);
-        if(f.id == rocalution::DIA && b == Backend::Host)
         {
-            KNOWN_BUG("csr_to_dia sizes the values by the smaller dimension, so LeaveDataPtrDIA "
-                      "aborts");
-            expect_in_child([&] { expect_leave_and_set(b, f, wide); });
-            return;
+            SCOPED_TRACE("wide");
+            expect_leave_and_set(b, f, full<T>(6, 12));
         }
-        expect_leave_and_set(b, f, wide);
+        SCOPED_TRACE("tall");
+        expect_leave_and_set(b, f, full<T>(12, 6));
     }
 }
 
@@ -1440,8 +1436,7 @@ namespace
 
 TYPED_TEST_SUITE(matrix_kernels_iterative_solves, WithBackends<RealTypes>, TypedName);
 
-// Without a tolerance every solve runs max_iter iterations, so the known bug of the
-// iteration limit does not apply
+// Without a tolerance every solve runs max_iter iterations
 TYPED_TEST(matrix_kernels_iterative_solves, ll_solve_without_a_tolerance)
 {
     using T = typename TypeParam::value_type;
@@ -1788,9 +1783,12 @@ TYPED_TEST(matrix_kernels_host_csritsv, matrix_without_entries)
     EXPECT_EQ(non_unit.y, untouched);
 
     // Every row lacks its diagonal, so the first zero pivot is row 0
-    KNOWN_BUG("without entries the non-unit solve returns before it looks for zero pivots and "
-              "reports none");
     EXPECT_EQ(non_unit.zero_pivot, 0);
+
+    // A non-unit solve without rows has no zero pivot
+    Itsv<T> no_rows = itsv(Csr<T>(0), c, std::vector<T>(), std::vector<T>());
+    EXPECT_TRUE(no_rows.status);
+    EXPECT_EQ(no_rows.zero_pivot, -1);
 }
 
 // Integer entries and a unit diagonal keep every iterate exact. The stored
@@ -1863,8 +1861,6 @@ TYPED_TEST(matrix_kernels_host_csritsv, the_tolerance_bounds_the_largest_residua
         EXPECT_EQ(r.iterations, expected.iterations);
         expect_near(r.y, lower_solve(dense(L), L.n, x, false), tol<T>());
     }
-
-    KNOWN_BUG("the transposed solve takes the largest update of the previous rows as the residual");
 
     {
         SCOPED_TRACE("transposed");
@@ -1967,11 +1963,6 @@ TYPED_TEST(matrix_kernels_stencil, laplace_2d_apply_add_adds_the_scaled_product)
 
     for(T scalar : {static_cast<T>(1), static_cast<T>(0.5)})
     {
-        if(scalar != static_cast<T>(1))
-        {
-            KNOWN_BUG("ApplyAdd ignores the scalar");
-        }
-
         for(int size : grid_sizes)
         {
             SCOPED_TRACE("grid " + std::to_string(size) + ", scalar " + std::to_string(scalar));
@@ -2063,13 +2054,9 @@ TYPED_TEST(matrix_kernels_local_stencil, apply_and_apply_add_on_the_host)
     S.ApplyAdd(in, static_cast<T>(1), &out);
     EXPECT_EQ(values_of(out), ref.apply(x));
 
-    KNOWN_BUG("LocalStencil::ApplyAdd calls Apply, which overwrites the output");
-
     out.CopyFromData(y.data());
     S.ApplyAdd(in, static_cast<T>(1), &out);
     EXPECT_EQ(values_of(out), apply_add(ref, x, static_cast<T>(1), y));
-
-    KNOWN_BUG("ApplyAdd ignores the scalar");
 
     out.CopyFromData(y.data());
     S.ApplyAdd(in, static_cast<T>(0.5), &out);

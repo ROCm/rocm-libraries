@@ -146,9 +146,12 @@ struct GroupedGemmKernel
     using OffsetTile1DPartitioner = OffsettedTile1DPartitioner<TilePartitioner>;
     using Kernel = GroupedGemmKernel<TilePartitioner, GemmPipeline, EpiloguePipeline>;
 
-    static constexpr index_t kBlockSize = GemmPipeline::BlockSize;
+    // Base's launch size, which also counts a wavelet pipeline's load waves.
+    static constexpr index_t kBlockSize = Base::kBlockSize;
+    /// Named barriers this kernel arms for GemmPipeline; void when it synchronises without them.
+    using barrier_pipeline = typename Base::barrier_pipeline;
     // Same detection as the base kernel: equals GemmPipeline::UsePersistentKernel when the
-    // pipeline defines it, false otherwise (the TDM pipelines do not define it).
+    // pipeline defines it, false otherwise.
     static constexpr bool UsePersistentKernel = Base::PersistentKernel;
 
     /// @brief True for the gfx125 TDM pipelines (see UniversalGemmKernel::kIsTdmPipeline).
@@ -306,9 +309,8 @@ struct GroupedGemmKernel
     {
         if constexpr(kIsTdmPipeline)
         {
-            // Base::IsSupportedArgument returns true unconditionally for TDM pipelines, so the
-            // TDM-specific constraints are checked here, before querying the device, so invalid
-            // arguments are rejected deterministically on any host.
+            // The TDM-specific constraints are checked here, before querying the device, so that
+            // invalid arguments are rejected deterministically on any host.
             for(const auto& karg : kargs)
             {
                 const auto& g = karg.group_karg;
@@ -375,6 +377,7 @@ struct GroupedGemmKernel
             {
                 __builtin_trap();
             }
+            // TDM grouped GEMM is non-persistent, so this runs once per launch.
             Base::RunGemm({a_ptr},
                           {b_ptr},
                           kargs.ds_ptr,
@@ -383,7 +386,8 @@ struct GroupedGemmKernel
                           kargs,
                           splitk_batch_offset,
                           i_m,
-                          i_n);
+                          i_n,
+                          Base::InitBarriers());
         }
         else if constexpr(GemmPipeline::DoubleSmemBuffer == true)
         {

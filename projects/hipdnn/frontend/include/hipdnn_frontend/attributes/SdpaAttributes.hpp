@@ -101,6 +101,8 @@ public:
         Scale_S = 18,
         Scale_O = 19,
         SINK_TOKEN = 20,
+        CU_SEQ_LEN_Q = 21, ///< Cumulative Q sequence lengths, INT32 (B+1,1,1,1); forward only
+        CU_SEQ_LEN_KV = 22, ///< Cumulative KV sequence lengths, INT32 (B+1,1,1,1); forward only
     };
     typedef InputNames input_names;
 
@@ -191,6 +193,20 @@ public:
     std::shared_ptr<TensorAttributes> get_seq_len_kv() const
     {
         return getInput(InputNames::SEQ_LEN_KV);
+    }
+    /// @brief Cumulative Q sequence lengths tensor.
+    /// @return The tensor, or null if unset.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_cu_seq_len_q() const
+    {
+        return getInput(InputNames::CU_SEQ_LEN_Q);
+    }
+    /// @brief Cumulative KV sequence lengths tensor.
+    /// @return The tensor, or null if unset.
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    std::shared_ptr<TensorAttributes> get_cu_seq_len_kv() const
+    {
+        return getInput(InputNames::CU_SEQ_LEN_KV);
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     std::shared_ptr<TensorAttributes> get_seed() const
@@ -372,6 +388,44 @@ public:
     SdpaAttributes& set_seq_len_kv(std::shared_ptr<TensorAttributes>&& value)
     {
         return setInput(InputNames::SEQ_LEN_KV, std::move(value));
+    }
+    /**
+     * @brief Set the cumulative Q sequence lengths (forward only; cuDNN 9.24+, mixed with a
+     * seq_len_* tensor on the other side 9.25+).
+     *
+     * Exclusive prefix sums of the per-batch Q lengths: INT32, B+1 entries, starting at 0 (for
+     * lengths 4, 3, 8 the tensor holds 0, 4, 7, 15). A 1-D (B+1) tensor is promoted to
+     * (B+1,1,1,1) during graph validation, in either call order. Requires padding_mask(true),
+     * excludes seq_len_q, and the KV side must also carry a length tensor (seq_len_kv or
+     * cu_seq_len_kv). The graph then needs an engine plugin reporting API version 1.6.0 or
+     * newer.
+     * @param value The cumulative Q sequence length tensor.
+     * @return Reference to this object for chaining.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_q(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setInput(InputNames::CU_SEQ_LEN_Q, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_q(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setInput(InputNames::CU_SEQ_LEN_Q, std::move(value));
+    }
+    /**
+     * @brief Set the cumulative KV sequence lengths. Same rules as set_cu_seq_len_q().
+     * @param value The cumulative KV sequence length tensor.
+     * @return Reference to this object for chaining.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_kv(const std::shared_ptr<TensorAttributes>& value)
+    {
+        return setInput(InputNames::CU_SEQ_LEN_KV, value);
+    }
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    SdpaAttributes& set_cu_seq_len_kv(std::shared_ptr<TensorAttributes>&& value)
+    {
+        return setInput(InputNames::CU_SEQ_LEN_KV, std::move(value));
     }
     // NOLINTNEXTLINE(readability-identifier-naming)
     SdpaAttributes& set_seed(const std::shared_ptr<TensorAttributes>& value)

@@ -37,7 +37,7 @@
 #include "rocke/instance_moe_fused_mega_fp8.h"
 #include "rocke/instance_moe_fused_mega_fp8_internal.h"
 #include "rocke/ir.h"
-#include "rocke/ir_internal.h" /* rocke_i_set_err */
+#include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_type_bytes */
 #include "rocke/lower_llvm.h"
 
 /* ===================================================================== *
@@ -772,8 +772,8 @@ size_t rocke_moe_fp8_lds_allocs(const rocke_fused_mega_kernel_spec_fp8_t* spec,
     tile_n = spec->tile_n_inter;
     n_blocks = tile_n / ROCKE_MOE_FP8_GROUP_K;
     n_warps = spec->warp_m * spec->warp_n;
-    fp8_b = rocke_mega_lds_elem_bytes(rocke_fp8e4m3());
-    f32_b = rocke_mega_lds_elem_bytes(rocke_f32());
+    fp8_b = rocke_i_type_bytes(rocke_fp8e4m3());
+    f32_b = rocke_i_type_bytes(rocke_f32());
 
     out[0].name = "Hidden_smem";
     out[0].elem_bytes = fp8_b;

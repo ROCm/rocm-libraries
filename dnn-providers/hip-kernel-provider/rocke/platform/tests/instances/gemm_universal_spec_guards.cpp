@@ -155,7 +155,7 @@ int main()
              no_tdm(s);
              s.tile.warp_tile_k = 16;
          },
-         "fp8/bf8 A/B GEMM is supported only on gfx1250 (got gfx1201)"},
+         "fp8/bf8 A/B GEMM is not supported on gfx1201 (supported on: gfx1250)"},
         /* the Tensor Data Mover */
         {"tdm without a mover",
          "gfx1201",
@@ -174,7 +174,7 @@ int main()
              s.trait.lds_k_pad = 0;
              s.trait.epilogue = "cshuffle";
          },
-         "WMMA path supports the 'cshuffle' epilogue only on gfx1250, not gfx1201"},
+         "WMMA path does not support the 'cshuffle' epilogue on gfx1201 (supported on: gfx1250)"},
         {"lds_swizzle",
          "gfx1250",
          [](Spec& s) { s.trait.lds_swizzle = true; },

@@ -15,7 +15,9 @@
  *      GEMM sub-specs pass their own validator;
  *   3. the fp8 mega rejects the K=128 hero atom on a target whose MMA catalog
  *      does not list it, and accepts the catalog 16x16x32 atom there;
- *   4. the fp8 mega rejects a wave32 target with gemm_universal's phrasing.
+ *   4. the fp8 mega rejects a wave32 target with gemm_universal's phrasing;
+ *   5. the accounting covers a segment the packer aligns to 16 bytes for its
+ *      vector access even when the segment before it is small.
  *
  * The two _lds_allocs ports live in the instances' *_internal.h headers (they
  * are private to the family, like the Python module-private `_lds_allocs` the
@@ -25,6 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/helper_rocke.instances.common._moe_fused_mega_lds.h"
 #include "rocke/instance_moe_fused_mega.h"
 #include "rocke/instance_moe_fused_mega_fp8.h"
 #include "rocke/instance_moe_fused_mega_fp8_internal.h"
@@ -461,10 +464,40 @@ static void test_fp8_guards(void)
     }
 }
 
+/* 5. A 2-byte buffer, a 16-byte buffer read as <4 x float>, then another
+ * 2-byte buffer: the packer places them at 0, 16 and 32 (a 48-byte pool),
+ * because the vector access aligns its segment to 16 bytes. The accounting
+ * must count at least that. The Python twin
+ * (test_accounting_covers_a_vector_segment_after_a_small_one) lowers the
+ * kernel and compares against the packer's pool directly. */
+static void test_mega_lds_bound_covers_vector_segment(void)
+{
+    const rocke_mega_lds_alloc_t allocs[] = {
+        {"head", 2, 1},
+        {"vector", 4, 4},
+        {"tail", 2, 1},
+    };
+    const long packed_pool_bytes = 48;
+    long accounted = rocke_mega_lds_pool_bytes(allocs, sizeof(allocs) / sizeof(allocs[0]));
+    if(accounted < packed_pool_bytes)
+    {
+        char detail[128];
+        snprintf(detail,
+                 sizeof(detail),
+                 "accounted %ld B, below the packed pool of %ld B",
+                 accounted,
+                 packed_pool_bytes);
+        fail("mega/bound_covers_vector_segment", detail);
+        return;
+    }
+    printf("ok   mega/bound_covers_vector_segment (%ld B)\n", accounted);
+}
+
 int main(void)
 {
     test_mega_lds_budget();
     test_fp8_guards();
+    test_mega_lds_bound_covers_vector_segment();
 
     if(g_failures != 0)
     {

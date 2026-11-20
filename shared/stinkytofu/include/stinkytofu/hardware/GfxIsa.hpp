@@ -276,6 +276,10 @@ struct HwInstDesc {
     /// HWModel::lds.dsLoadDefaultThroughput.
     uint16_t dsThroughput = 0;
 
+    /// WMMA issue-queue depth for this opcode. Populated from the architecture's
+    /// instruction-format .def; 0 means the opcode does not use the WMMA queue.
+    uint16_t wmmaQueueDepth = 0;
+
     /// Per-operand encoding field description (dest/src, encoding field,
     /// register type, and size in bits).
     struct OperandFieldDesc {

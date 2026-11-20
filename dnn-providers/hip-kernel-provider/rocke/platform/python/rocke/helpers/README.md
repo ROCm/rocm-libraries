@@ -55,6 +55,8 @@ rocke/helpers/
 │ # the (Y, P) decomposition is non-trivial.
 ├── io.py # io_ir_type, load_vec, load_vec_as_f32, pack_f32_to,
 │ # store_vec_from_f32; dtype-string-tolerant I/O dispatch.
+│ # smem_load_fragment: an LDS fragment read in <= 16-byte
+│ # pieces joined in K order by concat_tree (fp32 / TF32 conv).
 ├── reduction.py # block_lds_reduce (sum/max/min/prod) -- canonical
 │ # LDS tree reduction shared by norm/reduce/pool
 │ # kernels. Min and prod are also supported.
@@ -824,6 +826,14 @@ i32 SSA value as well: `max(1, num_wgs / num_xcds)` by default (one
 contiguous run of the launch per XCD), or the caller's `chunk_size` (e.g. the
 workgroups of one image row band, computed from the kernargs). Its pure-Python
 model is `python_chiplet_transform_chunked_runtime`.
+
+`xcd_remap` is the single entry point over these and two more modes
+(`mode=`): `"chunked"` picks the `chiplet_transform_chunked*` form from
+which of `num_wgs` / `chunk` are ints (compile-time) or Values; `"gated"`
+takes runtime `num_xcds` and `chunk` kernargs and is the identity when either
+is <= 0; `"contiguous"` gives each XCD one `ceil(num_wgs / num_xcds)` range.
+`xcd_remap_plane` applies the gated remap to each `gx * gy` batch plane and
+returns the remapped `(x, y)`. The host evaluator is `python_xcd_remap`.
 
 ### XOR-based LDS swizzles (`helpers/layouts.py`)
 

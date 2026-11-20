@@ -24,8 +24,7 @@
 
 //
 // Device unit tests of the generic triangular solve rocsparse_spsv for the
-// CSC, COO and (with ROCSPARSE_WITH_ELL_TRSV) ELL storage formats; the CSR path is
-// covered elsewhere.
+// CSC, COO and ELL storage formats; the CSR path is covered elsewhere.
 // Every solve is compared with a host substitution on a dense copy.
 //
 #include "unit_test_device_level2_common.hpp"
@@ -42,19 +41,14 @@ namespace
     enum class sp_format
     {
         csc,
-        coo
-#ifdef ROCSPARSE_WITH_ELL_TRSV
-        ,
+        coo,
         ell
-#endif
     };
 
     inline const char* format_name(sp_format f)
     {
-#ifdef ROCSPARSE_WITH_ELL_TRSV
         if(f == sp_format::ell)
             return "ell";
-#endif
         return f == sp_format::csc ? "csc" : "coo";
     }
 
@@ -135,10 +129,8 @@ namespace
         std::unique_ptr<device_csr<T, Idx, Idx>> dcsc;
         std::unique_ptr<device_vector<Idx>>      drow, dcol;
         std::unique_ptr<device_vector<T>>        dval;
-#ifdef ROCSPARSE_WITH_ELL_TRSV
-        std::unique_ptr<device_vector<Idx>> dell_col;
-        std::unique_ptr<device_vector<T>>   dell_val;
-#endif
+        std::unique_ptr<device_vector<Idx>>      dell_col;
+        std::unique_ptr<device_vector<T>>        dell_val;
 
         switch(c.format)
         {
@@ -188,7 +180,6 @@ namespace
                       rocsparse_status_success);
             break;
         }
-#ifdef ROCSPARSE_WITH_ELL_TRSV
         case sp_format::ell:
         {
             int32_t width = 0;
@@ -220,7 +211,6 @@ namespace
                       rocsparse_status_success);
             break;
         }
-#endif
         }
 
         dnvec_guard vx, vy;
@@ -287,10 +277,8 @@ namespace
                                             rocsparse_operation_transpose,
                                             rocsparse_operation_conjugate_transpose})
                     {
-#ifdef ROCSPARSE_WITH_ELL_TRSV
                         if(format == sp_format::ell && trans != rocsparse_operation_none)
                             continue; // ELL has no transposed solve (error path below)
-#endif
                         if(!all_trans && trans == rocsparse_operation_transpose)
                             continue;
                         for(const int base : {0, 1})
@@ -314,10 +302,8 @@ namespace
                             }
                     }
             size_t transes = all_trans ? 3 : 2;
-#ifdef ROCSPARSE_WITH_ELL_TRSV
             if(format == sp_format::ell)
                 transes = 1;
-#endif
             EXPECT_EQ(seen.size(), 2 * 2 * transes * 2 * 2);
         }
     };
@@ -334,13 +320,11 @@ namespace
         sweep<rocsparse_double_complex, int32_t>(sp_format::coo, false);
     }
 
-#ifdef ROCSPARSE_WITH_ELL_TRSV
     TEST_F(L2DeviceSpsv, ell_double_i64_and_complex)
     {
         sweep<double, int64_t>(sp_format::ell, false);
         sweep<rocsparse_float_complex, int32_t>(sp_format::ell, false);
     }
-#endif
 
     TEST_F(L2DeviceSpsv, csc_transposed_solves_share_one_descriptor)
     {
@@ -415,7 +399,6 @@ namespace
     }
 
     // ----- error paths --------------------------------------------------------------
-#ifdef ROCSPARSE_WITH_ELL_TRSV
     TEST_F(L2DeviceSpsv, ell_error_paths)
     {
         const spsv_case c;
@@ -510,7 +493,6 @@ namespace
                   rocsparse_status_success);
         EXPECT_NE(call(rocsparse_operation_none, rect.d, vx.d), rocsparse_status_success);
     }
-#endif
 
     TEST_F(L2DeviceSpsv, argument_checks_csc)
     {
