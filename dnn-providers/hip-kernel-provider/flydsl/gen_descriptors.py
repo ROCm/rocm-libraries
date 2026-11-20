@@ -426,6 +426,13 @@ def installed_models(
     installed: dict[str, dict[str, list[tuple[str | None, str]]]] = {}
     for path in sorted(root.rglob("*.uhd.json")) if root.is_dir() else []:
         parts = path.relative_to(root).parts
+        if len(parts) in (4, 5) and parts[0] != ued_id and _is_uuid(parts[0]):
+            raise HkpPackError(
+                f"{path}: filed under engine id {parts[0]}, but this engine's id is now "
+                f"{ued_id}: the id fingerprints the op's KMD fields (ued_id), so a field "
+                "change moved it. Retrain the model, or move it under the new id with its "
+                "trained_against UED id and selector revision updated"
+            )
         if len(parts) not in (4, 5) or parts[0] != ued_id:
             raise HkpPackError(
                 f"{path}: a trained model is installed at "
@@ -526,6 +533,14 @@ def estimate_document(uhd_id: str, name: str, symbol: str) -> dict[str, Any]:
         "score": {"metric": ENGINE_ESTIMATE_METRIC},
         "native": {"symbol": symbol},
     }
+
+
+def _is_uuid(text: str) -> bool:
+    try:
+        uuid.UUID(text)
+    except ValueError:
+        return False
+    return True
 
 
 # uuid5 from a name, so ids are stable across regenerations and adding a
