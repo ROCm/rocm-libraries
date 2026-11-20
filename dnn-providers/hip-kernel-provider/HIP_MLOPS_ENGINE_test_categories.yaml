@@ -13,18 +13,17 @@
 # See https://github.com/ROCm/rocm-libraries/issues/8852 for background on the
 # category execution model.
 # Tier behaviour (cumulative — each tier is a superset of the ones below it):
-#   - quick: run non-Full tests only.
+#   - quick: run tests with neither a Comprehensive* nor a Full* prefix.
 #   - standard: quick coverage (quick tests). No distinct Standard* prefix
-#     exists, so standard runs the same non-Full tests as quick.
-#   - comprehensive: standard + quick coverage. No distinct Comprehensive*
-#     prefix exists, so comprehensive runs the same non-Full tests as standard.
+#     exists, so standard runs the same tests as quick.
+#   - comprehensive: standard + quick coverage, plus Comprehensive*
+#     parameterised expansions.
 #   - full: all tests (non-Full + Full* parameterised expansions), excluding
 #     only disabled tests.
 #
-# Neither the unit tests in tests/ nor the ASM SDPA / rocKE-client integration
-# tests in integration_tests/ currently use a Full*/Standard*/Comprehensive*
-# GTest prefix, so all four tiers below run the same coverage until a suite
-# adopts one of those prefixes (matching miopen-provider's convention).
+# Comprehensive* and Full* are GTest instantiation prefixes (matching
+# miopen-provider's convention): the gfx942 dense attention knob suite's
+# per-kernel rows are Comprehensive/, and FlyDSL's every-object cases Full/.
 #
 # These categories apply to hip_kernel_provider_tests and
 # hip_kernel_provider_integration_tests. The external hipdnn_integration_tests
@@ -33,11 +32,12 @@
 # GTest naming conventions.
 test_categories:
   quick:
-    description: "Fast sanity checks (target: < 5 min) - excludes Full* parameterised expansions"
+    description: "Fast sanity checks (target: < 5 min) - excludes Comprehensive* and Full* parameterised expansions"
     test_patterns:
       - "*"
     exclude:
       - "*DISABLED*"
+      - "Comprehensive*"
       - "Full*"
     labels:
       - "quick"
@@ -45,11 +45,12 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation (cumulative: runs quick coverage) - excludes Full* parameterised expansions"
+    description: "Pre-checkin validation (cumulative: runs quick coverage) - excludes Comprehensive* and Full* parameterised expansions"
     test_patterns:
       - "*"
     exclude:
       - "*DISABLED*"
+      - "Comprehensive*"
       - "Full*"
     labels:
       - "standard"
@@ -57,7 +58,7 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Nightly comprehensive validation (cumulative: runs standard + quick coverage) - excludes Full* parameterised expansions"
+    description: "Nightly comprehensive validation (cumulative: runs standard + quick coverage, plus Comprehensive*) - excludes Full* parameterised expansions"
     test_patterns:
       - "*"
     exclude:
@@ -84,6 +85,7 @@ test_categories:
       - "*"
     exclude:
       - "*DISABLED*"
+      - "Comprehensive*"
       - "Full*"
     labels:
       - "ffm-quick"

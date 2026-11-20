@@ -48,6 +48,8 @@ cmake --build build --target hipdnn-standard-check
 
 `hipdnn-<category>-check` and `hipdnn-<category>-check-verbose` exist for each category in [`test_categories.yaml`](../test_categories.yaml): the tiers `quick`, `standard`, `comprehensive` and `full`, plus `ffm-quick`, `unit` and `integration`. They build and run the hipDNN core tests only; `hipdnn-check` runs all core tests. Provider and integration-tests targets are listed in [Building hipDNN: Superbuild Targets](./Building.md#superbuild-targets).
 
+`test_categories.yaml` labels whole CTest entries by name, so it cannot leave one gtest out of a binary. A target registered with `add_hipdnn_test(<target> <dir> GTEST_CATEGORIES)` also gets `<target>_<category>_suite` entries generated from [`test_categories_gtest.yaml`](../test_categories_gtest.yaml). Each runs the binary with that category's `--gtest_filter` and carries exactly the labels the file lists. Today only `hipdnn_backend_tests` opts in, and only for `ffm-quick`, where the file excludes tests the FFM simulator cannot pass. List such a target under `exclude_tests` for the same category in `test_categories.yaml`, so the plain entry does not carry the label and run the excluded tests. The `hipdnn-<category>-check` targets match their label exactly (`ctest -L '^<category>$'`), so `hipdnn-quick-check` does not also run the `ffm-quick` suite.
+
 **One provider.** Build the provider's preset (for example `miopen-provider`), then run the shared integration suite against it:
 
 ```bash
@@ -131,7 +133,7 @@ Labels on a PR change what CI runs. Required GitHub checks are configured outsid
 
 | Check | What it runs |
 |-------|--------------|
-| `hipdnn-superbuild-ci.yml` | Superbuild on Linux (gfx942 target) and Windows (gfx1151 target), then `ctest --test-dir build --output-on-failure --no-tests=error`, which produces no JUnit file. Triggers on PRs that touch `projects/hipdnn/**` or `dnn-providers/**`, and nightly. Skips the builds when every changed file is documentation (`*.md`, `*.rst`, `docs/**`); the skipped job counts as passing |
+| `hipdnn-superbuild-ci.yml` | Superbuild on Linux (gfx942 target) and Windows (gfx1151 target), then `ctest --test-dir build --output-on-failure --no-tests=error`, which produces no JUnit file. Triggers on PRs that touch `projects/hipdnn/**` or `dnn-providers/**`, and nightly. Skips the builds when every changed file is documentation (`*.md`, `*.rst`, `docs/**`); the skipped job counts as passing. The only lane that runs the build-tree-only uhd_gen tooling tests (`uhd_gen_tests`, `uhd_gen_dataset_tests`, `mine_shapes_tests`, `uhd_skill_scripts_tests`, `TestUhdGenArtifact`); it installs `tools/uhd_gen/requirements.txt` and configures with `-DHIPDNN_REQUIRE_UHD_GEN_TESTS=ON`, so a missing prerequisite fails the job instead of skipping |
 | `therock-multi-arch-ci.yml` | `standard` tier on Linux gfx94X and Windows gfx110X for the affected components |
 | `therock-multi-arch-ci-asan.yml` | ASAN build (host-ASAN with `ci:host-asan`), only with `ci:asan` or `ci:host-asan`; no tests |
 

@@ -1,0 +1,3 @@
+# Vendored bytes must stay as committed: a CRLF checkout (core.autocrlf) changes the sha256 that
+# sync.py --check compares. This file is not inside vendor/ because sync.py replaces that directory.
+vendor/** -text

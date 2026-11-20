@@ -130,10 +130,13 @@ _PARAMS = {
         ("LSE", "tensor"),
         ("seq_len", "i32"),
         ("seq_len_kv", "i32"),
-        ("CuSeqQ", "tensor"),
-        ("CuSeqKv", "tensor"),
+        # Upstream's cu_seqlens and page-table stride slots, which the dense objects
+        # read as a padded launch's per-batch lengths and its varlen flags
+        # (vendored-kernel modification 32).
+        ("SeqLenQ", "tensor"),
+        ("SeqLenKv", "tensor"),
         ("BlockTable", "tensor"),
-        ("block_table_stride", "i32"),
+        ("varlen_flags", "i32"),
         ("sm_scale", "f32"),
         ("num_heads_q", "i32"),
         ("num_heads_kv", "i32"),
@@ -166,6 +169,23 @@ _PARAMS = {
         ("stride_lse_b", "i32"),
         ("stride_lse_h", "i32"),
         ("stride_lse_n", "i32"),
+        # The bias's key stride and element type, read by a strided bias build only
+        # (vendored-kernel modification 31).
+        ("stride_bias_k", "i32"),
+        ("bias_f32", "i32"),
+        # Packed sequences' row offsets and the dropout arguments: the Philox seed and
+        # offset, the offset's by-value part (two words), the keep threshold and the
+        # scale (vendored-kernel modification 32).
+        ("RowOffQ", "tensor"),
+        ("RowOffKv", "tensor"),
+        ("DropoutSeed", "tensor"),
+        ("DropoutOffset", "tensor"),
+        ("dropout_offset2_lo", "i32"),
+        ("dropout_offset2_hi", "i32"),
+        ("idropout_p", "i32"),
+        ("dropout_scale", "f32"),
+        # V's own group size, Hq / Hv (vendored-kernel modification 42).
+        ("v_group", "i32"),
     ),
 }
 
@@ -188,6 +208,11 @@ _MERGE_PARAMS = (
     ("stride_lse_b", "i32"),
     ("stride_lse_h", "i32"),
     ("stride_lse_n", "i32"),
+    # A padded launch's per-batch query lengths, packed sequences' row offsets, and the
+    # varlen flags (vendored-kernel modification 32).
+    ("SeqLenQ", "tensor"),
+    ("RowOffQ", "tensor"),
+    ("varlen_flags", "i32"),
 )
 
 # Launch geometry the native dispatch handler reproduces (the launchers'
@@ -197,10 +222,11 @@ _GRID_RULE = {
     "dualwave": "heads_by_qblocks_by_batch",
     "generic": "batch_x_qtiles_x_heads",
 }
-# Threads per workgroup: the dual-wave kernel's is fixed at 512 (two waves of 64
-# per 32 query rows); the generic kernel runs block_m / 64 * 128 threads.
+# Threads per workgroup: the dual-wave kernel runs a wave of 64 per 32 query rows (512 on
+# its 256-row tile, 256 on head_dim 256's 128-row one); the generic kernel runs
+# block_m / 64 * 128 threads.
 _BLOCK_THREADS = {
-    "dualwave": lambda block_m: 512,
+    "dualwave": lambda block_m: block_m * 2,
     "generic": lambda block_m: block_m * 2,
 }
 
@@ -210,6 +236,18 @@ _BLOCK_THREADS = {
 # strides otherwise push them past; at 128 they cut registers but schedule the loop
 # measurably worse, so they apply only where they were measured to help.
 _GENERIC_LLVM_OPTIONS = {("gfx942", 64): {"amdgpu-use-amdgpu-trackers": True}}
+
+# The same trackers on gfx942's bf16 head_dim 128 non-causal 128-row objects without
+# a mask, bias, dropout or key alignment (the model shape's tile; a sink is fine), by
+# (arch, dtype, head_dim, block_m, causal, qk_mask, has_bias, has_dropout, kv_align).
+# The rounded bf16 P pack (vendored modification 46) flipped their register
+# allocation (AGPRs 30 -> 4, SGPRs 58 -> 106 with 2 spilled): 5-9% slower on every
+# measured shape; with the trackers they fit 256 registers and run 3% faster than
+# before the pack. The masked, 64- and 256-row and key-aligned siblings measured
+# slower with them, and keep the default.
+_GENERIC_TRACKER_OBJECTS = {
+    ("gfx942", "bf16", 128, 128, 0, 0, 0, 0, 0),
+}
 
 # The generic kernel's switch for its KV global prefetch (the `kv_gpfetch` knob).
 _KV_GPFETCH_ENV = "FLYDSL_FLASH_ATTN_FUNC_ENABLE_KV_GPFETCH"
@@ -235,16 +273,35 @@ _GENERIC_LDS_PADS = {
 
 def _lds_pads(instance: Instance, arch: str) -> dict:
     """The generic kernel's LDS padding for @p instance, or {} for upstream's."""
-    if instance.knobs["kernel"] != "generic":
+    # The f32 objects keep the padded tiles: their 256 splits O's columns (modification 35).
+    if instance.knobs["kernel"] != "generic" or instance.dtype == "f32":
+        return {}
+    # A tile that stages K in column chunks or V in column slices holds upstream's padded
+    # rows within the 64 KiB: it keeps them.
+    if instance.knobs.get("k_chunk") or int(instance.knobs.get("dv_split", 1)) > 1:
         return {}
     return dict(_GENERIC_LDS_PADS.get((arch, instance.knobs["head_dim"]), {}))
 
 
 def _llvm_options(instance: Instance, arch: str) -> dict:
     """The LLVM options this pack adds to the kernel's own for @p instance."""
-    if instance.knobs["kernel"] != "generic":
+    # Measured on the 16-bit objects only; f32's tiles were chosen without them.
+    if instance.knobs["kernel"] != "generic" or instance.dtype == "f32":
         return {}
-    return dict(_GENERIC_LLVM_OPTIONS.get((arch, instance.knobs["head_dim"]), {}))
+    knobs = instance.knobs
+    if (
+        arch,
+        instance.dtype,
+        knobs["head_dim"],
+        knobs["block_m"],
+        knobs["causal"],
+        knobs.get("qk_mask", 0),
+        knobs.get("has_bias", 0),
+        knobs.get("has_dropout", 0),
+        knobs.get("kv_align", 0),
+    ) in _GENERIC_TRACKER_OBJECTS:
+        return {"amdgpu-use-amdgpu-trackers": True}
+    return dict(_GENERIC_LLVM_OPTIONS.get((arch, knobs["head_dim"]), {}))
 
 
 def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
@@ -253,7 +310,9 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
 
     knobs = instance.knobs
     env.set_dump_dir(dump_dir)
-    dtype = {"bf16": torch.bfloat16, "f16": torch.float16}[instance.dtype]
+    dtype = {"bf16": torch.bfloat16, "f16": torch.float16, "f32": torch.float32}[
+        instance.dtype
+    ]
     heads, kv_heads, head_dim = _TRACE_HEADS, _TRACE_KV_HEADS, knobs["head_dim"]
     q = torch.empty(
         _TRACE_BATCH, _TRACE_SEQ, heads, head_dim, dtype=dtype, device="meta"
@@ -289,6 +348,14 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             # the offset-0 one (`any_diagonal` 0), which the matcher holds to that.
             cross_seqlen=bool(knobs["causal"]) and bool(knobs["any_diagonal"]),
             dualwave_swp_setprio=bool(knobs["setprio"]),
+            # 32 query rows a wave: head_dim 256's 128-row tile runs 4 (vendored-kernel
+            # modification 43).
+            **(
+                {"num_waves": knobs["block_m"] // 32} if knobs["block_m"] != 256 else {}
+            ),
+            **(
+                {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}
+            ),
         )
     else:
         from kernels.attention_cdna.flash_attn_generic import (  # noqa: PLC0415
@@ -323,6 +390,9 @@ def _build_one(instance: Instance, dump_dir: Path, arch: str) -> bytes:
             dv_split=int(knobs.get("dv_split", 1)),
             k_chunk=knobs.get("k_chunk") or None,
             has_sink=bool(knobs.get("has_sink", 0)),
+            bias_kstrided=bool(knobs.get("bias_kstrided", 0)),
+            has_dropout=bool(knobs.get("has_dropout", 0)),
+            v_mask=bool(knobs.get("v_mask", 0)),
             **_lds_pads(instance, arch),
             **(
                 {"waves_per_eu": knobs["waves_per_eu"]} if knobs["waves_per_eu"] else {}
@@ -369,8 +439,17 @@ _SPILL_ALLOWANCE: dict[tuple[str, str, int, int, int], int] = {
 }
 
 
+# The f32 objects' (vendored-kernel modification 35), keyed by (arch, head_dim, block_m,
+# causal): each was timed against the tile that does not spill.
+_F32_SPILL_ALLOWANCE: dict[tuple[str, int, int, int], int] = {}
+
+
 def _spill_allowance(instance: Instance, arch: str) -> int:
     knobs = instance.knobs
+    if instance.dtype == "f32":
+        return _F32_SPILL_ALLOWANCE.get(
+            (arch, knobs["head_dim"], knobs["block_m"], knobs["causal"]), 0
+        )
     return _SPILL_ALLOWANCE.get(
         (arch, knobs["kernel"], knobs["head_dim"], knobs["block_m"], knobs["has_bias"]),
         0,

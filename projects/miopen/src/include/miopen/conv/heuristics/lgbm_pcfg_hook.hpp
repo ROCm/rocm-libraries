@@ -9,6 +9,7 @@
 
 #include <miopen/config.hpp> // MIOPEN_INTERNALS_EXPORT
 
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -31,9 +32,14 @@ namespace pcfg {
 // `solver_db_id` on this problem + GPU, for the caller's first-valid walk. A ""
 // element denotes the solver default config. Returns an empty vector to abstain
 // (picker disabled, no model for the solver, or unknown bucket). Env-gated
-// internally (MIOPEN_DEBUG_LGBM_PCFG).
-MIOPEN_INTERNALS_EXPORT std::vector<std::string> MaybePickConfig(
-    const std::string& solver_db_id, const conv::ProblemDescription& problem, const Handle& handle);
+// internally (MIOPEN_DEBUG_LGBM_PCFG). `default_desc` returns the descriptor of the
+// solver's default config; it is called only for a (solver, arch, direction) whose picks must
+// beat the default config by a score margin (see DefaultMargin in lgbm_pcfg_pick.hpp).
+MIOPEN_INTERNALS_EXPORT std::vector<std::string>
+MaybePickConfig(const std::string& solver_db_id,
+                const conv::ProblemDescription& problem,
+                const Handle& handle,
+                const std::function<std::string()>& default_desc);
 
 } // namespace pcfg
 } // namespace lgbm

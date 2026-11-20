@@ -31,6 +31,15 @@ Tests:
   function: nnz_bad_arg
   precision: *single_double_precisions_complex_real
 
+- name: nnz_empty
+  category: quick
+  function: nnz
+  precision: *single_double_precisions_complex_real
+  M: [0, 8]
+  N: [0, 64]
+  denseld: [8]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+
 - name: nnz
   category: quick
   function: nnz

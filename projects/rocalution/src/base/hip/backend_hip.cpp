@@ -183,7 +183,9 @@ namespace rocalution
 
                         if(sparse_created)
                         {
+                            // COVERAGE_EXCL_NO_MPI_START
                             rocsparse_destroy_handle(*sparse_handle);
+                            // COVERAGE_EXCL_NO_MPI_STOP
                         }
 
                         if(blas_created)

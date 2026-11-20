@@ -191,6 +191,15 @@ segment is the selector revision with `/` as `-`.
    prediction. Grow the set with those quotas: `hipdnn_corpus_gen ... --regime-quotas
    <regime_quotas.json> --count 0` (the quotas alone), excluding every active set.
 
+## Slotted sweeps
+
+A slotted engine's measurements ([generate.md](generate.md), "Slotted engines") are
+`hipdnn_bench --sweep` CSVs. Columns: `kernel` (the composite id), `kernel.<slot>.<field>`
+per slot knob and `slot_reference` (the slots whose training rows a row is). Convert one as
+in step 4's `--csv` row; `ws.*` columns are dropped. One dataset trains every slot via
+`--slot`; the commands and refusals are in the
+uhd_gen README ("Slotted engines").
+
 ## Published engines
 
 An engine whose measurements come from another source only converts and trains: no shape

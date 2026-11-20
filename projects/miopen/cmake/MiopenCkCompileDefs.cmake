@@ -22,12 +22,6 @@ function(_miopen_arch_matches arch_value target_list out_var)
     set(${out_var} FALSE PARENT_SCOPE)
 endfunction()
 
-# Returns TRUE in out_var if GPU_TARGETS matches any entry in the given target list.
-function(_miopen_gpu_targets_match target_list out_var)
-    _miopen_arch_matches("${GPU_TARGETS}" ${target_list} _matched)
-    set(${out_var} ${_matched} PARENT_SCOPE)
-endfunction()
-
 # Apply CK compile definitions to a target so its CK macro set matches how CK
 # itself was built (see composable_kernel/CMakeLists.txt).
 #
@@ -63,15 +57,3 @@ function(miopen_apply_ck_compile_definitions target)
         target_compile_definitions(${target} PRIVATE CK_USE_OCP_FP8)
     endif()
 endfunction()
-
-# composable_kernel OCP FP8 mode requires IEEE FP8 exponent bias; keep MIOpen's
-# FP8 semantics aligned by defaulting MIOPEN_FP8_IEEE_EXPONENT_BIAS to ON when
-# needed. This file is included before src/CMakeLists.txt declares option(), so
-# seeding the cache here (without FORCE) both takes effect and still lets
-# advanced users override via -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=...
-if(MIOPEN_USE_COMPOSABLEKERNEL)
-    _miopen_gpu_targets_match(MIOPEN_CK_USE_OCP_FP8_TARGETS _miopen_ck_use_ocp_fp8)
-    if(_miopen_ck_use_ocp_fp8)
-        set(MIOPEN_FP8_IEEE_EXPONENT_BIAS ON CACHE BOOL "Sets the FP8 exponent bias to IEEE")
-    endif()
-endif()

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -101,6 +101,7 @@ namespace rocalution
 
         if(this->rec_ == true)
         {
+            this->residual_history_.clear();
             this->residual_history_.push_back(res);
         }
 
@@ -257,6 +258,8 @@ namespace rocalution
     {
         assert(this->init_res_ == true);
 
+        this->current_res_ = res;
+
         if((std::abs(res) == std::numeric_limits<double>::infinity()) || // infinity
            (res != res))
         { // not a number (NaN)
@@ -265,27 +268,30 @@ namespace rocalution
             return true;
         }
 
-        if(std::abs(res) <= this->absolute_tol_)
+        if(this->iteration_ >= this->minimum_iter_)
         {
-            this->reached_ = 1;
-            return true;
-        }
+            if(std::abs(res) <= this->absolute_tol_)
+            {
+                this->reached_ = 1;
+                return true;
+            }
 
-        if(res / this->initial_residual_ <= this->relative_tol_)
-        {
-            this->reached_ = 2;
-            return true;
+            if(res / this->initial_residual_ <= this->relative_tol_)
+            {
+                this->reached_ = 2;
+                return true;
+            }
+
+            if(this->iteration_ >= this->maximum_iter_)
+            {
+                this->reached_ = 4;
+                return true;
+            }
         }
 
         if(res / this->initial_residual_ >= this->divergence_tol_)
         {
             this->reached_ = 3;
-            return true;
-        }
-
-        if(this->iteration_ >= this->maximum_iter_)
-        {
-            this->reached_ = 4;
             return true;
         }
 
@@ -336,7 +342,7 @@ namespace rocalution
 
         file.setf(std::ios::scientific);
 
-        for(int n = 0; n < this->iteration_; n++)
+        for(size_t n = 0; n < this->residual_history_.size(); n++)
         {
             file << this->residual_history_[n] << std::endl;
         }
@@ -351,20 +357,18 @@ namespace rocalution
     {
         if(this->minimum_iter_ > 0)
         {
-            LOG_INFO("IterationControl criteria: "
-                     << "abs tol=" << this->absolute_tol_ << "; "
-                     << "rel tol=" << this->relative_tol_ << "; "
-                     << "div tol=" << this->divergence_tol_ << "; "
-                     << "min iter=" << this->minimum_iter_ << "; "
-                     << "max iter=" << this->maximum_iter_);
+            LOG_INFO("IterationControl criteria: " << "abs tol=" << this->absolute_tol_ << "; "
+                                                   << "rel tol=" << this->relative_tol_ << "; "
+                                                   << "div tol=" << this->divergence_tol_ << "; "
+                                                   << "min iter=" << this->minimum_iter_ << "; "
+                                                   << "max iter=" << this->maximum_iter_);
         }
         else
         {
-            LOG_INFO("IterationControl criteria: "
-                     << "abs tol=" << this->absolute_tol_ << "; "
-                     << "rel tol=" << this->relative_tol_ << "; "
-                     << "div tol=" << this->divergence_tol_ << "; "
-                     << "max iter=" << this->maximum_iter_);
+            LOG_INFO("IterationControl criteria: " << "abs tol=" << this->absolute_tol_ << "; "
+                                                   << "rel tol=" << this->relative_tol_ << "; "
+                                                   << "div tol=" << this->divergence_tol_ << "; "
+                                                   << "max iter=" << this->maximum_iter_);
         }
     }
 

@@ -42,10 +42,12 @@
 #include "rocke/instance_gfx950_attention_tiled_2d.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
+#include "rocke/arena.h" /* rocke_arena_strdup */
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* binary_search_seq_idx */
 #include "rocke/helper_helper_rocke.instances.gfx942.attention_tiled_2d.h" /* rocke__mfma_32x32_c_* */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join  */
+#include "rocke/helper_rocke.instances.common._fmha_common.h" /* rocke_attention_check_head_counts */
 
 #include <math.h>
 #include <stdio.h>
@@ -369,18 +371,14 @@ bool rocke_gfx950_attention_tiled_2d_supports(
 /* ===================================================================== *
  *  rocke_gfx950_attn2d_build_ctx_init -- the prologue (Python 711-1151)
  *
- *  INTEGRATION NOTE. The header-declared external definition of this symbol
- *  lives in the dedicated prologue TU (ctx_prologue.c). This driver TU carries
- *  its own self-consistent copy (it uses the file-local rocke_g950_* helpers and
- *  the gfx950-specific "leave ctx->target / ctx->qk_atom NULL" derivation that
- *  the phase functions this driver calls expect). To avoid a duplicate external
- *  symbol at link time, this copy is file-local (static); only this driver calls
- *  it. The cross-TU external symbol is the prologue TU's definition.
+ *  File-local: only this driver calls it. It uses the file-local rocke_g950_*
+ *  helpers and the gfx950-specific "leave ctx->target / ctx->qk_atom NULL"
+ *  derivation that the phase functions this driver calls expect.
  * ===================================================================== */
-static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx,
-                                            rocke_ir_builder_t* b,
-                                            const rocke_attention_tiled_2d_spec_t* spec,
-                                            const char* arch)
+static bool rocke_gfx950_attn2d_build_ctx_init(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                                               rocke_ir_builder_t* b,
+                                               const rocke_attention_tiled_2d_spec_t* spec,
+                                               const char* arch)
 {
     if(ctx == NULL || b == NULL || spec == NULL)
         return false;
@@ -448,6 +446,12 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     if(spec->use_fast_paged_kv_desc && !rocke_g950_streq(spec->dtype, "bf16"))
     {
         rocke_g950_fail(b, ROCKE_ERR_VALUE, "use_fast_paged_kv_desc is restricted to dtype='bf16'");
+    }
+    /* lse_layout (Python __post_init__): a layout without emit_lse would be a
+     * second name for the LSE-off kernel. */
+    if(spec->lse_head_major && !spec->emit_lse)
+    {
+        rocke_g950_fail(b, ROCKE_ERR_VALUE, "lse_layout='head_major' requires emit_lse");
     }
 
     /* ---- V-double-buffer / deep-ring / staggered-wait / q-reread.
@@ -567,7 +571,6 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     const int BLOCK_Q = rocke_attention_tiled_2d_spec_block_q(spec);
     const int NQK = rocke_attention_tiled_2d_spec_num_queries_per_kv(spec);
     const int NUM_KV = spec->num_kv_heads;
-    const int NUM_QH = spec->num_query_heads;
     const int SLIDING_WINDOW = spec->sliding_window;
 
     ctx->HD = HD;
@@ -579,7 +582,6 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     ctx->VALID_ROWS = BLOCK_Q * NQK;
     ctx->NQK = NQK;
     ctx->NUM_KV = NUM_KV;
-    ctx->NUM_QH = NUM_QH;
     ctx->SLIDING_WINDOW = SLIDING_WINDOW;
     ctx->USE_SOFTCAP = spec->has_softcap;
     ctx->USE_SINKS = spec->use_sinks;
@@ -743,6 +745,9 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
         ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
         ctx->bt_stride_p = rocke_b_param(b, "block_table_stride", rocke_i32(), NULL);
         ctx->qq_bias_stride0_p = rocke_b_param(b, "qq_bias_stride_0", rocke_i32(), NULL);
+        ctx->num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
+        ctx->num_kv_p = rocke_b_param(b, "num_kv_heads", rocke_i32(), NULL);
+        ctx->sliding_window_p = rocke_b_param(b, "sliding_window", rocke_i32(), NULL);
         /* Trailing LSE output (Python: after the optional additive-bias params,
          * which this twin does not declare). Off -> no param, ABI unchanged. */
         if(spec->emit_lse)
@@ -788,14 +793,11 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
     }
 
     /* ---- seq lookup + Q-block geometry (Py906-925) ---- */
-    ctx->seq_idx
-        = rocke_binary_search_seq_idx(b,
-                                      ctx->cu_q,
-                                      ctx->q_block_global_idx,
-                                      ctx->num_seqs_p,
-                                      BLOCK_Q,
-                                      rocke_attention_tiled_2d_spec_binary_search_iters(spec),
-                                      false);
+    {
+        rocke_value_t* trip = rocke_binary_search_seq_idx_trip_count(b, ctx->num_seqs_p);
+        ctx->seq_idx = rocke_binary_search_seq_idx_dyn(
+            b, ctx->cu_q, ctx->q_block_global_idx, ctx->num_seqs_p, BLOCK_Q, trip, false);
+    }
     ctx->cu_q_start = rocke_b_global_load_i32(b, ctx->cu_q, ctx->seq_idx, 0);
     ctx->cu_q_stop = rocke_b_global_load_i32(
         b, ctx->cu_q, rocke_b_add(b, ctx->seq_idx, rocke_b_const_i32(b, 1)), 0);
@@ -873,7 +875,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
      * The transposed-32x32 path keeps P entirely in registers (softmax publish
      * is a no-op, PV reads PT32_n from registers), so P_lds was dead LDS there.
      * Drop the allocation to free the occupancy-limiting LDS at HD=128.
-     * Mirrors attention_tiled_2d.py P_LDS_DEAD and the ctx_prologue twin. */
+     * Mirrors attention_tiled_2d.py P_LDS_DEAD. */
     const bool P_LDS_DEAD = USE_MFMA_32X32 && ctx->TRANSPOSED_QK_32X32;
     if(!ctx->REGISTER_PV && !P_LDS_DEAD)
     {
@@ -939,8 +941,7 @@ static bool rocke_g950_build_ctx_init_local(rocke_gfx950_attn2d_build_ctx_t* ctx
      * here so the SSA id matches Python; the PV epilogue reuses this value. */
     ctx->pv_fp8_scale_v
         = FP8_MFMA_PV ? rocke_b_fdiv(b, ctx->v_scale_p, rocke_b_const_f32(b, 240.0)) : NULL;
-    ctx->sw_const_v = rocke_b_const_i32(b, SLIDING_WINDOW); /* sw_const (1150) */
-    ctx->c0 = ctx->sw_const_v;
+    ctx->sw_const_v = ctx->sliding_window_p; /* sw_const = rt["sliding_window"] */
 
     /* ---- acc geometry the epilogue aliases (Py1381-1382) ---- */
     ctx->ACC_N_TILES = USE_MFMA_32X32 ? (HD / 32) : PV_N_TILES;
@@ -985,7 +986,7 @@ rocke_kernel_def_t* rocke_gfx950_build_unified_attention_2d_tiled(
          * smem_alloc, PV TransposeLdsReader bind, SSA constants. On any reject it
          * sets b's sticky error and returns false. */
         memset(&ctx, 0, sizeof(ctx));
-        if(!rocke_g950_build_ctx_init_local(&ctx, b, spec, arch))
+        if(!rocke_gfx950_attn2d_build_ctx_init(&ctx, b, spec, arch))
             return NULL;
 
         /* The emission order below mirrors the single linear Python emitter exactly
@@ -1050,7 +1051,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
                                                     char* out,
                                                     size_t out_cap)
 {
-    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], kv_buf[64];
+    char d_buf[32], b_buf[32], t_buf[32], hkv_buf[64], fhkv_buf[64], kv_buf[64];
     char sw_buf[32], w_buf[32], mw_buf[32], schedb_buf[32], smxil_buf[32];
     int nqh, nkv;
 
@@ -1059,6 +1060,9 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
 
     nqh = s->num_query_heads;
     nkv = s->num_kv_heads;
+    /* The name carries the GQA ratio; reject a spec it cannot be formed for. */
+    if(nkv <= 0)
+        return ROCKE_ERR_VALUE;
 
     snprintf(d_buf, sizeof(d_buf), "d%d", s->head_size);
     snprintf(b_buf, sizeof(b_buf), "b%d", s->block_size);
@@ -1066,13 +1070,20 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
         snprintf(t_buf, sizeof(t_buf), "t%d", rocke_attention_tiled_2d_spec_tile_size_eff(s));
     else
         t_buf[0] = '\0';
-    snprintf(hkv_buf, sizeof(hkv_buf), "h%dkv%d", nqh, nkv);
+    /* Head counts are kernargs; only the GQA ratio is baked. */
+    snprintf(hkv_buf, sizeof(hkv_buf), "g%d", nqh / nkv);
+    /* Except on the fast paged-KV descriptor path, whose shifts bake them. */
+    if(s->use_fast_paged_kv_desc)
+        snprintf(fhkv_buf, sizeof(fhkv_buf), "h%dkv%d", nqh, nkv);
+    else
+        fhkv_buf[0] = '\0';
     if(s->kv_storage_dtype)
         snprintf(kv_buf, sizeof(kv_buf), "kv%s", s->kv_storage_dtype);
     else
         kv_buf[0] = '\0';
+    /* The window size is a kernarg; only whether the body masks one is baked. */
     if(s->sliding_window > 0)
-        snprintf(sw_buf, sizeof(sw_buf), "sw%d", s->sliding_window);
+        snprintf(sw_buf, sizeof(sw_buf), "sw");
     else
         sw_buf[0] = '\0';
     if(s->num_warps != 1)
@@ -1108,8 +1119,11 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             b_buf,
             t_buf,
             hkv_buf,
+            fhkv_buf,
             s->dtype ? s->dtype : "",
             kv_buf,
+            /* i64 K/V addressing changes the loaders, so it is a distinct kernel. */
+            s->use_i64_kv_addr ? "i64" : "",
             s->use_sinks ? "sinks" : "",
             sw_buf,
             s->has_softcap ? "softcap" : "",
@@ -1140,7 +1154,7 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
             s->use_fp8_mfma_pv ? "fp8pv" : "",
             s->use_register_pv ? "regpv" : "",
             s->use_qblock_reverse ? "qrev" : "",
-            s->emit_lse ? "lse" : "",
+            s->emit_lse ? (s->lse_head_major ? "lsehm" : "lse") : "",
         };
         size_t num_parts = sizeof(parts) / sizeof(parts[0]);
         return rocke_kernel_name_join(
@@ -1154,14 +1168,25 @@ static rocke_status_t rocke_g950_attn2d_kernel_name(const rocke_attention_tiled_
 rocke_kernel_def_t* rocke_gfx950_build_unified_attention_2d_tiled_new(
     rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch)
 {
-    char kname[1024];
-    if(b == NULL || spec == NULL)
-        return NULL;
-    if(rocke_g950_attn2d_kernel_name(spec, kname, sizeof(kname)) != ROCKE_OK)
-        return NULL;
-    if(rocke_ir_builder_init(b, kname) != ROCKE_OK)
-        return NULL;
-    return rocke_gfx950_build_unified_attention_2d_tiled(b, spec, arch);
+    return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
+        char kname[1024];
+        char why[160];
+        if(b == NULL || spec == NULL)
+            return NULL;
+        /* Init before anything can fail: the lower convenience reads and frees
+         * `b` whatever this returns. */
+        if(rocke_ir_builder_init(b, "") != ROCKE_OK)
+            return NULL;
+        if(!rocke_attention_check_head_counts(
+               spec->num_query_heads, spec->num_kv_heads, why, sizeof(why)))
+            ckc::raise_status(ROCKE_ERR_VALUE, why);
+        if(rocke_g950_attn2d_kernel_name(spec, kname, sizeof(kname)) != ROCKE_OK)
+            ckc::raise_status(ROCKE_ERR_VALUE, "tiled 2D kernel_name encode failed");
+        b->kernel->name = rocke_arena_strdup(&b->arena, kname);
+        if(b->kernel->name == NULL)
+            ckc::raise_status(ROCKE_ERR_OOM, "tiled 2D kernel name OOM");
+        return rocke_gfx950_build_unified_attention_2d_tiled(b, spec, arch);
+    });
 }
 
 /* ===================================================================== *

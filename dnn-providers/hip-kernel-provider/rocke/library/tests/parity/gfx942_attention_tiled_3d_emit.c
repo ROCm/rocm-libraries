@@ -7,11 +7,15 @@
  * rocke_unified_attention_3d_tiled_spec_t identically to the Python emitter
  * gfx942_attention_tiled_3d_emit.py, and emits BOTH kernels, segment first:
  *   1. the segment kernel via
- *      rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm, then
+ *      rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm (paged K/V)
+ *      or rocke_build_unified_attention_3d_tiled_strided_gfx942 (configs
+ *      23-32: strided K/V, the Python kv_layout="strided"), then
  *   2. the reduce kernel via
  *      rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm, with a
  *      rocke_unified_attention_reduce_tiled_spec_t derived from the same config
- *      (head_size / num_query_heads / num_kv_heads / dtype / num_segments)
+ *      (head_size / num_query_heads / num_kv_heads / dtype / num_segments /
+ *      waves_per_eu, as the Python reduce_spec_for; configs 20-21 also
+ *      set emit_lse, as _REDUCE_LSE does)
  * (arch gfx942, flavor AUTO), printing the .ll to stdout for byte comparison.
  */
 #include <stdio.h>
@@ -24,10 +28,41 @@
 #include "rocke/lower_llvm.h"
 #include "rocke/verify.h"
 
-/* Fill `s` for config index `idx`. Returns 0 on success, -1 on unknown idx. */
-static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
+/* A strided (non-paged) decode spec as the strided decode candidate selects it:
+ * one CTA per sequence, streamed K/V, the runtime's auto tile for the block
+ * (tile <= 0: no override). Mirrors the Python _strided_decode. */
+static void strided_decode(rocke_unified_attention_3d_tiled_spec_t* s,
+                           int head_size,
+                           int block_size,
+                           int tile,
+                           const char* dtype,
+                           int num_segments,
+                           int num_query_heads,
+                           int num_kv_heads)
+{
+    s->head_size = head_size;
+    s->block_size = block_size;
+    s->num_query_heads = num_query_heads;
+    s->num_kv_heads = num_kv_heads;
+    s->dtype = dtype;
+    s->num_segments = num_segments;
+    s->use_sinks = false;
+    s->sliding_window = 0;
+    s->has_softcap = false;
+    s->kv_storage_dtype = NULL;
+    s->num_seqs = 4;
+    s->has_tile_size_override = tile > 0;
+    s->tile_size_override = tile > 0 ? tile : 0;
+    s->use_decode_grid = true;
+    s->kv_cache_policy = "stream";
+}
+
+/* Fill `s` for config index `idx` and set `*strided` when its K/V is strided
+ * (non-paged). Returns 0 on success, -1 on unknown idx. */
+static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* strided)
 {
     *s = rocke_unified_attention_3d_tiled_spec_default();
+    *strided = false;
     switch(idx)
     {
     case 0:
@@ -371,15 +406,52 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s)
         s->has_waves_per_eu = true;
         s->waves_per_eu = 2;
         break;
+    /* 23-31: representative strided decode specs spanning the catalog's D x block
+     * axes (D64/128/256 x block 16/32/64); 32 is 27 with waves_per_eu=2. */
+    case 23:
+        strided_decode(s, 64, 16, 0, "fp16", 64, 32, 8);
+        break;
+    case 24:
+        strided_decode(s, 64, 32, 0, "bf16", 16, 32, 8);
+        break;
+    case 25:
+        strided_decode(s, 64, 64, 0, "fp16", 8, 32, 8);
+        break;
+    case 26:
+        strided_decode(s, 128, 16, 0, "bf16", 60, 16, 16);
+        break;
+    case 27:
+        strided_decode(s, 128, 32, 16, "fp16", 16, 32, 8);
+        break;
+    case 28:
+        strided_decode(s, 128, 64, 32, "bf16", 2, 32, 8);
+        break;
+    case 29:
+        strided_decode(s, 256, 16, 0, "fp16", 22, 32, 8);
+        break;
+    case 30:
+        strided_decode(s, 256, 32, 16, "bf16", 64, 64, 4);
+        break;
+    case 31:
+        strided_decode(s, 256, 64, 32, "fp16", 8, 32, 8);
+        break;
+    case 32:
+        strided_decode(s, 128, 32, 16, "fp16", 16, 32, 8);
+        s->has_waves_per_eu = true;
+        s->waves_per_eu = 2;
+        break;
     default:
         return -1;
     }
+    if(idx >= 23)
+        *strided = true;
     return 0;
 }
 
-/* Derive the reduce spec from the segment spec, exactly as the Python emitter
- * (head_size / num_query_heads / num_kv_heads / dtype / num_segments /
- * waves_per_eu; configs 20-21 also set emit_lse, as _REDUCE_LSE does). */
+/* Derive the reduce spec from the segment spec, exactly as the Python
+ * reduce_spec_for (head_size / num_query_heads / num_kv_heads / dtype /
+ * num_segments / waves_per_eu); configs 20-21 also set emit_lse, as
+ * _REDUCE_LSE does. */
 static void make_reduce_spec(int idx,
                              const rocke_unified_attention_3d_tiled_spec_t* s,
                              rocke_unified_attention_reduce_tiled_spec_t* r)
@@ -393,6 +465,33 @@ static void make_reduce_spec(int idx,
     r->has_waves_per_eu = s->has_waves_per_eu;
     r->waves_per_eu = s->waves_per_eu;
     r->emit_lse = (idx == 20 || idx == 21);
+}
+
+/* Build the segment kernel into `b` (initialised here, named by the spec):
+ * the strided entry for strided K/V, the paged one otherwise. Returns the
+ * kernel, or NULL after printing the builder error (b is then freed). */
+static rocke_kernel_def_t* build_segment(rocke_ir_builder_t* b,
+                                         const rocke_unified_attention_3d_tiled_spec_t* s,
+                                         bool strided)
+{
+    char kname[256];
+    kname[0] = 0;
+    rocke_unified_attention_3d_tiled_spec_kernel_name(s, kname, sizeof(kname));
+    if(rocke_ir_builder_init(b, kname) != ROCKE_OK)
+    {
+        fprintf(stderr, "builder init failed\n");
+        return NULL;
+    }
+    rocke_kernel_def_t* k
+        = strided ? rocke_build_unified_attention_3d_tiled_strided_gfx942(b, s, "gfx942")
+                  : rocke_build_unified_attention_3d_tiled_gfx942(b, s, "gfx942");
+    if(!k || !rocke_ir_builder_ok(b))
+    {
+        fprintf(stderr, "segment build failed: err=%s\n", rocke_ir_builder_error(b));
+        rocke_ir_builder_free(b);
+        return NULL;
+    }
+    return k;
 }
 
 /* Emit the reduce kernel in `mode` (ll / ir / verify) after the segment.
@@ -472,7 +571,8 @@ int main(int argc, char** argv)
     const char* mode = (argc > 2) ? argv[2] : "ll";
 
     rocke_unified_attention_3d_tiled_spec_t s;
-    if(make_spec(idx, &s) != 0)
+    bool strided = false;
+    if(make_spec(idx, &s, &strided) != 0)
     {
         fprintf(stderr, "unknown config index %d\n", idx);
         return 1;
@@ -480,7 +580,7 @@ int main(int argc, char** argv)
     rocke_unified_attention_reduce_tiled_spec_t r;
     make_reduce_spec(idx, &s, &r);
 
-    if(strcmp(mode, "ll") == 0)
+    if(strcmp(mode, "ll") == 0 && !strided)
     {
         char* llvm_text = NULL;
         char err[ROCKE_ERR_MSG_CAP];
@@ -495,29 +595,21 @@ int main(int argc, char** argv)
         fputs(llvm_text, stdout);
         free(llvm_text);
     }
-    else if(strcmp(mode, "ir") == 0)
+    else if(strcmp(mode, "ll") == 0 || strcmp(mode, "ir") == 0)
     {
-        char kname[256];
-        kname[0] = 0;
-        rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof(kname));
         rocke_ir_builder_t b;
-        if(rocke_ir_builder_init(&b, kname) != ROCKE_OK)
-        {
-            fprintf(stderr, "builder init failed\n");
-            return 1;
-        }
-        rocke_kernel_def_t* seg_k = rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, "gfx942");
+        rocke_kernel_def_t* seg_k = build_segment(&b, &s, strided);
         if(!seg_k)
-        {
-            fprintf(stderr, "segment build failed: err=%s\n", rocke_ir_builder_error(&b));
-            rocke_ir_builder_free(&b);
             return 1;
-        }
         char* t = NULL;
-        rocke_status_t st = rocke_ir_serialize(seg_k, &t);
+        rocke_status_t st
+            = strcmp(mode, "ir") == 0
+                  ? rocke_ir_serialize(seg_k, &t)
+                  : rocke_lower_kernel_to_llvm(seg_k, ROCKE_LLVM_FLAVOR_AUTO, "gfx942", &t);
         if(st != ROCKE_OK || !t)
         {
-            fprintf(stderr, "serialize failed: status=%d\n", (int)st);
+            fprintf(stderr, "segment %s failed: status=%d\n", mode, (int)st);
+            free(t);
             rocke_ir_builder_free(&b);
             return 1;
         }
@@ -527,22 +619,10 @@ int main(int argc, char** argv)
     }
     else if(strcmp(mode, "verify") == 0)
     {
-        char kname[256];
-        kname[0] = 0;
-        rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof(kname));
         rocke_ir_builder_t b;
-        if(rocke_ir_builder_init(&b, kname) != ROCKE_OK)
-        {
-            fprintf(stderr, "builder init failed\n");
-            return 1;
-        }
-        rocke_kernel_def_t* seg_k = rocke_build_unified_attention_3d_tiled_gfx942(&b, &s, "gfx942");
+        rocke_kernel_def_t* seg_k = build_segment(&b, &s, strided);
         if(!seg_k)
-        {
-            fprintf(stderr, "segment build failed: err=%s\n", rocke_ir_builder_error(&b));
-            rocke_ir_builder_free(&b);
             return 1;
-        }
         rocke_diag_t* d = NULL;
         size_t n = 0;
         rocke_verify(seg_k, &d, &n);

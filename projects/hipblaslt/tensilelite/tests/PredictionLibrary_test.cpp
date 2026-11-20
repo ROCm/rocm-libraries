@@ -38,9 +38,9 @@
 #include <string>
 #include <vector>
 
+#include <Tensile/AMDGPUPredicates.hpp>
 #include <Tensile/ContractionLibrary.hpp>
 #include <Tensile/ContractionSolution.hpp>
-#include <Tensile/hip/HipHardware.hpp>
 #include <Tensile/MasterSolutionLibrary.hpp>
 
 #if defined(TENSILE_MSGPACK)
@@ -141,6 +141,73 @@ TEST(PredictionLibraryTest, CopiesClusterDimIntoOrigamiConfig)
 
     expectClusterDim(lib.origami_config_list[0], solution->sizeMapping.clusterDim);
     EXPECT_EQ(lib.origami_config_list[0].cluster_dim, (origami::dim3_t{2, 4, 1}));
+}
+
+TEST(PredictionLibraryTest, DeviceScalarAlphaFiltersUnadvertisedSolutions)
+{
+    // Exercise ranking without querying a physical GPU.
+    hip::HipAMDGPU hardware;
+    hardware.processor = AMDGPU::Processor::gfx950;
+    hardware.computeUnitCount = 256;
+    hardware.deviceName = "device-alpha-selection-test";
+    hardware.analyticalHardware = std::make_shared<origami::hardware_t>(
+        origami::hardware_t::architecture_t::gfx950,
+        256, 163840, 262144, 8, 1.0, 1.0, 1.0, 4000000, 1.2, 1,
+        std::make_tuple(0.0, 0.008, 0.0));
+
+    auto legacy = makeMappedSolution(0);
+    auto scalar = makeMappedSolution(1);
+    legacy->problemType.useScaleAlphaVec = 1;
+    scalar->problemType.useScaleAlphaVec = 5;
+    SolutionMap<ContractionSolution> solutions{{0, legacy}, {1, scalar}};
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({0, 1}, solutions, lib);
+    auto problem = ContractionProblemGemm::GEMM(false, false, 256, 256, 64,
+                                               256, 64, 256, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    problem.setComputeInputTypeA(rocisa::DataType::Float);
+    problem.setComputeInputTypeB(rocisa::DataType::Float);
+    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+
+    problem.setParams().setDeviceScalarAlpha(true);
+    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), scalar);
+    scalar->problemType.useScaleAlphaVec = 0;
+    EXPECT_TRUE(lib.findTopSolutions(problem, hardware, 2).empty());
+}
+
+TEST(PredictionLibraryTest, MlpDeviceScalarAlphaFiltersUnadvertisedSolutions)
+{
+    const AMDGPU hardware(AMDGPU::Processor::gfx900, 64, "selection test");
+    auto legacy = makeMappedSolution(0);
+    auto scalar = makeMappedSolution(1);
+    legacy->libraryLogicIndex = 0;
+    scalar->libraryLogicIndex = 1;
+    legacy->problemType.useScaleAlphaVec = 1;
+    scalar->problemType.useScaleAlphaVec = 5;
+    MLPClassificationLibrary<ContractionProblemGemm> lib;
+    lib.solutionmap = {{0, legacy}, {1, scalar}};
+    lib.probFeatures = {std::make_shared<MLFeatures::FreeSizeA>(),
+                        std::make_shared<MLFeatures::FreeSizeB>(),
+                        std::make_shared<MLFeatures::BatchSize>(),
+                        std::make_shared<MLFeatures::BoundSize>()};
+    lib.model = std::make_shared<MLPClassification::MLPNet>();
+    lib.model->scaler.mean.assign(12, 0.0f);
+    lib.model->scaler.scale.assign(12, 1.0f);
+    // Rank the unsupported solution first, then fall through to the capable one.
+    lib.model->dense = MLPClassification::DenseLayer(std::vector<float>(24, 0.0f), {2.0f, 1.0f});
+    ASSERT_TRUE(lib.model->valid());
+    auto problem = ContractionProblemGemm::GEMM(false, false, 4, 4, 4, 4, 4, 4, 1.0, false, 1);
+    problem.setUseScaleAlphaVec(1);
+    ASSERT_EQ(lib.findTopSolutions(problem, hardware, 2).size(), 2u);
+
+    problem.setParams().setDeviceScalarAlpha(true);
+    auto selected = lib.findTopSolutions(problem, hardware, 2);
+    ASSERT_EQ(selected.size(), 1u);
+    EXPECT_EQ(selected.front(), scalar);
+    scalar->problemType.useScaleAlphaVec = 0;
+    EXPECT_TRUE(lib.findTopSolutions(problem, hardware, 2).empty());
 }
 
 TEST(PredictionLibraryTest, DefaultClusterDimWhenUnset)
@@ -263,6 +330,41 @@ TEST(PredictionLibraryTest, UnmappedTemporalHintsStayCached)
     }
 }
 
+// gfx1250 kernel knobs the latency model reads: tensor DMA, GL2 prefetch, local-read prefetch,
+// the solution's own workgroup mapping, cluster sharing, and the store cache hint.
+TEST(PredictionLibraryTest, Gfx1250KnobsReachOrigamiConfig)
+{
+    auto solution                                  = makeMappedSolution(42);
+    solution->sizeMapping.TDMInst                  = 3;
+    solution->sizeMapping.PrefetchGL2              = 2;
+    solution->sizeMapping.PrefetchLocalRead        = 1;
+    solution->sizeMapping.HalfPLR                  = 3;
+    solution->sizeMapping.Multicast                = 1;
+    solution->sizeMapping.workGroupMappingXCC      = 8;
+    solution->sizeMapping.workGroupMappingXCCGroup = -1;
+    solution->sizeMapping.hasTemporalHint          = true;
+    solution->sizeMapping.temporalHintD            = 1;
+    solution->sizeMapping.NonTemporalD             = 2;
+
+    SolutionMap<ContractionSolution> solutions;
+    solutions.emplace(42, solution);
+
+    ContractionProblemPredictionLibrary lib;
+    loadPredictionLibrary({42}, solutions, lib);
+    ASSERT_EQ(lib.origami_config_list.size(), 1u);
+    auto const& config = lib.origami_config_list[0];
+    auto const& tp     = config.tensile();
+    EXPECT_EQ(tp.tdm_inst, 3);
+    EXPECT_EQ(tp.prefetch_gl2, 2);
+    EXPECT_EQ(tp.prefetch_local_read, 1);
+    EXPECT_EQ(tp.half_plr, 3);
+    EXPECT_TRUE(tp.multicast);
+    EXPECT_EQ(tp.workgroup_mapping_xcc, 8);
+    EXPECT_EQ(tp.workgroup_mapping_xcc_group, -1);
+    // On TemporalHint archs NonTemporalD is a scope selector; TemporalHintD carries the hint.
+    EXPECT_EQ(config.cache_hints_d, 4);
+}
+
 // The per-tile flags are written once while the library is loaded.
 // An NT-B solution at 128x256 must not mark the 256x256 solution.
 TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
@@ -287,36 +389,43 @@ TEST(PredictionLibraryTest, NonTemporalAvailabilityIsMemoizedPerMacroTile)
     EXPECT_FALSE(lib.origami_config_list[1].non_temporal_b_available);
 }
 
-TEST(PredictionLibraryTest, SpatialPaddingChangesRankingButNotExplicitIndexLookup)
+namespace
 {
-    auto clustered = makeMappedSolution(42, TensileLite::dim3(8, 1, 1));
-    auto plain = makeMappedSolution(7);
-    for(auto const& solution : {clustered, plain})
+    std::shared_ptr<ContractionSolution> makeArchSolution(int index, AMDGPU::Processor processor)
     {
-        solution->sizeMapping.tileProcessingStrategy = TileProcessingStrategy::StreamK;
-        solution->sizeMapping.workAssignment = WorkAssignment::StaticGrid;
-        solution->hardwarePredicate = std::make_shared<Predicates::True<Hardware>>();
-        solution->problemPredicate = std::make_shared<Predicates::True<ContractionProblemGemm>>();
+        auto solution               = makeMappedSolution(index);
+        solution->hardwarePredicate = std::make_shared<Predicates::IsSubclass<Hardware, AMDGPU>>(
+            std::make_shared<Predicates::GPU::ProcessorEqual>(processor));
+        return solution;
     }
-    clustered->internalArgsSupport.persistentLoopArgsVersion = 2;
-    SolutionMap<ContractionSolution> solutions{{42, clustered}, {7, plain}};
-    ContractionProblemPredictionLibrary lib;
-    loadPredictionLibrary({42, 7}, solutions, lib);
-    hip::HipAMDGPU device;
-    device.computeUnitCount = 256;
-    device.analyticalHardware = std::make_shared<origami::hardware_t>(
-        origami::hardware_t::architecture_t::gfx950, 256, 163840, 262144,
-        8, 1.0, 1.0, 1.0, 4000000, 1.2, 1, std::make_tuple(0.0, 0.008, 0.0));
-    auto problem = ContractionProblemGemm::GEMM(
-        false, false, 1, 8192, 8192, 1, 8192, 1, 1.0, false, 1);
-    // Compare padding costs without USO filtering out a candidate before ranking.
-    problem.setParams().setUniformSummationOrder(0);
-    problem.setComputeInputTypeA(rocisa::DataType::Float);
-    problem.setComputeInputTypeB(rocisa::DataType::Float);
-    const auto ranked = lib.findTopSolutions(problem, device, 2);
-    ASSERT_EQ(ranked.size(), 2u);
-    EXPECT_EQ(ranked[0], plain);
-    EXPECT_EQ(ranked[1], clustered);
-    EXPECT_EQ(lib.getSolutionByIndex(problem, device, 42), clustered);
-    EXPECT_EQ(clustered->sizeMapping.clusterDim.x, 8u);
+
+    // Loads each solution into a library of its own and returns its effective config.
+    origami::config_t effectiveConfig(std::shared_ptr<ContractionSolution> const& solution)
+    {
+        SolutionMap<ContractionSolution> solutions;
+        solutions.emplace(solution->index, solution);
+        ContractionProblemPredictionLibrary lib;
+        loadPredictionLibrary({solution->index}, solutions, lib);
+        EXPECT_EQ(lib.origami_config_list.size(), 1u);
+        return lib.origami_config_list.at(0);
+    }
+}
+
+// Configs keep every declared value; nothing is rewritten.
+TEST(PredictionLibraryTest, Gfx950ConfigsKeepTheirDeclaredValues)
+{
+    auto solution                                  = makeArchSolution(1, AMDGPU::Processor::gfx950);
+    solution->sizeMapping.tileProcessingStrategy   = TileProcessingStrategy::StreamK;
+    solution->sizeMapping.workGroupMapping         = -8;
+    solution->sizeMapping.workGroupMappingXCC      = 8;
+    solution->sizeMapping.workGroupMappingXCCGroup = 64;
+    solution->sizeMapping.nonTemporalA             = 4;
+    solution->sizeMapping.TDMInst                  = 3;
+    solution->sizeMapping.waveNum                  = 4;
+    auto const config                              = effectiveConfig(solution);
+    EXPECT_EQ(config.workgroup_mapping, -8);
+    EXPECT_EQ(config.tensile().workgroup_mapping_xcc, 8);
+    EXPECT_EQ(config.tensile().workgroup_mapping_xcc_group, 64);
+    EXPECT_EQ(config.cache_hints_a, 4);
+    EXPECT_EQ(config.cache_hints_b, 0);
 }

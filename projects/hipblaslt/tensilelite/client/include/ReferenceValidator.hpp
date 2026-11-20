@@ -37,17 +37,20 @@
 #include "DataInitialization.hpp"
 
 #include <cstddef>
+#include <cstdint>
+#include <vector>
 
 namespace TensileLite
 {
     namespace Client
     {
 
+        class ClientProblemFactory;
+
         class ReferenceValidator : public RunListener
         {
         public:
-            ReferenceValidator(po::variables_map const&                    args,
-                               std::vector<std::shared_ptr<DeviceContext>> devices);
+            ReferenceValidator(po::variables_map const& args);
 
             virtual bool needMoreBenchmarkRuns() const override;
             virtual void preBenchmarkRun() override;
@@ -126,23 +129,47 @@ namespace TensileLite
                 return m_referenceInputs[card];
             }
 
+            void setSplit(ClientProblemFactory const* split)
+            {
+                m_split = split;
+            }
+
+        protected:
+            // Allow lifecycle tests to observe validation without device transfers.
+            virtual void validateSlots(std::vector<size_t> const& slots);
+
         private:
             void allocateResultBuffer(size_t bytes);
+
+            // The problem device `card` runs: its slice under --split-devices, else m_problem.
+            ContractionProblem* deviceProblem(size_t card) const;
+
+            // --split-devices: point every non-owner device's reference A or B (the shared
+            // operand) at the owner's host data, the data the kernels read.
+            void redirectSharedInputs();
 
             bool shouldSkipNullTensor(const std::string& tensorName,
                                       bool hasNullPointer,
                                       bool hasZeroElements) const;
 
-            std::vector<std::shared_ptr<DeviceContext>> m_devices;
             std::vector<std::shared_ptr<ProblemInputs>> m_referenceInputs;
+            std::vector<std::vector<uint8_t>>           m_referenceRecvs;
+            std::vector<std::vector<uint8_t>>           m_a2aGemmB;
 
             size_t                   m_cpuResultBufferSize = 0;
             std::shared_ptr<uint8_t> m_cpuResultBuffer;
 
-            ContractionProblem* m_problem;
+            ContractionProblem* m_problem = nullptr;
+
+            ClientProblemFactory const* m_split = nullptr;
+
+            // The unsplit operand is shared: every device validates against the owner's data.
+            bool m_sharedA = false;
+            bool m_sharedB = false;
 
             bool m_enabled;
-            bool m_fusedA2A = false;
+            FusedA2A m_fusedA2A              = FusedA2A::Disabled;
+            bool     m_validateAfterEnqueues = false;
 
             int  m_elementsToValidate;
             bool m_printValids;
@@ -168,8 +195,8 @@ namespace TensileLite
             size_t m_errorsReported    = 0;
 
             bool validateSolution(size_t card, std::shared_ptr<ProblemInputs> inputs);
-            void validateSlots(std::vector<size_t> const& slots);
-            bool recvMatches(size_t dst, ContractionInputs const& inputs);
+            void referenceRecvs(ContractionProblemGemm const& problem);
+            void interleaveA2AGemmReferences(ContractionProblemGemm const& problem);
         };
     } // namespace Client
 } // namespace TensileLite

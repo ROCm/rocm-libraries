@@ -206,7 +206,7 @@ TEST(PermutationCpuImplTest, CompareF64ResultWithReference)
 
     // Tight enough that a reference computing in float (~1e-8 relative error) fails.
     auto [result, maxRelativeError] = permuteWithCpu<floatTypeA, floatTypeB, floatTypeCompute>(
-        typeA, typeB, typeCompute, 1e-12);
+        typeA, typeB, typeCompute, fp64Tolerance);
     EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
 }
 

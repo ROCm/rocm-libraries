@@ -40,7 +40,7 @@ from kernels.gfx1151.wmma_fmha_fwd_v2 import (
     WmmaFmhaFwdV2Spec,
     is_valid_spec as prefill_is_valid,
 )
-from rocke.dispatch.core import PinRefused, pin_to_spec
+from rocke.dispatch.core import PinRefused, pin_to_spec, stable_json_hash
 
 PREFILL = "attention_rdna_wmma_prefill"
 DECODE = "attention_rdna_wmma_decode"
@@ -111,13 +111,41 @@ class TestRdnaAttentionSelection(unittest.TestCase):
                     self.assertEqual(a.candidate.name, b.candidate.name)
                     self.assertEqual(a.spec, b.spec)
 
+    def test_every_generic_member_gets_exactly_its_generics_variants(self):
+        """RDNA_WMMA_ARCHES names the generics; each member pointing at one is
+        served exactly as its generic is: the same route, spec and sweep."""
+        from rocke.core.arch.target import _load_generic_targets
+
+        for generic, members in _load_generic_targets().items():
+            for member in members:
+                for request in (
+                    _request(seqlen_q=1024, seqlen_k=1024, hdim_q=64, hdim_v=64),
+                    _request(hdim_q=192, hdim_v=128),
+                    _decode_request(),
+                ):
+                    with self.subTest(member=member, request=request):
+                        a = dispatch_attention(
+                            dataclasses.replace(request, arch=generic)
+                        )
+                        mine = dataclasses.replace(request, arch=member)
+                        b = dispatch_attention(mine)
+                        self.assertEqual(b.request.arch, member)
+                        self.assertEqual(a.candidate.name, b.candidate.name)
+                        self.assertEqual(a.spec, b.spec)
+                        self.assertEqual(
+                            a.candidate.sweep_space(a.request),
+                            b.candidate.sweep_space(b.request),
+                        )
+
     def test_device_names_route_to_their_rdna_catalog_row(self):
+        # Every member of a supported generic target has its own catalog row,
+        # so a device name keeps its processor; the generic's kernels serve it.
         for device, arch in (
-            ("gfx1100", "gfx11-generic"),
-            ("gfx1103:xnack-", "gfx11-generic"),
+            ("gfx1100", "gfx1100"),
+            ("gfx1103:xnack-", "gfx1103"),
             ("gfx1151", "gfx1151"),
-            ("gfx1200", "gfx12-generic"),
-            ("gfx1200-strict", "gfx12-generic"),
+            ("gfx1200", "gfx1200"),
+            ("gfx1200-strict", "gfx1200"),
             ("gfx1201", "gfx1201"),
         ):
             with self.subTest(device=device):
@@ -767,6 +795,82 @@ class TestRdnaWmmaTunedCandidates(unittest.TestCase):
                 )
                 self.assertEqual(bucket.candidate.name, PREFILL)
 
+    def test_query_side_options_reach_the_prefill_spec(self):
+        # hipDNN's dense-Q / seqused_q paged graphs: the request fields select
+        # the prefill object with the matching options, even for a decode shape.
+        paged = dict(layout="paged", kv_block_size=16)
+        for fields in (
+            dict(dense_q=True),
+            dict(seqused_q=True),
+            dict(dense_q=True, seqused_q=True),
+        ):
+            for arch in RDNA_WMMA_ARCHES:
+                with self.subTest(arch=arch, **fields):
+                    result = dispatch_attention(
+                        _decode_request(arch=arch, **paged, **fields)
+                    )
+                    self.assertEqual(result.candidate.name, PREFILL)
+                    spec = result.spec
+                    self.assertEqual(spec.dense_q, fields.get("dense_q", False))
+                    self.assertEqual(spec.seqused_q, fields.get("seqused_q", False))
+        ragged = dispatch_attention(_request(layout="ragged", seqused_q=True))
+        self.assertTrue(ragged.spec.seqused_q)
+        plain = dispatch_attention(_request(**paged)).spec
+        self.assertFalse(plain.dense_q or plain.seqused_q)
+
+    def test_query_side_options_are_refused_by_the_decode(self):
+        decode = _make_auto_candidate("decode")
+        for fields in (dict(dense_q=True), dict(seqused_q=True)):
+            with self.subTest(**fields):
+                request = _decode_request(
+                    layout="paged",
+                    kv_block_size=16,
+                    algorithm="wmma_fmha_decode",
+                    **fields,
+                )
+                ok, why = decode.admits(request)
+                self.assertFalse(ok)
+                self.assertIn("prefill kernel", why)
+
+    def test_query_side_options_are_served_only_by_rdna_wmma(self):
+        for arch in ("gfx942", "gfx950", "gfx1250"):
+            # Each arch's own packed convention ("auto" is paged on the unified
+            # kernels); the flags are refused by capability, before validation.
+            plain = _request(arch=arch, hdim_q=128, hdim_v=128)
+            for name in ("dense_q", "seqused_q"):
+                flagged = dataclasses.replace(plain, **{name: True})
+                checked = 0
+                for candidate in attention_candidates():
+                    capability = candidate.capability
+                    if arch not in capability.arches or not capability.check(plain)[0]:
+                        continue
+                    with self.subTest(arch=arch, flag=name, candidate=candidate.name):
+                        ok, why = capability.check(flagged)
+                        self.assertFalse(ok)
+                        self.assertIn(name, why)
+                        checked += 1
+                self.assertGreater(checked, 0)
+
+    def test_query_side_options_are_validated(self):
+        for fields, message in (
+            (dict(dense_q="false", layout="paged"), "dense_q must be a bool"),
+            (dict(seqused_q=1, layout="paged"), "seqused_q must be a bool"),
+            (dict(dense_q=True, layout="ragged"), "dense_q requires layout='paged'"),
+            (dict(dense_q=True), "dense_q requires layout='paged'"),
+            (dict(seqused_q=True, layout="dense"), "seqused_q requires layout="),
+        ):
+            with self.subTest(**fields), self.assertRaisesRegex(ValueError, message):
+                dispatch_attention(_request(kv_block_size=16, **fields))
+
+    def test_query_side_options_leave_other_request_hashes_unchanged(self):
+        plain = _request(layout="paged", kv_block_size=16)
+        self.assertNotIn("dense_q", plain.normalized())
+        self.assertNotIn("seqused_q", plain.normalized())
+        flagged = dataclasses.replace(plain, dense_q=True)
+        self.assertNotEqual(
+            stable_json_hash(plain.normalized()), stable_json_hash(flagged.normalized())
+        )
+
     def test_illegal_knob_settings_are_refused(self):
         d256 = dict(hdim_q=256, hdim_v=256, batch=1, nhead_q=4, nhead_k=4)
         for request, kind, knobs, reason in (
@@ -858,6 +962,42 @@ class TestRdnaWmmaTunedCandidates(unittest.TestCase):
                 }
                 self.assertEqual(fields, swept | fixed)
                 self.assertFalse(swept & fixed)
+
+    def test_off_query_layout_options_keep_the_stored_spec_hash(self):
+        # ``dense_q`` / ``seqused_q`` (hipDNN's paged engine) stay out of the
+        # cache key while off, so a pin stored before they existed still
+        # resolves to the same spec_hash.
+        request = _pinned(_request(seqlen_q=1024, seqlen_k=1024), "prefill")
+        tuned = dispatch_attention(request)
+        self.assertEqual(tuned.kernel_id.spec_hash, "20a3e73979e722b5")
+        names = {name for name, _value in tuned.spec.cache_key()[4]}
+        self.assertFalse(names & {"dense_q", "seqused_q"})
+
+    def test_on_query_layout_options_change_the_cache_key(self):
+        # Turning either option on must reach the cache key and spec_hash, or
+        # a dense-Q / seqused_q object would share a packed object's cache entry.
+        tuned = dispatch_attention(
+            _pinned(_request(seqlen_q=1024, seqlen_k=1024), "prefill")
+        ).spec
+        paged = dataclasses.replace(
+            tuned,
+            kernel_spec=dataclasses.replace(
+                tuned.kernel_spec, layout="paged", page_block_size=16
+            ),
+        )
+        off_key = paged.cache_key()
+        off_hash = stable_json_hash(paged.identity(), n=16)
+        for option in ("dense_q", "seqused_q"):
+            with self.subTest(option=option):
+                on = dataclasses.replace(
+                    paged,
+                    kernel_spec=dataclasses.replace(
+                        paged.kernel_spec, **{option: True}
+                    ),
+                )
+                self.assertIn((option, "True"), on.cache_key()[4])
+                self.assertNotEqual(on.cache_key(), off_key)
+                self.assertNotEqual(stable_json_hash(on.identity(), n=16), off_hash)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,12 @@ static inline bool IsTF32Supported(const std::string& device_name)
     return device_name == "gfx942" || StartsWith(device_name, "gfx95");
 }
 
+// Keep in sync with MIOPEN_CK_USE_OCP_FP8_TARGETS in cmake/MiopenCkCompileDefs.cmake.
+static inline bool UsesIeeeExponentBias(const std::string& device_name)
+{
+    return device_name == "gfx950" || StartsWith(device_name, "gfx12");
+}
+
 struct Handle;
 
 class TargetProperties

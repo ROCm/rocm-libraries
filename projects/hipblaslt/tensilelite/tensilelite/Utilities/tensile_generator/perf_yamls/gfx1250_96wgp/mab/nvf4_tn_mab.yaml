@@ -1,7 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 #
-# Best 96-WGP kernel for nvf4_tn_mab. Concurrent mean 6.348 TB/s, +9.53% versus the previous [2,2] winner.
 
 GlobalParameters:
   NumElementsToValidate: 0
@@ -11,6 +10,7 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
+  MXDataGenerator: False
   DataInitTypeA: 12
   DataInitTypeB: 13
   DataInitTypeD: 3

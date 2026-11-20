@@ -947,3 +947,315 @@ def test_a_merge_of_one_timing_needs_no_argument():
 )
 def test_the_runner_reads_the_timing_it_forwards(forwarded, timing):
     assert run_conv_shards.forwarded_timing(forwarded) == timing
+
+
+# --------------------------------------------------------------------------- winograd
+def test_winograd_is_a_third_engine_on_the_row():
+    rows = case_results.merge(
+        [
+            _row("direct", "k", 1.0, "d"),
+            _row("implicit", "k", 0.8, "i"),
+            _row("winograd", "k", 0.4, "w", runners_up=["w-2"]),
+        ]
+    )
+    assert len(rows) == 1
+    assert rows[0]["winograd_kernel"] == "w" and rows[0]["winograd_kernel_2"] == "w-2"
+    assert rows[0]["winner"] == "winograd"
+    assert rows[0]["winner_kernel"] == "w" and rows[0]["winner_ms"] == 0.4
+    # Over the next best engine, not over the slowest.
+    assert rows[0]["speedup"] == 2.0
+
+
+def test_winograd_against_one_other_engine_is_a_comparison():
+    rows = case_results.merge(
+        [_row("implicit", "k", 0.5, "i"), _row("winograd", "k", 1.0, "w")]
+    )
+    assert rows[0]["direct_ms"] is None
+    assert rows[0]["winner"] == "implicit" and rows[0]["speedup"] == 2.0
+
+
+def test_a_winograd_only_case_names_no_winner():
+    rows = case_results.merge([_row("winograd", "k", 1.0, "w")])
+    assert rows[0]["winner"] is None and rows[0]["speedup"] is None
+
+
+def test_the_summary_counts_winograd_when_it_ran():
+    two = case_results.merge(
+        [_row("direct", "k", 0.5, "d"), _row("implicit", "k", 1.0, "i")]
+    )
+    assert "Winograd" not in case_results.summary(two)
+    three = case_results.merge(
+        [
+            _row("direct", "k", 0.5, "d"),
+            _row("implicit", "k", 1.0, "i"),
+            _row("winograd", "k", 0.25, "w"),
+        ]
+    )
+    line = case_results.summary(three)
+    # direct still beat implicit on the case, though Winograd won it.
+    assert "direct faster on 1" in line
+    assert "Winograd measured 1 (fastest on 1)" in line
+
+
+def test_the_csv_carries_the_winograd_pick(tmp_path):
+    rows = case_results.merge(
+        [_row("direct", "k", 0.5, "d"), _row("winograd", "k", 0.25, "w")]
+    )
+    csv_path = case_results.write(rows, tmp_path / "results.jsonl")
+    header, body = csv_path.read_text().splitlines()[:2]
+    fields = dict(zip(header.split(","), body.split(",")))
+    assert fields["winograd_kernel"] == "w" and fields["winograd_ms"] == "0.25"
+
+
+def test_merged_rows_resume_the_winograd_side_too():
+    merged = case_results.merge(
+        [_row("implicit", "k", 1.0, "i"), _row("winograd", "k", 0.5, "w")]
+    )
+    skip = case_results.expand_merged_for_skip(merged)
+    assert sorted(r["engine"] for r in skip) == ["implicit", "winograd"]
+
+
+def test_compare_merges_the_winograd_rows(tmp_path):
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    implicit = tmp_path / "implicit.jsonl"
+    implicit.write_text(json.dumps(_row("implicit", "k", 1.0, "i")) + "\n")
+    winograd = tmp_path / "winograd.jsonl"
+    winograd.write_text(json.dumps(_row("winograd", "k", 0.5, "w")) + "\n")
+    out = tmp_path / "merged.jsonl"
+
+    compare._write_results(
+        str(out), str(tmp_path / "absent.jsonl"), str(implicit), str(winograd)
+    )
+
+    rows = case_results.read_rows(out)
+    assert rows[0]["winograd_kernel"] == "w" and rows[0]["winner"] == "winograd"
+
+
+def _record_scripts(monkeypatch, compare) -> list:
+    """Stub the sweeps; return the ``(script name, argv)`` of each launch."""
+    ran = []
+
+    def fake(script, extra, timeout=None):
+        ran.append((script.name, list(extra)))
+        return 1.0, "kern", "", 0
+
+    monkeypatch.setattr(compare, "_run_script", fake)
+    return ran
+
+
+def _wino_cache(tmp_path, arch="gfx1250"):
+    from benchmarks.common.benchmark_winograd_aot import cache_index
+
+    index = cache_index(str(tmp_path), arch)
+    index.parent.mkdir(parents=True)
+    index.write_text("{}")
+    return index
+
+
+def test_compare_runs_winograd_from_a_cache_that_holds_it(tmp_path, monkeypatch):
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    _wino_cache(tmp_path)
+    ran = _record_scripts(monkeypatch, compare)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["x", "--arch", "gfx1250", "--run-from-cache", str(tmp_path), "--fast-rank",
+         "--early-stop", "1.5", "--results", str(tmp_path / "r.jsonl"),
+         "--skip-measured", str(tmp_path / "m.jsonl")],
+    )  # fmt: skip
+
+    assert compare.main() == 0
+    assert [name for name, _ in ran] == [
+        "benchmark_direct_conv.py",
+        "benchmark_implicit_gemm_conv.py",
+        "benchmark_winograd_aot.py",
+    ]
+    argv = ran[-1][1]
+    flags = {a for a in argv if a.startswith("--")}
+    # Its own inputs, the timing and the files; none of the kernel-list flags.
+    assert {"--run-from-cache", "--timing", "--N", "--C", "--dtype"} <= flags
+    assert {"--results", "--skip-measured"} <= flags
+    assert not flags & {"--fast-rank", "--early-stop", "--top", "--jobs"}
+    assert argv[argv.index("--results") + 1].endswith("r.winograd.jsonl")
+    assert argv[argv.index("--dtype") + 1] == "fp16"
+
+
+def test_compare_forwards_an_miopen_command_to_winograd(tmp_path, monkeypatch):
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    _wino_cache(tmp_path)
+    ran = _record_scripts(monkeypatch, compare)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["x", "--arch", "gfx1250", "--run-from-cache", str(tmp_path),
+         "--miopen-cmd", _MIOPEN_LINE],
+    )  # fmt: skip
+
+    assert compare.main() == 0
+    argv = ran[-1][1]
+    assert argv[argv.index("--miopen-cmd") + 1] == _MIOPEN_LINE
+    assert "--N" not in argv
+
+
+@pytest.mark.parametrize(
+    "extra, why",
+    [
+        ([], "no Winograd cache"),
+        (["--direction", "wgrad"], "forward direction only"),
+        (["--skip-winograd"], None),
+    ],
+)
+def test_compare_leaves_winograd_out(tmp_path, monkeypatch, capsys, extra, why):
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    if why != "no Winograd cache":
+        _wino_cache(tmp_path)
+    ran = _record_scripts(monkeypatch, compare)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["x", "--arch", "gfx1250", "--run-from-cache", str(tmp_path)] + extra,
+    )
+
+    assert compare.main() == 0
+    assert "benchmark_winograd_aot.py" not in [name for name, _ in ran]
+    err = capsys.readouterr().err
+    if why:
+        assert "Winograd skipped: " in err and why in err
+    else:
+        assert "Winograd skipped" not in err
+
+
+def test_a_jit_comparison_leaves_winograd_out(monkeypatch, capsys):
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    ran = _record_scripts(monkeypatch, compare)
+    monkeypatch.setattr(sys, "argv", ["x", "--skip-direct"])
+
+    assert compare.main() == 0
+    assert [name for name, _ in ran] == ["benchmark_implicit_gemm_conv.py"]
+    assert "AOT cache" in capsys.readouterr().err
+
+
+def test_compare_fails_when_the_winograd_sweep_dies(tmp_path, monkeypatch, capsys):
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    _wino_cache(tmp_path)
+
+    def fake(script, extra, timeout=None):
+        if script.name == "benchmark_winograd_aot.py":
+            return None, "", "", 1
+        return 1.0, "kern", "", 0
+
+    monkeypatch.setattr(compare, "_run_script", fake)
+    monkeypatch.setattr(
+        sys, "argv", ["x", "--arch", "gfx1250", "--run-from-cache", str(tmp_path)]
+    )
+
+    assert compare.main() == 1
+    assert "benchmark_winograd_aot.py exited 1" in capsys.readouterr().err
+
+
+def test_compare_says_why_a_shape_is_not_a_winograd_case(tmp_path, monkeypatch, capsys):
+    from benchmarks.common import benchmark_conv_compare as compare
+
+    _wino_cache(tmp_path)
+
+    def fake(script, extra, timeout=None):
+        if script.name == "benchmark_winograd_aot.py":
+            return None, "", "[skip] x fp16 fwd: not a Winograd case: stride != 1\n", 0
+        return 1.0, "kern", "", 0
+
+    monkeypatch.setattr(compare, "_run_script", fake)
+    monkeypatch.setattr(
+        sys, "argv", ["x", "--arch", "gfx1250", "--run-from-cache", str(tmp_path)]
+    )
+
+    assert compare.main() == 0
+    assert "no result — not a Winograd case: stride != 1" in capsys.readouterr().out
+
+
+def test_the_shard_runner_can_shard_the_winograd_sweep():
+    assert run_conv_shards.SCRIPTS["winograd"] == "benchmark_winograd_aot.py"
+    assert (run_conv_shards._SCRIPT_DIR / run_conv_shards.SCRIPTS["winograd"]).is_file()
+
+
+# The Winograd sweep's own reading of its cases: host-side, before the cache or
+# the device is touched.
+def _wino_args(*argv):
+    from benchmarks.common import benchmark_winograd_aot as W
+
+    captured = {}
+
+    def fake_run(args):
+        captured["args"] = args
+        return 0
+
+    import unittest.mock
+
+    with unittest.mock.patch.object(W, "run_from_cache", fake_run):
+        assert W.main(["--run-from-cache", "c", *argv]) == 0
+    return captured["args"]
+
+
+def test_winograd_reads_the_directions_of_an_miopen_line():
+    from benchmarks.common import benchmark_winograd_aot as W
+
+    line = _MIOPEN_LINE.replace("-F 1", "-F 0").replace("-u 2 -v 2", "-u 1 -v 1")
+    cases = W.cases_of(_wino_args("--miopen-cmd", line))
+    assert [(d, dt) for _p, dt, d in cases] == [
+        ("fwd", "bf16"),
+        ("dgrad", "bf16"),
+        ("wgrad", "bf16"),
+    ]
+    reasons = [W.winograd_case_reason(p, dt, d) for p, dt, d in cases]
+    assert reasons[0] is None
+    assert all("forward direction only" in r for r in reasons[1:])
+    # --dtype / --direction override the line, as in the other sweeps.
+    over = W.cases_of(_wino_args("--miopen-cmd", line, "--dtype", "fp16",
+                                 "--direction", "fwd"))  # fmt: skip
+    assert [(d, dt) for _p, dt, d in over] == [("fwd", "fp16")]
+
+
+def test_winograd_reads_the_shape_flags():
+    from benchmarks.common import benchmark_winograd_aot as W
+
+    ((p, dtype, direction),) = W.cases_of(
+        _wino_args("--N", "2", "--C", "32", "--K", "48", "--groups", "2")
+    )
+    assert (p.N, p.C, p.K, p.groups, p.Y, p.X) == (2, 32, 48, 2, 3, 3)
+    assert (dtype, direction) == ("fp16", "fwd")
+    assert _wino_args().timing == "staged"
+
+
+@pytest.mark.parametrize(
+    "shape, why",
+    [
+        (dict(Y=1, X=1, pH=0, pW=0), "1x1"),
+        (dict(sH=2, sW=2), "stride"),
+        (dict(Y=5, X=5, pH=2, pW=2), "3x3"),
+        (dict(C=2, K=2), "C/g"),
+    ],
+)
+def test_winograd_refuses_what_the_aot_route_refuses(shape, why):
+    from benchmarks.common import benchmark_winograd_aot as W
+
+    base = dict(N=1, Hi=16, Wi=16, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+    assert W.winograd_case_reason(ConvProblem(**base), "fp16", "fwd") is None
+    p = ConvProblem(**{**base, **shape})
+    assert why in W.winograd_case_reason(p, "fp16", "fwd")
+
+
+def test_a_winograd_run_with_no_winograd_case_loads_nothing(tmp_path, capsys):
+    """The comparison hands the sweep every case; one it cannot run is a skip
+    line and exit 0 -- no cache (there is none here), no device."""
+    from benchmarks.common import benchmark_winograd_aot as W
+
+    rc = W.main(
+        ["--run-from-cache", str(tmp_path / "absent"), "--sH", "2", "--sW", "2"]
+    )
+    assert rc == 0
+    assert "not a Winograd case: stride != 1" in capsys.readouterr().out

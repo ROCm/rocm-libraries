@@ -56,8 +56,6 @@ namespace TensileLite
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
 
-        mutable std::atomic<bool> lastFindTopRetAll = false;
-
         static std::string Type()
         {
             return "Prediction";
@@ -175,7 +173,8 @@ namespace TensileLite
                 Task task(hardware, problem, *solution);
                 const bool hwMatch = (*(solution->hardwarePredicate))(hardware);
                 // With uniform summation order off, the filter stays
-                // hardwarePredicate && problemPredicate. The extra conjuncts in
+                // hardwarePredicate && problemPredicate, plus device-scalar capability.
+                // The extra conjuncts in
                 // softwarePredicate() (taskPredicate, StreamK dynamic queue) are
                 // real filters, so they stay behind the check.
                 const bool swMatch = problem.getParams().uniformSummationOrder() != 0
@@ -184,7 +183,8 @@ namespace TensileLite
                                                              hardware,
                                                              *solution,
                                                              problem)
-                                         : (*(solution->problemPredicate))(problem);
+                                         : (*(solution->problemPredicate))(problem)
+                                               && solution->deviceScalarAlphaSupported(problem);
                 const bool predicateMatch = hwMatch && swMatch;
 
                 if(debug)
@@ -228,19 +228,6 @@ namespace TensileLite
                 auto prediction_result = origami::rank_configs(
                     origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
 
-                // Origami currently models individual output tiles. A spatial
-                // StreamK block also launches its padded edge peers; charge for
-                // that footprint before truncating the analytical candidate list.
-                // Index lookup and measured/exact libraries do not use this path.
-                for(auto& r : prediction_result)
-                {
-                    if(r.config.index < solution_list.size())
-                        r.latency /= solution_list[r.config.index].second
-                                         ->streamKClusterUtilization(problem);
-                }
-                std::stable_sort(prediction_result.begin(), prediction_result.end(),
-                                 [](auto const& a, auto const& b) { return a.latency < b.latency; });
-
                 for(const auto& r : prediction_result)
                 {
                     if(r.config.index >= solution_list.size())
@@ -254,14 +241,7 @@ namespace TensileLite
                     }
                 }
             }
-            // can't reach the requested number, means findTop already done its best
-            lastFindTopRetAll = (rv.size() < numSolutions);
             return rv;
-        }
-
-        virtual bool lastFindTopAlreadyRetAll() const override
-        {
-            return lastFindTopRetAll;
         }
 
         virtual SolutionVector<MySolution>

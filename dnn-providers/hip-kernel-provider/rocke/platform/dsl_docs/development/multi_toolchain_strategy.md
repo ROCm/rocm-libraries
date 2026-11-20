@@ -95,17 +95,31 @@ when a newer generation lands. The partition is exhaustiveness-checked by
 `test_datalayout_kinds_partition_every_flavor` — a hand-rolled substitute for
 the check a language-level `match` would give for free.
 
-**(b) Intrinsic declare text — modelled as base + per-flavor override dicts.**
+**(b) Intrinsic declare text — modelled as base + an inherited chain of per-generation override dicts.**
 
 ```python
-self._decls = dict(_INTRINSIC_DECLS)                    # LLVM 20 shapes
-if flavor == LLVM_FLAVOR_LLVM22: self._decls.update(_INTRINSIC_DECLS_LLVM22_OVERRIDES)
-elif flavor == LLVM_FLAVOR_LLVM23: self._decls.update(_INTRINSIC_DECLS_LLVM23_OVERRIDES)
+def _decls_for_flavor(flavor):
+    abi = _emission_profile(flavor).declaration_abi     # the lane's generation
+    generations = list(_LlvmDeclarationAbi)
+    decls = dict(_INTRINSIC_DECLS)                      # LLVM 20 shapes
+    for inherited in generations[: generations.index(abi) + 1]:
+        decls.update(_INTRINSIC_DECL_OVERRIDES_BY_ABI[inherited])
+    for call in MATRIX_CALLS.values():                  # MMA calls described as data
+        decls.setdefault(call.key, call.declaration(flavor))
+    return decls
 ```
 
 The **key is stable across flavors**, so all ~151 `_need(...)` call sites are
-flavor-agnostic. Only the text differs. Five overrides per modern flavor today
-(4 fp8/bf8 MFMA operand-width changes + `make.buffer.rsrc.p1`'s `i32`→`i64`).
+flavor-agnostic. Only the text differs. Each override dict holds only the
+entries whose text changed at its own declaration ABI generation: LLVM22 has
+five (4 fp8/bf8 MFMA operand-width changes + `make.buffer.rsrc.p1`'s
+`i32`→`i64`); LLVM23 inherits them and has no text of its own today; LLVM24
+inherits them too and has four of its own (the named-barrier declarations,
+whose pointer moved to addrspace(15)). Lanes that share an emission profile
+share one table. A `MatrixCall` derives its declaration for each flavor from its
+operand forms, so its per-flavor register types need no override entry. The C++
+engine walks the same chain along `rocke_ll_declaration_abi_t`
+(`rocke_ll_decl_text` / `rocke_ll_decl_at` / `rocke_ll_matrix_decl_key_at`).
 
 Why it has to be emitted correctly up front rather than left to auto-upgrade:
 **comgr verifies the toplevel `declare` lines *before* running the auto-upgrade
@@ -338,10 +352,10 @@ R1 and R2 change **zero emitted bytes**, need no golden re-bless, and are fully
 verifiable on a host without cmake.
 
 **R1 — generate an `arch_domain` artifact from the toolchain; do not hand-write
-it. — SHIPPED** as `tools/gen_arch_domain.py`, with source structure coverage in
-`tests/tools/test_arch_domain_artifact.py` and regeneration gated by the
-`rocke_arch_domain_reproducibility` CTest in both developer build trees and
-relocated provider test artifacts.
+it. — SHIPPED** as `tools/gen_arch_domain.py`, with source and installed
+column-structure checks in `tests/tools/test_arch_domain_support.py`.
+The `rocke_arch_domain_reproducibility` CTest gates regeneration in both
+developer build trees and relocated provider test artifacts.
 
 Uses the link probe (declare + call + `store volatile`, compile **and link**;
 prototype validated, §2.4), at **`-O0`** — at `-O3` the optimiser can delete the
@@ -350,13 +364,29 @@ it. A probe that links is then compiled to assembly and assembled for its target
 with the same install's `llvm-mc`: the backend can select an intrinsic for a
 target that lacks the instruction and write it into the object, and only the
 text assembler checks each instruction against the target (`arch_absent`
-otherwise). Every decl key × every wired arch — the committed columns are the count of
-record, not this sentence — ~15 s wall across cores on `llvm22`. Managed like
-golden — a generator tool, a committed artifact, and a test asserting
-regeneration is a no-op when run with the exact compiler build recorded in the
-artifact. A different build is explicitly unvalidated because development builds
-within one LLVM major can disagree. Depends only on `clang`, never on install
-layout (§2.4).
+otherwise). The sweep covers every declaration key on every wired architecture;
+the committed columns define its recorded coverage. Probes share a bounded worker
+pool. The committed artifact supplies a monotonic support floor: the test requires
+previously working cells and accepted processor names to remain working, with
+compatible flavor, scope, and probe methodology. Retained positives additionally
+require the same effective return/operand types, operand sources and constants,
+recorded in versioned `probe_contracts` from the probe renderer's operand plan.
+This prevents an added `immarg` from replacing an old variable operand with zero
+while both measurements still read `ok`. Both `ok` and `arch_absent` require an
+accepted processor. Compiler identity is recorded as provenance rather than an
+applicability gate; unusable live clang/opt identities fail before probing. Gains and improved
+classifications pass and are reported; remaining no-data and degraded negative
+measurements are not qualified. Invalid or missing records still fail. The
+probe uses matching `clang`, `opt`, and `llvm-mc` tools from a complete LLVM
+installation (§2.4), and validates the generated column before writing or
+comparing it.
+
+The comparison-only contracts extend the v1 envelope but leave runtime lookup
+and the generated C++ availability table unchanged. The support gate's
+[historical contract recovery policy](../../../TESTING.md#historical-positive-probe-contract-recovery)
+owns the evidence needed to compare older columns; changing compiler builds does
+not authorize inferring their missing metadata. Its column-storage and
+positive-key completeness rules apply to every toolchain column.
 
 Per-cell provenance landed as **one file per flavor, named after it**, rather
 than a `verified`/`unvalidated` marker inside a shared file as §3.2 suggested. A

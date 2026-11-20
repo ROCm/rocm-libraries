@@ -21,6 +21,7 @@ GlobalParameters:
   DataInitTypeBeta: 1
   ValidationMaxToPrint: 4
   PrintSolutionRejectionReason: True
+  UniformSummationOrder: 0
 
 BenchmarkProblems:
   - - OperationType: GEMM

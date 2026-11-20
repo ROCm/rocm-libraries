@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,9 +27,13 @@
 #include "type_dispatch.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <future>
+#include <memory>
+#include <thread>
 #ifdef WIN32
 #include <stdlib.h>
 #define setenv(A, B, C) _putenv_s(A, B)
@@ -1412,4 +1416,73 @@ void testing_logging(const Arguments& arg)
         fs::remove(bench_fspath1);
         fs::remove(bench_fspath2);
     }
+}
+
+// A failed write to a log file (e.g. a full disk) must not hang later logged calls.
+// /dev/full fails every write with ENOSPC. The logged calls run on a detached thread so
+// that a hang is reported as a test failure instead of blocking the test binary.
+inline void testing_logging_write_error(const Arguments&)
+{
+#ifndef WIN32
+    static constexpr rocblas_int c_n       = 1024;
+    static constexpr int         c_calls   = 3;
+    static constexpr auto        c_timeout = std::chrono::seconds(60);
+
+    DEVICE_MEMCHECK(device_vector<float>, dx, (c_n, 1));
+
+    // The current device is per thread and a new thread starts on device 0, so the
+    // logged calls must select the device that holds dx
+    int device;
+    CHECK_HIP_ERROR(hipGetDevice(&device));
+
+    ASSERT_EQ(setenv("ROCBLAS_LAYER", "1", true), 0);
+    ASSERT_EQ(setenv("ROCBLAS_LOG_TRACE_PATH", "/dev/full", true), 0);
+
+    // Status of the first failing call, or rocblas_status_success
+    auto   done   = std::make_shared<std::promise<rocblas_status>>();
+    auto   future = done->get_future();
+    float* x      = dx;
+
+    // The failed write below makes rocBLAS print an error to stderr, which is expected.
+    // No newline, so the error completes the line as "IGNORE: Error writing log file: ..."
+    rocblas_cerr << "IGNORE: " << std::flush;
+
+    std::thread([done, x, device] {
+        if(hipSetDevice(device) != hipSuccess)
+        {
+            done->set_value(rocblas_status_internal_error);
+            return;
+        }
+
+        rocblas_handle handle;
+
+        // Handle creation writes the first trace line, which fails
+        rocblas_status status = rocblas_create_handle(&handle);
+        if(status == rocblas_status_success)
+        {
+            const float alpha = 2.0f;
+            for(int i = 0; i < c_calls && status == rocblas_status_success; i++)
+                status = rocblas_sscal(handle, c_n, &alpha, x, 1);
+
+            rocblas_status destroy_status = rocblas_destroy_handle(handle);
+            if(status == rocblas_status_success)
+                status = destroy_status;
+        }
+        done->set_value(status);
+    }).detach();
+
+    if(future.wait_for(c_timeout) != std::future_status::ready)
+    {
+        // The thread is stuck in rocBLAS and the log worker would also block process
+        // exit, so report the failure and exit immediately
+        ADD_FAILURE() << "logged rocBLAS call hung after a failed log write";
+        std::fflush(nullptr);
+        std::_Exit(EXIT_FAILURE);
+    }
+
+    ASSERT_EQ(setenv("ROCBLAS_LAYER", "0", true), 0);
+    ASSERT_EQ(unsetenv("ROCBLAS_LOG_TRACE_PATH"), 0);
+
+    EXPECT_ROCBLAS_STATUS(future.get(), rocblas_status_success);
+#endif
 }

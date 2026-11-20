@@ -465,6 +465,17 @@ void testing_csric0_bad_arg(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS(rocsparse_csric0_clear(handle, nullptr),
                             rocsparse_status_invalid_pointer);
 
+    // Test rocsparse_csric0_set_tolerance()
+    {
+        static constexpr int nargs_to_exclude                  = 1;
+        const int            args_to_exclude[nargs_to_exclude] = {2};
+        const double         tol                               = 0.0;
+        select_bad_arg_analysis(
+            rocsparse_csric0_set_tolerance, nargs_to_exclude, args_to_exclude, handle, info, tol);
+        EXPECT_ROCSPARSE_STATUS(rocsparse_csric0_set_tolerance(handle, info, -1.0),
+                                rocsparse_status_invalid_value);
+    }
+
     // Additional tests for invalid zero matrices
     EXPECT_ROCSPARSE_STATUS(
         rocsparse_csric0_buffer_size<T>(

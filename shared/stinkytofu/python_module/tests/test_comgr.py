@@ -264,6 +264,9 @@ class TestArchCaps:
         assert arch["LdsGranularity"] == 256
         assert arch["CMPXWritesSGPR"] == 0
         assert arch["HasInvWbDevFences"] == 1
+        # Non-strict gfx1250 excludes NC mappings; strict is a separate target
+        # override in TensileLite because this API accepts only the ISA tuple.
+        assert arch["MTypeNC"] == 0
         assert arch["MaxSgprPreload"] == 32
         assert arch["LDSBankCount"] == 64
         assert arch["WmmaArbStallBitOffset"] == 2

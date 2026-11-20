@@ -809,13 +809,19 @@ namespace rocalution
         /** \brief Move all data (i.e. move the matrix) to the accelerator */
         ROCALUTION_EXPORT
         virtual void MoveToAccelerator(void);
-        /** \brief Move all data (i.e. move the matrix) to the accelerator asynchronously */
+        /** \brief Move all data (i.e. move the matrix) to the accelerator asynchronously
+      * \note
+      * Until \p Sync is called, further calls do nothing, and the matrix must not be modified.
+      */
         ROCALUTION_EXPORT
         virtual void MoveToAcceleratorAsync(void);
         /** \brief Move all data (i.e. move the matrix) to the host */
         ROCALUTION_EXPORT
         virtual void MoveToHost(void);
-        /** \brief Move all data (i.e. move the matrix) to the host asynchronously */
+        /** \brief Move all data (i.e. move the matrix) to the host asynchronously
+      * \note
+      * Until \p Sync is called, further calls do nothing, and the matrix must not be modified.
+      */
         ROCALUTION_EXPORT
         virtual void MoveToHostAsync(void);
         /** \brief Synchronize the matrix */
@@ -1083,7 +1089,11 @@ namespace rocalution
         ROCALUTION_EXPORT
         virtual void Transpose(void);
 
-        /** \brief Transpose the matrix */
+        /** \brief Transpose the matrix into T
+      * \details
+      * T is overwritten and gets the format of this matrix, or CSR if the conversion to
+      * that format fails.
+      */
         ROCALUTION_EXPORT
         void Transpose(LocalMatrix<ValueType>* T) const;
 

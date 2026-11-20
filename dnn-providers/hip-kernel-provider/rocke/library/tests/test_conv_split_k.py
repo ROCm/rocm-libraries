@@ -4,8 +4,8 @@
 
 CPU-only. Covers the conv-specific limits (reduction availability, the 16-bit
 atomic cap, merged groups, gridDim.z), the override and explicit paths, and
-that an arch without a fitted cost model resolves exactly as the previous
-CK-formula rule did.
+that an arch without a fitted cost model resolves as the previous CK-formula
+rule did, except that a 16-bit dgrad or wgrad degree is held to the atomic cap.
 """
 
 from __future__ import annotations
@@ -26,9 +26,9 @@ from kernels.common.conv_split_k import (
     MAX_WGRAD_WS_BYTES,
     parse_split_k_override,
     resolve_conv_split_k,
+    select_split_k_wgrad,
 )
-from rocke.helpers.split_k import select_split_k_wgrad
-from rocke.helpers.split_k_planner import MAX_GRID_DIM_Z
+from kernels.conv.split_k_planner import MAX_GRID_DIM_Z
 
 # Long reduction into a tiny dW, odd row (no packed atomic): a stem conv, the
 # class a 128-degree ceiling under-splits.
@@ -93,7 +93,11 @@ def _previous_rule(problem, arch, dtype, tile, gm, split_k):
         if gm == 1 or p is DEPTHWISE
     ],
 )
-def test_unfitted_arch_keeps_the_previous_rule(problem, dtype, tile, gm, split_k):
+def test_unfitted_arch_keeps_the_previous_rule_below_the_atomic_cap(
+    problem, dtype, tile, gm, split_k
+):
+    # None of these shapes reaches a 16-bit CK degree above
+    # ATOMIC_16BIT_MAX_SPLIT_K; the fallback tests below cover that region.
     got = _wgrad(problem, "gfx90a", dtype, tile, group_merge=gm, split_k=split_k)
     assert (got.split_k, got.two_stage) == _previous_rule(
         problem, "gfx90a", dtype, tile, gm, split_k
@@ -247,7 +251,9 @@ def test_override_holds_a_fixed_16bit_atomic_to_its_limit():
     assert (r32.split_k, r32.two_stage) == (over, False)
 
 
-def test_dgrad_explicit_and_unfitted_arch_unchanged():
+def test_dgrad_explicit_and_unfitted_arch_unchanged_below_the_atomic_cap():
+    # A 16-bit CK degree above ATOMIC_16BIT_MAX_SPLIT_K is covered by the
+    # fallback tests below.
     kw = {
         "arch": "gfx90a",
         "dtype": "bf16",
@@ -422,6 +428,110 @@ def test_dgrad_split_k_available_accepts_fp32_odd_channels():
     assert dgrad_split_k_available(ODD_CPG, "fp32") == (True, "ok")
 
 
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_dgrad_fallback_does_not_split_what_the_kernel_cannot_build(dtype):
+    # gfx942 has no fitted cost model, so this is the CK-formula fallback; an
+    # odd cpg cannot take a 16-bit split-K dX atomic, so it stays unsplit.
+    kw = dict(arch="gfx942", tile_m=64, tile_n=64, tile_k=32, block_size=256)
+    r = resolve_conv_split_k("dgrad", ODD_CPG, dtype=dtype, **kw)
+    assert (r.split_k, r.two_stage) == (1, False)
+    assert "even channels-per-group" in r.reason
+    # fp32 has no such limit and keeps its CK-formula degree.
+    assert resolve_conv_split_k("dgrad", ODD_CPG, dtype="fp32", **kw).split_k > 1
+
+
+def test_dgrad_fallback_splits_tf32_like_fp32():
+    # tf32 is fp32 storage; the buildable-split check must see fp32, not the
+    # logical dtype, or gfx942 tf32 dgrad would silently run unsplit.
+    kw = dict(arch="gfx942", tile_m=64, tile_n=64, tile_k=32, block_size=256)
+    r = resolve_conv_split_k("dgrad", FALLBACK_DGRAD, dtype="tf32", **kw)
+    assert r.split_k == r.requested > 1
+
+
+# Long dY reduction (K=2048) into a small dX: the CK formula asks for 608.
+FALLBACK_DGRAD = ConvProblem(N=1, Hi=8, Wi=8, C=64, K=2048, Y=3, X=3, pH=1, pW=1)
+
+
+def _fallback_dgrad(dtype):
+    from kernels.common.conv_split_k import split_k_cost_model
+
+    assert split_k_cost_model("gfx942") is None  # unfitted: the CK-formula fallback
+    return resolve_conv_split_k(
+        "dgrad",
+        FALLBACK_DGRAD,
+        arch="gfx942",
+        dtype=dtype,
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        block_size=256,
+    )
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_dgrad_fallback_holds_a_16bit_atomic_to_its_limit(dtype):
+    """An unfitted arch (gfx942) resolves dgrad through the CK formula; a 16-bit
+    dX atomic must stay within ATOMIC_16BIT_MAX_SPLIT_K there too."""
+    result = _fallback_dgrad(dtype)
+    assert result.split_k == ATOMIC_16BIT_MAX_SPLIT_K
+    assert result.requested > ATOMIC_16BIT_MAX_SPLIT_K
+
+
+def test_dgrad_fallback_does_not_clamp_fp32():
+    from kernels.common.conv_implicit_gemm_dgrad import _dg_K, _dg_M, _dg_N
+
+    result = _fallback_dgrad("fp32")
+    ck = select_split_k_wgrad(
+        wg_M=_dg_M(FALLBACK_DGRAD),
+        wg_N=_dg_N(FALLBACK_DGRAD),
+        wg_K=_dg_K(FALLBACK_DGRAD),
+        tile_m=64,
+        tile_n=64,
+        tile_k=32,
+        arch="gfx942",
+    )
+    assert result.split_k == result.requested == ck.split_k
+    assert result.split_k > ATOMIC_16BIT_MAX_SPLIT_K
+
+
+# 1x1, small channels, long N*H*W reduction: the CK formula asks for 608 on
+# gfx942 and 512 on gfx90a, far past the 16-bit atomic limit.
+FALLBACK_WGRAD = ConvProblem(N=256, Hi=28, Wi=28, C=32, K=32, Y=1, X=1)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_wgrad_fallback_moves_a_16bit_atomic_past_its_limit_to_the_workspace(
+    arch, dtype
+):
+    r = _wgrad(FALLBACK_WGRAD, arch, dtype, reduction="auto")
+    assert r.requested > ATOMIC_16BIT_MAX_SPLIT_K
+    assert (r.split_k, r.two_stage) == (r.requested, True)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_wgrad_fallback_holds_a_fixed_16bit_atomic_to_its_limit(arch, dtype):
+    r = _wgrad(FALLBACK_WGRAD, arch, dtype, reduction="atomic")
+    assert r.requested > ATOMIC_16BIT_MAX_SPLIT_K
+    assert (r.split_k, r.two_stage) == (ATOMIC_16BIT_MAX_SPLIT_K, False)
+
+
+@pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+def test_wgrad_fallback_holds_the_atomic_when_the_workspace_does_not_fit(dtype):
+    # 4096 bytes per replica: 1 << 20 replicas overflow the i32 ws_bytes
+    # kernarg, so auto has no workspace to move to and holds the atomic.
+    assert wgrad_workspace_nbytes(FALLBACK_WGRAD, 1 << 20) > MAX_WGRAD_WS_BYTES
+    r = _wgrad(FALLBACK_WGRAD, "gfx942", dtype, reduction="auto", ws_replicas=1 << 20)
+    assert r.requested > ATOMIC_16BIT_MAX_SPLIT_K
+    assert (r.split_k, r.two_stage) == (ATOMIC_16BIT_MAX_SPLIT_K, False)
+
+
+def test_wgrad_fallback_does_not_clamp_fp32():
+    r = _wgrad(FALLBACK_WGRAD, "gfx942", "fp32", reduction="atomic")
+    assert r.split_k == r.requested > ATOMIC_16BIT_MAX_SPLIT_K
+
+
 def test_benchmark_workers_skip_combos_the_resolver_cannot_serve():
     # The JIT sweep builds single- and two-stage legs for every combo; a combo
     # with nothing to split must come back None, not raise and end the run.
@@ -466,7 +576,7 @@ def test_auto_never_plans_a_workspace_its_replicas_overflow():
 
 
 def test_planner_rejects_a_batch_beyond_grid_z():
-    from rocke.helpers.split_k_planner import (
+    from kernels.conv.split_k_planner import (
         SplitKKernel,
         SplitKProblem,
         select_split_k_plan,
@@ -515,7 +625,7 @@ def test_cost_fit_keeps_each_workspace_replica_count_its_own_option():
     # Two workspace binaries of one main loop that differ only in replica
     # count: each time must stay paired with its own setup traffic.
     from benchmarks.common.split_k_cost_fit import _decisions, _Kernel
-    from rocke.helpers.split_k_planner import (
+    from kernels.conv.split_k_planner import (
         SplitKKernel,
         SplitKProblem,
         SplitKReduction,
@@ -563,7 +673,7 @@ def test_cost_fit_degree_list_parses_ranges():
 def test_cost_fit_round_trip_keeps_the_unsearched_fields():
     # The literal the fit prints must not drop the XCD count or the margin.
     from benchmarks.common.split_k_cost_fit import _model_of, _x_of
-    from rocke.helpers.split_k_planner import split_k_cost_model
+    from kernels.conv.split_k_planner import split_k_cost_model
 
     for cost in (
         split_k_cost_model("gfx950"),
@@ -628,7 +738,6 @@ def test_explicit_atomic_that_cannot_be_built_raises():
 def test_wmma_auto_without_a_reduction_runs_unsplit(dtype):
     # gfx1250 16-bit dW with an odd row (wg_N = 27): no packed pair, and WMMA
     # has no workspace. An auto request runs unsplit; a forced degree raises.
-    # fp16 is never split automatically, so only bf16 asks for a split here.
     p = ConvProblem(N=64, Hi=64, Wi=64, C=3, K=16, Y=3, X=3, pH=1, pW=1)
     kw = {
         "arch": "gfx1250",
@@ -646,12 +755,30 @@ def test_wmma_auto_without_a_reduction_runs_unsplit(dtype):
         resolve_conv_split_k("wgrad", p, split_k=8, **kw)
     with pytest.raises(ValueError, match="packed atomic"):
         resolve_conv_split_k("wgrad", p, override=8, **kw)
-    if dtype == "fp16":
-        assert r.requested == 1
-        return
     assert r.requested > 1  # the policy did ask for a split
     with pytest.raises(ValueError, match="packed atomic"):
         resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)
+
+
+def test_wmma_fp16_atomic_degree_is_capped_for_accuracy():
+    # gfx1250 fp16 dW, pointwise C=K=16 over a deep reduction (N*Ho*Wo =
+    # 262144) on one tile: the fill and slice terms ask for far more than the
+    # packed fp16 atomic's accuracy cap (97, see atomic_rounding_degree_cap),
+    # so the automatic atomic degree stops there. The f32 workspace reduction
+    # resolves as fp32 dW and keeps the general cap of 128.
+    p = ConvProblem(N=64, Hi=64, Wi=64, C=16, K=16, Y=1, X=1)
+    kw = {
+        "arch": "gfx1250",
+        "dtype": "fp16",
+        "tile_m": 64,
+        "tile_n": 128,
+        "tile_k": 64,
+        "block_size": 256,
+    }
+    atomic = resolve_conv_split_k("wgrad", p, reduction="atomic", **kw)
+    assert (atomic.split_k, atomic.two_stage) == (97, False)
+    ws = resolve_conv_split_k("wgrad", p, reduction="workspace", **kw)
+    assert (ws.split_k, ws.two_stage) == (128, True)
 
 
 @pytest.mark.parametrize("arch", ["gfx1151", "gfx1201"])
@@ -682,3 +809,58 @@ def test_wmma_auto_without_float_atomics_runs_unsplit(arch):
         resolve_conv_split_k("wgrad", p, allow_unsplit=False, **kw)
     free = resolve_conv_split_k("wgrad", p, **{**kw, "reduction": "auto"})
     assert (free.split_k, free.two_stage) == (1, False)
+
+
+# A deep reduction into a small output: forward splits on gfx1250, dgrad splits
+# on CDNA only; DENSE splits wgrad.
+DEEP_K = ConvProblem(N=1, Hi=7, Wi=7, C=2048, K=512, Y=3, X=3, pH=1, pW=1)
+
+
+@pytest.mark.parametrize("direction", ["fwd", "wgrad", "dgrad"])
+@pytest.mark.parametrize(
+    "target_id", ["gfx942:sramecc+", "gfx950:xnack-", "gfx1250:sramecc+:xnack-"]
+)
+@pytest.mark.parametrize("problem", [DENSE, DEEP_K], ids=["dense", "deep_k"])
+def test_a_decorated_target_id_resolves_as_its_bare_arch(direction, target_id, problem):
+    kw = {
+        "dtype": "bf16",
+        "tile_m": 64,
+        "tile_n": 64,
+        "tile_k": 32,
+        "block_size": 256,
+    }
+    bare = resolve_conv_split_k(
+        direction, problem, arch=target_id.split(":", 1)[0], **kw
+    )
+    assert resolve_conv_split_k(direction, problem, arch=target_id, **kw) == bare
+
+
+@pytest.mark.parametrize(
+    "arch, cus",
+    [
+        ("gfx1201", 64),
+        ("gfx1200", 32),
+        ("gfx12-generic", 64),
+        ("gfx1100", 96),
+        ("gfx11-generic", 96),
+    ],
+)
+def test_rdna_parts_size_the_wgrad_split_by_their_own_cus(arch, cus):
+    # One dW tile over a deep reduction: CK's formula fills waves_per_cu *
+    # num_cus workgroups. An RDNA part outside the table would be sized for
+    # the 256-CU default instead.
+    from kernels.common.conv_split_k import (
+        _ARCH_NUM_XCDS,
+        WGRAD_ASSUMED_WAVES_PER_CU,
+    )
+    from rocke.helpers.split_k import DEFAULT_NUM_CUS, num_cus
+
+    d = select_split_k_wgrad(
+        wg_M=64, wg_N=64, wg_K=1 << 20, tile_m=64, tile_n=64, tile_k=32, arch=arch
+    )
+    assert cus != DEFAULT_NUM_CUS
+    assert num_cus(arch) == cus
+    assert d.target_ctas == WGRAD_ASSUMED_WAVES_PER_CU * cus
+    assert d.split_k == WGRAD_ASSUMED_WAVES_PER_CU * cus
+    # One die: a grouped launch needs no XCD snap.
+    assert _ARCH_NUM_XCDS[arch] == 1

@@ -58,10 +58,10 @@ struct CopyCase
     const char* name;
     bool f16; /* false -> bf16 */
     int n;
-    int load_align; /* <=0 -> default */
+    int load_align; /* 0 -> default */
     bool load_streaming;
     bool store_streaming;
-    int store_align; /* <=0 -> default */
+    int store_align; /* 0 -> default */
 };
 
 const CopyCase CASES[] = {

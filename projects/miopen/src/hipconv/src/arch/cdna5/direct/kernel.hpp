@@ -22,6 +22,25 @@ namespace hipconv::cdna5::direct
 {
 using arch = bunnies::arch_mi400;
 
+// out[n][p][q][g][k]
+//      = sum_{c=0}^{C-1} sum_{r=0}^{R-1} sum_{s=0}^{S-1}
+//          dy[g][k][r][s][c] * input[n][p*sh + r*dh - pad_h][q*sw + s*dw - pad_w][g][c]
+//
+// Summation bounds for sh=sw=dh=dw=1:
+//
+// out[n][p][q][g][k]
+//      = sum_{c=0}^{C-1} sum_{r=0}^{R-1} sum_{s=0}^{S-1}
+//          dy[g][k][r][s][c] * input[n][p + r - pad_h][q + s - pad_w][g][c]
+//
+// Out-of-bounds accesses are defined to be zero and do not contribute to the sum:
+//
+// p+r-pad_h >= 0 and p >= 0, therefore p >= max(0, pad_h-(kh-1))
+// p+r-pad_h < H  and p < P,  therefore p < min(H+pad_h, P)
+//
+// Therefore if p < max(0, pad_h-(kh-1)) or p >= min(H+pad_h, P) we can skip the
+// computation and write zeros. Likewise for q.
+//
+
 // Global modes
 BUNNIES_DEFINE_MODE(N, int64_t)
 BUNNIES_DEFINE_MODE(H, int64_t)
@@ -42,54 +61,63 @@ BUNNIES_DEFINE_MODE(Nblock, int)
 BUNNIES_DEFINE_MODE(Hring, int)
 BUNNIES_DEFINE_MODE(Wpad, int)
 
-template <Config cfg, hipconv::DataType DT>
-__device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
-                                              const ToType<DT>* __restrict__ wei,
-                                              double alpha,
-                                              double beta,
-                                              ToType<DT>* __restrict__ out,
-                                              int batch_size,
-                                              int groups,
-                                              int c_per_group,
-                                              int k_per_group,
-                                              int hi,
-                                              int wi,
-                                              int ho,
-                                              int wo,
-                                              int sy,
-                                              int sx,
-                                              int dy,
-                                              int dx,
-                                              int py,
-                                              int px)
+// Position of this thread block in the problem: the element offsets of the block's output tile.
+struct TileOrigin
 {
-    using T              = ToType<DT>;
-    namespace bn         = bunnies;
-    constexpr auto tiles = cfg.tiles();
+    int tile_n, tile_g, tile_h, tile_w, tile_k;
+};
 
-    constexpr auto jcfg         = JConfig{.th          = cfg.tile_size_h,
-                                          .tn          = cfg.tile_size_n,
-                                          .tw          = cfg.tile_size_w,
-                                          .wmma_size_j = cfg.wmma_size_j,
-                                          .tiles_j     = cfg.tiles_j};
-    using j_to_hnw              = JToHNW<jcfg>;
-    constexpr auto reg_stride_j = jcfg.reg_stride_j();
+// The part of the input that the block's output tile reads. h0/w0 are the (clamped) input
+// coordinates of its first input pixel; h0_adj/w0_adj are the number of leading ring rows / padded
+// columns that lie in the zero padding.
+struct InputWindow
+{
+    int h0, w0;
+    int h0_adj, w0_adj;
+    // Does the window contribute nonzeros?
+    bool is_nonzero = true;
+};
+
+// Implementation of the direct NHWC convolution for CDNA5. The kernel is split into three phases
+// that the caller runs in order:
+//
+//   prologue()  - zero the LDS columns that TDM will not write, set up the TDM descriptors and
+//                 issue the pre-load of the first channel tile.
+//   main_loop() - loop over channel tiles and filter taps, overlapping TDM loads, LDS reads and
+//                 WMMA. Accumulates into c_acc.
+//   epilogue()  - convert the accumulators, stage them through LDS and store them to global
+//                 memory.
+template <Config cfg, hipconv::DataType DT>
+class Conv2dDirectNhwc
+{
+public:
+    using T = ToType<DT>;
+
+    static constexpr auto tiles = cfg.tiles();
+
+    static constexpr auto jcfg         = JConfig{.th          = cfg.tile_size_h,
+                                                 .tn          = cfg.tile_size_n,
+                                                 .tw          = cfg.tile_size_w,
+                                                 .wmma_size_j = cfg.wmma_size_j,
+                                                 .tiles_j     = cfg.tiles_j};
+    using j_to_hnw                     = JToHNW<jcfg>;
+    static constexpr auto reg_stride_j = jcfg.reg_stride_j();
     static_assert(reg_stride_j * cfg.wmma_size_j * cfg.tiles_j ==
                   cfg.tile_size_n * cfg.tile_size_h * cfg.tile_size_w);
 
-    constexpr auto reg_stride_k     = cfg.wmma_size_k * cfg.tiles_k;
-    constexpr auto reg_tiles_j      = reg_stride_j;
-    constexpr auto reg_tiles_k      = cfg.tile_size_k / reg_stride_k;
-    constexpr auto c_parts          = cfg.tile_size_c / (cfg.reg_tiles_c * cfg.wmma_size_c);
-    constexpr auto tile_size_h_ring = cfg.tile_size_h + 1;
-    constexpr auto tile_size_w_pad  = cfg.tile_size_w + (cfg.kw - 1);
+    static constexpr auto reg_stride_k     = cfg.wmma_size_k * cfg.tiles_k;
+    static constexpr auto reg_tiles_j      = reg_stride_j;
+    static constexpr auto reg_tiles_k      = cfg.tile_size_k / reg_stride_k;
+    static constexpr auto c_parts          = cfg.tile_size_c / (cfg.reg_tiles_c * cfg.wmma_size_c);
+    static constexpr auto tile_size_h_ring = cfg.tile_size_h + 1;
+    static constexpr auto tile_size_w_pad  = cfg.tile_size_w + (cfg.kw - 1);
     // TF32 is stored as fp32 and split into a (big, small) bf16 pair on the way into the MMA.
-    constexpr bool is_tf32 = DT == hipconv::DataType::tf32;
-    constexpr auto data_fmt =
-        is_tf32 ? bn::fpfmt::e8m10
-                : (DT == hipconv::DataType::bf16 ? bn::fpfmt::e8m7 : bn::fpfmt::e5m10);
-    constexpr auto compute_fmt = is_tf32 ? bn::fpfmt::e8m10_e8m7x2split : data_fmt;
-    constexpr bool is_dgrad    = cfg.direction == hipconv::Direction::Dgrad;
+    static constexpr bool is_tf32 = DT == hipconv::DataType::tf32;
+    static constexpr auto data_fmt =
+        is_tf32 ? bunnies::fpfmt::e8m10
+                : (DT == hipconv::DataType::bf16 ? bunnies::fpfmt::e8m7 : bunnies::fpfmt::e5m10);
+    static constexpr auto compute_fmt = is_tf32 ? bunnies::fpfmt::e8m10_e8m7x2split : data_fmt;
+    static constexpr bool is_dgrad    = cfg.direction == hipconv::Direction::Dgrad;
     // Dgrad keeps the weights k-major in LDS, so the transpose happens on the register read.
     // ds_load_tr16_b128 shuffles 16-bit lanes and has no 32-bit sibling, so tf32 gathers the
     // operand one element per round instead. Fprop is c-major either way: a round covers a
@@ -106,47 +134,28 @@ __device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
     static_assert(cfg.elem_bytes == sizeof(T),
                   "config elem_bytes must match the element width it is instantiated with");
 
-    using mat_a         = arch::matrix<data_fmt, cfg.wmma_size_k, cfg.wmma_size_c, bn::use::A>;
-    using mat_b         = arch::matrix<data_fmt, cfg.wmma_size_c, cfg.wmma_size_j, bn::use::B>;
-    using mat_a_compute = arch::matrix<compute_fmt, cfg.wmma_size_k, cfg.wmma_size_c, bn::use::A>;
-    using mat_b_compute = arch::matrix<compute_fmt, cfg.wmma_size_c, cfg.wmma_size_j, bn::use::B>;
+    using mat_a = arch::matrix<data_fmt, cfg.wmma_size_k, cfg.wmma_size_c, bunnies::use::A>;
+    using mat_b = arch::matrix<data_fmt, cfg.wmma_size_c, cfg.wmma_size_j, bunnies::use::B>;
+    using mat_a_compute =
+        arch::matrix<compute_fmt, cfg.wmma_size_k, cfg.wmma_size_c, bunnies::use::A>;
+    using mat_b_compute =
+        arch::matrix<compute_fmt, cfg.wmma_size_c, cfg.wmma_size_j, bunnies::use::B>;
     using mat_c_acc =
-        arch::matrix<bn::fpfmt::e8m23, cfg.wmma_size_k, cfg.wmma_size_j, bn::use::Acc>;
-    using mat_c        = arch::matrix<data_fmt, cfg.wmma_size_k, cfg.wmma_size_j, bn::use::Acc>;
-    using rt_a         = bn::reg_tile<mat_a, reg_tiles_k, cfg.reg_tiles_c>;
-    using rt_a_compute = bn::reg_tile<mat_a_compute, reg_tiles_k, cfg.reg_tiles_c>;
-    using rt_b         = bn::reg_tile<mat_b, cfg.reg_tiles_c, reg_tiles_j>;
-    using rt_b_compute = bn::reg_tile<mat_b_compute, cfg.reg_tiles_c, reg_tiles_j>;
-    using rt_c_acc     = bn::reg_tile<mat_c_acc, reg_tiles_k, reg_tiles_j>;
-
-    const int lane      = bn::lane_id();
-    const int wave_id   = bn::wave_id();
-    const int wave_id_k = __builtin_amdgcn_readfirstlane(wave_id % cfg.tiles_k);
-    const int wave_id_j = __builtin_amdgcn_readfirstlane(wave_id / cfg.tiles_k);
-    const int wave_rank = __builtin_amdgcn_readfirstlane(wave_id / 4);
-
-    const auto [block_n, tile_g, block_h, block_w, block_k] =
-        linear_index_to_coord(static_cast<int>(blockIdx.x),
-                              std::array<int, 5>{divup(batch_size, cfg.tile_size_n),
-                                                 groups,
-                                                 divup(ho, cfg.tile_size_h),
-                                                 divup(wo, cfg.tile_size_w),
-                                                 divup(k_per_group, cfg.tile_size_k)});
-    const auto tile_n = block_n * cfg.tile_size_n;
-    const auto tile_h = block_h * cfg.tile_size_h;
-    const auto tile_w = block_w * cfg.tile_size_w;
-    const auto tile_k = block_k * cfg.tile_size_k;
-
-    rt_c_acc c_acc = {};
-
+        arch::matrix<bunnies::fpfmt::e8m23, cfg.wmma_size_k, cfg.wmma_size_j, bunnies::use::Acc>;
+    using mat_c = arch::matrix<data_fmt, cfg.wmma_size_k, cfg.wmma_size_j, bunnies::use::Acc>;
+    using rt_a  = bunnies::reg_tile<mat_a, reg_tiles_k, cfg.reg_tiles_c>;
+    using rt_a_compute = bunnies::reg_tile<mat_a_compute, reg_tiles_k, cfg.reg_tiles_c>;
+    using rt_b         = bunnies::reg_tile<mat_b, cfg.reg_tiles_c, reg_tiles_j>;
+    using rt_b_compute = bunnies::reg_tile<mat_b_compute, cfg.reg_tiles_c, reg_tiles_j>;
+    using rt_c_acc     = bunnies::reg_tile<mat_c_acc, reg_tiles_k, reg_tiles_j>;
 
     // No good reason to choose different padding values, so assert.
     static_assert(cfg.tile_size_c_pad_amount == 4);
     static_assert(cfg.tiles_k * cfg.tile_size_k_pad_amount == 8);
 
-    constexpr int num_buf           = 2;
-    constexpr int c_pad_amount_item = cfg.tile_size_c_pad_amount * 4 / sizeof(T);
-    constexpr int k_pad_amount_item = cfg.tile_size_k_pad_amount * 4 / sizeof(T);
+    static constexpr int num_buf           = 2;
+    static constexpr int c_pad_amount_item = cfg.tile_size_c_pad_amount * 4 / sizeof(T);
+    static constexpr int k_pad_amount_item = cfg.tile_size_k_pad_amount * 4 / sizeof(T);
 
     // Fprop
     // =====
@@ -179,9 +188,10 @@ __device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
     // TDM. Padding is added after num_buf * (tile_size_k / tiles_k) items, so with tiles_k = 2 we
     // add the padding twice, giving 8 dwords of padding between rows, the optimal value for
     // ds_read_tr16_b128.
-    constexpr auto wei_lds_shape = Kpart(cfg.tiles_k) + Kblock(cfg.tile_size_k / cfg.tiles_k) +
-                                   Buf(num_buf) + Cpad(cfg.tile_size_c);
-    constexpr auto wei_lds_stride = [&] {
+    static constexpr auto wei_lds_shape = Kpart(cfg.tiles_k) +
+                                          Kblock(cfg.tile_size_k / cfg.tiles_k) + Buf(num_buf) +
+                                          Cpad(cfg.tile_size_c);
+    static constexpr auto wei_lds_stride = [] {
         if constexpr(is_dgrad)
         {
             constexpr auto buf_stride  = Kblock(wei_lds_shape).get();
@@ -195,9 +205,9 @@ __device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
         constexpr auto part_stride = Kblock(wei_lds_shape).get() * k_stride;
         return Kpart(part_stride) + Kblock(k_stride) + Buf(buf_stride) + Cpad(1);
     }();
-    constexpr int wei_lds_size = is_dgrad
-                                     ? Cpad(wei_lds_shape).get() * Cpad(wei_lds_stride).get()
-                                     : Kpart(wei_lds_shape).get() * Kpart(wei_lds_stride).get();
+    static constexpr int wei_lds_size =
+        is_dgrad ? Cpad(wei_lds_shape).get() * Cpad(wei_lds_stride).get()
+                 : Kpart(wei_lds_shape).get() * Kpart(wei_lds_stride).get();
 
     // The input tensor is stored in LDS as
     // tile_size_h_ring x tile_size_w_pad x num_buf x tile_size_c
@@ -209,9 +219,10 @@ __device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
     // Continue with channels of buffer 0 with w=-px+1
     // ...
     // Padding is added to avoid LDS bank conflicts.
-    constexpr auto in_lds_shape = Hring(tile_size_h_ring) + Nblock(cfg.tile_size_n) +
-                                  Wpad(tile_size_w_pad) + Buf(num_buf) + Cpad(cfg.tile_size_c);
-    constexpr auto in_lds_stride = [&in_lds_shape] {
+    static constexpr auto in_lds_shape = Hring(tile_size_h_ring) + Nblock(cfg.tile_size_n) +
+                                         Wpad(tile_size_w_pad) + Buf(num_buf) +
+                                         Cpad(cfg.tile_size_c);
+    static constexpr auto in_lds_stride = [] {
         constexpr int buf_stride = Cpad(in_lds_shape).get();
         constexpr int w_stride   = Buf(in_lds_shape).get() * buf_stride + c_pad_amount_item;
         constexpr int n_stride   = w_stride * Wpad(in_lds_shape).get();
@@ -219,104 +230,137 @@ __device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
         return Hring(h_stride) + Nblock(n_stride) + Wpad(w_stride) + Buf(buf_stride) + Cpad(1);
     }();
     // We need space for extra w because we may slightly write over bounds
-    constexpr int in_lds_size = Hring(in_lds_shape).get() * Hring(in_lds_stride).get() +
-                                std::min(cfg.max_px, tile_size_w_pad) * Wpad(in_lds_stride).get();
+    static constexpr int in_lds_size =
+        Hring(in_lds_shape).get() * Hring(in_lds_stride).get() +
+        std::min(cfg.max_px, tile_size_w_pad) * Wpad(in_lds_stride).get();
 
-
-    constexpr int tile_size_k_out = cfg.tile_size_k + cfg.tile_size_k_pad_out * 4 / sizeof(T);
-    constexpr int out_lds_size =
+    static constexpr int tile_size_k_out =
+        cfg.tile_size_k + cfg.tile_size_k_pad_out * 4 / sizeof(T);
+    static constexpr int out_lds_size =
         cfg.tile_size_n * cfg.tile_size_h * cfg.tile_size_w * tile_size_k_out;
 
-    __shared__ T lds[std::max(wei_lds_size + in_lds_size, out_lds_size)];
-    T* wei_lds = &lds[0];
-    T* in_lds  = &lds[wei_lds_size];
+    // Number of elements of shared memory the caller must provide. The weights, the input and the
+    // output staging buffer share the same storage; the latter is only used after the main loop.
+    static constexpr int lds_size = std::max(wei_lds_size + in_lds_size, out_lds_size);
 
-    auto const flip_rs = [](int r, int s) -> std::array<int, 2> {
+private:
+    // Global input (n, h, w, g, c) and weights (g, k, r, s, c) views. Dgrad transposes k and c of
+    // the weights.
+    using in_view_t      = bunnies::named_view<std::tuple<N, H, W, G, C>, const T*>;
+    using wei_view_t     = bunnies::named_view<std::tuple<G, K, R, S, C>, const T*>;
+    using in_mode_order  = bunnies::mode_order<C, G, W, H, N>;
+    using wei_mode_order = std::conditional_t<is_dgrad,
+                                              bunnies::mode_order<K, S, R, C, G>,
+                                              bunnies::mode_order<C, S, R, K, G>>;
+    using in_lds_view_t =
+        decltype(bunnies::named_view(std::declval<T*>(), in_lds_shape, in_lds_stride));
+    using wei_lds_view_t =
+        decltype(bunnies::named_view(std::declval<T*>(), wei_lds_shape, wei_lds_stride));
+    using wei_lds_view_part_t = decltype(std::declval<wei_lds_view_t>().moved_by(Kpart(0)));
+
+    // Map the filter tap (r, s) in iteration order to the tap that is read from memory. Dgrad
+    // convolves with the flipped filter.
+    static constexpr auto flip_rs(int r, int s) -> std::array<int, 2>
+    {
         if constexpr(is_dgrad)
         {
             r = cfg.kh - 1 - r;
             s = cfg.kw - 1 - s;
         }
         return {r, s};
-    };
+    }
 
-    // When h0 is negative we add -h0 to start at h=0. Same for w0.
-    int h0           = tile_h - py;
-    int w0           = tile_w - px;
-    const int h0_adj = std::min(tile_size_h_ring, std::max(0, -h0));
-    const int w0_adj = std::min(tile_size_w_pad, std::max(0, -w0));
-    h0 += h0_adj;
-    w0 += w0_adj;
+    // Input LDS layout for bunnies::lds_load
+    __device__ __forceinline__ auto in_lds_layout(int buf, int r, int s, int part_c) const
+    {
+        const int neg_h0_adj_mod_ring_size = mod(-win.h0_adj, tile_size_h_ring);
+        return [this, neg_h0_adj_mod_ring_size, buf, r, s, part_c](int cb, int jb, int c, int j) {
+            c += (cfg.reg_tiles_c * part_c + cb) * cfg.wmma_size_c;
+            auto const [h, n, w] = j_to_hnw::convert(wave_id_j, jb, j);
+            // Below we have a * s % (b * s) which is equivalent to a % b * s. So why don't we
+            // use the second -- simpler -- form here? All variables, a, s, and b, are either
+            // constant or scalar, therefore it's computation is cheap in the sense that it can
+            // always be co-executed. However, if we use the second form, the compiler
+            // generates a v_mad_u32 instruction to multiply a%b with s and add it to the
+            // offset in VGPR. We cannot co-execute v_mad_u32 with WMMA, therefore we prefer
+            // the first form.
+            auto h_stride = Hring(in_lds_stride).get();
+            auto hoffset =
+                (h + r + neg_h0_adj_mod_ring_size) * h_stride % (tile_size_h_ring * h_stride);
+            return hoffset + in_lds_view.delta(Nblock(n) + Wpad(w + s) + Buf(buf) + Cpad(c));
+        };
+    }
 
-    const auto in_view =
-        bn::make_named_memref(in,
-                              N(batch_size) + H(hi) + W(wi) + G(groups) + C(c_per_group),
-                              bn::mode_order<C, G, W, H, N>{})
-            .moved_by(N(tile_n) + H(h0) + W(w0) + G(tile_g));
+    // Weights LDS layout for bunnies::lds_load
+    __device__ __forceinline__ auto wei_lds_layout(int buf, int part_c) const
+    {
+        return [this, buf, part_c](int kb, int cb, int k, int c) {
+            c += (cfg.reg_tiles_c * part_c + cb) * cfg.wmma_size_c;
+            return wei_lds_view_part.delta(Kblock(cfg.wmma_size_k * kb + k) + Buf(buf) + Cpad(c));
+        };
+    }
 
-    const auto wei_view = [&] {
-        const auto shape = G(groups) + K(k_per_group) + R(cfg.kh) + S(cfg.kw) + C(c_per_group);
+    __device__ __forceinline__ void prefetch_weights_block(int r, int s, int c) const
+    {
+        // Wave group 0 is ahead of wave group 1 by one stage, so call prefetch only from
+        // group 0
+        auto base = wei_view(K(blk.tile_k) + R(r) + S(s) + C(c));
+        using pf_inst =
+            arch::prefetch_gvs<arch::make_prefetch_flags<arch::scope::SE, arch::th::RT, true>()>;
+        const auto& wei_stride = wei_view.stride();
         if constexpr(is_dgrad)
         {
-            // Transpose k and c
-            return bn::make_named_memref(wei, shape, bn::mode_order<K, S, R, C, G>{});
+            constexpr auto pf_cfg = bunnies::prefetch_config{
+                .rows = cfg.tile_size_c, .cols = cfg.tile_size_k, .num_waves = 4};
+            bunnies::prefetch_matrix<pf_inst, pf_cfg>(wave_id, base, C(wei_stride).get());
         }
         else
         {
-            return bn::make_named_memref(wei, shape, bn::mode_order<C, S, R, K, G>{});
-        }
-    }().moved_by(G(tile_g) + K(tile_k));
-
-    auto in_lds_view       = bn::named_view(in_lds, in_lds_shape, in_lds_stride);
-    auto wei_lds_view      = bn::named_view(wei_lds, wei_lds_shape, wei_lds_stride);
-    auto wei_lds_view_part = wei_lds_view.moved_by(Kpart(wave_id_k));
-
-
-    // Initial bytes may not be written so we zero them here
-    if(wave_id == 0)
-    {
-        constexpr int line_size = num_buf * cfg.tile_size_c;
-        static_assert(line_size % arch::wave_size == 0);
-        constexpr int BytesPerLane =
-            std::min(16, static_cast<int>(line_size / arch::wave_size * sizeof(T)));
-        constexpr int ItemsPerLane = BytesPerLane / sizeof(T);
-        auto* in_ptr               = in_lds + lane * ItemsPerLane;
-        __attribute__((ext_vector_type(BytesPerLane / sizeof(uint32_t)))) uint32_t zero = 0;
-        for(int w = 0; w < w0_adj; ++w)
-        {
-#pragma unroll
-            for(int c = 0; c < line_size; c += arch::wave_size * ItemsPerLane)
-                arch::ds_store<BytesPerLane>::store(in_ptr + c, &zero);
-            in_ptr += Wpad(in_lds_stride).get();
+            constexpr auto pf_cfg = bunnies::prefetch_config{
+                .rows = cfg.tile_size_k, .cols = cfg.tile_size_c, .num_waves = 4};
+            bunnies::prefetch_matrix<pf_inst, pf_cfg>(wave_id, base, K(wei_stride).get());
         }
     }
 
-    auto const init_tdm = [&](arch::tdm_group0& d0, arch::tdm_group1& d1, arch::tdm_group2& d2) {
-        d1.data_size = bn::ilog2(sizeof(T));
+    // Program the TDM descriptors d0, d1 and d2 of this wave: CU0 loads the input tensor and CU1
+    // the weights tensor; all other waves do not issue TDM loads.
+    __device__ __forceinline__ void init_tdm()
+    {
+        const int h0_adj = win.h0_adj;
+        const int w0_adj = win.w0_adj;
+        const int tile_k = blk.tile_k;
+
+        d1.data_size = bunnies::ilog2(sizeof(T));
         if(wave_id_k == 0 && wave_id_j < 2)
         {
             // CU 0 loads the input tensor
             //
-            // The first SIMD (wave_id_j == 0) is responsible for pre-loading the in_lds for the
-            // next c-tile. The initial offset tile_w-px may be negative. In the following we let
-            // tile_w=0 and px=1: We would need to start reading at w=-1 but cannot as TDM does not
-            // have negative OOB checks. Instead, we start reading at w=0 but start writing to LDS
-            // at w0_adj=1. We have tile_dim_1 = tile_size_w_pad, hence the write slightly "leaks"
-            // into the next row of the image. That is, w0_adj rows are written to h+1. That
-            // behaviour is intended, as with setting tensor_dim1 = tile_size_w_pad - w0_adj we
-            // ensure that the first w0 rows of h+1 are correctly initialized with zeros. The in_lds
-            // buffer is made slightly bigger to account for the "OOB" write, and the initial w0_adj
-            // columns are set to zero in the preamble of the kernel.
+            // The first SIMD (wave_id_j == 0) is responsible for pre-loading the in_lds for
+            // the next c-tile. The initial offset tile_w-px may be negative. In the
+            // following we let tile_w=0 and px=1: We would need to start reading at w=-1
+            // but cannot as TDM does not have negative OOB checks. Instead, we start
+            // reading at w=0 but start writing to LDS at w0_adj=1. We have tile_dim_1 =
+            // tile_size_w_pad, hence the write slightly "leaks" into the next row of the
+            // image. That is, w0_adj rows are written to h+1. That behaviour is intended,
+            // as with setting tensor_dim1 = tile_size_w_pad - w0_adj we ensure that the
+            // first w0 rows of h+1 are correctly initialized with zeros. The in_lds buffer
+            // is made slightly bigger to account for the "OOB" write, and the initial
+            // w0_adj columns are set to zero in the preamble of the kernel.
             //
             // Instead, we start reading at w=0 (with w0_adj=1), but use the tensor_dim1
-            // OOB check to let TDM write zeros to tile_size_w_pad-1. In the LDS read we then read
-            // from (w + tile_size_w_pad - w0_adj) % tile_size_w_pad. Therefore, if w0-w0_adj=-1 we
-            // correctly read zeros from tile_size_w_pad-1.
+            // OOB check to let TDM write zeros to tile_size_w_pad-1. In the LDS read we
+            // then read from (w + tile_size_w_pad - w0_adj) % tile_size_w_pad. Therefore,
+            // if w0-w0_adj=-1 we correctly read zeros from tile_size_w_pad-1.
             //
-            // The second SIMD (wave_id_j == 0) updates the h ring buffer on the go, because we only
-            // have a capacity of tile_size_h+1. Here, we also start reading at h=0 but we start
-            // writing to LDS at row 0. In the LDS read we then need to correct the read location by
-            // h0_adj as following: from (h + tile_size_h_ring - h0_adj) % tile_size_h_ring.
+            // The second SIMD (wave_id_j == 1) updates the h ring buffer on the go, because
+            // we only have a capacity of tile_size_h+1. Here, we also start reading at h=0
+            // but we start writing to LDS at row 0. In the LDS read we then need to
+            // correct the read location by h0_adj as following:
+            // from (h + tile_size_h_ring - h0_adj) % tile_size_h_ring.
+            // For the refill TDM, there is no leaking into the next row, as we limit tensor_dim1 to
+            // tile_size_w_pad - w0_adj and we use TDM iterate mode to set a non-canonical stride.
+            // (In contrast to first SIMD, we only read a single row at a time, therefore iterate
+            // mode is applicable.)
             //
             d1.tile_dim0 = cfg.tile_size_c;
             arch::configure_padding<sizeof(T), Cpad(in_lds_shape).get(), Wpad(in_lds_stride).get()>(
@@ -328,41 +372,44 @@ __device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
 
             const auto& in_shape  = in_view.shape();
             const auto& in_stride = in_view.stride();
+            // w0_adj < tile_size_w_pad if win.is_nonzero
             d1.set_tensor_dim1(
                 std::min(W(in_shape).get(), static_cast<int64_t>(tile_size_w_pad - w0_adj)));
             d1.set_tensor_stride1(W(in_stride).get());
             d1.tile_dim1 = Wpad(in_lds_shape).get();
 
-            if constexpr(cfg.tile_size_n > 1)
+            if(wave_id_j == 1)
             {
-                d2.set_tensor_dim2(N(in_shape).get());
-                d1.set_tensor_stride2(N(in_stride).get());
-                d1.tile_dim2 = Nblock(in_lds_shape).get();
-
-                d2.set_tensor_stride3(H(in_stride).get());
-                if(wave_id_j == 0)
+                d1.tile_dim1 -= w0_adj;
+                if constexpr(cfg.tile_size_n > 1)
                 {
-                    d2.set_tensor_dim3(std::min(H(in_shape).get(),
-                                                static_cast<int64_t>(tile_size_h_ring - h0_adj)));
-                    d2.tile_dim3 = Hring(in_lds_shape).get();
-                }
-                else
-                {
-                    d2.tile_dim3 = 1;
+                    d1.iterate_enable = 1;
+                    d2.set_lds_addr_increment(Nblock(in_lds_stride).get());
+                    d2.set_global_addr_increment(N(in_stride).get());
+                    d2.set_iterate_count(std::min(
+                        N(in_shape).get(), static_cast<int64_t>(Nblock(in_lds_shape).get())));
                 }
             }
             else
             {
-                d1.set_tensor_stride2(H(in_stride).get());
-                if(wave_id_j == 0)
+                const int64_t h_bound1 = std::max(0, tile_size_h_ring - h0_adj);
+                const int64_t h_bound2 = H(in_shape).get();
+                const auto h_bound     = std::min(h_bound1, h_bound2);
+                if constexpr(cfg.tile_size_n > 1)
                 {
-                    d2.set_tensor_dim2(std::min(H(in_shape).get(),
-                                                static_cast<int64_t>(tile_size_h_ring - h0_adj)));
-                    d1.tile_dim2 = Hring(in_lds_shape).get();
+                    d2.set_tensor_dim2(N(in_shape).get());
+                    d1.set_tensor_stride2(N(in_stride).get());
+                    d1.tile_dim2 = Nblock(in_lds_shape).get();
+
+                    d2.set_tensor_stride3(H(in_stride).get());
+                    d2.set_tensor_dim3(h_bound);
+                    d2.tile_dim3 = Hring(in_lds_shape).get();
                 }
                 else
                 {
-                    d1.tile_dim2 = 1;
+                    d1.set_tensor_stride2(H(in_stride).get());
+                    d2.set_tensor_dim2(h_bound);
+                    d1.tile_dim2 = Hring(in_lds_shape).get();
                 }
             }
             d0.set_lds_addr(in_lds_view(Wpad(w0_adj)));
@@ -404,323 +451,535 @@ __device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
         {
             d0.count = 0;
         }
-    };
+    }
 
-    auto d0 = arch::tdm_group0{};
-    auto d1 = arch::tdm_group1{};
-    auto d2 = arch::tdm_group2{};
-    auto d3 = arch::tdm_group3{};
-    auto d4 = arch::tdm_group4{};
-    init_tdm(d0, d1, d2);
+public:
+    // The tile this thread block works on is not set yet: call set_block() before prologue().
+    __device__ __forceinline__ Conv2dDirectNhwc(T* lds,
+                                                const T* in,
+                                                const T* wei,
+                                                T* out,
+                                                int batch_size,
+                                                int groups,
+                                                int c_per_group,
+                                                int k_per_group,
+                                                int hi,
+                                                int wi,
+                                                int ho,
+                                                int wo)
+        : lds(lds)
+        , out(out)
+        , batch_size(batch_size)
+        , groups(groups)
+        , c_per_group(c_per_group)
+        , k_per_group(k_per_group)
+        , hi(hi)
+        , wi(wi)
+        , ho(ho)
+        , wo(wo)
+        , wave_id(bunnies::wave_id())
+        , wave_id_k(__builtin_amdgcn_readfirstlane(wave_id % cfg.tiles_k))
+        , wave_id_j(__builtin_amdgcn_readfirstlane(wave_id / cfg.tiles_k))
+        , wave_rank(__builtin_amdgcn_readfirstlane(wave_id / 4))
+        , blk{}
+        , win{}
+        , in_base(
+              bunnies::make_named_memref(in,
+                                         N(batch_size) + H(hi) + W(wi) + G(groups) + C(c_per_group),
+                                         in_mode_order{}))
+        , wei_base(bunnies::make_named_memref(wei,
+                                              G(groups) + K(k_per_group) + R(cfg.kh) + S(cfg.kw) +
+                                                  C(c_per_group),
+                                              wei_mode_order{}))
+        , in_view(in_base)
+        , wei_view(wei_base)
+        , in_lds_view(bunnies::named_view(lds + wei_lds_size, in_lds_shape, in_lds_stride))
+        , wei_lds_view(bunnies::named_view(lds, wei_lds_shape, wei_lds_stride))
+        , wei_lds_view_part(wei_lds_view.moved_by(Kpart(wave_id_k)))
+    {
+    }
 
-    __syncthreads();
-    // Pre-load; no pre-load for wave_id_j=1
-    if(wave_id_j == 0)
-        arch::tensor_load_to_lds(d0, d1, d2, d3, d4);
+    // Replace the tile this thread block works on, and derive the input window it reads from the
+    // padding (py, px). The input and weights views are anchored at the tile and the window, so
+    // they are rebuilt as well. Must be called before prologue(), which programs the TDM
+    // descriptors from them.
+    __device__ __forceinline__ void set_block(const TileOrigin& origin, int py, int px)
+    {
+        blk = origin;
 
-    // Input LDS layout for bn::lds_load
-    auto const in_lds_layout = [&](int buf, int r, int s, int part_c) {
-        return [&, buf, r, s, part_c, wave_id_k](int cb, int jb, int c, int j) {
-            c += (cfg.reg_tiles_c * part_c + cb) * cfg.wmma_size_c;
-            auto const [h, n, w] = j_to_hnw::convert(wave_id_j, jb, j);
-            // Below we have a * s % (b * s) which is equivalent to a % b * s. So why don't we use
-            // the second -- simpler -- form here? All variables, a, s, and b, are either constant
-            // or scalar, therefore it's computation is cheap in the sense that it can always be
-            // co-executed. However, if we use the second form, the compiler generates a v_mad_u32
-            // instruction to multiply a%b with s and add it to the offset in VGPR. We cannot
-            // co-execute v_mad_u32 with WMMA, therefore we prefer the first form.
-            auto h_stride = Hring(in_lds_stride).get();
-            auto hoffset =
-                (h + r + tile_size_h_ring - h0_adj) * h_stride % (tile_size_h_ring * h_stride);
-            return hoffset + in_lds_view.delta(Nblock(n) + Wpad(w + s) + Buf(buf) + Cpad(c));
-        };
-    };
-    // Weights LDS layout for bn::lds_load
-    auto const wei_lds_layout = [&](int buf, int part_c) {
-        return [&, buf, part_c](int kb, int cb, int k, int c) {
-            c += (cfg.reg_tiles_c * part_c + cb) * cfg.wmma_size_c;
-            return wei_lds_view_part.delta(Kblock(cfg.wmma_size_k * kb + k) + Buf(buf) + Cpad(c));
-        };
-    };
+        // Check if p >= max(0, pad_h-(kh-1)) and p < min(H+pad_h, P)
+        // for all p in [tile_h; tile_h + tile_size_h-1]
+        const auto p_lo      = std::max(0, py - (cfg.kh - 1));
+        const auto p_hi      = std::min(hi + py, ho);
+        const bool p_nonzero = origin.tile_h + cfg.tile_size_h - 1 >= p_lo && origin.tile_h < p_hi;
 
-    auto const prefetch_weights_block = [&](int r, int s, int c) {
-        // Wave group 0 is ahead of wave group 1 by one stage, so call prefetch only from group 0
-        auto base = wei_view(K(tile_k) + R(r) + S(s) + C(c));
-        using pf_inst =
-            arch::prefetch_gvs<arch::make_prefetch_flags<arch::scope::SE, arch::th::RT, true>()>;
-        const auto& wei_stride = wei_view.stride();
-        if constexpr(is_dgrad)
+        // Check if q >= max(0, pad_w-(kw-1)) and q < min(W+pad_w, Q)
+        // for all q in [tile_w; tile_w + tile_size_w-1]
+        const auto q_lo      = std::max(0, px - (cfg.kw - 1));
+        const auto q_hi      = std::min(wi + px, wo);
+        const bool q_nonzero = origin.tile_w + cfg.tile_size_w - 1 >= q_lo && origin.tile_w < q_hi;
+
+        // When h0 is negative we add -h0 to start at h=0. Same for w0.
+        win.h0     = blk.tile_h - py;
+        win.w0     = blk.tile_w - px;
+        win.h0_adj = std::max(0, -win.h0);
+        win.w0_adj = std::max(0, -win.w0);
+        win.h0 += win.h0_adj;
+        win.w0 += win.w0_adj;
+        win.is_nonzero = p_nonzero && q_nonzero;
+        // When is_nonzero = true, then
+        // w0 = tile_w - pad_w
+        //    >= max(0, pad_w-(kw-1)) - (tile_size_w - 1) - pad_w
+        // Let 0 <= pad_w <= kw-1, then
+        //      w0 >= -(tile_size_w - 1) - (kw-1)
+        // Let pad_w > kw-1, then
+        //      w0 >= pad_w-(kw-1) - (cfg.tile_size_w - 1) - pad_w
+        //         =  -(kw-1) - (tile_size_w - 1)
+        // Hence,
+        // w0 >=  -(kw-1) - (tile_size_w - 1)
+        // and thus
+        // 0 <= w0_adj <= (tile_size_w - 1) + (kw-1) < tile_size_w_pad
+        // Likewise, it follows
+        // 0 <= h0_adj <= (tile_size_h - 1) + (kh-1)
+
+        in_view  = in_base.moved_by(N(blk.tile_n) + H(win.h0) + W(win.w0) + G(blk.tile_g));
+        wei_view = wei_base.moved_by(G(blk.tile_g) + K(blk.tile_k));
+    }
+
+    // Zero the LDS columns TDM does not write, program the TDM descriptors and start loading the
+    // first channel tile.
+    __device__ __forceinline__ void prologue()
+    {
+        if(!win.is_nonzero)
+            return;
+        const int lane   = bunnies::lane_id();
+        const int w0_adj = win.w0_adj;
+        T* const in_lds  = lds + wei_lds_size;
+
+        // Initial bytes may not be written so we zero them here
+        if(wave_id == 0)
         {
-            constexpr auto pf_cfg = bn::prefetch_config{
-                .rows = cfg.tile_size_c, .cols = cfg.tile_size_k, .num_waves = 4};
-            bn::prefetch_matrix<pf_inst, pf_cfg>(wave_id, base, C(wei_stride).get());
-        }
-        else
-        {
-            constexpr auto pf_cfg = bn::prefetch_config{
-                .rows = cfg.tile_size_k, .cols = cfg.tile_size_c, .num_waves = 4};
-            bn::prefetch_matrix<pf_inst, pf_cfg>(wave_id, base, K(wei_stride).get());
-        }
-    };
-
-    rt_a a;
-    rt_a_compute a_compute;
-    rt_b b;
-    rt_b_compute b_compute;
-
-    // We specialize for CU0 (wave_id_k == 0) and CU1 (wave_id_k == 1)
-    auto const inner_conv = [&]<bool IsKTile1>() {
-        // Split barrier for 8-wave schedule
-        if(wave_rank == 1)
-        {
-            __builtin_amdgcn_s_barrier();
-        }
-        __builtin_amdgcn_sched_barrier(0);
-
-        int buf_in  = 0;
-        int buf_wei = 0;
-#pragma nounroll
-        for(int c = 0; c < c_per_group; c += cfg.tile_size_c)
-        {
-            __builtin_amdgcn_s_wait_tensorcnt(0);
-            if constexpr(!IsKTile1)
+            constexpr int line_size = num_buf * cfg.tile_size_c;
+            static_assert(line_size % arch::wave_size == 0);
+            constexpr int BytesPerLane =
+                std::min(16, static_cast<int>(line_size / arch::wave_size * sizeof(T)));
+            constexpr int ItemsPerLane = BytesPerLane / sizeof(T);
+            auto* in_ptr               = in_lds + lane * ItemsPerLane;
+            __attribute__((ext_vector_type(BytesPerLane / sizeof(uint32_t)))) uint32_t zero = 0;
+            // w0_adj < tile_size_w_pad if win.is_nonzero
+            for(int w = 0; w < w0_adj; ++w)
             {
-                const int cnext = c + cfg.tile_size_c;
-                if(wave_id_j == 0 && cnext < c_per_group)
-                {
-                    // Load input tensor for next c-trip
-                    d0.set_global_addr(in_view(C(cnext)));
-                    d1.set_tensor_dim0(c_per_group - cnext);
-                    d0.set_lds_addr(in_lds_view(Wpad(w0_adj) + Buf(buf_in ^ 1)));
-                    arch::tensor_load_to_lds(d0, d1, d2, d3, d4);
-                }
+#pragma unroll
+                for(int c = 0; c < line_size; c += arch::wave_size * ItemsPerLane)
+                    arch::ds_store<BytesPerLane>::store(in_ptr + c, &zero);
+                in_ptr += Wpad(in_lds_stride).get();
             }
-            __builtin_amdgcn_s_barrier();
+        }
 
-#pragma nounroll
-            for(int r = 0; r < cfg.kh; ++r)
+        init_tdm();
+
+        __syncthreads();
+        // Pre-load; no pre-load for wave_id_j=1
+        if(wave_id_j == 0)
+            arch::tensor_load_to_lds(d0, d1, d2, d3, d4);
+    }
+
+    // Loop over channel tiles and filter taps, accumulating into c_acc.
+    __device__ __forceinline__ void main_loop(rt_c_acc& c_acc)
+    {
+        if(!win.is_nonzero)
+            return;
+
+        const int h0_adj = win.h0_adj;
+        const int w0_adj = win.w0_adj;
+        const int h0     = win.h0;
+
+        rt_a a;
+        rt_a_compute a_compute;
+        rt_b b;
+        rt_b_compute b_compute;
+
+        // We specialize for CU0 (wave_id_k == 0) and CU1 (wave_id_k == 1)
+        auto const inner_conv = [&]<bool IsKTile1>() {
+            // Split barrier for 8-wave schedule
+            if(wave_rank == 1)
             {
+                __builtin_amdgcn_s_barrier();
+            }
+            __builtin_amdgcn_sched_barrier(0);
+
+            int buf_in  = 0;
+            int buf_wei = 0;
+#pragma nounroll
+            for(int c = 0; c < c_per_group; c += cfg.tile_size_c)
+            {
+                __builtin_amdgcn_s_wait_tensorcnt(0);
                 if constexpr(!IsKTile1)
                 {
-                    const int h = cfg.tile_size_h + r - h0_adj;
-                    if(wave_id_j == 1 && h >= tile_size_h_ring - h0_adj && r < cfg.kh - 1)
+                    const int cnext = c + cfg.tile_size_c;
+                    if(wave_id_j == 0 && cnext < c_per_group)
                     {
-                        d0.set_global_addr(in_view(H(h) + C(c)));
-                        d1.set_tensor_dim0(c_per_group - c);
-                        if constexpr(cfg.tile_size_n > 1)
-                            d2.set_tensor_dim3(0 <= h && h < hi - h0 ? 1 : 0);
-                        else
-                            d2.set_tensor_dim2(0 <= h && h < hi - h0 ? 1 : 0);
-                        const int hring = h % tile_size_h_ring;
-                        d0.set_lds_addr(in_lds_view(Hring(hring) + Wpad(w0_adj) + Buf(buf_in)));
+                        // Load input tensor for next c-trip
+                        d0.set_global_addr(in_view(C(cnext)));
+                        d1.set_tensor_dim0(c_per_group - cnext);
+                        d0.set_lds_addr(in_lds_view(Wpad(w0_adj) + Buf(buf_in ^ 1)));
                         arch::tensor_load_to_lds(d0, d1, d2, d3, d4);
                     }
                 }
+                __builtin_amdgcn_s_barrier();
+
 #pragma nounroll
-                for(int s = 0; s < cfg.kw; ++s)
+                for(int r = 0; r < cfg.kh; ++r)
                 {
-                    if constexpr(IsKTile1)
+                    if constexpr(!IsKTile1)
                     {
-                        if(wave_id_j == 0)
+                        const int h = cfg.tile_size_h + r - h0_adj;
+                        // The in prefill loads all h for which
+                        // h0 <= h < h0 + tile_size_h_ring - h0_adj
+                        // is true, puts them into ring buffer slots
+                        // 0 <= hring <= tile_size_h_ring - h0_adj and fills all remaining ring
+                        // buffer slots with 0 (especially if h0_adj >= tile_size_h_ring then the
+                        // whole ring buffer is set to 0).
+                        //
+                        // In the refill stage we check whether h' = tile_h + tile_size_h + r - py
+                        // needs to be loaded into the ring slot
+                        // hring = (tile_size_h + r - h0_adj) % tile_size_h_ring.
+                        // With h0 = tile_h - py + h0_adj we have h' = h0 + tile_size_h + r - h0_adj
+                        // and we need to check whether h0 + tile_size_h_ring - h0_adj <= h' or
+                        // tile_size_h_ring - h0_adj <= tile_size_h + r - h0_adj. Moreover,
+                        // h0 + tile_size_h + r - h0_adj < h0 if tile_size_h + r - h0_adj < 0. All
+                        // rows up to h0 were already loaded in the prefill phase (or set to zero)
+                        // and can thus be skipped in the refill phase.
+                        //
+                        // Hence, we must have
+                        // tile_size_h + r - h0_adj >= max(0, tile_size_h_ring - h0_adj).
+                        if(wave_id_j == 1 && h >= std::max(0, tile_size_h_ring - h0_adj) &&
+                           r < cfg.kh - 1)
                         {
-                            // Load weights tensor for next (r,s) pair.
-                            // If (r,s) == (kh,kw) we load the next c-trip.
-                            const int snext = (s + 1);
-                            const int rnext = r + snext / cfg.kw;
-                            const int c1    = c + (rnext / cfg.kh) * cfg.tile_size_c;
-                            const int rem_c = c_per_group - c1;
-                            if(rem_c > 0)
+                            if(h < hi - h0)
                             {
-                                const auto [r1, s1] = flip_rs(rnext % cfg.kh, snext % cfg.kw);
-                                d0.set_global_addr(wei_view(R(r1) + S(s1) + C(c1)));
-                                if constexpr(is_dgrad)
-                                {
-                                    d1.set_tensor_dim1(rem_c);
-                                }
-                                else
-                                {
-                                    d1.set_tensor_dim0(rem_c);
-                                }
-                                d0.set_lds_addr(wei_lds_view(Buf(buf_wei ^ 1)));
-                                arch::tensor_load_to_lds(d0, d1, d2, d3, d4);
+                                d0.set_global_addr(in_view(H(h) + C(c)));
+                                d1.set_tensor_dim0(c_per_group - c);
                             }
+                            else
+                            {
+                                // We still need to zero in_lds at hring, hence make all accesses
+                                // OOB
+                                d1.set_tensor_dim0(0);
+                            }
+                            // No safeguards needed here as h >= 0
+                            const int hring = h % tile_size_h_ring;
+                            d0.set_lds_addr(in_lds_view(Hring(hring) + Wpad(w0_adj) + Buf(buf_in)));
+                            arch::tensor_load_to_lds(d0, d1, d2, d3, d4);
                         }
                     }
-
-#pragma unroll
-                    for(int part_c = 0; part_c < c_parts; ++part_c)
+#pragma nounroll
+                    for(int s = 0; s < cfg.kw; ++s)
                     {
-                        // In order to prevent vertical bank conflicts as much as possible, we
-                        // alternate the order in which in and weights are loaded for CU0 and
-                        // CU1, and we reverse the order in which c parts are accumulated.
                         if constexpr(IsKTile1)
                         {
-                            const int part_c_reversed = c_parts - 1 - part_c;
-                            load_tile<arch::ds_load_b128>(
-                                b,
-                                in_lds_view.offset(),
-                                in_lds_layout(buf_in, r, s, part_c_reversed));
-                            load_tile<wei_ds_load_inst>(a,
-                                                        wei_lds_view_part.offset(),
-                                                        wei_lds_layout(buf_wei, part_c_reversed));
-                        }
-                        else
-                        {
-                            load_tile<wei_ds_load_inst>(
-                                a, wei_lds_view_part.offset(), wei_lds_layout(buf_wei, part_c));
-                            load_tile<arch::ds_load_b128>(
-                                b, in_lds_view.offset(), in_lds_layout(buf_in, r, s, part_c));
+                            if(wave_id_j == 0)
+                            {
+                                // Load weights tensor for next (r,s) pair.
+                                // If (r,s) == (kh,kw) we load the next c-trip.
+                                const int snext = (s + 1);
+                                const int rnext = r + snext / cfg.kw;
+                                const int c1    = c + (rnext / cfg.kh) * cfg.tile_size_c;
+                                const int rem_c = c_per_group - c1;
+                                if(rem_c > 0)
+                                {
+                                    const auto [r1, s1] = flip_rs(rnext % cfg.kh, snext % cfg.kw);
+                                    d0.set_global_addr(wei_view(R(r1) + S(s1) + C(c1)));
+                                    if constexpr(is_dgrad)
+                                    {
+                                        d1.set_tensor_dim1(rem_c);
+                                    }
+                                    else
+                                    {
+                                        d1.set_tensor_dim0(rem_c);
+                                    }
+                                    d0.set_lds_addr(wei_lds_view(Buf(buf_wei ^ 1)));
+                                    arch::tensor_load_to_lds(d0, d1, d2, d3, d4);
+                                }
+                            }
                         }
 
-                        if(part_c == c_parts / 2 && wave_rank == 0)
+#pragma unroll
+                        for(int part_c = 0; part_c < c_parts; ++part_c)
                         {
-                            // Prefetch next weights matrix approximately in the middle between
-                            // two calls to TDM.
-                            const int snext     = (s + 2);
-                            const int rnext     = r + snext / cfg.kw;
-                            const int c1        = c + (rnext / cfg.kh) * cfg.tile_size_c;
-                            const auto [r1, s1] = flip_rs(rnext % cfg.kh, snext % cfg.kw);
-                            prefetch_weights_block(r1, s1, c1);
-                        }
-                        if constexpr(is_dgrad)
-                        {
-                            // Need to drain dscnt, because wave rank 1 runs one barrier behind
-                            // wave rank 0, so dscnt must not leak into the next stage or otherwise
-                            // LDS might already be overwritten by TDM
-                            if(part_c == c_parts - 1)
-                                llvm_amdgcn_s_wait_dscnt(0);
+                            // In order to prevent vertical bank conflicts as much as possible, we
+                            // alternate the order in which in and weights are loaded for CU0 and
+                            // CU1, and we reverse the order in which c parts are accumulated.
+                            if constexpr(IsKTile1)
+                            {
+                                const int part_c_reversed = c_parts - 1 - part_c;
+                                load_tile<arch::ds_load_b128>(
+                                    b,
+                                    in_lds_view.offset(),
+                                    in_lds_layout(buf_in, r, s, part_c_reversed));
+                                load_tile<wei_ds_load_inst>(
+                                    a,
+                                    wei_lds_view_part.offset(),
+                                    wei_lds_layout(buf_wei, part_c_reversed));
+                            }
+                            else
+                            {
+                                load_tile<wei_ds_load_inst>(
+                                    a, wei_lds_view_part.offset(), wei_lds_layout(buf_wei, part_c));
+                                load_tile<arch::ds_load_b128>(
+                                    b, in_lds_view.offset(), in_lds_layout(buf_in, r, s, part_c));
+                            }
+
+                            if(part_c == c_parts / 2 && wave_rank == 0)
+                            {
+                                // Prefetch next weights matrix approximately in the middle between
+                                // two calls to TDM.
+                                const int snext     = (s + 2);
+                                const int rnext     = r + snext / cfg.kw;
+                                const int c1        = c + (rnext / cfg.kh) * cfg.tile_size_c;
+                                const auto [r1, s1] = flip_rs(rnext % cfg.kh, snext % cfg.kw);
+                                prefetch_weights_block(r1, s1, c1);
+                            }
+                            if constexpr(is_dgrad)
+                            {
+                                // Need to drain dscnt, because wave rank 1 runs one barrier behind
+                                // wave rank 0, so dscnt must not leak into the next stage or
+                                // otherwise LDS might already be overwritten by TDM
+                                if(part_c == c_parts - 1)
+                                    llvm_amdgcn_s_wait_dscnt(0);
+                                __builtin_amdgcn_s_barrier();
+                                __builtin_amdgcn_sched_barrier(0);
+                                // move after sched_barrier to let VALU and mma overlap
+                                tile_cast(a_compute, a);
+                                tile_cast(b_compute, b);
+                            }
+                            else
+                            {
+                                tile_cast(a_compute, a);
+                                tile_cast(b_compute, b);
+                                // Need to drain dscnt, cf. comment in "if" branch
+                                if(part_c == c_parts - 1)
+                                    llvm_amdgcn_s_wait_dscnt(0);
+                                __builtin_amdgcn_s_barrier();
+                                __builtin_amdgcn_sched_barrier(0);
+                            }
+
+
+                            __builtin_amdgcn_s_setprio(1);
+                            mma<bunnies::walk_order::gray, bunnies::reuse_priority::c>(
+                                c_acc, a_compute, b_compute, c_acc);
+                            __builtin_amdgcn_s_setprio(0);
+                            if(part_c == c_parts - 1 && IsKTile1 && wave_id_j == 0)
+                                __builtin_amdgcn_s_wait_tensorcnt(0);
+                            if(part_c == c_parts - 1 && s == cfg.kw - 1 && !IsKTile1 &&
+                               wave_id_j == 1)
+                                __builtin_amdgcn_s_wait_tensorcnt(0);
                             __builtin_amdgcn_s_barrier();
                             __builtin_amdgcn_sched_barrier(0);
-                            // move after sched_barrier to let VALU and mma overlap
-                            tile_cast(a_compute, a);
-                            tile_cast(b_compute, b);
                         }
-                        else
-                        {
-                            tile_cast(a_compute, a);
-                            tile_cast(b_compute, b);
-                            // Need to drain dscnt, cf. comment in "if" branch
-                            if(part_c == c_parts - 1)
-                                llvm_amdgcn_s_wait_dscnt(0);
-                            __builtin_amdgcn_s_barrier();
-                            __builtin_amdgcn_sched_barrier(0);
-                        }
-
-
-                        __builtin_amdgcn_s_setprio(1);
-                        mma<bn::walk_order::gray, bn::reuse_priority::c>(
-                            c_acc, a_compute, b_compute, c_acc);
-                        __builtin_amdgcn_s_setprio(0);
-                        if(part_c == c_parts - 1 && IsKTile1 && wave_id_j == 0)
-                            __builtin_amdgcn_s_wait_tensorcnt(0);
-                        if(part_c == c_parts - 1 && s == cfg.kw - 1 && !IsKTile1 && wave_id_j == 1)
-                            __builtin_amdgcn_s_wait_tensorcnt(0);
-                        __builtin_amdgcn_s_barrier();
-                        __builtin_amdgcn_sched_barrier(0);
+                        buf_wei ^= 1;
                     }
-                    buf_wei ^= 1;
                 }
+                buf_in ^= 1;
             }
-            buf_in ^= 1;
-        }
-        if(wave_rank == 0)
+            if(wave_rank == 0)
+            {
+                __builtin_amdgcn_s_barrier();
+            }
+            __builtin_amdgcn_sched_barrier(0);
+        };
+
+        // Dispatch specialized code paths for CU0 and CU1
+        if(wave_id_k == 1)
         {
-            __builtin_amdgcn_s_barrier();
+            inner_conv.template operator()<true>();
         }
-        __builtin_amdgcn_sched_barrier(0);
-    };
+        else
+        {
+            inner_conv.template operator()<false>();
+        }
 
-    // Dispatch specialized code paths for CU0 and CU1
-    if(wave_id_k == 1)
-    {
-        inner_conv.template operator()<true>();
-    }
-    else
-    {
-        inner_conv.template operator()<false>();
+        __builtin_amdgcn_s_wait_tensorcnt(0);
     }
 
-    __builtin_amdgcn_s_wait_tensorcnt(0);
-    __syncthreads();
+    // Write the accumulated tile to global memory, staged through LDS.
+    __device__ __forceinline__ void epilogue(rt_c_acc& c_acc)
+    {
+        const int tile_n = blk.tile_n;
+        const int tile_g = blk.tile_g;
+        const int tile_h = blk.tile_h;
+        const int tile_w = blk.tile_w;
+        const int tile_k = blk.tile_k;
 
-    auto out_lds      = lds;
-    auto out_lds_view = bunnies::make_view_row_major<4>(
-        {cfg.tile_size_n, cfg.tile_size_h, cfg.tile_size_w, tile_size_k_out});
+        __syncthreads();
 
-    const auto k0 = cfg.tile_size_k / cfg.tiles_k * wave_id_k;
-    // sub() hands out a pointer into c_acc, so the block indices must be constants: with runtime
-    // ones the accumulator's address escapes and all 1024 bytes of it land in scratch.
-    bn::static_unroll<reg_tiles_j>([&](auto jb) {
-        bn::static_unroll<reg_tiles_k>([&](auto kb) {
-            auto const out_lds_layout = [&](int, int, int k, int j) {
-                auto const [h, n, w] = j_to_hnw::convert(wave_id_j, jb, j);
-                k += k0 + cfg.wmma_size_k * kb;
-                return out_lds_view(n, h, w, k);
-            };
+        auto out_lds      = lds;
+        auto out_lds_view = bunnies::make_view_row_major<4>(
+            {cfg.tile_size_n, cfg.tile_size_h, cfg.tile_size_w, tile_size_k_out});
 
-            bunnies::reg_tile<mat_c, 1, 1> c;
-            tile_cast(c, c_acc.template sub<1, 1>(kb, jb));
-            store_tile<arch::ds_store_b128>(c, out_lds, out_lds_layout);
+        const auto k0 = cfg.tile_size_k / cfg.tiles_k * wave_id_k;
+        // sub() hands out a pointer into c_acc, so the block indices must be constants: with
+        // runtime ones the accumulator's address escapes and all 1024 bytes of it land in scratch.
+        bunnies::static_unroll<reg_tiles_j>([&](auto jb) {
+            bunnies::static_unroll<reg_tiles_k>([&](auto kb) {
+                auto const out_lds_layout = [&](int, int, int k, int j) {
+                    auto const [h, n, w] = j_to_hnw::convert(wave_id_j, jb, j);
+                    k += k0 + cfg.wmma_size_k * kb;
+                    return out_lds_view(n, h, w, k);
+                };
+
+                bunnies::reg_tile<mat_c, 1, 1> c;
+                tile_cast(c, c_acc.template sub<1, 1>(kb, jb));
+                store_tile<arch::ds_store_b128>(c, out_lds, out_lds_layout);
+            });
         });
-    });
 
-    __syncthreads();
+        __syncthreads();
 
-    auto out_byte_view =
-        bn::make_named_memref((uint8_t*)out,
-                              N(batch_size) + P(ho) + Q(wo) + G(groups) +
-                                  K(k_per_group) * sizeof(T),
-                              bn::mode_order<K, G, Q, P, N>{})
-            .moved_by(N(tile_n) + P(tile_h) + Q(tile_w) + G(tile_g) + K(tile_k) * sizeof(T));
+        auto out_byte_view =
+            bunnies::make_named_memref((uint8_t*)out,
+                                       N(batch_size) + P(ho) + Q(wo) + G(groups) +
+                                           K(k_per_group) * sizeof(T),
+                                       bunnies::mode_order<K, G, Q, P, N>{})
+                .moved_by(N(tile_n) + P(tile_h) + Q(tile_w) + G(tile_g) + K(tile_k) * sizeof(T));
 
-    auto const out_in_bounds_map = [&](int i, int j) -> bool {
-        const int w = i % cfg.tile_size_w;
-        const int h = i / cfg.tile_size_w % cfg.tile_size_h;
-        const int n = i / (cfg.tile_size_w * cfg.tile_size_h);
-        const int k = j;
-        return out_byte_view.in_bounds(N(n) + P(h) + Q(w) + K(k));
-    };
-    auto const out_voffset_map = [&](int i, int j) -> size_t {
-        const int w = i % cfg.tile_size_w;
-        const int h = i / cfg.tile_size_w % cfg.tile_size_h;
-        const int n = i / (cfg.tile_size_w * cfg.tile_size_h);
-        const int k = j;
-        return out_byte_view.delta(N(n) + P(h) + Q(w) + K(k));
-    };
-    auto const out_lds_map_2d = [](int i, int j) -> int {
-        return tile_size_k_out * sizeof(T) * i + j;
-    };
+        auto const out_in_bounds_map = [&](int i, int j) -> bool {
+            const int w = i % cfg.tile_size_w;
+            const int h = i / cfg.tile_size_w % cfg.tile_size_h;
+            const int n = i / (cfg.tile_size_w * cfg.tile_size_h);
+            const int k = j;
+            return out_byte_view.in_bounds(N(n) + P(h) + Q(w) + K(k));
+        };
+        auto const out_voffset_map = [&](int i, int j) -> size_t {
+            const int w = i % cfg.tile_size_w;
+            const int h = i / cfg.tile_size_w % cfg.tile_size_h;
+            const int n = i / (cfg.tile_size_w * cfg.tile_size_h);
+            const int k = j;
+            return out_byte_view.delta(N(n) + P(h) + Q(w) + K(k));
+        };
+        auto const out_lds_map_2d = [](int i, int j) -> int {
+            return tile_size_k_out * sizeof(T) * i + j;
+        };
 
-    constexpr auto get_bytes_per_lane = []() {
-        const auto alignment      = cfg.aligned ? 16 : sizeof(T);
-        constexpr auto candidates = std::array{16, 8, 4};
-        for(auto c : candidates)
+        constexpr auto get_bytes_per_lane = []() {
+            const auto alignment      = cfg.aligned ? 16 : sizeof(T);
+            constexpr auto candidates = std::array{16, 8, 4};
+            for(auto c : candidates)
+            {
+                if(alignment % c == 0)
+                    return c;
+            }
+            return 1;
+        };
+        constexpr auto store_cfg =
+            bunnies::async_config{.rows = cfg.tile_size_n * cfg.tile_size_h * cfg.tile_size_w,
+                                  .cols = cfg.tile_size_k * sizeof(T),
+                                  .bytes_per_lane = get_bytes_per_lane(),
+                                  .num_waves      = tiles};
+        if(out_byte_view.in_bounds(N(cfg.tile_size_n - 1) + P(cfg.tile_size_h - 1) +
+                                   Q(cfg.tile_size_w - 1) + K(store_cfg.cols - 1)))
         {
-            if(alignment % c == 0)
-                return c;
+            bunnies::global_store_async_from_lds<arch, store_cfg>(wave_id,
+                                                                  out_byte_view.offset(),
+                                                                  out_voffset_map,
+                                                                  (uint8_t*)out_lds,
+                                                                  out_lds_map_2d);
         }
-        return 1;
-    };
-    constexpr auto store_cfg =
-        bn::async_config{.rows           = cfg.tile_size_n * cfg.tile_size_h * cfg.tile_size_w,
-                         .cols           = cfg.tile_size_k * sizeof(T),
-                         .bytes_per_lane = get_bytes_per_lane(),
-                         .num_waves      = tiles};
-    if(out_byte_view.in_bounds(N(cfg.tile_size_n - 1) + P(cfg.tile_size_h - 1) +
-                               Q(cfg.tile_size_w - 1) + K(store_cfg.cols - 1)))
-    {
-        bn::global_store_async_from_lds<arch, store_cfg>(
-            wave_id, out_byte_view.offset(), out_voffset_map, (uint8_t*)out_lds, out_lds_map_2d);
+        else
+        {
+            bunnies::global_store_async_from_lds_checked<arch, store_cfg>(wave_id,
+                                                                          out_byte_view.offset(),
+                                                                          out_in_bounds_map,
+                                                                          out_voffset_map,
+                                                                          (uint8_t*)out_lds,
+                                                                          out_lds_map_2d);
+        }
     }
-    else
-    {
-        bn::global_store_async_from_lds_checked<arch, store_cfg>(wave_id,
-                                                                 out_byte_view.offset(),
-                                                                 out_in_bounds_map,
-                                                                 out_voffset_map,
-                                                                 (uint8_t*)out_lds,
-                                                                 out_lds_map_2d);
-    }
+
+private:
+    T* lds;
+    T* out;
+    int batch_size;
+    int groups;
+    int c_per_group;
+    int k_per_group;
+    int hi;
+    int wi;
+    int ho;
+    int wo;
+
+    int wave_id;
+    int wave_id_k;
+    int wave_id_j;
+    int wave_rank;
+
+    TileOrigin blk;
+    InputWindow win;
+
+    // The views at the origin of the problem; set_block() moves them to the tile.
+    in_view_t in_base;
+    wei_view_t wei_base;
+    in_view_t in_view;
+    wei_view_t wei_view;
+    in_lds_view_t in_lds_view;
+    wei_lds_view_t wei_lds_view;
+    wei_lds_view_part_t wei_lds_view_part;
+
+    // TDM descriptors, set up in prologue() and updated by main_loop().
+    arch::tdm_group0 d0 = {};
+    arch::tdm_group1 d1 = {};
+    arch::tdm_group2 d2 = {};
+    arch::tdm_group3 d3 = {};
+    arch::tdm_group4 d4 = {};
+};
+template <Config cfg, hipconv::DataType DT>
+__device__ void conv2d_direct_cdna5_nhwc_impl(const ToType<DT>* __restrict__ in,
+                                              const ToType<DT>* __restrict__ wei,
+                                              double alpha,
+                                              double beta,
+                                              ToType<DT>* __restrict__ out,
+                                              int batch_size,
+                                              int groups,
+                                              int c_per_group,
+                                              int k_per_group,
+                                              int hi,
+                                              int wi,
+                                              int ho,
+                                              int wo,
+                                              int sy,
+                                              int sx,
+                                              int dy,
+                                              int dx,
+                                              int py,
+                                              int px)
+{
+    using kernel_t = Conv2dDirectNhwc<cfg, DT>;
+
+    __shared__ ToType<DT> lds[kernel_t::lds_size];
+
+    typename kernel_t::rt_c_acc c_acc = {};
+
+    kernel_t kernel(
+        lds, in, wei, out, batch_size, groups, c_per_group, k_per_group, hi, wi, ho, wo);
+
+    const auto [block_n, tile_g, block_h, block_w, block_k] =
+        linear_index_to_coord(static_cast<int>(blockIdx.x),
+                              std::array<int, 5>{divup(batch_size, cfg.tile_size_n),
+                                                 groups,
+                                                 divup(ho, cfg.tile_size_h),
+                                                 divup(wo, cfg.tile_size_w),
+                                                 divup(k_per_group, cfg.tile_size_k)});
+    TileOrigin origin;
+    origin.tile_n = block_n * cfg.tile_size_n;
+    origin.tile_g = tile_g;
+    origin.tile_h = block_h * cfg.tile_size_h;
+    origin.tile_w = block_w * cfg.tile_size_w;
+    origin.tile_k = block_k * cfg.tile_size_k;
+
+    kernel.set_block(origin, py, px);
+    kernel.prologue();
+    kernel.main_loop(c_acc);
+    kernel.epilogue(c_acc);
 }
 
 template <Config cfg, hipconv::DataType DT>
@@ -773,6 +1032,7 @@ __launch_bounds__(cfg.tiles() * arch::wave_size, 2) __global__
 
 template <Config cfg>
 void launch_impl(const LaunchParams& lp,
+                 const hipconv::Device&,
                  const hipconv::ConvParams& par,
                  const void* in,
                  const void* wei,
@@ -854,7 +1114,8 @@ public:
 
     // The base predicate verbatim, plus the tf32 operand types. TF32 is stored as fp32, so its
     // operands are tf32 and its result fp32; the base only knows the fp16/bf16 same-type form.
-    bool is_applicable(const hipconv::ConvParams& par) const override
+    bool is_applicable(const hipconv::Device& /*dev*/,
+                       const hipconv::ConvParams& par) const override
     {
         using namespace hipconv;
 
@@ -877,7 +1138,8 @@ public:
         return true;
     }
 
-    bool is_valid_config(const hipconv::ConvParams& par) const override
+    bool is_valid_config(const hipconv::Device& /*dev*/,
+                         const hipconv::ConvParams& par) const override
     {
         if(par.direction != cfg_.direction)
             return false;
@@ -912,7 +1174,8 @@ public:
         return true;
     }
 
-    auto get_weighted_throughput_index(const hipconv::ConvParams& par) const -> float override
+    auto get_weighted_throughput_index(const hipconv::Device& /*dev*/,
+                                       const hipconv::ConvParams& par) const -> float override
     {
         const auto [p, q, h, w, gk, gc] = problem_shape(par);
 
@@ -923,7 +1186,8 @@ public:
                throughput_factor(q, cfg_.tile_size_w) * throughput_factor(gk, cfg_.tile_size_k);
     }
 
-    LaunchParams get_launch_params(const hipconv::ConvParams& par) const override
+    LaunchParams get_launch_params(const hipconv::Device& /*dev*/,
+                                   const hipconv::ConvParams& par) const override
     {
         LaunchParams launch;
         launch.grid       = dim3(num_blocks(par), 1, 1);
