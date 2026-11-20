@@ -714,8 +714,10 @@ std::optional<IgemmProblem> withPatchView(const IgemmProblem& problem)
 std::optional<IgemmProblem> withCol2imView(const IgemmProblem& problem)
 {
     const auto& b = problem.base.args;
+    // The filter packed K T R S C or K C T R S and unreflected (filterExpandable): K-major rows
+    // of taps x channels in either order, the GEMM's B read in place.
     if(problem.direction != ConvDirection::BACKWARD_DATA || b.groups != 1 || problem.largeImage
-       || !problem.filterKtrsc || withPatchView(problem).has_value())
+       || !problem.filterExpandable || withPatchView(problem).has_value())
     {
         return std::nullopt;
     }
@@ -745,6 +747,9 @@ std::optional<IgemmProblem> withCol2imView(const IgemmProblem& problem)
     view.phases = 1;
     view.rows = dyPositions;
     view.w = Staging{};
+    // The direct-filter loads read rows of the view's columns, whichever their order.
+    view.filterKtrsc = true;
+    view.col2imTapMajor = problem.wSrcC == 1;
     view.col2imBytes = static_cast<size_t>(dyPositions * b.c * taps) * sizeof(float);
     layOutWorkspace(view);
     return view;
@@ -2447,6 +2452,7 @@ public:
             c2.dd = static_cast<int>(b.dilation[0]);
             c2.dh = static_cast<int>(b.dilation[1]);
             c2.dw = static_cast<int>(b.dilation[2]);
+            c2.tapMajor = problem.col2imTapMajor ? 1 : 0;
             dispatch.reduceForStream(stream).launch(stream, c2);
         }
         else if(plan.splits > 1)

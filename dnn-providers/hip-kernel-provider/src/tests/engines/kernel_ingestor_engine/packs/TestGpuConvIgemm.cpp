@@ -653,9 +653,9 @@ INSTANTIATE_TEST_SUITE_P(,
 
 /// Col2im backward data (patch 3): layers whose dy has fewer positions than dx ("valid" or partly
 /// padded), as one GEMM over dy's positions plus the column sum into dx. 3-D in both layouts
-/// (channels-first dy and dx staged), two images, padding on one side only, stride 2 (taps that
-/// skip dx positions, rows no tap reaches) and dilation, channels that are not whole vectors of
-/// four, and a filter longer than the input along an axis.
+/// (channels-first: dy and dx staged, the K C T R S filter's columns in its own order), two
+/// images, padding on one side only, stride 2 (taps that skip dx positions, rows no tap reaches),
+/// dilation, six channels (not whole vectors of four) in both layouts, and a 1-D filter.
 std::vector<DeviceCase> col2imCases()
 {
     std::vector<DeviceCase> cases;
@@ -670,7 +670,8 @@ std::vector<DeviceCase> col2imCases()
     auto dilated = dense(16, 24, {11, 12}, {3, 3}, {0, 0}, true);
     dilated.dilation = {2, 2};
     cases.push_back({"Nhwc3x3Dilation2Valid", dilated});
-    cases.push_back({"Nhwc3x3OddChannels", dense(18, 24, {7, 6}, {3, 3}, {0, 0}, true)});
+    cases.push_back({"Nhwc2x2SixChannels", dense(6, 24, {7, 6}, {2, 2}, {0, 0}, true)});
+    cases.push_back({"Nchw2x2SixChannels", dense(6, 24, {7, 6}, {2, 2}, {0, 0}, false)});
     cases.push_back({"Nhwc1dK5Valid", dense(16, 24, {12}, {5}, {0}, true)});
     return cases;
 }
@@ -2218,14 +2219,18 @@ TEST(TestConvIgemmCatalog, Col2imIsOneGemmOverDyPositionsWithColumnsInTheWorkspa
     EXPECT_EQ(view->phases, 1);
     EXPECT_EQ(view->rows, 2 * 4 * 3 * 5);
     EXPECT_FALSE(view->w.needed); // the K T R S C filter is the GEMM's K-major B, read in place
+    EXPECT_TRUE(view->col2imTapMajor);
     EXPECT_EQ(view->col2imBytes, sizeof(float) * 2 * 4 * 3 * 5 * 16 * 27);
     EXPECT_GE(view->col2imOffset, 0U);
     EXPECT_EQ(view->workspaceBytes % 256, 0U);
     EXPECT_GE(view->workspaceBytes, view->col2imOffset + view->col2imBytes);
-    // Channels-first dy and dx are staged; the columns follow them.
+    // Channels-first dy and dx are staged; the columns follow them, in the K C T R S filter's
+    // (channel, tap) order.
     const auto staged = col2imView(dense(16, 24, {6, 5, 7}, {3, 3, 3}, {0, 0, 0}, false));
     ASSERT_TRUE(staged.has_value());
     EXPECT_TRUE(staged->x.needed);
+    EXPECT_FALSE(staged->w.needed);
+    EXPECT_FALSE(staged->col2imTapMajor);
     EXPECT_GE(staged->col2imOffset, staged->x.workspaceOffset + staged->x.bytes);
 }
 
