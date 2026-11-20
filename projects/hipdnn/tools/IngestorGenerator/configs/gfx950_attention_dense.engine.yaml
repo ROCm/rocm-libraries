@@ -31,6 +31,9 @@ engine:
       gfx950:
       - df4ca2de-53c4-44d4-b92c-ead86e287fa5
       - 6f606e00-09cf-4e43-968b-77eb71de64db
+    predict_engine:
+      gfx950:
+      - d91b2ab8-19b3-424a-9eee-3cce9b4a1a6f
   trained_catalog_sha256:
     gfx950: 85faef422144bc770fb095b624b26732de9361b2ebce25d29d32cc08a3bfe513
 kmd_fields:
