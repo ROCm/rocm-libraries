@@ -541,6 +541,195 @@ TYPED_TEST(PrecondLegacyCsr, tolerance_argument_checks)
 }
 
 // ---------------------------------------------------------------------------
+// csric0 on Hermitian complex matrices
+// ---------------------------------------------------------------------------
+namespace
+{
+    // Lower triangle of A = L * L^H (stored by rows) for a given lower triangular L
+    // with a real positive diagonal: A is Hermitian positive definite and L is its
+    // Cholesky factor. Every value is a small dyadic rational, so the factorization is
+    // exact in every precision.
+    template <typename T>
+    csr_matrix<T> hermitian_from_factor(const std::vector<std::vector<std::complex<double>>>& l)
+    {
+        csr_matrix<T> a;
+        a.n = static_cast<int32_t>(l.size());
+        a.ptr.push_back(0);
+        for(int32_t i = 0; i < a.n; ++i)
+        {
+            for(int32_t j = 0; j <= i; ++j)
+            {
+                std::complex<double> s = 0.0;
+                for(int32_t k = 0; k <= j; ++k)
+                    s += l[i][k] * std::conj(l[j][k]);
+                a.ind.push_back(j);
+                a.val.push_back(from_cd<T>(s));
+            }
+            a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
+        }
+        return a;
+    }
+
+    template <typename T>
+    std::vector<T> factor_values(const std::vector<std::vector<std::complex<double>>>& l)
+    {
+        std::vector<T> v;
+        for(size_t i = 0; i < l.size(); ++i)
+            for(size_t j = 0; j <= i; ++j)
+                v.push_back(from_cd<T>(l[i][j]));
+        return v;
+    }
+
+    // The csric0 kernels accumulate the inner product of two rows of L as
+    //   sum_k L(j,k) * conj(L(i,k))
+    // where the Cholesky update of L(i,j) needs sum_k L(i,k) * conj(L(j,k)): the conjugate
+    // sits on the wrong factor (AISPARSE-903). The two agree whenever every product is
+    // real, which is the case when the entries of each column of L share a phase.
+    //
+    // Same-phase factor (column 0 along 1 + i, column 1 along 1 + i, column 2 real):
+    //   L = | 2                  |
+    //       | 1+i   2            |
+    //       | 2+2i  1+i   3      |
+    //       | 3+3i  2+2i  1   2  |
+    // The library's factor of A = L L^H must be L (the one host_ic0 computes), and L L^H
+    // must reproduce A on the pattern. A kernel without any conjugate accumulates
+    // L(1,0) * L(2,0) = (1+i)(2+2i) = 4i instead of (1+i)(2-2i) = 4 for L(2,1) and gets
+    // L(2,1) = (6+2i - 4i) / 2 = 3 - i, L(2,2) = sqrt(19 - 8 - 10) = 1 instead of 1 + i, 3.
+    std::vector<std::vector<std::complex<double>>> same_phase_factor()
+    {
+        using c = std::complex<double>;
+        return {{c(2, 0)},
+                {c(1, 1), c(2, 0)},
+                {c(2, 2), c(1, 1), c(3, 0)},
+                {c(3, 3), c(2, 2), c(1, 0), c(2, 0)}};
+    }
+
+    // General factor: L(2,0) * conj(L(1,0)) = (1-i)(1-i) = -2i is not real.
+    //   L = | 2              |
+    //       | 1+i   2        |
+    //       | 1-i   1+2i  3  |
+    // Cholesky: L(2,1) = (A(2,1) - L(2,0) conj(L(1,0))) / L(1,1) = (2+2i + 2i) / 2 = 1 + 2i,
+    // L(2,2) = sqrt(16 - 2 - 5) = 3. The mirrored sum of the library gives
+    // L(2,1) = (2+2i - 2i) / 2 = 1 and L(2,2) = sqrt(16 - 2 - 1) = sqrt(13).
+    std::vector<std::vector<std::complex<double>>> general_phase_factor()
+    {
+        using c = std::complex<double>;
+        return {{c(2, 0)}, {c(1, 1), c(2, 0)}, {c(1, -1), c(1, 2), c(3, 0)}};
+    }
+
+    // The factor the library's recurrence (conjugate on the dependency row) produces.
+    template <typename T>
+    std::vector<T> mirrored_ic0(const csr_matrix<T>& a)
+    {
+        std::vector<std::complex<double>> v(a.val.size());
+        for(size_t i = 0; i < v.size(); ++i)
+            v[i] = to_cd(a.val[i]);
+        for(int32_t i = 0; i < a.n; ++i)
+        {
+            const int32_t begin = a.ptr[i];
+            const int32_t diag  = a.ptr[i + 1] - 1;
+            for(int32_t j = begin; j < diag; ++j)
+            {
+                const int32_t        c = a.ind[j];
+                std::complex<double> s = 0.0;
+                for(int32_t p = begin; p < j; ++p)
+                    for(int32_t q = a.ptr[c]; q < a.ptr[c + 1] - 1; ++q)
+                        if(a.ind[q] == a.ind[p])
+                            s += v[q] * std::conj(v[p]);
+                v[j] = (v[j] - s) / v[a.ptr[c + 1] - 1];
+            }
+            std::complex<double> d = v[diag];
+            for(int32_t j = begin; j < diag; ++j)
+                d -= v[j] * std::conj(v[j]);
+            v[diag] = std::sqrt(d.real());
+        }
+        std::vector<T> out(v.size());
+        for(size_t i = 0; i < v.size(); ++i)
+            out[i] = from_cd<T>(v[i]);
+        return out;
+    }
+
+    template <typename T>
+    bool all_close(const std::vector<T>& got, const std::vector<T>& want, double tol)
+    {
+        if(got.size() != want.size())
+            return false;
+        for(size_t i = 0; i < got.size(); ++i)
+            if(std::abs(to_cd(got[i]) - to_cd(want[i])) > tol)
+                return false;
+        return true;
+    }
+
+    template <typename T>
+    std::string show(const std::vector<T>& v)
+    {
+        std::string s;
+        for(const auto& x : v)
+            s += " (" + std::to_string(re(x)) + ", " + std::to_string(im(x)) + ")";
+        return s;
+    }
+}
+
+// Hermitian positive definite complex input whose Cholesky factor has complex entries
+// but real row inner products (same-phase columns, see same_phase_factor): the factor
+// is the exact Cholesky factor and reproduces A.
+TEST_F(PrecondLegacy, csric0_hermitian_same_phase_columns)
+{
+    for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+    {
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            if constexpr(is_cplx<T>)
+            {
+                SCOPED_TRACE(::testing::Message() << "base " << static_cast<int>(base));
+                const auto a    = hermitian_from_factor<T>(same_phase_factor());
+                const auto want = factor_values<T>(same_phase_factor());
+                csr_out<T> out;
+                run_csr<Kind::ic, T>(handle, a, base, -1.0, boost_request{}, false, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                EXPECT_EQ(out.singular_pivot, -1);
+                expect_close(out.values, want, tolerance<T>());
+                expect_close(out.values, host_ic0(a), tolerance<T>());
+                expect_small_residual(ic_pattern_residual(a, out.values), a);
+            }
+        });
+    }
+}
+
+// Hermitian positive definite complex input with a non-real inner product (see
+// general_phase_factor). The factor must be the Cholesky factor of A; the library's
+// mirrored recurrence (AISPARSE-903) produces a different lower triangle, which does
+// not reproduce A, conj(A) or A^T. While the library behaves that way the test is
+// skipped after recording both factors; it fails on any other wrong result. Measured on
+// gfx1201 (cfloat and cdouble, the clean library): L(2,1) = (1, 0) and L(2,2) =
+// (3.605551, 0) where the Cholesky factor has (1, 2) and (3, 0); the other entries agree.
+TEST_F(PrecondLegacy, csric0_hermitian_general_phase)
+{
+    for_all_types([&](auto tag) {
+        using T = decltype(tag);
+        if constexpr(is_cplx<T>)
+        {
+            const auto a        = hermitian_from_factor<T>(general_phase_factor());
+            const auto want     = factor_values<T>(general_phase_factor());
+            const auto mirrored = mirrored_ic0(a);
+            csr_out<T> out;
+            run_csr<Kind::ic, T>(
+                handle, a, rocsparse_index_base_zero, -1.0, boost_request{}, false, out);
+            ASSERT_EQ(out.compute_status, rocsparse_status_success);
+            EXPECT_EQ(out.singular_pivot, -1);
+            if(all_close(out.values, mirrored, 1.0e-5) && !all_close(out.values, want, 1.0e-5))
+            {
+                GTEST_SKIP() << "csric0 conjugates the dependency row instead of the current "
+                                "one (AISPARSE-903); got"
+                             << show(out.values) << " want" << show(want);
+            }
+            expect_close(out.values, want, tolerance<T>());
+            expect_small_residual(ic_pattern_residual(a, out.values), a);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // csrilu0 numeric boost
 // ---------------------------------------------------------------------------
 TEST_F(PrecondLegacy, csrilu0_numeric_boost_types_and_pointer_modes)
