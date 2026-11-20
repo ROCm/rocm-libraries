@@ -72,6 +72,7 @@ extern "C" __global__ void LayernormBwd(const OutputType* __restrict__ dy,
     sum_dy_scale = ltmp1[0];
     sum_dy_scale_xc = ltmp2[0];
     constexpr float inverseInnerSize = 1.0f / INNER_SIZE;
+    // x is centered on the mean so dx stays accurate in fp32 when |mean| >> std.
     float a = prstd * prstd * prstd * inverseInnerSize * sum_dy_scale_xc;
     float b = prstd * sum_dy_scale * inverseInnerSize;
 
