@@ -244,6 +244,14 @@ TEST(CPU_HipRtcSelfContained_NONE, RtRespectsPreincludedHostStl)
         GTEST_SKIP() << "host STL is not usable by the runtime compiler: nothing to pre-include";
 
     RunSelfContainedKernel(h, "", kPreincludeHostStl);
+
+    // A single header that transitively declares only part of what the kernel headers provide
+    // (e.g. <string> declares std::forward without defining the <utility> include guard).
+    for(const char* header : {"<string>", "<type_traits>"})
+    {
+        SCOPED_TRACE(header);
+        RunSelfContainedKernel(h, "", std::string("#include ") + header + "\n");
+    }
 }
 
 TEST(CPU_HipRtcSelfContained_NONE, RtCompilesInlineKernelWithoutHostStl)

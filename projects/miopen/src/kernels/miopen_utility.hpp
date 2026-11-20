@@ -26,9 +26,13 @@
 #pragma once
 
 // Minimal std::forward for runtime compilation, never using the host C++ standard library (see
-// miopen_type_traits.hpp). An already-included real <utility> is respected.
-#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_GLIBCXX_UTILITY) && \
-    !defined(_LIBCPP_UTILITY) && !defined(_UTILITY_)
+// miopen_type_traits.hpp). A real std::forward that is already declared is respected, as a second
+// definition would clash. It is not only <utility> that declares it: libstdc++ defines it in
+// bits/move.h (pulled in by e.g. <string>), libc++ in <__utility/forward.h> (or <type_traits> in
+// older releases) and the MSVC STL in <type_traits>.
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_GLIBCXX_UTILITY) && !defined(_MOVE_H) && \
+    !defined(_LIBCPP_UTILITY) && !defined(_LIBCPP___UTILITY_FORWARD_H) &&                     \
+    !defined(_LIBCPP_TYPE_TRAITS) && !defined(_UTILITY_) && !defined(_TYPE_TRAITS_)
 
 #include "miopen_type_traits.hpp" // std::remove_reference
 
