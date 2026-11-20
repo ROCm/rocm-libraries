@@ -282,6 +282,18 @@ namespace
         return n;
     }
 
+    template <typename T>
+    Csr<T> diagonal_matrix(const Vec<T>& d)
+    {
+        Csr<T> D(static_cast<int>(d.size()));
+        for(int i = 0; i < D.n; ++i)
+        {
+            D.add(i, d[i]);
+            D.end_row();
+        }
+        return D;
+    }
+
     // Linear interpolation from the odd nodes of a path of 2m + 1 nodes
     template <typename T>
     Csr<T> linear_interpolation(int n)
@@ -845,14 +857,8 @@ TYPED_TEST(multigrid, k_cycle_keeps_an_exact_first_step)
 {
     using T        = typename TypeParam::value_type;
     Hierarchy<T> h = geometric_hierarchy<T>(3);
-    Csr<T>       D(h.A[1].n);
-    for(int i = 0; i < D.n; ++i)
-    {
-        D.add(i, static_cast<T>(2));
-        D.end_row();
-    }
-    h.A[1] = D;
-    h.A[2] = galerkin(h.R[1], h.A[1], h.P[1], 1.0);
+    h.A[1]         = diagonal_matrix(Vec<T>(h.A[1].n, static_cast<T>(2)));
+    h.A[2]         = galerkin(h.R[1], h.A[1], h.P[1], 1.0);
 
     CycleOptions o = options(rocalution::Kcycle, 1, 1, false);
     o.omega        = 1.0;
@@ -875,16 +881,7 @@ TYPED_TEST(multigrid, k_cycle_keeps_an_exact_first_step)
 // zero while (x, Ax) is not. The first CG step is zero, and the K-cycle gives (0.75, 0.75)
 TYPED_TEST(multigrid, k_cycle_step_is_zero_for_a_cycle_orthogonal_to_the_residual)
 {
-    using T             = typename TypeParam::value_type;
-    const auto diagonal = [](T v) {
-        Csr<T> D(2);
-        for(int i = 0; i < 2; ++i)
-        {
-            D.add(i, v);
-            D.end_row();
-        }
-        return D;
-    };
+    using T = typename TypeParam::value_type;
     Csr<T> R1(1, 2);
     R1.add(0, static_cast<T>(1));
     R1.end_row();
@@ -895,9 +892,9 @@ TYPED_TEST(multigrid, k_cycle_step_is_zero_for_a_cycle_orthogonal_to_the_residua
     P1.end_row();
 
     Hierarchy<T> h;
-    h.A = {diagonal(2), diagonal(2)};
-    h.R = {diagonal(1), R1};
-    h.P = {diagonal(1), P1};
+    h.A = {diagonal_matrix<T>({2, 2}), diagonal_matrix<T>({2, 2})};
+    h.R = {diagonal_matrix<T>({1, 1}), R1};
+    h.P = {diagonal_matrix<T>({1, 1}), P1};
     h.A.push_back(galerkin(h.R[1], h.A[1], h.P[1], 1.0));
 
     CycleOptions o = options(rocalution::Kcycle, 1, 1, false);
