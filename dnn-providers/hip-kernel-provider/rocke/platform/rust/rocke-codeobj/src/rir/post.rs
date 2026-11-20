@@ -498,7 +498,7 @@ fn block_dag(
     // scheduler then keeps a run of MFMAs that read prefetched operands together instead of slotting each MFMA
     // result's LDS store (and its hazard wait) between them (LLVM's model latency of a VMEM load is in this range).
     let result_latency = |inst: &MInst| match target {
-        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 => result_latency(inst),
+        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => result_latency(inst),
         crate::target::Target::Gfx950 => {
             let l = crate::target::gfx9::model::result_latency(inst);
             if inst.op.flags() & F_VMEM_LOAD != 0 {
@@ -513,11 +513,11 @@ fn block_dag(
         }
     };
     let mut mfma = match target {
-        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 => None,
+        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => None,
         crate::target::Target::Gfx950 => crate::target::gfx9::sched::MfmaEdges::new(insts),
     };
     let mut m0 = match target {
-        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 => None,
+        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => None,
         crate::target::Target::Gfx950 => crate::target::gfx9::m0_order::M0Order::new(insts),
     };
     let n = insts.len();
@@ -2450,7 +2450,7 @@ pub(super) mod tests {
     /// reference the shared graphs are checked against.
     fn schedule_block_reference(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: crate::target::Target) -> Vec<MInst> {
         let result_latency = |inst: &MInst| match target {
-            crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 => result_latency(inst),
+            crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => result_latency(inst),
             crate::target::Target::Gfx950 => crate::target::gfx9::model::result_latency(inst),
         };
         let n = insts.len();

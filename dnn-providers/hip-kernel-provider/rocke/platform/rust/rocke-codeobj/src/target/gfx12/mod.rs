@@ -1,7 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-//! gfx1201 (the gfx12 ISA, wave32).
+//! The gfx12 ISA, wave32: gfx1201 and gfx12-generic, which differ only in
+//! what the code object states about its processor.
 //!
 //! gfx12 keeps most of gfx11's instructions and encodings, so a gfx12
 //! kernel compiles through the gfx11 pipeline and this module supplies what
@@ -17,7 +18,8 @@
 //!   the scalar load layout, and the opcodes gfx12 renumbered.
 //!
 //! The instruction facts are LLVM's for `-mcpu=gfx1201`
-//! (`FeatureISAVersion12`); `llvm-mc` is the encoding reference, offline.
+//! (`FeatureISAVersion12`, which `gfx12-generic` shares); `llvm-mc` is the
+//! encoding reference, offline.
 
 pub mod asm;
 pub mod sgpr;

@@ -270,7 +270,7 @@ pub unsafe extern "C" fn rocke_codeobj_compile_rocke_ir_v2(
 }
 
 /// The targets this library compiles for: a static NUL-terminated,
-/// comma-separated list of names (`"gfx1151,gfx950,gfx1201"`).
+/// comma-separated list of names (`"gfx1151,gfx950,gfx1201,gfx12-generic"`).
 #[no_mangle]
 pub extern "C" fn rocke_codeobj_supported_targets_v1() -> *const c_char {
     crate::target::SUPPORTED_NAMES.as_ptr()
@@ -663,7 +663,7 @@ mod tests {
         let status = unsafe { rocke_codeobj_compile_rocke_ir_v2(&request, &mut result) };
         assert!(outcome(status, &mut result).2.contains("struct_size"));
         let supported = unsafe { CStr::from_ptr(rocke_codeobj_supported_targets_v1()) };
-        assert_eq!(supported.to_str().ok(), Some("gfx1151,gfx950,gfx1201"));
+        assert_eq!(supported.to_str().ok(), Some("gfx1151,gfx950,gfx1201,gfx12-generic"));
     }
 
     #[test]

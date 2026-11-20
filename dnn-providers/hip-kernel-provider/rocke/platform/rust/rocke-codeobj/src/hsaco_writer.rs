@@ -193,7 +193,8 @@ pub struct KernelArgMeta {
 pub struct ObjectTarget {
     /// The processor of `amdhsa.target` (`amdgcn-amd-amdhsa--<processor>`).
     pub processor: &'static str,
-    /// ELF `e_flags`: `EF_AMDGPU_MACH`, plus xnack and sramecc `any` on gfx9.
+    /// ELF `e_flags`: `EF_AMDGPU_MACH`, plus xnack and sramecc `any` on gfx9
+    /// and the generic version of a generic processor.
     pub e_flags: u32,
     pub wavefront_size: u32,
     /// gfx10+ records `.workgroup_processor_mode`; gfx9 records
@@ -235,6 +236,17 @@ pub const GFX1201_OBJECT: ObjectTarget = ObjectTarget {
     e_flags: 0x4e,
     producer: b"rocKE Rust direct gfx1201 encoder + ELF writer\0",
     ..GFX1151_OBJECT
+};
+
+/// gfx12-generic: gfx1201's object under LLVM's generic gfx12 machine
+/// (`EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC`) with generic version 1 in the
+/// top byte of `e_flags` (`EF_AMDGPU_GENERIC_VERSION`), which the loader
+/// matches against the device.
+pub const GFX12_GENERIC_OBJECT: ObjectTarget = ObjectTarget {
+    processor: "gfx12-generic",
+    e_flags: 0x0100_0059,
+    producer: b"rocKE Rust direct gfx12-generic encoder + ELF writer\0",
+    ..GFX1201_OBJECT
 };
 
 /// gfx950 with xnack and sramecc `any` (`e_flags` 0x54f, so it loads in

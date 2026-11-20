@@ -93,7 +93,7 @@ typedef struct rocke_codeobj_compile_request_v2
     const uint8_t* serialized_ir;
     size_t serialized_ir_size;
     /* NUL-terminated target name, one of rocke_codeobj_supported_targets_v1:
-     * "gfx1151", "gfx950" or "gfx1201" */
+     * "gfx1151", "gfx950", "gfx1201" or "gfx12-generic" */
     const char* target;
 } rocke_codeobj_compile_request_v2;
 
@@ -105,7 +105,8 @@ ROCKE_CODEOBJ_FFI_API int32_t rocke_codeobj_compile_rocke_ir_v2(
     const rocke_codeobj_compile_request_v2* request, rocke_codeobj_compile_result_v1* result);
 
 /* The targets the library compiles for: a static NUL-terminated,
- * comma-separated list of names ("gfx1151,gfx950,gfx1201"). Do not free it. */
+ * comma-separated list of names ("gfx1151,gfx950,gfx1201,gfx12-generic").
+ * Do not free it. */
 ROCKE_CODEOBJ_FFI_API const char* rocke_codeobj_supported_targets_v1(void);
 
 ROCKE_CODEOBJ_FFI_API void

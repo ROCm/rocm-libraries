@@ -203,7 +203,7 @@ fn vop3_words(
 fn encode(inst: &MInst, e: &mut Enc, target: crate::target::Target) -> Result<(), CompileError> {
     lane_mask_source(inst)?;
     match target {
-        crate::target::Target::Gfx1201 => {
+        crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => {
             if !crate::target::gfx12::asm::encode(inst, &mut e.words, encode_gfx11_into)? {
                 encode_gfx11_into(inst, &mut e.words)?;
             }

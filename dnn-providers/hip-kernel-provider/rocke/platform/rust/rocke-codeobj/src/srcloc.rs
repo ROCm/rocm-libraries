@@ -120,7 +120,7 @@ pub struct SourceMap {
 fn mnemonic(target: Target, op: crate::rir::mir::Opc) -> String {
     match target {
         Target::Gfx950 => crate::target::gfx9::gen_isa::mnemonic(op).map_or_else(|| op.name(), str::to_string),
-        Target::Gfx1151 | Target::Gfx1201 => op.name(),
+        Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => op.name(),
     }
 }
 
@@ -134,7 +134,7 @@ impl SourceMap {
         }
         let starts = match f.target {
             Target::Gfx950 => crate::target::gfx9::asm::inst_starts(f)?,
-            Target::Gfx1151 | Target::Gfx1201 => crate::rir::asm::inst_starts(f)?,
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => crate::rir::asm::inst_starts(f)?,
         };
         let chains: Vec<Vec<Frame>> = f.locs.iter().map(|loc| parse_loc(loc)).collect();
         let usable = |loc: u32| loc != NO_LOC && !chains[loc as usize - 1].is_empty();

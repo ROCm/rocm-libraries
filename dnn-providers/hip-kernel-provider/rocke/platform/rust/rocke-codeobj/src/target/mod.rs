@@ -13,7 +13,7 @@ pub mod gfx12;
 pub mod gfx9;
 
 use crate::error::CompileError;
-use crate::hsaco_writer::{ObjectTarget, GFX1151_OBJECT, GFX1201_OBJECT, GFX950_OBJECT};
+use crate::hsaco_writer::{ObjectTarget, GFX1151_OBJECT, GFX1201_OBJECT, GFX12_GENERIC_OBJECT, GFX950_OBJECT};
 
 /// A GPU the direct compiler knows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -22,11 +22,14 @@ pub enum Target {
     Gfx1151,
     Gfx950,
     Gfx1201,
+    /// LLVM's `gfx12-generic`: the gfx12 instruction set of gfx1201, in a
+    /// code object every gfx12 device of that set loads.
+    Gfx12Generic,
 }
 
 impl Target {
     /// Every target the compiler knows, supported or not.
-    pub const ALL: [Target; 3] = [Target::Gfx1151, Target::Gfx950, Target::Gfx1201];
+    pub const ALL: [Target; 4] = [Target::Gfx1151, Target::Gfx950, Target::Gfx1201, Target::Gfx12Generic];
 
     #[inline]
     pub fn info(self) -> &'static TargetInfo {
@@ -34,6 +37,7 @@ impl Target {
             Target::Gfx1151 => &GFX1151,
             Target::Gfx950 => &GFX950,
             Target::Gfx1201 => &GFX1201,
+            Target::Gfx12Generic => &GFX12_GENERIC,
         }
     }
 
@@ -42,20 +46,22 @@ impl Target {
     /// end of it (`target::gfx12`). gfx950 has its own back end.
     #[inline]
     pub fn gfx11_pipeline(self) -> bool {
-        matches!(self, Target::Gfx1151 | Target::Gfx1201)
+        matches!(self, Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic)
     }
 
-    /// Whether the target has the gfx12 instruction set (`target::gfx12`).
+    /// Whether the target has the gfx12 instruction set (`target::gfx12`):
+    /// gfx1201 and gfx12-generic, which differ only in the code object.
     #[inline]
     pub fn gfx12(self) -> bool {
-        matches!(self, Target::Gfx1201)
+        matches!(self, Target::Gfx1201 | Target::Gfx12Generic)
     }
 
     pub fn name(self) -> &'static str {
         self.info().name
     }
 
-    /// The target named `name` (`"gfx1151"`, `"gfx950"`, `"gfx1201"`).
+    /// The target named `name` (`"gfx1151"`, `"gfx950"`, `"gfx1201"`,
+    /// `"gfx12-generic"`).
     pub fn from_name(name: &str) -> Option<Target> {
         Target::ALL.into_iter().find(|t| t.name() == name)
     }
@@ -66,7 +72,7 @@ impl Target {
     /// as does one on a gfx12 target that needs what `target::gfx12` does
     /// not lower.
     pub fn supported(self) -> bool {
-        matches!(self, Target::Gfx1151 | Target::Gfx950 | Target::Gfx1201)
+        matches!(self, Target::Gfx1151 | Target::Gfx950 | Target::Gfx1201 | Target::Gfx12Generic)
     }
 
     /// `self`, or the `request` error a compile request for an unsupported
@@ -89,15 +95,21 @@ impl Target {
         match self {
             Target::Gfx1151 => op.fmt() != Fmt::Pseudo && !matches!(op, Opc::Gfx12(_)),
             Target::Gfx950 => gfx9::gen_isa::info(op).is_some_and(|i| i.table),
-            Target::Gfx1201 => op.fmt() != Fmt::Pseudo && !gfx12::removed(op),
+            Target::Gfx1201 | Target::Gfx12Generic => op.fmt() != Fmt::Pseudo && !gfx12::removed(op),
         }
     }
 
     /// The supported target named `name`, or the `request` error for an
-    /// unknown or unsupported one.
+    /// unknown or unsupported one. gfx1200, the other processor of
+    /// gfx12-generic, is refused by name: no code object of this compiler
+    /// has run on one.
     pub fn requested(name: &str) -> Result<Target, CompileError> {
         match Target::from_name(name) {
             Some(target) => target.require_supported(),
+            None if name == "gfx1200" => Err(CompileError::new(
+                "request",
+                format!("the direct compiler has no gfx1200 target: it is not verified on that device; it knows {}", supported_names()),
+            )),
             None => Err(CompileError::new(
                 "request",
                 format!("unknown target {name:?}; the direct compiler knows {}", supported_names()),
@@ -107,13 +119,13 @@ impl Target {
 }
 
 /// The supported targets' names, comma-separated
-/// (`"gfx1151,gfx950,gfx1201"`).
+/// (`"gfx1151,gfx950,gfx1201,gfx12-generic"`).
 pub fn supported_names() -> String {
     Target::ALL.into_iter().filter(|t| t.supported()).map(Target::name).collect::<Vec<_>>().join(",")
 }
 
 /// `supported_names()` as the static C string the FFI hands out.
-pub const SUPPORTED_NAMES: &std::ffi::CStr = c"gfx1151,gfx950,gfx1201";
+pub const SUPPORTED_NAMES: &std::ffi::CStr = c"gfx1151,gfx950,gfx1201,gfx12-generic";
 
 /// What the shared passes read about a target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,6 +215,13 @@ pub const GFX950: TargetInfo = TargetInfo {
 pub const GFX1201: TargetInfo =
     TargetInfo { target: Target::Gfx1201, name: "gfx1201", address_reduction: true, object: GFX1201_OBJECT, ..GFX1151 };
 
+/// gfx12-generic: gfx1201's code under LLVM's generic gfx12 processor. The
+/// generic processor has gfx1201's instruction set (LLVM's
+/// `FeatureISAVersion12`) and requires code object version 6, which every
+/// object of this compiler is.
+pub const GFX12_GENERIC: TargetInfo =
+    TargetInfo { target: Target::Gfx12Generic, name: "gfx12-generic", object: GFX12_GENERIC_OBJECT, ..GFX1201 };
+
 impl TargetInfo {
     /// Waves per SIMD that can be resident with `vgprs` VGPRs per lane and
     /// `lds_bytes` of LDS per workgroup of `workgroup_size` lanes.
@@ -210,7 +229,7 @@ impl TargetInfo {
         let by_vgprs = self.vgprs_per_simd / vgprs.max(1).next_multiple_of(self.vgpr_granule);
         let by_vgprs = match self.target {
             Target::Gfx950 => gfx9::rules::whole_workgroups(by_vgprs, workgroup_size.div_ceil(self.wave), self.simds_per_lds),
-            Target::Gfx1151 | Target::Gfx1201 => by_vgprs,
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => by_vgprs,
         };
         let by_lds = match lds_bytes {
             0 => self.max_waves,
@@ -319,11 +338,17 @@ mod tests {
         assert_eq!(Target::requested("gfx1151").ok(), Some(Target::Gfx1151));
         assert_eq!(Target::requested("gfx950").ok(), Some(Target::Gfx950));
         assert_eq!(Target::requested("gfx1201").ok(), Some(Target::Gfx1201));
-        for name in ["gfx942", "", "GFX1151", "gfx950:xnack-", "gfx1250", "gfx1200", "gfx12", "gfx12-generic"] {
+        assert_eq!(Target::requested("gfx12-generic").ok(), Some(Target::Gfx12Generic));
+        for name in ["gfx942", "", "GFX1151", "gfx950:xnack-", "gfx1250", "gfx1200", "gfx12", "gfx11-generic"] {
             assert_eq!(Target::requested(name).err().map(|e| e.kind), Some("request"), "{name}");
         }
-        assert_eq!(supported_names(), "gfx1151,gfx950,gfx1201");
+        assert!(Target::requested("gfx1200").is_err_and(|e| e.message.contains("not verified")));
+        assert_eq!(supported_names(), "gfx1151,gfx950,gfx1201,gfx12-generic");
         assert_eq!(SUPPORTED_NAMES.to_str().ok(), Some(supported_names().as_str()));
+        // The generic target is gfx1201's code in another object.
+        let (generic, gfx1201) = (Target::Gfx12Generic.info(), Target::Gfx1201.info());
+        assert_eq!(TargetInfo { target: gfx1201.target, name: gfx1201.name, object: gfx1201.object, ..*generic }, *gfx1201);
+        assert!(generic.object.e_flags != gfx1201.object.e_flags && Target::Gfx12Generic.gfx12() && Target::Gfx1201.gfx12());
         for t in Target::ALL {
             assert_eq!(t.info().target, t);
         }

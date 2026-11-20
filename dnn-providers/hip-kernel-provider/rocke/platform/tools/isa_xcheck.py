@@ -983,7 +983,7 @@ def literal_for_inline(v: Variant) -> bool:
 
 
 # The processors of the gfx12 encoder (`--isa`).
-GFX12 = ("gfx1201",)
+GFX12 = ("gfx1201", "gfx12-generic")
 
 
 def report(vs: list[Variant], path: Path, isa: str = "gfx11") -> str:
@@ -1109,12 +1109,13 @@ def main(argv: list[str] | None = None) -> int:
         "--isa",
         choices=("gfx11", "gfx950", *GFX12),
         default="gfx11",
-        help="the encoder: gfx11 (rir, llvm-mc -mcpu=gfx1151), gfx950 (target::gfx9, -mcpu=gfx950) "
-        "or gfx1201 (target::gfx12 over rir, -mcpu=gfx1201)",
+        help="the encoder: gfx11 (rir, llvm-mc -mcpu=gfx1151), gfx950 (target::gfx9, -mcpu=gfx950), "
+        "gfx1201 (target::gfx12 over rir, -mcpu=gfx1201) or gfx12-generic (the gfx1201 encoder "
+        "against -mcpu=gfx12-generic)",
     )
     args = ap.parse_args(argv)
     gfx950 = args.isa == "gfx950"
-    # The crate's example names the encoder.
+    # The crate's example names the encoder: gfx12-generic has gfx1201's.
     encoder = "gfx1201" if args.isa in GFX12 else args.isa
     if args.variants:
         text = args.variants.read_text(encoding="utf-8-sig")

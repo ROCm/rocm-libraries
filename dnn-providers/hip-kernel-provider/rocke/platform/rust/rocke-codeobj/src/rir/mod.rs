@@ -787,7 +787,7 @@ fn spill_best(
         agpr_slots: match f.target {
             Target::Gfx950 if !agprs => 0,
             Target::Gfx950 => crate::target::gfx9::spill::agpr_slots(t, hw.vgprs, lds_size, wg).min(agpr_cap()),
-            Target::Gfx1151 | Target::Gfx1201 => 0,
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => 0,
         },
     };
     // gfx950: also the accumulator webs in AGPRs beside the spilled values; the cheapest wins (`gfx9::agpr_spill`).
@@ -1157,7 +1157,7 @@ impl CompiledKernel {
     /// Text listing of the machine code with byte offsets and encodings.
     pub fn listing(&self) -> String {
         match self.target {
-            Target::Gfx1151 | Target::Gfx1201 => asm::listing(&self.func),
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => asm::listing(&self.func),
             Target::Gfx950 => crate::target::gfx9::asm::listing(&self.func),
         }
         .expect("the code assembled once")
@@ -1233,7 +1233,7 @@ pub(crate) fn compile_parsed_by_on(
     // gfx950 weighs an unrolled compile that loses waves by its cost (`gfx9::unrolled`).
     let keeps = |u: &CompiledKernel, r: &CompiledKernel| match target {
         Target::Gfx950 => crate::target::gfx9::unrolled::keeps(&u.func, &u.stats, &r.func, &r.stats),
-        Target::Gfx1151 | Target::Gfx1201 => keeps_unrolled(&u.stats, &r.stats),
+        Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => keeps_unrolled(&u.stats, &r.stats),
     };
     match (first, rolled) {
         (Ok(u), Ok(r)) => Ok(if keeps(&u, &r) { u } else { r }),
@@ -1574,14 +1574,14 @@ fn complete(
     let (vopd_pairs, vopd_weighted) = match target {
         // gfx950's passes lap themselves: `expand`, `waitcnt`, `hazards`.
         Target::Gfx950 => crate::target::gfx9::finish_lapped(&mut sel.func, alloc.num_vgprs, &mut |name| laps.lap(name)).map(|()| (0, 0))?,
-        Target::Gfx1151 | Target::Gfx1201 => {
+        Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => {
             let pairs = finish(&mut sel.func, alloc.num_vgprs)?;
             laps.lap("post");
             pairs
         }
     };
     let code = match target {
-        Target::Gfx1151 | Target::Gfx1201 => asm::assemble(&sel.func)?,
+        Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => asm::assemble(&sel.func)?,
         // Kernarg preload: the 256-byte entry that loads the preloaded
         // arguments for firmware that does not preload (which skips it).
         Target::Gfx950 if sel.preload > 0 => {
@@ -1604,7 +1604,7 @@ fn complete(
     let rsrc3 = (code.len().div_ceil(128).min(63) as u32) << 4;
     let (rsrc1, rsrc2, rsrc3, sgpr_count) = match target {
         Target::Gfx1151 => (rsrc1, rsrc2, rsrc3, alloc.num_sgprs + 2),
-        Target::Gfx1201 => {
+        Target::Gfx1201 | Target::Gfx12Generic => {
             let (rsrc1, rsrc3) = crate::target::gfx12::program_resources(rsrc1, code.len());
             (rsrc1, rsrc2, rsrc3, alloc.num_sgprs + 2)
         }

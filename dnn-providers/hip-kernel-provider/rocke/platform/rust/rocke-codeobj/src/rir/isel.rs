@@ -306,7 +306,7 @@ impl<'a> Isel<'a> {
     fn gfx11_only(&self, what: &str) -> Result<(), CompileError> {
         match self.t.target {
             Target::Gfx950 => Err(unsupported(format!("{what} on gfx950"))),
-            Target::Gfx1151 | Target::Gfx1201 => Ok(()),
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => Ok(()),
         }
     }
 
@@ -6358,7 +6358,7 @@ pub fn select_for(
         mem_tags: if super::debug_flag("noalias") { Vec::new() } else { super::alias::value_tags(kernel) },
         lds_dma: match target {
             Target::Gfx950 => crate::target::gfx9::lds_dma::Facts::of(kernel),
-            Target::Gfx1151 | Target::Gfx1201 => Default::default(),
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => Default::default(),
         },
         ds_bases: FxHashMap::default(),
         loop_frames: Vec::new(),
