@@ -60,6 +60,9 @@ namespace rocalution
         this->mat_.row_offset = NULL;
         this->mat_.col        = NULL;
         this->mat_.val        = NULL;
+        this->mat_.nrowb      = 0;
+        this->mat_.ncolb      = 0;
+        this->mat_.nnzb       = 0;
         this->mat_.blockdim   = blockdim;
         this->set_backend(local_backend);
 
@@ -156,6 +159,10 @@ namespace rocalution
         this->ncol_ = 0;
         this->nnz_  = 0;
 
+        this->mat_.nrowb = 0;
+        this->mat_.ncolb = 0;
+        this->mat_.nnzb  = 0;
+
         this->LAnalyseClear();
         this->UAnalyseClear();
         this->LUAnalyseClear();
@@ -224,11 +231,13 @@ namespace rocalution
 
         blockdim = this->mat_.blockdim;
 
-        this->mat_.blockdim = 0;
-
         this->nrow_ = 0;
         this->ncol_ = 0;
         this->nnz_  = 0;
+
+        this->mat_.nrowb = 0;
+        this->mat_.ncolb = 0;
+        this->mat_.nnzb  = 0;
     }
 
     template <typename ValueType>
@@ -355,12 +364,12 @@ namespace rocalution
             // Copy only if initialized
             if(hip_cast_mat->mat_.row_offset != NULL)
             {
-                copy_h2d(
+                copy_d2d(
                     this->mat_.nrowb + 1, hip_cast_mat->mat_.row_offset, this->mat_.row_offset);
             }
 
-            copy_h2d(this->mat_.nnzb, hip_cast_mat->mat_.col, this->mat_.col);
-            copy_h2d(this->mat_.nnzb * this->mat_.blockdim * this->mat_.blockdim,
+            copy_d2d(this->mat_.nnzb, hip_cast_mat->mat_.col, this->mat_.col);
+            copy_d2d(this->mat_.nnzb * this->mat_.blockdim * this->mat_.blockdim,
                      hip_cast_mat->mat_.val,
                      this->mat_.val);
         }
@@ -689,10 +698,15 @@ namespace rocalution
         // Empty matrix
         if(mat.GetNnz() == 0)
         {
-            int mb = (mat.GetM() + 1) / 2;
-            int nb = (mat.GetN() + 1) / 2;
+            int blockdim = this->mat_.blockdim;
 
-            this->AllocateBCSR(0, mb, nb, 2);
+            // Matrix dimensions must be a multiple of blockdim
+            if((mat.GetM() % blockdim) != 0 || (mat.GetN() % blockdim) != 0)
+            {
+                return false;
+            }
+
+            this->AllocateBCSR(0, mat.GetM() / blockdim, mat.GetN() / blockdim, blockdim);
 
             return true;
         }
