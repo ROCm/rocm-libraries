@@ -47,6 +47,11 @@ def manifest() -> dict:
         pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
     re_.bind_provider(manifest.get("provider_root"))
     manifest["enumerate"]["space"] = "full"
+    # The shipped manifest holds every performance knob but the tile, so projection is
+    # exactly what it does not do. These tests are about projection, so drop the holds
+    # and let the knobs vary: with them in place the per-knob loops below would skip
+    # every knob and pass without asserting anything.
+    manifest["enumerate"].pop("hold_fields", None)
     manifest["enumerate"]["cells"] = [
         {
             "fields": ["hdim_q", "hdim_v", "nhead_q", "nhead_k"],

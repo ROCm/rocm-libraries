@@ -126,7 +126,10 @@ builder: build_attention_dense
 kernel_name_template: attention_dense.{dtype}_d{head_size}_c{causal}_bm{block_m}_bn{block_n}.gfx950
 
 # The registry space the selection is drawn from (see registry_enumerator.py).
-# `space: slice` is exactly the shipped selection; `space: full` every production spec.
+# `space: full`, so every varying registry field is accounted for: projected into the
+# catalog, or named in `hold_fields` below and held at the cell default. One that is
+# neither is held with a WARN, which is how a knob added upstream becomes visible rather
+# than silently dropped (what `space: slice` did).
 enumerate:
   candidates: dispatch.attention:attention_candidates
   request: dispatch.attention.common:AttentionRequest
@@ -156,21 +159,41 @@ enumerate:
   feature_fields:
     use_additive_bias: {name_token: _addb, select: {block_m: 128, block_n: 64}}
   sweep_level: production
-  space: slice
-  # Spec fields the sweep may vary away from the candidate's own default spec.
-  # Every other field must equal that default, or the spec is a different
-  # kernel family and is not part of this catalog.
-  # The catalog is aligned-only, so `ragged` is not free: a ragged spec differs
-  # from the default and is excluded.
+  space: full
+  # The tile is the only thing this catalog varies, so every other performance knob is
+  # held at the cell's default spec by name. Holding is a decision, not an omission:
+  # check_hold_fields refuses a name the registry spec does not have, so a knob renamed
+  # upstream fails the build instead of quietly reverting to a default.
+  #
+  # Keep this list and reduction.fields.performance consistent by hand, and know what
+  # does NOT catch a mistake. A knob added there and forgotten here is projected, which
+  # widens the catalog, and the enumerator applies max_kernels only when `space` is not
+  # full (registry_enumerator.py, `if not full and limit is not None`). So nothing
+  # refuses the growth until it passes aot_budget_per_arch, which warns rather than
+  # fails. What does catch it is regenerating: the new kernels have to be committed,
+  # and the g2/g3 gates compare the shipped catalog against the enumeration.
+  # Kept though `space: full` never reads it: slice_of is the slice path's, but the bias
+  # feature's `select` is validated against it, and test_registry_full_space.py's bias
+  # cell builds a slice variant of this manifest to compare against.
   free_fields: [block_m, block_n]
-  # Fields of the registry spec every generated kernel carries. The registry spec
-  # is wider (the rest sit at their dataclass defaults), and the shipped KDP omits
-  # lds_k_row_pad too: `space: slice` leaves it at its default while `space: full`
-  # varies it. tests/test_registry_regeneration.py asserts the defaults (g1) and
-  # diffs the enumeration against the shipped catalog on the shipped fields (g3).
+  hold_fields: [waves_per_eu, lazy_rescale, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad,
+                lazy_rescale_threshold, use_exp2_fast, exp_per_pv_step,
+                partial_vmcnt_prefetch, pv_priority, pv_sched_fence,
+                pv_sched_group_template, iglp_mode, pv_sched_fence_mask,
+                pv_sched_group_ds_read, pv_loop_order, causal_diag_split, o_store_width]
+  # Fields of the registry spec every generated kernel carries. The registry spec is
+  # wider, and the rest sit at their dataclass defaults. The shipped KDP omits
+  # lds_k_row_pad, which hold_fields above keeps at its default.
+  # The catalog is aligned-only, so a ragged spec is not reachable: `ragged` is a
+  # reduction.fields.feature field, and `space: full` keeps only specs matching the
+  # cell default on those. tests/test_registry_regeneration.py asserts the defaults
+  # (g1) and diffs the enumeration against the shipped catalog on the shipped fields
+  # (g3, a subset check under `space: full`).
   spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, use_additive_bias]
-  # Frozen build cost: a registry that grows past this fails here, not at pack time.
-  # 52 bias-off kernels plus 8 bias kernels.
+  # Frozen build cost: 52 bias-off kernels plus 8 bias kernels. NOT enforced
+  # under `space: full`, which the enumerator skips this check for. It is kept as
+  # the declared intent and as the gate if this ever returns to `space: slice`. The
+  # ceiling that applies is reduction.aot_budget_per_arch.
   max_kernels: 60
 
 # How the variant space is reduced; copied verbatim into the generated config.
@@ -199,7 +222,12 @@ reduction:
       - {name: pv_loop_order, unset_resolves_by: resolved_pv_loop_order}
       - {name: causal_diag_split}
       - {name: o_store_width}
-    ignored: []
+    # Never a kernel axis for this engine, as opposed to hold_fields' "this section
+    # holds it": kv_segments is a split-KV build axis the dispatcher owns, and the
+    # matcher serves a single segment only (ServesOnlyASingleKvSegment). It varies over
+    # {1, 2, 4, 8} in the registry, so `space: full` reports it unclassified until it is
+    # named here.
+    ignored: [kv_segments]
   aot_budget_per_arch: 1000
 
 # How owner benchmark rows become hipDNN graphs (tools/ground_truth.py graphs).
