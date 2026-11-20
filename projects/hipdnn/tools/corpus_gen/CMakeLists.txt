@@ -78,11 +78,16 @@ if(HIPDNN_BUILD_FRONTEND AND HIPDNN_BUILD_BACKEND)
                 "form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--form-floor,1|0|8|plain,scale_unset,scale_tensor,dropout,padded,ragged,bias,sink"
                 # The backward declares six of them: no sink token, and no ragged form.
                 "form_floor_sdpa_bwd|--without-engine,--operations,${_operations_dir},--operation,sdpa_bwd,--form-floor,1|0|6|plain,scale_unset,scale_tensor,dropout,padded,bias"
-                # Both floors at once, narrowed to one form so that the six regimes the constraints
-                # exclude and the seven other forms are short: one graph fills a regime's floor
-                # and the form's, so `requested` is the graphs plus the larger of the two
-                # shortfalls (CorpusGenRun.cmake), not the floors' sum.
-                "regime_and_form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-floor,1,--form-floor,1,--keep,q.form=padded|0|18|padded"
+                # Both floors at once, narrowed to one form so that one regime and the seven other
+                # forms are short: one graph fills a regime's floor and the form's, so `requested`
+                # is the graphs plus the larger of the two shortfalls (CorpusGenRun.cmake), 23 + 7,
+                # not the floors' sum, 23 + 8. Of the 24 regimes, 23 are served: cross attention
+                # (more queries than keys) is declared, so its regimes are reachable, but
+                # cross_long_gqa is a sliver (more than 2048 keys, then more queries) that the
+                # focused search does not reach under the default --ceiling 4096 (it is found at
+                # 8192). It was 18 while the declaration forced seqlen_q <= seqlen_k and all six
+                # cross regimes were excluded.
+                "regime_and_form_floor|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-floor,1,--form-floor,1,--keep,q.form=padded|0|23|padded"
                 # A sweep with no share still delivers the regimes the quotas name.
                 "regime_quota_without_sweep|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--regime-quota,decode_short_mha=3,--sweep-share,0|0|3"
                 "model_shapes|--without-engine,--operations,${_operations_dir},--operation,sdpa_fwd,--model-shapes,${_model_shapes},--count,1,--model-share,1,--sweep-share,0|0|1"
