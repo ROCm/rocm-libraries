@@ -20,6 +20,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# DO NOT MERGE: no-op marker so this PR's diff is exactly one rocPRIM file.
+# This is the control for the hipRAND scoping test (#16381). rocPRIM maps to
+# TheRock's prim artifact, which does NOT set changed_projects_enabled, so
+# TheRock must drop changed_projects entirely and fall back to a full build.
+# Expected: math-libs configures with every artifact enabled, exactly as it
+# did before the opt-in plumbing landed. Any narrowing here is a bug.
+
 cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
 cmake_policy(VERSION 3.18...3.25)
 
