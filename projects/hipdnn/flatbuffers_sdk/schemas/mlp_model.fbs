@@ -1,0 +1,92 @@
+// Copyright © Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+namespace hipdnn_flatbuffers_sdk.data_objects;
+
+file_identifier "HMLP";
+
+/// One network input: a feature-row slot, transformed and standardized.
+///
+///     t = sign(x) * log(1 + |x|)      (0 when x is NaN: a missing or unbound feature)
+///     z = (t - mean) / scale
+table MlpInput {
+    /// Slot of the feature row this input reads, within 0..MlpModel.num_features.
+    feature:int32;
+
+    /// Centre and spread of t over the training rows; finite, scale > 0.
+    mean:double = 0.0;
+    scale:double = 1.0;
+}
+
+/// One fully connected layer: y = weights . x + biases.
+table MlpLayer {
+    /// Width of the layer's input and output; both > 0.
+    inputs:int32;
+    outputs:int32;
+
+    /// outputs x inputs values, row-major (one row per output). Finite.
+    weights:[float];
+
+    /// outputs values. Finite.
+    biases:[float];
+}
+
+/// One network of the ensemble. Every layer but the last is followed by SiLU,
+/// x / (1 + exp(-x)); the last layer has one output. A layer's `inputs` equals the previous
+/// layer's `outputs`, and the first layer's equals the network input width.
+table MlpNetwork {
+    layers:[MlpLayer];
+}
+
+/// Ensemble of small fully connected networks (RFC 0019 §7 "mlp_data" adapter).
+///
+/// An engine estimate (`predict_engine`) or a catalog ranker (`sort_kernel_catalog`): the
+/// score is the model's prediction of log(metric value) for the registered ranking metric
+/// `metric` names, so the UHD declares `score: {metric: <metric>, transform: log}` and that
+/// metric's objective.
+///
+/// Prediction for a feature row x:
+///     input = [z(inputs[0]), ..., z(inputs[n-1]),
+///              isnan(x[missing_flags[0]]), ..., isnan(x[missing_flags[m-1]])]
+///     score = target_mean + target_scale * mean over networks of network(input)
+/// The network input width is inputs.size() + missing_flags.size().
+table MlpModel {
+    /// Number of features expected in the input vector.
+    num_features:int32;
+
+    /// The ranking metric whose log the score predicts ("tflops", "time"). Must match the
+    /// UHD's score.metric for the model to load.
+    metric:string;
+
+    /// Hash of the features_signature this model was built against (sha256:...).
+    /// Must match the UHD's features_hash for the model to load.
+    features_hash:string;
+
+    /// The standardized network inputs, in network input order.
+    inputs:[MlpInput];
+
+    /// Feature-row slots appended to the network input as 1 when missing (NaN), else 0.
+    missing_flags:[int32];
+
+    /// The ensemble members; the score averages their outputs. At least one.
+    networks:[MlpNetwork];
+
+    /// Maps a network output back to the trained target: target_mean + target_scale * y.
+    /// Finite, target_scale > 0.
+    target_mean:double = 0.0;
+    target_scale:double = 1.0;
+
+    /// Model metadata.
+    framework:string;           // "uhd_gen.mlp"
+    training_date:string;       // ISO 8601 timestamp
+    num_training_samples:int64;
+
+    /// Model provenance (RFC 0019 §8.3, §13).
+    /// GPU architectures the model was trained on (e.g., ["gfx942", "gfx1100"]).
+    training_arches:[string];
+
+    /// Semantic version of the model (e.g., "1.0.0").
+    model_version:string;
+}
+
+root_type MlpModel;

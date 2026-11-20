@@ -1,0 +1,122 @@
+{
+  "aliases": {},
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "conv_direct_fwd_smallc_mfma/gfx950/bf16_c3_default": {
+          "arch": "gfx950",
+          "bytes": 45366,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f3x3_s1_p1_c3_wk1_wp4_tk4_tp2_oh4_ow32_tb1_bf16",
+          "sha256": "bf95457064a58640901dc24cb964c18433c31c2e617d11cfdc80c7d1bc1f7886",
+          "status": "ok"
+        },
+        "conv_direct_fwd_smallc_mfma/gfx950/bf16_c3_k7s2_tb4_pf": {
+          "arch": "gfx950",
+          "bytes": 374254,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f7x7_s2_p3_c3_wk1_wp8_tk4_tp2_oh8_ow32_tb4_pf_bf16",
+          "sha256": "b6ea3163eb73c58f41d9e9cfab11e5f99a135a5bb48809578bb61b488eb29ee6",
+          "status": "ok"
+        },
+        "conv_direct_fwd_smallc_mfma/gfx950/fp16_c3_s2_tb4": {
+          "arch": "gfx950",
+          "bytes": 160419,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f3x3_s2_p1_c3_wk1_wp4_tk1_tp4_oh8_ow32_tb4",
+          "sha256": "ec94cb3e10a2b198c5709a1a58332a28cbb5d9aa50b64d2ca3c72eac5ffc35f6",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm22": {
+      "cases": {
+        "conv_direct_fwd_smallc_mfma/gfx950/bf16_c3_default": {
+          "arch": "gfx950",
+          "bytes": 45419,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f3x3_s1_p1_c3_wk1_wp4_tk4_tp2_oh4_ow32_tb1_bf16",
+          "sha256": "d208cbbbe67302a0bcf711eb3fca893f6e3b91778166ae5778ae0a3acd39bdbb",
+          "status": "ok"
+        },
+        "conv_direct_fwd_smallc_mfma/gfx950/bf16_c3_k7s2_tb4_pf": {
+          "arch": "gfx950",
+          "bytes": 374309,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f7x7_s2_p3_c3_wk1_wp8_tk4_tp2_oh8_ow32_tb4_pf_bf16",
+          "sha256": "00614f7afc8ee2b77fcec6fae0eca07b4faa39010ddcfef3987f20207752d7a7",
+          "status": "ok"
+        },
+        "conv_direct_fwd_smallc_mfma/gfx950/fp16_c3_s2_tb4": {
+          "arch": "gfx950",
+          "bytes": 160472,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f3x3_s2_p1_c3_wk1_wp4_tk1_tp4_oh8_ow32_tb4",
+          "sha256": "79089451390c2be388e83c4b8c3bae47e0310a7d227846218bf7d58db6adf755",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm23": {
+      "cases": {
+        "conv_direct_fwd_smallc_mfma/gfx950/bf16_c3_default": {
+          "arch": "gfx950",
+          "bytes": 45483,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f3x3_s1_p1_c3_wk1_wp4_tk4_tp2_oh4_ow32_tb1_bf16",
+          "sha256": "3214e86d8d277a1c78bb12f44610afc2a971e99dcd96796ad97daa28588c3e00",
+          "status": "ok"
+        },
+        "conv_direct_fwd_smallc_mfma/gfx950/bf16_c3_k7s2_tb4_pf": {
+          "arch": "gfx950",
+          "bytes": 374373,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f7x7_s2_p3_c3_wk1_wp8_tk4_tp2_oh8_ow32_tb4_pf_bf16",
+          "sha256": "cdc060b95958558724e74e0729fed0c004d09d3846b6825dd8dbceb433128d5f",
+          "status": "ok"
+        },
+        "conv_direct_fwd_smallc_mfma/gfx950/fp16_c3_s2_tb4": {
+          "arch": "gfx950",
+          "bytes": 160536,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f3x3_s2_p1_c3_wk1_wp4_tk1_tp4_oh8_ow32_tb4",
+          "sha256": "f42818a5ad48fecfdc7718a529e68eec44538b388ef6c46ab0320c5f63cdda8c",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
+      "cases": {
+        "conv_direct_fwd_smallc_mfma/gfx950/bf16_c3_default": {
+          "arch": "gfx950",
+          "bytes": 45483,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f3x3_s1_p1_c3_wk1_wp4_tk4_tp2_oh4_ow32_tb1_bf16",
+          "sha256": "3214e86d8d277a1c78bb12f44610afc2a971e99dcd96796ad97daa28588c3e00",
+          "status": "ok"
+        },
+        "conv_direct_fwd_smallc_mfma/gfx950/bf16_c3_k7s2_tb4_pf": {
+          "arch": "gfx950",
+          "bytes": 374373,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f7x7_s2_p3_c3_wk1_wp8_tk4_tp2_oh8_ow32_tb4_pf_bf16",
+          "sha256": "cdc060b95958558724e74e0729fed0c004d09d3846b6825dd8dbceb433128d5f",
+          "status": "ok"
+        },
+        "conv_direct_fwd_smallc_mfma/gfx950/fp16_c3_s2_tb4": {
+          "arch": "gfx950",
+          "bytes": 160536,
+          "family": "conv_direct_fwd_smallc_mfma",
+          "kernel_name": "fwd_smallc_mfma_f3x3_s2_p1_c3_wk1_wp4_tk1_tp4_oh8_ow32_tb4",
+          "sha256": "f42818a5ad48fecfdc7718a529e68eec44538b388ef6c46ab0320c5f63cdda8c",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

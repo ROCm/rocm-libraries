@@ -11,6 +11,8 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -92,9 +94,14 @@ inline std::vector<std::string> csvFields(const std::string& line)
 /// @brief One row's text values as a point of @p metadata's declared types.
 ///
 /// Every declared parameter must be present and readable; a partial point is refused rather
-/// than defaulted, since a default would pass off an unrecorded shape as recorded.
+/// than defaulted, since a default would pass off an unrecorded shape as recorded. The one
+/// exception is `form`, which the shape files predate: a file with no `form` column at all
+/// reads as the `plain` form, the graph every earlier file described. Any other parameter a
+/// file lacks (a misspelled `q.alignment`, say) is refused, whatever the operation's
+/// `kernel_catalog` says of it, and so is a `form` column left empty in a row.
 inline bool pointFromColumns(const OperationMetadata& metadata,
                              const std::map<std::string, std::string>& values,
+                             const std::set<std::string>& columns,
                              ProblemPoint& point,
                              std::string& problem)
 {
@@ -104,6 +111,15 @@ inline bool pointFromColumns(const OperationMetadata& metadata,
         const auto found = values.find(parameter.name);
         if(found == values.end() || found->second.empty())
         {
+            const auto isPlainDefault
+                = parameter.name == "form" && columns.count(parameter.name) == 0
+                  && std::find(parameter.values.begin(), parameter.values.end(), "plain")
+                         != parameter.values.end();
+            if(isPlainDefault)
+            {
+                point[parameter.name] = std::string("plain");
+                continue;
+            }
             problem = "no value for '" + parameter.name + "'";
             return false;
         }
@@ -206,6 +222,7 @@ inline std::vector<PoolEntry> readModelShapes(const OperationMetadata& metadata,
             column = column.substr(2);
         }
     }
+    const std::set<std::string> columns(header.begin(), header.end());
 
     std::vector<PoolEntry> entries;
     while(std::getline(file, line))
@@ -233,7 +250,7 @@ inline std::vector<PoolEntry> readModelShapes(const OperationMetadata& metadata,
 
         PoolEntry entry;
         std::string problem;
-        if(!detail::pointFromColumns(metadata, values, entry.point, problem))
+        if(!detail::pointFromColumns(metadata, values, columns, entry.point, problem))
         {
             ++report.unusable;
             if(report.firstProblem.empty())
