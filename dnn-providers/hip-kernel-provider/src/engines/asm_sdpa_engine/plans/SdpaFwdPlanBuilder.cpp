@@ -491,9 +491,10 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     return ok;
 }
 
-// Batch-mode kernels form the LSE element offset (b * H + h) * s_lse_Hs + s in 32-bit
-// arithmetic, so the offset of the last element, (B * H - 1) * headStride + Sq - 1, must fit
-// in 32 bits. Evaluated by division so no product of graph values can overflow.
+// Batch-mode kernels form each LSE row's byte offset (b * H + h) * s_lse_Hs in 32-bit
+// arithmetic. The check bounds the byte offset of the last element,
+// 4 * ((B * H - 1) * headStride + Sq - 1), to 32 bits, which covers the last row's base with
+// Sq - 1 elements to spare. Evaluated by division so no product of graph values can overflow.
 static bool batchLseOffsetsFitU32(int64_t batch, int64_t heads, int64_t headStride, int64_t seqLenQ)
 {
     constexpr int64_t K_MAX_LSE_ELEMENTS = static_cast<int64_t>(UINT32_MAX) / K_FP32_BYTES;
@@ -511,7 +512,7 @@ static bool batchLseOffsetsFitU32(int64_t batch, int64_t heads, int64_t headStri
 // element (b, h, s) at (b * H + h) * s_lse_Hs + s: the kernel takes only a head stride
 // (s_lse_Hs), with no batch or sequence stride, and steps batches by H * s_lse_Hs. The
 // strides must therefore be [H * s_h, s_h, 1] with s_h >= Sq so rows of different heads do
-// not overlap, and the last element's offset must fit in 32 bits; any other layout is
+// not overlap, and the last element's byte offset must fit in 32 bits; any other layout is
 // declined. Group mode writes AITER's varlen layout [H, total_q]: one FP32 per Q token at
 // h * s_lse_Hs + seqstart_q[b] + s, with no per-token stride, so the stats tensor must be
 // ragged on the Q/O offset table in token units with a sequence stride of 1. Q must already
@@ -582,8 +583,8 @@ static bool
                                    "batch-mode stats tensor must have one stride per dim");
         // Checked first: it bounds the head stride, so the product below cannot overflow.
         HIP_KERNEL_RETURN_FALSE_IF(!batchLseOffsetsFitU32(batch, heads, strides->Get(1), seqLenQ),
-                                   "batch-mode stats tensor LSE offsets (B * H - 1) * head stride "
-                                   "+ Sq must fit in 32 bits");
+                                   "batch-mode stats tensor LSE byte offset 4 * ((B * H - 1) * "
+                                   "head stride + Sq - 1) must fit in 32 bits");
         HIP_KERNEL_RETURN_FALSE_IF(
             (batch != 1 && strides->Get(0) != heads * strides->Get(1))
                 || ((batch != 1 || heads != 1) && strides->Get(1) < seqLenQ)
@@ -595,8 +596,9 @@ static bool
 }
 
 // Checks every byte offset the kernel forms in 32 bits: the per-field strides,
-// the Ts product and, for hd192x128, the K/V per-head row extent. `inputBytes`
-// is the resolved Q/K/V element size and `tsQo` the matched row's Q-tile size.
+// the Ts product and, for hd192x128, the K/V per-head row extent. The batch-mode LSE
+// extent is bounded in isSupportedStatsTensor. `inputBytes` is the resolved Q/K/V element
+// size and `tsQo` the matched row's Q-tile size.
 static bool fwdByteRangesFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
