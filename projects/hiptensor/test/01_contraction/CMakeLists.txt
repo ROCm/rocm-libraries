@@ -176,3 +176,8 @@ set (ScaleContractionUnaryOpsTestSources ${ContractionCommonSources}
 ${CMAKE_CURRENT_SOURCE_DIR}/scale_contraction_with_unary_ops_test.cpp)
 set (ScaleContractionUnaryOpsTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/scale_contraction_unary_ops_params.yaml)
 add_hiptensor_test(scale_contraction_with_unary_ops_test ${ScaleContractionUnaryOpsTestConfig}  ${ScaleContractionUnaryOpsTestSources})
+
+# Trinary contraction with a workspace that holds NaN before each execution
+add_hiptensor_unit_test(trinary_contraction_workspace_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/trinary_contraction_workspace_test.cpp)
