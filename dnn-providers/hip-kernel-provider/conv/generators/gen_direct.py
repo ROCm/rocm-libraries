@@ -946,21 +946,15 @@ for dt, atom in (("HALF", "wmma125_f16"), ("BFLOAT16", "wmma125_bf16")):
     # Reuse the 3x3 input halo across twice as many output channels per block.
     add(dt, ["gfx1250"], [M(atom, F33, 64, 128, 32, 2, 4, 8)])
 
-# gfx942 fp32 3x3x3 trial candidates (nnU-Net 32-128 channel layers).
+# gfx942 fp32 3x3x3, 32-channel outputs (nnU-Net K = 32 layers on 96^3-160^3): the 256 x 32 tile
+# at 8-channel chunks and the streaming (ring) twin of its 16-channel form. MI325X, autotuned
+# against the catalog above: 1.01-1.07x on 18 of the 34 heaviest fp32 3-D layers, none slower.
 add(
     "FLOAT",
     ["gfx942"],
     [
-        M("mfma16_f32", F333, 128, 64, 16, 2, 2, 4, ring=0, bl=1),
-        M("mfma16_f32", F333, 128, 128, 16, 2, 2, 4, ring=0, bl=1),
-        M("mfma16_f32", F333, 256, 32, 16, 4, 1, 4, ring=0, xpf=1),
-        M("mfma16_f32", F333, 128, 32, 16, 4, 1, 4, ring=0, xpf=1),
         M("mfma16_f32", F333, 256, 32, 8, 4, 1, 4, ring=0),
-        M("mfma16_f32", F333, 256, 64, 16, 4, 2, 4, ring=0, xpf=1),
-        M("mfma16_f32", F333, 256, 64, 16, 4, 2, 4, ring=0),
         M("mfma16_f32", F333, 256, 32, 16, 4, 1, 4, ring=1),
-        M("mfma16_f32", F333, 128, 64, 16, 2, 2, 4, ring=1, xpf=1),
-        M("mfma16_f32", F333, 256, 32, 16, 4, 1, 4, ring=0, bl=1),
     ],
 )
 
