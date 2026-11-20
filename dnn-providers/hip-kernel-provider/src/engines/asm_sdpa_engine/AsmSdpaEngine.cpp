@@ -44,6 +44,33 @@ const IPlanBuilder* AsmSdpaEngine::findApplicablePlanBuilder(
     return nullptr;
 }
 
+std::optional<std::vector<int32_t>> AsmSdpaEngine::numericalNotesFor(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph, bool forwardClaimed)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+
+    bool hasForward = false;
+    for(const auto& node : opGraph.nodeWrappers())
+    {
+        switch(node->attributesType())
+        {
+        case NodeAttributes::SdpaBackwardAttributes:
+            return std::nullopt;
+        case NodeAttributes::SdpaAttributes:
+            hasForward = true;
+            break;
+        default:
+            break;
+        }
+    }
+
+    if(hasForward && forwardClaimed)
+    {
+        return std::vector<int32_t>{};
+    }
+    return std::nullopt;
+}
+
 bool AsmSdpaEngine::isApplicable(
     Handle& handle, const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
@@ -64,7 +91,12 @@ void AsmSdpaEngine::getDetails(Handle& handle,
     const std::vector<int32_t> behaviorNotes{
         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
     hip_kernel_provider::core::utils::storeEngineDetails(
-        handle, id(), knobs, behaviorNotes, detailsOut);
+        handle,
+        id(),
+        knobs,
+        behaviorNotes,
+        detailsOut,
+        numericalNotesFor(opGraph, ASM_SDPA_FORWARD_CLAIMS_DETERMINISM));
 }
 
 size_t AsmSdpaEngine::getMaxWorkspaceSize(

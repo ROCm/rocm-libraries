@@ -446,7 +446,7 @@ An engine reports numerical notes through the `numerical_notes` list of its `Eng
 - **Claim determinism with an explicit empty list.** Create the details with `CreateEngineDetails` or `CreateEngineDetailsDirect` and pass an empty vector. An empty list is a claim that no numerical note applies to the engine; make it only when a test proves bitwise-reproducible results across repeated runs of the same plan and inputs. Do not build the details with `EngineDetailsT::Pack`, which drops an empty list and so turns the claim into an absent field.
 - **List the notes that apply.** An engine that is not deterministic lists `HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC` and any precision note that applies.
 - **Omit the field when no test proves determinism.** Every engine defaults to `NONDETERMINISTIC`: results are not guaranteed bitwise reproducible.
-- **Make the claim per engine ID.** Notes describe the engine for the finalized graph passed to `GetEngineDetails`, not a plan or a knob setting.
+- **Make the claim for the engine ID and the finalized graph.** Notes describe the engine for the finalized graph passed to `GetEngineDetails`, not a plan, a configuration or a knob setting. An engine that serves several operations may report a different list per operation of that graph; it never reports a different list per plan, configuration or knob. Each operation's claim needs its own passing device test.
 
 ### Saving Execution Plans from Ingestor Engines
 

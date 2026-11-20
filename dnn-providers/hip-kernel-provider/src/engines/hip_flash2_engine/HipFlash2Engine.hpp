@@ -9,10 +9,12 @@
 
 #pragma once
 
+#include <cstdint>
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "core/Context.hpp"
@@ -21,6 +23,11 @@
 
 namespace hip_flash2_engine
 {
+
+// True only when the forward plan builder declines every output tensor whose strides map two
+// elements to one address, and the forward kernel has a passing bitwise run-to-run repeat test on
+// every code-object target it ships.
+inline constexpr bool HIP_FLASH2_CLAIMS_DETERMINISM = false;
 
 using IEngine = hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>;
 using IPlanBuilder = hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>;
@@ -43,6 +50,11 @@ public:
     {
         return hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME;
     }
+
+    // Numerical notes this engine reports: an explicit empty list (a determinism claim) when
+    // claimed, std::nullopt (field absent, i.e. NONDETERMINISTIC) otherwise. The engine serves
+    // forward SDPA only, so the note does not depend on the graph.
+    static std::optional<std::vector<int32_t>> numericalNotesFor(bool claimed);
 
     // id() returns the fixed constant -- no per-instance ID needed
     int64_t id() const override

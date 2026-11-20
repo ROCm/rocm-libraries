@@ -74,6 +74,37 @@ Engines verified for stream capture report `SUPPORTS_GRAPH_CAPTURE`, so `select_
 
 `deselect_numeric_notes({NONDETERMINISTIC})` keeps only engines whose reported numerical notes omit `NONDETERMINISTIC`. A provider claims determinism with an explicit empty list; an engine that declares nothing is reported `NONDETERMINISTIC`, so a missing claim proves nothing. A failed note query for an engine fails the filter instead of passing it.
 
+A claim is made for the engine ID and the finalized graph: an engine that serves several operations may report a different list per operation, never per plan, configuration or knob, and each operation's claim needs its own passing device test.
+
+The hip-kernel-provider SDPA engines report these claims. A claim rests on a source trace (no atomics, every split or cross-workgroup combine in a fixed order, every output byte written by one writer or by writers that store the same value), on the engine declining every output and stats tensor whose strides map two logical elements to one address, and on a device test that runs every launch structure of the engine on one device per code-object target it ships. The claim also covers the target's other devices, which run the same code objects and have no device run of their own: gfx11-generic is proven on gfx1100 (gfx1101 to gfx1103 and gfx1150 to gfx1153 not run), gfx12-generic on gfx1201 (gfx1200 not run), gfx942 on MI300X and MI325X (MI308X and MI300A not run), gfx90a on MI210 (MI250 and MI250X not run).
+
+| Engine | Operation | Claim | Basis | Targets proven (device) |
+|---|---|---|---|---|
+| `hipkernel:Gfx942AttentionDense`, `hipkernel:Gfx942AttentionUnified2D`, `hipkernel:Gfx942AttentionUnified3d` | forward | `[]` | source trace, repeat test | gfx942 (MI300X; repeated on MI325X) |
+| `hipkernel:Gfx950AttentionDense`, `hipkernel:Gfx950AttentionUnified2D`, `hipkernel:Gfx950AttentionUnified3D` | forward | `[]` | source trace, repeat test | gfx950 (MI350X; repeated on MI355X) |
+| `hipkernel:Gfx1151WmmaAttention`, `hipkernel:Gfx1151WmmaAttentionDecode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
+| `hipkernel:flydsl_sdpa_cdna`, `hipkernel:flydsl_sdpa_cdna_decode` | forward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI350X; repeated on MI355X) |
+| `hipkernel:flydsl_sdpa_cdna_dualwave` | forward | `[]` | source trace, repeat test | gfx950 (MI350X; repeated on MI355X) |
+| `hipkernel:flydsl_sdpa_rdna`, `hipkernel:flydsl_sdpa_rdna_decode` | forward | `[]` | source trace, repeat test | gfx11-generic (gfx1100), gfx12-generic (gfx1201) |
+| `hipkernel:flydsl_sdpa_aiw` | forward | `[]` | source trace, repeat test | gfx12-generic (gfx1201) |
+| `hipkernel:flydsl_sdpa_bwd_merged` | backward | `[]` | source trace, repeat test | gfx950 (MI350X; repeated on MI355X) |
+| `hipkernel:flydsl_sdpa_bwd_split` | backward | `[]` | source trace, repeat test | gfx90a (MI210), gfx942 (MI300X; repeated on MI325X), gfx950 (MI350X; repeated on MI355X), gfx11-generic (gfx1100) |
+| `ASM_SDPA_ENGINE` | backward | absent (`{NONDETERMINISTIC}`) | dQ is accumulated with fp32 atomics, so repeated launches of one plan can give different dQ bytes; dK and dV are identical in the measured rows | none |
+| `ASM_SDPA_ENGINE` | forward | absent (`{NONDETERMINISTIC}`) | held: the engine accepts an O or stats tensor whose strides map two logical elements to one address, so two workgroups can write one address in either order, and it does not pass the stats batch stride to the kernel. Its MI308X objects have not run. Every repeat test of the other objects on a layout without aliasing gives identical bytes | none |
+| `HIP_FLASH2_ENGINE` | forward | absent (`{NONDETERMINISTIC}`) | held: the engine accepts an O tensor whose strides map two logical elements to one address, and its variant objects (`HIP_FLASH2_BUILD_VARIANTS`) have not run. Every repeat test of the legacy object on a layout without aliasing gives identical bytes | none |
+
+A claim for the `ASM_SDPA_ENGINE` forward or `HIP_FLASH2_ENGINE` needs the engine to decline aliasing O and stats layouts, and stats layouts whose batch stride the kernel does not receive, and a passing repeat test of every object it ships.
+
+A claim is run-to-run: repeated launches of one plan on the same inputs, on one device and one runtime, give the same output bytes, as cuDNN's reproducibility statement is per architecture and runtime. Byte equality across devices, architectures or runtime versions is not part of the claim. On devices and compute-unit counts other than those run, run-to-run reproducibility is source-traced, not device-tested; several engines choose their launch shape from the device's compute-unit count (for example the split count of `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_rdna_decode` and `Gfx1151WmmaAttentionDecode`, the segment count of `Gfx942AttentionUnified3d`, and whether `Gfx942AttentionDense` ranks its persistent kernels first), so such a device may run split or segment counts the test did not. The device test launches each plan 20 times in one process on an otherwise idle GPU, poisons the outputs and workspace with NaN before each launch, and compares bytes. It does not test:
+
+- concurrent GPU load from other work;
+- fresh allocations between launches (every launch reuses the same buffers);
+- plan rebuild or graph replay (one built plan is launched each time);
+- runs in separate processes;
+- race-detection tooling;
+- ragged offset tables whose sequences overlap (the offsets are device data that no host check reads);
+- aliasing between the buffers of different tensors (no engine checks it).
+
 ## Engine filtering
 
 The native `Graph` keeps cuDNN's filter semantics: filters persist until changed, `check_support()` answers "is this supported with these filters?", and `build_plans()` builds the best plan that passes them ([RFC 0025](rfcs/0025_NumericalNotes.md) §4 lists the differences). The shim reapplies its own filters (`deselect_engines`, the behavior-note filters, and the determinism filter) to the applicable engines after plan creation, as native `deselect_engines`, which replaces its list. A filter set after plans were created takes effect at the next `check_support()`, `build_plans()`, `build_plan_at_index()`, or `autotune()`, including for plans already created.

@@ -194,7 +194,8 @@ void storeEngineDetails(Handle& handle,
                         int64_t engineId,
                         const std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>& knobs,
                         const std::vector<int32_t>& behaviorNotes,
-                        hipdnnPluginConstData_t& detailsOut)
+                        hipdnnPluginConstData_t& detailsOut,
+                        const std::optional<std::vector<int32_t>>& numericalNotes)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Knob>> knobOffsets;
@@ -205,8 +206,13 @@ void storeEngineDetails(Handle& handle,
     }
     const auto knobVector = builder.CreateVector(knobOffsets);
     const auto behaviorNoteVector = builder.CreateVector(behaviorNotes);
+    flatbuffers::Offset<flatbuffers::Vector<int32_t>> numericalNoteVector;
+    if(numericalNotes.has_value())
+    {
+        numericalNoteVector = builder.CreateVector(*numericalNotes);
+    }
     builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
-        builder, engineId, knobVector, behaviorNoteVector));
+        builder, engineId, knobVector, behaviorNoteVector, {}, {}, numericalNoteVector));
 
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

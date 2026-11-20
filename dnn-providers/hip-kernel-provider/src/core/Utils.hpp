@@ -4,6 +4,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -79,15 +80,17 @@ bool hasOnly16ByteAlignedTensors(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap);
 
-// Builds the EngineDetails flatbuffer of engine `engineId` advertising `knobs`
-// and `behaviorNotes` (hipdnnBehaviorNote_t values), points `detailsOut` at it,
-// and stores the buffer in `handle`, which keeps it alive until hipDNN releases
-// the details.
+// Builds the EngineDetails flatbuffer of engine `engineId` advertising `knobs`,
+// `behaviorNotes` (hipdnnBehaviorNote_t values) and, when present, `numericalNotes`
+// (hipdnnBackendNumericalNote_t values; an empty list claims none, an absent one leaves the
+// field unset, which hipDNN reads as NONDETERMINISTIC), points `detailsOut` at it, and stores
+// the buffer in `handle`, which keeps it alive until hipDNN releases the details.
 void storeEngineDetails(Handle& handle,
                         int64_t engineId,
                         const std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>& knobs,
                         const std::vector<int32_t>& behaviorNotes,
-                        hipdnnPluginConstData_t& detailsOut);
+                        hipdnnPluginConstData_t& detailsOut,
+                        const std::optional<std::vector<int32_t>>& numericalNotes = std::nullopt);
 
 // A `ragged_offset_multiplier` other than 1 only means something on a tensor with a ragged
 // offset; on any other tensor no provider kernel reads it.

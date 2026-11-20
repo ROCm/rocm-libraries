@@ -12,8 +12,18 @@
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
+#include <cstdint>
+#include <optional>
+#include <vector>
+
 namespace asm_sdpa_engine
 {
+
+// True only when the forward plan builder declines every O and stats tensor whose strides map two
+// elements to one address or that the kernel does not honour, and the forward kernels have a
+// passing bitwise run-to-run repeat test on every code-object target they ship. Backward is never
+// claimed: its dQ accumulation uses fp32 atomics.
+inline constexpr bool ASM_SDPA_FORWARD_CLAIMS_DETERMINISM = false;
 
 using IEngine = hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>;
 using IPlanBuilder = hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>;
@@ -31,6 +41,14 @@ public:
     {
         return hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME;
     }
+
+    // Numerical notes this engine reports for the operation in opGraph. An engine ID covers both
+    // forward and backward, so the note depends on the operation: an explicit empty list (a
+    // determinism claim) only for a graph with an SDPA forward node, no SDPA backward node and
+    // forwardClaimed set; std::nullopt (field absent, i.e. NONDETERMINISTIC) for everything else.
+    static std::optional<std::vector<int32_t>>
+        numericalNotesFor(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
+                          bool forwardClaimed);
 
     int64_t id() const override;
 

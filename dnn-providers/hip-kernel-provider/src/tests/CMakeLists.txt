@@ -367,6 +367,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 ShipsTheWideAndPairBuckets
                 StagesTheHeadDim256KeysInChunksOn64KiBParts
                 EveryKernelDeclaresItsFamilysSignature
+                DeclaresItsNumericalNotes
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_dualwave)
@@ -380,6 +381,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
                 EveryKernelDeclaresItsFamilysSignature
                 ServesHeadDim256OnFourWaves
+                DeclaresItsNumericalNotes
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_cdna_decode)
@@ -392,6 +394,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsUniqueObjectsAndOneTopServeAllPerClass
                 EveryKernelDeclaresItsFamilysSignature
+                DeclaresItsNumericalNotes
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_rdna)
@@ -406,6 +409,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 ShipsEverySpecializedAndGenericVariantOnce
                 RanksTheNarrowestServingObjectFirst
                 EveryKernelDeclaresTheFortySevenSlotSignature
+                DeclaresItsNumericalNotes
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_aiw)
@@ -418,6 +422,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 IsOnePackWithAGraphMatchAndOneKernelScopedMatcher
                 ShipsEveryVariantOnce
                 EveryKernelDeclaresTheFiftySlotSignature
+                DeclaresItsNumericalNotes
         )
     endif()
     if(HIPKERNELPROVIDER_FLYDSL_ACTIVE AND HIPKERNELPROVIDER_FLYDSL_ARCHS_sdpa_bwd_merged)
@@ -433,6 +438,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 DeclaresASchemaAtLeastTheRaggedOffsetMultiplierFloor
                 ServesStampedRaggedGraphsAndDeclinesTheFieldsTheMatcherRejects
                 RefusesPlanSerialization
+                DeclaresItsNumericalNotes
         )
     endif()
     # The split engine's slots are ops of their own (prep, dkdv, dq); its descriptor-only
@@ -466,6 +472,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 PrepVecTailIsOneOnTheCdna9RowsAndTheKmdDefaultElsewhere
                 EveryProbeGraphIsServedByTheRowsTheModelNames
                 TheCoverageConstantsAreTheHeadDimsTheShippedParityRowsServe
+                DeclaresItsNumericalNotes
         )
     endif()
     # The host half of the split engine's parity cases checks the gfx11, gfx90a and gfx942
@@ -560,6 +567,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 ShipsEveryDecodeVariantOnce
                 RanksTheNarrowestServingObjectFirst
                 EveryKernelDeclaresTheFortyFourSlotSignature
+                DeclaresItsNumericalNotes
         )
     endif()
     # The trained models of every FlyDSL engine, over every architecture a FlyDSL op ships
@@ -606,11 +614,27 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         TestGfx1151WmmaAttentionPacks
         TestGfx1151WmmaAttentionDecodePacks
     )
+    # A suite whose engine config declares numerical_notes, an empty list included, renders
+    # one more case. The list names those suites; keep it in step with the configs'
+    # engine.numerical_notes.
+    set(_hkp_numerical_notes_suites
+        TestGfx950AttentionDensePacks
+        TestGfx942AttentionDensePacks
+        TestGfx942AttentionUnified2DPacks
+        TestGfx942AttentionUnified3dPacks
+        TestGfx950AttentionUnified2DPacks
+        TestGfx950AttentionUnified3DPacks
+        TestGfx1151WmmaAttentionPacks
+        TestGfx1151WmmaAttentionDecodePacks
+    )
     # _hkp_generated_packs_cases_for(<out> <suite>): the cases <suite> registers.
     function(_hkp_generated_packs_cases_for out_var suite)
         set(_cases ${_hkp_generated_packs_cases})
         if(suite IN_LIST _hkp_behavior_notes_suites)
             list(APPEND _cases DeclaresItsConfiguredBehaviorNotes)
+        endif()
+        if(suite IN_LIST _hkp_numerical_notes_suites)
+            list(APPEND _cases DeclaresItsNumericalNotes)
         endif()
         set(${out_var} ${_cases} PARENT_SCOPE)
     endfunction()

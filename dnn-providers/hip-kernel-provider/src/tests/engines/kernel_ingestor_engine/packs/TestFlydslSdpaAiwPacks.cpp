@@ -246,6 +246,16 @@ TEST(TestFlydslSdpaAiwPacks, EveryKernelDeclaresTheFiftySlotSignature)
     EXPECT_GT(checked, 0U);
 }
 
+// The engine's UED authors `numerical_notes: []`, the claim that no note applies: the engine is
+// run-to-run deterministic. An absent key states nothing, so a lost key fails here.
+TEST(TestFlydslSdpaAiwPacks, DeclaresItsNumericalNotes)
+{
+    const auto& set = loadedSet(FLYDSL_SDPA_AIW.engineName);
+
+    ASSERT_TRUE(set.engine.numericalNotes.has_value());
+    EXPECT_TRUE(set.engine.numericalNotes->empty());
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine
 

@@ -225,6 +225,16 @@ def load_config(path: Path) -> IngestorConfig:
         behavior_notes=_require_sequence(
             engine_raw.get("behavior_notes"), "engine.behavior_notes"
         ),
+        numerical_notes=(
+            _require_sequence(
+                engine_raw["numerical_notes"],
+                "engine.numerical_notes",
+                "numerical note names",
+                allow_null=False,
+            )
+            if "numerical_notes" in engine_raw
+            else None
+        ),
         knobs=_require_sequence(engine_raw.get("knobs"), "engine.knobs"),
         heuristic="none" if slotted else engine_raw.get("heuristic", "native"),
         census_name_symbol=engine_raw.get("census_name_symbol"),
@@ -760,10 +770,14 @@ def _expand_axis_kernels(pack_raw: dict, kmd_field_names: set) -> list:
     return expanded
 
 
-def _require_sequence(value, scope: str, what: str = "field names") -> list:
+def _require_sequence(
+    value, scope: str, what: str = "field names", allow_null: bool = True
+) -> list:
     """Require a list of names: a bare string is valid YAML and iterates as
-    characters, so ``policy_knobs: use_exp2_fast`` is never recognised."""
-    if value is None:
+    characters, so ``policy_knobs: use_exp2_fast`` is never recognised. A null is an
+    empty list unless ``allow_null`` is False, for a key where only absence means
+    "no list"."""
+    if value is None and allow_null:
         return []
     if isinstance(value, str) or not isinstance(value, (list, tuple)):
         raise ConfigError(
@@ -1477,6 +1491,7 @@ _KNOWN_ENGINE = frozenset(
         "name",
         "sdk_version",
         "behavior_notes",
+        "numerical_notes",
         "knobs",
         "heuristic",
         "native_symbols_from",
@@ -1924,8 +1939,9 @@ def _reject_repeats(values: list, what: str, where: str) -> None:
 def _check_engine_declaration(config: IngestorConfig) -> None:
     """Check the engine block as ``parseEngineDescriptor`` reads it:
     ``sdk_version`` through ``requireString`` (260-266) and the ``Version``
-    constructor (770-781), ``knobs`` and ``behavior_notes`` for repeats (750,
-    753). Arch lists are exempt; `_unique_arch` collapses their repeats."""
+    constructor (770-781), ``knobs``, ``behavior_notes`` and ``numerical_notes``
+    for repeats (750, 753). Arch lists are exempt; `_unique_arch` collapses their repeats.
+    """
     version = config.engine.sdk_version
     if not isinstance(version, str):
         raise ConfigError(
@@ -1947,6 +1963,11 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
     _reject_repeats(config.engine.knobs, "knob", "engine.knobs")
     _reject_repeats(
         config.engine.behavior_notes, "behavior note", "engine.behavior_notes"
+    )
+    _reject_repeats(
+        config.engine.numerical_notes or [],
+        "numerical note",
+        "engine.numerical_notes",
     )
 
 
@@ -3002,6 +3023,16 @@ def _validate_config(config: IngestorConfig) -> list[str]:
                 f"engine.behavior_notes names '{note}', which is not in the "
                 f"closed vocabulary {BEHAVIOR_NOTES}. The loader hard-rejects "
                 f"anything else."
+            )
+
+    for note in config.engine.numerical_notes or []:
+        from .models import NUMERICAL_NOTES
+
+        if note not in NUMERICAL_NOTES:
+            raise ConfigError(
+                f"engine.numerical_notes names '{note}', which is not in the "
+                f"closed vocabulary {NUMERICAL_NOTES}. The loader hard-rejects "
+                f"anything else, including a name in the wrong case."
             )
 
     return warnings_out

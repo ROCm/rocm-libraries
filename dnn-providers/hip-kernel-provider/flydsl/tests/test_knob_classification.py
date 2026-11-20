@@ -256,3 +256,75 @@ def test_every_capture_safe_engine_is_a_shipped_ued() -> None:
 def test_the_generator_and_shipped_flydsl_engines_agree_on_graph_capture() -> None:
     flydsl_safe = {p.parent.name for p in UEDS} & CAPTURE_SAFE
     assert set(gen_descriptors.GRAPH_CAPTURE_OPS) == flydsl_safe
+
+
+ROCKE_UEDS = sorted(ROCKE_DESCRIPTORS.glob("*/*.ued.json"))
+# Engines whose UED authors `numerical_notes: []` (bit-for-bit repeatable results). An
+# absent key is not a claim and reads as NONDETERMINISTIC.
+DETERMINISTIC_ENGINES: set[str] = {
+    "sdpa_cdna",
+    "sdpa_cdna_dualwave",
+    "sdpa_cdna_decode",
+    "sdpa_rdna",
+    "sdpa_rdna_decode",
+    "sdpa_aiw",
+    "sdpa_bwd_merged",
+    "sdpa_bwd_split",
+    "gfx950_attention_dense",
+    "gfx942_attention_dense",
+    "gfx942_attention_unified_2d",
+    "gfx942_attention_unified_3d",
+    "gfx950_attention_unified_2d",
+    "gfx950_attention_unified_3d",
+    "gfx1151_wmma_attention",
+    "gfx1151_wmma_attention_decode",
+}
+
+
+@pytest.mark.parametrize("ued_path", UEDS + ROCKE_UEDS, ids=lambda p: p.parent.name)
+def test_only_proven_engines_declare_numerical_notes(ued_path: Path) -> None:
+    ued = json.loads(ued_path.read_text(encoding="utf-8"))
+    engine = ued_path.parent.name
+    assert ("numerical_notes" in ued) == (engine in DETERMINISTIC_ENGINES)
+    if engine in DETERMINISTIC_ENGINES:
+        assert ued["numerical_notes"] == []
+
+
+def test_every_deterministic_engine_is_a_shipped_ued() -> None:
+    shipped = {p.parent.name for p in UEDS + ROCKE_UEDS}
+    assert DETERMINISTIC_ENGINES <= shipped
+
+
+def test_the_generator_and_shipped_flydsl_engines_agree_on_determinism() -> None:
+    flydsl_deterministic = {p.parent.name for p in UEDS} & DETERMINISTIC_ENGINES
+    assert set(gen_descriptors.DETERMINISTIC_OPS) == flydsl_deterministic
+
+
+def _single_pack_ued(tmp_path: Path) -> dict:
+    rows = [_entry("sdpa_rdna", "sdpa_rdna_x", {"block_m": 64, "has_bias": 0})]
+    gen_descriptors._write(tmp_path, gen_descriptors.build_documents(rows, "gfx1201"))
+    path = tmp_path / "sdpa_rdna" / "flydsl_sdpa_rdna.ued.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _split_ued(tmp_path: Path) -> dict:
+    path = _split_tree(tmp_path) / "sdpa_bwd_split" / "flydsl_sdpa_bwd_split.ued.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize(
+    ("op", "build"),
+    [("sdpa_rdna", _single_pack_ued), (gen_descriptors.SPLIT_ENGINE, _split_ued)],
+)
+def test_the_generator_authors_empty_numerical_notes_only_for_a_deterministic_op(
+    op: str,
+    build,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(gen_descriptors, "DETERMINISTIC_OPS", ())
+    assert "numerical_notes" not in build(tmp_path / "absent")
+    monkeypatch.setattr(gen_descriptors, "DETERMINISTIC_OPS", (op,))
+    assert build(tmp_path / "member").get("numerical_notes") == []
+    monkeypatch.setattr(gen_descriptors, "DETERMINISTIC_OPS", ("rmsnorm",))
+    assert "numerical_notes" not in build(tmp_path / "other")

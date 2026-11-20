@@ -90,9 +90,16 @@ Compatibility-layer divergences from cuDNN are in [KNOWN_DIVERGENCES.md](../KNOW
 |---|---|
 | `MIOPEN_ENGINE_DETERMINISTIC` | Explicit `[]` |
 | `MIOPEN_ENGINE` | Explicit `[NONDETERMINISTIC]` |
+| hip-kernel-provider SDPA forward: `hipkernel:Gfx942AttentionDense`, `Gfx942AttentionUnified2D`, `Gfx942AttentionUnified3d`, `Gfx950AttentionDense`, `Gfx950AttentionUnified2D`, `Gfx950AttentionUnified3D`, `Gfx1151WmmaAttention`, `Gfx1151WmmaAttentionDecode`, `flydsl_sdpa_cdna`, `flydsl_sdpa_cdna_decode`, `flydsl_sdpa_cdna_dualwave`, `flydsl_sdpa_rdna`, `flydsl_sdpa_rdna_decode`, `flydsl_sdpa_aiw` | Explicit `[]`, authored in the engine's UED |
+| hip-kernel-provider SDPA backward: `hipkernel:flydsl_sdpa_bwd_merged`, `flydsl_sdpa_bwd_split` | Explicit `[]`, authored in the engine's UED |
+| `ASM_SDPA_ENGINE` (forward and backward), `HIP_FLASH2_ENGINE` | No claim: field absent, reported `{NONDETERMINISTIC}` |
 | Every other engine | No tested claim: field absent, reported `{NONDETERMINISTIC}` |
 
 `MIOPEN_ENGINE_DETERMINISTIC` claims determinism for every graph it accepts; the claim is about the engine ID, not per-solver evidence. No in-tree provider reports a precision note. Precision claims, such as MIOpen's `FP16_ALT_IMPL` on gfx90a and hipBLASLt compute types, are future work.
+
+`ASM_SDPA_ENGINE` is the engine whose claim is per operation: it serves both the SDPA forward and the SDPA backward operation, and `numericalNotesFor` reads the operation from the finalized graph. A graph with no SDPA forward or backward node, and every backward graph, reports no notes field, so it is reported `{NONDETERMINISTIC}`. A forward graph reports an explicit `[]` only once the forward operation's claim has its own passing device test.
+
+Each SDPA claim rests on a source trace, on the engine declining output and stats tensors whose strides map two logical elements to one address, and on a device repeat test of every launch structure on one device per code-object target the engine ships; the target's other devices run the same code objects and have no device run of their own. A claim is run-to-run on one device and runtime: byte equality across devices is not part of it, and on devices and compute-unit counts other than those run it is source-traced, not device-tested. The `ASM_SDPA_ENGINE` backward accumulates dQ with fp32 atomics and is never claimed. The `ASM_SDPA_ENGINE` forward and `HIP_FLASH2_ENGINE` pass the repeat tests that ran but report no claim: both accept output layouts whose strides map two logical elements to one address, the ASM forward does not pass the stats batch stride to its kernel, and objects they ship have not run (the ASM forward MI308X objects, the Flash2 variant objects). [KNOWN_DIVERGENCES](../KNOWN_DIVERGENCES.md#determinism) lists the devices each claim was proven on and the properties the test does not cover.
 
 ## 6. Compatibility layers
 

@@ -45,6 +45,15 @@ bool HipFlash2Engine::isApplicable(
     return false;
 }
 
+std::optional<std::vector<int32_t>> HipFlash2Engine::numericalNotesFor(bool claimed)
+{
+    if(claimed)
+    {
+        return std::vector<int32_t>{};
+    }
+    return std::nullopt;
+}
+
 void HipFlash2Engine::getDetails(
     Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
@@ -54,8 +63,17 @@ void HipFlash2Engine::getDetails(
 
     const std::vector<int32_t> behaviorNotes{
         static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)};
+    // An explicit empty list is written only through CreateEngineDetailsDirect's
+    // numerical_notes argument; a null pointer leaves the field absent.
+    const auto numericalNotes = numericalNotesFor(HIP_FLASH2_CLAIMS_DETERMINISM);
     auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetailsDirect(
-        builder, id(), nullptr, &behaviorNotes);
+        builder,
+        id(),
+        nullptr,
+        &behaviorNotes,
+        nullptr,
+        {},
+        numericalNotes.has_value() ? &*numericalNotes : nullptr);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();

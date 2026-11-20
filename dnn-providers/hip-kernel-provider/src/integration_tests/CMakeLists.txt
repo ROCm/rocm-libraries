@@ -7,6 +7,7 @@ find_package(Threads REQUIRED)
 # otherwise find installed packages (true standalone)
 if(NOT TARGET hipdnn_test_sdk)
     find_package(hipdnn_test_sdk CONFIG REQUIRED)
+    find_package(hipdnn_frontend CONFIG QUIET OPTIONAL_COMPONENTS cudnn_compatibility)
 endif()
 if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
@@ -81,6 +82,7 @@ if(ENABLE_HIP_FLASH2_ENGINE)
         add_subdirectory(hip_flash2_engine)
     endif()
 endif()
+add_subdirectory(determinism)
 if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     # The attention knob suites: each a source and the comma-separated engines it pins. A
     # suite is compiled whenever the product root carries all of them, on any build arch,
@@ -249,6 +251,85 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         TARGET hip_kernel_provider_integration_tests
         STAGED_DESCRIPTOR_ROOTS ${HIPKERNELPROVIDER_INTEGRATION_BUILD_DIR}
         PACK_NAMES integration integration_shared archive_fixture
+    )
+endif()
+
+# The SDPA note-selection suites: with deselect_numeric_notes({NONDETERMINISTIC}) set, only an
+# engine of sdpa_selection/SdpaProvenEngines.hpp may be selected.
+# A row exists only for an architecture some engine of this build serves its graph on, as the
+# determinism device cases gate theirs (determinism/CMakeLists.txt). The lists are passed into
+# the code as comma-separated architectures: HKP_SDPA_SELECTION_FWD_ARCHS for the forward graph
+# (bf16, head size 64, causal: an offered rocKE engine on its target architecture, the WMMA
+# engines on gfx1100 and gfx1201, FlyDSL forward content; neither ASM forward nor Flash2 serves
+# it) and HKP_SDPA_SELECTION_BWD_ARCHS for the backward graph (ASM on gfx942, FlyDSL backward
+# content: merged and the split engine, which needs prep, dkdv and dq).
+# HKP_SDPA_SELECTION_ASM_ONLY enables the graph only ASM_SDPA_ENGINE serves.
+set(_hkp_selection_fwd_archs "")
+set(_hkp_selection_bwd_archs "")
+if(ENABLE_ASM_SDPA_ENGINE)
+    list(APPEND _hkp_selection_bwd_archs gfx942)
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HKP_SDPA_SELECTION_ASM_ONLY=1
+    )
+endif()
+if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+    set(_hkp_selection_rocke
+        Gfx950AttentionDense gfx950
+        Gfx942AttentionDense gfx942
+        Gfx942AttentionUnified2D gfx942
+        Gfx942AttentionUnified3d gfx942
+        Gfx950AttentionUnified2D gfx950
+        Gfx950AttentionUnified3D gfx950
+        Gfx1151WmmaAttention "gfx1100;gfx1201"
+        Gfx1151WmmaAttentionDecode "gfx1100;gfx1201"
+    )
+    while(_hkp_selection_rocke)
+        list(POP_FRONT _hkp_selection_rocke _hkp_selection_engine _hkp_selection_engine_archs)
+        hkp_product_offers_engine(_hkp_selection_offered "hipkernel:${_hkp_selection_engine}")
+        if(_hkp_selection_offered)
+            list(APPEND _hkp_selection_fwd_archs ${_hkp_selection_engine_archs})
+        endif()
+    endwhile()
+    if(HIPKERNELPROVIDER_ENABLE_FLYDSL AND HIPKERNELPROVIDER_FLYDSL_ACTIVE)
+        foreach(_hkp_selection_op IN ITEMS sdpa_rdna sdpa_rdna_decode sdpa_aiw sdpa_cdna
+                                           sdpa_cdna_decode sdpa_cdna_dualwave)
+            list(APPEND _hkp_selection_fwd_archs
+                 ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_${_hkp_selection_op}})
+        endforeach()
+        list(APPEND _hkp_selection_bwd_archs ${HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_merged})
+        foreach(_hkp_selection_arch IN LISTS HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_prep)
+            if(_hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_dkdv
+               AND _hkp_selection_arch IN_LIST HIPKERNELPROVIDER_FLYDSL_CONTENT_ARCHS_sdpa_bwd_dq)
+                list(APPEND _hkp_selection_bwd_archs ${_hkp_selection_arch})
+            endif()
+        endforeach()
+    endif()
+endif()
+list(REMOVE_DUPLICATES _hkp_selection_fwd_archs)
+list(REMOVE_DUPLICATES _hkp_selection_bwd_archs)
+string(REPLACE ";" "," _hkp_selection_fwd_archs "${_hkp_selection_fwd_archs}")
+string(REPLACE ";" "," _hkp_selection_bwd_archs "${_hkp_selection_bwd_archs}")
+target_compile_definitions(hip_kernel_provider_integration_tests
+    PRIVATE
+        HKP_SDPA_SELECTION_FWD_ARCHS="${_hkp_selection_fwd_archs}"
+        HKP_SDPA_SELECTION_BWD_ARCHS="${_hkp_selection_bwd_archs}"
+)
+# The native suite drives the frontend graph builders of the ingestor lane, so it follows their
+# gate (the one of the determinism device cases in determinism/CMakeLists.txt).
+if(HIPDNN_ENABLE_KERNEL_INGESTOR AND HIPDNN_ENABLE_SDPA)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        sdpa_selection/IntegrationGpuSdpaNativeNoteFilter.cpp
+    )
+endif()
+# The v9 shim suite needs the shim headers: the hipDNN option in a superbuild, the installed
+# frontend's cudnn_compatibility component standalone (the pattern of
+# miopen-provider/integration_tests/CMakeLists.txt). Graph::sdpa needs HIPDNN_ENABLE_SDPA.
+if((HIPDNN_ENABLE_CUDNN_COMPATIBILITY OR hipdnn_frontend_cudnn_compatibility_FOUND) AND HIPDNN_ENABLE_SDPA)
+    target_sources(hip_kernel_provider_integration_tests PRIVATE
+        cudnn_shim/IntegrationGpuCudnnShimSdpaDeterministic.cpp
+    )
+    target_compile_definitions(hip_kernel_provider_integration_tests
+        PRIVATE HKP_CUDNN_SHIM_SDPA_TESTS=1
     )
 endif()
 
