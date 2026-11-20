@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN AITER ASM SDPA Forward Sync"
+  short_description: "Update the ASM SDPA forward kernels from AITER"
+  default_prompt: "Use $hipdnn-aiter-asm-sdpa-fwd-sync to check the latest AITER release and update the ASM SDPA forward kernels for the GPU archs I choose."

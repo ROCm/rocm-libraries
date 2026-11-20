@@ -97,13 +97,20 @@ struct AddSquare
     }
 };
 
+// Two integral inputs are compared exactly, since rounding them through ComputeType (such as float)
+// would make large values compare equal
+template <typename ComputeType, typename X0, typename X1>
+using CompareType
+    = std::conditional_t<std::is_integral_v<X0> && std::is_integral_v<X1>, int64_t, ComputeType>;
+
 template <typename ComputeType>
 struct CompareGreater
 {
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) > static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) > static_cast<T>(x1);
     }
 };
 
@@ -113,7 +120,8 @@ struct CompareEqual
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) == static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) == static_cast<T>(x1);
     }
 };
 
@@ -123,7 +131,8 @@ struct CompareNotEqual
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) != static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) != static_cast<T>(x1);
     }
 };
 
@@ -133,7 +142,8 @@ struct CompareGreaterEqual
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) >= static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) >= static_cast<T>(x1);
     }
 };
 
@@ -143,7 +153,8 @@ struct CompareLess
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) < static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) < static_cast<T>(x1);
     }
 };
 
@@ -153,7 +164,8 @@ struct CompareLessEqual
     template <typename X0, typename X1>
     bool operator()(const X0& x0, const X1& x1) const
     {
-        return static_cast<ComputeType>(x0) <= static_cast<ComputeType>(x1);
+        using T = CompareType<ComputeType, X0, X1>;
+        return static_cast<T>(x0) <= static_cast<T>(x1);
     }
 };
 
@@ -186,7 +198,8 @@ struct ReluBackward
     {
         auto dyCompute = static_cast<ComputeType>(dy);
         auto xCompute = static_cast<ComputeType>(x);
-        auto localGradient = (xCompute > ComputeType{0}) ? ComputeType{1} : ComputeType{0};
+        auto localGradient = (xCompute > static_cast<ComputeType>(0)) ? static_cast<ComputeType>(1)
+                                                                      : static_cast<ComputeType>(0);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -233,11 +246,11 @@ struct ParameterizedReluBackward
         }
         else if(xCompute > upperClip)
         {
-            localGradient = ComputeType{0};
+            localGradient = static_cast<ComputeType>(0);
         }
         else
         {
-            localGradient = ComputeType{1};
+            localGradient = static_cast<ComputeType>(1);
         }
 
         return static_cast<OutputType>(dyCompute * localGradient);
@@ -254,8 +267,9 @@ struct SigmoidBackward
         auto dyCompute = static_cast<ComputeType>(dy);
         auto xCompute = static_cast<ComputeType>(x);
 
-        ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + exp(-xCompute));
-        auto localGradient = sigmoidVal * (ComputeType{1} - sigmoidVal);
+        ComputeType sigmoidVal
+            = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-xCompute));
+        auto localGradient = sigmoidVal * (static_cast<ComputeType>(1) - sigmoidVal);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -271,7 +285,7 @@ struct TanhBackward
         auto xCompute = static_cast<ComputeType>(x);
 
         ComputeType tanhVal = tanh(xCompute);
-        auto localGradient = ComputeType{1} - (tanhVal * tanhVal);
+        auto localGradient = static_cast<ComputeType>(1) - (tanhVal * tanhVal);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -289,13 +303,14 @@ struct GeluBackward
 
         // d/dx [x * Phi(x)] = Phi(x) + x * phi(x), with Phi the standard normal CDF and phi its PDF
         static const ComputeType s_kInvSqrt2Pi
-            = ComputeType{1} / sqrt(ComputeType{2} * static_cast<ComputeType>(PI));
+            = static_cast<ComputeType>(1)
+              / sqrt(static_cast<ComputeType>(2) * static_cast<ComputeType>(PI));
         // Phi(x) = 0.5 * erfc(-x / sqrt(2)); unlike 1 + erf(...), erfc keeps the negative tail
         // when erf rounds to -1.
-        auto cdf = ComputeType{0.5}
+        auto cdf = static_cast<ComputeType>(0.5)
                    * hipdnn_test_sdk::detail::safeConvert<ComputeType>(
                        std::erfc(-static_cast<double>(xCompute) / std::sqrt(2.0)));
-        auto pdf = exp(ComputeType{-0.5} * xCompute * xCompute) * s_kInvSqrt2Pi;
+        auto pdf = exp(static_cast<ComputeType>(-0.5) * xCompute * xCompute) * s_kInvSqrt2Pi;
         return static_cast<OutputType>(dyCompute * (cdf + xCompute * pdf));
     }
 };
@@ -313,15 +328,17 @@ struct GeluApproxTanhBackward
 
         // Matches GeluApproxTanhForward: 0.5 * x * (1 + tanh(u)), u = sqrt(2/pi) * (x + c * x^3)
         static const ComputeType s_kSqrt2OverPi
-            = sqrt(ComputeType{2} / static_cast<ComputeType>(PI));
+            = sqrt(static_cast<ComputeType>(2) / static_cast<ComputeType>(PI));
         static const auto s_kCoeff = static_cast<ComputeType>(0.044715);
         auto inner = s_kSqrt2OverPi * (xCompute + s_kCoeff * xCompute * xCompute * xCompute);
         auto tanhVal = tanh(inner);
-        auto innerGradient
-            = s_kSqrt2OverPi * (ComputeType{1} + ComputeType{3} * s_kCoeff * xCompute * xCompute);
-        auto localGradient
-            = ComputeType{0.5} * (ComputeType{1} + tanhVal)
-              + ComputeType{0.5} * xCompute * (ComputeType{1} - tanhVal * tanhVal) * innerGradient;
+        auto innerGradient = s_kSqrt2OverPi
+                             * (static_cast<ComputeType>(1)
+                                + static_cast<ComputeType>(3) * s_kCoeff * xCompute * xCompute);
+        auto localGradient = static_cast<ComputeType>(0.5) * (static_cast<ComputeType>(1) + tanhVal)
+                             + static_cast<ComputeType>(0.5) * xCompute
+                                   * (static_cast<ComputeType>(1) - tanhVal * tanhVal)
+                                   * innerGradient;
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -331,7 +348,7 @@ struct SwishBackward
 {
     ComputeType beta;
 
-    explicit SwishBackward(ComputeType betaVal = ComputeType{1})
+    explicit SwishBackward(ComputeType betaVal = static_cast<ComputeType>(1))
         : beta(betaVal)
     {
     }
@@ -344,9 +361,11 @@ struct SwishBackward
         auto xCompute = static_cast<ComputeType>(x);
 
         // d/dx [x * sigmoid(beta * x)] = s + beta * x * s * (1 - s), with s = sigmoid(beta * x)
-        ComputeType sigmoidVal = ComputeType{1} / (ComputeType{1} + exp(-beta * xCompute));
+        ComputeType sigmoidVal
+            = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-beta * xCompute));
         auto localGradient
-            = sigmoidVal + beta * xCompute * sigmoidVal * (ComputeType{1} - sigmoidVal);
+            = sigmoidVal
+              + beta * xCompute * sigmoidVal * (static_cast<ComputeType>(1) - sigmoidVal);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -356,7 +375,7 @@ struct EluBackward
 {
     ComputeType alpha;
 
-    explicit EluBackward(ComputeType alphaVal = ComputeType{1})
+    explicit EluBackward(ComputeType alphaVal = static_cast<ComputeType>(1))
         : alpha(alphaVal)
     {
     }
@@ -369,7 +388,8 @@ struct EluBackward
         auto xCompute = static_cast<ComputeType>(x);
 
         // d/dx ELU(x) = 1 for x > 0, alpha * exp(x) otherwise
-        auto localGradient = xCompute > ComputeType{0} ? ComputeType{1} : alpha * exp(xCompute);
+        auto localGradient = xCompute > static_cast<ComputeType>(0) ? static_cast<ComputeType>(1)
+                                                                    : alpha * exp(xCompute);
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };
@@ -379,7 +399,7 @@ struct SoftplusBackward
 {
     ComputeType beta;
 
-    explicit SoftplusBackward(ComputeType betaVal = ComputeType{1})
+    explicit SoftplusBackward(ComputeType betaVal = static_cast<ComputeType>(1))
         : beta(betaVal)
     {
     }
@@ -392,7 +412,8 @@ struct SoftplusBackward
         auto xCompute = static_cast<ComputeType>(x);
 
         // d/dx [log(1 + exp(beta * x)) / beta] = sigmoid(beta * x)
-        auto localGradient = ComputeType{1} / (ComputeType{1} + exp(-beta * xCompute));
+        auto localGradient
+            = static_cast<ComputeType>(1) / (static_cast<ComputeType>(1) + exp(-beta * xCompute));
         return static_cast<OutputType>(dyCompute * localGradient);
     }
 };

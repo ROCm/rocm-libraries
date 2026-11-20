@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: MIT
 
 // CPU-only unit tests for the per-solver perf-config picker. No GPU required.
-// Two kinds of checks:
+// Three kinds of checks:
 //   * a self-contained ranking invariant: ScorePickForTest returns a
 //     deterministic permutation of the bucket's real candidate descriptors
-//     (nothing invented or dropped), driven off the shipped catalog+metadata, and
+//     (nothing invented or dropped), driven off the shipped catalog+metadata,
 //   * a golden-vector parity gate: the LightGBM text-model walker (LgbmForest)
 //     reproduces LightGBM's own raw scores within a tight tolerance on committed
-//     (features -> score) vectors, for each per-solver model.
+//     (features -> score) vectors, for each per-solver model, and
+//   * the (solver, arch, direction) hold-outs in HeldOutOfPicker, and the default-config score
+//     margin in DefaultMargin / KeepAboveDefaultMargin.
 
 #include <gtest/gtest.h>
 
@@ -19,6 +21,7 @@
 #include <miopen/conv/heuristics/lgbm_pcfg_pick.hpp>
 #include <miopen/conv/heuristics/lgbm_pcfg_metadata.hpp>
 #include <miopen/conv/heuristics/lgbm_forest.hpp>
+#include <miopen/conv_algo_name.hpp>
 
 #include <miopen/db_path.hpp>
 #include <miopen/filesystem.hpp>
@@ -35,8 +38,12 @@
 namespace {
 
 using miopen::ai::lgbm::LgbmForest;
+using miopen::ai::lgbm::pcfg::DefaultMargin;
+using miopen::ai::lgbm::pcfg::HeldOutOfPicker;
+using miopen::ai::lgbm::pcfg::KeepAboveDefaultMargin;
 using miopen::ai::lgbm::pcfg::kNumBaseProbFeatures;
 using miopen::ai::lgbm::pcfg::LgbmPcfgMetadata;
+using miopen::ai::lgbm::pcfg::RankedConfigs;
 using miopen::ai::lgbm::pcfg::ScorePickForTest;
 
 class CPU_LgbmPcfgPicker_NONE : public ::testing::Test
@@ -217,6 +224,55 @@ TEST(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
     ASSERT_GT(solvers_checked, 0) << "no pcfg model asset was found to check";
     MIOPEN_LOG_I2("lgbm_pcfg golden parity: " << solvers_checked << " solvers, max abs err "
                                               << max_abs_err);
+}
+
+// Pins which (solver, arch, direction) combinations the picker holds out, whether or not
+// lgbm_pcfg.bin has buckets for them. ConvHipConv is held out on gfx1250 in every direction.
+TEST(CPU_LgbmPcfgHoldOut_NONE, HeldOutOfPicker)
+{
+    using miopen::conv::Direction;
+    const std::string hipconv = "ConvHipConv";
+
+    for(const auto dir : {Direction::Forward, Direction::BackwardData, Direction::BackwardWeights})
+    {
+        EXPECT_FALSE(HeldOutOfPicker(hipconv, "gfx950", dir));
+        EXPECT_TRUE(HeldOutOfPicker(hipconv, "gfx1250", dir));
+        EXPECT_FALSE(HeldOutOfPicker(hipconv, "gfx942", dir));
+        EXPECT_FALSE(HeldOutOfPicker("ConvHipImplicitGemmV4R1Fwd", "gfx950", dir));
+        EXPECT_FALSE(HeldOutOfPicker("ConvHipImplicitGemmV4R1Fwd", "gfx1250", dir));
+    }
+}
+
+// Pins which (solver, arch, direction) combinations only use a pick that beats the default
+// config by a score margin: ConvHipConv on gfx950 backward weights.
+TEST(CPU_LgbmPcfgDefaultMargin_NONE, DefaultMargin)
+{
+    using miopen::conv::Direction;
+    const std::string hipconv = "ConvHipConv";
+
+    const auto margin = DefaultMargin(hipconv, "gfx950", Direction::BackwardWeights);
+    ASSERT_TRUE(margin.has_value());
+    EXPECT_GT(*margin, 0.0);
+    EXPECT_FALSE(DefaultMargin(hipconv, "gfx950", Direction::Forward).has_value());
+    EXPECT_FALSE(DefaultMargin(hipconv, "gfx950", Direction::BackwardData).has_value());
+    EXPECT_FALSE(DefaultMargin(hipconv, "gfx1250", Direction::BackwardWeights).has_value());
+    EXPECT_FALSE(DefaultMargin(hipconv, "gfx942", Direction::BackwardWeights).has_value());
+    EXPECT_FALSE(DefaultMargin("ConvHipImplicitGemmV4R1Fwd", "gfx950", Direction::BackwardWeights)
+                     .has_value());
+}
+
+// Only candidates scoring above the default's score plus the margin are kept, in ranked order.
+TEST(CPU_LgbmPcfgDefaultMargin_NONE, KeepAboveDefaultMargin)
+{
+    const RankedConfigs ranked{{"a", "b", "def", "c"}, {3.0, 2.0, 1.0, -1.0}};
+
+    EXPECT_EQ(KeepAboveDefaultMargin(ranked, "def", 0.5), (std::vector<std::string>{"a", "b"}));
+    EXPECT_EQ(KeepAboveDefaultMargin(ranked, "def", 1.0), (std::vector<std::string>{"a"}));
+    // The bar is exclusive: a score equal to default + margin is not kept.
+    EXPECT_EQ(KeepAboveDefaultMargin(ranked, "def", 2.0), std::vector<std::string>{});
+    EXPECT_EQ(KeepAboveDefaultMargin(ranked, "def", 9.0), std::vector<std::string>{});
+    // A default that is not among the candidates abstains.
+    EXPECT_EQ(KeepAboveDefaultMargin(ranked, "missing", 0.5), std::vector<std::string>{});
 }
 
 } // namespace
