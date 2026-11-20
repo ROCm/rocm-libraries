@@ -31,8 +31,10 @@ No GPU needed: the launch-path tests reach the guard before any device work.
 
 from __future__ import annotations
 
+import os
 import types
 import unittest
+from unittest import mock
 
 import kernels.common.attention_unified as au
 
@@ -257,6 +259,35 @@ class TestTheLaunch(unittest.TestCase):
             with self.assertRaises(NotImplementedError) as cm:
                 self._launch(_problem(65537, 32, 128), tuning_spec=_TuningSpec(8))
         self.assertIn("num_segments=8", str(cm.exception))
+
+    def test_the_refusal_does_not_depend_on_the_backend_lane(self):
+        """The guard is host code at the top of the launch, before any kernel is
+        lowered, so the lanes of the TESTING.md source backend matrix must not
+        change what the caller sees, a leaked ``ROCKE_CPP_STRICT=1`` included.
+        Each lane's two variables are set here and the type is exact."""
+        lanes = (
+            (None, None),
+            ("python", None),
+            ("cpp", "0"),
+            ("cpp", "1"),
+            ("both", "1"),
+        )
+        names = ("ROCKE_BACKEND", "ROCKE_CPP_STRICT")
+        for backend, strict in lanes:
+            with self.subTest(backend=backend, strict=strict):
+                with mock.patch.dict(os.environ):
+                    for name, value in zip(names, (backend, strict)):
+                        if value is None:
+                            os.environ.pop(name, None)
+                        else:
+                            os.environ[name] = value
+                    with _PinArch("gfx942"):
+                        with self.assertRaises(NotImplementedError) as cm:
+                            self._launch(
+                                _problem(65537, 32, 128), tuning_spec=_TuningSpec(8)
+                            )
+                    self.assertIs(type(cm.exception), NotImplementedError)
+                    self.assertIn("num_segments=8", str(cm.exception))
 
 
 if __name__ == "__main__":
