@@ -257,13 +257,16 @@ template <size_t queueSize>
     if (work == nullptr) {
         return nullptr;
     }
-    // work is now locked and queue[index] is empty. Unless we hand work over to the caller, guard puts it back into
-    // queue[index] when we return. Nobody else can write to queue[index] in the meantime:
-    //  - A pusher only writes to an entry once popCount has moved past the worknode that entry held on the previous
-    //    lap (see waitForSpace and waitForSpaceInCPUQueue), so the next push into queue[index] waits until popCount is
-    //    past work's position.
-    //  - popCount only moves past a position through the atomicCAS below, by the caller holding the worknode at that
-    //    position. While we hold work, nobody else can do that for work's position.
+    // work is now locked and queue[index] is empty. If for whatever reason we're unable to successfully return work to
+    // the caller, we need to put it back where we found it. Re-inserting it is safe because nobody else can write to
+    // queue[index] in the meantime:
+    // Let q be the position work was pushed at, so index == q % queueSize. The next push into queue[index] is
+    // position q + queueSize, and waitForSpace (or waitForSpaceInCPUQueue) makes that pusher wait until popCount > q.
+    // popCount only goes from q to q + 1 through the atomicCAS below, made by a caller holding a worknode it took from
+    // queue[index] while popCount == q. That worknode can only be the one at q: the push of q + queueSize is still
+    // waiting for exactly this CAS, and the worknode at q - queueSize was taken and returned from tryPop before q was
+    // pushed (its pusher waited for that). We hold the worknode at q and queue[index] is empty, so nobody else can make
+    // that CAS. popCount stays <= q, and queue[index] stays empty until we put work back.
     // To everyone else this looks the same as detachWorkNode locking a worknode that is still in the queue and later
     // unlocking it back into the same entry: popCount doesn't move, and other callers find the entry empty (locked) and
     // try again later.
