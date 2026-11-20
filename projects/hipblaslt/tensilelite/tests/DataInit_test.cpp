@@ -587,6 +587,83 @@ TEST(DataInitializationMXReuse, NoSwizzleSolutionDoesNotLeakIntoNextPreswizzle)
     EXPECT_TRUE(dataInit.preswizzledA());
     dataInit.postProblem();
 }
+
+namespace
+{
+    // Exposes the host-side source of each tensor so the staged upload can be checked.
+    class SwizzleProbe : public TensileLite::Client::DataInitialization
+    {
+    public:
+        using DataInitialization::DataInitialization;
+
+        const void* cpuSource(int tensor) const
+        {
+            return m_vdata[tensor].pristine.begin()->second.cpuInput.valid.get();
+        }
+    };
+
+    std::vector<uint8_t> readDevice(const void* ptr, size_t bytes)
+    {
+        std::vector<uint8_t> out(bytes);
+        HIP_CHECK_EXC(hipMemcpy(out.data(), ptr, bytes, hipMemcpyDeviceToHost));
+        return out;
+    }
+} // namespace
+
+// SwizzleTensorA/B: prepareGPUInputs allocates the padded buffer, stages the source into the
+// swizzled layout and uploads it (a second call reuses the cached staging).
+TEST(DataInitializationSwizzle, UploadsTheStagedLayoutForAAndB)
+{
+    using TensileLite::Client::detail::stageSwizzledTensor;
+    using TensileLite::Client::detail::swizzleStageGeometry;
+
+    hipDeviceProp_t prop{};
+    ASSERT_EQ(hipGetDeviceProperties(&prop, 0), hipSuccess);
+    const bool isGfx1250 = std::string(prop.gcnArchName).find("gfx1250") != std::string::npos;
+
+    auto args = makeMXLaunchArgs({{48, 40, 1, 100}});
+    setOption(args, "mx-a-block", 0);
+    setOption(args, "mx-b-block", 0);
+    setOption(args, "mx-scale-format", 0);
+    // Swizzled operands are K-fastest (TN): A is [K, M], B is [K, N].
+    setOption(args, "problem-identifier", std::string("Contraction_l_Alik_Bljk_Cijk_Dijk"));
+    setOption(args, "swizzle-tensor-a", true);
+    setOption(args, "swizzle-tensor-b", true);
+    TensileLite::Client::ClientProblemFactory factory(args);
+    SwizzleProbe                              dataInit(args, factory);
+    ContractionSolution                       solution;
+    auto*                                     problem = factory.problems()[0].get();
+    auto const& gemm = dynamic_cast<ContractionProblemGemm const&>(*problem);
+    ASSERT_TRUE(gemm.swizzleTensorA());
+    ASSERT_TRUE(gemm.swizzleTensorB());
+
+    dataInit.preProblem(problem);
+    dataInit.preSolution(&solution);
+    for(int pass = 0; pass < 2; ++pass) // the second pass takes the cached-staging path
+    {
+        auto const inputs = dataInit.prepareGPUInputs(problem);
+        auto const* gemmInputs
+            = dynamic_cast<TensileLite::ContractionInputs const*>(inputs.get());
+        ASSERT_NE(gemmInputs, nullptr);
+        struct
+        {
+            int                     tensor;
+            const void*             device;
+            TensorDescriptor const& desc;
+        } const tensors[] = {{ContractionProblemGemm::TENSOR::A, gemmInputs->a, gemm.a()},
+                             {ContractionProblemGemm::TENSOR::B, gemmInputs->b, gemm.b()}};
+        for(auto const& t : tensors)
+        {
+            const auto geom     = swizzleStageGeometry(t.desc, isGfx1250);
+            auto       expected = stageSwizzledTensor(t.desc, dataInit.cpuSource(t.tensor), geom);
+            auto       got      = readDevice(t.device, expected.getNumBytes());
+            EXPECT_EQ(std::memcmp(got.data(), expected.as<void>(), got.size()), 0)
+                << "tensor " << t.tensor << " pass " << pass;
+        }
+    }
+    dataInit.postSolution();
+    dataInit.postProblem();
+}
 #endif
 
 // =============================================================================
