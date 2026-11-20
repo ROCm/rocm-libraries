@@ -130,6 +130,11 @@ def tdmStoreRejectReason(state):
     return "TDMStoreInst does not support UseSubtileImpl"
   if isFusedA2A(pt):
     return "TDMStoreInst does not support FusedA2A"
+  if pt.get("OutputPeerD", False):
+    # The peer store is a tail recursion inside addStore, which a TDM block never reaches: it
+    # collects its elements and stages them instead. The TDM block writes one tensor, SrdD or
+    # SrdTD, so the peer partition's D would keep its initial value.
+    return "TDMStoreInst does not support OutputPeerD"
   return None
 
 
