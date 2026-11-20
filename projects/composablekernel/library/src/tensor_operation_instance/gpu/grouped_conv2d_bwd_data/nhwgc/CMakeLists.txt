@@ -15,6 +15,7 @@ set(GROUPED_CONV2D_BWD_DATA_NHWGC
    wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_f16_instance.cpp
    wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_f16_instance_part1.cpp
    wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_bf16_instance_part1.cpp
+   wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_f16_large_tiles_instance.cpp
    # xdl
    xdl/device_grouped_conv2d_bwd_data_xdl_nhwgc_gkyxc_nhwgk_bf16_16_16_instance.cpp
    xdl/device_grouped_conv2d_bwd_data_xdl_nhwgc_gkyxc_nhwgk_bf16_instance.cpp
@@ -45,5 +46,6 @@ set(GROUPED_CONV2D_BWD_DATA_NHWGC
 )
 if((GPU_TARGETS MATCHES "gfx1250"))
 set_source_files_properties(wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_bf16_large_tiles_instance.cpp PROPERTIES COMPILE_OPTIONS ";-mllvm;-enable-post-misched=1;-mllvm;--amdgpu-mfma-vgpr-form")
+set_source_files_properties(wmma/device_grouped_conv2d_bwd_data_wmma_v3_nhwgc_gkyxc_nhwgk_f16_large_tiles_instance.cpp PROPERTIES COMPILE_OPTIONS ";-mllvm;-enable-post-misched=1;-mllvm;--amdgpu-mfma-vgpr-form")
 endif()
 add_instance_library(device_grouped_conv2d_bwd_data_nhwgc_instance ${GROUPED_CONV2D_BWD_DATA_NHWGC})
