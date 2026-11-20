@@ -302,7 +302,8 @@ def test_the_generator_and_shipped_flydsl_engines_agree_on_determinism() -> None
 
 def _single_pack_ued(tmp_path: Path) -> dict:
     rows = [_entry("sdpa_rdna", "sdpa_rdna_x", {"block_m": 64, "has_bias": 0})]
-    gen_descriptors._write(tmp_path, gen_descriptors.build_documents(rows, "gfx1201"))
+    folders = gen_descriptors.build_documents(rows, "gfx1201", tmp_path)
+    gen_descriptors._write(tmp_path, folders)
     path = tmp_path / "sdpa_rdna" / "flydsl_sdpa_rdna.ued.json"
     return json.loads(path.read_text(encoding="utf-8"))
 

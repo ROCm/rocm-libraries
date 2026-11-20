@@ -183,18 +183,19 @@ std::vector<DeterminismRow> rockeRows()
     std::vector<DeterminismRow> rows;
 #ifdef HKP_DETERMINISM_ROCKE_GFX950_DENSE
     {
-        // One launch per (q-block, head, batch), no persistent grid and no kv split (the gfx950
-        // KMD has neither field), so the launch structure does not vary; what varies is the
-        // compiled kernel. The rows are the shapes and tiles of the repo's own knob suite
+        // One launch per (q-block, head, batch), no persistent grid and no kv split (the gfx950 KMD
+        // has neither field), so the launch structure does not vary; what varies is the compiled
+        // kernel. The rows are the shapes and tiles of the repo's own knob suite
         // (IntegrationGpuGfx950AttentionDenseKnobs.cpp knobCases, which holds its table to the
-        // catalog's kernel classes in CoversEveryCatalogKernelClass and head configurations in
-        // CoversEveryCatalogHeadConfiguration): one row per (head size, dtype, causal, block_m,
-        // block_n) class, 52 classes, and every one of the 33 (head size, Hq, Hkv) configurations
-        // the catalog bakes (the matcher compares head counts). The tile is pinned through the
-        // block_m and block_n knobs; the knob suite's mma_core_mode and attn_scale variants
-        // select no other kernel and are left out. The graph asks for no LSE (no catalog kernel
-        // writes one) and Sq, Skv divide the tile (the matcher requires it), so there is no tail
-        // row. A top-left or bottom-right band is the same kernel (causal 1).
+        // catalog's kernel classes in CoversEveryCatalogKernelClass, and runs at least four head
+        // configurations per head size, both GQA and MHA, in
+        // ServesEveryHeadConfigurationFromOneKernel): one row per (head size, dtype, causal,
+        // block_m, block_n) class, 52 classes; head counts are not among them, since the catalog
+        // has moved them to kernargs, so one class serves every (Hq, Hkv) the graph asks for. The
+        // tile is pinned through the block_m and block_n knobs; the knob suite's mma_core_mode and
+        // attn_scale variants select no other kernel and are left out. The graph asks for no LSE
+        // (no catalog kernel writes one) and Sq, Skv divide the tile (the matcher requires it), so
+        // there is no tail row. A top-left or bottom-right band is the same kernel (causal 1).
         const Served served{"hipkernel:Gfx950AttentionDense", "gfx950"};
         const auto addDense = [&](DataType dataType,
                                   int64_t headSize,
@@ -271,7 +272,9 @@ std::vector<DeterminismRow> rockeRows()
         addDense(FP16, 128, 16, 16, Band::TOP_LEFT, 2, 256, 512, 256, 64);
         addDense(FP16, 64, 32, 8, Band::NONE, 1, 384, 256, 128, 32);
 
-        // The ranker default: no knob, so the shape-blind scorer picks the baseline 256/64 tile.
+        // The ranker default: no knob; the native preferredTile scorer (the gfx950 tile sweep)
+        // picks the 128x128 tile for this D64 non-causal, Sq 256 shape (below the 1024 non-causal
+        // fat-tile threshold).
         const auto cold = shapeOf(BF16, 64, 8, 8, Band::NONE, 1, 256, 256);
         addRow(rows, served, shapeToken(cold) + "Cold", KnobClass::TILE_SCHEDULE, {}, cold);
     }
@@ -465,6 +468,20 @@ std::vector<DeterminismRow> rockeRows()
         add("Window",
             grid(256, 64, QB_MINOR),
             shapeOf(FP16, 64, 1, 1, Band::TOP_LEFT, 1, 4096, 4096, false, 2048));
+
+        // The keyless cells (#16203): seqlen_q - seqlen_kv >= the window excludes every key from
+        // the trailing q-blocks, so those blocks run a zero-trip key loop and the kernel zeroes
+        // their rows; served only without a stats output (windowLeavesRowsWithoutKeys says why).
+        add("KeylessWindow",
+            grid(256, 64, QB_MINOR),
+            shapeOf(BF16, 128, 1, 1, Band::TOP_LEFT, 1, 4096, 512, false, 128));
+        add("KeylessWindow",
+            grid(256, 64, QB_MINOR),
+            shapeOf(FP16, 64, 1, 1, Band::TOP_LEFT, 1, 4096, 512, false, 128));
+        // The boundary: seqlen_q - seqlen_kv == the window, the smallest gap that is keyless.
+        add("KeylessWindowBoundary",
+            grid(64, 64, QB_MINOR),
+            shapeOf(BF16, 128, 1, 1, Band::TOP_LEFT, 1, 640, 512, false, 128));
 
         // The ranker default: no knob; the scorer picks the persistent arm at D128 where the
         // CTA count suits the device, and the smallest tile that divides a short sequence.

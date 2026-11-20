@@ -22,7 +22,8 @@ namespace asm_sdpa_engine
 // True only when the forward plan builder declines every O and stats tensor whose strides map two
 // elements to one address or that the kernel does not honour, and the forward kernels have a
 // passing bitwise run-to-run repeat test on every code-object target they ship. Backward is never
-// claimed: its dQ accumulation uses fp32 atomics.
+// claimed: its dQ accumulation uses atomics (fp32 under the default a32 accumulator, 16-bit under
+// a16).
 inline constexpr bool ASM_SDPA_FORWARD_CLAIMS_DETERMINISM = false;
 
 using IEngine = hipdnn_plugin_sdk::IEngine<Handle, Settings, Context>;

@@ -33,9 +33,10 @@
 namespace hip_kernel_provider::sdpa_selection
 {
 
-/// The graph a row builds. BACKWARD_ASM_ONLY is a gfx942 backward graph that only
-/// ASM_SDPA_ENGINE ranks (only its O and dQ are padded, to a row pitch of D + 1 that the FlyDSL
-/// backward matcher declines and the ASM builder accepts).
+/// The graph a row builds. BACKWARD_ASM_ONLY is a backward graph that only ASM_SDPA_ENGINE ranks
+/// (only its O and dQ are padded, to a row pitch of D + 1 that the FlyDSL backward matcher declines
+/// and the ASM builder accepts), pinned to gfx942: ASM_SDPA_ENGINE backward also serves gfx950, but
+/// whether FlyDSL's gfx950 backward declines the same padded pitch is unverified.
 enum class GraphKind
 {
     FORWARD,
@@ -111,23 +112,25 @@ inline std::vector<SelectionRow> selectionRows()
     const auto bwdServed = archsOf(HKP_SDPA_SELECTION_BWD_ARCHS);
 
     std::vector<Case> cases;
-    // Forward: ASM forward declines the graph (stats with a mask, SdpaFwdPlanBuilder.cpp:707-708)
-    // and Flash2 serves fp16 only (HipFlash2FwdPlanBuilder.cpp:178), so every engine ranking it
-    // is a claimable one: no unclaimed engine is expected to rank it.
+    // Forward: ASM forward declines the graph -- its kernel table has no bf16 head-size-64 row
+    // (key.empty(), SdpaFwdPlanBuilder.cpp:1041-1045) -- and Flash2 serves fp16 only
+    // (HipFlash2FwdPlanBuilder.cpp:178), so every engine ranking it is a claimable one: no
+    // unclaimed engine is expected to rank it.
     cases.push_back({"FwdBf16Hd64Causal",
                      GraphKind::FORWARD,
                      {"gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1201"},
                      fwdServed,
                      {},
                      {}});
-    // Backward: on gfx942 ASM_SDPA_ENGINE accepts the packed bf16 hd128 graph (equal heads,
-    // packed strides and stats, SdpaBwdPlanBuilder.cpp:486-490 and :721-802) beside the FlyDSL
-    // split engine, and is never claimed, when this build has it. On the other architectures
-    // only FlyDSL engines rank it.
+    // Backward: ASM_SDPA_ENGINE accepts the packed bf16 hd128 graph (equal heads at
+    // SdpaBwdPlanBuilder.cpp:1185-1186, packed stats at :1196-1219) beside the FlyDSL split engine,
+    // on gfx942 and gfx950 (isSupportedArch :636-638, isBatchShapeSupported :699-721), and is never
+    // claimed, when this build has it.
     std::vector<std::string> bwdUnclaimedArchs;
     std::vector<std::string> bwdUnclaimed;
 #ifdef HKP_SDPA_SELECTION_ASM_ONLY
     bwdUnclaimedArchs.push_back("gfx942");
+    bwdUnclaimedArchs.push_back("gfx950");
     bwdUnclaimed.push_back("ASM_SDPA_ENGINE");
 #endif
     cases.push_back({"BwdBf16Hd128",

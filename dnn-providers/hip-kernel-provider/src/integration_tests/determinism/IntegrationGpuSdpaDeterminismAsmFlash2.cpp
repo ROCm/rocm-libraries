@@ -14,8 +14,8 @@
 /**
  * @file IntegrationGpuSdpaDeterminismAsmFlash2.cpp
  * @brief The determinism rows of ASM_SDPA_ENGINE (forward on gfx942 and gfx950, backward on
- *        gfx942) and HIP_FLASH2_ENGINE (gfx942). CMake defines HKP_DETERMINISM_ASM_SDPA and
- *        HKP_DETERMINISM_HIP_FLASH2 for the engines this build has, and each table below
+ *        gfx942 and gfx950) and HIP_FLASH2_ENGINE (gfx942). CMake defines HKP_DETERMINISM_ASM_SDPA
+ *        and HKP_DETERMINISM_HIP_FLASH2 for the engines this build has, and each table below
  *        exists only under its definition.
  */
 
@@ -43,12 +43,15 @@ constexpr const char* ASM_ENGINE = "ASM_SDPA_ENGINE";
 //    SdpaFwdLaunchParams.hpp:72), which needs at least four Q tiles: the causal rows have four;
 //    gfx942 hd192x128 batch keeps its own grid layout (:86-95) and gfx942 hd192x128 group keeps
 //    tgDiv=1 (:73-76), each with its own row;
-//  - tune_opt 3 (a causal row with Hq not a multiple of 8, :60-63; tune_opt 0 is the gfx942
-//    hd192x128 rows, :64-66) and GQA (Hq a multiple of Hkv, hasConsistentFwdShapes,
-//    SdpaPlanUtils.hpp:240-243);
-//  - LSE on and off: LSE is admitted only for batch mode without a mask
-//    (SdpaFwdPlanBuilder.cpp:561-562 declines ragged, :706-708 declines causal).
-// Causal is bottom-right (the CSV mask 2; top-left has no row, SdpaFwdPlanBuilder.cpp:690-695).
+//  - tune_opt 3 (a causal row with Hq not a multiple of 8 or Sq above 16384,
+//    SdpaFwdLaunchParams.hpp:73-76; tune_opt 0 is the gfx942 hd192x128 rows, :77-80) and GQA
+//    (Hq a multiple of Hkv, hasConsistentFwdShapes, SdpaPlanUtils.hpp:224-250);
+//  - LSE on and off: admitted in batch mode with packed strides [H * s_h, s_h, 1] and a 32-bit
+//    LSE offset, or in group mode on the Q/O ragged offset tensor with a unit sequence stride
+//    (isSupportedStatsTensor, SdpaFwdPlanBuilder.cpp:517-593); not gated by causal.
+// Causal: the CSV mask 2 serves bottom-right, and top-left too when every batch's Q and K/V
+// lengths are equal (fwdKernelMaskType, SdpaFwdPlanBuilder.cpp:97-109); this suite's causal rows
+// stay bottom-right.
 // The gfx942 batch rows are written for both SKUs: the engine loads MI308/<co> on an MI308X
 // device and MI300/<co> elsewhere (AsmKernelPath.hpp:56-65, isMi308Device
 // SdpaFwdPlanBuilder.cpp:215-240); a MI308 row's name ends in mi308x. gfx950 ships one set.
@@ -56,8 +59,8 @@ constexpr const char* ASM_ENGINE = "ASM_SDPA_ENGINE";
 // Group rows never reach a fully masked query row (every sequence has no more queries than
 // keys), so no output element is undefined by the mask. Group tensors are packed THD with Q/O
 // and K/V token offset tables whose multiplier is the sequence stride, the AITER contract
-// (isApplicable hasAiterCompatibleRaggedAddressing, :173-212); the precedent is
-// asm_sdpa_engine/IntegrationGpuSdpaForwardRagged.cpp.
+// (isApplicable hasAiterCompatibleRaggedAddressing, SdpaFwdPlanBuilder.cpp:189-229); the
+// precedent is asm_sdpa_engine/IntegrationGpuSdpaForwardRagged.cpp.
 struct AsmFwdCase
 {
     const char* caseName;
@@ -308,21 +311,25 @@ std::vector<AsmFwdCase> asmGfx950Cases()
     };
 }
 
-// ASM backward A32 (the default accumulator, the only one the engine reaches,
-// SdpaBwdPlan.cpp:244-246, 560-565): odo, dqdkdv with fp32 atomic dQ into a zeroed workspace,
-// dq_convert. Workgroups of different K tiles add into one dQ row, so the order of the adds is
-// scheduling dependent: a known hazard, measured and never proven. Rows have at least two K
-// tiles per (b, h): the dqdkdv K tile ts is 192 (hd128) or 64 (hd192) (fmha_bwd_dqdkdv.csv),
-// and Skv 512 gives three and eight. Admission: gfx942 only (SdpaBwdPlanBuilder.cpp:488); MHA
-// only (GQA declined, :718-724); BHSD packed strides; the lookup takes pssk=1, pddv=1,
-// atomic32=1 (computeDispatchTuples :322-335), so hd64, whose rows are all pddv=0, is declined
-// and has no row. hd128 and hd192, bf16 and fp16, each have a no-mask (mask 0) and a
-// bottom-right causal (mask 2) row; top-left causal (mask 1) has rows too but is not written
-// (the same launch structure). Sq below Skv, as in
+// ASM backward A32 (the default accumulator; a16 is reachable through the published
+// hipkernel.sdpa.bwd.accumulator_type knob and unmeasured here): odo, dqdkdv with fp32 atomic
+// dQ into a zeroed workspace, dq_convert (SdpaBwdPlan.cpp:177-215). Workgroups of different K
+// tiles add into one dQ row, so the order of the adds is scheduling dependent: a known hazard,
+// measured and never proven. Rows have at least two K tiles per (b, h): the dqdkdv K tile ts is
+// 192 (hd128) or 64 (hd192) (fmha_bwd_dqdkdv.csv), and Skv 512 gives three and eight.
+// ASM_SDPA_ENGINE serves backward on gfx942 and gfx950 (isSupportedArch,
+// SdpaBwdPlanBuilder.cpp:636-639); these rows are gfx942 by choice. MHA only (GQA declined,
+// :1183-1189); BHSD packed strides; findDqdkdvConfig (:192-230) picks the smallest qualifying
+// (pssk, pddv) row for the shape (requestedPssk, :165-176): hd128 and hd192 take pssk = 1,
+// pddv = 1; hd64 has its own pssk = 1, pddv = 0 row (fmha_bwd_dqdkdv.csv), so no row is
+// missing. hd128 and hd192, bf16 and fp16, each have a no-mask (mask 0) and a bottom-right
+// causal (mask 2) row; top-left causal (mask 1) has rows too but is not written (the same
+// launch structure). Sq below Skv, as in
 // asm_sdpa_engine/IntegrationGpuSdpaBackward.cpp:98-101. O and the LSE come from one forward
 // launch of the first-ranked engine on the device (harness): a causal or fp16 or hd192 row
-// needs a non-ASM gfx942 forward that serves LSE (the ASM forward declines causal with LSE, and
-// is bf16 only), for example flydsl_sdpa_cdna, so the row fails if none serves it.
+// needs a non-ASM gfx942 forward that serves LSE for the row's shape (ASM forward is bf16
+// only, so every fp16 row needs one), for example flydsl_sdpa_cdna, so the row fails if none
+// serves it.
 void addAsmBwdRows(std::vector<DeterminismRow>& rows)
 {
     struct BwdCase

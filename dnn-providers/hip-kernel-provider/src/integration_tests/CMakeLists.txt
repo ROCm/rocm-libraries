@@ -261,13 +261,13 @@ endif()
 # the code as comma-separated architectures: HKP_SDPA_SELECTION_FWD_ARCHS for the forward graph
 # (bf16, head size 64, causal: an offered rocKE engine on its target architecture, the WMMA
 # engines on gfx1100 and gfx1201, FlyDSL forward content; neither ASM forward nor Flash2 serves
-# it) and HKP_SDPA_SELECTION_BWD_ARCHS for the backward graph (ASM on gfx942, FlyDSL backward
+# it) and HKP_SDPA_SELECTION_BWD_ARCHS for the backward graph (ASM on gfx942 and gfx950, FlyDSL
 # content: merged and the split engine, which needs prep, dkdv and dq).
 # HKP_SDPA_SELECTION_ASM_ONLY enables the graph only ASM_SDPA_ENGINE serves.
 set(_hkp_selection_fwd_archs "")
 set(_hkp_selection_bwd_archs "")
 if(ENABLE_ASM_SDPA_ENGINE)
-    list(APPEND _hkp_selection_bwd_archs gfx942)
+    list(APPEND _hkp_selection_bwd_archs gfx942 gfx950)
     target_compile_definitions(hip_kernel_provider_integration_tests
         PRIVATE HKP_SDPA_SELECTION_ASM_ONLY=1
     )
