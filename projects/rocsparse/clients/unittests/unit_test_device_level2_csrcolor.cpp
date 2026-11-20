@@ -27,7 +27,9 @@
 // nodes to color below one: the remaining nodes receive distinct new colors. The
 // coloring is checked for what the documentation promises: it is a proper coloring
 // of the graph (no two adjacent nodes share a color), the colors lie in
-// [0, ncolors) and the optional reordering is a permutation.
+// [0, ncolors) and the optional reordering is a permutation. On disjoint triangles the
+// number of colors is known in closed form per fraction, which pins how many rounds the
+// fraction allows.
 //
 #include "unit_test_device_level2_common.hpp"
 
@@ -181,4 +183,128 @@ namespace
         run_coloring<rocsparse_double_complex>(handle, grid, 0.5, false);
     }
 
+    // ntri disjoint triangles (m = 3 ntri vertices). The first Jones-Plassmann-Luby round
+    // colors exactly two vertices of every triangle, the local maximum and the local
+    // minimum of the vertex weights (the two colors of the round), and leaves the third
+    // whatever the weights are, so the outcome does not depend on the hash. After that
+    // round ntri vertices are uncolored. The loop stops when at most m - m * fraction
+    // remain:
+    //   fraction <= 2/3: one round, every leftover gets its own color, ncolors = 2 + ntri;
+    //   fraction >  2/3: a second round colors every leftover alike, ncolors = 3.
+    host_csr<float> make_triangles(int32_t ntri, int base)
+    {
+        host_csr<float> a;
+        a.m    = 3 * ntri;
+        a.n    = a.m;
+        a.base = 0;
+        a.ptr.push_back(0);
+        for(int32_t v = 0; v < a.m; ++v)
+        {
+            const int32_t t = v / 3;
+            for(int32_t w = 3 * t; w < 3 * t + 3; ++w)
+                if(w != v)
+                {
+                    a.ind.push_back(w);
+                    a.val.push_back(1.0f);
+                }
+            a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
+        }
+        rebase(a, base);
+        return a;
+    }
+
+    template <typename T>
+    void run_triangles(rocsparse_handle handle, int32_t ntri, int base, double fraction)
+    {
+        using R = typename real_of<T>::type;
+        SCOPED_TRACE(::testing::Message()
+                     << "triangles ntri=" << ntri << " base=" << base << " fraction=" << fraction);
+        const host_csr<float> graph = make_triangles(ntri, base);
+        const rocsparse_int   m     = graph.m;
+        const std::vector<T>  val(graph.val.size(), rocsparse_ut::scalar<T>(1.0f));
+
+        device_vector<rocsparse_int> drow(convert_vector<rocsparse_int>(graph.ptr)),
+            dcol(convert_vector<rocsparse_int>(graph.ind));
+        device_vector<T>             dval(val);
+        device_vector<rocsparse_int> dcoloring(std::vector<rocsparse_int>(m, -1));
+        ASSERT_TRUE(drow.ptr && dcol.ptr && dval.ptr && dcoloring.ptr);
+
+        mat_descr descr;
+        ASSERT_TRUE(descr.d);
+        ASSERT_EQ(rocsparse_set_mat_index_base(descr.d, to_base(base)), rocsparse_status_success);
+        mat_info info;
+        ASSERT_TRUE(info.d);
+
+        const R       frac    = static_cast<R>(fraction);
+        rocsparse_int ncolors = 0;
+        ASSERT_EQ(csrcolor<T>(handle,
+                              m,
+                              graph.nnz(),
+                              descr.d,
+                              dval.ptr,
+                              drow.ptr,
+                              dcol.ptr,
+                              &frac,
+                              &ncolors,
+                              dcoloring.ptr,
+                              nullptr,
+                              info.d),
+                  rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        // The library stops once the uncolored count is at most m - m * fraction, which
+        // is computed in the precision of the fraction.
+        const rocsparse_int max_uncolored = static_cast<rocsparse_int>(m - m * frac);
+        const bool          one_round     = ntri <= max_uncolored;
+        EXPECT_EQ(ncolors, one_round ? 2 + ntri : 3);
+
+        // Every triangle is properly colored with two colors of the first round (0 and 1)
+        // and one later color; after one round the later colors are distinct new colors,
+        // after two rounds the range check above leaves only the color 2 for them.
+        const std::vector<rocsparse_int> colors = to_host(dcoloring);
+        std::vector<bool>                third_seen(static_cast<size_t>(ncolors), false);
+        for(int32_t t = 0; t < ntri; ++t)
+        {
+            const rocsparse_int c0 = colors[3 * t], c1 = colors[3 * t + 1], c2 = colors[3 * t + 2];
+            ASSERT_TRUE(c0 != c1 && c0 != c2 && c1 != c2) << "triangle " << t;
+            int           first_round = 0;
+            rocsparse_int third       = -1;
+            for(const rocsparse_int c : {c0, c1, c2})
+            {
+                ASSERT_GE(c, 0) << "triangle " << t;
+                ASSERT_LT(c, ncolors) << "triangle " << t;
+                if(c < 2)
+                    ++first_round;
+                else
+                    third = c;
+            }
+            ASSERT_EQ(first_round, 2) << "triangle " << t;
+            if(one_round)
+            {
+                ASSERT_FALSE(third_seen[static_cast<size_t>(third)])
+                    << "triangle " << t << " shares its new color";
+                third_seen[static_cast<size_t>(third)] = true;
+            }
+        }
+    }
+
+    // The fraction decides how many rounds run: 0.25 and 0.5 leave the third vertex of
+    // every triangle uncolored (then individually colored), 1.0 colors it in a second
+    // round. A library that ignores the fraction reports 3 colors for all of them.
+    TEST_F(L2DeviceCsrcolor, fraction_on_disjoint_triangles)
+    {
+        for(int base : {0, 1})
+            for(const double fraction : {0.25, 0.5, 1.0})
+            {
+                run_triangles<float>(handle, 100, base, fraction);
+                if(HasFailure())
+                    return;
+            }
+        // More vertices than one block of the leftover numbering handles (1024), and
+        // the other precisions.
+        run_triangles<float>(handle, 700, 0, 0.5);
+        run_triangles<double>(handle, 100, 1, 0.5);
+        run_triangles<rocsparse_float_complex>(handle, 100, 0, 1.0);
+        run_triangles<rocsparse_double_complex>(handle, 100, 0, 0.25);
+    }
 }
