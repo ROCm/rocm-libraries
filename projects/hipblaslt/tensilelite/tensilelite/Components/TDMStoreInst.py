@@ -71,7 +71,11 @@ DS_OFFSET_MAX = 0xFFFF
 def hasEpilogueSideEffects(pt):
   """Whether the epilogue writes or reduces per-element outputs beyond C and D (E, Gradient, gate residual,
   AmaxD). The TDM blocks of the edge paths of such a kernel keep the masks, the vector width and the C loads of
-  the edge block, so the elements outside D reach neither those outputs nor their reductions."""
+  the edge block, so the elements outside D reach neither those outputs nor their reductions.
+
+  The bias store of a BiasSrc=D reduction is a fifth such output, covered through Gradient rather than named:
+  useBias is only ever DataDirection.WRITE inside the Gradient branch of KernelWriter's bias setup, so a kernel
+  that emits it is already a Gradient kernel. Decoupling the two would leave that store unmasked here."""
   return pt["UseE"] or pt["Gradient"] or pt["UseGateResidual"] or pt["OutputAmaxD"]
 
 

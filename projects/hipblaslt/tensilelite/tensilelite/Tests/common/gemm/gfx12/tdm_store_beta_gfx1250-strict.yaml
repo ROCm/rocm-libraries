@@ -736,8 +736,8 @@ BenchmarkProblems:
           - Exact: [64, 65792, 1, 256]
           - Exact: [61, 65792, 1, 256]
   ########################################
-  # Every activation type of hipblaslt_all but the gradient ones (dgelu and drelu need Gradient, which
-  # TDMStoreInst rejects), selected by ActivationArgs and applied before the TDM block
+  # Every activation type of hipblaslt_all but the gradient ones (dgelu and drelu need Gradient, whose
+  # per-element outputs keep the edge blocks masked), selected by ActivationArgs and applied before the TDM block
   # stages D. The size has NonEdge, M-edge, N-edge and corner workgroups and a leading dimension larger
   # than M.
   ########################################
