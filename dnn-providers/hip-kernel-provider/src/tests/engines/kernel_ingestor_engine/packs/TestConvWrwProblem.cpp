@@ -1597,6 +1597,33 @@ TEST(TestConvWrwKernelMatch, PackedRowsServeNarrowChannelsFirstOutputsOnly)
     EXPECT_FALSE(admits(f, "gfx950", baseShape()));
 }
 
+TEST(TestConvWrwKernelMatch, SmallCRowsOfEveryFilterRowServeFiltersWithThatManyRows)
+{
+    // A 3-D stem: nine (depth, height) filter rows. fr 9 takes them all in one block (one grid
+    // row, so dy is read once); fr 3 takes a depth tap a block.
+    auto stem3d = stemShape();
+    stem3d.input = {6, 10, 12};
+    stem3d.filter = {3, 3, 3};
+    stem3d.prePadding = {1, 1, 1};
+    stem3d.postPadding = {1, 1, 1};
+    stem3d.stride = {1, 1, 1};
+    stem3d.dilation = {1, 1, 1};
+    auto all = smallcFields();
+    all.fr = 9;
+    EXPECT_TRUE(admits(all, "gfx942", stem3d));
+    const auto one = launchOf(all, stem3d, "gfx942", 304);
+    ASSERT_TRUE(one.has_value());
+    EXPECT_EQ(one->gridY, 1u);
+    auto three = smallcFields();
+    three.fr = 3;
+    const auto perDepth = launchOf(three, stem3d, "gfx942", 304);
+    ASSERT_TRUE(perDepth.has_value());
+    EXPECT_EQ(perDepth->gridY, 3u);
+    // A 2-D 3x3 stem has three filter rows: fr 9 declines it, fr 3 (its height) serves it.
+    EXPECT_FALSE(admits(all, "gfx942", stemShape()));
+    EXPECT_TRUE(admits(three, "gfx942", stemShape()));
+}
+
 TEST(TestConvWrwKernelMatch, SmallCRowsServeFewChannelsFirstChannels)
 {
     // Three input channels, channels-first: served; 24 (past 16) is not.
