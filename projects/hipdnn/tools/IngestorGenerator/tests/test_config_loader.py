@@ -6,6 +6,7 @@ configs, the five pre-mint loader-mirroring checks, deprecated- and duplicate-ke
 rejection, and the kernel_source_kind rejections."""
 
 import copy
+import re
 import sys
 from pathlib import Path
 
@@ -56,9 +57,11 @@ class TestEngineNameCheck:
         _check_engine_name_scoped(config)  # does not raise
 
     @pytest.mark.parametrize(
-        "borrowed", ["Unscoped", "hipkernel:Test", 3], ids=["unscoped", "self", "int"]
+        "borrowed",
+        ["Undotted", "hipkernel:Other", "hipkernel.test", 3, 0, False],
+        ids=["undotted", "engine-name", "self", "int", "zero", "false"],
     )
-    def test_native_symbols_from_must_name_another_scoped_engine(self, borrowed):
+    def test_native_symbols_from_must_state_another_engines_namespace(self, borrowed):
         from codegen.config_loader import _check_engine_name_scoped
 
         config = make_minimal_config(
@@ -72,7 +75,7 @@ class TestEngineNameCheck:
 
         config = make_minimal_config(
             engine=make_engine(
-                name="hipkernel:TestSeed", native_symbols_from="hipkernel:Test"
+                name="hipkernel:TestSeed", native_symbols_from="hipkernel.test"
             )
         )
         _check_engine_name_scoped(config)  # does not raise
@@ -1507,6 +1510,14 @@ class TestBehaviorNotesVocabulary:
         config = load_config(path)
         assert config.engine.behavior_notes == ["runtime_compilation"]
 
+    def test_supports_graph_capture_accepted(self, tmp_path):
+        raw = TestDeprecatedKeys()._base_raw()
+        raw["engine"]["behavior_notes"] = ["supports_graph_capture"]
+        path = tmp_path / "c.yaml"
+        path.write_text(yaml.dump(raw))
+        config = load_config(path)
+        assert config.engine.behavior_notes == ["supports_graph_capture"]
+
 
 class TestDirectLoadAuthoredSubpath:
     """Each set under ``test_descriptors/`` is its own pack target, walked by directory
@@ -2080,6 +2091,65 @@ class TestExpansionCarriesEveryAuthoredKind:
             self._load(tmp_path, raw)
 
 
+_IG_ROOT = Path(__file__).resolve().parents[1]
+_PACKS_DIR = (
+    Path(__file__).resolve().parents[5]
+    / "dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs"
+)
+
+
+class TestBorrowingASlugOverriddenEngine:
+    """A borrower of an engine whose ``slug`` override departs from the naive
+    snake_case of its local name (``Unified2D`` -> ``unified2_d``) names the namespace
+    that engine registers, from ``native_symbols_from`` alone."""
+
+    @staticmethod
+    def _registered_namespace(local_name):
+        """The namespace the engine's hand-maintained native code registers its
+        dispatch handler under (``DISPATCH_SYMBOL`` minus ``.dispatch``)."""
+        source = (_PACKS_DIR / f"{local_name}Native.cpp").read_text()
+        match = re.search(
+            r'DISPATCH_SYMBOL\s*=\s*"([^"]+)\.dispatch"', source, re.MULTILINE
+        )
+        assert match, f"{local_name}Native.cpp declares no DISPATCH_SYMBOL"
+        return match.group(1)
+
+    @pytest.mark.parametrize(
+        "local_name, config_stem",
+        [
+            ("Gfx950AttentionUnified2D", "gfx950_attention_unified_2d"),
+            ("Gfx950AttentionUnified3D", "gfx950_attention_unified_3d"),
+        ],
+    )
+    def test_the_borrower_names_the_namespace_its_target_registers(
+        self, tmp_path, local_name, config_stem
+    ):
+        registered = self._registered_namespace(local_name)
+        raw = yaml.safe_load((_IG_ROOT / f"configs/{config_stem}.yaml").read_text())
+        target_path = tmp_path / "target.yaml"
+        target_path.write_text(yaml.dump(raw))
+        target = load_config(target_path)
+        assert target.engine.slug_override is not None
+        assert target.native_symbol_namespace == registered
+        # The naive derivation this replaces would name nothing registered.
+        naive = re.sub(r"(?<!^)(?=[A-Z])", "_", local_name).lower()
+        assert f"hipkernel.{naive}" != registered
+
+        borrower_raw = copy.deepcopy(raw)
+        borrower_raw["engine"]["name"] = f"hipkernel:{local_name}Seed"
+        borrower_raw["engine"].pop("slug")
+        borrower_raw["engine"].pop("census_name_symbol", None)
+        borrower_raw["engine"]["native_symbols_from"] = registered
+        borrower_path = tmp_path / "borrower.yaml"
+        borrower_path.write_text(yaml.dump(borrower_raw))
+        borrower = load_config(borrower_path)
+        assert borrower.native_symbol_namespace == registered
+        assert borrower.dispatch_symbol == f"{registered}.dispatch"
+        assert borrower.graph_match_symbol == target.graph_match_symbol
+        # Everything else stays the borrower's own.
+        assert borrower.engine.slug != target.engine.slug
+
+
 class TestUnknownKeysAreRefused:
     """A silently dropped key means exit 0, a success banner and a bundle missing what
     the author configured -- `engine.knobbs` for `engine.knobs` emits a UED with no
@@ -2145,6 +2215,16 @@ class TestUnknownKeysAreRefused:
         raw = self._valid()
         raw["engine"]["knobbs"] = []
         with pytest.raises(ConfigError, match="Known keys"):
+            self._load(tmp_path, raw)
+
+    def test_the_retired_native_symbols_from_slug_is_refused(self, tmp_path):
+        """``native_symbols_from`` states the borrowed namespace whole; there is no
+        second key carrying the borrowed engine's slug."""
+        raw = self._valid()
+        raw["engine"]["name"] = "hipkernel:TestSeed"
+        raw["engine"]["native_symbols_from"] = "hipkernel.test"
+        raw["engine"]["native_symbols_from_slug"] = "test"
+        with pytest.raises(ConfigError, match="native_symbols_from_slug"):
             self._load(tmp_path, raw)
 
 
@@ -3190,12 +3270,27 @@ class TestEngineHeuristics:
             ),
             ({"predict_engine": {}}, r"heuristics\.predict_engine is empty"),
             ({"predict_engine": [MODEL]}, "predict_engine"),
+            (
+                {"predict_applicable_kernels": {"gfx942": MODEL}},
+                r"predict_applicable_kernels\.gfx942",
+            ),
             ([MODEL], "engine.heuristics"),
         ],
     )
     def test_refusals_name_the_key(self, tmp_path, configs_dir, heuristics, match):
         with pytest.raises(ConfigError, match=match):
             self._load(tmp_path, configs_dir, heuristics)
+
+    def test_predict_applicable_kernels_binds_a_list(self, tmp_path, configs_dir):
+        # The candidate generators, for future JIT spaces: a list like every role.
+        config = self._load(
+            tmp_path,
+            configs_dir,
+            {"predict_applicable_kernels": {"gfx942": [self.MODEL, self.OTHER]}},
+        )
+        assert config.engine.heuristics == {
+            "predict_applicable_kernels": {"gfx942": [self.MODEL, self.OTHER]}
+        }
 
     def test_arch_entries_need_the_native_default(self, tmp_path, configs_dir):
         with pytest.raises(ConfigError, match="engine.heuristic is 'none'"):

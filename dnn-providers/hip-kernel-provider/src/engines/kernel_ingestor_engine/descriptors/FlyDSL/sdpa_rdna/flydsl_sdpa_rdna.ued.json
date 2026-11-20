@@ -1,8 +1,8 @@
 {
   "version": "1.0",
-  "id": "a122a721-719a-5132-8cfe-97590e7485e7",
+  "id": "a03fe29e-61a4-5f70-9bc3-b43ec75b1530",
   "name": "hipkernel:flydsl_sdpa_rdna",
-  "sdk_version": "1.2.0",
+  "sdk_version": "1.6.0",
   "graph_match": {
     "native": "hipkernel.flydsl_sdpa_rdna.graph_match"
   },
@@ -11,9 +11,18 @@
   },
   "predict_engine": {
     "default": "deafb91e-7100-5f5e-8de7-bccd0bfb5bb5",
-    "gfx1100": "8078f07d-cf59-41e2-b8a0-ec639814b99a",
-    "gfx1151": "d51a010c-d660-45b7-a0f0-0b712111de2a",
-    "gfx1201": "128c014b-edce-4282-bf55-aeddc76c1206"
+    "gfx1100": [
+      "64e2c397-6110-4d62-a94b-1465d58a4741"
+    ],
+    "gfx1101": [
+      "c472baba-16a2-4d69-af87-f4e0f1cc5dd1"
+    ],
+    "gfx1151": [
+      "64c14275-9c65-4eeb-ac5c-b298bf3f2259"
+    ],
+    "gfx1201": [
+      "a5fd7fbb-52ed-4856-b65f-65a98a69d799"
+    ]
   },
   "metadata": "330ae779-3bb5-5a68-9a64-75bfdcbfd1fe",
   "knobs": [
@@ -21,5 +30,8 @@
     "block_n",
     "dv_split",
     "hd_pair"
+  ],
+  "behavior_notes": [
+    "supports_graph_capture"
   ]
 }

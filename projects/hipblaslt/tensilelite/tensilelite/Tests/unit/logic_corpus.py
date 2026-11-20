@@ -7,7 +7,7 @@ The corpus (hipBLASLt's tuned logic YAML) lives in the hipBLASLt product tree,
 outside tensilelite, so it is absent wherever these tests run from installed
 artifacts, and any tuning PR can change it. Prefer not to read it at all: test
 code against a fixture under ``logic_yaml/``, and put cross-file corpus
-invariants in ``tensilelite.TensileLogic.ValidCorpusConsistency``, which
+invariants in ``tensilelite.logic.valid_corpus_consistency``, which
 ``TensileLogic --check-all`` runs in every kernel-generating build.
 
 A test that still has to read the corpus carries ``@needs_logic_corpus``, so the

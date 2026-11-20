@@ -7,10 +7,7 @@
 
 #include <gtest/gtest.h>
 
-#include <nlohmann/json.hpp>
-
 #include "OperationsDir.hpp"
-#include <fstream>
 #include <string>
 
 /// @file TestDeclaredOracle.cpp
@@ -25,12 +22,7 @@ namespace
 
 OperationMetadata shippedSdpa()
 {
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    return parsed.ok() ? *parsed.metadata : OperationMetadata{};
+    return test::shippedOperation("sdpa_fwd");
 }
 
 ProblemPoint sdpaPoint()
@@ -44,6 +36,7 @@ ProblemPoint sdpaPoint()
                         {"is_causal", true},
                         {"alignment", std::string("top_left")},
                         {"generate_stats", false},
+                        {"form", std::string("plain")},
                         {"dtype", std::string("bf16")}};
 }
 
