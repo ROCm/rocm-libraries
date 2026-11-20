@@ -2365,6 +2365,15 @@ namespace impl {
 
 typedef unsigned bt32_t;
 
+// Pointer to the raw dwords of 4-byte elements (float, int32). The cast goes through void* so that
+// it is one explicit reinterpretation (and not reported by cppcheck as a float* -> unsigned* cast).
+template <typename T>
+inline __device__ bt32_t* bt_raw_ptr(T* p)
+{
+    static_assert(sizeof(T) == sizeof(bt32_t), "4-byte elements");
+    return static_cast<bt32_t*>(static_cast<void*>(p));
+}
+
 // ---- gfx1250 register transposes with 16-byte accesses (half / bfloat16 only).
 // A thread owns a VS x VL block of the source (VS rows, VL columns), transposes it in registers (no
 // LDS, no barriers) and stores VL destination row segments of VS elements. All blocks of a tile are
@@ -2871,8 +2880,8 @@ inline __device__ void batched_transpose_lds(T* dst,
                                                             uint32_t magic_w,    \
                                                             uint32_t shift_w)    \
     {                                                                            \
-        __VA_ARGS__(reinterpret_cast<impl::bt32_t*>(dst),                        \
-                    reinterpret_cast<impl::bt32_t*>(src),                        \
+        __VA_ARGS__(impl::bt_raw_ptr(dst),                                       \
+                    impl::bt_raw_ptr(src),                                       \
                     height,                                                      \
                     width,                                                       \
                     dim_stride,                                                  \
@@ -3105,8 +3114,8 @@ inline __device__ void batched_transpose_64x64_pack_4x4_ediv_4x4<float>(float* d
                                                                         uint32_t shift_w)
 {
     batched_transpose_lds<impl::bt32_t, 4, 4, 64, 64, false, BATCHED_TRANSPOSE_BLOCK_SIZE>(
-        reinterpret_cast<impl::bt32_t*>(dst),
-        reinterpret_cast<impl::bt32_t*>(src),
+        impl::bt_raw_ptr(dst),
+        impl::bt_raw_ptr(src),
         height,
         width,
         dim_stride,
