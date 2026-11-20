@@ -682,7 +682,7 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
     }
 }
 
-TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForFp32WithHalfOperandWrittenAsHalf)
+TEST(TestPointwiseSignatureKeyFp32, PlanBuildersRegisteredWithHalfOperandWrittenAsHalf)
 {
     const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
 
