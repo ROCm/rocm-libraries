@@ -1,12 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Per-engine predicates behind the shim's behavior-note and determinism filters.
+// Per-engine predicates behind the shim's behavior-note and numerical-note filters.
 #include <hipdnn_compatibility/cudnn/detail/engine_filters.h>
 
 #include <gtest/gtest.h>
-
-#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 #include <vector>
 
@@ -15,6 +13,7 @@ namespace
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
 
 using BehNote = fe::BehaviorNote_t;
+using NumNote = fe::NumericalNote_t;
 
 TEST(TestCudnnShimEngineFilters, BehaviorNotesMatchRequiresSelectedAndExcludesDeselected)
 {
@@ -30,12 +29,17 @@ TEST(TestCudnnShimEngineFilters, BehaviorNotesMatchRequiresSelectedAndExcludesDe
         fe::detail::behaviorNotesMatch({}, {BehNote::EXTERNAL_LIBRARY_DEPENDENCY}, engineNotes));
 }
 
-TEST(TestCudnnShimEngineFilters, OnlyTheDeterministicMiopenEngineClaimsDeterminism)
+TEST(TestCudnnShimEngineFilters, NumericalNotesMatchRequiresSelectedAndExcludesDeselected)
 {
-    EXPECT_TRUE(fe::detail::isDeterminismClaimed(
-        hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID));
-    EXPECT_FALSE(fe::detail::isDeterminismClaimed(hipdnn_data_sdk::utilities::MIOPEN_ENGINE_ID));
-    EXPECT_FALSE(fe::detail::isDeterminismClaimed(hipdnn_data_sdk::utilities::HIPBLASLT_ENGINE_ID));
+    const std::vector<NumNote> nondeterministic = {NumNote::NONDETERMINISTIC};
+    const std::vector<NumNote> none;
+
+    EXPECT_TRUE(fe::detail::numericalNotesMatch({}, {}, nondeterministic));
+    EXPECT_TRUE(fe::detail::numericalNotesMatch({NumNote::NONDETERMINISTIC}, {}, nondeterministic));
+    EXPECT_FALSE(fe::detail::numericalNotesMatch({NumNote::NONDETERMINISTIC}, {}, none));
+    EXPECT_FALSE(
+        fe::detail::numericalNotesMatch({}, {NumNote::NONDETERMINISTIC}, nondeterministic));
+    EXPECT_TRUE(fe::detail::numericalNotesMatch({}, {NumNote::NONDETERMINISTIC}, none));
 }
 
 } // namespace

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -116,8 +116,17 @@ void testing_prune_csr2csr_by_percentage_bad_arg(const Arguments& arg)
     EXPECT_ROCSPARSE_STATUS(rocsparse_prune_csr2csr_by_percentage<T>(PARAMS),
                             rocsparse_status_requires_sorted_storage);
 
+    // Only C unsorted.
     CHECK_ROCSPARSE_ERROR(
         rocsparse_set_mat_storage_mode(csr_descr_A, rocsparse_storage_mode_sorted));
+    EXPECT_ROCSPARSE_STATUS(
+        rocsparse_prune_csr2csr_by_percentage_buffer_size<T>(PARAMS_BUFFER_SIZE),
+        rocsparse_status_requires_sorted_storage);
+    EXPECT_ROCSPARSE_STATUS(rocsparse_prune_csr2csr_nnz_by_percentage<T>(PARAMS_NNZ),
+                            rocsparse_status_requires_sorted_storage);
+    EXPECT_ROCSPARSE_STATUS(rocsparse_prune_csr2csr_by_percentage<T>(PARAMS),
+                            rocsparse_status_requires_sorted_storage);
+
     CHECK_ROCSPARSE_ERROR(
         rocsparse_set_mat_storage_mode(csr_descr_C, rocsparse_storage_mode_sorted));
 

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -86,7 +86,8 @@ namespace rocsparse
                                              J                         block_dim,
                                              const rocsparse_mat_descr bsr_descr,
                                              I*                        bsr_row_ptr,
-                                             I*                        bsr_nnz);
+                                             I*                        bsr_nnz,
+                                             rocsparse_pointer_mode    bsr_nnz_pointer_mode);
 
     template <typename I, typename J>
     rocsparse_status csr2bsr_nnz_core(rocsparse_handle          handle,
@@ -99,7 +100,8 @@ namespace rocsparse
                                       J                         block_dim,
                                       const rocsparse_mat_descr bsr_descr,
                                       I*                        bsr_row_ptr,
-                                      I*                        bsr_nnz);
+                                      I*                        bsr_nnz,
+                                      rocsparse_pointer_mode    bsr_nnz_pointer_mode);
 
     template <typename... P>
     rocsparse_status csr2bsr_nnz_template(P&&... p)

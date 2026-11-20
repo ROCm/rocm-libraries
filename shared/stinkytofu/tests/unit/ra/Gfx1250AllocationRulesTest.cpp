@@ -245,7 +245,7 @@ TEST_F(Gfx1250AllocationRulesTest, WithoutTheRuleCompactionIntroducesTheOverlap)
     // Why the rule exists, stated as a test. The address is a live-in dying at
     // the load and the destination is defined there, so half-open ranges let
     // them share -- and compaction takes the offer, producing exactly the
-    // unrepairable case Gfx1250HazardPass asserts on.
+    // unrepairable case Gfx1250XnackHazardPass asserts on.
     //
     // This is the *current* behaviour, not the desired one. Promoting the rule
     // to Active is what makes it go away; this test then becomes the record of

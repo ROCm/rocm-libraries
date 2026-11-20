@@ -201,6 +201,21 @@ namespace rocsparse
             }
 
             spilu0_descr->m_batch_count = A->batch_count;
+
+            const rocsparse::numeric_boost* boost = spilu0_descr->get_boost();
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                (boost->get_enable() != 0 && boost->get_tol() == nullptr)
+                    ? rocsparse_status_invalid_pointer
+                    : rocsparse_status_success,
+                "rocsparse_spilu0_input_boost_enable is set, but "
+                "rocsparse_spilu0_input_boost_tolerance is not");
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                (boost->get_enable() != 0 && boost->get_val() == nullptr)
+                    ? rocsparse_status_invalid_pointer
+                    : rocsparse_status_success,
+                "rocsparse_spilu0_input_boost_enable is set, but "
+                "rocsparse_spilu0_input_boost_value is not");
+
             switch(format)
             {
             case rocsparse_format_csr:

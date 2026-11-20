@@ -29,10 +29,10 @@ where, what it covers, how to select it); **Options and guards**; **Consumers**.
 
 **Options and guards.** For the area's changed files: each `option()` and cache variable with its default, each
 `#ifdef`, `#if` and CMake `if(...)` guard, and for each change the flag it depends on and that flag's default, so a change
-that is dead code with the flag OFF shows. `RUN`, `ROCK` and `AUTH` read this section.
+that is dead code with the flag OFF shows. `RUN`, `ROCK`, `AUTH` and `IMPACT` read this section.
 
 **Consumers.** The in-repo includers of the area's changed public headers (`git -C "$CLONE" grep -l <header name> "$BASE"
--- <pathspec>`) and which project or provider tests exercise them. `RUN` and `AUTH` read this section.
+-- <pathspec>`) and which project or provider tests exercise them. `RUN`, `AUTH` and `IMPACT` read this section.
 
 Sources, in order: the area's `README.md` and `docs/`; `projects/hipdnn/docs/`; RFCs under
 `projects/hipdnn/docs/rfcs/`; then the code and tests. Check a document against the code

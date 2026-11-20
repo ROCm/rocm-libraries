@@ -1051,3 +1051,56 @@ TEST_F(TestGpuMiopenConvPlanBuilder, GetMaxWorkspaceSizeReturnsCachedDefaultWrw)
     auto result = _planBuilder.getMaxWorkspaceSize(*_handle, graph, settings);
     EXPECT_EQ(result, cachedValue);
 }
+
+// The handle-free checks of isApplicable, runnable without a device.
+namespace
+{
+
+bool isConvGraphApplicable(const flatbuffers::FlatBufferBuilder& builder)
+{
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    return MiopenConvPlanBuilder::isGraphApplicable(graph);
+}
+
+flatbuffers::FlatBufferBuilder convFwdGraphWithPassByValueTensor(const std::string& tensorName)
+{
+    return mutateGraph(createValidConvFwdGraph(),
+                       [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+                           for(auto& tensor : graph.tensors)
+                           {
+                               if(tensor->name == tensorName)
+                               {
+                                   tensor->is_runtime_pass_by_value = true;
+                               }
+                           }
+                       });
+}
+
+} // namespace
+
+TEST(TestMiopenConvPlanBuilderGraphApplicability, AcceptsLegalGraphs)
+{
+    EXPECT_TRUE(isConvGraphApplicable(createValidConvFwdGraph()));
+    EXPECT_TRUE(isConvGraphApplicable(createValidConvBwdGraph()));
+    EXPECT_TRUE(isConvGraphApplicable(createValidConvWrwGraph()));
+}
+
+TEST(TestMiopenConvPlanBuilderGraphApplicability, DeclinesPassByValueTensor)
+{
+    for(const char* name : {"x", "w", "y"})
+    {
+        const auto builder = convFwdGraphWithPassByValueTensor(name);
+        EXPECT_FALSE(isConvGraphApplicable(builder)) << name;
+    }
+}
+
+// isApplicable must apply the handle-free checks before consulting the device.
+TEST_F(TestMiopenConvPlanBuilder, IsApplicableDeclinesPassByValueTensor)
+{
+    for(const char* name : {"x", "w", "y"})
+    {
+        const auto builder = convFwdGraphWithPassByValueTensor(name);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph)) << name;
+    }
+}

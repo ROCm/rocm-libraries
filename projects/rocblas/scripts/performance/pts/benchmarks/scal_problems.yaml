@@ -11,4 +11,6 @@ Tests:
     N: *generic_l1_perf_sizes
     incx: 1 # using special unit-inc kernel for fp32, f16, generic for fp64
     incy: 1
+    iters: 100
+    cold_iters: 20
 ...

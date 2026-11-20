@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -34,10 +34,15 @@ using ::testing::ValuesIn;
 using namespace std;
 
 template <typename I>
-using larfg_tuple = std::tuple<I, I>;
+using larfg_tuple = std::tuple<I, I, int>;
 
-// case when n = 0 and incx = 0 also execute the bad arguments test
+// case when n = 0, incx = 0, singular = 0 also execute the bad arguments test
 // (null handle, null pointers and invalid values)
+
+const vector<int> singular_range = {
+    0, // alpha random, x random,
+    1, // alpha random and real, x = 0
+};
 
 const vector<int> incx_range = {
     // invalid
@@ -59,6 +64,12 @@ const vector<int64_t> incx_range_64 = {
     5,
     8,
     10,
+};
+
+// for weekly_lapack tests
+template <typename I>
+const static vector<I> very_large_incx_range = {
+    1,
 };
 
 // for checkin_lapack tests
@@ -101,16 +112,24 @@ const vector<int64_t> large_n_size_range_64 = {
     2547,
 };
 
+// for weekly_lapack tests
+template <typename I>
+const static vector<I> very_large_n_size_range = {
+    98305, // test BLAS implementation (n > kernel launch bounds for all arch.)
+};
+
 template <typename I>
 Arguments larfg_setup_arguments(larfg_tuple<I> tup)
 {
     I n_size = std::get<0>(tup);
     I inc = std::get<1>(tup);
+    int singular = std::get<2>(tup);
 
     Arguments arg;
 
     arg.set<I>("n", n_size);
     arg.set<I>("incx", inc);
+    arg.set<int>("singular", singular);
 
     arg.timing = 0;
 
@@ -131,7 +150,7 @@ protected:
     {
         Arguments arg = larfg_setup_arguments(this->GetParam());
 
-        if(arg.peek<I>("n") == 0 && arg.peek<I>("incx") == 0)
+        if(arg.peek<I>("n") == 0 && arg.peek<I>("incx") == 0 && arg.peek<int>("singular") == 0)
             testing_larfg_bad_arg<T, I>();
 
         testing_larfg<T, I>(arg);
@@ -189,14 +208,36 @@ TEST_P(LARFG_64, __double_complex)
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          LARFG,
-                         Combine(ValuesIn(large_n_size_range), ValuesIn(incx_range)));
+                         Combine(ValuesIn(large_n_size_range),
+                                 ValuesIn(incx_range),
+                                 ValuesIn(singular_range)));
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, LARFG, Combine(ValuesIn(n_size_range), ValuesIn(incx_range)));
+INSTANTIATE_TEST_SUITE_P(checkin_lapack,
+                         LARFG,
+                         Combine(ValuesIn(n_size_range),
+                                 ValuesIn(incx_range),
+                                 ValuesIn(singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          LARFG_64,
-                         Combine(ValuesIn(large_n_size_range_64), ValuesIn(incx_range_64)));
+                         Combine(ValuesIn(large_n_size_range_64),
+                                 ValuesIn(incx_range_64),
+                                 ValuesIn(singular_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          LARFG_64,
-                         Combine(ValuesIn(n_size_range_64), ValuesIn(incx_range_64)));
+                         Combine(ValuesIn(n_size_range_64),
+                                 ValuesIn(incx_range_64),
+                                 ValuesIn(singular_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LARFG,
+                         Combine(ValuesIn((very_large_n_size_range<int>)),
+                                 ValuesIn((very_large_incx_range<int>)),
+                                 ValuesIn(singular_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LARFG_64,
+                         Combine(ValuesIn((very_large_n_size_range<int64_t>)),
+                                 ValuesIn((very_large_incx_range<int64_t>)),
+                                 ValuesIn(singular_range)));

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,6 +39,7 @@
 
 #include "matrix_interface.hpp"
 #include "matrix_utils_detail.hpp"
+#include "rocblas_utility.hpp"
 
 namespace matxu
 {
@@ -471,7 +472,7 @@ public:
         for(I i = 0; i < size(); ++i)
         {
             S el = detail::abs(this->operator[](i));
-            norm = (norm > el) ? norm : el;
+            norm = rocblas_max_nan(norm, el);
         }
 
         return norm;

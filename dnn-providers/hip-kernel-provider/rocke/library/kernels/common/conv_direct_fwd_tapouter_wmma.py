@@ -62,7 +62,7 @@ Batch, spatial extents, the group count and both channel counts are kernargs
 :func:`kernels.common.conv_abi.conv_direct_arg_names`).
 The filter, padding and dilation are build-time capabilities.
 
-C++ twin: ``platform/cpp/instances/common/conv_direct_fwd_tapouter_wmma.cpp``
+C++ twin: ``library/cpp/instances/common/conv_direct_fwd_tapouter_wmma.cpp``
 (``instance_conv_direct_fwd_tapouter_wmma.h``).
 """
 

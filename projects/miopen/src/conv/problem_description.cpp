@@ -231,6 +231,10 @@ void ProblemDescription::MakeNetworkConfig(std::string& conf_key) const
         optional << "cw" << GetDataTypeName(*ct);
     if(const auto ct = GetOutCastType())
         optional << "co" << GetDataTypeName(*ct);
+    // In deterministic mode, a solver can build a different kernel (for example, split-K = 1).
+    // Thus the two modes must not share invokers. Default-mode keys stay unchanged.
+    if(GetConv().attribute.deterministic)
+        optional << "det";
     if(!optional.str().empty())
     {
         ss << 'x' << optional.str();
@@ -302,6 +306,12 @@ void ProblemDescription::Serialize(std::ostream& stream) const
         // cx indicates compute datatype
         if(data_type == "FP32" && UseTF32())
             optional << "_cxTF32";
+
+        // A find-db record of the default mode holds times of kernels that deterministic mode
+        // does not allow (split-K with atomics). Keep the records apart. Default-mode keys
+        // stay unchanged, so existing system and user find-db records stay valid.
+        if(GetConv().attribute.deterministic)
+            optional << "_det";
 
         SerializeStrides(optional, in, out, weights, sep);
     }

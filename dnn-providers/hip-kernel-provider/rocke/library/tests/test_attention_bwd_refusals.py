@@ -2441,7 +2441,7 @@ def unresolved_spec(row) -> AttnBwdSpec:
     if kind == "setcase":
         return _setcase_spec(row)
     if kind in ("counted", "countedfull"):
-        from .test_attention_bwd_counted_sync import spec_of as counted_spec_of
+        from ._attention_bwd_counted_cases import spec_of as counted_spec_of
 
         spec = counted_spec_of(*row[1:])
         if kind == "countedfull":  # the full-barrier twin of the counted row

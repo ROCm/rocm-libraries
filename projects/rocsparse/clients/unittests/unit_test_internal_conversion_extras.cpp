@@ -49,12 +49,14 @@ namespace
         rocsparse_mat_descr d = nullptr;
         MatDescr()
         {
-            (void)rocsparse_create_mat_descr(&d);
+            unit_test_throw_rocsparse_error("rocsparse_create_mat_descr",
+                                            rocsparse_create_mat_descr(&d));
         }
         ~MatDescr()
         {
             if(d)
-                (void)rocsparse_destroy_mat_descr(d);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_descr",
+                                                      rocsparse_destroy_mat_descr(d));
         }
     };
     struct MatInfo
@@ -62,12 +64,14 @@ namespace
         rocsparse_mat_info i = nullptr;
         MatInfo()
         {
-            (void)rocsparse_create_mat_info(&i);
+            unit_test_throw_rocsparse_error("rocsparse_create_mat_info",
+                                            rocsparse_create_mat_info(&i));
         }
         ~MatInfo()
         {
             if(i)
-                (void)rocsparse_destroy_mat_info(i);
+                rocsparse_clients_log_rocsparse_error("rocsparse_destroy_mat_info",
+                                                      rocsparse_destroy_mat_info(i));
         }
     };
 }

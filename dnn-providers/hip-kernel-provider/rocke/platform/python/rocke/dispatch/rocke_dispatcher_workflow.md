@@ -83,9 +83,14 @@ The caller names a candidate with both fields, for example
 `algorithm="attention_dense_persist", spec_id="gfx950_dense_persist"`. On
 gfx950 the `algorithm` names the dense kernel body (grid or persistent) and
 the `spec_id` names the candidate under it (the persistent body has a second
-one with wide DMA); the tile is a knob. gfx942 has one dense candidate,
-`algorithm="attention_dense", spec_id="gfx942_dense"`, with persistence as a
-knob.
+one with wide DMA, the grid body a second one at the `qb_minor` block order);
+the tile is a knob. gfx942 has five dense candidates under
+`algorithm="attention_dense"`: `spec_id="gfx942_dense"`, with persistence as a
+knob; `spec_id="gfx942_dense_qbminor"`, which fixes the hipDNN kernel
+ingestor's non-persistent `qb_minor` grid; and `gfx942_dense_persist_aot`,
+`gfx942_dense_btminor_aot` and `gfx942_dense_hqswz_aot`, which fix its other
+grids (D128 persistent at 304 CTAs, `bt_hkv_minor`, `hq_minor_swz`). All five
+are opt-in.
 
 ```text
 dispatch_attention(req)
@@ -189,7 +194,7 @@ setting fit, so the walk keeps going past a failure until those are decided.
 | Refuse | Settings that must never be built are rejected with a reason. | A knob known to give wrong answers; a field that is not a knob; changing a value the variant fixes. |
 | Build | The family builds the kernel spec; the kernel's own checks run. | An unsupported tile size is refused here. |
 | Drop no-ops | Knobs that compile to the same kernel as leaving them out are removed. | A value equal to the default; a padded-K layout the kernel turns off. |
-| Validate | The family's final legality check. | On gfx950 2D attention: the kernel would need more LDS than the chip has, or a padded K buffer that Q shares (this gave wrong output on MI355X). |
+| Validate | The family's final legality check. | On gfx950 2D attention: the kernel would need more LDS than the chip has. (A padded K buffer that Q shares, which gave wrong output on MI355X, is refused earlier, in Build.) |
 | Name it | The remaining knobs are hashed into `config_key`, and the family's `stem` adds the readable part of `tuning_id`. | `transposed32_nw2_mw32_t2xb_hipcc_wpenone@dc4ec33bb0fe3416` |
 
 Dropping no-ops is what keeps "one kernel, one id": two different-looking knob
@@ -200,6 +205,9 @@ outer-knob value, without re-running the checks above. For attention the outer
 knob is `waves_per_eu`, and the `_wpe{N}` part of the id shows its value.
 `KnobSpace` itself knows nothing about `waves_per_eu`; the shared
 `WavesPerEuSpace` subclass names it, and each family picks the values.
+A space can also name `outer_dependent_knobs` (GDN decode: `row_loads`), the
+knobs whose drop depends on the outer value; a knob set holding one goes
+through the drop step again at each outer value.
 
 ## 6. "Run it and tell me how fast it is" (benchmarks)
 

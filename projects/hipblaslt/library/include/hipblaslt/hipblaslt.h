@@ -50,9 +50,10 @@
 #include <hipblas/hipblas.h>
 #endif
 
+#ifdef __cplusplus
 #include <memory>
-#include <regex>
 #include <vector>
+#endif
 
 #include <hip/hip_bfloat16.h>
 #include <hip/hip_complex.h>
@@ -67,11 +68,18 @@
 /* Opaque structures holding information */
 // clang-format off
 
+#ifdef __cplusplus
 #define HIPBLASLT_DATATYPE_INVALID static_cast<hipDataType>(255)
 // TODO: Replace static_cast<hipblasComputeType_t>(0) with the appropriate value since 0 represents f16_r
 #define HIPBLASLT_COMPUTE_TYPE_INVALID static_cast<hipblasComputeType_t>(0)
 #define HIPBLASLT_OPERATION_INVALID static_cast<hipblasOperation_t>(0)
 #define ROCBLASLT_COMPUTE_TYPE_INVALID static_cast<rocblaslt_compute_type>(255)
+#else
+#define HIPBLASLT_DATATYPE_INVALID ((hipDataType)255)
+#define HIPBLASLT_COMPUTE_TYPE_INVALID ((hipblasComputeType_t)0)
+#define HIPBLASLT_OPERATION_INVALID ((hipblasOperation_t)0)
+#define ROCBLASLT_COMPUTE_TYPE_INVALID ((rocblaslt_compute_type)255)
+#endif
 
 #define HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT \
     static_assert(false, "HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER_VEC_EXT is deprecated and not supported. Please set HIPBLASLT_MATMUL_DESC_A_SCALE_MODE as HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F instead.")
@@ -133,7 +141,7 @@ typedef enum {
  *  Values ``0``-``11`` are reserved for the chainable family's attributes.
  */
 typedef enum {
-  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
+  HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_SDMA_QUEUES = 12, /**<Required by a solution using the SDMA transport. Host array of ``world`` ``hipblasLtSdmaQueue_t`` entries; entry ``j`` is this device's copy-engine queue targeting rank ``j``, with ``j == rank`` the loopback queue. On gfx942 and gfx950 every other queue must be on an even xGMI SDMA engine in 2..14. The library copies the entries and never interprets the addresses, so the caller's array need not outlive the call - but the queues themselves must outlive the launch group. Data type: ``const hipblasLtSdmaQueue_t*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_RECV_PTRS = 13, /**<Required. Host array of ``world`` pointers in rank order; entry ``j`` is the address, in this process, of rank ``j``'s receive buffer. The buffer holds ``world * N * (AM / world)`` elements of D's type, laid out ``[source, token, feature]`` with feature contiguous and the unpadded ``N`` as the source stride. Data type: ``void* const*``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_EXTENT = 14, /**<Required. ``AM``, the number of leading free-0 (feature) positions of D that are redistributed; the per-rank shard is ``AM / world``. Must be positive and divide by ``world``. This participates in solution selection, so it has the same standing as M, N, and K: setting it after ``hipblasLtMatmulAlgoGetHeuristic`` invalidates the returned algo. Data type: ``int64_t``.*/
   HIPBLASLT_FUSED_EPILOGUE_A2A_PREFIX_COMPLETION_MODE = 15, /**<Optional. How receive completion is established. ``HIPBLASLT_A2A_COMPLETION_IN_KERNEL_FULL`` is the only accepted value in this release, and the default. Data type: ``hipblasLtA2ACompletionMode_t``.*/
@@ -298,7 +306,10 @@ typedef enum {
    * the batch is specified in terms of number of elements.
    * 2. General Batched: This uses pointer array with each pointer storing the base address
    * of the matrices in the batch.
-   * See hipblasLtBatchMode_t
+   * See hipblasLtBatchMode_t. Other values are rejected with ``HIPBLAS_STATUS_INVALID_VALUE``.
+   * ``HIPBLASLT_BATCH_MODE_GROUPED`` is set only by ``hipblasLtGroupedMatrixLayoutCreate``:
+   * setting it on another layout, or another mode on a grouped layout, also returns
+   * ``HIPBLAS_STATUS_INVALID_VALUE``.
    */
   HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
 
@@ -361,6 +372,7 @@ typedef enum {
     HIPBLASLT_POINTER_MODE_HOST = 0,                          /**<Targets host memory. */
     HIPBLASLT_POINTER_MODE_DEVICE = 1,                        /**<Targets device memory. */
     HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_VECTOR_BETA_HOST = 4, /**<Alpha pointer targets a device memory vector of length equal to the number of rows of matrix D. Beta is a single value in host memory. */
+    HIPBLASLT_POINTER_MODE_ALPHA_DEVICE_SCALAR_BETA_HOST_EXT = 1000, /**<Alpha pointer targets a single FP32 value in device memory. Requires scaleType HIP_R_32F. Beta is a single value in host memory. */
 } hipblasLtPointerMode_t;
 
 /*! \ingroup types_module
@@ -390,6 +402,7 @@ typedef enum {
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT = 1015, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_ZP_EXT`` with ``HIP_R_16F`` scales. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT = 1016, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 64. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT = 1017, /**<Equivalent to ``HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16F_ZP_EXT`` with a block size of 128. */
+    HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT = 1018, /**<Scaling factors are 8-bit ``R_8F_UE8M0`` values, one for each 32-element block in the K dimension, shuffled in tiles of 128 rows by 4 blocks. For an operand with ``R`` rows (M for A, N for B), the scale of row ``r`` and K block ``kb`` is at byte ``((s*(R/128) + r/128)*64 + 16*g + r%16)*8 + (r%128)/16``, where ``s = kb/4`` and ``g = kb%4``. ``R`` must be a multiple of 128 and the number of K blocks a multiple of 4. Supported for ``HIP_R_6F_E2M3`` and ``HIP_R_6F_E3M2`` A and B only, on both A and B together, with ``HIPBLASLT_ORDER_COL256_R128_EXT`` on A and on B or ``HIPBLASLT_ORDER_COL`` with ``ldb = K`` on B, ``HIPBLAS_OP_T`` for A and ``HIPBLAS_OP_N`` for B. Solutions are specific to an architecture and to exact problem sizes, and need beta = 0, which hipblasLtMatmulAlgoGetHeuristic() does not assume: query them with the extension API's heuristic. */
     HIPBLASLT_MATMUL_MATRIX_SCALE_END
 } hipblasLtMatmulMatrixScale_t;
 
@@ -524,7 +537,20 @@ typedef enum {
    */
   HIPBLASLT_ORDER_COL16_4R8 = 101,
   HIPBLASLT_ORDER_COL16_4R4 = 102,
-  HIPBLASLT_ORDER_COL16_4R2 = 103
+  HIPBLASLT_ORDER_COL16_4R2 = 103,
+  /**
+   * 6-bit data (``HIP_R_6F_E2M3``, ``HIP_R_6F_E3M2``) ordered in tiles of 256 columns and 128 rows,
+   * column tiles outermost. Column ``c`` stores its rows as a 6-bit bitstream, least significant bit
+   * first. A tile holds two planes: the first 16 bytes of each 32-row group of each column, then the
+   * last 8. With ``rows`` the number of rows, ``ct = c/256``, ``rt = row/128``, ``kg = (row%128)/32``
+   * and ``o = 64*((c%256)/16) + 16*kg + c%16``, the tile starts at byte
+   * ``(ct*(rows/128) + rt)*24576``; byte ``j`` of the group's 24 is at ``16*o + j`` for ``j < 16`` and
+   * at ``16384 + 8*o + (j - 16)`` otherwise. The number of columns (rows) has to be a multiple of
+   * 256 (128), and the leading dimension has to equal the number of rows. Requires
+   * ``HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT``. Set on A, with B in this order or in
+   * ``HIPBLASLT_ORDER_COL``.
+   */
+  HIPBLASLT_ORDER_COL256_R128_EXT = 104
 } hipblasLtOrder_t;
 
 /** Matrix transform descriptor attributes to define details of the operation.
@@ -594,6 +620,7 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *
  *  A hipBLASLt handle is not safe for concurrent use across multiple HIP streams. Applications must ensure any previously submitted work associated with a handle has completed
  *  before reusing that handle on a different stream. For multi-stream execution, create one handle per stream.  
+ *
  *  Use the following functions to manipulate this library context:  
  *
  *  \ref hipblasLtCreate():
@@ -601,6 +628,9 @@ typedef hipblasLtMatrixTransformDescOpaque_t* hipblasLtMatrixTransformDesc_t;
  *  
  *  \ref hipblasLtDestroy():
  *  To destroy a previously created hipBLASLt library context descriptor and release the resources.
+ *
+ *  Distinct handles may be used at the same time from different threads, for example one handle per stream.
+ *  Handles in one process share the loaded solution libraries, code-object adapters, and heuristic caches.
  */
 typedef void* hipblasLtHandle_t;
 /*! \ingroup types_module
@@ -673,9 +703,15 @@ typedef struct _hipblasLtMatmulAlgo_t{
  */
 typedef struct _hipblasLtMatmulHeuristicResult_t{
   hipblasLtMatmulAlgo_t algo;                      /**<Algo struct*/
+#ifdef __cplusplus
   size_t workspaceSize = 0;                        /**<Actual size of workspace memory required.*/
   hipblasStatus_t state = HIPBLAS_STATUS_SUCCESS;  /**<Result status. Other fields are valid only if, after call to hipblasLtMatmulAlgoGetHeuristic(), this member is set to HIPBLAS_STATUS_SUCCESS..*/
   float wavesCount = 1.0;                          /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
+#else
+  size_t workspaceSize;                            /**<Actual size of workspace memory required.*/
+  hipblasStatus_t state;                           /**<Result status. Other fields are valid only if, after call to hipblasLtMatmulAlgoGetHeuristic(), this member is set to HIPBLAS_STATUS_SUCCESS..*/
+  float wavesCount;                                /**<Waves count is a device utilization metric. A wavesCount value of 1.0f suggests that when the kernel is launched it will fully occupy the GPU.*/
+#endif
   int reserved[4];                                 /**<Reserved.*/
 } hipblasLtMatmulHeuristicResult_t;
 #endif
@@ -789,13 +825,14 @@ hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
  *
  *  \details
  *  Enables or disables uniform summation order for subsequent GEMMs on
- *  this handle. ``0`` off, ``1`` on (default). See
+ *  this handle. ``0`` off, ``1`` on. The default is ``1``, except on gfx11,
+ *  gfx120x, and gfx942, where it is ``0``. See
  *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
  *
  *  @param[in]
  *  handle                     hipBLASLt library context.
  *  @param[in]
- *  uniformSummationOrder      ``0`` (off) or ``1`` (on, default).
+ *  uniformSummationOrder      ``0`` (off) or ``1`` (on).
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
@@ -810,12 +847,12 @@ hipblasStatus_t hipblasLtSetUniformSummationOrder(hipblasLtHandle_t handle,
  *
  *  \details
  *  Returns the value previously programmed via
- *  ``hipblasLtSetUniformSummationOrder``. ``1`` if never set.
+ *  ``hipblasLtSetUniformSummationOrder``, or the device default if never set.
  *
  *  @param[in]
  *  handle                     hipBLASLt library context.
  *  @param[out]
- *  uniformSummationOrder      receives the previously stored value (``1`` if never set).
+ *  uniformSummationOrder      receives the previously stored value (the device default if never set).
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.

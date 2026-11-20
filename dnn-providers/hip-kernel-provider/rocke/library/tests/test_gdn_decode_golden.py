@@ -183,7 +183,7 @@ def _cases():
     cases["knob_out_lds_w1"] = build(
         **{**fused_bpv1, "num_warps": 1}, fuse_out_norm=True, out_lds=True
     )
-    # one wave with conv_once at WTK 8: it loads first (late_row_inputs)
+    # one wave with conv_once at WTK 8: it loads first (auto_late_row_inputs)
     cases["knob_conv_once_kda_stf32_cv_rn_w1k8"] = build(
         **{**fused_bpv1, "num_warps": 1, "warp_threads_k": 8},
         gate_kind="kda",
@@ -192,9 +192,14 @@ def _cases():
         fuse_out_norm=True,
         conv_once=True,
     )
-    # Every knob on every path it changes (below), and at other head dims.
+    # Every knob on every path it changes (below), at other head dims, and
+    # each forced row_loads order next to the auto kernel it replaces.
     named = {fn.spec.kernel_name() for fn in cases.values()}
-    for cid, overrides in [*_knob_class_cases(), *_knob_head_dim_cases()]:
+    for cid, overrides in [
+        *_knob_class_cases(),
+        *_knob_head_dim_cases(),
+        *_row_loads_cases(),
+    ]:
         fn = build(**overrides)
         if fn.spec.kernel_name() not in named:
             named.add(fn.spec.kernel_name())
@@ -381,6 +386,70 @@ def _knob_head_dim_cases():
     yield "knob_out_lds_2rounds_cv_rn_ngo", dict(
         rounds, **_CV_RN, conv_once=True, norm_gate_once=True
     )
+
+
+def _row_loads_cases():
+    """``row_loads`` on single-wave ``fuse_conv`` tiles (Hk == Hv == 16, one
+    workgroup per head), per gate kind and state dtype: ``"late"`` where
+    ``auto`` loads first (``conv_once`` at WTK 4 / 8), ``"first"`` where it
+    loads late (no ``conv_once``, WTK 8 / 16; ``conv_once`` under a
+    ``waves_per_eu`` floor); per gate kind also at DK = DV = 64 and 256 and
+    with an f16 state. Each is followed by its auto counterpart (an existing
+    kernel name is not hashed twice)."""
+    one_wave = dict(num_k_heads=16, num_v_heads=16, num_warps=1, blocks_per_v_dim=1)
+    for gate in ("gdn", "kda"):
+        for st in ("bf16", "f32"):
+            kind = dict(one_wave, gate_kind=gate, state_dtype=st, **_CV_RN)
+            pairs = [
+                (
+                    f"late_{gate}_st{st}_cv_rn_co_w1k{wtk}",
+                    "late",
+                    dict(kind, warp_threads_k=wtk, conv_once=True),
+                )
+                for wtk in (4, 8)
+            ] + [
+                (
+                    f"first_{gate}_st{st}_cv_rn_w1k{wtk}",
+                    "first",
+                    dict(kind, warp_threads_k=wtk),
+                )
+                for wtk in (8, 16)
+            ]
+            for tag, order, ov in pairs:
+                yield f"knob_row_loads_{tag}", dict(ov, row_loads=order)
+                yield f"knob_row_loads_auto_{tag.split('_', 1)[1]}", ov
+    kda32 = dict(one_wave, gate_kind="kda", state_dtype="f32", warp_threads_k=8)
+    # conv only (no norm inputs to move), and conv_once under a floor
+    yield "knob_row_loads_late_kda_stf32_cv_co_w1k8", dict(
+        kda32, fuse_conv=True, conv_once=True, row_loads="late"
+    )
+    yield "knob_row_loads_first_kda_stf32_cv_rn_co_wpe4_w1k8", dict(
+        kda32, **_CV_RN, conv_once=True, waves_per_eu=4, row_loads="first"
+    )
+    # Per gate kind, at the other head dims (auto loads late there, so
+    # "first"; WTK 32 exists only from DK = 256) and with an f16 state (both
+    # orders, as at DK = DV = 128), each next to its auto counterpart.
+    for gate in ("gdn", "kda"):
+        kind = dict(one_wave, gate_kind=gate, **_CV_RN)
+        d64 = dict(kind, head_k_dim=64, head_v_dim=64)
+        d256 = dict(kind, head_k_dim=256, head_v_dim=256)
+        f16 = dict(kind, dtype="f16", state_dtype="f16")
+        for tag, order, ov in (
+            (
+                f"first_{gate}_dk64_cv_rn_co_w1k8",
+                "first",
+                dict(d64, warp_threads_k=8, conv_once=True),
+            ),
+            (f"first_{gate}_dk256_cv_rn_w1k32", "first", dict(d256, warp_threads_k=32)),
+            (
+                f"late_{gate}_f16_cv_rn_co_w1k4",
+                "late",
+                dict(f16, warp_threads_k=4, conv_once=True),
+            ),
+            (f"first_{gate}_f16_cv_rn_w1k16", "first", dict(f16, warp_threads_k=16)),
+        ):
+            yield f"knob_row_loads_{tag}", dict(ov, row_loads=order)
+            yield f"knob_row_loads_auto_{tag.split('_', 1)[1]}", ov
 
 
 def _current_flavor():

@@ -12,6 +12,8 @@
 #include <numeric>
 #include <optional>
 #include <random>
+#include <stdexcept>
+#include <string>
 #include <variant>
 #include <vector>
 
@@ -85,48 +87,38 @@ struct AllOfTypes : std::conjunction<Predicate<Ts>...>
 // Forward declarations
 class ITensor;
 
-namespace detail
-{
-
-inline int64_t raggedSeqExtent(const std::vector<int64_t>& rowOffsets, int64_t seqStride, int64_t b)
-{
-    if(b < 0 || (b + 1) >= static_cast<int64_t>(rowOffsets.size()))
-    {
-        return 0;
-    }
-    const auto bIdx = static_cast<size_t>(b);
-    return (rowOffsets[bIdx + 1] - rowOffsets[bIdx]) / seqStride;
-}
-
-} // namespace detail
-
 /**
  * @brief Snapshot of the state a ragged tensor iterator needs to traverse its buffer.
  *
- * `rowOffsets` is the B+1 offset table (element units), `seqAxis` is the logical axis
- * that varies within a batch's sequence, and `seqStride` is that axis's stride. All
- * three are fixed at construction so traversal performs no per-step aux reads.
+ * `origins` and `lengths` hold one entry per batch: the batch's origin in element units and
+ * its number of live sequence rows. `seqAxis` is the logical axis that varies within a
+ * batch's sequence, and `seqStride` is that axis's stride. All are fixed at construction so
+ * traversal performs no per-step aux reads.
  */
 struct RaggedIterationInfo
 {
-    std::vector<int64_t> rowOffsets;
+    std::vector<int64_t> origins;
+    std::vector<int64_t> lengths;
     int seqAxis;
     int64_t seqStride;
 
     /**
-     * @brief Number of sequence rows stored for batch `b`.
+     * @brief Number of live sequence rows of batch `b`.
      *
      * @param b Batch index.
-     * @return `(rowOffsets[b+1] - rowOffsets[b]) / seqStride`, or 0 when `b` is outside
-     *         `[0, B)`.
+     * @return `lengths[b]`, or 0 when `b` is outside `[0, B)`.
      */
     int64_t seqExtent(int64_t b) const
     {
-        return detail::raggedSeqExtent(rowOffsets, seqStride, b);
+        if(b < 0 || b >= static_cast<int64_t>(lengths.size()))
+        {
+            return 0;
+        }
+        return lengths[static_cast<size_t>(b)];
     }
 
     /**
-     * @brief Whether a logical index lies past its batch's stored sequence rows.
+     * @brief Whether a logical index lies past its batch's live sequence rows.
      *
      * Out-of-block positions have no storage of their own: they alias another batch's
      * rows or run past the end of the buffer, so they must not be dereferenced.
@@ -139,9 +131,62 @@ struct RaggedIterationInfo
         return indices[static_cast<size_t>(seqAxis)] >= seqExtent(indices[0]);
     }
 
+    /**
+     * @brief The B+1 offset table of a packed, in-order layout with no gaps between batches.
+     *
+     * `origins` and `lengths` stay authoritative; the table is derived from them and is not
+     * part of equality. Zero-length batches own no rows: their entry is the running end of
+     * the preceding batches (for leading empty batches, the origin of the first non-empty
+     * batch), whatever their stored origin. The final entry is the end of the last live row.
+     * When every batch is empty there are no live rows: every entry, the final one included,
+     * is `origins[0]`.
+     *
+     * @return The offset table in element units.
+     * @throws std::logic_error When the non-empty batches are not contiguous and in order,
+     *         i.e. a non-empty batch does not start where the previous non-empty batch ends
+     *         (`origins[b] != origins[a] + lengths[a] * seqStride`); the message names the
+     *         batch `a` that precedes the break.
+     */
+    std::vector<int64_t> rowOffsets() const
+    {
+        std::vector<int64_t> offsets;
+        if(origins.empty())
+        {
+            return offsets;
+        }
+        offsets.reserve(origins.size() + 1);
+
+        size_t first = 0;
+        while(first < origins.size() && lengths[first] == 0)
+        {
+            ++first;
+        }
+        int64_t end = first < origins.size() ? origins[first] : origins[0];
+        size_t previous = first;
+
+        for(size_t b = 0; b < origins.size(); ++b)
+        {
+            if(lengths[b] == 0)
+            {
+                offsets.push_back(end);
+                continue;
+            }
+            if(origins[b] != end)
+            {
+                throw std::logic_error("ragged batches are not contiguous and in order at batch "
+                                       + std::to_string(previous));
+            }
+            offsets.push_back(end);
+            end += lengths[b] * seqStride;
+            previous = b;
+        }
+        offsets.push_back(end);
+        return offsets;
+    }
+
     bool operator==(const RaggedIterationInfo& other) const
     {
-        return rowOffsets == other.rowOffsets && seqAxis == other.seqAxis
+        return origins == other.origins && lengths == other.lengths && seqAxis == other.seqAxis
                && seqStride == other.seqStride;
     }
 
@@ -362,17 +407,17 @@ public:
     /**
      * @brief Iterator index for ragged tensors.
      *
-     * Walks each batch's full per-batch range `[ragged_offset[b], ragged_offset[b+1])`
-     * in turn, visiting exactly `ragged_offset[B]` physical elements. The traversal
-     * state (`rowOffsets`, `seqAxis`, `seqStride`) is snapshotted once via
-     * `RaggedIterationInfo` at `begin()`/`end()`, so traversal performs no per-step
-     * aux reads.
+     * Walks each batch's live rows `s < lengths[b]` in turn, addressed from the batch's
+     * origin by the tensor's `getIndex`, and visits exactly `elementCount()` logical
+     * elements. The traversal state (`lengths`, `seqAxis`, `seqStride`) is snapshotted
+     * once via `RaggedIterationInfo` at `begin()`/`end()`, so traversal performs no
+     * per-step aux reads.
      */
     struct RaggedCompositeIndex
     {
         RaggedCompositeIndex(TensorType tensor, RaggedIterationInfo info, bool isEnd)
             : indices(tensor.get().dims().size(), 0)
-            , rowOffsets(std::move(info.rowOffsets))
+            , lengths(std::move(info.lengths))
             , tensor(tensor)
             , seqAxis(info.seqAxis)
             , seqStride(info.seqStride)
@@ -384,6 +429,11 @@ public:
                 {
                     indices[0] = batchCount;
                 }
+            }
+            else if(hasZeroExtentAxis())
+            {
+                // A zero-extent non-sequence axis leaves no element; begin() == end().
+                indices[0] = batchCount;
             }
             else
             {
@@ -459,7 +509,7 @@ public:
         }
 
         std::vector<int64_t> indices;
-        std::vector<int64_t> rowOffsets;
+        std::vector<int64_t> lengths;
         TensorType tensor;
         int seqAxis{1};
         int64_t seqStride{1};
@@ -467,12 +517,26 @@ public:
     private:
         int64_t numBatches() const
         {
-            return static_cast<int64_t>(rowOffsets.size()) - 1;
+            return static_cast<int64_t>(lengths.size());
+        }
+
+        // True when a non-batch, non-sequence axis has extent 0.
+        bool hasZeroExtentAxis() const
+        {
+            const auto& dims = tensor.get().dims();
+            for(size_t axis = 1; axis < dims.size(); ++axis)
+            {
+                if(static_cast<int>(axis) != seqAxis && dims[axis] == 0)
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         int64_t seqExtent(int64_t b) const
         {
-            return detail::raggedSeqExtent(rowOffsets, seqStride, b);
+            return lengths[static_cast<size_t>(b)];
         }
     };
 
@@ -503,7 +567,7 @@ private:
     IndexType makeIndex(TensorType tensor, bool isEnd)
     {
         // Both predicates are required. isPacked() keeps ragged tensors off this path
-        // (RFC 0014 §4.5.7), and visitsInIndexOrder keeps stride permutations off it.
+        // (RFC 0014 §4.5 item 7), and visitsInIndexOrder keeps stride permutations off it.
         if(tensor.get().isPacked() && visitsInIndexOrder(tensor.get()))
         {
             return LinearIndex(tensor, isEnd);
@@ -572,8 +636,8 @@ public:
      * @brief Returns the traversal info the iterator needs for a ragged tensor.
      *
      * Dense tensors return `std::nullopt` (the iterator then uses Linear/Composite
-     * indexing as today). Ragged tensors override this to expose their offset table,
-     * sequence axis, and sequence stride, which the iterator snapshots once to build a
+     * indexing as today). Ragged tensors override this to expose their per-batch origins
+     * and lengths, sequence axis, and sequence stride, which the iterator snapshots once to build a
      * RaggedCompositeIndex.
      */
     virtual std::optional<RaggedIterationInfo> raggedIterationInfo() const
@@ -600,7 +664,7 @@ protected:
      * @brief Computes the physical offset for a multi-dim index.
      *
      * Default (dense) implementation is the inner product of indices and strides.
-     * Ragged tensors override this to base each batch at `ragged_offset[b]`, which
+     * Ragged tensors override this to base each batch at its per-batch origin, which
      * makes every addressing path (getHostValue/setHostValue/operator(),
      * CompositeIndex::getValue, TensorView) ragged-aware at once. The argument-count
      * check stays in the non-virtual getIndex forwarder.

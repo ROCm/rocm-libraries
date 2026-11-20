@@ -175,6 +175,17 @@ static inline bool rocke_fmha_common_spec_use_custom_mask(const rocke_fmha_commo
  * ("ok" on the accept path); pass a live `arena`. The reason strings reproduce
  * the Python messages byte-for-byte. On a formatting OOM the predicate result is
  * still returned faithfully and the reason is a best-effort static fallback. */
+/* Python: kernels.common._fmha_common.check_head_counts. True when both head
+ * counts are positive and num_query_heads splits evenly over num_kv_heads;
+ * otherwise false, with the Python reason text written to `reason`. The one
+ * head-count rule: rocke_fmha_validate_common_spec and every tiled attention
+ * entry run it (the tiled entries before naming the kernel, whose name
+ * carries the GQA ratio). */
+bool rocke_attention_check_head_counts(int num_query_heads,
+                                       int num_kv_heads,
+                                       char* reason,
+                                       size_t reason_cap);
+
 bool rocke_fmha_validate_common_spec(rocke_arena_t* arena,
                                      const rocke_fmha_common_spec_t* spec,
                                      const char** out_reason);

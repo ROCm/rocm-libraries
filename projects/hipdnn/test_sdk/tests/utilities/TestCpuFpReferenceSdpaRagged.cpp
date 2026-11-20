@@ -25,6 +25,7 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpa.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceSdpaRagged.hpp>
+#include <hipdnn_test_sdk/utilities/RaggedLayoutTestSupport.hpp>
 #include <hipdnn_test_sdk/utilities/RaggedSdpaTestUtils.hpp>
 
 using namespace hipdnn_data_sdk::utilities;
@@ -867,22 +868,10 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnNonRaggedOutput)
 namespace
 {
 
-// Rewrites a ragged tensor's offset table after construction. The tensor only checked the
-// original table, so the reference must catch a bad one itself.
-void setTokenOffsets(ITensor& aux, const std::vector<int64_t>& tokens, int64_t seqStride)
-{
-    auto& offsets = static_cast<Tensor<int32_t>&>(aux);
-    for(size_t i = 0; i < tokens.size(); ++i)
-    {
-        offsets.setHostValue(
-            static_cast<int32_t>(tokens[i] * seqStride), static_cast<int64_t>(i), 0, 0, 0);
-    }
-}
-
-// Builds valid B = 2, S_max = 2, H * D = 16 ragged inputs, then rewrites Q's and O's offsets to
-// qTokens * offsetUnit (offsetUnit 1 writes raw element offsets). Returns whether forward() threw
-// std::invalid_argument.
-bool throwsOnEditedQTokens(const std::vector<int64_t>& qTokens, int64_t offsetUnit = 16)
+// Builds B = 2, S_max = 2, H * D = 16 ragged inputs, with Q's and O's offsets set to
+// qTokens * offsetUnit (offsetUnit 1 writes raw element offsets) and no length tensor. Returns
+// whether building the tensors or running forward() threw std::invalid_argument.
+bool throwsOnQTokens(const std::vector<int64_t>& qTokens, int64_t offsetUnit = 16)
 {
     const std::vector<int64_t> dims = raggedDims(2, 2, 1, 16);
     const std::vector<int64_t> valid = {0, 2, 4};
@@ -890,16 +879,20 @@ bool throwsOnEditedQTokens(const std::vector<int64_t>& qTokens, int64_t offsetUn
     std::vector<float> kB(64, 0.0f);
     std::vector<float> vB(64, 1.0f);
     std::vector<float> oB(64, 0.0f);
-    auto qAux = makeRaggedOffsetAux(valid, 16);
-    auto oAux = makeRaggedOffsetAux(valid, 16);
-    ShallowRaggedTensor<float> q(qB.data(), dims, raggedStrides(dims), SDPA_SEQ_AXIS, qAux);
-    auto k = wrapRagged(kB.data(), dims, 16, valid);
-    auto v = wrapRagged(vB.data(), dims, 16, valid);
-    ShallowRaggedTensor<float> o(oB.data(), dims, raggedStrides(dims), SDPA_SEQ_AXIS, oAux);
-    setTokenOffsets(*qAux, qTokens, offsetUnit);
-    setTokenOffsets(*oAux, qTokens, offsetUnit);
     try
     {
+        ShallowRaggedTensor<float> q(qB.data(),
+                                     dims,
+                                     raggedStrides(dims),
+                                     SDPA_SEQ_AXIS,
+                                     makeRaggedOffsetAux(qTokens, offsetUnit));
+        auto k = wrapRagged(kB.data(), dims, 16, valid);
+        auto v = wrapRagged(vB.data(), dims, 16, valid);
+        ShallowRaggedTensor<float> o(oB.data(),
+                                     dims,
+                                     raggedStrides(dims),
+                                     SDPA_SEQ_AXIS,
+                                     makeRaggedOffsetAux(qTokens, offsetUnit));
         CpuFpReferenceSdpaRagged::forward<float, float, float, float, float>(q, k, v, o);
     }
     catch(const std::invalid_argument&)
@@ -911,14 +904,16 @@ bool throwsOnEditedQTokens(const std::vector<int64_t>& qTokens, int64_t offsetUn
 
 } // namespace
 
+// Without a length tensor the offsets must be monotonic whole tokens. A shifted first offset and a
+// block longer than S_max are valid layouts (see the layout tables).
 TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnBadOffsetTable)
 {
-    EXPECT_TRUE(throwsOnEditedQTokens({1, 2, 4})) << "ragged_offset[0] != 0 accepted";
-    EXPECT_TRUE(throwsOnEditedQTokens({0, 3, 4})) << "batch longer than S_max accepted";
-    EXPECT_TRUE(throwsOnEditedQTokens({0, 2, 1})) << "decreasing offsets accepted";
-    EXPECT_TRUE(throwsOnEditedQTokens({0, 17, 32}, /*offsetUnit=*/1))
+    EXPECT_TRUE(throwsOnQTokens({0, 2, 1})) << "decreasing offsets accepted";
+    EXPECT_TRUE(throwsOnQTokens({0, 17, 32}, /*offsetUnit=*/1))
         << "offset that is not a whole token accepted";
-    EXPECT_FALSE(throwsOnEditedQTokens({0, 2, 3}));
+    EXPECT_FALSE(throwsOnQTokens({0, 2, 3}));
+    EXPECT_FALSE(throwsOnQTokens({1, 2, 4})) << "shifted first offset rejected";
+    EXPECT_FALSE(throwsOnQTokens({0, 3, 4})) << "block longer than S_max rejected";
 }
 
 // A dense LSE with a smaller Sq than Q would take rows from the next batch.
@@ -988,19 +983,6 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnSequenceBeforeHeadsLayout)
     auto o = wrap(oB);
     EXPECT_THROW((CpuFpReferenceSdpaRagged::forward<float, float, float, float, float>(q, k, v, o)),
                  std::invalid_argument);
-}
-
-// The layout check itself: [B, H, S, D] with BSHD strides passes; contiguous BHSD, sequence
-// before heads, or a seq stride too small for one token, fail.
-TEST(TestCpuFpReferenceSdpaRaggedFp32, TokenMajorLayoutCheck)
-{
-    using hipdnn_test_sdk::detail::isTokenMajorRaggedLayout;
-    EXPECT_TRUE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {120, 8, 24, 1}));
-    EXPECT_TRUE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {160, 8, 32, 1})); // padded token
-    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {120, 40, 8, 1})); // contiguous BHSD
-    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 5, 3, 8}, {120, 24, 8, 1})); // [B, S, H, D]
-    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 3, 5, 8}, {120, 8, 16, 1})); // tokens overlap
-    EXPECT_FALSE(isTokenMajorRaggedLayout({2, 5, 3}, {15, 3, 1})); // not rank 4
 }
 
 // AITER's cu_seqlens form: one token table shared by Q/O and one by K/V, each tensor scaling it
@@ -1138,4 +1120,335 @@ TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnZeroKvHeads)
 
     EXPECT_THROW((CpuFpReferenceSdpaRagged::forward<float, float, float, float, float>(q, k, v, o)),
                  std::invalid_argument);
+}
+
+// --- Container layouts (the layout table L1-L15) checked against the dense reference ---
+//
+// Each ragged role holds the same logical data (logicalValue) at the addresses its layout gives,
+// so the dense CpuFpReferenceSdpa with seq_len on the padded form of that data is the independent
+// checker. Elements a layout does not address stay poison.
+
+namespace
+{
+
+using hipdnn_test_sdk::utilities::ragged_layout_test::RaggedLayoutCase;
+using hipdnn_test_sdk::utilities::ragged_layout_test::raggedLayoutCase;
+
+constexpr float POISON = -777.0F;
+constexpr int ROLE_Q = 1;
+constexpr int ROLE_K = 2;
+constexpr int ROLE_V = 3;
+constexpr float LAYOUT_SCALE = 0.5F;
+
+// Deterministic logical value of (role, b, h, s, d), in [-1, 1].
+float logicalValue(int role, int64_t b, int64_t h, int64_t s, int64_t d)
+{
+    return std::sin(
+        0.37F * static_cast<float>(int64_t{role} * 131 + b * 53 + h * 17 + s * 7 + d * 3 + 1));
+}
+
+// A layout's buffer (elementSpace elements) and its offset and length auxes. Inputs hold
+// logicalValue at every live position; outputs are all poison.
+struct LayoutBuffer
+{
+    LayoutBuffer(const RaggedLayoutCase& layoutCase, int role, bool fill)
+        : layout(layoutCase)
+        , data(layoutCase.space, POISON)
+        , offsets(layoutCase.offsetTensor())
+        , lengths(layoutCase.seqLenTensor())
+    {
+        for(int64_t b = 0; fill && !layout.rejected && b < layout.batch(); ++b)
+        {
+            for(int64_t h = 0; h < layout.dims[1]; ++h)
+            {
+                for(int64_t s = 0; s < layout.lengths[static_cast<size_t>(b)]; ++s)
+                {
+                    for(int64_t d = 0; d < layout.dims[3]; ++d)
+                    {
+                        data[static_cast<size_t>(layout.address(b, h, s, d))]
+                            = logicalValue(role, b, h, s, d);
+                    }
+                }
+            }
+        }
+    }
+
+    ShallowRaggedTensor<float> tensor()
+    {
+        return {data.data(),
+                layout.dims,
+                layout.strides,
+                SDPA_SEQ_AXIS,
+                offsets,
+                std::nullopt,
+                layout.multiplier,
+                lengths};
+    }
+
+    int64_t liveElements() const
+    {
+        return std::count_if(data.begin(), data.end(), [](float x) { return x != POISON; });
+    }
+
+    RaggedLayoutCase layout;
+    std::vector<float> data;
+    std::shared_ptr<ITensor> offsets;
+    std::shared_ptr<ITensor> lengths;
+};
+
+// The dense padded run of the same logical data with seq_len.
+struct DenseRun
+{
+    Tensor<float> o;
+    Tensor<float> lse;
+};
+
+DenseRun
+    denseWithSeqLen(const RaggedLayoutCase& q, const RaggedLayoutCase& k, const RaggedLayoutCase& v)
+{
+    const auto fillDense = [](const RaggedLayoutCase& layout, int role) {
+        Tensor<float> dense(layout.dims);
+        dense.fillTensorWithValue(0.0F);
+        for(int64_t b = 0; b < layout.batch(); ++b)
+        {
+            for(int64_t h = 0; h < layout.dims[1]; ++h)
+            {
+                for(int64_t s = 0; s < layout.lengths[static_cast<size_t>(b)]; ++s)
+                {
+                    for(int64_t d = 0; d < layout.dims[3]; ++d)
+                    {
+                        dense.setHostValue(logicalValue(role, b, h, s, d), b, h, s, d);
+                    }
+                }
+            }
+        }
+        return dense;
+    };
+    const auto seqLens = [](const RaggedLayoutCase& layout) {
+        Tensor<int32_t> seqLen({layout.batch(), 1, 1, 1});
+        for(int64_t b = 0; b < layout.batch(); ++b)
+        {
+            seqLen.setHostValue(
+                static_cast<int32_t>(layout.lengths[static_cast<size_t>(b)]), b, 0, 0, 0);
+        }
+        return seqLen;
+    };
+
+    auto qd = fillDense(q, ROLE_Q);
+    auto kd = fillDense(k, ROLE_K);
+    auto vd = fillDense(v, ROLE_V);
+    auto seqQ = seqLens(q);
+    auto seqKv = seqLens(k);
+    DenseRun run{Tensor<float>({q.dims[0], q.dims[1], q.dims[2], v.dims[3]}),
+                 Tensor<float>({q.dims[0], q.dims[1], q.dims[2], 1})};
+    CpuFpReferenceSdpa::forward<float, float, float, float, float>(
+        qd,
+        kd,
+        vd,
+        run.o,
+        SdpaFwdOptions<float>{}.setScale(LAYOUT_SCALE).setSeqLens(&seqQ, &seqKv).setLse(&run.lse));
+    return run;
+}
+
+// Runs the ragged reference on the given layouts; `lse` is a ragged LSE layout, or null for a
+// dense LSE returned in `denseLse`.
+struct RaggedRun
+{
+    LayoutBuffer o;
+    std::optional<LayoutBuffer> lse;
+    Tensor<float> denseLse;
+};
+
+RaggedRun runRagged(const RaggedLayoutCase& q,
+                    const RaggedLayoutCase& k,
+                    const RaggedLayoutCase& v,
+                    const RaggedLayoutCase& o,
+                    const RaggedLayoutCase* lse = nullptr)
+{
+    LayoutBuffer qb(q, ROLE_Q, true);
+    LayoutBuffer kb(k, ROLE_K, true);
+    LayoutBuffer vb(v, ROLE_V, true);
+    RaggedRun run{LayoutBuffer(o, 0, false),
+                  std::nullopt,
+                  Tensor<float>({q.dims[0], q.dims[1], q.dims[2], 1})};
+    run.denseLse.fillTensorWithValue(POISON);
+    if(lse != nullptr)
+    {
+        run.lse.emplace(*lse, 0, false);
+    }
+
+    auto qt = qb.tensor();
+    auto kt = kb.tensor();
+    auto vt = vb.tensor();
+    auto ot = run.o.tensor();
+    std::optional<ShallowRaggedTensor<float>> lseTensor;
+    TensorBase<float>* lseArg = &run.denseLse;
+    if(lse != nullptr)
+    {
+        lseArg = &lseTensor.emplace(run.lse->tensor());
+    }
+    CpuFpReferenceSdpaRagged::forward<float, float, float, float, float>(
+        qt, kt, vt, ot, LAYOUT_SCALE, -1, -1, true, lseArg);
+    return run;
+}
+
+void expectOutputMatchesDense(const RaggedRun& ragged,
+                              const DenseRun& dense,
+                              const RaggedLayoutCase& oLayout)
+{
+    const auto& lens = oLayout.lengths;
+    for(int64_t b = 0; b < oLayout.batch(); ++b)
+    {
+        for(int64_t h = 0; h < oLayout.dims[1]; ++h)
+        {
+            for(int64_t s = 0; s < lens[static_cast<size_t>(b)]; ++s)
+            {
+                for(int64_t d = 0; d < oLayout.dims[3]; ++d)
+                {
+                    EXPECT_NEAR(ragged.o.data[static_cast<size_t>(oLayout.address(b, h, s, d))],
+                                dense.o.getHostValue(b, h, s, d),
+                                1e-5F)
+                        << oLayout.id << " O (" << b << "," << h << "," << s << "," << d << ")";
+                }
+                const float lse
+                    = ragged.lse.has_value()
+                          ? ragged.lse
+                                ->data[static_cast<size_t>(ragged.lse->layout.address(b, h, s, 0))]
+                          : ragged.denseLse.getHostValue(b, h, s, 0);
+                EXPECT_NEAR(lse, dense.lse.getHostValue(b, h, s, 0), 1e-5F)
+                    << oLayout.id << " LSE (" << b << "," << h << "," << s << ")";
+            }
+        }
+    }
+    EXPECT_EQ(ragged.o.liveElements(), static_cast<int64_t>(oLayout.count))
+        << oLayout.id << ": every logical element is written once and nothing else";
+}
+
+// Q, K, V and O all use the layout; the output and the (dense) LSE must equal the dense run.
+void expectForwardMatchesDense(const std::string& id)
+{
+    SCOPED_TRACE(id);
+    const auto& layout = raggedLayoutCase(id);
+    const auto ragged = runRagged(layout, layout, layout, layout);
+    expectOutputMatchesDense(ragged, denseWithSeqLen(layout, layout, layout), layout);
+}
+
+} // namespace
+
+TEST(TestCpuFpReferenceSdpaRaggedFp32, ContainerLayoutsMatchDenseWithSeqLen)
+{
+    // L2 fused-QKV, L5s padded THD with seq_len, L6 head-major, L8 shifted origin, L9
+    // non-monotonic origins, plus the packed L1 and the empty-batch L13.
+    for(const char* id : {"L1", "L2", "L5s", "L6", "L8", "L9", "L13", "L14"})
+    {
+        expectForwardMatchesDense(id);
+    }
+}
+
+// A block longer than S_max without seq_len runs min(block, S_max) rows (L5).
+TEST(TestCpuFpReferenceSdpaRaggedFp32, BlockLongerThanSMaxRunsSMaxRows)
+{
+    expectForwardMatchesDense("L5");
+}
+
+// A zero seq_len beside a non-zero origin (L15) leaves that batch untouched.
+TEST(TestCpuFpReferenceSdpaRaggedFp32, ZeroSeqLenBesideNonZeroOrigin)
+{
+    expectForwardMatchesDense("L15");
+}
+
+// A broadcast (zero-stride) head axis (L12): the heads share storage, so the output addresses
+// exactly elementSpace elements and every one is written.
+TEST(TestCpuFpReferenceSdpaRaggedFp32, BroadcastHeadAxisStoresHeadsOnce)
+{
+    const auto& layout = raggedLayoutCase("L12");
+    const auto ragged = runRagged(layout, layout, layout, layout);
+    EXPECT_EQ(ragged.o.liveElements(), static_cast<int64_t>(layout.space));
+    for(const float value : ragged.o.data)
+    {
+        EXPECT_TRUE(std::isfinite(value));
+    }
+}
+
+// Each tensor has its own origins: Q at L8, K at L9, V at L8, O at L9.
+TEST(TestCpuFpReferenceSdpaRaggedFp32, TensorsHaveIndependentOrigins)
+{
+    const auto& l8 = raggedLayoutCase("L8");
+    const auto& l9 = raggedLayoutCase("L9");
+    const auto ragged = runRagged(l8, l9, l8, l9);
+    expectOutputMatchesDense(ragged, denseWithSeqLen(l8, l9, l8), l9);
+}
+
+// Aliasing layouts never reach the reference: the tensor is not constructible.
+TEST(TestCpuFpReferenceSdpaRaggedFp32, ThrowsOnAliasingLayouts)
+{
+    for(const char* id : {"L10", "L11"})
+    {
+        const auto& aliasing = raggedLayoutCase(id);
+        ASSERT_TRUE(aliasing.rejected) << id;
+        EXPECT_THROW(
+            {
+                LayoutBuffer q(aliasing, ROLE_Q, true);
+                auto qt = q.tensor();
+            },
+            std::invalid_argument)
+            << id;
+    }
+}
+
+// LSE layouts: L7a ([H, T]), L7b ([T, H]) and L7c ([H, T] with a head pitch of 10) hold the same
+// logical LSE, which is the dense run's.
+TEST(TestCpuFpReferenceSdpaRaggedFp32, LseLayoutsAgreeAtLogicalCoordinates)
+{
+    const RaggedLayoutCase primary{
+        "Qpk", {2, 4, 3, 2}, {24, 2, 8, 1}, {0, 16, 40}, 1, {}, {2, 3}, 40, 40};
+    const auto dense = denseWithSeqLen(primary, primary, primary);
+
+    for(const char* id : {"L7a", "L7b", "L7c"})
+    {
+        SCOPED_TRACE(id);
+        const auto& lse = raggedLayoutCase(id);
+        const auto ragged = runRagged(primary, primary, primary, primary, &lse);
+        expectOutputMatchesDense(ragged, dense, primary);
+        EXPECT_EQ(ragged.lse->liveElements(), static_cast<int64_t>(lse.count));
+    }
+}
+
+// L7d: [H, T] LSE with H = 2 and a trailing gap per head. The gap rows keep their poison.
+TEST(TestCpuFpReferenceSdpaRaggedFp32, GappedLseKeepsGapsUntouched)
+{
+    const RaggedLayoutCase primary{
+        "Qpk2", {2, 2, 3, 2}, {12, 2, 4, 1}, {0, 8, 20}, 1, {}, {2, 3}, 20, 20};
+    const auto& lse = raggedLayoutCase("L7d");
+    const auto ragged = runRagged(primary, primary, primary, primary, &lse);
+    expectOutputMatchesDense(ragged, denseWithSeqLen(primary, primary, primary), primary);
+
+    EXPECT_EQ(ragged.lse->liveElements(), static_cast<int64_t>(lse.count));
+    for(int64_t h = 0; h < 2; ++h)
+    {
+        // Head h holds rows 0-1 (batch 0) and rows 4-6 (batch 1); rows 2 and 3 are gap.
+        for(const int64_t gapRow : {2, 3})
+        {
+            EXPECT_EQ(ragged.lse->data[static_cast<size_t>(h * 7 + gapRow)], POISON)
+                << "head " << h << " row " << gapRow;
+        }
+    }
+}
+
+// A multiplier row addresses the same elements as its element-offset form.
+TEST(TestCpuFpReferenceSdpaRaggedFp32, MultiplierRowsEqualElementOffsetForms)
+{
+    const auto& l9 = raggedLayoutCase("L9");
+    const auto& l9m = raggedLayoutCase("L9m");
+    const auto elementForm = runRagged(l9, l9, l9, l9);
+    const auto multiplied = runRagged(l9m, l9m, l9m, l9m);
+    EXPECT_EQ(multiplied.o.data, elementForm.o.data);
+
+    const RaggedLayoutCase primary{
+        "Qpk", {2, 4, 3, 2}, {24, 2, 8, 1}, {0, 16, 40}, 1, {}, {2, 3}, 40, 40};
+    const auto& l7b = raggedLayoutCase("L7b");
+    const auto& l7bm = raggedLayoutCase("L7bm");
+    const auto lseElementForm = runRagged(primary, primary, primary, primary, &l7b);
+    const auto lseMultiplied = runRagged(primary, primary, primary, primary, &l7bm);
+    EXPECT_EQ(lseMultiplied.lse->data, lseElementForm.lse->data);
 }

@@ -40,13 +40,20 @@ Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Tuple
+from typing import ClassVar, Optional, Tuple
 
+from kernels.common._fmha_common import check_head_counts, gqa_ratio
 from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
 )
-from kernels.common._lse_store import lse_row_has_mass, lse_store
+from kernels.common._lse_store import (
+    UNIFIED_LSE_LAYOUTS,
+    lse_row_has_mass,
+    lse_store,
+    unified_lse_offset,
+)
+from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
 
 from rocke.core.ir import (
@@ -67,7 +74,7 @@ from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
-    binary_search_seq_idx_iters,
+    binary_search_seq_idx_trip_count,
     dequant_fp8x8_to_dtype,
     mfma_16x16x16_for_dtype,
     mfma_16x16x32_for_dtype,
@@ -80,11 +87,23 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
-from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
+from rocke.helpers.transforms import (
+    DynamicTensorDescriptor,
+    TensorDescriptor,
+    embed,
+    indirect,
+    unmerge,
+)
 
 
 MFMA_M = 16
 MFMA_N = 16
+
+# Bytes one wave writes per async-DMA LDS copy: 64 lanes x 16 B.
+_ASYNC_DMA_WAVE_SLAB_BYTES = 64 * 16
+# bf16 elements in one wave's async-DMA K slab (2 B per element). The KQ LDS
+# pad goes between these slabs, so a padded K row never straddles one.
+_KQ_PAD_SLAB_HALVES = _ASYNC_DMA_WAVE_SLAB_BYTES // 2
 
 
 # CK-Tile C-accumulator warp distribution for the 32x32x16 MFMA atom. The
@@ -156,6 +175,18 @@ _warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 @dataclass(frozen=True)
 class UnifiedAttention2DTiledSpec:
+    # Problem fields this body reads as trailing i32 kernargs instead of baking
+    # them, in ABI order. The launch signature, the argument pack and the cache
+    # key read the same tuple (``_runtime_kernarg_fields``).
+    RUNTIME_KERNARG_FIELDS: ClassVar[Tuple[str, ...]] = (
+        "num_query_heads",
+        "num_kv_heads",
+        "sliding_window",
+    )
+    # The cu_q search derives its trip count from the num_seqs kernarg, so
+    # num_seqs never reaches the IR and one binary serves every batch.
+    RUNTIME_SEARCH_ITERS: ClassVar[bool] = True
+
     head_size: int
     block_size: int
     num_query_heads: int
@@ -365,8 +396,8 @@ class UnifiedAttention2DTiledSpec:
     # (``kq_lds_pad_halves=16``) for a ~25% Sq8192 latency win.
     use_kq_lds_pad: bool = False
     # Pad width in halves for the slab-granularity K_lds pad (must be a multiple
-    # of 8 to keep ds_read/ds_write b128 16-byte alignment). Only used when
-    # ``use_kq_lds_pad`` is set.
+    # of 8 to keep ds_read/ds_write b128 16-byte alignment; 0 lays out no pad).
+    # Only used when ``use_kq_lds_pad`` is set.
     kq_lds_pad_halves: int = 8
     # Transposed 32x32 softmax has one online-softmax state per query lane,
     # not one per output-dimension accumulator register. Keep a single m/l
@@ -506,16 +537,31 @@ class UnifiedAttention2DTiledSpec:
     #   [total_q, num_query_heads, 1] through a trailing ``lse_ptr`` argument.
     #   Off by default; off emits no new IR, so shipped kernels are unchanged.
     emit_lse: bool = field(default=False, kw_only=True)
+    # lse_layout: "token_major" is the [total_q, num_query_heads, 1] order above.
+    #   "head_major" stores each sequence as [num_query_heads, q_len] from element
+    #   cu_q_start * num_query_heads, i.e. [B, Hq, S, 1] for equal-length
+    #   sequences (the hipDNN SDPA stats tensor). Needs emit_lse.
+    lse_layout: str = field(default="token_major", kw_only=True)
 
     def __post_init__(self):
-        if type(self.emit_lse) is not bool:
+        require_bool("emit_lse", self.emit_lse)
+        if self.lse_layout not in UNIFIED_LSE_LAYOUTS:
             raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+                f"lse_layout must be one of {UNIFIED_LSE_LAYOUTS}, "
+                f"got {self.lse_layout!r}"
             )
+        if self.lse_layout != "token_major" and not self.emit_lse:
+            raise ValueError(f"lse_layout={self.lse_layout!r} requires emit_lse")
         if type(self.use_additive_bias) is not bool:
             raise ValueError(
                 "use_additive_bias must be a bool, got "
                 f"{type(self.use_additive_bias).__name__}"
+            )
+        if self.kq_lds_pad_halves < 0:
+            raise ValueError(
+                "KQ LDS pad width failed - "
+                f"kq_lds_pad_halves={self.kq_lds_pad_halves}, expected >= 0 "
+                "(0 lays out no pad)"
             )
         if self.right_bound < -1:
             raise ValueError(
@@ -797,6 +843,18 @@ class UnifiedAttention2DTiledSpec:
                     f"tile_size={self.tile_size_eff}). Set use_q_direct_reg to "
                     "lift this (Q is then gathered to VGPRs, never to the K slot)."
                 )
+            # Q staged in this K slot is written and read with unpadded
+            # (row, col) addressing, which does not match a laid-out K slab
+            # pad. A pad the kernel does not lay out is inert, so only a
+            # laid-out one is refused.
+            if self.kq_lds_pad_slab_rows and self.q_staged_in_k_lds:
+                raise ValueError(
+                    "KQ LDS pad failed - "
+                    f"use_q_reread={self.use_q_reread}, "
+                    f"use_q_direct_reg={self.use_q_direct_reg}, expected one "
+                    "of them True (transposed 32x32 path) or use_kq_lds_pad=False "
+                    "(Q staged in the padded single K slot is read unpadded)"
+                )
         if self.use_fast_paged_kv_desc:
             if not (
                 self.dtype == "bf16"
@@ -858,7 +916,7 @@ class UnifiedAttention2DTiledSpec:
 
     @property
     def num_queries_per_kv(self) -> int:
-        return self.num_query_heads // self.num_kv_heads
+        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
 
     @property
     def block_m(self) -> int:
@@ -897,6 +955,69 @@ class UnifiedAttention2DTiledSpec:
         return self.tile_size_eff // self.block_size
 
     @property
+    def fp8_k_in_lds(self) -> bool:
+        """True when K_lds holds raw fp8 K, dequantized in registers on read.
+
+        ``__post_init__`` refuses ``use_fp8_mfma_qk`` without an fp8 KV cache,
+        so the flag alone decides it.
+        """
+        return self.use_fp8_mfma_qk
+
+    @property
+    def q_staged_in_k_lds(self) -> bool:
+        """True when Q is staged in K_lds instead of its own slab or registers.
+
+        Q shares K_lds only when K_lds holds the kernel dtype (not raw fp8 K),
+        Q is neither re-read from a dedicated Q_lds nor gathered straight to
+        registers, and Q fits in the two K slots: rows 0..block_m of slot 0,
+        spilling into slot 1 when block_m > tile size.
+        """
+        if self.fp8_k_in_lds or self.use_q_reread or self.use_q_direct_reg:
+            return False
+        q_bytes = self.block_m * self.head_size * 2
+        k_slots_bytes = 2 * self.tile_size_eff * self.head_size * 2
+        return q_bytes <= k_slots_bytes
+
+    @property
+    def _kq_pad_whole_slab_rows(self) -> int:
+        """K rows per async-DMA slab, or 0 when a K row does not divide it."""
+        if _KQ_PAD_SLAB_HALVES % self.head_size:
+            return 0
+        return _KQ_PAD_SLAB_HALVES // self.head_size
+
+    @property
+    def kq_lds_pad_off_reason(self) -> str | None:
+        """Why a set ``use_kq_lds_pad`` would be laid out as no pad, or None
+        when it would be laid out. It does not read ``use_kq_lds_pad`` itself:
+        ``kq_lds_pad_slab_rows`` combines the two.
+
+        The pad is laid out only for a bf16 K read from a single K slot, with
+        whole async-DMA slabs tiling the KV tile and a nonzero pad width that
+        keeps the 16-byte LDS access alignment.
+        """
+        if self.fp8_k_in_lds:
+            return "the KQ LDS pad is off under native-FP8 K LDS"
+        if self.kq_lds_pad_halves == 0:
+            return "the KQ LDS pad width is 0"
+        slab_rows = self._kq_pad_whole_slab_rows
+        if not slab_rows:
+            return "the KQ LDS pad needs a K row that divides the async-DMA slab"
+        if self.tile_size_eff % slab_rows:
+            return "the KQ LDS pad needs whole async-DMA slabs to tile the KV tile"
+        if self.kq_lds_pad_halves % 8:
+            return "the KQ LDS pad width needs to be a multiple of 8 halves (16 bytes)"
+        if not self.use_k_single_buffer:
+            return "the KQ LDS pad is only laid out for a single-K schedule"
+        return None
+
+    @property
+    def kq_lds_pad_slab_rows(self) -> int:
+        """K rows per padded K_lds slab when the KQ pad is laid out, else 0."""
+        if not self.use_kq_lds_pad or self.kq_lds_pad_off_reason is not None:
+            return 0
+        return self._kq_pad_whole_slab_rows
+
+    @property
     def dtype_ir(self) -> Type:
         return F16 if self.dtype == "fp16" else BF16
 
@@ -916,15 +1037,6 @@ class UnifiedAttention2DTiledSpec:
             causal_top_left=self.causal_top_left,
         )
 
-    @property
-    def binary_search_iters(self) -> int:
-        # AITER/Triton uses a true while-loop binary search. Our IR currently
-        # lowers this as a fixed-trip scf.for, so specialize the trip count to
-        # the known problem batch size instead of always paying 32 iterations.
-        # Falls back to 32 for direct unit-test specs that do not provide
-        # `num_seqs`.
-        return binary_search_seq_idx_iters(self.num_seqs)
-
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
 
@@ -937,11 +1049,21 @@ class UnifiedAttention2DTiledSpec:
             f"d{self.head_size}",
             f"b{self.block_size}",
             f"t{self.tile_size_eff}" if self.n_blocks_per_tile != 1 else "",
-            f"h{self.num_query_heads}kv{self.num_kv_heads}",
+            # Head counts are kernargs; only the GQA ratio is baked.
+            f"g{self.num_queries_per_kv}",
+            # Except on the fast paged-KV descriptor path, whose shifts bake them.
+            (
+                f"h{self.num_query_heads}kv{self.num_kv_heads}"
+                if self.use_fast_paged_kv_desc
+                else ""
+            ),
             self.dtype,
             f"kv{self.kv_storage_dtype}" if self.kv_storage_dtype else "",
+            # i64 K/V addressing changes the loaders, so it is a distinct kernel.
+            "i64" if self.use_i64_kv_addr else "",
             "" if not self.use_sinks else "sinks",
-            f"sw{self.sliding_window}" if self.sliding_window > 0 else "",
+            # The window size is a kernarg; only whether the body masks one is baked.
+            "sw" if self.sliding_window > 0 else "",
             "softcap" if self.has_softcap else "",
             "alibi" if self.use_alibi else "",
             "qqb" if self.use_qq_bias else "",
@@ -988,7 +1110,11 @@ class UnifiedAttention2DTiledSpec:
             "fp8pv" if self.use_fp8_mfma_pv else "",
             "regpv" if self.use_register_pv else "",
             "qrev" if self.use_qblock_reverse else "",
-            "lse" if self.emit_lse else "",
+            (
+                ("lsehm" if self.lse_layout == "head_major" else "lse")
+                if self.emit_lse
+                else ""
+            ),
         )
 
 
@@ -1178,7 +1304,6 @@ def build_unified_attention_2d_tiled(
     NQK = spec.num_queries_per_kv
     VALID_ROWS = BLOCK_Q * NQK
     NUM_KV = spec.num_kv_heads
-    NUM_QH = spec.num_query_heads
     SLIDING_WINDOW = spec.sliding_window
     USE_SOFTCAP = spec.has_softcap
     USE_SINKS = spec.use_sinks
@@ -1201,7 +1326,7 @@ def build_unified_attention_2d_tiled(
     # populates the same LDS slabs as the bf16 path. ``KV_BYTES`` flips
     # the byte-stride math for the paged-KV descriptor.
     KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
-    FP8_MFMA_QK = KV_FP8 and spec.use_fp8_mfma_qk
+    FP8_MFMA_QK = spec.fp8_k_in_lds
     FP8_MFMA_PV = KV_FP8 and spec.use_fp8_mfma_pv
     # Native fp8 QK (32x32 combo with raw fp8 K, fp8-quantized Q, native fp8
     # MFMA) was implemented and measured: a LOSE-LOSE here -- slower AND less
@@ -1218,24 +1343,11 @@ def build_unified_attention_2d_tiled(
     # SLAB_ROWS*HD*2) contiguous slab per wave per call, so padding BETWEEN slabs
     # keeps the write contiguous while breaking the row-aliased bank conflict on
     # the QK read. Correct (write+read consistent) -> numerics preserved.
-    KQ_LDS_PAD = int(spec.kq_lds_pad_halves) if spec.use_kq_lds_pad else 0
-    # SLAB_ROWS = rows filled by one wave's 1024-B (WAVE=64 lanes x 16 B) slab.
-    KQ_SLAB_ROWS = (512 // HD) if KQ_LDS_PAD else 0
-    # The slab pad's remap is only implemented for the non-fp8 K read (see the K
-    # read path below). The async-DMA write pads whenever KQ_LDS_PAD is set, but
-    # the fp8 K read does NOT remap -- an fp8+pad combo would address different
-    # slots -> silent numeric corruption. So disable the pad under fp8 (and under
-    # unsupported geometry) so write and read stay consistent. Byte-identical for
-    # the supported bf16 D256 path (FP8_MFMA_QK is False there).
-    if KQ_LDS_PAD and (
-        FP8_MFMA_QK
-        or 512 % HD != 0
-        or KQ_SLAB_ROWS == 0
-        or T % KQ_SLAB_ROWS != 0
-        or KQ_LDS_PAD % 8 != 0
-    ):
-        KQ_LDS_PAD = 0
-        KQ_SLAB_ROWS = 0
+    # SLAB_ROWS = rows filled by one wave's 1024-B (WAVE=64 lanes x 16 B) slab;
+    # 0 when the spec does not lay the pad out (see kq_lds_pad_off_reason), so
+    # the K write and every K read stay on the same layout.
+    KQ_SLAB_ROWS = spec.kq_lds_pad_slab_rows
+    KQ_LDS_PAD = int(spec.kq_lds_pad_halves) if KQ_SLAB_ROWS else 0
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
@@ -1330,6 +1442,11 @@ def build_unified_attention_2d_tiled(
     num_seqs_p = b.param("num_seqs", I32)
     bt_stride_p = b.param("block_table_stride", I32)
     qq_bias_stride0_p = b.param("qq_bias_stride_0", I32)
+    # Shape values this body reads as kernargs (``RUNTIME_KERNARG_FIELDS``),
+    # after every fixed param so the shared launch signature can append them.
+    rt = {f: b.param(f, I32) for f in spec.RUNTIME_KERNARG_FIELDS}
+    num_qh_p = rt["num_query_heads"]
+    num_kv_p = rt["num_kv_heads"]
     # Additive-bias params are appended only when the feature is on, so the
     # non-bias kernel ABI (and its IR) is unchanged.
     additive_bias = declare_additive_bias_params(b) if USE_ADDITIVE_BIAS else None
@@ -1374,7 +1491,7 @@ def build_unified_attention_2d_tiled(
         q_block_global_idx,
         num_seqs_p,
         block_q=BLOCK_Q,
-        iterations=spec.binary_search_iters,
+        iterations=binary_search_seq_idx_trip_count(b, num_seqs_p),
     )
     cu_q_start = b.global_load_i32(cu_q, seq_idx)
     cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
@@ -1505,28 +1622,14 @@ def build_unified_attention_2d_tiled(
     K_LDS_DTYPE = FP8E4M3 if FP8_MFMA_QK else dtype
     V_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
     P_LDS_DTYPE = FP8E4M3 if FP8_MFMA_PV else dtype
-    Q_BYTES = BLOCK_M * HD * 2
-    # K_BUF_BYTES depends on the K_LDS_DTYPE (1 byte for fp8, 2 for bf16).
-    K_LDS_ELEM_BYTES = 1 if K_LDS_DTYPE == FP8E4M3 else 2
-    K_BUF_BYTES = T * HD * K_LDS_ELEM_BYTES
-    K_TOTAL_BYTES = 2 * K_BUF_BYTES  # K_lds has 2 double-buffer slots
-    # Q can alias K_lds when (a) the dtypes match and (b) it fits in the
-    # full K_lds region (both slots). When ``BLOCK_M <= T`` Q fits in one
-    # slot (rows 0..BLOCK_M of K_lds[0]); when ``BLOCK_M > T`` Q spills
-    # into K_lds[1] (rows T..2T map to K_lds[1, row-T, :]). The gather +
-    # store use ``(buf, row, col)`` indexing in both cases.
-    # Aliasing requires same dtype because the Q_lds writes use bf16 stores;
-    # for the fp8-MFMA path K_lds is fp8 so a dedicated Q_lds slab is needed.
-    Q_ALIAS_K = (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
-    # Q re-read needs a dedicated Q_lds that survives the K prefetch (aliased Q
-    # gets overwritten by K[0]), so it cannot share K_lds.
-    if spec.use_q_reread:
-        Q_ALIAS_K = False
-    # direct-to-register Q gather: Q never touches LDS (no Q_lds at all),
-    # so it cannot alias K either.
+    # Whether Q is staged in K_lds is the spec's rule (q_staged_in_k_lds). When
+    # ``BLOCK_M <= T`` Q fits in one slot (rows 0..BLOCK_M of K_lds[0]); when
+    # ``BLOCK_M > T`` Q spills into K_lds[1] (rows T..2T map to
+    # K_lds[1, row-T, :]). The gather + store use ``(buf, row, col)`` indexing
+    # in both cases. The fp8-MFMA path, Q re-read and direct-to-register Q keep
+    # Q out of K_lds.
+    Q_ALIAS_K = spec.q_staged_in_k_lds
     Q_DIRECT_REG = bool(spec.use_q_direct_reg)
-    if Q_DIRECT_REG:
-        Q_ALIAS_K = False
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
     # Deep K prefetch ring. kv_ring_depth=3 allocates K_lds as 3 slots
     # so K[i], K[i+1], K[i+2] are resident simultaneously (vs the depth-2
@@ -1539,10 +1642,6 @@ def build_unified_attention_2d_tiled(
     # with the ring (>2) and V-double-buffer paths in __post_init__.
     K_SINGLE_BUFFER = bool(spec.use_k_single_buffer)
     K_BUFS = 1 if K_SINGLE_BUFFER else (KV_RING_DEPTH if KV_RING_DEPTH > 2 else 2)
-    if KQ_LDS_PAD and K_BUFS != 1:
-        # Slab pad only wired for the single-buffer K path; disable otherwise.
-        KQ_LDS_PAD = 0
-        KQ_SLAB_ROWS = 0
     if KQ_LDS_PAD:
         # Slab-granularity layout: [K_BUFS, T/SLAB_ROWS, SLAB_ROWS*HD + PAD].
         # Each DMA wave-slab (SLAB_ROWS contiguous rows) lands in one padded
@@ -1652,7 +1751,7 @@ def build_unified_attention_2d_tiled(
     # know about FP8. Only allocate the fp8 staging slabs when actually
     # using the async-FP8 path (round 2 v1) -- otherwise they'd waste LDS
     # and starve occupancy on the round-1 sync FP8 path.
-    if KV_FP8 and spec.use_fp8_mfma_qk:
+    if FP8_MFMA_QK:
         K_fp8_lds = b.smem_alloc(FP8E4M3, [2, T, HD], name_hint="Kfp8lds")
         V_fp8_lds = b.smem_alloc(FP8E4M3, [1, T, HD], name_hint="Vfp8lds")
     if Q_DIRECT_REG:
@@ -1712,7 +1811,7 @@ def build_unified_attention_2d_tiled(
     # stays the same as the default bf16 path -- just softmax_scale /
     # ln(2) -- and we do NOT fold k_scale into qk_scale here.
     pv_fp8_scale = b.fdiv(v_scale_p, b.const_f32(240.0)) if FP8_MFMA_PV else None
-    sw_const = b.const_i32(int(SLIDING_WINDOW))
+    sw_const = rt["sliding_window"]
     z8 = b.zero_vec(dtype, 8)
 
     # ---------------- Q -> LDS (cooperative vec8 chunks) ----------------
@@ -1725,15 +1824,11 @@ def build_unified_attention_2d_tiled(
     # Coordinate transform for Q (and the symmetric output buffer):
     # ``(token, head, dim)`` packed contiguously. The element-unit
     # descriptor is reused below for the output store too.
-    q_desc = TensorDescriptor.naive(
+    # The head count is a kernarg, so the token stride is too.
+    q_desc = DynamicTensorDescriptor.create(
         "Q",
-        # The runtime extents (total_q, num_query_heads, head_size) are
-        # only used by the validity predicate (which we don't request
-        # here). Use generous compile-time bounds so the descriptor's
-        # row-major stride product matches the kernel's layout
-        # assumptions exactly.
-        lengths=[1 << 30, NUM_QH, HD],
         coord_names=("token", "head", "dim"),
+        strides=(b.mul(num_qh_p, b.const_i32(HD)), HD, 1),
     )
     # direct-reg: skip the cooperative Q->LDS staging store entirely.
     # The per-lane Q32 MFMA operand is gathered straight from global in the
@@ -1748,7 +1843,7 @@ def build_unified_attention_2d_tiled(
         )
         _qmask_inner = b.land(
             b.cmp_lt(q_pos_t, cur_batch_q_len),
-            b.cmp_lt(qh_t, b.const_i32(NUM_QH)),
+            b.cmp_lt(qh_t, num_qh_p),
         )
         qmask_t = (
             b.land(_qmask_inner, b.cmp_lt(Q_row, b.const_i32(VALID_ROWS)))
@@ -1938,7 +2033,7 @@ def build_unified_attention_2d_tiled(
             qh = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
             )
-            qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+            qh_in = b.cmp_lt(qh, num_qh_p)
             sink_h = b.global_load(sinks, qh, dtype, align=2)
             sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
             m_inits.append(b.select(qh_in, sink_f, neg_inf))
@@ -1948,7 +2043,7 @@ def build_unified_attention_2d_tiled(
                 qh = b.add(
                     b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
                 )
-                qh_in = b.cmp_lt(qh, b.const_i32(NUM_QH))
+                qh_in = b.cmp_lt(qh, num_qh_p)
                 sink_h = b.global_load(sinks, qh, dtype, align=2)
                 sink_f = b.fmul(b.cast_to_f32(sink_h), rcp_ln2)
                 m_inits.append(b.select(qh_in, sink_f, neg_inf))
@@ -2034,10 +2129,11 @@ def build_unified_attention_2d_tiled(
     # so for the FP8 K/V path the loader switches to a sync per-thread
     # dequant chain below; the byte-stride math here is shared so the
     # paged_kv_desc compiles consistently in both branches.
-    kv_stride_blk_b = BS * NUM_KV * HD * KV_BYTES
-    kv_stride_tok_b = NUM_KV * HD * KV_BYTES
+    # The token and block strides scale with the runtime kv head count.
+    kv_stride_tok_b = b.mul(num_kv_p, b.const_i32(HD * KV_BYTES))
+    kv_stride_blk_b = b.mul(kv_stride_tok_b, b.const_i32(BS))
     kv_stride_h_b = HD * KV_BYTES
-    kv_block_bytes_c = b.const_i32(kv_stride_blk_b)  # one-block buffer bound
+    kv_block_bytes_c = kv_stride_blk_b  # one-block buffer bound
 
     lane_half_base = b.mul(tid, b.const_i32(8))
 
@@ -2052,7 +2148,7 @@ def build_unified_attention_2d_tiled(
     # the wave-uniform `lds_dst`. Each wave issues its own instruction
     # but they share the LDS pointer unless we add a wave offset; with
     # NUM_WARPS=1 this collapses to zero.
-    WAVE_BYTES = WAVE * 16  # dwords=4 → 16 bytes per lane × 64 lanes
+    WAVE_BYTES = _ASYNC_DMA_WAVE_SLAB_BYTES
     if NUM_WARPS == 1:
         wave_lds_offset_i64 = b.const_i64(0)
     else:
@@ -2138,6 +2234,28 @@ def build_unified_attention_2d_tiled(
     # return ``0`` (a guaranteed-valid block id). Downstream causal /
     # in_prefix masks already discard the bogus tokens.
     block_table_max_idx = b.to_sgpr_u32(b.mul(num_seqs_p, bt_stride_p))
+    # When a copy covers COPY_TOKENS whole tokens and they fit in one page, the
+    # bf16/fp16 loaders build the page base, the in-page token offset and the
+    # lane part separately (see ``_paged_copy``). A copy that ends mid-row
+    # (head_size 192 with one warp: 512 halves are 2 2/3 rows) or spans pages
+    # keeps the paged-KV descriptor, which addresses each lane's own row.
+    COPY_TOKENS = KV_HALVES_PER_CALL // HD
+    PAGE_COPIES = (
+        not FAST_PAGED_KV_DESC
+        and not KV_FP8
+        and KV_HALVES_PER_CALL % HD == 0
+        and BS % COPY_TOKENS == 0
+    )
+    # With page copies, the loop carries the page ids of the current and the
+    # next tile and reads the ids of the tile after next one iteration ahead,
+    # so no copy waits on a table read issued just before it. The schedules
+    # that load two tiles ahead (the K ring, grouped KV2) read in place, and so
+    # do tiles of more than 16 pages, which the C++ twin's carry arrays bound.
+    PAGE_PREFETCH = (
+        PAGE_COPIES and not RING3 and not GROUPED_KV2 and N_BLOCKS_PER_TILE <= 16
+    )
+    # Page ids already read for a tile, by the tile index value.
+    tile_pages = {}
     if FAST_PAGED_KV_DESC:
         assert (BS, T, HD, NUM_KV, KV_BYTES, NUM_WARPS, kv_calls_per_tile) == (
             32,
@@ -2191,13 +2309,10 @@ def build_unified_attention_2d_tiled(
             return None, b.add(block_b, within)
 
     else:
-        _kv_base = TensorDescriptor.naive(
+        _kv_base = DynamicTensorDescriptor.create(
             "paged_kv_bytes",
-            # ``lengths`` here is just informational (validity propagation
-            # is driven by the transforms above, not by these bounds).
-            lengths=[1 << 24, BS, NUM_KV, HD],
-            strides=[kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES],
             coord_names=("physical_block", "token", "kv_head", "dim"),
+            strides=(kv_stride_blk_b, kv_stride_tok_b, kv_stride_h_b, KV_BYTES),
         )
         if N_BLOCKS_PER_TILE == 1:
             paged_kv_desc = _kv_base.transform(
@@ -2230,6 +2345,77 @@ def build_unified_attention_2d_tiled(
                     max_idx=block_table_max_idx,
                 ),
             )
+        if PAGE_COPIES:
+            # When a copy's tokens sit in one page, the bf16/fp16 loaders address
+            # it as its page's base, its first token's offset in the page and
+            # the lane's own part. The token stride is a kernarg, so build the
+            # lane part and the per-copy token offsets once here rather than
+            # multiplying the token index in every copy of every tile.
+            lane_tok = b.div(lane_half_base, b.const_i32(HD))
+            lane_dim = b.mod(lane_half_base, b.const_i32(HD))
+            lane_within_b = b.add(
+                b.add(
+                    b.mul(lane_tok, kv_stride_tok_b),
+                    b.mul(kv_head_idx, b.const_i32(kv_stride_h_b)),
+                ),
+                b.mul(lane_dim, b.const_i32(KV_BYTES)),
+            )
+            copy_tok_b = {}
+            for call in range(kv_calls_per_tile):
+                tok0 = (call * COPY_TOKENS) % BS
+                if tok0 and tok0 not in copy_tok_b:
+                    copy_tok_b[tok0] = b.mul(kv_stride_tok_b, b.const_i32(tok0))
+            if I64_KV_ADDR:
+                kv_stride_blk_i64 = b.zext(kv_stride_blk_b, I64)
+
+    def _tile_page_id(kv_tile_idx: Value, blk: int) -> Value:
+        """The paged-KV descriptor's indirect lookup for page ``blk`` of a tile:
+        one guarded block-table read, wave-uniform."""
+        idx = b.add(
+            seq_base,
+            (
+                kv_tile_idx
+                if N_BLOCKS_PER_TILE == 1
+                else b.add(
+                    b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)),
+                    b.const_i32(blk),
+                )
+            ),
+        )
+        page = b.masked_global_load(
+            block_tables,
+            idx,
+            b.cmp_lt(idx, block_table_max_idx),
+            b.const_i32(0),
+            dtype=I32,
+            align=4,
+        )
+        return b.to_sgpr_u32(page)
+
+    def _tile_page_ids(kv_tile_idx: Value) -> list:
+        return [_tile_page_id(kv_tile_idx, j) for j in range(N_BLOCKS_PER_TILE)]
+
+    if PAGE_COPIES:
+
+        def _paged_copy(src: Value, src_rsrc: Value, kv_tile_idx: Value, call, pages):
+            """(rsrc, voffset, soffset) of one bf16/fp16 K/V copy. ``pages``
+            caches this tile's page ids by block within the tile when the
+            loop does not carry them."""
+            blk = (call * COPY_TOKENS) // BS
+            tok0 = (call * COPY_TOKENS) % BS
+            carried = tile_pages.get(id(kv_tile_idx))
+            if carried is not None:
+                pages = carried
+            elif blk not in pages:
+                pages[blk] = _tile_page_id(kv_tile_idx, blk)
+            voff = lane_within_b
+            if tok0:
+                voff = b.add(voff, copy_tok_b[tok0])
+            if I64_KV_ADDR:
+                base_i64 = b.mul(b.zext(pages[blk], I64), kv_stride_blk_i64)
+                rsrc = b.buffer_rsrc(b.global_ptr_add(src, base_i64), kv_block_bytes_c)
+                return rsrc, voff, zero_soff
+            return src_rsrc, voff, b.mul(pages[blk], kv_stride_blk_b)
 
     def _issue_k_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
         """Issue async K loads for one tile into K_lds[buf_idx].
@@ -2252,14 +2438,20 @@ def build_unified_attention_2d_tiled(
         K_wave_base = b.smem_ptr_add(K_buf_base, wave_lds_offset_K_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
+        pages = {}
         for call in range(kv_calls_per_tile):
             k_rsrc = key_rsrc
+            soff = zero_soff
             if FAST_PAGED_KV_DESC:
                 base_i64, voff = _fast_paged_kv_voff(call, fast_block0, fast_block1)
                 if base_i64 is not None:  # I64_KV_ADDR: per-block 64-bit base
                     k_rsrc = b.buffer_rsrc(
                         b.global_ptr_add(key, base_i64), kv_block_bytes_c
                     )
+            elif PAGE_COPIES:
+                k_rsrc, voff, soff = _paged_copy(
+                    key, key_rsrc, kv_tile_idx, call, pages
+                )
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
@@ -2288,7 +2480,7 @@ def build_unified_attention_2d_tiled(
             # ``dsl_docs/primitives/intrinsics_and_primitives.md`` as the
             # right hint for K-loop streaming tile loads.
             b.async_buffer_load_lds_addr(
-                k_rsrc, k_dst, voff, zero_soff, 4, coherency=CACHE_STREAM
+                k_rsrc, k_dst, voff, soff, 4, coherency=CACHE_STREAM
             )
 
     def _issue_v_load_runtime(kv_tile_idx: Value, buf_idx: Value) -> None:
@@ -2310,14 +2502,20 @@ def build_unified_attention_2d_tiled(
             V_wave_base = b.smem_ptr_add(V_lds_addr, wave_lds_offset_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
+        pages = {}
         for call in range(kv_calls_per_tile):
             v_rsrc = value_rsrc
+            soff = zero_soff
             if FAST_PAGED_KV_DESC:
                 base_i64, voff = _fast_paged_kv_voff(call, fast_block0, fast_block1)
                 if base_i64 is not None:
                     v_rsrc = b.buffer_rsrc(
                         b.global_ptr_add(value, base_i64), kv_block_bytes_c
                     )
+            elif PAGE_COPIES:
+                v_rsrc, voff, soff = _paged_copy(
+                    value, value_rsrc, kv_tile_idx, call, pages
+                )
             else:
                 linear_half = b.add(
                     b.const_i32(call * KV_HALVES_PER_CALL), lane_half_base
@@ -2345,7 +2543,7 @@ def build_unified_attention_2d_tiled(
             # re-read within this kernel; see _issue_k_load_runtime for
             # the rationale.
             b.async_buffer_load_lds_addr(
-                v_rsrc, v_dst, voff, zero_soff, 4, coherency=CACHE_STREAM
+                v_rsrc, v_dst, voff, soff, 4, coherency=CACHE_STREAM
             )
 
     # ---------------- FP8 K/V cache: async DMA loader (round 2) ----------------
@@ -2369,7 +2567,7 @@ def build_unified_attention_2d_tiled(
     # 9-17 kv-tiles per CTA, the sync stall was the dominant cost
     # (5000 µs vs Triton's 50 µs measured on
     # `n254q5880k10999_fp8kv` in round 1).
-    if KV_FP8 and spec.use_fp8_mfma_qk:
+    if FP8_MFMA_QK:
         # The async FP8 loader is gated on use_fp8_mfma_qk. We pick the
         # largest dwords (and per-lane payload) that the tile bytes
         # support, mirroring the K_FP8_DWORDS / K_BYTES_PER_LANE pick
@@ -2845,9 +3043,10 @@ def build_unified_attention_2d_tiled(
         ``cvt_pk_f32_fp8`` + ``* k_scale`` + cast -- to the exact 8 bf16 the
         bf16 K_lds path would have held (bit-identical), then feed the
         standard bf16 MFMA. (Unfused cvt + explicit f32 multiply: the fused
-        ``cvt_scalef32`` truncates non-pow2 scales; see the 16x16 path.)
-        Otherwise read bf16 directly. Shared by the 16x16 and 32x32 QK
-        paths so both get the fp8 LDS-footprint win.
+        ``cvt_scalef32`` truncates non-pow2 scales; see
+        ``dequant_fp8x8_to_dtype``.) Otherwise read bf16 directly. Every QK
+        path (16x16, 32x32 and transposed 32x32) reads K through here, so
+        each reads K in the type and layout the K copy wrote.
         """
         if KQ_XOR_SWIZZLE:
             # Measurement-only vanilla XOR swizzle: permute the read column by
@@ -2856,7 +3055,7 @@ def build_unified_attention_2d_tiled(
             # aligned + in [0, HD)). Read-only -> numerically wrong; used solely
             # to measure the SQ_LDS_BANK_CONFLICT delta.
             k_off = b.xor(k_off, b.mul(b.mod(k_row, b.const_i32(8)), b.const_i32(8)))
-        if KQ_LDS_PAD and not K_FP8_MFMA:
+        if KQ_LDS_PAD:
             # Slab-granularity padded layout: K_lds is
             # [K_BUFS, T/SLAB_ROWS, SLAB_ROWS*HD + PAD]. Map the logical
             # (row, col) to (slab, row_in_slab*HD + col) so the read hits the
@@ -2981,7 +3180,7 @@ def build_unified_attention_2d_tiled(
         # so the <8 x dtype> operand is bit-identical to the staged path.
         #   row -> q_pos = qb_start_pos + row // NQK ; qh = kv_head*NQK + row%NQK
         #   col -> dim
-        # Out-of-range (token >= q_len or head >= NUM_QH) lanes read 0 (masked),
+        # Out-of-range (token >= q_len or head >= num_query_heads) lanes read 0 (masked),
         # matching the staging store's zero-fill.
         def _read_q32_global(k: int) -> Value:
             q32_col = b.add(b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8)))
@@ -2992,7 +3191,7 @@ def build_unified_attention_2d_tiled(
             )
             qg_mask = b.land(
                 b.cmp_lt(qg_pos, cur_batch_q_len),
-                b.cmp_lt(qg_h, b.const_i32(NUM_QH)),
+                b.cmp_lt(qg_h, num_qh_p),
             )
             qg_pos_safe = b.select(qg_mask, qg_pos, b.const_i32(0))
             qg_h_safe = b.select(qg_mask, qg_h, b.const_i32(0))
@@ -3054,6 +3253,16 @@ def build_unified_attention_2d_tiled(
     # the next thing scheduled, so this ordering is naturally
     # correct in the IR.
 
+    if PAGE_PREFETCH:
+        # Page ids of the first tile and of the one after it, carried into the
+        # loop; iteration i then reads the ids of tile i + 2.
+        start_next_raw = b.add(tile_start, b.const_i32(1))
+        start_next = b.select(
+            b.cmp_lt(start_next_raw, tile_end), start_next_raw, tile_start
+        )
+        start_pages = _tile_page_ids(tile_start)
+        start_next_pages = _tile_page_ids(start_next)
+        tile_pages[id(tile_start)] = start_pages
     # Prefetch tile_start's K into buffer 0 BEFORE the loop.
     _issue_k(tile_start, b.const_i32(0))
     if RING3:
@@ -3089,12 +3298,17 @@ def build_unified_attention_2d_tiled(
     #   6. Yield ``(m, l, acc, nxt_buf)`` so the next iter consumes nxt_buf.
     cur_buf_init = b.const_i32(0)
     iter_args.append(("cur_buf", cur_buf_init))
+    if PAGE_PREFETCH:
+        for j in range(N_BLOCKS_PER_TILE):
+            iter_args.append((f"page_cur{j}", start_pages[j]))
+        for j in range(N_BLOCKS_PER_TILE):
+            iter_args.append((f"page_next{j}", start_next_pages[j]))
 
     # ---------------- LICM hoist: per-reg invariants ----------------
     # ``qp_r``, ``qh_r``, ``row_ok``, ``causal_lim``, and ``alibi_per_row``
     # depend only on CTA-level constants (``wave_row_base``, ``lane_rg``,
     # ``qb_start_pos``, ``kv_head_idx``, ``cur_batch_q_len``, ``context_len``,
-    # ``NUM_QH``, ``NQK``). Computing them BEFORE the kvloop avoids paying
+    # ``num_qh_p``, ``NQK``). Computing them BEFORE the kvloop avoids paying
     # them per kv tile. LLVM LICM should hoist them automatically, but
     # explicit hoisting makes the IR's hot path leaner and eliminates a
     # source of compiler-scheduling variability. The per-reg arrays
@@ -3114,7 +3328,7 @@ def build_unified_attention_2d_tiled(
         qh_r = b.add(b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK)))
         _row_ok_inner = b.land(
             b.cmp_lt(qp_r, cur_batch_q_len),
-            b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+            b.cmp_lt(qh_r, num_qh_p),
         )
         row_ok = (
             b.land(_row_ok_inner, b.cmp_lt(row, b.const_i32(VALID_ROWS)))
@@ -3132,7 +3346,7 @@ def build_unified_attention_2d_tiled(
         hoist_alibi = []
         for reg in range(REGS_PER_LANE):
             qh_r = hoist_qh_r[reg]
-            qh_ok = b.cmp_lt(qh_r, b.const_i32(NUM_QH))
+            qh_ok = b.cmp_lt(qh_r, num_qh_p)
             slope = b.masked_global_load(
                 alibi_slopes_ptr, qh_r, qh_ok, b.const_f32(0.0), dtype=F32, align=4
             )
@@ -3148,7 +3362,7 @@ def build_unified_attention_2d_tiled(
         )
         _st_row_ok_inner = b.land(
             b.cmp_lt(st_qp, cur_batch_q_len),
-            b.cmp_lt(st_qh, b.const_i32(NUM_QH)),
+            b.cmp_lt(st_qh, num_qh_p),
         )
         st_row_ok = (
             b.land(_st_row_ok_inner, b.cmp_lt(st_q_row, b.const_i32(VALID_ROWS)))
@@ -3175,7 +3389,7 @@ def build_unified_attention_2d_tiled(
         and TRANSPOSED_QK_32X32
         and TRANSPOSED_INVARIANT_HOIST
     ):
-        st_qh_ok = b.cmp_lt(st_qh, b.const_i32(NUM_QH))
+        st_qh_ok = b.cmp_lt(st_qh, num_qh_p)
         st_alibi_slope = b.masked_global_load(
             alibi_slopes_ptr, st_qh, st_qh_ok, b.const_f32(0.0), dtype=F32, align=4
         )
@@ -3209,6 +3423,13 @@ def build_unified_attention_2d_tiled(
             return acc_vals[n * ACC_M_ATOMS + atom]
 
         cur_buf = carry[ml_count + ACC_N_TILES * ACC_M_ATOMS]
+        if PAGE_PREFETCH:
+            pages_at = ml_count + ACC_N_TILES * ACC_M_ATOMS + 1
+            cur_pages = list(carry[pages_at : pages_at + N_BLOCKS_PER_TILE])
+            next_pages = list(
+                carry[pages_at + N_BLOCKS_PER_TILE : pages_at + 2 * N_BLOCKS_PER_TILE]
+            )
+            tile_pages[id(kv_tile_iv)] = cur_pages
         if RING3:
             # 3-slot ring: cur_buf holds K[i]; (cur_buf+1)%3 holds K[i+1]
             # (prefetched last iter / prologue); the prefetch target for K[i+2]
@@ -3254,7 +3475,7 @@ def build_unified_attention_2d_tiled(
             )
             _st_row_ok_iter_inner = b.land(
                 b.cmp_lt(st_qp_iter, cur_batch_q_len),
-                b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH)),
+                b.cmp_lt(st_qh_iter, num_qh_p),
             )
             st_row_ok_iter = (
                 b.land(
@@ -3266,7 +3487,7 @@ def build_unified_attention_2d_tiled(
             )
             st_causal_lim_iter = b.add(context_len, st_qp_iter)
             if USE_ALIBI:
-                st_qh_iter_ok = b.cmp_lt(st_qh_iter, b.const_i32(NUM_QH))
+                st_qh_iter_ok = b.cmp_lt(st_qh_iter, num_qh_p)
                 st_alibi_slope_iter = b.masked_global_load(
                     alibi_slopes_ptr,
                     st_qh_iter,
@@ -3292,6 +3513,8 @@ def build_unified_attention_2d_tiled(
             next_tile_iv_raw = b.add(kv_tile_iv, b.const_i32(1))
         in_range_next = b.cmp_lt(next_tile_iv_raw, tile_end)
         safe_next_tile = b.select(in_range_next, next_tile_iv_raw, kv_tile_iv)
+        if PAGE_PREFETCH:
+            tile_pages[id(safe_next_tile)] = next_pages
         if RING3:
             # Ring depth 3 prefetches K[i+2] (two tiles ahead) into ring_pf_buf.
             ring_pf_tile_raw = b.add(kv_tile_iv, b.const_i32(2))
@@ -3334,6 +3557,15 @@ def build_unified_attention_2d_tiled(
         # GEMM MFMA-interleave, level 1 = attention-style interleave.
         if USE_SOFTMAX_INTERLEAVE and SOFTMAX_INTERLEAVE_MODE in (0, 1):
             b.iglp_opt(SOFTMAX_INTERLEAVE_MODE)
+        if PAGE_PREFETCH:
+            # Read the page ids of the tile after next now, right after the
+            # iter-start drain, so they arrive long before next iteration's
+            # copies need them. That tile is next iteration's safe_next_tile.
+            after_next_raw = b.add(kv_tile_iv, b.const_i32(2))
+            after_next = b.select(
+                b.cmp_lt(after_next_raw, tile_end), after_next_raw, next_tile_iv_raw
+            )
+            after_next_pages = _tile_page_ids(after_next)
         if EARLY_V_SCHEDULE:
             if V_DOUBLE_BUF:
                 # V[i] (cur_buf) was prefetched in the previous iter / prologue
@@ -3537,7 +3769,7 @@ def build_unified_attention_2d_tiled(
                         slope_for_lane = b.masked_global_load(
                             alibi_slopes_ptr,
                             qh_t_alibi,
-                            b.cmp_lt(qh_t_alibi, b.const_i32(NUM_QH)),
+                            b.cmp_lt(qh_t_alibi, num_qh_p),
                             b.const_f32(0.0),
                             dtype=F32,
                             align=4,
@@ -3592,7 +3824,7 @@ def build_unified_attention_2d_tiled(
                                     )
                                     _row_ok_inner_t = b.land(
                                         b.cmp_lt(qp_r, cur_batch_q_len),
-                                        b.cmp_lt(qh_r, b.const_i32(NUM_QH)),
+                                        b.cmp_lt(qh_r, num_qh_p),
                                     )
                                     row_ok = (
                                         b.land(
@@ -3726,6 +3958,9 @@ def build_unified_attention_2d_tiled(
                 # Non-transposed 32x32 QK: ``S32_n[n] = vec_f32(16)``,
                 # one 32x32x16 C tile per warp. Downstream softmax/PV
                 # consume this via the non-transposed mask block below.
+                # K goes through the shared K reader, like the transposed
+                # path: when K_lds holds raw fp8 bytes it reads them as fp8
+                # and dequantizes with k_scale before the bf16 MFMA.
                 S32_n = [None] * QK_N_TILES
                 for n in range(QK_N_TILES):
                     acc32 = b.zero_vec_f32(16)
@@ -3734,9 +3969,7 @@ def build_unified_attention_2d_tiled(
                         kc_off32 = b.add(
                             b.const_i32(k * 16), b.mul(lane_half, b.const_i32(8))
                         )
-                        B32_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row32, kc_off32, dtype=dtype, n=8
-                        )
+                        B32_v = _read_k8_mfma_operand(cur_buf, k_row32, kc_off32)
                         q32_op = _read_q32(k) if Q_REREAD else Q32_reg[k]
                         acc32 = _mfma_32x32x16(b, dtype, q32_op, B32_v, acc32)
                     S32_n[n] = acc32
@@ -3747,44 +3980,13 @@ def build_unified_attention_2d_tiled(
                 for k in range(QK_K_ITERS):
                     kc_off = b.add(b.const_i32(k * 32), b.mul(lane_rg, b.const_i32(8)))
                     k_row = b.add(b.const_i32(n * 16), lane_col)
-                    if K_FP8_MFMA:
-                        # K_lds holds raw fp8 bytes. Dequant in register to
-                        # bf16 (bit-identical to what the bf16 K_lds path
-                        # would have written) then run the standard bf16
-                        # MFMA.
-                        #
-                        # Uses gfx950's fused ``v_cvt_scalef32_pk_f32_fp8``
-                        # which folds the per-element scale multiply into
-                        # the cvt: 2 fused scaled cvts + 2 packed bf16
-                        # cvts = 4 instructions per 8-element load (vs the
-                        # old 2 cvt_pk_f32_fp8 + 8 fmul + 2 cvt_pk_bf16_f32
-                        # = 12 instructions). Triton uses the same fused
-                        # intrinsic in its long-prefill FP8 kernel.
-                        B_fp8 = b.smem_load_vN(
-                            K_lds,
-                            cur_buf,
-                            k_row,
-                            kc_off,
-                            dtype=FP8E4M3,
-                            n=8,
+                    # The shared K reader, as on the 32x32 paths: fp8 K in
+                    # K_lds is read as fp8 and dequantized with k_scale.
+                    B_v = _read_k8_mfma_operand(cur_buf, k_row, kc_off)
+                    for atom in range(M_ATOMS_PER_WARP):
+                        acc_per_atom[atom] = _mfma_16x16x32(
+                            b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
                         )
-                        # See FP8 dequant note in dequant_fp8x8_to_dtype:
-                        # cvt_scalef32_pk_f32_fp8 uses E8M0-only scale,
-                        # silently truncating non-pow2 scales. The helper uses
-                        # the unfused cvt_pk_f32_fp8 + explicit f32 multiply.
-                        B_v = dequant_fp8x8_to_dtype(b, B_fp8, k_scale_p, dtype)
-                        for atom in range(M_ATOMS_PER_WARP):
-                            acc_per_atom[atom] = _mfma_16x16x32(
-                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
-                            )
-                    else:
-                        B_v = b.smem_load_vN(
-                            K_lds, cur_buf, k_row, kc_off, dtype=dtype, n=8
-                        )
-                        for atom in range(M_ATOMS_PER_WARP):
-                            acc_per_atom[atom] = _mfma_16x16x32(
-                                b, dtype, A_kits[atom][k], B_v, acc_per_atom[atom]
-                            )
                 for atom in range(M_ATOMS_PER_WARP):
                     S_n[atom][n] = acc_per_atom[atom]
 
@@ -4498,6 +4700,9 @@ def build_unified_attention_2d_tiled(
             yields.append(ring_next_cur)
         else:
             yields.append(cur_buf if GROUPED_KV2 else nxt_buf)
+        if PAGE_PREFETCH:
+            yields.extend(next_pages)
+            yields.extend(after_next_pages)
         b.scf_yield(*yields)
 
     # ---- drive the (one or two) KV-loop phases ----
@@ -4611,7 +4816,7 @@ def build_unified_attention_2d_tiled(
             )
             _op_mask_t_inner = b.land(
                 b.cmp_lt(op_pos_t, cur_batch_q_len),
-                b.cmp_lt(op_qh_t, b.const_i32(NUM_QH)),
+                b.cmp_lt(op_qh_t, num_qh_p),
             )
             op_mask_t = (
                 b.land(_op_mask_t_inner, b.cmp_lt(q_row_t, b.const_i32(VALID_ROWS)))
@@ -4633,9 +4838,14 @@ def build_unified_attention_2d_tiled(
                     lse_store(
                         b,
                         lse,
-                        b.add(
-                            b.mul(b.add(cu_q_start, op_pos_t), b.const_i32(NUM_QH)),
-                            op_qh_t,
+                        unified_lse_offset(
+                            b,
+                            spec.lse_layout,
+                            cu_q_start=cu_q_start,
+                            q_len=cur_batch_q_len,
+                            pos=op_pos_t,
+                            head=op_qh_t,
+                            num_heads=num_qh_p,
                         ),
                         m_final[0],
                         l_final[0],
@@ -4679,7 +4889,7 @@ def build_unified_attention_2d_tiled(
         )
         _op_mask32_inner = b.land(
             b.cmp_lt(op_pos32_base, cur_batch_q_len),
-            b.cmp_lt(op_qh32_base, b.const_i32(NUM_QH)),
+            b.cmp_lt(op_qh32_base, num_qh_p),
         )
         op_mask32_base = (
             b.land(_op_mask32_inner, b.cmp_lt(OUT_ROW_BASE32, b.const_i32(VALID_ROWS)))
@@ -4702,12 +4912,14 @@ def build_unified_attention_2d_tiled(
                     lse_store(
                         b,
                         lse,
-                        b.add(
-                            b.mul(
-                                b.add(cu_q_start, hoist_qp_r[reg]),
-                                b.const_i32(NUM_QH),
-                            ),
-                            hoist_qh_r[reg],
+                        unified_lse_offset(
+                            b,
+                            spec.lse_layout,
+                            cu_q_start=cu_q_start,
+                            q_len=cur_batch_q_len,
+                            pos=hoist_qp_r[reg],
+                            head=hoist_qh_r[reg],
+                            num_heads=num_qh_p,
                         ),
                         m_final[reg],
                         l_final[reg],
@@ -4799,7 +5011,7 @@ def build_unified_attention_2d_tiled(
     )
     _op_mask_inner = b.land(
         b.cmp_lt(op_pos, cur_batch_q_len),
-        b.cmp_lt(op_qh, b.const_i32(NUM_QH)),
+        b.cmp_lt(op_qh, num_qh_p),
     )
     op_mask = (
         b.land(_op_mask_inner, b.cmp_lt(OUT_ROW_BASE, b.const_i32(VALID_ROWS)))
@@ -4862,12 +5074,14 @@ def build_unified_attention_2d_tiled(
                 lse_store(
                     b,
                     lse,
-                    b.add(
-                        b.mul(
-                            b.add(cu_q_start, hoist_qp_r[reg]),
-                            b.const_i32(NUM_QH),
-                        ),
-                        hoist_qh_r[reg],
+                    unified_lse_offset(
+                        b,
+                        spec.lse_layout,
+                        cu_q_start=cu_q_start,
+                        q_len=cur_batch_q_len,
+                        pos=hoist_qp_r[reg],
+                        head=hoist_qh_r[reg],
+                        num_heads=num_qh_p,
                     ),
                     m_final[reg],
                     l_final[reg],
@@ -4892,6 +5106,9 @@ def supports_tiled_2d_spec(
     ``use_conflict_free_v_store``, ``use_k_sliced_ring`` and ``use_d256_fast`` are
     not gfx950 spec fields.
     """
+    ok, reason = check_head_counts(spec.num_query_heads, spec.num_kv_heads)
+    if not ok:
+        return False, reason
     use_fp8 = spec.kv_storage_dtype is not None
     return supports_tiled_2d(
         head_size=spec.head_size,

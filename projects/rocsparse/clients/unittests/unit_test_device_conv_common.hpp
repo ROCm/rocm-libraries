@@ -34,6 +34,7 @@
 #include <array>
 #include <initializer_list>
 #include <limits>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -249,8 +250,27 @@ namespace convut
     using HybMat     = Owned<rocsparse_hyb_mat, rocsparse_destroy_hyb_mat>;
     using S2sDescr
         = Owned<rocsparse_sparse_to_sparse_descr, rocsparse_destroy_sparse_to_sparse_descr>;
+    using ExtractDescr  = Owned<rocsparse_extract_descr, rocsparse_destroy_extract_descr>;
     using MatDescrOwner = Owned<rocsparse_mat_descr, rocsparse_destroy_mat_descr>;
     using MatInfoOwner  = Owned<rocsparse_mat_info, rocsparse_destroy_mat_info>;
+
+    // Library bug (AISPARSE-925): for a matrix it does not support,
+    // rocsparse_create_extract_descr lets a rocsparse_status thrown by the descriptor
+    // constructor escape the C API instead of returning it. Both behaviours are accepted.
+    inline rocsparse_status create_extract(ExtractDescr&               descr,
+                                           rocsparse_const_spmat_descr source,
+                                           rocsparse_spmat_descr       target)
+    {
+        try
+        {
+            return rocsparse_create_extract_descr(
+                &descr, source, target, rocsparse_extract_alg_default);
+        }
+        catch(const rocsparse_status& status)
+        {
+            return status;
+        }
+    }
 
     // Matrix descriptor with the given index base.
     struct MatDescr : MatDescrOwner
@@ -411,5 +431,197 @@ namespace convut
         EXPECT_EQ(ptr.read(want.m + 1), want.ptr);
         EXPECT_EQ(ind.read(want.nnz()), want.ind);
         EXPECT_EQ(val.read(want.nnz()), want.val);
+    }
+
+    inline size_t value_size(rocsparse_datatype dt)
+    {
+        switch(dt)
+        {
+        case rocsparse_datatype_i8_r:
+        case rocsparse_datatype_u8_r:
+            return 1;
+        case rocsparse_datatype_f16_r:
+        case rocsparse_datatype_bf16_r:
+            return 2;
+        case rocsparse_datatype_f64_r:
+        case rocsparse_datatype_f32_c:
+            return 8;
+        case rocsparse_datatype_f64_c:
+            return 16;
+        default:
+            return 4;
+        }
+    }
+
+    // `AsConst` selects rocsparse_create_const_csr_descr / rocsparse_create_const_csc_descr.
+    // The descriptor type must be ConstSpmat in that case and Spmat otherwise.
+    template <bool AsConst = false, typename Descr>
+    rocsparse_status create_csx(Descr&              m,
+                                bool                csc,
+                                int64_t             rows,
+                                int64_t             cols,
+                                int64_t             nnz,
+                                void*               ptr,
+                                void*               ind,
+                                void*               val,
+                                rocsparse_indextype ptr_type,
+                                rocsparse_indextype ind_type,
+                                int                 base,
+                                rocsparse_datatype  dt)
+    {
+        const auto ib = base_of(base);
+        if constexpr(AsConst)
+        {
+            const auto create
+                = csc ? rocsparse_create_const_csc_descr : rocsparse_create_const_csr_descr;
+            return create(&m, rows, cols, nnz, ptr, ind, val, ptr_type, ind_type, ib, dt);
+        }
+        else
+        {
+            const auto create = csc ? rocsparse_create_csc_descr : rocsparse_create_csr_descr;
+            return create(&m, rows, cols, nnz, ptr, ind, val, ptr_type, ind_type, ib, dt);
+        }
+    }
+
+    // Extracts the part of the matrix given by (ptr, ind) and checks it against one host
+    // reference. For a unit diagonal the result may keep or drop the diagonal (the header
+    // does not say which); it must match one of the two references exactly. `AsConst`
+    // builds the source with the const constructor, fills every output with a sentinel,
+    // and requires the guard elements past the written prefix to stay unchanged.
+    template <typename P, typename J, bool AsConst = false>
+    void run_extract(rocsparse_handle      handle,
+                     bool                  csc,
+                     int64_t               rows,
+                     int64_t               cols,
+                     int                   base,
+                     rocsparse_datatype    dt,
+                     const std::vector<P>& ptr,
+                     const std::vector<J>& ind,
+                     rocsparse_fill_mode   fill,
+                     rocsparse_diag_type   diag)
+    {
+        SCOPED_TRACE("csc " + std::to_string(csc) + " " + std::to_string(rows) + "x"
+                     + std::to_string(cols) + " base " + std::to_string(base) + " datatype "
+                     + std::to_string(dt) + " fill " + std::to_string(fill) + " diag "
+                     + std::to_string(diag) + (AsConst ? " const" : ""));
+        const int64_t nnz = ind.size();
+        const size_t  vs  = value_size(dt);
+        // Entry k holds the byte 0x3f + k in every byte, a finite value of every datatype.
+        std::vector<char> val;
+        for(int64_t k = 0; k < nnz; ++k)
+            val.insert(val.end(), vs, char(0x3f + k));
+        // Four elements past each output array. Only the const source checks them.
+        constexpr size_t extra    = AsConst ? 4 : 0;
+        const J          ind_fill = AsConst ? static_cast<J>(-7) : static_cast<J>(0);
+        const char       val_fill = AsConst ? char(0xA5) : char(0);
+        DevBuf<P>        d_ptr(ptr), t_ptr(std::vector<P>(ptr.size() + extra, static_cast<P>(-7)));
+        DevBuf<J>    d_ind(ind), t_ind(std::vector<J>(static_cast<size_t>(nnz) + extra, ind_fill));
+        DevBuf<char> d_val(val),
+            t_val(std::vector<char>(static_cast<size_t>(nnz) * vs + extra * vs, val_fill));
+        using Source = std::conditional_t<AsConst, ConstSpmat, Spmat>;
+        Source source;
+        ASSERT_EQ((create_csx<AsConst>(source,
+                                       csc,
+                                       rows,
+                                       cols,
+                                       nnz,
+                                       d_ptr,
+                                       d_ind,
+                                       d_val,
+                                       it_of<P>(),
+                                       it_of<J>(),
+                                       base,
+                                       dt)),
+                  st_ok);
+        Spmat target;
+        ASSERT_EQ(create_csx(target,
+                             csc,
+                             rows,
+                             cols,
+                             0,
+                             t_ptr,
+                             nullptr,
+                             nullptr,
+                             it_of<P>(),
+                             it_of<J>(),
+                             base,
+                             dt),
+                  st_ok);
+        ASSERT_EQ(
+            rocsparse_spmat_set_attribute(target, rocsparse_spmat_fill_mode, &fill, sizeof(fill)),
+            st_ok);
+        ASSERT_EQ(
+            rocsparse_spmat_set_attribute(target, rocsparse_spmat_diag_type, &diag, sizeof(diag)),
+            st_ok);
+
+        rocsparse_const_spmat_descr source_view = source.get();
+        ExtractDescr                descr;
+        ASSERT_EQ(create_extract(descr, source_view, target), st_ok);
+        const auto stage = [&](rocsparse_extract_stage s) {
+            size_t size = 0;
+            ASSERT_EQ(rocsparse_extract_buffer_size(handle, descr, source_view, target, s, &size),
+                      st_ok);
+            DevBuf<char> buffer(size);
+            ASSERT_EQ(rocsparse_extract(handle, descr, source_view, target, s, size, buffer),
+                      st_ok);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        };
+        stage(rocsparse_extract_stage_analysis);
+        int64_t target_nnz = -1;
+        ASSERT_EQ(rocsparse_extract_nnz(handle, descr, &target_nnz), st_ok);
+        ASSERT_EQ((csc ? rocsparse_csc_set_pointers
+                       : rocsparse_csr_set_pointers)(target, t_ptr, t_ind, t_val),
+                  st_ok);
+        stage(rocsparse_extract_stage_compute);
+
+        // Host references: the entries below (above) the diagonal, with the diagonal
+        // (strict = 0) and without it (strict = 1).
+        std::vector<P>    want_ptr[2];
+        std::vector<J>    want_ind[2];
+        std::vector<char> want_val[2];
+        for(int strict = 0; strict < 2; ++strict)
+        {
+            want_ptr[strict] = {static_cast<P>(base)};
+            for(int64_t outer = 0; outer + 1 < static_cast<int64_t>(ptr.size()); ++outer)
+            {
+                for(int64_t k = ptr[outer] - base; k < ptr[outer + 1] - base; ++k)
+                {
+                    const int64_t i = csc ? ind[k] - base : outer, j = csc ? outer : ind[k] - base;
+                    if(i == j ? !strict : (fill == rocsparse_fill_mode_lower) == (j < i))
+                    {
+                        want_ind[strict].push_back(ind[k]);
+                        want_val[strict].insert(want_val[strict].end(), vs, char(0x3f + k));
+                    }
+                }
+                want_ptr[strict].push_back(base + want_ind[strict].size());
+            }
+        }
+        const int strict = diag == rocsparse_diag_type_unit
+                           && target_nnz != static_cast<int64_t>(want_ind[0].size());
+        ASSERT_EQ(target_nnz, static_cast<int64_t>(want_ind[strict].size()));
+        if constexpr(AsConst)
+        {
+            auto       expect_ptr = want_ptr[strict];
+            auto       expect_ind = want_ind[strict];
+            auto       expect_val = want_val[strict];
+            const auto got_ptr    = t_ptr.read();
+            const auto got_ind    = t_ind.read();
+            const auto got_val    = t_val.read();
+            if(expect_ptr.size() < got_ptr.size())
+                expect_ptr.resize(got_ptr.size(), static_cast<P>(-7));
+            if(expect_ind.size() < got_ind.size())
+                expect_ind.resize(got_ind.size(), static_cast<J>(-7));
+            if(expect_val.size() < got_val.size())
+                expect_val.resize(got_val.size(), char(0xA5));
+            EXPECT_EQ(got_ptr, expect_ptr);
+            EXPECT_EQ(got_ind, expect_ind);
+            EXPECT_EQ(got_val, expect_val);
+        }
+        else
+        {
+            EXPECT_EQ(t_ptr.read(ptr.size()), want_ptr[strict]);
+            EXPECT_EQ(t_ind.read(target_nnz), want_ind[strict]);
+            EXPECT_EQ(t_val.read(target_nnz * vs), want_val[strict]);
+        }
     }
 } // namespace convut

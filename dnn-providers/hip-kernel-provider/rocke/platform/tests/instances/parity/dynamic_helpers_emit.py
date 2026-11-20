@@ -5,7 +5,8 @@
 # tests/parity/dynamic_helpers_emit.py -- Python reference emitter for the
 # runtime-shape (AOT) helpers: SoftwarePipeline.run_ping_pong_dynamic and the
 # dynamic coordinate transforms (EmbedDynamic, UnmergeMagicDynamic, PadDynamic,
-# DynamicTensorDescriptor), and the runtime-chunk chiplet remap.
+# DynamicTensorDescriptor), the runtime-chunk chiplet remap, and the gated,
+# contiguous and per-plane XCD remaps (xcd_remap, xcd_remap_plane).
 #
 # Those helpers are otherwise only byte-compared through the conv families,
 # which drive a narrow slice of their argument space. Each config here builds
@@ -18,8 +19,12 @@
 # under different names.
 #
 # arch = gfx950, llvm_flavor = AUTO, matching the C side.
-from rocke.core.ir import F16, F32, I32, IRBuilder, KernelDef, PtrType
-from rocke.helpers.grid import chiplet_transform_chunked_runtime
+from rocke.core.ir import F16, F32, I32, I64, IRBuilder, KernelDef, PtrType
+from rocke.helpers.grid import (
+    chiplet_transform_chunked_runtime,
+    xcd_remap,
+    xcd_remap_plane,
+)
 from rocke.helpers.pipeline import SoftwarePipeline
 from rocke.helpers.schedule import SchedulePolicy
 from rocke.helpers.transforms import (
@@ -207,6 +212,28 @@ def build_unmerge_mixed(b: IRBuilder) -> None:
     b.ret()
 
 
+def build_mixed_strides(b: IRBuilder) -> None:
+    """DynamicTensorDescriptor.create with a Value, an int and an int-1 stride.
+
+    The tiled attention K/V descriptor's shape: the page stride is a kernarg,
+    the token stride a constant, the head dim contiguous. Covers both stride
+    hooks: offset (i32 terms) and offset_i64_split (the i64 page term).
+    """
+    o = _ptr(b, "O", I32)
+    o64 = _ptr(b, "O64", I64)
+    p_sb = b.param("p_sB", I32)
+    tid = b.thread_id_x()
+    desc = DynamicTensorDescriptor.create(
+        "kv_mixed", coord_names=("blk", "tok", "d"), strides=(p_sb, 64, 1)
+    )
+    off, _ = desc.offset(b, blk=tid, tok=tid, d=tid)
+    b.global_store(o, tid, off)
+    base_i64, within, _ = desc.offset_i64_split(b, "blk", blk=tid, tok=tid, d=tid)
+    b.global_store(o64, tid, base_i64)
+    b.global_store(o, within, tid)
+    b.ret()
+
+
 def build_pad_dynamic(b: IRBuilder) -> None:
     """embed_dynamic with every argument a Value, plus pad_dynamic variants.
 
@@ -261,6 +288,50 @@ def _chiplet_runtime(*, explicit_chunk: bool):
         b.ret()
 
     return build
+
+
+def _xcd_remap_gated(b: IRBuilder) -> None:
+    """xcd_remap(mode="gated"): runtime grid size, XCD count and chunk."""
+    o = _ptr(b, "O", I32)
+    p_n = b.param("p_num_wgs", I32)
+    p_xcds = b.param("p_xcds", I32)
+    p_chunk = b.param("p_chunk", I32)
+    wgid = b.block_id_x()
+    remapped = xcd_remap(
+        b, wgid, num_wgs=p_n, num_xcds=p_xcds, chunk=p_chunk, mode="gated"
+    )
+    b.global_store(o, wgid, remapped)
+    b.ret()
+
+
+def _xcd_remap_contiguous(b: IRBuilder) -> None:
+    """xcd_remap(mode="contiguous"): one ceil(npid / 8) range per XCD."""
+    o = _ptr(b, "O", I32)
+    p_n = b.param("p_num_wgs", I32)
+    wgid = b.block_id_x()
+    remapped = xcd_remap(b, wgid, num_wgs=p_n, num_xcds=8, mode="contiguous")
+    b.global_store(o, wgid, remapped)
+    b.ret()
+
+
+def _xcd_remap_plane(b: IRBuilder) -> None:
+    """xcd_remap_plane: the gated remap of one gx * gy batch plane."""
+    o = _ptr(b, "O", I32)
+    q = _ptr(b, "P", I32)
+    p_gx = b.param("p_gx", I32)
+    p_gy = b.param("p_gy", I32)
+    p_xcds = b.param("p_xcds", I32)
+    p_chunk = b.param("p_chunk", I32)
+    x = b.block_id_x()
+    y = b.block_id_y()
+    new_x, new_y = xcd_remap_plane(
+        b, x, y, gx=p_gx, gy=p_gy, num_xcds=p_xcds, chunk=p_chunk
+    )
+    row = b.mul(p_gx, y)
+    lin = b.add(x, row)
+    b.global_store(o, lin, new_x)
+    b.global_store(q, lin, new_y)
+    b.ret()
 
 
 CONFIGS = [
@@ -318,6 +389,14 @@ CONFIGS = [
     _chiplet_runtime(explicit_chunk=False),
     # 9: chiplet_transform_chunked_runtime with an explicit runtime chunk.
     _chiplet_runtime(explicit_chunk=True),
+    # 10: DynamicTensorDescriptor with Value / int / int-1 strides, i32 and i64 paths.
+    build_mixed_strides,
+    # 11: xcd_remap gated (runtime XCD count and chunk).
+    _xcd_remap_gated,
+    # 12: xcd_remap contiguous (GDN decode form).
+    _xcd_remap_contiguous,
+    # 13: xcd_remap_plane (per batch plane).
+    _xcd_remap_plane,
 ]
 
 

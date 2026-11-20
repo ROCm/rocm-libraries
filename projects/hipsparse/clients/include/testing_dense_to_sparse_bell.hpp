@@ -31,6 +31,7 @@
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -200,15 +201,11 @@ void testing_dense_to_sparse_bell_bad_arg(const Arguments& argus)
     T*    dbell_val     = (T*)dbell_val_managed.get();
     void* dbuf          = (void*)dbuf_managed.get();
 
-    hipsparseSpMatDescr_t matB;
-
     size_t bsize;
 
+    hipsparseLocalBlockedEll matB(
+        m, n, ellBlockSize, ellCols, dbell_col_ind, dbell_val, iType, idxBase, dataType);
     hipsparseLocalDnMat matA(m, n, ld, ddense_val, dataType, order);
-    verify_hipsparse_status_success(
-        hipsparseCreateBlockedEll(
-            &matB, m, n, ellBlockSize, ellCols, dbell_col_ind, dbell_val, iType, idxBase, dataType),
-        "success");
 
     // denseToSparse buffer size
     verify_hipsparse_status_invalid_handle(
@@ -246,8 +243,6 @@ void testing_dense_to_sparse_bell_bad_arg(const Arguments& argus)
         hipsparseBlockedEllSetPointers(nullptr, dbell_col_ind, dbell_val),
         "Error: matB is nullptr");
 
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matB), "success");
 #endif
 }
 
@@ -318,17 +313,8 @@ void testing_dense_to_sparse_bell(Arguments argus)
     hipsparseLocalDnMat matA(m, n, ld, ddense, typeT, order);
 
     // Create blocked ELL descriptor with null pointers; ellCols is discovered during analysis.
-    hipsparseSpMatDescr_t matB;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateBlockedEll(&matB,
-                                                    mb * blockDim,
-                                                    nb * blockDim,
-                                                    ellBlockSize,
-                                                    0,
-                                                    nullptr,
-                                                    nullptr,
-                                                    typeI,
-                                                    idx_base,
-                                                    typeT));
+    hipsparseLocalBlockedEll matB(
+        mb * blockDim, nb * blockDim, ellBlockSize, 0, nullptr, nullptr, typeI, idx_base, typeT);
 
     // Query DenseToSparse buffer size.
     size_t bufferSize;
@@ -401,7 +387,6 @@ void testing_dense_to_sparse_bell(Arguments argus)
         unit_check_general(1, bell_val_size, 1, hbell_val_cpu.data(), hbell_val.data());
     }
 
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
 }
 

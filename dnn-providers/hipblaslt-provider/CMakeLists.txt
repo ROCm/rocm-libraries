@@ -66,6 +66,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
      ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
+include(LongPathManifest)
 
 option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -226,17 +227,20 @@ if(NOT HIPDNN_SKIP_TESTS)
     set(HIPBLASLTPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
     set(HIPBLASLTPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
     set(HIPBLASLTPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_integration.yaml")
+    set(HIPBLASLTPROVIDER_GRAPH_CAPTURE_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_graph_capture.yaml")
     set(HIPBLASLTPROVIDER_CTEST_INSTALL_FILE "")
     set(HIPBLASLTPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
     if(EXISTS "${HIPBLASLTPROVIDER_GTEST_CATEGORIES_YAML}"
        AND EXISTS "${HIPBLASLTPROVIDER_CTEST_CATEGORIES_YAML}"
        AND EXISTS "${HIPBLASLTPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+       AND EXISTS "${HIPBLASLTPROVIDER_GRAPH_CAPTURE_CATEGORIES_YAML}"
        AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
         set(DNN_PROVIDER_CTEST_CATEGORIES_YAML "${HIPBLASLTPROVIDER_CTEST_CATEGORIES_YAML}")
         set(DNN_PROVIDER_TEST_CATEGORY_YAMLS
             "${HIPBLASLTPROVIDER_GTEST_CATEGORIES_YAML}"
             "${HIPBLASLTPROVIDER_INTEGRATION_CATEGORIES_YAML}"
+            "${HIPBLASLTPROVIDER_GRAPH_CAPTURE_CATEGORIES_YAML}"
             "${HIPBLASLTPROVIDER_CTEST_CATEGORIES_YAML}"
         )
         set(HIPBLASLTPROVIDER_YAML_CATEGORIZATION_ENABLED TRUE)
@@ -330,6 +334,33 @@ if(NOT HIPDNN_SKIP_TESTS)
         )
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
 
+        # HIPBLASLT_ENGINE reports SUPPORTS_GRAPH_CAPTURE, so a sibling lane pinned to it
+        # runs a few quick matmul suites with --graph-capture: each case the engine
+        # verifies is also captured into a HIP graph, replayed, and verified again. The
+        # suites are test_categories_graph_capture.yaml under YAML categorization and this
+        # filter otherwise; keep the two in step.
+        set(_graph_capture_category_args "")
+        if(HIPBLASLTPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _graph_capture_category_args
+                TEST_CATEGORIES_YAML "${HIPBLASLTPROVIDER_GRAPH_CAPTURE_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-graph-capture-external-integration
+                FIXTURES_REQUIRED ${_miopen_cache_fixture}
+            )
+        endif()
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-graph-capture-external-integration-check
+            PLUGIN_TARGET  hipblaslt_plugin
+            ENGINE_NAME    HIPBLASLT_ENGINE
+            INSTALL_SUBDIR hipblaslt_plugin
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/HIPBLASLT_ENGINE.toml
+            EXTRA_ARGS     --graph-capture
+            GTEST_FILTER   "quick_Matmul_Default.*" "quick_MatmulPointwise_Default.*"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_graph_capture_category_args}
+        )
+
         # This is a pre-registered CTest test (not a GTest binary), so it is
         # labeled via apply_ctest_category_labels()/test_categories_external.yaml.
         if(HIPBLASLTPROVIDER_YAML_CATEGORIZATION_ENABLED)
@@ -380,3 +411,4 @@ install(TARGETS hipblaslt_plugin EXPORT hipblaslt-plugin
         RUNTIME DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}
 )
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}")
+hipdnn_apply_long_path_manifest()

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -109,11 +109,24 @@ void testing_ell2csr(const Arguments& arg)
             return;
         }
 
-        rocsparse_int csr_nnz;
+        rocsparse_int csr_nnz = -1;
         EXPECT_ROCSPARSE_STATUS(
             rocsparse_ell2csr_nnz(
                 handle, M, N, descrA, safe_size, dell_col_ind, descrB, dcsr_row_ptr, &csr_nnz),
             (M < 0 || N < 0) ? rocsparse_status_invalid_size : rocsparse_status_success);
+        if(M >= 0 && N >= 0)
+        {
+            // An empty CSR matrix: no entries, and every row pointer is the index base.
+            unit_check_scalar<rocsparse_int>(0, csr_nnz);
+            host_vector<rocsparse_int> hcsr_row_ptr(M + 1);
+            CHECK_HIP_ERROR(hipMemcpy(hcsr_row_ptr.data(),
+                                      dcsr_row_ptr,
+                                      sizeof(rocsparse_int) * (M + 1),
+                                      hipMemcpyDeviceToHost));
+            host_vector<rocsparse_int> hcsr_row_ptr_gold(M + 1, baseB);
+            unit_check_segments<rocsparse_int>(
+                M + 1, hcsr_row_ptr_gold.data(), hcsr_row_ptr.data());
+        }
         EXPECT_ROCSPARSE_STATUS(rocsparse_ell2csr<T>(handle,
                                                      M,
                                                      N,

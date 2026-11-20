@@ -56,6 +56,7 @@
 namespace
 {
     using rocsparse_ut::device_vector;
+    using rocsparse_ut::to_host;
 
     namespace prim = rocsparse::primitives;
 
@@ -71,15 +72,6 @@ namespace
     inline void expect_success(rocsparse_status status)
     {
         ASSERT_EQ(status, rocsparse_status_success);
-    }
-
-    // Copy n elements from a device pointer back to a host vector.
-    template <typename T>
-    std::vector<T> to_host(const T* d, size_t n)
-    {
-        std::vector<T> h(n);
-        (void)hipMemcpy(h.data(), d, n * sizeof(T), hipMemcpyDeviceToHost);
-        return h;
     }
 } // namespace
 

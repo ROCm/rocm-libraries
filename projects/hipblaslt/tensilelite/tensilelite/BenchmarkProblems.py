@@ -55,7 +55,7 @@ from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
-from .TensileCreateLibrary import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
+from .create_library import copyStaticFiles, libraryDir, tensileLibraryFile, writeSolutionsAndKernels
 from .CustomKernels import getCustomKernelConfig
 from .Toolchain.Assembly import AssemblyToolchain
 from .Toolchain.Source import SourceToolchain
@@ -880,7 +880,8 @@ def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConf
 
                 if enableTileSelection:
                     configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
-                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
+                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths,
+                                       deviceScalarAlphaModes=benchmarkStep.deviceScalarAlphaModes)
 
                 # --cpu-only plumbing: runClient covered the config/run-script writing then
                 # stubbed the device launch (returncode 0). The device never produced a perf

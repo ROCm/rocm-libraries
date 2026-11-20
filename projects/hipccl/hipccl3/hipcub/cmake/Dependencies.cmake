@@ -89,6 +89,10 @@ set(BUILD_SHARED_LIBS OFF CACHE BOOL "Global flag to cause add_library() to crea
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(USER_${SHARED_OPTION} ${${SHARED_OPTION}})
+  unset(USER_CACHED_${SHARED_OPTION})
+  if(DEFINED CACHE{${SHARED_OPTION}})
+    get_property(USER_CACHED_${SHARED_OPTION} CACHE ${SHARED_OPTION} PROPERTY VALUE)
+  endif()
   set(${SHARED_OPTION} OFF)
 endforeach()
 
@@ -462,11 +466,6 @@ if(HIP_COMPILER STREQUAL "nvcc")
       PATHS ${CMAKE_CURRENT_BINARY_DIR}/cccl-${CCCL_MINIMUM_VERSION})
   endif()
 else()
-  # libhipcxx
-  if(NOT TARGET libhipcxx::libhipcxx)
-    find_package(libhipcxx 3.4 REQUIRED)
-  endif()
-
   # rocPRIM (only for ROCm platform)
   # NOTE(hipccl3): if rocprim is already a target in this build (e.g. the
   # unified hipccl3 superbuild, which runs add_subdirectory(rocprim) before
@@ -500,7 +499,6 @@ else()
         LOG_BUILD TRUE
         LOG_INSTALL TRUE
       )
-      override_cache_variable(BUILD_CODE_COVERAGE OFF BOOL)
       FetchContent_MakeAvailable(prim)
 
       if(NOT TARGET roc::rocprim)
@@ -510,13 +508,15 @@ else()
       if(NOT TARGET roc::rocprim_hip)
         add_library(roc::rocprim_hip ALIAS rocprim_hip)
       endif()
-      restore_cache_variable(BUILD_CODE_COVERAGE BOOL)
     endif()
   endif()
 endif()
 
 foreach(SHARED_OPTION BUILD_TEST BUILD_BENCHMARK BUILD_EXAMPLE)
   set(${SHARED_OPTION} ${USER_${SHARED_OPTION}})
+  if(DEFINED USER_CACHED_${SHARED_OPTION})
+    set_property(CACHE ${SHARED_OPTION} PROPERTY VALUE "${USER_CACHED_${SHARED_OPTION}}")
+  endif()
 endforeach()
 
 # Restore user global state

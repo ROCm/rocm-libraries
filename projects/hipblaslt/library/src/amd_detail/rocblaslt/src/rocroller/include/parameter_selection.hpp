@@ -55,6 +55,9 @@ struct SolutionParameters
 
     bool tailLoops = true;
 
+    // Drain the LDS queue at KLoop boundaries (rocRoller syncLDSQueueAtKLoopBoundaries)
+    bool syncLDSQueueAtKLoop = false;
+
     // Scale options
     rocRoller::Parameters::Solution::LoadPath loadPathAScale
         = rocRoller::Parameters::Solution::LoadPath::BufferToVGPR;

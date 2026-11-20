@@ -6,6 +6,29 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Conv] Fixed an out-of-bounds shared-memory read in the CK depthwise forward and backward-data
+  solvers (`ConvDepthwiseFwd2D`, `ConvDepthwiseBwdData2D`); LDS grows by up to 640 B for some instances.
+* [MultiMarginLoss] Fixed incorrect results and HIP kernel launch failures on Windows caused by
+  packing the `p` argument as a 32-bit `long` instead of the kernel's 64-bit integer.
+* [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
+  elements per output when the compute type is wider than the input type (for example FP16 `AVG`
+  with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
+  size that `miopenGetReductionWorkspaceSize` returns.
+* [Reduce] `miopenReduceTensor` now applies `alpha` and `beta` in the compute type in every
+  reduction; they were converted to the input and output type first (a fractional INT8 `alpha` or
+  `beta` became 0). The blend with the prior output is made in the compute type and rounded once.
+* [Reduce] Fixed an out-of-bounds shared-memory read in warp-wise reductions that return indices,
+  when the compute type has no built-in shuffle support (compute types other than FP32 and FP64, for
+  example FP16). The results were not affected.
+* [Conv] Fixed deterministic convolutions that reused the find-db record and the cached invokers
+  of a non-deterministic call with the same problem. The deterministic call could return a stale
+  time and, in one handle, run a non-deterministic split-K kernel. The find-db key now contains
+  `_det` and the network config contains `det` when the deterministic attribute is set.
+  Non-deterministic keys do not change, so existing find-db and perf-db records stay valid for
+  non-deterministic calls. The shipped find-db has no `_det` records. Thus the first deterministic
+  Find for each problem measures again, and the user waits for it. Deterministic immediate mode no
+  longer reads the shipped find-db times. Those times can come from split-K > 1 kernels, so they
+  do not apply to deterministic mode.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
   the seeded first config, so GenericSearch began enumeration at `valid_kernels[1]` and the first
@@ -30,6 +53,19 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   the 2 GiB bound are restored where the tuned config passes the new check. This restores
   ResNet-50/101 FP32 batch-1024 backward-weights speed. FP16/BF16 keep the 2 GiB bound, and so
   does the weight tensor in every case.
+* [Conv] Fixed convolution solution queries trusting the workspace size stored in the find-db.
+  `miopenConvolution*GetSolution`, Hybrid and Fast Find, and TrustVerify now use the size the
+  solver requires: Find checks the buffer against the workspace of the configuration that runs
+  and reports the maximum, as `miopenConvolution*GetWorkSpaceSize` does. A stored size that was
+  too small could make `miopenConvolution*Immediate` run with too little workspace. A stored size
+  that was too large could make Find skip the best solver, and TrustVerify copied the wrong size
+  into the user find-db. `miopenConvolution*GetSolution` reports the workspace of the
+  configuration `miopenConvolution*Immediate` runs; for solvers whose workspace depends on the
+  configuration (the CK grouped backward-weights solvers, `ConvHipConv`) this can be smaller than
+  what `miopenConvolution*GetSolutionWorkspaceSize` returns, which covers every configuration.
+* [Conv] Fixed wrong workspace sizes in the system find-dbs for gfx908, gfx90a (104 CU), gfx942,
+  gfx950, gfx1100, gfx1151 and gfx1201, mostly for `GemmWrwUniversal`, the CK grouped solvers and
+  `TransposedConvBinWinoRxS`. DBSync now checks the workspace stored in each find-db record.
 * [FP8] Fixed wrong FP8 and BF8 results on gfx942 from a library built for several targets that
   include gfx950 or gfx12 ([#14375](https://github.com/ROCm/rocm-libraries/issues/14375)). The
   FP8 exponent bias was picked once at build time from `GPU_TARGETS`. MIOpen now picks it at run
@@ -39,24 +75,81 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   held by a skipped evaluation is now released by a background thread as soon as its kernel
   finishes, rather than from a later kernel launch, so it is also released in workloads that only
   replay a captured graph.
+* [Conv] Fixed `miopenConvolutionForwardGetWorkSpaceSize` and its backward variants reporting no
+  GEMM workspace for dilated convolutions. Find, given the reported size, dropped `GemmFwdRest`,
+  so a dilated fp32 Conv1d on RDNA ran on the naive solver and failed with "No suitable algorithm
+  was found" when the naive solver was disabled (#14965). Dilated GEMM workspace is now reported
+  when GEMM is the only alternative to the naive solvers and the workspace fits in 85% of the
+  device memory free at query time. Where another solver applies, it stays unreported, so Find
+  does not also benchmark GEMM; larger requests stay unreported to avoid the out-of-memory
+  failures that caused #6974. The memory limit also applies when a find-db record names a GEMM
+  solver for a dilated problem (that workspace used to be reported whatever its size), and to the
+  workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
+  return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
+  workspace is reported.
 
 ### Added
+* [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
+  thin public `libMIOpen.so` over the new `libMIOpen_private.so`; set it to `Off` for the previous
+  single-library build. Programs that link a hand-written `-lMIOpen` and call functions not
+  declared in `miopen.h` must also link `-lMIOpen_private`; see `docs/install/build-source.rst`.
+* [hipDNN] Added experimental hipDNN forwarding of `miopenConvolutionForward`,
+  `miopenConvolutionBackwardData`, `miopenConvolutionBackwardWeights` and
+  `miopenConvolutionBiasActivationForward`. It is off by default and not intended for production
+  use; enable it with `MIOPEN_HIPDNN_FORWARDING=1`. See `docs/how-to/use-hipdnn-forwarding.rst`.
+* [hipDNN] Added the experimental `miopenGetLastForwardedError` API, which reports whether the last
+  call failed in hipDNN.
+* [hipDNN] Added `stderr` logging for hipDNN forwarding. See `docs/how-to/debug-log.rst`.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
+* [Conv] Updated the bundled hipconv from v0.4.0 to v0.5.0. This adds `ConvHipConv` kernels for
+  gfx950 (including `direct_flex`, dilated layers, conv3d, more filter shapes and layers past
+  2 GiB) and wider filter coverage on gfx1250, and fixes wrong backward-weights results from the
+  gfx950 `direct_wgrad` kernel when built with clang 23. See
+  [`src/hipconv/CHANGELOG.md`](src/hipconv/CHANGELOG.md) for the full list.
 
 ### Changed
+* [Conv] The gfx942/gfx950 two-tower config-selection heuristic now ranks a shipped precomputed
+  config-embedding table instead of running the per-candidate fdeep config tower at run time, then
+  checks CK applicability lazily top-down; on a miss (no table, or nothing applicable) selection
+  falls through to the solver's non-AI heuristic. The two-tower models for the grouped CK
+  implicit-GEMM solvers (2D and 3D; forward, backward-data, backward-weights) are refreshed on
+  current tuning data. Set `MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB=1` to disable the table
+  and revert to the non-AI heuristic; set `MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE=0`
+  to skip the pre-existing 3D forward large-tensor hard-coded override and use the AI heuristic.
+* [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
+  support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
+  improve top-1 accuracy and time-regret across all four architecture/dimension combinations.
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
+* [Conv] The AI performance-config picker again selects `ConvHipConv` configs on gfx950 for
+  forward and backward-data convolutions, using a model retrained on hipconv v0.5 configurations.
+  On gfx950 backward weights it uses a pick only if the score exceeds the default config's score
+  by a margin. Otherwise it runs the default config. gfx1250 keeps the default config because the
+  retrained model has no gfx1250 data.
 * [DB] Windows installs now place the system find-db, perf-db, kernel-db and AI heuristic model
   files in `share\miopen\db`, the same location as Linux, instead of `bin`. MIOpen looks for them
   in `share\miopen\db` under the parent of the directory that holds `MIOpen.dll`.
   `MIOPEN_SYSTEM_DB_PATH` still overrides the location. A Windows build tree stages the same
   files under `build\share\miopen\db` instead of `build\bin`, so a `BUILD_DEV=OFF` build runs
   from the build tree without an install.
+* [Conv] The bundled AI heuristic models (`*.tn.model` and `*.ktn.model`) are now Keras 3 exports
+  for frugally-deep v0.21.0 or newer (fixes ROCm/rocm-libraries#889). Builds against
+  frugally-deep 0.15.x instead install temporary Keras 2 copies of the same models. Configuring
+  against frugally-deep 0.16 to 0.20 is an error because those versions can load neither set.
+* [Conv] The `ConvHipConv` config version is now `v0.5`, so user perf-db records written with
+  hipconv v0.4 are rejected and those layers run the default config until re-tuned.
+* [Conv] `ConvHipConv` fp16 and bf16 backward weights now write dW directly in the weight type for
+  the kernels that support it, instead of staging fp32 and casting. With
+  `MIOPEN_CONVOLUTION_ATTRIB_DETERMINISTIC` set, only kernels that accumulate into dW atomically
+  are rejected.
 
 ### Removed
+* [Conv] Stopped shipping the per-solver `{arch}_{solver}_kernel_config_encoder.tn.model` files; the
+  precomputed config-embedding table replaces the live config tower, so the config encoder is no
+  longer loaded at run time.
 * Removed the unused `miopenOperatorDescriptor` type from `miopen.h` (source-level only, ABI-neutral).
 * Removed `miopenAlphaBetaCase_t` and its unprefixed enumerators `DEFAULT`, `SCALE`, `BILINEAR` and `ERROR_STATE` from `miopen.h` (source-level only, ABI-neutral).
 * Removed the `MIOPEN_FP8_IEEE_EXPONENT_BIAS` CMake option and its `config.h` define. The FP8

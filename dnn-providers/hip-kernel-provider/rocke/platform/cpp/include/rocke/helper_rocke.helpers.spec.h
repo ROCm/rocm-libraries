@@ -169,13 +169,17 @@ int rocke_validate_io(rocke_arena_t* arena,
  * choose_load_vec
  * ------------------------------------------------------------------ *
  *
- * Pick the widest global-load vector width for a GEMM block tile.
- * Starting at v = 16 / elem_bytes (the 16-byte buffer_load limit; Python
- * default elem_bytes=2) and halving, returns the first v that divides tile_k
- * and for which both (tile_m*tile_k)//v and (tile_n*tile_k)//v are
- * >= block_size and divisible by it. On no usable width the Python raises ValueError; here we return
- * ROCKE_ERR_VALUE and leave *out_vec untouched. On success *out_vec holds the
- * chosen width and ROCKE_OK is returned. */
+ * Pick the widest global-load vector width, in elements, for a GEMM block
+ * tile. Returns the largest v <= 16/elem_bytes (the 4-dword buffer_load
+ * limit) such that v divides tile_k and both (tile_m*tile_k)//v and
+ * (tile_n*tile_k)//v are >= block_size and divisible by it. On no usable
+ * width the Python raises ValueError; here we return ROCKE_ERR_VALUE and
+ * leave *out_vec untouched. On success *out_vec holds the chosen width and
+ * ROCKE_OK is returned.
+ *
+ * elem_bytes is bytes per element: 2 for f16/bf16, 1 for the 8-bit floats,
+ * 4 for fp32/i32. It only sets the cap; it takes no part in the divisibility
+ * tests. elem_bytes <= 0 is rejected. */
 rocke_status_t rocke_choose_load_vec(
     int tile_m, int tile_n, int tile_k, int block_size, int elem_bytes, int* out_vec);
 
@@ -380,10 +384,12 @@ long long rocke_align_up(long long n, long long mult);
  *
  * Copy a NUL-terminated reject/validation reason `msg` into the caller's
  * `reason` buffer of capacity `cap`, truncating to fit and always
- * NUL-terminating. A NULL buffer or zero capacity is a no-op. These reason
- * strings surface only through host-side ValueError-style diagnostics; they
- * never enter the emitted IR, so they have no effect on generated code. Shared
- * so the family validators do not each carry an identical local copy. */
+ * NUL-terminating; a reason that had to be cut ends in "..." (when cap >= 4)
+ * so it is never mistaken for a complete one. A NULL buffer or zero capacity is
+ * a no-op. These reason strings surface only through host-side
+ * ValueError-style diagnostics; they never enter the emitted IR, so they have
+ * no effect on generated code. Shared so the family validators do not each
+ * carry an identical local copy. */
 void rocke_spec_set_reason(char* reason, size_t cap, const char* msg);
 
 /* printf-style twin of rocke_spec_set_reason: format straight into the
