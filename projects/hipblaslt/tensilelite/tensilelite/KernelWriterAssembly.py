@@ -5926,9 +5926,18 @@ class KernelWriterAssembly(KernelWriter):
 
         # This is guaranteed to fit in 32-bit since the WG*MT is a number of elements in some unsigned direction:
         if useFixedSrd2:
-          # UseSubtileImpl fixedSrd2 case (including swizzle and nonSwizzle): tile start uses roundup(MT/swizzleSize0)
+          # UseSubtileImpl fixedSrd2 case (including swizzle and nonSwizzle).
+          # The per-tensor tile-count `mt` (roundUp(MT/swizzleSize0)) still drives
+          # the Srd+2 limit below.  The per-workgroup base, however, is the floor
+          # floor(WG*MT / swizzleSize0): for MT >= swizzleSize0 that equals WG*mt,
+          # but for a sub-group macrotile (MT < swizzleSize0 -- a 16-row MX-scale
+          # tile in a 32-row swizzle group) it keeps two adjacent workgroups in the
+          # SAME swizzle group (WG 0,1 -> group 0; WG 2,3 -> group 1) instead of
+          # overshooting a whole group per workgroup and running off the tensor.
           mt = roundUp(kernel[tP["mt"]] / swizzleSize0)
-          module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), mt, comment="WorkGroup[01] * roundup(MT/%u)"%swizzleSize0))
+          module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
+          if swizzleSize0 > 1:
+            module.add(SLShiftRightB32(dst=sgpr(tileStart+0), shiftHex=log2(swizzleSize0), src=sgpr(tileStart+0), comment="floor(WG*MT / %u) -> swizzle-group units"%swizzleSize0))
         else:
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart+0), sgpr(tileStart+1), sgpr(tP["wg"]), kernel[tP["mt"]], comment="WorkGroup[01] * MT"))
 
@@ -6005,6 +6014,21 @@ class KernelWriterAssembly(KernelWriter):
                   module.add(scalarMultiplyBpe("Srd%s+2"%tc, stmp+0, float(tP["bpeGR"]), comment="buffer_load limit for %s (tile-boundary, avoids 32-bit overflow)"%tc))
           module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                     strideF, comment="tlu=0, scaled tile-offset by stride"))
+          if isMxSwizzledScaleLayout and swizzleSize0 > kernel[tP["mt"]]:
+            # Sub-group MX-scale macrotile: swizzleSize0/MT M-tiles share one
+            # 32-row swizzle group, interleaved one scale byte apart (the 2x2
+            # pack puts M-tile m at byte m of each scale dword).  Part A placed
+            # the SRD base at this workgroup's GROUP; here add the intra-group
+            # M-tile byte (wg % tilesPerGroup) to the SRD base only.  Because the
+            # DTL load's LDS-write base (M0) is independent of the SRD base, this
+            # byte-rotates just the global read, so the kernel's byte-0 scale
+            # select consumes this workgroup's M-tile (M1 for an odd workgroup).
+            # Scale bpeGR == 1, so the M-tile index is already the byte offset.
+            tilesPerGroup = swizzleSize0 // kernel[tP["mt"]]
+            module.add(SAndB32(dst=sgpr(stmp+0), src0=sgpr(tP["wg"]), src1=(tilesPerGroup - 1),
+                               comment="wg %% %u = intra-group M-tile index"%tilesPerGroup))
+            module.add(SAddU32(dst=sgpr(tileStart+0), src0=sgpr(tileStart+0), src1=sgpr(stmp+0),
+                               comment="+ intra-group M-tile byte offset (sub-group scale tile)"))
           if isPreShuffledAB:
             module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tileStart), sgpr(tileStart+1), sgpr(tileStart+0), \
                       swizzleSize0, comment="pre-shuffled: scale by %u rows per block"%swizzleSize0))

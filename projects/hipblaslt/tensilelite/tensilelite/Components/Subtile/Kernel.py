@@ -607,9 +607,14 @@ class TileInfo:
       self.localSubtileGrid    = [1, 1]
       self.subtileSize         = lr_cfg.subtileSizeBytes() // lr_cfg.subtileShape[0]
       self.lrGlobalSubtileGrid = list(lr_cfg.globalSubtileGrid(self.macroTile, self.depthU))
+      # Odd MIWaveTile (mxfp8 skinny/odd macrotiles) leaves an odd scale MMA-tile
+      # count in M; the (2,2) scale pack divides it to a fractional subtile grid.
+      # Round the M dim up (mirrors the AB branch) so the odd trailing tile gets a
+      # full scale group whose unused half is inert, instead of flooring it away.
+      self.lrGlobalSubtileGrid[0] = math.ceil(self.lrGlobalSubtileGrid[0])
       self.lrSubtileSize       = lr_cfg.subtileSizeBytes()
       self.lrSubtileShape      = list(lr_cfg.subtileShape)
-      self.lrLocalSubtileGrid  = [int(self.localMMATileGrid[0] / lr_cfg.subtileShape[0]),
+      self.lrLocalSubtileGrid  = [math.ceil(self.localMMATileGrid[0] / lr_cfg.subtileShape[0]),
                                    int(self.localMMATileGrid[1] / lr_cfg.subtileShape[1])]
       self.loadRatioGR         = 0
       self.numGRPerSubtile     = 1
@@ -666,7 +671,10 @@ class TileInfo:
       mmaM, mmaK = geometry.mmaTileShape
       lr_st = geometry.lr.subtileShape
       scale_K_tiles = self.depthU // geometry.instK  # data depthU → scale MMA K tile count
-      self._check_dim(self.macroTile // mmaM, lr_st[0], self.lrGlobalSubtileGrid[0], self.waveGroupSize, 'macroTile[LR]')
+      # allowOver: an odd scale MMA-tile count in M rounds its subtile grid up
+      # (see lrGlobalSubtileGrid ceil above), over-covering by less than one
+      # subtile; the surplus half-tile is loaded but never read.
+      self._check_dim(self.macroTile // mmaM, lr_st[0], self.lrGlobalSubtileGrid[0], self.waveGroupSize, 'macroTile[LR]', allowOver=True)
       self._check_dim(scale_K_tiles,          lr_st[1], self.lrGlobalSubtileGrid[1], 1,                 'depthU[LR]')
     elif isinstance(geometry, CDTileGeometry):
       st = geometry.subtileShape

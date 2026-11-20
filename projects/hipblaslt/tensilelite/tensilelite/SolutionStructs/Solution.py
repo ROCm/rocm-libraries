@@ -1526,6 +1526,18 @@ class Solution(collections.abc.Mapping):
       # BufferLoad pipeline, so the format term is deferred to depthUIteration,
       # which re-confirms MXScaleFormat == "HostPreSwizzle" before applying the
       # dual-period data/scale split.
+      # Dual-period uses partition-directed prefetch, whose prefetch cycle is
+      # 2-coloured by partition-index parity and so needs >1 partition (an even
+      # cycle). The forced per-dim split rounds the half up to the MX scale LR
+      # granularity (2), which yields >1 partition only when the per-wave
+      # MFMA-tile count (MIWaveTile) is even and >= 4; odd or small-even tiles
+      # (e.g. skinny [1,4] M dim, [2,2], [3,3]) collapse that dim to a single
+      # partition. Require at least one partitionable dim so odd/skinny MIWaveTile
+      # mxfp8 kernels that cannot partition fall off the dual-period path (and are
+      # then served by the DepthU=256 non-dual-period solution) instead of hitting
+      # the prefetchNextPartition assertion in the scheduler.
+      def _dualPeriodDimCanPartition(t):
+        return t % 2 == 0 and t >= 4
       dualPeriodMXFP8 = (
           isgfx950
           and state["PrefetchGlobalRead"] == 2
@@ -1534,7 +1546,9 @@ class Solution(collections.abc.Mapping):
           and state["ProblemType"]["DataTypeB"].is8bitFloat()
           and not state["ProblemType"]["TLUA"]
           and not state["ProblemType"]["TLUB"]
-          and state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16)
+          and state["MatrixInstM"] == 16 and state["MatrixInstN"] == 16
+          and (_dualPeriodDimCanPartition(state["MIWaveTile"][0])
+               or _dualPeriodDimCanPartition(state["MIWaveTile"][1])))
       state["_DualPeriodMXFP8"] = dualPeriodMXFP8
 
       # DepthU must be a multiple of numSubIterK * MIK * LSU, where numSubIterK is
@@ -3114,10 +3128,36 @@ class Solution(collections.abc.Mapping):
                  f"{_name}={_val} must be a power of two (LraTileAssignment vectorStaticRemainder fast path)")
           return
       if state["UseSubtileImpl"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-        if state["MIWaveTile"][0] % 2 != 0 or state["MIWaveTile"][1] % 2 != 0:
+        # The MX scale local-read packs 2 MMA tiles in M x 2 in K per VGPR
+        # (MXScaleLRGeometry.subtileShape = (2, 2)), which historically forced
+        # even MIWaveTile.  mxfp8 (8-bit-float A and B) now sizes the scale grid
+        # with ceil (see TileInfo MXScale branch), so an odd MIWaveTile allocates
+        # a full trailing scale group whose unused half is inert.
+        #
+        # The supported odd case (GPU full-element validated, single- and
+        # multi-workgroup) is a single MMA tile in a single wave -- MIWaveTile == 1
+        # and MIWaveGroup == 1, i.e. MacroTile == 16 in that dim: the 16xN / Mx16
+        # skinny target. A 16-row tile is exactly half of the 32-row MX scale
+        # swizzle group, so two adjacent workgroups share one group; the
+        # per-workgroup scale SRD base in computeLoadSrd handles that split
+        # (floor(WG*MT/swizzleSize0) group + intra-group M-tile byte).
+        # A larger odd MIWaveTile (e.g. 3, MT48) is 1.5 swizzle groups and does
+        # not align, and odd MIWaveTile with >1 wave has inexact per-wave scale
+        # sizing; both, and fp4/fp6, stay even.
+        is8bitMX = (state["ProblemType"]["DataTypeA"].is8bitFloat()
+                    and state["ProblemType"]["DataTypeB"].is8bitFloat())
+        def _miWaveTileDimOk(d):
+          return (state["MIWaveTile"][d] % 2 == 0
+                  or (is8bitMX and state["MIWaveTile"][d] == 1
+                      and state["MIWaveGroup"][d] == 1))
+        if not (_miWaveTileDimOk(0) and _miWaveTileDimOk(1)):
           reject(state, printRejectionReason,
-                 "UseSubtileImpl=1 with MX datatype requires even MIWaveTile, got [%d, %d]"
-                 % (state["MIWaveTile"][0], state["MIWaveTile"][1]))
+                 "UseSubtileImpl=1 with MX datatype requires even MIWaveTile "
+                 "(mxfp8 also allows MIWaveTile==1 with MIWaveGroup==1 in that "
+                 "dim, the 16xN / Mx16 skinny case), got MIWaveTile=[%d, %d] "
+                 "MIWaveGroup=[%d, %d]"
+                 % (state["MIWaveTile"][0], state["MIWaveTile"][1],
+                    state["MIWaveGroup"][0], state["MIWaveGroup"][1]))
           return
       if isaInfoMap[isa].asmCaps["HasMFMA"]:
         if not state["ProblemType"]["HighPrecisionAccumulate"] \
