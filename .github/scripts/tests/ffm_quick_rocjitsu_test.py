@@ -69,16 +69,41 @@ class ParseInstalledCTestTest(unittest.TestCase):
             tests["test_hip_api_gpus_ffm-quick_suite"]["command"][:2],
             ["../test_hip_api", "--gtest_filter=Smoke*"],
         )
-        self.assertEqual(sweep.timeout_seconds(tests["test_hiprand_kernel"]), 1800)
+        self.assertEqual(sweep.timeout_seconds(tests["test_hiprand_kernel"]), 3600)
         self.assertEqual(
-            sweep.timeout_seconds(tests["rocblas-test_ffm-quick_suite"]), 10800
+            sweep.timeout_seconds(tests["rocblas-test_ffm-quick_suite"]), 3600
         )
 
-    def test_installed_gpu_timeout_is_scaled_for_rocjitsu(self):
-        self.assertEqual(sweep.timeout_seconds({"timeout": 300}), 3000)
-        self.assertEqual(sweep.timeout_seconds({"timeout": 30}), 1800)
-        self.assertEqual(sweep.timeout_seconds({"timeout": 7200}), 10800)
-        self.assertEqual(sweep.timeout_seconds({"timeout": None}), 1800)
+    def test_share_ctest_directory_uses_short_component_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ctest(
+                root / "share" / "hsa-amd-aqlprofile",
+                ["unittests"],
+                ["legacy-tests"],
+            )
+            found = sweep.discover(root, label="^quick$", components=["aqlprofile"])
+            self.assertEqual([item["component"] for item in found], ["aqlprofile"])
+            self.assertEqual(found[0]["tests"][0]["name"], "legacy-tests")
+
+    def test_named_rocjpeg_uses_quick_sample_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "share" / "rocjpeg" / "samples" / "jpegDecode").mkdir(parents=True)
+            (root / "share" / "rocjpeg" / "images").mkdir()
+            found = sweep.discover(root, label="^quick$", components=["rocjpeg"])
+            self.assertEqual([item["component"] for item in found], ["rocjpeg"])
+            self.assertEqual(
+                [test["name"] for test in found[0]["tests"]],
+                [name for name, _extra in sweep.JPEG_QUICK_CASES],
+            )
+            self.assertEqual(sweep.discover(root, label="^quick$"), [])
+
+    def test_rocjitsu_timeout_is_one_hour(self):
+        self.assertEqual(sweep.timeout_seconds({"timeout": 300}), 3600)
+        self.assertEqual(sweep.timeout_seconds({"timeout": 7200}), 3600)
+        self.assertEqual(sweep.timeout_seconds({"timeout": None}), 3600)
+        self.assertEqual(sweep.timeout_seconds({}), 3600)
 
     def test_skip_regex_matches_ctest_output(self):
         regex = sweep.parse_ctest_file(SAMPLE)["bilinear ffm-quick"]["skip_regex"]

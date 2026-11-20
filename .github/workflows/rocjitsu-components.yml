@@ -76,7 +76,7 @@ jobs:
         id: list
         env:
           CTEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
-          COMPONENTS: ${{ github.event_name == 'push' && 'hipsolver' || inputs.components }}
+          COMPONENTS: ${{ github.event_name == 'push' && 'aqlprofile,rocjpeg,rocdecode' || inputs.components }}
         run: |
           set -euo pipefail
           args=(
@@ -167,6 +167,37 @@ jobs:
           tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
           test -x "$root/bin/rocminfo"
           echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Build rocjpeg and rocdecode quick samples
+        run: |
+          set -euo pipefail
+          export ROCM_PATH="$ROCM_ROOT"
+          cc="$ROCM_ROOT/lib/llvm/bin/amdclang"
+          cxx="$ROCM_ROOT/lib/llvm/bin/amdclang++"
+          build_sample() {
+            local src="$1"
+            local dest="$2"
+            cmake -S "$src" -B "$dest" -G Ninja \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_PREFIX_PATH="$ROCM_ROOT" \
+              -DROCM_PATH="$ROCM_ROOT" \
+              -DGPU_TARGETS=gfx942 \
+              -DCMAKE_C_COMPILER="$cc" \
+              -DCMAKE_CXX_COMPILER="$cxx"
+            cmake --build "$dest"
+          }
+          case "$COMPONENT" in
+            rocjpeg)
+              build_sample \
+                "$ROCM_ROOT/share/rocjpeg/samples/jpegDecode" \
+                "$PWD/rj-samples/jpegDecode"
+              ;;
+            rocdecode)
+              build_sample \
+                "$ROCM_ROOT/share/rocdecode/samples/videoDecodeRaw" \
+                "$PWD/rj-samples/videoDecodeRaw"
+              ;;
+          esac
 
       - name: Run ${{ matrix.component }} under rocJITsu
         run: |

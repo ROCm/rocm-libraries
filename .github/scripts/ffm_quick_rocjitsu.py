@@ -6,10 +6,8 @@
 
 Walks the nightly's CTestTestfile.cmake files, selects tests by CTest label,
 and launches each selected command as ``rocjitsu --config <gfx942> --
-<command>``. A failing suite is recorded and the walk continues. Installed
-CTest TIMEOUT values are the GPU budget, so rocJITsu multiplies them. Each
-suite is still capped at three hours so one case cannot consume the whole
-six-hour job.
+<command>``. A failing suite is recorded and the walk continues. Each suite
+gets one hour. The installed CTest TIMEOUT is the GPU budget and is not used.
 
 By default the label is ``^ffm-quick$`` so the existing hipRAND sweep keeps
 working. Pass ``--label '^quick$'`` for the on-demand component workflow, and
@@ -28,11 +26,8 @@ from pathlib import Path
 
 EXCLUDE_PATTERN = re.compile(r"ex_gpu")
 DEFAULT_LABEL = r"^ffm-quick$"
-DEFAULT_TIMEOUT = 1800
-# Installed TIMEOUT is the GPU limit. rocJITsu needs a longer budget.
-ROCJITSU_TIMEOUT_MULTIPLIER = 10
-# Three hours. The component job limit is six hours.
-TIMEOUT_CAP = 3 * 60 * 60
+# One hour per suite. The installed CTest TIMEOUT is the GPU budget.
+DEFAULT_TIMEOUT = 60 * 60
 
 
 def tokenize_cmake_args(text: str) -> list[str]:
@@ -174,22 +169,100 @@ def selects_ffm_quick(test: dict) -> bool:
     return selects_label(test, label_pattern(DEFAULT_LABEL))
 
 
-def timeout_seconds(test: dict) -> int:
+def timeout_seconds(_test: dict) -> int:
     """Return the rocJITsu kill time for one installed test.
 
-    A missing TIMEOUT keeps the 30-minute default. An installed GPU timeout is
-    multiplied, then raised to that default and capped at three hours.
+    Every suite gets one hour. The parsed CTest TIMEOUT is the GPU budget and
+    is ignored.
     """
-    raw = test.get("timeout")
-    if raw is None:
-        return DEFAULT_TIMEOUT
-    scaled = max(int(raw) * ROCJITSU_TIMEOUT_MULTIPLIER, DEFAULT_TIMEOUT)
-    return max(1, min(scaled, TIMEOUT_CAP))
+    return DEFAULT_TIMEOUT
 
 
 def parse_component_names(text: str) -> list[str]:
     """Split a comma-separated component filter. Empty means no filter."""
     return [part.strip() for part in text.split(",") if part.strip()]
+
+
+SHARE_COMPONENT_ALIASES = {
+    "hsa-amd-aqlprofile": "aqlprofile",
+}
+JPEG_QUICK_CASES = (
+    ("jpeg-decode-fmt-native", []),
+    ("jpeg-decode-fmt-yuv-planar", ["-fmt", "yuv_planar"]),
+    ("jpeg-decode-fmt-y", ["-fmt", "y"]),
+    ("jpeg-decode-fmt-rgb", ["-fmt", "rgb"]),
+    ("jpeg-decode-fmt-rgb-planar", ["-fmt", "rgb_planar"]),
+)
+ROCDECODE_QUICK_CASES = (
+    ("video_decodeRaw-HEVC", "AMD_driving_virtual_20-H265.265"),
+    ("video_decodeRaw-AVC", "AMD_driving_virtual_20-H264.264"),
+    ("video_decodeRaw-AV1", "AMD_driving_virtual_20-AV1.ivf"),
+    ("video_decodeRaw-VP9", "AMD_driving_virtual_20-VP9.ivf"),
+)
+
+
+def component_name_for(rocm_root: Path, ctest_file: Path) -> str | None:
+    """Name a CTest directory under bin/ or share/."""
+    for root_name in ("bin", "share"):
+        root = rocm_root / root_name
+        try:
+            relative = ctest_file.parent.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if root_name == "bin":
+            return relative
+        top = relative.split("/", 1)[0]
+        return SHARE_COMPONENT_ALIASES.get(top, top)
+    return None
+
+
+def _sample_root() -> Path:
+    return Path(os.environ.get("ROCJITSU_SAMPLE_ROOT", "rj-samples"))
+
+
+def _quick_test(name: str, command: list[str]) -> dict:
+    return {
+        "name": name,
+        "command": command,
+        "labels": ["quick"],
+        "timeout": None,
+        "skip_regex": "",
+        "working_directory": "",
+    }
+
+
+def source_quick_group(rocm_root: Path, name: str) -> dict | None:
+    """Quick cases whose binaries are built from the nightly sample sources.
+
+    rocjpeg and rocdecode ship CMake sources under share/, not a prebuilt
+    CTest binary. The workflow builds the sample before these commands run.
+    """
+    if name == "rocjpeg":
+        source = rocm_root / "share" / "rocjpeg" / "samples" / "jpegDecode"
+        images = rocm_root / "share" / "rocjpeg" / "images"
+        if not source.is_dir() or not images.is_dir():
+            return None
+        binary = str(_sample_root() / "jpegDecode" / "jpegdecode")
+        tests = [
+            _quick_test(test_name, [binary, "-i", str(images), *extra])
+            for test_name, extra in JPEG_QUICK_CASES
+        ]
+        return {"component": name, "directory": source, "tests": tests}
+    if name == "rocdecode":
+        source = rocm_root / "share" / "rocdecode" / "samples" / "videoDecodeRaw"
+        video = rocm_root / "share" / "rocdecode" / "video"
+        if not source.is_dir() or not video.is_dir():
+            return None
+        binary = str(_sample_root() / "videoDecodeRaw" / "videodecoderaw")
+        tests = [
+            _quick_test(
+                test_name,
+                [binary, "-i", str(video / filename)],
+            )
+            for test_name, filename in ROCDECODE_QUICK_CASES
+        ]
+        return {"component": name, "directory": source, "tests": tests}
+    return None
 
 
 def discover(
@@ -200,8 +273,10 @@ def discover(
 ) -> list[dict]:
     """Installed tests matching ``label``, fewest tests in a directory first.
 
-    ``component`` selects one directory under ``bin/``. ``components`` selects
-    a set. When both are empty, every matching directory is returned.
+    ``component`` selects one directory. ``components`` selects a set. When
+    both are empty, every matching directory under ``bin/`` and ``share/`` is
+    returned. Named rocjpeg and rocdecode requests also include the quick
+    sample cases, which are built from share/ sources.
     """
     pattern = label_pattern(label)
     wanted: set[str] | None = None
@@ -211,27 +286,50 @@ def discover(
         wanted = set(components)
 
     groups = []
-    bin_dir = rocm_root / "bin"
-    for ctest_file in sorted(bin_dir.rglob("CTestTestfile.cmake")):
-        relative = ctest_file.parent.relative_to(bin_dir).as_posix()
-        if wanted is not None and relative not in wanted:
+    seen: set[str] = set()
+    roots = [rocm_root / "bin", rocm_root / "share"]
+    ctest_files = []
+    for root in roots:
+        if root.is_dir():
+            ctest_files.extend(sorted(root.rglob("CTestTestfile.cmake")))
+    for ctest_file in ctest_files:
+        name = component_name_for(rocm_root, ctest_file)
+        if name is None or name in seen:
             continue
-        tests = [
-            test
-            for test in parse_ctest_file(
+        if wanted is not None and name not in wanted:
+            continue
+        parsed = list(
+            parse_ctest_file(
                 ctest_file.read_text(encoding="utf-8", errors="replace")
             ).values()
-            if selects_label(test, pattern)
-        ]
+        )
+        tests = [test for test in parsed if selects_label(test, pattern)]
+        under_share = "share" in ctest_file.parts
+        if not tests and wanted is not None and under_share:
+            tests = [
+                test
+                for test in parsed
+                if not any(EXCLUDE_PATTERN.search(label) for label in test["labels"])
+            ]
         if not tests:
             continue
+        seen.add(name)
         groups.append(
             {
-                "component": relative,
+                "component": name,
                 "directory": ctest_file.parent,
                 "tests": tests,
             }
         )
+    if wanted is not None:
+        for name in sorted(wanted):
+            if name in seen:
+                continue
+            group = source_quick_group(rocm_root, name)
+            if group is None:
+                continue
+            seen.add(name)
+            groups.append(group)
     groups.sort(key=lambda group: (len(group["tests"]), group["component"]))
     return groups
 
