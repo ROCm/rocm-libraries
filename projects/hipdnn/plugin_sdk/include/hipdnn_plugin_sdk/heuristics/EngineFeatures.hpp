@@ -18,7 +18,18 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+#include <cstddef>
+#include <cstring>
+#include <list>
+#include <memory>
+#include <mutex>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
+
 #include <hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphContentKey.hpp>
 #include <hipdnn_plugin_sdk/heuristics/DeviceFeatures.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/FeatureExtractor.hpp>
 #endif
@@ -102,7 +113,7 @@ inline bool shaped(const Tensor* value, size_t minimumRank)
 }
 
 /// A shaped floating-point operand: the matrix-product families (Matmul, convolutions,
-/// attention) count floating-point multiply-adds only.
+/// attention, the MoE grouped matmuls, GDN and KDA) count floating-point multiply-adds only.
 inline bool dimensions(const Tensor* value, size_t minimumRank)
 {
     return value != nullptr && floatingPoint(value->data_type()) && shaped(value, minimumRank);
@@ -174,66 +185,213 @@ inline std::optional<double>
            / static_cast<double>(filter->dims()->Get(0));
 }
 
-/// Dense attention's QK^T and PV multiply-adds over the score pairs its causal mask keeps.
-/// Refuses, for the fields forward and backward share, what makes the pair count depend on
-/// more than shapes and mask flags; operands whose contents decide it (ragged offsets,
-/// sequence lengths, page tables, block masks) are refused by logicalFlops.
+/// Score pairs attention computes, summed exactly: for each of @p sq query rows, the keys of
+/// [0, @p sk) inside its band. Row i's diagonal is key i + @p shift (0 top-left, Sk - Sq
+/// bottom-right); @p left keeps that many keys up to and including the diagonal and @p right
+/// that many past it, an absent side being unbounded (cuDNN's band, SEM-001). Causal is
+/// right = 0. A row the band leaves empty contributes nothing.
+inline int64_t bandPairs(int64_t sq,
+                         int64_t sk,
+                         int64_t shift,
+                         std::optional<int64_t> left,
+                         std::optional<int64_t> right)
+{
+    int64_t pairs = 0;
+    for(int64_t row = 0; row < sq; ++row)
+    {
+        const auto diagonal = row + shift;
+        const auto first = left ? std::max<int64_t>(0, diagonal - *left + 1) : int64_t{0};
+        const auto last = right ? std::min<int64_t>(sk - 1, diagonal + *right) : sk - 1;
+        pairs += std::max<int64_t>(0, last - first + 1);
+    }
+    return pairs;
+}
+
+/// The keys per sequence an attention node declares, and which of K and V are paged: a paged
+/// side is a cache [blocks, heads, block size, D], an unpaged one [B, heads, keys, D].
+struct KeyExtent
+{
+    int64_t keys = 0;
+    bool pagedK = false;
+    bool pagedV = false;
+};
+
+/// The keys of an unpaged node: K's sequence extent.
 template <typename TAttention>
-std::optional<double> attentionFlops(const Graph& graph, const TAttention& op)
+std::optional<KeyExtent> denseKeys(const Graph& graph, const TAttention& op)
+{
+    const auto* k = tensor(graph, op.k_tensor_uid());
+    if(!shaped(k, 4) || k->dims()->size() != 4)
+    {
+        return std::nullopt;
+    }
+    return KeyExtent{k->dims()->Get(2)};
+}
+
+/// The keys per sequence an SDPA forward node declares, inferred in the order of cuDNN's
+/// `infer_s_kv` and the test SDK references' `sdpaPagedMaxSeqKv`. Either K or V may be paged
+/// alone, each side with its own table [B, 1, pages, 1] and block size. The keys are
+/// `max_seq_len_kv` when stated; else an unpaged K's, then V's, sequence extent; else the
+/// attention mask's last extent; else rng_dump's; else the smaller of the paged sides' pages x
+/// block size. Nullopt when they cannot be read, exceed a paged side's capacity or differ from
+/// an unpaged side's extent: the work is then unknown. On every layout `sdpaPagedMaxSeqKv`
+/// accepts the keys are the same. It counts a superset: it does not require `seq_len_q` and
+/// `seq_len_kv`, an INT32 table of shape [B, 1, pages, 1], a table of exactly
+/// ceil(keys / block size) pages, or a mask as wide as the keys or 1, so a table wider than the
+/// keys counts the keys, and a mask broadcast over the keys (last extent 1) on two paged sides
+/// gives one key, as `infer_s_kv` does. The bench writes `seq_len_kv` and `cu_seq_len_kv` from
+/// the same keys.
+inline std::optional<KeyExtent>
+    keyExtent(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& op)
+{
+    const auto tableK = op.page_table_k_tensor_uid();
+    const auto tableV = op.page_table_v_tensor_uid();
+    if(!tableK && !tableV)
+    {
+        return denseKeys(graph, op);
+    }
+    const auto capacity = [&graph](int64_t table, int64_t cache) -> std::optional<int64_t> {
+        const auto* pages = tensor(graph, table);
+        const auto* blocks = tensor(graph, cache);
+        if(!shaped(pages, 3) || !shaped(blocks, 4))
+        {
+            return std::nullopt;
+        }
+        return pages->dims()->Get(2) * blocks->dims()->Get(2);
+    };
+    const auto lastExtent = [&graph](int64_t uid) -> std::optional<int64_t> {
+        const auto* value = tensor(graph, uid);
+        if(!shaped(value, 1))
+        {
+            return std::nullopt;
+        }
+        return value->dims()->Get(value->dims()->size() - 1);
+    };
+    std::optional<int64_t> capacityK;
+    std::optional<int64_t> capacityV;
+    if(tableK)
+    {
+        capacityK = capacity(*tableK, op.k_tensor_uid());
+    }
+    if(tableV)
+    {
+        capacityV = capacity(*tableV, op.v_tensor_uid());
+    }
+    if((tableK && !capacityK) || (tableV && !capacityV))
+    {
+        return std::nullopt;
+    }
+    std::optional<int64_t> keys;
+    if(op.max_seq_len_kv())
+    {
+        keys = static_cast<int64_t>(*op.max_seq_len_kv());
+    }
+    else if(!tableK || !tableV)
+    {
+        const auto* unpaged = tensor(graph, tableK ? op.v_tensor_uid() : op.k_tensor_uid());
+        if(shaped(unpaged, 4) && unpaged->dims()->size() == 4)
+        {
+            keys = unpaged->dims()->Get(2);
+        }
+    }
+    else if(op.attn_mask_tensor_uid())
+    {
+        keys = lastExtent(*op.attn_mask_tensor_uid());
+    }
+    else if(op.rng_dump_tensor_uid())
+    {
+        keys = lastExtent(*op.rng_dump_tensor_uid());
+    }
+    else
+    {
+        keys = std::min(*capacityK, *capacityV);
+    }
+    if(!keys || *keys <= 0 || (capacityK && *keys > *capacityK)
+       || (capacityV && *keys > *capacityV))
+    {
+        return std::nullopt;
+    }
+    // An unpaged side holds the keys itself: [B, heads, keys, D].
+    for(const auto& [paged, uid] : {std::pair{tableK.has_value(), op.k_tensor_uid()},
+                                    std::pair{tableV.has_value(), op.v_tensor_uid()}})
+    {
+        const auto* side = tensor(graph, uid);
+        if(!paged && (!shaped(side, 4) || side->dims()->Get(2) != *keys))
+        {
+            return std::nullopt;
+        }
+    }
+    return KeyExtent{*keys, tableK.has_value(), tableV.has_value()};
+}
+
+/// Attention's logical work: the QK^T and PV multiply-adds over the score pairs its band keeps,
+/// for the problem the graph declares (RFC 0019 section 6.8). Where operand contents decide how
+/// much of it runs (sequence lengths, ragged offsets, cu_seq_len, page tables, block masks) this
+/// is the declared extent, which `data_dependent` marks. Elementwise work on the scores (scale,
+/// bias, ALiBi, softmax, dropout, sinks, FP8 scaling) is not counted, as softmax never was.
+/// @p extent gives the keys per sequence and which sides are paged caches.
+template <typename TAttention>
+std::optional<double>
+    attentionFlops(const Graph& graph, const TAttention& op, const std::optional<KeyExtent>& extent)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
     const auto* q = tensor(graph, op.q_tensor_uid());
     const auto* k = tensor(graph, op.k_tensor_uid());
     const auto* v = tensor(graph, op.v_tensor_uid());
     const auto* o = tensor(graph, op.o_tensor_uid());
-    if(!dimensions(q, 4) || !dimensions(k, 4) || !dimensions(v, 4) || !dimensions(o, 4)
+    if(!extent || !dimensions(q, 4) || !dimensions(k, 4) || !dimensions(v, 4) || !dimensions(o, 4)
        || q->dims()->size() != 4 || k->dims()->size() != 4 || v->dims()->size() != 4
-       || o->dims()->size() != 4 || op.attn_mask_tensor_uid() || op.padding_mask()
-       || op.alibi_mask() || op.dropout_mask_tensor_uid() || op.dropout_scale_tensor_uid()
-       || (op.dropout_probability() && *op.dropout_probability() != 0.0F)
-       || (op.left_bound() && *op.left_bound() >= 0)
-       || (op.right_bound() && *op.right_bound() != 0 && *op.right_bound() != -1))
+       || o->dims()->size() != 4)
     {
         return std::nullopt;
     }
     const auto batch = q->dims()->Get(0);
     const auto heads = q->dims()->Get(1);
     const auto sq = q->dims()->Get(2);
-    const auto sk = k->dims()->Get(2);
     const auto dq = q->dims()->Get(3);
     const auto dv = v->dims()->Get(3);
-    if(k->dims()->Get(0) != batch || v->dims()->Get(0) != batch || o->dims()->Get(0) != batch
-       || k->dims()->Get(1) != v->dims()->Get(1) || heads % k->dims()->Get(1) != 0
-       || o->dims()->Get(1) != heads || v->dims()->Get(2) != sk || o->dims()->Get(2) != sq
-       || k->dims()->Get(3) != dq || o->dims()->Get(3) != dv)
+    const auto sk = extent->keys;
+    // A paged cache holds blocks, not sequences, along its first and third axes.
+    const auto unpagedMatches = [batch, sk](const Tensor& side) {
+        return side.dims()->Get(0) == batch && side.dims()->Get(2) == sk;
+    };
+    if(sk <= 0 || (!extent->pagedK && !unpagedMatches(*k))
+       || (!extent->pagedV && !unpagedMatches(*v)) || k->dims()->Get(1) != v->dims()->Get(1)
+       || heads % k->dims()->Get(1) != 0 || o->dims()->Get(0) != batch || o->dims()->Get(1) != heads
+       || o->dims()->Get(2) != sq || k->dims()->Get(3) != dq || o->dims()->Get(3) != dv)
     {
         return std::nullopt;
     }
-    const bool causal = op.causal_mask() || op.causal_mask_bottom_right()
-                        || (op.right_bound() && *op.right_bound() == 0);
+    // The deprecated causal flags compose as cuDNN's setters do (SEM-002, the references'
+    // extractDiagonalBandParams): a flag means right_bound 0 unless one of at least 0 is
+    // stated, and causal_mask_bottom_right also means BOTTOM_RIGHT. A band outside hipDNN's
+    // domain has unknown work: the frontend rejects left_bound 0 and a bound below -1
+    // (SEM-005), and the references and the hip-kernel-provider reject both flags together.
+    std::optional<int64_t> left = op.left_bound();
+    std::optional<int64_t> right = op.right_bound();
+    if((left && (*left == 0 || *left < -1)) || (right && *right < -1)
+       || (op.causal_mask() && op.causal_mask_bottom_right()))
+    {
+        return std::nullopt;
+    }
+    // -1 is unbounded, as an absent bound is.
+    if(left && *left < 0)
+    {
+        left.reset();
+    }
+    if(right && *right < 0)
+    {
+        right.reset();
+    }
+    if(!right && (op.causal_mask() || op.causal_mask_bottom_right()))
+    {
+        right = 0;
+    }
     const bool bottomRight = op.causal_mask_bottom_right()
                              || op.diagonal_alignment() == DiagonalAlignment::BOTTOM_RIGHT;
-    double pairs = static_cast<double>(sq) * static_cast<double>(sk);
-    if(causal)
-    {
-        if(bottomRight)
-        {
-            // The formula assumes Sq <= Sk; with Sq > Sk the mask has empty rows.
-            if(sq > sk)
-            {
-                return std::nullopt;
-            }
-            pairs -= static_cast<double>(sq) * static_cast<double>(sq - 1) / 2.0;
-        }
-        else
-        {
-            const auto triangle = std::min(sq, sk);
-            pairs = static_cast<double>(triangle) * (static_cast<double>(triangle) + 1.0) / 2.0
-                    + static_cast<double>(sq - triangle) * static_cast<double>(sk);
-        }
-    }
-    return 2.0 * static_cast<double>(batch) * static_cast<double>(heads) * pairs
-           * (static_cast<double>(dq) + static_cast<double>(dv));
+    const auto pairs = bandPairs(sq, sk, bottomRight ? sk - sq : 0, left, right);
+    return 2.0 * static_cast<double>(batch) * static_cast<double>(heads)
+           * static_cast<double>(pairs) * (static_cast<double>(dq) + static_cast<double>(dv));
 }
 
 // One overload per node type not in NO_COUNTING_CONVENTION, each with a logicalFlops case.
@@ -305,30 +463,17 @@ inline std::optional<double>
 inline std::optional<double>
     nodeFlops(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& op)
 {
-    // Paged caches, block-sparse masks, sink tokens and FP8 scaling have no counting
-    // convention yet.
-    if(op.page_table_k_tensor_uid() || op.page_table_v_tensor_uid() || op.block_mask_tensor_uid()
-       || op.sink_token_tensor_uid() || op.descale_q_tensor_uid() || op.descale_k_tensor_uid()
-       || op.descale_v_tensor_uid() || op.descale_s_tensor_uid() || op.scale_s_tensor_uid()
-       || op.scale_o_tensor_uid())
-    {
-        return std::nullopt;
-    }
-    return attentionFlops(graph, op);
+    return attentionFlops(graph, op, keyExtent(graph, op));
 }
 
 /// FlashAttention's convention: 2.5x the forward, which recomputes QK^T and adds the dV,
-/// dP, dQ and dK products to the forward's two.
+/// dP, dQ and dK products to the forward's two. A bias gradient is a reduction of dP and
+/// inverse-scaled dropout elementwise, so neither adds to it.
 inline std::optional<double>
     nodeFlops(const Graph& graph,
               const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& op)
 {
-    // A bias gradient's reduction and inverse-scaled dropout have no convention yet.
-    if(op.dbias_tensor_uid() || op.dropout_scale_inv_tensor_uid())
-    {
-        return std::nullopt;
-    }
-    const auto forward = attentionFlops(graph, op);
+    const auto forward = attentionFlops(graph, op, denseKeys(graph, op));
     if(!forward)
     {
         return std::nullopt;
@@ -433,6 +578,91 @@ inline std::optional<double>
     return perElement(tensor(graph, op.x_tensor_uid()), 2.0);
 }
 
+/// The declared routed rows' K x N multiply-adds: token [1, T, K], weight [E, K, N] and
+/// output [1, R, N]. Gathering routes the output's R rows, the other modes the token's T;
+/// which of them a group covers is the routing offsets' contents, so this is the declared
+/// extent (RFC 0019 section 6.8).
+inline std::optional<double>
+    nodeFlops(const Graph& graph,
+              const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulAttributes& op)
+{
+    const auto* token = tensor(graph, op.token_tensor_uid());
+    const auto* weight = tensor(graph, op.weight_tensor_uid());
+    const auto* output = tensor(graph, op.output_tensor_uid());
+    if(!dimensions(token, 2) || !dimensions(weight, 3) || !dimensions(output, 2))
+    {
+        return std::nullopt;
+    }
+    const auto tr = token->dims()->size();
+    const auto wr = weight->dims()->size();
+    const auto orank = output->dims()->size();
+    const auto k = weight->dims()->Get(wr - 2);
+    const auto n = weight->dims()->Get(wr - 1);
+    if(token->dims()->Get(tr - 1) != k || output->dims()->Get(orank - 1) != n)
+    {
+        return std::nullopt;
+    }
+    const auto rows
+        = op.mode() == hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulMode::GATHER
+              ? output->dims()->Get(orank - 2)
+              : token->dims()->Get(tr - 2);
+    return 2.0 * static_cast<double>(rows) * static_cast<double>(k) * static_cast<double>(n);
+}
+
+/// The weight gradient's K x N multiply-adds over the declared rows: token [1, T, K],
+/// doutput [1, T, N].
+inline std::optional<double>
+    nodeFlops(const Graph& graph,
+              const hipdnn_flatbuffers_sdk::data_objects::MoeGroupedMatmulBwdAttributes& op)
+{
+    const auto* token = tensor(graph, op.token_tensor_uid());
+    const auto* doutput = tensor(graph, op.doutput_tensor_uid());
+    if(!dimensions(token, 2) || !dimensions(doutput, 2))
+    {
+        return std::nullopt;
+    }
+    const auto tr = token->dims()->size();
+    const auto dr = doutput->dims()->size();
+    const auto rows = token->dims()->Get(tr - 2);
+    if(doutput->dims()->Get(dr - 2) != rows)
+    {
+        return std::nullopt;
+    }
+    return 2.0 * static_cast<double>(rows) * static_cast<double>(token->dims()->Get(tr - 1))
+           * static_cast<double>(doutput->dims()->Get(dr - 1));
+}
+
+/// The delta-rule recurrence's multiply-adds per token and output head: S k, the rank-one
+/// update (v - S k) k^T, which carries both the correction and the write since
+/// S (I - beta k k^T) + beta v k^T = S + beta (v - S k) k^T, and S q, each V x K; decay and
+/// gating are elementwise and not counted. q [T, H, K] and o [T, HO, V] are token-packed, so
+/// how the tokens split into sequences does not change it.
+template <typename TRecurrence>
+std::optional<double> deltaRuleFlops(const Graph& graph, const TRecurrence& op)
+{
+    const auto* q = tensor(graph, op.q_tensor_uid());
+    const auto* o = tensor(graph, op.o_tensor_uid());
+    if(!dimensions(q, 3) || !dimensions(o, 3) || q->dims()->size() != 3 || o->dims()->size() != 3
+       || q->dims()->Get(0) != o->dims()->Get(0))
+    {
+        return std::nullopt;
+    }
+    return 6.0 * static_cast<double>(q->dims()->Get(0)) * static_cast<double>(o->dims()->Get(1))
+           * static_cast<double>(o->dims()->Get(2)) * static_cast<double>(q->dims()->Get(2));
+}
+
+inline std::optional<double>
+    nodeFlops(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::GdnAttributes& op)
+{
+    return deltaRuleFlops(graph, op);
+}
+
+inline std::optional<double>
+    nodeFlops(const Graph& graph, const hipdnn_flatbuffers_sdk::data_objects::KdaAttributes& op)
+{
+    return deltaRuleFlops(graph, op);
+}
+
 template <typename TAttributes>
 std::optional<double> flopsOf(const Graph& graph, const TAttributes* op)
 {
@@ -449,12 +679,6 @@ inline constexpr std::array NO_COUNTING_CONVENTION{
     NodeAttributes::NONE,
     // Opaque: the graph does not say what the op computes.
     NodeAttributes::CustomOpAttributes,
-    // Rows per expert follow the routing offsets' contents, not the shapes.
-    NodeAttributes::MoeGroupedMatmulAttributes,
-    NodeAttributes::MoeGroupedMatmulBwdAttributes,
-    // Linear-attention recurrences with no agreed count of their logical work yet.
-    NodeAttributes::GdnAttributes,
-    NodeAttributes::KdaAttributes,
 };
 
 constexpr bool hasCountingConvention(NodeAttributes type)
@@ -469,14 +693,15 @@ constexpr bool hasCountingConvention(NodeAttributes type)
     return true;
 }
 
-/// Logical work of @p node, the same for every engine. Unknown, never 0, when a dimension
-/// is, when the type is in NO_COUNTING_CONVENTION, or when @p dataDependent (operand contents
-/// such as routing offsets, ragged lengths, page tables or block masks decide the work): a
-/// count from the padded shapes would overstate it by an amount the graph cannot say.
-inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, bool dataDependent)
+/// Logical work of the problem @p node declares, the same for every engine (RFC 0019
+/// section 6.8). Where operand contents decide how much of it runs (sequence lengths, ragged
+/// offsets, page tables, block masks, routing offsets) it is the declared extent: the node's
+/// `data_dependent` says so. Unknown, never 0, when the operands do not compose or the type is
+/// in NO_COUNTING_CONVENTION.
+inline std::optional<double> logicalFlops(const Graph& graph, const Node& node)
 {
     const auto type = node.attributes_type();
-    if(dataDependent || !hasCountingConvention(type))
+    if(!hasCountingConvention(type))
     {
         return std::nullopt;
     }
@@ -522,6 +747,14 @@ inline std::optional<double> logicalFlops(const Graph& graph, const Node& node, 
         return flopsOf(graph, node.attributes_as_BlockScaleQuantizeAttributes());
     case NodeAttributes::BlockScaleDequantizeAttributes:
         return flopsOf(graph, node.attributes_as_BlockScaleDequantizeAttributes());
+    case NodeAttributes::MoeGroupedMatmulAttributes:
+        return flopsOf(graph, node.attributes_as_MoeGroupedMatmulAttributes());
+    case NodeAttributes::MoeGroupedMatmulBwdAttributes:
+        return flopsOf(graph, node.attributes_as_MoeGroupedMatmulBwdAttributes());
+    case NodeAttributes::GdnAttributes:
+        return flopsOf(graph, node.attributes_as_GdnAttributes());
+    case NodeAttributes::KdaAttributes:
+        return flopsOf(graph, node.attributes_as_KdaAttributes());
     // A type this build predates. A member of this build's NodeAttributes reaching here has
     // neither a case nor a NO_COUNTING_CONVENTION entry, which TestEngineFeatures rejects.
     default:
@@ -566,8 +799,9 @@ inline std::optional<double> elementBits(hipdnn_flatbuffers_sdk::data_objects::D
 }
 
 /// The graph's logical footprint: each non-virtual tensor once, numel x element size
-/// (fractional for sub-byte types); not allocation size or memory traffic. Unknown when any
-/// tensor's size is: a missing or negative extent, an unset type, or a ragged tensor.
+/// (fractional for sub-byte types); not allocation size or memory traffic. A ragged tensor
+/// counts its declared extent, as its work does. Unknown when any tensor's size is: a missing
+/// or negative extent, or an unset type.
 inline std::optional<double> logicalBytes(const Graph& graph)
 {
     double bytes = 0.0;
@@ -583,7 +817,6 @@ inline std::optional<double> logicalBytes(const Graph& graph)
         }
         const auto bits = elementBits(value->data_type());
         if(!bits || value->dims() == nullptr
-           || hipdnn_flatbuffers_sdk::data_objects::node_operands::workDataDependent(*value)
            || std::any_of(value->dims()->begin(), value->dims()->end(), [](int64_t extent) {
                   return extent < 0;
               }))
@@ -698,10 +931,9 @@ private:
     bool _dataDependent = false;
 };
 
-/// Publishes @p node's operands, `<prefix>.data_dependent`, and derived SDPA flags; returns
-/// the `data_dependent` verdict. Publishes nothing and returns false for a node without
-/// attributes or of an unknown type.
-inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
+/// Publishes @p node's operands, `<prefix>.data_dependent`, and derived SDPA flags. Publishes
+/// nothing for a node without attributes or of an unknown type.
+inline void bindNodeFeatures(uhd::FeatureExtractionContext& features,
                              const Graph& graph,
                              const Node& node,
                              const std::string& prefix)
@@ -709,7 +941,7 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
     NodeFeatureBinder binder(features, graph, prefix);
     if(!hipdnn_flatbuffers_sdk::data_objects::node_operands::visit(node, binder))
     {
-        return false;
+        return;
     }
     features.bind(prefix + ".data_dependent", binder.dataDependent());
     // Derived flags, not schema fields; shipped SDPA models read both.
@@ -720,15 +952,15 @@ inline bool bindNodeFeatures(uhd::FeatureExtractionContext& features,
                       op->seq_len_q_tensor_uid().has_value()
                           || op->seq_len_kv_tensor_uid().has_value());
     }
-    return binder.dataDependent();
 }
 } // namespace detail
 
 /// @brief Publishes the device and graph features fixed by (graph, device) alone.
 ///
 /// Must not read the engine configuration: `sort_kernel_catalog` rankings are cached per
-/// (graph, device, engine version, ranking metric, slot). Work features, absent (never 0) when
-/// unknown, and all graph-level ones absent when the graph allows execute-time shapes:
+/// (graph, device, engine version, ranking metric, slot). Work features count the problem the
+/// graph declares (RFC 0019 section 6.8), override-shape graphs by their declared shapes, and
+/// are absent (never 0) only when it cannot be counted:
 ///   graph.nodes[i].flops         detail::logicalFlops
 ///   graph.flops                  sum over all nodes, virtual intermediates included
 ///   graph.flops_by_type.<Type>   sum per NodeAttributes member, 0 when none
@@ -779,8 +1011,7 @@ inline uhd::FeatureExtractionContext
         }
     }
     using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
-    const bool shapesFixed = !raw.is_override_shape_enabled();
-    bool complete = nodes != nullptr && !nodes->empty() && shapesFixed;
+    bool complete = nodes != nullptr && !nodes->empty();
     double flops = 0.0;
     // Indexed by NodeAttributes value.
     constexpr auto TYPES = static_cast<size_t>(NodeAttributes::MAX) + 1;
@@ -795,8 +1026,8 @@ inline uhd::FeatureExtractionContext
             features.bind(prefix + ".type", static_cast<int64_t>(node.attributes_type()));
             features.bind(prefix + ".compute_data_type",
                           static_cast<int64_t>(node.compute_data_type()));
-            const bool dataDependent = detail::bindNodeFeatures(features, raw, node, prefix);
-            const auto work = detail::logicalFlops(raw, node, dataDependent);
+            detail::bindNodeFeatures(features, raw, node, prefix);
+            const auto work = detail::logicalFlops(raw, node);
             // A type this build predates has no name to publish under.
             const auto type = static_cast<size_t>(node.attributes_type());
             if(work && std::isfinite(*work) && *work > 0.0)
@@ -823,10 +1054,6 @@ inline uhd::FeatureExtractionContext
     {
         features.bind("graph.flops", flops);
     }
-    if(!shapesFixed)
-    {
-        return features;
-    }
     for(size_t type = 1; type < TYPES; ++type)
     {
         if(!unknownByType[type] && std::isfinite(flopsByType[type]))
@@ -848,16 +1075,166 @@ inline uhd::FeatureExtractionContext
     return features;
 }
 
+namespace detail
+{
+/// Everything problemFeatures() reads: the graph's content (GraphContentKey) and the device
+/// values it publishes.
+struct ProblemFeatureKey
+{
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphContentKey graph;
+    std::vector<std::pair<std::string, std::variant<int64_t, double>>> device;
+    size_t hash = 0;
+
+    template <typename TProperties>
+    ProblemFeatureKey(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& source,
+                      const TProperties& properties)
+        : graph(source)
+        , device(deviceFeatureValues(properties))
+    {
+        hash = static_cast<size_t>(graph.hash());
+        const auto mix = [this](uint64_t value) {
+            hash
+                ^= static_cast<size_t>(value) + 0x9e3779b97f4a7c15ULL + (hash << 6U) + (hash >> 2U);
+        };
+        for(const auto& [name, value] : device)
+        {
+            mix(std::hash<std::string>{}(name));
+            std::visit(
+                [&mix](auto held) {
+                    uint64_t bits = 0;
+                    static_assert(sizeof(held) == sizeof(bits));
+                    std::memcpy(&bits, &held, sizeof(bits));
+                    mix(bits);
+                },
+                value);
+        }
+    }
+
+    bool operator==(const ProblemFeatureKey& other) const
+    {
+        return hash == other.hash && device == other.device && graph == other.graph;
+    }
+};
+} // namespace detail
+
+/// @brief Recently computed problemFeatures(), shared by every engine of one plugin.
+///
+/// The backend asks each applicable engine for its estimate of the same graph in turn, and
+/// each one needs the same problem features: they depend on the graph and the device alone
+/// (problemFeatures()). The cache builds them once per (graph content, device) and hands each
+/// engine the same immutable context, which the engine's own context reads through
+/// (uhd::FeatureExtractionContext's shared base) while binding its own names on top.
+///
+/// Least recently used, a few entries: one selection asks for one graph, and a few threads
+/// may select at once. A graph without usable content (GraphContentKey::isUsable()) is never
+/// cached. Thread-safe.
+class ProblemFeatureCache
+{
+public:
+    static constexpr size_t CAPACITY = 16;
+
+    /// @returns problemFeatures(@p graph, @p device), computed now or reused.
+    template <typename TProperties>
+    std::shared_ptr<const uhd::FeatureExtractionContext>
+        get(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+            const TProperties& device)
+    {
+        detail::ProblemFeatureKey key(graph, device);
+        if(!key.graph.isUsable())
+        {
+            return std::make_shared<const uhd::FeatureExtractionContext>(
+                problemFeatures(graph, device));
+        }
+        {
+            const std::lock_guard<std::mutex> lock(_mutex);
+            if(auto found = findLocked(key))
+            {
+                return found;
+            }
+        }
+        // Computed outside the lock, so engines selecting for other graphs do not wait.
+        auto computed
+            = std::make_shared<const uhd::FeatureExtractionContext>(problemFeatures(graph, device));
+        const std::lock_guard<std::mutex> lock(_mutex);
+        if(auto found = findLocked(key))
+        {
+            return found; // Another thread computed it first.
+        }
+        _entries.emplace_front(std::move(key), computed);
+        if(_entries.size() > CAPACITY)
+        {
+            _entries.pop_back();
+        }
+        return computed;
+    }
+
+    /// @returns The number of graphs held, at most CAPACITY.
+    size_t size() const
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        return _entries.size();
+    }
+
+    /// Forgets every graph; a context already handed out stays valid for its holders.
+    void clear()
+    {
+        const std::lock_guard<std::mutex> lock(_mutex);
+        _entries.clear();
+    }
+
+private:
+    using Entry = std::pair<detail::ProblemFeatureKey,
+                            std::shared_ptr<const uhd::FeatureExtractionContext>>;
+
+    /// The entry for @p key, moved to the front, or null. Caller holds _mutex.
+    std::shared_ptr<const uhd::FeatureExtractionContext>
+        findLocked(const detail::ProblemFeatureKey& key)
+    {
+        for(auto it = _entries.begin(); it != _entries.end(); ++it)
+        {
+            if(it->first == key)
+            {
+                _entries.splice(_entries.begin(), _entries, it);
+                return _entries.front().second;
+            }
+        }
+        return nullptr;
+    }
+
+    mutable std::mutex _mutex;
+    std::list<Entry> _entries; // Most recently used first.
+};
+
+/// @brief The process-wide (per plugin library) ProblemFeatureCache.
+inline ProblemFeatureCache& problemFeatureCache()
+{
+    static ProblemFeatureCache s_cache;
+    return s_cache;
+}
+
+/// @brief problemFeatures() through problemFeatureCache(): built once per graph and device,
+///        then shared, immutable, by every caller.
+template <typename TProperties>
+inline std::shared_ptr<const uhd::FeatureExtractionContext>
+    sharedProblemFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                          const TProperties& device)
+{
+    return problemFeatureCache().get(graph, device);
+}
+
 /// @brief problemFeatures() plus the engine-level (L1) `constraint.*` features of @p config:
 ///        `constraint.workspace_limit` and `constraint.knobs.<name>` for every pinned knob
 ///        except the benchmarking knob, which chooses how to select, not what.
+///
+/// The problem features are sharedProblemFeatures(), read through; only the `constraint.*`
+/// names are bound in the returned context itself.
 template <typename TProperties>
 inline uhd::FeatureExtractionContext
     engineFeatures(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
                    const TProperties& device)
 {
-    auto features = problemFeatures(graph, device);
+    uhd::FeatureExtractionContext features(sharedProblemFeatures(graph, device));
     if(const auto limit = workspaceLimit(config))
     {
         features.bind("constraint.workspace_limit", *limit);

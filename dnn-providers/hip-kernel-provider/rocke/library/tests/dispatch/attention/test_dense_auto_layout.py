@@ -112,3 +112,28 @@ def test_explicit_pin_is_unchanged():
         "gfx950", algorithm="attention_dense_grid", spec_id="gfx950_dense_grid"
     )
     assert dispatch_attention(req).candidate.name == "attention_gfx950_dense_grid"
+
+
+def test_fp8_dense_layout_auto_pins_to_the_grid_body():
+    """An unpinned fp8 request that declares contiguous tensors gets the dense
+    fp8 kernel.
+
+    This IS a routing change: before fp8 was a declared feature the same request
+    was refused outright, because no candidate served it. It is confined to
+    ``layout='dense'`` (see the companion test), where asking for contiguous
+    tensors already means asking for the dense kernel. fp8 is grid-only, so the
+    persistent bodies the bf16 request would win do not admit it.
+    """
+    result = dispatch_attention(_request("gfx950", use_fp8=True))
+    assert result.candidate.name == "attention_gfx950_dense_grid"
+    assert result.spec.kernel_spec.kv_storage_dtype == "fp8e4m3"
+
+
+def test_fp8_keeps_the_unified_route_off_the_dense_layout():
+    """The fp8 auto-pin above is scoped to ``layout='dense'``.
+
+    Only ``auto`` is checked: ``paged`` and the unset layout are refused for
+    every dtype on this path, so they say nothing about fp8 either way.
+    """
+    result = dispatch_attention(_request("gfx950", use_fp8=True, layout="auto"))
+    assert result.candidate.name == "attention_unified_2d"

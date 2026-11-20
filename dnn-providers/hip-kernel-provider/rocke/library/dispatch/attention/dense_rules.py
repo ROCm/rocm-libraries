@@ -15,6 +15,7 @@ import math
 from dataclasses import dataclass, fields as _dataclass_fields, replace
 from functools import lru_cache
 from itertools import product
+from operator import index
 from typing import Callable, Iterable, Mapping, Optional, Tuple
 
 from kernels.common.attention_dense_kv_split import kv_split_admits
@@ -241,6 +242,40 @@ def resolve_dense_num_persistent(
         raise ValueError(
             f"num_persistent policy must be one of {sorted(counts)}, got {policy!r}"
         ) from None
+
+
+def dense_paged_fields(req) -> dict:
+    """Paged-KV spec fields of a ``layout="paged"`` request; empty for any other.
+
+    The block count is known only from the cache tensor, so this is the smallest
+    cache that holds the request; binding retargets it from ``k.shape[0]``
+    (:meth:`AttentionTuningSpec.with_num_kv_blocks`).
+    """
+    if req.layout.strip().lower() != "paged":
+        return {}
+    try:
+        block_size = index(req.kv_block_size)
+    except TypeError:
+        raise ValueError(
+            f"kv_block_size must be an integer, got {req.kv_block_size!r}"
+        ) from None
+    if block_size <= 0:
+        raise ValueError(f"kv_block_size must be positive, got {block_size}")
+    pages_per_seq = -(-int(req.seqlen_k) // block_size)
+    return {
+        "paged": True,
+        "block_size": block_size,
+        "num_kv_blocks": int(req.batch) * pages_per_seq,
+    }
+
+
+def dense_paged_tile_fits(req, block_m: int, block_n: int) -> bool:
+    """Whether the request's pages fit a ``block_m`` x ``block_n`` tile; True when the
+    request is not paged. A smaller tile that fails this keeps the default tile."""
+    from kernels.common._attention_dense_paged import paged_tile_check
+
+    paged = dense_paged_fields(req)
+    return not paged or paged_tile_check(paged["block_size"], block_m, block_n)[0]
 
 
 @lru_cache(maxsize=256)

@@ -1334,6 +1334,168 @@ class TestSdpaBwdRaggedLayouts(unittest.TestCase):
                 self._plan(**{option: value})
 
 
+@unittest.skipIf(TORCH_MISSING, "the generator requires PyTorch")
+class TestSdpaBwdGraphOnlyAndTemplateCheck(unittest.TestCase):
+    """A sweep case is registered only when the bundle's graph template expands to the
+    graph the generator emits, and --graph-only accepts only what it can express."""
+
+    CASE_ID = "case_bf16_x"
+    SHAPE = ("--q-dims", "1", "2", "32", "16", "--v-dims", "1", "2", "32", "16")
+
+    def setUp(self):
+        self._tmp = TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.sweep_dir = self.root / "Sweep"
+
+    def tearDown(self):
+        self._tmp.cleanup()
+
+    def _template(self, kind="dense", scale="0.25"):
+        subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--write-template",
+                str(self.sweep_dir),
+                "--template-kind",
+                kind,
+                "--attn-scale",
+                scale,
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    def _graph_only(self, *extra, scale="0.25"):
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--sweep-bundle-dir",
+                str(self.sweep_dir),
+                "--case-id",
+                self.CASE_ID,
+                *self.SHAPE,
+                "--attn-scale",
+                scale,
+                "--graph-only",
+                *extra,
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+    def _registered(self):
+        path = self.sweep_dir / "sweep.json"
+        if not path.is_file():
+            return []
+        return [c["id"] for c in json.loads(path.read_text())["cases"]]
+
+    def test_a_graph_only_case_is_registered_without_golden_data(self):
+        self._template()
+        result = self._graph_only()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self._registered(), [self.CASE_ID])
+        self.assertFalse((self.sweep_dir / "golden").exists())
+
+    def test_a_template_of_another_topology_registers_nothing(self):
+        self._template("dense_dbias")
+        result = self._graph_only()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("does not express this case", result.stderr)
+        self.assertEqual(self._registered(), [])
+
+    def test_a_template_written_for_another_scale_registers_nothing(self):
+        self._template(scale="0.5")
+        result = self._graph_only()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("node parameters differ", result.stderr)
+        self.assertEqual(self._registered(), [])
+
+    def test_a_template_whose_tensor_differs_registers_nothing(self):
+        # Every node section still agrees: only a tensor's own shape is wrong.
+        self._template()
+        path = self.sweep_dir / "graph.template.json"
+        template = json.loads(path.read_text())
+        template["tensors"][0]["dims"] = [9, 9, 9, 9]
+        path.write_text(json.dumps(template))
+        result = self._graph_only()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("tensors differ", result.stderr)
+        self.assertNotIn("node", result.stderr.split("does not express")[-1])
+        self.assertEqual(self._registered(), [])
+
+    def test_a_graph_only_case_needs_a_template(self):
+        self.sweep_dir.mkdir()
+        result = self._graph_only()
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no graph.template.json", result.stderr)
+
+    def test_graph_only_without_a_sweep_bundle_is_rejected(self):
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--base-filename",
+                str(self.root / "bwd/bwd"),
+                *self.SHAPE,
+                "--attn-scale",
+                "0.25",
+                "--graph-only",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(
+            "--graph-only requires --sweep-bundle-dir and --case-id", result.stderr
+        )
+        self.assertNotIn("Traceback", result.stderr)
+
+    def test_graph_only_is_for_dense_graphs_without_padding_or_dropout(self):
+        self._template()
+        for extra in (
+            ("--dropout-p", "0.1"),
+            ("--seq-lens-q", "32", "--seq-lens-kv", "32"),
+        ):
+            with self.subTest(extra=extra):
+                result = self._graph_only(*extra)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(
+                    "--graph-only is for dense graphs without padding or dropout",
+                    result.stderr,
+                )
+                self.assertEqual(self._registered(), [])
+
+    def test_a_golden_case_is_checked_against_the_template_too(self):
+        # The extended golden path (here dBias) must also refuse a template that does
+        # not express the graph, and leave the sweep untouched.
+        self._template("dense")
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPT_PATH),
+                "--sweep-bundle-dir",
+                str(self.sweep_dir),
+                "--case-id",
+                self.CASE_ID,
+                "--forward-base-filename",
+                str(self.root / "fwd/Small"),
+                *self.SHAPE,
+                "--attn-scale",
+                "0.25",
+                "--additive-mask",
+                "--dbias",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("does not express this case", result.stderr)
+        self.assertEqual(self._registered(), [])
+        self.assertFalse((self.sweep_dir / "golden").exists())
+
+
 if __name__ == "__main__":
     result = unittest.main(exit=False).result
     if not result.wasSuccessful():

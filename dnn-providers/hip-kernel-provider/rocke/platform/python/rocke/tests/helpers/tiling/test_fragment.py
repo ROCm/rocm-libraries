@@ -42,9 +42,9 @@ from rocke.helpers.tiling import tiling_recorder
 # 64-lane wave.
 _MMA = TileMma(
     (32, 32, 16),
-    a="f16",
-    b="f16",
-    c="f32",
+    a=F16,
+    b=F16,
+    c=F32,
     target="gfx90a",
     tiling=Tiling(atom_shape=(16, 16, 16)),
 )
@@ -312,7 +312,7 @@ def test_layout_and_dtype_are_read_only(attribute):
     ],
 )
 def test_non_scalar_ir_dtype_is_rejected_at_construction(dtype):
-    with pytest.raises(ValueError, match=r"dtype must be a scalar IR Type"):
+    with pytest.raises(TypeError, match=r"^Fragment dtype must be a scalar IR Type"):
         make_fragment(_MMA.c_desc, dtype)
 
 
@@ -324,7 +324,9 @@ def test_non_scalar_ir_dtype_is_rejected_at_construction(dtype):
     ],
 )
 def test_non_tile_desc_layout_is_rejected_at_construction(tile_desc):
-    with pytest.raises(ValueError, match=r"tile_desc must be a TileDesc .* -- got "):
+    with pytest.raises(
+        TypeError, match=r"^Fragment tile_desc must be a TileDesc .* -- got "
+    ):
         make_fragment(tile_desc, F32)
 
 

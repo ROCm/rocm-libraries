@@ -32,6 +32,14 @@
 
 namespace hiptensor
 {
+    // HIP keeps the error of a failed call until hipGetLastError() reads it, and CK checks
+    // hipGetLastError() after every kernel launch and throws on any error. Call this after
+    // handling a failed HIP call so a later, unrelated launch does not report it again.
+    inline void clearHipError()
+    {
+        (void)hipGetLastError();
+    }
+
     class HipDevice
     {
     public:
@@ -64,8 +72,14 @@ namespace hiptensor
             UNSUPPORTED_WARP_SIZE = 0u,
         };
 
+        // Does not query HIP; the object reports an unsupported device until initialize() succeeds.
         HipDevice();
         ~HipDevice() = default;
+
+        // Queries the properties of the given device. Leaves the object unchanged on failure.
+        hipError_t initialize(hipDevice_t deviceId);
+
+        hipDeviceProp_t const& getProperties() const;
 
         hipDevice_t  getDeviceId() const;
         hipGcnArch_t getGcnArch() const;

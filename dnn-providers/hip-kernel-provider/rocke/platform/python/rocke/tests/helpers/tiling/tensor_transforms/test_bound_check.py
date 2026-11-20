@@ -35,7 +35,6 @@ from rocke.helpers.tiling.tensor_transforms.ranges import (
     _required_checks,
 )
 from rocke.helpers.tiling.tensor_transforms.walk import split_coordinate
-from rocke.tests.gpu import current_device_arch
 
 from ._harness import (
     WAVE,
@@ -434,11 +433,10 @@ def _paths_agree_values(hi: int) -> list[int]:
     return sorted(values)
 
 
-def test_gpu_the_single_compare_and_the_fold_agree_on_every_value():
+def test_gpu_the_single_compare_and_the_fold_agree_on_every_value(any_gpu: str):
     """One kernel computes, for one wave-uniform value per workgroup, both the single compare
     and the forced fold, for int upper ends 1, 2, 1024 and 2^31 - 1 and a runtime length; the
     two answers are equal and equal ``0 <= u < hi`` on every value."""
-    current_device_arch()
     import numpy as np
 
     int_ends = (1, 2, 1024, I32_MAX)
@@ -456,6 +454,7 @@ def test_gpu_the_single_compare_and_the_fold_agree_on_every_value():
     array = np.array(values, dtype=np.int64)
     for m in (1, 1024, I32_MAX):
         stored = run_lanes(
+            any_gpu,
             build,
             scalars={"M": m},
             buffers={"values": array},
@@ -468,8 +467,7 @@ def test_gpu_the_single_compare_and_the_fold_agree_on_every_value():
             assert (stored[:, 2 * j + 1] == expected).all(), (m, hi)
 
 
-def test_gpu_unbounded_and_single_compare_checks_are_exact_on_edge_values():
-    current_device_arch()
+def test_gpu_unbounded_and_single_compare_checks_are_exact_on_edge_values(any_gpu: str):
     import numpy as np
 
     values = np.array(EDGE_VALUES, dtype=np.int64)
@@ -485,6 +483,7 @@ def test_gpu_unbounded_and_single_compare_checks_are_exact_on_edge_values():
 
     for m in (1023, 1024):
         stored = run_lanes(
+            any_gpu,
             build,
             scalars={"M": m},
             buffers={"values": values},
@@ -501,11 +500,12 @@ SIDE_VALUES = (I32_MIN, -1, 0, 1, I32_MAX)
 
 @pytest.mark.parametrize("extent", [1, 4, 64])
 @pytest.mark.parametrize("wide", [True, False])
-def test_gpu_a_lower_only_check_is_exact_for_every_lane_at_both_widths(extent, wide):
+def test_gpu_a_lower_only_check_is_exact_for_every_lane_at_both_widths(
+    extent, wide, any_gpu: str
+):
     """``lo <= s + lane`` with no upper end, ``s`` and ``lo`` at the extremes of their stated
     ranges (the full i32 range for the 64-bit fold, a narrower one for the 32-bit fold), every
     lane of ``[0, extent)``."""
-    current_device_arch()
     import numpy as np
 
     limit = 1 << 31 if wide else 1 << 29
@@ -525,7 +525,7 @@ def test_gpu_a_lower_only_check_is_exact_for_every_lane_at_both_widths(extent, w
         return [emit_bound_check(b, b.add(s, lane), lo_end, None)]
 
     stored = run_lanes(
-        build, buffers={"s": s_values, "lo": lo_values}, n_blocks=len(pairs)
+        any_gpu, build, buffers={"s": s_values, "lo": lo_values}, n_blocks=len(pairs)
     )
     lanes = np.arange(WAVE) & (extent - 1)
     expected = (s_values[:, None] + lanes[None, :]) >= lo_values[:, None]
@@ -542,12 +542,11 @@ def _stated(b: IRBuilder, value: Value, lo: int, hi: int):
     return b._assume_range(value, ge=lo, lt=hi)
 
 
-def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
+def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact(any_gpu: str):
     """``lo <= s + lane < hi`` with both ends runtime values, through ``emit_bound_check`` and
     through ``_required_checks`` + ``_emit_bound_check`` with a two-sided ``AxisBound``: exact for
     every lane, and an empty (``hi == lo``) or inverted (``hi < lo``) window accepts nothing,
     including a window wider than 2^31."""
-    current_device_arch()
     import numpy as np
 
     cases = []
@@ -580,6 +579,7 @@ def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
         ]
 
     stored = run_lanes(
+        any_gpu,
         build,
         buffers={"s": s_values, "lo": lo_values, "hi": hi_values},
         n_blocks=len(cases),
@@ -592,13 +592,12 @@ def test_gpu_runtime_ends_including_empty_and_inverted_windows_are_exact():
 
 
 @pytest.mark.parametrize("wide", [False, True])
-def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
+def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide, any_gpu: str):
     """Accesses ``s + lane + c`` for several constants ``c`` against ``[0, L)`` (``L`` a runtime
     length): with ``s`` unbounded the ends are pre-clamped in 64 bits once and finished per
     constant in 32 bits, and ``lo - s`` / ``L - s`` reach -2^31, 2^31 - 1, 2^31 and beyond; with
     ``s`` and ``L`` stated inside 2^29 the fold is 32-bit, exact at the edges of those ranges.
     """
-    current_device_arch()
     import numpy as np
 
     from rocke.helpers.tiling.tensor_transforms import emit_access_validity
@@ -623,7 +622,7 @@ def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
         return list(valid)
 
     stored = run_lanes(
-        build, buffers={"s": s_values, "L": l_values}, n_blocks=len(cases)
+        any_gpu, build, buffers={"s": s_values, "L": l_values}, n_blocks=len(cases)
     )
     lanes = np.arange(WAVE) & 31
     for j, c in enumerate(constants):
@@ -632,8 +631,7 @@ def test_gpu_the_saturated_fold_is_exact_at_its_clamp_edges(wide):
         assert (stored[:, :, j] == expected).all(), c
 
 
-def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes():
-    current_device_arch()
+def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes(any_gpu: str):
     import numpy as np
 
     extremes = (I32_MIN, I32_MIN + 1, -1, 0, 1, 4096, I32_MAX)
@@ -652,6 +650,7 @@ def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes():
         return [_emit_bound_check(b, coord, 0, 4096)]
 
     stored = run_lanes(
+        any_gpu,
         build,
         buffers={"begin": begin_values, "length": length_values},
         n_blocks=len(cases),
@@ -661,8 +660,9 @@ def test_gpu_two_uniform_parts_are_summed_exactly_at_the_i32_extremes():
     assert (stored[:, 0] == ((total >= 0) & (total < 4096))).all()
 
 
-def test_gpu_a_per_lane_value_starting_below_zero_is_checked_exactly_on_every_lane():
-    current_device_arch()
+def test_gpu_a_per_lane_value_starting_below_zero_is_checked_exactly_on_every_lane(
+    any_gpu: str,
+):
     import numpy as np
 
     ends = ((-2, 12), (0, 12), (5, 40), (0, None))
@@ -677,7 +677,7 @@ def test_gpu_a_per_lane_value_starting_below_zero_is_checked_exactly_on_every_la
             out.append(emit_bound_check(b, value, 0, m))
         return out
 
-    stored = run_lanes(build, scalars={"M": 12})
+    stored = run_lanes(any_gpu, build, scalars={"M": 12})
     t = np.arange(WAVE)
     slot = 0
     for truth in (40 - t, np.minimum(t - 3, 10)):

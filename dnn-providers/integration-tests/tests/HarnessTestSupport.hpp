@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -129,6 +130,9 @@ struct HarnessMocks
         deps.claimObserver = nonOwning<ISupportClaimObserver>(claimObserver);
         deps.reporter = nonOwning<IVerificationReporter>(reporter);
         deps.policy = std::move(policy);
+        // Never synchronizes, so the suites that turn on --benchmark-reference need no
+        // device; a suite that wants the real synchronize installs it itself.
+        deps.referenceTimer = ReferenceBenchmarkTimer();
         return deps;
     }
 };
@@ -136,14 +140,14 @@ struct HarnessMocks
 /// Makes the mocked engine write `value` into the bundle's output tensor and
 /// report success — the "the engine ran and produced this" case.
 inline void engineWrites(::testing::NiceMock<MockGraphEngineRunner>& runner,
-                         void (*writer)(VariantPack&, float),
+                         std::function<void(VariantPack&, float)> writer,
                          float value)
 {
     using ::testing::_;
     ON_CALL(runner, execute(_, _, _))
-        .WillByDefault([writer, value](GraphSession&,
-                                       const std::optional<LoadedEngine>&,
-                                       VariantPack& variantPack) {
+        .WillByDefault([writer = std::move(writer), value](GraphSession&,
+                                                           const std::optional<LoadedEngine>&,
+                                                           VariantPack& variantPack) {
             writer(variantPack, value);
             return EngineOpResult::succeeded();
         });

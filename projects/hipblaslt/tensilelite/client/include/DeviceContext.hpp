@@ -5,6 +5,7 @@
 
 #include <Tensile/ContractionProblem_fwd.hpp>
 #include <Tensile/ContractionSolution_fwd.hpp>
+#include <Tensile/FusedA2A.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/Tensile_fwd.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
@@ -47,10 +48,12 @@ namespace TensileLite
         {
             // sdmaPeers: device ids to enable P2P to and open one SDMA queue each for,
             // indexed by rank; the entry equal to deviceId is a loopback queue.
+            // sdmaRotate: the `rotate` of sdmaQueueEngine.
             DeviceContext(int                     deviceId,
                           bool                    useDefaultStream,
                           size_t                  commFlagsBytes = 0,
-                          std::vector<int> const& sdmaPeers      = {});
+                          std::vector<int> const& sdmaPeers      = {},
+                          int                     sdmaRotate     = 0);
             ~DeviceContext();
 
             DeviceContext(DeviceContext const&)            = delete;
@@ -73,6 +76,8 @@ namespace TensileLite
         constexpr size_t kCommChannels   = 2;
         constexpr size_t kCommFlagsBytes = kCommChannels * FUSED_A2A_FLAG_BLOCK_BYTES;
 
+        constexpr int kFusedA2ASdmaRotateDefault = -1;
+
         template <typename F>
         void forEachDevice(std::vector<std::shared_ptr<DeviceContext>> const& devices, F&& f)
         {
@@ -84,7 +89,7 @@ namespace TensileLite
         }
 
         // devices: the problem's ranks, rank r on devices[r]. These are no-ops unless the
-        // problem is a fused GEMM+A2A.
+        // problem is fused.
         void checkFusedA2ASolution(ContractionProblem const&  problem,
                                    ContractionSolution const& solution,
                                    Hardware const&            hardware,
@@ -100,5 +105,17 @@ namespace TensileLite
                                         std::vector<std::shared_ptr<DeviceContext>> const& devices,
                                         size_t                                             rank,
                                         size_t                                             launch);
+
+        // Same as forEachDevice, also passing the device's index in `devices`.
+        template <typename F>
+        void forEachDeviceIndexed(std::vector<std::shared_ptr<DeviceContext>> const& devices,
+                                  F&&                                                f)
+        {
+            for(size_t d = 0; d < devices.size(); d++)
+            {
+                ScopedDevice guard(devices[d]->deviceId);
+                f(*devices[d], d);
+            }
+        }
     } // namespace Client
 } // namespace TensileLite

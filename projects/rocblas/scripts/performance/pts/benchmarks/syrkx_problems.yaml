@@ -27,7 +27,8 @@ Tests:
           transA: [ N, T ]
           alpha: 1
           beta: 1
-          iters: 10
+          iters: 100
+          cold_iters: 20
 
         - name: syrkx_tall
           function: syrkx
@@ -37,7 +38,8 @@ Tests:
           transA: [ N, T ]
           alpha: 1
           beta: 1
-          iters: 10
+          iters: 100
+          cold_iters: 20
 
         - name: syrkx_wide
           function: syrkx
@@ -47,5 +49,6 @@ Tests:
           transA: [ N, T ]
           alpha: 1
           beta: 1
-          iters: 10
+          iters: 100
+          cold_iters: 20
 ...

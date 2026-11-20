@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -245,7 +245,6 @@ namespace rocalution
             {
                 this->U_[i]->Zeros();
                 this->G_[i]->Zeros();
-                this->P_[i]->Zeros();
             }
 
             if(this->precond_ != NULL)
@@ -393,6 +392,8 @@ namespace rocalution
             }
         }
 
+        bool breakdown = false;
+
         // IDR(s) iteration
         while(true)
         {
@@ -458,21 +459,24 @@ namespace rocalution
                 if(M[DENSE_IND(k, k, s, s)] == zero)
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == 0.0");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Check M_kk for NaN
                 if(M[DENSE_IND(k, k, s, s)] != M[DENSE_IND(k, k, s, s)])
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == NaN");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
-                // Check M_kk for zero
-                if(M[DENSE_IND(k, k, s, s)] == std::numeric_limits<ValueType>::infinity())
+                // Check M_kk for inf
+                if(std::abs(M[DENSE_IND(k, k, s, s)]) == std::numeric_limits<double>::infinity())
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == inf");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Make residual r orthogonal to P
@@ -489,8 +493,10 @@ namespace rocalution
                 // Residual norm
                 res_norm = this->Norm_(*r);
 
-                // Check inner loop for convergence
-                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm)))
+                // Check inner loop for convergence. Below the minimum iteration count an exact
+                // solution leaves the next inner step with M(k+1,k+1) == 0
+                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm))
+                   || res_norm == static_cast<ValueType>(0))
                 {
                     break;
                 }
@@ -502,8 +508,22 @@ namespace rocalution
                 }
             }
 
+            if(breakdown)
+            {
+                // Only a completed cycle counts as an iteration. A breakdown at k == 0 has
+                // not checked the residual of the last x yet
+                this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm));
+                break;
+            }
+
             // Check convergence
             if(this->iter_ctrl_.CheckResidual(std::abs(res_norm), this->index_))
+            {
+                break;
+            }
+
+            // Below the minimum iteration count an exact solution has no residual to reduce
+            if(res_norm == static_cast<ValueType>(0))
             {
                 break;
             }
@@ -531,21 +551,21 @@ namespace rocalution
             if(omega == zero)
             {
                 LOG_INFO("IDR(s) break down ; w == 0.0");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // Check omega for NaN
             if(omega != omega)
             {
                 LOG_INFO("IDR(s) break down ; w == NaN");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // Check omega for inf
-            if(omega == std::numeric_limits<ValueType>::infinity())
+            if(std::abs(omega) == std::numeric_limits<double>::infinity())
             {
                 LOG_INFO("IDR(s) break down ; w == inf");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // x = x + omega * r
@@ -621,6 +641,8 @@ namespace rocalution
             }
         }
 
+        bool breakdown = false;
+
         // IDR(s) iteration
         while(true)
         {
@@ -689,21 +711,24 @@ namespace rocalution
                 if(M[DENSE_IND(k, k, s, s)] == zero)
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == 0.0");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Check M_kk for NaN
                 if(M[DENSE_IND(k, k, s, s)] != M[DENSE_IND(k, k, s, s)])
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == NaN");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
-                // Check M_kk for zero
-                if(M[DENSE_IND(k, k, s, s)] == std::numeric_limits<ValueType>::infinity())
+                // Check M_kk for inf
+                if(std::abs(M[DENSE_IND(k, k, s, s)]) == std::numeric_limits<double>::infinity())
                 {
                     LOG_INFO("IDR(s) break down ; M(k,k) == inf");
-                    FATAL_ERROR(__FILE__, __LINE__);
+                    breakdown = true;
+                    break;
                 }
 
                 // Make residual r orthogonal to P
@@ -720,8 +745,10 @@ namespace rocalution
                 // Residual norm
                 res_norm = this->Norm_(*r);
 
-                // Check inner loop for convergence
-                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm)))
+                // Check inner loop for convergence. Below the minimum iteration count an exact
+                // solution leaves the next inner step with M(k+1,k+1) == 0
+                if(this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm))
+                   || res_norm == static_cast<ValueType>(0))
                 {
                     break;
                 }
@@ -733,8 +760,22 @@ namespace rocalution
                 }
             }
 
+            if(breakdown)
+            {
+                // Only a completed cycle counts as an iteration. A breakdown at k == 0 has
+                // not checked the residual of the last x yet
+                this->iter_ctrl_.CheckResidualNoCount(std::abs(res_norm));
+                break;
+            }
+
             // Check convergence
             if(this->iter_ctrl_.CheckResidual(std::abs(res_norm), this->index_))
+            {
+                break;
+            }
+
+            // Below the minimum iteration count an exact solution has no residual to reduce
+            if(res_norm == static_cast<ValueType>(0))
             {
                 break;
             }
@@ -765,21 +806,21 @@ namespace rocalution
             if(omega == zero)
             {
                 LOG_INFO("IDR(s) break down ; w == 0.0");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // Check omega for NaN
             if(omega != omega)
             {
                 LOG_INFO("IDR(s) break down ; w == NaN");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // Check omega for inf
-            if(omega == std::numeric_limits<ValueType>::infinity())
+            if(std::abs(omega) == std::numeric_limits<double>::infinity())
             {
                 LOG_INFO("IDR(s) break down ; w == inf");
-                FATAL_ERROR(__FILE__, __LINE__);
+                break;
             }
 
             // r = r - omega * t

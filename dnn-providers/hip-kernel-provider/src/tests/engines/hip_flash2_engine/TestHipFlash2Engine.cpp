@@ -9,8 +9,11 @@
 
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineDetailsWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_plugin_sdk/BehaviorNote.h>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/MockGraph.hpp>
 #include <hipdnn_test_sdk/utilities/SdpaGraphMutators.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
@@ -37,6 +40,19 @@ protected:
         _engine->addPlanBuilder(std::make_unique<HipFlash2FwdPlanBuilder>());
     }
 };
+
+TEST_F(TestHipFlash2Engine, GetDetailsReportsGraphCaptureSupport)
+{
+    const hipdnn_test_sdk::utilities::MockGraph mockGraph;
+    hipdnnPluginConstData_t result;
+    _engine->getDetails(_handle, mockGraph, result);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineDetailsWrapper details(result.ptr,
+                                                                                     result.size);
+    EXPECT_THAT(
+        details.behaviorNotes(),
+        ::testing::Contains(static_cast<int32_t>(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE)));
+}
 
 // -- isApplicable tests --------------------------------------------------------
 

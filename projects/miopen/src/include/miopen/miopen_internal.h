@@ -26,8 +26,16 @@
 #ifndef GUARD_MIOPEN_INTERNAL_H_
 #define GUARD_MIOPEN_INTERNAL_H_
 
-/* Put experimental APIs here. */
-/* Not part of the public C API: miopen.h does not include this header. */
+/* Entry points that libMIOpen exports but miopen.h does not declare: experimental
+ * APIs and the miopenHidden* shims. miopen.h does not include this header.
+ *
+ * Every MIOPEN_EXPORT declaration here is exported ABI: consumers may link it, so
+ * one added here must also be listed in test/public_abi/public_symbols.baseline.
+ * With MIOPEN_ENABLE_HIPDNN_WRAPPER=ON the private library renames each to its
+ * _impl form and the wrapper re-exports it under the original name, as for the
+ * miopen.h entry points (script/generate_wrapper_sources.py reads this header
+ * for that).
+ */
 
 #include <stddef.h>
 #include <miopen/miopen.h>
@@ -73,13 +81,12 @@ miopenConvolutionABBackwardWeightsGetWorkSpaceSize(const miopenAlphaBetaCase_t a
 /* The three miopenConvolution*GetWorkSpaceSizeRange entry points report the
  * smallest and largest workspace any applicable solver needs for a problem.
  *
- * They are exported but deliberately not part of miopen.h, so the public/private
- * split does not rename them: with MIOPEN_ENABLE_HIPDNN_WRAPPER=ON they stay on
- * libMIOpen_private.so under these names. They are declared once here so that
- * the compiler checks MIOpen's definitions and callers against the same
- * prototype. The hipDNN provider cannot include this header, so it keeps its own
- * copy, which check_public_abi.py check-headers compares with the definitions.
- * The parameters carry no top-level const, which does not change the type.
+ * They are exported but deliberately not part of miopen.h. They are declared
+ * once here so that the compiler checks MIOpen's definitions and callers against
+ * the same prototype. The hipDNN provider cannot include this header, so it keeps
+ * its own copy, which check_public_abi.py check-headers compares with the
+ * definitions. The parameters carry no top-level const, which does not change the
+ * type.
  */
 MIOPEN_EXPORT extern "C" miopenStatus_t
 miopenConvolutionForwardGetWorkSpaceSizeRange(miopenHandle_t handle,
@@ -107,6 +114,19 @@ miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(miopenHandle_t handle,
                                                       miopenTensorDescriptor_t dwDesc,
                                                       size_t* minWorkspaceSize,
                                                       size_t* maxWorkspaceSize);
+
+/* Raw-int find-mode accessors that predate the typed miopen{Get,Set}ConvolutionFindMode
+ * in miopen.h. MIGraphX probes for and calls the Set variant; a build that does not
+ * export it makes MIGraphX silently drop that call.
+ *
+ * findMode is the integer value of miopen::FindMode::Values. Set stores it in
+ * convDesc; Get writes the stored value to *findMode.
+ */
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenHiddenSetConvolutionFindMode(miopenConvolutionDescriptor_t convDesc, int findMode);
+
+MIOPEN_EXPORT extern "C" miopenStatus_t
+miopenHiddenGetConvolutionFindMode(miopenConvolutionDescriptor_t convDesc, int* findMode);
 
 #ifdef __cplusplus
 }

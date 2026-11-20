@@ -55,15 +55,79 @@ std::size_t GetMaxWorkSpaceSize(const std::vector<std::pair<std::string, std::si
     return sz;
 }
 
+// The largest workspace a caller that sizes its buffer from the workspace query can expect to
+// allocate right now: a share of the device memory free at query time, or 0 when that cannot be
+// read. Read uncached, so it tracks allocations made since the handle was created.
+[[maybe_unused]] std::size_t FreeMemoryWorkspaceBudget(const miopen::ExecutionContext& ctx)
+{
+    return static_cast<std::size_t>(ctx.GetStream().GetAvailableMemory() * UsableMemoryFraction);
+}
+
+// Whether `solver`'s workspace `size` is over `budget`; logs the solver when it is.
+[[maybe_unused]] bool
+ExceedsWorkspaceBudget(const std::string& solver, std::size_t size, std::size_t budget)
+{
+    if(size <= budget)
+        return false;
+    MIOPEN_LOG_I2(solver << ": " << size << " exceeds the workspace budget " << budget);
+    return true;
+}
+
+[[maybe_unused]] bool IsDilated(const conv::ProblemDescription& problem)
+{
+    return miopen::any_of(problem.GetConv().GetConvDilations(), [](auto v) { return v > 1; });
+}
+
+// Whether a solver other than GEMM and the naive reference solvers could serve `problem`: one
+// that Find would consider (allowed by MIOPEN_DEBUG_FIND_ONLY_SOLVER, its algorithm enabled,
+// dynamic when only dynamic solutions are wanted) and that is applicable.
+[[maybe_unused]] bool HasNonNaiveAlternativeToGemm(const miopen::ExecutionContext& ctx,
+                                                   const conv::ProblemDescription& problem)
+{
+    const auto find_only = GetEnvFindOnlySolver();
+    for(const auto& id : solver::GetSolversByPrimitive(solver::Primitive::Convolution))
+    {
+        const auto algo = id.GetAlgo();
+        if(algo == miopenConvolutionAlgoGEMM || conv::IsAlgorithmDisabled(algo, problem))
+            continue;
+        const auto name = id.ToString();
+        if(name.find("Naive") != std::string::npos)
+            continue;
+        if(find_only && std::ranges::find(*find_only, id) == find_only->end())
+            continue;
+        const auto& solver = id.GetSolver();
+        if(solver.IsEmpty() || (ctx.use_dynamic_solutions_only && !solver.IsDynamic()) ||
+           !solver.IsApplicable(ctx, problem))
+            continue;
+        MIOPEN_LOG_I2(name << " applies, so no dilated GEMM workspace is reported");
+        return true;
+    }
+    return false;
+}
+
 std::size_t GetWorkSpaceSizeGEMM(const miopen::ExecutionContext& ctx,
                                  const conv::ProblemDescription& problem)
 {
 #if MIOPEN_USE_GEMM
-    if(env::disabled(MIOPEN_DEBUG_CONV_GEMM) ||
-       miopen::any_of(problem.GetConv().GetConvDilations(), [](auto v) { return v > 1; }))
+    if(env::disabled(MIOPEN_DEBUG_CONV_GEMM))
         return 0;
 
-    return GetMaxWorkSpaceSize(AllGemmWorkspaceSize(ctx, problem));
+    auto sizes = AllGemmWorkspaceSize(ctx, problem);
+    // Dilated GEMM workspace is reported only where GEMM is the alternative to the naive solvers,
+    // and only within the free-memory budget. Where another solver applies, a reported GEMM
+    // workspace makes Find benchmark GEMM as well, which costs seconds on large shapes; and
+    // reporting it unconditionally made callers that allocate the reported size run out of memory
+    // on large diffusion shapes (~120 GB, see #6974). Other solvers keep their previous limits.
+    if(IsDilated(problem) && miopen::any_of(sizes, [](const auto& pr) { return pr.second > 0; }))
+    {
+        if(HasNonNaiveAlternativeToGemm(ctx, problem))
+            return 0;
+        const auto budget = FreeMemoryWorkspaceBudget(ctx);
+        std::erase_if(sizes, [budget](const auto& pr) {
+            return ExceedsWorkspaceBudget(pr.first, pr.second, budget);
+        });
+    }
+    return GetMaxWorkSpaceSize(sizes);
 #else
     std::ignore = ctx;
     std::ignore = problem;
@@ -417,6 +481,19 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
         }
         // With perf-db access disabled, GetSolutions() reports the solver's GetWorkspaceSize().
         const auto workspace_size = solutions.front().workspace_size;
+#if MIOPEN_USE_GEMM
+        // The solver comes from the find-db or, in Fast mode, from the immediate-mode fallback,
+        // and its workspace is recomputed above; returning it here would skip the free-memory
+        // budget that GetWorkSpaceSizeGEMM applies to dilated GEMM on the path below.
+        if(solutions.front().algorithm == miopenConvolutionAlgoGEMM && IsDilated(problem) &&
+           ExceedsWorkspaceBudget(solver::Id{solutions.front().solution_id}.ToString(),
+                                  workspace_size,
+                                  FreeMemoryWorkspaceBudget(ctx)))
+        {
+            ctx.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
+            break; // Fall down to Normal Find.
+        }
+#endif
 
         MIOPEN_LOG_I(workspace_size);
         return workspace_size;

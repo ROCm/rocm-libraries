@@ -1625,6 +1625,8 @@ try
     if(!params)
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
+    CHECK_ROCBLAS_ERROR(hipsolverZeroInfo((rocblas_handle)handle, info, 1));
+
     if(dataTypeA == HIP_R_32F && dataTypeB == HIP_R_32F)
     {
         return hipsolver::rocblas2hip_status(rocsolver_spotrs_64((rocblas_handle)handle,

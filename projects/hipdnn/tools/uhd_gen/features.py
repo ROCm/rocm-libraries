@@ -303,13 +303,46 @@ def evaluator_feature_semantics_revision(executable: str | Path | None = None) -
     return _run_feature_evaluator([], None, [], executable)[2]
 
 
+def run_evaluator(
+    request: dict | None,
+    executable: str | Path | None = None,
+    mode: str | None = None,
+) -> dict:
+    """The only crossing into hipdnn_uhd_features: resolve it, send `request` (None: nothing)
+    and return its parsed answer, whatever the mode (`--lint`, `--optional-features`, or the
+    default feature extraction). A nonzero exit or an unparsable answer is a ValueError.
+    """
+    flags = [] if mode is None else [mode]
+    result = subprocess.run(
+        [resolve_feature_evaluator(executable), *flags],
+        input=(
+            ""
+            if request is None
+            else json.dumps(request, ensure_ascii=False, allow_nan=False)
+        ),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError(
+            f"{' '.join([EVALUATOR_NAME, *flags])} failed ({result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except ValueError as error:
+        raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
+
+
 def _run_feature_evaluator(
     signature: list,
     categorical_encoding: dict | None,
     rows: list,
     executable: str | Path | None,
 ) -> tuple[str, list[list[float]], int]:
-    """The only crossing into FeatureExtractor, which owns both the digest and the values.
+    """Features and digest of `signature` over `rows`, from FeatureExtractor, which owns both.
 
     Entries are parsed first only for a readable error; the evaluator does the hashing.
     """
@@ -319,20 +352,8 @@ def _run_feature_evaluator(
         "categorical_encoding": categorical_encoding or {},
         "rows": rows,
     }
-    result = subprocess.run(
-        [resolve_feature_evaluator(executable)],
-        input=json.dumps(request, ensure_ascii=False, allow_nan=False),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if result.returncode:
-        raise ValueError(
-            f"{EVALUATOR_NAME} failed ({result.returncode}): {result.stderr.strip()}"
-        )
+    response = run_evaluator(request, executable)
     try:
-        response = json.loads(result.stdout)
         digest, values = response["features_hash"], response["values"]
         # An evaluator that omits it predates the field: revision 1 by definition.
         revision = response.get("feature_semantics_revision", 1)

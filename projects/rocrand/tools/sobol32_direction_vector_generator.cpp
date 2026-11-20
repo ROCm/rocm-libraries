@@ -86,7 +86,15 @@ int main(int argc, char const* argv[])
         << "#endif // SOBOL_DIM\n"
         << "#define SOBOL32_N " << rocrand_tools::SOBOL32_N << "\n"
         << "\n"
+        << "namespace rocrand_device\n"
+        << "{\n"
+        << "namespace detail\n"
+        << "{\n"
+        << "\n"
         << "extern \"C\" ROCRANDAPI const unsigned int " << symbol << "[SOBOL32_N];\n"
+        << "\n"
+        << "} // end namespace detail\n"
+        << "} // end namespace rocrand_device\n"
         << "\n"
         << "#endif // ROCRAND_SOBOL32_PRECOMPUTED_H_\n";
 

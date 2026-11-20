@@ -217,6 +217,27 @@ inline bool rocblas_gemvt_fat_n(rocblas_int m, rocblas_int n, int gfx_arch)
         return false;
 }
 
+// Column stride is required when the clamped grid cannot give every column its own block.
+inline bool rocblas_gemvt_needs_x_stride(unsigned int grid_x, rocblas_int n)
+{
+    return n > 0 && grid_x < static_cast<unsigned int>(n);
+}
+
+// The x-striding kernel covers several columns per block. Use the earlier
+// single-column kernel when grid.x already covers n.
+#define ROCBLAS_LAUNCH_GEMVT_XSTRIDE(x_stride_, xs_kernel_, kernel_, ...) \
+    do                                                                    \
+    {                                                                     \
+        if(x_stride_)                                                     \
+        {                                                                 \
+            ROCBLAS_LAUNCH_KERNEL(xs_kernel_, __VA_ARGS__);               \
+        }                                                                 \
+        else                                                              \
+        {                                                                 \
+            ROCBLAS_LAUNCH_KERNEL(kernel_, __VA_ARGS__);                  \
+        }                                                                 \
+    } while(0)
+
 /*! \brief rocblas_internal_gemv_kernel_workspace_size
     Currently only transpose/conj skinny n matrices use workspace memory, so usually returns 0
     Work buffer for column reductions: number of blocks * cols * batch_count
@@ -935,18 +956,26 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                             || n < sgemvt_gfx_arch_10_11_12_threshold))))
         {
             //Number of threads per block
-            static constexpr int NB = 256;
-            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
+            static constexpr int NB           = 256;
+            const unsigned int   gemvt_blocks = rocblas_limit_grid_x(handle, n, NB);
+            dim3                 gemvt_grid(gemvt_blocks, 1, batches);
             dim3                 gemvt_threads(NB);
+            const bool           x_stride = rocblas_gemvt_needs_x_stride(gemvt_blocks, n);
 
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
                 if(!i64_indices)
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
-                                          gemvt_KARGS(alpha, beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        gemvt_KARGS(alpha, beta));
                 else
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
-                                          gemvt_KARGS(alpha, beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        gemvt_KARGS(alpha, beta));
             }
             else
             {
@@ -954,11 +983,17 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                     return rocblas_status_success;
 
                 if(!i64_indices)
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
-                                          gemvt_KARGS(*alpha, *beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        gemvt_KARGS(*alpha, *beta));
                 else
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
-                                          gemvt_KARGS(*alpha, *beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        gemvt_KARGS(*alpha, *beta));
             }
         }
         //Using kernel code with shared memory reduction for single precision as well as for other precisions when m or n is less than gemvt_threshold and for complex double in gfx1030.
@@ -967,22 +1002,28 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                     || (is_arch_10_or_11_or_12 && is_complex_double)))
         {
             //Number of threads per block
-            static constexpr int NB = 256;
-            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
+            static constexpr int NB           = 256;
+            const unsigned int   gemvt_blocks = rocblas_limit_grid_x(handle, n, NB);
+            dim3                 gemvt_grid(gemvt_blocks, 1, batches);
             dim3                 gemvt_threads(NB);
+            const bool           x_stride = rocblas_gemvt_needs_x_stride(gemvt_blocks, n);
 
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
-                                      gemvt_KARGS(alpha, beta));
+                ROCBLAS_LAUNCH_GEMVT_XSTRIDE(x_stride,
+                                             (rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                             (rocblas_gemvt_kernel<CONJ, NB>),
+                                             gemvt_KARGS(alpha, beta));
             }
             else
             {
                 if(!*alpha && *beta == 1)
                     return rocblas_status_success;
 
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
-                                      gemvt_KARGS(*alpha, *beta));
+                ROCBLAS_LAUNCH_GEMVT_XSTRIDE(x_stride,
+                                             (rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                             (rocblas_gemvt_kernel<CONJ, NB>),
+                                             gemvt_KARGS(*alpha, *beta));
             }
         }
 
@@ -991,19 +1032,27 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else
         {
             //Number of threads per block
-            static constexpr int NB = 1024;
-            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
+            static constexpr int NB           = 1024;
+            const unsigned int   gemvt_blocks = rocblas_limit_grid_x(handle, n, NB);
+            dim3                 gemvt_grid(gemvt_blocks, 1, batches);
             dim3                 gemvt_threads(NB);
+            const bool           x_stride = rocblas_gemvt_needs_x_stride(gemvt_blocks, n);
 
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
 
                 if(!i64_indices)
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
-                                          gemvt_KARGS(alpha, beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        gemvt_KARGS(alpha, beta));
                 else
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
-                                          gemvt_KARGS(alpha, beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        gemvt_KARGS(alpha, beta));
             }
             else
             {
@@ -1011,11 +1060,17 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                     return rocblas_status_success;
 
                 if(!i64_indices)
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
-                                          gemvt_KARGS(*alpha, *beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        gemvt_KARGS(*alpha, *beta));
                 else
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
-                                          gemvt_KARGS(*alpha, *beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        gemvt_KARGS(*alpha, *beta));
             }
         }
 #undef gemvt_KARGS
@@ -1300,21 +1355,27 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else if(!i64_incs && (is_float || m < gemvt_threshold || n < gemvt_threshold))
         {
             //Number of threads per block
-            static constexpr int NB = 256;
-            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
+            static constexpr int NB           = 256;
+            const unsigned int   gemvt_blocks = rocblas_limit_grid_x(handle, n, NB);
+            dim3                 gemvt_grid(gemvt_blocks, 1, batches);
             dim3                 gemvt_threads(NB);
+            const bool           x_stride = rocblas_gemvt_needs_x_stride(gemvt_blocks, n);
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
-                                      gemvt_KARGS(alpha, beta));
+                ROCBLAS_LAUNCH_GEMVT_XSTRIDE(x_stride,
+                                             (rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                             (rocblas_gemvt_kernel<CONJ, NB>),
+                                             gemvt_KARGS(alpha, beta));
             }
             else
             {
                 if(!*alpha && *beta == 1)
                     return rocblas_status_success;
 
-                ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_xs_kernel<CONJ, NB>),
-                                      gemvt_KARGS(*alpha, *beta));
+                ROCBLAS_LAUNCH_GEMVT_XSTRIDE(x_stride,
+                                             (rocblas_gemvt_xs_kernel<CONJ, NB>),
+                                             (rocblas_gemvt_kernel<CONJ, NB>),
+                                             gemvt_KARGS(*alpha, *beta));
             }
         }
         //Using kernel code with warp reduction.
@@ -1322,17 +1383,25 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else
         {
             //Number of threads per block
-            static constexpr int NB = 1024;
-            dim3                 gemvt_grid(rocblas_limit_grid_x(handle, n, NB), 1, batches);
+            static constexpr int NB           = 1024;
+            const unsigned int   gemvt_blocks = rocblas_limit_grid_x(handle, n, NB);
+            dim3                 gemvt_grid(gemvt_blocks, 1, batches);
             dim3                 gemvt_threads(NB);
+            const bool           x_stride = rocblas_gemvt_needs_x_stride(gemvt_blocks, n);
             if(handle->pointer_mode == rocblas_pointer_mode_device)
             {
                 if(!i64_indices)
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
-                                          gemvt_KARGS(alpha, beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        gemvt_KARGS(alpha, beta));
                 else
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
-                                          gemvt_KARGS(alpha, beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        gemvt_KARGS(alpha, beta));
             }
             else
             {
@@ -1340,15 +1409,22 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                     return rocblas_status_success;
 
                 if(!i64_indices)
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
-                                          gemvt_KARGS(*alpha, *beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, rocblas_int>),
+                        gemvt_KARGS(*alpha, *beta));
                 else
-                    ROCBLAS_LAUNCH_KERNEL((rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
-                                          gemvt_KARGS(*alpha, *beta));
+                    ROCBLAS_LAUNCH_GEMVT_XSTRIDE(
+                        x_stride,
+                        (rocblas_gemvt_xs_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        (rocblas_gemvt_warp_reduce_kernel<CONJ, NB, int64_t>),
+                        gemvt_KARGS(*alpha, *beta));
             }
         }
 #undef gemvt_KARGS
     }
+#undef ROCBLAS_LAUNCH_GEMVT_XSTRIDE
     return rocblas_status_success;
 }
 

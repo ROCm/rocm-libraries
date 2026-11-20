@@ -23,7 +23,9 @@ variant:
 Block size 16 and 32 are both supported: a tile is a fixed 32-token window
 (two WMMA N-subtiles of 16), which spans one paged block when ``block_size==32``
 and two consecutive paged blocks when ``block_size==16`` — the per-N-subtile and
-per-token block-table lookups handle both. KV cache may be bf16 (no dequant) or
+per-token block-table lookups handle both, clamped to the sequence's last page so
+the tail tile cannot read an unvalidated block-table entry (see ``_phys_block``;
+``test_gfx1250_tiled_3d_bounds``). KV cache may be bf16 (no dequant) or
 fp8e4m3 (in-register dequant). bf8e5m2 is gated off pending its shared helper.
 """
 
@@ -656,8 +658,22 @@ def build_unified_attention_3d_tiled(
         stride_3=1,
     )
 
+    # Every block-table entry is bounded by the sequence's last page. A ``_T``-token
+    # KV tile spans two paged blocks when ``block_size == 16``, so the tail tile of a
+    # sequence whose length is not a tile multiple asks for a logical block past the
+    # last one the host filled in (seq_len 40, bs 16: logical 3, pages 0-2 valid).
+    # ``bindings.py`` validates only ``row[:cdiv(seq_len, block_size)]``, so that
+    # entry is an arbitrary page id and the K/V load built from it faults -- the
+    # AICK-2955 failure. Clamping the page rather than the key keeps the per-token
+    # page/offset split out of the KV loop; keys past ``seq_len`` read rows of the
+    # last valid page, are masked to -inf (P = 0) and are never stored, so only the
+    # addresses change. ``BS`` is 16 or 32 (spec check), so the shift is exact.
+    k_last_page = b.lshr(
+        b.sub(seq_len, b.const_i32(1)), b.const_i32(BS.bit_length() - 1)
+    )
+
     def _phys_block(tok_global):
-        logical = b.div(tok_global, b.const_i32(BS))
+        logical = b.smin(b.div(tok_global, b.const_i32(BS)), k_last_page)
         return b.global_load_i32(
             block_tables, b.add(b.mul(seq_idx, block_table_stride), logical)
         )

@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_descr.hpp"
 #include "hipsparse_local_handle.hpp"
 #include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
@@ -66,8 +67,7 @@ void testing_spgeam_csr_bad_arg(const Arguments& argus)
 
     hipsparseLocalHandle_t handle;
 
-    std::unique_ptr<spgeam_struct> unique_ptr_descr(new spgeam_struct);
-    hipsparseSpGEAMDescr_t         descr = unique_ptr_descr->descr;
+    hipsparseLocalSpGEAMDescr descr;
 
     auto dcsr_row_ptr_A_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int) * safe_size), device_free};
@@ -354,16 +354,14 @@ void testing_spgeam_csr(Arguments argus)
 
     hipsparseLocalHandle_t handle(argus);
 
-    std::unique_ptr<spgeam_struct> unique_ptr_descr(new spgeam_struct);
-    hipsparseSpGEAMDescr_t         descr = unique_ptr_descr->descr;
+    hipsparseLocalSpGEAMDescr descr;
 
     // cusparseSpGEAM only supports host pointer mode scalars, so the device pointer mode
     // pass (matrix C2 below) is only exercised on the rocSPARSE backend.
     // clang-format off
 #if(!defined(CUDART_VERSION))
     // clang-format on
-    std::unique_ptr<spgeam_struct> unique_ptr_descr2(new spgeam_struct);
-    hipsparseSpGEAMDescr_t         descr2 = unique_ptr_descr2->descr;
+    hipsparseLocalSpGEAMDescr descr2;
 #endif
 
     // Host structures for A

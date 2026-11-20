@@ -17,6 +17,31 @@ def packed(model) -> bytes:
     return bytes(builder.Output())
 
 
+def leaf_model(
+    features_hash: str,
+    num_features: int,
+    *,
+    leaf: float = 1.0,
+    grouped: bool = False,
+    training_arches: list[str] | None = None,
+) -> bytes:
+    """The smallest `tree_data` artifact the runtime would load: one tree of one leaf."""
+    from uhd_gen.lgbm_to_flatbuffer import build_gbdt_model
+
+    ensemble = {
+        "tree_info": [{"tree_structure": {"leaf_value": leaf}}],
+        "max_feature_idx": num_features - 1,
+        "objective": "regression",
+    }
+    return build_gbdt_model(
+        ensemble,
+        features_hash,
+        training_arches=training_arches,
+        group_by_feature_index=0 if grouped else -1,
+        groups=[(0.0, ensemble)] if grouped else None,
+    )
+
+
 def write_model(model, path: Path) -> Path:
     """`packed(model)` written to `path`; returns `path`."""
     path.write_bytes(packed(model))

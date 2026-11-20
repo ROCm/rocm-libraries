@@ -81,16 +81,9 @@ namespace
     template <typename... Lists>
     using Concat = typename concat_types<Lists...>::type;
 
-#ifdef SUPPORT_COMPLEX
-    using ComplexTypes = testing::Types<cfloat, cdouble>;
-#else
-    using ComplexTypes = testing::Types<>;
-#endif
-
     // The value types and backends for which the backend vectors define an
     // operation; the others end the program
-    using BlasTypes = Concat<WithBackends<FloatingTypes>, HostOnly<IntegerTypes>>;
-    using AbsTypes  = Concat<WithBackends<RealTypes>, HostOnly<Concat<ComplexTypes, IntegerTypes>>>;
+    using BlasTypes       = Concat<WithBackends<FloatingTypes>, HostOnly<IntegerTypes>>;
     using PowerTypes      = Concat<WithBackends<testing::Types<float, double, int64_t>>,
                                    HostOnly<Concat<testing::Types<int>, ComplexTypes>>>;
     using SortTypes       = WithBackends<testing::Types<float, double, int, int64_t, bool>>;
@@ -486,25 +479,20 @@ TYPED_TEST(local_vector_data, check_accepts_finite_values_and_rejects_nan_and_in
         const R inf = std::numeric_limits<R>::infinity();
         EXPECT_FALSE(
             logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(nan), from_int<T>(3)})));
-        if constexpr(!is_complex_v<T>)
+        EXPECT_FALSE(
+            logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(-inf), from_int<T>(3)})));
+        if constexpr(is_complex_v<T>)
         {
-            EXPECT_FALSE(
-                logged_check(*this->vec(std::vector<T>{from_int<T>(1), -inf, from_int<T>(3)})));
+            for(const T& bad : {T(0, inf), T(0, -inf), T(0, nan)})
+            {
+                EXPECT_FALSE(
+                    logged_check(*this->vec(std::vector<T>{from_int<T>(1), bad, from_int<T>(3)})))
+                    << bad;
+            }
         }
     }
 
-    if constexpr(is_complex_v<T> || std::is_same_v<T, int> || std::is_same_v<T, int64_t>)
-    {
-        KNOWN_BUG("HostVector::Check compares |v| with numeric_limits<T>::infinity(), which is "
-                  "zero for integers and complex numbers");
-    }
     EXPECT_TRUE(logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(0), from_int<T>(3)})));
-    if constexpr(is_complex_v<T>)
-    {
-        const R inf = std::numeric_limits<R>::infinity();
-        EXPECT_FALSE(
-            logged_check(*this->vec(std::vector<T>{from_int<T>(1), T(-inf), from_int<T>(3)})));
-    }
 }
 
 // operator[] accesses the host data; on the accelerator it is an assert, see
@@ -776,14 +764,14 @@ TYPED_TEST(local_vector_norm, norm_is_the_euclidean_norm)
     EXPECT_EQ(this->vec(std::vector<T>())->Norm(), T(0));
 }
 
-// Asum and Amax, which the accelerator defines only for real floating point types
+// Asum and Amax
 
 template <typename P>
 class local_vector_abs : public LocalVectorTest<P>
 {
 };
 
-TYPED_TEST_SUITE(local_vector_abs, AbsTypes, TypedName);
+TYPED_TEST_SUITE(local_vector_abs, BlasTypes, TypedName);
 
 TYPED_TEST(local_vector_abs, asum_sums_the_magnitudes)
 {
@@ -796,15 +784,14 @@ TYPED_TEST(local_vector_abs, asum_sums_the_magnitudes)
 
     if constexpr(is_complex_v<T>)
     {
-        // As BLAS scasum: the real sum of |re| + |im|
-        real_t<T> expected = 0;
+        // The 1-norm: the real sum of the moduli |z|, not the |re| + |im| of BLAS scasum
+        double expected = 0;
         for(const T& e : a)
         {
-            expected += std::abs(e.real()) + std::abs(e.imag());
+            expected += std::abs(std::complex<double>(e));
         }
-        EXPECT_EQ(asum.real() + asum.imag(), expected);
-        KNOWN_BUG("the host returns (sum |re|, sum |im|) instead of the real sum");
-        EXPECT_EQ(asum, T(expected, 0));
+        EXPECT_EQ(asum.imag(), 0);
+        expect_near(asum, T(static_cast<real_t<T>>(expected)));
     }
     else
     {
@@ -1044,10 +1031,8 @@ TYPED_TEST(local_vector_random_integers, uniform_integers_cover_the_range)
     EXPECT_GE(*std::min_element(values.begin(), values.end()), 0);
     EXPECT_LE(*std::max_element(values.begin(), values.end()), 10);
 
-    KNOWN_BUG("HostVector::SetRandomUniform divides rand() by RAND_MAX in integer arithmetic, so "
-              "almost every value is the lower bound");
     std::sort(values.begin(), values.end());
-    EXPECT_GE(std::unique(values.begin(), values.end()) - values.begin(), 10);
+    EXPECT_EQ(std::unique(values.begin(), values.end()) - values.begin(), 11);
 }
 
 // Binary files, which store float as double and have no complex and bool version

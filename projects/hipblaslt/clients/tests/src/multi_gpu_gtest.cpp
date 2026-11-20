@@ -11,6 +11,7 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -184,6 +185,23 @@ TEST(collective_rendezvous_smoke, two_ranks_agree_on_same_host_group)
 
     EXPECT_TRUE(result[0]);
     EXPECT_TRUE(result[1]);
+}
+
+TEST(collective_rendezvous_smoke, failed_exchange_is_not_reported_as_spanning_hosts)
+{
+    uint16_t port = 0;
+    ASSERT_TRUE(free_port(port));
+
+    LauncherEnv env;
+    env.rank        = 0;
+    env.world       = 2;
+    env.master_addr = "127.0.0.1";
+    env.master_port = port;
+
+    TcpRendezvous r(env, 1);
+
+    // Rank 1 never arrives.
+    EXPECT_THROW(r.same_host_group(), std::runtime_error);
 }
 
 TEST(collective_rendezvous_smoke, multi_segment_payload_arrives_intact)

@@ -3232,6 +3232,127 @@ TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, ARecordTakenUnderTheLimitSe
         << "a shortlist record does not cover the full candidate set";
 }
 
+/// A one-slot engine whose slot carries two candidates in declared order (slot_64 then
+/// slot_128); UnrankedKernelHeuristic keeps them in that order, so slot_64 is the ranked
+/// front.
+std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeOneSlotTwoKernelStateManager()
+{
+    MetadataSchema schema;
+    schema.id = SCHEMA_ID;
+    schema.name = "test slot schema";
+    schema.fields = {{BLOCK_SIZE, MetadataType::INT, MetadataValue{int64_t{64}}},
+                     {DTYPE, MetadataType::STRING, std::nullopt}};
+
+    KernelDescriptorPack pack;
+    pack.id = PACK_ID;
+    pack.name = "slot pack";
+    pack.engineId = ENGINE_ID;
+    pack.dispatchId = DISPATCH_ID;
+    pack.slot = "only";
+    pack.kernels = {makeKernel(testId(0x90), "slot_64", 64, "FLOAT"),
+                    makeKernel(testId(0x91), "slot_128", 128, "FLOAT")};
+
+    std::vector<KernelSlotInput> slots;
+    slots.push_back(
+        {"only", schema, {std::move(pack)}, std::make_shared<UnrankedKernelHeuristic>()});
+
+    ensureNoopDispatchRegistered<TestHandle>("test.dispatch");
+    return std::make_unique<KernelIngestorStateManager<TestHandle>>(
+        std::move(slots),
+        std::vector<MatchDescriptor>{},
+        std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
+        "test.graph",
+        std::string{},
+        "engine 'slot fixture'");
+}
+
+/// A slot's candidate shortlist must shrink under the same limit an unslotted engine's
+/// does: slotCandidates() used to never read settings.shortlistLimit, so a process-wide
+/// HIPDNN_INGESTOR_SHORTLIST_LIMIT narrowed unslotted selection but left every slotted
+/// engine still considering its whole catalog.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, NarrowsASlottedEnginesSelectionToo)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const FailsToPrepareOneBlockSizeHandler handler(/*failingBlockSize=*/64);
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeOneSlotTwoKernelStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto engineConfig = makeEmptyEngineConfig(fbb);
+    const TestGraph graph(makeGraphId(0xF4));
+
+    setLimit("1");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    ASSERT_FALSE(settings.ingestorSettings.benchmarkingEnabled);
+
+    BenchmarkContext limited;
+    limited.setExecutionSettings(settings);
+    try
+    {
+        builder.buildPlan(0, graph, engineConfig, limited);
+        FAIL() << "the only candidate a limit of 1 leaves (slot_64) cannot prepare";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
+    {
+        EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR);
+    }
+
+    setLimit("2");
+    builder.initializeExecutionSettings(0, graph, engineConfig, settings);
+    BenchmarkContext widened;
+    widened.setExecutionSettings(settings);
+    builder.buildPlan(0, graph, engineConfig, widened);
+    EXPECT_EQ(widened.plan().getWorkspaceSize(0), 128U)
+        << "with the limit widened to 2, the slot falls through to slot_128";
+}
+
+/// setSlotProgramBenchmark must count the shortlist limit in `narrowed`, as it already does
+/// the knob filter and workspace limit: with benchmarking on and a limit below the slot's
+/// catalog size, a measured record only covers the shortlisted candidates and must not be
+/// saved as if it covered the whole catalog. Reverting the shortlist term out of `narrowed`
+/// makes this fail, since the record would then be written.
+TEST_F(TestIngestorGenericPlanBuilderShortlistLimit, SlottedBenchmarkUnderTheLimitSavesNoRecord)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const WorkspaceEqualsBlockSizeHandler handler;
+    const ScopedDispatchRegistration<TestHandle> dispatch("test.dispatch", handler);
+    const auto manager = makeOneSlotTwoKernelStateManager();
+    const auto engine = makeEngineWithKnobs({});
+    const TestDeviceResolver resolver;
+    const BenchmarkPlanBuilder builder(engine, *manager, resolver);
+
+    flatbuffers::FlatBufferBuilder fbb;
+    const auto benchmarkConfig
+        = makeIntKnobEngineConfig(fbb, hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME, 1);
+    const TestGraph graph(makeGraphId(0xF6));
+    const auto properties = testDeviceProperties();
+    const TestHandle handle;
+
+    setLimit("1");
+    KnobFilterSettings settings;
+    builder.initializeExecutionSettings(handle, graph, benchmarkConfig, settings);
+    ASSERT_TRUE(settings.ingestorSettings.benchmarkingEnabled);
+    ASSERT_EQ(settings.ingestorSettings.shortlistLimit, std::optional<size_t>(1))
+        << "the slot has two candidates; the limit must sit below that";
+
+    BenchmarkContext context;
+    context.setExecutionSettings(settings);
+    builder.buildPlan(handle, graph, benchmarkConfig, context);
+    std::vector<std::byte> workspace(context.plan().getWorkspaceSize(handle));
+    context.plan().execute(handle, nullptr, 0U, workspace.data());
+
+    WinnerKey slotKey = winnerKeyFor(graph, properties);
+    slotKey.slot = "only";
+    EXPECT_FALSE(manager->winnerFor(slotKey).has_value())
+        << "a shortlist-limited measurement must not be saved as the slot's winner record";
+    EXPECT_FALSE(manager->programFor(winnerKeyFor(graph, properties)).has_value())
+        << "a shortlist-limited measurement must not be saved as the program record either";
+}
+
 /// predictConfiguration must name the same kernel buildPlan actually serves under a
 /// limit: both apply applyShortlistLimit to the same filtered catalog before ranking, so
 /// a benchmark record taken under the limit (shortlisting kernel_64, kernel_128) cannot

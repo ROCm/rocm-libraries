@@ -86,6 +86,7 @@ def _identities() -> list:
         _identity(direction="wgrad", group_merge=4, grouped=True),
         _identity(direction="fwd", group_merge=4, grouped=True),
         _identity(direction="dgrad", grouped=True),
+        _identity(direction="dgrad", grouped=True, split_k=2),
         _identity(direction="dgrad", patch=True),
         _identity(direction="dgrad", max_sub_gemms=4),
         _identity(direction="dgrad", tap_outer_k=True),

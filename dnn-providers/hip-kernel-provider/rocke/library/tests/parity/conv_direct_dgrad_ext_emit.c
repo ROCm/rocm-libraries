@@ -26,8 +26,8 @@
  * 59..61: the non-power-of-two group sizes cpg 24 and cpg 56 (stride 1) and
  * cpg 64 (stride 2) -- mirrors _WIN_G8_CFGS.
  * Indices 62..72: the Toeplitz WMMA form (mfma at wave_size 32, gfx1250);
- * 68..72 both reject (71 and 72: fwd at stride 1 and 2, the forward mode is
- * wave64 only) -- mirrors _WMMA_WIN_CFGS.
+ * 68..70 and 72 (fwd at stride 2, a wave64 mode) both reject, 71 is the
+ * depthwise fwd at stride 1 -- mirrors _WMMA_WIN_CFGS.
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -168,12 +168,21 @@ static const fourc_cfg_t FOURC_CFGS[] = {
     {1, 8, 8, 16, 5, "fp16", "gfx950", 4, 16, 0, 0},
 };
 
+static void
+    fill_fourc_spec(const fourc_cfg_t* c, rocke_direct_conv_4c_spec_t* spec, const char** arch);
+
 static int make_fourc_cfg(int idx, rocke_direct_conv_4c_spec_t* spec, const char** arch)
 {
     const int n = (int)(sizeof(FOURC_CFGS) / sizeof(FOURC_CFGS[0]));
     if(idx < 0 || idx >= n)
         return -1;
-    const fourc_cfg_t* c = &FOURC_CFGS[idx];
+    fill_fourc_spec(&FOURC_CFGS[idx], spec, arch);
+    return 0;
+}
+
+static void
+    fill_fourc_spec(const fourc_cfg_t* c, rocke_direct_conv_4c_spec_t* spec, const char** arch)
+{
     *spec = rocke_direct_conv_4c_spec_default();
     spec->problem = rocke_direct_conv_problem_default();
     spec->problem.N = c->N;
@@ -195,7 +204,6 @@ static int make_fourc_cfg(int idx, rocke_direct_conv_4c_spec_t* spec, const char
     spec->stage_rows = c->stage_rows != 0;
     spec->waves_q = c->stage_rows ? c->block_q / 4 : 1;
     *arch = c->arch;
-    return 0;
 }
 
 /* Generic DirectConvSpec configs, emitted as GENERIC_CFG_BASE + idx (mirrors
@@ -234,12 +242,21 @@ static const generic_cfg_t GENERIC_CFGS[] = {
 };
 /* clang-format on */
 
+static void
+    fill_generic_spec(const generic_cfg_t* c, rocke_direct_conv_spec_t* spec, const char** arch);
+
 static int make_generic_cfg(int idx, rocke_direct_conv_spec_t* spec, const char** arch)
 {
     const int n = (int)(sizeof(GENERIC_CFGS) / sizeof(GENERIC_CFGS[0]));
     if(idx < 0 || idx >= n)
         return -1;
-    const generic_cfg_t* c = &GENERIC_CFGS[idx];
+    fill_generic_spec(&GENERIC_CFGS[idx], spec, arch);
+    return 0;
+}
+
+static void
+    fill_generic_spec(const generic_cfg_t* c, rocke_direct_conv_spec_t* spec, const char** arch)
+{
     *spec = rocke_direct_conv_spec_default();
     spec->problem = rocke_direct_conv_problem_default();
     spec->problem.N = c->N;
@@ -279,7 +296,6 @@ static int make_generic_cfg(int idx, rocke_direct_conv_spec_t* spec, const char*
     spec->stage_out = c->stage_out != 0;
     spec->row_exit = c->row_exit != 0;
     *arch = c->arch;
-    return 0;
 }
 
 /* The Toeplitz MFMA form with fwd (the rotated filter), emitted as
@@ -385,6 +401,57 @@ static int
     return 0;
 }
 
+/* fp32-storage configs, emitted as F32_CFG_BASE + idx (mirrors _F32_CFG_BASE:
+ * _F32_GENERIC_CFGS, then _F32_FOURC_CFGS), after the Toeplitz WMMA ones. */
+#define F32_CFG_BASE 73
+/* clang-format off */
+static const generic_cfg_t F32_GENERIC_CFGS[] = {
+    /* N, H, W, G, cpg, kpg, K, dtype, arch, then the knob columns in struct order */
+    {8, 11, 19, 32, 16, 16, 3, "tf32", "gfx950", 32, 2, 8, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1, 8, 0, 1},
+    {8, 11, 19, 32, 16, 16, 3, "fp32", "gfx950", 32, 2, 8, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 1, 1, 1, 8, 0, 1},
+    {2, 9, 14, 8, 8, 32, 5, "fp32", "gfx942", 16, 1, 4, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 1, 0, 0, 0, 0},
+    {2, 9, 14, 8, 8, 32, 5, "tf32", "gfx942", 16, 1, 4, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 1, 1, 0, 0, 0, 0},
+    {9, 10, 13, 32, 16, 16, 3, "tf32", "gfx942", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 8, 1, 0},
+    {2, 6, 21, 8, 20, 8, 1, "tf32", "gfx950", 16, 4, 32, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1},
+    {2, 6, 21, 8, 20, 8, 1, "fp32", "gfx942", 16, 4, 32, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 1},
+    {2, 9, 17, 8, 16, 16, 3, "tf32", "gfx942", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 17, 8, 16, 16, 3, "fp32", "gfx950", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 17, 8, 16, 32, 3, "fp32", "gfx942", 16, 2, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 14, 8, 16, 32, 3, "tf32", "gfx950", 16, 1, 4, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 1, 2, 0, 8, 1, 0},
+    {8, 7, 14, 16, 32, 32, 3, "tf32", "gfx942", 16, 1, 16, 1, 1, 1, 0, 0, 64, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 1, 0},
+    {2, 9, 17, 4, 32, 32, 3, "fp32", "gfx950", 16, 1, 16, 1, 1, 1, 0, 0, 64, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0},
+    {2, 9, 17, 8, 64, 64, 3, "fp32", "gfx942", 64, 2, 16, 0, 1, 1, 0, 0, 64, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0},
+};
+/* clang-format on */
+static const fourc_cfg_t F32_FOURC_CFGS[] = {
+    {1, 8, 8, 16, 3, "fp32", "gfx942", 8, 16, 0, 0},
+    {2, 13, 13, 32, 3, "tf32", "gfx950", 4, 16, 1, 0},
+};
+
+/* 1 = generic, 2 = 4c, 0 past the last one. */
+static int make_f32_cfg(int idx,
+                        rocke_direct_conv_spec_t* specgen,
+                        rocke_direct_conv_4c_spec_t* spec4c,
+                        const char** arch)
+{
+    const int ng = (int)(sizeof(F32_GENERIC_CFGS) / sizeof(F32_GENERIC_CFGS[0]));
+    const int n4 = (int)(sizeof(F32_FOURC_CFGS) / sizeof(F32_FOURC_CFGS[0]));
+    if(idx < 0)
+        return 0;
+    if(idx < ng)
+    {
+        fill_generic_spec(&F32_GENERIC_CFGS[idx], specgen, arch);
+        return 1;
+    }
+    idx -= ng;
+    if(idx < n4)
+    {
+        fill_fourc_spec(&F32_FOURC_CFGS[idx], spec4c, arch);
+        return 2;
+    }
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -401,7 +468,18 @@ int main(int argc, char** argv)
     const char* arch = "gfx950";
     int is_4c = 0;
     int is_generic = 0;
-    if(make_wmma_cfg(idx - WMMA_WIN_CFG_BASE, &spec, &arch) == 0)
+    if(idx >= F32_CFG_BASE)
+    {
+        const int k = make_f32_cfg(idx - F32_CFG_BASE, &specgen, &spec4c, &arch);
+        if(k == 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        is_generic = k == 1;
+        is_4c = k == 2;
+    }
+    else if(make_wmma_cfg(idx - WMMA_WIN_CFG_BASE, &spec, &arch) == 0)
     {
         /* the windowed spec, Toeplitz WMMA form */
     }

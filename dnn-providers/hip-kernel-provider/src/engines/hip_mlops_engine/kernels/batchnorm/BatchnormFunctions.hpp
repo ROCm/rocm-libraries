@@ -147,11 +147,11 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
         {
-            if constexpr(config::channels % 2 == 0)
+            if constexpr((config::channels / config::vec_size_x) % 2 == 0)
             {
                 // xgrp_size values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_size is that they
-                // must be even.
+                // odd threads - at odd rows. The only restriction for C / vec_size_x and xgrp_size
+                // is that they must be even. Must match the parity test in getStashMethod.
                 return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
                        + (vindex * 2 + xlid % 2) * batchStride + ygroupoffset * ystride
                        + (xgrp_size * xgrp_id + xlid / 2 * 2) * xstride;
@@ -181,11 +181,11 @@ __forceinline__ __device__ unsigned int getStashIndex(unsigned int vindex,
         // 2 _FLOAT values are used to store 1 _FLOAT_PREC value.
         if constexpr(hip_kernel_provider::config::layout_channel_last)
         {
-            if constexpr(config::channels % 2 == 0)
+            if constexpr((config::channels / config::vec_size_x) % 2 == 0)
             {
                 // xgrp_size values are split in two parts: even threads use 2 values at even rows,
-                // odd threads - at odd rows. The only restriction for C and xgrp_size is that they
-                // must be even.
+                // odd threads - at odd rows. The only restriction for C / vec_size_x and xgrp_size
+                // is that they must be even. Must match the parity test in getStashMethod.
                 return zgroupoffset * (config::channels / config::vec_size_x * config::spatial_size)
                        + (vindex * 2 + xlid % 2) * batchStride + ygroupoffset * ystride
                        + (xgrp_size * xgrp_id + xlid / 2 * 2) * xstride;

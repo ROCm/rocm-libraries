@@ -79,11 +79,21 @@ class Tuner(BaseTuner):
             warp_small_ipt = params['warp_small_ipt']
             warp_medium_lws = params['warp_medium_lws']
             warp_medium_ipt = params['warp_medium_ipt']
+            item_size = key_size
+            if types["value_type"] != "rocprim::empty_type":
+                item_size += TYPE_CONFIGS[types["value_type"]].size
 
             if warp_small_lws * warp_small_ipt > warp_medium_lws * warp_medium_ipt:
                 return False
 
             if 1 << rb > bs:
+                return False
+
+            # Warp sorts keep their items in shared memory as well, and unknown targets
+            # compile every target's configs, so they must fit in 64 KiB too
+            if item_size * params['warp_small_bs'] * warp_small_ipt > TUNING_SHARED_MAX:
+                return False
+            if item_size * params['warp_medium_bs'] * warp_medium_ipt > TUNING_SHARED_MAX:
                 return False
 
             if types["value_type"] == "rocprim::empty_type":

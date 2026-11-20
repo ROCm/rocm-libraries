@@ -27,7 +27,7 @@ from .common import (
     AttentionTuningSpec,
     FAMILY,
     _parse_attention_mask_type,
-    _problem,
+    attention_problem,
     _request_errors,
     _selector_matches,
 )
@@ -111,7 +111,7 @@ def make_candidate() -> KernelCandidate:
             return ok, why
         # Head size and GQA ratio are the kernel's call: defer to the same gate
         # the strided runner applies, so dispatch admits what the kernel admits.
-        problem = _problem(req)
+        problem = attention_problem(req)
         ok, why = _explicit_path_supported(problem, None, "3d", req.arch.lower())
         if not ok:
             return False, why
@@ -126,7 +126,7 @@ def make_candidate() -> KernelCandidate:
         if not ok:
             raise ValueError(why)
         spec, reduce = _strided_3d_specs_from_problem(
-            _problem(req), arch=req.arch.lower()
+            attention_problem(req), arch=req.arch.lower()
         )
         return AttentionTuningSpec(
             path="3d",
@@ -153,7 +153,7 @@ def make_candidate() -> KernelCandidate:
             tensors = _dense_as_strided(request, tensors)
         problem = tensors.get("problem")
         if problem is None:
-            problem = _problem(request)
+            problem = attention_problem(request)
         if not isinstance(problem, UnifiedAttentionProblem):
             raise TypeError(
                 "tensors['problem'] must be a UnifiedAttentionProblem, got "
@@ -246,7 +246,7 @@ def make_candidate() -> KernelCandidate:
         signature=lambda spec: _tiled_3d_signatures(
             spec.arch, spec.kernel_spec.dtype, strided_kv=True
         )[0],
-        grid=lambda spec, req: spec.launch_grid(_problem(req)),
+        grid=lambda spec, req: spec.launch_grid(attention_problem(req)),
         block=lambda spec: spec.launch_block(),
         bind_torch=bind,
     )

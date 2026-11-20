@@ -26,20 +26,21 @@ from ..ExecutionPolicy import isPersistentDataParallel, isStreamK, hasStaticAssi
 from rocisa.code import SignatureBase
 from rocisa.enum import SignatureValueKind as SVK
 from ..Component import Signature
+from ..CustomKernels import magicSizeSemantic
 from ..Common import DataDirection
 from ..Common.ScaleAlphaVec import scaleAlphaVectorMode
 from ..Activation import ActivationType
+from ..SolutionStructs.Problem import isFusedA2A
 
 from dataclasses import dataclass, field
 
 # Fused GEMM.A2A kernarg segment layout.
 #
-# When kernel["ProblemType"]["FusedGemmA2A"] is set, Signature appends a fixed-size segment at
+# When either A2A fusion mode is set, Signature appends a fixed-size segment at
 # the tail of the kernarg buffer. These args are kernarg metadata ONLY -- no
-# defineSgpr, not counted in numSgprToLoad. The fusion logic runs solely in the
-# D-store epilogue, which reads each arg on demand by absolute byte offset into
-# a scratch SGPR freed right after use. A WG maps to a single dst_rank, so it
-# reads exactly one peer group.
+# defineSgpr, not counted in numSgprToLoad. Readers take each arg on demand by
+# absolute byte offset into a scratch SGPR freed right after use. A WG maps to a
+# single dst_rank, so it reads exactly one peer group.
 #
 # The slot count is a COMPILE-TIME constant, independent of the runtime W.
 FUSED_A2A_MAX_RANKS = 8
@@ -70,17 +71,25 @@ def _fusedA2AAlignLine(nbytes):
     return -(-nbytes // FUSED_A2A_LINE_BYTES) * FUSED_A2A_LINE_BYTES
 
 
-# Counter-block region offsets, twinned with kCounter*Offset in
+# Counter-block region offsets, twinned with kCursorBytes / kCounter*Offset in
 # client/src/DeviceContext.cpp; the flag-block offset and the
 # FusedDrain bits with their namesakes in client/include/FusedA2AKernArg.hpp.
 # The three leading counter regions are sized by FUSED_A2A_MAX_RANKS rather than
 # the runtime W. Each region starts on a 64-byte line; the trailing
 # variable-size region gets no tail padding.
-FUSED_A2A_COUNTER2_OFFSET = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * CURSOR_PAIR_BYTES)
+FUSED_A2A_CURSOR_BYTES = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * CURSOR_PAIR_BYTES)
+FUSED_A2A_COUNTER2_OFFSET = FUSED_A2A_CURSOR_BYTES
 FUSED_A2A_COUNTER3_OFFSET = _fusedA2AAlignLine(
     FUSED_A2A_COUNTER2_OFFSET + FUSED_A2A_MAX_RANKS * 4)
 FUSED_A2A_COUNTER1_OFFSET = _fusedA2AAlignLine(FUSED_A2A_COUNTER3_OFFSET + 4)
 FUSED_A2A_OUTBOUND_OFFSET = _fusedA2AAlignLine(FUSED_A2A_MAX_RANKS * 4)
+# FusedA2A=A2AGemm layout of the same block: the cursor region is shared, then the
+# flag block, then numTokenBlocks block tallies and one grid tally, then the election
+# counters, each on the next line past the previous region.
+FUSED_A2A_A2AGEMM_FLAG_OFFSET = FUSED_A2A_CURSOR_BYTES
+# FusedA2A=A2AGemm layout of a peer's flagPtr block: done[src] is set once rank src
+# has finished reading this rank's B.
+FUSED_A2A_A2AGEMM_DONE_OFFSET = 0
 FUSED_A2A_DRAIN_RECV = 1
 FUSED_A2A_DRAIN_SEND = 2
 
@@ -92,6 +101,7 @@ FUSED_A2A_DRAIN_SEND = 2
 #   counter_ptr      this device's counter base
 #   FusedDrain       runtime drain flag (NOT a compile-time gate)
 #   FusedAM          A2A feature-row count (first AM rows PUSH, rest local)
+#   FusedNumCu       this device's CU count
 #
 # One group per peer, so a work-group computes one base and reaches every
 # pointer it needs for that peer by immediate offset.
@@ -99,7 +109,8 @@ _FUSED_A2A_SEGMENT_ARGS = (
     [("peer_%u_%s" % (j, f), 8)
      for j in range(FUSED_A2A_MAX_RANKS) for f in FUSED_A2A_PEER_FIELDS]
     + [("counter_ptr", 8),
-       ("FusedMyRank", 4), ("FusedW", 4), ("FusedDrain", 4), ("FusedAM", 4)])
+       ("FusedMyRank", 4), ("FusedW", 4), ("FusedDrain", 4), ("FusedAM", 4),
+       ("FusedNumCu", 4)])
 
 def fusedA2AKernArgLayout():
     """Return {argName: intra-segment byte offset} for the fused-A2A segment.
@@ -375,13 +386,17 @@ class SignatureDefault(Signature):
             userArgumentsInfo.gemmArgumentSize += 4
 
         for idxChar in kernel["PackedC0IdxChars"][:-1]:
-            signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
-            signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,               "u32")
+            signature.addArg(magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]) + idxChar,
+                             SVK.SIG_VALUE, "u32")
+            signature.addArg(magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]) + idxChar,
+                             SVK.SIG_VALUE, "u32")
 
         if isPersistentDataParallel(kernel):
             for idxChar in kernel["PackedC1IdxChars"][:-1]:
-                signature.addArg("MagicNumberSize%s"%idxChar, SVK.SIG_VALUE,           "u32")
-                signature.addArg( "MagicShiftSize%s"%idxChar, SVK.SIG_VALUE,           "u32")
+                signature.addArg(magicSizeSemantic("MagicNumberSize", kernel["MagicDivAlg"]) + idxChar,
+                                 SVK.SIG_VALUE, "u32")
+                signature.addArg(magicSizeSemantic("MagicShiftSize", kernel["MagicDivAlg"]) + idxChar,
+                                 SVK.SIG_VALUE, "u32")
 
         # These are fixed sizes
         userArgumentsInfo.gemmArgumentSize += userArgumentsInfo.alphaMaxSize
@@ -445,6 +460,12 @@ class SignatureDefault(Signature):
             if kernel["ProblemType"]["ActivationType"] in ['all', 'hipblaslt_all'] :
                 signature.addArg(       "activationType", SVK.SIG_VALUE,               "u32")
 
+        # Second D output (OutputPeerD): the distance in bytes from D to the peer D, loaded with
+        # the other post-loop arguments. A distance and not an address, so that it is the same
+        # for a strided D and for a pointer-array D (where the D argument is the pointer array).
+        if kernel["ProblemType"]["OutputPeerD"]:
+            signature.addArg("DeltaPeerD", SVK.SIG_VALUE, "i64")
+
         # TODO- combine one workspace
         if (kernel["ProblemType"]["OutputAmaxD"]):
             signature.addArg(    "AddrAmaxOut", SVK.SIG_GLOBALBUFFER, cptValueType, "generic")
@@ -480,7 +501,7 @@ class SignatureDefault(Signature):
 
         # Fused GEMM.A2A kernarg metadata; registered LAST so it lands at the
         # tail. See fusedA2AKernArgLayout() for the offset contract.
-        if kernel["ProblemType"]["FusedGemmA2A"]:
+        if isFusedA2A(kernel["ProblemType"]):
             fusedBase = signature.offset
             for j in range(FUSED_A2A_MAX_RANKS):
                 for f in FUSED_A2A_PEER_FIELDS:
@@ -491,6 +512,7 @@ class SignatureDefault(Signature):
             signature.addArg("FusedW",            SVK.SIG_VALUE, "u32")
             signature.addArg("FusedDrain",        SVK.SIG_VALUE, "u32")
             signature.addArg("FusedAM",           SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedNumCu",        SVK.SIG_VALUE, "u32")
             # Publish the segment base. The prologue has already advanced
             # sgprKernArgAddress past the common-args header by commonArgsSize
             # ("Shift common args" in KernelWriterAssembly.py), while these

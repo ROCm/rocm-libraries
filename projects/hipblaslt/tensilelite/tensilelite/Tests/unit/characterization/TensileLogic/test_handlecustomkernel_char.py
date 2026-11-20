@@ -23,7 +23,7 @@
 # SPDX-License-Identifier: MIT
 ################################################################################
 
-"""Characterization tests for ``TensileLogic.HandleCustomKernel``.
+"""Characterization tests for ``tensilelite.logic.handle_custom_kernel``.
 
 * ``prepareCustomKernelConfig`` — pure string formatting of an MI-param dict
   into a developer-facing diff. Snapshot the produced text. Inputs are sized so
@@ -44,8 +44,8 @@ import copy
 
 import pytest
 
-import tensilelite.TensileLogic.HandleCustomKernel as hck_mod
-from tensilelite.TensileLogic.HandleCustomKernel import (
+import tensilelite.logic.handle_custom_kernel as hck_mod
+from tensilelite.logic.handle_custom_kernel import (
     handleCustomKernel,
     hasCustomKernel,
     prepareCustomKernelConfig,

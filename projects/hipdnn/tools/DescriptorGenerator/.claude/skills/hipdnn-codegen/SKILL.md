@@ -18,7 +18,7 @@ In a clean, well-known op (cuDNN-aligned with a clear analog), the agent may not
 
 There are two **mandatory** prompts:
 - **Schema confirmation** (Step 2a-ii), whenever the agent had to construct the FBS schema (from a user description, or from `cudnn-frontend`). Schema mistakes propagate through every layer, so the agent must show the schema and get explicit user sign-off before continuing. This prompt is skipped only when the user supplied a complete FBS file.
-- **Work-model confirmation** (Step 11, Class C), whenever the op has no `logicalFlops` decision in `EngineFeatures.hpp` yet: the FLOP formula, or "no counting convention" with a reason, and which operands are content-dependent (`work_data_dependent`). A missing or wrong answer degrades UHD heuristics without any build or test failure (no `graph.flops`, or counts from padded shapes), so the agent proposes its derivation and gets explicit sign-off.
+- **Work-model confirmation** (Step 11, Class C), whenever the op has no `logicalFlops` decision in `EngineFeatures.hpp` yet: the FLOP formula, or "no counting convention" with a reason, and which operands are content-dependent (`work_data_dependent`). A missing or wrong answer degrades UHD heuristics without any build or test failure (no `graph.flops`, or a count that is not the declared problem's), so the agent proposes its derivation and gets explicit sign-off.
 
 Everything else is mechanical and is derived from the FBS schema, existing codebase state, and the conventions in this skill.
 
@@ -488,12 +488,12 @@ There are three classes of question the agent is expected to ask the user. Every
 
 **Class C: work model (mandatory for `backend` or `full` mode; skip only when `grep -n "NodeAttributes::<Op>Attributes" $HIPDNN_SRC/plugin_sdk/include/hipdnn_plugin_sdk/heuristics/EngineFeatures.hpp` already shows a `logicalFlops` case or a `NO_COUNTING_CONVENTION` entry).** UHD heuristics publish the op's logical FLOPs and its operands; see `docs/AddingNewOperations.md`, "Work Model (FLOPs)" and "Operand Features". Derive a proposal first: the convention in RFC 0019 §6.8 (logical work, not executed work), the formulas of analogous ops in `EngineFeatures.hpp`, and the op's reference implementation. Then confirm both answers with `AskUserQuestion`:
 
-- "FLOPs of one `<Op>` node. I propose `<formula, e.g. 2 * x.numel>` (`<source: analogous op / reference>`). Confirm, give the formula, or answer 'no counting convention' with the reason (e.g. 'rows follow routing offsets', 'opaque custom op')."
+- "FLOPs of one `<Op>` node. I propose `<formula, e.g. 2 * x.numel>` (`<source: analogous op / reference>`). Confirm, give the formula, or answer 'no counting convention' with the reason (only when the graph does not describe the work at all, e.g. 'opaque custom op')."
   - Formula → insert `node_flops_overload.txt` with the formula in place of the TODO stub, the `logicalFlops` case, and the `work_model_test_case.txt` entry with the hand-computed expected value for its test shapes.
   - No counting convention → only the `NO_COUNTING_CONVENTION` entry from `logical_flops_case.txt`, with the reason as its comment. Graphs holding the op get no `graph.flops` and no `tflops` metric; say so in the report.
 - "Which operands' **contents**, not shapes, decide how much work the op does (valid lengths, page tables, block masks, routing offsets)? I propose `<list or none>`. An operand read densely whatever its values (an additive bias, a dropout seed) does not count."
   - Each listed operand gets `work_data_dependent: true` in its YAML `tensor_fields` / `tensor_array_fields` entry and `(cache_uid, work_data_dependent)` in the schema. If the answer changes either, update both, re-run Step 5, and re-apply `fbs_tensor_fields.txt` (Step 7), which regenerates `node_operands_generated.h`.
-  - A required work-data-dependent operand leaves the work unknown on every graph (`logicalFlops` returns `std::nullopt` whenever such an operand is present): pick "no counting convention" for the FLOPs, as `MoeGroupedMatmul` does.
+  - A work-data-dependent operand does not remove the count: the formula counts the declared extent (padded lengths, every routed row, as `MoeGroupedMatmul` does) and never reads an operand's contents; the node's `data_dependent` feature marks the count as a bound. The operand also needs a rule in `hipdnn_bench::declaredContents` (`$HIPDNN_SRC/tools/bench/include/hipdnn_bench/InputDomain.hpp`) that writes contents making a run the declared problem; without one a timed run reads zeros (lengths and offsets of 0, a mask keeping nothing).
 
 Do NOT ask the user about any other fields or decisions — derive everything else from the schema, existing code, and conventions.
 
@@ -536,7 +536,7 @@ Before building, do a quick self-check:
 - CMake lists include all new source/test files
 
 **Work-model oracle** (local, before the build). Each check must pass; fix the cause, do not skip it:
-- `node_operands_generated.h` is regenerated for the current schemas: from the repository root, `pre-commit run node-operands-hipdnn --all-files` passes. The hook rewrites `$HIPDNN_SRC/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h`; a "files were modified by this hook" failure means it was stale, so keep the rewrite and run the hook again until it passes. Do the same for `cache-key-hipdnn` (`cachekey_generated.h`). Without `pre-commit`, run `python $HIPDNN_SRC/scripts/gen_node_operands.py` and `python $HIPDNN_SRC/scripts/gen_cache_key.py`.
+- `node_operands_generated.h` is regenerated for the current schemas: from the repository root, `pre-commit run node-operands-hipdnn --all-files` passes. The hook rewrites two headers, the visitor `$HIPDNN_SRC/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h` and the tools operand table `$HIPDNN_SRC/tools/common/include/hipdnn_tools/node_operand_table_generated.h`; a "files were modified by this hook" failure means it was stale, so keep the rewrite and run the hook again until it passes. Do the same for `cache-key-hipdnn` (`cachekey_generated.h`). Without `pre-commit`, run `python $HIPDNN_SRC/scripts/gen_node_operands.py` and `python $HIPDNN_SRC/scripts/gen_cache_key.py`.
 - The regenerated header visits the new op, and its `visit()` passes `true` as the last `visitor.tensor(...)` argument for exactly the agreed work-data-dependent operands:
   ```bash
   grep -n "<Op>Attributes" $HIPDNN_SRC/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/node_operands_generated.h
@@ -556,7 +556,7 @@ ninja 2>&1 | tail -100
 ```
 
 If the build fails, **read the errors and fix them**. Common issues:
-- **`node_operands_generated.h is stale: rerun scripts/gen_node_operands.py`** (`static_assert`) → the schema changed after the header was generated. Run the `node-operands-hipdnn` hook and commit the header.
+- **`node_operands_generated.h is stale: rerun scripts/gen_node_operands.py`** (`static_assert`) → the schema changed after the header was generated. Run the `node-operands-hipdnn` hook and commit both headers (the visitor header and the tools operand table).
 - **Missing converter function in `Types.hpp`** → insert from `mode_frontend_plumbing_<field>.txt`. Includes both `toBackend<Foo>Mode` and `fromHipdnn<Foo>Mode` — the unpacker calls the inverse.
 - **Missing `#include`** → add it.
 - **Wrong attribute name (missing or extra `_EXT` suffix)** → check `HipdnnBackendAttributeName.h` against the YAML's `attr_suffix` per field. Re-derive per the cuDNN parity rule in Step 3a.
