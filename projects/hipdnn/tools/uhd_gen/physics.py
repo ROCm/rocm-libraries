@@ -12,6 +12,14 @@ new collection.
 Each family is a dict of name -> expression, guarded so a graph of another operation reads
 `ABSENT` instead of failing. None reads a device field: a single-SKU corpus has no variation in
 one, and generation refuses a computed expression over a constant device field.
+
+The families are written once for every graph of their operation: a convolution in any
+direction, 2-D or 3-D. An engine publishes only the fields of the graphs it serves (a 2-D
+forward convolution has no `dx` and no `dims[4]`), and a recipe may read only what it
+publishes, so `derived_features` specializes each expression to the published names: a
+fallback whose field is never published becomes its default, a presence test of one becomes
+false, and a branch that cannot be taken goes. On every graph that publishes only those names
+the specialized expression reads the same value as the written one.
 """
 from __future__ import annotations
 
@@ -232,10 +240,104 @@ _FAMILIES = (
 )
 
 
-def derived_features(frame: pd.DataFrame) -> dict:
-    """name -> expression for every family the training frame holds, in a fixed order."""
+class _Missing:
+    """A reference to a field no graph of the training rows publishes: on every one of them
+    it reads unresolved."""
+
+
+_MISSING = _Missing()
+
+
+def _specialize(expression, published: set[str]):
+    """`expression` as it evaluates on graphs publishing only `published`: equal value on
+    each, with no reference outside it, or `_MISSING` where the value depends on a reference
+    outside it in a way no expression without that reference can state (the feature is then
+    left out)."""
+    if isinstance(expression, str):
+        if expression.startswith("$"):
+            return expression if expression[1:] in published else _MISSING
+        return expression
+    if isinstance(expression, list):
+        items = [_specialize(item, published) for item in expression]
+        return _MISSING if any(item is _MISSING for item in items) else items
+    if not isinstance(expression, dict) or len(expression) != 1:
+        return expression
+    ((operator, raw),) = expression.items()
+    args = [
+        _specialize(arg, published) for arg in (raw if isinstance(raw, list) else [raw])
+    ]
+    if operator == "value_or_default":
+        # An unpublished first argument always falls back; an unpublished fallback is
+        # unresolved exactly when the first argument is, which no expression can say.
+        if args[0] is _MISSING:
+            return args[1]
+        return _MISSING if args[1] is _MISSING else {operator: args}
+    if operator == "present":
+        return False if any(arg is _MISSING for arg in args) else {operator: args}
+    if operator == "not_present":
+        kept = [arg for arg in args if arg is not _MISSING]
+        return {operator: kept} if kept else True
+    if operator in ("if", "?:"):
+        kept = []
+        for index in range(0, len(args) - 1, 2):
+            condition, result = args[index], args[index + 1]
+            if condition is False:
+                continue
+            if condition is True:
+                if result is _MISSING:
+                    return _MISSING
+                return {operator: [*kept, result]} if kept else result
+            if condition is _MISSING or result is _MISSING:
+                return _MISSING
+            kept += [condition, result]
+        if len(args) % 2 == 0:
+            # No else: no condition holding reads unresolved, as written.
+            return {operator: kept} if kept else _MISSING
+        otherwise = args[-1]
+        if otherwise is _MISSING:
+            return _MISSING
+        # Every outcome one literal, under conditions that always resolve (a presence test
+        # never reads unresolved): the value is that literal on every graph.
+        outcomes = [*kept[1::2], otherwise]
+        if all(
+            isinstance(condition, dict) and set(condition) <= {"present", "not_present"}
+            for condition in kept[0::2]
+        ) and all(
+            isinstance(outcome, (bool, int, float))
+            and type(outcome) is type(otherwise)
+            and outcome == otherwise
+            for outcome in outcomes
+        ):
+            return otherwise
+        return {operator: [*kept, otherwise]} if kept else otherwise
+    if operator in ("and", "or"):
+        decides, neutral = (False, True) if operator == "and" else (True, False)
+        if any(arg is decides for arg in args):
+            return decides
+        kept = [arg for arg in args if arg is not neutral]
+        if any(arg is _MISSING for arg in kept):
+            return _MISSING
+        if not kept:
+            return neutral
+        return kept[0] if len(kept) == 1 else {operator: kept}
+    return _MISSING if any(arg is _MISSING for arg in args) else {operator: args}
+
+
+def derived_features(frame: pd.DataFrame, published: set[str] | None = None) -> dict:
+    """name -> expression for every family the training frame holds, in a fixed order,
+    specialized to `published` (default: the frame's columns some row binds). A feature that
+    specializes to a constant, or that cannot be stated without an unpublished field, is
+    left out."""
+    if published is None:
+        published = {column for column in frame.columns if frame[column].notna().any()}
     features = {}
     for holds, family in _FAMILIES:
         if holds(frame):
-            features.update(family())
+            for name, expression in family().items():
+                specialized = _specialize(expression, published)
+                if not (
+                    specialized is _MISSING
+                    or isinstance(specialized, (bool, int, float))
+                ):
+                    features[name] = specialized
     return features

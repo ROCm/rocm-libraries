@@ -1707,8 +1707,9 @@ def feature_recipe(
     of one operation leave unbound is proposed only if it is one of hipDNN's `optional`
     features, which training reads through value_or_default; any other gap (a rank some rows'
     tensor lacks) leaves the column out. It then adds the derived features
-    (`physics.derived_features`) of each operation the corpus holds. An authored recipe is
-    taken as written.
+    (`physics.derived_features`) of each operation the corpus holds, specialized to the fields
+    the engine publishes (a 2-D forward convolution's recipe reads no `dx` and no `dims[4]`).
+    An authored recipe is taken as written.
     """
     omitted = []
     if authored is not None:
@@ -1744,7 +1745,7 @@ def feature_recipe(
             {"value_or_default": ["$" + name, ABSENT_FIELD_VALUE]}
             for name in operation_fields
         )
-        signature.extend(derived_features(train_frame).values())
+        signature.extend(derived_features(train_frame, published).values())
     if not isinstance(signature, list) or not signature:
         raise ValueError("the feature recipe must be a nonempty canonical array")
     if kmd_fields is not None:
