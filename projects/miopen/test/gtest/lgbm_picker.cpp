@@ -1,8 +1,9 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Unit tests for the cross-arch LGBM solver picker. All but one are CPU-only.
-// GPU_LgbmPickerStrictArch_NONE needs a HIP device for its MockHandle.
+// Unit tests for the cross-arch LGBM solver picker. All but two are CPU-only.
+// GPU_LgbmPickerStrictArch_FP16 and GPU_LgbmPickerStrictArch_FP32 need a HIP device for their
+// MockHandle.
 // Two kinds of checks:
 //   * self-contained invariants (vocab loads and is self-consistent; the
 //     scoring seam picks a valid in-range candidate deterministically), and
@@ -229,7 +230,9 @@ TEST_F(CPU_LgbmPicker_NONE, StrictArchScoresLikeBaseArch)
 // The same check through the production entry point. The test above scores with a hand-built
 // row, so it passes even if PickSolverRanked looks the gfx_id up with the raw device name.
 // A mock handle reports the device name, everything else comes from the real device.
-class GPU_LgbmPickerStrictArch_NONE : public CPU_LgbmPicker_NONE
+// One fixture per data type, each with its own control.
+template <miopenDataType_t DataType>
+class LgbmPickerStrictArch : public CPU_LgbmPicker_NONE
 {
 protected:
     static std::unique_ptr<MockHandle> MakeHandle(std::string_view name)
@@ -257,38 +260,36 @@ protected:
                    ? miopen::conv::ProblemDescription(x, w, y, conv, dir)
                    : miopen::conv::ProblemDescription(y, w, x, conv, dir);
     }
-};
 
-TEST_F(GPU_LgbmPickerStrictArch_NONE, PickSolverRankedMatchesBaseArch)
-{
-    std::unique_ptr<MockHandle> base, strict, unseen, unseen_strict;
-    try
+    void CheckPickSolverRankedMatchesBaseArch()
     {
-        base          = MakeHandle("gfx1250");
-        strict        = MakeHandle("gfx1250-strict");
-        unseen        = MakeHandle("gfx9999");
-        unseen_strict = MakeHandle("gfx9999-strict");
-    }
-    catch(const std::exception& e)
-    {
-        GTEST_SKIP() << "no HIP device for the mock handle: " << e.what();
-    }
-    ASSERT_EQ(base->GetDeviceName(), "gfx1250");
-    ASSERT_EQ(strict->GetDeviceName(), "gfx1250-strict");
+        std::unique_ptr<MockHandle> base, strict, unseen, unseen_strict;
+        try
+        {
+            base          = MakeHandle("gfx1250");
+            strict        = MakeHandle("gfx1250-strict");
+            unseen        = MakeHandle("gfx9999");
+            unseen_strict = MakeHandle("gfx9999-strict");
+        }
+        catch(const std::exception& e)
+        {
+            GTEST_SKIP() << "no HIP device for the mock handle: " << e.what();
+        }
+        ASSERT_EQ(base->GetDeviceName(), "gfx1250");
+        ASSERT_EQ(strict->GetDeviceName(), "gfx1250-strict");
 
-    int problems        = 0;
-    bool unseen_differs = false;
-    using miopen::conv::Direction;
-    for(const auto dir : {Direction::Forward, Direction::BackwardData, Direction::BackwardWeights})
-    {
-        for(const auto dtype : {miopenHalf, miopenFloat})
+        int problems        = 0;
+        bool unseen_differs = false;
+        using miopen::conv::Direction;
+        for(const auto dir :
+            {Direction::Forward, Direction::BackwardData, Direction::BackwardWeights})
         {
             // n, c, k, hw, fil, groups
             for(const auto& s : {std::array<int, 6>{16, 64, 64, 56, 3, 1},
                                  std::array<int, 6>{32, 256, 128, 14, 1, 1},
                                  std::array<int, 6>{2, 64, 64, 28, 3, 4}})
             {
-                const auto problem = MakeProblem(dir, dtype, s[0], s[1], s[2], s[3], s[4], s[5]);
+                const auto problem = MakeProblem(dir, DataType, s[0], s[1], s[2], s[3], s[4], s[5]);
                 const auto ranked  = PickSolverRanked(problem, *base);
                 ASSERT_FALSE(ranked.empty()) << "gfx1250 is in the vocab and must be scored";
                 EXPECT_EQ(PickSolverRanked(problem, *strict), ranked);
@@ -300,9 +301,22 @@ TEST_F(GPU_LgbmPickerStrictArch_NONE, PickSolverRankedMatchesBaseArch)
                 ++problems;
             }
         }
+        ASSERT_EQ(problems, 9);
+        EXPECT_TRUE(unseen_differs) << "gfx_id has no effect on any ranking; test is vacuous";
     }
-    ASSERT_EQ(problems, 18);
-    EXPECT_TRUE(unseen_differs) << "gfx_id has no effect on any ranking; test is vacuous";
+};
+
+using GPU_LgbmPickerStrictArch_FP16 = LgbmPickerStrictArch<miopenHalf>;
+using GPU_LgbmPickerStrictArch_FP32 = LgbmPickerStrictArch<miopenFloat>;
+
+TEST_F(GPU_LgbmPickerStrictArch_FP16, PickSolverRankedMatchesBaseArch)
+{
+    CheckPickSolverRankedMatchesBaseArch();
+}
+
+TEST_F(GPU_LgbmPickerStrictArch_FP32, PickSolverRankedMatchesBaseArch)
+{
+    CheckPickSolverRankedMatchesBaseArch();
 }
 
 // ---------------------------------------------------------------------------

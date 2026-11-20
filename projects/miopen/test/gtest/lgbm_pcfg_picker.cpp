@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 // Unit tests for the per-solver perf-config picker. All but one are CPU-only.
-// GPU_LgbmPcfgPickerStrictArch_NONE needs a HIP device for its MockHandle.
+// GPU_LgbmPcfgPickerStrictArch_FP16 needs a HIP device for its MockHandle.
 // Three kinds of checks:
 //   * a self-contained ranking invariant: ScorePickForTest returns a
 //     deterministic permutation of the bucket's real candidate descriptors
@@ -263,7 +263,9 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, StrictArchSharesBaseArchBucketAndPick)
 // The same check through the production entry point. The test above calls BucketKey and
 // GfxCode directly, so it passes even if PickConfig bypasses them for the raw device name.
 // A mock handle reports the device name, everything else comes from the real device.
-class GPU_LgbmPcfgPickerStrictArch_NONE : public CPU_LgbmPcfgPicker_NONE
+// The problems are fp16 only. The ConvHipConv control below needs a gfx950 bucket, and the
+// shipped model has none for fp32.
+class GPU_LgbmPcfgPickerStrictArch_FP16 : public CPU_LgbmPcfgPicker_NONE
 {
 protected:
     static std::unique_ptr<MockHandle> MakeHandle(std::string_view name)
@@ -285,7 +287,7 @@ protected:
     }
 };
 
-TEST_F(GPU_LgbmPcfgPickerStrictArch_NONE, PickConfigMatchesBaseArch)
+TEST_F(GPU_LgbmPcfgPickerStrictArch_FP16, PickConfigMatchesBaseArch)
 {
     std::unique_ptr<MockHandle> base, strict, unseen, unseen_strict, gfx950;
     try
