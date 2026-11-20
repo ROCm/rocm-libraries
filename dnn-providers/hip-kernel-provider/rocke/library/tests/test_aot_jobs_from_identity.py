@@ -236,3 +236,25 @@ def test_wave32_forward_k_loops_carry_no_wave64_drivers():
                     pipeline,
                     kloop,
                 )
+
+
+def test_forward_k_loop_variants_are_built_for_3d_only():
+    """The gfx942 forward K-loop variants (register prefetch, per-tile decode,
+    swizzle, XCD and tap orders) are built on the 3-D capabilities only: a
+    2-D capability gets the plain, unroll_k and (on "mem") async_dma loops, as
+    every other arch does."""
+    variant_keys = {
+        "prefetch_regs",
+        "reg_prefetch",
+        "uniform_k_decode",
+        "lds_xor",
+        "uk_tap_fast",
+        "xcd_remap",
+    }
+    for pipeline in ("mem", "compv3", "compv4"):
+        flat = aj._fwd_k_loops(pipeline, "gfx942", is_3d=False)
+        assert flat == aj._fwd_k_loops(pipeline, "gfx950", is_3d=True)
+        assert not any(variant_keys & {k for k, v in kl.items() if v} for kl in flat)
+        assert len(aj._fwd_k_loops(pipeline, "gfx942")) > len(flat)
+        pairs = aj._fwd_kloop_caps(pipeline, "gfx942")
+        assert all(kl in flat for kl, caps in pairs if not caps["is_3d"])

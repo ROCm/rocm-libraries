@@ -1399,15 +1399,17 @@ def _aot_pipeline(direction: str, pipeline: str) -> bool:
 # doubling.
 CACHE_FWD_XCD_REMAP: Dict[str, Tuple[int, ...]] = {"gfx942": (6, 8)}
 
-# Archs whose forward grid takes the K-loop variants below (prefetch_regs,
+# Archs whose 3-D forward grid takes the K-loop variants below (prefetch_regs,
 # reg_prefetch, uniform_k_decode, lds_xor, xcd_remap, uk_tap_fast and the opt-in
-# scheduling and ping-pong loops). Every other arch builds the plain, unroll_k and
-# (on "mem") async_dma loops only, the grid its packaged AOT forward instances
-# model (builders/common/convolution_forward.py).
+# scheduling and ping-pong loops). Every other arch, and the 2-D grid of every
+# arch, builds the plain, unroll_k and (on "mem") async_dma loops only, the grid
+# the packaged AOT forward instances model (builders/common/convolution_forward.py).
 CACHE_FWD_KLOOP_ARCHS: Tuple[str, ...] = ("gfx942",)
 
 
-def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
+def _fwd_k_loops(
+    pipeline: str, arch: Optional[str] = None, is_3d: bool = True
+) -> List[dict]:
     """K-loop driver kwargs emitted per forward geometry.
 
     async_dma replaces the K-loop driver entirely and ignores the pipeline
@@ -1425,10 +1427,11 @@ def _fwd_k_loops(pipeline: str, arch: Optional[str] = None) -> List[dict]:
     decode, with the plain loop kept as the fallback for cpg % tile_k != 0)
     are built on the wave64 MFMA pipelines, alone and together.
 
-    Only on :data:`CACHE_FWD_KLOOP_ARCHS`; other archs get the plain and
-    ``unroll_k`` loops and, on "mem", ``async_dma``.
+    Only for 3-D capabilities (``is_3d``) on :data:`CACHE_FWD_KLOOP_ARCHS`;
+    other archs and 2-D capabilities get the plain and ``unroll_k`` loops and,
+    on "mem", ``async_dma``.
     """
-    if arch not in CACHE_FWD_KLOOP_ARCHS:
+    if arch not in CACHE_FWD_KLOOP_ARCHS or not is_3d:
         base = [dict(unroll_k=unroll, async_dma=False) for unroll in (False, True)]
         if pipeline == "mem":
             base.append(dict(unroll_k=False, async_dma=True))
@@ -2508,6 +2511,19 @@ def _layout_caps() -> List[dict]:
     return [dict(grouped=g, is_3d=d) for d in CACHE_SPATIAL_3D for g in _GROUPED]
 
 
+def _fwd_kloop_caps(pipeline: str, arch: Optional[str]) -> List[Tuple[dict, dict]]:
+    """The (K loop, capability) pairs the forward grid builds per geometry,
+    K loop outer: every :func:`_fwd_k_loops` loop on the 3-D capabilities,
+    the 2-D loops only on the 2-D ones."""
+    flat = _fwd_k_loops(pipeline, arch, is_3d=False)
+    return [
+        (kloop, caps)
+        for kloop in _fwd_k_loops(pipeline, arch)
+        for caps in _layout_caps()
+        if caps["is_3d"] or kloop in flat
+    ]
+
+
 def _dgrad_caps() -> List[dict]:
     """dgrad's capability variants: grouped x (tilde, stride 1 / dilation 1)."""
     return [
@@ -2668,9 +2684,7 @@ def _fwd_jobs(
         narrowed = 1 not in _VECS
         vec_cs = (1,) if (epilogue == "default" and narrowed) else _VECS
         for vec_ab, vec_c in itertools.product(_VECS, vec_cs):
-            for kloop, caps in itertools.product(
-                _fwd_k_loops(pipeline, arch), _layout_caps()
-            ):
+            for kloop, caps in _fwd_kloop_caps(pipeline, arch):
                 if narrowed and epilogue == "default" and not kloop.get("lds_xor"):
                     continue
                 if not _fwd_kloop_in_scope(
@@ -4802,9 +4816,8 @@ def count_jobs(
                         len(_fwd_split_atomic_variants(kl, v))
                         for v in _fwd_job_variants(kl, g6, geo[7], caps, wave_size)
                     )
-                    for kl in _fwd_k_loops(pipeline, target.gfx)
+                    for kl, caps in _fwd_kloop_caps(pipeline, target.gfx)
                     if (not lean or kl.get("lds_xor")) and _fwd_kloop_in_scope(kl, *g6)
-                    for caps in _layout_caps()
                 )
                 if _fwd_merged_geometry(geo):
                     total += len(_FWD_GROUP_MERGES) * len(_fwd_merged_k_loops())
