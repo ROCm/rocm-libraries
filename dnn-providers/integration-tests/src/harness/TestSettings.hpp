@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <filesystem>
 #include <optional>
 #include <stdexcept>
@@ -14,6 +15,7 @@
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
+#include <hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp>
 
 #include "common/PlatformUtils.hpp"
 
@@ -33,6 +35,23 @@
 
 namespace hipdnn_integration_tests
 {
+
+/// The direction of a convolution; each has its own [conv_<direction>_tolerance] table in an
+/// engine's settings file.
+enum class ConvToleranceDirection
+{
+    FWD,
+    DGRAD,
+    WRW,
+};
+
+/// The top-level tables of the settings file, by ConvToleranceDirection.
+inline constexpr std::array<std::string_view, 3> K_CONV_TOLERANCE_TABLES
+    = {"conv_fwd_tolerance", "conv_dgrad_tolerance", "conv_wrw_tolerance"};
+
+/// The output types a table has a sub-table for.
+inline constexpr std::array<std::string_view, 3> K_CONV_TOLERANCE_TYPES
+    = {"float", "half", "bfloat16"};
 
 struct ToleranceOverride
 {
@@ -93,19 +112,37 @@ struct ValidatorOverride
 //   filters = ["*KnownBroken*"]
 //   reason  = "tracked in #1234"
 //
-//   # Coefficient of the convolution-forward dynamic tolerance for float outputs
+//   # Coefficients of the dynamic tolerance of a convolution output, one table per direction
+//   # (conv_fwd_tolerance, conv_dgrad_tolerance, conv_wrw_tolerance) and one sub-table per
+//   # output type (float, half, bfloat16)
+//   [conv_wrw_tolerance.half]
+//   lambda                    = 40.0
+//   lambda_per_quartic_root_k = 1.5
+//
 //   [conv_fwd_tolerance.float]
 //   summation_order = 9.0
 //
-// [conv_fwd_tolerance.float] 'summation_order' multiplies sqrt(K) * u32 in the dynamic
-// tolerance of a float convolution-forward output (see ConvDynamicTolerance.hpp); omitted,
-// the harness uses the SDK's default. It must be a finite positive number. Output types other
-// than "float" and keys other than 'summation_order' are load errors. A matching
-// [[tolerance_overrides]] entry still replaces the dynamic tolerance as a whole. Only the bundle
-// harness reads the table.
+// The tolerance model has an allowance for kernels that sum the K products in float and round
+// once (the SDK's default, see ConvDynamicTolerance.hpp). An engine whose kernels need more says
+// so here, for the direction and output type it applies to; every key is optional and an unset
+// one keeps the SDK's value:
+//   - 'summation_order' multiplies sqrt(K) * u32 in the summation-order term. float sub-table
+//     only. A finite positive number.
+//   - 'lambda' is the allowance for intermediates and partial results, in units of eps times
+//     the root mean square of the output (the means of the inputs included). It replaces the
+//     SDK's allowance of the direction and type, it does not add to it. A finite number, not
+//     negative.
+//   - 'lambda_per_quartic_root_k' is added to 'lambda' per K^(1/4), for kernels that split a
+//     longer reduction into more parts. A finite number, not negative, and only together with
+//     'lambda'.
+// An output type other than float, half or bfloat16, a key other than these three, a key of the
+// wrong type or value, 'summation_order' outside the float sub-table, and 'lambda_per_quartic_root_k'
+// without 'lambda' are load errors. A matching [[tolerance_overrides]] entry still replaces the
+// dynamic tolerance as a whole. Only the bundle harness reads these tables.
 //
-// A top-level key other than meta, tolerance_overrides, validator_overrides, test_skips and
-// conv_fwd_tolerance is a load error, so a misspelt section name cannot go unnoticed.
+// A top-level key other than meta, tolerance_overrides, validator_overrides, test_skips,
+// conv_fwd_tolerance, conv_dgrad_tolerance and conv_wrw_tolerance is a load error, so a misspelt
+// section name cannot go unnoticed.
 //
 // Filters use GTest-style globs (globMatch with * wildcards).
 // For tolerance_overrides, later entries take precedence over earlier
@@ -169,9 +206,15 @@ public:
             }
         }
 
-        if(const auto convFwdTolerance = table["conv_fwd_tolerance"])
+        for(const auto direction : {ConvToleranceDirection::FWD,
+                                    ConvToleranceDirection::DGRAD,
+                                    ConvToleranceDirection::WRW})
         {
-            parseConvFwdTolerance(*convFwdTolerance.node());
+            if(const auto convTolerance
+               = table[K_CONV_TOLERANCE_TABLES[static_cast<size_t>(direction)]])
+            {
+                parseConvTolerance(*convTolerance.node(), direction);
+            }
         }
     }
 
@@ -302,12 +345,21 @@ public:
         return std::nullopt;
     }
 
-    // The coefficient of the summation-order term of the convolution-forward dynamic tolerance
-    // that this engine's file sets for outputs of `outputType` ("float"); nullopt when it sets
-    // none, which keeps the default of the harness.
-    std::optional<double> convFwdSummationOrder(std::string_view outputType) const
+    // The coefficients of the dynamic tolerance of a convolution of `direction` whose output is
+    // of `outputType` ("float", "half" or "bfloat16") that this engine's file sets; every one
+    // unset, which keeps the default of the harness, for another type or when it sets none.
+    hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients
+        convToleranceCoefficients(ConvToleranceDirection direction,
+                                  std::string_view outputType) const
     {
-        return outputType == "float" ? _floatSummationOrder : std::nullopt;
+        const auto typeIt
+            = std::find(K_CONV_TOLERANCE_TYPES.begin(), K_CONV_TOLERANCE_TYPES.end(), outputType);
+        if(typeIt == K_CONV_TOLERANCE_TYPES.end())
+        {
+            return {};
+        }
+        return _convTolerance[static_cast<size_t>(direction)]
+                             [static_cast<size_t>(typeIt - K_CONV_TOLERANCE_TYPES.begin())];
     }
 
     size_t skipEntryCount() const
@@ -360,11 +412,13 @@ private:
     static void rejectUnknownTopLevelKeys(const toml::table& table,
                                           const std::filesystem::path& configPath)
     {
-        static constexpr std::array<std::string_view, 5> K_KNOWN = {"meta",
+        static constexpr std::array<std::string_view, 7> K_KNOWN = {"meta",
                                                                     "tolerance_overrides",
                                                                     "validator_overrides",
                                                                     "test_skips",
-                                                                    "conv_fwd_tolerance"};
+                                                                    "conv_fwd_tolerance",
+                                                                    "conv_dgrad_tolerance",
+                                                                    "conv_wrw_tolerance"};
         for(const auto& entry : table)
         {
             const std::string_view key = entry.first.str();
@@ -373,8 +427,8 @@ private:
                 throw std::runtime_error("TestSettings: unknown top-level key '" + std::string(key)
                                          + "' in " + configPath.string()
                                          + " (expected meta, tolerance_overrides, "
-                                           "validator_overrides, test_skips or "
-                                           "conv_fwd_tolerance)");
+                                           "validator_overrides, test_skips, conv_fwd_tolerance, "
+                                           "conv_dgrad_tolerance or conv_wrw_tolerance)");
             }
         }
     }
@@ -519,54 +573,87 @@ private:
         return parsed;
     }
 
-    // [conv_fwd_tolerance.<output type>] sets the coefficients of the convolution-forward
-    // dynamic tolerance for that output type. Only "float" and its 'summation_order' exist;
-    // anything else is a load error, so that a coefficient for a type or a term the harness
-    // does not read cannot sit in a file unnoticed.
-    void parseConvFwdTolerance(const toml::node& node)
+    // [conv_<direction>_tolerance.<output type>] sets the coefficients of the dynamic tolerance
+    // of a convolution of that direction whose output is of that type. Only the three output
+    // types and the keys of ConvToleranceCoefficients exist, 'summation_order' for float only;
+    // anything else is a load error, so that a coefficient for a type or a term the harness does
+    // not read cannot sit in a file unnoticed.
+    void parseConvTolerance(const toml::node& node, ConvToleranceDirection direction)
     {
-        static constexpr const char* K_SECTION = "TestSettings: [conv_fwd_tolerance]";
+        const std::string_view tableName = K_CONV_TOLERANCE_TABLES[static_cast<size_t>(direction)];
+        const std::string section = "TestSettings: [" + std::string(tableName) + "]";
 
         const auto* table = node.as_table();
         if(table == nullptr)
         {
-            throw std::runtime_error(std::string(K_SECTION) + " is not a table");
+            throw std::runtime_error(section + " is not a table");
         }
         for(const auto& [typeName, typeNode] : *table)
         {
-            if(typeName.str() != "float")
+            const auto typeIt = std::find(
+                K_CONV_TOLERANCE_TYPES.begin(), K_CONV_TOLERANCE_TYPES.end(), typeName.str());
+            if(typeIt == K_CONV_TOLERANCE_TYPES.end())
             {
-                throw std::runtime_error(std::string(K_SECTION) + " has unknown output type '"
+                throw std::runtime_error(section + " has unknown output type '"
                                          + std::string(typeName.str())
-                                         + R"~(' (expected "float"))~");
+                                         + R"~(' (expected "float", "half" or "bfloat16"))~");
             }
+            const std::string where = "TestSettings: [" + std::string(tableName) + "."
+                                      + std::string(typeName.str()) + "]";
             const auto* typeTable = typeNode.as_table();
             if(typeTable == nullptr)
             {
-                throw std::runtime_error(std::string(K_SECTION) + ".float is not a table");
+                throw std::runtime_error(where + " is not a table");
             }
+
+            hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients parsed;
             for(const auto& [key, value] : *typeTable)
             {
-                if(key.str() != "summation_order")
+                const std::string keyName(key.str());
+                if(keyName != "summation_order" && keyName != "lambda"
+                   && keyName != "lambda_per_quartic_root_k")
                 {
-                    throw std::runtime_error(std::string(K_SECTION) + ".float has unknown key '"
-                                             + std::string(key.str())
-                                             + "' (expected 'summation_order')");
+                    throw std::runtime_error(where + " has unknown key '" + keyName
+                                             + "' (expected 'summation_order', 'lambda' or "
+                                               "'lambda_per_quartic_root_k')");
                 }
                 const auto number = value.value<double>();
                 if(!number.has_value())
                 {
-                    throw std::runtime_error(std::string(K_SECTION)
-                                             + ".float 'summation_order' must be a number");
+                    throw std::runtime_error(where + " '" + keyName + "' must be a number");
                 }
-                if(!std::isfinite(*number) || !(*number > 0.0))
+                if(keyName == "summation_order")
                 {
-                    throw std::runtime_error(std::string(K_SECTION)
-                                             + ".float 'summation_order' must be finite and "
-                                               "positive");
+                    if(*typeIt != "float")
+                    {
+                        throw std::runtime_error(where
+                                                 + " 'summation_order' is for float outputs only");
+                    }
+                    if(!std::isfinite(*number) || !(*number > 0.0))
+                    {
+                        throw std::runtime_error(where
+                                                 + " 'summation_order' must be finite and "
+                                                   "positive");
+                    }
+                    parsed.summationOrder = number;
+                    continue;
                 }
-                _floatSummationOrder = number;
+                if(!std::isfinite(*number) || *number < 0.0)
+                {
+                    throw std::runtime_error(where + " '" + keyName
+                                             + "' must be finite and not negative");
+                }
+                (keyName == "lambda" ? parsed.lambda : parsed.lambdaPerQuarticRootK) = number;
             }
+            if(parsed.lambdaPerQuarticRootK.has_value() && !parsed.lambda.has_value())
+            {
+                throw std::runtime_error(where
+                                         + " 'lambda_per_quartic_root_k' needs 'lambda': it adds "
+                                           "to it");
+            }
+            _convTolerance[static_cast<size_t>(direction)]
+                          [static_cast<size_t>(typeIt - K_CONV_TOLERANCE_TYPES.begin())]
+                = parsed;
         }
     }
 
@@ -603,7 +690,10 @@ private:
     std::vector<OverrideEntry> _overrides;
     std::vector<ValidatorEntry> _validatorOverrides;
     std::vector<SkipEntry> _skips;
-    std::optional<double> _floatSummationOrder;
+    std::array<std::array<hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients,
+                          K_CONV_TOLERANCE_TYPES.size()>,
+               K_CONV_TOLERANCE_TABLES.size()>
+        _convTolerance{};
 };
 
 } // namespace hipdnn_integration_tests

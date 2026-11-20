@@ -1302,9 +1302,9 @@ TEST(TestConvFwdDynamicTolerance, OutputScaleOfAReconvergentAddIsTheSumOfItsPath
         halved.bakedScale = 0.5f;
         halved.wiring = Wiring::MUL_THEN_ADD_Y;
         halved.reverseNodes = reverseNodes;
-        const auto small = errorScale(halved);
-        ASSERT_TRUE(small.has_value()) << reverseNodes;
-        EXPECT_DOUBLE_EQ(small->outputScale, 1.5) << reverseNodes;
+        const auto halvedScale = errorScale(halved);
+        ASSERT_TRUE(halvedScale.has_value()) << reverseNodes;
+        EXPECT_DOUBLE_EQ(halvedScale->outputScale, 1.5) << reverseNodes;
 
         GraphSpec tripled;
         tripled.mul = Mul::SCALE_SECOND;
@@ -1608,7 +1608,7 @@ TEST(TestConvFwdDynamicTolerance, EngineCoefficientsReachTheToleranceOfTheirOutp
     scale.accumulationLength = 144;
     scale.inputMeanSquare = 1.0 / 3.0;
     scale.weightMeanSquare = 1.0 / 3.0;
-    hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+    hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients coefficients;
     coefficients.summationOrder = 11.0;
 
     const auto withDefault = tol::convOutputTolerance(scale, DataType::FLOAT);

@@ -93,6 +93,9 @@ version = 1
 [conv_fwd_tolerance.float]
 summation_order = 7.5
 
+[conv_wrw_tolerance.half]
+lambda = 21.0
+
 [[tolerance_overrides]]
 filters = ["*SomeCase*"]
 atol = 0.5
@@ -106,8 +109,14 @@ rtol = 0.25
 
     ASSERT_NE(policy.testSettings, nullptr);
     EXPECT_EQ(policy.testSettings, config.testSettings());
-    ASSERT_TRUE(policy.testSettings->convFwdSummationOrder("float").has_value());
-    EXPECT_DOUBLE_EQ(*policy.testSettings->convFwdSummationOrder("float"), 7.5);
+    const auto fwd
+        = policy.testSettings->convToleranceCoefficients(ConvToleranceDirection::FWD, "float");
+    ASSERT_TRUE(fwd.summationOrder.has_value());
+    EXPECT_DOUBLE_EQ(*fwd.summationOrder, 7.5);
+    const auto wrw
+        = policy.testSettings->convToleranceCoefficients(ConvToleranceDirection::WRW, "half");
+    ASSERT_TRUE(wrw.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*wrw.lambda, 21.0);
     const auto entry = policy.testSettings->findToleranceOverride("Suite.SomeCase");
     ASSERT_TRUE(entry.has_value());
     EXPECT_FLOAT_EQ(entry->atol, 0.5f);

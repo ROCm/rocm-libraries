@@ -475,13 +475,24 @@ struct AbsRelTolerance
 /// solvers err more sets its own.
 inline constexpr double DEFAULT_FLOAT_SUMMATION_ORDER = 4.0;
 
-/// The coefficients of the output tolerance an engine may set; an unset one keeps the default of
-/// the output type.
-struct ConvFpropCoefficients
+/// The coefficients of the output tolerance an engine may set, for a convolution of any
+/// direction; an unset one keeps the default of the output type and direction. They describe
+/// kernels that need more than the SDK's allowance, which is for kernels that sum the K
+/// products in float and round once.
+struct ConvToleranceCoefficients
 {
     /// Multiplies sqrt(K) * u32 in the summation-order term. Default: 1 for half and bfloat16,
     /// DEFAULT_FLOAT_SUMMATION_ORDER for float. Finite and positive.
     std::optional<double> summationOrder;
+    /// The allowance of the intermediates and partial results, in units of eps * rms, with rms
+    /// the root mean square of an output element (the means of the inputs included). When set it
+    /// replaces the SDK's allowance of the direction and output type, per-K part included.
+    /// Finite and not negative.
+    std::optional<double> lambda;
+    /// Added to lambda per K^(1/4), for kernels that split a longer reduction into more parts
+    /// whose partial results they add in the output type. Unset counts as 0. Finite and not
+    /// negative, and only together with lambda.
+    std::optional<double> lambdaPerQuarticRootK;
 };
 
 namespace detail
@@ -494,15 +505,14 @@ enum class ConvDirection
     WRW,
 };
 
-/// The calibrated allowances of the model, per direction and output type; tolerances.md has the
-/// calibration. lambda: intermediates and products, in units of eps * sigma, plus
-/// lambdaPerQuarticRootK * K^(1/4) where the need grows with the reduction length. summationOrder:
-/// c, in units of sqrt(K) * u32. Every lambda is fitted to MIOpen (the smallest that leaves a
-/// headroom of 1.5 on the calibration data; c is the base 4 of forward): backward float to the
-/// Winograd solvers at the shortest reductions, backward data half to Winograd, backward weights
-/// half and bfloat16 to the split-K kernels that add partial results in the output type. Those
-/// kernels split longer reductions into more parts, so their error grows with K: about as K^(1/4)
-/// on the calibration data, up to K = 2.8 million.
+/// The allowance of the model per direction and output type when the engine sets none: lambda
+/// covers intermediates and partial results, in units of eps * sigma0, plus
+/// lambdaPerQuarticRootK * K^(1/4) where the need grows with the reduction length;
+/// summationOrder is c, in units of sqrt(K) * u32. These are the allowance of kernels that sum
+/// the K products in float and round once. An engine whose kernels need more (Winograd, or
+/// split-K kernels that add partial results in the output type) sets its own through
+/// ConvToleranceCoefficients; it replaces lambda, and is priced on the root mean square of the
+/// output instead of sigma0.
 ///
 ///   (lambda, c)   float                half                   bfloat16
 ///   forward       (0, 4)               (12, 1)                (0, 1)
@@ -561,22 +571,35 @@ struct ConvOutputStatistics
 /// The model every direction shares; see calculateConvFpropOutputTolerance().
 template <ConvDirection Direction, typename OutputType>
 AbsRelTolerance convOutputTolerance(const ConvOutputStatistics& s,
-                                    std::optional<double> summationOrderOverride,
+                                    const ConvToleranceCoefficients& coefficients,
                                     const char* caller)
 {
     constexpr auto ALLOWANCES = convToleranceAllowances<Direction, OutputType>();
 
     const auto validMoment = [](double v) { return std::isfinite(v) && v >= 0.0; };
+    const auto validAllowance
+        = [&](const std::optional<double>& v) { return !v.has_value() || validMoment(*v); };
     const bool validPoints = std::all_of(
         s.roundingPoints->begin(), s.roundingPoints->end(), [&](const RoundingPoint& p) {
             return validMoment(p.epsilon) && validMoment(p.magnitude) && validMoment(p.slope);
         });
-    if(summationOrderOverride.has_value()
-       && (!std::isfinite(*summationOrderOverride) || !(*summationOrderOverride > 0.0)))
+    if(coefficients.summationOrder.has_value()
+       && (!std::isfinite(*coefficients.summationOrder) || !(*coefficients.summationOrder > 0.0)))
     {
         throw std::invalid_argument(std::string(caller)
                                     + ": the summation-order coefficient must be finite and "
                                       "positive.");
+    }
+    if(!validAllowance(coefficients.lambda) || !validAllowance(coefficients.lambdaPerQuarticRootK))
+    {
+        throw std::invalid_argument(std::string(caller)
+                                    + ": the lambda coefficients must be finite and not "
+                                      "negative.");
+    }
+    if(coefficients.lambdaPerQuarticRootK.has_value() && !coefficients.lambda.has_value())
+    {
+        throw std::invalid_argument(std::string(caller)
+                                    + ": lambdaPerQuarticRootK needs lambda: it adds to it.");
     }
     if(s.accumulationLength == 0 || !validMoment(s.firstMeanSquare)
        || !validMoment(s.secondMeanSquare) || !std::isfinite(s.firstMean)
@@ -595,16 +618,14 @@ AbsRelTolerance convOutputTolerance(const ConvOutputStatistics& s,
     const auto eps = static_cast<double>(std::numeric_limits<OutputType>::epsilon());
     const auto minNormal = static_cast<double>(std::numeric_limits<OutputType>::min());
     const auto k = static_cast<double>(s.accumulationLength);
-    // The root mean square of a sum of K independent products a*b: K * E[a^2] * E[b^2] for the
-    // spread, plus K * (K - 1) * E[a]^2 * E[b]^2 for what the means add up to.
-    const double meanProduct = s.firstMean * s.secondMean;
-    const double sigma = std::sqrt(k * s.firstMeanSquare * s.secondMeanSquare
-                                   + k * (k - 1.0) * meanProduct * meanProduct)
-                         * std::abs(s.outputScale);
+    // sigma0 is the root mean square of a sum of K independent zero-mean products a*b:
+    // sqrt(K * E[a^2] * E[b^2]). It sizes the allowance of the SDK.
+    const double sigma0
+        = std::sqrt(k * s.firstMeanSquare * s.secondMeanSquare) * std::abs(s.outputScale);
     // Each field is valid on its own, but k * firstMeanSquare can overflow to infinity while
     // secondMeanSquare or outputScale is 0: infinity times 0 is NaN, which no range check
     // rejects, and a NaN atol fails every comparison.
-    if(std::isnan(sigma))
+    if(std::isnan(sigma0))
     {
         throw std::overflow_error(std::string(caller)
                                   + ": the typical output magnitude is not a number (the "
@@ -619,10 +640,33 @@ AbsRelTolerance convOutputTolerance(const ConvOutputStatistics& s,
     }
 
     // The summation-order error of a float output is relative to the partial sums, which are
-    // about the size of the output or larger: the same coefficient on |ref| as on sigma. For
+    // about the size of the output or larger: the same coefficient on |ref| as on sigma0. For
     // half and bfloat16 that term is below 1 % of the rounding of the output and is left out.
-    const double summationOrder = summationOrderOverride.value_or(ALLOWANCES.summationOrder);
+    const double summationOrder = coefficients.summationOrder.value_or(ALLOWANCES.summationOrder);
     const double summationError = summationOrder * std::sqrt(k) * floatUnitRoundoff;
+
+    // The allowance of the intermediates and partial results. The SDK's is in units of sigma0.
+    // An engine's replaces it whole and is in units of the root mean square of the output, which
+    // adds what the means of the inputs sum to: K * (K - 1) * E[a]^2 * E[b]^2.
+    const double quarticRootK = std::sqrt(std::sqrt(k));
+    double lambda = ALLOWANCES.intermediateLambda + ALLOWANCES.lambdaPerQuarticRootK * quarticRootK;
+    double magnitude = sigma0;
+    if(coefficients.lambda.has_value())
+    {
+        lambda = *coefficients.lambda
+                 + coefficients.lambdaPerQuarticRootK.value_or(0.0) * quarticRootK;
+        const double meanProduct = s.firstMean * s.secondMean;
+        magnitude = std::sqrt(k * s.firstMeanSquare * s.secondMeanSquare
+                              + k * (k - 1.0) * meanProduct * meanProduct)
+                    * std::abs(s.outputScale);
+        if(std::isnan(magnitude))
+        {
+            throw std::overflow_error(std::string(caller)
+                                      + ": the root mean square of the output is not a number "
+                                        "(the product of the statistics overflows against a "
+                                        "zero factor).");
+        }
+    }
 
     AbsRelTolerance tolerance;
     tolerance.rtol = OUTPUT_ROUNDING_MARGIN * eps;
@@ -630,9 +674,10 @@ AbsRelTolerance convOutputTolerance(const ConvOutputStatistics& s,
     {
         tolerance.rtol += summationError;
     }
-    const double lambda = ALLOWANCES.intermediateLambda
-                          + ALLOWANCES.lambdaPerQuarticRootK * std::sqrt(std::sqrt(k));
-    tolerance.atol = (summationError + lambda * eps) * sigma
+    // No allowance, no term: a magnitude that overflowed to infinity must not turn 0 * infinity
+    // into a NaN, which no range check rejects.
+    const double partialResultError = lambda == 0.0 ? 0.0 : lambda * eps * magnitude;
+    tolerance.atol = summationError * sigma0 + partialResultError
                      + ROUNDING_POINT_MARGIN * roundingPointError + minNormal;
     hipdnn_test_sdk::utilities::validateToleranceRange<OutputType>(tolerance.atol);
     return tolerance;
@@ -647,39 +692,50 @@ AbsRelTolerance convOutputTolerance(const ConvOutputStatistics& s,
  *   |impl_i - ref_i| <= rtol * |ref_i| + atol
  *   rtol = 2 * eps                       (half, bfloat16)
  *   rtol = 2 * eps + c * sqrt(K) * u32   (float)
- *   atol = (c * sqrt(K) * u32 + lambda * eps) * sigma
+ *   atol = c * sqrt(K) * u32 * sigma0 + lambda(K) * eps * M
  *          + sum over the rounding points of (slope * eps_p * magnitude) + minNormal
- *   sigma = sqrt(K * mean(x^2) * mean(w^2) + K * (K - 1) * mean(x)^2 * mean(w)^2) * outputScale
+ *   sigma0 = sqrt(K * mean(x^2) * mean(w^2)) * outputScale
+ *   rms = sqrt(K * mean(x^2) * mean(w^2) + K * (K - 1) * mean(x)^2 * mean(w)^2) * outputScale
  *
  * - eps is the machine epsilon of the output type, u32 the unit roundoff of float (2^-24),
  *   minNormal the smallest normal number of the output type.
  * - c is the summation-order coefficient: 1 for half and bfloat16, and for float
  *   DEFAULT_FLOAT_SUMMATION_ORDER, unless `coefficients` sets it.
- * - lambda is 12 for half and 0 for bfloat16 and float.
- * - sigma is the root mean square of an output element for independent inputs: with zero-mean
- *   inputs the partial sums cancel and it grows as sqrt(K); with a nonzero mean on both inputs
- *   the means add up and it grows as K.
+ * - Without an engine lambda, lambda(K) is the SDK's allowance for the output type (12 for half,
+ *   0 for bfloat16 and float) and M = sigma0. These values are for kernels that sum the K
+ *   products in float and round once.
+ * - With `coefficients.lambda`, lambda(K) = lambda + lambdaPerQuarticRootK * K^(1/4) (an unset
+ *   per-K coefficient is 0) replaces the SDK's allowance, and M = rms. An engine whose kernels
+ *   need more than the SDK's allowance (Winograd, split-K kernels that add partial results in
+ *   the output type) sets its own this way.
+ * - sigma0 is the root mean square of an output element for independent zero-mean inputs: the
+ *   partial sums cancel and it grows as sqrt(K). rms adds what nonzero means of both inputs sum
+ *   to, which grows as K; it enters only through an engine lambda.
  *
  * The terms cover the two roundings of the float result to the output type (2 * eps), the order of
- * the float summation (c * sqrt(K) * u32, on sigma and for float on |ref|), partial results that
- * some half kernels keep in half (lambda * eps * sigma), the roundings of intermediates to half
- * or bfloat16 (the rounding points; see RoundingPoint) and flushed denormals (minNormal). The
- * derivation, the calibration of lambda and c and the comparison with calculateConvFpropTolerance()
- * are in tolerances.md in the documentation of the integration tests.
+ * the float summation (c * sqrt(K) * u32, on sigma0 and for float on |ref|), partial results that
+ * some kernels keep in half or bfloat16 (lambda * eps * M), the roundings of intermediates to
+ * half or bfloat16 (the rounding points; see RoundingPoint) and flushed denormals (minNormal).
+ * The derivation, the calibration of lambda and c and the comparison with
+ * calculateConvFpropTolerance() are in tolerances.md in the documentation of the integration
+ * tests.
  *
  * @tparam OutputType half, bfloat16 or float.
  * @param scale The problem statistics; see ConvFpropErrorScale.
- * @param coefficients Engine-set coefficients; see ConvFpropCoefficients.
+ * @param coefficients Engine-set coefficients; see ConvToleranceCoefficients.
  * @return atol and rtol for an allclose comparison.
  * @throws std::invalid_argument if scale.accumulationLength is 0, a mean square is negative or
  * not finite, a mean or outputScale is not finite, a rounding point has a negative or not finite
- * field, or the summation-order coefficient is not finite and positive.
- * @throws std::overflow_error if atol exceeds the largest value of OutputType, or if sigma is not
- * a number (an overflowing product of the statistics against a zero factor).
+ * field, the summation-order coefficient is not finite and positive, a lambda coefficient is not
+ * finite and not negative, or lambdaPerQuarticRootK is set without lambda.
+ * @throws std::overflow_error if atol exceeds the largest value of OutputType, or if sigma0 (or
+ * rms, with an engine lambda) is not a number (an overflowing product of the statistics against
+ * a zero factor).
  */
 template <typename OutputType>
 AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& scale,
-                                                  const ConvFpropCoefficients& coefficients = {})
+                                                  const ConvToleranceCoefficients& coefficients
+                                                  = {})
 {
     return detail::convOutputTolerance<detail::ConvDirection::FPROP, OutputType>(
         {scale.accumulationLength,
@@ -689,7 +745,7 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
          scale.weightMean,
          scale.outputScale,
          &scale.roundingPoints},
-        coefficients.summationOrder,
+        coefficients,
         "calculateConvFpropOutputTolerance");
 }
 
@@ -698,18 +754,23 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
  * bfloat16 or float, with float accumulation, graded against a float-accumulating reference.
  *
  * The model of calculateConvFpropOutputTolerance() with dy and w in place of x and w, K from
- * convDgradAccumulationLength(), and its own calibrated constants: lambda 12 for half, 6 for
- * bfloat16 and 13 for float; c 1 for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for
- * float. The float lambda covers the shortest reductions, where a few products differ by several
- * float steps of a typical output.
+ * convDgradAccumulationLength(), and the SDK's allowance of this direction, for kernels that sum
+ * the K products in float and round once: lambda 12 for half, 6 for bfloat16 and 13 for float;
+ * c 1 for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for float. The float lambda covers
+ * the shortest reductions, where a few products differ by several float steps of a typical
+ * output. An engine whose kernels need more sets `coefficients`, priced on the root mean square
+ * of the output (see calculateConvFpropOutputTolerance()).
  *
  * @tparam OutputType half, bfloat16 or float.
  * @param scale The problem statistics; see ConvDgradErrorScale.
+ * @param coefficients Engine-set coefficients; see ConvToleranceCoefficients.
  * @return atol and rtol for an allclose comparison.
  * @throws std::invalid_argument and std::overflow_error as calculateConvFpropOutputTolerance().
  */
 template <typename OutputType>
-AbsRelTolerance calculateConvDgradOutputTolerance(const ConvDgradErrorScale& scale)
+AbsRelTolerance calculateConvDgradOutputTolerance(const ConvDgradErrorScale& scale,
+                                                  const ConvToleranceCoefficients& coefficients
+                                                  = {})
 {
     return detail::convOutputTolerance<detail::ConvDirection::DGRAD, OutputType>(
         {scale.accumulationLength,
@@ -719,7 +780,7 @@ AbsRelTolerance calculateConvDgradOutputTolerance(const ConvDgradErrorScale& sca
          scale.weightMean,
          scale.outputScale,
          &scale.roundingPoints},
-        std::nullopt,
+        coefficients,
         "calculateConvDgradOutputTolerance");
 }
 
@@ -728,18 +789,22 @@ AbsRelTolerance calculateConvDgradOutputTolerance(const ConvDgradErrorScale& sca
  * bfloat16 or float, with float accumulation, graded against a float-accumulating reference.
  *
  * The model of calculateConvFpropOutputTolerance() with x and dy in place of x and w, K from
- * convWrwAccumulationLength(), and its own calibrated constants: lambda 22 + 1.5 * K^(1/4) for
- * half, 13 + 0.5 * K^(1/4) for bfloat16 and 15 for float; c 1 for half and bfloat16 and
- * DEFAULT_FLOAT_SUMMATION_ORDER for float. The half and bfloat16 lambdas cover split-K reductions
- * whose partial results are added in the output type, more of them the longer the reduction.
+ * convWrwAccumulationLength(), and the SDK's allowance of this direction, for kernels that sum
+ * the K products in float and round once: lambda 22 + 1.5 * K^(1/4) for half, 13 + 0.5 * K^(1/4)
+ * for bfloat16 and 15 for float; c 1 for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for
+ * float. An engine whose kernels need more (for instance split-K kernels that add partial
+ * results in the output type, more of them the longer the reduction) sets `coefficients`, priced
+ * on the root mean square of the output (see calculateConvFpropOutputTolerance()).
  *
  * @tparam OutputType half, bfloat16 or float.
  * @param scale The problem statistics; see ConvWrwErrorScale.
+ * @param coefficients Engine-set coefficients; see ConvToleranceCoefficients.
  * @return atol and rtol for an allclose comparison.
  * @throws std::invalid_argument and std::overflow_error as calculateConvFpropOutputTolerance().
  */
 template <typename OutputType>
-AbsRelTolerance calculateConvWrwOutputTolerance(const ConvWrwErrorScale& scale)
+AbsRelTolerance calculateConvWrwOutputTolerance(const ConvWrwErrorScale& scale,
+                                                const ConvToleranceCoefficients& coefficients = {})
 {
     return detail::convOutputTolerance<detail::ConvDirection::WRW, OutputType>(
         {scale.accumulationLength,
@@ -749,7 +814,7 @@ AbsRelTolerance calculateConvWrwOutputTolerance(const ConvWrwErrorScale& scale)
          scale.dyMean,
          scale.outputScale,
          &scale.roundingPoints},
-        std::nullopt,
+        coefficients,
         "calculateConvWrwOutputTolerance");
 }
 

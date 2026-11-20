@@ -1,9 +1,10 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// How the bundle harness grades a half, bfloat16 or float convolution-forward output: the
-// selection in IntegrationBundleVerificationHarness::compareAgainst() between the dynamic
-// tolerance and the per-op default, and where the dynamic tolerance gets its input statistics.
+// How the bundle harness grades a half, bfloat16 or float convolution output: the selection in
+// IntegrationBundleVerificationHarness::compareAgainst() between the dynamic tolerance and the
+// per-op default, where the dynamic tolerance gets its input statistics, and which engine table
+// ([conv_fwd_tolerance], [conv_dgrad_tolerance], [conv_wrw_tolerance]) sets its coefficients.
 //
 // A failing comparison prints the atol and rtol it graded with, so the tests read the tolerance
 // the harness actually handed to the comparison from that report. A TOML override is applied by
@@ -86,6 +87,13 @@ enum class ScaleSource
     FILLED, ///< the scale is a tensor filled from a recipe
 };
 
+enum class Direction
+{
+    FWD,
+    DGRAD, ///< x is the output, from dy and w
+    WRW, ///< w is the output, from x and dy
+};
+
 struct Spec
 {
     bool isHalf = true;
@@ -100,9 +108,20 @@ struct Spec
     std::string pointwiseCompute = "float"; ///< the compute type of every pointwise node
     bool inputBlobs = false;
     std::string inputType; ///< the type of x and w; empty: the graph's own
+    /// A plain graph of the other directions (topology and scale are for forward only).
+    Direction direction = Direction::FWD;
 
     std::vector<int64_t> outputUids() const
     {
+        switch(direction)
+        {
+        case Direction::DGRAD:
+            return {X_UID};
+        case Direction::WRW:
+            return {W_UID};
+        default:
+            break;
+        }
         switch(topology)
         {
         case Topology::PLAIN:
@@ -111,6 +130,20 @@ struct Spec
             return {MUL_OUT_UID, ADD_OUT_UID};
         default:
             return {OUT_UID};
+        }
+    }
+
+    /// The elements of each output.
+    size_t outputElems() const
+    {
+        switch(direction)
+        {
+        case Direction::DGRAD:
+            return K_X_ELEMS;
+        case Direction::WRW:
+            return K_W_ELEMS;
+        default:
+            return K_OUT_ELEMS;
         }
     }
 };
@@ -148,8 +181,45 @@ std::string pointwiseJson(const char* name,
     return o.str();
 }
 
+/// A plain convolution backward-data or backward-weights graph on the tensors of the forward one:
+/// x [1, 4, 6, 6], w [8, 4, 3, 3] and dy [1, 8, 4, 4] (the forward y). The output is x (dgrad) or
+/// w (wrw), and the other two are the inputs.
+std::string backwardGraphJson(const Spec& spec)
+{
+    std::string dtype = spec.isHalf ? "half" : "bfloat16";
+    if(spec.isFloat)
+    {
+        dtype = "float";
+    }
+    const bool dgrad = spec.direction == Direction::DGRAD;
+    std::ostringstream convNode;
+    convNode << R"({"compute_data_type": "float", "inputs": )"
+             << (dgrad ? R"({"dy_tensor_uid": 2, "w_tensor_uid": 1}, "name": "dgrad", )"
+                         R"("outputs": {"dx_tensor_uid": 0})"
+                       : R"({"dy_tensor_uid": 2, "x_tensor_uid": 0}, "name": "wrw", )"
+                         R"("outputs": {"dw_tensor_uid": 1})")
+             << R"(, "parameters": {"conv_mode": "CROSS_CORRELATION", "dilation": [1, 1], )"
+             << R"("post_padding": [0, 0], "pre_padding": [0, 0], "stride": [1, 1]}, "type": ")"
+             << (dgrad ? "ConvolutionBwdAttributes" : "ConvolutionWrwAttributes") << R"("})";
+    const std::vector<std::string> tensors{
+        tensorJson(X_UID, dgrad ? "dx" : "x", "[1, 4, 6, 6]", "[144, 36, 6, 1]", dtype, false),
+        tensorJson(W_UID, dgrad ? "w" : "dw", "[8, 4, 3, 3]", "[36, 9, 3, 1]", dtype, false),
+        tensorJson(Y_UID, "dy", "[1, 8, 4, 4]", "[128, 16, 4, 1]", dtype, false),
+    };
+    std::ostringstream graph;
+    graph << R"({"nodes": [)" << convNode.str() << R"(], "tensors": [)" << tensors[0] << ", "
+          << tensors[1] << ", " << tensors[2] << R"(], "io_data_type": ")" << dtype
+          << R"(", "compute_data_type": "float", "intermediate_data_type": "float", )"
+          << R"("name": ""})";
+    return graph.str();
+}
+
 std::string graphJson(const Spec& spec)
 {
+    if(spec.direction != Direction::FWD)
+    {
+        return backwardGraphJson(spec);
+    }
     std::string dtype = spec.isHalf ? "half" : "bfloat16";
     if(spec.isFloat)
     {
@@ -386,12 +456,13 @@ protected:
         const bool isHalf = spec.isHalf;
         const bool isFloat = spec.isFloat;
         const auto outUids = spec.outputUids();
+        const auto outElems = spec.outputElems();
         testing_support::engineWrites(
             _mocks.engineRunner,
             [=](VariantPack& pack, float value) {
                 for(const int64_t outUid : outUids)
                 {
-                    writeConstant(pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, value);
+                    writeConstant(pack.at(outUid), outElems, isHalf, isFloat, value);
                 }
             },
             engineValue);
@@ -401,8 +472,7 @@ protected:
                 .WillByDefault([=](void*, size_t, const VariantPack& pack) {
                     for(const int64_t outUid : outUids)
                     {
-                        writeConstant(
-                            pack.at(outUid), K_OUT_ELEMS, isHalf, isFloat, referenceValue);
+                        writeConstant(pack.at(outUid), outElems, isHalf, isFloat, referenceValue);
                     }
                 });
         }
@@ -954,7 +1024,7 @@ namespace
 
 AbsRelTolerance floatTolerance(const ConvFpropErrorScale& scale, std::optional<double> coefficient)
 {
-    hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+    hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients coefficients;
     coefficients.summationOrder = coefficient;
     return hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<float>(scale,
                                                                                       coefficients);
@@ -1146,6 +1216,228 @@ rms_threshold = 1e-4
 )");
     const Spec spec;
     EXPECT_TRUE(grade(spec, K_REFERENCE + 0.25f, K_REFERENCE).failed);
+}
+
+// ── Every direction reads its own engine table ──────────────────────────────
+//
+// A convolution output is graded with the coefficients of [conv_<direction>_tolerance.<type>] for
+// the direction of its own convolution and its own type. The file below sets a different value in
+// each of the direction's tables, so an output read from another direction's table, or another
+// type's, is graded with a tolerance that is not the one expected.
+
+namespace
+{
+
+using hipdnn_test_sdk::utilities::conv::ConvDgradErrorScale;
+using hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients;
+using hipdnn_test_sdk::utilities::conv::ConvWrwErrorScale;
+
+constexpr const char* K_THREE_TABLES_TOML = R"([meta]
+version = 1
+
+[conv_fwd_tolerance.half]
+lambda = 3.0
+
+[conv_dgrad_tolerance.half]
+lambda = 20.0
+
+[conv_wrw_tolerance.half]
+lambda = 40.0
+lambda_per_quartic_root_k = 1.0
+
+[conv_fwd_tolerance.float]
+summation_order = 6.0
+
+[conv_dgrad_tolerance.float]
+summation_order = 9.0
+
+[conv_wrw_tolerance.float]
+summation_order = 12.0
+)";
+
+ConvToleranceCoefficients coefficientsOf(std::optional<double> summationOrder,
+                                         std::optional<double> lambda = std::nullopt,
+                                         std::optional<double> lambdaPerQuarticRootK = std::nullopt)
+{
+    ConvToleranceCoefficients coefficients;
+    coefficients.summationOrder = summationOrder;
+    coefficients.lambda = lambda;
+    coefficients.lambdaPerQuarticRootK = lambdaPerQuarticRootK;
+    return coefficients;
+}
+
+Spec backwardSpec(Direction direction, bool isHalf, bool isFloat = false)
+{
+    Spec spec;
+    spec.direction = direction;
+    spec.isHalf = isHalf;
+    spec.isFloat = isFloat;
+    return spec;
+}
+
+/// dx [1, 4, 6, 6] from dy [1, 8, 4, 4] and w [8, 4, 3, 3]: 8 * 3 * 3 products per element, the
+/// operands uniform on [-1, 1].
+ConvDgradErrorScale dgradScale()
+{
+    ConvDgradErrorScale scale;
+    scale.accumulationLength = 72;
+    scale.dyMeanSquare = 1.0 / 3.0;
+    scale.weightMeanSquare = 1.0 / 3.0;
+    return scale;
+}
+
+/// dw [8, 4, 3, 3] from x [1, 4, 6, 6] and dy [1, 8, 4, 4]: 1 * 4 * 4 products per element.
+ConvWrwErrorScale wrwScale()
+{
+    ConvWrwErrorScale scale;
+    scale.accumulationLength = 16;
+    scale.inputMeanSquare = 1.0 / 3.0;
+    scale.dyMeanSquare = 1.0 / 3.0;
+    return scale;
+}
+
+template <typename OutputType>
+AbsRelTolerance dgradTolerance(const ConvToleranceCoefficients& coefficients = {})
+{
+    return hipdnn_test_sdk::utilities::conv::calculateConvDgradOutputTolerance<OutputType>(
+        dgradScale(), coefficients);
+}
+
+template <typename OutputType>
+AbsRelTolerance wrwTolerance(const ConvToleranceCoefficients& coefficients = {})
+{
+    return hipdnn_test_sdk::utilities::conv::calculateConvWrwOutputTolerance<OutputType>(
+        wrwScale(), coefficients);
+}
+
+template <typename OutputType>
+AbsRelTolerance fwdTolerance(const ConvToleranceCoefficients& coefficients = {})
+{
+    ConvFpropErrorScale scale;
+    scale.accumulationLength = K_ACCUMULATION;
+    scale.inputMeanSquare = 1.0 / 3.0;
+    scale.weightMeanSquare = 1.0 / 3.0;
+    return hipdnn_test_sdk::utilities::conv::calculateConvFpropOutputTolerance<OutputType>(
+        scale, coefficients);
+}
+
+/// Two tolerances that grade apart: the check that a test of "this table and not that one" can
+/// tell the tables apart.
+void expectApart(const AbsRelTolerance& a, const AbsRelTolerance& b)
+{
+    EXPECT_GT(std::abs(a.atol - b.atol) + std::abs(a.rtol - b.rtol), 1e-2 * (a.atol + a.rtol));
+}
+
+} // namespace
+
+TEST_F(TestConvFwdToleranceGradingFixture, DgradOutputIsGradedWithTheDgradTableAndNoOther)
+{
+    useTomlSettings(K_THREE_TABLES_TOML);
+    const auto own = dgradTolerance<half>(coefficientsOf(std::nullopt, 20.0));
+    expectApart(own, dgradTolerance<half>(coefficientsOf(std::nullopt, 3.0))); // the forward table
+    expectApart(own, dgradTolerance<half>(coefficientsOf(std::nullopt, 40.0, 1.0))); // wrw
+    expectApart(own, dgradTolerance<half>());
+    expectReported(grade(backwardSpec(Direction::DGRAD, true), K_FAR_OFF, K_REFERENCE), own);
+}
+
+TEST_F(TestConvFwdToleranceGradingFixture, WrwOutputIsGradedWithTheWrwTableAndNoOther)
+{
+    useTomlSettings(K_THREE_TABLES_TOML);
+    // lambda 40 and 1 per K^(1/4), which is 2 at K = 16
+    const auto own = wrwTolerance<half>(coefficientsOf(std::nullopt, 40.0, 1.0));
+    expectApart(own, wrwTolerance<half>(coefficientsOf(std::nullopt, 3.0))); // the forward table
+    expectApart(own, wrwTolerance<half>(coefficientsOf(std::nullopt, 20.0))); // dgrad
+    expectApart(own, wrwTolerance<half>());
+    expectReported(grade(backwardSpec(Direction::WRW, true), K_FAR_OFF, K_REFERENCE), own);
+}
+
+TEST_F(TestConvFwdToleranceGradingFixture, ForwardOutputIsGradedWithTheForwardTableAndNoOther)
+{
+    useTomlSettings(K_THREE_TABLES_TOML);
+    const auto own = fwdTolerance<half>(coefficientsOf(std::nullopt, 3.0));
+    expectApart(own, fwdTolerance<half>(coefficientsOf(std::nullopt, 20.0)));
+    expectApart(own, fwdTolerance<half>(coefficientsOf(std::nullopt, 40.0, 1.0)));
+    expectApart(own, fwdTolerance<half>());
+    Spec spec;
+    spec.isHalf = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), own);
+}
+
+// The summation order of a float output is read per direction too.
+TEST_F(TestConvFwdToleranceGradingFixture, FloatOutputOfEachDirectionIsGradedWithItsOwnTable)
+{
+    useTomlSettings(K_THREE_TABLES_TOML);
+    const auto dgrad = dgradTolerance<float>(coefficientsOf(9.0));
+    const auto wrw = wrwTolerance<float>(coefficientsOf(12.0));
+    const auto fwd = fwdTolerance<float>(coefficientsOf(6.0));
+    expectApart(dgrad, dgradTolerance<float>(coefficientsOf(6.0)));
+    expectApart(dgrad, dgradTolerance<float>(coefficientsOf(12.0)));
+    expectApart(wrw, wrwTolerance<float>(coefficientsOf(6.0)));
+    expectApart(wrw, wrwTolerance<float>(coefficientsOf(9.0)));
+    expectApart(fwd, fwdTolerance<float>(coefficientsOf(9.0)));
+    expectReported(grade(backwardSpec(Direction::DGRAD, false, true), K_FAR_OFF, K_REFERENCE),
+                   dgrad);
+    expectReported(grade(backwardSpec(Direction::WRW, false, true), K_FAR_OFF, K_REFERENCE), wrw);
+    Spec spec;
+    spec.isFloat = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), fwd);
+}
+
+// A table sets the coefficients of its own output type: bfloat16 outputs of the direction have no
+// table in this file and keep the SDK's allowance, as does a direction with no table at all.
+TEST_F(TestConvFwdToleranceGradingFixture,
+       OutputOfATypeOrDirectionWithoutATableKeepsTheSdkAllowance)
+{
+    useTomlSettings(K_THREE_TABLES_TOML);
+    expectReported(grade(backwardSpec(Direction::DGRAD, false), K_FAR_OFF, K_REFERENCE),
+                   dgradTolerance<bfloat16>());
+    expectReported(grade(backwardSpec(Direction::WRW, false), K_FAR_OFF, K_REFERENCE),
+                   wrwTolerance<bfloat16>());
+
+    useTomlSettings(R"([meta]
+version = 1
+
+[conv_dgrad_tolerance.half]
+lambda = 20.0
+)");
+    expectReported(grade(backwardSpec(Direction::DGRAD, true), K_FAR_OFF, K_REFERENCE),
+                   dgradTolerance<half>(coefficientsOf(std::nullopt, 20.0)));
+    expectReported(grade(backwardSpec(Direction::WRW, true), K_FAR_OFF, K_REFERENCE),
+                   wrwTolerance<half>());
+    Spec spec;
+    spec.isHalf = true;
+    expectReported(grade(spec, K_FAR_OFF, K_REFERENCE), fwdTolerance<half>());
+}
+
+// An engine's lambda is in units of the root mean square of the output, which has the means of
+// the inputs in it: dy and w uniform on [0, 2] have a mean of 1 and a mean square of 4/3, so the
+// rms of a dx element is sqrt(72 * 16/9 + 72 * 71) = 72.4 where its zero-mean spread is 11.3.
+TEST_F(TestConvFwdToleranceGradingFixture, EngineLambdaIsPricedOnTheMeansOfTheInputs)
+{
+    useTomlSettings(K_THREE_TABLES_TOML);
+    ConvDgradErrorScale scale = dgradScale();
+    scale.dyMeanSquare = 4.0 / 3.0;
+    scale.weightMeanSquare = 4.0 / 3.0;
+    scale.dyMean = 1.0;
+    scale.weightMean = 1.0;
+    const auto coefficients = coefficientsOf(std::nullopt, 20.0);
+    const auto expected = hipdnn_test_sdk::utilities::conv::calculateConvDgradOutputTolerance<half>(
+        scale, coefficients);
+    auto withoutMeans = scale;
+    withoutMeans.dyMean = 0.0;
+    withoutMeans.weightMean = 0.0;
+    ASSERT_GT(expected.atol,
+              2.0
+                  * hipdnn_test_sdk::utilities::conv::calculateConvDgradOutputTolerance<half>(
+                        withoutMeans, coefficients)
+                        .atol);
+
+    const auto positive = [](InputFillRecipes& recipes) {
+        recipes.set(Y_UID, FillRecipe::free(0.0f, 2.0f));
+        recipes.set(W_UID, FillRecipe::free(0.0f, 2.0f));
+    };
+    expectReported(grade(backwardSpec(Direction::DGRAD, true), K_FAR_OFF, K_REFERENCE, positive),
+                   expected);
 }
 
 // NOLINTEND(readability-identifier-naming)

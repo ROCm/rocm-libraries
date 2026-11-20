@@ -24,6 +24,7 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp>
 
+#include "harness/TestSettings.hpp"
 #include "harness/input-init/FillRecipe.hpp"
 
 // The dynamic tolerance for convolution outputs (forward, backward data and backward weights)
@@ -40,9 +41,9 @@
 // intermediates (the tensors one node writes and another reads, virtual or not) are half,
 // bfloat16, float or double: the roundings to half or bfloat16 between the convolution and the
 // output are rounding points that widen atol (ALMIOPEN-3239). A graph with a type the model does
-// not know keeps the per-op default. A float forward output is graded with the summation-order
-// coefficient the engine's TOML sets, or the default of the SDK (ALMIOPEN-3249); backward data
-// and backward weights use their calibrated constants.
+// not know keeps the per-op default. A convolution output is graded with the allowance of the
+// SDK for its direction and type, or with the coefficients the engine's TOML sets for them
+// ([conv_fwd_tolerance], [conv_dgrad_tolerance], [conv_wrw_tolerance]).
 
 namespace hipdnn_integration_tests::tolerance
 {
@@ -1067,7 +1068,7 @@ namespace detail
 template <typename OutputType>
 hipdnn_test_sdk::utilities::conv::AbsRelTolerance convOutputToleranceAs(
     const ConvErrorScale& scale,
-    const hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients& coefficients)
+    const hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients& coefficients)
 {
     namespace sdk = hipdnn_test_sdk::utilities::conv;
     return std::visit(
@@ -1079,11 +1080,11 @@ hipdnn_test_sdk::utilities::conv::AbsRelTolerance convOutputToleranceAs(
             }
             else if constexpr(std::is_same_v<Scale, sdk::ConvDgradErrorScale>)
             {
-                return sdk::calculateConvDgradOutputTolerance<OutputType>(s);
+                return sdk::calculateConvDgradOutputTolerance<OutputType>(s, coefficients);
             }
             else
             {
-                return sdk::calculateConvWrwOutputTolerance<OutputType>(s);
+                return sdk::calculateConvWrwOutputTolerance<OutputType>(s, coefficients);
             }
         },
         scale);
@@ -1092,14 +1093,12 @@ hipdnn_test_sdk::utilities::conv::AbsRelTolerance convOutputToleranceAs(
 } // namespace detail
 
 /// The dynamic tolerance for one output tensor, or nullopt when its type is not modeled
-/// (see hasDynamicToleranceFor()). `coefficients` are the ones the engine sets for forward
-/// convolutions ([conv_fwd_tolerance] in its TOML); an unset one keeps the default of the output
-/// type. Backward data and backward weights use their calibrated constants.
-inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
-    convOutputTolerance(const ConvErrorScale& scale,
-                        hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
-                        const hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients& coefficients
-                        = {})
+/// (see hasDynamicToleranceFor()). `coefficients` are the ones an engine sets for the direction
+/// of the scale's convolution and the output type; an unset one keeps the SDK's value for them.
+inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> convOutputTolerance(
+    const ConvErrorScale& scale,
+    hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
+    const hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients& coefficients = {})
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
     switch(outputType)
@@ -1113,6 +1112,57 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
     default:
         return std::nullopt;
     }
+}
+
+/// convOutputTolerance() for the engine whose settings file this is: its coefficients of the
+/// scale's own direction ([conv_fwd_tolerance], [conv_dgrad_tolerance] or [conv_wrw_tolerance])
+/// and of the output type, whichever other direction or type the file also sets. With no
+/// settings file the SDK's values apply.
+inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
+    convOutputToleranceFor(const ConvErrorScale& scale,
+                           hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
+                           const TestSettings* settings)
+{
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    namespace sdk = hipdnn_test_sdk::utilities::conv;
+    if(settings == nullptr)
+    {
+        return convOutputTolerance(scale, outputType);
+    }
+    const auto direction = std::visit(
+        [](const auto& s) {
+            using Scale = std::decay_t<decltype(s)>;
+            if constexpr(std::is_same_v<Scale, sdk::ConvFpropErrorScale>)
+            {
+                return ConvToleranceDirection::FWD;
+            }
+            else if constexpr(std::is_same_v<Scale, sdk::ConvDgradErrorScale>)
+            {
+                return ConvToleranceDirection::DGRAD;
+            }
+            else
+            {
+                return ConvToleranceDirection::WRW;
+            }
+        },
+        scale);
+    std::string_view typeName;
+    switch(outputType)
+    {
+    case DataType::HALF:
+        typeName = "half";
+        break;
+    case DataType::BFLOAT16:
+        typeName = "bfloat16";
+        break;
+    case DataType::FLOAT:
+        typeName = "float";
+        break;
+    default:
+        return std::nullopt;
+    }
+    return convOutputTolerance(
+        scale, outputType, settings->convToleranceCoefficients(direction, typeName));
 }
 
 } // namespace hipdnn_integration_tests::tolerance

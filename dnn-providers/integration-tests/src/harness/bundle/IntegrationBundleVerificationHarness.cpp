@@ -1603,15 +1603,8 @@ VerificationOutcome
             }
             if(convScale->second.has_value())
             {
-                hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
-                if(dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
-                   && _deps.policy.testSettings != nullptr)
-                {
-                    coefficients.summationOrder
-                        = _deps.policy.testSettings->convFwdSummationOrder("float");
-                }
-                dynamic
-                    = tolerance::convOutputTolerance(*convScale->second, dataType, coefficients);
+                dynamic = tolerance::convOutputToleranceFor(
+                    *convScale->second, dataType, _deps.policy.testSettings);
             }
         }
         if(dynamic.has_value())
