@@ -338,9 +338,7 @@ struct GemmPipelineAgBgCrCompTDMProducerConsumer
         constexpr DramStep k_step =
             k_is_outer ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
 
-        // No cluster multicast: a non-zero workgroup_mask makes the transfer wait for cluster
-        // peers.
-        const TDMConfig tdm_config = PipelineImplBase::template MakeTdmConfig<IsA>();
+        const TDMConfig tdm_config = Policy::template MakeTdmConfig<Problem, IsA>();
 
         using Ring = typename BarrierPipeline::template ring<0>;
         Ring::template producer<Producer>::template run<PublishLag>(
