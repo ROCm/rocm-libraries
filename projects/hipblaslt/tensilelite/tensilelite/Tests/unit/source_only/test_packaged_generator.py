@@ -211,6 +211,7 @@ tensilelite_prepare_generator(TARGET selected WHEEL "{wheel}"
     PYTHON_EXECUTABLE "{Path(sys.executable).as_posix()}")
 tensilelite_generator_command(selected command dependencies)
 add_custom_command(OUTPUT "${{CMAKE_BINARY_DIR}}/import.txt"
+    COMMAND ${{command}} -m tensilelite --help
     COMMAND ${{command}} "${{CMAKE_SOURCE_DIR}}/record.py" "${{CMAKE_BINARY_DIR}}/import.txt"
     DEPENDS ${{dependencies}} VERBATIM)
 add_custom_target(probe DEPENDS "${{CMAKE_BINARY_DIR}}/import.txt")
@@ -233,7 +234,7 @@ add_custom_target(probe DEPENDS "${{CMAKE_BINARY_DIR}}/import.txt")
         hidden.rename(producer[0])
 
 
-@pytest.mark.parametrize("failure", ["missing", "version", "revision", "resource", "module"])
+@pytest.mark.parametrize("failure", ["missing", "unreadable", "name", "version", "revision"])
 def test_explicit_artifact_rejection(tmp_path, producer, failure):
     wheel = tmp_path / _wheel(producer).name
     replacements = {}
@@ -242,11 +243,15 @@ def test_explicit_artifact_rejection(tmp_path, producer, failure):
         metadata["distribution_version"] = "0.0.0"
     elif failure == "revision":
         metadata["source_revision"] = "f" * 40
-    elif failure == "resource":
-        replacements["tensilelite/logic/known_bugs.yaml"] = None
-    elif failure == "module":
-        replacements["tensilelite/cli.py"] = None
-    if failure != "missing":
+    elif failure == "name":
+        with zipfile.ZipFile(_wheel(producer)) as archive:
+            entry = next(
+                name for name in archive.namelist() if name.endswith(".dist-info/METADATA")
+            )
+            replacements[entry] = archive.read(entry).replace(b"Name: tensilelite", b"Name: other")
+    if failure == "unreadable":
+        wheel.write_bytes(b"not a wheel archive")
+    elif failure != "missing":
         _rewrite_wheel(_wheel(producer), wheel, replacements)
     metadata_file = tmp_path / "metadata.json"
     metadata_file.write_text(json.dumps(metadata))

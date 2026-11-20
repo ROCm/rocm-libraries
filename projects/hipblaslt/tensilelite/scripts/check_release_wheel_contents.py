@@ -102,9 +102,47 @@ def _stamped_revision(archive: zipfile.ZipFile, names: set[str]):
     return True, ...
 
 
+def _identity_problems(archive, names, metadata, expected_version, expected_source_revision):
+    problems = []
+    if canonicalize_name(metadata.get("Name", "")) != "tensilelite":
+        problems.append(f"unexpected distribution name: {metadata['Name']}")
+    if Version(metadata.get("Version", "")) != Version(expected_version):
+        problems.append(f"unexpected version: {metadata['Version']}")
+    found, stamped = _stamped_revision(archive, names)
+    if not found:
+        problems.append(f"missing {_BUILD_INFO}")
+    elif stamped is ...:
+        problems.append(f"{_BUILD_INFO} does not define SOURCE_REVISION")
+    elif expected_source_revision is not None:
+        expected = None if expected_source_revision == "none" else expected_source_revision
+        if stamped != expected:
+            problems.append(
+                f"source revision must be {expected_source_revision}, got {stamped or 'none'}"
+            )
+    return problems
+
+
+def validate_identity(
+    wheel: Path, expected_version: str, expected_source_revision: str | None = None
+) -> list[str]:
+    """Check a supplied artifact's identity; package usability is tested by its producer."""
+    try:
+        with zipfile.ZipFile(wheel) as archive:
+            names = set(archive.namelist())
+            metadata_names = [name for name in names if name.endswith(".dist-info/METADATA")]
+            if len(metadata_names) != 1:
+                return [f"expected exactly one METADATA file, got {metadata_names}"]
+            metadata = Parser().parsestr(archive.read(metadata_names[0]).decode())
+            return _identity_problems(
+                archive, names, metadata, expected_version, expected_source_revision
+            )
+    except (OSError, ValueError, SyntaxError, zipfile.BadZipFile) as exc:
+        return [str(exc)]
+
+
 def validate(
     wheel: Path,
-    source_root: Path | None,
+    source_root: Path,
     expected_version: str,
     expected_source_revision: str | None = None,
 ) -> list[str]:
@@ -120,14 +158,12 @@ def validate(
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         return [str(exc)]
     with archive:
-        expected_name = "tensilelite"
+        problems.extend(
+            _identity_problems(archive, names, metadata, expected_version, expected_source_revision)
+        )
         expected_filename = f"tensilelite-{expected_version}-py3-none-any.whl"
         if wheel.name != expected_filename:
             problems.append(f"filename must be {expected_filename}, got {wheel.name}")
-        if canonicalize_name(metadata["Name"]) != expected_name:
-            problems.append(f"unexpected distribution name: {metadata['Name']}")
-        if Version(metadata["Version"]) != Version(expected_version):
-            problems.append(f"unexpected version: {metadata['Version']}")
         if metadata.get("Requires-Python") != ">=3.10":
             problems.append(f"Requires-Python must be >=3.10, got {metadata.get('Requires-Python')}")
         tags = wheel_metadata.get_all("Tag", [])
@@ -139,19 +175,6 @@ def validate(
         bound_clients = sorted(name for name in names if name.endswith("client.json"))
         if bound_clients:
             problems.append("wheel must not contain client bindings: " + ", ".join(bound_clients))
-
-        found, stamped = _stamped_revision(archive, names)
-        if not found:
-            problems.append(f"missing {_BUILD_INFO}")
-        elif stamped is ...:
-            problems.append(f"{_BUILD_INFO} does not define SOURCE_REVISION")
-        elif expected_source_revision is not None:
-            expected = None if expected_source_revision == "none" else expected_source_revision
-            if stamped != expected:
-                problems.append(
-                    f"source revision must be {expected_source_revision}, "
-                    f"got {stamped or 'none'}"
-                )
 
         requirements = [Requirement(value) for value in metadata.get_all("Requires-Dist", [])]
         # The legacy Tensile* command names are gone; the tensilelite command
@@ -170,28 +193,17 @@ def validate(
         ):
             if resource not in names:
                 problems.append(f"missing resource: {resource}")
+        custom_kernel_root = source_root / "tensilelite/CustomKernels"
+        source_kernels = {
+            "tensilelite/CustomKernels/"
+            + path.relative_to(custom_kernel_root).as_posix()
+            for path in custom_kernel_root.rglob("*.s")
+        }
         wheel_kernels = {
             name for name in names if name.startswith("tensilelite/CustomKernels/")
         }
-        if not wheel_kernels:
-            problems.append("missing custom-kernel resources")
-        if source_root is not None:
-            custom_kernel_root = source_root / "tensilelite/CustomKernels"
-            source_kernels = {
-                "tensilelite/CustomKernels/" + path.relative_to(custom_kernel_root).as_posix()
-                for path in custom_kernel_root.rglob("*.s")
-            }
-            if source_kernels != wheel_kernels:
-                problems.append("custom-kernel resource set does not match the source tree")
-        for module in (
-            "tensilelite/__init__.py",
-            "tensilelite/__main__.py",
-            "tensilelite/cli.py",
-            "tensilelite/logic/run.py",
-            "tensilelite/create_library/run.py",
-        ):
-            if module not in names:
-                problems.append(f"missing generator module: {module}")
+        if source_kernels != wheel_kernels:
+            problems.append("custom-kernel resource set does not match the source tree")
         rocisa = [req for req in requirements if canonicalize_name(req.name) == "rocisa"]
         if rocisa:
             problems.append(

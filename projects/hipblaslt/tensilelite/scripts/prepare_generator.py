@@ -10,7 +10,7 @@ import argparse
 import json
 from pathlib import Path
 
-from check_release_wheel_contents import validate
+from check_release_wheel_contents import validate_identity
 from install_release_wheels import install_wheels
 
 
@@ -31,11 +31,11 @@ def main(argv=None) -> int:
         wheel = args.manifest.parent / manifest["wheel"]
     metadata = json.loads(args.metadata.read_text(encoding="utf-8"))
     # Source archives without a revision retain the established pairing policy:
-    # validate contents/version, but do not invent a Git identity requirement.
+    # validate the package/version, but do not invent a Git identity requirement.
     revision = metadata["source_revision"]
     if revision == "none":
         revision = None
-    problems = validate(wheel, None, metadata["distribution_version"], revision)
+    problems = validate_identity(wheel, metadata["distribution_version"], revision)
     if problems:
         parser.error("Invalid TensileLite generator wheel:\n" + "\n".join(problems))
     if not args.check_only:

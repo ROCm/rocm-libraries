@@ -56,11 +56,13 @@ the extraction/native paths themselves.
 The installed helper uses relocatable native-support metadata. It does not need
 the producer's source checkout or build directory. The supplied wheel must match
 the producer's distribution version and its source revision when one is known.
-An archive with no Git identity keeps the existing policy: version/content checks
-apply, but source pairing is disabled. Missing, malformed or mismatched explicit
-artifacts fail; they do not select a different generator. Locally produced wheels
-are checked after publication; supplied wheels are checked during configuration
-and again before extraction when their inputs change.
+An archive with no Git identity keeps the existing policy: package/version checks
+apply, but source pairing is disabled. Supplied artifacts are checked for readable
+identity metadata and a matching package/version/revision during configuration
+and again before extraction when their inputs change. Failures do not select a
+different generator. Release-content checks run when producing the canonical wheel;
+package/build tests exercise the packaged commands. Consumers do not maintain a
+required-module inventory.
 
 The generator's dependencies cover wheel extraction and native inputs.
 `create_device_library` additionally tracks logic edits and membership changes.
