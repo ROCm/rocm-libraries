@@ -190,17 +190,20 @@ elseif(_origami_version_resource_module)
             set(ORIGAMI_VERSION_COMMIT_ID "${_origami_git_commit_id}")
         endif()
     endif()
+    set(_origami_version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
     set(_origami_product_name
         "AMD ROCm Origami ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR} (${PROJECT_VERSION_TWEAK})")
     get_target_property(_origami_type origami TYPE)
     if(_origami_type STREQUAL "SHARED_LIBRARY")
         rocm_libraries_add_version_resource(origami "origami"
             "AMD Origami - Analytical GEMM Kernel Configuration Selection Library for GPU Computing"
+            VERSION "${_origami_version}"
             PRODUCT_NAME "${_origami_product_name}"
             COMMENTS "Git commit: ${ORIGAMI_VERSION_COMMIT_ID}")
     endif()
     if(TARGET origami-tests)
         rocm_libraries_add_version_resource(origami-tests "origami-tests" "AMD Origami Tests"
+            VERSION "${_origami_version}"
             PRODUCT_NAME "${_origami_product_name}"
             COMMENTS "Git commit: ${ORIGAMI_VERSION_COMMIT_ID}")
     endif()

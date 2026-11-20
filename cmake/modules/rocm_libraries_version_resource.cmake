@@ -6,11 +6,12 @@
 # build it came from. Does nothing on non-Windows platforms.
 #
 #   rocm_libraries_add_version_resource(<target> <name> <description>
+#       VERSION <major>.<minor>.<patch>
 #       [PRODUCT_NAME <product_name>]
 #       [COMMENTS <comments>])
 #
-# FILEVERSION and PRODUCTVERSION come from PROJECT_VERSION_{MAJOR,MINOR,PATCH}
-# in the calling scope. <name> sets InternalName and <description> sets
+# VERSION sets FILEVERSION and PRODUCTVERSION and is checked on every platform.
+# <name> sets InternalName and <description> sets
 # FileDescription. OriginalFilename is derived from the target's OUTPUT_NAME,
 # PREFIX and SUFFIX. PRODUCT_NAME overrides ProductName (default
 # "<name> <filename>"); COMMENTS adds a Comments value, for example the git
@@ -83,10 +84,16 @@ endfunction()
 # Embed VERSIONINFO in TARGET; see the top of this file for the arguments.
 function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
     # PARSE_ARGV keeps a quoted value containing ';' (e.g. a git subject) as one argument.
-    cmake_parse_arguments(PARSE_ARGV 3 ARG "" "PRODUCT_NAME;COMMENTS" "")
+    cmake_parse_arguments(PARSE_ARGV 3 ARG "" "VERSION;PRODUCT_NAME;COMMENTS" "")
     if(ARG_UNPARSED_ARGUMENTS)
         message(FATAL_ERROR "rocm_libraries_add_version_resource: unexpected arguments: ${ARG_UNPARSED_ARGUMENTS}")
     endif()
+    if(NOT ARG_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)$")
+        message(FATAL_ERROR "rocm_libraries_add_version_resource: ${TARGET} needs VERSION <major>.<minor>.<patch>, "
+                            "got '${ARG_VERSION}'")
+    endif()
+    set(version "${ARG_VERSION}")
+    set(version_csv "${CMAKE_MATCH_1},${CMAKE_MATCH_2},${CMAKE_MATCH_3},0")
     # Marked on every platform so rocm_libraries_check_version_resources works in Linux builds too.
     # On Windows a marked target has its resource attached, unless the build opted out below.
     set_property(TARGET ${TARGET} PROPERTY ROCM_LIBRARIES_VERSION_RESOURCE TRUE)
@@ -125,8 +132,6 @@ function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
         set(comments_value "      VALUE \"Comments\", \"${comments}\\0\"")
     endif()
 
-    set(version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
-    set(version_csv "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0")
     string(TIMESTAMP year "%Y")
     set(rc_path "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_version.rc")
     configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/rocm_libraries_version_resource.rc.in" "${rc_path}" @ONLY)

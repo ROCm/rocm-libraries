@@ -40,6 +40,7 @@ function(hipblaslt_add_version_resource TARGET DESCRIPTION)
         return()
     endif()
     rocm_libraries_add_version_resource(${TARGET} "${TARGET}" "${DESCRIPTION}"
+        VERSION "${hipblaslt_VERSION_MAJOR}.${hipblaslt_VERSION_MINOR}.${hipblaslt_VERSION_PATCH}"
         PRODUCT_NAME "AMD ROCm hipBLASLt ${hipblaslt_VERSION_MAJOR}.${hipblaslt_VERSION_MINOR} (${hipblaslt_VERSION_TWEAK})"
         COMMENTS "Git commit: ${HIPBLASLT_VERSION_RESOURCE_COMMIT}")
 endfunction()
