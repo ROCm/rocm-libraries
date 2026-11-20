@@ -545,6 +545,20 @@ nlohmann::json
             {"extremes", taken}};
 }
 
+/// Per operation, the declared value weights of each weighted categorical parameter, added to
+/// `report` under the operation's name.
+void addDeclaredWeights(nlohmann::json& report,
+                        const hipdnn_corpus_gen::OperationMetadata& metadata)
+{
+    for(const auto& parameter : metadata.parameters)
+    {
+        if(!parameter.weights.empty())
+        {
+            report[metadata.operation][parameter.name] = parameter.weights;
+        }
+    }
+}
+
 int runGenerator(const std::vector<std::string>& args)
 {
     Options options;
@@ -1163,13 +1177,7 @@ int runGenerator(const std::vector<std::string>& args)
         hipdnn_corpus_gen::MetadataOperationCorpus result;
         result.metadataPath = operationEntry.first;
         result.operation = metadata.operation;
-        for(const auto& parameter : metadata.parameters)
-        {
-            if(!parameter.weights.empty())
-            {
-                categoricalWeights[result.operation][parameter.name] = parameter.weights;
-            }
-        }
+        addDeclaredWeights(categoricalWeights, metadata);
 
         // Every source passes the same engine test; a problem is served only if every named
         // engine serves it. The byte ceiling applies only to the search: pack and model shapes

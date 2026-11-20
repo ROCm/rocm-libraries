@@ -1276,18 +1276,9 @@ SdpaScaleAndBand scaleAndBand(const GraphBytes& bytes)
     SdpaScaleAndBand out;
     const auto take = [&out](const auto* attributes) {
         ASSERT_NE(attributes, nullptr);
-        if(attributes->attn_scale_value().has_value())
-        {
-            out.scale = attributes->attn_scale_value().value();
-        }
-        if(attributes->left_bound().has_value())
-        {
-            out.left = attributes->left_bound().value();
-        }
-        if(attributes->right_bound().has_value())
-        {
-            out.right = attributes->right_bound().value();
-        }
+        out.scale = attributes->attn_scale_value();
+        out.left = attributes->left_bound();
+        out.right = attributes->right_bound();
     };
     if(node->attributes_as_SdpaAttributes() != nullptr)
     {
@@ -1306,10 +1297,10 @@ TEST(TestGraphBuilderRegistry, EverySdpaLayoutStridesEachOperandAsItIsNamed)
 {
     // BSHD = [S*H*D, D, H*D, 1]; BHSD = [H*S*D, S*D, D, 1]. kv_bhsd is the decode KV cache: the
     // query side token-major and the key/value side head-major, in both directions.
-    const std::vector<int64_t> tokenQ{16 * 8 * 64, 64, 8 * 64, 1};
-    const std::vector<int64_t> headQ{8 * 16 * 64, 16 * 64, 64, 1};
-    const std::vector<int64_t> tokenKv{32 * 2 * 64, 64, 2 * 64, 1};
-    const std::vector<int64_t> headKv{2 * 32 * 64, 32 * 64, 64, 1};
+    const std::vector<int64_t> tokenQ{int64_t{16} * 8 * 64, 64, int64_t{8} * 64, 1};
+    const std::vector<int64_t> headQ{int64_t{8} * 16 * 64, int64_t{16} * 64, 64, 1};
+    const std::vector<int64_t> tokenKv{int64_t{32} * 2 * 64, 64, int64_t{2} * 64, 1};
+    const std::vector<int64_t> headKv{int64_t{2} * 32 * 64, int64_t{32} * 64, 64, 1};
 
     struct Layout
     {
@@ -1465,7 +1456,7 @@ TEST(TestGraphBuilderRegistry, ASlidingWindowWritesItsLeftBoundAndNoWindowWrites
     }
 }
 
-TEST(TestGraphBuilderRegistry, Fp32IsADeclaredSdpaDtypeAndBuildsFloatOperands)
+TEST(TestGraphBuilderRegistry, SingleFloatIsADeclaredSdpaDtypeAndBuildsFloatOperands)
 {
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {

@@ -529,11 +529,12 @@ inline std::vector<int64_t> apportion(int64_t total,
         }
     }
     // The start in [0, 1): the keys' own, or the middle (plain rounding of the running total).
-    double start = tieKeys.empty() ? 0.5 : static_cast<double>(mixed >> 11) / 9007199254740992.0;
+    const double start
+        = tieKeys.empty() ? 0.5 : static_cast<double>(mixed >> 11) / 9007199254740992.0;
 
     std::vector<bool> extra(sizes.size(), false);
     double running = 0.0;
-    int64_t lastCount = static_cast<int64_t>(std::floor(start));
+    auto lastCount = static_cast<int64_t>(std::floor(start));
     for(const auto index : order)
     {
         running += remainder[index];

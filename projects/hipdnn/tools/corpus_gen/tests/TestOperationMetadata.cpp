@@ -455,6 +455,21 @@ TEST(TestOperationMetadata, AWeightMustNameADeclaredValueAndBePositive)
               std::string::npos);
 }
 
+TEST(TestOperationMetadata, WeightErrorsNameTheParameterAndValue)
+{
+    const auto firstError = [](const std::string& weights) {
+        auto declaration = layernormMetadata();
+        declaration["parameters"]["dtype"] = nlohmann::json::parse(
+            R"({"type": "enum", "values": ["fp32", "fp16"], "weights": )" + weights + "}");
+        const auto load = parseOperationMetadata(declaration);
+        return load.errors.empty() ? std::string() : load.errors.front();
+    };
+
+    EXPECT_EQ(firstError(R"({"bogus": 1})"), "parameter 'dtype' weights undeclared value 'bogus'");
+    EXPECT_EQ(firstError(R"({"fp32": 0})"),
+              "parameter 'dtype' weight for 'fp32' must be a number above 0");
+}
+
 TEST(TestOperationMetadata, AValueWithoutAWeightWeighsOneAndWeightsAreRelativeToTheirMean)
 {
     auto declaration = layernormMetadata();

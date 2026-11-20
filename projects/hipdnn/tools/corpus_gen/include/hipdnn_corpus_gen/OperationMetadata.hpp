@@ -738,13 +738,21 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
                         if(std::find(parameter.values.begin(), parameter.values.end(), value)
                            == parameter.values.end())
                         {
-                            load.errors.push_back("parameter '" + name
-                                                  + "' weights undeclared value '" + value + "'");
+                            std::string message = "parameter '";
+                            message.append(name)
+                                .append("' weights undeclared value '")
+                                .append(value)
+                                .append("'");
+                            load.errors.push_back(std::move(message));
                         }
                         else if(!weight.is_number() || !(weight.get<double>() > 0.0))
                         {
-                            load.errors.push_back("parameter '" + name + "' weight for '" + value
-                                                  + "' must be a number above 0");
+                            std::string message = "parameter '";
+                            message.append(name)
+                                .append("' weight for '")
+                                .append(value)
+                                .append("' must be a number above 0");
+                            load.errors.push_back(std::move(message));
                         }
                         else
                         {
