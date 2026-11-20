@@ -369,7 +369,8 @@ struct DeviceGroupedConvBwdWeight_Xdl_WaveletModel_CShuffleV3
                                        NumGroupsToMerge,
                                        ConvBackwardWeightSpecialization,
                                        index_t,
-                                       UseTdm>{};
+                                       UseTdm,
+                                       DirectLoad>{};
 
     template <ck::index_t NDim, typename ck::enable_if<NDim == 1, bool>::type = false>
     static auto GetABCGridDesc()

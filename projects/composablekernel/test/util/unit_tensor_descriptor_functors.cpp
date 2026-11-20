@@ -12,6 +12,7 @@
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
 #include "ck/tensor_operation/operator_transform/transform_conv_bwd_data_to_gemm_v1.hpp"
+#include "ck/tensor_operation/operator_transform/transform_conv_bwd_weight_to_gemm_v2.hpp"
 
 using namespace ck;
 
@@ -1088,5 +1089,171 @@ TEST(TensorDescriptorFunctorsIntegration, BackwardDataOutputTransformMatchesGene
     {
         CheckBwdDataOutTransformMatchesGeneric<false>(c);
         CheckBwdDataOutTransformMatchesGeneric<true>(c);
+    }
+}
+
+// =============================================================================
+// Backward weight input (B) descriptor: fused custom transform against the generic chain of Pad /
+// Embed / Merge / right-pad / UnMerge transforms
+// =============================================================================
+
+namespace {
+
+template <index_t NDim>
+struct BwdWeightCase
+{
+    index_t N, C, K;
+    std::array<index_t, NDim> In, Filter, Stride, Dilation, PadLeft, PadRight;
+    index_t BatchK;
+};
+
+template <index_t NDim, bool Custom>
+auto MakeBwdWeightBDescriptor(const BwdWeightCase<NDim>& c)
+{
+    using Transform = ck::tensor_operation::TransformConvBwdWeightToGemmV2<
+        NDim,
+        32,
+        32,
+        8,
+        2,
+        1,
+        ck::tensor_operation::device::ConvolutionBackwardWeightSpecialization::Default,
+        index_t,
+        false,
+        Custom>;
+
+    std::array<index_t, NDim> out{};
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        out[d] = (c.In[d] + c.PadLeft[d] + c.PadRight[d] - c.Dilation[d] * (c.Filter[d] - 1) - 1) /
+                     c.Stride[d] +
+                 1;
+    }
+
+    // packed (G = 1) N spatial C input, N spatial K output, K filter C weight
+    std::array<index_t, NDim + 3> in_strides{}, wei_strides{}, out_strides{};
+    in_strides[0]  = c.C;
+    in_strides[1]  = c.C;
+    in_strides[2]  = 1;
+    out_strides[0] = c.K;
+    out_strides[1] = c.K;
+    out_strides[2] = 1;
+    wei_strides[0] = c.K * c.C;
+    wei_strides[1] = c.C;
+    wei_strides[2] = 1;
+    index_t in_s = c.C, out_s = c.K, wei_s = c.C;
+    for(index_t d = NDim - 1; d >= 0; --d)
+    {
+        in_strides[3 + d]  = in_s;
+        out_strides[3 + d] = out_s;
+        wei_strides[3 + d] = wei_s;
+        in_s *= c.In[d];
+        out_s *= out[d];
+        wei_s *= c.Filter[d];
+    }
+    for(index_t d = 0; d < NDim; ++d)
+    {
+        in_strides[1] *= c.In[d];
+        out_strides[1] *= out[d];
+    }
+
+    return Transform::template MakeABCGridDescriptor_A_K0_M_K1_B_K0_N_K1_C_M_N<NDim>(
+        c.N,
+        c.K,
+        c.C,
+        c.In,
+        c.Filter,
+        out,
+        in_strides,
+        wei_strides,
+        out_strides,
+        c.Stride,
+        c.Dilation,
+        c.PadLeft,
+        c.PadRight,
+        c.BatchK)[Number<1>{}];
+}
+
+template <index_t NDim>
+void CheckBwdWeightBTransformMatchesGeneric(const BwdWeightCase<NDim>& c)
+{
+    SCOPED_TRACE("N=" + std::to_string(c.N) + " C=" + std::to_string(c.C) +
+                 " In0=" + std::to_string(c.In[0]) + " Filter0=" + std::to_string(c.Filter[0]) +
+                 " BatchK=" + std::to_string(c.BatchK));
+
+    const auto custom  = MakeBwdWeightBDescriptor<NDim, true>(c);
+    const auto generic = MakeBwdWeightBDescriptor<NDim, false>(c);
+
+    const index_t k0 = custom.GetLength(Number<0>{});
+    const index_t n  = custom.GetLength(Number<1>{});
+    const index_t k1 = custom.GetLength(Number<2>{});
+    ASSERT_EQ(k0, generic.GetLength(Number<0>{}));
+    ASSERT_EQ(n, generic.GetLength(Number<1>{}));
+    ASSERT_EQ(k1, generic.GetLength(Number<2>{}));
+
+    index_t mismatches  = 0;
+    index_t valid_count = 0;
+    for(index_t i0 = 0; i0 < k0; ++i0)
+    {
+        for(index_t i1 = 0; i1 < n; ++i1)
+        {
+            for(index_t i2 = 0; i2 < k1; ++i2)
+            {
+                const auto cc = make_tensor_coordinate(custom, make_multi_index(i0, i1, i2));
+                const auto gc = make_tensor_coordinate(generic, make_multi_index(i0, i1, i2));
+                const bool cv = coordinate_has_valid_offset(custom, cc);
+                const bool gv = coordinate_has_valid_offset(generic, gc);
+                if(cv != gv || (cv && cc.GetOffset() != gc.GetOffset()))
+                {
+                    if(mismatches++ < 5)
+                    {
+                        ADD_FAILURE() << "(" << i0 << "," << i1 << "," << i2
+                                      << ") custom valid=" << cv << " offset=" << cc.GetOffset()
+                                      << ", generic valid=" << gv << " offset=" << gc.GetOffset();
+                    }
+                }
+                valid_count += gv;
+            }
+        }
+    }
+    EXPECT_EQ(mismatches, 0);
+    EXPECT_GT(valid_count, 0);
+}
+
+} // namespace
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardWeightInputTransformMatchesGeneric)
+{
+    // {N, C, K, In, Filter, Stride, Dilation, PadLeft, PadRight, BatchK}
+    const BwdWeightCase<1> cases1d[] = {
+        {2, 8, 8, {17}, {3}, {1}, {1}, {1}, {1}, 1},
+        {3, 5, 8, {13}, {4}, {2}, {2}, {3}, {0}, 2},
+        {2, 7, 8, {10}, {1}, {3}, {1}, {0}, {0}, 3},
+    };
+    const BwdWeightCase<2> cases2d[] = {
+        {2, 8, 8, {9, 9}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, 1},
+        {2, 8, 8, {11, 7}, {3, 3}, {2, 2}, {1, 1}, {1, 1}, {1, 1}, 2},
+        {3, 5, 8, {10, 13}, {5, 3}, {1, 2}, {2, 1}, {2, 1}, {2, 1}, 1},
+        {1, 6, 8, {12, 12}, {3, 3}, {2, 3}, {1, 1}, {0, 2}, {0, 2}, 3},
+        {2, 8, 8, {6, 6}, {1, 1}, {2, 2}, {1, 1}, {0, 0}, {0, 0}, 2},
+        {2, 3, 8, {8, 9}, {4, 4}, {3, 2}, {2, 3}, {3, 4}, {2, 1}, 1},
+        {3, 8, 8, {7, 5}, {3, 3}, {1, 1}, {1, 1}, {1, 1}, {1, 1}, 4},
+    };
+    const BwdWeightCase<3> cases3d[] = {
+        {1, 4, 8, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, 1},
+        {2, 3, 8, {6, 5, 7}, {2, 3, 3}, {2, 1, 2}, {1, 2, 1}, {1, 2, 0}, {0, 1, 1}, 2},
+        {2, 8, 8, {4, 4, 4}, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, {0, 0, 0}, 3},
+    };
+    for(const auto& c : cases1d)
+    {
+        CheckBwdWeightBTransformMatchesGeneric<1>(c);
+    }
+    for(const auto& c : cases2d)
+    {
+        CheckBwdWeightBTransformMatchesGeneric<2>(c);
+    }
+    for(const auto& c : cases3d)
+    {
+        CheckBwdWeightBTransformMatchesGeneric<3>(c);
     }
 }
