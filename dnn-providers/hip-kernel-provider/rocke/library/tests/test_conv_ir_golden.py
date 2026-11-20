@@ -225,6 +225,8 @@ def build_dgrad(
     tap_outer_k=False,
     halo=None,
     tf32=False,
+    epilogue="default",
+    vector_size_c=None,
 ):
     def _build():
         from kernels.common.conv_implicit_gemm_dgrad import (
@@ -256,6 +258,8 @@ def build_dgrad(
             wave_size=wave_size,
             split_k=split_k,
             tap_outer_k=tap_outer_k,
+            epilogue=epilogue,
+            vector_size_c=vector_size_c,
             **(halo or {}),
         )
         return build_implicit_gemm_conv_dgrad(spec, arch=arch)
@@ -2024,6 +2028,28 @@ def cases():
             tile_m=64,
             tile_n=64,
             tile_k=64,
+        ),
+    )
+    # Split-K with the cshuffle epilogue: the staged tile atomic-added into dX
+    # through the tilde address function, one packed fp16 pair per lane.
+    add(
+        "conv_dgrad",
+        "conv_dgrad/gfx950/n2h16c32k32r3_s2_sk4_cshuffle",
+        "gfx950",
+        build_dgrad(
+            "irhash_dgrad_950_s2_sk4_cshuffle",
+            "gfx950",
+            dgrad2,
+            wave_size=64,
+            wtm=32,
+            wtn=32,
+            wtk=16,
+            tile_m=64,
+            tile_n=64,
+            tile_k=64,
+            split_k=4,
+            epilogue="cshuffle",
+            vector_size_c=2,
         ),
     )
     # gfx1151 WMMA (wave32) -- stride=1 only; WMMA dgrad supports only 16x16x16.

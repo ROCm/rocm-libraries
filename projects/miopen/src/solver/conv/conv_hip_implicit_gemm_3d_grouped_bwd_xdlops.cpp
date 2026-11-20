@@ -171,13 +171,11 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
     {
         bool mode_use_tf32 = (problem.GetInDataType() == miopenFloat) && problem.UseTF32();
 
-        auto fill_valid_kernels = [&loader](const ProblemDescription& p, bool try_tf32) {
-            return loader.FillValidKernels(
-                CKSolverType::GrpConv3dBwd, p, p.GetInDataType(), try_tf32);
-        };
-
-        auto ck_val_creator = MakeCKValidatorCreator(
-            loader, CKSolverType::GrpConv3dBwd, problem.GetInDataType(), mode_use_tf32);
+        auto ck_val_creator = MakeCKValidatorCreator(loader,
+                                                     CKSolverType::GrpConv3dBwd,
+                                                     problem.GetInDataType(),
+                                                     mode_use_tf32,
+                                                     k3DBwdSolverConfig.uses_split_k);
 
         // Note: No KTN runner needed for 3D (supports_ktn = false)
         if(RunAIHeuristics(k3DBwdSolverConfig,
@@ -185,7 +183,6 @@ void PerformanceConfigHipImplicitGemm3DGroupBwdXdlops::HeuristicInit(
                            ctx,
                            problem,
                            false,
-                           fill_valid_kernels,
                            nullptr,
                            ck_val_creator,
                            mode_use_tf32))

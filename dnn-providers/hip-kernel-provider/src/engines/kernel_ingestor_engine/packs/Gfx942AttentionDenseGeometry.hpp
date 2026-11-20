@@ -12,7 +12,7 @@
 /**
  * @file Gfx942AttentionDenseGeometry.hpp
  * @brief The tile rules and launch geometry gfx942 attention_dense restates from its
- *        Python builder, and this engine's own window guard.
+ *        Python builder.
  *
  * A rocKE kernel is launched from Python; an ingestor engine relaunches the same binary
  * from C++. The engine must recompute what the Python launch path computes identically:
@@ -80,39 +80,6 @@ inline bool isSupportedGfx942AttentionDenseTile(int64_t headSize, int64_t blockM
     const int64_t numWaves = blockM / GFX942_ROWS_PER_WAVE;
     const int64_t rowsPerInstruction = GFX942_DMA_ELEMENTS_PER_INSTRUCTION / headSize;
     return blockN % numWaves == 0 && (blockN / numWaves) % rowsPerInstruction == 0;
-}
-
-/**
- * @brief Does every query block of a causal sliding-window launch see at least one key
- *        tile?
- *
- * This engine's own zero-trip guard: the last query block's window can start past the
- * final key tile. The kernel zeroes those rows; the pack declines them anyway, for the
- * reason windowLeavesRowsWithoutKeys (AttentionDenseNative.cpp) states. The guard reads the
- * candidate's own tile.
- *
- *     n_q = seqlen_q // block_m;  n_ktiles = seqlen_kv // block_n
- *     n_per = block_m // block_n; swt = sliding_window // block_n
- *     reject when (n_q - 1) * n_per - swt >= n_ktiles
- *
- * A zero window (no window) always passes. Callers must have validated the tile with
- * isSupportedGfx942AttentionDenseTile and the extents as positive.
- *
- * This is per query block. A block can pass while its last rows see no key at all; the
- * graph matcher declines those windows (seqlen_q - seqlen_kv >= window) on its own.
- */
-inline bool gfx942AttentionDenseWindowReachesKeys(
-    int64_t blockM, int64_t blockN, int64_t seqLenQ, int64_t seqLenKv, int64_t slidingWindow)
-{
-    if(slidingWindow == 0)
-    {
-        return true;
-    }
-    const int64_t queryBlocks = seqLenQ / blockM;
-    const int64_t keyTiles = seqLenKv / blockN;
-    const int64_t tilesPerQueryBlock = blockM / blockN;
-    const int64_t windowTiles = slidingWindow / blockN;
-    return (queryBlocks - 1) * tilesPerQueryBlock - windowTiles < keyTiles;
 }
 
 /// The grid and block a variant must launch with.

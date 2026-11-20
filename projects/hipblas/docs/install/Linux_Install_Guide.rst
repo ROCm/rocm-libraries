@@ -17,7 +17,6 @@ Alternatively, you can build hipBLAS standalone using the following
 instructions.
 
 This topic discusses how to install hipBLAS on Linux from a package and how to build and install it from the source code.
-For a list of installation prerequisites, see :doc:`hipBLAS prerequisites <prerequisites>`.
 
 Prerequisites for Linux
 =========================
