@@ -12,6 +12,7 @@ import tempfile
 import unittest
 from collections import Counter
 from fnmatch import fnmatch
+from itertools import product
 from pathlib import Path
 from dataclasses import fields, replace
 import sys
@@ -24,10 +25,12 @@ from codegen.ops.fmha_fwd import (  # noqa: E402
     CppConstraint,
     FMHA_FWD_API_FOOTER,
     FMHA_FWD_API_HEADER,
+    FMHA_FWD_API_INNER_DISPATCH,
     FmhaFwdApiPool,
     KernelComponentFactoryGfx125,
     KernelContext,
     ProblemContext,
+    api_trait_fmt_args,
     get_fwd_blobs,
     write_fwd_api,
 )
@@ -496,7 +499,7 @@ endforeach()
         filters = {
             "logits": "fmha_fwd_d*_bf16_*_logits*_nbias*_nmask*_nlse*_ndropout*_nskip*_nqscale*",
             "bias": "fmha_fwd_d*_bf16_*_nlogits*_bias*_nmask*_nlse*_ndropout*_nskip*_nqscale*",
-            "dropout": "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_nlse*_dropout*_nskip*_nqscale*",
+            "dropout": "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_lse*_dropout*_nskip*_nqscale*",
             "skip": "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_nlse*_ndropout*_skip*_nqscale*",
             "sink": "fmha_fwd_d*_bf16_*_nlogits*_nbias*_nmask*_nlse*_ndropout*_nskip*_nqscale*_sink*",
         }
@@ -2036,6 +2039,176 @@ class TestCompiledGfx125V128Dispatch(unittest.TestCase):
             run(seqlen_q=100, seqlen_k=512, **big), [kernel("qr_tdm_pingpong", 64)]
         )
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
+
+
+class TestGfx125QrReplacement(unittest.TestCase):
+    def test_explicit_pingpong_padding_filter(self):
+        _, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "*_qr_tdm_pingpong_vr_pssk*_nbias_*",
+            100,
+            [128],
+            "simplified",
+        )
+        self.assertTrue(kernels)
+        self.assertTrue(all(k.F_pipeline.F_skpad == "t" for k in kernels))
+
+    def test_unique_dispatch_conditions(self):
+        condition_template = FMHA_FWD_API_INNER_DISPATCH.split(" {{\n", 1)[0]
+        for mask in ("simplified", "generic"):
+            pool, _ = get_fwd_blobs(["gfx1250"], None, 0, [-1], mask)
+            for arch, by_dtype in pool.pool.items():
+                for dtype, by_dim in by_dtype.items():
+                    for (hdim, _), traits in by_dim.items():
+                        max_bm0 = max(t.bm0 for t in traits)
+                        seen = set()
+                        for trait in traits:
+                            condition = condition_template.format(
+                                F_if="if",
+                                **api_trait_fmt_args(arch, dtype, hdim, trait, max_bm0),
+                            )
+                            condition = re.sub(r"/\*.*?\*/|\s+", "", condition)
+                            self.assertNotIn(condition, seen, trait)
+                            seen.add(condition)
+
+    def test_instance_budget(self):
+        # PR #15342 parent (d90dfdb), receipt 0, all head dimensions/dtypes.
+        for mask, total in (
+            ("simplified", 15300),
+            ("generic", 22654),
+        ):
+            with self.subTest(mask=mask):
+                _, kernels = get_fwd_blobs(["gfx1250"], None, 0, [-1], mask)
+                self.assertTrue(kernels)
+                self.assertLessEqual(len(kernels), total)
+                for kernel in kernels:
+                    p = kernel.F_pipeline
+                    if p.F_dropout == "t":
+                        self.assertEqual(p.F_lse, "t", kernel.name)
+                    if kernel.F_hdim == 512:
+                        self.assertEqual(
+                            (p.F_logits, p.F_dropout, p.F_skip), ("f",) * 3
+                        )
+                self.check_feature_coverage(kernels, mask)
+
+    def check_feature_coverage(self, kernels, mask_impl):
+        features = ("mask", "logits", "bias", "lse", "dropout", "skip", "sink")
+        full_pad = {
+            (k.F_dtype, k.F_mode, k.F_hdim)
+            + tuple(getattr(k.F_pipeline, "F_" + f) for f in features)
+            for k in kernels
+            if k.F_pipeline.tag == "qr_tdm"
+            and all(
+                getattr(k.F_pipeline, "F_" + f) == "t"
+                for f in ("spad", "skpad", "dpad", "dvpad")
+            )
+        }
+        masks = (
+            ("s_no", "s_mask")
+            if mask_impl == "simplified"
+            else ("no", "causal", "generic")
+        )
+        # Supported QR features must retain a fully padded TDM fallback.
+        for key in product(
+            ("fp16", "bf16"),
+            ("batch", "group"),
+            (32, 64, 96, 128, 160, 192, 256),
+            masks,
+            ("f", "t"),
+            ("no", "bias", "alibi"),
+            ("f", "t"),
+            ("f", "t"),
+            ("f", "t"),
+            ("f", "t"),
+        ):
+            _, mode, hdim, _, logits, bias, lse, dropout, skip, _ = key
+            if mode == "batch" and skip == "t":
+                continue
+            if dropout == "t" and lse == "f":
+                continue
+            if logits == "t" and bias != "no":
+                continue
+            if hdim == 192 and (bias != "no" or dropout == "t"):
+                continue
+            self.assertIn(key, full_pad)
+
+    @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
+    def test_dropout_lse_sink_dispatch(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d64_bf16_*_nbias*_lse_dropout_*_sink*",
+            0,
+            [64],
+            "simplified",
+        )
+        self.assertTrue(kernels)
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        for group, skip, logits, mask, (dim, sk) in product(
+            (0, 1), (0, 1), (0, 1), (0, 1, 2), ((57, 137), (64, 137), (64, 128))
+        ):
+            with self.subTest(
+                group=group, skip=skip, logits=logits, mask=mask, dim=dim, sk=sk
+            ):
+                selected = dispatch.run(
+                    hdim_q=dim,
+                    hdim_v=dim,
+                    seqlen_q=71,
+                    seqlen_k=sk,
+                    group=group,
+                    skip=skip,
+                    logits=logits,
+                    mask=mask,
+                    window_size_right=0 if mask else -1,
+                    lse=1,
+                    dropout=1,
+                    sink=1,
+                    has_sink_ptr=1,
+                )
+                expected = {
+                    index
+                    for kernel, index in dispatch.kernel_ids
+                    if kernel.F_mode == ("group" if group else "batch")
+                    and kernel.F_pipeline.F_logits == ("t" if logits else "f")
+                    and kernel.F_pipeline.F_skip == ("t" if group and skip else "f")
+                    and kernel.F_pipeline.F_mask == ("s_mask" if mask else "s_no")
+                    and kernel.F_pipeline.F_spad == ("t" if group or sk == 137 else "f")
+                    and kernel.F_pipeline.F_dpad == ("t" if dim == 57 else "f")
+                    and kernel.F_pipeline.tag == "qr_tdm"
+                }
+                self.assertTrue(expected)
+                self.assertEqual(len(selected), 1)
+                self.assertIn(selected[0], expected)
+
+    @unittest.skipUnless(_HOST_CXX, "a C++17 host compiler is required")
+    def test_softcap_causal_dispatch(self):
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d64_bf16_*_logits_nbias_*_nlse_ndropout_nskip_*_nsink",
+            0,
+            [64],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(self, pool, kernels)
+        causal_ids = {
+            index
+            for kernel, index in dispatch.kernel_ids
+            if kernel.F_pipeline.F_mask == "causal"
+        }
+        self.assertTrue(causal_ids)
+        for group, mask, sk in product((0, 1), (1, 2), (128, 137)):
+            with self.subTest(group=group, mask=mask, sk=sk):
+                selected = dispatch.run(
+                    hdim_q=64,
+                    hdim_v=64,
+                    seqlen_q=71,
+                    seqlen_k=sk,
+                    group=group,
+                    logits=1,
+                    mask=mask,
+                    window_size_right=0,
+                )
+                self.assertEqual(len(selected), 1)
+                self.assertIn(selected[0], causal_ids)
 
 
 if __name__ == "__main__":

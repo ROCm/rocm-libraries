@@ -2084,6 +2084,12 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                     ["f", "t"],
                     ["f", "t"],
                 ):
+                    if dropout == "t" and lse == "f":
+                        continue
+                    qr_features = logits == "t" or dropout == "t" or skip == "t"
+                    # Keep D512's existing feature scope.
+                    if qr_features and (hdim > 256 or hdim_v > 256):
+                        continue
                     mask_constraint = CppConstraint()
                     if mask_impl == "simplified" and mask == "causal":
                         if bias != "no" or lse != "f" or sink != "f":
@@ -2608,6 +2614,7 @@ def get_fwd_blobs(
     targets: List[str], kernel_filter: Optional[str], receipt, optdim_list, mask_impl
 ) -> Tuple[FmhaFwdApiPool, List[FmhaFwdKernel]]:
     gen = list()
+    generated_names = set()
     api_pool = FmhaFwdApiPool()
 
     factories = get_factories_for_targets(targets, get_factory)
@@ -2655,8 +2662,22 @@ def get_fwd_blobs(
                 kernel = create_kernel(factory.arch, problem_ctx, kernel_ctx)
                 if kernel_filter and not fnmatch.fnmatch(kernel.name, kernel_filter):
                     continue
+                if (
+                    pipeline.tag == "qr_tdm_pingpong"
+                    and mode == "batch"
+                    and pipeline.F_bias != "bias"
+                    and pipeline.F_skpad == "t"
+                ):
+                    # skcheck allows K tails; skip only if the unpadded twin survived filtering.
+                    unpadded = replace(
+                        kernel,
+                        F_pipeline=replace(pipeline, F_spad="f", F_skpad="f"),
+                    )
+                    if unpadded.filename in generated_names:
+                        continue
                 api_pool.register_traits(kernel.api_trait())
                 gen.append(kernel)
+                generated_names.add(kernel.filename)
 
     return (api_pool, gen)
 

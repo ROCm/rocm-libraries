@@ -3653,8 +3653,9 @@ struct FmhaFwdKernel
                     kargs.hdim_v % alignment == 0 && kargs.stride_o % alignment == 0 &&
                     reinterpret_cast<uintptr_t>(o_ptr) % (alignment * sizeof(ODataType)) == 0);
                 // hdim_v, stride_o and o_ptr are workgroup-uniform.
-                // Scalarize only the causal specialization to preserve other masks' prefill speed.
-                if constexpr(std::is_same_v<FmhaMask, GenericAttentionMask<true, false>>)
+                // Measured: other masks and softcap regress prefill with scalarization.
+                if constexpr(std::is_same_v<FmhaMask, GenericAttentionMask<true, false>> &&
+                             !kHasLogitsSoftCap)
                     aligned = amd_wave_read_first_lane(aligned);
                 if(aligned)
                     store_output(number<alignment>{});

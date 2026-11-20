@@ -56,6 +56,9 @@ group mode on this architecture.
 
 FP16/BF16 inventories contain only TDM pipelines, with head buckets up to 512.
 The existing D192/V128 bias/dropout and softcap-with-bias exclusions still apply.
+The gfx125 FP16/BF16 inventory only includes dropout with LSE (`-lse=1`).
+D512 keeps its earlier feature scope and does not generate logits soft cap,
+dropout, or group skip instances.
 FP8 and the split-KV/paged-KV APIs retain their separate inventories.
 
 ### Scheduled TDM forward pipeline
