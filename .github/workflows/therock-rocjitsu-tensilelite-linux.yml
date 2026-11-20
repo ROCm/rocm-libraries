@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # Run TensileLite common GEMM tests under rocjitsu CPU emulation.
-# Advisory (continue-on-error) sidecar job following the same pattern as
-# therock-rocjitsu-race-check-linux.yml. Build the emulator from the latest
+# Advisory (continue-on-error) comparison job. Build the emulator from the latest
 # rocm-systems develop; mirage and the HIP runtime come from TheRock artifacts.
 
 name: TheRock rocjitsu tensilelite test Linux
