@@ -121,6 +121,17 @@ class ParseInstalledCTestTest(unittest.TestCase):
             found = sweep.discover(root, label="^quick$", components=["rocdecode"])
             self.assertTrue(Path(found[0]["tests"][0]["command"][0]).is_absolute())
 
+    def test_named_aqlprofile_runs_legacy_script_directly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "share" / "hsa-amd-aqlprofile").mkdir(parents=True)
+            script = root / "share" / "hsa-amd-aqlprofile" / "run_tests.sh"
+            script.write_text("#!/bin/sh\n", encoding="utf-8")
+            found = sweep.discover(root, label="^quick$", components=["aqlprofile"])
+            self.assertEqual([item["component"] for item in found], ["aqlprofile"])
+            self.assertEqual(found[0]["directory"], root)
+            self.assertEqual(found[0]["tests"][0]["command"], [str(script)])
+
     def test_rocjitsu_timeout_is_one_hour(self):
         self.assertEqual(sweep.timeout_seconds({"timeout": 300}), 3600)
         self.assertEqual(sweep.timeout_seconds({"timeout": 7200}), 3600)

@@ -249,6 +249,14 @@ def source_quick_group(rocm_root: Path, name: str) -> dict | None:
             for test_name, extra in JPEG_QUICK_CASES
         ]
         return {"component": name, "directory": source, "tests": tests}
+    if name == "aqlprofile":
+        # The nightly ships no CTestTestfile for aqlprofile. Run its legacy
+        # script directly from the install root, as test_aqlprofile.py does.
+        script = rocm_root / "share" / "hsa-amd-aqlprofile" / "run_tests.sh"
+        if not script.is_file():
+            return None
+        tests = [_quick_test("aqlprofile-legacy-tests", [str(script)])]
+        return {"component": name, "directory": rocm_root, "tests": tests}
     if name == "rocdecode":
         source = rocm_root / "share" / "rocdecode" / "samples" / "videoDecodeRaw"
         video = rocm_root / "share" / "rocdecode" / "video"
