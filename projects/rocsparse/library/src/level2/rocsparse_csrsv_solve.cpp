@@ -154,11 +154,7 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
 
     // When computing transposed triangular solve, we first need to update the
     // transposed matrix values
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
     if(trans != rocsparse_operation_none)
-#else
-    if(trans == rocsparse_operation_transpose || trans == rocsparse_operation_conjugate_transpose)
-#endif
     {
         void*                    csrt_val          = ptr;
         const int64_t            csrt_val_stride   = A->nnz;
@@ -177,14 +173,6 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                                                                    csrsv->get_transposed_perm(),
                                                                    rocsparse_index_base_zero)));
 
-#ifndef ROCSPARSE_WITH_TRSM_REFACTORING
-        if(trans == rocsparse_operation_conjugate_transpose)
-        {
-            RETURN_IF_ROCSPARSE_ERROR((rocsparse::conjugate_strided_batched(
-                handle, A->batch_count, A->nnz, A->data_type, csrt_val, csrt_val_stride)));
-        }
-
-#endif
         local_row_data        = csrsv->get_transposed_row_ptr();
         local_col_data        = csrsv->get_transposed_col_ind();
         local_val_data        = csrt_val;
@@ -199,33 +187,12 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
             break;
         }
     }
-#ifndef ROCSPARSE_WITH_TRSM_REFACTORING
-    else if(force_conj)
-    {
-        void*         conj_val        = ptr;
-        const int64_t conj_val_stride = A->nnz;
-        const size_t  sizeof_T        = rocsparse::datatype_sizeof(A->data_type);
-
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(conj_val,
-                                           A->const_val_data,
-                                           sizeof_T * A->nnz * A->batch_count,
-                                           hipMemcpyDeviceToDevice,
-                                           stream));
-
-        RETURN_IF_ROCSPARSE_ERROR((rocsparse::conjugate_strided_batched(
-            handle, A->batch_count, A->nnz, A->data_type, conj_val, conj_val_stride)));
-
-        local_val_data        = conj_val;
-        local_val_data_stride = (A->batch_count > 1) ? A->nnz : 0;
-    }
-#endif
 
     const std::string gcn_arch_name = rocsparse::handle_get_arch_name(handle);
     const int         asicRev       = handle->asic_rev;
     const bool        sleep_  = (gcn_arch_name == rocsparse_arch_names::gfx908 && asicRev < 2);
     const uint32_t    wfsize_ = sleep_ ? 64 : handle->wavefront_size;
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
     const bool conjugate = ((trans == rocsparse_operation_conjugate_transpose) || (force_conj))
                            && rocsparse::datatype_is_complex(A->data_type);
 
@@ -238,11 +205,6 @@ rocsparse_status rocsparse::csrsv_solve(rocsparse_handle            handle,
                                                        A->row_type,
                                                        A->col_type,
                                                        A->data_type));
-#else
-    rocsparse::csrsv_launch_kernel_t csrsv_launch_kernel{};
-    RETURN_IF_ROCSPARSE_ERROR(csrsv_launch_kernel_find(
-        &csrsv_launch_kernel, 1024, wfsize_, sleep_, A->row_type, A->col_type, A->data_type));
-#endif
 
     auto numeric_exact_position = csrsv_info->get_singularity_numeric_exact();
     RETURN_IF_ROCSPARSE_ERROR(

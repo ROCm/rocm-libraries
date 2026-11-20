@@ -34,15 +34,6 @@ static constexpr std::size_t countof2(T (&)[N])
 #define ROCSPARSE_FOREACH_TEST_ENUM_ILDLT0    \
   TRANSFORM_ROCSPARSE_TEST_ENUM(spildlt0)
 
-#ifdef ROCSPARSE_WITH_SPSORT
-#define ROCSPARSE_FOREACH_TEST_ENUM_SPSORT    \
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spsort_coo)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spsort_csr)				\
-  TRANSFORM_ROCSPARSE_TEST_ENUM(spsort_csc)
-#else
-#define ROCSPARSE_FOREACH_TEST_ENUM_SPSORT
-#endif
-
 #define ROCSPARSE_FOREACH_TEST_ENUM		                        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(axpby)					        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(axpyi)					        \
@@ -199,7 +190,9 @@ static constexpr std::size_t countof2(T (&)[N])
   TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_csr)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_csc)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_coo)				\
-  ROCSPARSE_FOREACH_TEST_ENUM_SPSORT					\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spsort_coo)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spsort_csr)				\
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spsort_csc)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(spsv_ell)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(sptrsv_ell)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(sptrsm_coo)				\

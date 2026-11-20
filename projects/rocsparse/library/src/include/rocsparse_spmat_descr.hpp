@@ -122,7 +122,6 @@ struct _rocsparse_spmat_descr
                            rocsparse_mat_descr  descr,
                            rocsparse_mat_info   info);
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
     //
     // Constructor to use when we want to switch from csr to csc or csc to csr.
     //
@@ -130,5 +129,4 @@ struct _rocsparse_spmat_descr
                            rocsparse_format            format,
                            rocsparse_mat_descr         descr,
                            rocsparse_mat_info          info);
-#endif
 };

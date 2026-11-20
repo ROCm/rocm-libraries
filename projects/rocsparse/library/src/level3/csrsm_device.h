@@ -87,12 +87,8 @@ namespace rocsparse
               bool     SLEEP,
               typename I,
               typename J,
-              typename T
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-              ,
-              bool OP_A_CONJUGATE = false
-#endif
-              >
+              typename T,
+              bool OP_A_CONJUGATE = false>
     ROCSPARSE_DEVICE_ILF void csrsm_block_device(int64_t             block_id,
                                                  rocsparse_operation transB,
                                                  J                   m,
@@ -169,17 +165,11 @@ namespace rocsparse
                 scsr_col_ind[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
                                                    ? csr_col_ind[hipThreadIdx_x + j] - idx_base
                                                    : -1;
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
-                                               ? (!OP_A_CONJUGATE)
-                                                     ? csr_val[hipThreadIdx_x + j]
-                                                     : rocsparse::conj(csr_val[hipThreadIdx_x + j])
-                                               : static_cast<T>(0);
-#else
-                scsr_val[hipThreadIdx_x] = (hipThreadIdx_x < row_end - j)
-                                               ? csr_val[hipThreadIdx_x + j]
-                                               : static_cast<T>(0);
-#endif
+                scsr_val[hipThreadIdx_x]     = (hipThreadIdx_x < row_end - j)
+                                                   ? (!OP_A_CONJUGATE)
+                                                         ? csr_val[hipThreadIdx_x + j]
+                                                         : rocsparse::conj(csr_val[hipThreadIdx_x + j])
+                                                   : static_cast<T>(0);
 
                 // Wait for preload to finish
                 __syncthreads();
@@ -322,12 +312,8 @@ namespace rocsparse
               bool     SLEEP,
               typename I,
               typename J,
-              typename T
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-              ,
-              bool OP_A_CONJUGATE = false
-#endif
-              >
+              typename T,
+              bool OP_A_CONJUGATE = false>
     ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
                                            J                   m,
                                            J                   nrhs,
@@ -392,27 +378,22 @@ namespace rocsparse
 
         for(int64_t block_id = hipBlockIdx_x; block_id < num_blocks; block_id += stride)
         {
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
-            rocsparse::csrsm_block_device<BLOCKSIZE, SLEEP, I, J, T, OP_A_CONJUGATE>(
-#else
-            rocsparse::csrsm_block_device<BLOCKSIZE, SLEEP, I, J, T>(
-#endif
-                block_id,
-                transB,
-                m,
-                nrhs,
-                alpha,
-                csr_row_ptr,
-                csr_col_ind,
-                csr_val,
-                B,
-                ldb,
-                done_array,
-                map,
-                zero_pivot,
-                idx_base,
-                fill_mode,
-                diag_type);
+            rocsparse::csrsm_block_device<BLOCKSIZE, SLEEP, I, J, T, OP_A_CONJUGATE>(block_id,
+                                                                                     transB,
+                                                                                     m,
+                                                                                     nrhs,
+                                                                                     alpha,
+                                                                                     csr_row_ptr,
+                                                                                     csr_col_ind,
+                                                                                     csr_val,
+                                                                                     B,
+                                                                                     ldb,
+                                                                                     done_array,
+                                                                                     map,
+                                                                                     zero_pivot,
+                                                                                     idx_base,
+                                                                                     fill_mode,
+                                                                                     diag_type);
         }
     }
 

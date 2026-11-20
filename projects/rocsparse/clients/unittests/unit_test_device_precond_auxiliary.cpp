@@ -567,7 +567,6 @@ TEST_F(PrecondAuxiliary, dense_transpose_back_of_batches)
     });
 }
 
-#ifdef ROCSPARSE_WITH_TRSM_REFACTORING
 namespace
 {
     // A dense matrix of the public interface with its device storage.
@@ -716,7 +715,6 @@ TEST_F(PrecondAuxiliary, dnmat_transpose_of_every_order_and_type)
         }
     });
 }
-#endif
 
 namespace
 {

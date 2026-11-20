@@ -24,10 +24,11 @@
 
 //
 // rocsparse::conjugate and rocsparse::conjugate_strided_batched clamp grid.x
-// with get_grid_size_x and grid-stride when the clamp binds (AISPARSE-654). On
-// the conjugate-transposed sptrsv path they run over nnz values, which can need
-// more than (2^32 - 1) / 256 blocks. The tests shrink maxGridSize[0] to 1, 3 or
-// 7 so a small array takes several sweeps, and compare against the host.
+// with get_grid_size_x and grid-stride when the clamp binds (AISPARSE-654). The
+// library reaches them through rocsparse::dnvec_conjugate, which the triangular
+// solve applies to a conjugate-transposed dense right-hand side; that array can
+// need more than (2^32 - 1) / 256 blocks. The tests shrink maxGridSize[0] to 1,
+// 3 or 7 so a small array takes several sweeps, and compare against the host.
 //
 
 #include "unit_test_utils.hpp"

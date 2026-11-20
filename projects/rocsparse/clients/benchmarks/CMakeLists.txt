@@ -229,20 +229,17 @@ set(ROCSPARSE_CLIENTS_TESTINGS
 ../testings/testing_spildlt0.cpp
 )
 
-if(BUILD_WITH_TRSM_REFACTORING)
-  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_dnmat_copy_data.cpp)
-  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_dnmat_transpose.cpp)
-  list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_sptrsm.cpp)
-endif()
+list(APPEND ROCSPARSE_BENCHMARK_SOURCES
+  ../testings/testing_dnmat_copy_data.cpp
+  ../testings/testing_dnmat_transpose.cpp
+  ../testings/testing_sptrsm.cpp)
 
 list(APPEND ROCSPARSE_BENCHMARK_SOURCES ../testings/testing_spsv_ell.cpp)
 
-if(BUILD_WITH_SPSORT)
-  list(APPEND ROCSPARSE_BENCHMARK_SOURCES
-    ../testings/testing_spsort_coo.cpp
-    ../testings/testing_spsort_csr.cpp
-    ../testings/testing_spsort_csc.cpp)
-endif()
+list(APPEND ROCSPARSE_BENCHMARK_SOURCES
+  ../testings/testing_spsort_coo.cpp
+  ../testings/testing_spsort_csr.cpp
+  ../testings/testing_spsort_csc.cpp)
 
 add_executable(rocsparse-bench ${ROCSPARSE_BENCHMARK_SOURCES} ${ROCSPARSE_CLIENTS_COMMON} ${ROCSPARSE_CLIENTS_TESTINGS})
 
