@@ -391,44 +391,68 @@ namespace hipblaslt_jit
             return saw;
         }
 
+        // Matches: the code object identifies this target and code-object version.
+        // Rejects: it identifies a different one. Unreadable: the file is missing
+        // or damaged, so its identity cannot be checked.
+        enum class CodeObjectFit
+        {
+            Matches,
+            Rejects,
+            Unreadable
+        };
+
         // Target and code-object version come from the code object, not from
         // the directory name. codeObjects remembers one path for this call.
-        bool codeObjectAgrees(const fs::path&              file,
-                              const CacheKey&              key,
-                              std::map<std::string, bool>& codeObjects)
+        CodeObjectFit codeObjectFit(const fs::path&                       file,
+                                    const CacheKey&                       key,
+                                    std::map<std::string, CodeObjectFit>& codeObjects)
         {
             const auto name  = files::utf8String(file);
             const auto found = codeObjects.find(name);
             if(found != codeObjects.end())
                 return found->second;
             std::vector<uint8_t> bytes;
-            bool                 agrees = false;
+            auto                 fit = CodeObjectFit::Unreadable;
             if(files::readFile(file, fileLimit, bytes).ok())
             {
                 const auto metadata = code_object::inspect(bytes);
-                agrees              = metadata.ok() && metadata.isaName == key.target.isaName()
-                         && metadata.codeObjectVersion == key.codeObjectVersion;
+                if(metadata.ok())
+                    fit = metadata.isaName == key.target.isaName()
+                                  && metadata.codeObjectVersion == key.codeObjectVersion
+                              ? CodeObjectFit::Matches
+                              : CodeObjectFit::Rejects;
             }
-            codeObjects.emplace(name, agrees);
-            return agrees;
+            codeObjects.emplace(name, fit);
+            return fit;
         }
 
         // An entry is reusable when its CustomKernel semantic names still
         // resolve, the stored content hash of that set agrees, and the code
         // object's target and code-object version agree with key. A missing
-        // hash or a mismatch rejects the entry. Argument order is not read.
+        // hash or a mismatch rejects the entry. A code object that cannot be
+        // read is Unreadable: this revision still owns the index, and loading
+        // it reports the file. Argument order is not read.
+        CodeObjectFit entryFit(const fs::path&                         slice,
+                               const std::string&                      prefix,
+                               const TensileLite::ContractionSolution& solution,
+                               const CacheKey&                         key,
+                               std::map<std::string, CodeObjectFit>&   codeObjects)
+        {
+            uint64_t hash = 0;
+            if(solution.kernelName.empty() || !semanticNameHash(solution.customKernel, hash))
+                return CodeObjectFit::Rejects;
+            if(!storedHashAgrees(slice / (prefix + ".hash"), solution.index, hash))
+                return CodeObjectFit::Rejects;
+            return codeObjectFit(slice / (prefix + ".co"), key, codeObjects);
+        }
+
         bool entryReusable(const fs::path&                         slice,
                            const std::string&                      prefix,
                            const TensileLite::ContractionSolution& solution,
                            const CacheKey&                         key,
-                           std::map<std::string, bool>&            codeObjects)
+                           std::map<std::string, CodeObjectFit>&   codeObjects)
         {
-            uint64_t hash = 0;
-            if(solution.kernelName.empty() || !semanticNameHash(solution.customKernel, hash))
-                return false;
-            if(!storedHashAgrees(slice / (prefix + ".hash"), solution.index, hash))
-                return false;
-            return codeObjectAgrees(slice / (prefix + ".co"), key, codeObjects);
+            return entryFit(slice, prefix, solution, key, codeObjects) == CodeObjectFit::Matches;
         }
 
         // custom.config inside the code object's .amdgpu_metadata, when it is
@@ -1171,8 +1195,8 @@ namespace hipblaslt_jit
             // Indices the current revision may return. A sibling directory
             // contributes one only after its stored key and that entry's
             // content checks pass, so a copied folder does not win by name.
-            std::set<int32_t>           owned;
-            std::map<std::string, bool> codeObjects;
+            std::set<int32_t>                    owned;
+            std::map<std::string, CodeObjectFit> codeObjects;
             for(auto* directory : owners)
             {
                 std::map<int, std::string> mapping;
@@ -1262,8 +1286,12 @@ namespace hipblaslt_jit
                         const auto prefix = master->libraryMapping.at(solution->index);
                         // Current and older entries use the same checks. Current
                         // wins an index only when its own entry passed above.
-                        if(!entryReusable(
-                               slice->path, prefix, *solution, directory->identity, codeObjects)
+                        // An unreadable code object in this revision is still
+                        // returned, so resolve names the file it cannot load.
+                        const auto fit = entryFit(
+                            slice->path, prefix, *solution, directory->identity, codeObjects);
+                        if(fit == CodeObjectFit::Rejects
+                           || (fit == CodeObjectFit::Unreadable && !directory->current)
                            || (!directory->current && owned.count(solution->index)))
                             continue;
                         found.push_back(solution->index);
@@ -1585,8 +1613,8 @@ namespace hipblaslt_jit
                 std::stable_partition(routes.begin(), routes.end(), [](const Directory* directory) {
                     return directory->current;
                 });
-                std::map<std::string, bool> codeObjects;
-                auto                        passes = [&](Directory*         directory,
+                std::map<std::string, CodeObjectFit> codeObjects;
+                auto                                 passes = [&](Directory*         directory,
                                   Directory::Slice*  slice,
                                   const std::string& prefix) {
                     try
@@ -1595,16 +1623,16 @@ namespace hipblaslt_jit
                             TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
                                 (slice->path / (prefix + ".dat")).string()));
                         if(!loaded)
-                            return false;
+                            return CodeObjectFit::Rejects;
                         const auto found = loaded->solutions.find(index);
                         if(found == loaded->solutions.end() || !found->second)
-                            return false;
-                        return entryReusable(
+                            return CodeObjectFit::Rejects;
+                        return entryFit(
                             slice->path, prefix, *found->second, directory->identity, codeObjects);
                     }
                     catch(const std::exception&)
                     {
-                        return false;
+                        return CodeObjectFit::Rejects;
                     }
                 };
                 bool currentOwns = false;
@@ -1622,9 +1650,11 @@ namespace hipblaslt_jit
                     if(!slice->refresh(directory->identity.target).ok() || !slice->master
                        || !slice->master->libraryMapping.count(index))
                         continue;
-                    if(passes(directory, slice, slice->master->libraryMapping.at(index)))
+                    if(passes(directory, slice, slice->master->libraryMapping.at(index))
+                       == CodeObjectFit::Matches)
                         currentOwns = true;
                 }
+                Status unreadable;
                 for(auto* directory : routes)
                 {
                     // Current wins only after its entry passed the content
@@ -1653,23 +1683,37 @@ namespace hipblaslt_jit
                     {
                         auto*      adapter = slice->adapter(device);
                         const auto prefix  = slice->master->libraryMapping.at(index);
-                        if(!passes(directory, slice, prefix))
+                        const auto fit     = passes(directory, slice, prefix);
+                        // A damaged code object in this revision is loaded so the
+                        // failure names its file. An older damaged object is skipped.
+                        if(fit == CodeObjectFit::Rejects
+                           || (fit == CodeObjectFit::Unreadable && !directory->current))
                             continue;
-                        auto&      loaded  = slice->loadedCodeObjects[device];
+                        auto& loaded = slice->loadedCodeObjects[device];
                         if(!loaded.count(prefix))
                         {
                             const auto file = (slice->path / (prefix + ".co")).string();
                             if(const auto error = adapter->loadCodeObjectFile(file);
                                error != hipSuccess)
-                                return failed(Stage::Lookup,
-                                              "Cannot load JIT code object " + file + ": "
-                                                  + hipGetErrorString(error));
+                            {
+                                auto status = failed(Stage::Lookup,
+                                                     "Cannot load JIT code object " + file + ": "
+                                                         + hipGetErrorString(error));
+                                if(fit == CodeObjectFit::Unreadable)
+                                {
+                                    unreadable = std::move(status);
+                                    continue;
+                                }
+                                return status;
+                            }
                             loaded.insert(prefix);
                         }
                         view = {slice->master, adapter};
                         return {};
                     }
                 }
+                if(!unreadable.ok())
+                    return unreadable;
             }
             if(!reloadFailure.ok())
                 return reloadFailure;
