@@ -35,6 +35,10 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * `tensilelite-client` now moves each remote peer's SDMA queue off KFD's recommended engine by default (`--fused-a2a-sdma-rotate`, default `-1`), in both fused modes. Remote peer queues need an even xGMI SDMA engine from KFD, and a nonzero rotation also needs 14 xGMI SDMA engines; on other nodes pass `--fused-a2a-sdma-rotate=0`.
 * `hipblaslt.h` no longer includes `<regex>`, which none of the hipBLASLt headers use. Code that uses `std::regex` must include `<regex>` itself.
 
+### Changed
+
+* In a build without rocRoller (`HIPBLASLT_ENABLE_ROCROLLER=OFF`), a GEMM that hipBLASLt routes to rocRoller now runs the checked-in kernel for the configuration the rocRoller build would pick, or gets no algorithm. Previously it could run the kernel of a lower-ranked configuration or, through the `hipblaslt_ext` API, a TensileLite kernel. This applies to `hipblasLtMatmul`, `hipblasLtMatmulAlgoGetHeuristic` and the `hipblaslt_ext` API. These GEMMs now ignore the uniform summation order request (`HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT` and `hipblasLtSetUniformSummationOrder`), as GEMMs served by rocRoller already do: a Stream-K kernel that used to be refused with `HIPBLAS_STATUS_INVALID_VALUE` now runs, and the rows of its output may not be bitwise identical.
+
 ### Resolved issues
 
 * Fixed `hipblaslt-bench` and `hipblaslt-test` rejecting a compute-input type override for A alone and accepting an unsupported override for B alone.

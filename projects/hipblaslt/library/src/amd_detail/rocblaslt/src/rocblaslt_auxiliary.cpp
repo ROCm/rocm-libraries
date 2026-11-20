@@ -988,6 +988,10 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
     return problem;
 }
 
+// C++ linkage, matching tensile_host.cpp. A declaration inside the extern "C"
+// block below would ask the loader for a different symbol.
+bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& prob);
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -3248,7 +3252,14 @@ rocblaslt_status
         // getBestSolutions, and the dedup below still reads this count.
         *returnAlgoCount = 0;
 
-        if(tuningFile.active)
+        // A rocRoller-routed problem keeps the checked-in walk's pick. A tuning
+        // file would put a Tensile-ranked kernel in front of it.
+#ifndef HIPBLASLT_USE_ROCROLLER
+        const bool routedToRocRoller = useRocRoller(handle, prob);
+#else
+        const bool routedToRocRoller = false;
+#endif
+        if(tuningFile.active && !routedToRocRoller)
         {
             override_success = problem_override_from_file(handle,
                                                           prob,
@@ -3510,7 +3521,14 @@ rocblaslt_status
         bool                                           override_success = false;
         std::vector<rocblaslt_matmul_heuristic_result> override_result;
 
-        if(tuningFile.active)
+#ifndef HIPBLASLT_USE_ROCROLLER
+        bool rocblaslt_routed_to_rocroller(rocblaslt_handle, const std::shared_ptr<void>&);
+        const bool routedToRocRoller = gemmType == rocblaslt::RocGemmType::ROCBLASLT_GEMM
+                                       && rocblaslt_routed_to_rocroller(handle, gemmData);
+#else
+        const bool routedToRocRoller = false;
+#endif
+        if(tuningFile.active && !routedToRocRoller)
         {
             override_success = problem_override_from_file_cpp(
                 handle, gemmType, gemmData, override_result, tuningFile.path, workspaceLimit);
