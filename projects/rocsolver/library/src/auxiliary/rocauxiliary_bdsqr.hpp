@@ -37,6 +37,8 @@
 #include "rocsolver/rocsolver.h"
 
 #include <cmath>
+#include <memory>
+#include <type_traits>
 
 #include "rocauxiliary_bdsqr_hybrid.hpp"
 
@@ -118,16 +120,27 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
             f = (std::abs(D[dk]) - sh) * (S(sgn) + sh / D[dk]);
         g = E[ek];
 
+        // (the entries that the chase updates and reads in the next step are kept in registers:
+        // dcur = D[dk] and ecur = E[ek]; the next ones are read one step ahead)
+        S dcur = D[dk], ecur = E[ek];
+        S dnext = D[dk + dir];
+        S enext = (n > 2 ? E[ek + dir] : S(0));
         for(rocblas_int kk = 0; kk < n - 1; kk++)
         {
+            S dnn = 0, enn = 0;
+            if(kk + 2 <= n - 1)
+                dnn = D[dk + 2 * dir];
+            if(kk + 2 < n - 1)
+                enn = E[ek + 2 * dir];
+
             // first apply rotation by columns (t2b) or rows (b2t)
             lartg(f, g, c, s, r);
             if(kk > 0)
                 E[ek - dir] = r;
-            f = c * D[dk] - s * E[ek];
-            E[ek] = c * E[ek] + s * D[dk];
-            g = -s * D[dk + dir];
-            D[dk + dir] = c * D[dk + dir];
+            f = c * dcur - s * ecur;
+            ecur = c * ecur + s * dcur;
+            g = -s * dnext;
+            dnext = c * dnext;
 
             // save rotations to update singular vectors
             if(t2b && nv)
@@ -144,12 +157,12 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
             // then apply rotation by rows (t2b) or columns (b2t)
             lartg(f, g, c, s, r);
             D[dk] = r;
-            f = c * E[ek] - s * D[dk + dir];
-            D[dk + dir] = c * D[dk + dir] + s * E[ek];
+            f = c * ecur - s * dnext;
+            dnext = c * dnext + s * ecur;
             if(kk < n - 2)
             {
-                g = -s * E[ek + dir];
-                E[ek + dir] = c * E[ek + dir];
+                g = -s * enext;
+                enext = c * enext;
             }
 
             // save rotations to update singular vectors
@@ -164,9 +177,14 @@ __device__ void bdsqr_QRstep(const rocblas_int tid,
                 rots[ek + nr + n] = s;
             }
 
+            dcur = dnext;
+            ecur = enext;
+            dnext = dnn;
+            enext = enn;
             dk += dir;
             ek += dir;
         }
+        D[dk] = dcur;
 
         ek = (t2b ? n - 2 : 0);
         E[ek] = f;
@@ -354,6 +372,18 @@ __device__ static void bdsqr_permute_swap(const I n,
         computations. 0 means computations are ongoing, 1 means computations are finished,
         and 2 means the input is invalid. */
 /***************************************************************/
+
+/** BDSQR_MARK_BAD marks the instances with info = n (bad input) as bdsqr_init does, so that
+    bdsqr_finalize skips them **/
+ROCSOLVER_KERNEL void bdsqr_mark_bad(const rocblas_int n,
+                                     const rocblas_int batch_count,
+                                     const rocblas_int* info,
+                                     rocblas_int* completed)
+{
+    const rocblas_int bid = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
+    if(bid < batch_count && info[bid] == n)
+        completed[bid + 2] = 2;
+}
 
 /** BDSQR_INIT kernel checks if there are any NaNs or Infs in the input, calculates the
     convergence threshold and initial estimate for the smallest singular value, and splits
@@ -1213,8 +1243,12 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                                         const rocblas_int batch_count,
                                         rocblas_int* splits_map,
                                         S* work,
-                                        rocblas_int* completed)
+                                        rocblas_int* completed,
+                                        hipEvent_t ready = nullptr)
 {
+    // (ready, if given, is recorded on the stream once D and E are computed: in hybrid mode, the
+    // host iteration then starts without waiting for the work enqueued after it, such as the
+    // generation of the vectors that the rotations are applied to)
     ROCSOLVER_ENTER("bdsqr", "uplo:", uplo, "n:", n, "nv:", nv, "nu:", nu, "nc:", nc,
                     "shiftV:", shiftV, "ldv:", ldv, "shiftU:", shiftU, "ldu:", ldu,
                     "shiftC:", shiftC, "ldc:", ldc, "bc:", batch_count);
@@ -1267,17 +1301,37 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threadsReset, 0, stream, completed,
                             batch_count + 2, 0);
 
-    // check for NaNs and Infs in input
-    ROCSOLVER_LAUNCH_KERNEL((bdsqr_init<T>), gridBasic, threadsBasic, 0, stream, n, D, strideD, E,
-                            strideE, info, maxiter, sfm, tol, splits_map, work, strideW, completed);
+    // in hybrid mode with ready, the input is checked and read on a side stream
+    hipStream_t side = nullptr;
+    if(alg_mode == rocsolver_alg_mode_hybrid && ready && n > 1)
+    {
+        HIP_CHECK(hipStreamCreateWithFlags(&side, hipStreamNonBlocking));
+        HIP_CHECK(hipStreamWaitEvent(side, ready, 0));
+    }
+
+    // check for NaNs and Infs in input (on the host with side, as bdsqr_init uses workspace that
+    // the work enqueued after ready may be using)
+    if(!side)
+        ROCSOLVER_LAUNCH_KERNEL((bdsqr_init<T>), gridBasic, threadsBasic, 0, stream, n, D, strideD,
+                                E, strideE, info, maxiter, sfm, tol, splits_map, work, strideW,
+                                completed);
 
     if(n > 1)
     {
         if(alg_mode == rocsolver_alg_mode_hybrid)
         {
-            ROCBLAS_CHECK(rocsolver_bdsqr_host_batch_template<T, S, W1, W2, W3, rocblas_int>(
+            rocblas_status st = rocsolver_bdsqr_host_batch_template<T, S, W1, W2, W3, rocblas_int>(
                 handle, uplo, n, nv, nu, nc, D, strideD, E, strideE, V, shiftV, ldv, strideV, U,
-                shiftU, ldu, strideU, C, shiftC, ldc, strideC, info, batch_count, splits_map, work));
+                shiftU, ldu, strideU, C, shiftC, ldc, strideC, info, batch_count, splits_map, work,
+                side);
+            if(side)
+                HIP_CHECK(hipStreamDestroy(side));
+            ROCBLAS_CHECK(st);
+            // (with side, bdsqr_init did not run: mark the instances with bad input, for which
+            // the host iteration set info = n, as it would have)
+            if(side)
+                ROCSOLVER_LAUNCH_KERNEL(bdsqr_mark_bad, dim3((batch_count - 1) / 256 + 1),
+                                        dim3(256), 0, stream, n, batch_count, info, completed);
         }
         else
         {
@@ -1296,6 +1350,16 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                 rocblas_int num_splits;
             } h_params;
 
+            // for one large problem, the rotations of BDSQR_ROT_SWEEPS sweeps are recorded and
+            // applied in accumulated blocks (see BDSQR_GPULOG)
+            std::unique_ptr<bdsqr_gpulog<S, T>> glog;
+            if(batch_count == 1 && nvuc_max > BDSQR_SWITCH_SIZE)
+                glog = std::make_unique<bdsqr_gpulog<S, T>>(
+                    handle, n, bdsqr_host_ptr<T>(V, shiftV, stream), ldv, nv,
+                    bdsqr_host_ptr<T>(U, shiftU, stream), ldu, nu,
+                    bdsqr_host_ptr<T>(C, shiftC, stream), ldc, nc);
+            const rocblas_int sweeps = glog ? glog->sweeps() : BDSQR_ITERS_PER_SYNC;
+
             while(h_iter < maxiter)
             {
                 // if all instances in the batch have finished, exit the loop
@@ -1309,7 +1373,7 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                 dim3 gridSplits(1, h_params.num_splits, batch_count);
                 dim3 gridVUC((nvuc_max - 1) / BS1 + 1, h_params.num_splits, batch_count);
 
-                for(rocblas_int inner_iters = 0; inner_iters < BDSQR_ITERS_PER_SYNC; inner_iters++)
+                for(rocblas_int inner_iters = 0; inner_iters < sweeps; inner_iters++)
                 {
                     if(nvuc_max <= BDSQR_SWITCH_SIZE)
                     {
@@ -1331,10 +1395,15 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                                                 splits_map, work, incW, strideW, completed);
 
                         // update singular vectors
-                        ROCSOLVER_LAUNCH_KERNEL((bdsqr_rotate<T>), gridVUC, threadsVUC, 0, stream,
-                                                n, nv, nu, nc, V, shiftV, ldv, strideV, U, shiftU,
-                                                ldu, strideU, C, shiftC, ldc, strideC, maxiter,
-                                                splits_map, work, incW, strideW, completed);
+                        if(glog)
+                            glog->snapshot(inner_iters, h_params.num_splits, maxiter, splits_map,
+                                           work, incW, completed);
+                        else
+                            ROCSOLVER_LAUNCH_KERNEL((bdsqr_rotate<T>), gridVUC, threadsVUC, 0,
+                                                    stream, n, nv, nu, nc, V, shiftV, ldv, strideV,
+                                                    U, shiftU, ldu, strideU, C, shiftC, ldc,
+                                                    strideC, maxiter, splits_map, work, incW,
+                                                    strideW, completed);
                     }
 
                     // update split block endpoints
@@ -1344,9 +1413,11 @@ rocblas_status rocsolver_bdsqr_template(rocblas_handle handle,
                 }
 
                 // check for completion
-                h_iter += BDSQR_ITERS_PER_SYNC;
+                h_iter += sweeps;
                 ROCSOLVER_LAUNCH_KERNEL((bdsqr_chk_completed<T>), gridBasic, threadsBasic, 0,
                                         stream, n, maxiter, splits_map, work, strideW, completed);
+                if(glog)
+                    glog->flush();
             }
         }
     }

@@ -56,12 +56,28 @@ const vector<vector<int>> matrix_size_range = {
 // for daily_lapack tests
 const vector<vector<int>> large_matrix_size_range = {{192, 192}, {250, 250}, {256, 270}, {300, 300}};
 
+// deflation of close eigenvalues in the merges: {N, ldc, glued, pair}
+// - glued Wilkinson matrices: copies of W21+ joined by off-diagonal entries 10^-glued (clusters of
+//   nearly equal eigenvalues)
+// - pair: two eigenvalues a few ulps apart at the top merge, with a tiny component of z (in double
+//   precision they are not deflated without the criterion of LAPACK, and some eigenvalues are wrong)
+// (see stedcj_initData)
+const vector<vector<int>> close_size_range
+    = {{63, 63, 8, 0}, {105, 105, 12, 0}, {32, 32, 0, 1130}, {64, 64, 0, 1040}, {100, 100, 0, 1120}};
+const vector<vector<int>> large_close_size_range
+    = {{252, 252, 8, 0},    {273, 273, 10, 0},   {128, 128, 0, 1130}, {200, 200, 0, 1120},
+       {250, 250, 0, 1390}, {256, 256, 0, 1040}, {300, 300, 0, 1130}};
+
 Arguments stedcj_setup_arguments(stedcj_tuple tup)
 {
     Arguments arg;
 
     arg.set<rocblas_int>("n", tup[0]);
     arg.set<rocblas_int>("ldc", tup[1]);
+    if(tup.size() > 2)
+        arg.set<rocblas_int>("glued", tup[2]);
+    if(tup.size() > 3)
+        arg.set<rocblas_int>("pair", tup[3]);
 
     // case evect = N is not implemented for now.
     // it could be added if stedcj goes to public API
@@ -117,3 +133,7 @@ TEST_P(STEDCJ, __double_complex)
 INSTANTIATE_TEST_SUITE_P(daily_lapack, STEDCJ, ValuesIn(large_matrix_size_range));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack, STEDCJ, ValuesIn(matrix_size_range));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack_close, STEDCJ, ValuesIn(large_close_size_range));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack_close, STEDCJ, ValuesIn(close_size_range));
