@@ -4,7 +4,9 @@
 """``SdpaRequest``: one frozen request that represents a hipDNN SDPA forward node.
 
 Every field of the hipDNN SDPA forward node has a home here, including the ones
-no rocKE kernel implements. A field that is valid but unimplemented is reported
+no rocKE kernel implements, except the cumulative sequence lengths
+(``cu_seq_len_q`` and ``cu_seq_len_kv``), which :func:`from_hipdnn` declines with
+``NotImplementedError``. A field that is valid but unimplemented is reported
 by :meth:`SdpaRequest.features` and declined by candidates through the existing
 ``Capability.check`` contract; it is never dropped. ``__post_init__`` rejects only
 requests the hipDNN frontend would also reject (``SdpaFwdNode::pre_validate_node``)

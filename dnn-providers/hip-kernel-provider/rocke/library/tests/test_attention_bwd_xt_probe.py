@@ -347,6 +347,7 @@ def test_probe_kernels_use_the_intended_lds_opcodes():
                 assert ops == {"ds_write_b128", "ds_read_b64"}, (kern.name, ops)
 
 
+@pytest.mark.gpu
 def test_probe_layout_correct_on_device():
     arch = device_arch()
     if arch not in ("gfx942", "gfx950"):
@@ -371,6 +372,7 @@ def _parse_counter_csv(root: Path) -> dict[str, dict[str, float]]:
     return sums
 
 
+@pytest.mark.gpu
 def test_conflict_counter_matches_predictor_on_device():
     arch = device_arch()
     if arch not in ("gfx942", "gfx950"):

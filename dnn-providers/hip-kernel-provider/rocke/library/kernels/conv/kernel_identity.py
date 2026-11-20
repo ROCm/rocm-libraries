@@ -143,6 +143,9 @@ class KernelIdentity:
     # Left out of the hash while False, like ws_replicas, so identities that
     # predate the field keep their hash and their cache entries.
     prefetch_addr: bool = False
+    # wgrad only (WgradConvSpec.prefetch_global_regs): the register-prefetch K loop.
+    # Left out of the hash while False, like prefetch_addr.
+    prefetch_global_regs: bool = False
     # dgrad only (DgradConvSpec.uniform_k_decode): the per-tile reduction
     # decode K loop. Left out of the hash while False, like prefetch_addr.
     uniform_k_decode: bool = False
@@ -250,6 +253,8 @@ class KernelIdentity:
             del fields["ws_replicas"]
         if not fields["prefetch_addr"]:
             del fields["prefetch_addr"]
+        if not fields["prefetch_global_regs"]:
+            del fields["prefetch_global_regs"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["patch"]:
@@ -568,6 +573,27 @@ def identity_supports_problem(
         if not ok:
             return False, why
 
+    # Split-K dgrad atomic-adds straight into dX. For a 16-bit dX that is a
+    # packed <2 x dtype> atomic, which needs an even channels-per-group; on
+    # an odd one it misaddresses silently. A grouped binary takes cpg at run
+    # time (identity.cpg == 0), so the baked-cpg check below cannot see it.
+    # Ask the same predicate the builder uses.
+    if (
+        identity.direction == "dgrad"
+        and not identity.is_direct
+        and identity.split_k > 1
+        and hasattr(problem, "Y")
+    ):
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            dgrad_split_k_available,
+        )
+
+        ok, why = dgrad_split_k_available(
+            problem, identity.dtype_d, wave_size=identity.wave_size
+        )
+        if not ok:
+            return False, why
+
     # Baked filter geometry (direct conv), and the stride/dilation older
     # implicit-GEMM dgrad caches recorded per binary (current ones record
     # 0: the tilde kernel takes them at run time). For implicit GEMM 0
@@ -720,6 +746,7 @@ IDENTITY_CAPABILITY_FIELDS = (
     "vector_size_a",
     "vector_size_b",
     "vector_size_c",
+    "wave_size",
     "dtype_d",
     "split_k",
     "two_stage",

@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,8 @@ namespace rocsparse
                                     rocsparse_indextype       csr_row_ptr_indextype,
                                     const void*               csr_row_ptr,
                                     const rocsparse_mat_descr ell_descr,
-                                    int64_t*                  out_ell_width);
+                                    int64_t*                  out_ell_width,
+                                    rocsparse_pointer_mode    ell_width_pointer_mode);
 
     rocsparse_status gcsr2ell(rocsparse_handle          handle,
                               int64_t                   m,

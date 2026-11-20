@@ -187,7 +187,7 @@ int carried_index(const rocke_value_t* v, const rocke_op_t* loop)
     if(iv && strcmp(v->name, iv) == 0)
         return -1;
     const rocke_attr_value_t* args = rocke_attr_get(&loop->attrs, "iter_args");
-    if(args && args->kind == ROCKE_ATTR_LIST)
+    if(rocke_i_attr_is_list(args))
         for(int i = 0; i < args->u.list.count; i++)
         {
             const char* name = rocke_attr_get_str(args->u.list.items[i], "name");

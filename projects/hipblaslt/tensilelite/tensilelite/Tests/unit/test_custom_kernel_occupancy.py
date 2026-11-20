@@ -363,7 +363,7 @@ class TestNonGfx9OccupancyNotComputed:
 
 
 class TestPythonDebugWarning:
-    """Verify the print2-gated CUOccupancy<=0 warning in processKernelSource (Run.py).
+    """Verify the print2-gated CUOccupancy<=0 warning in processKernelSource (create_library/run.py).
 
     Tests replicate the conditional directly without importing tensilelite.Common.
     """

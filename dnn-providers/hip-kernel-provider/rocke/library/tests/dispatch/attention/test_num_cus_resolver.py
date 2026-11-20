@@ -193,8 +193,8 @@ def test_canonical_arch_does_not_change_selection():
     behaviour to preserve for them -- but the already-valid spellings must land
     on exactly the segment count they landed on before.
     """
-    p_suffixed = A._problem(_req(num_cus=256, arch="gfx950:sramecc+"))
-    p_plain = A._problem(_req(num_cus=256, arch="gfx950"))
+    p_suffixed = A.attention_problem(_req(num_cus=256, arch="gfx950:sramecc+"))
+    p_plain = A.attention_problem(_req(num_cus=256, arch="gfx950"))
     assert au._num_segments(p_suffixed, "gfx950") == au._num_segments(p_plain, "gfx950")
 
 
@@ -395,8 +395,8 @@ def test_gfx942_partition_routing_matches_develop():
                 nhead_q=32, nhead_k=8, hdim_q=128, hdim_v=128, seqlen_k=4096, batch=32
             ),
         ):
-            resolved = A._problem(_req(num_cus=0, arch="gfx942", **shape))
-            unfloored = A._problem(_req(num_cus=38, arch="gfx942", **shape))
+            resolved = A.attention_problem(_req(num_cus=0, arch="gfx942", **shape))
+            unfloored = A.attention_problem(_req(num_cus=38, arch="gfx942", **shape))
             assert resolved.num_cus == 38, shape
             assert resolved.select_path() == unfloored.select_path(), shape
             assert au._num_segments(resolved, "gfx942") == au._num_segments(
@@ -596,11 +596,11 @@ class TestNumCusResolver(unittest.TestCase):
 
     def test_target_ctas_threaded_through_problem(self):
         """AttentionRequest.target_ctas reaches the built problem; the resolver ignores it."""
-        prob = A._problem(_req(num_cus=200, target_ctas=1216))
+        prob = A.attention_problem(_req(num_cus=200, target_ctas=1216))
         assert prob.target_ctas == 1216
         assert prob.num_cus == 200  # num_cus still resolved independently
         assert prob._effective_target_ctas == 1216
-        prob2 = A._problem(_req(num_cus=200, target_ctas=0))
+        prob2 = A.attention_problem(_req(num_cus=200, target_ctas=0))
         assert prob2.target_ctas == 0  # unset => auto
         assert prob2._effective_target_ctas == 800  # 200*4
 
@@ -793,8 +793,10 @@ class TestNumCusResolver(unittest.TestCase):
                     batch=32,
                 ),
             ):
-                resolved = A._problem(_req(num_cus=0, arch="gfx942", **shape))
-                unfloored = A._problem(_req(num_cus=38, arch="gfx942", **shape))
+                resolved = A.attention_problem(_req(num_cus=0, arch="gfx942", **shape))
+                unfloored = A.attention_problem(
+                    _req(num_cus=38, arch="gfx942", **shape)
+                )
                 assert resolved.num_cus == 38, shape
                 assert resolved.select_path() == unfloored.select_path(), shape
                 assert au._num_segments(resolved, "gfx942") == au._num_segments(

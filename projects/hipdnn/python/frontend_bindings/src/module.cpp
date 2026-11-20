@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "bindings.hpp"
+#include "cudnn_compat.hpp"
 
 #include <HipdnnBackendPluginLoadingMode.h>
 #include <hipdnn_backend.h>
@@ -24,6 +25,8 @@ NB_MODULE(hipdnn_frontend_python, m) // NOLINT(modernize-avoid-c-arrays)
     tensorBindings(m); // Then tensor attributes
     attributesBindings(m); // Then node attributes
     graphBindings(m); // Finally graph which uses all of the above
+    hipdnn_python::compatBindings(m); // GraphNotSupportedError, raised only by pygraph
+    pygraphBindings(m); // cuDNN-semantics graph class, derived from Graph
 
     // Module-level function to set engine plugin paths
     m.def(

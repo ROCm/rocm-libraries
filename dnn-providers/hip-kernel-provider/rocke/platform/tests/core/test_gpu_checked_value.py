@@ -798,7 +798,7 @@ def test_the_marker_builder_refuses_with_the_verifier_text():
 def _cli() -> Path:
     """``ROCKE_GPU_CHECKED_VALUE_CLI`` names the built ``rocke_gpu_checked_value``:
     ``tests/run_all.py`` resolves it from a configured build and the installed
-    ``rocke_pytest`` ctest sets it. A value that names no file fails."""
+    ``rocke_pytest_*`` ctest entries set it. A value that names no file fails."""
     return built_program("ROCKE_GPU_CHECKED_VALUE_CLI", "rocke_gpu_checked_value")
 
 

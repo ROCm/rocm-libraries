@@ -46,6 +46,8 @@ _CHILD_PYTHONPATH = os.pathsep.join(
 
 ARCH = get_device_arch(0)
 _HAS_TORCH = importlib.util.find_spec("torch") is not None
+if _HAS_TORCH:
+    from builders.common.conv_reference import tf32_reference_inputs, tf32_reference_tol
 
 _MFMA_ARCHES = ("gfx90a", "gfx942", "gfx950")
 _WMMA_ARCHES = ("gfx1151", "gfx1201")
@@ -919,7 +921,7 @@ def _dgrad_run_inprocess(spec, dtype, seed=0, poison=False, problem=None):
     artifact = compile_kernel(
         build_implicit_gemm_conv_dgrad(spec, arch=ARCH), arch=ARCH
     )
-    td = {"fp16": torch.float16, "bf16": torch.bfloat16}[dtype]
+    td = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype]
     p = spec.problem if problem is None else problem
     torch.manual_seed(seed)
     dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0).to(td)
@@ -1842,11 +1844,21 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
 
         return ConvProblem(N=1, Hi=8, Wi=8, C=64, K=2048, Y=3, X=3, pH=1, pW=1)
 
+    # The tile is the widest 32x32 atom the arch's MMA table offers for 16-bit
+    # inputs (32x32x16 on gfx950, 32x32x8 on gfx90a/gfx942) and it must
+    # validate. These tests are about the split-K degree and the 16-bit atomic.
     def _spec(self, dtype, split_k):
         from kernels.common.conv_implicit_gemm import ConvDataSpec
-        from kernels.common.conv_implicit_gemm_dgrad import DgradConvSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+        from rocke.core.arch import ArchTarget
 
-        return DgradConvSpec(
+        atom = ArchTarget.from_gfx(ARCH).mma.select_largest_k(
+            family="mma", a_dtype=dtype, b_dtype=dtype, c_dtype="fp32", m=32, n=32
+        )
+        spec = DgradConvSpec(
             problem=self._problem(),
             name="rocke_test_dgrad_resolved_split_k",
             data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
@@ -1857,11 +1869,14 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
             warp_n=2,
             warp_tile_m=32,
             warp_tile_n=32,
-            warp_tile_k=16,
+            warp_tile_k=atom.k,
             wave_size=64,
             epilogue="cshuffle",
             split_k=split_k,
         )
+        ok, why = is_valid_dgrad_spec(spec, arch=ARCH)
+        assert ok, why
+        return spec
 
     def _resolve(self, dtype, **kw):
         from kernels.common.conv_split_k import resolve_conv_split_k
@@ -1904,7 +1919,7 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
         )
 
     def test_resolved_degree(self):
-        from rocke.helpers.split_k_planner import split_k_cost_model
+        from kernels.conv.split_k_planner import split_k_cost_model
 
         for dtype in ("bf16", "fp16"):
             with self.subTest(dtype=dtype):
@@ -1921,6 +1936,317 @@ class TestConvDgradResolvedSplitK(unittest.TestCase):
                 split_k = self._resolve(dtype, override=2 * ATOMIC_16BIT_MAX_SPLIT_K)
                 self.assertEqual(split_k, ATOMIC_16BIT_MAX_SPLIT_K)
                 self._assert_accurate(dtype, split_k)
+
+
+# TF32 is judged against conv_reference.tf32_reference_inputs (gfx942's native
+# XF32 on masked inputs) with conv_reference.tf32_reference_tol, as in
+# test_conv_fwd_correctness / test_conv_wgrad_correctness.
+
+# Per arch, the two TF32 atoms as (warp_tile_m, warp_tile_n, warp_tile_k),
+# 16x16 first.
+_TF32_WARP_TILES = {
+    "gfx950": ((16, 16, 32), (32, 32, 16)),
+    "gfx942": ((16, 16, 8), (32, 32, 4)),
+}
+
+
+@unittest.skipUnless(
+    ARCH in _TF32_WARP_TILES and _HAS_TORCH,
+    "TF32 dgrad correctness needs gfx942 or gfx950 + torch",
+)
+class TestConvDgradTf32(unittest.TestCase):
+    """fp32 storage, TF32 MMA (``mma_dtype="tf32"``) against an IEEE fp32 reference.
+
+    Built and launched in-process (``_dgrad_run_inprocess``), not through the
+    benchmark driver, so every case pins exactly one spec.
+    """
+
+    def _check(
+        self, *, warp_tile, tile_k, epilogue, split_k, stride, groups=1, Hi=14, K=64
+    ):
+        import torch
+
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        C = 64 * groups
+        K = K * groups
+        problem = ConvProblem(
+            N=2,
+            Hi=Hi,
+            Wi=Hi + 3,
+            C=C,
+            K=K,
+            Y=3,
+            X=3,
+            sH=stride,
+            sW=stride,
+            pH=1,
+            pW=1,
+            groups=groups,
+        )
+        wm, wn, wk = warp_tile
+        spec = DgradConvSpec(
+            problem=problem,
+            name="rocke_test_dgrad_tf32",
+            data=ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32"),
+            tile_m=64,
+            tile_n=64,
+            tile_k=tile_k,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=wm,
+            warp_tile_n=wn,
+            warp_tile_k=wk,
+            wave_size=64,
+            pipeline="mem",
+            epilogue=epilogue,
+            split_k=split_k,
+        )
+        ok, reason = is_valid_dgrad_spec(spec, ARCH)
+        self.assertTrue(ok, reason)
+        spec.validate()
+        got = _dgrad_run_inprocess(spec, "fp32")
+
+        # The same inputs _dgrad_run_inprocess drew, in its order.
+        p = spec.problem
+        torch.manual_seed(0)
+        dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+        W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
+        dY = tf32_reference_inputs(dY, ARCH)
+        W = tf32_reference_inputs(W, ARCH)
+        # Pin the reference to IEEE fp32: torch 2.10 defaults convolutions to
+        # TF32 where the backend has it.
+        from builders.common.conv_reference import ieee_fp32
+
+        with ieee_fp32():
+            ref = torch.nn.grad.conv2d_input(
+                (p.N, p.C, p.Hi, p.Wi),
+                W.permute(0, 3, 1, 2),
+                dY.permute(0, 3, 1, 2),
+                stride=stride,
+                padding=1,
+                groups=groups,
+            ).permute(0, 2, 3, 1)
+        self.assertEqual(tuple(got.shape), tuple(ref.shape))
+        self.assertFalse(torch.isnan(got).any(), "dX contains NaN")
+        rel = (got - ref).abs().max().item() / ref.abs().max().item()
+        self.assertLess(
+            rel, tf32_reference_tol(ARCH), f"relative-to-peak error {rel:.3e}"
+        )
+
+    def test_cases(self):
+        for warp_tile, tile_k in zip(_TF32_WARP_TILES[ARCH], (64, 32)):
+            for epilogue in ("default", "cshuffle"):
+                for split_k in (1, 2):
+                    for stride in (1, 2):
+                        with self.subTest(
+                            warp_tile=warp_tile,
+                            epilogue=epilogue,
+                            split_k=split_k,
+                            stride=stride,
+                        ):
+                            self._check(
+                                warp_tile=warp_tile,
+                                tile_k=tile_k,
+                                epilogue=epilogue,
+                                split_k=split_k,
+                                stride=stride,
+                            )
+
+    def test_grouped(self):
+        for split_k in (1, 2):
+            with self.subTest(split_k=split_k):
+                self._check(
+                    warp_tile=_TF32_WARP_TILES[ARCH][1],
+                    tile_k=32,
+                    epilogue="cshuffle",
+                    split_k=split_k,
+                    stride=2,
+                    groups=2,
+                )
+
+    def test_k_not_tile_aligned(self):
+        # gemm_k = 9 * 48 is not a multiple of tile_k = 64: the last tile reads
+        # past real K and relies on the buffer OOB clamp returning zero.
+        self._check(
+            warp_tile=_TF32_WARP_TILES[ARCH][0],
+            tile_k=64,
+            epilogue="default",
+            split_k=1,
+            stride=1,
+            Hi=13,
+            K=48,
+        )
+
+    def test_stride1_and_patch_k_loops(self):
+        # The tap-outer K loop, its dY halo forms and the patch (one-GEMM)
+        # decomposition read their fragments through the same TF32 path as
+        # the tilde K loop; pin that each still feeds the TF32 atom.
+        import torch
+
+        from kernels.common._conv_implicit_gemm_common import (
+            ConvDataSpec,
+            ConvProblem,
+        )
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        data = ConvDataSpec("fp32", "fp32", "fp32", mma_dtype="tf32")
+        same = ConvProblem(N=2, Hi=14, Wi=14, C=64, K=64, Y=3, X=3, pH=1, pW=1)
+        patch = ConvProblem(N=2, Hi=28, Wi=28, C=64, K=64, Y=2, X=2, sH=2, sW=2)
+        cases = [
+            ("tap_outer_k", dict(tap_outer_k=True), same),
+            ("dy_halo=1", dict(tap_outer_k=True, dy_halo=1, halo_max_wo=14), same),
+            ("dy_halo=2", dict(tap_outer_k=True, dy_halo=2, halo_max_wo=14), same),
+            ("patch", dict(patch=True), patch),
+        ]
+        for warp_tile in _TF32_WARP_TILES[ARCH]:
+            for label, knobs, p in cases:
+                with self.subTest(warp_tile=warp_tile, knobs=label):
+                    spec = DgradConvSpec(
+                        problem=p,
+                        data=data,
+                        tile_m=64,
+                        tile_n=64,
+                        tile_k=64,
+                        warp_m=2,
+                        warp_n=2,
+                        warp_tile_m=warp_tile[0],
+                        warp_tile_n=warp_tile[1],
+                        warp_tile_k=warp_tile[2],
+                        epilogue="cshuffle",
+                        **knobs,
+                    )
+                    ok, reason = is_valid_dgrad_spec(spec, ARCH)
+                    self.assertTrue(ok, reason)
+                    got = _dgrad_run_inprocess(spec, "fp32", seed=0)
+                    # _dgrad_run_inprocess's inputs, in its draw order.
+                    torch.manual_seed(0)
+                    dY = torch.empty(p.N, p.Ho, p.Wo, p.K).uniform_(-1.0, 1.0)
+                    W = torch.empty(p.K, p.Y, p.X, p.cpg).uniform_(-1.0, 1.0)
+                    dY = tf32_reference_inputs(dY, ARCH)
+                    W = tf32_reference_inputs(W, ARCH)
+                    ref = torch.nn.grad.conv2d_input(
+                        (p.N, p.C, p.Hi, p.Wi),
+                        W.permute(0, 3, 1, 2).double(),
+                        dY.permute(0, 3, 1, 2).double(),
+                        stride=(p.sH, p.sW),
+                        padding=(p.pH, p.pW),
+                    ).permute(0, 2, 3, 1)
+                    rel = (
+                        (got.double().cpu() - ref).abs().max() / ref.abs().max()
+                    ).item()
+                    self.assertLess(
+                        rel,
+                        tf32_reference_tol(ARCH),
+                        f"relative-to-peak error {rel:.3e}",
+                    )
+
+
+@unittest.skipUnless(
+    ARCH == "gfx950" and _HAS_TORCH, "the cached split-K cshuffle dgrad is gfx950"
+)
+class TestConvDgradSplitKCshuffle(unittest.TestCase):
+    """Split-K with the cshuffle epilogue: the LDS-staged tile is atomic-added
+    into dX through the tilde address function (packed pairs for 16-bit dX).
+
+    The geometry of the cached split-K kernels (16x16x32 atom, K-outer B, 8-wide
+    loads); the atomic accumulation order is not deterministic, so dX is held
+    to the fp32 torch reference within tolerance. Each case is launched on a
+    problem other than its build probe, as an AOT binary is.
+    """
+
+    def _check(
+        self,
+        dtype,
+        *,
+        split_k,
+        vec_c=2,
+        stride=1,
+        groups=1,
+        C=64,
+        K=128,
+        Hi=14,
+        tile_m=32,
+        tile_n=128,
+        pipeline="mem",
+    ):
+        import torch
+
+        sys.path.insert(0, os.path.abspath(_PYDIR))
+        from benchmarks.common.benchmark_implicit_gemm_conv import parse_miopen_cmd
+        from kernels.common.conv_implicit_gemm import ConvDataSpec
+        from kernels.common.conv_implicit_gemm_dgrad import (
+            DgradConvSpec,
+            is_valid_dgrad_spec,
+        )
+
+        kw = "convbfp16" if dtype == "bf16" else "convfp16"
+
+        def problem(n, h):
+            return parse_miopen_cmd(
+                f"./MIOpenDriver {kw} -n {n} -c {C} -H {h} -W {h + 3} -k {K} "
+                f"-y 3 -x 3 -p 1 -q 1 -u {stride} -v {stride} -l 1 -j 1 -m conv "
+                f"-g {groups} -F 2 -t 1"
+            )[0]
+
+        spec = DgradConvSpec(
+            problem=problem(1, 8),
+            name="rocke_test_dgrad_sk_cshuffle",
+            data=ConvDataSpec(dtype_a=dtype, dtype_b=dtype, dtype_d=dtype),
+            tile_m=tile_m,
+            tile_n=tile_n,
+            tile_k=64,
+            warp_m=2,
+            warp_n=4,
+            warp_tile_m=16,
+            warp_tile_n=16,
+            warp_tile_k=32,
+            wave_size=64,
+            pipeline=pipeline,
+            epilogue="cshuffle",
+            lds_k_outer=True,
+            vector_size_a=8,
+            vector_size_b=8,
+            vector_size_c=vec_c,
+            split_k=split_k,
+        )
+        ok, reason = is_valid_dgrad_spec(spec, ARCH)
+        self.assertTrue(ok, reason)
+        spec.validate()
+        p = problem(2, Hi)
+        got = _dgrad_run_inprocess(spec, dtype, problem=p)
+        ref = _dgrad_reference(p, dtype)
+        self.assertFalse(torch.isnan(got.float()).any(), "dX contains NaN")
+        delta = (got.float() - ref).abs().max().item()
+        scale = ref.abs().max().item()
+        self.assertLess(delta / max(scale, 1e-6), 2e-2)
+
+    def test_fp16_stride1_split4(self):
+        self._check("fp16", split_k=4)
+
+    def test_bf16_stride2_split2(self):
+        # The tilde sub-GEMMs: dX rows a sub-GEMM skips stay untouched.
+        self._check("bf16", split_k=2, stride=2, Hi=15)
+
+    def test_fp16_grouped_split8_compv3(self):
+        # The group base in the dX address; kpg = 64 split eight ways.
+        self._check(
+            "fp16", split_k=8, groups=2, C=128, K=128, tile_m=64, pipeline="compv3"
+        )
+
+    def test_fp16_width8_split16(self):
+        # Four packed pairs per lane; tiles past the channel run are masked.
+        self._check("fp16", split_k=16, vec_c=8, C=72, tile_m=64, tile_n=64)
 
 
 if __name__ == "__main__":

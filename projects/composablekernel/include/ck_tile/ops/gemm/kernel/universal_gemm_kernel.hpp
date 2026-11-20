@@ -19,6 +19,7 @@
 #include "ck_tile/core/arch/workgroup_barrier.hpp"
 #include "ck_tile/core/arch/amd_tdm_descriptor.hpp"
 #include "ck_tile/ops/gemm/kernel/wavelet_utils.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 
 namespace ck_tile {
 
@@ -488,38 +489,55 @@ struct UniversalGemmKernel
     // for skipping validation of launch parameters especially for TDM where padding is unused
     struct has_skip_check_valid_launch_params
     {
-        template <typename T>
-        using has_skip_check_type = decltype(T::skipCheckValidLaunchParams);
-
-        static constexpr bool value = []() {
-            if constexpr(is_detected<has_skip_check_type, GemmPipeline>{})
-                return GemmPipeline::skipCheckValidLaunchParams;
-            else
-                return false;
-        }();
+        static constexpr bool value = pipeline_is_tdm_v<GemmPipeline>;
     };
 
-    /// True for the gfx125 TDM pipelines (CompTDM V1, and V2 through inheritance): they expose
-    /// skipCheckValidLaunchParams, consume tuples of A/B windows and need a TDM epilogue.
+    /// True for the gfx125 TDM pipelines (CompTDM V1, V2 and V3 through inheritance, the
+    /// producer/consumer pipeline and the run-ahead pipeline): they expose
+    /// skipCheckValidLaunchParams and consume tuples of A/B windows. UniversalGemmKernel also pairs
+    /// them with a non-TDM epilogue (e.g. CShuffleEpilogue for split-K), subject to the whole-tile
+    /// checks in IsSupportedArgument unless the pipeline declares kSupportsTdmSplitK (comp_tdm_v3).
     /// Kernels that host them take a dedicated TDM path.
     static constexpr bool kIsTdmPipeline = has_skip_check_valid_launch_params::value;
 
+    /// True for the TDM and named-barrier pipelines, which only run on gfx125
+    /// (pipeline_requires_gfx125_v, shared with the dispatcher's kernel selection).
+    /// IsSupportedArgument rejects them on any other device.
+    static constexpr bool kRequiresGfx125 = pipeline_requires_gfx125_v<GemmPipeline>;
+
     template <typename T>
-    using has_plain_gemm_only = decltype(T::kPlainGemmOnly);
-    /// True for a pipeline tested only in the plain GEMM kernel (comp_tdm_v3). The kernels that
-    /// derive from or wrap this one static_assert against it.
-    static constexpr bool kIsPlainGemmOnlyPipeline = []() {
-        if constexpr(is_detected<has_plain_gemm_only, GemmPipeline>{})
-            return GemmPipeline::kPlainGemmOnly;
+    using has_gemm_kernel_only = decltype(T::kGemmKernelOnly);
+    /// True for a pipeline validated only in this kernel itself, persistent or not (comp_tdm_ra).
+    /// Every kernel that derives from or wraps UniversalGemmKernel static_asserts against it:
+    /// through kIsPlainGemmOnlyPipeline, which it implies, and directly in the Stream-K and MX
+    /// kernels, which accept plain-GEMM-only pipelines.
+    static constexpr bool kIsGemmKernelOnlyPipeline = []() {
+        if constexpr(is_detected<has_gemm_kernel_only, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kGemmKernelOnly);
         else
             return false;
     }();
 
     template <typename T>
+    using has_plain_gemm_only = decltype(T::kPlainGemmOnly);
+    /// True for a pipeline tested only in the plain GEMM kernel and the kernels built directly on
+    /// it, Stream-K and MX (comp_tdm_v3), and for every kIsGemmKernelOnlyPipeline. The multi-D,
+    /// grouped, batched, multi-ABD and batched-contraction kernels static_assert against it.
+    static constexpr bool kIsPlainGemmOnlyPipeline = []() {
+        if constexpr(is_detected<has_plain_gemm_only, GemmPipeline>{})
+            return static_cast<bool>(GemmPipeline::kPlainGemmOnly) || kIsGemmKernelOnlyPipeline;
+        else
+            return kIsGemmKernelOnlyPipeline;
+    }();
+
+    template <typename T>
     using has_tdm_split_k = decltype(T::kSupportsTdmSplitK);
-    /// True for a TDM pipeline tested with split-K (comp_tdm_v3). With a split-K-capable epilogue
-    /// (CShuffle) only such a pipeline may run k_batch > 1; the other TDM pipelines reject it
-    /// whatever the epilogue, as does any TDM pipeline with a TDM epilogue.
+    /// True for a TDM pipeline tested with split-K, including splits that end inside a K tile
+    /// (comp_tdm_v3). With a split-K-capable epilogue (CShuffle) such a pipeline may run
+    /// k_batch > 1 and is exempt from IsSupportedArgument's whole-tile checks. The
+    /// producer/consumer pipeline may also run k_batch > 1 with that epilogue, but only with
+    /// whole-K-tile splits. The other TDM pipelines reject it whatever the epilogue, as does any
+    /// TDM pipeline with a TDM epilogue.
     static constexpr bool kPipelineSupportsTdmSplitK = []() {
         if constexpr(is_detected<has_tdm_split_k, GemmPipeline>{})
             return static_cast<bool>(GemmPipeline::kSupportsTdmSplitK);
@@ -584,9 +602,11 @@ struct UniversalGemmKernel
     ///          elements of T. That is the element size for 1-, 2-, 4- and 8-byte scalars; a
     ///          12-byte 6-bit pack has a 1-byte unit, so its 4 comes from alignof(T) alone.
     ///          IsSupportedArgument ends with this check for TDM pipelines, after its k_batch
-    ///          guards, but checks the device only for named-barrier pipelines. The MultiD GEMM,
-    ///          grouped GEMM, batched contraction and MX GEMM kernels therefore call this and
-    ///          IsTdmDeviceSupported themselves.
+    ///          guards and, for a non-TDM epilogue and a pipeline without kSupportsTdmSplitK, its
+    ///          tile-multiple checks, and it rejects every TDM pipeline on a non-gfx125 device
+    ///          first. The MultiD GEMM, grouped GEMM, batched contraction, MX GEMM and Stream-K
+    ///          kernels also call this and IsTdmDeviceSupported themselves, with their own
+    ///          k_batch and operation name.
     CK_TILE_HOST static bool IsTdmArgumentSupported(const char* op_name,
                                                     index_t k_batch,
                                                     index_t K,
@@ -695,14 +715,15 @@ struct UniversalGemmKernel
 
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
-        if constexpr(!std::is_void_v<barrier_pipeline>)
+        // Named-barrier pipelines and TDM pipelines alike compile only an inert fallback on
+        // other targets, so a non-gfx125 device must be rejected here, not left to return zeros.
+        if constexpr(kRequiresGfx125)
         {
-            // Other targets compile only the pipeline's inert fallback.
             if(!is_gfx125_supported())
             {
                 if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
                 {
-                    CK_TILE_ERROR("Hardware named barriers require gfx1250!");
+                    CK_TILE_ERROR("TDM / named-barrier pipelines require gfx1250!");
                 }
                 return false;
             }
@@ -803,16 +824,66 @@ struct UniversalGemmKernel
             return false;
         }
 
+        // A TDM pipeline clips its A/B loads to the real extents, which is why the
+        // skipCheckValidLaunchParams short-circuit below drops the divisibility checks. Paired
+        // with a non-TDM epilogue, C is stored through MakeCBlockWindows instead, and the TDM
+        // pipelines run with kPadM = kPadN = false. That view masks the non-contiguous dimension
+        // itself (it pads it for bf16 atomic_add and the 64-bit global path); otherwise a tile
+        // past the last row (row-major) or column (column-major) lies beyond the buffer range and
+        // the hardware drops it. A ragged tile along the contiguous dimension is covered by
+        // neither: its excess lanes address the start of the next row of C, inside the buffer, so
+        // a buffer store or atomic writes them, and a bf16 global atomic is not masked at all.
+        //
+        // Split-K is also held to whole K tiles per split. SplitKBatchOffset cuts K at WarpTile K
+        // granularity. The TDM loads clip each split to its own splitted_k, so a ragged split
+        // would be zero-filled rather than read the next split's data, but only whole-tile splits
+        // have been validated on hardware.
+        //
+        // A pipeline that declares kSupportsTdmSplitK (comp_tdm_v3) is exempt: unlike the other TDM
+        // pipelines, it is validated with a padded C and with splits that end inside a K tile, and
+        // IsCTensorSupported below still checks its C store.
+        if constexpr(kIsTdmPipeline && !is_tdm_epilogue_v<EpiloguePipeline> &&
+                     !kPipelineSupportsTdmSplitK)
+        {
+            constexpr bool kCRowMajor = std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>;
+            if(kCRowMajor ? kargs.N % TilePartitioner::NPerBlock != 0
+                          : kargs.M % TilePartitioner::MPerBlock != 0)
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("A TDM pipeline with a non-TDM epilogue needs the contiguous "
+                                  "dimension of C (N if row-major, M if column-major) to be a "
+                                  "multiple of its block tile!");
+                }
+                return false;
+            }
+            // K % (KPerBlock * k_batch) == 0, written without the int32 product, which can
+            // overflow for a large K and k_batch.
+            if(kargs.k_batch > 1 && (kargs.K % kargs.k_batch != 0 ||
+                                     (kargs.K / kargs.k_batch) % TilePartitioner::KPerBlock != 0))
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("A TDM pipeline needs K to be a multiple of k_batch * KPerBlock "
+                                  "for split-K!");
+                }
+                return false;
+            }
+        }
+
         if constexpr(has_skip_check_valid_launch_params::value)
         {
             // Apply the same TDM checks as the kernels that host a TDM pipeline, including their
-            // split-K rejection: the TDM epilogue overwrites C, and only comp_tdm_v3 is tested with
-            // split-K. A pipeline that declares kSupportsTdmSplitK (comp_tdm_v3) with a
+            // split-K rejection: the TDM epilogue overwrites C, and only comp_tdm_v3 and the
+            // producer/consumer pipeline are tested with split-K. A pipeline that declares
+            // kSupportsTdmSplitK (comp_tdm_v3), or the producer/consumer pipeline, with a
             // split-K-capable epilogue (CShuffle) adds each split into C atomically, its TDM loads
-            // clipped to the split's K range, so k_batch > 1 is not rejected here for it.
+            // clipped to the split's K range, so k_batch > 1 is not rejected here for it. The
+            // producer/consumer pipeline's whole-tile split checks above already ran.
+            constexpr bool kSplitKValidated =
+                kPipelineSupportsTdmSplitK || is_wavelet_pipeline<GemmPipeline>;
             const index_t tdm_k_batch =
-                (is_tdm_epilogue_v<EpiloguePipeline> || !kPipelineSupportsTdmSplitK) ? kargs.k_batch
-                                                                                     : 1;
+                (is_tdm_epilogue_v<EpiloguePipeline> || !kSplitKValidated) ? kargs.k_batch : 1;
             if(!IsTdmArgumentSupported(
                    "GEMM", tdm_k_batch, kargs.K, kargs.as_ptr[0], kargs.bs_ptr[0], kargs.e_ptr))
             {
@@ -1558,27 +1629,13 @@ struct UniversalGemmKernel
             amd_wave_read_first_lane(TilePartitioner::GetLoopNum(splitk_batch_offset.splitted_k));
 
         // Run GEMM cooperatively by whole workgroup.
-        const auto& c_block_tile = [&]() {
-            if constexpr(std::is_void_v<barrier_pipeline>)
-            {
-                return GemmPipeline{}.template operator()(as_block_window,
-                                                          AElementWise{},
-                                                          bs_block_window,
-                                                          BElementWise{},
-                                                          num_loop,
-                                                          smem_ptr);
-            }
-            else
-            {
-                return GemmPipeline{}.template operator()(as_block_window,
-                                                          AElementWise{},
-                                                          bs_block_window,
-                                                          BElementWise{},
-                                                          num_loop,
-                                                          smem_ptr,
-                                                          barriers);
-            }
-        }();
+        const auto& c_block_tile = RunGemmPipeline<GemmPipeline>(as_block_window,
+                                                                 AElementWise{},
+                                                                 bs_block_window,
+                                                                 BElementWise{},
+                                                                 num_loop,
+                                                                 smem_ptr,
+                                                                 barriers);
 
         const index_t k_batch = amd_wave_read_first_lane(kargs.k_batch);
         // Run Epilogue Pipeline

@@ -2432,6 +2432,7 @@ INCLUDE_FILE_PATTERNS  =
 PREDEFINED             = __attribute__(x)= \
                          __inline= \
                          ROCSPARSE_EXPORT= \
+                         "ROCSPARSE_DEPRECATED_MSG(x)=[[deprecated(x)]]" \
                          ROCSPARSE_WITH_SPSORT \
                          ROCSPARSE_WITH_TRSM_REFACTORING
 
