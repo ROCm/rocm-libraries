@@ -98,16 +98,19 @@ program rocblas_dgemm_trans_test
       call hipCheck(hipDeviceSynchronize())
       call hipCheck(hipMemcpy(hC, dC, hipMemcpyDeviceToHost))
 
+      allocate(opA(m, k))
       if (ops(ia) == rocblas_operation_none) then
         opA = hA(1:m, 1:k)
       else
         opA = transpose(hA(1:k, 1:m))
       end if
+      allocate(opB(k, n))
       if (ops(ib) == rocblas_operation_none) then
         opB = hB(1:k, 1:n)
       else
         opB = transpose(hB(1:n, 1:k))
       end if
+      allocate(hC_ref(m, n))
       hC_ref = alpha * matmul(opA, opB) + beta * hC0(1:m, 1:n)
 
       error = maxval(abs(hC(1:m, 1:n) - hC_ref))

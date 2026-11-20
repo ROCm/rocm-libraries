@@ -22,6 +22,10 @@
 #
 # ########################################################################
 
+# The tests are free form whatever their extension: with the Intel compilers,
+# which read .f03 and .f08 as fixed form, this adds -free.
+set(CMAKE_Fortran_FORMAT FREE)
+
 # Intel's ifx/ifort do not treat .f03/.f08 as Fortran source by default.
 if(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
   string(REPLACE "<SOURCE>" "-Tf <SOURCE>"

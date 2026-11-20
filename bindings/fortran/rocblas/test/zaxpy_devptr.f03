@@ -96,7 +96,7 @@ program rocblas_zaxpy_test
     ! Verification
     do i = 1, N
         result = alpha * hx(i) + hz(i)
-        error = abs(hy(i) - result)
+        error = abs(hy(i) - result) / abs(result)
         if(error .gt. error_max) then
             write(*,*) "FAILED! Error bigger than max! Error = ", error, " hy(", i, ") = ", hy(i)
             call exit(1)

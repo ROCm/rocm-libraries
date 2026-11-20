@@ -96,12 +96,14 @@ program rocblas_cgemv_trans_test
     call hipCheck(hipDeviceSynchronize())
     call hipCheck(hipMemcpy(c_loc(hy(1)), dy, size(hy, kind=c_size_t) * elem, hipMemcpyDeviceToHost))
 
+    allocate(opA(ly, lx))
     if (ops(it) == rocblas_operation_none) then
       opA = hA(1:m, 1:n)
     else
       opA = transpose(hA(1:m, 1:n))
       if (ops(it) == rocblas_operation_conjugate_transpose) opA = conjg(opA)
     end if
+    allocate(y_ref(ly))
     y_ref = alpha * matmul(opA, hx(1::incx)) + beta * hy0(1::incy)
 
     error = maxval(abs(hy(1::incy) - y_ref))
