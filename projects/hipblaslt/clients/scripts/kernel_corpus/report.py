@@ -121,6 +121,16 @@ def first_line(text: str, needle: str = "") -> str:
     return ""
 
 
+def unsupported_reason(message: str) -> str:
+    """The line of an unsupported case's output that says why it could not be checked. The first
+    line is usually gtest's failure location, which says nothing."""
+    for line in (message or "").splitlines():
+        line = line.strip()
+        if _ORACLE_REFUSAL.search(line) or _CLIENT_LAYOUT_REFUSAL.search(line):
+            return line[:200]
+    return first_line(message, "fast_check") or first_line(message) or "unsupported"
+
+
 def failure_reason(row: dict) -> str:
     message = row.get("message") or ""
     if row.get("fault"):
@@ -186,7 +196,12 @@ def summarize(
     not_run_reasons = collections.Counter(
         first_line(r.get("message", ""), "fast_check") or first_line(r.get("message", ""))
         for r in results.values()
-        if r["status"] in ("deferred", "unmapped", "unreachable", "unsupported")
+        if r["status"] in ("deferred", "unmapped", "unreachable")
+    )
+    unsupported_reasons = collections.Counter(
+        unsupported_reason(r.get("message", ""))
+        for r in results.values()
+        if r["status"] == "unsupported"
     )
     meta = {}
     for row in results.values():
@@ -221,6 +236,7 @@ def summarize(
         "by_problem_type": {k: dict(v) for k, v in sorted(by_type.items())},
         "skip_reasons": dict(skip_reasons.most_common(20)),
         "not_run_reasons": dict(not_run_reasons.most_common(20)),
+        "unsupported_reasons": dict(unsupported_reasons.most_common(20)),
     }
 
 
@@ -292,6 +308,9 @@ def markdown(summary: dict) -> str:
     if summary["skip_reasons"]:
         lines += ["", "## Skip reasons", ""]
         lines += [f"- {n} cases: {k}" for k, n in summary["skip_reasons"].items()]
+    if summary.get("unsupported_reasons"):
+        lines += ["", "## Unsupported cases", ""]
+        lines += [f"- {n} cases: {k}" for k, n in summary["unsupported_reasons"].items()]
     if summary["not_run_reasons"]:
         lines += ["", "## Solutions not planned", ""]
         lines += [f"- {n} solutions: {k}" for k, n in summary["not_run_reasons"].items()]

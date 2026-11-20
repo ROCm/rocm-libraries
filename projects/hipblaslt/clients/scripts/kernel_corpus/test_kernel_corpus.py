@@ -924,6 +924,26 @@ class ReportTests(unittest.TestCase):
             self.assertEqual(report.classify_failure(message), "unsupported")
         self.assertEqual(report.classify_failure("Received uncaught exception: boom"), "fail")
 
+    def test_unsupported_cases_are_listed_as_cases_with_the_line_that_explains_them(self):
+        why = "Received uncaught exception: MX scales require lda equal to the rows stored"
+        results = {
+            "0:ldapad": {
+                "case_id": "0:ldapad",
+                "index": 0,
+                "shape": "ldapad",
+                "status": "unsupported",
+                "message": f"hipblaslt_test.cpp:256: Failure\n{why}",
+            },
+            "1:-": {"case_id": "1:-", "index": 1, "shape": None, "status": "deferred"},
+        }
+        results["1:-"]["message"] = "deferred: grouped GEMM"
+        summary = report.summarize(results, [], today=TODAY)
+        self.assertEqual(summary["unsupported_reasons"], {why: 1})
+        self.assertEqual(summary["not_run_reasons"], {"deferred: grouped GEMM": 1})
+        text = report.markdown(summary)
+        self.assertIn(f"## Unsupported cases\n\n- 1 cases: {why}", text)
+        self.assertIn("## Solutions not planned\n\n- 1 solutions: deferred: grouped GEMM", text)
+
 
 TODAY = datetime.date(2026, 11, 1)
 
