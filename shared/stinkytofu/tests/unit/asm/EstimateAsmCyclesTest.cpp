@@ -1512,10 +1512,10 @@ TEST_F(EstimateAsmCyclesTest, LoopCounterSkipJoinStaysInPreLoop) {
     EXPECT_EQ(phases.postLoopCycles, 3u);
 }
 
-// The load and the wait are in different blocks. The wait still retires the
-// load: one ds_load_b128 issues in 1 cycle and drains in 56, so s_wait_dscnt 0
-// stalls for the remaining 55.
-TEST_F(EstimateAsmCyclesTest, WaitDscntSeesLoadFromPreviousBlock) {
+// The load and the wait are in different blocks. Replay state is not carried
+// across blocks, so s_wait_dscnt does not retire the previous block's load and
+// costs only its own issue cycle.
+TEST_F(EstimateAsmCyclesTest, WaitDscntDoesNotSeeLoadFromPreviousBlock) {
     BasicBlock* post = func->createBasicBlockAfter(loopBB, "epilogue");
     {
         AsmIRBuilder builder(*loopBB, arch);
@@ -1542,13 +1542,12 @@ TEST_F(EstimateAsmCyclesTest, WaitDscntSeesLoadFromPreviousBlock) {
     passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
     EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
     EXPECT_EQ(phases.mainLoopCycles, 1u);
-    EXPECT_EQ(phases.postLoopCycles, 55u);
+    EXPECT_EQ(phases.postLoopCycles, 1u);
 }
 
-// Data-ready lives in the issue queue. A consumer in the next block still waits
-// for the producer's remaining latency. That is the same queue that holds the
-// WMMA window.
-TEST_F(EstimateAsmCyclesTest, DataReadyStallCrossesBlocks) {
+// Data-ready stays inside the block that produced it. A consumer in the next
+// block does not wait out the producer's remaining latency.
+TEST_F(EstimateAsmCyclesTest, DataReadyStallDoesNotCrossBlocks) {
     BasicBlock* post = func->createBasicBlockAfter(loopBB, "epilogue");
     {
         AsmIRBuilder builder(*loopBB, arch);
@@ -1581,5 +1580,5 @@ TEST_F(EstimateAsmCyclesTest, DataReadyStallCrossesBlocks) {
     passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
     EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
     EXPECT_EQ(phases.mainLoopCycles, 1u);
-    EXPECT_EQ(phases.postLoopCycles, 20u);
+    EXPECT_EQ(phases.postLoopCycles, 1u);
 }
