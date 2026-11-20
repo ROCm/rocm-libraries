@@ -1,6 +1,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+import json
 import sys
 import tempfile
 import textwrap
@@ -29,6 +30,19 @@ SAMPLE = textwrap.dedent(
     set_tests_properties("quick_only" PROPERTIES LABELS "quick")
     """
 )
+
+
+def write_ctest(path: Path, labels: list[str], names: list[str] | None = None) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    names = names or ["kernel"]
+    joined = ";".join(labels)
+    body = []
+    for name in names:
+        body.append(f'add_test({name} "../{name}")')
+        body.append(f'set_tests_properties("{name}" PROPERTIES LABELS "{joined}")')
+    path.joinpath("CTestTestfile.cmake").write_text(
+        "\n".join(body) + "\n", encoding="utf-8"
+    )
 
 
 class ParseInstalledCTestTest(unittest.TestCase):
@@ -66,25 +80,76 @@ class ParseInstalledCTestTest(unittest.TestCase):
     def test_discover_orders_small_directories_first(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            one = root / "bin" / "hipRAND"
-            many = root / "bin" / "rocprim"
-            one.mkdir(parents=True)
-            many.mkdir()
-            one.joinpath("CTestTestfile.cmake").write_text(
-                'add_test(kernel "../kernel")\n'
-                'set_tests_properties("kernel" PROPERTIES LABELS "ffm-quick")\n',
-                encoding="utf-8",
-            )
-            many.joinpath("CTestTestfile.cmake").write_text(
-                "\n".join(
-                    f'add_test(t{i} "../t{i}")\n'
-                    f'set_tests_properties("t{i}" PROPERTIES LABELS "ffm-quick")\n'
-                    for i in range(3)
-                ),
-                encoding="utf-8",
-            )
+            write_ctest(root / "bin" / "hipRAND", ["ffm-quick"], ["kernel"])
+            write_ctest(root / "bin" / "rocprim", ["ffm-quick"], ["t0", "t1", "t2"])
             found = sweep.discover(root)
-            self.assertEqual([item["component"] for item in found], ["hipRAND", "rocprim"])
+            self.assertEqual(
+                [item["component"] for item in found], ["hipRAND", "rocprim"]
+            )
+
+    def test_discover_all_quick_directories(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ctest(root / "bin" / "hipRAND", ["quick", "standard"], ["api"])
+            write_ctest(root / "bin" / "rocBLAS", ["quick"], ["suite"])
+            write_ctest(root / "bin" / "ffm_only", ["ffm-quick"], ["ffm"])
+            found = sweep.discover(root, label="^quick$")
+            self.assertEqual(
+                [item["component"] for item in found], ["hipRAND", "rocBLAS"]
+            )
+
+    def test_discover_named_component_subset(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ctest(root / "bin" / "hipRAND", ["quick"], ["api"])
+            write_ctest(root / "bin" / "rocBLAS", ["quick"], ["suite"])
+            write_ctest(root / "bin" / "rocprim", ["quick"], ["t0"])
+            found = sweep.discover(
+                root, label="^quick$", components=["hipRAND", "rocprim"]
+            )
+            self.assertEqual(
+                [item["component"] for item in found], ["hipRAND", "rocprim"]
+            )
+            one = sweep.discover(root, label="^quick$", component="rocBLAS")
+            self.assertEqual([item["component"] for item in one], ["rocBLAS"])
+
+    def test_missing_components_lists_unknown_names(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ctest(root / "bin" / "hipRAND", ["quick"], ["api"])
+            self.assertEqual(
+                sweep.missing_components(root, "^quick$", ["hipRAND", "missing"]),
+                ["missing"],
+            )
+
+    def test_matrix_payload_lists_components(self):
+        groups = [{"component": "hipRAND"}, {"component": "rocBLAS"}]
+        self.assertEqual(
+            sweep.matrix_payload(groups),
+            {"include": [{"component": "hipRAND"}, {"component": "rocBLAS"}]},
+        )
+
+    def test_parse_component_names(self):
+        self.assertEqual(
+            sweep.parse_component_names(" hipRAND, rocBLAS , "),
+            ["hipRAND", "rocBLAS"],
+        )
+        self.assertEqual(sweep.parse_component_names(""), [])
+
+    def test_label_pattern_anchors_bare_names(self):
+        pattern = sweep.label_pattern("quick")
+        self.assertTrue(pattern.search("quick"))
+        self.assertFalse(pattern.search("ffm-quick"))
+
+    def test_rocjitsu_arg_starting_with_dashes_is_attached(self):
+        joined = sweep.attach_option_values(
+            ["--rocjitsu-arg", "--cpu-thread-budget=1", "--list-only"],
+            "--rocjitsu-arg",
+        )
+        self.assertEqual(
+            joined,
+            ["--rocjitsu-arg=--cpu-thread-budget=1", "--list-only"],
+        )
 
 
 if __name__ == "__main__":

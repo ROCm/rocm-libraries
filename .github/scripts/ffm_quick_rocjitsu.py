@@ -2,13 +2,16 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Run every installed ffm-quick CTest entry under one rocJITsu process tree.
+"""Run installed CTest entries under one rocJITsu process tree.
 
-The nightly's CTestTestfile.cmake files already carry the ffm-quick label.
-This walks those files, in ascending test-count order, and launches each
-selected command as ``rocjitsu --config <gfx942> -- <command>``. A failing
-suite is recorded and the walk continues. Each test is capped at one hour
-so one suite cannot consume the whole six-hour job.
+Walks the nightly's CTestTestfile.cmake files, selects tests by CTest label,
+and launches each selected command as ``rocjitsu --config <gfx942> --
+<command>``. A failing suite is recorded and the walk continues. Each test is
+capped at one hour so one suite cannot consume the whole six-hour job.
+
+By default the label is ``^ffm-quick$`` so the existing hipRAND sweep keeps
+working. Pass ``--label '^quick$'`` for the on-demand component workflow, and
+``--component <dir>`` to run one installed directory under ``bin/``.
 """
 
 import argparse
@@ -21,8 +24,8 @@ import sys
 import time
 from pathlib import Path
 
-LABEL_PATTERN = re.compile(r"^ffm-quick$")
 EXCLUDE_PATTERN = re.compile(r"ex_gpu")
+DEFAULT_LABEL = r"^ffm-quick$"
 DEFAULT_TIMEOUT = 1800
 TIMEOUT_CAP = 3600
 
@@ -144,11 +147,26 @@ def parse_ctest_file(text: str) -> dict[str, dict]:
     return {name: tests[name] for name in order if tests[name]["command"]}
 
 
-def selects_ffm_quick(test: dict) -> bool:
+def label_pattern(label: str) -> re.Pattern[str]:
+    """Compile a CTest label regex. Bare names become an exact match."""
+    text = label.strip()
+    if not text:
+        text = DEFAULT_LABEL
+    if text.startswith("^") or text.endswith("$"):
+        return re.compile(text)
+    return re.compile(rf"^{re.escape(text)}$")
+
+
+def selects_label(test: dict, pattern: re.Pattern[str]) -> bool:
     labels = test["labels"]
     if any(EXCLUDE_PATTERN.search(label) for label in labels):
         return False
-    return any(LABEL_PATTERN.search(label) for label in labels)
+    return any(pattern.search(label) for label in labels)
+
+
+def selects_ffm_quick(test: dict) -> bool:
+    """Backward-compatible helper used by the existing unit tests."""
+    return selects_label(test, label_pattern(DEFAULT_LABEL))
 
 
 def timeout_seconds(test: dict) -> int:
@@ -158,21 +176,44 @@ def timeout_seconds(test: dict) -> int:
     return max(1, min(int(raw), TIMEOUT_CAP))
 
 
-def discover(rocm_root: Path) -> list[dict]:
-    """Installed ffm-quick tests, fewest tests in a directory first."""
+def parse_component_names(text: str) -> list[str]:
+    """Split a comma-separated component filter. Empty means no filter."""
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def discover(
+    rocm_root: Path,
+    label: str = DEFAULT_LABEL,
+    component: str | None = None,
+    components: list[str] | None = None,
+) -> list[dict]:
+    """Installed tests matching ``label``, fewest tests in a directory first.
+
+    ``component`` selects one directory under ``bin/``. ``components`` selects
+    a set. When both are empty, every matching directory is returned.
+    """
+    pattern = label_pattern(label)
+    wanted: set[str] | None = None
+    if component:
+        wanted = {component}
+    elif components:
+        wanted = set(components)
+
     groups = []
     bin_dir = rocm_root / "bin"
     for ctest_file in sorted(bin_dir.rglob("CTestTestfile.cmake")):
+        relative = ctest_file.parent.relative_to(bin_dir).as_posix()
+        if wanted is not None and relative not in wanted:
+            continue
         tests = [
             test
             for test in parse_ctest_file(
                 ctest_file.read_text(encoding="utf-8", errors="replace")
             ).values()
-            if selects_ffm_quick(test)
+            if selects_label(test, pattern)
         ]
         if not tests:
             continue
-        relative = ctest_file.parent.relative_to(bin_dir).as_posix()
         groups.append(
             {
                 "component": relative,
@@ -182,6 +223,14 @@ def discover(rocm_root: Path) -> list[dict]:
         )
     groups.sort(key=lambda group: (len(group["tests"]), group["component"]))
     return groups
+
+
+def missing_components(rocm_root: Path, label: str, names: list[str]) -> list[str]:
+    """Names from ``names`` that have no installed tests for ``label``."""
+    if not names:
+        return []
+    found = {group["component"] for group in discover(rocm_root, label=label)}
+    return [name for name in names if name not in found]
 
 
 def output_skips(text: str, skip_regex: str) -> bool:
@@ -209,9 +258,24 @@ def build_env(rocm_root: Path) -> dict:
     return env
 
 
-def run_one(rocjitsu: Path, config: Path, test: dict, cwd: Path, env: dict, log_path: Path) -> dict:
+def run_one(
+    rocjitsu: Path,
+    config: Path,
+    test: dict,
+    cwd: Path,
+    env: dict,
+    log_path: Path,
+    rocjitsu_args: list[str] | None = None,
+) -> dict:
     timeout = timeout_seconds(test)
-    command = [str(rocjitsu), "--config", str(config), "--", *test["command"]]
+    command = [
+        str(rocjitsu),
+        *list(rocjitsu_args or []),
+        "--config",
+        str(config),
+        "--",
+        *test["command"],
+    ]
     work = Path(test["working_directory"]) if test["working_directory"] else cwd
     log_path.parent.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
@@ -257,9 +321,9 @@ def run_one(rocjitsu: Path, config: Path, test: dict, cwd: Path, env: dict, log_
     }
 
 
-def render_summary(rows: list[dict]) -> str:
+def render_summary(rows: list[dict], label: str) -> str:
     lines = [
-        "# rocJITsu ffm-quick",
+        f"# rocJITsu {label}",
         "",
         "| component | tests | passed | failed | timeout | skipped | not started | seconds |",
         "| --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -279,24 +343,98 @@ def render_summary(rows: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def main() -> int:
+def matrix_payload(groups: list[dict]) -> dict:
+    """GitHub Actions matrix JSON: one include entry per component."""
+    return {"include": [{"component": group["component"]} for group in groups]}
+
+
+def attach_option_values(argv: list[str], option: str) -> list[str]:
+    """Bind the following token to ``option``, even when that token starts with ``--``."""
+    joined = []
+    index = 0
+    while index < len(argv):
+        token = argv[index]
+        if token == option and index + 1 < len(argv):
+            joined.append(f"{option}={argv[index + 1]}")
+            index += 2
+            continue
+        joined.append(token)
+        index += 1
+    return joined
+
+
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--rocjitsu", required=True)
-    parser.add_argument("--config", required=True)
+    parser.add_argument("--rocjitsu")
+    parser.add_argument("--config")
     parser.add_argument("--rocm-root", required=True)
-    parser.add_argument("--out-dir", required=True)
+    parser.add_argument("--out-dir")
     parser.add_argument("--deadline-seconds", type=int, default=19800)
+    parser.add_argument(
+        "--label",
+        default=DEFAULT_LABEL,
+        help="CTest label regex. Default ^ffm-quick$. Use ^quick$ for on-demand.",
+    )
+    parser.add_argument(
+        "--component",
+        default="",
+        help="Run only this installed bin/ directory (e.g. hipRAND).",
+    )
+    parser.add_argument(
+        "--components",
+        default="",
+        help="Comma-separated bin/ directories. Empty means every matching directory.",
+    )
+    parser.add_argument(
+        "--rocjitsu-arg",
+        action="append",
+        default=[],
+        help="Extra rocJITsu flag before --config. May start with --. Repeatable.",
+    )
     parser.add_argument("--list-only", action="store_true")
-    args = parser.parse_args()
+    parser.add_argument(
+        "--list-json",
+        action="store_true",
+        help="Print a GitHub Actions matrix JSON of selected components and exit.",
+    )
+    raw = sys.argv[1:] if argv is None else argv
+    args = parser.parse_args(attach_option_values(raw, "--rocjitsu-arg"))
 
     rocm_root = Path(args.rocm_root)
-    groups = discover(rocm_root)
+    selected_names = parse_component_names(args.components)
+    if args.component:
+        selected_names = [args.component]
+    missing = missing_components(rocm_root, args.label, selected_names)
+    if missing:
+        print(
+            "unknown components for label " f"{args.label!r}: {', '.join(missing)}",
+            file=sys.stderr,
+            flush=True,
+        )
+        return 2
+
+    groups = discover(
+        rocm_root,
+        label=args.label,
+        component=args.component or None,
+        components=selected_names or None,
+    )
     total = sum(len(group["tests"]) for group in groups)
-    print(f"ffm-quick directories: {len(groups)} tests: {total}", flush=True)
+    print(
+        f"label={args.label} directories: {len(groups)} tests: {total}",
+        flush=True,
+    )
     for group in groups:
         print(f"  {len(group['tests']):4d}  {group['component']}", flush=True)
+
+    if args.list_json:
+        print(json.dumps(matrix_payload(groups), separators=(",", ":")))
+        return 0 if groups else 1
     if args.list_only:
         return 0 if groups else 1
+
+    if not args.rocjitsu or not args.config or not args.out_dir:
+        parser.error("--rocjitsu, --config, and --out-dir are required to run tests")
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -325,7 +463,15 @@ def main() -> int:
                 continue
             safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", test["name"])[:120]
             log_path = out_dir / "logs" / group["component"] / f"{safe}.log"
-            result = run_one(rocjitsu, config, test, group["directory"], env, log_path)
+            result = run_one(
+                rocjitsu,
+                config,
+                test,
+                group["directory"],
+                env,
+                log_path,
+                rocjitsu_args=args.rocjitsu_arg,
+            )
             results.append(result)
             if result["status"] in ("failed", "timeout"):
                 any_problem = True
@@ -341,7 +487,7 @@ def main() -> int:
             "tests": results,
         }
         rows.append(row)
-        summary = render_summary(rows)
+        summary = render_summary(rows, args.label)
         (out_dir / "summary.md").write_text(summary, encoding="utf-8")
         (out_dir / "summary.json").write_text(
             json.dumps(rows, indent=2) + "\n", encoding="utf-8"

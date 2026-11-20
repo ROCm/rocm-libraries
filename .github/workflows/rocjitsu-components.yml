@@ -1,0 +1,225 @@
+name: rocJITsu Component Tests
+
+# Manually dispatched on-demand testing under rocJITsu. Does not call TheRock
+# multi-arch CI and does not use a GPU test runner.
+#
+# Empty components runs every installed bin/ directory that carries the
+# selected CTest label (default ^quick$). A comma-separated components list
+# narrows that set. Names match the directory under the nightly bin/ tree.
+#
+# runs-on comes from TheRock select_build_runner(), the same CPU scale set
+# used by the hipRAND rocJITsu parity workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      components:
+        description: "Comma-separated bin/ directories (e.g. hipRAND,rocBLAS). Empty runs every installed component for the label."
+        type: string
+        default: ""
+      ctest_label:
+        description: "CTest label regex. Default ^quick$."
+        type: string
+        default: "^quick$"
+      rocm_version:
+        description: "Pinned gfx94X-dcgpu nightly used for runtime and tests."
+        type: string
+        default: "10.2.0a20260928"
+      rocjitsu_arg:
+        description: "Optional extra rocJITsu flag, for example --cpu-thread-budget=1. Empty uses the config default."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Select runner and components
+    runs-on: ubuntu-24.04
+    outputs:
+      build_runs_on: ${{ steps.runner.outputs.build_runs_on }}
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - name: Checkout rocm-libraries scripts
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Load CI environment
+        id: ci-env
+        uses: ./.github/actions/ci-env
+
+      - name: Checkout TheRock
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: ${{ steps.ci-env.outputs.therock-ref }}
+          path: TheRock
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout CI config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/therock-ci-config
+          ref: main
+          path: ci-config
+        continue-on-error: true
+
+      - name: Select CPU build runner
+        id: runner
+        env:
+          CI_CONFIG_PATH: ci-config
+        run: python3 .github/scripts/select_cpu_build_runner.py
+
+      - name: Install pinned gfx94X runtime and tests
+        env:
+          ROCM_VERSION: ${{ inputs.rocm_version }}
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
+          mkdir -p "$root" cache
+          base="https://nightly.repo.amd.com/rocm/core/tarball"
+          curl -fL --retry 3 -o "cache/rocm-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-${ROCM_VERSION}.tar.gz"
+          curl -fL --retry 3 -o "cache/tests-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
+          tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
+          test -x "$root/bin/rocminfo"
+          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: List selected components
+        id: list
+        env:
+          CTEST_LABEL: ${{ inputs.ctest_label }}
+          COMPONENTS: ${{ inputs.components }}
+        run: |
+          set -euo pipefail
+          args=(
+            python3 .github/scripts/ffm_quick_rocjitsu.py
+            --rocm-root "$ROCM_ROOT"
+            --label "$CTEST_LABEL"
+            --list-json
+          )
+          if [ -n "$COMPONENTS" ]; then
+            args+=(--components "$COMPONENTS")
+          fi
+          matrix="$("${args[@]}")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "Selected components:"
+          echo "$matrix" | python3 -c 'import json,sys; print("\n".join(item["component"] for item in json.load(sys.stdin)["include"]))'
+
+  test:
+    name: ${{ matrix.component }} under rocJITsu
+    needs: prepare
+    if: needs.prepare.outputs.matrix != '' && needs.prepare.outputs.matrix != '{"include":[]}'
+    runs-on: ${{ needs.prepare.outputs.build_runs_on }}
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ubuntu:24.04
+    env:
+      ROCM_VERSION: ${{ inputs.rocm_version }}
+      CTEST_LABEL: ${{ inputs.ctest_label }}
+      ROCJITSU_ARG: ${{ inputs.rocjitsu_arg }}
+      COMPONENT: ${{ matrix.component }}
+      BUILD_RUNS_ON: ${{ needs.prepare.outputs.build_runs_on }}
+      # Same pin as hiprand-rocjitsu-parity.yml: after ROCm/rocm-systems#12515
+      # and #12618.
+      ROCM_SYSTEMS_REF: 7e7420053ea9c896034a073eb53c0e71f7a19de0
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git ninja-build pkg-config python3
+
+      - name: Checkout rocm-libraries
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout rocJITsu
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/rocm-systems
+          ref: ${{ env.ROCM_SYSTEMS_REF }}
+          path: rocm-systems
+          sparse-checkout: emulation/rocjitsu
+          sparse-checkout-cone-mode: true
+
+      - name: Build rocJITsu
+        run: |
+          set -euo pipefail
+          cmake -S rocm-systems/emulation/rocjitsu -B rj-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DRJ_LOG_GROUPS=OFF
+          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+          test -x rj-build/tools/rocjitsu/rocjitsu
+
+      - name: Install pinned gfx94X runtime and tests
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
+          mkdir -p "$root" cache
+          base="https://nightly.repo.amd.com/rocm/core/tarball"
+          curl -fL --retry 3 -o "cache/rocm-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-${ROCM_VERSION}.tar.gz"
+          curl -fL --retry 3 -o "cache/tests-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
+          tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
+          test -x "$root/bin/rocminfo"
+          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Run ${{ matrix.component }} under rocJITsu
+        run: |
+          set +e
+          args=(
+            python3 .github/scripts/ffm_quick_rocjitsu.py
+            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu"
+            --config "$PWD/rocm-systems/emulation/rocjitsu/configs/gfx942_cdna3.json"
+            --rocm-root "$ROCM_ROOT"
+            --out-dir parity
+            --label "$CTEST_LABEL"
+            --component "$COMPONENT"
+          )
+          if [ -n "$ROCJITSU_ARG" ]; then
+            args+=(--rocjitsu-arg="$ROCJITSU_ARG")
+          fi
+          "${args[@]}"
+          status=$?
+          if [ -f parity/summary.md ]; then
+            cat parity/summary.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          exit "$status"
+
+      - name: Name the upload artifact
+        if: always()
+        id: artifact
+        run: |
+          # Artifact names cannot contain '/'; flatten nested bin/ paths.
+          safe="${COMPONENT//\//-}"
+          echo "name=rocjitsu-${safe}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload ${{ matrix.component }} summary
+        if: always()
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: parity/
+          if-no-files-found: warn
