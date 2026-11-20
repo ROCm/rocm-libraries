@@ -57,6 +57,9 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_value if any required enumeration is invalid.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size_in_bytes
 *               pointer is invalid.
+*  \retval      rocsparse_status_invalid_size \p source has a batch count greater than one.
+*  \retval      rocsparse_status_type_mismatch \p source and \p target differ in matrix type,
+*               fill mode, diagonal type, index base, or storage mode.
 *  \retval      rocsparse_status_not_implemented the conversion is not supported for the
 *               formats or data types of \p source and \p target. A conversion that does
 *               not need \ref rocsparse_sparse_to_sparse_permissive checks the data types
@@ -305,8 +308,9 @@ rocsparse_status rocsparse_sparse_to_sparse_buffer_size(rocsparse_handle        
 *  \retval      rocsparse_status_invalid_value \p stage is not a valid enumeration.
 *  \retval      rocsparse_status_invalid_size a conversion to the same format has a
 *               \p source and a \p target with different numbers of rows or columns.
-*  \retval      rocsparse_status_type_mismatch the source and target matrix descriptors differ,
-*               or an index value does not fit in the target index type.
+*  \retval      rocsparse_status_type_mismatch \p source and \p target differ in matrix type,
+*               fill mode, diagonal type, index base, or storage mode, or an index value
+*               does not fit in the target index type.
 *  \retval      rocsparse_status_not_implemented the conversion is not supported for the formats
 *               or data types of \p source and \p target, or the matrix is batched.
 *  \par Example
