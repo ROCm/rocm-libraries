@@ -3581,6 +3581,35 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # issues two loads a tile with ROCKE_EXP_TDM_SPLIT=2), not tile 1 too.
         pro_partial = (_os_ra.environ.get("ROCKE_EXP_MX_RA_PRO") == "1"
                        and _os_ra.environ.get("ROCKE_EXP_TDM_SPLIT") == "2")
+        # EXPERIMENT (diagnostic): ROCKE_EXP_MX_RA_STAMP=1 (RA=2) stamps each
+        # wave's tile end: reaching the drain, its fill landed, past the
+        # workgroup barrier, past the cluster wait; each as (shader cycles,
+        # realtime) i64, 8 per tile, every lane writing the same address past
+        # C: slot = M*N/4 + ((wg * waves + wave) * tiles + tile) * 8, with
+        # wg = block_y * N-tiles + block_x and tiles the loop's tile count.
+        stamp_on = _mx_ra_one and _os_ra.environ.get("ROCKE_EXP_MX_RA_STAMP") == "1"
+        if stamp_on:
+            from ...core.ir import I64 as _I64s
+
+            def _st_now():
+                cyc = b.inline_asm("s_get_shader_cycles_u64 $0", "=s", [], result_type=_I64s)
+                rt = b.inline_asm(
+                    "s_sendmsg_rtn_b64 $0, sendmsg(MSG_RTN_GET_REALTIME)\n\ts_wait_kmcnt 0x0",
+                    "=s", [], result_type=_I64s)
+                return [cyc, rt]
+
+            _st_waves = spec.block_size // spec.wave_size
+            _st_gx = b.div(b.add(N, b.const_i32(block_n - 1)), b.const_i32(block_n))
+            _st_wg = b.add(b.mul(b.block_id_y(), _st_gx), b.block_id_x())
+            _st_tiles = b.add(_k_tile_count(), b.mod(_k_tile_count(), b.const_i32(2)))
+            _st_row = b.mul(b.add(b.mul(_st_wg, b.const_i32(_st_waves)), _tdm_wave_id), _st_tiles)
+            _st_c0 = b.div(b.mul(M, N), b.const_i32(4))
+
+            def _st_store(k_cur, vals):
+                tile = b.div(b.sub(k_cur, k_lo), c_block_k)
+                base = b.add(_st_c0, b.mul(b.add(_st_row, tile), b.const_i32(8)))
+                for j, v in enumerate(vals):
+                    b.global_store(C, b.add(base, b.const_i32(j)), v, align=8)
         if cs >= 0 and k_atoms < 2:
             raise ValueError("ROCKE_EXP_MX_RA_CS needs two K-atoms per tile")
 
@@ -3613,12 +3642,17 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                     fence()
                     wmmas(acc, a, b0, sa, sb, 0, 0, bar_at)
                     fence()
+                    st = _st_now() if stamp_on else None
                     if splitbar:
                         b.s_barrier_wait(_WG_WAIT)
                     else:
                         b.inline_asm("s_wait_dscnt 0", "~{memory}")
                         b.s_wait_tensorcnt(0)
+                        if stamp_on:
+                            st += _st_now()
                         b.s_barrier_bare()
+                    if stamp_on:
+                        st += _st_now()
                     if cb:
                         # This workgroup is done with the buffer: tell the
                         # cluster (wave 0 only), and refill only once every
@@ -3632,6 +3666,9 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         wmmas(acc, a, b0, sa, sb, 0, bar_at, wait_at)
                         fence()
                         b.inline_asm("s_barrier_wait -3", "~{memory}")
+                        if stamp_on:
+                            st += _st_now()
+                            _st_store(k_cur, st)
                         _refill(p, k_cur)
                         fence()
                         wmmas(acc, a, b0, sa, sb, 0, wait_at)
