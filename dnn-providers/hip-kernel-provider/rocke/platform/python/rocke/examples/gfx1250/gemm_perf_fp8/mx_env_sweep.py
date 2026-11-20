@@ -346,6 +346,8 @@ def main():
     ap.add_argument("--jobs", type=int, default=max(1, min(8, (os.cpu_count() or 2) // 4)))
     ap.add_argument("--verify-top", type=int, default=3)
     ap.add_argument("--dry-run", action="store_true", help="build and list; no GPU runs")
+    ap.add_argument("--no-build", action="store_true",
+                    help="reuse the kernels an earlier run built into this --out (stale if the emitter changed)")
     ap.add_argument("--pairs", default="6,7 0,1 2,3 4,5")
     ap.add_argument("--free-samples", type=int, default=6)
     ap.add_argument("--free-interval", type=float, default=10.0)
@@ -375,19 +377,39 @@ def main():
                 launch_cluster[tag] = None
             jobs.append((tag.replace("|", "__"), env, str(out)))
 
-    _log(f"building {len(jobs)} kernel(s), {o.jobs} at a time")
     built = {}
-    ctx = mp.get_context("spawn")
-    with cf.ProcessPoolExecutor(o.jobs, mp_context=ctx) as ex:
-        for tag, path, name, st, err in ex.map(_build_one, jobs):
-            t = tag.replace("__", "|")
-            if err:
-                _log(f"  FAIL {t}: {err}")
-            elif st["vspill"] or st["sspill"]:
-                _log(f"  SKIP {t}: spills (vgpr {st['vspill']}, sgpr {st['sspill']})")
-            else:
-                built[t] = (path, name, st)
-                _log(f"  {t}: vgpr={st['vgpr']} sgpr={st['sgpr']}")
+    manifest = out / "built.json"
+    if o.no_build:
+        # Reuse an earlier build of this --out: only the kernels this config names.
+        if not manifest.exists():
+            sys.exit(f"--no-build: {manifest} not found (build once with this --out first)")
+        saved = json.loads(manifest.read_text())
+        want = {tag.replace("__", "|") for tag, _, _ in jobs}
+        missing = sorted(want - set(saved))
+        if missing:
+            sys.exit(f"--no-build: not in {manifest}: {', '.join(missing)}")
+        for t in sorted(want):
+            path, name, st = saved[t]
+            if not Path(path).exists():
+                sys.exit(f"--no-build: {path} is gone")
+            built[t] = (path, name, st)
+            _log(f"  reuse {t}: vgpr={st['vgpr']} sgpr={st['sgpr']}")
+    else:
+        _log(f"building {len(jobs)} kernel(s), {o.jobs} at a time")
+        ctx = mp.get_context("spawn")
+        with cf.ProcessPoolExecutor(o.jobs, mp_context=ctx) as ex:
+            for tag, path, name, st, err in ex.map(_build_one, jobs):
+                t = tag.replace("__", "|")
+                if err:
+                    _log(f"  FAIL {t}: {err}")
+                elif st["vspill"] or st["sspill"]:
+                    _log(f"  SKIP {t}: spills (vgpr {st['vspill']}, sgpr {st['sspill']})")
+                else:
+                    built[t] = (path, name, st)
+                    _log(f"  {t}: vgpr={st['vgpr']} sgpr={st['sgpr']}")
+        saved = json.loads(manifest.read_text()) if manifest.exists() else {}
+        saved.update(built)
+        manifest.write_text(json.dumps(saved, indent=1) + "\n")
     swz_of = {t: (dict(base, **v.get("env", {})).get("ROCKE_EXP_MX_SWZ") == "1")
               for v in cfg["variants"] for t in [f"{v['name']}|{a['name']}" for a in cfg["arms"]]}
     if o.dry_run or not built:
