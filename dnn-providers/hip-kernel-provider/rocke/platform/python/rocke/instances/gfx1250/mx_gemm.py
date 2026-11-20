@@ -4218,6 +4218,20 @@ class Epilogue:
             packed = part if packed is None else b.vec_concat(packed, part)
         return packed
 
+    def _pack_16(self, values):
+        """``values`` (FP32) as an FP16 or BF16 vector. A lone value goes
+        through an optimization barrier first: without it the conversion of
+        ``alpha * acc`` may be selected as one multiply-convert (v_fma_mixlo),
+        which rounds the exact product once, so a product whose FP32
+        rounding is a tie between two FP16/BF16 values can end on the odd
+        one. Pairs convert with v_cvt_pk_*_f32, after the FP32 rounding."""
+        b = self.k.b
+        if len(values) == 1:
+            values = [b.optimization_barrier(values[0])]
+        if self.k.spec.out_dtype == "fp16":
+            return b.vec_pack([b.trunc_f32_to_f16(v) for v in values], F16)
+        return b.vec_pack([b.trunc_f32_to_bf16(v) for v in values], BF16)
+
     def _store(self, final, read_c: bool) -> None:
         k = self.k
         ops, spec = k.ops, k.spec
@@ -4297,12 +4311,7 @@ class Epilogue:
             values = [self._saturate(v) for v in values]
         for begin in chunks:
             part = values[begin : begin + width]
-            if fp8:
-                packed = self._pack_fp8(part)
-            elif spec.out_dtype == "fp16":
-                packed = b.vec_pack([b.trunc_f32_to_f16(v) for v in part], F16)
-            else:
-                packed = b.vec_pack([b.trunc_f32_to_bf16(v) for v in part], BF16)
+            packed = self._pack_fp8(part) if fp8 else self._pack_16(part)
             if width == 1:
                 b.global_store(
                     d_ptr,
@@ -4364,10 +4373,8 @@ class Epilogue:
                     ]
                 if fp8:
                     packed = self._pack_fp8([self._saturate(v) for v in values])
-                elif spec.out_dtype == "fp16":
-                    packed = b.vec_pack([b.trunc_f32_to_f16(v) for v in values], F16)
                 else:
-                    packed = b.vec_pack([b.trunc_f32_to_bf16(v) for v in values], BF16)
+                    packed = self._pack_16(values)
                 if width == 1:
                     b.global_store(d_ptr, at, b.vec_extract(packed, 0), align=out_bytes)
                 else:

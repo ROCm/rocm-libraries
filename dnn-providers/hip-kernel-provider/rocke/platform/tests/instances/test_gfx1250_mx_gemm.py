@@ -2835,6 +2835,37 @@ class MxGemmIrTest(unittest.TestCase):
                 }
                 self.assertIn(f"store {store[out_dtype]}", llvm)
 
+    def test_one_column_stores_keep_the_fp32_product(self):
+        """One D column per store (tile_n 64, 1x4 waves): each FP32 result
+        passes an optimization barrier before its FP16 or BF16 conversion,
+        so alpha * acc is not converted by one fused multiply-convert;
+        whole and partial M tiles. Two-column stores convert in pairs
+        without it."""
+        barrier = 'asm "", "=v,0"(float'
+        for m, out_dtype in itertools.product((64, 40), ("fp16", "bf16")):
+            lone = _spec6(
+                m,
+                256,
+                384,
+                tile_m=16,
+                tile_n=64,
+                tile_k=384,
+                wave_group=(1, 4),
+                cluster_dim=(1, 1, 1),
+                out_dtype=out_dtype,
+                **_DIRECT,
+            )
+            pair = replace(lone, tile_n=128)
+            with self.subTest(m=m, out_dtype=out_dtype):
+                self.assertIsNone(validate(lone))
+                self.assertEqual(lone.store_width, 1)
+                self.assertEqual(pair.store_width, 2)
+                llvm = _llvm(lone)
+                converts = len(re.findall(r"= fptrunc float ", llvm))
+                self.assertGreater(converts, 0)
+                self.assertEqual(llvm.count(barrier), converts)
+                self.assertNotIn(barrier, _llvm(pair))
+
     def test_output_types(self):
         for out_dtype, store in (("fp16", "<8 x half>"), ("bf16", "<8 x bfloat>")):
             with self.subTest(out_dtype):
@@ -3770,6 +3801,25 @@ class MxGemmDeviceTest(unittest.TestCase):
                     | {"cluster_dim": (1, 1, 1)},
                     _DIRECT | {"scales": "registers", "cluster_dim": (1, 1, 1)},
                 )
+            ]
+            # One D column per store at an alpha (1 / 384) whose products
+            # round to FP32 ties between two FP16/BF16 values: whole and
+            # partial M tiles.
+            + [
+                _spec6(
+                    M,
+                    256,
+                    384,
+                    tile_m=16,
+                    tile_n=64,
+                    tile_k=384,
+                    wave_group=(1, 4),
+                    cluster_dim=(1, 1, 1),
+                    out_dtype=out_dtype,
+                    **_DIRECT,
+                )
+                for M in (64, 40)
+                for out_dtype in ("fp16", "bf16")
             ]
             # Three LDS buffers: every peel, a K tail, read-ahead, FP8.
             + [
