@@ -114,6 +114,8 @@ struct DeviceOperationInstanceFactory<
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_wavelet_xdl_v3_nhwgk_gkyxc_nhwgc_f16_instances_part1(
                         op_ptrs);
+                    add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_f16_gfx1250_instances(
+                        op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_v3_nhwgk_gkyxc_nhwgc_f16_large_tensors_instances(
                         op_ptrs);
                     add_device_grouped_conv2d_bwd_data_xdl_nhwgk_gkyxc_nhwgc_f16_instances(op_ptrs);
