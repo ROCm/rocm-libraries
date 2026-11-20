@@ -66,7 +66,7 @@ module hipfft
 
   integer(c_int), parameter :: hipfftVersionMajor = 1
   integer(c_int), parameter :: hipfftVersionMinor = 0
-  integer(c_int), parameter :: hipfftVersionPatch = 27
+  integer(c_int), parameter :: hipfftVersionPatch = 28
   integer(c_int), parameter :: HIPFFT_FORWARD = -1
   integer(c_int), parameter :: HIPFFT_BACKWARD = 1
 
