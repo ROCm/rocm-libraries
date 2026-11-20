@@ -313,8 +313,10 @@ EngineeredConvFeaturesByName(std::size_t N,
     std::map<std::string, float> by_name;
     for(std::size_t i = 0; i < kBaseDerivedFeatureNames.size(); ++i)
         by_name[kBaseDerivedFeatureNames[i]] = base[i];
-    if(spatial_dim == 3) // log_d_in is appended after the base block (3D only)
-        by_name["log_d_in"] = base[kBaseDerivedFeatureNames.size()];
+    // log_d_in = log1p(depth): real depth for 3D, log1p(1) for 2D models that carry a constant
+    // depth feature (in_d) in their derived_features. Computed from D_in so the named registry
+    // serves both spatial ranks; the 3D value is identical to the base block's appended entry.
+    by_name["log_d_in"] = static_cast<float>(std::log1p(static_cast<double>(D_in)));
 
     // GEMM dims for the divfeat features. Same direction switch as EngineeredConvFeatures; computed
     // exactly (not reconstructed from the log features) so tile-alignment is not perturbed by
