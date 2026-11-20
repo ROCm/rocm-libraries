@@ -811,12 +811,17 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
     }
 }
 
-TEST(TestProblemSpace, TheShippedSdpaConstraintsKeepOnlyProblemsThatAreDistinctAndHaveKeys)
+/// The shipped attention declarations, whose constraints the forward and the backward share.
+class TestShippedSdpaConstraints : public ::testing::TestWithParam<std::string>
 {
-    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
-    ASSERT_TRUE(file.good());
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    ASSERT_TRUE(parsed.ok());
+};
+
+TEST_P(TestShippedSdpaConstraints, KeepOnlyProblemsThatAreDistinctAndHaveKeys)
+{
+    // The window is the forward's alone: the backward declares neither it nor generate_stats, so
+    // the expectations about a window run only for the forward.
+    const bool forward = GetParam() == "sdpa_fwd";
+    const auto metadata = test::shippedOperation(GetParam());
 
     struct Candidate
     {
@@ -830,37 +835,32 @@ TEST(TestProblemSpace, TheShippedSdpaConstraintsKeepOnlyProblemsThatAreDistinctA
         std::string alignment = "top_left";
     };
     const auto admits = [&](const Candidate& c) {
-        const ProblemPoint point{{"batch", int64_t{1}},
-                                 {"heads", c.heads},
-                                 {"heads_kv", c.headsKv},
-                                 {"seqlen_q", c.seqlenQ},
-                                 {"seqlen_k", c.seqlenK},
-                                 {"head_dim", int64_t{64}},
-                                 {"is_causal", c.causal},
-                                 {"alignment", c.alignment},
-                                 {"dtype", std::string("fp16")},
-                                 {"generate_stats", false},
-                                 {"form", std::string("plain")},
-                                 {"layout", c.layout},
-                                 {"scale", std::string("inv_sqrt_d")},
-                                 {"window", c.window}};
-        return detail::satisfiesConstraints(*parsed.metadata, point);
+        ProblemPoint point{{"batch", int64_t{1}},
+                           {"heads", c.heads},
+                           {"heads_kv", c.headsKv},
+                           {"seqlen_q", c.seqlenQ},
+                           {"seqlen_k", c.seqlenK},
+                           {"head_dim", int64_t{64}},
+                           {"is_causal", c.causal},
+                           {"alignment", c.alignment},
+                           {"dtype", std::string("fp16")},
+                           {"form", std::string("plain")},
+                           {"layout", c.layout},
+                           {"scale", std::string("inv_sqrt_d")}};
+        if(forward)
+        {
+            point["generate_stats"] = false;
+            point["window"] = c.window;
+        }
+        return detail::satisfiesConstraints(metadata, point);
     };
 
     // Cross attention is bidirectional; a causal mask needs seqlen_q <= seqlen_k.
     EXPECT_TRUE(admits({4096, 77, 8, 8, false}));
     EXPECT_FALSE(admits({4096, 77, 8, 8, true}));
-    EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "local_1024"}));
-    // The frontend accepts a left bound under any mask.
-    EXPECT_TRUE(admits({2048, 2048, 8, 8, false, "local_1024"}));
-    // A window over more queries than keys: top-left, every row from seqlen_k + N - 1 on keeps
-    // no key (90% of the rows at 2048 x 77, local_128), so the softmax is over nothing.
-    EXPECT_FALSE(admits({2048, 77, 8, 8, false, "local_128"}));
-    EXPECT_FALSE(admits({4096, 77, 8, 8, false, "local_4096"}));
-    // The anchor is a distinct problem where the mask is causal OR windowed and seqlen_q <
-    // seqlen_k, and pinned to top_left everywhere else.
+    // The anchor is a distinct problem where the mask is causal (OR, for the forward, windowed)
+    // and seqlen_q < seqlen_k, and pinned to top_left everywhere else.
     EXPECT_TRUE(admits({128, 4096, 8, 8, true, "none", "bshd", "bottom_right"}));
-    EXPECT_TRUE(admits({128, 4096, 8, 8, false, "local_128", "bshd", "bottom_right"}));
     EXPECT_FALSE(admits({128, 4096, 8, 8, false, "none", "bshd", "bottom_right"}));
     // Extents of 1 make kv_bhsd the same graph as bhsd (seqlen_q 1, one head) or as bshd
     // (seqlen_k 1, one kv head), so it is not listed there.
@@ -869,7 +869,23 @@ TEST(TestProblemSpace, TheShippedSdpaConstraintsKeepOnlyProblemsThatAreDistinctA
     EXPECT_TRUE(admits({2, 4096, 1, 1, true, "none", "kv_bhsd"}));
     EXPECT_FALSE(admits({1, 1, 8, 1, false, "none", "kv_bhsd"}));
     EXPECT_TRUE(admits({1, 1, 8, 1, false, "none", "bhsd"}));
+
+    if(forward)
+    {
+        EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "local_1024"}));
+        // The frontend accepts a left bound under any mask.
+        EXPECT_TRUE(admits({2048, 2048, 8, 8, false, "local_1024"}));
+        // A window over more queries than keys: top-left, every row from seqlen_k + N - 1 on
+        // keeps no key (90% of the rows at 2048 x 77, local_128), so the softmax is over nothing.
+        EXPECT_FALSE(admits({2048, 77, 8, 8, false, "local_128"}));
+        EXPECT_FALSE(admits({4096, 77, 8, 8, false, "local_4096"}));
+        EXPECT_TRUE(admits({128, 4096, 8, 8, false, "local_128", "bshd", "bottom_right"}));
+    }
 }
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestShippedSdpaConstraints,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
 
 TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndAdmitTheRest)
 {

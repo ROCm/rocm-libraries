@@ -367,12 +367,25 @@ TEST(TestRegimeFocus, AFloorIsAskedOfEveryRegimeNoQuotaNames)
     EXPECT_EQ(floors.size(), declaredRegimeLabels(metadata).size() - 1);
     EXPECT_EQ(floors.at("decode_long_gqa").pins, (std::map<std::string, int64_t>{{"seqlen_q", 1}}));
 }
-TEST(TestRegimeFocus, AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnlyTheLanesItNeeds)
+namespace
 {
-    // layout 2:1:1, scale 2:1:1, window 3:1:1:1 in sdpa_fwd. The regime quota and floor path
+
+/// Each shipped attention declaration (forward and backward), whose weighted facets differ.
+class TestShippedValueWeights : public ::testing::TestWithParam<std::string>
+{
+};
+
+} // namespace
+
+TEST_P(TestShippedValueWeights,
+       AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnlyTheLanesItNeeds)
+{
+    // layout 2:1:1 and scale 2:1:1 in both, window 3:1:1:1 in sdpa_fwd, which alone declares one,
+    // and form plain 7 of 14 in sdpa_fwd, 5 of 10 in sdpa_bwd. The regime quota and floor path
     // splits its need over categorical lanes, so a lane-even split would make every value 1/3
-    // (window none 1/4) however the main search is weighted.
-    const auto metadata = shippedSdpa();
+    // (window none 1/4, plain 1/8 or 1/6) however the main search is weighted.
+    const bool forward = GetParam() == "sdpa_fwd";
+    const auto metadata = test::shippedOperation(GetParam());
     std::string error;
     const auto focus = compileRegimeFocus(metadata, "decode_long_mha", error);
     ASSERT_TRUE(focus.has_value()) << error;
@@ -382,22 +395,48 @@ TEST(TestRegimeFocus, AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnly
     request.pointsPerCombination = 20;
     request.seed = 5;
 
-    const auto found = exploreRegime(metadata, *focus, request, 600, SERVES_EVERYTHING, {}, {});
+    constexpr size_t ROWS = 2400;
+    const auto found = exploreRegime(metadata, *focus, request, ROWS, SERVES_EVERYTHING, {}, {});
 
-    ASSERT_GE(found.problems.size(), 600u);
-    const auto shareOf = [&found](const std::string& parameter, const std::string& value) {
-        size_t held = 0;
-        for(const auto& point : found.problems)
-        {
-            held += std::get<std::string>(point.at(parameter)) == value ? 1 : 0;
-        }
-        return static_cast<double>(held) / static_cast<double>(found.problems.size());
-    };
-    EXPECT_NEAR(shareOf("layout", "bshd"), 0.5, 0.1);
-    EXPECT_NEAR(shareOf("layout", "bhsd"), 0.25, 0.1);
-    EXPECT_NEAR(shareOf("scale", "inv_sqrt_d"), 0.5, 0.1);
-    EXPECT_NEAR(shareOf("window", "none"), 0.5, 0.1);
-    EXPECT_NEAR(shareOf("window", "local_128"), 1.0 / 6.0, 0.08);
+    ASSERT_GE(found.problems.size(), ROWS);
+    // The scale is a free facet only under the forms that state one: scale_unset and
+    // scale_tensor take inv_sqrt_d, a constraint holds it there. The declared 1/2 is realised
+    // over every point, so over every point the weighted and the unweighted share both fall
+    // within the tolerance of 0.5 (about 0.5 and 0.47 in sdpa_bwd). Among the points whose form states
+    // the scale the weight is what remains once the forced share is taken out, and the unweighted
+    // 1/3 is further from it than the tolerance.
+    const auto* formParameter = metadata.find("form");
+    ASSERT_NE(formParameter, nullptr);
+    const auto forced = (formParameter->relativeWeight("scale_unset")
+                         + formParameter->relativeWeight("scale_tensor"))
+                        / static_cast<double>(formParameter->values.size());
+    const auto statedInvSqrtD = (0.5 - forced) / (1.0 - forced);
+    const auto shareOf
+        = [&found](const std::string& parameter, const std::string& value, bool statesScale) {
+              size_t held = 0;
+              size_t counted = 0;
+              for(const auto& point : found.problems)
+              {
+                  const auto& form = std::get<std::string>(point.at("form"));
+                  if(statesScale && (form == "scale_unset" || form == "scale_tensor"))
+                  {
+                      continue;
+                  }
+                  ++counted;
+                  held += std::get<std::string>(point.at(parameter)) == value ? 1 : 0;
+              }
+              return static_cast<double>(held) / static_cast<double>(counted);
+          };
+    EXPECT_NEAR(shareOf("layout", "bshd", false), 0.5, 0.05);
+    EXPECT_NEAR(shareOf("layout", "bhsd", false), 0.25, 0.05);
+    EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", false), 0.5, 0.1);
+    EXPECT_NEAR(shareOf("scale", "inv_sqrt_d", true), statedInvSqrtD, 0.03);
+    EXPECT_NEAR(shareOf("form", "plain", false), 0.5, 0.05);
+    if(forward)
+    {
+        EXPECT_NEAR(shareOf("window", "none", false), 0.5, 0.1);
+        EXPECT_NEAR(shareOf("window", "local_128", false), 1.0 / 6.0, 0.08);
+    }
 
     // A floor of 60 needs at most 60 lanes of the declared lanes; running each of them once would
     // cost its whole budget, which is what the search used to do.
@@ -410,6 +449,10 @@ TEST(TestRegimeFocus, AFocusedSearchRealisesTheDeclaredValueWeightsAndProbesOnly
     EXPECT_LT(few.proposed, static_cast<int64_t>(lanes) * request.budgetPerCombination / 8)
         << "proposed " << few.proposed << " over " << lanes << " lanes";
 }
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestShippedValueWeights,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
 
 TEST(TestRegimeFocus, EveryRegimeDrawsItsOwnLanesInItsOwnOrder)
 {

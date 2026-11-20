@@ -398,24 +398,27 @@ TEST(TestCorpusRealism, EveryShippedMirrorKeepsItsArchetypesProportion)
     }
 }
 
-TEST(TestCorpusRealism, TheShippedSdpaCorpusCoversHeadDimsLayoutsAndSequenceRelationsAModelUses)
+/// The shipped attention declarations: the forward, and the backward whose problem space is
+/// the same one without the window and the softmax statistics.
+class TestShippedSdpaRealism : public ::testing::TestWithParam<std::string>
+{
+};
+
+TEST_P(TestShippedSdpaRealism, CorpusCoversHeadDimsLayoutsAndSequenceRelationsAModelUses)
 {
     // The gaps this guards: head_dim drawn log-uniformly from 1 (43% of rows at D <= 16, none of
     // them a real head), no layout but BSHD, and seqlen_q <= seqlen_k forced everywhere, so
     // cross attention (seqlen_q > seqlen_k) never appeared.
-    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
-    ASSERT_TRUE(file.good());
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+    const auto metadata = test::shippedOperation(GetParam());
 
     ExplorationRequest request;
     request.pointsPerCombination = 30;
     request.seed = 9;
-    const auto problems
-        = exploreProblemSpace(*parsed.metadata, request, ACCEPT_EVERYTHING).problems();
-    // 30 points for each of the 24 unweighted combinations: enough rows that the shares below are
-    // not noise.
-    ASSERT_GT(problems.size(), 500U);
+    const auto problems = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING).problems();
+    // 30 points for each live combination of the unweighted parameters (24 in the forward, 12 in
+    // the backward, which has no generate_stats): 720 and 270 rows for this seed, enough that the
+    // shares below are not noise.
+    ASSERT_GT(problems.size(), GetParam() == "sdpa_fwd" ? 500U : 200U);
 
     size_t wide = 0;
     size_t square = 0;
@@ -442,7 +445,8 @@ TEST(TestCorpusRealism, TheShippedSdpaCorpusCoversHeadDimsLayoutsAndSequenceRela
         return static_cast<double>(count) / static_cast<double>(problems.size());
     };
 
-    // Measured at 0.92 and 0.18 for this seed; the floors leave room for a reseed.
+    // Measured for this seed at 0.84 and 0.14 (sdpa_fwd) and 0.83 and 0.14 (sdpa_bwd), and over
+    // seeds 0 to 40 no lower than 0.82 and 0.11 for either, so one pair of floors holds for both.
     constexpr double SDPA_WIDE_SHARE = 0.8;
     constexpr double SDPA_SQUARE_SHARE = 0.1;
     EXPECT_GE(narrowest, 8) << "the declared head_dim range";
@@ -452,29 +456,29 @@ TEST(TestCorpusRealism, TheShippedSdpaCorpusCoversHeadDimsLayoutsAndSequenceRela
     EXPECT_EQ(layouts, (std::set<std::string>{"bhsd", "bshd", "kv_bhsd"}));
 }
 
-TEST(TestCorpusRealism, TheShippedSdpaArchetypesAnchorCrossAttentionAndTheHeadWidthsOfRealModels)
+TEST_P(TestShippedSdpaRealism, ArchetypesAnchorCrossAttentionAndTheHeadWidthsOfRealModels)
 {
     // The anchors are what a large corpus is mostly made of, so they must themselves hold the
     // cross-attention and the head widths the model-pinned archetypes (D of 64 and 128) lack.
-    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
-    ASSERT_TRUE(file.good());
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    const auto& metadata = *parsed.metadata;
+    const bool forward = GetParam() == "sdpa_fwd";
+    const auto metadata = test::shippedOperation(GetParam());
 
     std::mt19937_64 rng(11);
     std::set<int64_t> headDims;
     size_t cross = 0;
     for(const bool causal : {true, false})
     {
-        const ProblemPoint categorical{{"alignment", std::string("top_left")},
-                                       {"dtype", std::string("bf16")},
-                                       {"generate_stats", false},
-                                       {"is_causal", causal},
-                                       {"form", std::string("plain")},
-                                       {"layout", std::string("bshd")},
-                                       {"scale", std::string("inv_sqrt_d")},
-                                       {"window", std::string("none")}};
+        ProblemPoint categorical{{"alignment", std::string("top_left")},
+                                 {"dtype", std::string("bf16")},
+                                 {"is_causal", causal},
+                                 {"form", std::string("plain")},
+                                 {"layout", std::string("bshd")},
+                                 {"scale", std::string("inv_sqrt_d")}};
+        if(forward)
+        {
+            categorical["generate_stats"] = false;
+            categorical["window"] = std::string("none");
+        }
         for(const auto& archetype : metadata.archetypes)
         {
             for(int i = 0; i < 40; ++i)
@@ -497,5 +501,9 @@ TEST(TestCorpusRealism, TheShippedSdpaArchetypesAnchorCrossAttentionAndTheHeadWi
         EXPECT_EQ(headDims.count(width), 1U) << "no archetype anchors head_dim " << width;
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestShippedSdpaRealism,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
 
 } // namespace hipdnn_corpus_gen
