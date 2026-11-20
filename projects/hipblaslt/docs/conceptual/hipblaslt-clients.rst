@@ -98,7 +98,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --compute_input_typeA <value>      Precision of computation input A. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeA has no effect.
    --compute_input_typeB <value>      Precision of computation input B. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeB has no effect.
    --scale_type <value>               Precision of scalar. Options: f16_r,bf16_r
-   --initialization <value>           Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01  (Default value is: hpl)
+   --initialization <value>           Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, maf1_0, maf2_0, maf2_0_unit_scale  (Default value is: hpl)
    --transA <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
    --transB <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
    --swizzleA                         Enable tensor swizzling for A
@@ -145,6 +145,12 @@ For more information, run the command with the ``--help`` option. The output of 
    --wgm <value>                      [Tuning parameter] Set workgroup mapping for a solution, 0 is use solution's default value. (Only support GEMM + api_method mix or cpp)
    --flush                            Flush icache, only works for gemm.
    --uniform_summation_order <value>  Set the handle-level uniform summation order request for every API method. Accepts off|0, on|1 (case-insensitive). When on, the matmul returns HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. A YAML case's explicit 0 or 1 overrides the command-line value. When neither specifies a value, the library default for the device applies.
+   --partitions <value>               Run each GEMM as slices on this many partitions, one stream each, with hipblaslt_ext::experimental::PartitionedGemm. The devices are the DPX group of the current device when it is in one (the current device is partition 0), otherwise the current device once per partition (SPX: correct results, only for checking them, not for speed). The time is the full span, from the first launch until the last partition finishes. Data placement follows --part_place_a/b/c/d: shared (one copy in the first partition's buffers, which the other partitions read over peer access) or replicated (a copy per partition). Only plain GEMM is supported, with the heuristic solution selection.  (Default value is: 1)
+   --split_dim <value>                With --partitions: the dimension to split, M, N, or B (the batch). The first partitions take size/partitions and the last takes the rest.  (Default value is: N)
+   --part_place_a <value>             With --partitions: shared (one copy of A in the first partition's buffer, read by every partition over peer access) or replicated (a copy on each partition device).  (Default value is: shared)
+   --part_place_b <value>             With --partitions: shared or replicated B, as --part_place_a.  (Default value is: shared)
+   --part_place_c <value>             With --partitions: shared or replicated C, as --part_place_a.  (Default value is: shared)
+   --part_place_d <value>             With --partitions: shared (every partition writes its slice into the device 0 D) or replicated (a D on each partition device; the slices are gathered into the device 0 D after a verified run, outside the timing).  (Default value is: shared)
    --help |-h                         Produces this help message
    --version <value>                  Prints the version number
 
