@@ -2,38 +2,19 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Select the Linux CPU runner from TheRock build_runners.
+"""Pin the Linux runner used by rocJITsu jobs.
 
-TheRock's select_build_runner() reads build_runners from CI_CONFIG_PATH
-(therock-ci-config) and falls back to the in-tree BUILD_RUNNER_LABELS.
-This PoC uses that label for runs-on so the parity job lands on the same
-CPU scale set as Linux builds, not on a GPU test runner.
+rocJITsu does not follow select_build_runner()'s default CPU pool. Those
+jobs run on the sanitizer scale set below.
 """
 
 import os
-import sys
-from pathlib import Path
 
-
-def therock_actions_dir() -> Path:
-    override = os.environ.get("THEROCK_ROOT", "").strip()
-    root = Path(override) if override else Path("TheRock")
-    return root / "build_tools" / "github_actions"
+ROCJITSU_RUNS_ON = "az-linux-scale-rocm-asan-prod-2"
 
 
 def select_linux_build_runner() -> str:
-    actions = therock_actions_dir()
-    if not (actions / "amdgpu_family_matrix.py").is_file():
-        raise SystemExit(f"TheRock github_actions not found at {actions}")
-    sys.path.insert(0, str(actions))
-    from amdgpu_family_matrix import select_build_runner
-
-    # Empty build variant selects the platform default, matching
-    # rocm-libraries therock_configure_ci.py (not the sanitizer pool).
-    label = select_build_runner("linux", "")
-    if not label:
-        raise SystemExit("select_build_runner returned an empty linux label")
-    return label
+    return ROCJITSU_RUNS_ON
 
 
 def main() -> None:

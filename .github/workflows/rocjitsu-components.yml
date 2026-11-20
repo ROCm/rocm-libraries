@@ -7,10 +7,15 @@ name: rocJITsu Component Tests
 # selected CTest label (default ^quick$). A comma-separated components list
 # narrows that set. Names match the directory under the nightly bin/ tree.
 #
-# runs-on comes from TheRock select_build_runner(), the same CPU scale set
-# used by the hipRAND rocJITsu parity workflow.
+# Test jobs run on az-linux-scale-rocm-asan-prod-2. The prepare job only
+# lists components and stays on a GitHub-hosted runner.
 
 on:
+  push:
+    branches:
+      - users/dileepr1/rocjitsu-components-dispatch
+    paths:
+      - .github/rocjitsu-oneshot-hipsolver
   workflow_dispatch:
     inputs:
       components:
@@ -39,10 +44,9 @@ concurrency:
 
 jobs:
   prepare:
-    name: Select runner and components
+    name: Select components
     runs-on: ubuntu-24.04
     outputs:
-      build_runs_on: ${{ steps.runner.outputs.build_runs_on }}
       matrix: ${{ steps.list.outputs.matrix }}
     steps:
       - name: Checkout rocm-libraries scripts
@@ -50,33 +54,6 @@ jobs:
         with:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
-
-      - name: Load CI environment
-        id: ci-env
-        uses: ./.github/actions/ci-env
-
-      - name: Checkout TheRock
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: ${{ steps.ci-env.outputs.therock-ref }}
-          path: TheRock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
-
-      - name: Checkout CI config
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/therock-ci-config
-          ref: main
-          path: ci-config
-        continue-on-error: true
-
-      - name: Select CPU build runner
-        id: runner
-        env:
-          CI_CONFIG_PATH: ci-config
-        run: python3 .github/scripts/select_cpu_build_runner.py
 
       - name: Install pinned gfx94X runtime and tests
         env:
@@ -99,7 +76,7 @@ jobs:
         id: list
         env:
           CTEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
-          COMPONENTS: ${{ inputs.components }}
+          COMPONENTS: ${{ github.event_name == 'push' && 'hipsolver' || inputs.components }}
         run: |
           set -euo pipefail
           args=(
@@ -124,7 +101,7 @@ jobs:
     name: ${{ matrix.component }} under rocJITsu
     needs: prepare
     if: needs.prepare.outputs.matrix != '' && needs.prepare.outputs.matrix != '{"include":[]}'
-    runs-on: ${{ needs.prepare.outputs.build_runs_on }}
+    runs-on: az-linux-scale-rocm-asan-prod-2
     timeout-minutes: 360
     strategy:
       fail-fast: false
@@ -139,7 +116,7 @@ jobs:
       CTEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
       ROCJITSU_ARG: ${{ inputs.rocjitsu_arg }}
       COMPONENT: ${{ matrix.component }}
-      BUILD_RUNS_ON: ${{ needs.prepare.outputs.build_runs_on }}
+      BUILD_RUNS_ON: az-linux-scale-rocm-asan-prod-2
       # Same pin as hiprand-rocjitsu-parity.yml: after ROCm/rocm-systems#12515
       # and #12618.
       ROCM_SYSTEMS_REF: 7e7420053ea9c896034a073eb53c0e71f7a19de0
@@ -148,7 +125,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential ca-certificates cmake curl git ninja-build pkg-config python3
+            build-essential ca-certificates cmake curl git libgfortran5 \
+            ninja-build pkg-config python3
 
       - name: Checkout rocm-libraries
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

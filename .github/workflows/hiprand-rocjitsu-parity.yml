@@ -4,9 +4,8 @@ name: hipRAND rocJITsu Parity PoC
 # and it does not change therock-multi-arch-ci.yml.
 #
 # The pull-request label ci:rocjitsu decides whether the parity job runs.
-# runs-on comes from TheRock select_build_runner(), which reads build_runners
-# (therock-ci-config when CI_CONFIG_PATH is set, otherwise the in-tree
-# BUILD_RUNNER_LABELS). That label is a CPU scale set, not a GPU test runner.
+# runs-on is az-linux-scale-rocm-asan-prod-2, not the default CPU build pool
+# and not a GPU test runner.
 #
 # The default run is ctest -L '^quick$', the same five hipRAND binaries the
 # hardware baseline selects with ctest -L '^standard$'. quick and standard are
@@ -76,35 +75,9 @@ jobs:
           sparse-checkout: .github
           sparse-checkout-cone-mode: true
 
-      - name: Load CI environment
-        if: steps.label.outputs.enabled == 'true'
-        id: ci-env
-        uses: ./.github/actions/ci-env
-
-      - name: Checkout TheRock
-        if: steps.label.outputs.enabled == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/TheRock
-          ref: ${{ steps.ci-env.outputs.therock-ref }}
-          path: TheRock
-          sparse-checkout: build_tools/github_actions
-          sparse-checkout-cone-mode: true
-
-      - name: Checkout CI config
-        if: steps.label.outputs.enabled == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ROCm/therock-ci-config
-          ref: main
-          path: ci-config
-        continue-on-error: true
-
-      - name: Select CPU build runner
+      - name: Select rocJITsu runner
         id: runner
         if: steps.label.outputs.enabled == 'true'
-        env:
-          CI_CONFIG_PATH: ci-config
         run: python3 .github/scripts/select_cpu_build_runner.py
 
       - name: No runner when the label is absent
