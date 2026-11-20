@@ -439,14 +439,15 @@ Tests:
    function: matmul, transA: N, transB: N, M: 32, N: 32, K: 32, alpha: 1.0, beta: 0.0,
    batch_count: 2, initialization: norm_dist_one_special }
 
+# MAF data does not give exact sums, so these cases validate with norm_check.
 - {name: matmul_maf_ordinary, category: quick, precision: *real_precisions,
    function: matmul, transA: N, transB: T, M: 32, N: 32, K: 32,
    alpha: 1.0, beta: 1.0, batch_count: 2,
-   initialization: [maf2_0, maf2_0_unit_scale, maf1_0] }
+   initialization: [maf2_0, maf2_0_unit_scale, maf1_0], norm_check: 1, unit_check: 0 }
 
 - {name: matmul_maf_double, category: quick, precision: *real_precisions_gemm_only,
    function: matmul, transA: N, transB: T, M: 32, N: 32, K: 32,
-   alpha: 1.0, beta: 1.0, initialization: [maf2_0, maf1_0] }
+   alpha: 1.0, beta: 1.0, initialization: [maf2_0, maf1_0], norm_check: 1, unit_check: 0 }
 
 - name: matmul_maf_mxfp4
   category: quick
@@ -463,6 +464,8 @@ Tests:
   alpha: 1.0
   beta: 0.0
   initialization: [maf2_0, maf2_0_unit_scale, maf1_0]
+  norm_check: 1
+  unit_check: 0
   gpu_arch: '1250'
 
 - name: matmul_one
