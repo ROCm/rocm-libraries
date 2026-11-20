@@ -659,6 +659,81 @@ TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithBeta)
     }
 }
 
+TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanEluWithDefaultAlpha)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Without an alpha attribute on the node, the kernel uses the default of 1
+    const float alpha = 1.0f;
+    auto builder = createUnaryGraph(PointwiseMode::ELU_FWD);
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+
+    Tensor<float> inputTensor(DIMS);
+    Tensor<float> outputTensor(DIMS);
+    fillWithRandomValues(inputTensor, -3.0f, 3.0f, 1U);
+    outputTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_0_UID] = inputTensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    plan->execute(variantPack);
+    outputTensor.markDeviceModified();
+
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        const float x = static_cast<float*>(inputTensor.rawHostData())[i];
+        const float expected = (x > 0.0f) ? x : alpha * std::expm1(x);
+        EXPECT_NEAR(expected, static_cast<float*>(outputTensor.rawHostData())[i], 1e-5f)
+            << "Mismatch at index " << i;
+    }
+}
+
+TEST(TestGpuPointwiseUnaryPlanFp32, ExecutePlanSoftplusWithDefaultBeta)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Without a beta attribute on the node, the kernel uses the default of 1
+    const float beta = 1.0f;
+    auto builder = createUnaryGraph(PointwiseMode::SOFTPLUS_FWD);
+    auto graph = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const GpuPointwiseUnaryPlanBuilder<DataType::FLOAT, DataType::FLOAT, DataType::FLOAT> patient;
+    auto plan = patient.buildNodePlan(graph, graph.getNode(0));
+
+    Tensor<float> inputTensor(DIMS);
+    Tensor<float> outputTensor(DIMS);
+    fillWithRandomValues(inputTensor, -3.0f, 3.0f, 1U);
+    outputTensor.fillWithValue(0);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    inputTensor.memory().hostData();
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[IN_0_UID] = inputTensor.rawDeviceData();
+    variantPack[OUT_UID] = outputTensor.rawDeviceData();
+
+    plan->execute(variantPack);
+    outputTensor.markDeviceModified();
+
+    for(size_t i = 0; i < outputTensor.elementCount(); ++i)
+    {
+        const auto x = static_cast<double>(static_cast<float*>(inputTensor.rawHostData())[i]);
+        const auto betaDouble = static_cast<double>(beta);
+        const auto expected = static_cast<float>(std::log1p(std::exp(betaDouble * x)) / betaDouble);
+        EXPECT_NEAR(expected, static_cast<float*>(outputTensor.rawHostData())[i], 1e-5f)
+            << "Mismatch at index " << i;
+    }
+}
+
 TEST(TestGpuPointwiseBinaryPlanFp32, ExecutePlanMaxMin)
 {
     SKIP_IF_NO_DEVICES();

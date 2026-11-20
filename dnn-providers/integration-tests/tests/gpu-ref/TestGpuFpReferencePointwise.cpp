@@ -69,6 +69,35 @@ TEST(TestGpuPointwiseMixedLayouts, Binary)
         outputCpuTensor, outputGpuTensor, getDynamicTolerance<float>(operation, fillRange));
 }
 
+TEST(TestGpuPointwiseMixedLayouts, BinaryMax)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Input tensors have different layouts
+    Tensor<float> input0Tensor({1, 3, 2, 2}, TensorLayout::NHWC);
+    Tensor<float> input1Tensor({1, 3, 2, 2}, TensorLayout::NCHW);
+    Tensor<float> outputCpuTensor({1, 3, 2, 2}, TensorLayout::NHWC);
+    Tensor<float> outputGpuTensor({1, 3, 2, 2}, TensorLayout::NHWC);
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::MAX_OP;
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
 TEST(TestGpuPointwiseMixedLayouts, Compare)
 {
     SKIP_IF_NO_DEVICES();
@@ -102,7 +131,7 @@ TEST(TestGpuPointwiseMixedLayouts, Ternary)
 {
     SKIP_IF_NO_DEVICES();
 
-    // All three inputs and the output have different layouts
+    // The inputs and the output use different layouts
     Tensor<float> input0Tensor({1, 3, 2, 2}, TensorLayout::NHWC);
     Tensor<float> input1Tensor({1, 3, 2, 2}, TensorLayout::NCHW);
     Tensor<bool> maskTensor({1, 3, 2, 2}, TensorLayout::NHWC);
@@ -214,6 +243,35 @@ TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
     assertAllClose(outputCpuTensor,
                    outputGpuTensor,
                    getDynamicTolerance<float, HalfType>(operation, fillRange));
+}
+
+TEST(TestGpuPointwiseMixedTypes, BinaryMinMixedInputs)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Input tensors have different types
+    Tensor<HalfType> input0Tensor({1, 3, 2, 2});
+    Tensor<BFloat16Type> input1Tensor({1, 3, 2, 2});
+    Tensor<float> outputCpuTensor({1, 3, 2, 2});
+    Tensor<float> outputGpuTensor({1, 3, 2, 2});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, HalfType{-fillRange}, HalfType{fillRange}, seed);
+    fillWithRandomValues(input1Tensor, BFloat16Type{-fillRange}, BFloat16Type{fillRange}, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::MIN_OP;
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
 }
 
 TEST(TestGpuPointwiseMixedTypes, CompareMixedInputs)
@@ -1018,6 +1076,35 @@ TEST(TestGpuPointwiseBroadcast, BinaryBroadcast3D)
     assertAllEqual(outputCpuTensor, outputGpuTensor);
 }
 
+TEST(TestGpuPointwiseBroadcast, BinaryMinBroadcast3D)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // broadcast [4, 1, 3] and [1, 5, 3] -> [4, 5, 3]
+    Tensor<float> input0Tensor({4, 1, 3});
+    Tensor<float> input1Tensor({1, 5, 3});
+    Tensor<float> outputCpuTensor({4, 5, 3});
+    Tensor<float> outputGpuTensor({4, 5, 3});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, -fillRange, fillRange, seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::MIN_OP;
+    CpuReferencePointwiseImpl<float, double>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
 TEST(TestGpuPointwiseBroadcast, CompareBroadcast4D)
 {
     SKIP_IF_NO_DEVICES();
@@ -1076,6 +1163,34 @@ TEST(TestGpuPointwiseBroadcast, TernaryBroadcast5D)
         operation, outputGpuTensor, input0Tensor, input1Tensor, maskTensor);
 
     assertAllEqual(outputCpuTensor, outputGpuTensor);
+}
+
+// --- Test fp16 and bf16 compute types ---
+
+TEST(TestGpuPointwiseOwnTypeCompute, BinaryFp16)
+{
+    SKIP_IF_NO_DEVICES();
+
+    for(const auto operation : {PointwiseMode::ADD,
+                                PointwiseMode::MAX_OP,
+                                PointwiseMode::SIGMOID_BWD,
+                                PointwiseMode::TANH_BWD})
+    {
+        runGpuVsCpuPointwiseBinary<HalfType, HalfType>(operation, {1, 3, 4, 4});
+    }
+}
+
+TEST(TestGpuPointwiseOwnTypeCompute, BinaryBfp16)
+{
+    SKIP_IF_NO_DEVICES();
+
+    for(const auto operation : {PointwiseMode::ADD,
+                                PointwiseMode::MAX_OP,
+                                PointwiseMode::SIGMOID_BWD,
+                                PointwiseMode::TANH_BWD})
+    {
+        runGpuVsCpuPointwiseBinary<BFloat16Type, BFloat16Type>(operation, {1, 3, 4, 4});
+    }
 }
 
 // --- Test activation parameters ---
@@ -1266,15 +1381,21 @@ TEST(TestGpuPointwiseSpecialValues, CompareGreater)
 using TestGpuPointwiseUnaryRef4DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseUnaryRef5DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseBinaryRef4DFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseCompareRef4DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseBinaryRef5DFp16 = PointwiseTestSuite<HalfType>;
+using TestGpuPointwiseCompareRef5DFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseUnaryRef4DBfp16 = PointwiseTestSuite<BFloat16Type>;
 using TestGpuPointwiseUnaryRef5DBfp16 = PointwiseTestSuite<BFloat16Type>;
 using TestGpuPointwiseBinaryRef4DBfp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseCompareRef4DBfp16 = PointwiseTestSuite<BFloat16Type>;
 using TestGpuPointwiseBinaryRef5DBfp16 = PointwiseTestSuite<BFloat16Type>;
+using TestGpuPointwiseCompareRef5DBfp16 = PointwiseTestSuite<BFloat16Type>;
 using TestGpuPointwiseUnaryRef4DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseUnaryRef5DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseBinaryRef4DFp32 = PointwiseTestSuite<float>;
+using TestGpuPointwiseCompareRef4DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseBinaryRef5DFp32 = PointwiseTestSuite<float>;
+using TestGpuPointwiseCompareRef5DFp32 = PointwiseTestSuite<float>;
 using TestGpuPointwiseUnarySpecialValuesFp16 = PointwiseTestSuite<HalfType>;
 using TestGpuPointwiseUnarySpecialValuesBfp16 = PointwiseTestSuite<BFloat16Type>;
 using TestGpuPointwiseUnarySpecialValuesFp32 = PointwiseTestSuite<float>;
@@ -1300,9 +1421,19 @@ TEST_P(TestGpuPointwiseBinaryRef4DFp16, MatchesCpuRef)
     this->runPointwiseBinaryTest();
 }
 
+TEST_P(TestGpuPointwiseCompareRef4DFp16, MatchesCpuRef)
+{
+    this->runPointwiseCompareTest();
+}
+
 TEST_P(TestGpuPointwiseBinaryRef5DFp16, MatchesCpuRef)
 {
     this->runPointwiseBinaryTest();
+}
+
+TEST_P(TestGpuPointwiseCompareRef5DFp16, MatchesCpuRef)
+{
+    this->runPointwiseCompareTest();
 }
 
 TEST_P(TestGpuPointwiseUnaryRef4DBfp16, MatchesCpuRef)
@@ -1320,9 +1451,19 @@ TEST_P(TestGpuPointwiseBinaryRef4DBfp16, MatchesCpuRef)
     this->runPointwiseBinaryTest();
 }
 
+TEST_P(TestGpuPointwiseCompareRef4DBfp16, MatchesCpuRef)
+{
+    this->runPointwiseCompareTest();
+}
+
 TEST_P(TestGpuPointwiseBinaryRef5DBfp16, MatchesCpuRef)
 {
     this->runPointwiseBinaryTest();
+}
+
+TEST_P(TestGpuPointwiseCompareRef5DBfp16, MatchesCpuRef)
+{
+    this->runPointwiseCompareTest();
 }
 
 TEST_P(TestGpuPointwiseUnaryRef4DFp32, MatchesCpuRef)
@@ -1340,9 +1481,19 @@ TEST_P(TestGpuPointwiseBinaryRef4DFp32, MatchesCpuRef)
     this->runPointwiseBinaryTest();
 }
 
+TEST_P(TestGpuPointwiseCompareRef4DFp32, MatchesCpuRef)
+{
+    this->runPointwiseCompareTest();
+}
+
 TEST_P(TestGpuPointwiseBinaryRef5DFp32, MatchesCpuRef)
 {
     this->runPointwiseBinaryTest();
+}
+
+TEST_P(TestGpuPointwiseCompareRef5DFp32, MatchesCpuRef)
+{
+    this->runPointwiseCompareTest();
 }
 
 TEST_P(TestGpuPointwiseTernaryRef4DFp16, MatchesCpuRef)
@@ -1401,6 +1552,9 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuPointwiseCompareRef4DFp32,
+                         ::testing::ValuesIn(getSmall4dComparePointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseTernaryRef4DFp32,
                          ::testing::ValuesIn(getSmall4dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -1410,6 +1564,9 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp16,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseCompareRef4DFp16,
+                         ::testing::ValuesIn(getSmall4dComparePointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseTernaryRef4DFp16,
                          ::testing::ValuesIn(getSmall4dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -1418,6 +1575,9 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseCompareRef4DBfp16,
+                         ::testing::ValuesIn(getSmall4dComparePointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseTernaryRef4DBfp16,
                          ::testing::ValuesIn(getSmall4dTernaryPointwiseCases()));
@@ -1430,6 +1590,9 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getMedium4dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseCompareRef4DFp32,
+                         ::testing::ValuesIn(getMedium4dComparePointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseTernaryRef4DFp32,
                          ::testing::ValuesIn(getMedium4dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
@@ -1438,6 +1601,9 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseBinaryRef4DFp32,
                          ::testing::ValuesIn(getLarge4dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuPointwiseCompareRef4DFp32,
+                         ::testing::ValuesIn(getLarge4dComparePointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseTernaryRef4DFp32,
                          ::testing::ValuesIn(getLarge4dTernaryPointwiseCases()));
@@ -1453,6 +1619,9 @@ INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Quick,
+                         TestGpuPointwiseCompareRef5DFp32,
+                         ::testing::ValuesIn(getSmall5dComparePointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Quick,
                          TestGpuPointwiseTernaryRef5DFp32,
                          ::testing::ValuesIn(getSmall5dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -1462,6 +1631,9 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp16,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseCompareRef5DFp16,
+                         ::testing::ValuesIn(getSmall5dComparePointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseTernaryRef5DFp16,
                          ::testing::ValuesIn(getSmall5dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
@@ -1470,6 +1642,9 @@ INSTANTIATE_TEST_SUITE_P(Standard,
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseCompareRef5DBfp16,
+                         ::testing::ValuesIn(getSmall5dComparePointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseTernaryRef5DBfp16,
                          ::testing::ValuesIn(getSmall5dTernaryPointwiseCases()));
@@ -1482,6 +1657,9 @@ INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getMedium5dBinaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuPointwiseCompareRef5DFp32,
+                         ::testing::ValuesIn(getMedium5dComparePointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuPointwiseTernaryRef5DFp32,
                          ::testing::ValuesIn(getMedium5dTernaryPointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
@@ -1490,6 +1668,9 @@ INSTANTIATE_TEST_SUITE_P(Comprehensive,
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseBinaryRef5DFp32,
                          ::testing::ValuesIn(getLarge5dBinaryPointwiseCases()));
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuPointwiseCompareRef5DFp32,
+                         ::testing::ValuesIn(getLarge5dComparePointwiseCases()));
 INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuPointwiseTernaryRef5DFp32,
                          ::testing::ValuesIn(getLarge5dTernaryPointwiseCases()));

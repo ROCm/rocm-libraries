@@ -45,6 +45,14 @@ inline const std::vector<PointwiseMode>& getBinaryOps()
     return s_binaryOps;
 };
 
+inline const std::vector<PointwiseMode>& getCompareOps()
+{
+    static const std::vector<PointwiseMode> s_compareOps = {
+        PointwiseMode::CMP_GT,
+    };
+    return s_compareOps;
+}
+
 inline const std::vector<PointwiseMode>& getTernaryOps()
 {
     static const std::vector<PointwiseMode> s_ternaryOps = {
@@ -136,6 +144,25 @@ inline std::vector<PointwiseTestCase> getSmall4dBinaryPointwiseCases()
     return cases;
 }
 
+inline std::vector<PointwiseTestCase> getSmall4dComparePointwiseCases()
+{
+    const std::vector<PointwiseMode>& compareOps = getCompareOps();
+    const std::vector<std::vector<int64_t>>& shapes = get4dSmallShapes();
+
+    std::vector<PointwiseTestCase> cases;
+    cases.reserve(compareOps.size() * shapes.size());
+
+    // Use std::views::cartesian_product once compiler supports C++23
+    for(const auto& op : compareOps)
+    {
+        for(const auto& shape : shapes)
+        {
+            cases.push_back({op, shape});
+        }
+    }
+    return cases;
+}
+
 inline std::vector<PointwiseTestCase> getSmall4dTernaryPointwiseCases()
 {
     const std::vector<PointwiseMode>& ternaryOps = getTernaryOps();
@@ -184,6 +211,25 @@ inline std::vector<PointwiseTestCase> getSmall5dBinaryPointwiseCases()
 
     // Use std::views::cartesian_product once compiler supports C++23
     for(const auto& op : binaryOps)
+    {
+        for(const auto& shape : shapes)
+        {
+            cases.push_back({op, shape});
+        }
+    }
+    return cases;
+}
+
+inline std::vector<PointwiseTestCase> getSmall5dComparePointwiseCases()
+{
+    const std::vector<PointwiseMode>& compareOps = getCompareOps();
+    const std::vector<std::vector<int64_t>>& shapes = get5dSmallShapes();
+
+    std::vector<PointwiseTestCase> cases;
+    cases.reserve(compareOps.size() * shapes.size());
+
+    // Use std::views::cartesian_product once compiler supports C++23
+    for(const auto& op : compareOps)
     {
         for(const auto& shape : shapes)
         {
@@ -284,6 +330,25 @@ inline std::vector<PointwiseTestCase> getMedium4dBinaryPointwiseCases()
     return cases;
 }
 
+inline std::vector<PointwiseTestCase> getMedium4dComparePointwiseCases()
+{
+    const std::vector<PointwiseMode>& compareOps = getCompareOps();
+    const std::vector<std::vector<int64_t>>& shapes = get4dMediumShapes();
+
+    std::vector<PointwiseTestCase> cases;
+    cases.reserve(compareOps.size() * shapes.size());
+
+    // Use std::views::cartesian_product once compiler supports C++23
+    for(const auto& op : compareOps)
+    {
+        for(const auto& shape : shapes)
+        {
+            cases.push_back({op, shape});
+        }
+    }
+    return cases;
+}
+
 inline std::vector<PointwiseTestCase> getMedium4dTernaryPointwiseCases()
 {
     const std::vector<PointwiseMode>& ternaryOps = getTernaryOps();
@@ -332,6 +397,25 @@ inline std::vector<PointwiseTestCase> getMedium5dBinaryPointwiseCases()
 
     // Use std::views::cartesian_product once compiler supports C++23
     for(const auto& op : binaryOps)
+    {
+        for(const auto& shape : shapes)
+        {
+            cases.push_back({op, shape});
+        }
+    }
+    return cases;
+}
+
+inline std::vector<PointwiseTestCase> getMedium5dComparePointwiseCases()
+{
+    const std::vector<PointwiseMode>& compareOps = getCompareOps();
+    const std::vector<std::vector<int64_t>>& shapes = get5dMediumShapes();
+
+    std::vector<PointwiseTestCase> cases;
+    cases.reserve(compareOps.size() * shapes.size());
+
+    // Use std::views::cartesian_product once compiler supports C++23
+    for(const auto& op : compareOps)
     {
         for(const auto& shape : shapes)
         {
@@ -418,6 +502,25 @@ inline std::vector<PointwiseTestCase> getLarge4dBinaryPointwiseCases()
     return cases;
 }
 
+inline std::vector<PointwiseTestCase> getLarge4dComparePointwiseCases()
+{
+    const std::vector<PointwiseMode>& compareOps = getCompareOps();
+    const std::vector<std::vector<int64_t>>& shapes = get4dLargeShapes();
+
+    std::vector<PointwiseTestCase> cases;
+    cases.reserve(compareOps.size() * shapes.size());
+
+    // Use std::views::cartesian_product once compiler supports C++23
+    for(const auto& op : compareOps)
+    {
+        for(const auto& shape : shapes)
+        {
+            cases.push_back({op, shape});
+        }
+    }
+    return cases;
+}
+
 inline std::vector<PointwiseTestCase> getLarge4dTernaryPointwiseCases()
 {
     const std::vector<PointwiseMode>& ternaryOps = getTernaryOps();
@@ -466,6 +569,25 @@ inline std::vector<PointwiseTestCase> getLarge5dBinaryPointwiseCases()
 
     // Use std::views::cartesian_product once compiler supports C++23
     for(const auto& op : binaryOps)
+    {
+        for(const auto& shape : shapes)
+        {
+            cases.push_back({op, shape});
+        }
+    }
+    return cases;
+}
+
+inline std::vector<PointwiseTestCase> getLarge5dComparePointwiseCases()
+{
+    const std::vector<PointwiseMode>& compareOps = getCompareOps();
+    const std::vector<std::vector<int64_t>>& shapes = get5dLargeShapes();
+
+    std::vector<PointwiseTestCase> cases;
+    cases.reserve(compareOps.size() * shapes.size());
+
+    // Use std::views::cartesian_product once compiler supports C++23
+    for(const auto& op : compareOps)
     {
         for(const auto& shape : shapes)
         {

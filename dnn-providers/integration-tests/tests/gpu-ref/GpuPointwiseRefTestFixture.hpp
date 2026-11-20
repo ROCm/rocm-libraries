@@ -36,7 +36,9 @@ float getDynamicTolerance(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode op
                                                                          errorClass);
 }
 
-template <typename DataType>
+// ComputeType defaults to float, the compute type of every registered unary tuple and of the
+// FP32 and mixed-precision binary tuples
+template <typename DataType, typename ComputeType = float>
 void runGpuVsCpuPointwiseUnary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                const std::vector<int64_t>& ioDims,
                                float fillRange = 1.0f)
@@ -60,15 +62,16 @@ void runGpuVsCpuPointwiseUnary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMo
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     inputTensor.memory().hostData();
 
-    CpuReferencePointwiseImpl<DataType, double, DataType>::pointwiseCompute(
+    CpuReferencePointwiseImpl<DataType, ComputeType, DataType>::pointwiseCompute(
         operation, outputCpu, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<DataType, DataType>(operation, outputGpu, inputTensor);
+    GpuReferencePointwise::pointwiseCompute<DataType, DataType, ComputeType>(
+        operation, outputGpu, inputTensor);
 
     assertAllClose(outputCpu, outputGpu, getDynamicTolerance<DataType>(operation, fillRange));
 }
 
-template <typename DataType>
+template <typename DataType, typename ComputeType = float>
 void runGpuVsCpuPointwiseBinary(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
                                 const std::vector<int64_t>& ioDims,
                                 float fillRange = 1.0f)
@@ -82,20 +85,57 @@ void runGpuVsCpuPointwiseBinary(hipdnn_flatbuffers_sdk::data_objects::PointwiseM
 
     fillWithRandomValues(
         input0Tensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
-    fillWithRandomValues(
-        input1Tensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+    // A different seed per operand, so that an operation that returns the wrong operand (MAX vs.
+    // MIN, or one of the inputs) can be told apart from the right one
+    fillWithRandomValues(input1Tensor,
+                         static_cast<DataType>(-fillRange),
+                         static_cast<DataType>(fillRange),
+                         seed + 1);
 
     // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
     input0Tensor.memory().hostData();
     input1Tensor.memory().hostData();
 
-    CpuReferencePointwiseImpl<DataType, double, DataType, DataType>::pointwiseCompute(
+    CpuReferencePointwiseImpl<DataType, ComputeType, DataType, DataType>::pointwiseCompute(
         operation, outputCpu, input0Tensor, input1Tensor);
 
-    GpuReferencePointwise::pointwiseCompute<DataType, DataType, DataType>(
+    GpuReferencePointwise::pointwiseCompute<DataType, DataType, DataType, ComputeType>(
         operation, outputGpu, input0Tensor, input1Tensor);
 
     assertAllClose(outputCpu, outputGpu, getDynamicTolerance<DataType>(operation, fillRange));
+}
+
+// Comparison operations produce a boolean output
+template <typename DataType, typename ComputeType = float>
+void runGpuVsCpuPointwiseCompare(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode operation,
+                                 const std::vector<int64_t>& ioDims,
+                                 float fillRange = 1.0f)
+{
+    const unsigned int seed = getGlobalTestSeed();
+    auto input0Tensor = Tensor<DataType>(ioDims);
+    auto input1Tensor = Tensor<DataType>(ioDims);
+
+    auto outputCpu = Tensor<bool>(ioDims);
+    auto outputGpu = Tensor<bool>(ioDims);
+
+    fillWithRandomValues(
+        input0Tensor, static_cast<DataType>(-fillRange), static_cast<DataType>(fillRange), seed);
+    fillWithRandomValues(input1Tensor,
+                         static_cast<DataType>(-fillRange),
+                         static_cast<DataType>(fillRange),
+                         seed + 1);
+
+    // Single non-const access to trigger migration as, despite a comment claiming otherwise, MigratableMemory cannot migrate via a const access
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    CpuReferencePointwiseImpl<bool, ComputeType, DataType, DataType>::pointwiseCompute(
+        operation, outputCpu, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<bool, DataType, DataType, ComputeType>(
+        operation, outputGpu, input0Tensor, input1Tensor);
+
+    assertAllEqual(outputCpu, outputGpu);
 }
 
 // Fills a mask with a deterministic mix of true and false.
@@ -165,10 +205,10 @@ void runGpuVsCpuPointwiseUnarySpecialValues(
             static_cast<DataType>(values[i]), 0, 0, 0, static_cast<int64_t>(i));
     }
 
-    CpuReferencePointwiseImpl<DataType, double, DataType>::pointwiseCompute(
+    CpuReferencePointwiseImpl<DataType, float, DataType>::pointwiseCompute(
         operation, outputCpuTensor, inputTensor);
 
-    GpuReferencePointwise::pointwiseCompute<DataType, DataType>(
+    GpuReferencePointwise::pointwiseCompute<DataType, DataType, float>(
         operation, outputGpuTensor, inputTensor);
 
     assertAllCloseWithSpecialValues(
@@ -197,10 +237,10 @@ void runGpuVsCpuPointwiseBinarySpecialValues(
         input1Tensor.setHostValue(values1[i], 0, 0, 0, static_cast<int64_t>(i));
     }
 
-    CpuReferencePointwiseImpl<OutputType, double, float, float>::pointwiseCompute(
+    CpuReferencePointwiseImpl<OutputType, float, float, float>::pointwiseCompute(
         operation, outputCpuTensor, input0Tensor, input1Tensor);
 
-    GpuReferencePointwise::pointwiseCompute<OutputType, float, float>(
+    GpuReferencePointwise::pointwiseCompute<OutputType, float, float, float>(
         operation, outputGpuTensor, input0Tensor, input1Tensor);
 
     assertAllEqual(outputCpuTensor, outputGpuTensor);
@@ -230,6 +270,13 @@ protected:
         SKIP_IF_NO_DEVICES();
         const auto& tc = GetParam();
         runGpuVsCpuPointwiseBinary<DataType>(tc.operation, tc.ioDims);
+    }
+
+    void runPointwiseCompareTest()
+    {
+        SKIP_IF_NO_DEVICES();
+        const auto& tc = GetParam();
+        runGpuVsCpuPointwiseCompare<DataType>(tc.operation, tc.ioDims);
     }
 
     void runPointwiseTernaryTest()

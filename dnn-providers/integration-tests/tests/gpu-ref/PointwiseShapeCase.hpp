@@ -75,7 +75,7 @@ void assertAllCloseWithSpecialValues(hipdnn_data_sdk::utilities::TensorBase<T>& 
 }
 
 // Exact comparison for results that are not subject to rounding (bool, selection, MAX/MIN).
-// A NaN matches a NaN. Both tensors must have the same layout.
+// A NaN matches a NaN and the sign of a zero must match. Both tensors must have the same layout.
 template <typename T>
 void assertAllEqual(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
                     hipdnn_data_sdk::utilities::TensorBase<T>& actual)
@@ -87,8 +87,10 @@ void assertAllEqual(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
     {
         const auto expectedValue = static_cast<float>(expectedData[i]);
         const auto actualValue = static_cast<float>(actualData[i]);
+        // -0.0 and +0.0 compare equal, so the sign of a zero is checked separately
         ASSERT_TRUE((std::isnan(expectedValue) && std::isnan(actualValue))
-                    || expectedValue == actualValue)
+                    || (expectedValue == actualValue
+                        && std::signbit(expectedValue) == std::signbit(actualValue)))
             << "Mismatch at index " << i << ": expected " << expectedValue << ", actual "
             << actualValue;
     }
