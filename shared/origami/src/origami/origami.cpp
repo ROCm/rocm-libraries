@@ -15,6 +15,7 @@
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
 #include "origami/origami.hpp"
+#include "origami/heuristics.hpp"
 #include "origami/streamk.hpp"
 #include "origami/types.hpp"
 
@@ -699,7 +700,9 @@ double compute_ranked_latency(const problem_t& problem,
     return attention::compute_total_latency(problem, hardware, config);
   }
 
-  if (!gemm::check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
+  // A W4A16 kernel keeps its dequantized A tile in LDS as the MI type.
+  const data_type_t lds_a_dtype = w4a16_params(problem, hardware) != nullptr ? problem.mi_dtype : problem.a_dtype;
+  if (!gemm::check_lds_capacity(hardware, config.mt, lds_a_dtype, problem.b_dtype)) {
     log_config_rejection(config, "LDS capacity exceeded");
     return kRejectedLatency;
   }
