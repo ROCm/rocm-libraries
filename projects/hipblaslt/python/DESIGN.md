@@ -6,6 +6,10 @@ This file records the decisions behind the bindings that a maintainer would othe
 
 The bindings are a development and testing tool for hipBLASLt and its consumers, not a ROCm deliverable. They're opt-in and source-build only: built from a rocm-libraries checkout against an installed ROCm, and installed into the active Python environment. hipBLASLt's CMake never adds or installs them, and TheRock never builds them, so nothing about hipBLASLt's own build, install rules or packages depends on them.
 
+## Layout
+
+`src/hipblaslt/` is the Python package and `csrc/` is the nanobind extension, with the `_build_info.py` template CMake fills in. The `src/` layout, which origami's bindings also use, means a Python started in this directory imports the installed package rather than the source tree, which has no `_core`, and nothing outside the package ends up in the wheel.
+
 ## Version
 
 The package version, `hipblaslt.__version__`, is hipBLASLt's own `MAJOR.MINOR.PATCH`, read from the `hipblaslt-version.h` of the hipBLASLt the bindings are built against. A separate bindings version would say nothing about which hipBLASLt a user has, and a solution index, a default heuristic choice or a bug is only meaningful for one hipBLASLt build.

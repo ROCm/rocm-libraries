@@ -77,11 +77,11 @@ else()
 endif()
 
 nanobind_add_module(_core NB_SUPPRESS_WARNINGS
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/module.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/csrc/module.cpp"
 )
 # hipBLASLt's headers first: hip::host's include directory may hold an older hipBLASLt.
 target_include_directories(_core BEFORE PRIVATE "${HIPBLASLT_PY_BUILD_INCLUDE_DIR}")
-target_include_directories(_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+target_include_directories(_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/csrc")
 target_link_libraries(_core PRIVATE hip::host roc::hipblaslt)
 if(WIN32)
     target_compile_definitions(_core PRIVATE NOMINMAX)
@@ -91,7 +91,7 @@ else()
         BUILD_WITH_INSTALL_RPATH ON)
 endif()
 
-configure_file("${CMAKE_CURRENT_SOURCE_DIR}/hipblaslt/_build_info.py.in"
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/csrc/_build_info.py.in"
                "${CMAKE_CURRENT_BINARY_DIR}/_build_info.py" @ONLY)
 
 install(TARGETS _core DESTINATION hipblaslt)
