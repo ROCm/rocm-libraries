@@ -680,11 +680,14 @@ class _MlpScorer:
 
 
 def _paired(worse: np.ndarray, better: np.ndarray) -> tuple[float, float]:
-    """(mean, standard error) of the per-cell fall in error from `worse` to `better`."""
+    """(mean, standard error) of the per-cell fall in error from `worse` to `better`.
+
+    One cell has no spread to estimate: its standard error is 0, so the margin is the
+    MIN_TOLERANCE floor, as it is for a one-seed LightGBM run."""
     difference = worse - better
-    return float(difference.mean()), float(
-        difference.std(ddof=1) / math.sqrt(len(difference))
-    )
+    count = len(difference)
+    error = float(difference.std(ddof=1) / math.sqrt(count)) if count > 1 else 0.0
+    return float(difference.mean()), error
 
 
 def _adapter_candidates(
@@ -793,7 +796,8 @@ def _adapter_pass(
             mlp.cells(without, ADAPTER_REMOVAL),
             mlp.cells(sorted(current), ADAPTER_REMOVAL),
         )
-        # Fewer cells than the other folds: one standard error is the bar, as in confirm.
+        # Fewer cells than the other folds: one standard error is the bar, as in confirm. With
+        # one seed the removal fold is one cell and its error is 0: the floor alone decides.
         kept = cost > max(error, MIN_TOLERANCE)
         checks.append(
             {"feature": candidates[index].name, "mlp_removal_cost": cost, "kept": kept}
