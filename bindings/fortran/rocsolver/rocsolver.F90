@@ -157,6 +157,10 @@ module rocsolver
     enumerator :: rocsolver_function_hetrd = 406
   end enum
 
+  integer(c_int), parameter :: ROCSOLVER_VERSION_MAJOR = 3
+  integer(c_int), parameter :: ROCSOLVER_VERSION_MINOR = 39
+  integer(c_int), parameter :: ROCSOLVER_VERSION_PATCH = 0
+
 
   interface rocsolver_get_version_string
     function rocsolver_get_version_string_(buf,len) bind(c, name="rocsolver_get_version_string")
