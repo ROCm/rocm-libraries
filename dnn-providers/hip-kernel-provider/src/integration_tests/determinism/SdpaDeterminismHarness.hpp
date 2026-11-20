@@ -367,17 +367,24 @@ inline PreparedGraph prepareForward(
     }
 
     // The last live query row of batch 0 sees keys (the first row of a causal graph sees one
-    // key, so its output ignores Q), at head 0 and element 0 of the head.
+    // key, so its output ignores Q), at head 0 and element 0 of the head. A top-left band whose
+    // left bound is at most Sq - Skv leaves the last rows without keys; there the probe is row
+    // Skv - 1, which sees the bound's keys.
     const auto [liveQ, liveKv] = liveLengths(spec, 0);
-    static_cast<void>(liveKv);
+    int64_t probeRow = std::max<int64_t>(liveQ, 1) - 1;
+    if(spec.alignment == hipdnn_frontend::DiagonalAlignment::TOP_LEFT && spec.leftBound.has_value()
+       && liveQ - liveKv >= *spec.leftBound)
+    {
+        probeRow = liveKv - 1;
+    }
     int64_t firstToken = 0;
     if(!spec.packedLensQ.empty())
     {
         firstToken = tokenTable(spec.packedOriginsQ, spec.packedLensQ).front();
     }
     prepared.sensitivityUid = Q_UID;
-    prepared.sensitivityElement = static_cast<size_t>((firstToken + std::max<int64_t>(liveQ, 1) - 1)
-                                                      * spec.queryHeads * spec.headSize);
+    prepared.sensitivityElement
+        = static_cast<size_t>((firstToken + probeRow) * spec.queryHeads * spec.headSize);
     return prepared;
 }
 
