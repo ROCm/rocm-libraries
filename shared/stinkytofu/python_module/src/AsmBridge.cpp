@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <memory>
 #include <sstream>
@@ -118,6 +119,8 @@ bool isLabelName(const std::string& name) {
 bool isSupportedTypedInstruction(const std::string& mnemonic) {
     static const std::unordered_set<std::string> supported = {
         // T00 FMHA typed forms. Packed v_pk_fma_f32/v_pk_mul_f32 remain audited custom words.
+        // buffer_atomic_add_f32 is accepted only in its ::noret form (see selectForm).
+        "buffer_atomic_add_f32",
         "ds_load_b128", "ds_load_tr16_b128", "ds_store_b128", "ds_store_b32",
         "flat_load_b32", "flat_store_b32", "global_prefetch_b8", "s_add_co_ci_u32",
         "s_add_co_i32", "s_add_co_u32", "s_add_u32",
@@ -136,12 +139,14 @@ bool isSupportedTypedInstruction(const std::string& mnemonic) {
         "v_cmp_eq_f32", "v_cmp_le_u32", "v_cmp_lt_i32",
         "v_cmp_lt_u32", "v_cndmask_b32", "v_cvt_f32_u32", "v_cvt_pk_bf16_f32",
         "v_cvt_u32_f32", "v_exp_f32", "v_fma_f32", "v_log_f32", "v_lshlrev_b32",
-        "v_lshrrev_b32", "v_max3_num_f32", "v_max_num_f32", "v_mov_b32", "v_mov_b64",
+        "v_lshrrev_b32", "v_mad_co_u64_u32", "v_max3_num_f32", "v_max_num_f32", "v_mov_b32",
+        "v_mov_b64",
         "v_mul_f32", "v_mul_hi_u32", "v_mul_i32_i24", "v_mul_lo_u32",
         "v_mul_u32_u24", "v_nop", "v_permlane16_swap_b32", "v_permlanex16_b32",
         "v_perm_b32", "v_pk_add_f32", "v_pk_mul_f32", "v_rcp_f32", "v_rcp_iflag_f32", "v_readfirstlane_b32",
         "v_readlane_b32", "v_sub_f32", "v_sub_nc_i32", "v_sub_u32", "v_subrev_nc_u32",
-        "v_swap_b32", "v_tanh_f32", "v_wmma_f32_16x16x32_bf16", "v_writelane_b32", "v_xor_b32",
+        "v_swap_b32", "v_tanh_f32", "v_wmma_f32_16x16x32_bf16", "v_writelane_b32", "v_xor3_b32",
+        "v_xor_b32",
         // Structural records selected by the target lowering.
         "s_branch", "s_cbranch_execnz", "s_cbranch_execz", "s_cbranch_scc0",
         "s_cbranch_scc1", "s_cbranch_vccnz", "s_cbranch_vccz", "s_set_vgpr_msb",
@@ -171,15 +176,28 @@ std::vector<StinkyRegister> parseOperands(const nb::dict& record, const char* ke
     return result;
 }
 
+// gfx1250 buffer instructions encode an unsigned 23-bit immediate offset.
+constexpr int64_t kMaxMubufOffset = (int64_t{1} << 23) - 1;
+
 void addModifiers(StinkyInstruction& inst, const nb::dict& record, size_t itemIndex) {
+    // The typed buffer atomic always carries a VGPR vaddr, so it needs the offen addressing
+    // mode; without the modifier the emitter would print a line that does not assemble.
+    const bool requiresMubuf =
+        std::string_view(inst.getHwInstDesc()->mnemonic) == "buffer_atomic_add_f32";
     nb::handle value = find(record, "modifiers");
-    if (!value.is_valid()) return;
+    if (!value.is_valid()) {
+        if (requiresMubuf)
+            fail(itemIndex, "buffer_atomic_add_f32 requires modifier 'mubuf' with offen=True");
+        return;
+    }
     if (!PyDict_Check(value.ptr())) fail(itemIndex, "field 'modifiers' must be a dict");
     nb::dict modifiers = nb::borrow<nb::dict>(value);
     rejectUnknownKeys(modifiers,
-                      {"ds", "global", "smem", "vop3p", "mfma", "swaitcnt",
+                      {"ds", "global", "mubuf", "smem", "vop3p", "mfma", "swaitcnt",
                        "swaittensorcnt", "waitalu"},
                       itemIndex);
+    if (requiresMubuf && !find(modifiers, "mubuf").is_valid())
+        fail(itemIndex, "buffer_atomic_add_f32 requires modifier 'mubuf' with offen=True");
 
     if (nb::handle dsValue = find(modifiers, "ds"); dsValue.is_valid()) {
         if (!(inst.is(IF_DSRead) || inst.is(IF_DSStore) || inst.is(IF_DSAtomic)))
@@ -252,6 +270,31 @@ void addModifiers(StinkyInstruction& inst, const nb::dict& record, size_t itemIn
         inst.addModifier(SMEMModifiers(optionalBool(data, "glc", false, itemIndex),
                                        optionalBool(data, "nv", false, itemIndex),
                                        static_cast<int>(offset)));
+    }
+
+    if (nb::handle value = find(modifiers, "mubuf"); value.is_valid()) {
+        if (std::string_view(inst.getHwInstDesc()->mnemonic) != "buffer_atomic_add_f32")
+            fail(itemIndex, "modifier 'mubuf' is only valid on buffer_atomic_add_f32");
+        if (!PyDict_Check(value.ptr())) fail(itemIndex, "modifier 'mubuf' must be a dict");
+        nb::dict data = nb::borrow<nb::dict>(value);
+        rejectUnknownKeys(data, {"offen", "offset", "scope"}, itemIndex);
+        // The emitter prints the offset together with offen, and the typed form always
+        // carries a VGPR vaddr, so the offen (VGPR byte offset) addressing mode is required.
+        if (!optionalBool(data, "offen", false, itemIndex))
+            fail(itemIndex, "MUBUF modifier 'offen' must be True");
+        int64_t offset = optionalInteger(data, "offset", 0, itemIndex);
+        if (offset < 0 || offset > kMaxMubufOffset)
+            fail(itemIndex, "MUBUF modifier 'offset' must be in [0, 8388607]");
+        std::string scope = find(data, "scope").is_valid()
+                                ? requireString(data, "scope", itemIndex)
+                                : "SCOPE_NONE";
+        MUBUFScope parsedScope = parseMUBUFScope(scope);
+        if (scope != "SCOPE_NONE" && parsedScope == MUBUFScope::SCOPE_NONE)
+            fail(itemIndex, "unknown MUBUF scope '" + scope + "'");
+        inst.addModifier(MUBUFModifiers(/*offen=*/true, static_cast<int>(offset), /*glc=*/false,
+                                        /*slc=*/false, /*nt=*/false, /*lds=*/false,
+                                        /*isStore=*/false, /*hasGLCModifier=*/false,
+                                        /*hasSC0Modifier=*/false, parsedScope));
     }
 
     if (nb::handle value = find(modifiers, "global"); value.is_valid()) {
@@ -341,16 +384,30 @@ bool hasLabelField(const HwInstDesc& desc) {
                        });
 }
 
-bool selectPromotedFields(const nb::dict& record, const HwInstDesc& desc,
-                          const std::string& mnemonic, size_t itemIndex) {
+enum class SelectedForm { Primary, Promoted, NoReturn };
+
+// MUBUF atomics are defined with vdata as a read-write destination, which the emitter
+// prints as a returning atomic (th:TH_ATOMIC_RETURN). The ::noret form selects the
+// fire-and-forget encoding instead: vdata only supplies the operand.
+bool hasNoReturnForm(const std::string& mnemonic) {
+    return mnemonic == "buffer_atomic_add_f32";
+}
+
+SelectedForm selectForm(const nb::dict& record, const HwInstDesc& desc,
+                        const std::string& mnemonic, size_t itemIndex) {
     const std::string form = requireString(record, "form", itemIndex);
     const std::string primary = "gfx1250::" + mnemonic;
-    if (form == primary) return false;
+    if (hasNoReturnForm(mnemonic)) {
+        if (form == primary + "::noret") return SelectedForm::NoReturn;
+        fail(itemIndex, "instruction '" + mnemonic + "' is only supported in form '" + primary +
+                            "::noret'");
+    }
+    if (form == primary) return SelectedForm::Primary;
     if (form == primary + "::vop3") {
         if (desc.promotedFormat == MicrocodeFormat::NONE || desc.promotedFields.empty())
             fail(itemIndex, "form '" + form + "' requests a promoted encoding that instruction '" +
                                 mnemonic + "' does not provide");
-        return true;
+        return SelectedForm::Promoted;
     }
 
     const bool selectedExpansion =
@@ -361,7 +418,7 @@ bool selectPromotedFields(const nb::dict& record, const HwInstDesc& desc,
         ((mnemonic == "s_wait_dscnt" || mnemonic == "s_wait_kmcnt" ||
           mnemonic == "s_wait_loadcnt" || mnemonic == "s_wait_storecnt") &&
          form == primary + "::from_s_waitcnt");
-    if (selectedExpansion) return false;
+    if (selectedExpansion) return SelectedForm::Primary;
 
     fail(itemIndex, "form '" + form + "' does not select instruction '" + mnemonic + "'");
 }
@@ -453,6 +510,14 @@ bool allowsM0(const HwInstDesc& desc, bool isDest, size_t operandIndex,
     return fieldType == FieldType::sreg_m0;
 }
 
+// v_mad_co_u64_u32 writes its carry to an SGPR/VCC or discards it with null.
+bool isNullCarryDestination(const StinkyRegister& operand, const HwInstDesc& desc,
+                            size_t operandIndex) {
+    return operand.dataType == StinkyRegister::Type::LiteralString &&
+           operand.literalValue == "null" && operandIndex == 1 &&
+           std::string_view(desc.mnemonic) == "v_mad_co_u64_u32";
+}
+
 void validateRegisterRange(const StinkyRegister& operand, const ArchHelper::ArchInfo& archInfo,
                            const std::string& location, size_t itemIndex,
                            bool allowAuditedVgprBoundaryCrossing = false) {
@@ -490,6 +555,7 @@ void validateOperand(const StinkyRegister& operand, const HwInstDesc& desc,
     }
     if (field.fieldType == FieldType::hwreg)
         fail(itemIndex, location + " hardware-register field requires a structured hwreg operand");
+    if (field.isDest && isNullCarryDestination(operand, desc, operandIndex)) return;
     if (field.isDest && operand.dataType != StinkyRegister::Type::Register)
         fail(itemIndex, location + " destination must be a physical register");
 
@@ -513,6 +579,20 @@ void validateOperand(const StinkyRegister& operand, const HwInstDesc& desc,
 
     if (field.fieldType == FieldType::label)
         fail(itemIndex, location + " label field requires a string target");
+
+    if (field.fieldType == FieldType::sreg_m0 && !isM0(operand)) {
+        // Buffer soffset: one SGPR, m0, or zero, which the emitter writes as null.
+        if (operand.dataType == StinkyRegister::Type::LiteralInt) {
+            if (operand.literalInt != 0)
+                fail(itemIndex, location + " soffset immediate must be 0 (null)");
+            return;
+        }
+        if (operand.dataType != StinkyRegister::Type::Register ||
+            operand.reg.type != RegType::S || operand.reg.num != 1)
+            fail(itemIndex, location + " soffset requires one SGPR, m0 or 0 (null)");
+        validateRegisterRange(operand, archInfo, location, itemIndex);
+        return;
+    }
 
     if (isM0(operand)) {
         if (!allowsM0(desc, isDest, operandIndex, field.fieldType))
@@ -684,6 +764,7 @@ std::string emitAsm(const std::string& archName, uint32_t waveSize, const nb::li
     // object that refers to them, including Function destruction.
     std::vector<std::unique_ptr<std::string>> selectedMnemonicStorage;
     std::vector<std::unique_ptr<HwInstDesc>> selectedDescriptorStorage;
+    std::deque<std::vector<HwInstDesc::OperandFieldDesc>> selectedFieldStorage;
     Function function("emit_asm");
     BasicBlock* block = function.createBasicBlock("entry");
     AsmIRBuilder builder(*block, arch);
@@ -716,7 +797,24 @@ std::string emitAsm(const std::string& archName, uint32_t waveSize, const nb::li
             const HwInstDesc* desc = getMCIDByIsaOp(opcodeIt->second, arch);
             if (!desc || !desc->mnemonic)
                 fail(itemIndex, "instruction '" + mnemonic + "' has no hardware descriptor");
-            const bool promoted = selectPromotedFields(record, *desc, mnemonic, itemIndex);
+            const SelectedForm selectedForm = selectForm(record, *desc, mnemonic, itemIndex);
+            const bool promoted = selectedForm == SelectedForm::Promoted;
+            if (selectedForm == SelectedForm::NoReturn) {
+                // Same descriptor, with the read-write vdata destination demoted to a plain
+                // source, so the instruction has no destination and prints no
+                // th:TH_ATOMIC_RETURN.
+                auto& fields = selectedFieldStorage.emplace_back(desc->operandFields.begin(),
+                                                                 desc->operandFields.end());
+                for (auto& field : fields) {
+                    if (!field.isDest) continue;
+                    field.isDest = 0;
+                    field.isReadWrite = 0;
+                }
+                auto selected = std::make_unique<HwInstDesc>(*desc);
+                selected->operandFields = {fields.data(), fields.size()};
+                selectedDescriptorStorage.push_back(std::move(selected));
+                desc = selectedDescriptorStorage.back().get();
+            }
 
             auto dests = parseOperands(record, "dst", itemIndex);
             auto srcs = parseOperands(record, "src", itemIndex);

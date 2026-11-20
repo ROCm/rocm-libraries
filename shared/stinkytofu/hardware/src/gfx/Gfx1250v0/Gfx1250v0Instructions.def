@@ -698,6 +698,19 @@ DEF_T(VAddCoU32Inst, "v_add_co_u32", .format = VOP3, .logical = "VAddCOU32",
     },
 )
 
+// 32x32 -> 64-bit unsigned multiply-add with carry out (VOP3SD encoding, like v_add_co_u32
+// above). The assembler still accepts the pre-gfx12 spelling v_mad_u64_u32 but prints
+// v_mad_co_u64_u32. The carry destination may be null when it is not needed.
+DEF_T(VMadCoU64U32Inst, "v_mad_co_u64_u32", .format = VOP3,
+    .operand_fields = {
+        {D0, vdst, vgpr, 64},
+        {D1, sdst, sreg, M64},
+        {S0, src0, src, 32},
+        {S1, src1, src, 32},
+        {S2, src2, src, 64},
+    },
+)
+
 // Vector ALU — VOP3 only (commutative)
 DEF_BATCH(.format = VOP3_COMMUTATIVE,
     VAdd3U32Inst, "v_add3_u32", .logical = "VAdd3U32",
@@ -706,6 +719,7 @@ DEF_BATCH(.format = VOP3_COMMUTATIVE,
     VFmaF32Inst, "v_fma_f32", .logical = "VFmaF32",
     VFmaF64Inst, "v_fma_f64", .logical = "VFmaF64", .flags = {DPMACC},
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64}, {S2, .size=64} },
+    VXor3B32Inst, "v_xor3_b32",
 )
 
 // Vector ALU — VOP3 only (2 sources, commutative)

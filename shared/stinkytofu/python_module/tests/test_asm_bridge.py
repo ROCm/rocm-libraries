@@ -388,6 +388,140 @@ def test_emit_asm_supports_fmha_softcap_and_dropout_vector_ops(target):
         assert expected in assembly
 
 
+
+def _skip_unbuilt(target):
+    try:
+        _raw_emit_asm(target, 32, [])
+    except ValueError as error:
+        if "unsupported architecture" not in str(error):
+            raise
+        pytest.skip(f"{target} is not built (see STINKYTOFU_ARCHS_TO_BUILD)")
+
+
+def _dq_atomic(vdata, vaddr, rsrc, soffset, modifiers=None):
+    item = {"kind": "instruction", "form": "gfx1250::buffer_atomic_add_f32::noret",
+            "mnemonic": "buffer_atomic_add_f32", "src": [vdata, vaddr, rsrc, soffset]}
+    if modifiers is not None:
+        item["modifiers"] = modifiers
+    return item
+
+
+@pytest.mark.parametrize("target", ["gfx1250", "gfx1250v0", "gfx1250-strict"])
+def test_emit_asm_supports_fmha_dropout_philox_round_ops(target):
+    # One Philox round on gfx1250 is two v_mad_co_u64_u32 (the 32x32->64 multiply with a
+    # constant multiplier and a discarded carry) and two v_xor3_b32.
+    _skip_unbuilt(target)
+    assembly = emit_asm(
+        target,
+        32,
+        [
+            {"kind": "instruction", "mnemonic": "v_mad_co_u64_u32",
+             "dst": [vgpr(0, 2), Register("null")],
+             "src": [Register(0xD2511F53 - (1 << 32)), vgpr(3), Register(0)]},
+            {"kind": "instruction", "mnemonic": "v_mad_co_u64_u32",
+             "dst": [vgpr(4, 2), Register("null")],
+             "src": [sgpr(2), vgpr(3), vgpr(6, 2)]},
+            {"kind": "instruction", "mnemonic": "v_mad_co_u64_u32",
+             "dst": [vgpr(8, 2), Register("vcc_lo", 0, 1)],
+             "src": [vgpr(10), vgpr(11), Register(0)]},
+            {"kind": "instruction", "mnemonic": "v_xor3_b32", "dst": [vgpr(12)],
+             "src": [sgpr(22), vgpr(13), vgpr(14)]},
+            {"kind": "instruction", "mnemonic": "v_xor3_b32", "dst": [vgpr(15)],
+             "src": [vgpr(15), vgpr(16), sgpr(26)]},
+        ],
+    )
+    for expected in (
+        "v_mad_co_u64_u32 v[0:1], null, -766435501, v3, 0",  # 0xd2511f53
+        "v_mad_co_u64_u32 v[4:5], null, s2, v3, v[6:7]",
+        "v_mad_co_u64_u32 v[8:9], vcc_lo, v10, v11, 0",
+        "v_xor3_b32 v12, s22, v13, v14",
+        "v_xor3_b32 v15, v15, v16, s26",
+    ):
+        assert expected in assembly
+
+
+@pytest.mark.parametrize("target", ["gfx1250", "gfx1250v0", "gfx1250-strict"])
+def test_emit_asm_supports_fmha_bwd_dq_buffer_atomic_add(target):
+    # The FMHA backward kernel accumulates partial FP32 dQ tiles with a non-returning
+    # buffer_atomic_add_f32 (BF16_FMHA_BWD_D128_1TG_4W_32mx1_32nx4_A32.sp3).
+    _skip_unbuilt(target)
+    assembly = emit_asm(
+        target,
+        32,
+        [
+            _dq_atomic(vgpr(12), vgpr(32), sgpr(60, 4), Register(0),
+                       {"mubuf": {"offen": True, "offset": 5632, "scope": "SCOPE_DEV"}}),
+            _dq_atomic(vgpr(13), vgpr(33), sgpr(60, 4), sgpr(4),
+                       {"mubuf": {"offen": True, "offset": 8388607}}),
+            _dq_atomic(vgpr(14), vgpr(34), sgpr(60, 4), Register("m", 0, 1),
+                       {"mubuf": {"offen": True}}),
+        ],
+    )
+    for expected in (
+        "buffer_atomic_add_f32 v12, v32, s[60:63], null offen offset:5632 scope:SCOPE_DEV\n",
+        "buffer_atomic_add_f32 v13, v33, s[60:63], s4 offen offset:8388607\n",
+        "buffer_atomic_add_f32 v14, v34, s[60:63], m0 offen offset:0\n",
+    ):
+        assert expected in assembly
+    assert "TH_ATOMIC_RETURN" not in assembly
+
+
+_DQ_MUBUF = {"mubuf": {"offen": True, "offset": 512, "scope": "SCOPE_DEV"}}
+
+
+@pytest.mark.parametrize(
+    "item, message",
+    [
+        ({"kind": "instruction", "mnemonic": "buffer_atomic_add_f32", "dst": [vgpr(0)],
+          "src": [vgpr(0), vgpr(1), sgpr(0, 4), Register(0)]}, "only supported in form"),
+        ({**_dq_atomic(vgpr(0), vgpr(1), sgpr(0, 4), Register(0), _DQ_MUBUF),
+          "dst": [vgpr(0)]}, "expects 0 dst and 4 src"),
+        (_dq_atomic(sgpr(0), vgpr(1), sgpr(4, 4), Register(0), _DQ_MUBUF), "requires a VGPR"),
+        (_dq_atomic(vgpr(0), sgpr(1), sgpr(4, 4), Register(0), _DQ_MUBUF), "requires a VGPR"),
+        (_dq_atomic(vgpr(0), vgpr(1), vgpr(4, 4), Register(0), _DQ_MUBUF), "scalar register"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 2), Register(0), _DQ_MUBUF), "register width 2"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), vgpr(2), _DQ_MUBUF), "soffset requires"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), sgpr(8, 2), _DQ_MUBUF), "soffset requires"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(4), _DQ_MUBUF), "must be 0"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(0),
+                    {"mubuf": {"offen": True, "offset": 8388608}}), r"\[0, 8388607\]"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(0),
+                    {"mubuf": {"offen": True, "offset": -4}}), r"\[0, 8388607\]"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(0),
+                    {"mubuf": {"offset": 0}}), "'offen' must be True"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(0)), "requires modifier 'mubuf'"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(0), {}), "requires modifier 'mubuf'"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(0),
+                    {"global": {"offset": 0}}), "requires modifier 'mubuf'"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(0),
+                    {"mubuf": {"offen": True, "glc": True}}), "unknown"),
+        (_dq_atomic(vgpr(0), vgpr(1), sgpr(4, 4), Register(0),
+                    {"mubuf": {"offen": True, "scope": "SCOPE_GPU"}}), "unknown MUBUF scope"),
+        ({"kind": "instruction", "mnemonic": "flat_load_b32", "dst": [vgpr(0)],
+          "src": [vgpr(2, 2), Register("off")], "modifiers": _DQ_MUBUF},
+         "only valid on buffer_atomic_add_f32"),
+        ({"kind": "instruction", "mnemonic": "v_mad_co_u64_u32", "dst": [vgpr(0), Register("null")],
+          "src": [vgpr(2), vgpr(3), Register(0)]}, "register width 1, expected 2"),
+        ({"kind": "instruction", "mnemonic": "v_mad_co_u64_u32",
+          "dst": [sgpr(0, 2), Register("null")],
+          "src": [vgpr(2), vgpr(3), Register(0)]}, "requires a VGPR"),
+        ({"kind": "instruction", "mnemonic": "v_mad_co_u64_u32",
+          "dst": [Register("null"), Register("null")],
+          "src": [vgpr(2), vgpr(3), Register(0)]}, "physical register"),
+        ({"kind": "instruction", "mnemonic": "v_mad_co_u64_u32", "dst": [vgpr(0, 2), vgpr(4)],
+          "src": [vgpr(2), vgpr(3), Register(0)]}, "scalar register"),
+        ({"kind": "instruction", "mnemonic": "v_mad_co_u64_u32", "dst": [vgpr(0, 2)],
+          "src": [vgpr(2), vgpr(3), Register(0)]}, "expects 2 dst and 3 src"),
+        ({"kind": "instruction", "mnemonic": "v_xor_b32", "dst": [vgpr(0), Register("null")],
+          "src": [vgpr(2), vgpr(3)]}, "expects 1 dst"),
+        ({"kind": "instruction", "mnemonic": "v_xor3_b32", "dst": [vgpr(0)],
+          "src": [vgpr(2), vgpr(3)]}, "expects 1 dst and 3 src"),
+    ],
+)
+def test_emit_asm_rejects_invalid_fmha_bwd_and_dropout_shapes(item, message):
+    with pytest.raises(ValueError, match=message):
+        _emit([item])
+
 def test_emit_asm_uses_selected_primary_or_promoted_descriptor_fields():
     primary = _raw_emit_asm(
         "gfx1250",
