@@ -9,7 +9,7 @@
 
 // libstdc++ guards <initializer_list> with _INITIALIZER_LIST, libc++ with _LIBCPP_INITIALIZER_LIST.
 #if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_INITIALIZER_LIST) && \
-    !defined(_LIBCPP_INITIALIZER_LIST)
+    !defined(_LIBCPP_INITIALIZER_LIST) && !defined(_INITIALIZER_LIST_)
 
 #if !defined(__clang__)
 #error "the initializer_list fallback relies on clang braced-init-list lowering"

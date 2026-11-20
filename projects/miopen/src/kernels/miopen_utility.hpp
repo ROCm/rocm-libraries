@@ -27,7 +27,8 @@
 
 // Minimal std::forward for runtime compilation, never using the host C++ standard library (see
 // miopen_type_traits.hpp). An already-included real <utility> is respected.
-#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_GLIBCXX_UTILITY) && !defined(_LIBCPP_UTILITY)
+#if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_GLIBCXX_UTILITY) && \
+    !defined(_LIBCPP_UTILITY) && !defined(_UTILITY_)
 
 #include "miopen_type_traits.hpp" // std::remove_reference
 

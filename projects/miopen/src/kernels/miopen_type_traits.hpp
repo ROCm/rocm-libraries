@@ -30,7 +30,7 @@
 // already-included real <type_traits> is respected, as a second definition would clash. Extend this
 // fallback when a kernel needs a trait that is missing here.
 #if defined(MIOPEN_HIP_RUNTIME_COMPILE) && !defined(_GLIBCXX_TYPE_TRAITS) && \
-    !defined(_LIBCPP_TYPE_TRAITS)
+    !defined(_LIBCPP_TYPE_TRAITS) && !defined(_TYPE_TRAITS_)
 
 namespace std {
 
