@@ -65,6 +65,8 @@ namespace
         bool                 long_rows  = false; // one row touching all columns, one empty row
         int64_t              ld_pad     = 3;
         rocsparse_index_base base       = rocsparse_index_base_zero;
+        // Explicit number of non-zeros per row (overrides max_nnz / long_rows).
+        std::vector<int64_t> row_lengths;
         // Start from a C filled with quiet NaN: only meaningful with beta == 0,
         // where the library must overwrite C instead of scaling it.
         bool nan_C = false;
@@ -135,6 +137,11 @@ namespace
             {
                 len[1] = c.k;
                 len[2] = 0;
+            }
+            if(!c.row_lengths.empty())
+            {
+                ASSERT_EQ(static_cast<int64_t>(c.row_lengths.size()), c.m);
+                len = c.row_lengths;
             }
             A = csr_with_row_lengths<T>(c.m, c.k, len, rng);
         }
@@ -789,4 +796,39 @@ TEST_F(ExtraSpmm, bsr_index_base_one)
                 if(HasFatalFailure())
                     return;
             }
+}
+
+// ---------------------------------------------------------------------------
+// COO segmented: every thread block reduces 1024 non-zeros and hands the
+// partial sum of its last row to a final cross-block reduction, which must add
+// only the last partial of a run of blocks that end in the same row. A row of
+// 1026 * 1024 + 10 non-zeros fills blocks 0 to 1025, so the run covers every
+// thread of the first 1024-block pass of that reduction and spills into the
+// second. Adding every partial of the run instead of the last one is only
+// visible when the last non-atomic store to the C entry does not come from the
+// wavefront holding the complete prefix: within a wavefront the stores
+// collapse to the highest lane, and across wavefronts the last store wins.
+// Which wavefront that is depends on the hardware; on gfx1201 (wave32) it is
+// reproducibly not the top one, so the mutant is killed there. On wave64
+// parts this has not been verified and the mutant may compute the correct
+// value. The run spans all 32 (16 on wave64) wavefronts of the first
+// block-reduce pass so that as many wavefronts as possible compete.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, coo_segmented_row_spanning_whole_blocks)
+{
+    const int64_t long_row = 1026 * 1024 + 10;
+    for(rocsparse_order oC : all_orders)
+    {
+        SpmmCase c;
+        c.fmt         = SFmt::coo;
+        c.alg         = rocsparse_spmm_alg_coo_segmented;
+        c.m           = 3;
+        c.k           = long_row; // row 0 touches every column
+        c.n           = 2;
+        c.row_lengths = {long_row, 7, 2};
+        c.order_C     = oC;
+        run_spmm<float, int32_t, int32_t>(handle, c);
+        if(HasFatalFailure())
+            return;
+    }
 }
