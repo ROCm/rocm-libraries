@@ -243,10 +243,9 @@ def test_gfx11_floor_round_trips_through_getoccupancy(max_occupancy):
     LDS granule rounds the floor up, which lands non-aligned values one
     workgroup below their nominal target.
 
-    Stops at 16: getVgprOccupancy caps at MaxWavesPerSimd // multiplier, and its
-    multiplier still uses a hardcoded wave64 divisor, so no workgroup shape can
-    reach the 32/64 the LDS term would allow.  Lifting that is the separate
-    wave-size-multiplier fix.
+    Stops at 16, the workgroups of 4 waves (128 threads) a WGP holds.  Workgroups
+    of fewer waves reach the 32/64 the LDS term allows: see
+    test_gfx11_small_workgroups_match_hip.
     """
     isa = (11, 5, 1)
     kw = _make_writer(_init_rocisa(isa), isa)
@@ -254,6 +253,43 @@ def test_gfx11_floor_round_trips_through_getoccupancy(max_occupancy):
     occ = _occ(kw, numThreads=128, vgprs=8, accvgprs=0,
                sgprs=66, ldsBytes=lds)
     assert occ == max_occupancy
+
+
+# hipModuleOccupancyMaxActiveBlocksPerMultiprocessor on a gfx1151 (Radeon 8060S, 20 WGPs,
+# ROCm 10.3) for a wave32 kernel of these resources: (threads, VGPRs, LDS bytes, blocks).
+_GFX1151_HIP_BLOCKS = [
+    (32, 56, 0, 64),      # one wave: 4 SIMDs x 16 waves
+    (32, 56, 3640, 32),   # ... capped by the LDS pool (the W4A16 decode kernels)
+    (32, 127, 3640, 32),
+    (32, 193, 0, 28),     # 7 waves per SIMD
+    (32, 255, 0, 20),     # 5 waves per SIMD
+    (64, 56, 0, 32),      # two waves
+    (64, 193, 0, 14),
+    (96, 56, 0, 20),      # three waves: 2 CUs x (2 SIMDs x 16 waves // 3)
+    (96, 193, 0, 8),
+    (128, 56, 0, 16),     # four waves: one per SIMD
+    (128, 127, 0, 10),
+]
+
+
+@pytest.mark.parametrize("threads,vgprs,lds,blocks", _GFX1151_HIP_BLOCKS)
+def test_gfx11_small_workgroups_match_hip(threads, vgprs, lds, blocks):
+    """A workgroup of fewer waves than the WGP has SIMDs is not limited to what one SIMD
+    holds: the WGP holds 4 SIMDs' worth of its waves.  The W4A16 decode kernels are
+    one-wave workgroups, and their LDS request (MaxOccupancy) is what caps them."""
+    isa = (11, 5, 1)
+    kw = _make_writer(_init_rocisa(isa), isa)
+    assert _occ(kw, numThreads=threads, vgprs=vgprs, accvgprs=0, sgprs=83, ldsBytes=lds) == blocks
+
+
+def test_small_workgroup_rule_is_gfx11_only():
+    """The other architectures keep counting a one-wave workgroup per SIMD."""
+    for isa, threads in (((9, 5, 0), 64), ((12, 0, 1), 32), ((11, 7, 0), 32)):
+        kw = _make_writer(_init_rocisa(isa), isa)
+        assert kw.wavesOfSmallWorkgroup(threads) == 0
+    isa = (11, 5, 0)
+    kw = _make_writer(_init_rocisa(isa), isa)
+    assert [kw.wavesOfSmallWorkgroup(t) for t in (32, 64, 96, 128, 256)] == [1, 2, 3, 0, 0]
 
 
 # ---------------------------------------------------------------------------
