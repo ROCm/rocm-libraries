@@ -935,9 +935,11 @@ The ALMIOPEN-3041 and ALMIOPEN-3182 entries are not trigger-based yet. Each
 lists the cases that were measured to fail, not every case with the trigger:
 
 - ALMIOPEN-3041 (a Q, K, V or O head-dim stride other than 1, on a head dim
-  larger than 1): 373 of the 2,776 cases with the trigger. The engine reads
+  larger than 1): 385 of the 2,776 cases with the trigger. The engine reads
   memory outside the layout, so the result depends on the contents of that
-  memory.
+  memory. The ASM forward applicability change that accepts more graphs made
+  the engine accept 12 of these cases. They compute a wrong O, so they are in
+  the list.
 - ALMIOPEN-3182 (a zero-stride broadcast Q or V): 64 of the 736 cases with the
   trigger.
 
