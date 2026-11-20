@@ -11,8 +11,7 @@ The bindings are a development and testing tool for hipBLASLt and its consumers,
 The package version, `hipblaslt.__version__`, is hipBLASLt's own `MAJOR.MINOR.PATCH`, read from the `hipblaslt-version.h` of the hipBLASLt the bindings are built against. A separate bindings version would say nothing about which hipBLASLt a user has, and a solution index, a default heuristic choice or a bug is only meaningful for one hipBLASLt build.
 
 - **Package metadata.** `skbuild_plugins/hipblaslt_version_provider.py` is a scikit-build-core dynamic-metadata provider (the standard `[[tool.dynamic-metadata]]` table, scikit-build-core 1.1.2 or later). It searches `hipblaslt_ROOT`, `ROCM_PATH`, `ROCM_HOME`, then `/opt/rocm`. `CMakeLists.txt` stops the build if `find_package(hipblaslt)` found a different version, so the two can't disagree.
-- **The loaded build.** The version alone doesn't identify a build: hipBLASLt's kernels can be retuned without a version change. So the bindings also compare git revisions. `hipblasLtGetGitRevision` reports `HIPBLASLT_VERSION_TWEAK`, which is the revision, and the compiled-in value comes from the same header.
-- **When it's checked.** The first `Handle()` created in a process compares the loaded hipBLASLt's version and git revision with the compiled-in ones, and warns with `HipblasLtLoadWarning` when either differs. It doesn't happen at import, because `hipblasLtGetVersion` and `hipblasLtGetGitRevision` need a handle, and creating one allocates GPU memory. `hipblasLtCreate` calls `exit()` when that allocation fails. A process that never creates a handle is never checked.
+- **The loaded build.** The version alone doesn't identify a build: hipBLASLt's kernels can be retuned without a version change. So `_core` reports the git revision as well as the version, both for the build it was compiled against and for the one loaded. `hipblasLtGetGitRevision` reports `HIPBLASLT_VERSION_TWEAK`, which is the revision, and the compiled-in value comes from the same header.
 
 ## Which libhipblaslt loads
 
@@ -31,7 +30,6 @@ The library that `_core` binds to isn't decided by link-time paths alone. With t
   - The override can't take effect, because the process already uses a different `libhipblaslt`: raise `HipblasLtLoadError`, and say to import `hipblaslt` first or unset the override.
   - The override is active: log which build loaded, and warn that importing a framework built against a different ROCm afterward will fail to load. A framework imported afterward that does load, torch for example, shares the override's `libhipblaslt`: there's one copy per process. That's what lets you run a framework on a custom hipBLASLt, but it's only safe when that build is ABI-compatible with the one the framework was built against. The matching SONAME is necessary, not sufficient, and frameworks can use the C++ `hipblaslt-ext` API as well as the C API.
   - hipBLASLt's companion libraries (`libtensilelite-host`, `liborigami`, `librocroller`; there's no rocRoller on Windows) aren't in `libhipblaslt`'s directory: raise `HipblasLtLoadError`. This runs before the preload too, because a companion from another build makes the preload fail, or, between ABI-compatible builds, mix silently and corrupt memory.
-  - A different build than the one the bindings were compiled against: warn, as described under Version. Not when the library came from the override, which already warned and is what the caller asked for.
 
 ## Windows DLLs
 

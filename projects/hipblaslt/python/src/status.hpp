@@ -57,13 +57,6 @@ namespace hipblaslt_py
                                  + std::to_string(static_cast<int>(s)) + ")");
     }
 
-    inline void check_hip(hipError_t e, const char* call)
-    {
-        if(e != hipSuccess)
-            throw HipblasLtError(std::string(call) + " failed: " + hipGetErrorString(e));
-    }
-
 } // namespace hipblaslt_py
 
 #define HIPBLASLT_CHECK(expr) ::hipblaslt_py::check_status((expr), #expr)
-#define HIP_CHECK(expr) ::hipblaslt_py::check_hip((expr), #expr)
