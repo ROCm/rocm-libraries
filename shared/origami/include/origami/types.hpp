@@ -779,6 +779,18 @@ struct problem_t {
   /// MX block size.
   std::size_t a_mx_block_size = 0;
   std::size_t b_mx_block_size = 0;
+
+  /// Leading dimensions of A, B, C, D in elements; 0 = natural / unknown.
+  std::size_t ld_a = 0;
+  std::size_t ld_b = 0;
+  std::size_t ld_c = 0;
+  std::size_t ld_d = 0;
+
+  /// The kernel also writes the auxiliary output E (same element type as D).
+  bool use_e = false;
+
+  /// Leading dimension of E in elements; 0 = natural / unknown.
+  std::size_t ld_e = 0;
 };
 
 /**
