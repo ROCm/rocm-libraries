@@ -921,53 +921,35 @@ setting or the value that the ticket names. It covers those cases on every GPU,
 unless the defect is specific to an architecture. It covers them also when some
 of them pass today. Some defects give a result that depends on the memory
 contents or on the GPU. Such a case can pass by chance, so a pass does not show
-that the engine is correct for it. Examples:
+that the engine is correct for it. Example:
 
-- ALMIOPEN-3041: every case with a Q, K, V or O head-dim stride other than 1.
-  The engine reads memory outside the layout, so the result depends on the
-  contents of that memory.
 - ALMIOPEN-3042: every case with self-overlapping Q, K or V sequence strides,
   and every case with a Stats layout that the kernel cannot address. The
   result depends on the input data and on the memory contents.
 
-ALMIOPEN-3123, ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 have no entry.
-Since rocm-libraries #15768, `ASM_SDPA_ENGINE` declines the 1,486 cases that
-the ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 entries skipped (628
-`standard`, 257 `comprehensive` and 601 `full`). 40 of these cases match both
-an ALMIOPEN-3124 entry and the ALMIOPEN-3126 entry. With those entries removed,
-the engine declined every one of these cases on gfx942 and on gfx950, in
-3 runs with each fill. On gfx942, 40 of the cases also match the
-`FP8_E4M3_FNUZ` entry (ALMIOPEN-2273), which still skips them, so 1,446 cases
-move from skipped to declined there.
-
-With the ALMIOPEN-3123 fix (rocm-libraries #15768), `ASM_SDPA_ENGINE` declines a graph that has a block mask, or a dropout mask
-and a dropout scale. The engine declines, on gfx942 and gfx950 with both
-fills, the 445 trigger cases that failed before the fix (207 `standard`, 111
-`comprehensive` and 127 `full`). On the `quick`, `standard` and
-`comprehensive` tiers, the fix moved 123 cases on gfx942 and 120 on gfx950
-from passed to declined, and no case failed. The other `full` tier trigger
-cases were not run after the fix.
-
-The `ASM_SDPA_ENGINE` results on the `SdpaFwdPlan` cases with the fix, per
-tier (each tier's own cases), with the GPU reference and the default fill:
-
-| Tier | Cases | gfx942 passed / declined / skipped | gfx950 passed / declined / skipped |
-|---|---|---|---|
-| quick | 1,500 | 170 / 1,204 / 126 | 150 / 1,342 / 8 |
-| standard | 9,519 | 320 / 8,440 / 759 | 302 / 8,915 / 302 |
-| comprehensive | 4,622 | 151 / 4,207 / 264 | 137 / 4,410 / 75 |
-
-No case failed. A skipped case matches a `[[test_skips]]` entry of
-`ASM_SDPA_ENGINE.toml`. The skips differ by GPU because the `FP8_E4M3_FNUZ`
-entry applies on gfx942 only. That run still had the ALMIOPEN-3124,
-ALMIOPEN-3126 and ALMIOPEN-3211 entries. The table counts the cases that they
-skipped as declined: 608 `standard` and 253 `comprehensive` cases on gfx942,
-and 628 and 257 on gfx950. gfx942 has 24 fewer because the `FP8_E4M3_FNUZ`
-entry comes first and still skips them.
-
 Use a list of exact names from measured failures only for a defect that has no
 known trigger. For example, the ALMIOPEN-3212 entry names the one case that
 showed the defect.
+
+The ALMIOPEN-3041 and ALMIOPEN-3182 entries are not trigger-based yet. Each
+lists the cases that were measured to fail, not every case with the trigger:
+
+- ALMIOPEN-3041 (a Q, K, V or O head-dim stride other than 1, on a head dim
+  larger than 1): 373 of the 2,776 cases with the trigger. The engine reads
+  memory outside the layout, so the result depends on the contents of that
+  memory.
+- ALMIOPEN-3182 (a zero-stride broadcast Q or V): 64 of the 736 cases with the
+  trigger.
+
+The other cases with these triggers are not in an entry. The engine declined
+them or they passed in the measured runs. If an engine change accepts more of
+them while the defect remains, the suite reports them as failures. The checks
+in "Checking the entries" do not apply to these two entries.
+
+ALMIOPEN-3123, ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 have no entry.
+With the ALMIOPEN-3123 fix, `ASM_SDPA_ENGINE` declines a graph that has a block
+mask, or a dropout mask and a dropout scale. It also declines the cases of the
+other three tickets, so they need no skip.
 
 #### Building an entry from the bundles
 
