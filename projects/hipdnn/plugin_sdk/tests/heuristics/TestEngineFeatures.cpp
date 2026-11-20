@@ -127,6 +127,8 @@ GraphT groupedConvFwdGraph()
     return graph;
 }
 
+// attention() and attentionGraph() (tensor shapes and strides for uids 1-8) are copied into
+// tools/common/tests/TestOptionalFeatures.cpp, which cannot include this file: keep them equal.
 SdpaAttributesT attention()
 {
     SdpaAttributesT sdpa;
