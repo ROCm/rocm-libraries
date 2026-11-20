@@ -734,6 +734,32 @@ exclude_gpu:
       - "full"
       - "ex_gpu_gfx115X"
 
+  exclude_gpu_gfx117X:
+    test_patterns:
+      # gfx1170 reproduces the FP16 backward dw tolerance failures tracked in
+      # ROCm/rocm-libraries#15056. Remove when that issue is fixed.
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/124"
+      - "Full/GPU_LayerNormBwdTest_FP16.LayerNormTestBw/127"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx117X"
+
+  exclude_gpu_gfx117X_windows:
+    test_patterns:
+      # gfx1170: the large untiled GPU reference can hit the Windows watchdog.
+      # Quarantine only the reproduced FP32 and FP16 large-memory cases.
+      - "Standard/GPU_GemmWrwUniversal_LargeMemory_FP32.GemmWrwUniversal/0"
+      - "Standard/GPU_GemmWrwUniversal_LargeMemory_FP16.GemmWrwUniversal/0"
+    labels:
+      - "quick"
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "ex_gpu_gfx117X"
+
   exclude_gpu_gfx950:
     test_patterns:
       - "*DBSync*"

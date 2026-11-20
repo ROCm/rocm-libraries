@@ -67,6 +67,30 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
         | 1: Check for OOBs before sub-buffer start
         | 2: Check for OOBs after sub-buffer end
 
+hipDNN forwarding
+=================
+
+These variables have an effect only when MIOpen is built with ``MIOPEN_ENABLE_HIPDNN_WRAPPER=On``.
+MIOpen reads them once per process. For more information, see
+:doc:`Use hipDNN forwarding <../how-to/use-hipdnn-forwarding>`.
+
+.. list-table::
+    :header-rows: 1
+    :widths: 70,30
+
+    * - **Environment variable**
+      - **Value**
+
+    * - | ``MIOPEN_HIPDNN_FORWARDING``
+        | Sends the supported convolution functions to hipDNN. All other functions still run in MIOpen.
+      - | 0: Disable (default)
+        | 1: Enable
+
+    * - | ``MIOPEN_DISABLE_HIPDNN_FOR``
+        | Comma-separated list of functions to keep in MIOpen when forwarding is enabled.
+      - | Function names, such as ``miopenConvolutionForward``
+        | ``*``: All functions
+
 Find mode configuration
 =======================
 
@@ -786,9 +810,9 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
         | 1: Enable
 
     * - | ``MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE``
-        | Opts out of the gfx942/gfx950 FP16/BF16 large-tensor (in_depth >= 3 and in_width >= 256)
-        | hard-coded override for 3D ConvHipImplicitGemmGroupFwdXdlops, so selection uses the AI
-        | heuristic instead of the hard-coded config.
+        | Opts out of the gfx942 FP16/BF16 hard-coded kernel picks for 3D
+        | ConvHipImplicitGemm3DGroupFwdXdlops, so selection uses the AI heuristic instead. gfx950
+        | has no hard-coded picks and always uses the AI heuristic.
       - | 0: Skip the override and use the AI heuristic
         | unset or 1: Hard-coded override active (default)
 

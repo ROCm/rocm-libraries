@@ -292,6 +292,23 @@ set(hipblaslt_python_dev Development.Module)
 hipblaslt_find_python("${hipblaslt_python_dev}")
 hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 
+if(TENSILELITE_ENABLE_CLIENT)
+    set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+    set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
+        "rocm-libraries commit to record when building from a tree without git")
+    hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    include(cmake/TensileLiteMetadata.cmake)
+    hipblaslt_configure_tensilelite_metadata("${_tensilelite_source_root}"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated")
+    if(TENSILELITE_CLIENT_SOURCE_REVISION STREQUAL "none")
+        message(WARNING "No source revision found; client pairing disabled. Build from a git "
+            "checkout or pass -DTENSILELITE_SOURCE_REVISION=<sha>.")
+    endif()
+    message(STATUS "TensileLite client: version ${TENSILELITE_DISTRIBUTION_VERSION}, "
+        "source revision ${TENSILELITE_CLIENT_SOURCE_REVISION}, "
+        "build ROCm ${TENSILELITE_CLIENT_BUILD_ROCM}")
+endif()
+
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBS_SUPERBUILD)
         if(HIPBLASLT_ENABLE_THEROCK)
@@ -804,6 +821,22 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    # Race check run under CPU rocjitsu by TheRock's hipblaslt-rocjitsu-race
+    # test; it locates the ROCm installation from this install location.
+    # rocjitsu is Linux-only.
+    if(NOT WIN32)
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/rocjitsu_race_smoke.py"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+            COMPONENT clients-common
+        )
+        rocm_install(
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/rocjitsu_race_smoke_tensilelite.yaml"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+            COMPONENT clients-common
+        )
+    endif()
+
     if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
         rocm_install(
             TARGETS hipblaslt-bench-a2a
@@ -893,6 +926,14 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN ".pytest_cache" EXCLUDE
         PATTERN "*.pyc" EXCLUDE
         PATTERN "source_only" EXCLUDE
+    )
+
+    install(
+        FILES
+            "${_tensilelite_src}/_tensilelite_client_binding.py"
+            "${_tensilelite_src}/tensilelite_configure_client.py"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
     )
 
     # Scripts used by unit tests

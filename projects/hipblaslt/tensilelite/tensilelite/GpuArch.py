@@ -58,7 +58,7 @@ def _inRocmInstall(root, relative_parts):
     return None
 
 
-def _tool(relpaths):
+def _tool(relpaths, rocm_path=None):
     """An executable at any of ``relpaths``, the ROCm installs before PATH.
 
     Every install is tried against every layout before PATH is consulted at all.
@@ -66,24 +66,21 @@ def _tool(relpaths):
     let a stray amdgpu-arch beat the one inside the install the caller pointed
     ROCM_PATH at, since the two layouts differ only by a "lib" prefix.
     """
+    roots = _rocm_roots() if rocm_path is None else [os.fspath(rocm_path)]
     found = next(
-        (
-            tool
-            for root in _rocm_roots()
-            for parts in relpaths
-            if (tool := _inRocmInstall(root, parts))
-        ),
+        (tool for root in roots for parts in relpaths if (tool := _inRocmInstall(root, parts))),
         None,
     )
-    if found:
+    if found or rocm_path is not None:
         return found
     return next((w for parts in relpaths if (w := shutil.which(parts[-1]))), None)
 
 
-def _run(command):
+def _run(command, rocm_path=None):
     """stdout of a successful run, or None on any failure. Never raises."""
     try:
-        result = subprocess.run(command, capture_output=True, text=True, timeout=30)
+        env = None if rocm_path is None else dict(os.environ, ROCM_PATH=os.fspath(rocm_path))
+        result = subprocess.run(command, capture_output=True, text=True, timeout=30, env=env)
     except (OSError, subprocess.SubprocessError):
         return None
     return result.stdout if result.returncode == 0 else None
@@ -110,7 +107,7 @@ def _base_arch(name):
     return name.partition(":")[0].split("-", 1)[0]
 
 
-def _rocminfo_archs(rocminfo):
+def _rocminfo_archs(rocminfo, rocm_path=None):
     """The agent names rocminfo reports, or ``[]`` if it is absent or fails.
 
     rocminfo needs read-write /dev/kfd, so a caller outside the render group
@@ -119,7 +116,7 @@ def _rocminfo_archs(rocminfo):
     """
     if not rocminfo:
         return []
-    output = _run([rocminfo])
+    output = _run([rocminfo], rocm_path)
     if not output:
         return []
     return _real_archs(_ROCMINFO_AGENT_RE.findall(output))
@@ -152,9 +149,7 @@ def _restore_steppings(archs, rocminfo_archs):
     for name in rocminfo_archs:
         by_base.setdefault(_base_arch(name), set()).add(name.partition(":")[0])
 
-    told_apart = {
-        _base_arch(name) for name in archs if _base_arch(name) != name.partition(":")[0]
-    }
+    told_apart = {_base_arch(name) for name in archs if _base_arch(name) != name.partition(":")[0]}
 
     restored = []
     for arch in archs:
@@ -181,7 +176,7 @@ def restore_steppings(archs):
     return _restore_steppings(archs, _rocminfo_archs(_tool(_ROCMINFO_RELPATHS)))
 
 
-def _probe():
+def _probe(rocm_path=None):
     """``(archs, any_tool_found)`` from the first tool that answers.
 
     Deliberately does not use rocm_agent_enumerator: it parses rocminfo with a
@@ -194,17 +189,17 @@ def _probe():
     The second element separates "no ROCm here" from "ROCm is here but reported
     nothing usable", which the callers report differently.
     """
-    amdgpu_arch = _tool(_AMDGPU_ARCH_RELPATHS)
-    rocminfo = _tool(_ROCMINFO_RELPATHS)
+    amdgpu_arch = _tool(_AMDGPU_ARCH_RELPATHS, rocm_path)
+    rocminfo = _tool(_ROCMINFO_RELPATHS, rocm_path)
 
     if amdgpu_arch:
-        output = _run([amdgpu_arch])
+        output = _run([amdgpu_arch], rocm_path)
         if output:
             archs = _real_archs(_ARCH_LINE_RE.findall(output))
             if archs:
-                return _restore_steppings(archs, _rocminfo_archs(rocminfo)), True
+                return _restore_steppings(archs, _rocminfo_archs(rocminfo, rocm_path)), True
 
-    archs = _rocminfo_archs(rocminfo)
+    archs = _rocminfo_archs(rocminfo, rocm_path)
     if archs:
         return archs, True
 
@@ -238,9 +233,13 @@ def cmake_gpu_target(name):
     return name.split(":", 1)[0]
 
 
-def detect_gpu_arch():
-    """The architecture name the runtime reports for the first GPU, or None."""
-    archs, any_tool_found = _probe()
+def detect_gpu_arch(rocm_path=None):
+    """The first GPU's architecture, optionally using only one build installation.
+
+    An explicit root selects both detection tools and their ROCM_PATH without
+    changing the caller's environment or borrowing tools from another install.
+    """
+    archs, any_tool_found = _probe(rocm_path)
     if archs:
         return archs[0]
 

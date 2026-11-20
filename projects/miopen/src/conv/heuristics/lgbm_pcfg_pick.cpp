@@ -60,16 +60,6 @@ int DataTypeCode(miopenDataType_t t)
     return -1;
 }
 
-// gfx_code for solvers trained with a gfx_code feature (SolverModel::has_gfx_code):
-// the gfx_id's index in the model's own trained vocab, shipped in lgbm_pcfg.bin.
-// Unknown arch -> -1 (the missing-category sentinel).
-int GfxCode(const SolverModel& model, const std::string& gfx_id)
-{
-    const auto& vocab = model.gfx_vocab;
-    const auto it     = std::find(vocab.begin(), vocab.end(), gfx_id);
-    return it == vocab.end() ? -1 : static_cast<int>(it - vocab.begin());
-}
-
 inline double Log1pAbs(double v) { return std::log1p(std::fabs(v)); }
 
 // Build the problem+GPU prefix, matching model_fields.build_X exactly: 14
@@ -79,7 +69,7 @@ inline double Log1pAbs(double v) { return std::log1p(std::fabs(v)); }
 void FillProblemPrefix(std::vector<double>& prefix,
                        const conv::ProblemDescription& p,
                        const Handle& handle,
-                       const std::string& gfx_id,
+                       const std::string& device_name,
                        const SolverModel& model)
 {
     const double channels = static_cast<double>(p.GetInChannels());
@@ -141,7 +131,7 @@ void FillProblemPrefix(std::vector<double>& prefix,
     prefix.push_back(static_cast<double>(DataTypeCode(p.GetInDataType())));
     // optional trailing gfx_code categorical (PCFG_GFXID solvers)
     if(model.has_gfx_code)
-        prefix.push_back(static_cast<double>(GfxCode(model, gfx_id)));
+        prefix.push_back(static_cast<double>(GfxCode(model, device_name)));
 }
 
 /// Candidate indices ordered best->worst by predicted speed, with their scores in the same order.
@@ -296,6 +286,21 @@ bool TwoTowerCoversSolver(const std::string& solver_name, const std::string& gfx
 
 } // namespace
 
+int GfxCode(const SolverModel& model, const std::string& device_name)
+{
+    const auto& vocab    = model.gfx_vocab;
+    const std::string id = NormalizeArchName(device_name);
+    const auto it        = std::find(vocab.begin(), vocab.end(), id);
+    return it == vocab.end() ? -1 : static_cast<int>(it - vocab.begin());
+}
+
+std::string
+BucketKey(const std::string& device_name, conv::Direction direction, miopenDataType_t data_type)
+{
+    return NormalizeArchName(device_name) + "|" + std::to_string(DirectionPerfDbCode(direction)) +
+           "|" + DataTypeName(data_type);
+}
+
 // ConvHipConv on gfx1250, every direction: the model retrained on hipconv v0.5 configs was trained
 // on gfx950 data only and has no gfx1250 buckets, and no model has been checked on gfx1250
 // hardware.
@@ -344,11 +349,17 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
 {
     // Hold-out first: it needs only the device name, so a held-out combination never loads the
     // solver's model (Find parses and caches it under the metadata mutex).
-    std::string gfx_id;
+    //
+    // GetDeviceName() strips the :sramecc+:xnack- feature suffix but not a target-variant suffix
+    // (gfx1250 parts report "gfx1250-strict"). The bucket keys and the gfx_code vocab use the
+    // base name: gfx_id is the normalized name for the arch predicates below, device_name the raw
+    // one handed to BucketKey/GfxCode (which normalize it) and kept for the logs.
+    std::string device_name;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.GetDeviceName");
-        gfx_id = handle.GetDeviceName();
+        device_name = handle.GetDeviceName();
     }
+    const std::string gfx_id = NormalizeArchName(device_name);
 
     if(HeldOutOfPicker(solver_name, gfx_id, problem.GetDirection()))
     {
@@ -374,29 +385,28 @@ std::vector<std::string> PickConfig(const std::string& solver_name,
     // default-config path (which runs it) rather than preempting it here.
     if(TwoTowerCoversSolver(solver_name, gfx_id))
     {
-        MIOPEN_LOG_I2("lgbm_pcfg: deferring " << solver_name << " on " << gfx_id
-                                              << " to the two-tower KTN model");
+        MIOPEN_LOG_I2("lgbm_pcfg: deferring " << solver_name << " on " << gfx_id << " (device \""
+                                              << device_name << "\") to the two-tower KTN model");
         return {};
     }
 
     // Otherwise the perf-config picker runs on every architecture its per-solver
     // models cover; a bucket lookup below naturally abstains (empty result) for any
     // gfx_id/direction/dtype the models were not trained on.
-    const std::string key = gfx_id + "|" +
-                            std::to_string(DirectionPerfDbCode(problem.GetDirection())) + "|" +
-                            DataTypeName(problem.GetInDataType());
+    const std::string key = BucketKey(device_name, problem.GetDirection(), problem.GetInDataType());
 
     const auto bit = model->buckets.find(key);
     if(bit == model->buckets.end())
     {
-        MIOPEN_LOG_I2("lgbm_pcfg: no bucket " << key << " for " << solver_name << "; abstain");
+        MIOPEN_LOG_I2("lgbm_pcfg: no bucket " << key << " (device \"" << device_name << "\") for "
+                                              << solver_name << "; abstain");
         return {};
     }
 
     std::vector<double> prefix;
     {
         ScopedTimeLogger t("lgbm_pcfg.PickConfig.FillProblemPrefix");
-        FillProblemPrefix(prefix, problem, handle, gfx_id, *model);
+        FillProblemPrefix(prefix, problem, handle, device_name, *model);
     }
 
     RankedConfigs ranked;
