@@ -26,6 +26,7 @@ inline const PointwiseModeBitset& getImplementedUnaryModesBitset()
     static const PointwiseModeBitset s_implementedUnaryModes = []() {
         PointwiseModeBitset bitset;
         // Only include operations with implemented functors in ReferencePointwiseBase
+        bitset.set(toBitPosition(data_objects::PointwiseMode::IDENTITY));
         bitset.set(toBitPosition(data_objects::PointwiseMode::RELU_FWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::SIGMOID_FWD));
         bitset.set(toBitPosition(data_objects::PointwiseMode::TANH_FWD));

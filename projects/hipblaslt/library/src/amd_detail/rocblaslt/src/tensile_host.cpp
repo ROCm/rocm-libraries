@@ -41,6 +41,7 @@
 #include "rocblaslt_fused_a2a_peers.hpp"
 #include "candidate_preparation.hpp"
 #include "get_all_search_type_for_test.hpp"
+#include "grouped_predicate_problem.hpp"
 #include "rocblaslt_mat_utils.hpp"
 #include "rocblaslt_secure_env.hpp"
 #include "tensile_host.hpp"
@@ -2076,22 +2077,10 @@ namespace
 
     bool mxScaleTensorNeedsPaddingFreeDim()
     {
-        static std::mutex                    cacheMutex;
-        static std::unordered_map<int, bool> cache;
-
         int deviceId = 0;
         HIP_CHECK_EXC(hipGetDevice(&deviceId));
 
-        std::lock_guard<std::mutex> lock(cacheMutex);
-        auto                        it = cache.find(deviceId);
-        if(it != cache.end())
-            return it->second;
-
-        hipDeviceProp_t prop;
-        HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
-        const bool needsPadFreeDim = std::string(prop.gcnArchName).find("gfx950") != std::string::npos;
-        cache[deviceId]            = needsPadFreeDim;
-        return needsPadFreeDim;
+        return rocblaslt_internal_get_arch_name(deviceId).find("gfx950") != std::string::npos;
     }
 
     // A Block_32_UE8M0_32_8_EXT caller pre-swizzled its scales into the padded
@@ -2490,6 +2479,7 @@ namespace
 
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
+        tensileProblem.setOutputPeerD(prob.dPeer != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
 
         if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -2855,6 +2845,7 @@ namespace
 
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
+        tensileProblem.setOutputPeerD(prob.dPeer != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
 
         if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -3023,6 +3014,7 @@ namespace
         inputs.scaleD        = reinterpret_cast<const void*>(prob.scaleD);
         inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.scaleAlphaVec);
         inputs.amaxD         = reinterpret_cast<void*>(prob.amaxD);
+        inputs.peerD         = prob.dPeer;
 
         static const std::map<rocisa::DataType, TensileLite::ConstantVariant> argument_vals = {
             {rocisa::DataType::Float, 0.0f},
@@ -3352,7 +3344,7 @@ namespace
         {
             return m_devicePropMap.at(deviceName);
         }
-        auto get_hardware(const std::string& deviceName) const
+        auto& get_hardware(const std::string& deviceName) const
         {
             return m_hardwareMap.at(deviceName);
         }
@@ -3361,7 +3353,7 @@ namespace
         {
             return m_deviceProp;
         }
-        auto get_hardware() const
+        auto& get_hardware() const
         {
             return m_hardware;
         }
@@ -3611,7 +3603,20 @@ namespace
         int                                                                                 device);
 #endif
 
-    // Return the library and adapter for the current HIP device
+    // A shared_ptr that points at p's object without owning it, so copying and
+    // destroying it never touches p's reference count.
+    template <typename T>
+    std::shared_ptr<T> nonOwning(std::shared_ptr<T> const& p)
+    {
+        return std::shared_ptr<T>(std::shared_ptr<T>(), p.get());
+    }
+
+    // Return the library and adapter for the current HIP device. The library,
+    // device properties and hardware are owned by the static TensileHost and
+    // never replaced, so the out-params do not own them: every thread copying
+    // them would otherwise update reference counts in shared cache lines.
+    // Use nonOwning only for TensileHost-owned objects; hand out anything that
+    // can be replaced while a call uses it as an owning copy.
     TensileLite::hip::SolutionAdapter* get_library_and_adapter(
         std::shared_ptr<TensileLite::MasterSolutionLibrary<TensileLite::ContractionProblemGemm>>*
             library
@@ -3640,11 +3645,12 @@ namespace
             adapter = a.adapter.load(std::memory_order_relaxed);
             if(!adapter)
             {
-                // Allocate a new adapter using the current HIP device
-                adapter = new TensileLite::hip::SolutionAdapter;
+                // Allocate a new adapter using the current HIP device. It is
+                // owned here until published, so a throwing initialize frees it.
+                auto owned = std::make_unique<TensileLite::hip::SolutionAdapter>();
 
                 // Initialize the adapter and possibly the library
-                host.initialize(*adapter, device);
+                host.initialize(*owned, device);
 
 #ifdef HIPBLASLT_ENABLE_LOCAL_KERNELS
                 // Before the adapter is published, so the first heuristic query
@@ -3653,23 +3659,30 @@ namespace
 #endif
 
                 // Atomically change the adapter stored for this device ID
+                adapter = owned.release();
                 a.adapter.store(adapter, std::memory_order_release);
             }
         }
 
         // If an adapter is found, it is assumed that the library is initialized
         if(library)
-            *library = host.get_library();
+            *library = nonOwning(host.get_library());
 #if ROCBLASLT_TENSILE_LAZY_LOAD
-        if(deviceProp)
-            *deviceProp = host.get_device_property(rocblaslt_internal_get_arch_name());
-        if(hardware)
-            *hardware = host.get_hardware(rocblaslt_internal_get_arch_name());
+        if(deviceProp || hardware)
+        {
+            int current = 0;
+            HIP_CHECK_EXC(hipGetDevice(&current));
+            const std::string& arch = rocblaslt_internal_get_arch_name(current);
+            if(deviceProp)
+                *deviceProp = nonOwning(host.get_device_property(arch));
+            if(hardware)
+                *hardware = nonOwning(host.get_hardware(arch));
+        }
 #else
         if(deviceProp)
-            *deviceProp = host.get_device_property();
+            *deviceProp = nonOwning(host.get_device_property());
         if(hardware)
-            *hardware = host.get_hardware();
+            *hardware = nonOwning(host.get_hardware());
 #endif
 
         return adapter;
@@ -3857,6 +3870,26 @@ namespace
         return rocblaslt_status_invalid_value;
     }
 
+    // A device library built before OutputPeerD has no PeerDCheck predicate, so its
+    // plain kernels match a problem that asks for a second D and would never write it.
+    // Those libraries also read the flag as false, so it tells them apart.
+    bool peerDKernelFits(bool problemWantsPeerD, const TensileLite::ContractionSolution& solution)
+    {
+        return !problemWantsPeerD || solution.problemType.outputPeerD;
+    }
+
+    rocblaslt_status checkPeerDKernelMatch(const char* caller,
+                                           bool        problemWantsPeerD,
+                                           const TensileLite::ContractionSolution& solution)
+    {
+        if(peerDKernelFits(problemWantsPeerD, solution))
+            return rocblaslt_status_success;
+        log_error(caller,
+                  "the problem has a peer D, but the algo's solution does not store one "
+                  "(device library built without OutputPeerD?)");
+        return rocblaslt_status_invalid_value;
+    }
+
     // An algo index can name a solution of the other kind, grouped or not, whose
     // kernel takes different arguments.
     rocblaslt_status checkGroupedGemmMatch(const char*                             caller,
@@ -3874,8 +3907,8 @@ namespace
     // A hand-written kernel may rely on its problem predicates to stay inside the
     // tensors (fixed sizes or strides, no bounds checks) and takes plain tensor
     // addresses, so an algo for one is refused once the problem it runs no longer
-    // satisfies them or is a pointer-array batch. Generated kernels and the grouped
-    // path keep their existing launch checks.
+    // satisfies them or is a pointer-array batch. Generated kernels keep their
+    // existing launch checks.
     rocblaslt_status checkHandwrittenKernelPredicates(
         const char*                                caller,
         const TensileLite::ContractionProblemGemm& problem,
@@ -4022,6 +4055,7 @@ TensileLite::ProblemOverride
     po.hasScaleE        = problem.scaleE != nullptr;
     po.hasScaleAlphaVec = problem.scaleAlphaVec != nullptr;
     po.hasAmaxD         = problem.amaxD != nullptr;
+    po.hasPeerD         = problem.dPeer != nullptr;
 
     po.swizzleA              = problem.swizzleA;
     po.swizzleB              = problem.swizzleB;
@@ -4309,6 +4343,21 @@ namespace
         static int hotIterations()
         {
             return std::max(1, envInt("HIPBLASLT_TUNING_HOT_ITERS", 1000));
+        }
+        /**
+         * Whether candidates are timed with HIP events rather than the host clock.
+         * Not on Windows until the minimum supported runtime has ROCm/rocm-systems#13190.
+         * Without it, HIP's PAL backend writes later launches' end times into an event
+         * record's timestamp and derives elapsed time from the host clock, so an event
+         * pair does not time the batch it brackets.
+         */
+        static constexpr bool gpuTimer()
+        {
+#ifdef _WIN32
+            return false;
+#else
+            return true;
+#endif
         }
         /**
          * Wall-clock ceiling for one shape, or zero for no ceiling.
@@ -5447,10 +5496,11 @@ namespace
         // hipblaslt-bench's measurement, from the same code: per candidate the cold
         // launches, then one timed batch of hot launches with the instruction cache
         // flushed after each and the flush's per-device cost taken back out, the
-        // lowest time winning. Tune mode times on HIP events.
+        // lowest time winning. Tune mode times on HIP events, or on the host clock
+        // between stream synchronizations where events cannot time a batch.
         hipblaslt_bench::TimingConfig timing;
         timing.iters         = TuningPolicy::hotIterations();
-        timing.use_gpu_timer = true;
+        timing.use_gpu_timer = TuningPolicy::gpuTimer();
 
         hipblaslt_bench::SearchConfig search;
         search.cold_calls = TuningPolicy::coldIterations();
@@ -6078,13 +6128,17 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         updateTensileData(prob, *data);
 
         // The solution at the index looked up last, so an index that re-selection
-        // and tuning leave alone is looked up once.
+        // and tuning leave alone is looked up once. knownOwner holds it only
+        // when the library does not keep it for its lifetime.
         int                                               knownIndex = -1;
-        std::shared_ptr<TensileLite::ContractionSolution> known;
+        TensileLite::ContractionSolution const*           known      = nullptr;
+        std::shared_ptr<TensileLite::ContractionSolution> knownOwner;
         auto                                              solutionAt = [&](int index) {
             if(!known || index != knownIndex)
             {
-                known      = library->getSolutionByIndex(data->problem, *hardware, index);
+                knownOwner.reset();
+                known = library->getSolutionByIndexForCall(
+                    data->problem, *hardware, index, knownOwner);
                 knownIndex = index;
             }
             return known;
@@ -6464,12 +6518,10 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
         // the GSU reduction area, which is far larger and stays shared. The two
         // never coincide in one kernel, so a single pointer serves both and the
         // choice is made here, where the solution is finally known.
-        {
-            auto picked = solutionAt(*solutionIndex);
-            if(picked)
-                data->inputs.Synchronizer
-                    = synchronizerForSolution(*picked, prob.streamKFlags, prob.Synchronizer);
-        }
+        auto solution = solutionAt(*solutionIndex);
+        if(solution)
+            data->inputs.Synchronizer
+                = synchronizerForSolution(*solution, prob.streamKFlags, prob.Synchronizer);
 
         if((get_logger_layer_mode() & rocblaslt_layer_mode_log_bench)
            || rocblaslt::Debug::Instance().printLogAsMarker()
@@ -6517,7 +6569,6 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
                                                   false);
         }
 
-        auto solution = solutionAt(*solutionIndex);
         if(!solution)
             return rocblaslt_status_not_implemented;
         if(auto st = checkGroupedGemmMatch(__func__, false, *solution);
@@ -6887,6 +6938,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
+            if(auto st = checkPeerDKernelMatch(__func__, data->problem.outputPeerD(), *solution);
+               st != rocblaslt_status_success)
+                return st;
             data->algoIndex = *solutionIndex;
 
             if(data->problem.getParams().uniformSummationOrder() == 1)
@@ -7077,6 +7131,20 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             {
                 log_error(__func__, "workspace size is less than the solution requires");
                 return rocblaslt_status_invalid_value;
+            }
+            // With user args every launch reads its sizes from device memory, and
+            // the host sizes may be placeholders, so only the host problem is checked.
+            if(!useUserArgs)
+            {
+                for(size_t i = 0; i < data->problem.gemms.size(); i++)
+                {
+                    if(auto st = checkHandwrittenKernelPredicates(
+                           __func__,
+                           rocblaslt::groupedPredicateProblem(data->problem, i, isCUFallback),
+                           *solution);
+                       st != rocblaslt_status_success)
+                        return st;
+                }
             }
 
             // Grouped GEMM does select Stream-K solutions, so isolation has to
@@ -7654,6 +7722,8 @@ inline auto getSolutions(
     auto drop          = [&](auto const& s) {
         if(isCustomKernelForPointerArray(tensile_prob, *s))
             return true;
+        if(!peerDKernelFits(tensile_prob.outputPeerD(), *s))
+            return true;
         if(mxScaleLayoutFits(mxScaleNeed, *s))
             return false;
         layoutDropped = true;
@@ -8065,6 +8135,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
                 }
                 continue;
             }
+            if(!peerDKernelFits(prob.outputPeerD(), *solution))
+                continue;
         }
 
         //workaround: findAllSolutions should get all solutions without duplications.
@@ -8308,6 +8380,9 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
         }
 
         if(auto st = checkMxScaleLayout(__func__, mxScaleNeed, *solution);
+           st != rocblaslt_status_success)
+            return st;
+        if(auto st = checkPeerDKernelMatch(__func__, tensile_prob.outputPeerD(), *solution);
            st != rocblaslt_status_success)
             return st;
 

@@ -33,6 +33,8 @@ subtrees:
     title: Use logging and heuristics
   - file: how-to/how-to-use-streamk
     title: Use Stream-K with hipBLASLt
+  - file: how-to/how-to-use-high-density-mesh-selection
+    title: Use High-Density Mesh (HDM) solution selection
   - file: how-to/how-to-detect-nan
     title: Detect NaN in GEMM output
   - file: how-to/how-to-general-batched-gemm

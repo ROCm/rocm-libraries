@@ -11,6 +11,9 @@ This page covers:
   `library/kernels/common/conv_direct_wgrad_gather.py`,
   `library/kernels/common/conv_direct_dw_wgrad_mfma.py`,
   `library/kernels/common/conv_direct_grouped_wgrad_mfma.py` (direct wgrad)
+- `library/kernels/common/conv_direct_fwd_pp_mfma.py` (gfx950 ping-pong direct forward)
+- `library/kernels/common/conv_direct_pp_mfma.py` (the ping-pong pipeline the gfx950 direct dgrad and forward share)
+- `library/kernels/common/conv_direct_fwd_flex_mfma.py` (gfx950 flattened-pixel direct forward)
 - `library/kernels/common/img2col.py`
 
 Pooling (`platform/python/rocke/instances/common/pooling.py`) is a platform
@@ -468,6 +471,7 @@ M-outer default for dgrad, and matches the fp32 reference for wgrad.
 - `pipeline="basic"`: now uses a bounded runtime `scf.for` K-loop (load → sync → MFMA → sync per tile), identical to the `"mem"` path. No K-trip-count limit. dgrad has no `basic` branch.
 - `prefetch_global_regs` (wgrad, MFMA only) is the register-prefetch form of the plain single-buffer synchronous K loop shared by `mem`/`compv3`/`compv4`/`basic`. A prologue issues tile `k_lo`'s global reads into VGPRs (`CoalescedTileLoader.load_global`). Each iteration writes the carried tile to LDS (`store_lds`), publishes it with an LDS-only barrier (`sync_lds_only`: `lgkmcnt(0)` + `s_barrier`), issues tile k+1's reads, runs tile k's MFMAs and closes with a second LDS-only barrier, so the global reads stay in flight under the MFMAs instead of being drained at every barrier. The reads of the last iteration lie past the slice and are never stored. It is rejected with `async_dma`, `unroll_k`, `prefetch_addr`, stream-K and on WMMA, and when a tile needs more than 32 global loads per thread per operand (each one is a carried loop value; both engines share the limit), and tags the kernel name `pgr` (identity field `prefetch_global_regs`, out of the hash while False). It is a different loop from `register_prefetch` (tag `rpf`), which only applies to compv3 with `prefetch_addr` and carries the load offsets. On gfx950 the AOT grid builds it next to the plain loop of the 8/8-wide kernels on the `CACHE_WGRAD_PREFETCH_GLOBAL_REGS_GEOMETRIES` cover (cshuffle epilogue with `split_k` 1 or the atomic split, and two-stage split-K).
 - The packed 16-bit split-K atomic (wgrad, cshuffle epilogue) stores `vector_size_c` elements per thread from the LDS-staged tile, one `<2 x dtype>` atomic per pair. On gfx950 the AOT grid builds these kernels at `vector_size_c` = 2 (`CACHE_WGRAD_ATOMIC_VEC_C`): one pair per lane, so a wave's atomics cover consecutive dwords of a dW row instead of a 16-byte run per lane. Other arches keep dW at the X width.
+- dgrad split-K (`split_k` > 1, MFMA; the degree is baked, tag `sk<N>`, grid z = `split_k`) with the cshuffle epilogue stages the tile in LDS as the plain cshuffle store does and atomic-adds it into dX through the tilde address function (`CShuffleEpilogue.atomic_store(addr_fn=...)`; C++ `rocke_cshuffle_epilogue_atomic_store_addr`): scalar f32 atomics for an fp32 dX, one `<2 x dtype>` atomic per pair for fp16 / bf16, so the store width the epilogue picks must be even (`_dgrad_split_k_cshuffle_store_vec`, refused by the validator otherwise). The default epilogue keeps the per-fragment atomic epilogue. dX must be zeroed before every launch. On gfx950 the AOT grid builds one split-K copy, at dX width 2, of each 8/8 cshuffle tilde kernel on the `CACHE_DGRAD_SPLIT_K_GEOMETRIES` cover (nine `mem` kernels up to 64 x 128 tiles at degree 8 or 16, `_dgrad_split_ks`), for the small-M, deep-K problems a single K pass leaves most CUs idle on; `benchmark_implicit_gemm_conv --run-from-cache` zeroes dX before each launch of one. They are cache-served only: the packaged backward-data catalog does not include them.
 - `async_dma` is a swept axis on the wgrad sweep driver, not a run-level flag. Unlike `lds_k_outer` it is not deducible from `(arch, spec)`: it removes the register staging of the tile, but it also forces the K-outer row pad to 0 and coarsens the load-width ladder to the widths the intrinsic accepts, and both terms are functions of tile width and channel run, which are themselves sweep axes.
 - WMMA wgrad (gfx1250): `async_dma` is a ping-pong over `global_load_async_to_lds` (`CoalescedTileLoader.load_async_to_lds`, one barrier per tile, drained by `s_wait_asynccnt`). It reuses the synchronous K-outer loaders' slot partition, needs `lds_k_outer` and a 4-, 8- or 16-byte chunk on both operands, and ANDs the buffer-range check (`byte offset < num_bytes`, unsigned as the resource compares it) into each chunk's `valid`, zero-filling failing chunks with an LDS store of the tile's element type. `epilogue="cshuffle"` is admitted on WMMA too: both cshuffle epilogues (direct store and split-K atomic) read the WMMA fragment through `CShuffleEpilogue.from_grid_op`. Two-stage (f32 workspace) split-K runs on gfx1250 as well: the Stage 1 scratch epilogue decodes the WMMA fragment through `op.dst_layout()` (`wgrad_two_stage_available` needs the arch's float global atomics on wave32). `pipeline` stays `mem`; `unroll_k`, `prefetch_addr` and `chiplet_swizzle` stay rejected on WMMA.
 - No K loop is unrolled at build time any more: `async_dma` runs `SoftwarePipeline.run_ping_pong_dynamic` and `unroll_k` a hand-rolled 2x ping-pong, both over the runtime extent, so the former `_MAX_UNROLLED_K_ITERS` / `ROCKE_MAX_UNROLLED_K_ITERS` cap is gone.
@@ -1323,7 +1327,9 @@ covers every knob; the byte-identity gate is
 ## Direct Dgrad on MFMA with LDS DMA (gfx950)
 
 `library/kernels/common/conv_direct_dgrad_pp_mfma.py`, spec `DgradPpMfmaSpec`,
-builder `build_dgrad_pp_mfma` (C++ twin `instance_conv_direct_dgrad_pp_mfma.h`).
+builder `build_dgrad_pp_mfma` (C++ twin `instance_conv_direct_dgrad_pp_mfma.h`),
+on the ping-pong pipeline of `conv_direct_pp_mfma.py` (shared with the direct
+forward on MFMA with LDS DMA).
 A dense (`groups == 1`) stride-1 dgrad for gfx950 (wave64,
 `mfma_f32_16x16x32`), computed as the forward pass over the transposed problem
 (`dgrad_pp_mfma_problem`: dY in, dX out, padding `dil_h * (KH - 1) - PAD`
@@ -1363,7 +1369,8 @@ every extent and channel count at least 1, the dgrad's K a multiple of 8 and
 C a multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 only
 at `block_k` 128, 7x7 not at all), and one dY image, one dX image and the
 filter each at most `INT32_MAX` bytes (the buffer descriptors span them and a
-masked lane reads at that offset), with an i32 block count. The AOT
+masked lane reads at that offset), and the whole dY and dX each at most
+`INT32_MAX` bytes (their sizes are i32 kernargs). The AOT
 grid is `DGRAD_PP_MFMA_FILTERS` (3, 5) times `DGRAD_PP_MFMA_BLOCK_K`
 (`kernels/conv/direct_aot_jobs.py`, variant `direct_dgrad_pp_mfma`, a
 single-kernel forward-ABI step of `DIRECT_DGRAD_FPROP_SINGLE`); a binary is
@@ -1582,6 +1589,93 @@ builder directly.
 Runtime: N, H, W, Ho, Wo, groups and the strides; baked: KH, KW, PAD and the
 knobs. The AOT grid is `DW_FWD_WMMA_*` over "same" 3x3 / 5x5 / 7x7 and "valid"
 7x7 (variant `direct_dw_fwd_wmma`).
+
+## Direct Forward on MFMA with LDS DMA (gfx950)
+
+`library/kernels/common/conv_direct_fwd_pp_mfma.py`, spec `FwdPpMfmaSpec`,
+builder `build_fwd_pp_mfma` (C++ twin `instance_conv_direct_fwd_pp_mfma.h`).
+It runs on the ping-pong pipeline it shares with the direct dgrad below
+(`conv_direct_pp_mfma.py`, C++ `instance_conv_direct_pp_mfma_internal.hpp`);
+only the weight staging and the A reads are its own.
+A dense (`groups == 1`) stride-1 forward for gfx950 (wave64,
+`mfma_f32_16x16x32`). The arch gate reads `ArchTarget` capabilities (wave64,
+16-byte `buffer_load ... lds`, `mfma_f32_16x16x32`), which of the known
+targets only gfx950 has.
+
+A workgroup of 8 waves owns a 16x16 output pixel tile and `block_k` (64, 128
+or 256) output channels, and walks the input channels in chunks of 64:
+
+- every operand byte is staged with `buffer_load ... lds` (16 bytes per lane,
+  4 for the narrow tail of a halo row), never through VGPRs; the LDS
+  swizzle, a 16-byte granule XOR (granule `g` of a 64-channel row `x` at
+  slot `g ^ (x % 8)`) chosen from the bank arithmetic to spread fragment
+  reads over distinct slots, is applied on the global side;
+- the waves form two ranks of 4: rank 0 streams the next filter tap's
+  weights (`[block_k][64]`) into a double buffer, rank 1 the next chunk's
+  input halo `[16 + KH - 1][16 + KW - 1][64]` into the other input buffer, a
+  few 1 KiB pieces per step;
+- rank 1 runs one barrier behind; every step (one tap, one 32-channel half of
+  the chunk) is `reads + DMA issue; barrier; s_setprio 1; MFMAs; s_setprio 0;
+  barrier`, so one rank's MFMAs overlap the other rank's fragment reads and
+  DMA issue. The `vmcnt` waits are explicit, every buffer is its own LDS
+  allocation (`lds_alias_scopes`), and the chunk loop is unrolled twice so
+  each read names its buffer statically.
+
+Runtime (kernargs, the direct-conv block): batch, extents and both channel
+counts. Build-time: the filter, padding, dtype and `block_k`. Constraints:
+square odd filters, stride 1, no dilation, "same" padding on both axes,
+every extent and channel count at least 1, C a multiple of 8 and K a
+multiple of 4, the double-buffered tiles within the 160 KB LDS (5x5 up to
+`block_k` 128, 7x7 only at 64), and one input image, one output image and
+the filter each at most `INT32_MAX` bytes (the buffer descriptors span them
+and a masked lane reads at that offset), and the whole input and output each
+at most `INT32_MAX` bytes (their sizes are i32 kernargs). The AOT
+grid is `FWD_PP_MFMA_FILTERS` (3x3) times the kernel module's `BLOCK_K`
+(`kernels/conv/direct_aot_jobs.py`, variant `direct_fwd_pp_mfma`); a binary
+is offered where at least half of its padded tile grid is real work. The C++
+twin covers every knob; the byte-identity gate is
+`library/tests/parity/conv_direct_fwd_pp_mfma_emit.{c,py}`, the GPU numeric
+test `library/tests/test_direct_fwd_pp_mfma.py`.
+
+## Direct Forward on MFMA with Flattened Pixels (gfx950)
+
+`library/kernels/common/conv_direct_fwd_flex_mfma.py`, spec `FwdFlexMfmaSpec`,
+builder `build_fwd_flex_mfma` (C++ twin `instance_conv_direct_fwd_flex_mfma.h`).
+A dense (`groups == 1`) forward for gfx950 (wave64, `mfma_f32_16x16x32`) that
+handles any filter, stride, dilation and padding. The arch gate reads
+`ArchTarget` capabilities (wave64, 16-byte `buffer_load ... lds`,
+`mfma_f32_16x16x32`), which of the known targets only gfx950 has.
+
+A workgroup of 8 waves owns a tile of 256 flattened output pixels (N x Ho x Wo)
+and `bk` (128 or 256) output channels. The reduction is over taps x 64-channel
+chunks in a persistent grid of up to 256 blocks:
+
+- the im2col mapping is a per-lane pixel base (tile constant) plus a scalar
+  tap offset; taps whose window falls entirely in padding are skipped (a
+  32-bit valid-tap bitmap per pixel, one bit per tap);
+- every operand byte is staged with `buffer_load ... lds` (16 bytes per lane),
+  never through VGPRs; the LDS granule XOR swizzle is applied on the global
+  side; two static stages avoid cross-stage alias ambiguity for the
+  `waitcnt` pass;
+- the 8 waves form two ping-pong groups of 4 (each owning half the pixel
+  tile); group 0 issues the next DMA after the barrier, group 1 issues at
+  its MFMA phase start, so every DMA has a full step to land;
+- the `permlane32_swap` epilogue reorders the per-lane MFMA results so that
+  consecutive channels are contiguous in memory without an LDS round-trip;
+- `split_c > 1` slices the channel reduction into `split_c` pieces and
+  writes fp32 partial sums to a workspace that `direct_split_reduce` folds
+  into the output.
+
+Runtime (kernargs, the direct-conv block): batch, extents and both channel
+counts. Build-time: the filter, padding, stride, dilation, `bk`, `split_c`
+and dtype. Constraints: `groups == 1`, `C` a multiple of 64, `K` a multiple
+of 8, stride and dilation both at least 1, at most 32 taps, every extent at
+least 1, the input image, output image, weight tensor and workspace slab
+(when `split_c > 1`) each at most `INT32_MAX` bytes. The AOT grid is
+`FWD_FLEX_LAYERS` times `FWD_FLEX_KNOBS` (`kernels/conv/direct_aot_jobs.py`,
+variant `direct_fwd_flex_mfma`). The C++ twin covers every knob; the
+byte-identity gate is `library/tests/parity/conv_direct_fwd_flex_mfma_emit.{c,py}`,
+the GPU numeric test `library/tests/test_direct_fwd_flex_mfma.py`.
 
 ## Winograd Forward (gfx1250)
 
