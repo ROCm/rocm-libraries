@@ -77,7 +77,9 @@ Path(config).write_text(str(client.pid))
         # A killed orphan can await reaping by init/the suite supervisor.
         try:
             state = stat.read_text().split(") ", 1)[1]
-        except FileNotFoundError:
+        # The process can exit between exists() and the read; the read then
+        # fails with ESRCH (ProcessLookupError) rather than ENOENT.
+        except (FileNotFoundError, ProcessLookupError):
             break
         if state.startswith("Z"):
             break
