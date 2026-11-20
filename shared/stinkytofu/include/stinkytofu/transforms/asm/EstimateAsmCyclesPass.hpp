@@ -51,8 +51,8 @@ struct EstimateAsmCyclesAnalysis {
 /// same iteration and is not added again. preLoopCycles and postLoopCycles are
 /// the longest path through the blocks before and after that range. A back-edge
 /// counts one iteration. The global-write edge fork always takes NonEdge; other
-/// exclusive edges keep the heavier side. Issue state carries across blocks, so
-/// a wait sees a load issued in an earlier block.
+/// exclusive edges keep the heavier side. Each block is replayed from empty
+/// issue state, so a wait does not see a load issued in another block.
 struct EstimateAsmCyclePhases {
     uint32_t preLoopCycles = 0;
     uint32_t mainLoopCycles = 0;

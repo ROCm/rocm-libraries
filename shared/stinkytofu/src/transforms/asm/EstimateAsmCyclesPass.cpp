@@ -239,9 +239,9 @@ struct IssuedDsOp {
     DsLoadDrainEntry entry;
 };
 
-// One issue timeline for the whole kernel. A fresh queue per basic block drops
-// the WMMA window, data-ready counters, and in-flight DS ops, so a wait cannot
-// see a load that issued in the previous block.
+// Issue state for one basic block. It is not carried to the next block: a
+// predecessor may be on another side of a branch, and longest-path adds the
+// block costs after the fact.
 struct CycleReplay {
     std::unique_ptr<dag::ReadyQueue> queue;
     std::deque<IssuedDsOp> inflightDs;
@@ -329,11 +329,9 @@ class EstimateAsmCyclesPassImpl : public Pass {
         // The per-instruction query is a read-only slice of the unrolled loop.
         // Phase totals are for the publishing pass, which sees the whole kernel.
         if (perInstructionCycleQuery_) {
-            CycleReplay replay;
-            replay.queue = dag::chooseReadyQueue(passCtx);
             for (BasicBlock& bb : func) {
                 if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-                calculateMathClocksInUnrolledLoop(bb, passCtx, BlockCycleScope::Legacy, replay);
+                calculateMathClocksInUnrolledLoop(bb, passCtx, BlockCycleScope::Legacy);
             }
             PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] totalCycles=" << totalCycles_ << "\n");
             return PreservedAnalyses::all();
@@ -430,10 +428,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
         std::vector<char> excluded(ordered.size(), 0);
         markAlternateWaveLoopBlocks(ordered, excluded);
 
-        // Replay every block on one timeline. The other wave's copy is skipped so
-        // the epilogue continues from the wave-0 body, not from that copy.
-        CycleReplay replay;
-        replay.queue = dag::chooseReadyQueue(passCtx);
+        // Each block is replayed from empty issue state. The other wave's copy is
+        // skipped so its instructions are not added to the epilogue.
         std::unordered_map<BasicBlock*, uint32_t> blockCost;
         std::string primaryLoopLabels;
         std::vector<BasicBlock*> preBlocks;
@@ -448,8 +444,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                     primaryLoopLabels += bb.getLabel();
                 }
                 calculateMathClocksInUnrolledLoop(
-                    bb, passCtx, inLoop ? BlockCycleScope::LoopBody : BlockCycleScope::EntireBlock,
-                    replay);
+                    bb, passCtx, inLoop ? BlockCycleScope::LoopBody : BlockCycleScope::EntireBlock);
                 blockCycles = totalCycles_;
             }
             blockCost[&bb] = blockCycles;
@@ -534,10 +529,10 @@ class EstimateAsmCyclesPassImpl : public Pass {
         }
     }
 
-    /// Process a single basic block to estimate asm cycles. \p replay is the
-    /// kernel timeline and is not rebuilt here.
+    /// Process a single basic block to estimate asm cycles. Issue state starts
+    /// empty here and is discarded when the block ends.
     void calculateMathClocksInUnrolledLoop(BasicBlock& bb, PassContext& passCtx,
-                                           BlockCycleScope scope, CycleReplay& replay) {
+                                           BlockCycleScope scope) {
         totalCycles_ = 0;
         // Collect all instructions in this basic block
         std::vector<StinkyInstruction*> instructions;
@@ -549,6 +544,8 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         if (instructions.empty()) return;
 
+        CycleReplay replay;
+        replay.queue = dag::chooseReadyQueue(passCtx);
         int const blockStart = replay.cycles;
         // Loop-body modelling runs in any basic block whose label contains label_LoopBeginL
         // (tensilelite names the block ^label_LoopBeginL, and the rocisa split adds suffixes
