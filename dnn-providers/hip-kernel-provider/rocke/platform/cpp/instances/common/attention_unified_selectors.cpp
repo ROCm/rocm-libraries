@@ -154,7 +154,10 @@ static bool enable_combo_2d(const rocke_unified_attn_problem_t* p)
         /* bf16 admits the whole combo cohort; every other dtype is rejected. */
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias || p->softcap > 0)
+    /* QQ bias and softcap stay refused here (#9220: Python admits them); the
+     * kernel applies ALiBi on every gfx950 path, so ALiBi takes the same path
+     * as the problem without it. */
+    if(p->use_qq_bias || p->softcap > 0)
     {
         return false;
     }
@@ -192,7 +195,8 @@ static bool enable_single_batch_combo(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias)
+    /* ALiBi rides the combo (applied on every gfx950 path); QQ bias stays out. */
+    if(p->use_qq_bias)
     {
         return false;
     }
@@ -281,8 +285,8 @@ static bool enable_i64_kv_addr(const rocke_unified_attn_problem_t* p)
 static bool d256_gfx950_cohort(const rocke_unified_attn_problem_t* p)
 {
     return p->head_size == 256 && strcmp(p->dtype, "bf16") == 0 && !p->use_fp8
-           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !p->use_alibi
-           && !p->use_qq_bias && p->max_seqlen_q > 1;
+           && p->sliding_window == 0 && p->softcap == 0 && !p->use_sinks && !p->use_qq_bias
+           && p->max_seqlen_q > 1;
 }
 
 /* Python: _d256_gfx950_fast(problem). */
@@ -332,7 +336,8 @@ static bool enable_transposed_qk_32x32(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_alibi || p->use_qq_bias)
+    /* The transposed softmax applies ALiBi; QQ bias stays out (#9220). */
+    if(p->use_qq_bias)
     {
         return false;
     }
@@ -464,7 +469,7 @@ static bool enable_gfx950_sink_prefill_wpe3(const rocke_unified_attn_problem_t* 
     return arch_is("gfx950") && (strcmp(p->dtype, "bf16") == 0 || strcmp(p->dtype, "fp16") == 0)
            && !p->use_fp8 && p->head_size == 64 && p->block_size == 16 && p->num_seqs <= 1
            && p->max_seqlen_q > 1 && p->use_sinks && p->sliding_window == 0 && p->softcap == 0
-           && !p->use_alibi && !p->use_qq_bias;
+           && !p->use_qq_bias;
 }
 
 /* Python: _gfx942_flash_wide_setting(). The HIPDNN_GFX942_FLASH_WIDE env knob
@@ -878,7 +883,9 @@ static bool enable_register_pv(const rocke_unified_attn_problem_t* p)
     {
         return false;
     }
-    if(p->use_alibi)
+    /* gfx950 applies ALiBi on register-P; gfx942 keeps ALiBi off it until its
+     * arms are ported. */
+    if(p->use_alibi && !arch_is("gfx950"))
     {
         return false;
     }
@@ -1026,7 +1033,8 @@ rocke_attention_tiled_2d_spec_t
      * only the scalar-state layout maps correctly, so sinks always take it. */
     bool scalar_state = combo || subflags || (p->use_sinks && enable_transposed_qk_32x32(p));
     bool skip_legacy_qreg = combo || subflags;
-    bool bias_active = (p->softcap > 0) || p->use_alibi || p->use_qq_bias;
+    /* The mask opts apply ALiBi themselves; only other score terms turn them off. */
+    bool bias_active = (p->softcap > 0) || p->use_qq_bias;
     bool mask_opts = (combo_no_sw && !bias_active) || subflags;
     s.use_transposed_scalar_state = scalar_state;
     s.use_mfma32_skip_legacy_qreg = skip_legacy_qreg;

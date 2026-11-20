@@ -845,20 +845,32 @@ class TestMaskGates(unittest.TestCase):
             attention_problem(_req(mask_type=TOP_LEFT, **kw)).causal_top_left
         )
 
-    def test_alibi_with_sinks_is_rejected_under_every_mask(self):
-        for over in (
-            dict(right_bound=0),
-            dict(right_bound=0, causal_top_left=True),
-            dict(right_bound=0, sliding_window=64),
-            dict(right_bound=0, causal_top_left=True, sliding_window=64),
+    def test_alibi_with_sinks_needs_the_top_left_diagonal(self):
+        for over, defined in (
+            (dict(right_bound=0), False),
+            (dict(right_bound=0, causal_top_left=True), True),
+            (dict(right_bound=0, sliding_window=64), False),
+            (dict(right_bound=0, causal_top_left=True, sliding_window=64), True),
         ):
             with self.subTest(**over):
                 problem = au.UnifiedAttentionProblem(
                     **_problem_kw(use_alibi=True, use_sinks=True, **over)
                 )
-                ok, why = au._reject_mask_semantics(problem)
-                self.assertFalse(ok)
-                self.assertIn("sinks", why)
+                rejected = au._reject_mask_semantics(problem)
+                if defined:
+                    self.assertIsNone(rejected)
+                else:
+                    ok, why = rejected
+                    self.assertFalse(ok)
+                    self.assertIn("sinks", why)
+
+    def test_square_alibi_with_sinks_stays_top_left(self):
+        # Folded to bottom-right it would be refused as undefined.
+        kw = dict(seqlen_q=1024, seqlen_k=1024, use_alibi=True, use_sinks=True)
+        for arch in ("gfx942", "gfx950"):
+            with self.subTest(arch=arch):
+                problem = attention_problem(_req(arch=arch, mask_type=TOP_LEFT, **kw))
+                self.assertTrue(problem.causal_top_left)
 
     def test_a_window_with_any_right_bound_is_valid(self):
         for right in (-1, 0, 8):

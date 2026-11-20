@@ -24,8 +24,7 @@ row, so softmax and O are unchanged; only the log-sum-exp moves, and
 :func:`alibi_lse_shift` gives the correction to add to the log2-domain row max
 before the LSE store. A sink logit gets no ALiBi term and no shift, so sinks
 need the anchor to be the query's own diagonal (top-left causal, right bound 0):
-the dense kernels admit sinks with ALiBi there only, the unified kernels refuse
-the pair.
+the kernels admit sinks with ALiBi there only.
 
 hipDNN defines the term on the top-left diagonal only. Off it (bottom-right
 alignment with ``Sq != Skv``) the kernels anchor at the shifted diagonal, which
@@ -45,6 +44,7 @@ from __future__ import annotations
 from rocke.core.ir import F32, I32, IRBuilder, Value
 
 __all__ = [
+    "ALIBI_DESIGNS",
     "alibi_lse_shift",
     "alibi_split_lane_terms",
     "alibi_split_tile_offsets",
@@ -53,6 +53,18 @@ __all__ = [
     "alibi_tile_bias",
     "check_alibi_slopes",
 ]
+
+# How the ALiBi term enters the scores, and the kernel-name tokens. ``seed``: the
+# QK MFMA accumulator starts at the term in raw units (free in the MFMA); ``fma``:
+# the term joins the post-MFMA scale op. ``tile``: the whole term per KV tile;
+# ``split``: a loop-invariant per-key part plus a per-row offset per tile folded
+# into the row max and the exp2 offset.
+ALIBI_DESIGNS = {
+    "seed_tile": "st",
+    "fma_tile": "ft",
+    "seed_split": "ss",
+    "fma_split": "fs",
+}
 
 _LOG2E = 1.4426950408889634
 

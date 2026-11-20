@@ -1220,6 +1220,62 @@ _CONFIGS[78] = {**_TRANSPOSED_ALIBI, "use_transposed_mask_once": True}
 _CONFIGS[79] = {**_TRANSPOSED_ALIBI, "use_transposed_invariant_hoist": True}
 _CONFIGS[80] = dict(_TRANSPOSED_ALIBI)
 
+# --- idx81-95: the ALiBi arms (alibi_design). 81-84 each arm on the transposed
+#     mask-limit softmax; default arms: 85 D256 mask-limit (fma_split), 86 D192
+#     mask-limit (seed_tile), 87 grouped_kv2 and 88 register-P (fma_tile); 89-92
+#     each arm on the 16x16 path (two atoms, four N-tiles); 93-95 the other arms
+#     on grouped_kv2 (second-tile seed, two split groups).
+_MLIM_ALIBI = {
+    **_TRANSPOSED_ALIBI,
+    "use_transposed_scalar_state": True,
+    "use_transposed_mask_once": True,
+    "use_transposed_half_local_pv": True,
+    "use_mfma32_skip_legacy_qreg": True,
+    "use_transposed_mask_limit": True,
+}
+_ALIBI_16X16 = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=24,
+    num_kv_heads=6,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    block_m_per_warp=32,
+    tile_size=64,
+)
+_CONFIGS[81] = {**_MLIM_ALIBI, "alibi_design": "seed_tile"}
+_CONFIGS[82] = {**_MLIM_ALIBI, "alibi_design": "fma_tile"}
+_CONFIGS[83] = {**_MLIM_ALIBI, "alibi_design": "seed_split"}
+_CONFIGS[84] = {**_MLIM_ALIBI, "alibi_design": "fma_split"}
+_CONFIGS[85] = {**_MLIM_ALIBI, "head_size": 256}
+_CONFIGS[86] = {**_MLIM_ALIBI, "head_size": 192}
+_CONFIGS[87] = {**_TRANSPOSED_ALIBI, "use_grouped_kv2_softmax": True}
+_CONFIGS[88] = dict(
+    head_size=64,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=32,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=True,
+    num_seqs=2,
+    waves_per_eu=2,
+    use_register_pv=True,
+    tile_size=64,
+)
+_CONFIGS[89] = {**_ALIBI_16X16, "alibi_design": "seed_tile"}
+_CONFIGS[90] = {**_ALIBI_16X16, "alibi_design": "fma_tile"}
+_CONFIGS[91] = {**_ALIBI_16X16, "alibi_design": "seed_split"}
+_CONFIGS[92] = {**_ALIBI_16X16, "alibi_design": "fma_split"}
+_CONFIGS[93] = {**_CONFIGS[87], "alibi_design": "fma_split"}
+_CONFIGS[94] = {**_CONFIGS[87], "alibi_design": "seed_tile"}
+_CONFIGS[95] = {**_CONFIGS[87], "alibi_design": "seed_split"}
+
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:
     if idx not in _CONFIGS:

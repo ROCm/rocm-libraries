@@ -18,6 +18,7 @@ from typing import Optional
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
+from kernels.common._attention_alibi import ALIBI_DESIGNS
 from kernels.common._attention_dense_paged import paged_cache_bytes, paged_tile_check
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -98,19 +99,6 @@ def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
         f"which are already multiples of block_m {spec.block_m} and block_n "
         f"{spec.block_n}"
     )
-
-
-# How the ALiBi term enters the scores, and the kernel-name tokens. ``seed``: the
-# QK MFMA accumulator starts at the term in raw units (free in the MFMA); ``fma``:
-# the term joins the post-MFMA scale op. ``tile``: the whole term per KV tile;
-# ``split``: a loop-invariant per-key part plus a per-row offset per tile folded
-# into the row max and the exp2 offset.
-ALIBI_DESIGNS = {
-    "seed_tile": "st",
-    "fma_tile": "ft",
-    "seed_split": "ss",
-    "fma_split": "fs",
-}
 
 
 @dataclass(frozen=True)

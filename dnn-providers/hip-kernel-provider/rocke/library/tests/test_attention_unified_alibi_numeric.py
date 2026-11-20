@@ -11,15 +11,20 @@ are built in (hipDNN's per-head formula) or read from a caller tensor.
 
 import itertools
 import math
+from dataclasses import replace
 
 import pytest
 
 torch = pytest.importorskip("torch")
 
+import kernels.common.attention_unified as au  # noqa: E402
+from dispatch.attention.common import AttentionTuningSpec  # noqa: E402
+from kernels.common._attention_alibi import ALIBI_DESIGNS  # noqa: E402
 from kernels.common.attention_unified import (  # noqa: E402
     UnifiedAttentionProblem,
     run_unified_attention_torch,
 )
+from kernels.gfx950.attention_tiled_2d import _alibi_design  # noqa: E402
 from rocke.numeric.sdpa_reference import alibi_slopes  # noqa: E402
 
 
@@ -41,9 +46,12 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _reference(q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, slopes, tl):
+def _reference(
+    q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, slopes, tl, sinks=None
+):
     """FP32 O and natural-log LSE; causal on the bottom-right diagonal, or the
-    top-left one when ``tl``; ALiBi measured from the query's diagonal."""
+    top-left one when ``tl``; ALiBi measured from the query's diagonal. A sink
+    logit joins each row's denominator with no ALiBi term and no value (SEM-022)."""
     hq, d = q.shape[1], q.shape[2]
     hkv, bs = k_cache.shape[2], k_cache.shape[1]
     slope = slopes.float().view(hq, 1, 1)
@@ -61,7 +69,11 @@ def _reference(q, k_cache, v_cache, q_lens, kv_lens, block_table, scale, slopes,
         diag = p if tl else p + (kl - ql)
         s = s + slope * (kk - diag)
         s = s.masked_fill(~(kk <= diag), float("-inf"))
-        lse = torch.logsumexp(s, dim=-1)
+        if sinks is not None:
+            sink_col = sinks.float().view(hq, 1, 1).expand(hq, ql, 1)
+            lse = torch.logsumexp(torch.cat([s, sink_col], dim=-1), dim=-1)
+        else:
+            lse = torch.logsumexp(s, dim=-1)
         has = torch.isfinite(lse)
         prob = torch.exp(s - torch.where(has, lse, 0.0).unsqueeze(-1))
         prob = torch.where(has.unsqueeze(-1), prob, 0.0)
@@ -79,15 +91,21 @@ def _run_case(
     hq=12,
     hkv=4,
     d=128,
+    bs=16,
     dtype="bf16",
     top_left=False,
     lse=False,
     external=False,
-    seed=0
+    sinks=False,
+    alibi_design=None,
+    family=None,
+    seed=0,
 ):
+    """``family``: a 2D spec flag the dispatched kernel must set (or
+    ``_PER_SCORE_ADD``), so the case runs the path it names; ``alibi_design``
+    forces that arm on it."""
     g = torch.Generator(device="cuda").manual_seed(seed)
     tdt = torch.float16 if dtype == "fp16" else torch.bfloat16
-    bs = 16
     total_q, num_seqs = sum(q_lens), len(q_lens)
     max_blocks = max(1, max((kl + bs - 1) // bs for kl in kv_lens))
     num_blocks = num_seqs * max_blocks + 3
@@ -118,10 +136,31 @@ def _run_case(
         dtype=dtype,
         num_kv_blocks=num_blocks,
         use_alibi=True,
+        use_sinks=sinks,
         causal_top_left=top_left,
         right_bound=0,
         emit_lse=lse,
     )
+    sink_t = torch.randn(hq, device="cuda", dtype=tdt, generator=g) if sinks else None
+    tuning_spec = None
+    if family is not None or alibi_design is not None:
+        assert au.select_auto_path(problem, _ARCH) == "2d"
+        spec = au._tiled_spec_from_problem(problem, _ARCH)
+        if family == _PER_SCORE_ADD:
+            assert _alibi_design(spec) is None, spec.kernel_name()
+        elif family is not None:
+            assert getattr(spec, family), f"{spec.kernel_name()} is not on {family}"
+        if alibi_design is not None:
+            tuning_spec = AttentionTuningSpec(
+                path="2d",
+                arch=_ARCH,
+                builder_kind="tiled",
+                compile_backend=au._select_2d_compile_backend(problem, _ARCH),
+                candidate_name="alibi_design",
+                tuning_id=alibi_design,
+                kernel_spec=replace(spec, alibi_design=alibi_design),
+                num_kv_blocks=num_blocks,
+            )
     out = torch.empty_like(q)
     lse_t = torch.full((total_q, hq, 1), float("nan"), device="cuda") if lse else None
     scale = 1.0 / math.sqrt(d)
@@ -136,12 +175,16 @@ def _run_case(
         softmax_scale=scale,
         block_table=bt,
         softcap=0.0,
+        sinks=sink_t,
         backend=backend,
         alibi_slopes=slopes if external else None,
         lse=lse_t,
+        tuning_spec=tuning_spec,
     )
     torch.cuda.synchronize()
-    o_ref, lse_ref = _reference(q, kc, vc, q_lens, kv_lens, bt, scale, slopes, top_left)
+    o_ref, lse_ref = _reference(
+        q, kc, vc, q_lens, kv_lens, bt, scale, slopes, top_left, sink_t
+    )
     tol = _tolerance(dtype)
     assert (out.float() - o_ref).abs().max().item() < tol
     if lse:
@@ -178,3 +221,92 @@ def test_top_left_with_lse(backend, q_lens, kv_lens):
 def test_bottom_right_lse_is_refused():
     with pytest.raises((ValueError, NotImplementedError), match="top-left"):
         _run_case([4], [64], backend="tiled", lse=True)
+
+
+# The paths that kept the per-score add from before the design arms.
+_PER_SCORE_ADD = "per-score add"
+
+# gfx950 tiled 2D families ALiBi reaches through dispatch: (case kwargs, the spec
+# flag of the family). Square prefill rows keep both diagonals equal.
+_GFX950_FAMILIES = {
+    "combo": (
+        dict(q_lens=[512], kv_lens=[512], hq=64, hkv=8, d=64, bs=32),
+        "use_transposed_mask_limit",
+    ),
+    "d128 single batch": (
+        dict(q_lens=[1024], kv_lens=[1024], hq=32, hkv=8, bs=64),
+        "use_transposed_mask_limit",
+    ),
+    "d128 multi batch": (
+        dict(q_lens=[512, 384], kv_lens=[700, 384], hq=32, hkv=8, bs=64),
+        "use_transposed_mask_limit",
+    ),
+    "d192 single batch": (
+        dict(q_lens=[1024], kv_lens=[1024], hq=32, hkv=8, d=192, bs=64),
+        "use_transposed_mask_limit",
+    ),
+    "d256 cohort": (
+        dict(q_lens=[1024, 512], kv_lens=[1024, 600], hq=16, hkv=2, d=256),
+        "use_mask_phase_split",
+    ),
+    "register-P": (
+        dict(q_lens=[64, 48], kv_lens=[200, 48], hq=8, hkv=8, d=64, bs=32),
+        "use_register_pv",
+    ),
+}
+
+
+def _gfx950_only():
+    if _ARCH != "gfx950":
+        pytest.skip("the ALiBi design arms are on the gfx950 tiled 2D kernel")
+
+
+@pytest.mark.parametrize("name", list(_GFX950_FAMILIES))
+def test_gfx950_family_default_design(name):
+    _gfx950_only()
+    kw, family = _GFX950_FAMILIES[name]
+    _run_case(backend="tiled", family=family, **kw)
+
+
+@pytest.mark.parametrize("design", sorted(ALIBI_DESIGNS))
+@pytest.mark.parametrize("name", ["d128 multi batch", "d256 cohort", "register-P"])
+def test_gfx950_designs(name, design):
+    _gfx950_only()
+    kw, family = _GFX950_FAMILIES[name]
+    _run_case(backend="tiled", family=family, alibi_design=design, **kw)
+
+
+@pytest.mark.parametrize(
+    "case,design",
+    [
+        ("combo", None),
+        ("combo", "seed_split"),
+        ("combo", "fma_split"),
+        ("per-score add", None),
+    ],
+)
+def test_sinks_on_the_top_left_diagonal(case, design):
+    _gfx950_only()
+    if case == "combo":
+        kw, family = dict(_GFX950_FAMILIES["combo"][0]), "use_transposed_mask_limit"
+        kw.update(q_lens=[320], kv_lens=[512])
+    else:
+        kw, family = dict(q_lens=[96, 64], kv_lens=[300, 64]), _PER_SCORE_ADD
+    _run_case(
+        backend="tiled",
+        top_left=True,
+        sinks=True,
+        family=family,
+        alibi_design=design,
+        **kw,
+    )
+
+
+def test_sinks_on_the_top_left_diagonal_split_kv():
+    _gfx950_only()
+    _run_case([4, 2], [3000, 1029], backend="3d", top_left=True, sinks=True)
+
+
+def test_sinks_off_the_top_left_diagonal_are_refused():
+    with pytest.raises((ValueError, NotImplementedError), match="sinks"):
+        _run_case([96], [300], backend="tiled", sinks=True)

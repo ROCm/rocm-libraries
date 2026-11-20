@@ -795,10 +795,13 @@ def normalize_band(
         return AttentionBand(
             None, 0 if sq == 1 and not uniform_lengths else None, Alignment.BOTTOM_RIGHT
         )
-    # The arch fold would turn top-left ALiBi with LSE into the bottom-right case its
-    # gate refuses as undefined; unfolded, the arch gate names the missing kernel.
-    alibi_lse = bool(req.use_alibi) and bool(req.emit_lse)
-    folds = not _has_no_mask_kernel(req.arch) and not alibi_lse
+    # The arch fold would turn top-left ALiBi with LSE or sinks into the bottom-right
+    # case its gate refuses as undefined; unfolded, the arch gate names the missing
+    # kernel.
+    alibi_on_diagonal = bool(req.use_alibi) and (
+        bool(req.emit_lse) or bool(req.use_sinks)
+    )
+    folds = not _has_no_mask_kernel(req.arch) and not alibi_on_diagonal
     if sq == sk and (uniform_lengths or folds):
         align = Alignment.BOTTOM_RIGHT
     return AttentionBand(left_bound, right_bound, align)
@@ -1059,12 +1062,13 @@ class AttentionTuningSpec:
             # token-major), so those keys and the spec_hash taken over them are the
             # ones stored before the fields existed. The RDNA WMMA prefill
             # ``dense_q`` / ``seqused_q`` layout options (from the request's fields
-            # of the same names) are left out the same way while they are off.
+            # of the same names) are left out the same way while they are off,
+            # and ``alibi_design`` while it is None (the path's default design).
             return tuple(
                 (f.name, repr(getattr(spec, f.name)))
                 for f in fields(spec)
                 if not (
-                    f.name in ("emit_lse", *QUERY_SIDE_OPTIONS)
+                    f.name in ("emit_lse", "alibi_design", *QUERY_SIDE_OPTIONS)
                     and not getattr(spec, f.name)
                 )
                 and not (f.name == "lse_layout" and spec.lse_layout == "token_major")

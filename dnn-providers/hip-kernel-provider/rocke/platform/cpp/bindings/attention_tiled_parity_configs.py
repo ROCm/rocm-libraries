@@ -1511,6 +1511,66 @@ GFX950_ATTENTION_TILED_2D += [
     },
 ]
 
+# idx81-95: the ALiBi arms (alibi_design): 81-84 each arm on the transposed
+# mask-limit softmax; default arms 85 D256 and 86 D192 mask-limit, 87
+# grouped_kv2, 88 register-P; 89-92 each arm on the 16x16 path; 93-95 the
+# other arms on grouped_kv2.
+_TRANSPOSED_ALIBI = dict(GFX950_ATTENTION_TILED_2D[80])
+_MLIM_ALIBI = {
+    **_TRANSPOSED_ALIBI,
+    "use_transposed_scalar_state": True,
+    "use_transposed_mask_once": True,
+    "use_transposed_half_local_pv": True,
+    "use_mfma32_skip_legacy_qreg": True,
+    "use_transposed_mask_limit": True,
+}
+_ALIBI_16X16 = {
+    "head_size": 64,
+    "block_size": 32,
+    "num_query_heads": 24,
+    "num_kv_heads": 6,
+    "dtype": "bf16",
+    "use_sinks": False,
+    "sliding_window": 0,
+    "has_softcap": False,
+    "use_alibi": True,
+    "block_m_per_warp": 32,
+    "tile_size": 64,
+}
+_ALIBI_DESIGN_ORDER = ("seed_tile", "fma_tile", "seed_split", "fma_split")
+_GKV2_ALIBI = {**_TRANSPOSED_ALIBI, "use_grouped_kv2_softmax": True}
+GFX950_ATTENTION_TILED_2D += [
+    {**_MLIM_ALIBI, "alibi_design": d} for d in _ALIBI_DESIGN_ORDER
+]
+GFX950_ATTENTION_TILED_2D += [
+    {**_MLIM_ALIBI, "head_size": 256},
+    {**_MLIM_ALIBI, "head_size": 192},
+    _GKV2_ALIBI,
+    {
+        "head_size": 64,
+        "block_size": 32,
+        "num_query_heads": 32,
+        "num_kv_heads": 32,
+        "dtype": "bf16",
+        "use_sinks": False,
+        "sliding_window": 0,
+        "has_softcap": False,
+        "use_alibi": True,
+        "num_seqs": 2,
+        "waves_per_eu": 2,
+        "use_register_pv": True,
+        "tile_size": 64,
+    },
+]
+GFX950_ATTENTION_TILED_2D += [
+    {**_ALIBI_16X16, "alibi_design": d} for d in _ALIBI_DESIGN_ORDER
+]
+GFX950_ATTENTION_TILED_2D += [
+    {**_GKV2_ALIBI, "alibi_design": "fma_split"},
+    {**_GKV2_ALIBI, "alibi_design": "seed_tile"},
+    {**_GKV2_ALIBI, "alibi_design": "seed_split"},
+]
+
 GFX942_ATTENTION_TILED_3D = [
     {
         "head_size": 64,

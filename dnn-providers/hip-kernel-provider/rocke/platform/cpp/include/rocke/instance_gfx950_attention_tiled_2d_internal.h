@@ -97,6 +97,14 @@ extern "C" {
 /* QK / PV N-tiles (T/QK_MFMA_N or HD/16); <=16. */
 #define ROCKE_GFX950_ATTN2D_MAX_N_TILES 16
 
+/* Resolved ALiBi design (Python _alibi_design; ALIBI_DESIGNS). NONE = the
+ * per-score add of the paths that took ALiBi before the arms. */
+#define ROCKE_GFX950_ATTN2D_AD_NONE 0
+#define ROCKE_GFX950_ATTN2D_AD_SEED_TILE 1
+#define ROCKE_GFX950_ATTN2D_AD_FMA_TILE 2
+#define ROCKE_GFX950_ATTN2D_AD_SEED_SPLIT 3
+#define ROCKE_GFX950_ATTN2D_AD_FMA_SPLIT 4
+
 /* ============================================================ *
  *  rocke_gfx950_attn2d_build_ctx_t
  *
@@ -365,6 +373,26 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* st_row_ok_hoist;
     rocke_value_t* st_causal_lim_hoist;
     rocke_value_t* st_alibi_slope_hoist;
+
+    /* ---- ALiBi arms (Python _alibi_design and the ad_* state) ---- *
+     * ALIBI_DESIGN is the resolved design (ROCKE_GFX950_ATTN2D_AD_*); NONE keeps
+     * the per-score add. The values are loop-invariant, set by the LICM hoist:
+     * slopes in log2 score units, the seed ones divided by qk_scale (raw MFMA
+     * units). Transposed 32x32: one query per lane (ad_slope, ad_anchor,
+     * ad_key_off, ad_split_c[16]); 16x16: one slope per reg (ad_slope_r) and
+     * the split terms [reg][n]. */
+    int ALIBI_DESIGN;
+    bool AD_SEED, AD_SPLIT;
+    rocke_value_t* ad_slope;
+    rocke_value_t* ad_anchor;
+    rocke_value_t* ad_key_off;
+    rocke_value_t* ad_seed_slope;
+    rocke_value_t* ad_split_c[16];
+    rocke_value_t* ad_seed_vec;
+    rocke_value_t* ad_slope_r[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* ad_seed_slope_r[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* ad_split_c16[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE]
+                               [ROCKE_GFX950_ATTN2D_MAX_N_TILES];
 
     /* ---- KV-loop body live carry (set per _emit_kv_body invocation) ---- *
      * The current loop iter var + the unpacked m/l/acc carry the inner QK/mask/
