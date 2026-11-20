@@ -65,8 +65,6 @@ struct GraphTestCase
     /// Group mode only: the per-batch lengths of the offset and cumulative length tables. The
     /// batch count must match the set's.
     GroupLengths groupLengths = GroupLengths::STANDARD;
-    /// Inputs are filled uniformly from [-inputAbsMax, inputAbsMax].
-    float inputAbsMax = 1.0f;
 
     std::string name;
     std::string arch;

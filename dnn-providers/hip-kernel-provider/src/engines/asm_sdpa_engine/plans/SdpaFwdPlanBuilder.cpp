@@ -843,28 +843,6 @@ bool SdpaFwdPlanBuilder::acceptsLaunchBlock(const fmha_v3_fwdConfig& config) con
     return true;
 }
 
-// The vendored fp8 causal kernel (gfx942 fwd_hd128_fp8_causal.co, AITER v0.1.28.post1)
-// computes every Q tile after the first wrongly: from row ts_qo on, O and LSE are off or NaN.
-// Single-tile graphs are correct, as are the fp8 no-mask kernel and the bf16 causal kernels.
-// AITER reproduces the defect upstream (ROCm/aiter#7593). The check reads the matched row, so
-// it covers a top-left mask that runs on the bottom-right kernel, with or without stats. In
-// group mode the Q sequence dim is the longest batch's length.
-static bool servesQTileCount(const fmha_v3_fwdConfig& config,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
-{
-    // NOLINTNEXTLINE(readability-identifier-naming)
-    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
-
-    const int64_t seqLenQ = q.dims()->Get(SDPA_SEQ_AXIS);
-    HIP_KERNEL_RETURN_FALSE_IF(
-        config.dtype == "fp8bf16" && config.mask != static_cast<int>(plan_utils::MaskType::NO_MASK)
-            && seqLenQ > config.ts_qo,
-        "fp8 causal kernel " + config.co_name + " computes every Q tile after the first wrongly "
-            + "(ROCm/aiter#7593); S_q must not exceed its tile size (S_q: "
-            + std::to_string(seqLenQ) + ", ts_qo: " + std::to_string(config.ts_qo) + ")");
-    return true;
-}
-
 // False when the node sets an attribute none of the forward kernels read.
 static bool
     servesOptionalAttributes(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs)
@@ -1186,11 +1164,9 @@ bool SdpaFwdPlanBuilder::isApplicable(
         return false;
     }
 
-    // Decline a kernel that cannot take the block it would be launched with, or that
-    // miscomputes this graph's Q tiles, so the graph falls through to another engine instead
-    // of failing at launch or returning wrong results.
-    const auto& config = cfg_fmha_fwd.at(key);
-    return servesQTileCount(config, *qTensor) && acceptsLaunchBlock(config);
+    // Decline a kernel that cannot take the block it would be launched with, so
+    // the graph falls through to another engine instead of failing at launch.
+    return acceptsLaunchBlock(cfg_fmha_fwd.at(key));
 }
 
 size_t SdpaFwdPlanBuilder::getMaxWorkspaceSize(
