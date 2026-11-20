@@ -171,21 +171,18 @@ Two ways to validate:
 W4A16 kernels are emitted directly by TensileLite from the gfx1151 Equality
 and FreeSize logic. No W4A16 custom assembly or HIP source is required.
 Prefill uses packed FP16 dequantization or FP32 dequantization with BF16 rounding.
-Decode uses `KernelWriterW4A16Decode` and rocisa's instruction and dependency passes.
+Decode uses dot2 WaveSplitK kernels from the normal generator.
 
-The `W4A16Decode` solution parameter contains seven values:
-`[loadWidth, unroll, accumulators, threads, maxN, linearK, nativePermute]`.
-Load width counts packed int4 dwords per lane. The emitter preserves the
-per-element FP16 rounding before FP32 dot products and wave reduction.
-A dword fallback handles K or row strides that do not support the wider load.
+A decode kernel is a one-wave workgroup that owns `MacroTile0` weight rows and
+`MacroTile1` tokens and splits K over its lanes. `DirectToVgprDot2A` and
+`DirectToVgprDot2B` feed `v_dot2` from the global-read registers, so the kernel
+uses no LDS; each lane issues `NumLoadsCoalescedA` loads ("K slots") per
+iteration and dequantizes each slot right before its `v_dot2`. A K that is not
+a multiple of `DepthU` runs one more iteration with the lanes past K reading
+zeros. `Dot2PostScaleA` applies the group scale to each slot's f32 partial sum
+instead of to every weight.
 
-All kernels accept runtime quantization groups 32, 64 and 128. Decode predicates
-require batch=1, positive K divisible by 256, and N within the configured bound
-(1 or 4). The 512-thread variant uses 16 waves and computes 16 rows per workgroup.
-The Equality selections retain their original load widths, accumulation order,
-and tile choices. Instruction scheduling is handled by the decode emitter.
-`W4A16DecodePrefetch: 4` stages four wide iterations before consumption, using
-128 VGPRs to hide memory latency in the selected N=1 kernels. The default is 1.
-The scalar N=1 unroll-four schedule reserves 104 VGPRs to reduce resident waves;
-other schedules use 64. Scalar tails below K4096 prefetch the final pair while
-preserving accumulation order. Longer scalar tails retain serial loads.
+All kernels accept runtime quantization groups 32, 64 and 128. `MaxOccupancy`
+makes the kernel request LDS it does not use, which caps the workgroups a WGP
+holds (`CUOccupancy` counts workgroups per WGP, and a WGP holds four SIMDs'
+worth of one-wave workgroups).
