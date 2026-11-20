@@ -991,8 +991,11 @@ has no head-dim gate for D ≤ 192 besides `% 8`.
 
 A dispatch outside the
 [Verified Kernel Matrix](../../../hip-kernel-provider/src/engines/asm_sdpa_engine/asm/asm_kernels/README.md#verified-kernel-matrix)
-(kernels that passed the provider's backward GPU tests on MI300X and MI355X in PR #15484, run at
-their own head dims) logs a WARN on its first dispatch.
+(kernels that passed the provider's backward GPU tests on MI300X and MI355X in PR #15484, and the
+gfx950 hd64 and hd192 × hd192 ones on MI355X in PR #16337, run at their own head dims) logs a WARN on
+its first dispatch. AITER's Python users send the three cases served on purpose above to CK, so
+AITER's own use does not validate the kernels on those graphs: the provider's GPU tests against the
+CPU reference are their validation.
 
 *Non-normative, 2026-11-10,* the HF census PR: two MI300X GPUs (gfx942) of one node, two GTest
 shards, otherwise configured as above, with O and Stats derived by the reference executors

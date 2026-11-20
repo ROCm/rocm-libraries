@@ -90,6 +90,10 @@ follows AITER's choice of kernel (the gate in `aiter/ops/mha.py` and
   the gfx942 kernels rebuilt (`_recompile`) and which AITER's C++
   `fmha_v3_bwd()` runs, since it has no head-dim gate for D ≤ 192 besides `% 8`
   ([SDPA backward test plan §4.6](../../../../../../integration-tests/docs/test-plans/sdpa-bwd.md#46-asm_sdpa_engine-scope)).
+  AITER's Python users never run these kernels on these graphs, so AITER's own
+  use does not validate them here. The engine's GPU tests against the CPU
+  reference (below) are their validation; the gfx950 hd64 and hd192 x hd192
+  rows passed them in PR #16337.
 
 A dispatch whose kernel has been checked on a GPU against the CPU backward
 reference, at the head dims it runs, is **verified**.
@@ -134,7 +138,11 @@ The gfx950 192 x 128 rows carry `pssk = 1` and `pddv = 1` in their CSV,
 although their object names end in `_pssk`. Among rounding-specific bf16 rows
 (every gfx942 one, and the gfx950 hd64 and hd192 x hd192 ones) the engine
 selects the RTNE row, never the RTNA or RTZ one. AITER deprecates RTNA and
-RTZ on gfx950.
+RTZ on gfx950. fp16 rows have no rounding variants: every gfx942 fp16 DQDKDV
+and DQ_CONVERT kernel, and the gfx950 fp16 hd64 and hd192 x hd192 DQDKDV
+kernels, convert to fp16 by rounding toward zero (`v_cvt_pkrtz_f16_f32`), which
+biases dQ, dK and dV toward zero. The FP16 tolerance in
+`IntegrationGpuSdpaBackward.cpp` records how large that error is.
 
 Every other configuration the engine accepts is unverified, which means any
 padded head dim. That includes the gfx942 hd128 A16 rows with `pddv = 1`
