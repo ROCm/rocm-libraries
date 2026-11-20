@@ -368,7 +368,7 @@ namespace
     constexpr double exact = 1.0e-6;
 }
 
-// The datatype utilities used by the dense helpers below that develop's datatype_utils
+// The datatype utilities used by the dense routines below that develop's datatype_utils
 // tests do not reach: the 16-bit types and datatype_is_complex.
 TEST_F(PrecondAuxiliary, datatype_utilities)
 {
