@@ -6,6 +6,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [MultiMarginLoss] Fixed incorrect results and HIP kernel launch failures on Windows caused by
+  packing the `p` argument as a 32-bit `long` instead of the kernel's 64-bit integer.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
   elements per output when the compute type is wider than the input type (for example FP16 `AVG`
   with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
@@ -89,6 +91,17 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   config-tower runtime: TunaNet solver-selection and KTN candidate-selection model assets plus the
   precomputed config-embedding tables for the grouped xdlops forward, backward-data, and
   backward-weights solvers (2D and 3D).
+* [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
+  thin public `libMIOpen.so` over the new `libMIOpen_private.so`; set it to `Off` for the previous
+  single-library build. Programs that link a hand-written `-lMIOpen` and call functions not
+  declared in `miopen.h` must also link `-lMIOpen_private`; see `docs/install/build-source.rst`.
+* [hipDNN] Added experimental hipDNN forwarding of `miopenConvolutionForward`,
+  `miopenConvolutionBackwardData`, `miopenConvolutionBackwardWeights` and
+  `miopenConvolutionBiasActivationForward`. It is off by default and not intended for production
+  use; enable it with `MIOPEN_HIPDNN_FORWARDING=1`. See `docs/how-to/use-hipdnn-forwarding.rst`.
+* [hipDNN] Added the experimental `miopenGetLastForwardedError` API, which reports whether the last
+  call failed in hipDNN.
+* [hipDNN] Added `stderr` logging for hipDNN forwarding. See `docs/how-to/debug-log.rst`.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
@@ -113,6 +126,11 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 * [Conv] Enabled the 2D and 3D grouped forward CK xdlops solvers in deterministic mode. Forward
   never uses split-K, so these solvers are deterministic; previously, deterministic forward
   convolutions could only use the GEMM and naive solvers.
+* [Conv] The AI performance-config picker again selects `ConvHipConv` configs on gfx950 for
+  forward and backward-data convolutions, using a model retrained on hipconv v0.5 configurations.
+  On gfx950 backward weights it uses a pick only if the score exceeds the default config's score
+  by a margin. Otherwise it runs the default config. gfx1250 keeps the default config because the
+  retrained model has no gfx1250 data.
 * [DB] Windows installs now place the system find-db, perf-db, kernel-db and AI heuristic model
   files in `share\miopen\db`, the same location as Linux, instead of `bin`. MIOpen looks for them
   in `share\miopen\db` under the parent of the directory that holds `MIOpen.dll`.
