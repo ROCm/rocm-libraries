@@ -267,6 +267,11 @@ void layOutWorkspace(IgemmProblem& problem)
             offset = alignUp(offset + staging->bytes);
         }
     }
+    if(problem.col2imBytes > 0)
+    {
+        problem.col2imOffset = offset;
+        offset = alignUp(offset + problem.col2imBytes);
+    }
     problem.workspaceBytes = offset;
 }
 
@@ -702,6 +707,45 @@ std::optional<IgemmProblem> withPatchView(const IgemmProblem& problem)
         w.bytes = static_cast<size_t>(w.copy.total) * static_cast<size_t>(problem.elementBytes);
         view.w = w;
     }
+    layOutWorkspace(view);
+    return view;
+}
+
+std::optional<IgemmProblem> withCol2imView(const IgemmProblem& problem)
+{
+    const auto& b = problem.base.args;
+    if(problem.direction != ConvDirection::BACKWARD_DATA || b.groups != 1 || problem.largeImage
+       || !problem.filterKtrsc || withPatchView(problem).has_value())
+    {
+        return std::nullopt;
+    }
+    const long long taps = b.filter[0] * b.filter[1] * b.filter[2];
+    const long long dyPositions = b.n * b.outSpatial[0] * b.outSpatial[1] * b.outSpatial[2];
+    const long long dxPositions = b.n * b.inSpatial[0] * b.inSpatial[1] * b.inSpatial[2];
+    const long long phaseTaps = divUp(taps, std::max<long long>(1, problem.phases));
+    constexpr long long MAX_COLUMN_BYTES = 1LL << 30;
+    if(taps < 2 || b.c * taps > INT_LIMIT || dyPositions * taps >= dxPositions * phaseTaps
+       || dyPositions * b.c * taps > MAX_COLUMN_BYTES / static_cast<long long>(sizeof(float)))
+    {
+        return std::nullopt;
+    }
+    // A 1x1, unit-stride problem over dy's positions with T R S C columns.
+    IgemmProblem view = problem;
+    auto& v = view.args;
+    v.c = static_cast<int>(b.c * taps);
+    v.di = v.dout;
+    v.hi = v.ho;
+    v.wi = v.wo;
+    v.ft = v.fr = v.fs = 1;
+    v.sd = v.sh = v.sw = 1;
+    v.pd = v.ph = v.pw = 0;
+    v.dd = v.dh = v.dw = 1;
+    v.wRowStride = 0;
+    v.wTapStride = 0;
+    view.phases = 1;
+    view.rows = dyPositions;
+    view.w = Staging{};
+    view.col2imBytes = static_cast<size_t>(dyPositions * b.c * taps) * sizeof(float);
     layOutWorkspace(view);
     return view;
 }
@@ -1240,6 +1284,7 @@ constexpr std::string_view COPY_ENTRY_POINT = "ConvIgemmCopy";
 constexpr std::string_view TRANSPOSE_ENTRY_POINT = "ConvIgemmTranspose";
 constexpr std::string_view EXPAND_ENTRY_POINT = "ConvIgemmExpand";
 constexpr std::string_view REDUCE_ENTRY_POINT = "ConvIgemmReduce";
+constexpr std::string_view COL2IM_ENTRY_POINT = "ConvIgemmCol2im";
 constexpr unsigned int COPY_BLOCK = 256;
 /// Bytes a 32-bit buffer offset reaches.
 constexpr long long BUFFER_LIMIT = std::numeric_limits<int>::max();
@@ -1408,7 +1453,8 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     // The flex tile: 256 positions x 256, 192 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2
     // waves, 64-channel k-steps, 8-wide vectors, XCD order; any split policy; every other variant
     // knob off. The register-staged form (16x16x16 / 16x16x4 atoms, gfx942): one 64 KiB-class LDS
-    // stage, BN 128, 128-byte reduction steps (64 16-bit or 32 fp32 channels, 16-byte vectors).
+    // stage, BN 128, 128-byte reduction steps (64 16-bit or 32 fp32 channels, 16-byte vectors),
+    // and backward data may read the graph's filter in place (wdirect).
     const bool flexReg
         = tile.atom == "mfma16_f16" || tile.atom == "mfma16_bf16" || tile.atom == "mfma16_f32";
     const int64_t flexElem = tile.atom == "mfma16_f32" ? 4 : 2;
@@ -1418,8 +1464,8 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
            || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 192 && tile.bn != 128)
            || (flexReg && tile.bn != 128) || tile.bk != 128 / flexElem || tile.wm != 4
            || tile.wn != 2 || tile.vec != 16 / flexElem || tile.stages != 1 || tile.xcd != 1
-           || tile.halo != 0 || tile.wdirect != 0 || tile.pack != 0 || tile.cf != 0 || tile.swz != 0
-           || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0
+           || tile.halo != 0 || (tile.wdirect != 0 && !flexReg) || tile.pack != 0 || tile.cf != 0
+           || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0
            || tile.cfx != 0))
     {
         return std::nullopt;
@@ -1461,7 +1507,12 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
        || (tile.fuse != 0 && tile.fuse != 2 && tile.fuse != 4 && tile.fuse != 8 && tile.fuse != 16)
        || (tile.fuse != 0 && (tile.halo != 0 || tile.pack != 0))
        || (tile.patch != 0
-           && (tile.patch < 0 || tile.patch > 2 || tile.large != 0 || tile.fuse != 0))
+           && (tile.patch < 0 || tile.patch > 3 || tile.large != 0 || tile.fuse != 0))
+       // Col2im (withCol2imView): the general loop reading the graph's filter in place, plain
+       // tiles (no halo, tap packing, channels-first output or input, DMA), native math.
+       || (tile.patch == 3
+           && (tile.wdirect != 1 || tile.split || tile.halo != 0 || tile.pack != 0 || tile.cf != 0
+               || tile.dma != 0 || tile.cfx != 0 || tile.flex != 0))
        // The patch tile (k1PatchMma): 16-bit 16x16 matrix-core atoms, every variant knob off.
        || (tile.patch == 2
            && (!patchTileAtom(tile.atom) || tile.split || tile.stages != 1 || tile.xcd != 0
@@ -1540,7 +1591,16 @@ bool kernelMatches(const MatchContext& context,
         }
         problem = conv_igemm::withFusedGroups(*problem, tile->fuse);
     }
-    if(problem.has_value() && tile->patch != 0)
+    if(problem.has_value() && tile->patch == 3)
+    {
+        // Col2im configs: backward data its view serves (withCol2imView).
+        if(*direction != ConvDirection::BACKWARD_DATA)
+        {
+            return false;
+        }
+        problem = conv_igemm::withCol2imView(*problem);
+    }
+    else if(problem.has_value() && tile->patch != 0)
     {
         // Patch configs serve exactly the patch convolutions; backward data writes dx
         // channels-last, in runs of S C columns its channel vector divides.
@@ -1783,7 +1843,11 @@ std::optional<IgemmProblem>
         // The expanded filter is the staged operand, direct filter or not.
         problem = conv_igemm::withFusedGroups(*problem, tile.fuse);
     }
-    if(problem.has_value() && tile.patch != 0)
+    if(problem.has_value() && tile.patch == 3)
+    {
+        problem = conv_igemm::withCol2imView(*problem);
+    }
+    else if(problem.has_value() && tile.patch != 0)
     {
         problem = conv_igemm::withPatchView(*problem);
     }
@@ -1840,6 +1904,13 @@ const std::vector<KernelArgument>& expandSignature()
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(ConvIgemmExpandArgs)), 0, ""}};
+    return s_signature;
+}
+
+const std::vector<KernelArgument>& col2imSignature()
+{
+    static const std::vector<KernelArgument> s_signature{
+        {"by_value", static_cast<uint32_t>(sizeof(K1Col2imArgs)), 0, ""}};
     return s_signature;
 }
 
@@ -2119,7 +2190,25 @@ public:
                 static_cast<unsigned int>(rowTiles % launchTiles), grid->y, gridZ);
         }
         std::optional<IngestorKernelCode> reduce;
-        if(plan.splits > 1)
+        if(tile->patch == 3)
+        {
+            // Col2im: ConvIgemmCol2im in the reduce's place, four channels of a dx position a
+            // thread.
+            const auto& b = problem->base.args;
+            KernelDefinition col2imKernel = kernel;
+            col2imKernel.source.entryPoint = std::string(COL2IM_ENTRY_POINT);
+            reduce.emplace(buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, col2imKernel, options, col2imSignature()));
+            reduce->setBlockSize(COPY_BLOCK, 1, 1);
+            reduce->setGridSize(static_cast<unsigned int>(std::clamp<long long>(
+                                    divUpBlocks(b.n * b.inSpatial[0] * b.inSpatial[1]
+                                                * b.inSpatial[2] * ((b.c + 3) / 4)),
+                                    1,
+                                    COPY_MAX_BLOCKS)),
+                                1,
+                                1);
+        }
+        else if(plan.splits > 1)
         {
             KernelDefinition reduceKernel = kernel;
             reduceKernel.source.entryPoint = std::string(REDUCE_ENTRY_POINT);
@@ -2273,6 +2362,13 @@ public:
         args.outElems = plan.outElems;
         args.partial
             = plan.splits > 1 ? reinterpret_cast<float*>(base + plan.partialOffset) : nullptr;
+        const bool col2im = problem.col2imBytes > 0;
+        if(col2im)
+        {
+            // Col2im: the GEMM's columns (one split) in the workspace, for ConvIgemmCol2im.
+            args.partial = reinterpret_cast<float*>(base + problem.col2imOffset);
+            args.outElems = static_cast<long long>(problem.col2imBytes / sizeof(float));
+        }
         const bool fused = !problem.base.epilogue.empty();
         ConvEpiArgs epiArgs{};
         if(fused)
@@ -2323,7 +2419,37 @@ public:
                                  : dispatch.convTailForStream(stream));
             }
         }
-        if(plan.splits > 1)
+        if(col2im)
+        {
+            const auto& b = problem.base.args;
+            K1Col2imArgs c2{};
+            c2.partial = args.partial;
+            c2.dx = operand[0];
+            c2.splitElems = args.outElems;
+            c2.splits = 1;
+            c2.n = static_cast<int>(b.n);
+            c2.c = static_cast<int>(b.c);
+            c2.di = static_cast<int>(b.inSpatial[0]);
+            c2.hi = static_cast<int>(b.inSpatial[1]);
+            c2.wi = static_cast<int>(b.inSpatial[2]);
+            c2.dout = static_cast<int>(b.outSpatial[0]);
+            c2.ho = static_cast<int>(b.outSpatial[1]);
+            c2.wo = static_cast<int>(b.outSpatial[2]);
+            c2.ft = static_cast<int>(b.filter[0]);
+            c2.fr = static_cast<int>(b.filter[1]);
+            c2.fs = static_cast<int>(b.filter[2]);
+            c2.sd = static_cast<int>(b.stride[0]);
+            c2.sh = static_cast<int>(b.stride[1]);
+            c2.sw = static_cast<int>(b.stride[2]);
+            c2.pd = static_cast<int>(b.prePadding[0]);
+            c2.ph = static_cast<int>(b.prePadding[1]);
+            c2.pw = static_cast<int>(b.prePadding[2]);
+            c2.dd = static_cast<int>(b.dilation[0]);
+            c2.dh = static_cast<int>(b.dilation[1]);
+            c2.dw = static_cast<int>(b.dilation[2]);
+            dispatch.reduceForStream(stream).launch(stream, c2);
+        }
+        else if(plan.splits > 1)
         {
             // The split rows' output: past the unsplit rows' elements.
             char* out = static_cast<char*>(forward ? operand[2] : operand[0])

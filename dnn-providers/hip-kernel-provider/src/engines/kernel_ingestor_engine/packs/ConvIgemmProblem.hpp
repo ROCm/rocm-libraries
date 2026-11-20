@@ -68,6 +68,10 @@ struct IgemmProblem
     /// can expand it. Element (k, c, tap) at k * wSrcK + c * wSrcC + tap * wSrcTap.
     bool filterExpandable = false;
     long long wSrcK = 0, wSrcC = 0, wSrcTap = 0;
+    /// Col2im backward data (withCol2imView): the fp32 GEMM columns ConvIgemmCol2im sums into
+    /// dx, after the staged operands in the workspace; 0 bytes otherwise.
+    size_t col2imOffset = 0;
+    size_t col2imBytes = 0;
 };
 
 /// @p problem without the filter staging, for a direct-filter config: the remaining staged
@@ -98,6 +102,20 @@ std::optional<IgemmProblem> withFusedGroups(const IgemmProblem& problem, int64_t
  * [t][r][s][c][k] (reflected for true convolution).
  */
 std::optional<IgemmProblem> withPatchView(const IgemmProblem& problem);
+
+/**
+ * @brief Backward data @p problem as the col2im configs run it, or nullopt where they do not.
+ *
+ * One GEMM over dy's positions with the filter's T R S C as columns (as withPatchView's
+ * backward data), for any filter, stride, padding and dilation: its fp32 columns go to the
+ * workspace and ConvIgemmCol2im adds, for each dx element, those of the dy positions it reaches,
+ * tap by tap. Served for one group and a packed, unreflected K T R S C filter (read in place),
+ * where the GEMM has fewer multiply-adds than the GEMMs over dx's rows (dy positions times taps
+ * below dx positions times the taps a stride phase reaches: "valid" or partly padded layers,
+ * whose dx rows mostly multiply padding), for convolutions that are not patch convolutions
+ * (withPatchView serves those with no columns in between), and within 1 GiB of columns.
+ */
+std::optional<IgemmProblem> withCol2imView(const IgemmProblem& problem);
 
 /// Whether @p problem's output (forward y, backward data dx) is packed channels-first, so a
 /// channels-first-output config writes it in place of the staging transpose.

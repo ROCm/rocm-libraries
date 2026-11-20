@@ -302,6 +302,10 @@ std::vector<DeviceCase> deviceCases()
     cases.push_back({"NchwGroupedStride2", groupedFirst});
     cases.push_back({"Nhwc1x1", dense(64, 32, {7, 9}, {1, 1}, {0, 0}, true)});
     cases.push_back({"NhwcSmallChannels", dense(3, 16, {17, 15}, {3, 3}, {1, 1}, true)});
+    // Pointwise layers with a narrow side (6 channels): forward reduces 6 channels into 64,
+    // backward data 6 into 64 the other way, so a 1-wide reduction vector writes wide rows.
+    cases.push_back({"Nhwc1x1NarrowReduction", dense(64, 6, {9, 11}, {1, 1}, {0, 0}, true)});
+    cases.push_back({"Nchw1x1NarrowReduction", dense(64, 6, {9, 11}, {1, 1}, {0, 0}, false)});
 
     auto grouped = dense(32, 48, {12, 13}, {3, 3}, {1, 1}, true);
     grouped.groups = 4;
@@ -411,13 +415,14 @@ bool matches(float got, float want, float tolerance)
 }
 
 /// Which configs a case must run: any, or at least one patch config (and only those), or at least
-/// one channels-first-input config (and only those).
+/// one channels-first-input config (and only those), or the flex or col2im configs alone.
 enum class Configs
 {
     ANY,
     PATCH,
     CFX,
     FLEX,
+    COL2IM,
 };
 
 template <typename T>
@@ -428,7 +433,8 @@ void runCase(ConvShape shape,
              Configs configs = Configs::ANY,
              unsigned int seed = 1234,
              bool noSplitOnly = false,
-             bool channelsFirstInputOnly = false)
+             bool channelsFirstInputOnly = false,
+             bool filterInfinities = false)
 {
     shape.dataType = dataTypeOf<T>();
     const auto spec = specFor(shape, direction);
@@ -446,6 +452,10 @@ void runCase(ConvShape shape,
     if(infinities)
     {
         plantInfinities(forward ? x : y);
+    }
+    if(filterInfinities)
+    {
+        plantInfinities(w);
     }
     Tensor<T>& written = forward ? y : x;
 
@@ -510,6 +520,7 @@ void runCase(ConvShape shape,
             continue;
         }
         if((configs == Configs::PATCH && kernel.getIntMetadata("patch") == 0)
+           || (configs == Configs::COL2IM && kernel.getIntMetadata("patch") != 3)
            || (configs == Configs::CFX && kernel.getIntMetadata("cfx") == 0)
            || (configs == Configs::FLEX && kernel.getIntMetadata("flex") == 0))
         {
@@ -639,6 +650,107 @@ INSTANTIATE_TEST_SUITE_P(,
                                     + (std::get<1>(info.param) == ConvDirection::FORWARD ? "Fwd"
                                                                                          : "Bwd");
                          });
+
+/// Col2im backward data (patch 3): layers whose dy has fewer positions than dx ("valid" or partly
+/// padded), as one GEMM over dy's positions plus the column sum into dx. 3-D in both layouts
+/// (channels-first dy and dx staged), two images, padding on one side only, stride 2 (taps that
+/// skip dx positions, rows no tap reaches) and dilation, channels that are not whole vectors of
+/// four, and a filter longer than the input along an axis.
+std::vector<DeviceCase> col2imCases()
+{
+    std::vector<DeviceCase> cases;
+    cases.push_back({"Ndhwc3x3x3Valid", dense(16, 24, {6, 5, 7}, {3, 3, 3}, {0, 0, 0}, true)});
+    cases.push_back({"Ncdhw3x3x3Valid", dense(16, 24, {6, 5, 7}, {3, 3, 3}, {0, 0, 0}, false)});
+    auto partly = dense(24, 32, {9, 8}, {3, 3}, {0, 1}, true);
+    partly.postPadding = {0, 0};
+    cases.push_back({"Nhwc3x3PaddedOneSide", partly});
+    auto strided = dense(16, 16, {13, 12}, {3, 3}, {0, 0}, true);
+    strided.stride = {2, 2};
+    cases.push_back({"Nhwc3x3Stride2Valid", strided});
+    auto dilated = dense(16, 24, {11, 12}, {3, 3}, {0, 0}, true);
+    dilated.dilation = {2, 2};
+    cases.push_back({"Nhwc3x3Dilation2Valid", dilated});
+    cases.push_back({"Nhwc3x3OddChannels", dense(18, 24, {7, 6}, {3, 3}, {0, 0}, true)});
+    cases.push_back({"Nhwc1dK5Valid", dense(16, 24, {12}, {5}, {0}, true)});
+    return cases;
+}
+
+/// Infinities in dy (the reduction's input) or in the filter. Col2im sums only the products of dy
+/// positions that exist, as the reference defines backward data: an infinite filter tap meets no
+/// padding, so dx elements whose taps reach past dy stay finite (a GEMM over dx rows multiplies
+/// the padding's zeros by the filter, 0 x inf = NaN, which is why no other suite plants infinities
+/// in the filter).
+enum class Infinities
+{
+    NONE,
+    DY,
+    FILTER,
+};
+
+class TestGpuConvIgemmCol2im : public ::testing::TestWithParam<std::tuple<DeviceCase, Infinities>>
+{
+protected:
+    template <typename T>
+    void run()
+    {
+        SKIP_IF_NO_DEVICES();
+        // The col2im configs run on matrix cores: none take fp32 on RDNA or anything on gfx906.
+        const auto device = currentDeviceProperties();
+        const auto dtype
+            = std::string(hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(dataTypeOf<T>()));
+        bool served = false;
+        for(const auto& kernel : catalog(ConvDirection::BACKWARD_DATA))
+        {
+            served = served
+                     || (kernel.getIntMetadata("patch") == 3
+                         && kernel.getStringMetadata("dtype") == dtype
+                         && conv_igemm::atomRunsOn(kernel.getStringMetadata("atom"),
+                                                   device.gcnArchName));
+        }
+        if(!served)
+        {
+            GTEST_SKIP() << "no col2im config runs this element type on this device";
+        }
+        const auto& [deviceCase, infinities] = GetParam();
+        runCase<T>(deviceCase.shape,
+                   ConvDirection::BACKWARD_DATA,
+                   Math::NATIVE,
+                   infinities == Infinities::DY,
+                   Configs::COL2IM,
+                   1234,
+                   false,
+                   false,
+                   infinities == Infinities::FILTER);
+    }
+};
+
+TEST_P(TestGpuConvIgemmCol2im, Float)
+{
+    run<float>();
+}
+
+TEST_P(TestGpuConvIgemmCol2im, Half)
+{
+    run<Half>();
+}
+
+TEST_P(TestGpuConvIgemmCol2im, BFloat16)
+{
+    run<BFloat16>();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    ,
+    TestGpuConvIgemmCol2im,
+    ::testing::Combine(::testing::ValuesIn(col2imCases()),
+                       ::testing::Values(Infinities::NONE, Infinities::DY, Infinities::FILTER)),
+    [](const auto& info) {
+        const auto inf = std::get<1>(info.param);
+        return std::get<0>(info.param).name
+               + (inf == Infinities::DY       ? "DyInfinities"
+                  : inf == Infinities::FILTER ? "FilterInfinities"
+                                              : "");
+    });
 
 /// 1-D channels-first (N C L) graphs: PyTorch's only conv1d layout, read in place by the
 /// channels-first-input configs (cfx). Lengths that 8 does not divide (vectors straddling the
@@ -2077,6 +2189,109 @@ std::optional<conv_igemm::IgemmProblem> patchView(ConvShape shape, ConvDirection
     return conv_igemm::withPatchView(*problem);
 }
 
+std::optional<conv_igemm::IgemmProblem> col2imView(ConvShape shape)
+{
+    shape.dataType = DataType::HALF;
+    const GraphFixture fixture(buildGraph(specFor(shape, ConvDirection::BACKWARD_DATA)));
+    const auto problem
+        = conv_igemm::parseIgemmProblem(fixture.context(), ConvDirection::BACKWARD_DATA);
+    if(!problem.has_value())
+    {
+        ADD_FAILURE() << "the plain parse declined a col2im test case";
+        return std::nullopt;
+    }
+    return conv_igemm::withCol2imView(*problem);
+}
+
+TEST(TestConvIgemmCatalog, Col2imIsOneGemmOverDyPositionsWithColumnsInTheWorkspace)
+{
+    // 3x3x3 "valid" over 6 x 5 x 7: dy is 4 x 3 x 5 a image, 27 taps of 16 channels a column row.
+    const auto valid = dense(16, 24, {6, 5, 7}, {3, 3, 3}, {0, 0, 0}, true);
+    const auto view = col2imView(valid);
+    ASSERT_TRUE(view.has_value());
+    EXPECT_EQ(view->args.c, 16 * 27);
+    EXPECT_EQ(view->args.k, 24);
+    EXPECT_EQ(view->args.di * view->args.hi * view->args.wi, 4 * 3 * 5);
+    EXPECT_EQ(view->args.ft * view->args.fr * view->args.fs, 1);
+    EXPECT_EQ(view->args.sd * view->args.sh * view->args.sw, 1);
+    EXPECT_EQ(view->args.pd + view->args.ph + view->args.pw, 0);
+    EXPECT_EQ(view->phases, 1);
+    EXPECT_EQ(view->rows, 2 * 4 * 3 * 5);
+    EXPECT_FALSE(view->w.needed); // the K T R S C filter is the GEMM's K-major B, read in place
+    EXPECT_EQ(view->col2imBytes, sizeof(float) * 2 * 4 * 3 * 5 * 16 * 27);
+    EXPECT_GE(view->col2imOffset, 0U);
+    EXPECT_EQ(view->workspaceBytes % 256, 0U);
+    EXPECT_GE(view->workspaceBytes, view->col2imOffset + view->col2imBytes);
+    // Channels-first dy and dx are staged; the columns follow them.
+    const auto staged = col2imView(dense(16, 24, {6, 5, 7}, {3, 3, 3}, {0, 0, 0}, false));
+    ASSERT_TRUE(staged.has_value());
+    EXPECT_TRUE(staged->x.needed);
+    EXPECT_GE(staged->col2imOffset, staged->x.workspaceOffset + staged->x.bytes);
+}
+
+TEST(TestConvIgemmCatalog, Col2imDeclinesEachFieldItDoesNotServe)
+{
+    const auto valid = dense(16, 24, {6, 5, 7}, {3, 3, 3}, {0, 0, 0}, true);
+    ASSERT_TRUE(col2imView(valid).has_value());
+    // "Same" padding: dy has as many positions as dx, so the GEMM over dx rows is no larger.
+    EXPECT_FALSE(col2imView(dense(16, 24, {6, 5, 7}, {3, 3, 3}, {1, 1, 1}, true)).has_value());
+    // Groups.
+    auto grouped = valid;
+    grouped.groups = 2;
+    EXPECT_FALSE(col2imView(grouped).has_value());
+    // Patch convolutions: the patch view writes their dx with no columns in between.
+    EXPECT_FALSE(col2imView(patchShape(16, 24, {6, 10}, 2, true)).has_value());
+    // True convolution: the reflected filter is not the K-major B the configs read in place.
+    auto convolution = valid;
+    convolution.mode = ConvMode::CONVOLUTION;
+    EXPECT_FALSE(col2imView(convolution).has_value());
+    // One tap: nothing to sum (the plain GEMM over dx rows is the same GEMM).
+    EXPECT_FALSE(col2imView(dense(16, 24, {6, 5, 7}, {1, 1, 1}, {0, 0, 0}, true)).has_value());
+    // Columns past 1 GiB of fp32.
+    auto huge = dense(256, 24, {66, 66, 66}, {3, 3, 3}, {0, 0, 0}, true);
+    huge.n = 1;
+    EXPECT_FALSE(col2imView(huge).has_value());
+    auto under = huge;
+    under.input = {34, 34, 34};
+    EXPECT_TRUE(col2imView(under).has_value());
+    // Forward graphs never reach the view: the kernel match declines col2im configs there.
+}
+
+TEST(TestConvIgemmCatalog, Col2imConfigsAreBackwardDataDirectFilterPlainTiles)
+{
+    int count = 0;
+    for(const auto direction : {ConvDirection::FORWARD, ConvDirection::BACKWARD_DATA})
+    {
+        for(const auto& kernel : catalog(direction))
+        {
+            if(kernel.getIntMetadata("patch") != 3)
+            {
+                continue;
+            }
+            SCOPED_TRACE(kernel.name);
+            ++count;
+            EXPECT_EQ(direction, ConvDirection::BACKWARD_DATA);
+            EXPECT_EQ(kernel.getIntMetadata("wdirect"), 1);
+            EXPECT_EQ(kernel.getStringMetadata("math"), "native");
+            EXPECT_NE(kernel.getStringMetadata("atom"), "fma");
+            for(const auto* knob : {"halo",
+                                    "pack",
+                                    "cf",
+                                    "swz",
+                                    "dma",
+                                    "fuse",
+                                    "large",
+                                    "cfx",
+                                    "flex",
+                                    "split_policy"})
+            {
+                EXPECT_EQ(kernel.getIntMetadata(knob), 0) << knob;
+            }
+        }
+    }
+    EXPECT_GT(count, 0);
+}
+
 TEST(TestConvIgemmCatalog, PatchForwardFoldsTheWidthTapsIntoChannels)
 {
     // 16x16 stride 16 over RGB: W / 16 pixels of 48 channels, filter rows of one tap.
@@ -2842,6 +3057,9 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOthe
             EXPECT_EQ(kernel.getIntMetadata("bm"), 256);
             EXPECT_EQ(kernel.getIntMetadata("bk"), fp32 ? 32 : 64);
             EXPECT_EQ(kernel.getIntMetadata("xcd"), 1);
+            // The register-staged form's backward data may read the graph's filter in place.
+            const bool direct = kernel.getIntMetadata("wdirect") != 0;
+            EXPECT_TRUE(!direct || (!dma && direction == ConvDirection::BACKWARD_DATA));
             if(kernel.getStringMetadata("dtype") != "HALF")
             {
                 continue;
@@ -2874,6 +3092,11 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOthe
                                                                        {"cfx", 1}})
             {
                 SCOPED_TRACE(field);
+                if(std::string_view(field) == "wdirect" && !dma
+                   && direction == ConvDirection::BACKWARD_DATA)
+                {
+                    continue;
+                }
                 auto mutated = kernel;
                 mutated.metadata[field] = value;
                 EXPECT_FALSE(matchesKernel(pack, home.context(), mutated, homeBound));

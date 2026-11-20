@@ -36,9 +36,17 @@
 // Split-K (a.splits > 1): as the flex tile, split z runs a contiguous range of the steps and
 // writes fp32 partials that ConvIgemmReduce adds in split order. A launch of the trailing row
 // tiles only (the tail split) indexes its partials from row tile a.partialTile.
+//
+// Direct filter (WD 1, backward data): W comes from the graph's K T R S C/g filter, where a
+// step's reduction channels (output channels k) are rows and the tile's columns (input
+// channels) run contiguously, instead of from the transposed copy. A thread's unit is KV
+// consecutive k rows (a dword: two 16-bit or one fp32 channel) of one 16-byte column granule:
+// it loads the KV row granules and stores each column's dword into the column's row of the same
+// stage, so the stage and the MMAs are the forward form's. The 32 units of a column granule are
+// 32 lanes of one wave, so a dword store covers the 32 banks once.
 #pragma once
 
-template <class T, class Atom, int DIR, int BN>
+template <class T, class Atom, int DIR, int BN, int WD = 0>
 __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64, DIM = 16;
@@ -53,12 +61,20 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     constexpr int WM = BM / 4, WN = BN / 2; // a wave's output positions and channels
     constexpr int FM = WM / DIM, FN = WN / DIM; // a wave's position x channel fragments
     constexpr int MPG = GE / Atom::KPL; // MMAs a granule
+    // Direct filter: KV k rows (one dword) by one column granule a unit, KQ units a granule.
+    constexpr bool DIRECT = DIR == K1_BACKWARD_DATA && WD != 0;
+    constexpr int KV = 4 / ES;
+    constexpr int KQ = KS / KV;
+    constexpr int WU = DIRECT ? KQ * (BN / GE) / THREADS : 0; // units a thread
+    constexpr int WR = DIRECT ? WU * KV : WL; // W registers a thread
     typedef typename K1Raw<16>::type Raw16;
     typedef typename Atom::frag Frag;
     static_assert(Atom::WAVE == WAVE && GE % Atom::KPL == 0 && 4 * Atom::KPL == Atom::KA,
                   "16-row atoms, KPL elements a lane group");
     static_assert((BN == 256 || BN == 128) && XL == 4 && WL >= 1, "tile");
     static_assert(static_cast<int>(sizeof(Frag)) == Atom::KPL * ES, "fragment of KPL elements");
+    static_assert(!DIRECT || (KQ == 32 && (KQ * (BN / GE)) % THREADS == 0 && WU >= 1),
+                  "direct-filter units: a column granule's 32 dwords on 32 lanes");
 
     __shared__ Raw16 sx[NG];
     __shared__ Raw16 sw[NGW];
@@ -199,14 +215,32 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     const long long wGroupBase = static_cast<long long>(g) * kg * filterTaps * cg;
     const __amdgpu_buffer_rsrc_t wr = k1Rsrc(
         a.w, static_cast<long long>(a.k) * filterTaps * cg * static_cast<long long>(sizeof(T)));
-    int wOff[WL];
-    bool wOk[WL];
-#pragma unroll
-    for(int i = 0; i < WL; ++i)
+    int wOff[DIRECT ? WU : WL];
+    bool wOk[DIRECT ? WU : WL];
+    if constexpr(DIRECT)
     {
-        const int n = n0 + rowT + 64 * i;
-        wOk[i] = n < ncols;
-        wOff[i] = static_cast<int>(wGroupBase + (wOk[i] ? n * wRowStride : 0));
+        // Unit u = tid + THREADS i: k rows (u % KQ) KV .., column granule u / KQ; the offset of
+        // its first k row of slice 0 at tap 0.
+#pragma unroll
+        for(int i = 0; i < WU; ++i)
+        {
+            const int u = tid + THREADS * i;
+            const int n = n0 + (u / KQ) * GE;
+            wOk[i] = n < ncols;
+            wOff[i] = static_cast<int>(
+                wOk[i] ? (static_cast<long long>(g) * kg + (u % KQ) * KV) * filterTaps * cg + n
+                       : 0);
+        }
+    }
+    else
+    {
+#pragma unroll
+        for(int i = 0; i < WL; ++i)
+        {
+            const int n = n0 + rowT + 64 * i;
+            wOk[i] = n < ncols;
+            wOff[i] = static_cast<int>(wGroupBase + (wOk[i] ? n * wRowStride : 0));
+        }
     }
 
     // The load cursor: the step the next tile load fetches (taps qt, qr, qs; slice c0).
@@ -246,7 +280,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         }
     };
     // The cursor step's X and W granules of this thread into registers (zeros past the range).
-    Raw16 rx[XL], rw[WL];
+    Raw16 rx[XL], rw[WR];
     auto load = [&]() __attribute__((always_inline))
     {
         const bool cok = cur.v < vEnd && cur.c0 + gran < red;
@@ -266,13 +300,38 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         const int ft = map.first[0] + cur.qt * map.step[0];
         const int fr = map.first[1] + cur.qr * map.step[1];
         const int fs = map.first[2] + cur.qs * map.step[2];
-        const int wDelta = static_cast<int>(((ft * a.fr + fr) * a.fs + fs) * wTapStride) + cur.c0;
-#pragma unroll
-        for(int i = 0; i < WL; ++i)
+        const int tap = (ft * a.fr + fr) * a.fs + fs;
+        if constexpr(DIRECT)
         {
-            const bool ok = cok && wOk[i];
-            rw[i] = k1BufferLoad<Raw16>(
-                wr, ok ? static_cast<unsigned>((wOff[i] + wDelta + gran) * ES) : K1_OUT_OF_RANGE);
+            // k row c0 + (u % KQ) KV + e of the unit's column granule at this tap.
+            const int kRow = static_cast<int>(filterTaps) * cg;
+            const int wDelta = tap * cg + cur.c0 * kRow;
+#pragma unroll
+            for(int i = 0; i < WU; ++i)
+            {
+                const int k = cur.c0 + ((tid + THREADS * i) % KQ) * KV;
+#pragma unroll
+                for(int e = 0; e < KV; ++e)
+                {
+                    const bool ok = cur.v < vEnd && wOk[i] && k + e < red;
+                    rw[i * KV + e] = k1BufferLoad<Raw16>(
+                        wr,
+                        ok ? static_cast<unsigned>((wOff[i] + wDelta + e * kRow) * ES)
+                           : K1_OUT_OF_RANGE);
+                }
+            }
+        }
+        else
+        {
+            const int wDelta = static_cast<int>(tap * wTapStride) + cur.c0;
+#pragma unroll
+            for(int i = 0; i < WL; ++i)
+            {
+                const bool ok = cok && wOk[i];
+                rw[i] = k1BufferLoad<Raw16>(
+                    wr,
+                    ok ? static_cast<unsigned>((wOff[i] + wDelta + gran) * ES) : K1_OUT_OF_RANGE);
+            }
         }
         advance();
     };
@@ -282,9 +341,42 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
 #pragma unroll
         for(int i = 0; i < XL; ++i)
             sx[tid + THREADS * i] = rx[i];
+        if constexpr(DIRECT)
+        {
+            // Column n's dword of k rows kLoc .. kLoc + KV - 1: granule kLoc / GE of row n
+            // (swizzled), dword (kLoc % GE) / KV of it.
 #pragma unroll
-        for(int i = 0; i < WL; ++i)
-            sw[tid + THREADS * i] = rw[i];
+            for(int i = 0; i < WU; ++i)
+            {
+                const int u = tid + THREADS * i;
+                const int kLoc = (u % KQ) * KV, nLoc = (u / KQ) * GE;
+#pragma unroll
+                for(int e = 0; e < GE; ++e)
+                {
+                    const int n = nLoc + e;
+                    unsigned v;
+                    if constexpr(KV == 2)
+                    {
+                        const unsigned lo = rw[i * KV][e / 2], hi = rw[i * KV + 1][e / 2];
+                        v = e % 2 == 0 ? (lo & 0xFFFFu) | (hi << 16)
+                                       : (lo >> 16) | (hi & 0xFFFF0000u);
+                    }
+                    else
+                    {
+                        v = rw[i][e];
+                    }
+                    reinterpret_cast<unsigned*>(
+                        &sw[n * GR + ((kLoc / GE) ^ (n % 8))])[(kLoc % GE) / KV]
+                        = v;
+                }
+            }
+        }
+        else
+        {
+#pragma unroll
+            for(int i = 0; i < WL; ++i)
+                sw[tid + THREADS * i] = rw[i];
+        }
     };
 
     typename Atom::acc acc[FM][FN];

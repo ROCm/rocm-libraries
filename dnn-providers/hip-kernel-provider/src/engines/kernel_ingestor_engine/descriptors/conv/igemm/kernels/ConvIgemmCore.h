@@ -891,7 +891,13 @@ __device__ inline long long
     }
     else
     {
-#if K1_PATCH
+#if K1_PATCH == 3
+        // Col2im: the GEMM over dy's positions, its T R S C columns stored row by row.
+        (void)gather;
+        (void)g;
+        (void)phase;
+        return m * a.c + n;
+#elif K1_PATCH
         // Patch convolution as one GEMM (one group, unit stride over dy's positions): column n
         // is the filter element ((t R + r) S + s) C + c, and dx is (D T) x (H R) x (W S) x C, so
         // a row of S C columns is one contiguous run of dx.
@@ -3119,9 +3125,10 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         }
     }
 
-    if(splits > 1)
+    if(splits > 1 || K1_PATCH == 3)
     {
         // Split-K: this split's fp32 partial, indexed like the output; the reduce adds them.
+        // Col2im (K1_PATCH 3) always writes its columns there, for ConvIgemmCol2im.
         float* partial = a.partial + static_cast<long long>(split) * a.outElems;
 #pragma unroll
         for(int i = 0; i < FM; ++i)
@@ -3503,7 +3510,7 @@ __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
             if(m < gather.rows && nn < ncols)
             {
                 const long long o = k1OutIndex<DIR>(a, gather, g, phase, m, nn);
-                if(splits > 1)
+                if(splits > 1 || K1_PATCH == 3)
                     partial[o] = acc[i][j];
                 else
 #if defined(CONV_EPI) && CONV_EPI
@@ -3694,6 +3701,91 @@ __device__ inline void k1ReduceSplits(const K1ReduceArgs& a)
         for(int sp = 0; sp < a.splits; ++sp)
             sum += a.partial[static_cast<long long>(sp) * a.elems + i];
         out[i] = K1Elem<T>::store(sum);
+    }
+}
+
+// Col2im backward data: each dx element (packed N D H W C) sums, tap by tap in filter order and
+// split by split, the GEMM columns of the dy positions it reaches. A thread takes four channels of
+// one position (whole vectors where the channels are a multiple of four).
+template <class T>
+__device__ inline void k1Col2im(const K1Col2imArgs& a)
+{
+    T* dx = static_cast<T*>(a.dx);
+    const int quads = (a.c + 3) / 4;
+    const long long cols = static_cast<long long>(a.c) * a.ft * a.fr * a.fs;
+    const long long elems = static_cast<long long>(a.n) * a.di * a.hi * a.wi * quads;
+    const bool whole = a.c % 4 == 0;
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < elems;
+        i += step)
+    {
+        long long r = i / quads;
+        const int c0 = static_cast<int>(i - r * quads) * 4;
+        const int iw = static_cast<int>(r % a.wi);
+        r /= a.wi;
+        const int ih = static_cast<int>(r % a.hi);
+        r /= a.hi;
+        const int id = static_cast<int>(r % a.di);
+        const long long n = r / a.di;
+        float sum[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        for(int t = 0; t < a.ft; ++t)
+        {
+            const int zd = id + a.pd - t * a.dd;
+            const int od = zd / a.sd;
+            if(zd < 0 || od * a.sd != zd || od >= a.dout)
+                continue;
+            for(int q = 0; q < a.fr; ++q)
+            {
+                const int zh = ih + a.ph - q * a.dh;
+                const int oh = zh / a.sh;
+                if(zh < 0 || oh * a.sh != zh || oh >= a.ho)
+                    continue;
+                for(int s = 0; s < a.fs; ++s)
+                {
+                    const int zw = iw + a.pw - s * a.dw;
+                    const int ow = zw / a.sw;
+                    if(zw < 0 || ow * a.sw != zw || ow >= a.wo)
+                        continue;
+                    const long long row
+                        = ((n * a.dout + od) * a.ho + oh) * static_cast<long long>(a.wo) + ow;
+                    const long long col
+                        = ((static_cast<long long>(t) * a.fr + q) * a.fs + s) * a.c + c0;
+                    for(int sp = 0; sp < a.splits; ++sp)
+                    {
+                        const float* p = a.partial + sp * a.splitElems + row * cols + col;
+                        if(whole)
+                        {
+                            typedef float F4 __attribute__((ext_vector_type(4)));
+                            const F4 v = *reinterpret_cast<const F4*>(p);
+#pragma unroll
+                            for(int e = 0; e < 4; ++e)
+                                sum[e] += v[e];
+                        }
+                        else
+                        {
+                            for(int e = 0; e < 4 && c0 + e < a.c; ++e)
+                                sum[e] += p[e];
+                        }
+                    }
+                }
+            }
+        }
+        T* o = dx + (((n * a.di + id) * a.hi + ih) * static_cast<long long>(a.wi) + iw) * a.c + c0;
+        if(whole)
+        {
+            T v[4];
+            for(int e = 0; e < 4; ++e)
+                v[e] = K1Elem<T>::store(sum[e]);
+            typedef typename K1Raw<4 * sizeof(T)>::type Raw4;
+            Raw4 raw;
+            __builtin_memcpy(&raw, v, sizeof(raw));
+            *reinterpret_cast<Raw4*>(o) = raw;
+        }
+        else
+        {
+            for(int e = 0; e < 4 && c0 + e < a.c; ++e)
+                o[e] = K1Elem<T>::store(sum[e]);
+        }
     }
 }
 
