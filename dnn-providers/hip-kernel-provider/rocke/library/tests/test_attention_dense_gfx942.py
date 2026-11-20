@@ -341,6 +341,12 @@ _PRIVATE_PERTURBATIONS = {
     "window_wave_skip": (True,),  # legal only with a causal window -> the *_swa base
     "emit_lse": (True, False),
     "kv_segments": (2, 4),  # default grid only; skipped on the persistent base
+    "use_additive_bias": (True,),
+    # Legal only with use_additive_bias=True -> the *_bias bases. A value equal to the
+    # policy's verdict is the same body and name, so on the bases where the policy picks
+    # the 4-wide loads only False moves the IR (and the name), and on the scalar-policy
+    # base only True does.
+    "use_bias_x4": (True, False),
 }
 
 _PERTURBATIONS = {**_SPEC_PERTURBATIONS, **_PRIVATE_PERTURBATIONS}
@@ -406,6 +412,24 @@ _INJECTIVITY_BASES = {
     "persistent_d128_fp16": dict(
         head_size=128,
         dtype="fp16",
+        persistent=True,
+        num_persistent=228,
+        seqlen_q=4096,
+        seqlen_kv=4096,
+        num_query_heads=32,
+    ),
+    # The bias bases are what make use_bias_x4 reachable, and put every other knob
+    # through the bias-on body (a refused combination is skipped, not asserted on).
+    "d128_fp16_bias": dict(head_size=128, dtype="fp16", use_additive_bias=True),
+    "d64_bf16_bias": dict(head_size=64, dtype="bf16", use_additive_bias=True),
+    # fp16 D128, 256-row tile, no mask (the policy's former scalar group).
+    "d128_fp16_full_bias": dict(
+        head_size=128, dtype="fp16", causal=False, use_additive_bias=True
+    ),
+    "persistent_d128_bf16_bias": dict(
+        head_size=128,
+        dtype="bf16",
+        use_additive_bias=True,
         persistent=True,
         num_persistent=228,
         seqlen_q=4096,
@@ -1691,6 +1715,36 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
     assert "gqapair" not in spec.kernel_name()
 
 
+def test_bias_x4_policy_ignores_runtime_shape_fields():
+    """_use_bias_x4 takes the whole spec, but the kernel name and the cache key drop
+    runtime_param_fields; a verdict that read one would put two bias bodies under
+    one symbol and one launcher slot."""
+    from kernels.gfx942.attention_dense import _use_bias_x4
+
+    for grid in ({}, {"persistent": True, "num_persistent": 304}):
+        for lse in (False, True):
+            base = Gfx942AttentionDenseSpec(
+                batch=1,
+                seqlen_q=512,
+                seqlen_kv=512,
+                num_query_heads=32,
+                num_kv_heads=8,
+                head_size=128,
+                causal=True,
+                dtype="bf16",
+                emit_lse=lse,
+                use_additive_bias=True,
+                **grid,
+            )
+            assert base.runtime_param_fields  # the runtime-shape path
+            for k in (2, 8, 64):
+                moved = dataclasses.replace(
+                    base,
+                    **{f: k * getattr(base, f) for f in base.runtime_param_fields},
+                )
+                assert _use_bias_x4(moved) == _use_bias_x4(base), (grid, lse, k)
+
+
 # --------------------------------------------------------------------------- #
 # the contract: supports is the single gate
 # --------------------------------------------------------------------------- #
@@ -1701,7 +1755,11 @@ def test_gfx942_auto_decode_cannot_leak_to_gqa_pair():
 #     always <= 0), so it is a perf A/B, not a correctness or tile-exactness
 #     hazard. Gating it would make the config unsweepable.
 #   emit_lse: an optional extra output, legal on every config the body accepts.
-_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "emit_lse"})
+#   use_bias_x4: its one illegal value, a non-None choice with the bias off, fails in
+#     __post_init__ before supports() runs; both forms are legal on every bias body.
+_TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset(
+    {"use_exp2_fast", "emit_lse", "use_bias_x4"}
+)
 
 # Rows are kwargs for a single :class:`Gfx942AttentionDenseSpec` -- there is one spec
 # and one builder signature, so the shared and gfx942-private knobs go in the same
@@ -1710,7 +1768,7 @@ _TUNING_FIELDS_WITHOUT_A_REJECTED_REGION = frozenset({"use_exp2_fast", "emit_lse
 # on the knobs a sweep harness will actually turn. Every private field gets at least
 # two rows -- its default (or a second accepted value) and one that must land in the
 # REJECTED region -- so a new gate, or a gate that silently stops firing, shows up
-# here. The two fields with no rejected region by design, and why, are recorded once
+# here. The fields with no rejected region by design, and why, are recorded once
 # at _TUNING_FIELDS_WITHOUT_A_REJECTED_REGION above.
 #
 # Rows must be CONSTRUCTIBLE: a value the dataclass validator rejects in
@@ -1805,6 +1863,26 @@ _CONTRACT_GRID = [
     # --- private: emit_lse (no rejected region -- see the comment above) ---
     dict(emit_lse=False),
     dict(emit_lse=True, persistent=True, num_persistent=304),
+    # --- private: use_additive_bias (both grids; refused where the body cannot honour
+    #     it: KV segments, the KDB/VPF pipeline) and use_bias_x4 (bias only) ---
+    dict(use_additive_bias=False),
+    dict(use_additive_bias=True),  # accepted: default grid
+    dict(use_additive_bias=True, persistent=True, num_persistent=304),  # accepted
+    dict(use_additive_bias=True, kv_segments=2),  # REJECTED: segment store
+    dict(
+        use_additive_bias=True,
+        lds_num_buffers=2,
+        persistent=True,
+        num_persistent=304,
+    ),  # REJECTED: KDB pipeline
+    dict(
+        use_additive_bias=True,
+        v_reg_prefetch=True,
+        persistent=True,
+        num_persistent=304,
+    ),  # REJECTED: VPF pipeline
+    dict(use_additive_bias=True, use_bias_x4=True),  # accepted
+    dict(use_additive_bias=True, use_bias_x4=False),  # accepted
 ]
 
 

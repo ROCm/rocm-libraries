@@ -129,6 +129,53 @@ def test_an_unclassified_varying_field_warns_and_is_held(manifest, config):
     assert values(config) == {2, 4}
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"free_fields": ["block_m", "block_n"]},
+        {
+            "free_fields": ["block_m", "block_n"],
+            "select": {"block_m": 128, "block_n": 64},
+        },
+        # The shipped entry: no free_fields, so every performance knob is swept and
+        # only the select narrows.
+        {"select": {"block_m": 128, "block_n": 64}},
+    ],
+    ids=["free-fields", "free-fields-and-select", "select-only"],
+)
+def test_a_full_space_bias_cell_is_narrowed_as_the_slice_narrows_it(manifest, entry):
+    """The shipped manifest's bias cell at ``space: full``. When the feature entry
+    lists the two tile fields as its ``free_fields``, the kernels are exactly the
+    slice's: every other performance knob stays at the registry default. With
+    ``select`` alone, every performance knob is free, so the selected tile is kept
+    and each other knob still takes all of its values."""
+    bias_cell = copy.deepcopy(manifest)
+    cells = bias_cell["enumerate"]["cells"]
+    cells[0]["values"] = [[128, 128, 8, 8]]
+    cells.append({"fields": ["use_attn_bias"], "values": [True]})
+    bias_cell["enumerate"]["feature_fields"]["use_additive_bias"] = {
+        "name_token": "_addb",
+        **entry,
+    }
+    as_slice = copy.deepcopy(bias_cell)
+    as_slice["enumerate"]["space"] = "slice"
+    warnings = []
+    full = re_.build_config(bias_cell, warn=warnings.append)["packs"][0]["kernels"]
+    assert not warnings
+    sliced = re_.build_config(as_slice, warn=warnings.append)["packs"][0]["kernels"]
+    assert all(k["name"].endswith("_addb.gfx950") for k in full)
+    if "free_fields" in entry:
+        assert full == sliced
+        return
+    # Select alone frees every other performance knob, so more than the slice's one kernel.
+    assert len(full) > len(sliced) == 1
+    assert {k["metadata"]["block_m"] for k in full} == {128}
+    assert {k["metadata"]["block_n"] for k in full} == {64}
+    (default,) = [k for k in full if k.get("default")]
+    spec, wanted = default["kernel_source"]["spec"], sliced[0]["kernel_source"]["spec"]
+    assert {n: spec[n] for n in wanted} == wanted
+
+
 def test_a_budget_overrun_warns_and_exits_0(manifest, tmp_path, capsys):
     over = copy.deepcopy(manifest)
     over["reduction"]["aot_budget_per_arch"] = 10

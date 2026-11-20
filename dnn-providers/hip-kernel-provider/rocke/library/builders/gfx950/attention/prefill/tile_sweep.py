@@ -3,9 +3,11 @@
 
 """Times every legal tile for every shape, to fit the gfx950 dense tile heuristic.
 
-The hipDNN ``hipkernel:Gfx950AttentionDense`` catalog is 52 kernels: one per
-(head_size, dtype, causal, tile), with seven tiles at D64 and six at D128. Its
-scorer currently prefers the 256x64 tile for every problem, which was the right
+The hipDNN ``hipkernel:Gfx950AttentionDense`` catalog is 60 kernels: 52 plain
+ones, one per (head_size, dtype, causal, tile), with seven tiles at D64 and six
+at D128, and 8 additive-bias kernels at the 128/64 tile, which this sweep does
+not time (a bias graph has one bias kernel to pick). The 52 are what it sweeps.
+Its scorer currently prefers the 256x64 tile for every problem, which was the right
 default while the catalog baked the shape and is not once it does not. This
 sweep measures which tile actually wins per shape so the scorer can be fitted
 against data rather than intuition.

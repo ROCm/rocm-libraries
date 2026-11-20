@@ -768,7 +768,7 @@ Greedily, the UKD covering the most uncovered pairs is kept, ties broken by sort
 until every pair is covered; the result is deterministic. A group in which no field varies,
 and every group of a kind without a sweep field (`hip`, `hsaco`, `embedded_source`), keeps
 one UKD, the first by sorted `name`. Kept UKDs keep their authored order. The gfx950 dense
-attention KDP (52 UKDs in one group, 5 varying spec fields) keeps 4.
+attention KDP (60 UKDs in one group, 6 varying spec fields) keeps 4.
 
 - **Each value is packed; combinations are not.** The sweep guarantees, say, that some fp16
   UKD and some causal UKD are packed, not that an fp16 causal one is. Breakage specific to
