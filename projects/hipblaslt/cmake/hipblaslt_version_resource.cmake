@@ -16,8 +16,10 @@ include("${ROCM_LIBRARIES_ROOT}/cmake/modules/rocm_libraries_version_resource.cm
 if(WIN32)
     set(HIPBLASLT_VERSION_RESOURCE_COMMIT "unknown")
     if(GIT)
+        # The checkout's commit rather than the last one under projects/hipblaslt: these binaries
+        # also contain shared code from outside it, and ProductName's tag describes HEAD too.
         execute_process(
-            COMMAND "${GIT}" log -1 --format=%H .
+            COMMAND "${GIT}" rev-parse HEAD
             WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
             OUTPUT_VARIABLE _hipblaslt_version_resource_commit
             RESULT_VARIABLE _hipblaslt_version_resource_result
