@@ -604,25 +604,22 @@ if(HIPBLASLT_ENABLE_HOST
     get_filename_component(_hipblaslt_cxx_dir "${CMAKE_CXX_COMPILER}" REALPATH)
     get_filename_component(_hipblaslt_cxx_dir "${_hipblaslt_cxx_dir}" DIRECTORY)
     find_program(HIPBLASLT_LLVM_IFS llvm-ifs
+        REQUIRED
         HINTS "${_hipblaslt_cxx_dir}"
         PATHS "${ROCM_PATH}/lib/llvm/bin" "$ENV{ROCM_PATH}/lib/llvm/bin" /opt/rocm/lib/llvm/bin
     )
-    if(HIPBLASLT_LLVM_IFS)
-        enable_testing()
-        add_test(
-            NAME hipblaslt.symbol-contract.tensilelite-host
-            COMMAND "${CMAKE_COMMAND}"
-                "-DLLVM_IFS=${HIPBLASLT_LLVM_IFS}"
-                "-DCONSUMER=$<TARGET_FILE:hipblaslt>"
-                "-DPROVIDER=$<TARGET_FILE:tensilelite-host>"
-                "-DREQUIRED_IMPORTS=${CMAKE_CURRENT_SOURCE_DIR}/library/symbol-contract/tensilelite-host-imports.txt"
-                "-DNAMESPACE_PATTERN=11TensileLite"
-                "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/symbol-contract"
-                -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_check_symbol_contract.cmake"
-        )
-    else()
-        message(STATUS "llvm-ifs not found; hipblaslt.symbol-contract.tensilelite-host test disabled")
-    endif()
+    enable_testing()
+    add_test(
+        NAME hipblaslt.symbol-contract.tensilelite-host
+        COMMAND "${CMAKE_COMMAND}"
+            "-DLLVM_IFS=${HIPBLASLT_LLVM_IFS}"
+            "-DCONSUMER=$<TARGET_FILE:hipblaslt>"
+            "-DPROVIDER=$<TARGET_FILE:tensilelite-host>"
+            "-DREQUIRED_IMPORTS=${CMAKE_CURRENT_SOURCE_DIR}/library/symbol-contract/tensilelite-host-imports.txt"
+            "-DNAMESPACE_PATTERN=11TensileLite"
+            "-DWORK_DIR=${CMAKE_CURRENT_BINARY_DIR}/symbol-contract"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_check_symbol_contract.cmake"
+    )
 endif()
 
 if(HIPBLASLT_ENABLE_DEVICE)
