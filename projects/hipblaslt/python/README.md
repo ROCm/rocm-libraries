@@ -66,7 +66,7 @@ The bindings know each attribute's C storage type, and its enum if it has one, a
 
 It warns (`HipblasLtLoadWarning`) when it doesn't end up on the hipBLASLt the bindings were built against and `HIPBLASLT_PY_LIBRARY` isn't set.
 
-If torch (or anything else) already loaded hipBLASLt, the bindings use that copy instead. The import raises `HipblasLtLoadError` when `HIPBLASLT_PY_LIBRARY` can't take effect because a different hipBLASLt is already loaded, or when hipBLASLt's companion libraries come from another build.
+If torch (or anything else) already loaded hipBLASLt, the bindings use that copy instead. The import raises `HipblasLtLoadError` when `HIPBLASLT_PY_LIBRARY` can't take effect because a different hipBLASLt is already loaded, or when hipBLASLt's companion libraries come from another build. The first `Handle()` in a process warns (`HipblasLtLoadWarning`) when the loaded hipBLASLt isn't the build the bindings were compiled against. The check needs a handle, so it doesn't run at import.
 
 ## Testing
 
