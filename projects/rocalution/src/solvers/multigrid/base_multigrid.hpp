@@ -150,9 +150,12 @@ namespace rocalution
 
         /** \brief V-cycle */
         void Vcycle_(const VectorType& rhs, VectorType* x);
-        /** \brief V-cycle; a coarse level, and the finest level of a preconditioner, start
-         *  from a zero initial guess unless continue_x is set. The coarsest level always
-         *  solves from zero, so continue_x must not be set there */
+        /** \brief V-cycle, optionally continuing from x
+         *  \details
+         *  A coarse level, and the finest level of a preconditioner, start from a zero
+         *  initial guess unless \p continue_x is set. The coarsest level always solves from
+         *  zero, so \p continue_x must not be set there.
+         */
         void Vcycle_(const VectorType& rhs, VectorType* x, bool continue_x);
         /** \brief W-cycle */
         void Wcycle_(const VectorType& rhs, VectorType* x);
@@ -210,7 +213,11 @@ namespace rocalution
         VectorType** s_level_; /**< \private */
         VectorType** q_level_; /**< \private */
 
-        /** \brief Transfer mapping */
+        /** \brief Transfer mapping
+         *  \details
+         *  Only \p BaseAMG allocates and frees it. It stays NULL for \p MultiGrid, and
+         *  \p Finalize does not touch it.
+         */
         LocalVector<int>** trans_level_;
 
         /** \brief Coarse grid solver */

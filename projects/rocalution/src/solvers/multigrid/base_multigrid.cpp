@@ -765,7 +765,8 @@ namespace rocalution
         }
         else
         {
-            // For AMG as a solver, x cannot be zero
+            // For AMG as a solver, and for the second coarse cycle of a W-cycle, which
+            // continues from the first, x holds the initial guess
             smoother->Solve(rhs, x);
         }
 
