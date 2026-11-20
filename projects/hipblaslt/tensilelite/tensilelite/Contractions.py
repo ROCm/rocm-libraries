@@ -33,6 +33,12 @@ from .Common import state, state_key_ordering, IsaInfo
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
+from .Common.ValidParameters import (
+    ASSERT_DIM_MULTIPLE_PARAMETERS,
+    checkAssertAnySizeLessThanIsValid,
+    checkAssertMultipleMapIsValid,
+    checkAssertSizeMapIsValid,
+)
 from .SolutionStructs import Solution as OriginalSolution
 from .SolutionStructs.Problem import getBiasDataTypeListDefault, getGateResidualDataTypeListDefault
 from .Toolchain.Component import Assembler
@@ -106,8 +112,8 @@ class ProblemType:
                  'useBeta', 'useBias', 'biasSrcWhiteList', 'useE', 'useGateResidual', 'gateResidualDataTypeWhiteList', 'useScaleAB', 'useScaleCD', 'useScaleAlphaVec', 'biasDataTypeWhiteList',
                  'highPrecisionAccumulate', 'useInitialStridesAB', 'useInitialStridesCD', 'stridedBatched', 'groupedGemm',
                  'useGradient', 'activationType', 'activationArgLength', 'activationComputeDataType', 'activationNoGuard',
-                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
-                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedGemmA2A', 'stochasticRounding']
+                 'sparse', 'f32XdlMathOp', 'supportDeviceUserArguments', 'outputAmaxD', 'outputPeerD', 'swizzleTensorA', 'swizzleTensorB', 'metadataLayout',
+                 'mxBlockA', 'mxBlockB', 'mxBlockFreeA', 'mxBlockFreeB', 'mxTypeA', 'mxTypeB', 'mxScaleFormat', 'fusedA2A', 'stochasticRounding']
     @classmethod
     def FromOriginalState(cls, d):
         indices = [None]*d['TotalIndices']
@@ -296,6 +302,10 @@ class ProblemType:
         if 'OutputAmaxD' in d:
             rv.outputAmaxD = d['OutputAmaxD']
 
+        rv.outputPeerD = False
+        if 'OutputPeerD' in d:
+            rv.outputPeerD = d['OutputPeerD']
+
         rv.useScaleAB = ""
         if 'UseScaleAB' in d:
             rv.useScaleAB = d['UseScaleAB']
@@ -345,7 +355,7 @@ class ProblemType:
         rv.swizzleTensorA = d.get('SwizzleTensorA', False)
         rv.swizzleTensorB = d.get('SwizzleTensorB', False)
 
-        rv.fusedGemmA2A = d.get('FusedGemmA2A', False)
+        rv.fusedA2A = d.get('FusedA2A', 'Disabled')
 
         rv.mxBlockA = d.get('MXBlockA', 0)
         rv.mxBlockB = d.get('MXBlockB', 0)
@@ -455,6 +465,7 @@ class ProblemType:
             predicates.append(ProblemPredicate("GateResidualDataTypeWhiteList", value=self.gateResidualDataTypeWhiteList))
             predicates.append(ProblemPredicate("BiasSrcWhiteList", value=self.biasSrcWhiteList))
             predicates.append(ProblemPredicate("AmaxDCheck", value=self.outputAmaxD))
+            predicates.append(ProblemPredicate("PeerDCheck", value=self.outputPeerD))
             if self.activationType in ['all', 'hipblaslt_all']:
                 exportType = ActivationType.Export.GRADONLY if self.useGradient else ActivationType.Export.NORMAL
                 supportedBy = ActivationType.SupportedBy.ALL if self.activationType == 'all' else ActivationType.SupportedBy.HIPBLASLT
@@ -493,8 +504,8 @@ class ProblemType:
             predicates.append(ProblemPredicate("SupportDeviceUserArguments", value=self.supportDeviceUserArguments))
             predicates.append(ProblemPredicate("SwizzleTensorA", value=self.swizzleTensorA))
             predicates.append(ProblemPredicate("SwizzleTensorB", value=self.swizzleTensorB))
-            predicates.append(ProblemPredicate("FusedGemmA2A", value=self.fusedGemmA2A))
-            if self.fusedGemmA2A and self.batched:
+            predicates.append(ProblemPredicate("FusedA2A", value=self.fusedA2A))
+            if self.fusedA2A != 'Disabled' and self.batched:
                 predicates.append(ProblemPredicate("BatchSizeEqual", index=0, value=1))
             predicates.append(ProblemPredicate("MXBlockA", value=self.mxBlockA))
             if self.mxBlockA:
@@ -513,6 +524,8 @@ ASSERT_DIM_MAP_PREDICATES = {
     "AssertSizeLessThan": "SizeLessThan",
     "AssertStrideAEqual": "StrideAEqual",
     "AssertStrideBEqual": "StrideBEqual",
+    "AssertStrideAMultiple": "StrideAMultiple",
+    "AssertStrideBMultiple": "StrideBMultiple",
     "AssertStrideCEqual": "StrideCEqual",
     "AssertStrideDEqual": "StrideDEqual",
 }
@@ -581,11 +594,34 @@ class ProblemPredicate(Properties.Predicate):
             return cls("AIGreaterThanEqual", value=value) if value > 0 else None
         if key == "AssertAILessThanEqual":
             return cls("AILessThanEqual", value=value) if value > 0 else None
+        if key == "AssertAnySizeLessThan":
+            if value == -1:
+                return None
+            if not isinstance(value, dict):
+                raise RuntimeError(
+                    "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
+                )
+            try:
+                checkAssertAnySizeLessThanIsValid(key, value)
+            except Exception as e:
+                raise RuntimeError(str(e)) from e
+            predicates = [
+                cls("SizeLessThan", index=pos, value=val) for pos, val in value.items() if val != -1
+            ]
+            return cls.Or(predicates) if predicates else None
         if key in ASSERT_DIM_MAP_PREDICATES:
             if not isinstance(value, dict):
                 raise RuntimeError(
                     "{} must be a dict of {{index: value}}, got {!r}".format(key, value)
                 )
+            if key in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                # Checked here as well as on the YAML inputs because logic-file
+                # and custom.config values reach the predicate without that gate.
+                try:
+                    checkAssertSizeMapIsValid(key, value)
+                    checkAssertMultipleMapIsValid(key, value)
+                except Exception as e:
+                    raise RuntimeError(str(e)) from e
             return extractDimPredicate(cls, value, ASSERT_DIM_MAP_PREDICATES[key])
         if key == "AssertAlphaValue":
             if value not in ASSERT_ALPHA_VALUE_NAMES:
@@ -593,6 +629,24 @@ class ProblemPredicate(Properties.Predicate):
                     "AssertAlphaValue must be one of {}, got {!r}".format(
                         sorted(ASSERT_ALPHA_VALUE_NAMES), value))
             return cls("AlphaValue", value=ASSERT_ALPHA_VALUE_NAMES[value])
+
+        if key == "AssertTensorBytesLessThan":
+            if value == -1:
+                return None
+            if type(value) is not int or value <= 0:
+                raise RuntimeError(
+                    "{} must be a positive int or -1, got {!r}".format(key, value)
+                )
+            return cls("TensorBytesLessThan", value=value)
+
+        if key == "AssertMXScalesPreSwizzled":
+            if value == -1:
+                return None
+            if value is not True:
+                raise RuntimeError(
+                    "{} must be True or -1, got {!r}".format(key, value)
+                )
+            return cls("MXScalesPreSwizzled")
 
         if key.endswith('Multiple'):
             if value == 1:
@@ -744,7 +798,7 @@ class ProblemPredicate(Properties.Predicate):
         if problemType.mxBlockA or problemType.mxBlockB:
             rv += [cls('MXScaleFormatEquals', value=mxScaleFormatId(state))]
 
-        if state['ProblemType']['FusedGemmA2A']:
+        if state['ProblemType']['FusedA2A'] == 'GemmA2A':
             rv += [cls('GemmA2AShape', value=state['MacroTile0'])]
 
         # Exact-size custom kernels record the M/N/K window they won. Without
@@ -772,6 +826,9 @@ class ProblemPredicate(Properties.Predicate):
             rv += [cls('SizeGreaterThan', index=kIdx, value=0)]
             rv += [cls('SizeLessThan', index=kIdx,
                        value=kTiles * state['DepthU'] + 1)]
+
+        if state['ProblemType']['FusedA2A'] == 'A2AGemm':
+            rv += [cls('A2AGemmShape', value=state['DepthU'] * state['A2ASubRounds'])]
 
         return rv
 
@@ -814,7 +871,8 @@ class CustomKernel:
             setattr(self, key, value)
 
 class SizeMapping:
-    StateKeys = ['activationFused',
+    StateKeys = ['a2aSubRounds',
+                 'activationFused',
                  'adaptiveGemm',
                  'adaptiveGemmGSUA',
                  'adaptiveGemmNTAB',
@@ -930,7 +988,8 @@ class SizeMapping:
         dtlA = bool(d['DirectToLdsA'])
         dtlB = bool(d['DirectToLdsB'])
 
-        return cls(activationFused          = d['ActivationFused'],
+        return cls(a2aSubRounds             = d.get('A2ASubRounds', 1),
+                   activationFused          = d['ActivationFused'],
                    adaptiveGemm             = int(d.get('AdaptiveGemm', 0)),
                    adaptiveGemmGSUA         = d['AdaptiveGemmGSUA'] if 'AdaptiveGemmGSUA' in d else 0,
                    adaptiveGemmNTAB         = d['AdaptiveGemmNTAB'] if 'AdaptiveGemmNTAB' in d else 0,
@@ -1115,6 +1174,28 @@ class Solution:
             *,
             raiseProblemTypeOnTypeMismatch: bool = True,
         ):
+        rv = cls.RecordFromOriginalState(d, srcName, deviceInfo)
+        rv.originalSolution = OriginalSolution(
+                                  d,
+                                  splitGSU,
+                                  printSolutionRejectionReason,
+                                  printIndexAssignmentInfo,
+                                  assembler,
+                                  isaInfoMap,
+                                  srcName,
+                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
+                              )
+        rv.srcName = srcName
+
+        return rv
+
+    @classmethod
+    def RecordFromOriginalState(cls, d, srcName="", deviceInfo=None):
+        """The library record FromOriginalState writes, without the OriginalSolution.
+
+        Fills in d['ISA'] and d['CUCount'] as FromOriginalState does, so the
+        OriginalSolution built from d afterwards sees the same state.
+        """
         rv = cls()
 
         if 'SolutionNameMin' in d:
@@ -1172,18 +1253,6 @@ class Solution:
         rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
             d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
         )
-        rv.originalSolution = OriginalSolution(
-                                  d,
-                                  splitGSU,
-                                  printSolutionRejectionReason,
-                                  printIndexAssignmentInfo,
-                                  assembler,
-                                  isaInfoMap,
-                                  srcName,
-                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
-                              )
-        rv.srcName = srcName
-
         return rv
 
     @classmethod

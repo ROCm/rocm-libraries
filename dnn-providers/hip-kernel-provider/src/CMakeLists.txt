@@ -211,6 +211,9 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         gfx942 unified_3d Gfx942AttentionUnified3d HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
             hipkernel_Gfx942AttentionUnified3d.toml
             HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_3D_INTEGRATION_CATEGORIES_YAML
+        gfx942 unified_2d Gfx942AttentionUnified2D HKP_SDPA_FWD_DEFAULT_GTEST_FILTER
+            hipkernel_Gfx942AttentionUnified2D.toml
+            HIPKERNELPROVIDER_GFX942_ATTENTION_UNIFIED_2D_INTEGRATION_CATEGORIES_YAML
         gfx942 dense Gfx942AttentionDense HKP_GFX942_ATTENTION_DENSE_GTEST_FILTER
             hipkernel_Gfx942AttentionDense.toml
             HIPKERNELPROVIDER_GFX942_ATTENTION_DENSE_INTEGRATION_CATEGORIES_YAML
@@ -463,6 +466,55 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         set(${out_var} "${_file}" PARENT_SCOPE)
     endfunction()
 
+    # The packaged forward AOT-instance engine's own external-integration-check:
+    # dnn-providers/integration-tests/integration-test-bundles/*/Gfx950ConvFwd/ claims
+    # hipkernel:Gfx950ConvFwdAot, but nothing short of this target checks that claim --
+    # IntegrationGpuGfx950ConvFwd.cpp (integration_tests/) is the provider's own suite,
+    # built from rocKE's sweep grid directly, and never reads these bundle files. Routed
+    # into gfx950's own census shard (INSTALL_DESTINATION/INSTALL_STAGING_KEY) and
+    # categorized, like the pinned attention engines below, rather than the common
+    # arch-neutral file: without a tier, ctest -L standard never selected it. Gated on
+    # hkp_product_ships_engine_for_arch for gfx950: a build whose `product` root ships
+    # only another bundle reads as absent rather than a missing-engine failure.
+    set(_hkp_conv_fwd_aot_available FALSE)
+    if(HIPDNN_ENABLE_KERNEL_INGESTOR)
+        hkp_product_ships_engine_for_arch(_hkp_conv_fwd_aot_available "hipkernel:Gfx950ConvFwdAot" gfx950)
+    endif()
+    if(_hkp_conv_fwd_aot_available AND TARGET hipdnn_integration_tests)
+        _hkp_census_external_test_file(_hkp_conv_fwd_aot_shard_ctest gfx950)
+        set(_hkp_conv_fwd_aot_config "${CMAKE_CURRENT_SOURCE_DIR}/../config/hipkernel_Gfx950ConvFwdAot.toml")
+        hkp_reserve_census_shard(_hkp_conv_fwd_aot_shard_dest gfx950 FILES "${_hkp_conv_fwd_aot_config}")
+
+        set(_hkp_conv_fwd_aot_category_args "")
+        if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
+            list(APPEND _hkp_conv_fwd_aot_category_args
+                TEST_CATEGORIES_YAML "${HIPKERNELPROVIDER_GFX950_CONV_FWD_AOT_INTEGRATION_CATEGORIES_YAML}"
+                INSTALL_TEST_FILE "${_hkp_conv_fwd_aot_shard_ctest}"
+                TEST_NAME_PREFIX ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration
+            )
+        endif()
+
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration-check
+            PLUGIN_TARGET  hip_kernel_provider
+            ENGINE_NAME    "hipkernel:Gfx950ConvFwdAot"
+            INSTALL_SUBDIR hip_kernel_provider
+            INSTALL_DESTINATION "${_hkp_conv_fwd_aot_shard_dest}"
+            INSTALL_STAGING_KEY hkp_census_gfx950
+            TEST_CONFIG    "${_hkp_conv_fwd_aot_config}"
+            ENVIRONMENT    ${TEST_ENVIRONMENT}
+            ENVIRONMENT_MODIFICATION ${TEST_ENVIRONMENT_MODIFICATION}
+            ${_hkp_conv_fwd_aot_category_args}
+        )
+        message(STATUS "Created ${PROJECT_NAME}-gfx950-conv-fwd-aot-external-integration-check target")
+    elseif(NOT _hkp_conv_fwd_aot_available)
+        message(STATUS "hipkernel:Gfx950ConvFwdAot not shipped by this configuration - "
+                       "skipping gfx950-conv-fwd-aot-external-integration-check")
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping "
+                       "gfx950-conv-fwd-aot-external-integration-check")
+    endif()
+
     # One engine-pinned external integration entry per HKP_PINNED_ATTENTION_ENGINES engine,
     # serving the bundles its filter variable names (the unified 3D engines serve only
     # their decode, seqlen_q 1, cases and decline the rest).
@@ -664,7 +716,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 
     # The FlyDSL SDPA backward engines, hipkernel:flydsl_sdpa_bwd_split and
-    # hipkernel:flydsl_sdpa_bwd_merged. Split ships gfx950 content and gfx11-generic
+    # hipkernel:flydsl_sdpa_bwd_merged. Split ships gfx950, gfx942 and gfx90a content and gfx11-generic
     # content, which the pack expands to every gfx11 member this build targets; merged
     # ships gfx950 only. Each (engine, architecture) the product ships gets its own
     # engine-pinned target in that architecture's shard, for the reason the gfx950 dense

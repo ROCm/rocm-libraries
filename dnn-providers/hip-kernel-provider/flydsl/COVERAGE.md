@@ -16,7 +16,7 @@ engine of its own (256, §5.6). Every target also ships the keep-mask writer and
 padding copy (one object each); §6.2 has the per-target ledger.
 **SDPA forward on CDNA** (§7) is three engines -- the generic kernel's prefill, gfx950's
 dual-wave kernel and the split-KV decode -- built per arch for gfx950, gfx942 and gfx90a
-from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,707 object files; the split engine also on gfx11-generic, 509). Every graph a pack accepts is
+from FlyDSL's own CDNA kernels, and on gfx950 **SDPA backward** (§9, 2,707 object files; the split engine also on gfx942, gfx90a and gfx11-generic, 509 each). Every graph a pack accepts is
 computed by one of its objects; everything else is **declined**, so another
 engine gets the plan.
 
@@ -137,7 +137,7 @@ Evaluated once per graph. Every one of these is a hard refusal.
 | x, y rank ≥ 2; scale rank ≥ 1; `dims` and `strides` both present and equal length | Rank ≥ 2 so there is a row to reduce over. The matcher runs on an *unvalidated* graph, so it must be total against null or mismatched dims. |
 | `sameShape(x, y)` | |
 | x, y, scale all **packed row-major**, ignoring the stride of any axis of extent 1 | The innermost stride is a compile-time literal 1 in the kernel and has no descriptor slot, and the launch passes the width as the row stride. The check is stronger than the descriptor strictly needs — it could carry a padded row stride — but it is what makes collapsing rank > 2 to (M, N) sound, since one row stride has to describe all the leading axes at once. An axis of extent 1 is never stepped along, so its stride is not checked: hipdnn_torch describes an `F.rms_norm` weight with stride 0 on its unit axes, and the data SDK's packed test exempts them the same way. |
-| rows > 0 and columns > 0, and every element of x and y within 2³¹ − 1 bytes | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. |
+| rows > 0 and columns > 0, and every element of x, y and gamma within 2³¹ − 1 bytes, and in training inv_rms's 4 bytes per row too | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. Gamma is bounded on its own columns times its own element size, inv_rms on its row count times 4: at width 1 and 16-bit x, inv_rms reaches the bound before x does. |
 | gamma **encodes the normalised shape** as the frontend reads it: the normalised axes are the longest trailing run where gamma's extent equals x's (never axis 0), and gamma is 1 on every axis before it | Any other shape would be a broadcast the kernel does not perform. The rule of `validateScaleNormalizedShape` in the frontend, but for rank: a gamma of lower rank than x, which the frontend rejects, is aligned at the innermost axis with its missing leading axes read as 1, so the matcher stays total. |
 | epsilon is one scalar: present, with dims, and extent 1 on every axis | The kernel takes one f32; a tensor of more elements would be read as its first. |
 | epsilon is runtime-user-supplied, **or** a finite, non-negative f32 | See below. |
@@ -227,7 +227,9 @@ virtual, pass-by-value or ragged); x, dy, dx one dtype; gamma and dgamma one dty
 or f32 beside 16-bit x; dx shaped as x and dgamma as gamma; inv_rms one f32 per row (the
 forward's rule); every row operand and gamma/dgamma packed and 16-byte aligned; gamma
 encoding the normalised shape; every element of x, dy and dx within 2³¹ − 1 bytes (the
-forward's bound); not override-shape. **The kernel matcher** pairs dtype and gamma
+forward's row-operand bound), and inv_rms's 4 bytes per row within it too (the backward
+matcher does not bound gamma or dgamma bytes);
+not override-shape. **The kernel matcher** pairs dtype and gamma
 form, and serves a baked width exactly or a generic one up to its `n_max`.
 
 ---
@@ -504,7 +506,7 @@ queries than keys — gets O = 0 and LSE = −inf, as the reference defines it.
 
 **Graph schema.** Before a matcher runs, the ingestor declines a graph whose schema floor
 (hipDNN's `computeMinimumEnginePluginApiVersion`) is above the engine's UED `sdk_version`.
-Every FlyDSL SDPA engine (RDNA, aiw and CDNA alike) claims **1.4.0**, the newest version
+Every FlyDSL SDPA forward engine (RDNA, aiw and CDNA alike) claims **1.6.0**, the newest version
 the SDK defines (`K_MAX_SUPPORTED_API_VERSION`), so ragged graphs reach the matchers; each
 field the schema added up to it is gated:
 
@@ -515,10 +517,13 @@ field the schema added up to it is gated:
 | 1.3.0 | tensor `ragged_offset_tensor_uid` | Q/K/V/O: compact THD or cuDNN's packed form, else declined (§5.9, §7.10); the LSE: packed through Q's table or dense; every other tensor declines it |
 | 1.3.0 | tensor `alignment` | `declaresAlignment` wherever a device tensor is read: Q/K/V/O and the bias 16 bytes, LSE, lengths, offset tables, RNG dump and the (FLOAT) sink 4, seed and offset on the device 8 |
 | 1.4.0 | tensor `ragged_offset_multiplier` | a ragged tensor's must be its own sequence stride (`isPackedThrough`); on a tensor that is not ragged anything but 1 declines (`usesUnreadSchemaFields`) |
+| 1.6.0 | SDPA `cu_seq_len_q` / `cu_seq_len_kv` | declined in the CDNA and RDNA matchers before the varlen rules read the graph: the kernels read per-batch lengths (`seq_len_*`), not cumulative ones |
 
 `TestFlydslSdpaGraphSchema` pins the claim to the SDK's newest version: an SDK that adds one
-fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2). **Through
-hipDNN's backend:** the provider declares engine plugin API 1.4.0, the SDK's newest
+fails it until the new fields are reviewed here. RMSNorm stays at 1.2.0 (§2), and the two
+backward engines at 1.4.0, the schema that introduced the last field they read: `cu_seq_len_*`
+exists on the forward node only. **Through
+hipDNN's backend:** the provider declares engine plugin API 1.6.0, the SDK's newest
 (`src/core/PluginPublic.cpp`), so the backend routes it ragged graphs; its schema guard
 (`src/core/GraphSchema.hpp`) declines a graph for every engine whose declared schema is below
 the graph's floor: built-in engines declare theirs in `Container.cpp`, ingestor engines their
@@ -1278,13 +1283,27 @@ wins by default. The rule this provider follows:
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
 
-No trained UHD model is installed for the FlyDSL SDPA engines (`sdpa_*`), whose catalog
-this provider changed. Each SDPA engine orders its kernels by descriptor `priority` (the
-native ranker), its engine estimate is the `default` slot the loader disables, and
-autotune measures the order. SDPA models trained on this catalog are a follow-up:
-`gen_descriptors.py` binds each one per arch once it is installed under `heuristics/`
-([README](README.md)). The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their
-trained models; their catalog is unchanged.
+Trained UHD models are installed for the FlyDSL SDPA engines on these architectures
+(under each op's `heuristics/`, bound per arch by `gen_descriptors.py`, see the
+[README](README.md)):
+
+| Engine | Engine estimate (`predict_engine`) | Kernel ranker (`sort_kernel_catalog`) |
+|---|---|---|
+| `sdpa_aiw` | gfx1201 | gfx1201 |
+| `sdpa_cdna` | gfx90a, gfx942, gfx950 | gfx942 |
+| `sdpa_cdna_decode` | gfx90a, gfx942, gfx950 | -- |
+| `sdpa_cdna_dualwave` | gfx950 | -- |
+| `sdpa_rdna` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+| `sdpa_rdna_decode` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+
+Elsewhere an SDPA engine orders its kernels by descriptor `priority` (the native ranker),
+its engine estimate is the `default` slot the loader disables, and autotune measures the
+order. Each installed model records the selector revision it was trained against, which
+digests the engine's kernel catalog and ranker: a change to an SDPA catalog, its kernel
+fields or a ranker makes those models refused at run time, so such a change retrains or
+re-stamps them in the same pull request. `TestFlydslModelBinding` (the census) fails the
+build on a stale stamp. The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their trained
+models; their catalog is unchanged.
 
 ### 6.1 Runtime features audited against compiled-out builds
 
@@ -1399,7 +1418,8 @@ a class's "default" and "companions", ranking applies within one engine: the gen
 kernel's tiles against each other, by descriptor `priority` plus a bonus where a tier's
 measured rule prefers it (the engine's interim native ranker). That static order is
 provisional: autotune times every object the engine admits for a graph and caches the
-measured order, and a trained UHD ranker replaces the static one. Which engine runs a
+measured order, and a trained UHD ranker replaces the static one where one is installed
+(`sdpa_cdna` on gfx942, §6). Which engine runs a
 graph several serve is the engine-level heuristic's (UHD), or autotune's; `priority`
 never compares objects of different engines. The kernels are FlyDSL's own MFMA flash-attention forwards,
 vendored whole under
@@ -1903,8 +1923,8 @@ What came out of it:
 
 The rules were fitted on bf16 and the f16 objects share them. Bias classes are
 rare in the corpus and ship their default tier only. The process is repeated as
-features land; the rules are coarse by design, and a trained heuristic replaces
-them when the ingestor gains one.
+features land; the rules are coarse by design, and a trained ranker replaces them
+where one is installed (gfx942, §6).
 
 ### 7.7 gfx90a (MI210, MI250)
 
@@ -2260,7 +2280,7 @@ Approved for this integration.
 
 ## 9. SDPA backward — `hipkernel:flydsl_sdpa_bwd_merged` and `hipkernel:flydsl_sdpa_bwd_split`
 
-Split and merged ship for gfx950; split alone also ships for gfx11-generic. Both engines share one graph matcher
+Split and merged ship for gfx950; split alone also ships for gfx942, gfx90a and gfx11-generic. Both engines share one graph matcher
 ([`FlydslSdpaBwdCommon.hpp`](../src/engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp)),
 a pure function of the graph that either computes the problem or says why it declines; what
 belongs to one engine (tile routing, bias staging, workspace bounds) is that engine's.
@@ -2270,7 +2290,7 @@ belongs to one engine (tile routing, bias staging, workspace bounds) is that eng
 | `hipkernel:flydsl_sdpa_bwd_merged` | one: dK, dV, dQ and, on a bias graph, dBias in one grid, with no prep kernel | `sdpa_bwd_merged` (325) |
 | `hipkernel:flydsl_sdpa_bwd_split` | three, in order, one per slot: prep (Delta and the statistics), dK/dV, dQ (and dBias) | `sdpa_bwd_prep` (86), `sdpa_bwd_dkdv` (1,329), `sdpa_bwd_dq` (962); `sdpa_bwd_split` carries the descriptors only |
 
-Backward rows exist only for gfx950 and gfx11-generic; the forward engines also run on gfx942, gfx90a and gfx12. What the engines serve, in one place (rule IDs and decline causes are in 9.1 and 9.2). In the last column, AOTriton's entry is `yes` where its backward test suite parametrizes the feature and `untested` where it does not; `?` marks a cell this document does not establish.
+Backward rows exist for gfx950, gfx942, gfx90a and gfx11-generic (the merged engine on gfx950 only); the forward engines also run on gfx12. The table's split columns cover gfx950 and gfx11-generic; on gfx942 and gfx90a the split engine serves head dims up to 512, as on gfx950. What the engines serve, in one place (rule IDs and decline causes are in 9.1 and 9.2). In the last column, AOTriton's entry is `yes` where its backward test suite parametrizes the feature and `untested` where it does not; `?` marks a cell this document does not establish.
 
 | Variant | Split gfx950 | Split gfx11 | Merged gfx950 | Also served by: FlyDSL forward / cuDNN / AOTriton |
 |---|---|---|---|---|
@@ -2300,8 +2320,8 @@ Backward rows exist only for gfx950 and gfx11-generic; the forward engines also 
 Neither engine's plans can be serialized: the merged engine's dispatch handler does not
 implement plan saving, and the split engine is slotted (RFC 0021). A
 broadcast dBias is summed by the dBias reduce kernel, launched as the `dbias_reduce` entry of
-the row's `sources` (RFC 0017 §15.1). On gfx950 that entry names the row's own object and the
-reduce symbol, a second kernel of the same code object; on gfx11 it names a standalone object
+the row's `sources` (RFC 0017 §15.1). On gfx950 (and for the fp32 combined bias rows of gfx942 and gfx90a) that entry names the row's own object and the
+reduce symbol, a second kernel of the same code object; on gfx11-generic (and for the 16-bit rows of gfx942 and gfx90a) it names a standalone object
 (the generator op `sdpa_bwd_dbias_reduce` builds 3 standalone pins, the
 fp32 family has its own); the dSink reduce is the generator op `sdpa_bwd_dsink_reduce` (2
 pins). Neither ships content: the reduce kernels ride inside the objects that launch them. The 16-bit families cover bf16 and f16;
@@ -2310,7 +2330,7 @@ declined with a named cause (data type, operand layout, mask, workspace overflow
 another engine gets the plan where one exists (on gfx11 the split engine is the only SDPA
 backward engine). The kernels and how the shipped objects are pinned are in
 [`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
-the split ops also carry the gfx11-generic set (509 object files: prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op, 3 standalone dBias reduce objects and 5 tail-zero objects), built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
+the split ops also carry a 509-object-file set on each of gfx11-generic, gfx942 and gfx90a (prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op: 3 standalone dBias reduce objects and 5 tail-zero objects); the gfx11-generic set is built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md).
 
 **Regeneration needs only this tree.** The backward objects regenerate from the tree and the pulled content alone
 ([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`),
@@ -2381,7 +2401,7 @@ A graph the forward engines serve can still decline in the backward, deliberatel
 - `seq_len_kv` alone over a ragged Q (PV-2, SEM-028);
 - a stats tensor that declares 4 or 8 bytes of alignment, which the forward accepts and the backward requires 16 (SS-3).
 
-On gfx942, gfx90a and gfx12 the forward runs and no FlyDSL backward exists.
+On gfx12 the forward runs and no FlyDSL backward exists.
 
 **Rows and head dims.** The new rows are exact tiles on gfx950 and padded `g1` tiles on
 gfx11-generic, for f16 and bf16, with and without baked dropout.
@@ -2438,8 +2458,16 @@ ship their pins. Residual resource cells, none with a correctness effect:
   gfx1103, gfx1150 to gfx1153) run the same object and have no device run of their own.
 - **Padded graphs.** With `padding_mask`, a launch after the gradient launches zeroes the
   dense dQ rows at or past `seq_len_q` and the dense dK/dV rows at or past `seq_len_kv`, on
-  gfx950 and gfx11-generic, as the references and cuDNN define them. A ragged output is not
+  gfx950, gfx942, gfx90a and gfx11-generic, as the references and cuDNN define them. A ragged output is not
   written past a length: that storage belongs to a gap or to the next sequence, and gap rows
   are not iterated. The `*_padneq_*` bundles run in both engine lanes; `padneq_nomask`,
   `padneq_causal_tl` and `padneq_causal_br` carry claims, and `padneq_dbias_batch` and
   `padneq_window_br` decline by rule (PV-10, MW-13).
+- **gfx90a f16 subnormal operands.** The gfx90a MFMA flushes fp16 subnormal operands (below 2^-14).
+  Where the softmax probabilities fall below that (the plain `x06` bundle case, Sq 64 x Skv 65536,
+  P about 1.5e-5) dV is 0 against a reference of about 4e-2, as in AOTriton. The in-tree device
+  harness compares f16 graphs on gfx90a against a flush-aware reference (`usesFlushAwareReference`);
+  the bundle lane has none, so that one case is skipped on gfx90a by the split engine's static test
+  config and carries no claim there. Scaling P into the normal range for the dV GEMM would remove it.
+- **Support claims on CDNA.** The split engine carries gfx942 and gfx90a claims over the SdpaBackward bundle graphs; the merged engine
+  has no CDNA content and no CDNA claims.

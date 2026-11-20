@@ -3,9 +3,9 @@
  *
  * rocke/helper_rocke.helpers.mx_scale.h -- C99 port of rocke.helpers.mx_scale.
  *
- * Scope of THIS file: `decode_mx_scale_e8m0`, `fma_with_mx_scale_pair`, the
+ * Scope of THIS file: `decode_mx_scale_e8m0`, `add_mx_scaled_dot`, the
  * element formats (`MxElementFormat` and the four fp8 / bf8 encodings) and
- * `exact_mx_scale_split` are ported here (the other MX helpers in
+ * `largest_safe_mx_scale_code` are ported here (the other MX helpers in
  * helpers/mx_scale.py -- apply_mx_scale, load_and_decode_mx_scale_byte,
  * load_and_decode_mx_scales_wave -- are out of scope for this phase).
  *
@@ -43,15 +43,11 @@
 extern "C" {
 #endif
 
-/* Python MxElementFormat: the values an element format can hold, as far as an
- * MX group's dot product depends on them. The smallest positive value is
- * 2^smallest_exponent (the smallest subnormal) and every value is a multiple
- * of it; largest_value is the largest finite magnitude; name appears in error
- * messages. */
+/* Python MxElementFormat: an element format's largest finite magnitude, which
+ * bounds the products of an MX group; name names the format in messages. */
 typedef struct rocke_mx_element_format
 {
     const char* name;
-    int smallest_exponent;
     double largest_value;
 } rocke_mx_element_format_t;
 
@@ -62,36 +58,21 @@ extern const rocke_mx_element_format_t ROCKE_BF8_E5M2_OCP;
 extern const rocke_mx_element_format_t ROCKE_FP8_E4M3_FNUZ;
 extern const rocke_mx_element_format_t ROCKE_BF8_E5M2_FNUZ;
 
-/* Python MxScaleSplit: how rocke_fma_with_mx_scale_pair splits 2^(ea + eb)
- * into two f32 factors. ea + eb is split as pre + fused with fused clamped to
- * fused_min..fused_max and pre the rest, then pre is saturated at
- * rocke_mx_scale_split_pre_max. As exponent_cap is at least fused_max, that
- * is the split of ea + eb saturated at exponent_cap. */
-typedef struct rocke_mx_scale_split
-{
-    int exponent_cap;
-    int fused_min;
-    int fused_max;
-} rocke_mx_scale_split_t;
-
-/* Python MxScaleSplit.pre_max: the largest pre, exponent_cap - fused_max.
- * ea + eb above exponent_cap has fused = fused_max and pre beyond this. */
-int rocke_mx_scale_split_pre_max(const rocke_mx_scale_split_t* split);
-
-/* Python exact_mx_scale_split(a_format, b_format, group_size): the split that
- * makes rocke_fma_with_mx_scale_pair exact (one rounding, IEEE special values
- * and signed zeros) for every dot product of group_size A and B elements of
- * these formats. See the Python docstring for the derivation.
+/* Python largest_safe_mx_scale_code(a_format, b_format, products): the largest
+ * E8M0 code an A and a B scale may both have so that a sum of `products`
+ * scaled A x B products stays a binade below the f32 overflow threshold
+ * (|sum| <= products * a_max * b_max * 2^(2c - 254) <= 2^127). See the Python
+ * docstring.
  *
- * Returns ROCKE_OK and fills *out, or ROCKE_ERR_VALUE with the
- * Python-matching message in err (capacity err_cap, may be NULL) when the
- * formats' bounds admit no exact split. */
-rocke_status_t rocke_exact_mx_scale_split(const rocke_mx_element_format_t* a_format,
-                                          const rocke_mx_element_format_t* b_format,
-                                          int group_size,
-                                          rocke_mx_scale_split_t* out,
-                                          char* err,
-                                          size_t err_cap);
+ * Returns ROCKE_OK and writes the code to *out, or ROCKE_ERR_VALUE with the
+ * Python-matching message in err (capacity err_cap, may be NULL) when
+ * `products` is not positive. */
+rocke_status_t rocke_largest_safe_mx_scale_code(const rocke_mx_element_format_t* a_format,
+                                                const rocke_mx_element_format_t* b_format,
+                                                int products,
+                                                int* out,
+                                                char* err,
+                                                size_t err_cap);
 
 /* Decode an 8-bit E8M0 scale code into an f32 multiplier: ``2^(code - 127)``
  * for codes 0..254, NaN for code 255.
@@ -101,29 +82,25 @@ rocke_status_t rocke_exact_mx_scale_split(const rocke_mx_element_format_t* a_for
  * Returns the f32 multiplier Value (ready for an MX-scale fmul). */
 rocke_value_t* rocke_decode_mx_scale_e8m0(rocke_ir_builder_t* b, rocke_value_t* e8m0);
 
-/* ``addend + value * 2^(ea + eb)`` for two E8M0 scale bytes, rounded once;
- * NaN if either code is 255. ``ea``, ``eb`` are the unbiased exponents of the
- * i8 codes `a_e8m0`, `b_e8m0`; `value` and `addend` are matching f32 vectors.
+/* Python add_mx_scaled_dot(b, acc, dot, a_codes, b_codes):
+ * ``acc + dot * 2^(ea + eb)`` element by element, NaN for an element whose A or
+ * B code is 255. `acc` and `dot` are matching f32 vectors of n elements;
+ * `a_codes` and `b_codes` hold the n A and B E8M0 bytes (i8) of the elements
+ * (the same Value may repeat when elements share a scale; each distinct Value
+ * is read once). Each term is ldexp(dot, ea + eb): one rounding, correct for
+ * every pair of codes, as the product of two decoded scales is never formed.
  *
- * The two exponents are added as integers and never formed into one f32
- * scale, which would overflow to Inf or flush to zero for large or small
- * codes: ``ea + eb`` is split as ``pre + fused`` with ``fused`` clamped to
- * split->fused_min..fused_max and ``pre`` the rest, saturated at
- * rocke_mx_scale_split_pre_max(split), and the result is
- * ``fma(value * 2^pre, 2^fused, addend)``. With `split` from
- * rocke_exact_mx_scale_split for the formats of the group's elements, that
- * is the exact result rounded once for every value the group can produce.
- * See the Python docstring of rocke.helpers.mx_scale.fma_with_mx_scale_pair.
- *
- * On a non-f32-vector value, a mismatched addend or a non-i8 code the
- * builder's sticky error (ROCKE_ERR_VALUE) is set with the Python-matching
- * message and NULL is returned. Returns the result vector Value. */
-rocke_value_t* rocke_fma_with_mx_scale_pair(rocke_ir_builder_t* b,
-                                            rocke_value_t* value,
-                                            rocke_value_t* a_e8m0,
-                                            rocke_value_t* b_e8m0,
-                                            rocke_value_t* addend,
-                                            const rocke_mx_scale_split_t* split);
+ * On a non-f32-vector dot, a mismatched accumulator, a code count that is not
+ * n or a non-i8 code the builder's sticky error (ROCKE_ERR_VALUE) is set with
+ * the Python-matching message and NULL is returned. Returns the result vector
+ * Value. */
+rocke_value_t* rocke_add_mx_scaled_dot(rocke_ir_builder_t* b,
+                                       rocke_value_t* acc,
+                                       rocke_value_t* dot,
+                                       rocke_value_t* const* a_codes,
+                                       size_t n_a_codes,
+                                       rocke_value_t* const* b_codes,
+                                       size_t n_b_codes);
 
 #ifdef __cplusplus
 }

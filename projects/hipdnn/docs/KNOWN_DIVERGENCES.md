@@ -105,6 +105,19 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 | `deselect_workspace_greater_than` | Forwarded; reapplied after plan creation. |
 | `deselect_shared_mem_greater_than` | `0`: no-op. Non-zero: records `GRAPH_NOT_SUPPORTED` (no shared-memory metadata). |
 
+## SDPA cumulative sequence lengths
+
+`SDPA_attributes` is hipDNN's `SdpaAttributes`, so it exposes `set_cu_seq_len_q` / `set_cu_seq_len_kv` and the getters although the shim targets v1.24.0, which has none (cuDNN added them in v1.25.0). They differ from cuDNN as follows:
+
+| Aspect | cuDNN (v1.25.0) | hipDNN |
+|---|---|---|
+| Data type | `INT32` or `INT64` | `INT32` only |
+| 1-D `(B+1)` tensor | Promoted to `(B+1,1,1,1)` in `infer_properties_node` | Promoted in place during validation, so either call order works; the tensor keeps its uid and handle |
+| Mixed per-side form (`cu_seq_len_*` on one side, `seq_len_*` on the other) | Rejected by cudnn-frontend v1.25.0 and v1.26.0; accepted from v1.27.0 | Accepted (`SdpaFwdNode` Rule 6c) |
+| `padding_mask` | Must be `true` whenever any length tensor (`seq_len_*` or `cu_seq_len_*`) is set | Required for `cu_seq_len_*` only; `seq_len_*` with `padding_mask=false` still validates |
+| Paged K/V with `cu_seq_len_*` | Accepted by cudnn-frontend v1.25.0 | Rejected: `SdpaFwdNode::validatePagedKv` requires `seq_len_q` and `seq_len_kv` for paged K/V |
+| Engine support | Unified SDPA engine on cuDNN 9.24+ (mixed per-side forms: 9.25+) | Only an engine plugin reporting API version 1.6.0 or newer; no in-tree engine or reference implements them yet |
+
 ## Build and execute
 
 - `build_operation_graph()` without a handle succeeds only for a graph with no nodes.
@@ -117,6 +130,7 @@ hipDNN knob IDs are matched to `KnobType_t` by their last dot-separated segment,
 - `print()` on a graph whose operation graph is not built prints an empty object.
 - `deserialize` ignores `enforce_precompiled`.
 - A built or deserialized plan executes only on handles whose stream is on the device it was built or deserialized for; `execute` with a handle on another device fails, even when the devices have the same properties. cuDNN allows the same finalized plan on another GPU. To use a plan on another device, `serialize` it and `deserialize` it with a handle on that device. See [backend architecture](./user-guides/conceptual/backend-architecture.rst).
+- `validate()` and `build_operation_graph()` reject a tensor, or its attached ragged-offset tensor, with a negative stride on any axis with `INVALID_VALUE`; cuDNN frontend v1.24.0 accepts one.
 
 ## SDPA dropout random stream
 
@@ -131,6 +145,8 @@ The hip-kernel-provider's FlyDSL SDPA backward engines (`hipkernel:flydsl_sdpa_b
 - They decline some graphs cuDNN frontend v1.24.0 serves: ALiBi, a bias with a top-left causal or window mask, a window with bottom-right alignment under `padding_mask`, a bias or dBias with `padding_mask`, an explicit dropout mask, a ragged bias or dBias, and a device-resident attention scale. Another engine may serve them. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
 - Their plans cannot be serialized. See [COVERAGE.md 9.3](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#93-known-issues).
 
+On gfx90a, `hipkernel:flydsl_sdpa_bwd_split` serves fp16 graphs with the gfx90a MFMA, which flushes fp16 subnormal operands (below 2^-14). Where a softmax probability or dS falls below that, it contributes 0 to dV, dK and dQ, while cuDNN computes it exactly: for example, the plain bundle case `x06_b1h1k1v1_64x65536_d128_fp16` (every probability about 1.5e-5) gives dV exactly 0 against a reference of about 4e-2. AOTriton on MI200 behaves the same. Scope: the split engine, fp16, gfx90a; bf16 and fp32 are unaffected, as are the other architectures. The in-tree device harness compares fp16 graphs on gfx90a against a flush-aware reference, and that bundle case is skipped on gfx90a by the engine's test configuration and carries no support claim there.
+
 ## hipDNN extensions
 
 - `Graph::is_supported_ext(cudnnHandle_t, std::vector<HeurMode_t> = {FALLBACK})`: returns `OK` if any engine supports the graph, `GRAPH_NOT_SUPPORTED` otherwise. Builds the operation graph if needed; does not create or invalidate plans.
@@ -139,7 +155,7 @@ The hip-kernel-provider's FlyDSL SDPA backward engines (`hipkernel:flydsl_sdpa_b
 - `HIPDNN_COMPATIBILITY_CUDNN_FRONTEND` macro.
 - SDPA forward with a ragged Q over non-paged K/V validates with `seq_len_kv` alone (PyTorch's varlen `seqused_k`); the query lengths come from Q's ragged offset. cuDNN frontend v1.24.0 requires `seq_len_q` as well; cuDNN 9.25 spells the form `cu_seq_len_q` + `seq_len_kv`. See [SEM-028](./SdpaSemanticsRegister.md#sem-028-ragged-q-with-seq_len_kv-alone-non-paged-kv).
 - SDPA backward with FP32 Q, K, V, O, dO and gradients: served by the hip-kernel-provider's `hipkernel:flydsl_sdpa_bwd_split` engine. cuDNN documents its SDPA backward for FP16 and BF16 only. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
-- SDPA backward graphs cuDNN frontend v1.24.0 rejects: dropout with a bottom-right causal mask; a bottom-right causal mask or a window with `Sq > Skv` and no `padding_mask`; head dims that are not a multiple of 8, or from 257 to 512; and `s_q = s_kv = 1`. The gfx950 split engine serves them (a head dim that is not a multiple of 8 only with a padded pitch). The merged engine serves such head dims only up to 32 and none above 256, and the gfx11 split engine serves up to 256. See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
+- SDPA backward graphs cuDNN frontend v1.24.0 rejects: dropout with a bottom-right causal mask; a bottom-right causal mask or a window with `Sq > Skv` and no `padding_mask`; head dims that are not a multiple of 8, or from 257 to 512; and `s_q = s_kv = 1`. The gfx950 split engine serves them (a head dim that is not a multiple of 8 only with a padded pitch). The merged engine serves such head dims only up to 32 and none above 256, the gfx11 split engine serves up to 256, and the gfx942 and gfx90a split engines serve up to 512 (one padded 512 tile above 256). See [COVERAGE.md 9.1](../../../dnn-providers/hip-kernel-provider/flydsl/COVERAGE.md#91-what-the-matcher-accepts-and-declines).
 
 Code that must also compile or run against NVIDIA cuDNN cannot use these.
 

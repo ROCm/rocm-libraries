@@ -2,7 +2,7 @@
 
 - Contributors: Jason Campbell, Chris Erb
 - **Status**: In progress
-- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD; none ships a trained model.
+- **Status notes**: The UHD runtime ships (#13028): the UHD parser, the UED role maps, feature extraction, the `static_order`, `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters, ranking metrics, engine estimates, and the winner cache (`plugin_sdk/include/hipdnn_plugin_sdk/heuristics/`, `ingestor/DescriptorLoader.hpp`, `ingestor/UhdKernelHeuristic.hpp`). The `onnx` adapter, a consumer for `predict_applicable_kernels`, a persistent cache of model rankings, and the generation tool are not built. Every in-tree engine ships a `native` UHD; none ships a trained model.
 - **Last verified**: 2026-10-15 against `develop` (2501d0b28cc)
 - Parent: [RFC 0017 Universal Kernel Descriptor](0017_UniversalKernelDescriptor.md) — the "UHD + kernel selection" follow-up named in [RFC 0017 §14.2](0017_UniversalKernelDescriptor.md#142-follow-up-rfcs).
 - Siblings:
@@ -427,7 +427,7 @@ engine rather than folded into one model. **OPEN:** See [Open Question 2](#schem
 
 The UHD parser (`heuristics/uhd/UhdParser.hpp`) admits the schema in this section, and
 `parseHeuristicDescriptor()` in `DescriptorLoader.hpp` reads it. `heuristics/uhd/AdapterFactory.hpp`
-builds the `native`, `tree_data`, `table`, `linear_data`, and `custom_library` adapters; `static_order` needs no
+builds the `native`, `tree_data`, `table`, `linear_data`, `mlp_data`, and `custom_library` adapters; `static_order` needs no
 adapter. Not yet built: the `onnx` adapter. The parser admits an `onnx` UHD, and the engine then ranks
 its catalog by `priority`, then `id`.
 
@@ -593,7 +593,7 @@ hold the schema and the packer together (below).
     "version": {"const": "1.0"},
     "id": {"$ref": "#/definitions/uuid"},
     "name": {"type": "string", "minLength": 1},
-    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "linear_data", "onnx", "custom_library"]},
+    "adapter": {"enum": ["static_order", "native", "table", "tree_data", "linear_data", "mlp_data", "onnx", "custom_library"]},
     "provenance": {"description": "Free-form authoring notes; never read by the loader."},
     "features_signature": {
       "type": "array",
@@ -663,6 +663,7 @@ hold the schema and the packer together (below).
     "table": {"$ref": "#/definitions/artifact"},
     "tree_data": {"$ref": "#/definitions/artifact"},
     "linear_data": {"$ref": "#/definitions/artifact"},
+    "mlp_data": {"$ref": "#/definitions/artifact"},
     "onnx": {"$ref": "#/definitions/artifact"},
     "custom_library": {
       "type": "object",
@@ -683,6 +684,7 @@ hold the schema and the packer together (below).
     {"required": ["table"], "properties": {"adapter": {"const": "table"}}},
     {"required": ["tree_data"], "properties": {"adapter": {"const": "tree_data"}}},
     {"required": ["linear_data"], "properties": {"adapter": {"const": "linear_data"}}},
+    {"required": ["mlp_data"], "properties": {"adapter": {"const": "mlp_data"}}},
     {"required": ["onnx"], "properties": {"adapter": {"const": "onnx"}}},
     {"required": ["custom_library"], "properties": {"adapter": {"const": "custom_library"}}}
   ],
@@ -691,21 +693,26 @@ hold the schema and the packer together (below).
       {"required": ["static_order"]}, {"required": ["native"]},
       {"required": ["table"]}, {"required": ["tree_data"]},
       {"required": ["linear_data"]},
+      {"required": ["mlp_data"]},
       {"required": ["onnx"]}, {"required": ["custom_library"]}
     ]},
-    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "linear_data", "onnx"]}}},
+    {"if": {"properties": {"adapter": {"enum": ["table", "tree_data", "linear_data", "mlp_data", "onnx"]}}},
      "then": {"required": ["features_signature", "features_hash", "trained_against"]}},
     {"if": {"required": ["features_signature"]},
      "then": {"required": ["features_hash", "trained_against"]}},
     {"if": {"required": ["categorical_encoding"]},
      "then": {"required": ["features_signature"]}},
-    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "linear_data", "onnx", "custom_library"]}}},
+    {"if": {"properties": {"adapter": {"enum": ["native", "table", "tree_data", "linear_data", "mlp_data", "onnx", "custom_library"]}}},
      "then": {"required": ["objective"]}},
     {"if": {"properties": {"adapter": {"const": "linear_data"}}},
      "then": {"properties": {"objective": {"const": "min"},
                              "score": {"not": {"required": ["metric"]},
                                        "properties": {"calibrated": {"const": false},
                                                       "transform": {"const": "identity"}}}}}},
+    {"if": {"properties": {"adapter": {"const": "mlp_data"}}},
+     "then": {"required": ["score"],
+              "properties": {"score": {"required": ["metric", "transform"],
+                                       "properties": {"transform": {"const": "log"}}}}}},
     {"if": {"required": ["score"],
             "properties": {"score": {"required": ["calibrated"],
                                      "properties": {"calibrated": {"const": true}}}}},
@@ -738,7 +745,7 @@ naming, because each needs an explicit construct rather than falling out of the 
   rest rather than being left as the one adapter whose absent body validates. Its body is closed: a
   declared ordering criterion (`order`) is refused.
 - **The scoring and training fields are conditioned, and their subfields are reachable.** Every adapter
-  except `static_order` requires `objective`. The model adapters (`table`, `tree_data`, `linear_data`, `onnx`) also
+  except `static_order` requires `objective`. The model adapters (`table`, `tree_data`, `linear_data`, `mlp_data`, `onnx`) also
   require the feature contract and `trained_against`, and any document declaring a
   `features_signature` requires `features_hash` and `trained_against` with it, whatever its adapter.
   `trained_against` in turn
@@ -812,6 +819,7 @@ new model family) is one more `adapter` value — the single discriminant is wha
 | `table` | A bucketed lookup over quantized feature ranges, carried as a FlatBuffer | Quantize the row, look up the bucket, then tie-break | with engine |
 | `tree_data` | A GBDT tree table (LightGBM/XGBoost), in-tree walker — **default shipping path** | Score each candidate, argmax | with engine |
 | `linear_data` | A per-config linear ranker (RelLin): predicted log slowdown against the catalog's best, carried as a FlatBuffer | Score each candidate, lowest first | with engine |
+| `mlp_data` | An ensemble of small MLPs predicting log(metric) for one engine, carried as a FlatBuffer | Score each row (the graph's, or each candidate's), in the metric's direction | with engine |
 | `onnx` | An ONNX graph via a gated runtime | Score each candidate, argmax | with engine |
 | `custom_library` | An author-shipped `.so` behind a small C ABI (drop-in escape hatch) | Whatever the library returns | with engine |
 
@@ -882,7 +890,7 @@ lives beside the policy names in the data SDK, and each entry fixes three things
 
 | Metric | Units | Better | Status |
 |---|---|---|---|
-| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown has no `tflops` label. |
+| `tflops` | TFLOPS (10^12 FLOP/s over the graph's logical FLOPs, `$graph.flops`, [Section 6.8](#68-the-work-model)) | higher | Defined. The default metric. A graph whose work is unknown (an opaque custom op, inconsistent operands) has no `tflops` label. |
 | `time` | milliseconds of device time for one execution | lower | Defined. Trained on `avgTimeMs` directly, not derived from throughput, so it never depends on a FLOP count. |
 | `accuracy.*` | per definition | per definition | **Reserved.** Each accuracy metric names its definition, e.g. `accuracy.max_rel_error`; none is registered until its reference and tolerance are settled ([Open Question 20](#ranking-metrics)). |
 
@@ -1602,7 +1610,7 @@ the set.
 | string, nested table or struct, union, byte vector | nothing |
 
 Beside those, each node publishes `type` (its `NodeAttributes` member), `compute_data_type`,
-`data_dependent` (below), and `flops` when its work is known ([Section 6.8](#68-the-work-model)); SDPA
+`data_dependent` (below), and `flops` when its work can be counted ([Section 6.8](#68-the-work-model)); SDPA
 adds two derived flags no schema field carries, `has_attention_mask` and `has_variable_lengths`. Graph
 tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, dims[d], strides[d]}`.
 
@@ -1622,8 +1630,9 @@ tensors are also reachable by position, as `$graph.tensors[j].{data_type, rank, 
   `TensorAttributes.ragged_offset_tensor_uid`, which marks every node reading or writing a ragged tensor.
   An operand read densely whatever its values — an additive attention bias, a dropout seed, MoE's
   `token_index` — is not annotated. A node with an annotated operand present publishes
-  `data_dependent = true`. The generator rejects the annotation anywhere its visitor would not report
-  it, so a misplaced one cannot compile and silently mark nothing.
+  `data_dependent = true`: its work count is the declared extent, which the contents may cut short
+  ([Section 6.8](#68-the-work-model)). The generator rejects the annotation anywhere its visitor would
+  not report it, so a misplaced one cannot compile and silently mark nothing.
 
 ### 6.8 The Work Model
 
@@ -1645,13 +1654,31 @@ the trainer, and the runtime compute the same number.
    intermediates included, so a fused convolution + bias + ReLU is the convolution plus two pointwise
    nodes. If any node's work is unknown, `$graph.flops` is **absent**, never a partial sum: divided by
    the whole graph's time, a partial count reports a throughput the engine did not achieve. Each known
-   node still publishes its `$graph.nodes[i].flops`. A graph with override shapes publishes no
-   graph-level work features, because the shapes it declares are not the ones it executes.
-4. **Content-dependent work is unknown.** A node whose `data_dependent` is true
-   ([Section 6.7](#67-per-node-operand-features)) has no count, whatever its type: its shapes bound its
-   work without determining it. Any present `work_data_dependent` operand or ragged operand tensor
-   makes it so, for Matmul, ConvolutionFwd, and SDPA as for every other type. A bound, where one is
-   worth publishing, takes its own name (`…flops_upper_bound`) and never `flops`.
+   node still publishes its `$graph.nodes[i].flops`. A graph with override shapes counts the shapes it
+   declares, like any other: an execute-time override changes what runs, not the problem the graph was
+   built and selected for.
+4. **Content-dependent work is the declared extent.** A node whose `data_dependent` is true
+   ([Section 6.7](#67-per-node-operand-features)) counts the problem its shapes declare: padded
+   sequence lengths, a ragged tensor's padded dims, a paged cache's declared keys, every score a block
+   mask could keep, every routed row. Its operands' contents decide how much of that runs, and a
+   problem feature never reads device memory; `data_dependent` tells a model the count bounds the work
+   rather than measuring it. The convention holds the rule-1 property that matters: every engine of a
+   graph has the same numerator, so their `tflops` order is their `time` order. Refusing a count
+   instead would cost every variable-length, paged, ragged and routed graph its `tflops` label and its
+   work features. Collection runs exactly that problem: `hipdnn_bench` writes each such operand's
+   declared contents (`InputDomain.hpp`, `declaredContents`): full valid lengths, cumulative lengths
+   of full sequences (GDN and KDA split their tokens evenly over the sequences), ragged offsets of the
+   dense layout (values at their stride positions when the tensor is gapped), a page of its own for
+   every table entry, a mask keeping every block (every byte of the bit-packed `UINT8` mask 0xFF), and
+   every routed row spread over the groups. Without that, a timing buffer's zeros would run lengths of
+   0 and time a near-empty problem against the declared work, so an operand whose declared contents
+   cannot be derived — a ragged stride its multiplier does not divide, two rules disagreeing on a
+   shared tensor, a page cache with fewer blocks than table entries, an unknown extent, a block mask
+   that is not `UINT8` or covers fewer tiles than the declared problem — fails the run with an
+   error naming it rather than timing its zeros.
+   A measured `tflops` (a benchmark record's) of such a graph divides the declared count by the time
+   of the caller's actual contents, so it can exceed a dense-equivalent rate and is not comparable
+   with a model estimate.
 5. **One formula per node type**, over the operand roles of
    [Section 6.7](#67-per-node-operand-features):
 
@@ -1671,24 +1698,26 @@ the trainer, and the runtime compute the same number.
    | `ResampleFwdAttributes` | `y.numel · Π window[i]` | One positive `window` entry per spatial dim. |
    | `ResampleBwdAttributes` | `dy.numel · Π window[i]` | |
    | `BlockScaleQuantizeAttributes`, `BlockScaleDequantizeAttributes` | `2·x.numel` | |
-   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` is `Sq·Sk`, or the attended pairs under a causal mask. |
+   | `SdpaAttributes` | `2·B·H·pairs·(Dq + Dv)` | `pairs` sums, per query row, the keys inside its band: causal mask, `left_bound`, `right_bound` and diagonal alignment (cuDNN's band, SEM-001), `Sq·Sk` when unbounded. The deprecated `causal_mask` and `causal_mask_bottom_right` compose as cuDNN's setters do: a flag gives `right_bound` when it is ≥ 0, else 0; `causal_mask_bottom_right` forces bottom-right alignment, `causal_mask` keeps `diagonal_alignment`. `left_bound` of 0, a bound below -1, or both deprecated flags leave the work unknown: the frontend rejects the first two and the references the third. A `left_bound` below -1 and both flags were counted before this rule; they are dropped without a revision bump because no engine serves them and their training rows are re-collected. A paged cache's `Sk` is inferred as cuDNN does: `max_seq_len_kv` when stated, else a non-paged K's (then V's) sequence length, else the `attn_mask` last dim, else the `rng_dump` last dim, else the smaller of the two sides' page-table pages × page size. K or V may be paged alone, each with its own block size; the extent must fit every paged side's capacity and match a dense side's sequence extent, else the work is unknown. Bias, ALiBi, softmax, dropout, sinks and FP8 scaling are elementwise on the scores and not counted. |
    | `SdpaBackwardAttributes` | `2.5 ×` the forward count on its `q`/`k`/`v`/`o` | The FlashAttention convention. |
-   | `MoeGroupedMatmulAttributes`, `MoeGroupedMatmulBwdAttributes` | unknown | `first_token_offset` decides how many rows are computed. |
+   | `MoeGroupedMatmulAttributes` | `2·rows·K·N` | `rows` is the output's when gathering, else the token's: every declared routed row. |
+   | `MoeGroupedMatmulBwdAttributes` | `2·rows·K·N` | The weight gradient over the token's declared rows. |
+   | `GdnAttributes`, `KdaAttributes` | `6·T·HO·V·K` | Three `V × K` products per token and output head: `S k`, the rank-one update `β (v − S k) kᵀ` (`S (I − β k kᵀ) + β v kᵀ` is `S` plus that one product), and `S q`; decay and gating are elementwise. Token-packed, so the split into sequences does not change it. |
    | `CustomOpAttributes` | unknown | Opaque to hipDNN. |
 
    The per-element constants for the normalizations, resampling, and SDPA backward are conventions,
    chosen once and held; what matters is that every engine counts the same. A formula refuses — the
    node's work is unknown — when its operands are inconsistent: a missing tensor, a non-positive dim, or
-   shapes that do not compose. The convolutions, Matmul, and SDPA forward and backward also require
-   floating-point operands. So 20 of the 23 node types have a static count; whether a given graph has one
-   is still rule 3's to decide.
+   shapes that do not compose. The convolutions, Matmul, SDPA forward and backward, the MoE grouped
+   matmuls, GDN and KDA also require floating-point operands. So 24 of the 25 node types have a static
+   count; whether a given graph has one is still rule 3's to decide.
 6. **Bytes are a declared convention, and three different quantities are kept apart.**
    - **Logical footprint** — `$graph.logical_bytes`, a feature. The sum over the graph's non-virtual
      tensors, each counted once however many nodes read it, of element count × element size. Sub-byte
      types count fractionally (fp4 and int4 as 0.5 byte, fp6 as 0.75); virtual intermediates are
-     excluded, since keeping them out of memory is what fusion is for. Absent when any non-virtual
-     tensor's footprint is unknown — missing or negative dims, an unset data type, or a ragged tensor,
-     whose dims are only its padded bound. A zero-extent tensor contributes 0.
+     excluded, since keeping them out of memory is what fusion is for. A ragged tensor counts its
+     declared (padded) dims, as its work does. Absent when any non-virtual tensor's footprint is
+     unknown — missing or negative dims, or an unset data type. A zero-extent tensor contributes 0.
    - **Allocation size** — strides, alignment, rounding, and workspace, in whole bytes. What corpus
      generation's memory-safety accounting budgets; not a feature, and not derived from the footprint.
    - **Measured traffic** — what the device actually moved, re-reads and cache effects included. Never
@@ -1721,7 +1750,7 @@ feature-semantics revision they were computed under ([Section 6.9](#69-feature-s
 
 **A new node type declares its work.** Each `NodeAttributes` member either has a formula (a
 `nodeFlops` overload and a `logicalFlops` case) or is listed in `NO_COUNTING_CONVENTION` with its
-reason, as `NONE`, `CustomOpAttributes`, and the MoE grouped matmuls are. A test over every member
+reason, as `NONE` and `CustomOpAttributes` are. A test over every member
 fails for one with neither, so a new op cannot silently leave its graphs without `$graph.flops`.
 [Adding a New Operation: Work Model (FLOPs)](../AddingNewOperations.md#work-model-flops) gives the
 contributor steps.
@@ -1804,6 +1833,7 @@ loadable artifact rather than baked into `libhipdnn_provider.so`.
 | `table` | none | Yes | Bucketed lookup over quantized feature ranges, carried as a FlatBuffer beside the descriptor |
 | `tree_data` | none | **Yes — default shipping path** | GBDT tree table + in-tree walker |
 | `linear_data` | none | Yes | Per-config linear ranker: one hash lookup and one dot product per candidate; a within-catalog ranker only ([Section 7.5](#75-linear_data)) |
+| `mlp_data` | none | Yes | Per-engine MLP ensemble: a few small matrix products per row; engine estimates or catalog ranking ([Section 7.6](#76-mlp_data)) |
 | `onnx` | ONNX runtime | Yes, if dep present | Opt-in, dependency-gated |
 | `custom_library` | none on provider | Yes | Engine ships its own `.so`, `dlopen`'d through a tiny C ABI |
 
@@ -1915,7 +1945,8 @@ and always available; `native` proves the seam with a compiled function and need
 `tree_data` is the data-driven shipping path. `table` is a low-cost addition for coarse bucketed
 heuristics. `onnx` is added when a concrete need appears. `custom_library` is implemented with no trust
 gate; [Open Question 11](#operational) records what the code does. `linear_data` ([Section 7.5](#75-linear_data))
-is a cheaper alternative to `tree_data` for small catalogs.
+is a cheaper alternative to `tree_data` for small catalogs, and `mlp_data`
+([Section 7.6](#76-mlp_data)) a cheaper one where a ranking costs one estimate per engine.
 
 ### 7.5 `linear_data`
 
@@ -1950,6 +1981,44 @@ needs a corpus in which every problem is measured on several configurations, bec
 slowdown relative to the best of the problem. The adapter loads under the same checks as `table`: digest,
 file identifier, FlatBuffers verifier, `features_hash`, then the model's own bounds (indices, lengths,
 finiteness, unique keys).
+
+### 7.6 `mlp_data`
+
+The UHD names this adapter as `"adapter": "mlp_data"` and points `mlp_data.artifact` at a FlatBuffer
+(`flatbuffers_sdk/schemas/mlp_model.fbs`, file identifier `HMLP`), with the artifact's `hash` as for
+`tree_data`. It scores a feature row to the **log of a registered ranking metric**: for an engine
+estimate (`predict_engine`) one model per engine and architecture scores the graph's row, and as a
+catalog ranker (`sort_kernel_catalog`) it scores each candidate's row like an ungrouped `tree_data`
+model. The artifact names that metric, and the UHD declares the same one with `transform: "log"`
+(`score: {metric, transform: "log"}` and the metric's `objective`; `calibrated` follows the role, as
+for any adapter). The parser refuses an `mlp_data` UHD without `score.metric` or with another
+transform, and the adapter refuses an artifact whose metric is not the UHD's.
+
+The model is an ensemble of small fully connected networks over one standardized input:
+
+```text
+t     = sign(x) * log1p(|x|)        a missing (NaN) value gives t = 0
+z     = (t - mean) / scale          per network input; a non-finite z declines the row
+input = [z..., isnan(x[slot])...]   the standardized inputs, then one 0/1 missing flag per slot
+score = target_mean + target_scale * (mean over networks of network(input))
+```
+
+The inputs are log1p-compressed and standardized but not clamped, so a row outside the training range
+gets an extrapolated score. `uhd_gen evaluate` on graphs larger than the training corpus is how to
+check that.
+
+Every layer of a network but the last is followed by SiLU, `x / (1 + exp(-x))`; the last has one output.
+The networks run in float32 with the ensemble mean in double. An estimate costs a few small matrix
+products: about 2 us in the portable build for three networks of two 64-wide layers, against 6-15 us
+for a 500-tree `tree_data` model, whose cost rises as more engines' models compete for the CPU cache
+(one Ryzen AI MAX+ 395 core, clang -O3, SSE2 build, one convolution graph with 77 inputs; the 15 us end
+is per engine when 32 engines' models are scored in turn). One estimate is made per applicable engine
+and graph, so that cost grows with the number of engines.
+Training (`uhd_gen train --adapter mlp_data`) fits each network on the engine's own rows with an L1
+loss on the standardized log metric, so engines stay independent; whether a catalog ranker should be
+`mlp_data` or `tree_data` is the evaluation's to decide. The adapter loads under the checks of
+`linear_data`: digest, file identifier and FlatBuffers verifier, then the model's own bounds (slots,
+layer shapes, widths of at most 512, finiteness), its metric and `features_hash`.
 
 ---
 
@@ -3138,10 +3207,9 @@ Caveats:
   tensor's own size, fractional for sub-byte types — a single-dtype shortcut is wrong for quantized
   kernels.
 - **Not every op has a clean closed form.** Ragged or data-dependent work (variable-length sequences,
-  page tables, MoE routing) cannot be counted from shapes; the count is then absent rather than
-  silently wrong ([Section 6.8](#68-the-work-model)). A bound, where one is useful, is published under its
-  own name and never as the count, and a UHD that needs better can compute its own inline in the
-  signature.
+  page tables, MoE routing) is counted at its declared extent, and `data_dependent` says the count is a
+  bound ([Section 6.8](#68-the-work-model)); contents are device data, so a UHD ranks on the bound and
+  `data_dependent`, not on the work actually done.
 - **Auto-derivation yields a *superset*.** Deriving every raw field and generic transform produces a
   bloated, noisy vector that can hurt a small-data model; the sweep's feature-importance (or a curated
   per-op template) prunes it. Auto-derivation proposes; data or a template trims.
@@ -3712,8 +3780,9 @@ dependency-gated and land only when a concrete need appears.
   refused ([Section 6.9](#69-feature-semantics-revision)).
 
 - **Work model:** The conventions by which the plugin SDK counts a graph's logical FLOPs and bytes —
-  multiply-add = 2, graph = Σ nodes all or nothing, content-dependent work unknown — published as
-  `$graph.flops`, `$graph.logical_bytes`, and the features built from them
+  multiply-add = 2, graph = Σ nodes all or nothing, content-dependent work counted at its declared
+  extent and marked `data_dependent` — published as `$graph.flops`, `$graph.logical_bytes`, and the
+  features built from them
   ([Section 6.8](#68-the-work-model)).
 
 - **Dispatch-only field:** A KMD field that is *not* a knob, and therefore not in the UHD's feature set —

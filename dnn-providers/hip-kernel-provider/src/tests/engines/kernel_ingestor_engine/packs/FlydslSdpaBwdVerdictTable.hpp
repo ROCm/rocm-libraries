@@ -32,7 +32,7 @@
 
 /**
  * @file FlydslSdpaBwdVerdictTable.hpp
- * @brief The gfx11 verdict table (flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv) as graphs the
+ * @brief The verdict tables (flydsl/tests/data/sdpa_bwd_{gfx11,gfx90a,gfx942}_verdicts.csv) as graphs the
  *        split SDPA backward engine can be asked about, and the slot-product uniqueness
  *        predicate both of its consumers apply.
  *
@@ -47,8 +47,8 @@
 namespace hip_kernel_provider::kernel_ingestor_engine::testing
 {
 
-/// One row of the verdict table, as written; `hash` columns are the 12-hex spec hashes of the
-/// gfx11-generic manifests.
+/// One row of a verdict table, as written; `hash` columns are the 12-hex spec hashes of the
+/// manifests of the table's content directory.
 struct VerdictRow
 {
     std::string id;
@@ -81,8 +81,8 @@ struct VerdictRow
     std::string rule;
 };
 
-/// The directory staged beside the binary's descriptor trees that holds the verdict table
-/// (`sdpa_bwd_gfx11_verdicts.csv`) and the manifests (`<op>/gfx11-generic/manifest.json`);
+/// The directory staged beside the binary's descriptor trees that holds the verdict tables
+/// (`sdpa_bwd_<arch>_verdicts.csv`) and the manifests (`<op>/<content>/manifest.json`);
 /// resolved from the executable like the descriptor roots, so a relocated tree carries it.
 inline std::filesystem::path verdictDataRoot()
 {
@@ -357,7 +357,7 @@ inline std::vector<std::string> enrolledKnobs(const std::string& slot)
 {
     if(slot == "prep")
     {
-        return {"head_dim", "padded", "hints", "floor"};
+        return {"head_dim", "padded", "hints", "floor", "vec_tail"};
     }
     if(slot == "dkdv")
     {

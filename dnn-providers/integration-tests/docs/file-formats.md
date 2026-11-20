@@ -217,6 +217,9 @@ suffix only when the readable part is not already unique.
 case, for example to add its `golden` pointer. Do not rename ids without a
 reason, because support-claim sidecars name cases by id.
 
+Ops with a per-op plan are written by their generator; edit the plan, not the
+bundle ([test-plans/README.md](test-plans/README.md)).
+
 #### `tensor_patches`
 
 This field is for a case that differs from the template by more than a
@@ -313,7 +316,7 @@ parses it.
 | `minimum_vram_mb` | int | Skip the case when the device has less VRAM. |
 | `gpu_architecture` | string | Golden data is locked to an arch. Skip the case unless the base arch token of the device matches (`gfx942` matches `gfx942:sramecc+:xnack-`, not `gfx940`). If absent, the data is portable. |
 | `seed` | int | Seed for generated inputs. |
-| `inputs` | object | Per-input fill specs keyed by tensor uid as a string (`"3"`). See [Input fill specs](#input-fill-specs). A key that is not a tensor uid rejects the metadata, and so does an entry that is not a valid fill spec. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, under its scale, diagonal band and additive mask, so an override for them has no effect. A node whose forward the fill cannot derive (ALiBi, padding, sequence lengths, dropout, ragged tensors, mixed or unsupported data types, a scale tensor that is not a pass-by-value scalar, a Q, K, V or mask computed by the graph) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Shapes the CPU reference rejects, such as stats not shaped `[B, H, Sq, 1]`, keep the override, and the CPU reference then fails the bundle. Likewise, the index input of a MAXPOOL ResampleBwd node is recomputed by `deriveResampleBackwardIndex()` when it is a graph input, so its override has no effect; an index produced by another graph node is not overridden. Non-INT32 indices make the bundle unverifiable. If the CPU forward rejects the ranks, the index keeps its fill and the backward reference then fails the bundle. |
+| `inputs` | object | Per-input fill specs keyed by tensor uid as a string (`"3"`). See [Input fill specs](#input-fill-specs). A key that is not a tensor uid rejects the metadata, and so does an entry that is not a valid fill spec. The O and stats inputs of an SDPA backward node are the exception: after the fill they are recomputed as the forward of its Q, K and V, so an override for them has no effect. The forward is an SDPA forward graph built from the node (its scale, diagonal band, additive mask, ALiBi, padding with sequence lengths, explicit dropout mask and ragged offsets; rank-3 stats as `[B, H, Sq, 1]`) and run by the harness's reference graph executors. When the fill runs on the device the GPU one runs it; when the GPU one declines the forward graph or rejects it before it launches, and when the fill runs on the host, the CPU one runs it. A device failure after the GPU one accepted the graph fails the case (`DeviceInputError`) rather than falling back. A node whose forward cannot be derived (Philox dropout, a forward operand or ragged offsets computed by the graph, or a forward graph the references decline or reject) makes the bundle unverifiable, with the reason; `deriveSdpaBackwardForwardOutputs()` is the authority. Likewise, the index input of a MAXPOOL ResampleBwd node is recomputed by `deriveResampleBackwardIndex()` when it is a graph input, so its override has no effect; an index produced by another graph node is not overridden. Non-INT32 indices make the bundle unverifiable. If the CPU forward rejects the ranks, the index keeps its fill and the backward reference then fails the bundle. |
 | `aliases` | array of objects | Inputs that read the memory of another input and have no allocation of their own. See [Tensors that share memory](#tensors-that-share-memory--aliases). Needs `format_version` 2. |
 | `start_offsets` | array of objects | Tensors whose data starts a number of bytes past an aligned address when the engine under test runs. See [Tensors that start past an aligned address](#tensors-that-start-past-an-aligned-address--start_offsets). Needs `format_version` 2. |
 | `live_rows` | array of objects | Dense outputs whose positions past a live length per batch hold no defined value and are not compared. See [Outputs with rows past a live length](#outputs-with-rows-past-a-live-length--live_rows). Needs `format_version` 2. |
@@ -949,6 +952,9 @@ archs     = ["gfx90a"]   # optional; omit to match every arch
 platforms = ["windows"]                             # optional; omit to match both
 filters   = ["*_SdpaFwd_Default.*_128_bfp16_*"]
 reason    = "no applicable kernel for this shape on this arch"
+
+[conv_fwd_tolerance.float]
+summation_order = 9.0   # optional; replaces the base coefficient of float conv-fwd outputs
 ```
 
 | Table | Rules |
@@ -957,6 +963,7 @@ reason    = "no applicable kernel for this shape on this arch"
 | `[[tolerance_overrides]]` | `filters`, `atol` and `rtol` are all required. **Later entries win** when several match. |
 | `[[validator_overrides]]` | Applies when a `filters` glob matches the test **and** a `tensors` glob matches the output tensor's label (its name, or `uid=N` when unnamed). `validator` is `allclose`, `allclose_matching_infinities` or `rms`. `rms_threshold` is required and positive for `rms`, and forbidden for the other two. **Later entries win.** Allclose is the default everywhere. Only this table changes it. Use it for outputs where per-element comparison is the wrong question, not to get more tolerance. See the validators below. |
 | `[[test_skips]]` | `filters` and `reason` are required. **The first matching entry wins** — this is the opposite order from the two tables above. `archs` is a substring match against the raw `gcnArchName` (so `gfx11` covers `gfx1100` and `gfx1151`). `platforms` is `linux` / `windows`. The skip message is `[arch <current gcnArchName>] <reason>`. |
+| `[conv_fwd_tolerance.float]` | One key, `summation_order`: a finite positive number that replaces the base coefficient (4) of the summation-order terms of the dynamic tolerance of a float convolution-forward output. No other output type and no other key load. A matching `[[tolerance_overrides]]` entry still replaces the dynamic tolerance whole. Read by bundle tests only. See [Tolerances](tolerances.md#float-outputs). |
 
 `filters` are globs that match the full GTest name. This is the same string that
 `--gtest_filter` matches, but the syntax is not `--gtest_filter` syntax: `:` does
@@ -992,7 +999,10 @@ Neither validator is defined for integer outputs. If a glob selects an integer
 output, that tensor fails with a message that names the glob. Narrow the glob to
 float outputs.
 
-The TOML applies to bundle and C++ graph tests alike. It never applies to
+The TOML applies to bundle and C++ graph tests alike, except `[conv_fwd_tolerance.float]`,
+which only bundle tests read: the C++ graph harness does not grade with the dynamic
+tolerance. A top-level key other than the five tables above is a load error, so a
+misspelt section name does not go unnoticed. The TOML never applies to
 `hipdnn_golden_data_tests`. The config of an engine describes how far that engine
 is allowed to drift. It cannot skip or loosen a check on our own golden data. The
 full schema is in `src/harness/TestSettings.hpp`.
@@ -1013,7 +1023,7 @@ Do not confuse them:
 | `dnn-providers/integration-tests/test_categories.yaml` | This project's own binaries `hipdnn_integration_tests_unit_tests` and `hipdnn_golden_data_tests` |
 | `dnn-providers/integration-tests/test_categories_gpu_ref.yaml` | `hipdnn_gpu_ref_tests`. Quick is an fp32 smoke run; reduced-precision and mixed-type cases are in standard |
 | `dnn-providers/integration-tests/test_categories_external.yaml` | Pre-registered non-GTest CTest tests (the Python verifiers, test-name validation) |
-| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_split_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_merged_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
+| `dnn-providers/<provider>/test_categories_integration.yaml` (hip-kernel-provider: `HIP_MLOPS_ENGINE_test_categories_integration.yaml`, `ASM_SDPA_ENGINE_test_categories_integration.yaml`, `hipkernel_Gfx950Attention_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified3d_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionDense_test_categories_integration.yaml`, `hipkernel_Gfx942AttentionUnified2D_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_test_categories_integration.yaml`, `hipkernel_flydsl_rmsnorm_bwd_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_split_test_categories_integration.yaml`, `hipkernel_flydsl_sdpa_bwd_merged_test_categories_integration.yaml`) | `hipdnn_integration_tests` **run against that provider's engine** — the lane's bundle suites |
 
 A provider's own `test_categories.yaml` governs its native `*_plugin_tests`
 binaries, not the shared suite.

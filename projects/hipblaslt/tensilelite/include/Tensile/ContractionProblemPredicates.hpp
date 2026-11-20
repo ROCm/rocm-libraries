@@ -767,6 +767,179 @@ namespace TensileLite
                 }
             };
 
+            // Divisibility of one A or B stride, in elements. A zero (broadcast) stride never
+            // satisfies it, because the kernels that declare it take the stride as a byte kernarg.
+            template <typename Class, TensorDescriptor const& (ContractionProblemGemm::*tensor)() const>
+            struct OperandStrideMultiple : public Predicate_CRTP<Class, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = true,
+                    HasValue = true
+                };
+                size_t index = 0;
+                size_t value = 0;
+
+                OperandStrideMultiple() = default;
+                OperandStrideMultiple(size_t index, size_t value)
+                    : index(index)
+                    , value(value)
+                {
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    std::vector<size_t> const& strides = (problem.*tensor)().strides();
+                    if(value == 0 || index >= strides.size() || strides[index] == 0)
+                        return false;
+                    return strides[index] % value == 0;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool                       rv      = (*this)(problem);
+                    std::vector<size_t> const& strides = (problem.*tensor)().strides();
+                    std::ostringstream         details;
+                    if(index >= strides.size())
+                        details << "index=" << index << " out of range, strides=" << strides.size();
+                    else
+                        details << "prob=" << strides[index] << " % sol=" << value << " == 0";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            struct StrideAMultiple
+                : public OperandStrideMultiple<StrideAMultiple, &ContractionProblemGemm::a>
+            {
+                using OperandStrideMultiple::OperandStrideMultiple;
+                StrideAMultiple() = default;
+
+                static std::string Type()
+                {
+                    return "StrideAMultiple";
+                }
+            };
+
+            struct StrideBMultiple
+                : public OperandStrideMultiple<StrideBMultiple, &ContractionProblemGemm::b>
+            {
+                using OperandStrideMultiple::OperandStrideMultiple;
+                StrideBMultiple() = default;
+
+                static std::string Type()
+                {
+                    return "StrideBMultiple";
+                }
+            };
+
+            // Handwritten kernels that address a whole tensor through one buffer resource
+            // declare the first byte extent they cannot address (the shipped skinny MXFP8
+            // kernels declare 2^31). Each tensor's allocated bytes and its leading stride in
+            // bytes must stay below it; the stride is passed as a 32-bit kernel argument and is
+            // not part of the allocated bytes when a dimension has size 1.
+            struct TensorBytesLessThan
+                : public Predicate_CRTP<TensorBytesLessThan, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                size_t value = 0;
+
+                TensorBytesLessThan() = default;
+                TensorBytesLessThan(size_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "TensorBytesLessThan";
+                }
+
+                // Leading stride in bytes, 0 for a tensor with no leading dimension.
+                static size_t leadingStrideBytes(TensorDescriptor const& tensor)
+                {
+                    if(tensor.dimensions() < 2)
+                        return 0;
+                    return multiplyElementSize(tensor.strides()[1], tensor.elementBytes());
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    for(TensorDescriptor const* tensor :
+                        {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
+                    {
+                        if(tensor->empty())
+                            continue;
+                        if(tensor->totalAllocatedBytes() >= value)
+                            return false;
+                        if(leadingStrideBytes(*tensor) >= value)
+                            return false;
+                    }
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool const         rv = (*this)(problem);
+                    std::ostringstream details;
+                    char               name = 'A';
+                    for(TensorDescriptor const* tensor :
+                        {&problem.a(), &problem.b(), &problem.c(), &problem.d()})
+                    {
+                        char const tensorName = name++;
+                        if(tensor->empty())
+                            continue;
+                        details << tensorName << " alloc bytes=" << tensor->totalAllocatedBytes()
+                                << " ld bytes=" << leadingStrideBytes(*tensor) << "; ";
+                    }
+                    details << "< sol=" << value;
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // Handwritten kernels that read the padded HostPreSwizzle MX scale layout declare
+            // it. A caller that hands over compactly packed scales (hipBLASLt does for every
+            // format but Block_32_UE8M0_32_8_EXT) sets the custom-kernel packed flags, and the
+            // kernel would read the wrong scales.
+            struct MXScalesPreSwizzled
+                : public Predicate_CRTP<MXScalesPreSwizzled, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+                static std::string Type()
+                {
+                    return "MXScalesPreSwizzled";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return !problem.customKernelMXScaleAIsPacked()
+                           && !problem.customKernelMXScaleBIsPacked();
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "packed scaleA=" << problem.customKernelMXScaleAIsPacked()
+                            << " scaleB=" << problem.customKernelMXScaleBIsPacked()
+                            << " sol=pre-swizzled";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
             struct StrideCEqual : public Predicate_CRTP<StrideCEqual, ContractionProblemGemm>
             {
                 enum
@@ -932,6 +1105,43 @@ namespace TensileLite
                     details << "prob_amaxD=" << problem.outputAmaxD() << " == sol_amaxD=" << value;
                     if(value)
                         details << ", prob_gsu=" << problem.getParams().gsu() << " (must be 0 or 1)";
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // A problem with a peer D buffer runs only kernels that store to it, and the reverse.
+            struct PeerDCheck : public Predicate_CRTP<PeerDCheck, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                bool value;
+
+                PeerDCheck() = default;
+                PeerDCheck(bool value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "PeerDCheck";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return problem.outputPeerD() == value;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    std::ostringstream details;
+                    details << "prob_peerD=" << problem.outputPeerD() << " == sol_peerD=" << value;
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }
@@ -2317,6 +2527,36 @@ namespace TensileLite
                 }
             };
 
+            struct MeshBasedMatching
+                : public Predicate_CRTP<MeshBasedMatching, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = false
+                };
+
+                MeshBasedMatching() = default;
+
+                static std::string Type()
+                {
+                    return "MeshBasedMatching";
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return true;
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool rv = (*this)(problem);
+                    PredicateDebugger::printRow(stream, rv, this->type());
+                    return rv;
+                }
+            };
+
             struct UseGradientEqual
                 : public Predicate_CRTP<UseGradientEqual, ContractionProblemGemm>
             {
@@ -3134,36 +3374,36 @@ namespace TensileLite
                 }
             };
 
-            struct FusedGemmA2A : public Predicate_CRTP<FusedGemmA2A, ContractionProblemGemm>
+            struct FusedA2AEqual : public Predicate_CRTP<FusedA2AEqual, ContractionProblemGemm>
             {
                 enum
                 {
                     HasIndex = false,
                     HasValue = true
                 };
-                bool value;
+                FusedA2A value = FusedA2A::Disabled;
 
-                FusedGemmA2A() = default;
-                FusedGemmA2A(bool value)
+                FusedA2AEqual() = default;
+                FusedA2AEqual(FusedA2A value)
                     : value(value)
                 {
                 }
 
                 static std::string Type()
                 {
-                    return "FusedGemmA2A";
+                    return "FusedA2A";
                 }
 
                 bool operator()(ContractionProblemGemm const& problem) const override
                 {
-                    return problem.fusedGemmA2A() == value;
+                    return problem.fusedA2A() == value;
                 }
 
                 bool debugEval(ContractionProblemGemm const& problem,
                                std::ostream&                 stream) const override
                 {
                     return debugEvalCmp(
-                        problem, stream, "prob", problem.fusedGemmA2A(), "==", "sol", value);
+                        problem, stream, "prob", problem.fusedA2A(), "==", "sol", value);
                 }
             };
 
@@ -3190,7 +3430,7 @@ namespace TensileLite
 
                 bool fits(ContractionProblemGemm const& problem) const
                 {
-                    if(!problem.fusedGemmA2A())
+                    if(problem.fusedA2A() != FusedA2A::GemmA2A)
                         return true;
                     const int64_t world = problem.world();
                     const int64_t am    = problem.fusedA2AExtent();
@@ -3220,7 +3460,7 @@ namespace TensileLite
                 {
                     bool               rv = fits(problem);
                     std::ostringstream details;
-                    if(problem.fusedGemmA2A())
+                    if(problem.fusedA2A() == FusedA2A::GemmA2A)
                     {
                         const auto& d = problem.d();
                         details << "world=" << problem.world() << " am=" << problem.fusedA2AExtent()
@@ -3235,6 +3475,74 @@ namespace TensileLite
                                " (am/world)>>3 < 2^14, mStride == 1, ldd % 8 == 0,"
                                " ldd>>3 < 2^19, batch == 1)";
                     }
+                    PredicateDebugger::printRow(stream, rv, this->type(), details.str());
+                    return rv;
+                }
+            };
+
+            // value is the solution's DepthU * A2ASubRounds.
+            struct A2AGemmShape : public Predicate_CRTP<A2AGemmShape, ContractionProblemGemm>
+            {
+                enum
+                {
+                    HasIndex = false,
+                    HasValue = true
+                };
+                int64_t value;
+
+                A2AGemmShape() = default;
+                A2AGemmShape(int64_t value)
+                    : value(value)
+                {
+                }
+
+                static std::string Type()
+                {
+                    return "A2AGemmShape";
+                }
+
+                bool fits(ContractionProblemGemm const& problem) const
+                {
+                    const int64_t world = problem.world();
+                    const int64_t k     = problem.boundSize(0);
+                    if(world == 0 || value <= 0 || k <= 0 || problem.getParams().gsuc()
+                       || problem.batchMode() != ContractionProblemGemm::BATCHMODE::STRIDED)
+                        return false;
+                    for(size_t i = 0; i < problem.batchIndices().size(); i++)
+                        if(problem.batchSize(i) != 1)
+                            return false;
+                    auto const&   b        = problem.b();
+                    const int64_t rowBytes = (k / world) * (int64_t)b.elementBytes();
+                    return problem.fusedA2AExtent() == k && k % (world * value) == 0
+                           && rowBytes / 16 <= (1 << 14)
+                           && ((int64_t)problem.freeSizeB(0) * rowBytes) % 128 == 0
+                           && b.strides()[problem.boundIndices()[0].b] == 1
+                           && (int64_t)b.strides()[problem.freeIndicesB()[0].i] == k;
+                }
+
+                virtual bool operator()(ContractionProblemGemm const& problem) const override
+                {
+                    return fits(problem);
+                }
+
+                virtual bool debugEval(ContractionProblemGemm const& problem,
+                                       std::ostream&                 stream) const override
+                {
+                    bool               rv = fits(problem);
+                    std::ostringstream details;
+                    auto const&        b = problem.b();
+                    details << "world=" << problem.world() << " K=" << problem.boundSize(0)
+                            << " extent=" << problem.fusedA2AExtent()
+                            << " N=" << problem.freeSizeB(0) << " DU*S=" << value
+                            << " bpeB=" << b.elementBytes()
+                            << " strideBK=" << b.strides()[problem.boundIndices()[0].b]
+                            << " strideBN=" << b.strides()[problem.freeIndicesB()[0].i]
+                            << " gsuc=" << problem.getParams().gsuc()
+                            << " batchMode=" << problem.batchMode()
+                            << " (need world >= 1, extent == K, K % (world*DU*S) == 0,"
+                               " (K/world)*bpeB/16 <= 2^14, N*(K/world)*bpeB % 128 == 0,"
+                               " strideBK == 1, strideBN == K, batch == 1, gsuc == 0,"
+                               " batchMode == 0 (strided))";
                     PredicateDebugger::printRow(stream, rv, this->type(), details.str());
                     return rv;
                 }

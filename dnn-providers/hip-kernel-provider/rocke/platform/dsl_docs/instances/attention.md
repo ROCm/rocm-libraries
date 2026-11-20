@@ -10,8 +10,11 @@ Production tiled matrix-core, paged-KV decode:
 - `library/kernels/gfx950/attention_tiled_2d.py`, `library/kernels/gfx942/attention_tiled_2d.py`, `library/kernels/gfx1250/attention_tiled_2d.py`
 - `library/kernels/gfx950/attention_tiled_3d.py`, `library/kernels/gfx942/attention_tiled_3d.py`, `library/kernels/gfx1250/attention_tiled_3d.py`
 - `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
-- `library/kernels/gfx950/attention_dense.py` -- dense (non-paged) flash prefill; block orders and
-  grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md)
+- `library/kernels/gfx950/attention_dense.py` -- dense flash prefill (contiguous or paged K/V); block orders and
+  grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md).
+  Optional fp8 e4m3 (OCP) K/V (`kv_storage_dtype="fp8e4m3"`) with per-tensor `k_scale` /
+  `v_scale`, dequantized on load into the bf16/fp16 compute path; default-order grid body
+  only, aligned contiguous (non-paged) KV, no sinks
 - `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA).
   Opt-in `FmhaMfmaSpec.free_stride` adds per-tensor batch strides and rebases Q/K/V/O per batch
   (`global_ptr_add`), so one kernel reads BSHD, BHSD, general strides and packed QKV. Default off and
@@ -35,7 +38,10 @@ RDNA / gfx1250 WMMA forward:
   (one query row per lane, transposed S/PV, shared padded LDS K/V; runtime shapes,
   head counts incl. a separate V head count, head widths, masks and bias strides;
   baked features: softcap, attention sinks, ALiBi, QQ-bias, OCP E4M3FN K/V, ragged and
-  paged (power-of-two page) layouts; body in `platform/python/rocke/helpers/rdna_attention.py`)
+  paged (power-of-two page; separate K and V block tables, which may be one table) layouts,
+  a batch-strided Q against a paged cache (`dense_q`)
+  and per-sequence live query counts (`seqused_q`); body in
+  `platform/python/rocke/helpers/rdna_attention.py`)
 - `library/kernels/gfx1151/wmma_fmha_decode.py` -- gfx11 / gfx12 split-KV, GQA-packed WMMA
   decode (Sq up to a few 16-row tiles: decode, speculative decode, cross attention); runtime
   split count with a fused or separate merge (`build_wmma_fmha_decode_module` ships decode +

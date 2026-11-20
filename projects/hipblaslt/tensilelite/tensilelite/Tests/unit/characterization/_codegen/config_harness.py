@@ -170,6 +170,7 @@ def _solutions_from_config_unguarded(
     problem_index=0,
     problem_fingerprint=None,
     expected_fork_count=None,
+    size_group_index=0,
 ):
     """Build ``Solution`` objects from one selected BenchmarkProblems entry.
 
@@ -182,7 +183,8 @@ def _solutions_from_config_unguarded(
     generation (keeps the rocisa per-process footprint bounded for big sweeps).
     ``problem_fingerprint`` selects an entry by content and takes precedence
     over ``problem_index``. ``expected_fork_count`` checks the complete
-    permutation count before the cap is applied.
+    permutation count before the cap is applied. ``size_group_index`` selects
+    the ProblemSizeGroup within the entry.
     """
     from tensilelite.BenchmarkProblems import _generateForkedSolutions
     from tensilelite.BenchmarkStructs import BenchmarkProcess, constructForkPermutations
@@ -196,8 +198,9 @@ def _solutions_from_config_unguarded(
     if selected_problem is None:
         return []
 
-    # Each BenchmarkProblems entry is [ProblemTypeConfig, ProblemSizeGroupConfig].
-    problemTypeConfig, problemSizeGroupConfig = selected_problem[:2]
+    # Each BenchmarkProblems entry is [ProblemTypeConfig, ProblemSizeGroupConfig, ...].
+    problemTypeConfig = selected_problem[0]
+    problemSizeGroupConfig = selected_problem[1 + size_group_index]
 
     debugConfig = makeDebugConfig(config.get("GlobalParameters", {}))
 
@@ -257,7 +260,8 @@ def solutions_from_config(
 
 def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical=True,
                              splitGSU=False, cluster_dim=None, problem_index=0,
-                             problem_fingerprint=None, expected_fork_count=None):
+                             problem_fingerprint=None, expected_fork_count=None,
+                             size_group_index=0):
     """Emit assembly for the kernels of a ``BenchmarkProblems`` config.
 
     Drives ``config -> BenchmarkProcess -> constructForkPermutations ->
@@ -278,7 +282,8 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
     time (the kernel name is a hash, so the shape is not recoverable from it).
 
     ``problem_fingerprint`` selects a stable problem-group identity and takes
-    precedence over the positional ``problem_index``.
+    precedence over the positional ``problem_index``. ``size_group_index``
+    selects the ProblemSizeGroup within that entry.
     """
     from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
@@ -296,6 +301,7 @@ def emit_kernels_from_config(config_path, limit=8, arch=_DEFAULT_ARCH, canonical
             problem_index=problem_index,
             problem_fingerprint=problem_fingerprint,
             expected_fork_count=expected_fork_count,
+            size_group_index=size_group_index,
         )
         kernels = generateKernelObjectsFromSolutions(sols)
         if cluster_dim is not None:

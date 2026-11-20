@@ -7,15 +7,27 @@
   pin.py init --evidence DIR --scratch DIR --round N --owner-repo O/R
               (--pr N | --branch NAME [--target BR] | --range BASE..HEAD)
               [--clone DIR] [--remote-url URL] [--skill DIR]
+              [--reviewer LOGIN] [--since TIME]
+  pin.py threads --evidence DIR --round N --owner-repo O/R --pr N
+              [--reviewer LOGIN] [--since TIME]
+  pin.py freshness --evidence DIR --owner-repo O/R [--pr N] [--reviewer LOGIN]
+              [--prev-head SHA] [--prev-pinned TIME] [--prev-target BRANCH]
   pin.py cleanup --evidence DIR --round N
 
 `init` also writes drift.txt: the target tip, whether it merges cleanly with the head, the
 commits since BASE that touch the change, and whether the DRIFT lane triggers.
 
+`init` with `--pr` and `threads` save the PR's review threads as r<N>/pr/threads.json and
+write r<N>/threads.md and r<N>/reply-affected.txt under --evidence, record thread state in
+the ledger's Threads rows and print `unlinked:` and `mismatch:` lines. `freshness` prints
+whether the newest round is still current. TIME is `YYYY-MM-DD` (00:00 UTC) or
+`YYYY-MM-DDTHH:MM:SSZ`.
+
 Each subcommand prints terse results and exits non-zero with a one-line reason.
 """
 
 import argparse
+import datetime
 import json
 import os
 import re
@@ -25,6 +37,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import ledger  # noqa: E402
 import reviewlib as rl  # noqa: E402
 
 PIN_VARS = "SKILL|EVIDENCE|SCRATCH|CLONE|KEY|TARGET|TARGET_TIP|HEAD|HEAD_SHORT|BASE|REPO|REPO_BASE|KNOWLEDGE"
@@ -80,6 +93,288 @@ def gh_paginated_list(endpoint):
         arr, pos = dec.raw_decode(text, pos)
         out.extend(arr)
     return out
+
+
+THREADS_QUERY = """
+query($owner: String!, $repo: String!, $pr: Int!, $cursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      author { login }
+      reviewThreads(first: 50, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          isResolved isOutdated path originalLine originalStartLine
+          resolvedBy { login }
+          comments(first: 100) {
+            pageInfo { hasNextPage }
+            nodes { author { login } createdAt updatedAt originalCommit { oid } url body }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+UTC_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def parse_utc(text, what):
+    """A UTC datetime from `YYYY-MM-DD` (00:00) or `YYYY-MM-DDTHH:MM:SS[Z]`."""
+    for fmt in ("%Y-%m-%d", UTC_FORMAT, "%Y-%m-%dT%H:%M:%S"):
+        try:
+            return datetime.datetime.strptime(text.strip(), fmt).replace(
+                tzinfo=datetime.timezone.utc
+            )
+        except ValueError:
+            pass
+    die(f"{what}: not a UTC time (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SSZ): {text}")
+
+
+def fetch_threads(owner_repo, pr):
+    """{author, threads} of a PR from GraphQL `reviewThreads` (all pages). Fails loudly on a
+    GraphQL error or a thread with more than 100 comments; there is no REST fallback."""
+    owner, _, repo = owner_repo.partition("/")
+    threads, author, cursor = [], None, None
+    while True:
+        args = [
+            "api",
+            "graphql",
+            "-f",
+            f"query={THREADS_QUERY}",
+            "-f",
+            f"owner={owner}",
+            "-f",
+            f"repo={repo}",
+            "-F",
+            f"pr={pr}",
+        ]
+        if cursor:
+            args += ["-f", f"cursor={cursor}"]
+        doc = json.loads(gh(*args))
+        if doc.get("errors"):
+            die(f"reviewThreads query failed: {doc['errors'][0].get('message')}")
+        node = ((doc.get("data") or {}).get("repository") or {}).get("pullRequest")
+        if not node:
+            die(f"reviewThreads query returned no pull request {owner_repo}#{pr}")
+        author = (node.get("author") or {}).get("login")
+        page = node["reviewThreads"]
+        for t in page["nodes"]:
+            if t["comments"]["pageInfo"]["hasNextPage"]:
+                die(f"thread {t['comments']['nodes'][0]['url']} has over 100 comments")
+        threads += page["nodes"]
+        if not page["pageInfo"]["hasNextPage"]:
+            return {"author": author, "threads": threads}
+        cursor = page["pageInfo"]["endCursor"]
+
+
+def role_of(login, reviewer, author):
+    return "review" if login == reviewer else "author" if login == author else "other"
+
+
+def thread_state(thread):
+    return "resolved" if thread["isResolved"] else "unresolved"
+
+
+def reopen_cutoff(evidence, n, since):
+    """The time after which a reply is new to a reopened round n: --since, else round n's
+    own Pinned:; fails when round n has neither."""
+    if since:
+        return parse_utc(since, "--since")
+    rdir = rl.round_dir(evidence, n)
+    pinned = rl.pin_value(rdir, "Pinned") if (rdir / "PIN.md").is_file() else None
+    if not pinned:
+        die(f"r{n} has no Pinned: pass --since <time>")
+    return parse_utc(pinned, f"r{n} Pinned")
+
+
+def reply_cutoff(evidence, n, since):
+    """The time after which a reply is new to a fresh round n: --since, else the Pinned: of
+    the newest round before round n; None when no earlier round exists."""
+    if since:
+        return parse_utc(since, "--since")
+    before = [p for p in rl.round_dirs(evidence) if int(p.name[1:]) < n]
+    if not before:
+        return None
+    pinned = (
+        rl.pin_value(before[-1], "Pinned")
+        if (before[-1] / "PIN.md").is_file()
+        else None
+    )
+    if not pinned:
+        die(f"{before[-1].name} has no Pinned: pass --since <time>")
+    return parse_utc(pinned, f"{before[-1].name} Pinned")
+
+
+def created_at(text):
+    return parse_utc(text, "createdAt")
+
+
+def reviewer_of(rdir, flag):
+    """--reviewer, else PIN.md's Reviewer:; fails when neither exists."""
+    if flag:
+        return flag
+    if (rdir / "PIN.md").is_file():
+        found = rl.pin_value(rdir, "Reviewer")
+        if found:
+            return found
+    die(f"{rdir.name} has no Reviewer: pass --reviewer <gh login>")
+
+
+def intake(evidence, n, doc, cutoff):
+    """Record `doc` (fetch_threads output with a `reviewer`) for round n: pr/threads.json,
+    the Threads rows' State, Last reply and Round seen, threads.md, reply-affected.txt, and
+    `unlinked:` and `mismatch:` lines on stdout. A finding's verdict, tier and status are
+    never touched."""
+    rdir = rl.round_dir(evidence, n)
+    reviewer, author, threads = doc["reviewer"], doc["author"], doc["threads"]
+    (rdir / "pr").mkdir(exist_ok=True)
+    rl.write(rdir / "pr" / "threads.json", json.dumps(doc))
+    by_url = {t["comments"]["nodes"][0]["url"]: t for t in threads}
+    tables, statuses, rows = [], {}, []
+    try:
+        if ledger.ledger_path(evidence).is_file():
+            tables = ledger.load_ledger(evidence)
+            statuses = {
+                r["ID"]: r["Status"] for r in rl.find_table(tables, "Findings").rows
+            }
+            rows = ledger.threads_table(tables).rows
+    except rl.Fail as e:
+        die(str(e))
+    affected, linked = set(), set()
+    for row in rows:
+        thread = by_url.get(row["Thread URL"])
+        if thread is None:
+            print(f"missing: {row['Thread URL']} ({row['Finding']})")
+            continue
+        linked.add(row["Thread URL"])
+        replies = thread["comments"]["nodes"][1:]
+        row["State"] = thread_state(thread)
+        row["Round seen"] = str(n)
+        row["Last reply"] = (
+            role_of(rl.login_of(replies[-1]), reviewer, author)
+            + " "
+            + replies[-1]["createdAt"][:10]
+            if replies
+            else ""
+        )
+        if cutoff and any(
+            rl.new_by_other(c, reviewer, cutoff, created_at) for c in replies
+        ):
+            affected.add(row["Finding"])
+        status = statuses.get(row["Finding"], "")
+        if thread["isResolved"] and status in rl.NOT_CLOSED:
+            print(f"mismatch: {row['Thread URL']} resolved, {row['Finding']} {status}")
+        if not thread["isResolved"] and rl.is_closed(status):
+            print(
+                f"mismatch: {row['Thread URL']} unresolved, {row['Finding']} {status}"
+            )
+    if tables:
+        ledger.save_ledger(evidence, tables)
+    rl.write(rdir / "reply-affected.txt", "".join(f"{f}\n" for f in sorted(affected)))
+    lines = [f"# Review threads (round {n})", "", f"{len(threads)} threads", ""]
+    lines += [
+        "| URL | Where | State | Opened by | Last reply | Linked |",
+        "|---|---|---|---|---|---|",
+    ]
+    for url, t in by_url.items():
+        comments = t["comments"]["nodes"]
+        last = comments[-1] if len(comments) > 1 else None
+        found = ", ".join(r["Finding"] for r in rows if r["Thread URL"] == url)
+        lines.append(
+            f"| {url} | {t['path']}:{rl.thread_line(t)} | {thread_state(t)}"
+            f"{' (outdated)' if t['isOutdated'] else ''} | "
+            f"{rl.login_of(comments[0])} | "
+            + (f"{rl.login_of(last)} {last['createdAt'][:10]}" if last else "")
+            + f" | {found} |"
+        )
+    rl.write(rdir / "threads.md", "\n".join(lines) + "\n")
+    for url in by_url:
+        if url not in linked:
+            print(f"unlinked: {url}")
+    print(
+        f"threads: {len(threads)} saved, {len(linked)} linked, "
+        f"{len(affected)} findings with a new reply"
+    )
+
+
+def cmd_threads(args):
+    """Re-fetch a PR's review threads for round N (a round reopened on the same head) and
+    record them as `init` does. A reply is new when it came after --since, else after round
+    N's own Pinned:."""
+    rdir = rl.round_dir(args.evidence, args.round)
+    reviewer = reviewer_of(rdir, args.reviewer)
+    cutoff = reopen_cutoff(args.evidence, args.round, args.since)
+    doc = fetch_threads(args.owner_repo, args.pr)
+    intake(args.evidence, args.round, {**doc, "reviewer": reviewer}, cutoff)
+
+
+def cmd_freshness(args):
+    """Print whether the newest round is still current: `stale: base branch changed`,
+    `stale: head moved`, `new thread activity` or `fresh` (in that priority), then
+    `next: start r<N+1>` or `next: reopen r<N>`; `N/A` for a review with no PR (`--pr`, else a round's PIN.md KEY `pr<N>`). The previous
+    head, Pinned time and target come from the newest round's PIN.md, else the --prev-*
+    flags (a missing target skips the base check and says so)."""
+    rounds = rl.round_dirs(args.evidence)
+    if not rounds:
+        die(f"no round directory under {args.evidence}")
+    last = rounds[-1]
+    n = int(last.name[1:])
+    has_pin = (last / "PIN.md").is_file()
+
+    def pinned_value(key):
+        return rl.pin_value(last, key) if has_pin else None
+
+    pr = args.pr
+    for rd in reversed(rounds):
+        if pr:
+            break
+        key = rl.pin_value(rd, "KEY") if (rd / "PIN.md").is_file() else None
+        m = re.fullmatch(r"pr(\d+)", key or "")
+        pr = m.group(1) if m else None
+    if not pr:
+        print("N/A")
+        return
+    head = args.prev_head or pinned_value("HEAD")
+    pinned = args.prev_pinned or pinned_value("Pinned")
+    target = args.prev_target or pinned_value("TARGET")
+    if not head or not pinned:
+        die(
+            f"{last.name} has no {'HEAD' if not head else 'Pinned'}: pass "
+            f"{'--prev-head' if not head else '--prev-pinned'}"
+        )
+    since = parse_utc(pinned, "previous Pinned")
+    info = json.loads(
+        gh(
+            "pr",
+            "view",
+            str(pr),
+            "-R",
+            args.owner_repo,
+            "--json",
+            "baseRefName,headRefOid",
+        )
+    )
+    if not target:
+        print("skipped: base branch check (no previous target)")
+    if target and info["baseRefName"] != target:
+        verdict = "stale: base branch changed"
+    elif not (
+        info["headRefOid"].startswith(head) or head.startswith(info["headRefOid"])
+    ):
+        verdict = "stale: head moved"
+    else:
+        reviewer = reviewer_of(last, args.reviewer)
+        doc = fetch_threads(args.owner_repo, pr)
+        active = any(
+            rl.new_by_other(c, reviewer, since, created_at)
+            for t in doc["threads"]
+            for c in t["comments"]["nodes"]
+        )
+        verdict = "new thread activity" if active else "fresh"
+    print(verdict)
+    print(
+        f"next: start r{n + 1}" if verdict.startswith("stale") else f"next: reopen r{n}"
+    )
 
 
 def derive_key(text):
@@ -205,6 +500,10 @@ def cmd_init(args):
     clone = Path(args.clone or os.environ.get("CLONE") or scratch / "clone")
     repo, repo_base = scratch / f"r{n}" / "head", scratch / f"r{n}" / "base"
     rdir = evidence / f"r{n}"
+    reviewer = args.reviewer or (
+        gh("api", "user", "--jq", ".login").strip() if args.pr else None
+    )
+    cutoff = reply_cutoff(evidence, n, args.since) if args.pr else None
     rdir.mkdir(parents=True, exist_ok=True)
     rl.write(
         rdir / "PIN.md",
@@ -217,7 +516,12 @@ def cmd_init(args):
                 ("KEY", key),
                 ("REPO", repo),
                 ("REPO_BASE", repo_base),
-            ],
+                (
+                    "Pinned",
+                    datetime.datetime.now(datetime.timezone.utc).strftime(UTC_FORMAT),
+                ),
+            ]
+            + ([("Reviewer", reviewer)] if reviewer else []),
         ),
     )
     rl.write(rdir / "env.sh", ENV_SH)
@@ -326,6 +630,9 @@ def cmd_init(args):
     print(
         f"KEY={key} TARGET={target} HEAD={head[:12]} BASE={base[:12]} files={len(files)}"
     )
+    if args.pr:
+        doc = fetch_threads(args.owner_repo, args.pr)
+        intake(evidence, n, {**doc, "reviewer": reviewer}, cutoff)
 
 
 def pr_gate(args, rdir, clone, base, head):
@@ -463,9 +770,24 @@ def main(argv=None):
         "--clone",
         "--remote-url",
         "--skill",
+        "--reviewer",
+        "--since",
     ):
         s.add_argument(a)
     s.set_defaults(fn=cmd_init)
+    s = sub.add_parser("threads", help=cmd_threads.__doc__.split("\n\n")[0])
+    for a in ("--evidence", "--owner-repo", "--pr"):
+        s.add_argument(a, required=True)
+    s.add_argument("--round", type=int, required=True)
+    for a in ("--reviewer", "--since"):
+        s.add_argument(a)
+    s.set_defaults(fn=cmd_threads)
+    s = sub.add_parser("freshness", help=cmd_freshness.__doc__.split("\n\n")[0])
+    for a in ("--evidence", "--owner-repo"):
+        s.add_argument(a, required=True)
+    for a in ("--pr", "--reviewer", "--prev-head", "--prev-pinned", "--prev-target"):
+        s.add_argument(a)
+    s.set_defaults(fn=cmd_freshness)
     s = sub.add_parser("cleanup", help=cmd_cleanup.__doc__)
     s.add_argument("--evidence", required=True)
     s.add_argument("--round", type=int, required=True)

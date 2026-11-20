@@ -32,6 +32,8 @@ from kernels.gfx950.attention_dense import (
 
 torch = pytest.importorskip("torch", reason="ROCm torch required")
 
+from ._dense_paged_gpu import paged_cache, run_dispatched_paged  # noqa: E402
+
 
 def _gpu_ready():
     """True only on a gfx950 box with ROCm torch. Gate on ``gcnArchName`` (the ISA
@@ -95,9 +97,14 @@ def _spec(
     *,
     batch=1,
     sq=512,
+    sk=None,
     use_sinks=False,
     sliding_window=0,
     causal=True,
+    kv_block_size=0,
+    causal_bottom_right=False,
+    num_cus=None,
+    use_fp8=False,
 ):
     """The SHIPPED gfx950 dense spec for a cohort row, built through the dispatch
     factory rather than hand-rolled.
@@ -119,20 +126,33 @@ def _spec(
         spec_id = "gfx950_dense_persist_widedma"
     else:
         spec_id = "gfx950_dense_persist"
+    if causal_bottom_right:
+        mask_type = 2
+    elif causal:
+        mask_type = 1
+    else:
+        mask_type = 0
     return attention_tuning_spec(
         AttentionRequest(
             batch=batch,
             nhead_q=hq,
             nhead_k=hkv,
             seqlen_q=sq,
-            seqlen_k=sq,
+            seqlen_k=sq if sk is None else sk,
             hdim_q=d,
             hdim_v=d,
             arch="gfx950",
-            mask_type=1 if causal else 0,
+            mask_type=mask_type,
             dtype=dtype,
             use_sinks=use_sinks,
             sliding_window=sliding_window,
+            **(
+                {"layout": "paged", "kv_block_size": kv_block_size}
+                if kv_block_size
+                else {}
+            ),
+            use_fp8=use_fp8,
+            **({} if num_cus is None else {"num_cus": num_cus}),
         ),
         spec_id,
     ).kernel_spec
@@ -161,8 +181,8 @@ def _tolerance(dtype):
     return 2e-2 if dtype == "fp16" else 4e-2
 
 
-def _standard_reference(q, k, v, scale, sliding_window=0):
-    """Standard causal attention reference using PyTorch SDPA.
+def _standard_reference(q, k, v, scale, sliding_window=0, causal=True):
+    """Standard (optionally causal) attention reference using PyTorch SDPA.
 
     Args:
         q: [B, S, Hq, D] query tensor
@@ -190,13 +210,19 @@ def _standard_reference(q, k, v, scale, sliding_window=0):
         sq, sk = q.shape[1], k.shape[1]
         qi = torch.arange(sq, device=q.device).view(-1, 1)
         ki = torch.arange(sk, device=q.device).view(1, -1)
-        allowed = (ki <= qi) & (ki > qi - sliding_window)
+        # The window's LEFT bound always applies. The causal (right) bound applies
+        # only when causal: gfx950 dense runs a left-only window too, and folding
+        # the causal bound in unconditionally would score a non-causal window
+        # against a causal reference and hide a real mask bug.
+        allowed = ki > qi - sliding_window
+        if causal:
+            allowed = allowed & (ki <= qi)
         ref = F.scaled_dot_product_attention(
             qf, kf, vf, attn_mask=allowed, scale=scale
         ).transpose(1, 2)
     else:
         ref = F.scaled_dot_product_attention(
-            qf, kf, vf, is_causal=True, scale=scale
+            qf, kf, vf, is_causal=causal, scale=scale
         ).transpose(
             1, 2
         )  # -> [B, S, Hq, D]
@@ -352,6 +378,87 @@ class TestDenseNumeric:
         assert max_abs < tol, (
             f"bf16 D{d} SWA{window} scale={scale:g} "
             f"{'persist' if persistent else 'default'}: max_abs={max_abs:.3e} >= {tol}"
+        )
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+    @pytest.mark.parametrize("d,hq,hkv", [(64, 16, 4), (128, 16, 4)])
+    # (causal, sliding_window): flash-causal, SWA-128, non-causal (full), and the
+    # left-only window. Each is a distinct mask path the PR adds; the IR golden
+    # pins their bytes, this pins their correctness. The kernel does serve a
+    # non-causal window (_supports_noncausal_window is True and the validator
+    # accepts it), and that band runs its own left-only pipeline, so it needs its
+    # own numeric case rather than being assumed unreachable.
+    @pytest.mark.parametrize(
+        "causal,sliding_window", [(True, 0), (True, 128), (False, 0), (False, 128)]
+    )
+    def test_fp8_kv_dequant_numeric_vs_fp32_sdpa(
+        self, d, hq, hkv, dtype, causal, sliding_window
+    ):
+        """fp8 KV-dequant dense: the kernel reads float8_e4m3fn K/V and dequants
+        with per-tensor k_scale/v_scale into the bf16 or fp16 compute/output
+        path; the reference attends over the SAME dequantized K/V,
+        so this isolates kernel error from quantization loss (the convention the
+        live bench uses). Covered over the causal, sliding-window and non-causal
+        masks the grid variant serves for fp8."""
+        import torch
+
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        B, S = 1, 512
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, hq, d, device="cuda", dtype=tdt) * 0.3
+        k = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
+        v = torch.randn(B, S, hkv, d, device="cuda", dtype=tdt) * 0.3
+
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        def _quant(t):
+            amax = t.abs().max().clamp(min=1e-8)
+            s = (amax / fp8_max).item()
+            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+            return q8, s
+
+        k_fp8, k_scale = _quant(k)
+        v_fp8, v_scale = _quant(v)
+        k_deq = (k_fp8.float() * k_scale).to(tdt)
+        v_deq = (v_fp8.float() * v_scale).to(tdt)
+
+        spec = _spec(
+            dtype,
+            d,
+            hq,
+            hkv,
+            persistent=False,
+            batch=B,
+            sq=S,
+            use_fp8=True,
+            causal=causal,
+            sliding_window=sliding_window,
+        )
+        out = torch.empty(B, S, hq, d, device="cuda", dtype=tdt)
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_fp8,
+            v=v_fp8,
+            out=out,
+            scale=scale,
+            k_scale=k_scale,
+            v_scale=v_scale,
+        )
+        torch.cuda.synchronize()
+
+        ref = _standard_reference(
+            q, k_deq, v_deq, scale, sliding_window=sliding_window, causal=causal
+        )
+        max_abs = (ref - out.float()).abs().max().item()
+        # Reference attends over the dequantized K/V, so the residual is kernel
+        # compute error at the compute precision; keep a small fp8 margin over tol.
+        assert max_abs < 6e-2, (
+            f"fp8 {dtype} D{d} GQA{hq}/{hkv} causal={causal} "
+            f"swa={sliding_window}: max_abs={max_abs:.3e}"
         )
 
     @requires_gfx950_gpu
@@ -1075,6 +1182,163 @@ class TestDenseBottomRightNumeric:
         assert top_left_err > 1e-3, (
             f"{label}: unexpectedly matches top-left " f"(max_abs={top_left_err:.3e})"
         )
+
+    # fp8 KV is aligned-only and has no sink path, so only aligned, sink-free
+    # moving diagonals apply. D128 and D64 cover both K layouts of the fp8 loader.
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,sq,skv",
+        [
+            pytest.param(128, 256, 512, id="d128-256x512"),
+            pytest.param(128, 512, 1024, id="d128-512x1024"),
+            pytest.param(64, 512, 1024, id="d64-512x1024"),
+        ],
+    )
+    def test_fp8_kv_matches_shifted_diagonal_not_top_left(self, d, sq, skv):
+        import torch
+
+        tile = DENSE_TILE_GEOMETRIES["default"]
+        spec = Gfx950AttentionDenseSpec(
+            batch=1,
+            seqlen_q=sq,
+            seqlen_kv=skv,
+            num_query_heads=4,
+            num_kv_heads=1,
+            head_size=d,
+            causal=True,
+            dtype="bf16",
+            block_m=int(tile["block_m"]),
+            block_n=int(tile["block_n"]),
+            persistent=False,
+            causal_bottom_right=True,
+            kv_storage_dtype="fp8e4m3",
+        )
+        assert skv > sq, "every case must exercise a moving diagonal"
+
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, 4, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        def _quant(t):
+            s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
+            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+            return q8, s
+
+        k_fp8, k_scale = _quant(k)
+        v_fp8, v_scale = _quant(v)
+        # The oracle attends over the same dequantized K/V the kernel reads, so
+        # the check isolates kernel error from quantization loss.
+        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
+        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(d)
+
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_fp8,
+            v=v_fp8,
+            out=out,
+            scale=scale,
+            k_scale=k_scale,
+            v_scale=v_scale,
+        )
+        torch.cuda.synchronize()
+
+        shifted = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=False)
+        top_left = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=True)
+        shifted_err = (out.float() - shifted).abs().max().item()
+        top_left_err = (out.float() - top_left).abs().max().item()
+        label = f"fp8 D{d} {sq}x{skv}"
+        assert (
+            shifted_err < _BOTTOM_RIGHT_TOL
+        ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"
+        assert (
+            top_left_err > 1e-3
+        ), f"{label}: unexpectedly matches top-left (max_abs={top_left_err:.3e})"
+
+    # The test above pins the fp8 bottom-right MATH on a hand-built default-tile
+    # spec, which takes one KV segment. Dispatch does not select that spec: for a
+    # moving diagonal it splits KV across segments and runs the combine kernel, a
+    # different code path. This case runs what dispatch actually ships.
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "d,sq,skv",
+        [
+            pytest.param(128, 512, 1024, id="d128-512x1024"),
+            pytest.param(64, 512, 1024, id="d64-512x1024"),
+        ],
+    )
+    def test_fp8_bottom_right_dispatched_split_matches_reference(self, d, sq, skv):
+        import torch
+
+        spec = _spec(
+            "bf16",
+            d,
+            4,
+            1,
+            persistent=False,
+            batch=1,
+            sq=sq,
+            sk=skv,
+            use_fp8=True,
+            causal=True,
+            causal_bottom_right=True,
+            num_cus=256,
+        )
+        # Assert the split, so this never silently degrades into a second copy of
+        # the single-segment case if dispatch stops splitting.
+        assert spec.kv_segments > 1, (
+            "dispatch no longer splits KV for fp8 bottom-right "
+            f"(kv_segments={spec.kv_segments}); this case must cover the "
+            "segment+combine path"
+        )
+
+        torch.manual_seed(0)
+        q = torch.randn(1, sq, 4, d, device="cuda", dtype=torch.bfloat16)
+        k = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        v = torch.randn(1, skv, 1, d, device="cuda", dtype=torch.bfloat16)
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        def _quant(t):
+            s = (t.abs().max().clamp(min=1e-8) / fp8_max).item()
+            q8 = (t.float() / s).clamp(-fp8_max, fp8_max).to(torch.float8_e4m3fn)
+            return q8, s
+
+        k_fp8, k_scale = _quant(k)
+        v_fp8, v_scale = _quant(v)
+        k_deq = (k_fp8.float() * k_scale).to(torch.bfloat16)
+        v_deq = (v_fp8.float() * v_scale).to(torch.bfloat16)
+        out = torch.empty_like(q)
+        scale = 1.0 / math.sqrt(d)
+
+        run_attention_dense_torch(
+            spec=spec,
+            q=q,
+            k=k_fp8,
+            v=v_fp8,
+            out=out,
+            scale=scale,
+            k_scale=k_scale,
+            v_scale=v_scale,
+        )
+        torch.cuda.synchronize()
+
+        shifted = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=False)
+        top_left = _bottom_right_reference(q, k_deq, v_deq, None, scale, top_left=True)
+        shifted_err = (out.float() - shifted).abs().max().item()
+        top_left_err = (out.float() - top_left).abs().max().item()
+        label = f"fp8 split D{d} {sq}x{skv} segs={spec.kv_segments}"
+        assert (
+            shifted_err < _BOTTOM_RIGHT_TOL
+        ), f"{label}: shifted max_abs={shifted_err:.3e} >= {_BOTTOM_RIGHT_TOL}"
+        assert (
+            top_left_err > 1e-3
+        ), f"{label}: unexpectedly matches top-left (max_abs={top_left_err:.3e})"
 
 
 # KV-segment split on the default grid: (geometry, mask, diag_split, segments, sq,
@@ -2207,10 +2471,11 @@ class TestDensePagedNumeric:
     @pytest.mark.gpu
     @pytest.mark.parametrize("dtype", ["fp16", "bf16"])
     @pytest.mark.parametrize("block_size", [16, 32, 64])
-    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024)])
-    def test_paged_matches_dense_bit_exact(self, dtype, block_size, sq, window):
+    @pytest.mark.parametrize("sq,window", [(1024, 256), (2048, 1024), (1024, 0)])
+    @pytest.mark.parametrize("d", [128, 64])
+    def test_paged_matches_dense_bit_exact(self, dtype, block_size, sq, window, d):
         """A paged cache must give the same bits as the dense K/V it was scattered
-        from, and match the fp32 sliding-window reference.
+        from, and match the fp32 causal (sliding-window) reference.
 
         The pages land at randomly permuted physical ids in a cache twice the
         needed size, and every unused page is NaN. A wrong page index (the
@@ -2219,32 +2484,69 @@ class TestDensePagedNumeric:
         the wrong keys, rather than a near miss the tolerance could absorb.
         block_size 16/32/64 covers 4, 2 and 1 pages per 64-key tile.
         """
+        self._check_paged(dtype, block_size, sq, sq, window, d)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize(
+        "sq,sk,window",
+        [
+            pytest.param(512, 2048, 0, id="top-left-512x2048"),
+            pytest.param(2048, 512, 0, id="top-left-2048x512"),
+            pytest.param(1088, 1088, 0, id="ragged-q-1088"),
+            pytest.param(1024, 512, 128, id="swa-empty-rows-1024x512"),
+        ],
+    )
+    def test_paged_cross_length_matches_dense(self, sq, sk, window):
+        """Top-left causal with ``seqlen_q != seqlen_kv``, a ragged query tail and
+        rows whose window holds no key."""
+        self._check_paged("fp16", 16, sq, sk, window, 128)
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("spec_id", ["gfx950_dense_grid", "gfx950_dense_qbminor"])
+    def test_dispatched_paged(self, spec_id):
+        """Request -> dispatch -> bind -> launch, with the block count taken from the
+        cache at bind."""
+        window = 1024
+        q, k, v, out = run_dispatched_paged("gfx950", spec_id, window=window)
+        assert torch.isfinite(out).all()
+        scale = 1.0 / math.sqrt(q.shape[-1])
+        ref = _standard_reference(q, k, v, scale, sliding_window=window)
+        assert (out.float() - ref).abs().max().item() < _tolerance("fp16")
+
+    @staticmethod
+    def _check_paged(dtype, block_size, sq, sk, window, d):
         import torch
 
-        hq, hkv, d, B = 16, 4, 128, 1
+        hq, hkv, B = 16, 4, 1
         tdt = getattr(torch, _TORCH_DT[dtype])
         scale = 1.0 / math.sqrt(d)
         torch.manual_seed(0)
 
         q = torch.randn(B, sq, hq, d, device="cuda", dtype=tdt)
-        k = torch.randn(B, sq, hkv, d, device="cuda", dtype=tdt)
-        v = torch.randn(B, sq, hkv, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, sk, hkv, d, device="cuda", dtype=tdt)
 
-        npages = sq // block_size
-        num_kv_blocks = 2 * npages
-        phys = torch.randperm(num_kv_blocks, device="cuda")[:npages]
-        k_cache = torch.full(
-            (num_kv_blocks, block_size, hkv, d), float("nan"), device="cuda", dtype=tdt
+        k_cache, v_cache, block_tables, kv_lens = paged_cache(k, v, block_size)
+        num_kv_blocks = k_cache.shape[0]
+
+        # The shipped paged spec (its tile can differ from the contiguous one's),
+        # and its contiguous twin on the same tile.
+        shipped = _spec(
+            dtype,
+            d,
+            hq,
+            hkv,
+            False,
+            sq=sq,
+            sk=sk,
+            sliding_window=window,
+            kv_block_size=block_size,
         )
-        v_cache = torch.full_like(k_cache, float("nan"))
-        k_cache[phys] = k[0].view(npages, block_size, hkv, d)
-        v_cache[phys] = v[0].view(npages, block_size, hkv, d)
-        block_tables = phys.to(torch.int32).view(1, npages).contiguous()
-        kv_lens = torch.tensor([sq], device="cuda", dtype=torch.int32)
-
-        dense_spec = _spec(dtype, d, hq, hkv, False, sq=sq, sliding_window=window)
-        paged_spec = dataclasses.replace(
-            dense_spec, paged=True, block_size=block_size, num_kv_blocks=num_kv_blocks
+        paged_spec = dataclasses.replace(shipped, num_kv_blocks=num_kv_blocks)
+        dense_spec = dataclasses.replace(
+            shipped, paged=False, block_size=0, num_kv_blocks=0
         )
 
         dense_out = torch.empty_like(q)
@@ -2264,12 +2566,23 @@ class TestDensePagedNumeric:
         )
         torch.cuda.synchronize()
 
-        name = f"{dtype} pgd{block_size} sq{sq} swa{window}"
+        name = f"{dtype} D{d} pgd{block_size} sq{sq} sk{sk} swa{window}"
         assert torch.isfinite(paged_out).all(), f"{name}: read a NaN (unused) page"
         assert torch.equal(paged_out, dense_out), f"{name}: paged != dense bits"
         ref = _standard_reference(q, k, v, scale, sliding_window=window)
-        max_abs = (ref - paged_out.float()).abs().max().item()
+        # A row whose window holds no key has no SDPA reference (NaN); its output
+        # must be zero.
+        qi = torch.arange(sq, device="cuda").view(-1, 1)
+        ki = torch.arange(sk, device="cuda").view(1, -1)
+        keep = ki <= qi
+        if window:
+            keep &= ki > qi - window
+        live = keep.any(dim=1)
+        max_abs = (ref - paged_out.float())[:, live].abs().max().item()
         assert max_abs < _tolerance(dtype), f"{name}: max_abs={max_abs:.3e}"
+        if not live.all():
+            worst = paged_out.float()[:, ~live].abs().max().item()
+            assert worst == 0.0, f"{name}: {int((~live).sum())} keyless rows: {worst}"
 
 
 # Cross-length top-left (unshifted diagonal): sq < sk and sq > sk, ragged and
@@ -2610,6 +2923,54 @@ class TestDenseBandIndexTruthTable:
                 expected[p, :, visible] = 1.0 / len(visible)
         err = (out.float().cpu() - expected[None]).abs().max().item()
         assert err < 1e-2, f"max_abs={err:.3e}"
+
+
+class TestDenseRowIndependence:
+    """A row's output depends only on the keys that row sees.
+
+    Causal (top-left), Sq = Skv = S: key S-1 is visible to row S-1 only, which shares
+    a 32-row wave with rows S-32..S-2. K at that key is 1e4 * sign(Q of row S-1), so
+    row S-1's running max jumps far past the lazy-rescale threshold, and V there is
+    +-1e4. Every other row masks the key, so its output must not change by a single
+    bit. A wave-wide lazy-rescale decision breaks this: the jump makes every row of
+    the wave move its max and round differently.
+    """
+
+    @requires_gfx950_gpu
+    @pytest.mark.gpu
+    @pytest.mark.parametrize("window", [0, 128], ids=["causal", "causal_w128"])
+    @pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persist"])
+    @pytest.mark.parametrize("d", [64, 128])
+    @pytest.mark.parametrize("dtype", ["bf16", "fp16"])
+    def test_rows_independent_of_wave_neighbours(self, dtype, d, persistent, window):
+        import torch
+
+        tdt = getattr(torch, _TORCH_DT[dtype])
+        B, S, H = 1, 512, 16
+        scale = 1.0 / math.sqrt(d)
+        torch.manual_seed(0)
+        q = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        k = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        v = torch.randn(B, S, H, d, device="cuda", dtype=tdt)
+        k_hot, v_hot = k.clone(), v.clone()
+        k_hot[:, S - 1] = 1e4 * torch.sign(q[:, S - 1])
+        v_hot[:, S - 1] = 1e4 * torch.sign(torch.randn_like(v[:, S - 1]))
+
+        spec = _spec(dtype, d, H, H, persistent, sq=S, sliding_window=window)
+        outs = []
+        for kk, vv in ((k, v), (k_hot, v_hot)):
+            out = torch.empty_like(q)
+            run_attention_dense_torch(spec=spec, q=q, k=kk, v=vv, out=out, scale=scale)
+            torch.cuda.synchronize()
+            outs.append(out)
+        base, hot = outs
+        assert torch.isfinite(hot).all(), "non-finite output"
+        assert not torch.equal(base[:, S - 1], hot[:, S - 1]), "key S-1 had no effect"
+        changed = (base[:, : S - 1] != hot[:, : S - 1]).any(dim=-1).nonzero()
+        assert changed.numel() == 0, (
+            f"{len(changed)} (row, head) pairs that mask key {S - 1} changed, rows "
+            f"{sorted(set(changed[:, 1].tolist()))}"
+        )
 
 
 if __name__ == "__main__":

@@ -23,6 +23,9 @@ Run commands from the repository root. The superbuild is in `build/`.
 **New graph-verification coverage must be a bundle.** If a proposed C++ test is
 really "build graph X, run it, compare", make it a bundle instead.
 
+Ops with a per-op plan are written by their generator; edit the plan, not the
+bundle ([test-plans/README.md](test-plans/README.md)).
+
 Then pick the bundle kind:
 
 - **Sweep** — the same topology across several shapes, dtypes or layouts. This
