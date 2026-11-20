@@ -766,6 +766,14 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     parser.add_argument("--arch", help="Library architecture to test (default: the device's)")
     parser.add_argument("--profile", default="smoke", choices=plan.PROFILES)
     parser.add_argument(
+        "--mx-oracle",
+        default="reference",
+        choices=plan.MX_ORACLES,
+        help="How MX FP6 kernels are checked: the CPU reference (default), or fast_check with "
+        "sparse_k integer_exact data, which needs a hipblaslt-test whose MX generator supports "
+        "sparse_k",
+    )
+    parser.add_argument(
         "--shard-index",
         type=int,
         default=env_int("SHARD_INDEX", 1),
@@ -893,6 +901,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "host": socket.gethostname(),
         "hipblaslt_git_version": device["hipblaslt_git_version"],
         "profile": args.profile,
+        "mx_oracle": args.mx_oracle,
     }
     meta = {
         **shard.base,
@@ -922,7 +931,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         reason = unreachable_reason(record, cu_count, chip_id)
         kernel_cases = []
         if not reason:
-            kernel_cases, reason = plan.plan_kernel(record, args.profile)
+            kernel_cases, reason = plan.plan_kernel(record, args.profile, args.mx_oracle)
         if reason:
             case_id = f"{record['index']}:-"
             if case_id not in done:

@@ -66,6 +66,12 @@ sums pass 2^24, `trig_float` data with `norm_check` and `allclose_check`, as the
 `--reference-timeout` (default 2 hours). At M = N = 4096 and K = 131584 a case needs about
 12 GiB of host memory. Other MX kernels (fp4, fp8, other scale layouts) are deferred.
 
+`--mx-oracle fast_check` checks the same MX FP6 cases with fast_check instead, exactly and with no
+CPU reference: `integer_exact` data with `integer_exact_pattern: sparse_k`, which keeps every
+element of a bf16 D below 256 at any K. It needs a hipblaslt-test whose MX generator supports
+sparse_k (rocm-libraries #16345). An older one ignores the pattern for MX data, so most of D
+leaves bf16's exact range and fast_check stops on every MX case.
+
 `--profile edges` builds, for each exact-size solution, problems one step outside each of its
 predicates: K one DepthU up and down, half K, M or N one macro tile up, a batch of 2, alpha + 1,
 beta = 1, padded `lda`, `ldb` or `ldd`, and B in the other order. The pinned solution must

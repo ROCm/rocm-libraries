@@ -13,8 +13,9 @@ macro tile, DepthU and split-K, honoring its size predicates; a kernel registere
 for an exact-size kernel, problems one step outside each of its predicates, which the pinned
 solution must refuse.
 
-MX FP6 kernels with host-shuffled 128x4 scales are checked against the CPU reference, since
-fast_check does not decode FP6 or swizzled operands. Other MX kernels are deferred.
+MX FP6 kernels with host-shuffled 128x4 scales are checked against the CPU reference by default,
+or with mx_oracle "fast_check" by fast_check with sparse_k integer_exact data, which needs a
+hipblaslt-test whose MX generator supports sparse_k. Other MX kernels are deferred.
 """
 
 from __future__ import annotations
@@ -88,6 +89,8 @@ EDGE_TAGS = (
 )
 SHAPE_TAGS = SMOKE_TAGS + (REGISTERED_TAG,) + EDGE_TAGS
 PROFILES = ("smoke", "edges")
+# How MX FP6 kernels are checked: the CPU reference, or fast_check with sparse_k data.
+MX_ORACLES = ("reference", "fast_check")
 CASE_PREFIX = "kc"
 ALPHA = 2.0
 BETA = -2.0
@@ -331,12 +334,18 @@ def predicate_args(record: dict) -> dict:
     return args
 
 
-def oracle_args(record: dict, shape: Shape) -> dict:
-    """How the case checks D. fast_check with integer_exact data, except for MX kernels, which
-    fast_check cannot check (no FP6, no swizzled operands): those use the CPU reference, exactly
-    while fp32 sums stay exact and within a norm and elementwise tolerance beyond that."""
+def oracle_args(record: dict, shape: Shape, mx_oracle: str = "reference") -> dict:
+    """How the case checks D. fast_check with integer_exact data, except for MX kernels. With
+    mx_oracle "reference" those use the CPU reference, exactly while fp32 sums stay exact and
+    within a norm and elementwise tolerance beyond that. With "fast_check" they use fast_check
+    with sparse_k integer_exact data, which keeps a bf16 D exact at any K; that needs a
+    hipblaslt-test whose MX generator supports sparse_k (rocm-libraries #16345)."""
+    if mx_oracle not in MX_ORACLES:
+        raise ValueError(f"unknown MX oracle {mx_oracle!r}")
     if not is_mx(record):
         return {}
+    if mx_oracle == "fast_check":
+        return {"integer_exact_pattern": "sparse_k"}
     args = {"fast_check": 0, "unit_check": 1, "norm_check": 1, "initialization": "rand_int"}
     if shape.k > _RAND_INT_MAX_K.get(record["problem"].get("aType"), shape.k):
         args.update(initialization="trig_float", unit_check=0, allclose_check=1)
@@ -398,8 +407,11 @@ def edge_cases(record: dict, base: Case) -> list[Case]:
     return cases
 
 
-def plan_kernel(record: dict, profile: str = "smoke") -> tuple[list[Case], Optional[str]]:
-    """The cases for one record, or no cases and the reason it is not planned."""
+def plan_kernel(
+    record: dict, profile: str = "smoke", mx_oracle: str = "reference"
+) -> tuple[list[Case], Optional[str]]:
+    """The cases for one record, or no cases and the reason it is not planned. mx_oracle picks
+    how MX kernels are checked (oracle_args)."""
     if profile not in PROFILES:
         raise ValueError(f"unknown profile {profile!r}")
     types, reason = problem_types(record)
@@ -423,7 +435,7 @@ def plan_kernel(record: dict, profile: str = "smoke") -> tuple[list[Case], Optio
             types,
             trans_a,
             trans_b,
-            {**base_args, **oracle_args(record, shape)},
+            {**base_args, **oracle_args(record, shape, mx_oracle)},
         )
         for shape in shapes
     ]

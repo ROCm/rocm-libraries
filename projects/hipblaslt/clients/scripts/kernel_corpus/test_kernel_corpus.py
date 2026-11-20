@@ -331,6 +331,43 @@ class MXPlanTests(unittest.TestCase):
         e2m3 = plan.plan_kernel(record(mx_solution(0, k=131584)))[0][0].args
         self.assertEqual(e2m3["initialization"], "rand_int")
 
+    def test_the_fast_check_mx_oracle_uses_sparse_k_integer_exact_data_at_any_k(self):
+        for a, k in (("Float6", 2048), ("BFloat6", 131584)):
+            cases, reason = plan.plan_kernel(record(mx_solution(4, a=a, k=k)), "smoke", "fast_check")
+            self.assertIsNone(reason)
+            case = cases[0]
+            self.assertFalse(case.cpu_reference)
+            entry = plan.case_yaml_entry(case)
+            self.assertEqual(
+                {
+                    key: entry.get(key)
+                    for key in (
+                        "initialization",
+                        "integer_exact_pattern",
+                        "fast_check",
+                        "unit_check",
+                        "norm_check",
+                        "allclose_check",
+                    )
+                },
+                {
+                    "initialization": "integer_exact",
+                    "integer_exact_pattern": "sparse_k",
+                    "fast_check": 1,
+                    "unit_check": 0,
+                    "norm_check": None,
+                    "allclose_check": None,
+                },
+            )
+            self.assertEqual(entry["matrix_size"][0]["K"], k)
+        # Kernels without MX scales are unchanged, and edges still check only for a refusal.
+        plain = plan.plan_kernel(record(solution(5)), "smoke", "fast_check")[0]
+        self.assertEqual(plain, plan.plan_kernel(record(solution(5)))[0])
+        edges = plan.plan_kernel(record(mx_solution(3)), "edges", "fast_check")[0]
+        self.assertTrue(all(c.expect == "refused" and not c.cpu_reference for c in edges))
+        with self.assertRaises(ValueError):
+            plan.plan_kernel(record(mx_solution(3)), "smoke", "cpu")
+
     def test_edges_break_one_predicate_each_and_expect_a_refusal(self):
         cases, reason = plan.plan_kernel(record(mx_solution(3)), "edges")
         self.assertIsNone(reason)
