@@ -630,7 +630,7 @@ namespace rocalution
         {
             hip_cast_mat->set_backend(this->local_backend_);
 
-            if(this->nnz_ == 0)
+            if(hip_cast_mat->nnz_ == 0)
             {
                 hip_cast_mat->AllocateBCSR(
                     this->mat_.nnzb, this->mat_.nrowb, this->mat_.ncolb, this->mat_.blockdim);

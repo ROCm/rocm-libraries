@@ -729,6 +729,9 @@ namespace rocalution
             CHECK_HIP_ERROR(__FILE__, __LINE__);
         }
 
+        // COO entries are kept sorted by row and column
+        this->Sort();
+
         return true;
     }
 
@@ -787,6 +790,9 @@ namespace rocalution
 
             free_hip(&pb);
         }
+
+        // COO entries are kept sorted by row and column
+        this->Sort();
 
         return true;
     }

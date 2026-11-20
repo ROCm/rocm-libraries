@@ -589,7 +589,7 @@ namespace rocalution
 
             rocblas_status status;
 
-            ValueType beta = static_cast<ValueType>(0);
+            ValueType beta = static_cast<ValueType>(1);
 
             if(DENSE_IND_BASE == 0)
             {
