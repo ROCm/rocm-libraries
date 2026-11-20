@@ -215,9 +215,38 @@ protected:
             }
             else
             {
-                bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+                const float absMax = this->GetParam().inputAbsMax;
+                bundle.randomizeTensor(tensorPair.first, -absMax, absMax, seed);
             }
         }
+    }
+
+    // Checks that ASM_SDPA_ENGINE is not in the ranked engine list for the case's graph.
+    void runDeclineTest()
+    {
+        auto deviceString = hip_kernel_provider_common::getDeviceString(this->stream());
+        const GraphTestCase& testCase = this->GetParam();
+        if(testCase.arch != deviceString)
+        {
+            GTEST_SKIP() << "Skipped: Test case requires " << testCase.arch
+                         << " but current device architecture is " << deviceString;
+        }
+
+        const SdpaFwdGraph built = buildSdpaFwdGraph(testCase);
+        auto& graph = *built.graph;
+        const auto validationResult = graph.validate();
+        ASSERT_TRUE(validationResult.is_good())
+            << "Graph validation failed for config: " << testCase.name << " - "
+            << validationResult.get_message();
+
+        auto result = graph.build_operation_graph(this->_handle);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        std::vector<int64_t> rankedEngineIds;
+        result = graph.get_ranked_engine_ids(rankedEngineIds);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        EXPECT_EQ(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), ASM_SDPA_ENGINE_ID),
+                  rankedEngineIds.end())
+            << "ASM_SDPA_ENGINE offered to serve " << testCase.name;
     }
 
     void runGraphTest(float tolerance)
@@ -323,12 +352,10 @@ protected:
         ASSERT_NO_FATAL_FAILURE(this->buildPlansForEngine(*graph, ASM_SDPA_ENGINE_ID, {}));
         this->verifyBuiltGraph(context, 0);
     }
-
-    float _minVal = -1.0;
-    float _maxVal = 1.0;
 };
 
 using IntegrationGpuSdpaFwdBf16 = IntegrationSdpaFwd<bfloat16>;
+using IntegrationGpuSdpaFwdDeclines = IntegrationSdpaFwd<bfloat16>;
 
 /**
  * @brief Test fixture for shape-sweep tests parameterized on SdpaFwdTestCase.
@@ -657,6 +684,21 @@ GraphTestCase groupTestCase(const fmha_v3_fwdConfig& config, bool withStats, Gro
     return testCase;
 }
 
+// Whether the engine serves @p config with fewer K/V heads than Q heads: the gfx950 head
+// dim 256 kernels do not support GQA/MQA.
+bool servesGqa(const fmha_v3_fwdConfig& config)
+{
+    return config.arch != "gfx950" || config.hdim_q != 256;
+}
+
+// @p testCase with two K/V heads for its four Q heads (GQA ratio 2).
+GraphTestCase withGqa(GraphTestCase testCase)
+{
+    testCase.numHeadsKv = 2;
+    testCase.name += "Gqa";
+    return testCase;
+}
+
 // Each causal group row under a top-left causal mask, with Q, K, V and O on one offset
 // table: every batch's Q and K/V lengths are then equal, where the two causal alignments
 // agree, so the engine serves the top-left mask with the row's bottom-right kernel.
@@ -756,6 +798,76 @@ std::vector<GraphTestCase> getGroupEdgeLengthTestCases()
     return cases;
 }
 
+// Every group row that serves GQA, with two Q heads per K/V head: stats over the
+// standard lengths, stats with cu_seq_len over the edge lengths, and for causal rows the
+// top-left mask on one shared offset table. Each case matches its MHA counterpart in
+// getGroupStatsTestCases, getGroupEdgeLengthTestCases or getGroupTopLeftCausalTestCases
+// apart from the K/V head count.
+std::vector<GraphTestCase> getGroupGqaTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(!isGroupRow(config) || !servesGqa(config))
+        {
+            continue;
+        }
+        cases.push_back(withGqa(groupTestCase(config, /*withStats=*/true, GroupLengths::STANDARD)));
+
+        auto edge = groupTestCase(config, /*withStats=*/true, GroupLengths::EDGE);
+        edge.cuSeqLens = true;
+        edge.name += "CuSeqLenEdge";
+        cases.push_back(withGqa(edge));
+
+        if(isBottomRightCausalRow(config))
+        {
+            auto topLeftConfig = config;
+            topLeftConfig.mask = static_cast<int>(plan_utils::MaskType::TOP_LEFT_CAUSAL);
+            auto topLeft = configToTestCase(topLeftConfig);
+            topLeft.sharedOffsetTable = true;
+            topLeft.name += "SharedOffsets";
+            cases.push_back(withGqa(topLeft));
+        }
+    }
+    return cases;
+}
+
+// The gfx942 fp8 batch causal rows at S_q = S_kv = 512, past the row's single Q tile, under
+// both causal alignments, without and with stats. The gfx942 fp8 causal kernel computes every
+// Q tile after the first wrongly (ROCm/aiter#7593), so the engine declines these graphs. Once
+// a fixed kernel is vendored the engine accepts them, and these cases belong in a numerical
+// suite at the fp8 tolerance instead. Inputs span [-4, 4] so a numerical run would see
+// scores large enough to expose a wrong tile.
+std::vector<GraphTestCase> getFp8CausalMultiTileTestCases()
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.arch != "gfx942" || config.dtype != hip_kernel_provider_common::config::FP8BF16
+           || config.mode != hip_kernel_provider_common::BatchMode::BATCH
+           || !isBottomRightCausalRow(config))
+        {
+            continue;
+        }
+        for(const auto mask :
+            {plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL, plan_utils::MaskType::TOP_LEFT_CAUSAL})
+        {
+            auto maskConfig = config;
+            maskConfig.mask = static_cast<int>(mask);
+            for(const bool withStats : {false, true})
+            {
+                auto testCase = configToTestCase(maskConfig, withStats);
+                testCase.seqQ = 512;
+                testCase.seqKv = 512;
+                testCase.inputAbsMax = 4.0f;
+                testCase.name += "MultiTile";
+                cases.push_back(testCase);
+            }
+        }
+    }
+    return cases;
+}
+
 // Every fp8 row with mma_core_mode set to each FP8 path value cuDNN writes: FP8_E4M3 (the
 // sdpa_fp8() default) and FP8_E5M2. The mode names the MMA path, not the FP8_E4M3_FNUZ input
 // encoding.
@@ -836,6 +948,21 @@ INSTANTIATE_TEST_SUITE_P(GroupCuSeqLen,
 INSTANTIATE_TEST_SUITE_P(GroupEdgeLengths,
                          IntegrationGpuSdpaFwdBf16,
                          testing::ValuesIn(getGroupEdgeLengthTestCases()),
+                         GraphTestCase::getName);
+
+INSTANTIATE_TEST_SUITE_P(StandardGroupGqa,
+                         IntegrationGpuSdpaFwdBf16,
+                         testing::ValuesIn(getGroupGqaTestCases()),
+                         GraphTestCase::getName);
+
+TEST_P(IntegrationGpuSdpaFwdDeclines, IsNotOffered)
+{
+    runDeclineTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(Fp8CausalMultiTile,
+                         IntegrationGpuSdpaFwdDeclines,
+                         testing::ValuesIn(getFp8CausalMultiTileTestCases()),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)

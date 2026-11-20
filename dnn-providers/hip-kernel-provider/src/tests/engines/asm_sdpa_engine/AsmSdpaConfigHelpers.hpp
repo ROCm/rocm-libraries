@@ -41,6 +41,8 @@ struct GraphTestCase
 
     int64_t batch = 2;
     int64_t numHeads = 4;
+    /// K/V head count; unset means numHeads (multi-head attention).
+    std::optional<int64_t> numHeadsKv;
     int64_t seqQ = 256;
     int64_t seqKv = 128;
 
@@ -61,6 +63,8 @@ struct GraphTestCase
     /// Group mode only: the per-batch lengths of the offset and cumulative length tables. The
     /// batch count must match the set's.
     GroupLengths groupLengths = GroupLengths::STANDARD;
+    /// Inputs are filled uniformly from [-inputAbsMax, inputAbsMax].
+    float inputAbsMax = 1.0f;
 
     std::string name;
     std::string arch;
