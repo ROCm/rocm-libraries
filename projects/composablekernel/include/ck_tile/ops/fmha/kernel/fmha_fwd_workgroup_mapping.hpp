@@ -199,6 +199,14 @@ MapFmhaFwdWorkgroup(const FmhaFwdWorkgroupFeatures& features,
                     index_t num_xcds,
                     index_t nhead_ratio_qk = 1)
 {
+#if defined(__gfx120__)
+    if constexpr(!HasMask)
+    {
+        if(num_xcds == 0 && grid.num_qv_tiles == 1)
+            return {0, 0, block.head, block.batch};
+    }
+#endif
+
     // These are internal code paths, not independently tunable policies.
     enum class Path
     {
@@ -304,6 +312,15 @@ MapFmhaFwdWorkgroup(const FmhaFwdWorkgroupFeatures& features,
         batch                   = rest / grid.num_heads;
         head                    = rest - batch * grid.num_heads;
     }
+
+#if defined(__gfx120__)
+    if constexpr(!HasMask)
+    {
+        // A single V tile leaves the packed tile index equal to Q.
+        if(grid.num_v_tiles == 1)
+            return {tile, 0, head, batch};
+    }
+#endif
 
     index_t q       = tile / grid.num_v_tiles;
     const index_t v = tile - q * grid.num_v_tiles;
