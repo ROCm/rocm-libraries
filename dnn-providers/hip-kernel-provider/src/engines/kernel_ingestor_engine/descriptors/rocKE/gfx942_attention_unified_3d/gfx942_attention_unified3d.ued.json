@@ -16,5 +16,10 @@
   "knobs": [
     "block_size",
     "num_segments"
-  ]
+  ],
+  "predict_engine": {
+    "gfx942": [
+      "dca6eadf-134f-4f35-8195-3f78565f9f94"
+    ]
+  }
 }
