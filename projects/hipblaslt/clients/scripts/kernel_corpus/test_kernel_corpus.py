@@ -333,7 +333,9 @@ class MXPlanTests(unittest.TestCase):
 
     def test_the_fast_check_mx_oracle_uses_sparse_k_integer_exact_data_at_any_k(self):
         for a, k in (("Float6", 2048), ("BFloat6", 131584)):
-            cases, reason = plan.plan_kernel(record(mx_solution(4, a=a, k=k)), "smoke", "fast_check")
+            cases, reason = plan.plan_kernel(
+                record(mx_solution(4, a=a, k=k)), "smoke", "fast_check"
+            )
             self.assertIsNone(reason)
             case = cases[0]
             self.assertFalse(case.cpu_reference)
