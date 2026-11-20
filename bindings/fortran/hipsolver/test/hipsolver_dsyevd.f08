@@ -1,0 +1,86 @@
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+! Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+!
+! SPDX-License-Identifier: MIT
+!
+! Permission is hereby granted, free of charge, to any person obtaining a copy
+! of this software and associated documentation files (the "Software"), to deal
+! in the Software without restriction, including without limitation the rights
+! to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+! copies of the Software, and to permit persons to whom the Software is
+! furnished to do so, subject to the following conditions:
+!
+! The above copyright notice and this permission notice shall be included in
+! all copies or substantial portions of the Software.
+!
+! THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+! IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+! FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+! AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+! LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+! OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+! THE SOFTWARE.
+!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+!!!!!!!!!!!!!!
+! hipsolver dsyevd example (symmetric eigenvalues, Fortran 2008 interfaces)
+! see: https://rocm.docs.amd.com/projects/hipSOLVER/en/latest/
+!
+! Checks sum(eigenvalues) == trace(A) and sum(eigenvalues**2) == ||A||_F**2.
+! Native-array f2008 form; workspace via
+! hipsolverDsyevd_bufferSize; devInfo device-backed.
+!!!!!!!!!!!!!!
+!
+program hipsolver_dsyevd
+  use iso_c_binding
+  use hip
+  use hipsolver
+  implicit none
+  integer(c_int), parameter :: N = 4, lda = 4
+  real(c_double) :: hA(N,N) = reshape((/ &
+      10.0d0,  2.0d0,  3.0d0,  6.0d0, &
+       2.0d0, 11.0d0,  1.0d0,  0.0d0, &
+       3.0d0,  1.0d0, 12.0d0,  2.0d0, &
+       6.0d0,  0.0d0,  2.0d0, 13.0d0/), (/N,N/))
+  real(c_double) :: hD(N) = 0.0d0
+  real(c_double), pointer :: dA(:,:)
+  real(c_double), pointer :: dD(:)
+  integer(c_int), pointer :: dInfo
+  integer(c_int) :: hInfo
+  type(c_ptr) :: dWork, handle = c_null_ptr
+  integer(c_int) :: lwork
+  real(c_double) :: trace_A, fro2_A, error
+  real(c_double), parameter :: rtol = 1.0d-9
+  write(*,"(a)",advance="no") "-- Running test 'hipsolver_dsyevd' (Fortran 2008 interfaces) - "
+  trace_A = hA(1,1) + hA(2,2) + hA(3,3) + hA(4,4)
+  fro2_A = sum(hA**2)
+  call hipsolverCheck(hipsolverCreate(handle))
+  call hipCheck(hipMalloc(dA, source=hA))
+  call hipCheck(hipMalloc(dD, source=hD))
+  call hipCheck(hipMalloc(dInfo))
+  call hipsolverCheck(hipsolverDsyevd_bufferSize(handle, HIPSOLVER_EIG_MODE_NOVECTOR, &
+                                                 HIPSOLVER_FILL_MODE_UPPER, N, dA, lda, dD, lwork))
+  call hipCheck(hipMalloc(dWork, max(int(lwork,c_size_t) * 8, 1_c_size_t)))
+  call hipsolverCheck(hipsolverDsyevd(handle, HIPSOLVER_EIG_MODE_NOVECTOR, HIPSOLVER_FILL_MODE_UPPER, &
+                                      N, dA, lda, dD, dWork, lwork, c_loc(dInfo)))
+  call hipCheck(hipMemcpy(hD, dD, hipMemcpyDeviceToHost))
+  call hipCheck(hipMemcpy(hInfo, dInfo, hipMemcpyDeviceToHost))
+  if (hInfo /= 0) then
+     write(*,*) "FAILED! info = ", hInfo, " (expected 0)"
+     call exit(1)
+  end if
+  error = abs(sum(hD) - trace_A) / abs(trace_A)
+  if (.not. (error <= rtol)) then
+     write(*,*) "FAILED! sum(eigenvalues) = ", sum(hD), " expected trace = ", trace_A
+     call exit(1)
+  end if
+  error = abs(sum(hD**2) - fro2_A) / fro2_A
+  if (.not. (error <= rtol)) then
+     write(*,*) "FAILED! sum(eigenvalues**2) = ", sum(hD**2), " expected ||A||_F**2 = ", fro2_A
+     call exit(1)
+  end if
+  call hipCheck(hipFree(dA)); call hipCheck(hipFree(dD)); call hipCheck(hipFree(dInfo)); call hipCheck(hipFree(dWork))
+  call hipsolverCheck(hipsolverDestroy(handle))
+  write(*,*) "PASSED!"
+end program hipsolver_dsyevd
