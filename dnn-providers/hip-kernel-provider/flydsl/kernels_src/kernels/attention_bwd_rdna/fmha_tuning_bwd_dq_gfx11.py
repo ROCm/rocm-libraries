@@ -79,12 +79,10 @@ POLICY = {
 }
 # gfx12-generic: rows measured on gfx1201 against AOTriton's gfx1201 split kernels (whole-sample J4 timing); one row serves the exact (padded=0) and the padded
 # keys of a rung. Tuples are (contraction_shards, num_waves, block_n[, sched_strategy]); the 4th field is the LLVM `amdgpu-sched-strategy` of the rung. The knobs
-# that are not policy fields (`waves_per_eu`, `kt_lds_layout`, `lpt_tile_order`; at 48, 80, 192, 224 and 512) are spelled in every key of the rung.
+# that are not policy fields (`waves_per_eu`, `kt_lds_layout`, `lpt_tile_order`; at 80, 192 and 512) are spelled in every key of the rung.
 POLICY_GFX12 = {
     **POLICY,
-    128: (1, 4, 32),
     192: (1, 16, 32),
-    224: (2, 8, 16),
     320: (4, 8, 16),
     384: (4, 8, 16, "max-memory-clause"),
     448: (4, 8, 16),

@@ -27,7 +27,7 @@ instance list is untouched.
 | flydsl_kernels_describe | `v0.3.4.1-19-g89ad52f` |
 | rocm_version | `10.2.0` |
 | generic_target_shim | `chipset=gfx1200 flydsl_gpu_arch=gfx1200` |
-| inputs_sha256 | `62cadf1f1b8009527dacbf2f6377ee6e29d1e1e09dfd2cd07c54f919839205a4` |
+| inputs_sha256 | `d3487f4b5adb514186546958ca1e8c7c04cbee8c6cd704e54af6a1fd82b4036e` |
 
 ## Instances
 
@@ -36,23 +36,23 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 
 | Instance | Priority | VGPRs | LDS | SHA256 |
 | --- | ---: | ---: | ---: | --- |
-| `sdpa_bwd_dq_bf16_d128_causal0_bias1_pad0_fltail_dfbk_sdb1` | 135 | 240 | 16896 | `f6a5963bae808eb6` |
-| `sdpa_bwd_dq_bf16_d128_causal0_bias1_pad1_flg1_dfbk_sdb1` | 133 | 255 | 16896 | `e05721db38b70cce` |
-| `sdpa_bwd_dq_bf16_d128_causal0_bias1_pad1_flg1_dfbk_sdb1_f32bias1` | 133 | 256 | 16896 | `3146f9238af9c243` |
-| `sdpa_bwd_dq_bf16_d128_causal0_bias1_pad1_flg1_dfbk_sdb0_f32bias1` | 134 | 256 | 16896 | `1491fc355304bfa4` |
-| `sdpa_bwd_dq_bf16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 133 | 256 | 16896 | `b801d4dec666bb42` |
-| `sdpa_bwd_dq_bf16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1_f32bias1` | 133 | 256 | 16896 | `074c7e09a3f08fe3` |
-| `sdpa_bwd_dq_bf16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb0_f32bias1` | 134 | 256 | 16896 | `02b9d44914785291` |
-| `sdpa_bwd_dq_bf16_d128_causal1_pad0_fltail_dfbk` | 135 | 237 | 16896 | `001414bae787a4d0` |
-| `sdpa_bwd_dq_bf16_d128_causal1_pad1_flg1_dfbk` | 133 | 255 | 16896 | `f6d95d326082d284` |
-| `sdpa_bwd_dq_bf16_d128_causal1_pad1_flg1_dfbk_u2dq` | 133 | 255 | 16896 | `17ea4b26090758e4` |
-| `sdpa_bwd_dq_bf16_d128_causal1_dropout1_pad1_flg1_dfbk` | 133 | 255 | 16896 | `d9e8b3ed3a9d680b` |
-| `sdpa_bwd_dq_bf16_d128_causal1_dropout1_pad1_flg1_dfbk_u2dq` | 133 | 255 | 16896 | `c81d6eaf9c8876c7` |
-| `sdpa_bwd_dq_bf16_d128_causal0_pad0_fltail_dfbk` | 135 | 235 | 16896 | `cc40cda9367e4f53` |
-| `sdpa_bwd_dq_bf16_d128_causal0_pad1_flg1_dfbk` | 133 | 256 | 16896 | `6b9dea52feddc3fa` |
-| `sdpa_bwd_dq_bf16_d128_causal0_pad1_flg1_dfbk_u2dq` | 133 | 256 | 16896 | `d814a55121538c56` |
-| `sdpa_bwd_dq_bf16_d128_causal0_dropout1_pad1_flg1_dfbk` | 133 | 256 | 16896 | `79371e14920bcac3` |
-| `sdpa_bwd_dq_bf16_d128_causal0_dropout1_pad1_flg1_dfbk_u2dq` | 133 | 256 | 16896 | `313493b6786c87b5` |
+| `sdpa_bwd_dq_bf16_d128_causal0_bias1_pad0_fltail_dfbk_sdb1` | 135 | 148 | 24832 | `2dafd2f44f45c546` |
+| `sdpa_bwd_dq_bf16_d128_causal0_bias1_pad1_flg1_dfbk_sdb1` | 133 | 164 | 24832 | `606e975cde55b89a` |
+| `sdpa_bwd_dq_bf16_d128_causal0_bias1_pad1_flg1_dfbk_sdb1_f32bias1` | 133 | 164 | 24832 | `4625bf9270a7245d` |
+| `sdpa_bwd_dq_bf16_d128_causal0_bias1_pad1_flg1_dfbk_sdb0_f32bias1` | 134 | 166 | 24832 | `3bc7b7dbbfd5e6b0` |
+| `sdpa_bwd_dq_bf16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 133 | 169 | 24832 | `4ef2b2ef2e9ed11a` |
+| `sdpa_bwd_dq_bf16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1_f32bias1` | 133 | 166 | 24832 | `a7f426a3c10d80f4` |
+| `sdpa_bwd_dq_bf16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb0_f32bias1` | 134 | 166 | 24832 | `27f264ad1002902d` |
+| `sdpa_bwd_dq_bf16_d128_causal1_pad0_fltail_dfbk` | 135 | 144 | 24832 | `88b7fe061c92ce4b` |
+| `sdpa_bwd_dq_bf16_d128_causal1_pad1_flg1_dfbk` | 133 | 162 | 24832 | `dfe963d7bc59e217` |
+| `sdpa_bwd_dq_bf16_d128_causal1_pad1_flg1_dfbk_u2dq` | 133 | 162 | 24832 | `de8e123ef46ef132` |
+| `sdpa_bwd_dq_bf16_d128_causal1_dropout1_pad1_flg1_dfbk` | 133 | 163 | 24832 | `ff6b6e653ef579fc` |
+| `sdpa_bwd_dq_bf16_d128_causal1_dropout1_pad1_flg1_dfbk_u2dq` | 133 | 163 | 24832 | `88e6bc02df05072f` |
+| `sdpa_bwd_dq_bf16_d128_causal0_pad0_fltail_dfbk` | 135 | 144 | 24832 | `5eba6c26505d7a4f` |
+| `sdpa_bwd_dq_bf16_d128_causal0_pad1_flg1_dfbk` | 133 | 144 | 24832 | `8dd0201230241297` |
+| `sdpa_bwd_dq_bf16_d128_causal0_pad1_flg1_dfbk_u2dq` | 133 | 144 | 24832 | `f7e75fb0d4bb7f61` |
+| `sdpa_bwd_dq_bf16_d128_causal0_dropout1_pad1_flg1_dfbk` | 133 | 149 | 24832 | `17e300aa7400e79e` |
+| `sdpa_bwd_dq_bf16_d128_causal0_dropout1_pad1_flg1_dfbk_u2dq` | 133 | 149 | 24832 | `256b2733caf442e7` |
 | `sdpa_bwd_dq_bf16_d16_causal0_bias1_pad1_flg1_dfbk_sdb1` | 161 | 104 | 2560 | `b7f81f19b43c90c4` |
 | `sdpa_bwd_dq_bf16_d16_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 161 | 120 | 2560 | `df089ca3f0083ae8` |
 | `sdpa_bwd_dq_bf16_d16_causal1_pad1_flg1_dfbk` | 161 | 101 | 2560 | `71f43a877b3013f0` |
@@ -71,12 +71,12 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_bwd_dq_bf16_d192_causal1_dropout1_pad1_flg1_dfbk_wpe1` | 117 | 256 | 38912 | `98b8c9f5fcc6f76a` |
 | `sdpa_bwd_dq_bf16_d192_causal0_pad1_flg1_dfbk_wpe1` | 117 | 256 | 38912 | `46994f1ea6c78658` |
 | `sdpa_bwd_dq_bf16_d192_causal0_dropout1_pad1_flg1_dfbk_wpe1` | 117 | 256 | 38912 | `e62b9a4c5b0b1853` |
-| `sdpa_bwd_dq_bf16_d224_causal0_bias1_pad1_flg1_dfbk_wpe3_sdb1` | 109 | 222 | 30976 | `04a59105fc0a31c3` |
-| `sdpa_bwd_dq_bf16_d224_causal0_bias1_dropout1_pad1_flg1_dfbk_wpe3_sdb1` | 109 | 227 | 30976 | `33e3a90ed679ad54` |
-| `sdpa_bwd_dq_bf16_d224_causal1_pad1_flg1_dfbk_wpe3` | 109 | 213 | 30976 | `68986be791dc61e0` |
-| `sdpa_bwd_dq_bf16_d224_causal1_dropout1_pad1_flg1_dfbk_wpe3` | 109 | 220 | 30976 | `6e45c8bd282813c3` |
-| `sdpa_bwd_dq_bf16_d224_causal0_pad1_flg1_dfbk_wpe3` | 109 | 209 | 30976 | `685b8671ea143ce0` |
-| `sdpa_bwd_dq_bf16_d224_causal0_dropout1_pad1_flg1_dfbk_wpe3` | 109 | 217 | 30976 | `5a2ea55266792cc1` |
+| `sdpa_bwd_dq_bf16_d224_causal0_bias1_pad1_flg1_dfbk_sdb1` | 109 | 219 | 47360 | `5de954e8be77e858` |
+| `sdpa_bwd_dq_bf16_d224_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 109 | 223 | 47360 | `fc4e77b1e444dcbb` |
+| `sdpa_bwd_dq_bf16_d224_causal1_pad1_flg1_dfbk` | 109 | 217 | 47360 | `a7056d617d51e111` |
+| `sdpa_bwd_dq_bf16_d224_causal1_dropout1_pad1_flg1_dfbk` | 109 | 223 | 47360 | `7b9fa602b52b9bb8` |
+| `sdpa_bwd_dq_bf16_d224_causal0_pad1_flg1_dfbk` | 109 | 196 | 47360 | `01da521b089ceb74` |
+| `sdpa_bwd_dq_bf16_d224_causal0_dropout1_pad1_flg1_dfbk` | 109 | 213 | 47360 | `9cd95144e170eefd` |
 | `sdpa_bwd_dq_bf16_d256_causal0_bias1_pad0_fltail_dfbk_sdb1` | 103 | 182 | 49408 | `e80882457ca9efc7` |
 | `sdpa_bwd_dq_bf16_d256_causal0_bias1_pad1_flg1_dfbk_sdb1` | 101 | 194 | 49408 | `a3e5ee04bdb1f457` |
 | `sdpa_bwd_dq_bf16_d256_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 101 | 206 | 49408 | `2692c5e1d4fa06b2` |
@@ -98,12 +98,12 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_bwd_dq_bf16_d384_causal1_dropout1_pad1_flg1_dfbk` | 69 | 235 | 41216 | `29eccc25661bdb7a` |
 | `sdpa_bwd_dq_bf16_d384_causal0_pad1_flg1_dfbk` | 69 | 218 | 41216 | `6a05df0cbb8e00eb` |
 | `sdpa_bwd_dq_bf16_d384_causal0_dropout1_pad1_flg1_dfbk` | 69 | 227 | 41216 | `5a404786529d1b0e` |
-| `sdpa_bwd_dq_bf16_d48_causal0_bias1_pad1_flg1_dfbk_wpe3_sdb1` | 153 | 150 | 10112 | `0e5329676b3bcce1` |
-| `sdpa_bwd_dq_bf16_d48_causal0_bias1_dropout1_pad1_flg1_dfbk_wpe3_sdb1` | 153 | 144 | 10112 | `31cba37f62df4345` |
-| `sdpa_bwd_dq_bf16_d48_causal1_pad1_flg1_dfbk_wpe3` | 153 | 148 | 10112 | `f6af3a524c5400ae` |
-| `sdpa_bwd_dq_bf16_d48_causal1_dropout1_pad1_flg1_dfbk_wpe3` | 153 | 154 | 10112 | `c3ce59287260460b` |
-| `sdpa_bwd_dq_bf16_d48_causal0_pad1_flg1_dfbk_wpe3` | 153 | 130 | 10112 | `bb984a3cddf87f66` |
-| `sdpa_bwd_dq_bf16_d48_causal0_dropout1_pad1_flg1_dfbk_wpe3` | 153 | 133 | 10112 | `b1befa9c5e8a76c8` |
+| `sdpa_bwd_dq_bf16_d48_causal0_bias1_pad1_flg1_dfbk_sdb1` | 153 | 172 | 6656 | `113a199b86efab4f` |
+| `sdpa_bwd_dq_bf16_d48_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 153 | 166 | 6656 | `bab8d58e7260de6b` |
+| `sdpa_bwd_dq_bf16_d48_causal1_pad1_flg1_dfbk` | 153 | 171 | 6656 | `13ce173d07ca0a3c` |
+| `sdpa_bwd_dq_bf16_d48_causal1_dropout1_pad1_flg1_dfbk` | 153 | 177 | 6656 | `e788a99f98600240` |
+| `sdpa_bwd_dq_bf16_d48_causal0_pad1_flg1_dfbk` | 153 | 150 | 6656 | `9fe949b917006c0b` |
+| `sdpa_bwd_dq_bf16_d48_causal0_dropout1_pad1_flg1_dfbk` | 153 | 164 | 6656 | `f618d4c447cd1108` |
 | `sdpa_bwd_dq_bf16_d512_causal0_bias1_pad1_flg1_dfbk_wpe1_sdb1` | 37 | 251 | 57600 | `39db9d90b6e92b11` |
 | `sdpa_bwd_dq_bf16_d512_causal0_bias1_dropout1_pad1_flg1_dfbk_wpe1_sdb1` | 37 | 256 | 57600 | `45ae898e34fcf8e6` |
 | `sdpa_bwd_dq_bf16_d512_causal1_pad1_flg1_dfbk_wpe1` | 37 | 231 | 57600 | `17f27ea8d50f2b4d` |
@@ -142,23 +142,23 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_bwd_dq_bf16_d96_causal0_pad0_fltail_dfbk` | 143 | 177 | 12800 | `415923f60cf24c7f` |
 | `sdpa_bwd_dq_bf16_d96_causal0_pad1_flg1_dfbk` | 141 | 221 | 12800 | `1896bc7ee6044af5` |
 | `sdpa_bwd_dq_bf16_d96_causal0_dropout1_pad1_flg1_dfbk` | 141 | 219 | 12800 | `c15e54b493dbc749` |
-| `sdpa_bwd_dq_f16_d128_causal0_bias1_pad0_fltail_dfbk_sdb1` | 135 | 240 | 16896 | `e1e383d8cfd19ce1` |
-| `sdpa_bwd_dq_f16_d128_causal0_bias1_pad1_flg1_dfbk_sdb1` | 133 | 256 | 16896 | `467052085aa710a0` |
-| `sdpa_bwd_dq_f16_d128_causal0_bias1_pad1_flg1_dfbk_sdb1_f32bias1` | 133 | 256 | 16896 | `4be8ef02979f0d6f` |
-| `sdpa_bwd_dq_f16_d128_causal0_bias1_pad1_flg1_dfbk_sdb0_f32bias1` | 134 | 256 | 16896 | `149b9592517e0255` |
-| `sdpa_bwd_dq_f16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 133 | 256 | 16896 | `0bcf6deb14469ead` |
-| `sdpa_bwd_dq_f16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1_f32bias1` | 133 | 256 | 16896 | `b467819fc154801d` |
-| `sdpa_bwd_dq_f16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb0_f32bias1` | 134 | 256 | 16896 | `09c52440da47ac3b` |
-| `sdpa_bwd_dq_f16_d128_causal1_pad0_fltail_dfbk` | 135 | 235 | 16896 | `98d570e68e07865f` |
-| `sdpa_bwd_dq_f16_d128_causal1_pad1_flg1_dfbk` | 133 | 256 | 16896 | `7ddf2cfc325bfe4e` |
-| `sdpa_bwd_dq_f16_d128_causal1_pad1_flg1_dfbk_u2dq` | 133 | 256 | 16896 | `11e9663a71c1516f` |
-| `sdpa_bwd_dq_f16_d128_causal1_dropout1_pad1_flg1_dfbk` | 133 | 256 | 16896 | `293ef484ccb0de46` |
-| `sdpa_bwd_dq_f16_d128_causal1_dropout1_pad1_flg1_dfbk_u2dq` | 133 | 256 | 16896 | `4e8fc43574182ea6` |
-| `sdpa_bwd_dq_f16_d128_causal0_pad0_fltail_dfbk` | 135 | 237 | 16896 | `c855cdca2a45f943` |
-| `sdpa_bwd_dq_f16_d128_causal0_pad1_flg1_dfbk` | 133 | 256 | 16896 | `28dea3f52c90a617` |
-| `sdpa_bwd_dq_f16_d128_causal0_pad1_flg1_dfbk_u2dq` | 133 | 256 | 16896 | `bd8d237e6cc92abf` |
-| `sdpa_bwd_dq_f16_d128_causal0_dropout1_pad1_flg1_dfbk` | 133 | 256 | 16896 | `dcf26dfb94e360a6` |
-| `sdpa_bwd_dq_f16_d128_causal0_dropout1_pad1_flg1_dfbk_u2dq` | 133 | 256 | 16896 | `1bb97ae9b22134d3` |
+| `sdpa_bwd_dq_f16_d128_causal0_bias1_pad0_fltail_dfbk_sdb1` | 135 | 150 | 24832 | `05851ef32618ae94` |
+| `sdpa_bwd_dq_f16_d128_causal0_bias1_pad1_flg1_dfbk_sdb1` | 133 | 164 | 24832 | `725107c3ac672ddb` |
+| `sdpa_bwd_dq_f16_d128_causal0_bias1_pad1_flg1_dfbk_sdb1_f32bias1` | 133 | 164 | 24832 | `f7834ef441e71e6c` |
+| `sdpa_bwd_dq_f16_d128_causal0_bias1_pad1_flg1_dfbk_sdb0_f32bias1` | 134 | 166 | 24832 | `3e1c27e30ea25eba` |
+| `sdpa_bwd_dq_f16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 133 | 166 | 24832 | `752d4eed15da2a12` |
+| `sdpa_bwd_dq_f16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1_f32bias1` | 133 | 166 | 24832 | `f9e95493da4b12f9` |
+| `sdpa_bwd_dq_f16_d128_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb0_f32bias1` | 134 | 160 | 24832 | `9cd03cfdd31e113c` |
+| `sdpa_bwd_dq_f16_d128_causal1_pad0_fltail_dfbk` | 135 | 144 | 24832 | `037ae2f03409a7f1` |
+| `sdpa_bwd_dq_f16_d128_causal1_pad1_flg1_dfbk` | 133 | 162 | 24832 | `e84ff4d573a6c51d` |
+| `sdpa_bwd_dq_f16_d128_causal1_pad1_flg1_dfbk_u2dq` | 133 | 162 | 24832 | `21ebf0df87e0be93` |
+| `sdpa_bwd_dq_f16_d128_causal1_dropout1_pad1_flg1_dfbk` | 133 | 167 | 24832 | `55bc5d32a291a12b` |
+| `sdpa_bwd_dq_f16_d128_causal1_dropout1_pad1_flg1_dfbk_u2dq` | 133 | 167 | 24832 | `f48147d730434410` |
+| `sdpa_bwd_dq_f16_d128_causal0_pad0_fltail_dfbk` | 135 | 144 | 24832 | `71e1b5c1a76efda1` |
+| `sdpa_bwd_dq_f16_d128_causal0_pad1_flg1_dfbk` | 133 | 144 | 24832 | `3617d9fa3edb28a3` |
+| `sdpa_bwd_dq_f16_d128_causal0_pad1_flg1_dfbk_u2dq` | 133 | 144 | 24832 | `24a5da455e78895d` |
+| `sdpa_bwd_dq_f16_d128_causal0_dropout1_pad1_flg1_dfbk` | 133 | 153 | 24832 | `ae3478df6f6000a5` |
+| `sdpa_bwd_dq_f16_d128_causal0_dropout1_pad1_flg1_dfbk_u2dq` | 133 | 153 | 24832 | `eb1d69f6326973d9` |
 | `sdpa_bwd_dq_f16_d16_causal0_bias1_pad1_flg1_dfbk_sdb1` | 161 | 103 | 2560 | `57e53b42fd168734` |
 | `sdpa_bwd_dq_f16_d16_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 161 | 118 | 2560 | `3e81b82c45d6ed6f` |
 | `sdpa_bwd_dq_f16_d16_causal1_pad1_flg1_dfbk` | 161 | 103 | 2560 | `a58cfee5ff2cf9b6` |
@@ -177,12 +177,12 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_bwd_dq_f16_d192_causal1_dropout1_pad1_flg1_dfbk_wpe1` | 117 | 256 | 38912 | `9f3f65e44cbc106b` |
 | `sdpa_bwd_dq_f16_d192_causal0_pad1_flg1_dfbk_wpe1` | 117 | 256 | 38912 | `a15831a43858b02f` |
 | `sdpa_bwd_dq_f16_d192_causal0_dropout1_pad1_flg1_dfbk_wpe1` | 117 | 256 | 38912 | `4cce8000684973d3` |
-| `sdpa_bwd_dq_f16_d224_causal0_bias1_pad1_flg1_dfbk_wpe3_sdb1` | 109 | 222 | 30976 | `f16054e5813aa5df` |
-| `sdpa_bwd_dq_f16_d224_causal0_bias1_dropout1_pad1_flg1_dfbk_wpe3_sdb1` | 109 | 229 | 30976 | `75924e1e324f98bd` |
-| `sdpa_bwd_dq_f16_d224_causal1_pad1_flg1_dfbk_wpe3` | 109 | 213 | 30976 | `64b9505b4aaca7cc` |
-| `sdpa_bwd_dq_f16_d224_causal1_dropout1_pad1_flg1_dfbk_wpe3` | 109 | 220 | 30976 | `1bbbb25b2dc20484` |
-| `sdpa_bwd_dq_f16_d224_causal0_pad1_flg1_dfbk_wpe3` | 109 | 209 | 30976 | `42af39e67b29bd20` |
-| `sdpa_bwd_dq_f16_d224_causal0_dropout1_pad1_flg1_dfbk_wpe3` | 109 | 217 | 30976 | `66d539bae1d09679` |
+| `sdpa_bwd_dq_f16_d224_causal0_bias1_pad1_flg1_dfbk_sdb1` | 109 | 219 | 47360 | `ec1e876d183120ea` |
+| `sdpa_bwd_dq_f16_d224_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 109 | 222 | 47360 | `c4a21222d125f299` |
+| `sdpa_bwd_dq_f16_d224_causal1_pad1_flg1_dfbk` | 109 | 217 | 47360 | `fd513f46c69f797c` |
+| `sdpa_bwd_dq_f16_d224_causal1_dropout1_pad1_flg1_dfbk` | 109 | 223 | 47360 | `2f8dcb1052019cc1` |
+| `sdpa_bwd_dq_f16_d224_causal0_pad1_flg1_dfbk` | 109 | 196 | 47360 | `97ce5203e674f1dd` |
+| `sdpa_bwd_dq_f16_d224_causal0_dropout1_pad1_flg1_dfbk` | 109 | 213 | 47360 | `664666dbefa2a8cd` |
 | `sdpa_bwd_dq_f16_d256_causal0_bias1_pad0_fltail_dfbk_sdb1` | 103 | 184 | 49408 | `3bf56c08b765d6ad` |
 | `sdpa_bwd_dq_f16_d256_causal0_bias1_pad1_flg1_dfbk_sdb1` | 101 | 189 | 49408 | `11b10f9c1a58462b` |
 | `sdpa_bwd_dq_f16_d256_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 101 | 179 | 49408 | `052861998d2bc56c` |
@@ -204,12 +204,12 @@ changes when the object does. The full record is `gfx12-generic/manifest.json`.
 | `sdpa_bwd_dq_f16_d384_causal1_dropout1_pad1_flg1_dfbk` | 69 | 235 | 41216 | `a5745f279d0d39d8` |
 | `sdpa_bwd_dq_f16_d384_causal0_pad1_flg1_dfbk` | 69 | 224 | 41216 | `f6f5c58319bc7dd7` |
 | `sdpa_bwd_dq_f16_d384_causal0_dropout1_pad1_flg1_dfbk` | 69 | 227 | 41216 | `c6f93cc9e9b407b6` |
-| `sdpa_bwd_dq_f16_d48_causal0_bias1_pad1_flg1_dfbk_wpe3_sdb1` | 153 | 150 | 10112 | `5dcc7e7663fffbf5` |
-| `sdpa_bwd_dq_f16_d48_causal0_bias1_dropout1_pad1_flg1_dfbk_wpe3_sdb1` | 153 | 161 | 10112 | `a25aacd9badda957` |
-| `sdpa_bwd_dq_f16_d48_causal1_pad1_flg1_dfbk_wpe3` | 153 | 147 | 10112 | `f9b8724689387ad4` |
-| `sdpa_bwd_dq_f16_d48_causal1_dropout1_pad1_flg1_dfbk_wpe3` | 153 | 156 | 10112 | `c4c2bc61c250bafb` |
-| `sdpa_bwd_dq_f16_d48_causal0_pad1_flg1_dfbk_wpe3` | 153 | 130 | 10112 | `a9616e614616b41d` |
-| `sdpa_bwd_dq_f16_d48_causal0_dropout1_pad1_flg1_dfbk_wpe3` | 153 | 132 | 10112 | `c29d95e1e6c439ec` |
+| `sdpa_bwd_dq_f16_d48_causal0_bias1_pad1_flg1_dfbk_sdb1` | 153 | 170 | 6656 | `505de3269a46a1bd` |
+| `sdpa_bwd_dq_f16_d48_causal0_bias1_dropout1_pad1_flg1_dfbk_sdb1` | 153 | 174 | 6656 | `5738deb282f31aee` |
+| `sdpa_bwd_dq_f16_d48_causal1_pad1_flg1_dfbk` | 153 | 174 | 6656 | `ba779c68653a136e` |
+| `sdpa_bwd_dq_f16_d48_causal1_dropout1_pad1_flg1_dfbk` | 153 | 174 | 6656 | `dd07d360f2c9d37e` |
+| `sdpa_bwd_dq_f16_d48_causal0_pad1_flg1_dfbk` | 153 | 158 | 6656 | `d5fa809448ba5634` |
+| `sdpa_bwd_dq_f16_d48_causal0_dropout1_pad1_flg1_dfbk` | 153 | 164 | 6656 | `2b5cfee0c110a920` |
 | `sdpa_bwd_dq_f16_d512_causal0_bias1_pad1_flg1_dfbk_wpe1_sdb1` | 37 | 255 | 57600 | `c6224bef34d19b60` |
 | `sdpa_bwd_dq_f16_d512_causal0_bias1_dropout1_pad1_flg1_dfbk_wpe1_sdb1` | 37 | 248 | 57600 | `1dc2a7ff98da53ba` |
 | `sdpa_bwd_dq_f16_d512_causal1_pad1_flg1_dfbk_wpe1` | 37 | 227 | 57600 | `5b8d98ec97762937` |
