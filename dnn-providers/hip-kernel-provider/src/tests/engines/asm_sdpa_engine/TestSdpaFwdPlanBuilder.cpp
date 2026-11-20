@@ -865,6 +865,9 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableStatsLayoutFollowsBatchMode)
         return mutateGraph(
             createBshdSdpaFwdGraph(singleHeadDims, singleHeadDims, /*withStats=*/true), mutate);
     };
+    // floor((UINT32_MAX / 4 - (Sq - 1)) / (B * H - 1)) for B = 4, H = 8, Sq = 256, written out
+    // so the test does not restate the bound it checks.
+    constexpr int64_t K_LAST_FITTING_HEAD_STRIDE = 34636824;
     // Mutates the head-major stats graph that group mode accepts.
     const auto withGroupStats = [&](const std::function<void(GraphT&)>& mutate) {
         return mutateGraph(
@@ -935,6 +938,30 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableStatsLayoutFollowsBatchMode)
                            = {int64_t{1} << 29, int64_t{1} << 29, 1, 1};
                    }),
                    "Batch mode stats with a padded head stride whose LSE offsets wrap 32 bits"},
+         false},
+        // Single head, batch stride equal to the head stride: only the head-stride clause
+        // (s_h >= Sq) declines it.
+        {GraphTest{withSingleHeadBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides = {seqLenQ - 1, seqLenQ - 1, 1, 1};
+                   }),
+                   "Batch mode single-head stats with matching strides and head stride Sq - 1"},
+         false},
+        // B = 4, H = 8, Sq = 256: the last LSE element sits at byte 4 * (31 * s_h + 255), which
+        // fits in 32 bits up to s_h = 34636824.
+        {GraphTest{withBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides
+                           = {heads * K_LAST_FITTING_HEAD_STRIDE, K_LAST_FITTING_HEAD_STRIDE, 1, 1};
+                   }),
+                   "Batch mode stats at the largest head stride whose LSE offsets fit"},
+         true},
+        {GraphTest{withBatchStats([&](GraphT& graph) {
+                       findTensor(graph, "stats").strides
+                           = {heads * (K_LAST_FITTING_HEAD_STRIDE + 1),
+                              K_LAST_FITTING_HEAD_STRIDE + 1,
+                              1,
+                              1};
+                   }),
+                   "Batch mode stats one head stride past the 32-bit LSE bound"},
          false},
         {GraphTest{withBatchStats([&](GraphT& graph) {
                        findTensor(graph, "stats").strides = {2 * heads * seqLenQ, seqLenQ, 1, 1};
