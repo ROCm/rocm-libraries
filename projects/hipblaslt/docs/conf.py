@@ -9,10 +9,12 @@ import re
 
 from rocm_docs import ROCmDocs
 
-with open("../CMakeLists.txt", encoding="utf-8") as f:
-    match = re.search(r".*\bHIPBLASLT_PROJECT_VERSION\s+\"?([0-9.]+)[^0-9.]+", f.read())
+# hipBLASLt's version is the ROCm version it ships in, which the newest
+# CHANGELOG heading names ("## hipBLASLt X.Y.Z for ROCm X.Y.Z").
+with open("../CHANGELOG.md", encoding="utf-8") as f:
+    match = re.search(r"^## hipBLASLt \S+ for ROCm ([0-9]+\.[0-9]+\.[0-9]+)", f.read(), re.M)
     if not match:
-        raise ValueError("VERSION not found!")
+        raise ValueError("No '## hipBLASLt ... for ROCm X.Y.Z' heading in CHANGELOG.md")
     version_number = match[1]
 left_nav_title = f"hipBLASLt {version_number} Documentation"
 
