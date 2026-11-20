@@ -36,7 +36,6 @@ namespace rocalution
     class GlobalVector;
     template <typename ValueType>
     class GlobalMatrix;
-    class BackendPlacement;
     class ParallelManager;
 
     /** \private */
@@ -131,6 +130,27 @@ namespace rocalution
         template <typename ValueType2>
         ROCALUTION_EXPORT void CloneBackend(const BaseRocalution<ValueType2>& src); /**< \private */
 
+        /** \brief Move the object to the backend of another object
+      * \details
+      * Unlike \p CloneBackend, \p MoveToBackend keeps the parallel manager of the object.
+      * It places an object that has its own parallel manager, such as a \p GlobalMatrix
+      * of another level of a multigrid hierarchy, on the backend of \p src.
+      *
+      * @param[in]
+      * src Object, to whose backend the object is moved.
+      *
+      * \par Example
+      * \code{.cpp}
+      *   GlobalMatrix<ValueType> coarse(pm_coarse);
+      *   GlobalMatrix<ValueType> fine(pm_fine);
+      *
+      *   // coarse is on the backend of fine, and keeps pm_coarse
+      *   coarse.MoveToBackend(fine);
+      * \endcode
+      */
+        ROCALUTION_EXPORT
+        void MoveToBackend(const BaseRocalution<ValueType>& src);
+
         /** \brief Print object information
       * \details
       * \p Info can print object information about any rocALUTION object. This
@@ -182,8 +202,6 @@ namespace rocalution
         friend class GlobalMatrix<int>;
         friend class GlobalMatrix<float>;
         friend class GlobalMatrix<double>;
-
-        friend class BackendPlacement;
     };
 
 } // namespace rocalution

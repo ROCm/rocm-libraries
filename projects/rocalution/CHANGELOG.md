@@ -6,6 +6,7 @@ Full documentation for rocALUTION is available at [https://rocm.docs.amd.com/pro
 
 ### Added
 * Added the generic `amdgcnspirv` SPIR-V target to the default list of GPU architectures.
+* Added `MoveToBackend()` to vectors and matrices. It moves an object to the backend of another object and, unlike `CloneBackend()`, keeps the parallel manager of the object.
 
 ### Changed
 * `LocalMatrix::DiagonalMatrixMultL()` now requires a vector with one entry per row of the matrix, and `LocalMatrix::DiagonalMatrixMultR()` one with one entry per column. Before, both accepted either size.

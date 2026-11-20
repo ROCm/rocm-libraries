@@ -24,7 +24,6 @@
 #include "pairwise_amg.hpp"
 #include "../../utils/def.hpp"
 
-#include "../../base/backend_placement.hpp"
 #include "../../base/global_matrix.hpp"
 #include "../../base/global_vector.hpp"
 #include "../../base/local_matrix.hpp"
@@ -154,7 +153,7 @@ namespace rocalution
 
         // Create coarse operator, on the backend of the finest operator
         this->op_level_[0]->Clear();
-        BackendPlacement::MoveToBackendOf(*this->op_level_[0], *this->op_);
+        this->op_level_[0]->MoveToBackend(*this->op_);
         this->op_level_[0]->ConvertToCSR();
 
         this->trans_level_[0]->CloneBackend(*this->op_);
@@ -195,8 +194,7 @@ namespace rocalution
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
-                BackendPlacement::MoveToBackendOf(*this->op_level_[i - 1],
-                                                  *this->restrict_op_level_[i - 1]);
+                this->op_level_[i - 1]->MoveToBackend(*this->restrict_op_level_[i - 1]);
             }
         }
 
