@@ -2652,6 +2652,62 @@ class MxGemmIrTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "multiple of 32"):
                     build_mx_gemm(_spec(M, N, K))
 
+    def test_fp6_k_is_a_multiple_of_16(self):
+        """FP6 takes K a multiple of 16 (rows of whole 16-value packs, the
+        last E8M0 scale covering what is left of K) and K shorter than
+        tile_k. The other types keep K a multiple of 32 and a full tile; the
+        tiled operands and the ring keep their K rules."""
+        small = {"tile_m": 64, "tile_n": 64, "cluster_dim": (1, 1, 1)}
+        for K, tile_k in itertools.product(
+            (16, 32, 80, 112, 144, 240, 528, 1840), (128, 256, 512)
+        ):
+            spec = _spec6(256, 2048, K, tile_k=tile_k, **small)
+            with self.subTest(K=K, tile_k=tile_k):
+                self.assertIsNone(validate(spec))
+                self.assertEqual(spec.tail_steps, -(-(K % tile_k) // 128))
+        for K in (8, 24, 92, 104, 2048 + 8):
+            with self.subTest(K=K):
+                self.assertEqual(
+                    validate(_spec6(256, 2048, K, tile_k=128, **small)),
+                    "FP6 K must be a multiple of 16: A and B rows are whole "
+                    f"16-value packs (got K={K})",
+                )
+        self.assertRegex(
+            validate(_spec8(256, 2048, 80, tile_k=128, **small)), "multiple of 32"
+        )
+        self.assertEqual(
+            validate(_spec8(256, 2048, 96, tile_k=128, **small)),
+            "K must hold at least one full tile",
+        )
+        self.assertRegex(
+            validate(_spec6(256, 2048, 80, tile_k=128, tiled_operands="ab", **small)),
+            "multiple of tile_k",
+        )
+        self.assertIsNotNone(validate(_spec6(512, 512, 2048 + 16, **_RING)))
+
+    def test_fp6_short_k_is_one_partial_tile(self):
+        """FP6 K shorter than tile_k has no full tile: the peel and the loop
+        run zero times (the loop body is still emitted) and the K tail is the
+        only tile read. Loads past K reload tile 0, so no offset is K -
+        tile_k, which would be negative; with a full tile they reload the
+        last whole tile as before."""
+        small = {"tile_m": 64, "tile_n": 64, "cluster_dim": (1, 1, 1)}
+        for K, tile_k, buffers in (
+            (32, 128, 2),
+            (80, 256, 2),
+            (112, 512, 3),
+            (240, 256, 3),
+        ):
+            spec = _spec6(256, 2048, K, tile_k=tile_k, lds_buffers=buffers, **small)
+            with self.subTest(K=K, tile_k=tile_k, buffers=buffers):
+                llvm = _llvm(spec)
+                steps = buffers * spec.k_steps + spec.tail_steps
+                per_step = spec.wave_repeat_m * spec.wave_repeat_n
+                self.assertEqual(len(re.findall(_WMMA, llvm)), steps * per_step)
+                self.assertNotRegex(llvm, rf"= sub (nsw )?i32 %K, {tile_k}\b")
+        full = _llvm(_spec6(256, 2048, 512 + 32, tile_k=256, **small))
+        self.assertRegex(full, r"= sub (nsw )?i32 %K, 256\b")
+
     def test_short_k(self):
         """One or two full tiles, with or without a tail. The loop body is
         emitted (it runs zero times) after the odd-count peel."""
@@ -2874,6 +2930,35 @@ class MxGemmBenchReferenceTest(unittest.TestCase):
             self.assertTrue((swizzled[4, :, 3] == 0).all())
             self.assertTrue(np.array_equal(swizzled[4, :, :3], canonical[:, 16:19]))
             self.assertTrue(np.array_equal(swizzled[0], canonical[:, :4]))
+
+    def test_fp6_partial_scale_group(self):
+        """FP6 K % 32 != 0: ceil(K / 32) scale groups, the last covering the
+        K % 32 values left. The reference equals that of K padded to a
+        multiple of 32 with zero codes."""
+        for K, data in itertools.product((16, 80, 112, 144), ("exact", "sparse")):
+            spec = _spec6(
+                64, 48, K, tile_m=64, tile_n=16, wave_group=(4, 1), half_plr="none"
+            )
+            inputs = check_inputs(spec) if data == "exact" else sparse_inputs(spec)
+            groups = -(-K // 32)
+            padded_k = groups * 32
+            padded = replace(spec, K=padded_k)
+            codes = [np.pad(c, ((0, 0), (0, padded_k - K))) for c in inputs[5:]]
+            padded_inputs = (*inputs[:5], *codes)
+            with self.subTest(K=K, data=data):
+                self.assertEqual(inputs[2].shape, (64, groups))
+                self.assertEqual(inputs[3].shape, (groups, 48))
+                self.assertEqual(inputs[0].shape, (64, K // 4 * 3))
+                for beta in (0.0, 0.5):
+                    self.assertEqual(
+                        reference(spec, inputs, alpha=1.0, beta=beta).tobytes(),
+                        reference(
+                            padded, padded_inputs, alpha=1.0, beta=beta
+                        ).tobytes(),
+                    )
+                _, _, a_scale, b_scale, _ = device_inputs(inputs)
+                self.assertEqual(a_scale.shape, (-(-K // 128), 64, 4))
+                self.assertEqual(b_scale.shape, (-(-K // 128), 48, 4))
 
 
 class _FakeEvent:
@@ -3649,6 +3734,42 @@ class MxGemmDeviceTest(unittest.TestCase):
                     k_reads="contiguous",
                     out_dtype="bf16",
                 ),
+            ]
+            # FP6 K a multiple of 16: partial last scale blocks, K shorter
+            # than tile_k, M = 1 and 128 (partial M tiles).
+            + [
+                _spec6(M, 512, K, tile_m=tile_m, tile_k=tile_k, **fields)
+                for M, tile_m, fields in (
+                    (1, 16, {"wave_group": (1, 4), "cluster_dim": (2, 1, 1)}),
+                    (128, 64, {"cluster_dim": (1, 1, 1)}),
+                )
+                for K, tile_k in (
+                    (32, 128),
+                    (80, 256),
+                    (112, 128),
+                    (144, 512),
+                    (240, 256),
+                    (528, 256),
+                    (1840, 512),
+                )
+            ]
+            + [
+                _spec6(128, 512, K, tile_m=64, tile_n=64, tile_k=256, **fields)
+                for K in (80, 528)
+                for fields in (
+                    _DIRECT | {"cluster_dim": (1, 1, 1)},
+                    {"half_b_order": "late", "k_reads": "contiguous"}
+                    | {
+                        "scale_swap": "wait",
+                        "lds_buffers": 3,
+                        "cluster_dim": (2, 2, 1),
+                    },
+                    {"half_plr": "none", "k_reads": "contiguous", "scale_swap": "wait"}
+                    | {"read_issue": "interleave", "cluster_dim": (1, 1, 1)},
+                    {"half_b_order": "late", "wmma_reuse": "b", "read_bases": "fixed"}
+                    | {"cluster_dim": (1, 1, 1)},
+                    _DIRECT | {"scales": "registers", "cluster_dim": (1, 1, 1)},
+                )
             ]
             # Three LDS buffers: every peel, a K tail, read-ahead, FP8.
             + [

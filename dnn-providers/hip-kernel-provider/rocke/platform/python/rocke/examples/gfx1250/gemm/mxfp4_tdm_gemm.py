@@ -47,8 +47,10 @@ def make_inputs(spec: MxFp4TdmGemmSpec, seed: int = 0x32F4, *, signed: bool = Fa
     else:
         a_codes = rng.integers(0, 2, (spec.M, spec.K), dtype=np.uint8) * 2
         b_codes = rng.integers(0, 2, (spec.N, spec.K), dtype=np.uint8) * 2
-    a_scale = rng.integers(125, 129, (spec.M, spec.K // spec.block_k), dtype=np.uint8)
-    b_scale = rng.integers(125, 129, (spec.K // spec.block_k, spec.N), dtype=np.uint8)
+    # A partial last scale group when 32 does not divide K (FP6).
+    groups = -(-spec.K // spec.block_k)
+    a_scale = rng.integers(125, 129, (spec.M, groups), dtype=np.uint8)
+    b_scale = rng.integers(125, 129, (groups, spec.N), dtype=np.uint8)
     c_values = rng.integers(0, 3, (spec.M, spec.N), dtype=np.uint8).astype(np.float32)
     c = c_values.astype(ml_dtypes.float8_e4m3fn)
     return (

@@ -71,6 +71,8 @@ _ATOM_K = 128
 _WAVE = 32
 _WAVES = 4
 _SCALE_GROUPS_PER_STEP = _ATOM_K // 32
+# K values in one FP6 pack (12 bytes): FP6 K is a multiple of this.
+_FP6_PACK_K = 16
 
 
 @dataclass(frozen=True)
@@ -384,7 +386,8 @@ class MxGemmSpec:
     def k_bytes(self, k, ops=IntOps):
         """Bytes of ``k`` K values of an A or B row; ``k`` is an int, or an
         IR value with ``ops``. FP4 packs two values in a byte, FP6 four in
-        three bytes; ``k`` is a multiple of 4 (K is one of 32)."""
+        three bytes; ``k`` is a multiple of 4 (FP6 K is one of 16, the
+        others' one of 32)."""
         unit = gcd(self.elem_bits, 8)
         return ops.mul(ops.div(k, 8 // unit), self.elem_bits // unit)
 
@@ -1023,7 +1026,15 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
         return f"mx_gemm is gfx1250-only (got {arch!r})"
     if min(spec.M, spec.N, spec.K) <= 0:
         return "M, N and K must be positive"
-    if spec.K % spec.block_k:
+    if spec.a_dtype == "fp6":
+        # CK Tile's FP6 contract: rows of whole 16-value packs; the last
+        # E8M0 scale covers the K % 32 values left, the TDM zero-fills past K.
+        if spec.K % _FP6_PACK_K:
+            return (
+                f"FP6 K must be a multiple of {_FP6_PACK_K}: A and B rows are "
+                f"whole {_FP6_PACK_K}-value packs (got K={spec.K})"
+            )
+    elif spec.K % spec.block_k:
         return (
             f"K must be a multiple of {spec.block_k}: each E8M0 scale covers "
             f"{spec.block_k} K values (got K={spec.K})"
@@ -1135,7 +1146,9 @@ def validate(spec: MxGemmSpec, arch: str = "gfx1250") -> str | None:
     # K < 2 * tile_k is supported but is a poor fit for this pipeline:
     # the tile k+2 refills and GL2 prefetches past K re-load the last tile, and
     # with one or two tiles they are most of the loads. Prefer a short-K kernel.
-    if spec.K < spec.tile_k:
+    # FP6 also takes K < tile_k: one partial tile, and the loads past K
+    # re-load it (clamp_k).
+    if spec.K < spec.tile_k and spec.a_dtype != "fp6":
         return "K must hold at least one full tile"
     if spec.local_prefetch not in (0, 1):
         return "local_prefetch must be 0 or 1"
@@ -1331,10 +1344,16 @@ class _Kernel:
         return ops.div(K, _ATOM_K)
 
     def clamp_k(self, k):
+        """``k``, or past K the last whole tile's start (tile 0 when K is
+        shorter than a tile)."""
         b = self.b
-        return b.select(
-            b.cmp_lt(k, self.params["K"]), k, b.sub(self.params["K"], self.tile_k_v)
-        )
+        inside = b.cmp_lt(k, self.params["K"])
+        return b.select(inside, k, self.last_tile_k())
+
+    def last_tile_k(self):
+        if self.spec.K < self.spec.tile_k:
+            return self.c0
+        return self.b.sub(self.params["K"], self.tile_k_v)
 
 
 def wave_coords(spec: MxGemmSpec, wave, ops=IntOps):
@@ -1910,9 +1929,7 @@ class Gl2Prefetcher:
         cluster_x, cluster_y, _ = spec.cluster_dim
         # Branch-free: any branch in the loop body makes LLVM drain the LDS
         # read pipeline. Past the end, the last tile is prefetched again.
-        k_ahead = b.select(
-            b.cmp_lt(k_ahead, p["K"]), k_ahead, b.sub(p["K"], k.tile_k_v)
-        )
+        k_ahead = k.clamp_k(k_ahead)
         k_byte = spec.k_bytes(k_ahead, ops)
         whole_lines = row_bytes % _GL2_LINE_BYTES == 0
         straddle = not whole_lines and _GL2_LINE_BYTES % row_bytes != 0

@@ -358,7 +358,7 @@ def sparse_inputs(spec: MxGemmSpec):
         full = np.zeros((rows, spec.K), dtype=np.uint8)
         full[:, k_index] = _sparse_codes(rng, (rows, len(k_index)), dtype)
         codes.append(full)
-    groups = spec.K // spec.block_k
+    groups = -(-spec.K // spec.block_k)
     low, high = (125, 129) if spec.a_dtype == "fp4" else (126, 128)
     a_scale = rng.integers(low, high, (spec.M, groups), dtype=np.uint8)
     if spec.b_dtype == "fp6":
@@ -389,7 +389,7 @@ def timed_inputs(spec: MxGemmSpec, seed: int = 0x32F4):
         codes = rng.integers(0, 64 if fp6 else 256, (rows, spec.K), dtype=np.uint8)
         np.bitwise_and(codes, 0x2F if fp6 else 0xBF, out=codes)
         operands.append(pack_fp6_rows(codes) if fp6 else codes)
-    groups = spec.K // spec.block_k
+    groups = -(-spec.K // spec.block_k)
     return (
         *operands,
         rng.integers(124, 131, (spec.M, groups), dtype=np.uint8),
@@ -438,7 +438,8 @@ def reference(
     """FP32 grouped-scale reference rounded to ``spec.out_dtype`` the way the
     kernel stores it (FP8 saturating, FP16/BF16 round to nearest even). It is
     exact for ``check_inputs`` and ``sparse_inputs``: their FP32 partial sums
-    are exact. All-zero K groups of A are skipped.
+    are exact. All-zero K groups of A are skipped; the last group holds
+    the K % 32 values left when 32 does not divide K (FP6).
 
     ``rows`` and ``cols`` (index arrays) restrict it to that block of D."""
     _, _, a_scale, b_scale, c, a_codes, b_codes = inputs
@@ -450,7 +451,7 @@ def reference(
     sb = decode_e8m0(b_scale).astype(np.float32)
     a_values, b_values = decode_table(spec.a_dtype), decode_table(spec.b_dtype)
     out = np.zeros((a_codes.shape[0], b_codes.shape[0]), dtype=np.float32)
-    for group in range(spec.K // spec.block_k):
+    for group in range(-(-spec.K // spec.block_k)):
         begin, end = group * spec.block_k, (group + 1) * spec.block_k
         a_group = a_codes[:, begin:end]
         if not a_group.any():
