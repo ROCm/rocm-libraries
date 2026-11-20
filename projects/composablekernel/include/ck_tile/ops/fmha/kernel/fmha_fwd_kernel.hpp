@@ -196,11 +196,16 @@ inline constexpr bool epilogue_uses_smem_v = epilogue_uses_smem<Epilogue>::value
 
 } // namespace detail
 
-template <typename FmhaPipeline_, typename EpiloguePipeline_>
+// kSplitKV_: the split-KV main kernel of qr_tdm_pingpong. The grid's head dimension runs
+// nhead * num_splits workgroups (split fastest); split i takes its share of the key tiles and
+// writes its own normalized O and LSE at split i of o_ptr / lse_ptr (fp32 accumulators), which
+// the split-KV combine kernel merges.
+template <typename FmhaPipeline_, typename EpiloguePipeline_, bool kSplitKV_ = false>
 struct FmhaFwdKernel
 {
     using FmhaPipeline                           = ck_tile::remove_cvref_t<FmhaPipeline_>;
     using EpiloguePipeline                       = ck_tile::remove_cvref_t<EpiloguePipeline_>;
+    static constexpr bool kSplitKV               = kSplitKV_;
     static constexpr ck_tile::index_t kBlockSize = FmhaPipeline::kBlockSize;
 
     template <typename T>
@@ -259,6 +264,10 @@ struct FmhaFwdKernel
     // rows itself (MergedHeads); qr_tdm_pingpong takes the merged rows' q descales, MX scales
     // and sink logits by their heads (BlockFmhaQuantScales), the kernel's Q/O views carrying
     // the rest.
+    // Split-KV runs qr_tdm_pingpong, with the LSE every split must store and no sink tokens (a
+    // split takes a range of key tiles); merged heads keep their rows' strides on each split.
+    static_assert(!kSplitKV || (kPipelineName == "qr_tdm_pingpong" && kStoreLSE && !kHasSink),
+                  "split-KV is implemented for qr_tdm_pingpong with LSE, without sink tokens");
     static_assert(!kMergeNumHeadGroupsSeqLenQ || kPipelineName == "qr_tdm_fp8_sched" ||
                       kPipelineName == "qr_tdm_pingpong",
                   "merged query heads are implemented for qr_tdm_fp8_sched and qr_tdm_pingpong");
@@ -536,6 +545,14 @@ struct FmhaFwdKernel
         ck_tile::index_t min_seqlen_q = 0;
     };
 
+    // Split-KV: the split count and the split strides of the O and LSE accumulators.
+    struct FmhaFwdSplitKVKargs
+    {
+        ck_tile::index_t num_splits       = 1;
+        ck_tile::index_t split_stride_o   = 0;
+        ck_tile::index_t split_stride_lse = 0;
+    };
+
     struct FmhaFwdBatchModeKargs
         : FmhaFwdCommonKargs,
           std::conditional_t<BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS,
@@ -558,7 +575,8 @@ struct FmhaFwdKernel
                                          FmhaFwdCommonPerHeadKargs,
                                          FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdBatchModeDropoutKargs, FmhaFwdEmptyKargs<4>>,
-          std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>
+          std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>,
+          std::conditional_t<kSplitKV, FmhaFwdSplitKVKargs, FmhaFwdEmptyKargs<7>>
     {
         ck_tile::index_t batch_stride_q;
         ck_tile::index_t batch_stride_k;
@@ -594,7 +612,8 @@ struct FmhaFwdKernel
                                          FmhaFwdEmptyKargs<3>>>>>,
           std::conditional_t<kHasDropout, FmhaFwdCommonDropoutKargs, FmhaFwdEmptyKargs<4>>,
           std::conditional_t<kHasLogitsSoftCap, FmhaFwdLogitsSoftCapKargs, FmhaFwdEmptyKargs<5>>,
-          std::conditional_t<kSkipMinSeqlenQ, FmhaFwdSkipMinSeqlenQKargs, FmhaFwdEmptyKargs<6>>
+          std::conditional_t<kSkipMinSeqlenQ, FmhaFwdSkipMinSeqlenQKargs, FmhaFwdEmptyKargs<6>>,
+          std::conditional_t<kSplitKV, FmhaFwdSplitKVKargs, FmhaFwdEmptyKargs<7>>
     {
         const int32_t* seqstart_q_ptr;
         const int32_t* seqstart_k_ptr;
@@ -715,6 +734,7 @@ struct FmhaFwdKernel
                     {},               // placeholder for qscale
                     {},               // placeholder for dropout
                     {},               // placeholder for logits_soft_cap
+                    {},               // placeholder for split-kv
                     batch_stride_q,
                     batch_stride_k,
                     batch_stride_v,
@@ -1188,6 +1208,7 @@ struct FmhaFwdKernel
                     {},               // placeholder for dropout
                     {},               // placeholder for logits_soft_cap
                     {},               // placeholder for min_seqlen_q
+                    {},               // placeholder for split-kv
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                     reinterpret_cast<const int32_t*>(seqstart_k_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_q_ptr),
@@ -1686,15 +1707,12 @@ struct FmhaFwdKernel
                 return reject("merged query heads do not support cu_seqlen_q/k_ptr.");
             if constexpr(kPipelineName == "qr_tdm_pingpong")
             {
-                // its merged rows' mask is each head's single query under a bottom-right
-                // causal mask (see the kernel's FmhaMask)
+                // its merged rows under a mask are the heads' single query, each taking that
+                // query's key range (any window; see the kernel's FmhaMask)
                 if constexpr(kHasMask)
                 {
-                    if(s != 1 ||
-                       kargs.mask_type != GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT ||
-                       kargs.window_size_left >= 0 || kargs.window_size_right != 0)
-                        return reject("merged query heads take only a single-query "
-                                      "bottom-right causal mask.");
+                    if(s != 1)
+                        return reject("merged query heads take a mask on a single query only.");
                 }
             }
         }
@@ -2805,7 +2823,20 @@ struct FmhaFwdKernel
             // qr_tdm_fp8_sched takes the fixed LDS arena path, one-wavefront decode tiles included.
             constexpr bool kPrefillLdsPath = PrefillCase || kPipelineName == "qr_tdm_fp8_sched";
             // divide problem
-            const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
+            const auto [i_tile_m, i_tile_n, i_nhead_split, i_batch] = GetTileIndex(kargs);
+            // Split-KV: the head index runs nhead * num_splits, split fastest.
+            const index_t i_split = [&]() -> index_t {
+                if constexpr(kSplitKV)
+                    return i_nhead_split % kargs.num_splits;
+                else
+                    return 0;
+            }();
+            const index_t i_nhead = [&]() -> index_t {
+                if constexpr(kSplitKV)
+                    return i_nhead_split / kargs.num_splits;
+                else
+                    return i_nhead_split;
+            }();
             const index_t i_m0                                = i_tile_m * FmhaPipeline::kM0;
             const index_t i_n1                                = i_tile_n * FmhaPipeline::kN1;
 
@@ -2959,9 +2990,16 @@ struct FmhaFwdKernel
                 (static_cast<long_index_t>(i_nhead_k) * kargs.nhead_stride_v + batch_offset_v) /
                     numeric_traits<VDataType>::PackedSize;
 
+            long_index_t split_offset_o   = 0;
+            long_index_t split_offset_lse = 0;
+            if constexpr(kSplitKV)
+            {
+                split_offset_o   = static_cast<long_index_t>(i_split) * kargs.split_stride_o;
+                split_offset_lse = static_cast<long_index_t>(i_split) * kargs.split_stride_lse;
+            }
             ODataType* o_ptr = reinterpret_cast<ODataType*>(kargs.o_ptr) +
                                static_cast<long_index_t>(i_nhead_q) * kargs.nhead_stride_o +
-                               batch_offset_o;
+                               batch_offset_o + split_offset_o;
 
             // Q/K/V DRAM and DRAM window
             const auto q_dram = [&] {
@@ -3479,7 +3517,7 @@ struct FmhaFwdKernel
                     LSEDataType* lse_ptr =
                         reinterpret_cast<LSEDataType*>(kargs.lse_ptr) +
                         static_cast<long_index_t>(i_nhead_) * kargs.nhead_stride_lse +
-                        batch_offset_lse;
+                        batch_offset_lse + split_offset_lse;
 
                     const auto lse_dram = [&] {
                         const auto lse_dram_naive = [&] {
@@ -3505,22 +3543,21 @@ struct FmhaFwdKernel
             }();
 
             FmhaMask mask = [&]() {
-                // qr_tdm_pingpong's merged rows are the heads' single queries (seqlen_q 1,
-                // bottom-right causal): num_rows_q rows, each seeing every key, i.e. a window
-                // reaching num_rows_q - 1 further right.
+                // qr_tdm_pingpong's merged rows under a mask are the heads' single queries
+                // (seqlen_q 1): the mask has that one query row, which the pipeline applies to
+                // every merged row (any window). Unmasked, the mask spans the merged rows.
                 constexpr bool kRowsAreHeads =
                     kMergeNumHeadGroupsSeqLenQ && kPipelineName == "qr_tdm_pingpong";
-                const index_t mask_rows = kRowsAreHeads ? num_rows_q : kargs.seqlen_q;
                 if constexpr(kHasMask)
                     return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                         kargs.window_size_left,
-                        kargs.window_size_right + (kRowsAreHeads ? num_rows_q - 1 : 0),
+                        kargs.window_size_right,
                         kargs.sink_size,
-                        mask_rows,
+                        kargs.seqlen_q,
                         kargs.seqlen_k,
                         kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
                 else
-                    return FmhaMask{mask_rows, kargs.seqlen_k};
+                    return FmhaMask{kRowsAreHeads ? num_rows_q : kargs.seqlen_q, kargs.seqlen_k};
             }();
 
             // WA i_batch capture structure binding before c++20
@@ -3637,8 +3674,9 @@ struct FmhaFwdKernel
                     return GetSoftmaxScale(kargs, descale_offset_q, descale_offset_k, i_m0);
             }();
             // Merged rows read their sinks per head in the pipeline; a finite value marks one.
+            // Split-KV: the sink logit joins the softmax of split 0 only.
             const float sink_value =
-                kargs.sink_ptr != nullptr
+                kargs.sink_ptr != nullptr && i_split == 0
                     ? (kMergeNumHeadGroupsSeqLenQ
                            ? 0.0f
                            : (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s)
@@ -3789,7 +3827,14 @@ struct FmhaFwdKernel
                                           tdm_soft_cap_rcp,
                                           tdm_randval_dram_window,
                                           tdm_dropout,
-                                          quant);
+                                          quant,
+                                          [&]() -> index_t {
+                                              if constexpr(kSplitKV)
+                                                  return kargs.num_splits;
+                                              else
+                                                  return 1;
+                                          }(),
+                                          i_split);
                 }
                 else if constexpr(kTakesTdmDescales && kBlockQScale)
                 {

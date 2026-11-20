@@ -96,6 +96,11 @@ struct BlockFmhaFwdSplitKVCombinePipeline
                 constexpr std::array occupancy{2, 2, 2, 2, 2, 1};
                 return occupancy[detail::log2<kMaxSplits>::value - 2];
             }
+            else // d512 (qr_tdm_pingpong's split-KV)
+            {
+                constexpr std::array occupancy{1, 1, 1, 1, 1, 1};
+                return occupancy[detail::log2<kMaxSplits>::value - 2];
+            }
         }
     }();
 

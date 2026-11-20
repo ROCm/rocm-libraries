@@ -593,8 +593,13 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
     // Sink-aware K tile range of the block's rows: (sink_seq_end, seqlen_k_start,
     // seqlen_k_end). For non-sink, sink_seq_end is always 0.
+    // Split-KV: split i_split of num_splits takes the next equal share of the range's key tiles,
+    // so only the last split ends off a tile boundary (empty when the tiles run out).
     template <typename QOrigin>
-    CK_TILE_DEVICE static auto GetKTileRange(const FmhaMask& mask, const QOrigin& q_origin)
+    CK_TILE_DEVICE static auto GetKTileRange(const FmhaMask& mask,
+                                             const QOrigin& q_origin,
+                                             index_t num_splits = 1,
+                                             index_t i_split    = 0)
     {
         if constexpr(kHasSink)
             return mask.GetSinkTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
@@ -602,6 +607,14 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         {
             auto [start, end] =
                 mask.GetTileRangeAlongX(q_origin.at(I0), number<kM0>{}, number<kN0>{});
+            if(num_splits > 1)
+            {
+                const index_t tiles_per_split =
+                    integer_divide_ceil(integer_divide_ceil(end - start, kN0), num_splits);
+                const index_t split_start = start + i_split * tiles_per_split * kN0;
+                end   = min(end, split_start + tiles_per_split * kN0);
+                start = min(split_start, end);
+            }
             return ck_tile::make_tuple(0, start, end);
         }
     }
@@ -752,6 +765,20 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             if(NeedsScoreMask(mask, q_origin.at(I0), k_start))
             {
                 const index_t k0 = OpaqueIndex(k_start);
+                // Merged rows under a mask are the heads' single queries (seqlen_q 1; the mask
+                // has one row): every row takes row 0's key range.
+                if constexpr(Problem::kMergeNumHeadGroupsSeqLenQ && FmhaMask::IsMasking)
+                {
+                    set_tile_if(
+                        s_acc, -numeric<SMPLComputeDataType>::infinity(), [&](auto tile_idx) {
+                            const auto col = k0 + tile_idx.at(I1);
+                            if constexpr(kHasSink)
+                                return mask.IsOutOfSinkBound(0, col);
+                            else
+                                return mask.IsOutOfBound(0, col);
+                        });
+                    return;
+                }
                 const index_t q0 = OpaqueIndex(q_origin.at(I0));
                 if constexpr(detail::qr_tdm_band_mask<FmhaMask>::value && !kHasSink)
                 {
@@ -1040,7 +1067,9 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                float logits_soft_cap_rcp                               = 0.f,
                RandValDramBlockWindowTmp randval_dram_block_window_tmp = {},
                Dropout dropout                                         = {},
-               QuantScaleArgs quant_scale_args                         = {}) const
+               QuantScaleArgs quant_scale_args                         = {},
+               index_t num_splits                                      = 1,
+               index_t i_split                                         = 0) const
     {
         static_assert(
             std::is_same_v<QDataType, remove_cvref_t<typename QDramBlockWindowTmp::DataType>> &&
@@ -1102,7 +1131,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
         const auto q_origin = q_dram_block_window_tmp.get_window_origin();
 
-        const auto tile_range_result      = GetKTileRange(mask, q_origin);
+        const auto tile_range_result      = GetKTileRange(mask, q_origin, num_splits, i_split);
         const auto sink_seq_end           = tile_range_result.get(ck_tile::number<0>{});
         const auto logical_seqlen_k_start = tile_range_result.get(ck_tile::number<1>{});
         const auto logical_seqlen_k_end   = tile_range_result.get(ck_tile::number<2>{});
@@ -1972,7 +2001,9 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                float logits_soft_cap_rcp                               = 0.f,
                RandValDramBlockWindowTmp randval_dram_block_window_tmp = {},
                Dropout dropout                                         = {},
-               QuantScaleArgs quant_scale_args                         = {}) const
+               QuantScaleArgs quant_scale_args                         = {},
+               index_t num_splits                                      = 1,
+               index_t i_split                                         = 0) const
     {
         return (*this)(q_dram_block_window_tmp,
                        k_dram_block_window_tmp,
@@ -1988,7 +2019,9 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                        logits_soft_cap_rcp,
                        randval_dram_block_window_tmp,
                        dropout,
-                       quant_scale_args);
+                       quant_scale_args,
+                       num_splits,
+                       i_split);
     }
 };
 

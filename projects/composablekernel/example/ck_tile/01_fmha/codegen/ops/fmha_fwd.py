@@ -1172,13 +1172,15 @@ def qr_tdm_pingpong_packgqa_pipelines(hdim_pair, mask_impl, qscales):
     one tile's rows (TileFmhaMergeHeadsTraits; fmha_fwd_can_merge_head_groups), so each KV
     head's K/V is read once. Merged rows take their heads' q descales and sink logits
     (MergedQDescales) but no bias; and their row index is a head's, so the masks are none or,
-    with one query per head, a bottom-right causal one (whose rows all see every key). Batch
+    with one query per head, any (a bottom-right causal one first, then windows). Batch
     mode, row-major V; dispatched ahead of the unmerged pipelines."""
     causal = "causal"
     no_mask = "s_no" if mask_impl == "simplified" else "no"
+    # any window: the pipeline gives every merged row the single query row's key range
+    window = "s_mask" if mask_impl == "simplified" else "generic"
     pipelines = []
     for mask, lse, qscale, sink in itertools.product(
-        (no_mask, causal), ("f", "t"), qscales, ("f", "t")
+        (no_mask, causal, window), ("f", "t"), qscales, ("f", "t")
     ):
         constraint = CppConstraint()
         if mask == causal:
@@ -1186,6 +1188,8 @@ def qr_tdm_pingpong_packgqa_pipelines(hdim_pair, mask_impl, qscales):
                 "t.mask_type == mask_enum::mask_bottom_right && a.window_size_left < 0"
                 " && a.window_size_right == 0 && a.seqlen_q == 1"
             )
+        elif mask == window:
+            constraint &= CppConstraint("a.seqlen_q == 1")
         pipelines += qr_tdm_pingpong_pipelines(
             hdim_pair,
             "row",
@@ -2470,6 +2474,32 @@ def _gfx125_qr_tdm_pingpong_tile(
     return FmhaFwdTileSize(bm0, bn0, wk, hdim_v, pv, k_row,  wm, wn, 1,  wm, wn, 1,  16, 16, wk,  16, 16, pv,  -1, CppConstraint(constraint), "qr_tdm_pingpong")  # fmt: skip
 
 
+# qr_tdm_pingpong's decode (16-row) tile per input width and (hdim, hdim_v): (key warps, keys a
+# trip, keys a trip from that many keys on). Key warps kw split each trip's keys through both
+# gemms (the pipeline's kKeySplit), the other 4 / kw warps V's columns; a trip is at least one
+# PV warp gemm per key warp (32 keys at 16 bits, 64 at fp8, 128 for MX). The trips are the
+# longest whose K and V fit 128 KB of LDS and whose O and V operands fit 192 VGPRs a lane
+# (two blocks a CU), long blocks staging up to 64 KB of K (gfx1250 fp8 d128 GQA decode, 512-
+# over 256-key trips: b=8 32k keys +35%, b=1 64k +39%). kw 1 (d512) exchanges S instead.
+GFX125_QR_TDM_PINGPONG_DECODE = {
+    "16bit": {
+        (32, 32): (4, 128, 512), (64, 64): (4, 128, 512), (96, 96): (4, 128, 256),
+        (128, 128): (4, 128, 256), (160, 160): (4, 128, 128), (192, 128): (4, 128, 128),
+        (256, 256): (2, 64, 128), (512, 512): (1, 32, 32),
+    },
+    "fp8": {
+        (32, 32): (4, 256, 512), (64, 64): (4, 256, 512), (96, 96): (4, 256, 512),
+        (128, 128): (4, 256, 512), (160, 160): (4, 256, 256), (192, 128): (4, 256, 256),
+        (256, 256): (2, 128, 256), (512, 512): (1, 64, 64),
+    },
+    "mx": {
+        (32, 32): (4, 512, 512), (64, 64): (4, 512, 512), (96, 96): (4, 512, 512),
+        (128, 128): (4, 512, 512), (160, 160): (2, 256, 256), (192, 128): (2, 256, 256),
+        (256, 256): (2, 256, 256), (512, 512): (1, 128, 128),
+    },
+}  # fmt: skip
+
+
 def _gfx125_qr_tdm_pingpong_tiles(hdim_pair, fp8=False, mx=False):
     """qr_tdm_pingpong's tiles for (hdim, hdim_v), in dispatch order, the same for fp16/bf16
     and fp8 inputs: 16-, 64- and 128-row tiles. Each but the last is guarded, and the last
@@ -2521,52 +2551,26 @@ def _gfx125_qr_tdm_pingpong_tiles(hdim_pair, fp8=False, mx=False):
             hdim_pair, bm0, bn0, qk_k, constraint, warps, pv_slice=pv_k, k_row=k_row
         )
 
-    # The decode (short-query) tile: 16 rows, its four warps kw on each trip's keys (through
-    # both gemms, see the pipeline's kKeySplit) times 4 / kw on V's columns, so a trip
-    # exchanges nothing between them. Everything follows from the WMMA K of the PV warp gemm
-    # (pv_k_min: 32 at 16 bits, 64 at fp8, 128 for MX; the longer trips' up to 128 at fp8),
-    # the row bytes and two budgets:
-    # a warp's O and V operand at most 192 VGPRs a lane (two blocks a CU) and a trip's K and
-    # V at most 128 KB of LDS (of the 160 KB budget; the rest holds Q, the rows' padding and
-    # the staged scales). kw is the most warps on keys (4, 2, 1) whose shortest trip, a
-    # pv_k-deep warp gemm per warp, keeps both; long blocks stage up to 64 KB of K (a power of
-    # two, at most 512 keys) within both, which keeps enough bytes in flight (gfx1250 fp8 d128
-    # GQA decode, 512- over 256-key trips: b=8 32k keys +35%, b=1 64k +39%), and shorter key
-    # ranges take the shortest trip.
+    # The decode (short-query) tile: 16 rows, see GFX125_QR_TDM_PINGPONG_DECODE.
     pv_k_min = widest_k if mx else wk
-    pv_k_max = widest_k
-    v_row_bytes = hdim_v * (1 if fp8 else 2)
-
-    def fits(trip, kw):
-        nw = 4 // kw
-        vgprs = hdim_v // (2 * nw) + (trip // kw) * v_row_bytes // (128 * nw)
-        return vgprs <= 192 and trip * (k_row_bytes + v_row_bytes) <= 128 * 1024
-
-    kw = next((w for w in (4, 2) if fits(w * pv_k_min, w)), 1)
+    width = "mx" if mx else ("fp8" if fp8 else "16bit")
+    kw, min_trip, long_trip = GFX125_QR_TDM_PINGPONG_DECODE[width][hdim_pair]
     if kw == 1:
-        # (d512) no split: gemm_0's warps on N take 32 KB of K a trip (MX: its 128-key PV
-        # warp gemm) and exchange S, gemm_1's split V's columns (the pipeline's kExchangeS)
-        trip = max(32 * 1024 // k_row_bytes, pv_k_min)
+        # no key split: gemm_0's warps on N exchange S, gemm_1's split V's columns (the
+        # pipeline's kExchangeS)
         short_tiles = (
             _gfx125_qr_tdm_pingpong_tile(
-                hdim_pair, 16, trip, qk_k, short_q, (1, min(4, trip // 16)),
+                hdim_pair, 16, min_trip, qk_k, short_q, (1, min(4, min_trip // 16)),
                 pv_slice=pv_k_min, k_row=k_row,
             ),
         )  # fmt: skip
+        trip = min_trip
     else:
-        min_trip = kw * pv_k_min
-        long_trip = min_trip
-        while (
-            long_trip < 512
-            and long_trip * k_row_bytes < 64 * 1024
-            and fits(2 * long_trip, kw)
-        ):
-            long_trip *= 2
 
         def decode_tile(trip, constraint):
             return _gfx125_qr_tdm_pingpong_tile(
                 hdim_pair, 16, trip, wide_slice, constraint, (1, 4),
-                pv_slice=min(pv_k_max, trip // kw), k_row=k_row, key_warps=kw,
+                pv_slice=min(widest_k, trip // kw), k_row=k_row, key_warps=kw,
             )  # fmt: skip
 
         short_tiles = (decode_tile(min_trip, short_q),)

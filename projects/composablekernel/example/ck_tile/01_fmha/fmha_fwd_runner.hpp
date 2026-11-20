@@ -141,10 +141,11 @@ int num_splits_heuristic(int batch_nhead_mblocks,
 
 int override_num_splits_if_necessary(int batch,
                                      int nhead,
+                                     int nhead_k,
                                      int max_seqlen_q,
                                      int max_seqlen_k,
-                                     int hdim_q,
-                                     int hdim_v,
+                                     [[maybe_unused]] int hdim_q,
+                                     [[maybe_unused]] int hdim_v,
                                      float p_drop,
                                      int num_splits)
 {
@@ -180,20 +181,17 @@ int override_num_splits_if_necessary(int batch,
         float fill_threshold = 0.8f;
         if(is_gfx125)
         {
-            // Every gfx125 split-kv instance needs hdim % 8 == 0, so other head
-            // dims must not be split or no instance would match.
-            if(hdim_q % 8 != 0 || hdim_v % 8 != 0)
+            // qr_tdm_pingpong's decode tile (16 query rows; GQA folds a KV head's query heads
+            // into them): split a grid of fewer workgroups than WGPs to about 1.5 of them a WGP,
+            // each split keeping at least 1024 keys (gfx1250 bf16 decode, d64..d256).
+            const int rows   = max_seqlen_q * (nhead / std::max(nhead_k, 1));
+            const int blocks = batch * std::max(nhead_k, 1) * ck_tile::integer_divide_ceil(rows, 16);
+            const int wgps   = props.multiProcessorCount;
+            if(blocks >= wgps)
                 return 1;
-
-            // Cap the split count so every split keeps enough KV tiles to
-            // amortise its prologue and the combine pass.
-            constexpr int kN0               = 64;
-            constexpr int kMinTilesPerSplit = 8;
-            const int num_kv_tiles          = ck_tile::integer_divide_ceil(max_seqlen_k, kN0);
-            max_splits = std::max(1, std::min(128, num_kv_tiles / kMinTilesPerSplit));
-            // num_blocks_per_SM is 4 per WGP, i.e. 2 per CU, so this stops
-            // splitting at 1 workgroup per CU instead of 1.6.
-            fill_threshold = 0.5f;
+            const int by_grid = ck_tile::integer_divide_ceil(3 * wgps, 2 * blocks);
+            const int by_keys = std::max(1, ck_tile::integer_divide_ceil(max_seqlen_k, 1024));
+            return std::min({by_grid, by_keys, 128});
         }
 
         return num_splits_heuristic(batch * nhead * num_m_blocks,
@@ -726,20 +724,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
     // legalize num_splits according to other options
     if(num_splits < 1)
     {
-        int nhead_merged        = nhead;
-        int max_seqlen_q_merged = max_seqlen_q;
-        // When max_seqlen_q == 1 and multiple head groups are merged (kMergeNumHeadGroupsSeqLenQ)
-        // then more splits are required
-        if(bias.type == bias_enum::no_bias && mask.type == mask_enum::no_mask &&
-           max_seqlen_q == 1 && nhead_k < nhead)
-        {
-            nhead_merged        = nhead_k;
-            max_seqlen_q_merged = max_seqlen_q * (nhead / nhead_k);
-        }
+        // a sliding window bounds the keys each query visits
+        const int window_keys =
+            mask.left >= 0 ? std::min<int>(max_seqlen_k, mask.left + mask.right + 1 + max_seqlen_q)
+                           : max_seqlen_k;
         num_splits = override_num_splits_if_necessary(batch,
-                                                      nhead_merged,
-                                                      max_seqlen_q_merged,
-                                                      max_seqlen_k,
+                                                      nhead,
+                                                      nhead_k,
+                                                      max_seqlen_q,
+                                                      window_keys,
                                                       hdim_q,
                                                       hdim_v,
                                                       p_drop,
@@ -859,7 +852,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                       << shape_seqlen_q << " % " << block_scale_size_q_
                       << "). ignoring the 'pack_gqa' option" << std::endl;
         }
-        else if(pack_gqa_costs_parallelism(
+        // split-KV restores the parallelism the folded heads give up
+        else if(num_splits <= 1 && pack_gqa_costs_parallelism(
                     [&] {
                         fmha_fwd_traits traits;
                         init_traits(traits);

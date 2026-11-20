@@ -25,7 +25,11 @@ from codegen.cpp_symbol_map import (
 from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
 
 from codegen.ops.fmha_fwd import (
+    FmhaFwdPipeline,
     FmhaFwdTileSize,
+    GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE,
+    _gfx125_qr_tdm_pingpong_tiles,
+    qr_tdm_pingpong_effective_schedule,
     DTYPE_BITS,
     K0_MAX_SUBMAX_MAP,
     TDM_K0_MAX_SUBMAX_MAP,
@@ -36,13 +40,134 @@ from codegen.ops.fmha_fwd import (
 )
 
 
-SPLITKV_PIPELINES_TAG = ["qr", "qr_nwarp_sshuffle", "qr_tdm"]
+SPLITKV_PIPELINES_TAG = ["qr", "qr_nwarp_sshuffle", "qr_tdm", "qr_tdm_pingpong"]
 
 FMHA_FWD_SPLITKV_PIPELINE_MAP = {
     "qr": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVS",
     "qr_nwarp_sshuffle": "ck_tile::BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS",
     "qr_tdm": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdm",
+    "qr_tdm_pingpong": "ck_tile::BlockFmhaPipelineQRKSVSTdmPingPong",
 }
+
+# qr_tdm_pingpong as the split-KV main kernel: the forward kernel (FmhaFwdKernel<..., kSplitKV>)
+# on its 16-row decode tile, writing each split's normalized O and LSE to the fp32 accumulators.
+FMHA_FWD_SPLITKV_PINGPONG_KERNEL_BODY = """
+#include <iostream>
+
+#if !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
+
+namespace {{
+template <bool kMergeHeads>
+struct instance_{F_idx} {{
+using fmha_dtype = {F_dtype};
+
+using fmha_block_tile = ck_tile::sequence<{F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}>;
+
+using fmha_shape = ck_tile::TileFmhaShape<fmha_block_tile,
+                                          ck_tile::sequence<{F_rm0}, {F_rn0}, {F_rk0}>,
+                                          ck_tile::sequence<{F_wm0}, {F_wn0}, {F_wk0}>,
+                                          ck_tile::sequence<{F_rm1}, {F_rn1}, {F_rk1}>,
+                                          ck_tile::sequence<{F_wm1}, {F_wn1}, {F_wk1}>,
+                                          {F_vlayout},
+                                          true>;
+
+using fmha_traits_base = ck_tile::TileFmhaTraits<{F_spad},
+                                            {F_skpad},
+                                            {F_dpad},
+                                            {F_dvpad},
+                                            {F_logits},
+                                            {F_bias},
+                                            false,
+                                            true,
+                                            false,
+                                            ck_tile::BlockAttentionQuantScaleEnum::NO_SCALE,
+                                            {F_occupancy},
+                                            false,
+                                            false>;
+// merged: a KV head's query heads (one query each) as the tile's rows
+using fmha_traits = std::conditional_t<kMergeHeads,
+                                       ck_tile::TileFmhaMergeHeadsTraits<fmha_traits_base>,
+                                       fmha_traits_base>;
+
+using fmha_variant = ck_tile::ComposedAttention<{F_logits} * ck_tile::LOGITS_SOFT_CAP, CK_TILE_FMHA_FWD_FAST_EXP2>;
+
+using fmha_mask = {F_mask};
+
+using fmha_pipeline_problem = ck_tile::BlockFmhaPipelineProblem<
+    typename FmhaFwdTypeConfig<fmha_dtype>::QDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::KDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::VDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::SaccDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::SMPLComputeDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::BiasDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::RandValOutputDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::LSEDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::PDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
+    typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
+    fmha_shape,
+    {F_mode},
+    fmha_variant,
+    fmha_mask,
+    false,
+    fmha_traits,
+    false,
+    false>;
+
+using fmha_pipeline = ck_tile::BlockFmhaPipelineQRKSVSTdmPingPong<
+    fmha_pipeline_problem, ck_tile::BlockFmhaPipelineQRKSVSTdmPingPongPolicy,
+    ck_tile::QrTdmPingPongLdsReadSchedule<{F_pp_slice_prefetch}, {F_pp_v_before_softmax}>>;
+
+using fmha_epilogue = ck_tile::LdsShuffle2DEpilogue<
+    ck_tile::LdsShuffle2DEpilogueProblem<
+        typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
+        typename FmhaFwdTypeConfig<fmha_dtype>::OaccDataType,
+        fmha_shape::NumWarps,
+        {F_bm0},
+        {F_bn1},
+        {F_spad},
+        {F_dvpad},
+        1>>;
+
+using fmha_kernel = ck_tile::FmhaFwdKernel<fmha_pipeline, fmha_epilogue, true>;
+}};
+}} // anonymous namespace
+
+using trait_{F_idx} = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
+                        {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, false, false, false, {F_spad}, {F_skpad}, {F_dpad},
+                        {F_dvpad}, {F_occupancy}>;
+
+namespace {{
+template <bool kMergeHeads>
+void run_{F_idx}(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
+{{
+    using k_ = typename instance_{F_idx}<kMergeHeads>::fmha_kernel;
+    auto [kargs, grids] = fmha_fwd_splitkv_pingpong_create_kargs_and_grids<k_>(a);
+    const dim3 blocks                      = k_::BlockSize();
+    constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
+    ck_tile::make_kernel<kBlockPerCu, {F_arch.tag}>(k_{{}}, grids, blocks, 0, kargs)(ck_tile::stream_config{{s.stream_id_}});
+}}
+}} // anonymous namespace
+
+template<>
+void fmha_fwd_splitkv_oneshot_<trait_{F_idx}, {F_arch.tag}>(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
+{{
+    // GQA decode: a KV head's single-query heads fold into one tile's rows (K/V read once)
+    if(a.seqlen_q == 1 && a.max_seqlen_q == 1 && a.nhead_q > a.nhead_k &&
+       a.nhead_q / a.nhead_k <= {F_bm0})
+        run_{F_idx}<true>(s, a);
+    else
+        run_{F_idx}<false>(s, a);
+}}
+
+template<>
+std::string fmha_fwd_splitkv_get_name_<trait_{F_idx}, {F_arch.tag}>()
+{{
+    return "{F_kname}";
+}}
+
+#endif // !defined(__HIP_DEVICE_COMPILE__) || ({F_arch.preprocessor_check})
+"""
 
 FMHA_FWD_SPLITKV_KERNEL_BODY = """
 #include <iostream>
@@ -404,6 +529,9 @@ class FmhaFwdSplitKVApiTrait:
             if self.dpad == "t":
                 return "a.hdim_q % 8 == 0"
             return f"a.hdim_q % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+        elif self.pipeline_tag == "qr_tdm_pingpong":
+            # padded: any head dim of the bucket; unpadded: exactly the instance's
+            return "true" if self.dpad == "t" else f"a.hdim_q == {self.hdim}"
         elif self.pipeline_tag in SPLITKV_PIPELINES_TAG:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dpad == "t":
@@ -425,6 +553,8 @@ class FmhaFwdSplitKVApiTrait:
             if self.dvpad == "t":
                 return "a.hdim_v % 8 == 0"
             return f"a.hdim_v % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
+        elif self.pipeline_tag == "qr_tdm_pingpong":
+            return "true" if self.dvpad == "t" else f"a.hdim_v == {self.bn1}"
         elif self.pipeline_tag in SPLITKV_PIPELINES_TAG:
             bk0submax = K0_MAX_SUBMAX_MAP[self.bk0max]
             if self.dvpad == "t":
@@ -663,9 +793,53 @@ class FmhaFwdSplitKVKernel:
     F_pipeline: FmhaFwdSplitKVPipeline
     mask_impl: str
 
+    def _pingpong_template(self) -> str:
+        # the LDS read schedule the forward kernel runs on this tile
+        hdim_pair = (self.F_hdim, self.F_tile.F_bn1)
+        sp, vbs = GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE.get(hdim_pair, (0, 0))
+        fwd_pipeline = qr_tdm_pingpong_effective_schedule(
+            self.F_tile,
+            FmhaFwdPipeline(
+                "qr_tdm_pingpong", self.F_pipeline.F_vlayout, self.F_pipeline.F_spad,
+                self.F_pipeline.F_skpad, self.F_pipeline.F_dpad, self.F_pipeline.F_dvpad,
+                self.F_pipeline.F_logits, self.F_pipeline.F_bias, "t", "f", "no",
+                self.F_pipeline.F_mask, "f", "f", "f",
+                F_pp_slice_prefetch=sp, F_pp_v_before_softmax=vbs,
+            ),
+        )  # fmt: skip
+        t = self.F_tile
+        return FMHA_FWD_KERNEL_HEADER + FMHA_FWD_SPLITKV_PINGPONG_KERNEL_BODY.format(
+            F_idx=self.F_idx,
+            F_kname=self.name,
+            F_arch=self.F_arch,
+            F_hdim=self.F_hdim,
+            F_dtype=FWD_DTYPE_MAP[self.F_dtype],
+            F_bm0=t.F_bm0, F_bn0=t.F_bn0, F_bk0=t.F_bk0, F_bn1=t.F_bn1, F_bk1=t.F_bk1,
+            F_bk0max=t.F_bk0max,
+            F_rm0=t.F_rm0, F_rn0=t.F_rn0, F_rk0=t.F_rk0,
+            F_rm1=t.F_rm1, F_rn1=t.F_rn1, F_rk1=t.F_rk1,
+            F_wm0=t.F_wm0, F_wn0=t.F_wn0, F_wk0=t.F_wk0,
+            F_wm1=t.F_wm1, F_wn1=t.F_wn1, F_wk1=t.F_wk1,
+            F_vlayout=LAYOUT_MAP[self.F_pipeline.F_vlayout],
+            F_spad=BOOL_MAP[self.F_pipeline.F_spad],
+            F_skpad=BOOL_MAP[self.F_pipeline.F_skpad],
+            F_dpad=BOOL_MAP[self.F_pipeline.F_dpad],
+            F_dvpad=BOOL_MAP[self.F_pipeline.F_dvpad],
+            F_logits=BOOL_MAP[self.F_pipeline.F_logits],
+            F_bias=BIAS_MAP[self.F_pipeline.F_bias],
+            F_occupancy=t.F_occupancy,
+            F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
+            F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
+            F_mode=MODE_MAP[self.F_mode],
+            F_pp_slice_prefetch=fwd_pipeline.F_pp_slice_prefetch,
+            F_pp_v_before_softmax=fwd_pipeline.F_pp_v_before_softmax,
+        )  # fmt: skip
+
     @property
     def template(self) -> str:
         assert self.F_pipeline.F_lse == "t"
+        if self.F_pipeline.tag == "qr_tdm_pingpong":
+            return self._pingpong_template()
         return FMHA_FWD_KERNEL_HEADER + FMHA_FWD_SPLITKV_KERNEL_BODY.format(
             F_idx=self.F_idx,
             F_arch=self.F_arch,
@@ -914,8 +1088,23 @@ class KernelComponentFactoryGfx117(KernelComponentFactoryGfx12):
     arch = ArchTrait("gfx117")
 
 
+# qr_tdm_pingpong's split-KV head dims (hdim, hdim_v)
+GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS = (
+    (32, 32), (64, 64), (96, 96), (128, 128), (160, 160), (192, 128), (256, 256), (512, 512),
+)  # fmt: skip
+
+
 class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     arch = ArchTrait("gfx125")
+
+    @staticmethod
+    def get_combine_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
+        d = KernelComponentFactoryBase.get_combine_hdim_tile_size_dict(dtype)
+        if d is not None and dtype in ["fp16", "bf16"]:
+            # the head dims qr_tdm_pingpong splits
+            for h, _ in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS:
+                d.setdefault(str(h), FmhaFwdSplitKVCombineTileSize(32, -1))
+        return d
 
     @staticmethod
     def get_pipelines(dtype, hdim, mask_impl) -> List[FmhaFwdSplitKVPipeline]:
@@ -924,6 +1113,12 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
         pipelines = []
         if dtype in ["fp16", "bf16"]:
             squant = "f"
+            # qr_tdm_pingpong's decode tile first (its seqtune takes up to 16 query rows), on
+            # whole and on padded head dims: no bias, soft cap, paged KV or sink.
+            for mask in get_mask_map(mask_impl).keys():
+                #                             vlayout spad skpad dpad dvpad logits bias lse squant pagedkv sink mask
+                pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", squant, "f", "f", mask))  # fmt: skip
+                pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "t", "t", "f", "no", "t", squant, "f", "f", mask))  # fmt: skip
             # Entries with an unpadded seqlen go first: spad/skpad == t predicates
             # always hold, so the fully padded (t, t) entries must come last.
             # Soft cap with bias is dropped in get_fwd_splitkv_blobs.
@@ -958,13 +1153,20 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
         if dtype in ["fp16", "bf16"]:
-            return {
+            tiles = {
                 #                      bm0, bn0, bk0, bn1, bk1,
                 "32" : FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                 "64" : FmhaFwdTileSize( 64,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                 "128": FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
                 "256": FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
             }  # fmt: skip
+            # qr_tdm_pingpong's decode tile, the longest-trip one (a split's keys are long), at
+            # each of its head dims (hdim_v: 128 at d192), ahead of qr_tdm's
+            result = {}
+            for h, h_v in GFX125_QR_TDM_PINGPONG_SPLITKV_HDIMS:
+                pp = _gfx125_qr_tdm_pingpong_tiles((h, h_v))[0]
+                result[str(h)] = [pp] + ([tiles[str(h)]] if str(h) in tiles else [])
+            return result
         elif dtype in ["bf8"]:
             return {
                 #                      bm0, bn0, bk0, bn1, bk1,
@@ -1013,8 +1215,17 @@ def get_fwd_splitkv_blobs(
             for tile, pipeline in itertools.product(
                 tiles, factory.get_pipelines(dtype, hdim, mask_impl)
             ):
+                # qr_tdm_pingpong takes its own tiles (F_pipeline_tag), the others the rest
+                is_pingpong_tile = tile.F_pipeline_tag == "qr_tdm_pingpong"
+                if is_pingpong_tile != (pipeline.tag == "qr_tdm_pingpong"):
+                    continue
+                # (qr_tdm_pingpong's split-KV: batch mode)
+                if is_pingpong_tile and mode == "group":
+                    continue
                 # Use qr_nwarp_sshuffle with multiple N warps and qr otherwise
-                if (tile.F_rn0 != 1) != (pipeline.tag == "qr_nwarp_sshuffle"):
+                if not is_pingpong_tile and (tile.F_rn0 != 1) != (
+                    pipeline.tag == "qr_nwarp_sshuffle"
+                ):
                     continue
                 # qr_tdm's unpadded head-dim check reads the TDM length map. Where
                 # that exceeds the head dim this bucket dispatches on, the
