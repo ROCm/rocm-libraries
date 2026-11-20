@@ -19,7 +19,7 @@ set(HIPBLASLT_EXPERIMENTAL_MAX_FEATURES 3)
 hipblaslt_experimental_feature(PARTITIONED_GEMM
     HEADER       hipblaslt-experimental-partitioned-gemm.h
     OWNER        "@KKyang"
-    TRACKING     "https://github.com/ROCm/rocm-libraries/pull/15976"
+    TRACKING     "https://amd-hub.atlassian.net/browse/AIHPBLAS-5704"
     INTRODUCED   10.3
     LAST_RELEASE 11.0
 )
