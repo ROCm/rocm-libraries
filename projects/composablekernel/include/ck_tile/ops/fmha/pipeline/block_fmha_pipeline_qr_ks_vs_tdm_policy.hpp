@@ -4,6 +4,8 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/block/block_dropout.hpp"
+#include "ck_tile/ops/fmha/block/variants.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
@@ -21,6 +23,32 @@ namespace detail {
 // hardware fields, qr_tdm uses one configuration to couple writer encoding, reader descriptors,
 // and LDS capacity.
 inline constexpr index_t kQrTdmLdsAccessBytes = 16;
+
+// The TDM pipelines (qr_tdm, qr_tdm_pingpong, qr_tdm_sched) apply the logits soft cap
+// themselves, with qr_tdm_apply_logits_soft_cap, instead of through an attention variant,
+// and implement only its tanh form: a build selecting another
+// CK_TILE_ATTENTION_LOGITS_SOFT_CAP_DEFAULT must not let their results differ from the
+// other pipelines', so they refuse it.
+inline constexpr bool kQrTdmLogitsSoftCapIsTanh =
+    CK_TILE_ATTENTION_LOGITS_SOFT_CAP_DEFAULT == CK_TILE_ATTENTION_LOGITS_SOFT_CAP_TANH;
+
+// The soft cap of the exp2-domain attention variant (LogitsSoftCap<true>: scale_s carries
+// log2(e)) on every score, applied after scale_s and before the bias (the reference's order).
+// The variant's parameters take a mask they do not use here.
+template <typename SaccTile>
+CK_TILE_DEVICE void qr_tdm_apply_logits_soft_cap(SaccTile& s_acc,
+                                                 float scale_s,
+                                                 float logits_soft_cap,
+                                                 float logits_soft_cap_rcp)
+{
+    constexpr struct
+    {
+    } kNoMask{};
+    const LogitsSoftCapParams<decltype(kNoMask), true> params{
+        kNoMask, scale_s, logits_soft_cap, logits_soft_cap_rcp};
+    tile_elementwise_inout(
+        [&](auto& x) { x = LogitsSoftCap<true>{}.LogitsTransform(params, x, 0, 0, 0); }, s_acc);
+}
 
 template <index_t X>
 CK_TILE_HOST_DEVICE constexpr index_t integer_log2_exact()
@@ -122,6 +150,18 @@ struct EncodedTdmPadding
     static constexpr index_t kPadInterval = raw_pad_interval;
     static constexpr index_t kPadAmount   = raw_pad_amount;
 };
+
+// The TDM load configuration of an LDS region padded as PaddingConfig.
+template <typename PaddingConfig>
+CK_TILE_DEVICE TDMConfig make_tdm_config()
+{
+    using Raw = EncodedTdmPadding<PaddingConfig>;
+    TDMConfig config;
+    config.pad_enable              = Raw::kEnabled;
+    config.pad_config.pad_amount   = Raw::kPadAmount;
+    config.pad_config.pad_interval = Raw::kPadInterval;
+    return config;
+}
 
 template <
     typename DataType,
@@ -286,6 +326,19 @@ struct QrTdmPaddingSelection<Problem, true>
     using V                             = std::conditional_t<kVPadDisabled,
                                                              LdsPaddingConfig<false, 0, 0>,
                                                              LdsPaddingConfig<true, kVInterval, kVPad>>;
+};
+
+// A policy whose pipeline quantizes P itself (a fixed power-of-two scale, see
+// BlockFmhaPipelineQRKSVSTdmPingPong) and so takes a quantized run without qr_tdm's scaled
+// gemm1 WMMA.
+template <typename Policy, typename = void>
+struct qr_tdm_policy_quantizes_p_itself : std::false_type
+{
+};
+template <typename Policy>
+struct qr_tdm_policy_quantizes_p_itself<Policy, std::void_t<decltype(Policy::kQuantizesPItself)>>
+    : std::bool_constant<Policy::kQuantizesPItself>
+{
 };
 
 } // namespace detail
@@ -470,38 +523,26 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
             bool_constant<true>{});          // IsWarpLevelParallelOnly
     }
 
+    // The bias tile follows the scores of this policy's QK gemm (the base policy's would
+    // name the generic MX block gemm at MX scales).
     template <typename Problem>
-    CK_TILE_HOST_DEVICE static constexpr auto MakeQRegTileDistribution()
+    CK_TILE_HOST_DEVICE static constexpr auto GetAlignmentBias()
     {
         using BlockGemm       = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
         constexpr auto config = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
         using WarpGemm        = remove_cvref_t<decltype(config.template at<0>())>;
+        return WarpGemm::WarpGemmAttribute::Impl::kCM1PerLane;
+    }
 
-        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<0>{});
-        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{});
-
-        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kSubQKHeaddim;
-
-        constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
-        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
-
-        // Read M first, then K
-        // This is the same data consume order as BlockGEMM
-        constexpr auto q_block_outer_dstr_encoding =
-            tile_distribution_encoding<sequence<NWarp>,
-                                       tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
-                                       tuple<sequence<1, 0>>,
-                                       tuple<sequence<1, 0>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 0>>{};
-
-        constexpr auto q_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-            q_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
-
-        constexpr auto q_block_dstr = make_static_tile_distribution(q_block_dstr_encode);
-
-        return q_block_dstr;
+    template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeQRegTileDistribution()
+    {
+        // gemm_0's A operand over the whole Q row (the gemm's slices of it), read M first,
+        // then K: the same data consume order as the gemm
+        using BlockGemm = remove_cvref_t<
+            decltype(GetQKBlockGemm<Problem, Problem::BlockFmhaShape::kSubQKHeaddim>())>;
+        return make_static_tile_distribution(
+            remove_cvref_t<decltype(BlockGemm::MakeABlockDistributionEncode())>{});
     }
 
     template <typename Problem>
@@ -557,26 +598,41 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         using Padding                = LdsPaddingConfigV<Problem>;
 
         static_assert(!Xor, "qr_tdm V LDS descriptor must remain row-major");
-        return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
-                                                            kKPerBlock,
-                                                            kNPerBlock,
-                                                            Padding,
-                                                            detail::kQrTdmLdsAccessBytes>();
+        // row-major V: [kN0][kN1]; column-major V: [kN1][kN0], as it sits in memory
+        if constexpr(Problem::BlockFmhaShape::IsVLayoutRowMajor)
+            return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                                kKPerBlock,
+                                                                kNPerBlock,
+                                                                Padding,
+                                                                detail::kQrTdmLdsAccessBytes>();
+        else
+            return detail::make_qr_tdm_row_major_lds_descriptor<DataType,
+                                                                kNPerBlock,
+                                                                kKPerBlock,
+                                                                Padding,
+                                                                detail::kQrTdmLdsAccessBytes>();
     }
 
+    // The warps of gemm_1 on K (Gemm1BlockWarps' third entry): each warp takes its own
+    // range of a trip's keys through both gemms and its own softmax.
     template <typename Problem>
+    CK_TILE_HOST_DEVICE static constexpr bool IsKeySplitOverWarps()
+    {
+        return Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<2>{}) > 1;
+    }
+
+    // (kK: the gemm's K, a QK slice; MakeQRegTileDistribution takes the whole Q row's)
+    template <typename Problem, index_t kK = Problem::BlockFmhaShape::kK0>
     CK_TILE_HOST_DEVICE static constexpr auto GetQKBlockGemm()
     {
-        using GemmProblem =
-            BlockGemmProblem<typename Problem::QDataType,
-                             typename Problem::KDataType,
-                             typename Problem::SaccDataType,
-                             Problem::kBlockSize,
-                             TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
-                                                    Problem::BlockFmhaShape::kN0,
-                                                    Problem::BlockFmhaShape::kK0>,
-                                           typename Problem::BlockFmhaShape::Gemm0BlockWarps,
-                                           typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
+        using GemmProblem = BlockGemmProblem<
+            typename Problem::QDataType,
+            typename Problem::KDataType,
+            typename Problem::SaccDataType,
+            Problem::kBlockSize,
+            TileGemmShape<sequence<Problem::BlockFmhaShape::kM0, Problem::BlockFmhaShape::kN0, kK>,
+                          typename Problem::BlockFmhaShape::Gemm0BlockWarps,
+                          typename Problem::BlockFmhaShape::Gemm0WarpTile>>;
 
         using WarpGemm = WarpGemmDispatcher<typename Problem::QDataType,
                                             typename Problem::KDataType,
@@ -586,30 +642,32 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
                                             Problem::BlockFmhaShape::Gemm0WarpTile::at(number<2>{}),
                                             true>;
 
+        // gemm_1 on the warps' own key ranges (warps on K) takes gemm_0's warps on N whole
+        // ranges of keys
         using BlockGemmPolicy =
             BlockGemmARegBRegCRegV2CustomPolicy<typename Problem::QDataType,
                                                 typename Problem::KDataType,
                                                 typename Problem::SaccDataType,
                                                 typename Problem::BlockFmhaShape::Gemm0BlockWarps,
                                                 WarpGemm,
-                                                GemmLoopOrder::MNK>;
+                                                GemmLoopOrder::MNK,
+                                                IsKeySplitOverWarps<Problem>()>;
 
         return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
-    template <typename Problem>
+    // (kK: the gemm's K, a PV slice; MakePRegTileDistribution takes the whole trip's)
+    template <typename Problem, index_t kK = Problem::BlockFmhaShape::kK1>
     CK_TILE_HOST_DEVICE static constexpr auto GetPVBlockGemm()
     {
-        using GemmProblem =
-            BlockGemmProblem<typename Problem::PDataType,
-                             typename Problem::VDataType,
-                             typename Problem::OaccDataType,
-                             Problem::kBlockSize,
-                             TileGemmShape<sequence<Problem::BlockFmhaShape::kM0,
-                                                    Problem::BlockFmhaShape::kN1,
-                                                    Problem::BlockFmhaShape::kK1>,
-                                           typename Problem::BlockFmhaShape::Gemm1BlockWarps,
-                                           typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
+        using GemmProblem = BlockGemmProblem<
+            typename Problem::PDataType,
+            typename Problem::VDataType,
+            typename Problem::OaccDataType,
+            Problem::kBlockSize,
+            TileGemmShape<sequence<Problem::BlockFmhaShape::kM0, Problem::BlockFmhaShape::kN1, kK>,
+                          typename Problem::BlockFmhaShape::Gemm1BlockWarps,
+                          typename Problem::BlockFmhaShape::Gemm1WarpTile>>;
 
         using WarpGemm = WarpGemmDispatcher<typename Problem::PDataType,
                                             typename Problem::VDataType,
@@ -636,35 +694,10 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKRegTileDistribution()
     {
-        using BlockGemm       = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
-        constexpr auto config = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-        using WarpGemm        = remove_cvref_t<decltype(config.template at<0>())>;
-
-        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<0>{});
-        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{});
-
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
-
-        constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
-        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
-
-        // Read N first, then K
-        // This is the same data consume order as BlockGEMM
-        constexpr auto k_block_outer_dstr_encoding =
-            tile_distribution_encoding<sequence<MWarp>,
-                                       tuple<sequence<NIterPerWarp, NWarp>, sequence<KIterPerWarp>>,
-                                       tuple<sequence<0, 1>>,
-                                       tuple<sequence<0, 1>>,
-                                       sequence<1, 2>,
-                                       sequence<0, 0>>{};
-
-        constexpr auto k_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-            k_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
-
-        constexpr auto k_block_dstr = make_static_tile_distribution(k_block_dstr_encode);
-
-        return k_block_dstr;
+        // gemm_0's B operand, read N first, then K: the same data consume order as the gemm
+        using BlockGemm = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+        return make_static_tile_distribution(
+            remove_cvref_t<decltype(BlockGemm::MakeBBlockDistributionEncode())>{});
     }
 
     // V dram dist for the TDM writer path. Trivial tile-major mirrors the
@@ -685,90 +718,68 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0; // V seq dim, 64
         constexpr index_t warpNum    = kBlockSize / get_warp_size();
 
-        static_assert(kKPerBlock % warpNum == 0,
-                      "V kN0 (seq) must be divisible by warpNum for trivial tile-major V dist");
+        if constexpr(!Problem::BlockFmhaShape::IsVLayoutRowMajor)
+        {
+            // column-major V: the hdim rows split over the warps
+            static_assert(kNPerBlock % warpNum == 0);
+            return make_static_tile_distribution(
+                tile_distribution_encoding<
+                    sequence<>,
+                    tuple<sequence<warpNum, kNPerBlock / warpNum>, sequence<kKPerBlock>>,
+                    tuple<sequence<1>>,
+                    tuple<sequence<0>>,
+                    sequence<1, 2>,
+                    sequence<1, 0>>{},
+                bool_constant<true>{});
+        }
+        else
+        {
+            static_assert(kKPerBlock % warpNum == 0,
+                          "V kN0 (seq) must be divisible by warpNum for trivial tile-major V dist");
 
-        return make_static_tile_distribution(
-            tile_distribution_encoding<
-                sequence<>,                                    // R: empty
-                tuple<sequence<warpNum, kKPerBlock / warpNum>, // X[0]: V seq dim, warp split (8, 8)
-                      sequence<kNPerBlock>>, // X[1]: V hdim, single full vector per thread (128)
-                tuple<sequence<1>>,          // PsToRH: warp dim mapping
-                tuple<sequence<0>>,          // PsToRH_lid
-                sequence<1, 2>,              // YsToD outer
-                sequence<1, 0>>{},           // YsToD inner
-            bool_constant<true>{});          // IsWarpLevelParallelOnly
+            return make_static_tile_distribution(
+                tile_distribution_encoding<
+                    sequence<>,                                    // R: empty
+                    tuple<sequence<warpNum, kKPerBlock / warpNum>, // X[0]: V seq dim, warp split
+                                                                   // (8, 8)
+                          sequence<kNPerBlock>>, // X[1]: V hdim, single full vector per thread
+                                                 // (128)
+                    tuple<sequence<1>>,          // PsToRH: warp dim mapping
+                    tuple<sequence<0>>,          // PsToRH_lid
+                    sequence<1, 2>,              // YsToD outer
+                    sequence<1, 0>>{},           // YsToD inner
+                bool_constant<true>{});          // IsWarpLevelParallelOnly
+        }
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakePRegTileDistribution()
     {
-        using BlockGemm       = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
-        constexpr auto config = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-        using WarpGemm        = remove_cvref_t<decltype(config.template at<0>())>;
-
-        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<0>{});
-        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<1>{});
-
-        constexpr index_t kMPerBlock = Problem::BlockFmhaShape::kM0;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kN0;
-
-        constexpr index_t MIterPerWarp = kMPerBlock / (MWarp * WarpGemm::kM);
-        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
-
-        // Read M first, then K
-        // This is the same data consume order as BlockGEMM
-        constexpr auto p_block_outer_dstr_encoding =
-            tile_distribution_encoding<sequence<NWarp>,
-                                       tuple<sequence<MIterPerWarp, MWarp>, sequence<KIterPerWarp>>,
-                                       tuple<sequence<1, 0>>,
-                                       tuple<sequence<1, 0>>,
-                                       sequence<2, 1>,
-                                       sequence<0, 0>>{};
-
-        constexpr auto p_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-            p_block_outer_dstr_encoding, typename WarpGemm::AWarpDstrEncoding{});
-
-        constexpr auto p_block_dstr = make_static_tile_distribution(p_block_dstr_encode);
-
-        return p_block_dstr;
+        // gemm_1's A operand over the whole trip (its kN0 keys, the gemm's slices of them),
+        // read M first, then K: the same data consume order as the gemm
+        using BlockGemm =
+            remove_cvref_t<decltype(GetPVBlockGemm<Problem, Problem::BlockFmhaShape::kN0>())>;
+        return make_static_tile_distribution(
+            remove_cvref_t<decltype(BlockGemm::MakeABlockDistributionEncode())>{});
     }
 
     template <typename Problem>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVRegTileDistribution()
     {
-        using BlockGemm       = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
-        constexpr auto config = BlockGemm::Policy::template GetWarpGemmMWarpNWarp<Problem>();
-        using WarpGemm        = remove_cvref_t<decltype(config.template at<0>())>;
+        // gemm_1's B operand, read N first, then K: the same data consume order as the gemm
+        using BlockGemm = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
+        constexpr auto v_block_dstr_encode =
+            remove_cvref_t<decltype(BlockGemm::MakeBBlockDistributionEncode())>{};
 
-        constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<0>{});
-        constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<1>{});
-
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
-
-        constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
-        constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
-
-        // Read N first, then K
-        // This is the same data consume order as BlockGEMM
-        constexpr auto v_block_outer_dstr_encoding =
-            tile_distribution_encoding<sequence<MWarp>,
-                                       tuple<sequence<NIterPerWarp, NWarp>, sequence<KIterPerWarp>>,
-                                       tuple<sequence<0, 1>>,
-                                       tuple<sequence<0, 1>>,
-                                       sequence<2, 1>,
-                                       sequence<0, 0>>{};
-
-        constexpr auto v_block_dstr_encode = detail::make_embed_tile_distribution_encoding(
-            v_block_outer_dstr_encoding, typename WarpGemm::BWarpDstrEncoding{});
-
-        constexpr auto v_block_dstr =
-            make_static_tile_distribution(typename InputTileDistributionTraits<
-                                          decltype(v_block_dstr_encode),
-                                          typename Problem::VDataType>::TransposedDstrEncode{});
-
-        return v_block_dstr;
+        // a column-major V is read as it is ([kN1][kN0], K-contiguous); a row-major one
+        // through the transposed LDS read
+        if constexpr(!Problem::BlockFmhaShape::IsVLayoutRowMajor)
+            return make_static_tile_distribution(v_block_dstr_encode);
+        else
+            return make_static_tile_distribution(
+                typename InputTileDistributionTraits<
+                    decltype(v_block_dstr_encode),
+                    typename Problem::VDataType>::TransposedDstrEncode{});
     }
 
     template <typename Problem>
@@ -864,9 +875,11 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
     {
         constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{});
 
-        return NWarp > 1 ? MakeSLdsBlockDescriptor<Problem>().get_element_space_size() *
-                               sizeof(typename Problem::SaccDataType)
-                         : 0;
+        // the warps on N exchange S, unless each softmaxes its own keys
+        return NWarp > 1 && !IsKeySplitOverWarps<Problem>()
+                   ? MakeSLdsBlockDescriptor<Problem>().get_element_space_size() *
+                         sizeof(typename Problem::SaccDataType)
+                   : 0;
     }
 
     template <typename Problem>
@@ -899,6 +912,31 @@ namespace detail {
 //   double K/V LDS buffer: Q/K0=0, K1=17408, V0=34816, V1=53248, end=71680
 //   single-V/double-K LDS buffer: Q/K0=0, K1=17408, S=34816, V0=34832, end=53248
 // Region alignment follows one gfx1250 LDS bank row.
+// Problem::kHasDropout, false for a problem without one (the split-KV problem: no dropout).
+template <typename Problem, typename = void>
+struct qr_tdm_problem_has_dropout : std::false_type
+{
+};
+
+template <typename Problem>
+struct qr_tdm_problem_has_dropout<Problem, std::void_t<decltype(Problem::kHasDropout)>>
+    : std::bool_constant<Problem::kHasDropout>
+{
+};
+
+// The LDS of dropout's randval shuffle (BlockDropout::Run) with the policy's QK gemm, 0
+// without dropout: the TDM arenas end with it.
+template <typename Problem, typename Policy>
+CK_TILE_HOST_DEVICE constexpr index_t qr_tdm_randval_lds_bytes()
+{
+    if constexpr(qr_tdm_problem_has_dropout<Problem>::value)
+        return BlockDropout::MakeRandValLdsBlockDescriptor<
+                   remove_cvref_t<decltype(Policy::template GetQKBlockGemm<Problem>())>>()
+            .get_element_space_size();
+    else
+        return 0;
+}
+
 template <typename Problem, typename QPadding, typename KPadding, typename VPadding>
 struct QrTdmLdsArenaLayout
 {
@@ -961,16 +999,17 @@ struct QrTdmLdsArenaLayout
     static constexpr index_t kV1Offset =
         kUseDoubleKVLdsBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
                               : kV0Offset;
-    static constexpr index_t kArenaBytes = [] {
+    // dropout's randval shuffle (BlockDropout::Run) past the Q/K/S/V regions
+    static constexpr index_t kRandValOffset = [] {
         if constexpr(kUseDoubleKVLdsBuffer)
-        {
-            return integer_least_multiple(kV1Offset + kVBytes, kArenaAlignment);
-        }
+            return kV1Offset + kVBytes;
         else
-        {
-            return integer_least_multiple(max(kQBytes, kV0Offset + kVBytes), kArenaAlignment);
-        }
+            return max(kQBytes, kV0Offset + kVBytes);
     }();
+    static constexpr index_t kRandValBytes =
+        qr_tdm_randval_lds_bytes<Problem, BlockFmhaPipelineQRKSVSTdmDefaultPolicy>();
+    static constexpr index_t kArenaBytes =
+        integer_least_multiple(kRandValOffset + kRandValBytes, kArenaAlignment);
 
     static constexpr bool kHasProductionAlignment =
         kQOffset % kRegionAlignment == 0 && kK0Offset % kRegionAlignment == 0 &&

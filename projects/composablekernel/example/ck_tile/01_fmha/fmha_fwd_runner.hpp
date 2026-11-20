@@ -249,6 +249,20 @@ struct ScalesConfig<TypeConfig, true>
     static constexpr ck_tile::index_t kVScaleGranularity  = TypeConfig::kVScaleGranularity;
 };
 
+// Pack-GQA (the host-side fold) follows the kernel's own head merge: no fold of a short
+// query past qr_tdm_pingpong's 16-row tile on a small grid
+// (fmha_fwd_pack_gqa_costs_parallelism), wherever that tile serves the call's traits.
+inline bool pack_gqa_costs_parallelism(const fmha_fwd_traits& traits,
+                                       ck_tile::index_t batch,
+                                       ck_tile::index_t nhead,
+                                       ck_tile::index_t nhead_ratio,
+                                       ck_tile::index_t seqlen_q)
+{
+    return fmha_fwd_pack_gqa_costs_parallelism(
+               batch, nhead, nhead_ratio, seqlen_q, ck_tile::get_num_cus()) &&
+           fmha_fwd_has_short_query_tile(traits);
+}
+
 template <typename DataTypeConfig>
 fwd_result fmha_fwd_run(mode_enum mode,
                         ck_tile::index_t batch,
@@ -288,7 +302,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         int pack_gqa,
                         const ck_tile::stream_config& stream_config,
                         std::optional<std::string> json   = std::nullopt,
-                        std::string* selected_kernel_name = nullptr)
+                        std::string* selected_kernel_name = nullptr,
+                        ck_tile::index_t block_scale_q    = 0,
+                        ck_tile::index_t block_scale_kv   = 0)
 {
     using TypeConfig = FmhaFwdTypeConfig<DataTypeConfig>;
 
@@ -321,7 +337,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     // Note: block_scale_size_q_ and block_scale_size_kv_ should be greater than or equal to the
     // compute block size
-    constexpr ck_tile::index_t block_scale_size_q_ = 128;
+    // (block_scale_q / block_scale_kv, when positive, override both)
+    const ck_tile::index_t block_scale_size_q_ = block_scale_q > 0 ? block_scale_q : 128;
 
     const std::string data_type = []() {
         if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp32>)
@@ -616,7 +633,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
 #endif
 
     const ck_tile::index_t block_scale_size_kv_ =
-        fmha_fwd_block_scale_size_kv(data_type, hdim_q, hdim_v);
+        block_scale_kv > 0 ? block_scale_kv
+                           : fmha_fwd_block_scale_size_kv(data_type, hdim_q, hdim_v);
 
     const auto seqstart_q_host              = to_seqstarts(seqlen_qs);
     const auto seqstart_k_host              = to_seqstarts(seqlen_ks);
@@ -766,6 +784,51 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                          ? seqstart_k_with_padding_host.back()
                                          : seqstart_k_host.back()));
 
+    const auto init_traits = [&](auto& traits) {
+        traits.hdim_q        = hdim_q;
+        traits.hdim_v        = hdim_v;
+        traits.data_type     = data_type;
+        traits.is_v_rowmajor = is_v_rowmajor;
+
+        if constexpr(std::is_same_v<fmha_fwd_appendkv_traits, std::decay_t<decltype(traits)>>)
+        {
+            traits.rope_type = (0 < rotary_dim ? (is_rotary_interleaved ? rope_enum::interleaved
+                                                                        : rope_enum::half_rotated)
+                                               : rope_enum::none);
+        }
+        else // fmha_fwd_traits or fmha_splitkv_traits
+        {
+            traits.is_group_mode       = (mode == mode_enum::group);
+            traits.has_logits_soft_cap = 0.f < logits_soft_cap;
+            traits.mask_type           = mask.type;
+            traits.bias_type           = bias.type;
+            traits.has_sink            = (mask.sink > 0 || init_sink_value != 0) ? true : false;
+            traits.has_lse             = lse;
+
+            if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
+            {
+                traits.has_dropout = (p_drop > 0.0f);
+                traits.qscale_type = qscale.type;
+            }
+            else if constexpr(std::is_same_v<fmha_fwd_pagedkv_traits,
+                                             std::decay_t<decltype(traits)>>)
+            {
+                traits.use_pagedkv = (0 < page_block_size);
+            }
+            else if constexpr(std::is_same_v<fmha_batch_prefill_traits,
+                                             std::decay_t<decltype(traits)>>)
+            {
+                traits.has_dropout = (p_drop > 0.0f);
+                traits.qscale_type = qscale.type;
+                traits.kv_memory_layout =
+                    ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
+                traits.kv_lookup_table =
+                    ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
+                traits.page_size = page_block_size;
+            }
+        }
+    };
+
     // Compute Pack-GQA dimensions early so buffer allocations use the right sizes
     const int nhead_ratio = nhead / nhead_k;
     int pack_gqa_nhead    = nhead;
@@ -795,6 +858,21 @@ fwd_result fmha_fwd_run(mode_enum mode,
             std::cerr << "pack_gqa needs seqlen_q to be a multiple of block_scale_size_q ("
                       << shape_seqlen_q << " % " << block_scale_size_q_
                       << "). ignoring the 'pack_gqa' option" << std::endl;
+        }
+        else if(pack_gqa_costs_parallelism(
+                    [&] {
+                        fmha_fwd_traits traits;
+                        init_traits(traits);
+                        return traits;
+                    }(),
+                    shape_batch,
+                    nhead,
+                    nhead_ratio,
+                    shape_seqlen_q))
+        {
+            std::cerr << "pack_gqa would leave this short query too few blocks on a small grid "
+                         "(see pack_gqa_costs_parallelism). ignoring the 'pack_gqa' option"
+                      << std::endl;
         }
         else
         {
@@ -1292,51 +1370,6 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
     std::cout << std::flush;
 
-    const auto init_traits = [&](auto& traits) {
-        traits.hdim_q        = hdim_q;
-        traits.hdim_v        = hdim_v;
-        traits.data_type     = data_type;
-        traits.is_v_rowmajor = is_v_rowmajor;
-
-        if constexpr(std::is_same_v<fmha_fwd_appendkv_traits, std::decay_t<decltype(traits)>>)
-        {
-            traits.rope_type = (0 < rotary_dim ? (is_rotary_interleaved ? rope_enum::interleaved
-                                                                        : rope_enum::half_rotated)
-                                               : rope_enum::none);
-        }
-        else // fmha_fwd_traits or fmha_splitkv_traits
-        {
-            traits.is_group_mode       = (mode == mode_enum::group);
-            traits.has_logits_soft_cap = 0.f < logits_soft_cap;
-            traits.mask_type           = mask.type;
-            traits.bias_type           = bias.type;
-            traits.has_sink            = (mask.sink > 0 || init_sink_value != 0) ? true : false;
-            traits.has_lse             = lse;
-
-            if constexpr(std::is_same_v<fmha_fwd_traits, std::decay_t<decltype(traits)>>)
-            {
-                traits.has_dropout = (p_drop > 0.0f);
-                traits.qscale_type = qscale.type;
-            }
-            else if constexpr(std::is_same_v<fmha_fwd_pagedkv_traits,
-                                             std::decay_t<decltype(traits)>>)
-            {
-                traits.use_pagedkv = (0 < page_block_size);
-            }
-            else if constexpr(std::is_same_v<fmha_batch_prefill_traits,
-                                             std::decay_t<decltype(traits)>>)
-            {
-                traits.has_dropout = (p_drop > 0.0f);
-                traits.qscale_type = qscale.type;
-                traits.kv_memory_layout =
-                    ck_tile::BlockAttentionKVCacheMemoryLayoutEnum::LINEAR_LAYOUT;
-                traits.kv_lookup_table =
-                    ck_tile::BlockAttentionKVCacheLookupTableEnum::VLLM_BLOCK_TABLE_2D;
-                traits.page_size = page_block_size;
-            }
-        }
-    };
-
     // Pack-GQA: print status (dimensions already computed earlier for buffer allocation)
     if(pack_gqa_nhead != nhead)
     {
@@ -1651,6 +1684,14 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     // Cumulative lengths not used in group mode
                     args.cu_seqlen_q_ptr = nullptr;
                     args.cu_seqlen_k_ptr = nullptr;
+                    // XCD-locality hint: the longest lengths within 1/8 of the means, as the
+                    // Python varlen API sets it
+                    const auto near_mean = [&](const std::vector<ck_tile::index_t>& lens) {
+                        const int64_t longest = *std::max_element(lens.begin(), lens.end());
+                        const int64_t total = std::accumulate(lens.begin(), lens.end(), int64_t{0});
+                        return 8 * longest * static_cast<int64_t>(lens.size()) <= 9 * total;
+                    };
+                    args.uniform_seqlens = near_mean(seqlen_qs) && near_mean(seqlen_ks);
                 }
                 else // mode == mode_enum::batch
                 {
@@ -2571,6 +2612,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
                               << "\tseqstart_k: " << seqstart_k_host << std::endl;
                 }
             }
+            // Each row's largest fp32 P before dropout: an fp8 P's subnormal spacing, a floor
+            // under its rounding, is a fixed fraction of it (see the OUT check).
+            ck_tile::HostTensor<SMPLComputeDataType> p_row_max({nhead, real_seqlen_q});
+            p_row_max.ForEach([&](auto& self, auto i) {
+                SMPLComputeDataType m = 0;
+                for(ck_tile::index_t k = 0; k < real_seqlen_k; ++k)
+                    m = std::max(m, p_host_ref_f32(i[0], i[1], k));
+                self(i) = m;
+            });
             if(p_drop > 0)
             {
                 const bool is_pack_gqa_active = (pack_gqa_nhead != nhead);
@@ -2595,6 +2645,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
 
                     ck_tile::reference_batched_dropout(
                         p_host_ref, randval_host_ref, p_undrop_in_uint8_t, rp_undrop);
+                    // the quantized runs' fp32 P (see the qscale branches below)
+                    ck_tile::reference_batched_dropout(
+                        p_host_ref_f32, randval_host_ref, p_undrop_in_uint8_t, rp_undrop);
 
                     ck_tile::HostTensor<RandValOutputDataType> randval_host_result(
                         {pack_gqa_nhead, pack_gqa_seqlen_q, real_seqlen_k});
@@ -2618,6 +2671,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         randval_host_ref, wb, drop_seed, drop_offset);
                     ck_tile::reference_batched_dropout(
                         p_host_ref, randval_host_ref, p_undrop_in_uint8_t, rp_undrop);
+                    // the quantized runs' fp32 P (see the qscale branches below)
+                    ck_tile::reference_batched_dropout(
+                        p_host_ref_f32, randval_host_ref, p_undrop_in_uint8_t, rp_undrop);
 
                     ck_tile::HostTensor<RandValOutputDataType> randval_host_result(
                         {nhead, real_seqlen_q, real_seqlen_k});
@@ -2642,6 +2698,23 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 }
             }
 
+            // P's floor: a quantized P rounds to its subnormal spacing below the normal range,
+            // at most 2^-16 of the row's largest P (fp8 e4m3 taken at 2^7 or more of its
+            // softmax value), whatever the value; each kept key (dropout's 1/(1 - p) included)
+            // adds that times |V| (floor_ref, in absmag_ref's units). Where the row keeps its
+            // largest P this is far under u_p * (P|V|); where dropout drops the large ones it
+            // is not.
+            ck_tile::HostTensor<SMPLComputeDataType> p_floor(p_host_ref_f32.get_lengths());
+            {
+                const float kept_scale = p_drop > 0 ? rp_undrop : 1.f;
+                p_floor.ForEach([&](auto& self, auto i) {
+                    self(i) = p_host_ref_f32(i) != 0
+                                  ? std::ldexp(p_row_max(i[0], i[1]), -16) * kept_scale
+                                  : 0;
+                });
+            }
+            ck_tile::HostTensor<OaccDataType> floor_ref(o_host_ref.get_lengths());
+            floor_ref.ForEach([](auto& self, auto i) { self(i) = 0; });
             if constexpr(is_mx)
             {
                 const ck_tile::index_t real_seqlen_v_scale =
@@ -2675,6 +2748,30 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     ck_tile::identity{},
                     ck_tile::identity{},
                     oacc_element_func);
+                {
+                    // the device quantizes P to fp8 (per 32 keys, or at a fixed 2^7 offset):
+                    // the same P|V| bound and floor as the fp8 scales' (see the OUT check)
+                    auto v_abs = v_host_ref2;
+                    v_abs.ForEach([](auto& self, auto i) { self(i) = std::abs(self(i)); });
+                    ck_tile::
+                        reference_batched_gemm<PDataType, OaccDataType, OaccDataType, OaccDataType>(
+                            p_host_ref,
+                            v_abs,
+                            absmag_ref,
+                            ck_tile::identity{},
+                            ck_tile::identity{},
+                            oacc_element_func);
+                    ck_tile::reference_batched_gemm<SMPLComputeDataType,
+                                                    OaccDataType,
+                                                    OaccDataType,
+                                                    OaccDataType>(p_floor,
+                                                                  v_abs,
+                                                                  floor_ref,
+                                                                  ck_tile::identity{},
+                                                                  ck_tile::identity{},
+                                                                  oacc_element_func);
+                    have_absmag = true;
+                }
             }
             else if(qscale.type == quant_scale_enum::blockscale)
             {
@@ -2705,6 +2802,22 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         p_host_ref_f32,
                         v_abs,
                         absmag_ref,
+                        ck_tile::idx_identity{},
+                        [&](auto idx, auto value) {
+                            return ck_tile::type_convert<float>(value) *
+                                   v_descale_host(b_idx,
+                                                  std::get<0>(idx) / nr,
+                                                  v_offset +
+                                                      std::get<2>(idx) / block_scale_size_kv_);
+                        },
+                        ck_tile::idx_identity{});
+                    ck_tile::reference_batched_quant_gemm<SMPLComputeDataType,
+                                                          VDataType,
+                                                          OaccDataType,
+                                                          OaccDataType>(
+                        p_floor,
+                        v_abs,
+                        floor_ref,
                         ck_tile::idx_identity{},
                         [&](auto idx, auto value) {
                             return ck_tile::type_convert<float>(value) *
@@ -2746,10 +2859,22 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         [&](auto idx, auto value) {
                             return value * v_descale_host(wb, std::get<0>(idx) / nr);
                         });
+                    ck_tile::reference_batched_quant_gemm<SMPLComputeDataType,
+                                                          VDataType,
+                                                          OaccDataType,
+                                                          OaccDataType>(
+                        p_floor,
+                        v_abs,
+                        floor_ref,
+                        ck_tile::idx_identity{},
+                        ck_tile::idx_identity{},
+                        [&](auto idx, auto value) {
+                            return value * v_descale_host(wb, std::get<0>(idx) / nr);
+                        });
                     have_absmag = true;
                 }
             }
-            else if(qscale.type == quant_scale_enum::pertensor && !(p_drop > 0))
+            else if(qscale.type == quant_scale_enum::pertensor)
             {
                 // Same reasoning as the mx branch above: quantizing P on the host makes the
                 // reference *less* precise than the device. The kernel quantizes exp(s - m),
@@ -2774,6 +2899,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                                     OaccDataType>(p_host_ref_f32,
                                                                   v_abs,
                                                                   absmag_ref,
+                                                                  ck_tile::identity{},
+                                                                  ck_tile::identity{},
+                                                                  ck_tile::scales{scale_o_host});
+                    ck_tile::reference_batched_gemm<SMPLComputeDataType,
+                                                    VDataType,
+                                                    OaccDataType,
+                                                    OaccDataType>(p_floor,
+                                                                  v_abs,
+                                                                  floor_ref,
                                                                   ck_tile::identity{},
                                                                   ck_tile::identity{},
                                                                   ck_tile::scales{scale_o_host});
@@ -2821,7 +2955,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                           atol);
             };
             bool cur_pass = true;
-            if constexpr(supports_qscale)
+            // the quantized P's bound (MX's too, see its reference above)
+            if constexpr(supports_qscale || is_mx)
             {
                 if(!have_absmag)
                 {
@@ -2833,7 +2968,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     // group scale and that scale is itself rounded, so P carries two
                     // roundings. The reference keeps P in fp32, so all of that error lands
                     // here. u_o likewise, since out and ref are both rounded to ODataType.
-                    const double u_p = std::pow(2.0, -ck_tile::numeric_traits<PDataType>::mant);
+                    // (MX's reference P is fp32; its device P is of the inputs' fp8 type)
+                    using PQuantType = std::conditional_t<is_mx, QDataType, PDataType>;
+                    const double u_p = std::pow(2.0, -ck_tile::numeric_traits<PQuantType>::mant);
                     const double u_o = std::pow(2.0, -ck_tile::numeric_traits<ODataType>::mant);
                     // u_o * |r| is the ULP only while r is normal; subnormal spacing is fixed.
                     const double u_o_floor = u_o * static_cast<double>(ck_tile::type_convert<float>(
@@ -2847,7 +2984,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                         const double o   = ck_tile::type_convert<float>(self(idx));
                         const double r   = ck_tile::type_convert<float>(o_host_ref(idx));
                         const double c   = std::abs(ck_tile::type_convert<float>(absmag_ref(idx)));
-                        const double lim = u_p * c + std::max(u_o * std::abs(r), u_o_floor);
+                        const double lim = u_p * c +
+                                           std::abs(ck_tile::type_convert<float>(floor_ref(idx))) +
+                                           std::max(u_o * std::abs(r), u_o_floor);
                         const double err = std::abs(o - r);
                         if(lim > 0 && err / lim > worst)
                             worst = err / lim;
@@ -2875,8 +3014,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     // The one policy constant: the worst correct head measured needed 1.07.
                     constexpr double alpha_k = 2;
                     // 1/12 is the variance of a half-ULP round-to-nearest.
+                    // Dropout keeps 1 - p of a row's keys, whose P rounding averages over that
+                    // fraction of the terms.
+                    const double kept = p_drop > 0 ? 1.0 - p_drop : 1.0;
                     const double alpha_tol =
-                        alpha_k * std::sqrt(u_p * u_p / (12 * alpha_rows) +
+                        alpha_k * std::sqrt(u_p * u_p / (12 * alpha_rows * kept) +
                                             u_o * u_o / (12 * alpha_rows * hdim_v));
                     cur_pass = (over == 0) && (std::abs(worst_alpha) <= alpha_tol);
                     if(over != 0)

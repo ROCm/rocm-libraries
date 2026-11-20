@@ -352,6 +352,12 @@ struct fmha_fwd_args
 
     ck_tile::index_t block_scale_size_q;
     ck_tile::index_t block_scale_size_kv;
+
+    // Group mode: a hint that the batches' query and key lengths are about equal. FmhaFwdKernel
+    // then keeps the m-tiles of a (batch, head), which stream the same K/V, on one XCD, as it
+    // does in batch mode; with uneven lengths whole-batch XCD segments would leave the XCDs
+    // unbalanced. Performance only: either value gives the same results.
+    bool uniform_seqlens = false;
 };
 
 struct fmha_fwd_pagedkv_args
@@ -877,7 +883,8 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
 
     if constexpr(FmhaKernel::kIsGroupMode)
     {
-        dim3 grids = FmhaKernel::GridSize(
+        kargs.uniform_seqlens = args.uniform_seqlens;
+        dim3 grids            = FmhaKernel::GridSize(
             args.batch, args.nhead_q, args.max_seqlen_q, args.hdim_v, args.seqlen_k_ptr != nullptr);
         return ck_tile::make_tuple(kargs, grids);
     }
@@ -897,6 +904,20 @@ auto fmha_fwd_create_kargs_and_grids(fmha_fwd_args args)
             FmhaKernel::GridSize(args.batch, args.nhead_q, args.max_seqlen_q, args.hdim_v, false);
         return ck_tile::make_tuple(kargs, grids);
     }
+}
+
+// Whether folding the query heads of a KV head into one tile costs more parallelism than
+// the shared K/V loads save: a short query (up to 16 rows per head) folded past
+// qr_tdm_pingpong's 16-row tile runs nhead_ratio times fewer blocks, which loses on a grid
+// the unfolded heads fill less than twice over (d128, 32 heads, 8:1 GQA: up to -45%).
+inline bool fmha_fwd_pack_gqa_costs_parallelism(ck_tile::index_t batch,
+                                                ck_tile::index_t nhead_q,
+                                                ck_tile::index_t nhead_ratio,
+                                                ck_tile::index_t seqlen_q,
+                                                unsigned num_cus)
+{
+    return seqlen_q >= 1 && seqlen_q <= 16 && nhead_ratio * seqlen_q > 16 &&
+           1LL * batch * nhead_q < 2LL * num_cus;
 }
 
 // Batch-mode decode GQA whose query heads fold into one tile of query rows per KV head.
@@ -1816,6 +1837,10 @@ inline constexpr ck_tile::index_t fmha_fwd_largest_n_tile_size = 128;
 ck_tile::index_t fmha_fwd_block_scale_size_kv(const std::string& data_type,
                                               ck_tile::index_t hdim_q,
                                               ck_tile::index_t hdim_v);
+
+// Generated: whether dispatch's head-dim case for these traits holds a qr_tdm_pingpong
+// 16-row (short-query) tile serving them.
+bool fmha_fwd_has_short_query_tile(fmha_fwd_traits traits);
 
 struct fmha_fwd_pagedkv_traits
 {
