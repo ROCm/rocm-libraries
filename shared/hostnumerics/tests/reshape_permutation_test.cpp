@@ -16,6 +16,10 @@
 #include <utility>
 #include <vector>
 
+#ifdef _OPENMP
+#error "HostNumerics consumers must not inherit OpenMP compile flags."
+#endif
+
 using namespace roc::hostnumerics;
 
 // Tutorial: describe a padded tensor as factors, then make one factor run
