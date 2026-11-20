@@ -193,8 +193,8 @@ namespace rocsparse
                         // Entry found, do linear combination
                         I idx     = data[hash];
                         local_sum = rocsparse::fma(
-                            rocsparse::load_done_row_data(&csr_val[k]),
-                            rocsparse::conj(rocsparse::load_done_row_data(&csr_val[idx])),
+                            rocsparse::load_done_row_data(&csr_val[idx]),
+                            rocsparse::conj(rocsparse::load_done_row_data(&csr_val[k])),
                             local_sum);
                         break;
                     }

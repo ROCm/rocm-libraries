@@ -13,7 +13,7 @@
 
 name: TheRock Multi-Arch CI
 
-# TheRock ref: pinned to ROCm/TheRock commit 11621df52cb7e5790ab7a37515098cde8faed4ab.
+# TheRock ref: pinned to ROCm/TheRock commit ddecad3a9050c0ed1136de8b68af1781307bd1c4.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching.
 
 on:
@@ -142,7 +142,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+          ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
           path: _therock
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
@@ -184,7 +184,7 @@ jobs:
 
   setup:
     needs: [ci-env, configure]
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     with:
       build_variant: "release"
       # Limit GPU families for rocm-libraries CI.
@@ -228,7 +228,7 @@ jobs:
           'off'
         }}
       repository: ROCm/TheRock
-      ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+      ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
       # Pass external repo info for stage-impact analysis.
       external_repo: >-
         {
@@ -250,7 +250,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -264,7 +264,7 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+      ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     permissions:
       contents: read
       id-token: write
@@ -277,7 +277,7 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
@@ -290,46 +290,10 @@ jobs:
       changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.test_projects }}
       repository: ROCm/TheRock
       # Concrete SHA resolved once by setup; do not re-resolve main here.
-      ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+      ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
     permissions:
       contents: read
       id-token: write
-
-  rocjitsu_race_check:
-    name: rocjitsu race check (${{ matrix.amdgpu_families }})
-    # A caller cannot depend on an individual job inside a reusable workflow,
-    # so start after the Linux workflow has finished publishing its artifacts.
-    # This sidecar remains advisory and is not part of the required summary.
-    needs: [ci-env, configure, linux_build_and_test]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - amdgpu_families: gfx94X-dcgpu
-            amdgpu_targets: gfx942
-          - amdgpu_families: gfx950-dcgpu
-            amdgpu_targets: gfx950
-    # Temporarily disabled due to artifact setup flakes. Re-enable after
-    # https://github.com/ROCm/TheRock-Infra/issues/1160 is resolved.
-    if: >-
-      ${{
-        false &&
-        !cancelled() &&
-        github.event_name == 'pull_request' &&
-        (
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt,') ||
-          contains(format(',{0},', needs.configure.outputs.changed_projects), ',projects/hipblaslt/tensilelite,') ||
-          contains(github.event.pull_request.labels.*.name, 'test:hipblaslt')
-        ) &&
-        needs.linux_build_and_test.result != 'skipped'
-      }}
-    uses: ./.github/workflows/therock-rocjitsu-race-check-linux.yml
-    with:
-      therock_ref: ${{ needs.ci-env.outputs.therock-ref }}
-      build_runs_on: ${{ needs.ci-env.outputs.linux-runner }}
-      amdgpu_families: ${{ matrix.amdgpu_families }}
-      amdgpu_targets: ${{ matrix.amdgpu_targets }}
-      # TODO(newling): Add gfx1151 after validating a target-specific workload.
 
   notify_teams_on_failure:
     name: Notify Teams Channel on Failure
@@ -398,7 +362,7 @@ jobs:
         with:
           repository: "ROCm/TheRock"
           # Concrete SHA resolved once by setup; do not re-resolve main here.
-          ref: 11621df52cb7e5790ab7a37515098cde8faed4ab # 2026-11-17
+          ref: ddecad3a9050c0ed1136de8b68af1781307bd1c4 # 2026-11-20
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
