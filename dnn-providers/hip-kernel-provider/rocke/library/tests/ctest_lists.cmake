@@ -227,7 +227,9 @@ endif()
 # oracle-free uniform-probability checker and subject contracts, the gfx942
 # dense golden IR hashes (pure text lowering, a few seconds), the dense
 # varlen-keys host checks, the gfx950 dense varlen K/V buffer bound on the emitted
-# IR, and the backward-test memo bound in tests/conftest.py.
+# IR, the tiled-2D spec validators' refusals (their engine-comparison cases skip
+# here, where rocke_engine is not built), and the backward-test memo bound in
+# tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -254,6 +256,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_3d_kv_cache_policy.py"
     "tests/library/tests/test_attention_tiled_launch_signature.py"
     "tests/library/tests/test_attention_tiled_cpp_entry_guards.py"
+    "tests/library/tests/test_attention_binding_spec_fields.py"
     "tests/library/tests/test_attention_dense_kv_split_combine_abi.py"
     "tests/library/tests/test_attention_tiled_3d_mask_type.py"
     "tests/library/tests/test_attention_tiled_3d_module.py"

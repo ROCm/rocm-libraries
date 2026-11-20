@@ -345,10 +345,139 @@ _CONFIGS = {
     ),
 }
 
+_CONFIGS[21] = dict(
+    # Two-page tiles from strided (non-paged) K/V into swizzled LDS, with
+    # softcap.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=4,
+    dtype="fp16",
+    num_segments=32,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=True,
+    kv_storage_dtype=None,
+    num_seqs=4,
+    tile_size_override=32,
+    use_decode_grid=True,
+    kv_cache_policy="stream",
+    use_kv_lds_swizzle=True,
+    kv_layout="strided",
+)
+
+_CONFIGS[22] = dict(
+    # Decode grid with SC0 + NT K/V copies.
+    head_size=128,
+    block_size=16,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+    kv_cache_policy="nt",
+)
+
+_CONFIGS[23] = dict(
+    # Decode grid with globally cached K/V copies.
+    head_size=128,
+    block_size=16,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+    kv_cache_policy="global",
+)
+
+_CONFIGS[24] = dict(
+    # Reduce with the LSE output, decode grid.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+)
+
+_CONFIGS[25] = dict(
+    # Reduce with the LSE output.
+    head_size=64,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+)
+
+_CONFIGS[26] = dict(
+    # Top-left causal mask (context_len pinned to 0).
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    causal_top_left=True,
+)
+
+_CONFIGS[27] = dict(
+    # Right bound of 8 keys with a sliding window and sinks.
+    head_size=64,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=8,
+    use_sinks=True,
+    sliding_window=128,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    right_bound=8,
+)
+
+_CONFIGS[28] = dict(
+    # Top-left unbounded band, fp8 K/V, decode grid.
+    head_size=128,
+    block_size=16,
+    num_query_heads=64,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype="fp8e4m3",
+    use_decode_grid=True,
+    causal_top_left=True,
+    right_bound=-1,
+)
+
 # Configs whose REDUCE kernel is built with emit_lse=True. 18 and 19 leave the
 # segment unchanged (reduce-only emit_lse); 20's cfg dict also carries
 # emit_lse=True into the segment spec, pairing both kernels as production does.
-_REDUCE_LSE = frozenset({18, 19, 20})
+_REDUCE_LSE = frozenset({18, 19, 20, 24, 25})
 
 
 def _emit(idx: int) -> str:

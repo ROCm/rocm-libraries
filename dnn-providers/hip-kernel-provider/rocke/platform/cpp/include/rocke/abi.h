@@ -136,8 +136,18 @@ extern "C" {
  * 20: rocke_mx_gemm_spec_t lost per_input_row and now declares the
  *     workgroup tile (block_tile_m, block_tile_n) right after M, N, K, which
  *     changes its size and the offsets of its fields; rocke_mx_gemm_block_size
- *     returns long long (it returned int), which changes its signature. */
-#define ROCKE_ABI_VERSION 20
+ *     returns long long (it returned int), which changes its signature.
+ * 21: rocke_unified_attention_problem_t (renamed from rocke_unified_attn_problem_t)
+ *     gained use_additive_bias, fp8_fnuz, target_ctas, causal_top_left,
+ *     right_bound and emit_lse, which changes its size and field offsets;
+ *     rocke_attention_tiled_2d_spec_t gained the kq_lds_pad, mask phase split,
+ *     HBM-direct K/V and mask-band fields, and the gfx942 / gfx950
+ *     rocke_unified_attention_3d_tiled_spec_t gained kv_layout and the
+ *     mask-band fields, which changes their sizes;
+ *     rocke_gfx942_attention_tiled_2d_supports_args_t gained use_d256_fast; the
+ *     unified-attention selectors take an explicit arch argument, and
+ *     rocke_unified_attn_set_resolved_arch is gone. */
+#define ROCKE_ABI_VERSION 21
 
 /* Wire ABI: the CBOR recipe/bundle/guard vocabulary this engine understands.
  * 2: list-tagged ("l") kernel attrs such as cluster_dims; level-1 engines drop them.

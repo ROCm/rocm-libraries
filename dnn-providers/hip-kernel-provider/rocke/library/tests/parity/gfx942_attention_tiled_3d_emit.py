@@ -381,7 +381,7 @@ _CONFIGS = {
 }
 
 # Configs whose REDUCE kernel is built with emit_lse=True (segment unchanged).
-_REDUCE_LSE = frozenset({20, 21})
+_REDUCE_LSE = frozenset({20, 21, 35, 36})
 
 
 def _strided_decode(head_size, block_size, tile, dtype, num_segments, heads=(32, 8)):
@@ -422,6 +422,69 @@ _CONFIGS.update(
         31: _strided_decode(256, 64, 32, "fp16", 8),
         32: dict(_strided_decode(128, 32, 16, "fp16", 16), waves_per_eu=2),
     }
+)
+
+_CONFIGS[33] = dict(
+    # Decode K/V streamed by the async copies from strided (non-paged) K/V.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    num_seqs=4,
+    use_decode_grid=True,
+    kv_cache_policy="stream",
+    kv_layout="strided",
+)
+
+_CONFIGS[34] = dict(
+    # Decode K/V with globally cached copies through the 1-DWORD async loader.
+    head_size=128,
+    block_size=32,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=16,
+    use_sinks=True,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+    kv_cache_policy="global",
+)
+
+_CONFIGS[35] = dict(
+    # Reduce with the LSE output, decode grid.
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    num_segments=16,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
+    use_decode_grid=True,
+)
+
+_CONFIGS[36] = dict(
+    # Reduce with the LSE output.
+    head_size=64,
+    block_size=16,
+    num_query_heads=8,
+    num_kv_heads=8,
+    dtype="fp16",
+    num_segments=8,
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    kv_storage_dtype=None,
 )
 
 

@@ -508,6 +508,8 @@ class UnifiedAttention2DTiledSpec:
 
     def __post_init__(self):
         require_bool("emit_lse", self.emit_lse)
+        if self.block_size <= 0:
+            raise ValueError(f"block_size must be positive, got {self.block_size}")
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
         # The wide-K (32x32x16 migration) and transpose-read / native-fp8
         # experimental knobs all depend on gfx950-only ISA (wide-K MFMA atoms,
@@ -575,7 +577,7 @@ class UnifiedAttention2DTiledSpec:
                 f"Other counts would need new MFMA distribution logic. "
                 f"num_warps=8 (BLOCK_M=128, THREADS=512) matches the BLOCK_M "
                 f"the production Triton 2D kernel uses for high-q prefill "
-                f"shapes; both are well within MI355X's 1024-thread CTA cap."
+                f"shapes; both are well within the 1024-thread CTA cap."
             )
         if self.block_m_per_warp not in (16, 32):
             raise ValueError(
@@ -810,6 +812,12 @@ class UnifiedAttention2DTiledSpec:
                 f"kv_cache_policy must be one of {', '.join(CACHE_POLICY_NAMES)} "
                 f"(got {self.kv_cache_policy!r})"
             )
+        for flag in ("use_k_hbm_direct", "use_v_hbm_direct"):
+            if getattr(self, flag) and self.use_i64_kv_addr:
+                raise ValueError(
+                    f"{flag} reads K/V with i32 offsets; it cannot be combined "
+                    "with use_i64_kv_addr"
+                )
         if self.use_k_hbm_direct:
             if not (self.use_mfma_32x32x8 and self.use_transposed_qk_32x32):
                 raise ValueError(
