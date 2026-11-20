@@ -20,7 +20,6 @@
 #include <memory>
 #include <numeric>
 #include <optional>
-#include <utility>
 #include <vector>
 
 namespace
@@ -251,9 +250,9 @@ namespace
         return factor != 0 && multiplySize(multiple, factor / std::gcd(size_t(multiple), factor));
     }
 
-    // The size closest to the preferred one that the solution's own size
-    // predicates accept. Bounds and multiples named by the predicates suggest
-    // candidates; the predicates themselves decide.
+    // Try the preferred shape and nearby predicate bounds, aligned to required
+    // multiples. Return the first shape accepted by the native size predicates;
+    // finding an optimal shape is not needed to exercise the selected solution.
     std::optional<Sizes> chooseSizes(TensileLite::ContractionSolution const&               solution,
                                      std::vector<std::shared_ptr<ProblemPredicate>> const& checks,
                                      Sizes   preferred,
@@ -346,9 +345,6 @@ namespace
                 return da != db ? da < db : a > b;
             });
         }
-        // The sum of distances can exceed the range of a single dimension.
-        std::optional<Sizes>        best;
-        std::pair<int, long double> bestCost{5, 0};
         for(int64_t m : candidates[0])
             for(int64_t n : candidates[1])
                 for(int64_t k : candidates[3])
@@ -384,32 +380,19 @@ namespace
                                                                                 0);
                         problem.setGroupedGemm(p.groupedGemm);
                         problem.setGroupedGemmCount(p.groupedGemm ? 2 : 1);
-                        bool accepted
-                            = std::all_of(checks.begin(), checks.end(), [&](auto const& check) {
-                                  return (*check)(problem);
-                              });
-                        if(!accepted)
-                            continue;
-                        std::array<int64_t, 4>      chosen{m, n, batch, k};
-                        std::pair<int, long double> cost{0, 0};
-                        for(int d = 0; d < 4; ++d)
-                        {
-                            cost.first += chosen[d] != want[d];
-                            cost.second += std::abs(chosen[d] - want[d]);
-                        }
-                        if(cost.first == 0)
+                        if(std::all_of(checks.begin(), checks.end(), [&](auto const& check) {
+                               return (*check)(problem);
+                           }))
                             return Sizes{m, n, k, batch};
-                        if(cost < bestCost)
-                            best = Sizes{m, n, k, batch}, bestCost = cost;
                     }
-        return best;
+        return std::nullopt;
     }
 
 }
 
-std::variant<Arguments, UnsupportedSolution>
-    solutionIndexCase(TensileLite::ContractionSolution const& solution,
-                      SolutionCaseOptions const&              options)
+std::variant<Arguments, hipblaslt_client::UnsupportedSolution>
+    hipblaslt_client::solutionIndexCase(TensileLite::ContractionSolution const& solution,
+                                        SolutionCaseOptions const&              options)
 {
     using Result        = std::variant<Arguments, UnsupportedSolution>;
     auto unsupported    = [](std::string reason) { return Result{UnsupportedSolution{reason}}; };

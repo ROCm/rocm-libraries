@@ -21,6 +21,10 @@
 
 namespace
 {
+    using hipblaslt_client::SolutionCaseOptions;
+    using hipblaslt_client::solutionIndexCase;
+    using hipblaslt_client::UnsupportedSolution;
+
     using Problem        = TensileLite::ContractionProblemGemm;
     namespace Predicates = TensileLite::Predicates;
 
