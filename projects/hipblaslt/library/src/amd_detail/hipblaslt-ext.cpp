@@ -26,6 +26,7 @@
 
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "exceptions.hpp"
+#include "hipblaslt-ext-inputs.hpp"
 #include "hipblaslt_internal.hpp"
 #include "utility.hpp"
 #include <Debug.hpp>
@@ -429,6 +430,8 @@ namespace hipblaslt_ext
                 return RocblasltContractionProblem::ScalingFormat::Block_16_UE5M3;
             case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
                 return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
+            case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
+                return RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
             default:
                 std::cerr << "Unsupported scaling type for " << which
                           << " matrix: " << static_cast<int>(s) << std::endl;
@@ -484,6 +487,8 @@ namespace hipblaslt_ext
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC64_16F_ZP_EXT;
             case RocblasltContractionProblem::ScalingFormat::Block_128_F16_ZP:
                 return HIPBLASLT_MATMUL_MATRIX_SCALE_VEC128_16F_ZP_EXT;
+            case RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT:
+                return HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
             default:
                 std::cerr << "Unsupported scaling type for " << which
                           << " matrix: " << static_cast<int>(f) << std::endl;
@@ -605,29 +610,6 @@ namespace hipblaslt_ext
     {
         return pimpl->wgm;
     }
-
-    class GemmInputs::GemmInputsImpl
-    {
-    public:
-        const void* a     = nullptr;
-        const void* b     = nullptr;
-        const void* c     = nullptr;
-        const void* d     = nullptr;
-        const void* alpha = nullptr;
-        const void* beta  = nullptr;
-        // Epilogue inputs
-        const void* bias          = nullptr;
-        const void* scaleA        = nullptr;
-        const void* scaleB        = nullptr;
-        const void* scaleC        = nullptr;
-        const void* scaleD        = nullptr;
-        const void* scaleAux      = nullptr;
-        const void* scaleAlphaVec = nullptr;
-        const void* aux           = nullptr;
-        const void* amaxD         = nullptr;
-        // Keep this layout in sync with rocblaslt::RocGemmInputsV2.
-        bool deviceScalarAlpha = false;
-    };
 
     GemmInputs::GemmInputs()
         : pimpl(std::make_unique<GemmInputsImpl>())

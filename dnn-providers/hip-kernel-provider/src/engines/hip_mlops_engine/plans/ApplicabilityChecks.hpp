@@ -8,10 +8,16 @@
 #include <unordered_set>
 #include <vector>
 
+#include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hip_kernel_provider
 {
+
+void checkNormalizationActivationModeSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
+    bool isBwd,
+    const std::string& normalizationName);
 
 // --- Tensor Descriptor Value Object ---
 
@@ -74,6 +80,21 @@ protected:
     virtual void validateConsistentShapes(const std::vector<int64_t>& tensorIds,
                                           const std::vector<int64_t>& referenceShape,
                                           const std::string& errorMessage);
+
+    // Kernel buffers are device tensors, so a virtual tensor in a buffer role has no storage.
+    virtual void validateNoVirtualTensors(const std::vector<int64_t>& tensorIds,
+                                          const std::string& errorMessage);
+
+    // The kernels index and size their problem with 32-bit unsigned compile-time constants and
+    // arithmetic (element count, per-axis extents, grid), so the element count of `dims` must stay
+    // below UINT32_MAX. The product is checked in 64 bits.
+    virtual void validateElementCountFitsUint32(const std::vector<int64_t>& dims,
+                                                const std::string& errorMessage);
+
+    // Plans resolve epsilon as a scalar operand when they are built; an epsilon uid the graph does
+    // not carry, or a tensor that holds no readable scalar, must decline here instead. Throws
+    // BAD_PARAM, which the builder logs and turns into a decline.
+    void checkEpsilonSupported(int64_t epsilonTensorId) const;
 
     // --- Component Validators ---
 

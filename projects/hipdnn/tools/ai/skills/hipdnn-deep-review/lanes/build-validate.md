@@ -56,6 +56,9 @@ them. Provider builds and tests use [hipdnn-superbuild](../../hipdnn-superbuild/
    `ctest --test-dir $SCRATCH/RUN/prefix/bin/hipdnn -N`.
 5. **Run.** Run CPU-only selections locally. Run a GPU selection only when it is listed under `Approved:` in dispatch-context.md;
    put every other GPU selection under **Approval requests**.
+   Loading a HIP or ROCm runtime library on the host to check which libraries it maps (dlopen,
+   `/proc/self/maps`, `ldd`) is host work and needs no approval; device enumeration, kernel
+   launches and GPU test selections do.
 6. **Failures.** Rerun each failing selection once at `$HEAD` to separate flaky from broken, then at `$BASE` in
    `$SCRATCH/RUN/base`. A failure at both is pre-existing; attach both logs.
 7. **Regression tests (M1).** For each regression test a defect fix adds, run it at `$BASE` (or at `$HEAD` with the fix reverted in

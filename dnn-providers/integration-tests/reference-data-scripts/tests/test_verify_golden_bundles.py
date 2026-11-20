@@ -1277,6 +1277,118 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertIn("has unused values entry 'layout'", completed.stderr)
 
+    def test_sweep_tensor_field_placeholders_resolve_by_first_token(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment.0}"
+            template["tensors"][1]["alignment"] = "${case.alignment.1}"
+            template["tensors"][1]["value"] = "${case.value}"
+            template_path.write_text(json.dumps(template))
+            used = self.sweep_case(
+                "used",
+                values_overrides={"alignment": {"0": 16, "1": 2}},
+                golden_path=None,
+            )
+            used["values"]["tensors"][1]["value"] = 0.5
+            missing = self.sweep_case("missing", golden_path=None)
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [used, missing]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertNotIn("case 'used' has unused values entry", completed.stderr)
+            self.assertNotIn("case 'used' is missing", completed.stderr)
+            self.assertIn(
+                "case 'missing' is missing placeholder value for 'alignment.0'",
+                completed.stderr,
+            )
+            self.assertIn(
+                "case 'missing' is missing placeholder value for 'value'",
+                completed.stderr,
+            )
+
+    def test_sweep_dotted_placeholder_nested_in_a_tensor_entry_now_resolves(
+        self,
+    ) -> None:
+        # The C++ loader's resolvePlaceholder()/lookupJsonPath() walk a (possibly
+        # dotted) placeholder path against a tensor's own values.tensors[] entry
+        # with no restriction on field name, descending through nested dicts. A
+        # dotted placeholder like alignment.0 therefore DOES resolve when the
+        # tensor's own entry holds the matching nested structure -- this used to
+        # be rejected because the verifier only ever checked a flat whitelist of
+        # field names against a single dotted token, not a real recursive walk.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment.0}"
+            template_path.write_text(json.dumps(template))
+            case = self.sweep_case("nested", golden_path=None)
+            case["values"]["tensors"][0]["alignment"] = {"0": 16}
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_sweep_dotted_placeholder_over_a_tensor_scalar_is_still_missing(
+        self,
+    ) -> None:
+        # The real false-negative this family of tests originally caught: a
+        # dotted placeholder (alignment.0) whose tensor-scoped value is a plain
+        # scalar, not the nested object the dotted path needs to walk through.
+        # The recursive walk can't descend into a non-dict 16 to find key "0",
+        # so this must still be reported as missing -- distinct from the
+        # previous test, which nests the value correctly.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment.0}"
+            template_path.write_text(json.dumps(template))
+            case = self.sweep_case("scalar_misplaced", golden_path=None)
+            case["values"]["tensors"][0]["alignment"] = 16
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "case 'scalar_misplaced' is missing placeholder value for 'alignment.0'",
+                completed.stderr,
+            )
+
+    def test_sweep_plain_tensor_scoped_placeholder_resolves_from_its_own_entry(
+        self,
+    ) -> None:
+        # A non-dotted, non-whitelisted field name (e.g. alignment, as used by
+        # develop's SdpaBackward bundles) placed directly in a tensor's own
+        # values.tensors[] entry must resolve -- the C++ loader has no
+        # whitelist on which per-tensor field names are allowed.
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            template = json.loads(template_path.read_text())
+            template["tensors"][0]["alignment"] = "${case.alignment}"
+            template_path.write_text(json.dumps(template))
+            case = self.sweep_case("plain", golden_path=None)
+            case["values"]["tensors"][0]["alignment"] = 16
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_sweep_golden_path_must_reference_tensors_dvc(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -1656,6 +1768,145 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
 
             self.assertEqual(completed.returncode, 1)
             self.assertIn("missing graph.template.json", completed.stderr)
+
+    def write_superset_sweep_bundle(
+        self, root: Path, absent_case: dict[str, object], version: int = 2
+    ) -> Path:
+        """A template with an optional sink tensor 2, one case that has it and one
+        that marks it absent."""
+        template_path, sweep_path = self.write_sweep_bundle(
+            root, Path("quick/TestOp/Topology"), []
+        )
+        template = json.loads(template_path.read_text())
+        template["nodes"][0]["inputs"]["sink_tensor_uid"] = 2
+        template["tensors"].append(
+            {
+                "uid": 2,
+                "name": "sink",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "virtual": False,
+            }
+        )
+        template_path.write_text(json.dumps(template))
+        full = self.sweep_case(
+            "with_sink",
+            tensor_uids=(0, 1, 2),
+            golden_path=None,
+        )
+        sweep_path.write_text(
+            json.dumps({"version": version, "cases": [full, absent_case]})
+        )
+        return sweep_path
+
+    def absent_sink_case(self, **overrides: object) -> dict[str, object]:
+        case = self.sweep_case(
+            "no_sink",
+            tensor_uids=(0, 1),
+            metadata={
+                "format_version": 2,
+                "generator": "manual",
+                "reference_source": "manual",
+            },
+            golden_path=None,
+        )
+        case["absent_tensors"] = [2]
+        case.update(overrides)
+        return case
+
+    def test_sweep_case_with_absent_tensor_needs_no_values_for_it(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_superset_sweep_bundle(root, self.absent_sink_case())
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("0 error(s), 0 warning(s)", completed.stderr)
+
+    def test_absent_tensor_with_a_tensor_scoped_placeholder_needs_no_value(
+        self,
+    ) -> None:
+        """A placeholder in a non-shape field of an absent tensor (here its
+        runtime `value`) is never expanded, so the absent case needs no value
+        for it; the case that keeps the tensor still does."""
+        for keep_value, returncode in ((True, 0), (False, 1)):
+            with self.subTest(keep_value=keep_value), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                sweep_path = self.write_superset_sweep_bundle(
+                    root, self.absent_sink_case()
+                )
+                template_path = sweep_path.parent / "graph.template.json"
+                template = json.loads(template_path.read_text())
+                template["tensors"][-1]["value"] = "${case.sink_value}"
+                template_path.write_text(json.dumps(template))
+                sweep = json.loads(sweep_path.read_text())
+                if keep_value:
+                    sweep["cases"][0]["values"]["sink_value"] = 0.5
+                sweep_path.write_text(json.dumps(sweep))
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, returncode, completed.stderr)
+                self.assertNotIn("case 'no_sink' is missing", completed.stderr)
+
+    def test_sweep_case_with_absent_tensor_the_loader_refuses_fails(self) -> None:
+        for version, overrides, message in (
+            (1, {}, "absent_tensors needs sweep version 2, not 1"),
+            (2, {"absent_tensors": [7]}, "7 is not a tensor of the template"),
+            (
+                2,
+                {"golden": {"path": "golden/no_sink/tensors.dvc"}},
+                "absent_tensors and golden data do not mix",
+            ),
+        ):
+            with self.subTest(message=message), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                self.write_superset_sweep_bundle(
+                    root, self.absent_sink_case(**overrides), version
+                )
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, 1)
+                self.assertIn(
+                    f"case 'no_sink' absent_tensors: {message}", completed.stderr
+                )
+
+    def test_sweep_values_entry_for_an_absent_tensor_is_one_error(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            case = self.absent_sink_case()
+            case["values"]["tensors"].append({"uid": 2})
+            self.write_superset_sweep_bundle(root, case)
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "case 'no_sink' absent_tensors: 2 has a values.tensors entry",
+                completed.stderr,
+            )
+            self.assertIn("1 error(s), 0 warning(s)", completed.stderr)
+
+    def test_sweep_version_must_be_1_or_2(self) -> None:
+        for version, returncode in ((1, 0), (2, 0), (3, 1), (0, 1), (2.0, 1)):
+            with self.subTest(version=version), TemporaryDirectory() as tmpdir:
+                root = Path(tmpdir)
+                _, sweep_path = self.write_sweep_bundle(
+                    root, Path("quick/TestOp/Topology"), []
+                )
+                case = self.sweep_case("small_fp32", golden_path=None)
+                sweep_path.write_text(json.dumps({"version": version, "cases": [case]}))
+
+                completed = self.run_verifier(root)
+
+                self.assertEqual(completed.returncode, returncode, completed.stderr)
+                if returncode:
+                    self.assertIn(
+                        "version is required and must be 1 or 2", completed.stderr
+                    )
 
     def test_sweep_case_over_2mib_fails(self) -> None:
         with TemporaryDirectory() as tmpdir:

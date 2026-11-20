@@ -174,6 +174,25 @@ if(CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER MATCHES ".*clang
   string(REGEX MATCH ".mcode\-object\-version" TARGET_ID_SUPPORT ${CXX_OUTPUT})
 endif()
 
+# The SPIR-V translator of ROCm 10.1 and older crashes while it finalizes the SPIR-V of rocSPARSE
+# at runtime. The library runs on the ROCm it was built with, so the ROCm version found here
+# decides. Looked up in a function because the rocm-core config overwrites ROCM_PATH.
+function(rocsparse_get_rocm_version out_var)
+  find_package(rocm-core CONFIG QUIET PATHS ${ROCM_PATH} /opt/rocm)
+  set(${out_var} "${rocm-core_VERSION}" PARENT_SCOPE)
+endfunction()
+
+set(ROCSPARSE_SPIRV_GPU_TARGET)
+if(NOT BUILD_ADDRESS_SANITIZER AND (NOT GPU_TARGETS OR GPU_TARGETS STREQUAL "all"))
+  rocsparse_get_rocm_version(ROCSPARSE_ROCM_VERSION)
+  if(ROCSPARSE_ROCM_VERSION VERSION_GREATER_EQUAL 10.2)
+    set(ROCSPARSE_SPIRV_GPU_TARGET "amdgcnspirv")
+  else()
+    message(STATUS "Default GPU_TARGETS without amdgcnspirv, it needs ROCm 10.2 or later "
+                   "(found: '${ROCSPARSE_ROCM_VERSION}')")
+  endif()
+endif()
+
 #Set the GPU_TARGETS with backward compatibility
 if(COMMAND rocm_check_target_ids)
     if(BUILD_ADDRESS_SANITIZER)
@@ -181,7 +200,7 @@ if(COMMAND rocm_check_target_ids)
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+          TARGETS ${ROCSPARSE_SPIRV_GPU_TARGET} "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                   "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
                   "gfx1030;gfx1100;gfx1101;gfx1102"
                   "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
@@ -190,7 +209,7 @@ if(COMMAND rocm_check_target_ids)
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+        set(DEFAULT_GPU_TARGETS ${ROCSPARSE_SPIRV_GPU_TARGET} "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
                                 "gfx1030;gfx1100;gfx1101;gfx1102"
                                 "gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171"
                                 "gfx1200;gfx1201;gfx1250;gfx1250-strict")
@@ -206,7 +225,7 @@ if( AMDGPU_TARGETS AND NOT GPU_TARGETS )
 elseif( GPU_TARGETS )
   set( GFX_LIST ${GPU_TARGETS} )
 else ()
-  set( GFX_LIST ${DEFAULT_AMDGPU_TARGETS} ) # default if not set
+  set( GFX_LIST ${DEFAULT_GPU_TARGETS} ) # default if not set
 endif()
 
 set(GPU_TARGETS "${GFX_LIST}" CACHE STRING "GPU architectures to build for")
@@ -223,6 +242,20 @@ else()
 endif()
 
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
+
+if("amdgcnspirv" IN_LIST GPU_TARGETS)
+  if(BUILD_ADDRESS_SANITIZER)
+    message(FATAL_ERROR "The amdgcnspirv target cannot be combined with BUILD_ADDRESS_SANITIZER")
+  endif()
+  if(NOT DEFINED ROCSPARSE_ROCM_VERSION)
+    rocsparse_get_rocm_version(ROCSPARSE_ROCM_VERSION)
+  endif()
+  if(NOT ROCSPARSE_ROCM_VERSION VERSION_GREATER_EQUAL 10.2)
+    message(WARNING "The amdgcnspirv target needs ROCm 10.2 or later (found: "
+                    "'${ROCSPARSE_ROCM_VERSION}'). With older versions the process crashes when "
+                    "the runtime compiles the SPIR-V code object.")
+  endif()
+endif()
 
 # Setup version
 set(VERSION_STRING "5.2.0")
@@ -501,6 +534,23 @@ if(BUILD_CODE_COVERAGE)
     )
   endif()
 
+  # Rewrite SF: paths to start at projects/rocsparse/ so two machines' exported
+  # reports can be unioned. llvm-cov export needs each machine's own binaries,
+  # so the lcov files are the layer that travels. coverage.info keeps absolute
+  # paths so genhtml can still open sources.
+  set(COVERAGE_MERGE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/scripts/merge_coverage_info.py")
+  if(Python3_FOUND AND EXISTS ${COVERAGE_MERGE_SCRIPT})
+    message(STATUS "Found Python3 and merge script - coverage upload files will use repo-relative SF: paths")
+    set(COVERAGE_NORMALIZE_COMMAND
+      COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage.info -o ./coverage-report/coverage-upload.info
+    )
+  else()
+    message(WARNING "Python3 or merge_coverage_info.py not found. Upload files will keep absolute SF: paths.")
+    set(COVERAGE_NORMALIZE_COMMAND
+      COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage.info ./coverage-report/coverage-upload.info
+    )
+  endif()
+
   add_custom_target(
     coverage
     DEPENDS coverage_analysis
@@ -508,6 +558,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata
     COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/rocsparse.profdata -format=lcov > ./coverage-report/coverage-raw.info
     ${COVERAGE_FILTER_COMMAND}
+    ${COVERAGE_NORMALIZE_COMMAND}
     ${COVERAGE_HTML_COMMAND}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
@@ -516,7 +567,8 @@ if(BUILD_CODE_COVERAGE)
   # from the profiles that coverage_analysis already wrote. This does not run any
   # test. It only merges and exports subsets of the same profraw files.
   # > make coverage_split (after make coverage)
-  # writes coverage-report/coverage-unit.info and coverage-integration.info.
+  # writes coverage-report/coverage-unit.info and coverage-integration.info,
+  # plus coverage-unit-upload.info and coverage-integration-upload.info.
   foreach(_split unit integration)
     if(Python3_FOUND AND EXISTS ${COVERAGE_FILTER_SCRIPT})
       set(_split_filter_${_split}
@@ -524,6 +576,13 @@ if(BUILD_CODE_COVERAGE)
     else()
       set(_split_filter_${_split}
         COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-${_split}-raw.info ./coverage-report/coverage-${_split}.info)
+    endif()
+    if(Python3_FOUND AND EXISTS ${COVERAGE_MERGE_SCRIPT})
+      set(_split_normalize_${_split}
+        COMMAND ${Python3_EXECUTABLE} ${COVERAGE_MERGE_SCRIPT} ./coverage-report/coverage-${_split}.info -o ./coverage-report/coverage-${_split}-upload.info)
+    else()
+      set(_split_normalize_${_split}
+        COMMAND ${CMAKE_COMMAND} -E copy ./coverage-report/coverage-${_split}.info ./coverage-report/coverage-${_split}-upload.info)
     endif()
   endforeach()
 
@@ -533,10 +592,12 @@ if(BUILD_CODE_COVERAGE)
     COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/unit.profdata
     COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/unit.profdata -format=lcov > ./coverage-report/coverage-unit-raw.info
     ${_split_filter_unit}
+    ${_split_normalize_unit}
     COMMAND ${LLVM_PROFDATA} merge -sparse ./coverage-report/profraw/rocsparse-coverage_integration_*.profraw -o ./coverage-report/integration.profdata
     COMMAND ${LLVM_COV} report ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/integration.profdata
     COMMAND ${LLVM_COV} export ${COVERAGE_OBJECTS} -instr-profile=./coverage-report/integration.profdata -format=lcov > ./coverage-report/coverage-integration-raw.info
     ${_split_filter_integration}
+    ${_split_normalize_integration}
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
   )
 
