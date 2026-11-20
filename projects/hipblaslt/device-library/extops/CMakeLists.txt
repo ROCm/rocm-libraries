@@ -19,7 +19,7 @@ foreach(arch IN LISTS archs)
         set(extop_xnack_args --xnack)
     endif()
     set(WAVEFRONT "-mwavefrontsize64")
-    if(arch MATCHES "^gfx1[12][0-9][0-9](-[a-z0-9]+)*$")
+    if(arch MATCHES "^gfx1[0-2][0-9][0-9](-[a-z0-9]+)*$")
         set(WAVEFRONT "-mno-wavefrontsize64")
     endif()
     # Enable true16 on all gfx11*/gfx12* (NoSDWA). "SHELL:" keeps the flag group
