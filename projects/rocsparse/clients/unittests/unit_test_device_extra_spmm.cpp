@@ -694,3 +694,35 @@ TEST_F(ExtraSpmm, csr_row_split_beta_zero_overwrites_nan_C)
                     return;
             }
 }
+
+// ---------------------------------------------------------------------------
+// One-based indices through the generic API. The stored indices are all
+// shifted by one, so a kernel that keeps the base in a column index reads B
+// one row too far. CSR: the row-split n <= 32 shared kernel and the n > 32
+// main kernels, plus nnz-split and merge-path.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, csr_index_base_one)
+{
+    const std::vector<rocsparse_spmm_alg> algs = {rocsparse_spmm_alg_csr_row_split,
+                                                  rocsparse_spmm_alg_csr_nnz_split,
+                                                  rocsparse_spmm_alg_csr_merge_path};
+    for(rocsparse_spmm_alg alg : algs)
+        for(int64_t n : {5, 33, 40, 64, 72})
+            for(rocsparse_operation opB : op_nt)
+                for(rocsparse_order oB : all_orders)
+                {
+                    SpmmCase c;
+                    c.alg       = alg;
+                    c.n         = n;
+                    c.m         = 11;
+                    c.k         = 9;
+                    c.max_nnz   = 5;
+                    c.long_rows = true;
+                    c.opB       = opB;
+                    c.order_B   = oB;
+                    c.base      = rocsparse_index_base_one;
+                    run_spmm<float, int32_t, int32_t>(handle, c);
+                    if(HasFatalFailure())
+                        return;
+                }
+}
