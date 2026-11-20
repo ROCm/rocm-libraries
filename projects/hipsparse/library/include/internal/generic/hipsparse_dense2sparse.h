@@ -53,7 +53,9 @@ extern "C" {
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p matA, \p matB, or \p pBufferSizeInBytes
-*               pointer is invalid, or the rows or columns of \p matA and \p matB differ.
+*               pointer is invalid, or the rows or columns of \p matA and \p matB differ. For a
+*               blocked ELL \p matB, the same status is returned when
+*               sizeof(int64_t) * ceil(rows / block_dim) does not fit in \p size_t.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseDenseToSparse_bufferSize(hipsparseHandle_t           handle,
