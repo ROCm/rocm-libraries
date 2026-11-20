@@ -25,6 +25,10 @@
 # rocRAND Fortran binding tests: the .f03 programs, their .f08 variants (array
 # overloads) and the FRUIT suite.
 
+# The tests are free form whatever their extension: with the Intel compilers,
+# which read .f03 and .f08 as fixed form, this adds -free.
+set(CMAKE_Fortran_FORMAT FREE)
+
 # ifx/ifort skip .f03/.f08 files unless -Tf precedes the source.
 if(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
   string(REPLACE "<SOURCE>" "-Tf <SOURCE>"
