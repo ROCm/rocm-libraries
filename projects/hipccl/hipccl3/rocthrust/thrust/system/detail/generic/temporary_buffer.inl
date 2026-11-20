@@ -27,20 +27,16 @@
 #endif // no system header
 #include <thrust/detail/malloc_and_free.h>
 #include <thrust/detail/pointer.h>
-#include <thrust/pair.h>
 #include <thrust/system/detail/generic/temporary_buffer.h>
 
-THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace detail
-{
-namespace generic
-{
+#include _THRUST_STD_INCLUDE(__utility/pair.h)
 
+THRUST_NAMESPACE_BEGIN
+namespace system::detail::generic
+{
 template <typename T, typename DerivedPolicy>
 THRUST_HOST_DEVICE
-thrust::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
+_THRUST_STD::pair<thrust::pointer<T, DerivedPolicy>, typename thrust::pointer<T, DerivedPolicy>::difference_type>
 get_temporary_buffer(thrust::execution_policy<DerivedPolicy>& exec,
                      typename thrust::pointer<T, DerivedPolicy>::difference_type n)
 {
@@ -52,7 +48,7 @@ get_temporary_buffer(thrust::execution_policy<DerivedPolicy>& exec,
     n = 0;
   } // end if
 
-  return thrust::make_pair(ptr, n);
+  return _THRUST_STD::make_pair(ptr, n);
 } // end get_temporary_buffer()
 
 THRUST_EXEC_CHECK_DISABLE
@@ -81,8 +77,5 @@ THRUST_HOST_DEVICE void return_temporary_buffer(thrust::execution_policy<Derived
   // `return_temporary_buffer` was found.
   thrust::free(exec, p);
 } // end return_temporary_buffer()
-
-} // namespace generic
-} // namespace detail
-} // namespace system
+} // namespace system::detail::generic
 THRUST_NAMESPACE_END

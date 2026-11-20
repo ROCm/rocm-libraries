@@ -34,6 +34,8 @@
 #include "../../../grid/grid_mapping.hpp"
 #include "../util_type.hpp"
 
+#include _HIPCUB_LIBCXX_INCLUDE(__cmath/ceil_div.h)
+
 #include <type_traits>
 
 BEGIN_HIPCUB_NAMESPACE
@@ -117,11 +119,22 @@ public:
         int     max_grid_size,      ///< Maximum grid size allowable (actual grid size may be less if not warranted by the the number of input items)
         int     tile_items)         ///< Number of data items per input tile
     {
+        if(num_items_ <= 0 || max_grid_size <= 0 || tile_items <= 0)
+        {
+            this->num_items    = 0;
+            this->grid_size    = 0;
+            this->block_offset = 0;
+            this->block_end    = 0;
+            return;
+        }
+
         this->block_offset          = num_items_;    // Initialize past-the-end
         this->block_end             = num_items_;    // Initialize past-the-end
         this->num_items             = num_items_;
         HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
-        this->total_tiles           = static_cast<int>(hipcub::DivideAndRoundUp(num_items_, tile_items));
+        this->total_tiles
+            = static_cast<int>(_HIPCUB_STD::min(OffsetT{_HIPCUB_STD::numeric_limits<int>::max()},
+                                                _HIPCUB_LIBCXX::ceil_div(num_items_, tile_items)));
         HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
         this->grid_size             = _HIPCUB_STD::min(total_tiles, max_grid_size);
         int avg_tiles_per_block     = total_tiles / grid_size;

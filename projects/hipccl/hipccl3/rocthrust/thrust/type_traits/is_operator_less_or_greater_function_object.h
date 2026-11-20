@@ -50,13 +50,11 @@ THRUST_NAMESPACE_BEGIN
 
 namespace detail
 {
-
 template <typename T>
 struct is_operator_less_function_object_impl;
 
 template <typename T>
 struct is_operator_greater_function_object_impl;
-
 } // namespace detail
 
 /*! \endcond
@@ -147,7 +145,6 @@ constexpr bool is_operator_less_or_greater_function_object_v = is_operator_less_
 
 namespace detail
 {
-
 template <typename T>
 struct is_operator_less_function_object_impl : false_type
 {};
@@ -171,7 +168,6 @@ template <typename T>
 struct is_operator_greater_function_object_impl<std::greater<T>> : true_type
 {};
 #endif
-
 } // namespace detail
 
 /*! \endcond

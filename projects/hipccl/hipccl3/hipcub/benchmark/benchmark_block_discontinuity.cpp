@@ -64,7 +64,7 @@ struct flag_heads
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
             bool                                     head_flags[ItemsPerThread];
-            if(WithTile)
+            if constexpr(WithTile)
             {
                 bdiscontinuity.FlagHeads(head_flags, input, equal(), T(123));
             } else
@@ -101,7 +101,7 @@ struct flag_tails
         {
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
             bool                                     tail_flags[ItemsPerThread];
-            if(WithTile)
+            if constexpr(WithTile)
             {
                 bdiscontinuity.FlagTails(tail_flags, input, equal(), T(123));
             } else
@@ -139,7 +139,7 @@ struct flag_heads_and_tails
             hipcub::BlockDiscontinuity<T, BlockSize> bdiscontinuity;
             bool                                     head_flags[ItemsPerThread];
             bool                                     tail_flags[ItemsPerThread];
-            if(WithTile)
+            if constexpr(WithTile)
             {
                 bdiscontinuity
                     .FlagHeadsAndTails(head_flags, T(123), tail_flags, T(234), input, equal());

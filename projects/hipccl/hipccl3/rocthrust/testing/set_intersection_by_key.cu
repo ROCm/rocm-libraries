@@ -27,7 +27,7 @@ template <typename InputIterator1,
           typename InputIterator3,
           typename OutputIterator1,
           typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> set_intersection_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> set_intersection_by_key(
   my_system& system,
   InputIterator1,
   InputIterator1,
@@ -38,7 +38,7 @@ thrust::pair<OutputIterator1, OutputIterator2> set_intersection_by_key(
   OutputIterator2 values_result)
 {
   system.validate_dispatch();
-  return thrust::make_pair(keys_result, values_result);
+  return _THRUST_STD::make_pair(keys_result, values_result);
 }
 
 void TestSetIntersectionByKeyDispatchExplicit()
@@ -58,7 +58,7 @@ template <typename InputIterator1,
           typename InputIterator3,
           typename OutputIterator1,
           typename OutputIterator2>
-thrust::pair<OutputIterator1, OutputIterator2> set_intersection_by_key(
+_THRUST_STD::pair<OutputIterator1, OutputIterator2> set_intersection_by_key(
   my_tag,
   InputIterator1,
   InputIterator1,
@@ -69,7 +69,7 @@ thrust::pair<OutputIterator1, OutputIterator2> set_intersection_by_key(
   OutputIterator2 values_result)
 {
   *keys_result = 13;
-  return thrust::make_pair(keys_result, values_result);
+  return _THRUST_STD::make_pair(keys_result, values_result);
 }
 
 void TestSetIntersectionByKeyDispatchImplicit()
@@ -100,7 +100,7 @@ void TestSetIntersectionByKeySimple()
   Vector ref_key{0, 4}, ref_val{0, 0};
   Vector result_key(2), result_val(2);
 
-  thrust::pair<Iterator, Iterator> end = thrust::set_intersection_by_key(
+  _THRUST_STD::pair<Iterator, Iterator> end = thrust::set_intersection_by_key(
     a_key.begin(), a_key.end(), b_key.begin(), b_key.end(), a_val.begin(), result_key.begin(), result_val.begin());
 
   ASSERT_EQUAL_QUIET(result_key.end(), end.first);
@@ -142,9 +142,9 @@ void TestSetIntersectionByKey(const size_t n)
     thrust::device_vector<T> d_result_keys(n);
     thrust::device_vector<T> d_result_vals(n);
 
-    thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+    _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-    thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+    _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
     h_end = thrust::set_intersection_by_key(
       h_a_keys.begin(),
@@ -193,9 +193,9 @@ void TestSetIntersectionByKeyEquivalentRanges(const size_t n)
   thrust::host_vector<T> h_result_key(n), h_result_val(n);
   thrust::device_vector<T> d_result_key(n), d_result_val(n);
 
-  thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+  _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-  thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+  _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
   h_end = thrust::set_intersection_by_key(
     h_a_key.begin(),
@@ -253,9 +253,9 @@ void TestSetIntersectionByKeyMultiset(const size_t n)
   thrust::host_vector<T> h_result_key(n), h_result_val(n);
   thrust::device_vector<T> d_result_key(n), d_result_val(n);
 
-  thrust::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
+  _THRUST_STD::pair<typename thrust::host_vector<T>::iterator, typename thrust::host_vector<T>::iterator> h_end;
 
-  thrust::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
+  _THRUST_STD::pair<typename thrust::device_vector<T>::iterator, typename thrust::device_vector<T>::iterator> d_end;
 
   h_end = thrust::set_intersection_by_key(
     h_a_key.begin(),

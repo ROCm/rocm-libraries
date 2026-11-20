@@ -28,23 +28,23 @@
 
 #include <thrust/detail/type_traits.h>
 
-#include <utility> // for std::declval
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(__type_traits/enable_if.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_convertible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_void.h)
+#include _THRUST_STD_INCLUDE(__utility/declval.h)
 
-#define __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name, member_function_name)                                       \
-  template <typename T, typename Signature, typename = void>                                                        \
-  struct trait_name : thrust::false_type                                                                            \
-  {};                                                                                                               \
-                                                                                                                    \
-  template <typename T, typename ResultT, typename... Args>                                                         \
-  struct trait_name<                                                                                                \
-    T,                                                                                                              \
-    ResultT(Args...),                                                                                               \
-    _THRUST_STD::enable_if_t<                                                                                       \
-      _THRUST_STD::is_same<ResultT, void>::value                                                                    \
-      || _THRUST_STD::                                                                                              \
-        is_convertible<ResultT, decltype(std::declval<T>().member_function_name(std::declval<Args>()...))>::value>> \
-      : thrust::true_type                                                                                           \
+#define __THRUST_DEFINE_HAS_MEMBER_FUNCTION(trait_name, member_function_name)                                          \
+  template <typename T, typename Signature, typename = void>                                                           \
+  struct trait_name : thrust::false_type                                                                               \
+  {};                                                                                                                  \
+                                                                                                                       \
+  template <typename T, typename ResultT, typename... Args>                                                            \
+  struct trait_name<                                                                                                   \
+    T,                                                                                                                 \
+    ResultT(Args...),                                                                                                  \
+    _THRUST_STD::enable_if_t<_THRUST_STD::is_void_v<ResultT>                                                           \
+                             || _THRUST_STD::is_convertible_v<ResultT,                                                 \
+                                                              decltype(_THRUST_STD::declval<T>().member_function_name( \
+                                                                _THRUST_STD::declval<Args>()...))>>>                   \
+      : thrust::true_type                                                                                              \
   {};

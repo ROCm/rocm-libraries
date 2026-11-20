@@ -61,14 +61,14 @@ struct saxpy_functor
 int main(void)
 {
   // input data
-  float a    = 2.0f;
-  float x[4] = {1, 2, 3, 4};
-  float y[4] = {1, 1, 1, 1};
+  float a                             = 2.0f;
+  thrust::device_vector<float> x_data = {1, 2, 3, 4};
+  thrust::device_vector<float> y_data = {1, 1, 1, 1};
 
   // SAXPY implemented with a functor (function object)
   {
-    thrust::device_vector<float> X(x, x + 4);
-    thrust::device_vector<float> Y(y, y + 4);
+    thrust::device_vector<float> X = x_data;
+    thrust::device_vector<float> Y = y_data;
 
     thrust::transform(
       X.begin(),
@@ -78,16 +78,16 @@ int main(void)
       saxpy_functor(a)); // functor
 
     std::cout << "SAXPY (functor method)" << std::endl;
-    for (size_t i = 0; i < 4; i++)
+    for (size_t i = 0; i < Y.size(); i++)
     {
-      std::cout << a << " * " << x[i] << " + " << y[i] << " = " << Y[i] << std::endl;
+      std::cout << a << " * " << x_data[i] << " + " << y_data[i] << " = " << Y[i] << std::endl;
     }
   }
 
   // SAXPY implemented with a placeholders
   {
-    thrust::device_vector<float> X(x, x + 4);
-    thrust::device_vector<float> Y(y, y + 4);
+    thrust::device_vector<float> X = x_data;
+    thrust::device_vector<float> Y = y_data;
 
     thrust::transform(
       X.begin(),
@@ -97,9 +97,9 @@ int main(void)
       a * _1 + _2); // placeholder expression
 
     std::cout << "SAXPY (placeholder method)" << std::endl;
-    for (size_t i = 0; i < 4; i++)
+    for (size_t i = 0; i < Y.size(); i++)
     {
-      std::cout << a << " * " << x[i] << " + " << y[i] << " = " << Y[i] << std::endl;
+      std::cout << a << " * " << x_data[i] << " + " << y_data[i] << " = " << Y[i] << std::endl;
     }
   }
 

@@ -40,21 +40,18 @@
 #  pragma system_header
 #endif // no system header
 
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/conditional.h>
-#include <thrust/detail/libcxx_wrapper/std/__type_traits/type_identity.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/iterator/strided_iterator.h>
 
+#include _THRUST_LIBCXX_INCLUDE(__type_traits/is_floating_point.h)
+#include _THRUST_STD_INCLUDE(__type_traits/conditional.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_integral.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_same.h)
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 #include _THRUST_STD_INCLUDE(cstddef)
-#include _THRUST_STD_INCLUDE(type_traits)
-#if _THRUST_HAS_DEVICE_SYSTEM_STD
-#  include _THRUST_LIBCXX_INCLUDE(type_traits)
-#else
-#  include <rocprim/type_traits.hpp>
-#endif
 
 THRUST_NAMESPACE_BEGIN
 
@@ -65,18 +62,18 @@ namespace detail
 {
 template <typename Number>
 using counting_iterator_difference_type =
-  ::internal::If<::internal::is_integral_v<Number> && sizeof(Number) < sizeof(int), int, _THRUST_STD::ptrdiff_t>;
+  _THRUST_STD::_If<_THRUST_STD::is_integral_v<Number> && sizeof(Number) < sizeof(int), int, _THRUST_STD::ptrdiff_t>;
 
 template <typename Incrementable, typename System, typename Traversal, typename Difference, typename StrideHolder>
 struct make_counting_iterator_base
 {
-  using system = typename eval_if<_THRUST_STD::is_same<System, use_default>::value,
+  using system = typename eval_if<_THRUST_STD::is_same_v<System, use_default>,
                                   _THRUST_STD::type_identity<any_system_tag>,
                                   _THRUST_STD::type_identity<System>>::type;
 
-  using traversal = replace_if_use_default<Traversal, ::internal::type_identity<random_access_traversal_tag>>;
+  using traversal = replace_if_use_default<Traversal, _THRUST_STD::type_identity<random_access_traversal_tag>>;
   using difference =
-    replace_if_use_default<Difference, ::internal::type_identity<counting_iterator_difference_type<Incrementable>>>;
+    replace_if_use_default<Difference, _THRUST_STD::type_identity<counting_iterator_difference_type<Incrementable>>>;
 
   // our implementation departs from Boost's in that counting_iterator::dereference
   // returns a copy of its counter, rather than a reference to it. returning a reference
@@ -290,7 +287,7 @@ private:
   THRUST_HOST_DEVICE difference_type distance_to(
     counting_iterator<Incrementable, OtherSystem, OtherTraversal, OtherDifference, StrideHolder> const& y) const
   {
-    if constexpr (::internal::is_integral<Incrementable>::value)
+    if constexpr (_THRUST_STD::is_integral_v<Incrementable>)
     {
       return static_cast<difference_type>(y.base()) - static_cast<difference_type>(this->base());
     }

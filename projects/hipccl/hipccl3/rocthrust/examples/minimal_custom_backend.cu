@@ -25,9 +25,6 @@
 #include <thrust/transform.h>
 
 #include <iostream>
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <functional>
-#endif
 
 // This example demonstrates how to build a minimal custom
 // Thrust backend by intercepting for_each's dispatch.

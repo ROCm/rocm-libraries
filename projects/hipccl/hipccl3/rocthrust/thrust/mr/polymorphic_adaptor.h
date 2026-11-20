@@ -31,7 +31,6 @@
 THRUST_NAMESPACE_BEGIN
 namespace mr
 {
-
 /*! This memory_resource-derived type provides the ability to implement custom allocation behaviour.
  *
  * Since this class inherits from \p memory_resource, an instance of this class can be passed
@@ -87,6 +86,5 @@ public:
 private:
   memory_resource<Pointer>* upstream_resource;
 };
-
 } // namespace mr
 THRUST_NAMESPACE_END

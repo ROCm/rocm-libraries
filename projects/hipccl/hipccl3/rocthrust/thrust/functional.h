@@ -31,12 +31,15 @@
 #endif // no system header
 
 #include <thrust/detail/functional/actor.h>
-#include <thrust/detail/libcxx_wrapper/__functional/maximum.h>
-#include <thrust/detail/libcxx_wrapper/__functional/minimum.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/not_fn.h>
 
-#include _THRUST_LIBCXX_INCLUDE(functional)
-#include _THRUST_STD_INCLUDE(functional)
+#include _THRUST_LIBCXX_INCLUDE(__functional/maximum.h)
+#include _THRUST_LIBCXX_INCLUDE(__functional/minimum.h)
+#include _THRUST_STD_INCLUDE(__functional/not_fn.h)
+#include _THRUST_STD_INCLUDE(__functional/operations.h)
+#include _THRUST_STD_INCLUDE(__type_traits/decay.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_constructible.h)
+#include _THRUST_STD_INCLUDE(__type_traits/is_move_constructible.h)
+#include _THRUST_STD_INCLUDE(__utility/forward.h)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -365,7 +368,6 @@ _CCCL_API constexpr auto not_fn(_Fn&& __f)
  */
 namespace placeholders
 {
-
 /*! \p thrust::placeholders::_1 is the placeholder for the first function parameter.
  */
 THRUST_GLOBAL_CONSTANT thrust::detail::functional::placeholder<0>::type _1;
@@ -405,7 +407,6 @@ THRUST_GLOBAL_CONSTANT thrust::detail::functional::placeholder<8>::type _9;
 /*! \p thrust::placeholders::_10 is the placeholder for the tenth function parameter.
  */
 THRUST_GLOBAL_CONSTANT thrust::detail::functional::placeholder<9>::type _10;
-
 } // namespace placeholders
 
 /*! \} // placeholder_objects

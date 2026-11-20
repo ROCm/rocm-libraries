@@ -32,8 +32,8 @@
 #include <thrust/iterator/iterator_adaptor.h>
 #include <thrust/iterator/iterator_facade.h>
 
+#include _THRUST_STD_INCLUDE(__type_traits/type_identity.h)
 #include _THRUST_STD_INCLUDE(cstdint)
-#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -184,8 +184,10 @@ private: // Core iterator interface
   //! \endcond
 };
 
+#ifndef THRUST_DOXYGEN_INVOKED
 template <class ValueT>
 THRUST_HOST_DEVICE constant_iterator(ValueT) -> constant_iterator<ValueT>;
+#endif // THRUST_DOXYGEN_INVOKED
 
 //! This version of \p make_constant_iterator creates a \p constant_iterator from values given for both value and index.
 //! The type of \p constant_iterator may be inferred by the compiler from the types of its parameters.

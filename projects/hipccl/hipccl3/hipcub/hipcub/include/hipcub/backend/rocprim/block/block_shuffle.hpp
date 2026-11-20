@@ -38,24 +38,16 @@
 
 BEGIN_HIPCUB_NAMESPACE
 
-template<typename T, int BLOCK_DIM_X, int BLOCK_DIM_Y = 1, int BLOCK_DIM_Z = 1>
-class BlockShuffle : public ::rocprim::block_shuffle<T, BLOCK_DIM_X, BLOCK_DIM_Y, BLOCK_DIM_Z>
+template<typename T, int BlockDimX, int BlockDimY = 1, int BlockDimZ = 1>
+class BlockShuffle : public ::rocprim::block_shuffle<T, BlockDimX, BlockDimY, BlockDimZ>
 {
-  static_assert(
-      BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z > 0,
-      "BLOCK_DIM_X * BLOCK_DIM_Y * BLOCK_DIM_Z must be greater than 0"
-  );
+    static_assert(BlockDimX * BlockDimY * BlockDimZ > 0,
+                  "BlockDimX * BlockDimY * BlockDimZ must be greater than 0");
 
-  using base_type =
-      typename ::rocprim::block_shuffle<
-          T,
-          BLOCK_DIM_X,
-          BLOCK_DIM_Y,
-          BLOCK_DIM_Z
-      >;
+    using base_type = typename ::rocprim::block_shuffle<T, BlockDimX, BlockDimY, BlockDimZ>;
 
-  // Reference to temporary storage (usually shared memory)
-  typename base_type::storage_type& temp_storage_;
+    // Reference to temporary storage (usually shared memory)
+    typename base_type::storage_type& temp_storage_;
 
 public:
   using TempStorage = typename base_type::storage_type;
@@ -73,10 +65,11 @@ public:
   /**
    * \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided by <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>. The offset \p distance may be negative.
    */
-  HIPCUB_DEVICE inline void Offset(
-      T   input,                  ///< [in] The input item from the calling thread (<em>thread<sub>i</sub></em>)
-      T&  output,                 ///< [out] The \p input item from the successor (or predecessor) thread <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub> (may be aliased to \p input).  This value is only updated for for <em>thread<sub>i</sub></em> when 0 <= (<em>i</em> + \p distance) < <tt>BLOCK_THREADS-1</tt>
-      int distance = 1)           ///< [in] Offset distance (may be negative)
+  HIPCUB_DEVICE
+  inline void Offset(
+      T input, ///< [in] The input item from the calling thread (<em>thread<sub>i</sub></em>)
+      T& output, ///< [out] The \p input item from the successor (or predecessor) thread <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub> (may be aliased to \p input).  This value is only updated for for <em>thread<sub>i</sub></em> when 0 <= (<em>i</em> + \p distance) < <tt>BlockThreads-1</tt>
+      int distance = 1) ///< [in] Offset distance (may be negative)
   {
     base_type::offset(input,output,distance);
   }
@@ -84,33 +77,37 @@ public:
   /**
  * \brief Each <em>thread<sub>i</sub></em> obtains the \p input provided by <em>thread</em><sub><em>i</em>+<tt>distance</tt></sub>.
  */
-  HIPCUB_DEVICE inline void Rotate(
-      T   input,                  ///< [in] The calling thread's input item
-      T&  output,                 ///< [out] The \p input item from thread <em>thread</em><sub>(<em>i</em>+<tt>distance></tt>)%<tt>\<BLOCK_THREADS\></tt></sub> (may be aliased to \p input).  This value is not updated for <em>thread</em><sub>BLOCK_THREADS-1</sub>
-      unsigned int distance = 1)  ///< [in] Offset distance (0 < \p distance < <tt>BLOCK_THREADS</tt>)
+  HIPCUB_DEVICE
+  inline void Rotate(
+      T input, ///< [in] The calling thread's input item
+      T& output, ///< [out] The \p input item from thread <em>thread</em><sub>(<em>i</em>+<tt>distance></tt>)%<tt>\<BlockThreads\></tt></sub> (may be aliased to \p input).  This value is not updated for <em>thread</em><sub>BlockThreads-1</sub>
+      unsigned int distance = 1) ///< [in] Offset distance (0 < \p distance < <tt>BlockThreads</tt>)
   {
     base_type::rotate(input,output,distance);
   }
   /**
   * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item
   */
-  template <int ITEMS_PER_THREAD>
-  HIPCUB_DEVICE inline void Up(
-    T (&input)[ITEMS_PER_THREAD],   ///< [in] The calling thread's input items
-    T (&prev)[ITEMS_PER_THREAD])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+  template<int ItemsPerThread>
+  HIPCUB_DEVICE
+  inline void Up(
+      T (&input)[ItemsPerThread], ///< [in] The calling thread's input items
+      T (&prev)
+          [ItemsPerThread]) ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
   {
     base_type::up(input,prev);
   }
 
-
-   /**
-   * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item.  All threads receive the \p input provided by <em>thread</em><sub><tt>BLOCK_THREADS-1</tt></sub>.
+  /**
+   * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it up by one item.  All threads receive the \p input provided by <em>thread</em><sub><tt>BlockThreads-1</tt></sub>.
    */
-  template <int ITEMS_PER_THREAD>
-  HIPCUB_DEVICE inline void Up(
-      T (&input)[ITEMS_PER_THREAD],   ///< [in] The calling thread's input items
-      T (&prev)[ITEMS_PER_THREAD],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
-      T &block_suffix)                ///< [out] The item \p input[ITEMS_PER_THREAD-1] from <em>thread</em><sub><tt>BLOCK_THREADS-1</tt></sub>, provided to all threads
+  template<int ItemsPerThread>
+  HIPCUB_DEVICE
+  inline void Up(
+      T (&input)[ItemsPerThread], ///< [in] The calling thread's input items
+      T (&prev)
+          [ItemsPerThread], ///< [out] The corresponding predecessor items (may be aliased to \p input).  The item \p prev[0] is not updated for <em>thread</em><sub>0</sub>.
+      T& block_suffix) ///< [out] The item \p input[ItemsPerThread-1] from <em>thread</em><sub><tt>BlockThreads-1</tt></sub>, provided to all threads
   {
     base_type::up(input,prev,block_suffix);
   }
@@ -118,10 +115,12 @@ public:
    /**
    * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of \p input items, shifting it down by one item
    */
-  template <int ITEMS_PER_THREAD>
-  HIPCUB_DEVICE inline void Down(
-      T (&input)[ITEMS_PER_THREAD],   ///< [in] The calling thread's input items
-      T (&next)[ITEMS_PER_THREAD])    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BLOCK_THREADS-1</sub>.
+  template<int ItemsPerThread>
+  HIPCUB_DEVICE
+  inline void Down(
+      T (&input)[ItemsPerThread], ///< [in] The calling thread's input items
+      T (&next)
+          [ItemsPerThread]) ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockThreads-1</sub>.
   {
     base_type::down(input,next);
   }
@@ -129,11 +128,13 @@ public:
    /**
    * \brief The thread block rotates its [<em>blocked arrangement</em>](index.html#sec5sec3) of input items, shifting it down by one item.  All threads receive \p input[0] provided by <em>thread</em><sub><tt>0</tt></sub>.
    */
-  template <int ITEMS_PER_THREAD>
-  HIPCUB_DEVICE inline void Down(
-      T (&input)[ITEMS_PER_THREAD],   ///< [in] The calling thread's input items
-      T (&next)[ITEMS_PER_THREAD],    ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BLOCK_THREADS-1</sub>.
-      T &block_prefix)                ///< [out] The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
+  template<int ItemsPerThread>
+  HIPCUB_DEVICE
+  inline void Down(
+      T (&input)[ItemsPerThread], ///< [in] The calling thread's input items
+      T (&next)
+          [ItemsPerThread], ///< [out] The corresponding predecessor items (may be aliased to \p input).  The value \p next[0] is not updated for <em>thread</em><sub>BlockThreads-1</sub>.
+      T& block_prefix) ///< [out] The item \p input[0] from <em>thread</em><sub><tt>0</tt></sub>, provided to all threads
   {
     base_type::down(input,next,block_prefix);
   }
