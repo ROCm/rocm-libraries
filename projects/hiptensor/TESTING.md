@@ -56,7 +56,7 @@ Unit tests live in `test/00_unit/` and are built with the `add_hiptensor_unit_te
 | `logger_test` | Logger singleton identity, callback registration, log-level filtering, file-sink behavior |
 | `yaml_test` | YAML config parsing and round-trip correctness |
 | `elementwise_op_test` | CPU-side elementwise operator type traits and identity/scale op correctness |
-| `util_test` | Utility helpers (type conversion, scalar reads per compute type, index math, stride calculation) |
+| `util_test` | Utility helpers (type conversion, scalar reads per compute type, index math, stride and element-space calculation) |
 | `hiptensor_options_test` | CLI/env option parsing (`--hot_runs`, `--cold_runs`, `-y`, `HIPTENSOR_*` env vars) |
 | `plan_lifetime_test` | Plan object lifetime: using a permutation plan after its descriptor or preference object is destroyed. Despite living in `00_unit/`, it allocates device memory and launches a real permute kernel, so it **requires a GPU** and is registered as a device tier test |
 | `plan_cache_lru_test` | Plan cache file round trip and LRU eviction: writing the cache to a file and then destroying the handle, a full cache evicting its least recently used line for a new problem, and updating an existing line without evicting. Also checks that the cache's internal priority queue is move-only. Launches a permute kernel to add a cache line, so it **requires a GPU** and is registered as a device tier test; skipped when `HIPTENSOR_DISABLE_PLAN_CACHE` is set |
@@ -143,6 +143,7 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Contraction — complex bilinear/scale | `complex_{bilinear,scale}_contraction_test_m{1-6}...` | CF32, CF64 |
 | Contraction — trinary | `trinary_bilinear_contraction_test`, `trinary_scale_contraction_test` | Three-tensor contractions |
 | Contraction — unary ops | `bilinear_contraction_with_unary_ops_test`, `scale_contraction_with_unary_ops_test` | Fused unary activation ops |
+| Contraction — padded strides | `contraction_padded_strides_test` | FP32 bilinear contraction whose tensors have padded (non-packed) strides spanning several MB, planned with `HIPTENSOR_ALGO_DEFAULT` and `HIPTENSOR_ALGO_DEFAULT_PATIENT` (which time every candidate kernel during plan creation) and checked against a host reference |
 | Plan cache | `plan_cache_test` | Cache write/read round-trip on device |
 | Plan cache — file and LRU | `plan_cache_lru_test` | Write/read of plan cache files, handle destruction after a write, LRU eviction when full (launches a permute kernel) |
 | Plan lifetime | `plan_lifetime_test` | Permute plan reuse after descriptor/preference destruction (launches a kernel) |
@@ -158,7 +159,7 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 
 All device tests compare GPU results against a CPU reference implementation using a per-type tolerance.
 
-**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_cache_lru_test`, `plan_lifetime_test`, `concurrency_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`.
+**GPU-required tests:** All `bilinear_contraction_test_*`, `scale_contraction_test_*`, `complex_*`, `trinary_*`, `*_unary_ops_test`, `contraction_padded_strides_test`, `rank*_elementwise_*`, `rank*_reduction_test`, `plan_cache_test`, `plan_cache_lru_test`, `plan_lifetime_test`, `concurrency_test`, `elementwise_broadcast_test`, `elementwise_output_strides_test`.
 
 **CPU-only (host) tests:** `contraction_mode_test`, `elementwise_cpu_test`, `reduction_cpu_impl_test`, and the `00_unit/` binaries (`logger_test`, `yaml_test`, `elementwise_op_test`, `util_test`, `hiptensor_options_test`). `batched_contraction_test` and `elementwise_mode_test` launch no kernels but create a hipTensor handle and descriptors (`elementwise_mode_test` also allocates small device buffers).
 
