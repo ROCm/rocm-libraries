@@ -152,6 +152,11 @@ if(NOT _hiprand_dir STREQUAL "${_hiprand_built_dir}")
   endforeach()
 endif()
 
+# The target and the .mod directory, for a project that does not want to spell
+# the target's namespace or that passes the paths to another build system.
+set(hiprand_FORTRAN_LIBRARIES hip::hiprand_fortran)
+set(hiprand_FORTRAN_INCLUDE_DIRS "${_hiprand_incdir}/${_hiprand_dir}")
+
 set(hiprand_FORTRAN_FOUND TRUE)
 
 check_required_components(hiprand-fortran)
