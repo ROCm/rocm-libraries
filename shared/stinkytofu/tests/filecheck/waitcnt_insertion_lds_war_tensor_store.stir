@@ -1,0 +1,33 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --StinkyBuildImplicitDependencyPass --StinkyWaitCntInsertionPass --print-output
+#
+# StinkyWaitCntInsertionPass (gfx1250): LDS write-after-read (WAR) against a tensor store.
+# The mirror image of waitcnt_insertion_lds_war_tensor_load.stir.
+#
+# tensor_store_from_lds READS the LDS region and writes global memory, so it is an LDS consumer
+# with no register destination (StinkyAsmIR.hpp isTensorStore). The SSA use-def chain therefore
+# cannot order a later LDS WRITE against it -- the store has no def for the writer to depend on.
+# That is the same shape as global_store_async_from_lds, which is why scanAsyncAntiDeps exists
+# (ROCm/rocm-libraries#9487, AIHPBLAS-4141); scanTensorAntiDeps is the tensor-counter equivalent.
+#
+# Here two tensor_store_from_lds on token 0 are followed by a ds_store_b64 that rewrites the same
+# region. Both stores must land before the writer is issued, so the pass must emit
+# s_wait_tensorcnt 0 immediately before the ds_store.
+#
+# Note the counter is NOT dscnt: a tensor op lives on tensorcnt (MI400 ISA p97 -- both
+# TENSOR_LOAD_TO_LDS and TENSOR_STORE_FROM_LDS map to TENSORcnt), so the DS queue at the writer
+# is empty and no s_wait_dscnt is warranted.
+#
+# CHECK-LABEL: @waitcnt_insertion_lds_war_tensor_store
+# CHECK: tensor_store_from_lds
+# CHECK-NEXT: tensor_store_from_lds
+# CHECK-NEXT: s_wait_tensorcnt
+# CHECK-SAME: tlcnt = 0
+# CHECK-NEXT: ds_store_b64
+# CHECK-NOT: s_wait_loadcnt
+
+st.func @waitcnt_insertion_lds_war_tensor_store() {
+^entry:
+  "st.tensor_store_from_lds"(s[0:3], s[10:17]) { mod.memtoken = { tokens = [0] } }
+  "st.tensor_store_from_lds"(s[4:7], s[20:27]) { mod.memtoken = { tokens = [0] } }
+  "st.ds_store_b64"(v10, v[0:1]) { mod.ds = { na = 1, offset = 0, gds = false }, mod.memtoken = { tokens = [0] } }
+}

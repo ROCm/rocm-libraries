@@ -17,14 +17,14 @@
 
 ## Hardware background
 
-Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds`, scalar `s_load_*`) complete long after they issue. The hardware exposes one counter per kind of async memop, and before a consumer reads a result the compiler must insert the matching `s_wait_*` to drain the producer. Most of these counters retire in issue order, so a wait can name a producer while leaving newer ops in flight; `kmcnt` cannot.
+Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_load_to_lds` / `tensor_store_from_lds`, scalar `s_load_*`) complete long after they issue. The hardware exposes one counter per kind of async memop, and before a consumer reads a result the compiler must insert the matching `s_wait_*` to drain the producer. Most of these counters retire in issue order, so a wait can name a producer while leaving newer ops in flight; `kmcnt` cannot.
 
 | `CounterKind` | Covers | Wait instruction | Modifier field | Completion order |
 |---------------|--------|------------------|----------------|------------------|
 | `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` | in order |
 | `CK_Load` | global/buffer/flat **load**, returning MUBUF/FLAT/GLOBAL atomic | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` | in order |
 | `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt 0` | `SWaitCntData.kmcnt` | **out of order** |
-| `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
+| `CK_Tensor` | `tensor_load_to_lds` / `tensor_store_from_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` | in order |
 
 `s_wait_*cnt N` blocks until the counter has dropped to **at most `N`**. On the in-order counters each op contributes exactly 1, so `N` is an op count and it identifies precisely which ops completed: the `N` most-recently-issued stay in flight and everything older has landed. `kmcnt` is neither in order nor one-per-op (see below).
 
@@ -348,7 +348,7 @@ Removing a wait is **legal** only when some pass regenerates it; otherwise the h
 | `HazardPass` | `s_wait_xcnt` | `Gfx1250XnackHazardPass`, from its own XNACK replay-group rules |
 | `None` | `s_wait_storecnt`, `s_wait_storecnt_dscnt`, legacy `s_waitcnt` | nothing — all three can name `STOREcnt` |
 
-`RemoveWaitCntOptions` then applies **policy** to what is legal: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless.
+`RemoveWaitCntOptions` then applies **policy** to what is legal: `s_wait_kmcnt` is kept because insertion is region-scoped, `s_wait_xcnt` because its regenerator places drains by different criteria, and `s_wait_tensorcnt` when the insertion pass should reuse the incoming ones. Blocks the strip pass skipped keep everything regardless. A wait whose comment carries `stinky-keep` is kept before legality and policy are consulted: TensileLite tags the waits whose hazard the insertion pass does not re-derive, the `s_wait_dscnt` before a `tensor_store_from_lds` and the `s_wait_tensorcnt` after it and after the `tensor_load_to_lds` that loads C into the staged tile.
 
 ### Existing waits in the input
 
