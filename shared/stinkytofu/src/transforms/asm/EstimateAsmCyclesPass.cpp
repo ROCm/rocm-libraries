@@ -122,11 +122,15 @@ uint32_t longestPathCycles(std::vector<BasicBlock*> const& nodes,
     // block is not an alternate entry; only blocks reachable from a real entry
     // contribute. Other indegree-0 blocks stay entries, so an unmodeled fork
     // still keeps its heavier side.
-    std::unordered_set<BasicBlock*> reachable;
+    // Membership stays in a set. Iteration uses a vector so the order does not
+    // depend on pointer values (bugprone-nondeterministic-pointer-iteration-order).
+    std::unordered_set<BasicBlock*> reachableSet;
+    std::vector<BasicBlock*> reachable;
     std::queue<BasicBlock*> walk;
     for (BasicBlock* bb : nodes) {
         if (indegree[bb] == 0 && ignoredRoots.count(bb) == 0) {
-            reachable.insert(bb);
+            reachableSet.insert(bb);
+            reachable.push_back(bb);
             walk.push(bb);
         }
     }
@@ -134,7 +138,10 @@ uint32_t longestPathCycles(std::vector<BasicBlock*> const& nodes,
         BasicBlock* bb = walk.front();
         walk.pop();
         for (BasicBlock* next : forward[bb]) {
-            if (reachable.insert(next).second) walk.push(next);
+            if (reachableSet.insert(next).second) {
+                reachable.push_back(next);
+                walk.push(next);
+            }
         }
     }
 
@@ -142,7 +149,7 @@ uint32_t longestPathCycles(std::vector<BasicBlock*> const& nodes,
     for (BasicBlock* bb : reachable) reachIndegree[bb] = 0;
     for (BasicBlock* bb : reachable) {
         for (BasicBlock* next : forward[bb]) {
-            if (reachable.count(next) != 0) reachIndegree[next] += 1;
+            if (reachableSet.count(next) != 0) reachIndegree[next] += 1;
         }
     }
 
@@ -158,7 +165,7 @@ uint32_t longestPathCycles(std::vector<BasicBlock*> const& nodes,
         BasicBlock* bb = ready.front();
         ready.pop();
         for (BasicBlock* next : forward[bb]) {
-            if (reachable.count(next) == 0) continue;
+            if (reachableSet.count(next) == 0) continue;
             uint32_t const nextCost = cost.count(next) ? cost.at(next) : 0;
             dist[next] = std::max(dist[next], dist[bb] + nextCost);
             reachIndegree[next] -= 1;
@@ -381,7 +388,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
             uint32_t blockCycles = 0;
             if (passCtx.shouldProcessBasicBlock(bb)) {
                 if (inLoop) {
-                    if (!primaryLoopLabels.empty()) primaryLoopLabels += ",";
+                    if (!primaryLoopLabels.empty()) primaryLoopLabels += ',';
                     primaryLoopLabels += bb.getLabel();
                 }
                 calculateMathClocksInUnrolledLoop(
@@ -462,7 +469,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
     void appendComment(StinkyInstruction* inst, const std::string& suffix) {
         if (!inst || suffix.empty()) return;
         if (auto* c = inst->getModifier<CommentData>()) {
-            if (!c->comment.empty()) c->comment += " ";
+            if (!c->comment.empty()) c->comment += ' ';
             c->comment += suffix;
         } else {
             inst->addModifier<CommentData>(CommentData{suffix});
