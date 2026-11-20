@@ -137,7 +137,6 @@ test_categories:
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
       - "rocke_library_conv_pytest"
-      - "rocke_library_conv3d_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
@@ -153,7 +152,6 @@ test_categories:
       - "rocke_pytest_[a-z0-9_]+"
       - "rocke_tiling_pytest"
       - "rocke_library_gpu_pytest"
-      - "rocke_library_conv3d_gpu_pytest"
       - "rocke_tiling_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
@@ -283,11 +281,30 @@ test_categories:
       - "rocke_library_gdn_pytest"
       # Its host tests are too slow for the single-shard quick tier.
       - "rocke_library_conv_fwd_aot_packaging_pytest"
+      # Library 3-D NDHWC conv and conv pin / route table host tests: not
+      # smoke, so standard (rocke/TESTING.md section 5.0.3).
+      - "rocke_library_conv3d_pytest"
+      - "rocke_library_conv_tables_pytest"
     labels:
       - "standard"
       - "comprehensive"
       - "full"
       - "host"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  python-gpu-standard:
+    description: "rocKE Python GPU checks that start at the standard tier, not quick"
+    test_patterns:
+      # GPU numeric tests that are not a published operation's pinned
+      # reference lane (rocke/TESTING.md section 5.0.3).
+      - "rocke_library_conv3d_gpu_pytest"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "gpu"
       - "python"
       - "ckc"
       - "hip-kernel-provider"

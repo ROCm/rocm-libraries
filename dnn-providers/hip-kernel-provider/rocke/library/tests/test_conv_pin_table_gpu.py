@@ -31,7 +31,10 @@ def _gfx942():
     return "gfx942" in getattr(torch.cuda.get_device_properties(0), "gcnArchName", "")
 
 
-pytestmark = pytest.mark.skipif(not _gfx942(), reason="needs a gfx942 device")
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(not _gfx942(), reason="needs a gfx942 device"),
+]
 
 _ARCH = "gfx942"
 # Output depth of the cut-down problem: enough for every depth tile and box

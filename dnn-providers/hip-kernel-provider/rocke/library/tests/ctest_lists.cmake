@@ -104,8 +104,9 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # shipped tables rebuilds its kernel IR from the label alone, the tables load,
 # refuse what their kernels cannot serve and dispatch, and the kernel job read
 # off an identity is the one the AOT generators build. Their own entry, with
-# the conv entry's labels and PYTHONPATH, so building IR for every pinned case
-# does not share rocke_library_conv_pytest's CTest budget.
+# the conv entry's PYTHONPATH, so building IR for every pinned case does not
+# share rocke_library_conv_pytest's CTest budget. Not smoke: it starts at the
+# standard tier (python-standard in ROCKE_ENGINE_test_categories_external.yaml).
 set(_ROCKE_LIBRARY_CONV_TABLE_TEST_RELPATHS
     "tests/library/tests/test_aot_jobs_from_identity.py"
     "tests/library/tests/test_conv_dgrad_identity_filters.py"
@@ -123,7 +124,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_tables_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TABLE_TESTS} -v -rs --timeout=120)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_tables_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT 600)\n")
 
@@ -174,8 +175,9 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # route tables with their dispatch. Several files also hold GPU classes
 # (marked gpu); -m "not gpu" leaves those to rocke_library_conv3d_gpu_pytest.
 # Their own entry, so they do not share rocke_library_conv_pytest's budget.
-# ROCKE_ENGINE_test_categories_external.yaml lists it beside that entry in the
-# quick and ffm-quick tiers.
+# Not smoke: ROCKE_ENGINE_test_categories_external.yaml lists it under
+# python-standard (the standard tier and later) and, beside that entry, in the
+# ffm-quick tier.
 set(_ROCKE_LIBRARY_CONV3D_TEST_RELPATHS
     "tests/library/tests/test_benchmark_conv_compare_cli.py"
     "tests/library/tests/test_benchmark_det_pins.py"
@@ -228,7 +230,7 @@ else()
          "add_test(rocke_library_conv3d_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV3D_TESTS} -m \"not gpu\" -v -rs --timeout=60)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_conv3d_pytest PROPERTIES\n"
-         "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+         "  LABELS \"ckc\\;python\\;conv\\;host\"\n"
          "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
          "  TIMEOUT 300)\n")
 endif()
@@ -685,8 +687,6 @@ set(_ROCKE_LIBRARY_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_winograd_gen_gpu.py"
     "tests/library/tests/test_conv_winograd_dispatch_gpu.py"
     "tests/library/tests/test_conv_implicit_gemm_numeric.py"
-    "tests/library/tests/test_conv_pin_table_gpu.py"
-    "tests/library/tests/test_conv_winograd3d_gpu.py"
     "tests/library/tests/test_conv_direct_tf32_mfma.py::TestDirectTf32Gpu"
     "tests/library/tests/test_conv_direct_tf32_scalar.py::TestGpuCorrectness"
     # The sweep sampler (test_sweep_candidates) compiles exact-fp32 grid
@@ -746,12 +746,16 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # deterministic selections), and the GPU classes of the 3-D forward knob
 # suites. They skip without a gfx942 device. Their own entry, so they do not
 # eat into rocke_library_gpu_pytest's timeout; like that entry it has no
-# per-test --timeout (a test first builds the kernels it launches)
-# and ROCKE_ENGINE_test_categories_external.yaml lists it beside that entry in
-# the quick and ffm-quick tiers.
+# per-test --timeout (a test first builds the kernels it launches).
+# GPU numeric tests that are not a published operation's pinned reference
+# lane: ROCKE_ENGINE_test_categories_external.yaml lists the entry under
+# python-gpu-standard (the standard tier and later) and, beside that entry, in
+# the ffm-quick tier.
 set(_ROCKE_LIBRARY_CONV3D_GPU_TEST_RELPATHS
     "tests/library/tests/test_conv_shipped_tables_gpu.py"
     "tests/library/tests/test_conv_routes_gpu.py"
+    "tests/library/tests/test_conv_pin_table_gpu.py"
+    "tests/library/tests/test_conv_winograd3d_gpu.py"
     "tests/library/tests/test_conv_fwd_3d_fxd.py::TestFwd3dXHaloDma"
     "tests/library/tests/test_conv_fwd_3d_fxd.py::TestFwd3dMBandSplitTail"
     "tests/library/tests/test_conv_fwd_3d_kloop_knobs.py::TestFwd3dKLoopKnobs"
