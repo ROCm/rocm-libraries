@@ -249,6 +249,41 @@ TEST(ClientProblemFactorySplit, OutputPeerDReachesEveryProblemAndSlice)
         EXPECT_TRUE(gemm(factory.sliceProblem(full, d)).outputPeerD()) << "device " << d;
 }
 
+TEST(ClientProblemFactorySplit, SplitsTheBatchOfEveryTensor)
+{
+    // 5 batches over 2 devices: the first takes 5 / 2 = 2, the last takes the rest.
+    ClientProblemFactory factory(makeArgs({128, 96, 5, 64}, 2, "B"));
+    auto*                full = factory.problems()[0].get();
+    ASSERT_EQ(factory.numSlices(), 2u);
+
+    size_t const batches[] = {2, 3};
+    for(size_t d = 0; d < 2; d++)
+    {
+        auto const& slice = gemm(factory.sliceProblem(full, d));
+        EXPECT_EQ(slice.a().sizes(), (std::vector<size_t>{128, 64, batches[d]})) << d;
+        EXPECT_EQ(slice.b().sizes(), (std::vector<size_t>{64, 96, batches[d]})) << d;
+        EXPECT_EQ(slice.c().sizes(), (std::vector<size_t>{128, 96, batches[d]})) << d;
+        EXPECT_EQ(slice.d().sizes(), (std::vector<size_t>{128, 96, batches[d]})) << d;
+        // D keeps the full strides, so the slice sits inside the full D.
+        EXPECT_EQ(slice.d().strides(), gemm(full).d().strides()) << d;
+    }
+    // The second slice starts after the first one's two batches.
+    EXPECT_EQ(factory.sliceOffsetInD(full, 0), 0u);
+    EXPECT_EQ(factory.sliceOffsetInD(full, 1), 2u * 128u * 96u);
+}
+
+TEST(ClientProblemFactorySplit, RejectsMoreDevicesThanBatches)
+{
+    EXPECT_THROW(ClientProblemFactory(makeArgs({96, 96, 1, 64}, 2, "B")), std::runtime_error);
+}
+
+TEST(ClientProblemFactorySplit, RejectsAnUnknownSplitDim)
+{
+    for(auto dim : {"K", "", "m", "MN"})
+        EXPECT_THROW(ClientProblemFactory(makeArgs({128, 128, 2, 64}, 2, dim)), std::runtime_error)
+            << dim;
+}
+
 TEST(ClientProblemFactorySplit, RefusesGroupedGemm)
 {
     auto args = makeArgs({128, 96, 1, 64}, 2, "M");
