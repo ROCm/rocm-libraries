@@ -159,8 +159,9 @@ flatbuffers::FlatBufferBuilder createMxGraphWithWrongVirtual(MxTensor target,
 
 // CPU fixture: graph-level negative cases, no device required. The handle has no
 // hipBLASLt handle, so isApplicable() also returns false for a valid graph that
-// reaches the heuristic: these tests show that a graph is declined, not why. The
-// packing rules are tested in the GPU fixture, against a packed control.
+// reaches the heuristic: these tests show that a graph is declined, not why. A decline
+// that needs a packed control is in the GPU fixture, and the graph-only rules are also
+// tested without a device in TestMxGraphConstraints.
 class TestHipblasltMxMatmulPlanBuilder : public ::testing::Test
 {
 protected:
@@ -353,7 +354,7 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableHandlesSwappedDequantOrd
 }
 
 // ===========================================================================
-// isApplicable — negative cases (all CPU-safe, no GPU call needed)
+// isApplicable — negative cases (CPU fixture unless the fixture name says Gpu)
 // ===========================================================================
 
 // Plain matmul (1 node) must NOT match the MX builder

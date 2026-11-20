@@ -873,7 +873,7 @@ double decodeE4M3(uint8_t bits)
 
 // Expects C to equal dequant(A) x dequant(B), each E8M0 scale being 2^(value - 127),
 // computed on the host in double. On gfx950 hipBLASLt's C differs from it by up to
-// about 1.2e-4 of the sum of the products' magnitudes; the tolerance is 1e-3 of it.
+// about 1.7e-4 of the sum of the products' magnitudes; the tolerance is 1e-3 of it.
 void expectMatchesHostReference(const MxExecution& run, const MxInputs& in, const std::string& name)
 {
     const auto m = in.shape.m;
@@ -947,9 +947,9 @@ protected:
     }
 };
 
-// K-contiguous A and B (hipBLAS TN, every MX arch). With rocRoller a scale in the
-// other order is transposed by hipBLASLt; on gfx1250 the relayout kernel swizzles every
-// scale from whichever order it has, both in one launch.
+// K-contiguous A and B (hipBLAS TN, every MX arch). With rocRoller the plan transposes
+// a scale in the other order (one hipblasLtMatrixTransform); on gfx1250 the relayout
+// kernel swizzles every scale from whichever order it has, both in one launch.
 TEST_F(TestGpuMxMatmulPlanExecute, KContiguousOperandsAnyScaleOrder)
 {
     expectSameResult({true, true, true, true},
@@ -1078,7 +1078,7 @@ TEST_F(TestGpuMxMatmulPlanExecute, LeadingUnitDimsGiveTheSameResult)
     }
 }
 
-// A scale stored in the other order is transposed by hipBLASLt for natural scales and
+// A scale stored in the other order is transposed by the plan for natural scales and
 // rewritten by the provider's relayout kernel for a swizzled format.
 TEST_F(TestGpuMxMatmulPlanExecute, PreparesScalesByFormat)
 {

@@ -54,6 +54,13 @@
 // kernel's layout from its name (the `_MXSF` token, or rocRoller), declines when it
 // does not match the scales the plan prepares, and feeds natural scales to a gfx1250
 // NoSwizzle kernel.
+//
+// To remove once hipBLASLt matches the kernel's scale layout to the scale mode on
+// gfx1250 too: `git grep WORKAROUND_ISSUE_14286` finds the define and its `#if` sites
+// in HipblasltMxMatmulPlan.{hpp,cpp} and TestHipblasltMxMatmulPlan.cpp. Delete each
+// `#if` block (keep the `#else` branch where there is one) and the define. That also
+// deletes the `hipblaslt/hipblaslt-ext.hpp` include, the plugin's only import of
+// hipblaslt_ext (getIndexFromAlgo, getKernelNameFromAlgo).
 // ----------------------------------------------------------------------------
 // ROCm/rocm-libraries#14290 — hipBLASLt ignores the leading dimensions of an MX
 // GEMM: it reads A and B and writes C as packed matrices, so a padded one silently
@@ -68,9 +75,11 @@
 // three call sites. Padded A and B are then still declined in the plan by
 // packedMxOrder (makeScaleOperand, HipblasltMxMatmulPlan.cpp), which also gives
 // each operand's order; take the order from the contiguous axis there instead. The
-// padded A, B and C cases of IsApplicableRejectsNonPackedTensors,
-// IsApplicableRejectsNonPackedTensorsNt and DeclinesOutputThatIsNotPackedRowMajor
-// then become accepted cases.
+// padded cases of IsApplicableRejectsNonPackedTensors,
+// IsApplicableRejectsNonPackedTensorsNt, DeclinesOutputThatIsNotPackedRowMajor and
+// DeclinesMatricesThatAreNotPacked then become accepted cases; keep a decline for a
+// C row stride below N. Drop the padded-leading-dimension sentence from
+// docs/OperationSupport.md and projects/hipdnn/docs/user-guides/reference/hipblaslt.rst.
 // ----------------------------------------------------------------------------
 
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
