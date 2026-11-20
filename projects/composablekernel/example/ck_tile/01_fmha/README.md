@@ -54,18 +54,23 @@ with tile i + 1. On the 128-row tiles V has two buffers as well, issued a trip a
 read the current one. Two or
 more resident blocks per CU overlap one block's softmax with another's gemms on the same
 SIMD, the waves in their gemms at a raised priority (`s_setprio`, on the tiles that read
-V before the softmax, except unmasked 128-key trips); `qr_tdm` and `qr_tdm_sched` instead
-prefetch and schedule within a block.
+V before the softmax, except unmasked 128-key trips, and on MX's 128-deep PV warp gemms);
+`qr_tdm_sched` instead prefetches and schedules within a block.
 
 It has 16-, 64- and 128-row query tiles (Q/K rows of 512 bytes or more, d256 at 16 bits and
 d512, have no 128-row tile), the same for every head dim and for FP16/BF16, FP8 and MX; the
 tile rules are `_gfx125_qr_tdm_pingpong_tiles` in `codegen/ops/fmha_fwd.py`. A WMMA's K
 slice is 32 bytes a lane at either width (32 elements at 16 bits, 64 at FP8). Q/K rows are
 staged at the head dim rounded up to whole K slices (d32 is not padded to 64 at 16 bits;
-FP8 d32, d96 and d160 stage 64, 128 and 192). d128 adds 128-key trips when the keys are at
-least max(1024, 2 x query rows) without a sliding window; those, and the 16-row tile's
-trips, take the widest WMMA K where it divides the row (32 elements at 16 bits, 128 at
-FP8).
+FP8 d32, d96 and d160 stage 64, 128 and 192). The 16-row tiles that split their keys over
+the warps take the widest WMMA K where it divides the row (32 elements at 16 bits, 128 at
+FP8); FP8 d512's, whose warps share the keys, takes 64 like the other tiles.
+
+A query takes the 16-row tile up to 16 rows, the 128-row tile from 128 rows on, and the
+64-row tile otherwise, and under a sliding window of fewer than 512 keys (left + right + 1),
+where the 64-row tile keeps more blocks resident against the few keys a block visits; d96,
+d160, d192/128 and MX take the 128-row tile at any window (gfx1250, against the faster tile
+a shape: bf16 -0.4%, fp8 -0.7%, MX -0.7% geomean).
 
 The 16-row (decode) tile splits each trip's keys over its warps (flash decoding within the
 block): `kw` warps on the keys times `4 / kw` on V's columns, each with its own online
@@ -98,16 +103,19 @@ window mask, no bias, no dropout) always prefetch the next slice; their names do
 it.
 
 It supports masks, LSE, logits soft cap, elementwise bias and ALiBi, dropout (not on
-the 16-row tile), sink tokens, column-major V, batch and group mode, at FP16/BF16 and FP8
-alike; FP8 takes no scales, per-tensor, per-head or block descales (any q block, k/v
-blocks of whole 64-key PV slices; `_gfx125_qr_tdm_pingpong_block_scales`), or MX scales
-(scale rows read a word at a time where aligned, else bytewise). The one query it leaves to
-`qr_tdm_sched` (`qr_tdm_fp8_sched` at FP8) is d128 with at least 128 query rows and fewer than two
-128-row query blocks per CU (`batch * nhead_q * max_seqlen_q < 256 * num_cus`), where a
-single resident block cannot overlap softmax and gemms. `qr_tdm` sits on the tiles behind
-pingpong's on every head dim and takes what pingpong and `qr_tdm_sched` leave: group-mode
-skip, head dims that are not multiples of 8 (pingpong's dcheck/dvcheck), and on d128 the
-calls `qr_tdm_sched` refuses. The FP16/BF16 inventories hold no generic `qr`.
+the 16-row tile; D192/V128 takes neither dropout nor ALiBi), sink tokens, column-major V, batch and group mode, at FP16/BF16 and FP8
+alike, group-mode `skip_min_seqlen_q`, and at FP16/BF16 any head dim up to the bucket's
+(the padded instances store O an element at a time; FP8 and MX take head dims of whole
+8-element rows); FP8 takes no scales, per-tensor,
+per-head or block descales (any q block, k/v blocks of whole 32-key chunks: a PV slice
+spanning blocks of several descales takes a gemm a chunk;
+`_gfx125_qr_tdm_pingpong_block_scales`), or MX scales (scale rows read a word at a time
+where aligned, else bytewise). It takes every forward call of its head dims but d128's small
+grids at FP16/BF16 and FP8 (at least 128 query rows, fewer than two 128-row query blocks per
+CU: `batch * nhead_q * max_seqlen_q < 256 * num_cus`, `GFX125_QR_TDM_SCHED_SMALL_GRID`),
+where a single resident block cannot overlap softmax and gemms and `qr_tdm_sched` /
+`qr_tdm_fp8_sched` run instead; it also takes the small-grid calls those refuse. MX keeps
+pingpong on every grid. The forward inventories hold no `qr_tdm` or generic `qr`.
 
 GQA decode merges the query heads of a K/V head into one tile's rows in the kernel
 (`fmha_fwd_can_merge_head_groups`, batch mode, no mask or one query per head under a
@@ -118,22 +126,20 @@ ahead of the unpacked ones; folding up to 16 query rows past the 16-row tile als
 
 ### Basic TDM forward feature coverage
 
-On gfx125, FP16/BF16 `qr_tdm` supports logits soft cap, dropout, group-mode
-`skip_min_seqlen_q`, and padded Q/V head dimensions that are not multiples of eight.
-Dropout preserves the forward/backward Philox mapping and computes LSE from the
+On gfx125 the forward API runs `qr_tdm_pingpong` (and the scheduled pipelines on d128's
+small grids, see above); `qr_tdm` serves the split-KV/paged-KV APIs. Dropout preserves the forward/backward Philox mapping and computes LSE from the
 undropped probability mass. Group skip compares the logical Q length with the
 threshold and leaves skipped outputs untouched. Batch dispatch reuses `skip=false`
 instances because the threshold only applies to group mode. All gfx125 receipts
 accept batch `skip_min_seqlen_q=true`; custom tune `filters.skip` applies only to
 group mode on this architecture.
 
-FP16/BF16 inventories contain only TDM pipelines, with head buckets up to 512.
-The existing D192/V128 bias/dropout exclusion still applies; the logits soft cap with a
+The forward inventories contain only TDM pipelines, with head buckets up to 512.
+D192/V128 generates no dropout or ALiBi; the logits soft cap with a
 bias is generated for the TDM pipelines (`GFX125_TDM_PIPELINES_WITH_SOFT_CAP_BIAS`:
 scale_s, the soft cap, then the bias).
-FP8 and MX forward take `qr_tdm_pingpong` (see above); `qr_tdm_fp8_sched` keeps d128's
-small grids and the block-scale sizes pingpong leaves. The split-KV/paged-KV APIs retain their separate
-inventories.
+FP8 and MX forward take `qr_tdm_pingpong` (see above); `qr_tdm_fp8_sched` keeps FP8 d128's
+small grids. The split-KV/paged-KV APIs retain their separate inventories.
 
 ### Scheduled TDM forward pipeline
 
@@ -142,7 +148,7 @@ On gfx125 it is generated for FP16/BF16 D128/V128 with row-major V and serves th
 small-grid d128 queries `qr_tdm_pingpong` leaves to it (see above). It takes masks,
 LSE, logits soft cap, elementwise bias and ALiBi, dropout and sink tokens. Its
 variants without sink tokens require a null runtime `sink_ptr`; a sink logit without
-sink tokens uses the `qr_tdm` fallback. This runtime pointer is independent of the
+sink tokens falls back to `qr_tdm_pingpong`. This runtime pointer is independent of the
 compile-time sink-token flag. The pipeline also implements D64/V64 and D192/V128
 geometries (described below), which are not generated on gfx125 since
 `qr_tdm_pingpong` serves those head dims.

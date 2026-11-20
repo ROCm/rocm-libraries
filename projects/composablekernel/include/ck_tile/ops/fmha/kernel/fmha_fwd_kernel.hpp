@@ -1634,7 +1634,8 @@ struct FmhaFwdKernel
                 if(kargs.sink_ptr != nullptr)
                     return false;
             }
-            // The codegen constraint repeats these checks so the dispatcher falls back to qr_tdm.
+            // The codegen constraint repeats these checks so the dispatcher falls back to
+            // qr_tdm_pingpong.
             if constexpr(kUseAsyncLdsOStore)
             {
                 if(kargs.hdim_v != FmhaPipeline::kN1)

@@ -527,11 +527,7 @@ class FmhaFwdApiTrait:
                 assert False
         elif self.pipeline_tag in ["qr_tdm", "qr_tdm_pingpong"]:
             if self.dpad == "t":
-                return (
-                    "true"
-                    if self.pipeline_tag == "qr_tdm" and self.dtype in ("fp16", "bf16")
-                    else "a.hdim_q % 8 == 0"
-                )
+                return "true" if self.dtype in ("fp16", "bf16") else "a.hdim_q % 8 == 0"
             return f"a.hdim_q % {TDM_K0_MAX_SUBMAX_MAP[self.bk0max]} == 0"
         elif self.pipeline_tag in [
             "qr",
@@ -559,9 +555,10 @@ class FmhaFwdApiTrait:
                 assert False
         elif self.pipeline_tag == "qr_tdm_pingpong":
             # Its V rows are bn1 = hdim_v long (not bk0max, which differs for
-            # (192, 128)), so the unpadded instances take exactly that hdim_v.
+            # (192, 128)), so the unpadded instances take exactly that hdim_v; the padded
+            # fp16/bf16 ones any (O goes out an element at a time), fp8 whole 8-element rows.
             if self.dvpad == "t":
-                return "a.hdim_v % 8 == 0"
+                return "true" if self.dtype in ("fp16", "bf16") else "a.hdim_v % 8 == 0"
             return f"a.hdim_v == {self.bn1}"
         elif self.pipeline_tag == "qr_tdm":
             if self.dvpad == "t":
@@ -1089,8 +1086,10 @@ def qr_tdm_pingpong_pipelines(
     packgqa="f",
 ):
     """qr_tdm_pingpong's pipelines for one feature combination, at any input width: the
-    four pad specializations (packed GQA, batch only, needs no sequence padding), with the
-    head-dim pair's LDS read schedule (GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE)."""
+    four pad specializations (packed GQA, batch only, needs no sequence padding), each with
+    and without group mode's skip_min_seqlen_q (the kernel's early exit; batch mode reuses
+    the instances without it), with the head-dim pair's LDS read schedule
+    (GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE)."""
     sp, vbs = (
         GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE
         if qscale == "mx"
@@ -1112,7 +1111,7 @@ def qr_tdm_pingpong_pipelines(
             dropout,
             qscale,
             mask,
-            "f",
+            skip,
             "f",
             sink,
             F_constraint=constraint,
@@ -1121,6 +1120,7 @@ def qr_tdm_pingpong_pipelines(
             F_packgqa=packgqa,
         )  # fmt: skip
         for pads in pad_variants
+        for skip in (("f",) if packgqa == "t" else ("f", "t"))
     ]
 
 
@@ -1277,7 +1277,10 @@ class FmhaFwdKernel:
                 f"        {self.F_tile.F_bm0},\n"
                 f"        {self.F_tile.F_bn1},\n"
                 f"        {spad},\n"
-                f"        {dvpad}>>;"
+                f"        {dvpad},\n"
+                # padded fp16/bf16 instances take any hdim_v (see the dvcheck), fp8 whole
+                # 8-element rows
+                f"        {1 if self.F_dtype in ('fp16', 'bf16') else 8}>>;"
             )
         return (
             "using fmha_epilogue =\n"
@@ -1436,13 +1439,7 @@ class FmhaFwdKernel:
             self.F_pipeline.tag == "qr_tdm_pingpong"
             and self.F_pipeline.F_qscale == "blockscale"
         ):
-            # the block sizes the other pipelines leave to it, and k/v blocks of whole PV
-            # slices of this tile
-            constraint &= CppConstraint(
-                _gfx125_qr_tdm_pingpong_block_scales()
-                # whole PV slices, or with the key split whole quarters of one (a warp's keys)
-                + f" && a.block_scale_size_kv % {self.F_tile.F_bk1 // self.F_tile.F_rk1} == 0"
-            )
+            constraint &= CppConstraint(_gfx125_qr_tdm_pingpong_block_scales())
         if self.F_pipeline.F_packgqa != "t":
             return constraint
         # A KV head's packed query rows must fit the tile; one-wavefront tiles also take MHA.
@@ -2334,49 +2331,21 @@ class KernelComponentFactoryGfx117(CompatibilityRuleFactory):
         )
 
 
-# Measured bm0=64 -> bm0=128 crossover max_seqlen_q of qr_tdm on gfx1250 (fp16/bf16),
-# per head dim (hdim_q, hdim_v). Among the head dims qr_tdm_pingpong serves, only d128
-# runs qr_tdm on the calls pingpong takes too (the ones qr_tdm_sched refuses; see
-# _gfx125_qr_tdm_serves); re-benchmark the value (do not inherit it) when a head dim is
-# added or the pipeline changes.
-GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q = {
-    (128, 128): 128,
-}
-
-# qr_tdm_pingpong serves every fp16/bf16 query of the head dims it supports, at any
-# query and key length, except head-dim pairs listed here with a small grid of 128-row
-# query blocks: it overlaps one block's softmax with another's gemms on the same SIMD,
-# which takes at least two blocks per CU, while qr_tdm_sched overlaps them inside one
-# block. Measured on gfx1250 (32 / 256 heads x 128..2048 rows): with fewer than two
-# 128-row blocks per CU, d128 loses 12..32% to qr_tdm_sched; the other head dims keep
-# pingpong ahead or within noise.
-GFX125_QR_TDM_PINGPONG_SMALL_GRID_HDIMS = ((128, 128),)
-
-
-# The head dims qr_tdm_pingpong's instances take (whole 8-element vectors: dcheck/dvcheck)
-GFX125_QR_TDM_PINGPONG_WHOLE_VECTORS = "a.hdim_q % 8 == 0 && a.hdim_v % 8 == 0"
-
-
-def _gfx125_qr_tdm_pingpong_range(hdim_pair):
-    """Condition under which qr_tdm_pingpong serves (hdim, hdim_v) queries, the same at either
-    input width: head dims of whole 8-element vectors (its dcheck/dvcheck; the padded ones on
-    the padded instances), but d128's small grids, which qr_tdm_sched / qr_tdm_fp8_sched
-    take (GFX125_QR_TDM_PINGPONG_SMALL_GRID_HDIMS; gfx1250 fp8 d128, 12 small grids: sched
-    +8..35%, +20% geomean)."""
-    whole_vectors = GFX125_QR_TDM_PINGPONG_WHOLE_VECTORS
-    if hdim_pair not in GFX125_QR_TDM_PINGPONG_SMALL_GRID_HDIMS:
-        return whole_vectors
-    return (
-        f"{whole_vectors} && !(a.max_seqlen_q >= 128 && 1LL * a.batch * a.nhead_q"
-        " * a.max_seqlen_q < 256LL * num_cus)"
-    )
-
-
 # gfx125 TDM pipelines that combine the logits soft cap with a bias (scale_s, then the soft
 # cap, then the bias, as the example's reference does).
 GFX125_TDM_PIPELINES_WITH_SOFT_CAP_BIAS = ("qr_tdm", "qr_tdm_pingpong", "qr_tdm_sched")
 
-# Head dims qr_tdm_pingpong serves (fp16/bf16).
+# qr_tdm_sched (fp16/bf16) and qr_tdm_fp8_sched (fp8) take d128's small grids: fewer than two
+# 128-row query blocks a CU leave qr_tdm_pingpong no second block to overlap with, while the
+# scheduled pipelines overlap softmax and gemms inside one block (gfx1250 bf16 d128, 8/16
+# heads x 1..2 batches x 128..4096 rows: the scheduled pipeline +5..16% over pingpong's
+# 128-row tile). Everything else, including the calls they refuse, takes qr_tdm_pingpong:
+# from 512 to 32768 keys on bigger grids pingpong keeps level or ahead (bf16 d128 dense
+# -2..+3%, causal +16..31%; fp8 d64..d256 +0..15%). MX keeps pingpong: its scheduled
+# pipeline misses the reference at d128/d256.
+GFX125_QR_TDM_SCHED_SMALL_GRID = "a.max_seqlen_q >= 128 && 1LL * a.batch * a.nhead_q * a.max_seqlen_q < 256LL * num_cus"
+
+# Head dims qr_tdm_pingpong serves, at every input width.
 GFX125_QR_TDM_PINGPONG_HDIMS = (
     (32, 32),
     (64, 64),
@@ -2396,47 +2365,11 @@ GFX125_QR_TDM_PINGPONG_FP8_QSCALES = ("no", "pertensor", "perhead", "blockscale"
 
 def _gfx125_qr_tdm_pingpong_block_scales():
     """Block sizes qr_tdm_pingpong's fp8 block scales take: any q block (each row takes its
-    own descale), k/v blocks of whole 64-deep PV slices (its narrowest; a tile of deeper
-    slices also needs whole ones of its own, see FmhaFwdKernel._pipeline_constraint)."""
+    own descale), k/v blocks of whole 32-key chunks (a PV slice spanning blocks of several
+    descales takes a gemm a chunk, see BlockFmhaQuantScales::Pv)."""
     return (
         "a.block_scale_size_q > 0 && a.block_scale_size_kv > 0"
-        " && a.block_scale_size_kv % 64 == 0"
-    )
-
-
-def _gfx125_qr_tdm_pingpong_leaves(hdim_pair, fp8=False, qscale="no"):
-    """The clause that leaves qr_tdm_pingpong its queries, for the pipelines dispatched
-    around it on the same (hdim, hdim_v) and qscale; None where pingpong has no instance
-    for them (fp8: the scales outside GFX125_QR_TDM_PINGPONG_FP8_QSCALES). With block
-    scales pingpong takes the block sizes of _gfx125_qr_tdm_pingpong_block_scales."""
-    if hdim_pair not in GFX125_QR_TDM_PINGPONG_HDIMS or (
-        fp8 and qscale not in (*GFX125_QR_TDM_PINGPONG_FP8_QSCALES, "mx")
-    ):
-        return None
-    taken = _gfx125_qr_tdm_pingpong_range(hdim_pair)
-    if fp8 and qscale == "blockscale":
-        taken = f"{taken} && {_gfx125_qr_tdm_pingpong_block_scales()}"
-    return f"!({taken})"
-
-
-def _gfx125_qr_tdm_pingpong_leave_constraint(hdim_pair, **features) -> "CppConstraint":
-    """_gfx125_qr_tdm_pingpong_leaves as a constraint (none where pingpong has no instance)."""
-    leave = _gfx125_qr_tdm_pingpong_leaves(hdim_pair, **features)
-    return CppConstraint(leave) if leave else CppConstraint()
-
-
-def _gfx125_qr_tdm_serves(hdim_pair):
-    """Whether every fp16/bf16 qr_tdm variant is generated for (hdim, hdim_v).
-    qr_tdm_pingpong takes every query of the head dims whose range is unconditional, so
-    there qr_tdm only takes skip and the padded head dims off the 8-element vector (see
-    get_pipelines); all of its variants stay for the other pairs and for those whose
-    queries pingpong leaves to qr_tdm_sched, which falls back to qr_tdm for the calls it
-    refuses (e.g. a sink_ptr without sink tokens). get_hdim_tile_size_dict keeps a qr_tdm
-    tile for every pair."""
-    return (
-        hdim_pair not in GFX125_QR_TDM_PINGPONG_HDIMS
-        or _gfx125_qr_tdm_pingpong_range(hdim_pair)
-        != GFX125_QR_TDM_PINGPONG_WHOLE_VECTORS
+        " && a.block_scale_size_kv % 32 == 0"
     )
 
 
@@ -2475,26 +2408,21 @@ GFX125_QR_TDM_PINGPONG_MX_LDS_READ_SCHEDULE = {
 # at two blocks, the 64-row one is slower) keep 128-key trips.
 GFX125_QR_TDM_PINGPONG_MX_64_KEY_TRIPS = ((160, 160), (192, 128))
 
-# Inside its range qr_tdm_pingpong runs 64-row tiles for short keys and 128-row tiles
-# (once there are 128 query rows to fill one) from this K length on, or for dense grids
-# from 512 query rows on: the 64-row tile keeps more blocks resident, the 128-row one
-# halves the K/V LDS reads per row. Measured on gfx1250: with 128 query rows d64 64-row
-# wins up to 772 keys and 128-row from 1859; with 512 query rows and 512 keys the
-# 128-row tile wins dense (d64 +8%, d128 +6%) and the 64-row one masked (d64 +7%, d128
-# +4%); with 1024 keys the 128-row tile wins both.
-GFX125_QR_TDM_PINGPONG_M128_MIN_SEQLEN_K = 1024
-# A sliding window of fewer keys than this (left + right + 1) keeps the 64-row tile (gfx1250
-# d64/d128, 128..8192 query rows, either width: width 512 128-row +5..7%, 1024 +12..15%;
-# width 129..257 64-row +2..10%).
+# qr_tdm_pingpong runs 128-row tiles once there are 128 query rows to fill one, but under a
+# sliding window of fewer keys than this (left + right + 1), where the 64-row tile keeps
+# more blocks resident against the few keys a block visits; the 128-row tile halves the
+# K/V LDS reads per row. Measured on gfx1250 (32 x 8 heads, 16k tokens, d64..d256, 128..4096
+# rows, 1x/4x keys; dense, causal, windows 256/1024), against the faster tile a shape
+# (geomean): bf16 -0.4%, fp8 -0.7%, MX -0.7%; 128-row tiles regardless: bf16 -1.4% (window
+# 256 -22%), fp8 -1.3%.
 GFX125_QR_TDM_PINGPONG_M128_MIN_WINDOW = 512
-GFX125_QR_TDM_PINGPONG_M128_DENSE_MIN_SEQLEN_Q = 512
-# Head-dim pairs whose 128-row tile takes every K length from 128 query rows on: with
-# slice prefetch, wide rows make the 64-row tile's doubled K/V LDS reads the larger cost
-# (gfx1250, 32 x 16 heads, 128 x 256 keys, 128-row over 64-row: d96 dense +11% causal
-# +4%, d160 +33% / +29%, d192/128 +43% / +32%). fp8 inputs take it at every head dim: the
-# fp8 128-row tile runs three blocks a CU (d64 dense 200 x 300 +26%, causal 256 x 768
-# +22%; d128 window 512, 4096^2 +30%).
-GFX125_QR_TDM_PINGPONG_M128_ANY_SEQLEN_K = ((96, 96), (160, 160), (192, 128))
+# Head-dim pairs whose 128-row tile takes every window from 128 query rows on: with slice
+# prefetch, wide rows make the 64-row tile's doubled K/V LDS reads the larger cost (gfx1250,
+# 32 x 16 heads, 128 x 256 keys, 128-row over 64-row: d96 dense +11% causal +4%, d160
+# +33% / +29%, d192/128 +43% / +32%). MX takes it at every head dim: its 64-row tiles, on
+# 128-key trips, lose to it everywhere but the shortest windows (MX, the measure above:
+# window rule -2.8%, 128-row tiles regardless -0.7%).
+GFX125_QR_TDM_PINGPONG_M128_ANY_WINDOW = ((96, 96), (160, 160), (192, 128))
 
 
 def _gfx125_seqlen_k_at_least(value):
@@ -2505,12 +2433,6 @@ def _gfx125_seqlen_k_at_least(value):
         f"a.seqlen_k >= {value}LL * (t.is_group_mode ? a.batch : 1)"
         " && a.seqlen_k_ptr == nullptr && a.cu_seqlen_k_ptr == nullptr"
     )
-
-
-# qr_tdm_pingpong head dims whose calls with at least this many keys, and twice the query
-# rows, take 128-key trips (on the widest WMMA K, two blocks a CU; see
-# _gfx125_qr_tdm_pingpong_tiles), at any input width.
-GFX125_QR_TDM_PINGPONG_LONG_TRIP_MIN_SEQLEN_K = {(128, 128): 1024}
 
 
 def _gfx125_qr_tdm_pingpong_tile(
@@ -2543,20 +2465,17 @@ def _gfx125_qr_tdm_pingpong_tile(
 def _gfx125_qr_tdm_pingpong_tiles(hdim_pair, fp8=False, mx=False):
     """qr_tdm_pingpong's tiles for (hdim, hdim_v), in dispatch order, the same for fp16/bf16
     and fp8 inputs: 16-, 64- and 128-row tiles. Each but the last is guarded, and the last
-    one takes the whole range, so the tiles of other pipelines listed behind them only see
-    the queries pingpong leaves. A B fragment is 32 bytes a lane at either width: K slices
+    takes every query. A B fragment is 32 bytes a lane at either width: K slices
     of 32 elements at 16 bits, 64 at fp8. Q/K rows of 512 bytes or more (d256 at 16 bits,
     d512) have no 128-row tile: it would run one wave a SIMD. Q/K rows are staged
     at their own length: d32 does not pad to 64 as qr_tdm does, which halves its QK WMMAs
     (gfx1250, d32 x 32 x 16 heads: +13..58% over the padded row from 128 query rows on).
 
-    d128 adds 128-key trips for long blocks (GFX125_QR_TDM_PINGPONG_LONG_TRIP_MIN_SEQLEN_K).
     MX (fp8 with E8M0 scale operands) takes the same tiles on the scaled WMMA, whose K is 128
     (64 zero-padded in registers): its gemms' K (qk_k, pv_k below) and the Q/K row (k_row)
     are all that differ."""
     hdim, hdim_v = hdim_pair
     fp8 = fp8 or mx
-    rng = _gfx125_qr_tdm_pingpong_range(hdim_pair)
     wk = 64 if fp8 else 32
     # MX's scaled WMMA is 16x16x128: its Q/K rows go to whole 128-deep slices where those take
     # fewer WMMAs than 64-deep ones (d192: two against three, zero padded to 256 on the padded
@@ -2579,18 +2498,14 @@ def _gfx125_qr_tdm_pingpong_tiles(hdim_pair, fp8=False, mx=False):
     if mx:
         pv_k = 64 if hdim_pair in GFX125_QR_TDM_PINGPONG_MX_64_KEY_TRIPS else 128
     # A sliding window bounds the keys a block visits by the window, not by seqlen_k.
-    min_k = GFX125_QR_TDM_PINGPONG_M128_MIN_SEQLEN_K
     m128 = (
         "a.max_seqlen_q >= 128"
-        if hdim_pair in GFX125_QR_TDM_PINGPONG_M128_ANY_SEQLEN_K
-        else "a.max_seqlen_q >= 128 && ("
-        "((a.window_size_left < 0 || a.window_size_right < 0 || a.window_size_left"
-        f" + a.window_size_right + 1 >= {GFX125_QR_TDM_PINGPONG_M128_MIN_WINDOW})"
-        f" && {_gfx125_seqlen_k_at_least(min_k)})"
-        " || (t.mask_type == mask_enum::no_mask && a.max_seqlen_q >= "
-        f"{GFX125_QR_TDM_PINGPONG_M128_DENSE_MIN_SEQLEN_Q}))"
+        if mx or hdim_pair in GFX125_QR_TDM_PINGPONG_M128_ANY_WINDOW
+        else "a.max_seqlen_q >= 128 && (a.window_size_left < 0 || a.window_size_right < 0"
+        " || a.window_size_left + a.window_size_right + 1 >= "
+        f"{GFX125_QR_TDM_PINGPONG_M128_MIN_WINDOW})"
     )
-    short_q = f"a.max_seqlen_q <= 16 && {rng}"
+    short_q = "a.max_seqlen_q <= 16"
     k_row_bytes = k_row * (1 if fp8 else 2)
 
     def tile(bm0, bn0, constraint, warps=(4, 1)):
@@ -2654,43 +2569,22 @@ def _gfx125_qr_tdm_pingpong_tiles(hdim_pair, fp8=False, mx=False):
     if hdim >= 512:
         # 32 KB of K per trip (32 keys at 16 bits, 64 at fp8; MX: its 128-key PV slice):
         # two whole-row K buffers of twice that and V would leave no second resident block.
-        return short_tiles + (tile(64, trip, rng),)
+        return short_tiles + (tile(64, trip, "true"),)
     # Q/K rows of 512 bytes or more have no 128-row tile (see below): the 64-row one takes the
     # whole range
     wide_rows = k_row_bytes >= 512
-    m64 = rng if wide_rows else f"{rng} && !({m128})"
+    m64 = "true" if wide_rows else f"!({m128})"
     # A narrow V (d32) leaves a trip little work against its fixed cost (loop-head
     # barrier, K/V transfers, row-max rescale): it stages 128 keys per trip, which the
     # whole-tile K buffers hold easily.
     bn0 = max(128 if hdim_v < 64 else 64, pv_k)
-    tiles = (tile(64, bn0, m64), tile(128, bn0, rng))
+    tiles = (tile(64, bn0, m64), tile(128, bn0, "true"))
     # The 128-row tile halves the K/V LDS reads per row; its Q/K rows of 512 bytes or more
     # (d256 at 16 bits, d512) leave it one wave a SIMD, the 64-row tile two (gfx1250 d256
     # 128-row over 64-row: fp8 +33..40% dense, +17% causal, 512 VGPRs; MX +55%; bf16 658
     # VGPRs -2..7%).
     if wide_rows:
         tiles = tiles[:1]
-    # (where the tiles already take 128-key trips, MX's, there is nothing to add)
-    min_k = GFX125_QR_TDM_PINGPONG_LONG_TRIP_MIN_SEQLEN_K.get(hdim_pair)
-    if min_k is not None and bn0 < 128:
-        # Keys at least twice the query rows, without a sliding window: few query tiles
-        # share a head's K/V and the blocks are long, so a trip's sync and transfers pay off
-        # half as often, and two blocks a CU fill the grid's waves (gfx1250 d128, 128-key over
-        # 64-key trips, fp8: dense 512 x 4096 keys +15%, 1024 x 8192 +20%, 128 x 1024 +14%;
-        # bottom-right causal 2048 x 8192 +9%, 4096 x 16384 +10%, 128 x 1024 +19%; top-left
-        # 1024 x 8192 +4%; a 1024-key window -6%. bf16, on 32-deep slices: dense 512 x 4096
-        # +3%, 1024 x 8192 +2%, 4096 x 16384 +1%; bottom-right causal 2048 x 8192 +2%,
-        # 4096 x 16384 +2%, 128 x 1024 -2%; top-left 1024 x 8192 +4%).
-        long_trips = (
-            f"{rng} && a.max_seqlen_q >= 128 && a.window_size_left < 0"
-            f" && {_gfx125_seqlen_k_at_least(min_k)}"
-            " && a.seqlen_k >= 2LL * a.max_seqlen_q * (t.is_group_mode ? a.batch : 1)"
-        )
-        tiles = (
-            _gfx125_qr_tdm_pingpong_tile(
-                hdim_pair, 128, 128, wide_slice, long_trips, k_row=k_row
-            ),
-        ) + tiles
     return short_tiles + tiles
 
 
@@ -2732,301 +2626,61 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
     # Pipelines whose tiles carry F_pipeline_tag (see check_tile_owner).
     _PIPELINES_WITH_OWN_TILES = ("qr_tdm_pingpong",)
 
-    # Define scheduled tile configurations once. Codegen inventory and pipeline
-    # compatibility share these entries; runtime constraints are attached to copies.
-    # qr_tdm_sched is generated only where qr_tdm_pingpong leaves queries to it (see
-    # GFX125_QR_TDM_PINGPONG_SMALL_GRID_HDIMS).
+    # The scheduled pipelines' d128 tiles (GFX125_QR_TDM_SCHED_SMALL_GRID); the fp8 one runs
+    # one workgroup a CU with an elementwise bias. Must match kFmhaTdmSchedFp8{,Bias}BlockPerCu
+    # in the policy.
     _QR_TDM_SCHED_TILES = {
         (128, 128): (
             FmhaFwdTileSize(128, 128, 32, 128, 32, 128, 4, 1, 1, 4, 1, 1, 16, 16, 32, 16, 16, 32, 1),
         ),
     }  # fmt: skip
-
-    # FP8 scheduled tiles (QK WMMA K64 at D64/D192, else K128; K128 PV): FP8, FP8BF16, MXFP8.
-    _DT_QR_TDM_SCHED_FP8 = _DT_FP8_FP8BF16 + _DT_MXFP8
     _QR_TDM_SCHED_FP8_TILES = {
-        (64, 64): (
-            FmhaFwdTileSize(128, 128, 64, 64, 128, 64, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 2),
-            FmhaFwdTileSize(128, 128, 64, 64, 128, 64, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 1),
-        ),
         (128, 128): (
             FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 2),
             FmhaFwdTileSize(128, 128, 128, 128, 128, 128, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 1),
         ),
-        # D192 one-per-CU tile (MX, bias, packed GQA) goes first so two-per-CU does not shadow it.
-        (192, 128): (
-            FmhaFwdTileSize(128, 128, 192, 128, 128, 192, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 1),
-            FmhaFwdTileSize(128, 128, 192, 128, 128, 192, 4, 1, 1, 4, 1, 1, 16, 16, 64, 16, 16, 128, 2),
-        ),
-        # D256 runs one workgroup per CU, with or without bias.
-        (256, 256): (
-            FmhaFwdTileSize(128, 128, 256, 256, 128, 256, 4, 1, 1, 4, 1, 1, 16, 16, 128, 16, 16, 128, 1),
-        ),
     }  # fmt: skip
-    # Packed GQA one-wavefront tiles: 32 query rows, the per-wavefront shape of the tiles above.
-    _QR_TDM_SCHED_FP8_ONE_WAVE_TILES = {
-        (64, 64): (
-            FmhaFwdTileSize(32, 128, 64, 64, 128, 64, 1, 1, 1, 1, 1, 1, 16, 16, 64, 16, 16, 128, 2),
-        ),
-        (128, 128): (
-            FmhaFwdTileSize(32, 128, 128, 128, 128, 128, 1, 1, 1, 1, 1, 1, 16, 16, 128, 16, 16, 128, 2),
-        ),
-        (192, 128): (
-            FmhaFwdTileSize(32, 128, 192, 128, 128, 192, 1, 1, 1, 1, 1, 1, 16, 16, 64, 16, 16, 128, 2),
-        ),
-        (256, 256): (
-            FmhaFwdTileSize(32, 128, 256, 256, 128, 256, 1, 1, 1, 1, 1, 1, 16, 16, 128, 16, 16, 128, 1),
-        ),
-    }  # fmt: skip
-    # Must match kFmhaTdmSchedFp8{,Bias,D256,D192Mx,D192Merged,OneWave}BlockPerCu in the policy.
-    _QR_TDM_SCHED_FP8_OCCUPANCY = 2
-    _QR_TDM_SCHED_FP8_BIAS_OCCUPANCY = 1
-    _QR_TDM_SCHED_FP8_D256_OCCUPANCY = 1
-    _QR_TDM_SCHED_FP8_D192_MX_OCCUPANCY = 1
-    _QR_TDM_SCHED_FP8_D192_MERGED_OCCUPANCY = 1
+
+    @classmethod
+    def _sched_tiles(cls, dtype: str) -> dict:
+        if dtype in cls._DT_FP16_BF16:
+            return cls._QR_TDM_SCHED_TILES
+        if dtype in cls._DT_FP8_FP8BF16:
+            return cls._QR_TDM_SCHED_FP8_TILES
+        return {}
+
+    @classmethod
+    def is_sched_tile(cls, dtype: str, tile: FmhaFwdTileSize, hdim: int) -> bool:
+        # The name encodes every geometry field and occupancy, but not runtime constraints.
+        return any(
+            tile.name == candidate.name
+            for candidate in cls._sched_tiles(dtype).get((hdim, tile.F_bn1), ())
+        )
+
+    @classmethod
+    def qr_tdm_fp8_sched_constraint(cls, qscale: str, sink: str) -> CppConstraint:
+        # d128's small grids (GFX125_QR_TDM_SCHED_SMALL_GRID); its sink and scale layouts
+        sink_expr = "a.sink_ptr == nullptr && " if sink == "f" else ""
+        expr = (
+            f"a.hdim_q == 128 && a.hdim_v == 128 && {sink_expr}"
+            f"t.hdim_q == 128 && t.hdim_v == 128 && {GFX125_QR_TDM_SCHED_SMALL_GRID}"
+        )
+        if qscale == "blockscale":
+            # IsSupportedArgument rejects q blocks that split an M tile, and k/v blocks of no
+            # whole 32-column QK stage.
+            expr += " && a.block_scale_size_q > 0 && a.block_scale_size_kv > 0"
+            expr += (
+                " && a.block_scale_size_q % 128 == 0 && a.block_scale_size_kv % 32 == 0"
+            )
+        return CppConstraint(expr)
 
     @classmethod
     def supported_dtypes(cls) -> Tuple[str]:
         return cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_MXFP8
 
     @classmethod
-    def is_tile_supported_by_qr_tdm_sched(
-        cls, tile: FmhaFwdTileSize, hdim: int
-    ) -> bool:
-        # The name encodes every geometry field and occupancy, but not runtime
-        # constraints. Equivalent custom-tune tiles therefore match as well.
-        return any(
-            tile.name == candidate.name
-            for candidate in cls._QR_TDM_SCHED_TILES.get((hdim, tile.F_bn1), ())
-        )
-
-    @classmethod
-    def _with_qr_tdm_sched_fp8_tiles(cls, result: dict) -> dict:
-        # Sched tiles may add head dims (FP8 D64, D256); dispatch needs them ascending.
-        for hdims, tiles in itertools.chain(
-            cls._QR_TDM_SCHED_FP8_TILES.items(),
-            cls._QR_TDM_SCHED_FP8_ONE_WAVE_TILES.items(),
-        ):
-            merged = result.setdefault(hdims, [])
-            merged.extend(copy.deepcopy(tiles))
-            merged.sort(key=lambda tile: tile.F_bm0)
-        return dict(sorted(result.items()))
-
-    @classmethod
-    def qr_tdm_fp8_sched_occupancy(
-        cls,
-        hdim: int,
-        bias: str,
-        qscale: str = "no",
-        dtype: str = "fp8",
-        packgqa: str = "f",
-        mask: str = "no",
-        sink: str = "f",
-    ) -> int:
-        if hdim == 256:
-            return cls._QR_TDM_SCHED_FP8_D256_OCCUPANCY
-        if hdim == 192 and qscale == "mx":
-            return cls._QR_TDM_SCHED_FP8_D192_MX_OCCUPANCY
-        # D192 packed GQA: FP32 O with row descales overflows LDS, masked sink overflows VGPRs.
-        if (
-            hdim == 192
-            and packgqa == "t"
-            and (
-                (dtype in cls._DT_FP8 and qscale in ("perhead", "blockscale"))
-                or (sink == "t" and mask not in ("no", "s_no"))
-            )
-        ):
-            return cls._QR_TDM_SCHED_FP8_D192_MERGED_OCCUPANCY
-        if bias == "bias":
-            return cls._QR_TDM_SCHED_FP8_BIAS_OCCUPANCY
-        return cls._QR_TDM_SCHED_FP8_OCCUPANCY
-
-    @classmethod
-    def is_one_wave_tile_supported_by_qr_tdm_fp8_sched(
-        cls, tile: FmhaFwdTileSize, hdim: int
-    ) -> bool:
-        return any(
-            tile.name == candidate.name
-            for candidate in cls._QR_TDM_SCHED_FP8_ONE_WAVE_TILES.get(
-                (hdim, tile.F_bn1), ()
-            )
-        )
-
-    @classmethod
-    def is_tile_supported_by_qr_tdm_fp8_sched(
-        cls, tile: FmhaFwdTileSize, hdim: int
-    ) -> bool:
-        return any(
-            tile.name == candidate.name
-            for candidate in cls._QR_TDM_SCHED_FP8_TILES.get((hdim, tile.F_bn1), ())
-        )
-
-    @classmethod
-    def qr_tdm_fp8_sched_constraint(
-        cls,
-        hdim: int,
-        hdim_v: int,
-        qscale: str,
-        sink: str,
-        bias: str = "no",
-    ) -> CppConstraint:
-        # Runtime eligibility: exact head dims, sink pointer and scale layout; any seqlen_q.
-        tile = cls._QR_TDM_SCHED_FP8_TILES[(hdim, hdim_v)][0]
-        # Sink instances take both the sink logit and mask sink tokens.
-        sink_expr = "a.sink_ptr == nullptr && " if sink == "f" else ""
-        expr = (
-            f"a.hdim_q == {hdim} && a.hdim_v == {hdim_v} && {sink_expr}"
-            f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}"
-        )
-        # the queries qr_tdm_pingpong takes are left to it
-        leave_pp = _gfx125_qr_tdm_pingpong_leaves(
-            (hdim, hdim_v), fp8=True, qscale=qscale
-        )
-        if leave_pp:
-            expr += f" && {leave_pp}"
-        if qscale == "blockscale":
-            # kKVScaleAlign: lcm of the 32-column QK stage and the bk1 / 4 rows of a V E8M0 byte.
-            kv_scale_align = 32
-            assert tile.F_bk1 // 4 == kv_scale_align
-            # IsSupportedArgument rejects Q scale blocks that split an M tile, likewise for KV.
-            expr += " && a.block_scale_size_q > 0 && a.block_scale_size_kv > 0"
-            expr += f" && a.block_scale_size_q % {tile.F_bm0} == 0"
-            expr += f" && a.block_scale_size_kv % {kv_scale_align} == 0"
-        elif qscale == "mx":
-            # Q/K E8M0 rows (one byte per 32 head elements): an int16 per K64 step, else int32s.
-            row = 2 if hdim % 128 else 4
-            expr += (
-                f" && reinterpret_cast<uintptr_t>(a.q_descale_ptr) % {row} == 0"
-                f" && reinterpret_cast<uintptr_t>(a.k_descale_ptr) % {row} == 0"
-                f" && a.stride_q_descale % {row} == 0 && a.stride_k_descale % {row} == 0"
-                f" && a.nhead_stride_q_descale % {row} == 0 && a.nhead_stride_k_descale % {row} == 0"
-                # Group mode leaves the batch strides unset and offsets by the token starts.
-                f" && (t.is_group_mode || (a.batch_stride_q_descale % {row} == 0"
-                f" && a.batch_stride_k_descale % {row} == 0))"
-            )
-        return CppConstraint(expr)
-
-    @classmethod
-    def _qr_tdm_fp8_sched_left_nothing(
-        cls, hdim: int, hdim_v: int, qscale: str, packed: bool = False
-    ) -> bool:
-        """Whether qr_tdm_pingpong takes every call a qr_tdm_fp8_sched variant could serve:
-        it has every bias, sink and mask variant of its head dims and scales, and with block
-        scales leaves the block sizes it does not take. A packed-GQA call's merged rows fit
-        one 128-row tile, so it has under 128 queries a head and never the small grids
-        pingpong leaves (_gfx125_qr_tdm_pingpong_range)."""
-        return (
-            qscale != "blockscale"
-            and _gfx125_qr_tdm_pingpong_leaves((hdim, hdim_v), fp8=True, qscale=qscale)
-            is not None
-            and (
-                packed
-                or _gfx125_qr_tdm_pingpong_range((hdim, hdim_v))
-                == GFX125_QR_TDM_PINGPONG_WHOLE_VECTORS
-            )
-        )
-
-    # Launch-bound occupancy of the one-wavefront tiles.
-    _QR_TDM_SCHED_FP8_ONE_WAVE_OCCUPANCY = {64: 2, 128: 2, 192: 2, 256: 1}
-
-    @classmethod
     def get_rules(cls) -> List[CompatibilityRule]:
         rules = super().get_rules()
-
-        def check_qr_tdm_fp8_sched_codegen_compatibility(
-            problem_ctx: ProblemContext, kernel_ctx: KernelContext
-        ) -> bool:
-            is_fp8_sched_tile = cls.is_tile_supported_by_qr_tdm_fp8_sched(
-                kernel_ctx.tile, problem_ctx.hdim
-            )
-            is_one_wave_tile = cls.is_one_wave_tile_supported_by_qr_tdm_fp8_sched(
-                kernel_ctx.tile, problem_ctx.hdim
-            )
-            if kernel_ctx.pipeline.tag != "qr_tdm_fp8_sched":
-                # Other FP8 pipelines keep their own tiles.
-                return not (
-                    problem_ctx.dtype in cls._DT_QR_TDM_SCHED_FP8
-                    and (is_fp8_sched_tile or is_one_wave_tile)
-                )
-            if kernel_ctx.pipeline.F_packgqa == "t" and problem_ctx.mode != "batch":
-                return False
-            if is_one_wave_tile:
-                # Only packed GQA runs the one-wavefront tile.
-                return (
-                    kernel_ctx.pipeline.F_packgqa == "t"
-                    and problem_ctx.dtype in cls._DT_QR_TDM_SCHED_FP8
-                    and kernel_ctx.pipeline.F_vlayout == "row"
-                    and kernel_ctx.tile.F_occupancy
-                    == cls._QR_TDM_SCHED_FP8_ONE_WAVE_OCCUPANCY[problem_ctx.hdim]
-                )
-            return (
-                problem_ctx.dtype in cls._DT_QR_TDM_SCHED_FP8
-                and is_fp8_sched_tile
-                and kernel_ctx.pipeline.F_vlayout == "row"
-                and kernel_ctx.tile.F_occupancy
-                == cls.qr_tdm_fp8_sched_occupancy(
-                    problem_ctx.hdim,
-                    kernel_ctx.pipeline.F_bias,
-                    kernel_ctx.pipeline.F_qscale,
-                    problem_ctx.dtype,
-                    kernel_ctx.pipeline.F_packgqa,
-                    kernel_ctx.pipeline.F_mask,
-                    kernel_ctx.pipeline.F_sink,
-                )
-            )
-
-        def check_qr_tdm_sched_codegen_compatibility(
-            problem_ctx: ProblemContext, kernel_ctx: KernelContext
-        ) -> bool:
-            is_qr_tdm_sched_pipeline = kernel_ctx.pipeline.tag == "qr_tdm_sched"
-            matches_qr_tdm_sched_dtype_and_dims = (
-                problem_ctx.dtype in cls._DT_FP16_BF16
-                and (problem_ctx.hdim, problem_ctx.hdim_v) in cls._QR_TDM_SCHED_TILES
-            )
-            if not is_qr_tdm_sched_pipeline:
-                # Reject only a pairing with a sched-specific tile. The legacy
-                # qr_tdm/qr candidates still use their own tiles.
-                if (
-                    matches_qr_tdm_sched_dtype_and_dims
-                    and cls.is_tile_supported_by_qr_tdm_sched(
-                        kernel_ctx.tile, problem_ctx.hdim
-                    )
-                ):
-                    return False
-                return True
-
-            # Sched is generated for the FP16/BF16 head dims in _QR_TDM_SCHED_TILES
-            # only. Other configurations use separate qr_tdm/qr candidates.
-            if not matches_qr_tdm_sched_dtype_and_dims:
-                return False
-
-            is_qr_tdm_sched_tile = cls.is_tile_supported_by_qr_tdm_sched(
-                kernel_ctx.tile, problem_ctx.hdim
-            )
-            if not is_qr_tdm_sched_tile:
-                return False
-
-            # D128 keeps its measured padded specialization (group lengths live in
-            # device memory, so dispatch could not prove them tile aligned anyway).
-            return (
-                kernel_ctx.pipeline.F_vlayout == "row"
-                and kernel_ctx.pipeline.F_spad == "t"
-                and kernel_ctx.pipeline.F_skpad == "t"
-                and kernel_ctx.pipeline.F_dpad == "t"
-                and kernel_ctx.pipeline.F_dvpad == "t"
-            )
-
-        def check_gemm0_k(
-            problem_ctx: ProblemContext, kernel_ctx: KernelContext
-        ) -> bool:
-            if problem_ctx.dtype not in cls._DT_FP8_FP8BF16:
-                return True
-            k0_loops = kernel_ctx.tile.F_bk0max // kernel_ctx.tile.F_bk0
-            if kernel_ctx.pipeline.tag == "qr_tdm_pingpong":
-                return True
-            if kernel_ctx.pipeline.tag in ("qr_tdm", "qr_tdm_fp8_sched"):
-                return k0_loops == 1
-            return k0_loops >= 2
 
         def check_tile_owner(
             problem_ctx: ProblemContext, kernel_ctx: KernelContext
@@ -3057,118 +2711,47 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
                 return kernel_ctx.pipeline.tag == owner
             return kernel_ctx.pipeline.tag not in cls._PIPELINES_WITH_OWN_TILES
 
-        rules.extend(
-            [
-                check_gemm0_k,
-                check_tile_owner,
-                check_qr_tdm_fp8_sched_codegen_compatibility,
-                check_qr_tdm_sched_codegen_compatibility,
-            ]
-        )
+        def check_sched_tiles(
+            problem_ctx: ProblemContext, kernel_ctx: KernelContext
+        ) -> bool:
+            # A scheduled pipeline runs on its tiles (row-major V; the fp16/bf16 one padded
+            # only, the fp8 one at its bias occupancy), and no other pipeline on them.
+            sched_tile = cls.is_sched_tile(
+                problem_ctx.dtype, kernel_ctx.tile, problem_ctx.hdim
+            )
+            p = kernel_ctx.pipeline
+            if p.tag not in ("qr_tdm_sched", "qr_tdm_fp8_sched"):
+                return not sched_tile
+            if not sched_tile or p.F_vlayout != "row" or p.F_packgqa == "t":
+                return False
+            if p.tag == "qr_tdm_sched":
+                return (p.F_spad, p.F_skpad, p.F_dpad, p.F_dvpad) == ("t",) * 4
+            return kernel_ctx.tile.F_occupancy == (1 if p.F_bias == "bias" else 2)
+
+        rules.extend([check_tile_owner, check_sched_tiles])
         return rules
 
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
-        if dtype in cls._DT_FP16_BF16:
-            # Short causal grids benefit from twice as many Q workgroups. Keep the
-            # d128 causal override on top of the measured M64/M128 crossover.
-            m64_d128_constraint = (
-                f"a.max_seqlen_q < {GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q[(128, 128)]}"
-                " || (!t.is_group_mode && t.is_v_rowmajor"
-                " && !t.has_logits_soft_cap && !t.has_dropout"
-                " && (t.mask_type == mask_enum::mask_top_left || t.mask_type == mask_enum::mask_bottom_right)"
-                " && a.window_size_left < 0 && a.window_size_right == 0"
-                " && a.seqlen_q == a.seqlen_k && a.seqlen_q % 128 == 0"
-                " && a.hdim_q == 128 && a.hdim_v == 128"
-                " && a.stride_q == a.hdim_q && a.nhead_stride_q > a.hdim_q"
-                " && get_num_blocks(128) <= 2 * num_cus)"
-            )
-            # Per head-dim pair, in dispatch order: qr_tdm_pingpong's tiles (see
-            # _gfx125_qr_tdm_pingpong_tiles), each guarded but its last, which takes
-            # pingpong's whole range. Only the queries pingpong leaves reach the unowned
-            # tiles behind them, which serve qr_tdm: all its variants where
-            # _gfx125_qr_tdm_serves, and skip and head dims off the 8-element vector
-            # elsewhere (see get_pipelines). d128 keeps qr_tdm's bm0=64 tile below the
-            # crossover max_seqlen_q (GFX125_QR_TDM_BM0_CROSSOVER_MAX_SEQLEN_Q) and its
-            # bm0=128 tile above it; the other pairs keep one qr_tdm tile. _validate_gfx125_tile_dispatch_order
-            # checks that no unconditional tile shadows a later one of the same owner.
-            pp_tiles = {
-                h: _gfx125_qr_tdm_pingpong_tiles(h)
-                for h in GFX125_QR_TDM_PINGPONG_HDIMS
-            }
-            result = _validate_gfx125_tile_dispatch_order({
-                #                                       bm0, bn0, bk0, bn1, bk1,
-                ( 32,  32) : [*pp_tiles[(32, 32)],
-                              FmhaFwdTileSize(128,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                ( 64,  64) : [*pp_tiles[(64, 64)],
-                              FmhaFwdTileSize(128,  64,  32,  64,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                ( 96,  96) : [*pp_tiles[(96, 96)],
-                              FmhaFwdTileSize(128,  64,  32,  96,  32,   96,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                # qr_tdm_pingpong's tiles sit next to the qr_tdm ones of the same bm0.
-                (128, 128) : [*(t for t in pp_tiles[(128, 128)] if t.F_bm0 < 128),
-                              FmhaFwdTileSize( 64,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1, CppConstraint(m64_d128_constraint)),
-                              *(t for t in pp_tiles[(128, 128)] if t.F_bm0 == 128),
-                              FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (160, 160) : [*pp_tiles[(160, 160)],
-                              FmhaFwdTileSize(128,  64,  32, 160,  32,  160,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (192, 128) : [*pp_tiles[(192, 128)],
-                              FmhaFwdTileSize(128,  64,  32, 128,  32,  192,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1)],
-                (256, 256) : [*(t for t in pp_tiles[(256, 256)] if t.F_bm0 < 128),
-                              FmhaFwdTileSize( 64,  64,  32, 256,  32,  256,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-                              *(t for t in pp_tiles[(256, 256)] if t.F_bm0 == 128)],
-                (512, 512) : [*(t for t in pp_tiles[(512, 512)] if t.F_bm0 < 128),
-                              FmhaFwdTileSize( 64,  64,  32, 512,  32,  512,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
-                              *(t for t in pp_tiles[(512, 512)] if t.F_bm0 == 128)],
-            })  # fmt: skip
-            # The qr_tdm_sched tiles go last: check_qr_tdm_sched_codegen_compatibility
-            # pairs them with the scheduled pipeline only, and dispatch tries that
-            # pipeline first (FmhaFwdApiPool.render).
-            for hdim_pair, sched_tiles in cls._QR_TDM_SCHED_TILES.items():
-                result[hdim_pair].extend(copy.deepcopy(sched_tiles))
-            return result
-        elif dtype in cls._DT_FP8_FP8BF16:
-            # pingpong's tiles, then qr_tdm's and qr's; _with_qr_tdm_sched_fp8_tiles adds
-            # sched's (gated by their pipelines' constraints) and sorts all by bm0, so
-            # pingpong's tiles are validated in that merged order
-            fp8_pp = {
-                h: list(_gfx125_qr_tdm_pingpong_tiles(h, fp8=True))
-                for h in GFX125_QR_TDM_PINGPONG_HDIMS
-            }
-            result = {
-                #                             bm0, bn0, bk0, bn1, bk1,
-                ( 64,  64) : [*fp8_pp[(64, 64)],
-                              FmhaFwdTileSize( 64, 128,  64,  64, 128,   64,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 128,  -1),
-                              FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-                (128, 128) : [*fp8_pp[(128, 128)],
-                              FmhaFwdTileSize( 64, 128, 128, 128, 128,  128,  4, 1, 1,  4, 1, 1,  16, 16, 128,  16, 16, 128,  -1),
-                              FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-                #(256, 256) : [FmhaFwdTileSize( 64,  32,  64, 256,  64,  256,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1)],
-            }  # fmt: skip
-            # the other head dims: pingpong's tiles alone (qr_tdm_fp8_sched adds its own)
-            for h in GFX125_QR_TDM_PINGPONG_HDIMS:
-                result.setdefault(h, list(fp8_pp[h]))
-            result = cls._with_qr_tdm_sched_fp8_tiles(result)
-            _validate_gfx125_tile_dispatch_order(
+        if dtype in cls._DT_FP16_BF16 + cls._DT_FP8_FP8BF16 + cls._DT_MXFP8:
+            # qr_tdm_pingpong's tiles (see _gfx125_qr_tdm_pingpong_tiles), in dispatch order,
+            # each guarded but its last, which takes every query; behind them d128's
+            # scheduled tiles (GFX125_QR_TDM_SCHED_SMALL_GRID), whose pipelines dispatch
+            # tries first (api_dispatch_rank)
+            result = _validate_gfx125_tile_dispatch_order(
                 {
-                    h: [t for t in tiles if t.F_pipeline_tag == "qr_tdm_pingpong"]
-                    for h, tiles in result.items()
-                }
-            )
-            return result
-        elif dtype in cls._DT_MXFP8:
-            # qr_tdm_pingpong's MX tiles, then qr_tdm_fp8_sched's
-            result = cls._with_qr_tdm_sched_fp8_tiles(
-                {
-                    h: list(_gfx125_qr_tdm_pingpong_tiles(h, mx=True))
+                    h: list(
+                        _gfx125_qr_tdm_pingpong_tiles(
+                            h,
+                            fp8=dtype in cls._DT_FP8_FP8BF16,
+                            mx=dtype in cls._DT_MXFP8,
+                        )
+                    )
                     for h in GFX125_QR_TDM_PINGPONG_HDIMS
                 }
             )
-            _validate_gfx125_tile_dispatch_order(
-                {
-                    h: [t for t in tiles if t.F_pipeline_tag == "qr_tdm_pingpong"]
-                    for h, tiles in result.items()
-                }
-            )
+            for h, tiles in cls._sched_tiles(dtype).items():
+                result[h] += copy.deepcopy(tiles)
             return result
         else:
             raise ValueError(f"unsupported dtype={dtype}")
@@ -3178,234 +2761,58 @@ class KernelComponentFactoryGfx125(CompatibilityRuleFactory):
         cls, dtype, hdim, hdim_v, receipt, mask_impl
     ) -> List[FmhaFwdPipeline]:
         pipelines = []
-        if dtype in cls._DT_FP16_BF16:
-            qscale = "no"
-            # The gfx125 TDM pipelines (FP16/BF16 inventories hold no generic qr):
-            # qr_tdm_pingpong serves every query of its head dims whose head dims are a
-            # whole number of 8-element vectors (dcheck / dvcheck), but those
-            # _gfx125_qr_tdm_pingpong_range leaves to qr_tdm_sched below, and skip. qr_tdm,
-            # on the tiles behind pingpong's, takes what both leave: skip, head dims off the
-            # 8-element vector (its O store falls back to single elements), and (where
-            # _gfx125_qr_tdm_serves, here d128) the calls qr_tdm_sched refuses. Dispatch
-            # tries the tiles in the order of get_hdim_tile_size_dict and, per tile, the
-            # pipelines in this list's order.
-            if (hdim, hdim_v) in {
-                (32, 32),
-                (64, 64),
-                (96, 96),
-                (128, 128),
-                (160, 160),
-                (192, 128),
-                (256, 256),
-                (512, 512),
-            }:
-                emit_qr_tdm = _gfx125_qr_tdm_serves((hdim, hdim_v))
-                # qr_tdm_pingpong's packed-GQA decode first
-                pipelines += qr_tdm_pingpong_packgqa_pipelines(
-                    (hdim, hdim_v), mask_impl, ("no",)
-                )
-                # D256 and D512 keep single-V/double-K LDS buffers: their
-                # double-buffer arenas leave no room for the bank-conflict
-                # padding their row pitch needs, and at D512 one would not fit
-                # in LDS at all. Progressive K reload stays on for both: the
-                # single-buffer path also stages whole K tiles now.
-                tdm_double_kv = (
-                    "f" if (hdim, hdim_v) in ((256, 256), (512, 512)) else "t"
-                )
-                tdm_prog_k = "t"
-                tdm_masks = list(get_mask_map(mask_impl))
-                if mask_impl == "simplified":
-                    # Avoid carrying general-window mask state through the
-                    # causal main loop. Keep the simplified fallback for windows.
-                    tdm_masks.insert(0, "causal")
-                for (
-                    logits,
-                    mask,
-                    bias,
-                    lse,
-                    sink,
-                    dropout,
-                    vlayout,
-                    skip,
-                ) in itertools.product(
-                    ["f", "t"],
-                    tdm_masks,
-                    BIAS_MAP.keys(),
-                    ["t", "f"],
-                    ["t", "f"],
-                    ["f", "t"],
-                    ["row", "col"],
-                    ["f", "t"],
-                ):
-                    mask_constraint = CppConstraint()
-                    causal_lse = False
-                    if mask_impl == "simplified" and mask == "causal":
-                        if bias != "no" or sink != "f" or dropout != "f":
-                            continue
-                        # with the LSE only qr_tdm_pingpong takes the causal kernel
-                        causal_lse = lse == "t"
-                        # the band mask takes top-left/bottom-right without a window (the
-                        # generic mask_impl routes those in fwd_mask_check_expr)
-                        mask_constraint = CppConstraint(
-                            "a.window_size_left < 0 && a.window_size_right == 0"
-                        )
-                    # qr_tdm: every variant where it serves; elsewhere, on row-major V (as
-                    # the generic qr it replaces), skip and the padded head dims that are no
-                    # whole number of pingpong's 8-element vectors
-                    if not causal_lse and (emit_qr_tdm or vlayout == "row"):
-                        qr_tdm_pads = (
-                            ALL_PAD_VARIANTS
-                            if emit_qr_tdm or skip == "t"
-                            else (("f", "f", "t", "t"), ("t", "t", "t", "t"))
-                        )  # fmt: skip
-                        for pads in qr_tdm_pads:
-                            pipelines.append(FmhaFwdPipeline("qr_tdm", vlayout, *pads, logits, bias, lse, dropout, qscale, mask, skip, "f", sink, F_constraint=mask_constraint, F_use_double_kv_lds_buffer=tdm_double_kv, F_progressive_ds_load_k=tdm_prog_k))  # fmt: skip
-                if (hdim, hdim_v) in GFX125_QR_TDM_PINGPONG_HDIMS:
-                    pipelines += qr_tdm_pingpong_feature_pipelines(
-                        (hdim, hdim_v), mask_impl, (qscale,)
-                    )
-
-            # qr_tdm_sched serves only the head dims qr_tdm_pingpong leaves queries to (see
-            # _gfx125_qr_tdm_pingpong_range); the others would never be dispatched.
-            sched_serves = (hdim, hdim_v) in cls._QR_TDM_SCHED_TILES and (
-                (hdim, hdim_v) not in GFX125_QR_TDM_PINGPONG_HDIMS
-                or (hdim, hdim_v) in GFX125_QR_TDM_PINGPONG_SMALL_GRID_HDIMS
+        # qr_tdm_pingpong alone, at every input width: its packed-GQA decode first, then
+        # every feature (fp8: no scales or per-tensor, per-head or block descales; MX)
+        if (hdim, hdim_v) in GFX125_QR_TDM_PINGPONG_HDIMS:
+            if dtype in cls._DT_FP16_BF16:
+                qscales = ("no",)
+            elif dtype in cls._DT_MXFP8:
+                qscales = ("mx",)
+            else:
+                qscales = GFX125_QR_TDM_PINGPONG_FP8_QSCALES
+            pipelines += qr_tdm_pingpong_packgqa_pipelines(
+                (hdim, hdim_v), mask_impl, qscales
             )
-            if sched_serves:
-                for logits, bias, mask, lse, dropout, sink in itertools.product(
-                    ["f", "t"],
-                    BIAS_MAP.keys(),
-                    get_mask_map(mask_impl).keys(),
-                    ["t", "f"],
-                    ["f", "t"],
-                    ["f", "t"],
-                ):
-                    # The queries qr_tdm_pingpong serves are left to it.
-                    sched_seqlen_q = "a.max_seqlen_q >= 128"
-                    leave_pp = _gfx125_qr_tdm_pingpong_leaves((hdim, hdim_v))
-                    if leave_pp:
-                        sched_seqlen_q += f" && {leave_pp}"
-                    sched_constraint = CppConstraint(
-                        f"a.hdim_q == {hdim} && "
-                        f"a.hdim_v == {hdim_v} && "
-                        f"{sched_seqlen_q} && "
-                        f"t.hdim_q == {hdim} && t.hdim_v == {hdim_v}"
-                    )
-                    if sink == "f":
-                        # without the virtual sink, IsSupportedArgument refuses a sink_ptr;
-                        # those calls fall back to qr_tdm
-                        sched_constraint &= CppConstraint("a.sink_ptr == nullptr")
-                    if hdim == 128:
-                        # O layouts the async O store (kUseAsyncLdsOStore) cannot address use qr_tdm.
-                        sched_constraint &= CppConstraint(
-                            "reinterpret_cast<uintptr_t>(a.o_ptr) % 16 == 0 && a.stride_o >= 0 && "
-                            "a.stride_o % 8 == 0 && a.nhead_stride_o % 8 == 0 && "
-                            "(t.is_group_mode || a.batch_stride_o % 8 == 0) && "
-                            "127 * static_cast<uint64_t>(a.stride_o) * 2 + 256 <= (uint64_t{1} << 32)"
-                        )
-                    # the padded specialization only (check_qr_tdm_sched_codegen_compatibility)
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink, F_constraint=sched_constraint))  # fmt: skip
-
+            pipelines += qr_tdm_pingpong_feature_pipelines(
+                (hdim, hdim_v), mask_impl, qscales
+            )
+        if (hdim, hdim_v) != (128, 128):
+            return pipelines
+        if dtype in cls._DT_FP16_BF16:
+            for logits, bias, mask, lse, dropout, sink in itertools.product(
+                ["f", "t"],
+                BIAS_MAP.keys(),
+                get_mask_map(mask_impl).keys(),
+                ["t", "f"],
+                ["f", "t"],
+                ["f", "t"],
+            ):
+                constraint = CppConstraint(
+                    f"a.hdim_q == 128 && a.hdim_v == 128 && {GFX125_QR_TDM_SCHED_SMALL_GRID}"
+                    " && t.hdim_q == 128 && t.hdim_v == 128"
+                )
+                if sink == "f":
+                    # without the virtual sink IsSupportedArgument refuses a sink_ptr
+                    constraint &= CppConstraint("a.sink_ptr == nullptr")
+                # O layouts its async O store (kUseAsyncLdsOStore) addresses
+                constraint &= CppConstraint(
+                    "reinterpret_cast<uintptr_t>(a.o_ptr) % 16 == 0 && a.stride_o >= 0 && "
+                    "a.stride_o % 8 == 0 && a.nhead_stride_o % 8 == 0 && "
+                    "(t.is_group_mode || a.batch_stride_o % 8 == 0) && "
+                    "127 * static_cast<uint64_t>(a.stride_o) * 2 + 256 <= (uint64_t{1} << 32)"
+                )
+                pipelines.append(FmhaFwdPipeline("qr_tdm_sched", "row", "t", "t", "t", "t", logits, bias, lse, dropout, "no", mask, "f", "f", sink, F_constraint=constraint))  # fmt: skip
         elif dtype in cls._DT_FP8_FP8BF16:
-            # fp8 qr_tdm_pingpong: the fp16/bf16 features at no scales or per-tensor, per-head
-            # or block descales, on the shared tiles
-            if (hdim, hdim_v) in GFX125_QR_TDM_PINGPONG_HDIMS:
-                # packed-GQA decode first (merged rows take their heads' q descales)
-                pipelines += qr_tdm_pingpong_packgqa_pipelines(
-                    (hdim, hdim_v), mask_impl, GFX125_QR_TDM_PINGPONG_FP8_QSCALES
-                )
-                pipelines += qr_tdm_pingpong_feature_pipelines(
-                    (hdim, hdim_v),
-                    mask_impl,
-                    GFX125_QR_TDM_PINGPONG_FP8_QSCALES,
-                )
-            # no need dropout kernels. Alibi is held back: its near-one-hot P leaves a
-            # slope-dependent quantization bias the OUT gain check reads as a systematic error.
-            if (hdim, hdim_v) in ((128, 128), (64, 64)):
-                for logits, qscale, mask, bias, lse, sink in itertools.product(
-                    ["f"],
-                    ["no", "pertensor", "perhead", "blockscale"],
-                    get_mask_map(mask_impl).keys(),
-                    ["no", "bias"],
-                    ["f", "t"],
-                    ["f", "t"],
-                ):
-                    # the queries the fp8 qr_tdm_pingpong takes are left to it
-                    leave_pp = _gfx125_qr_tdm_pingpong_leave_constraint(
-                        (hdim, hdim_v), fp8=True, qscale=qscale
-                    )
-                    for pads in ALL_PAD_VARIANTS:
-                        pipelines.append(FmhaFwdPipeline("qr_tdm", "row", *pads, logits, bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=leave_pp))  # fmt: skip
-
-            if (
-                dtype in cls._DT_QR_TDM_SCHED_FP8
-                and (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_TILES
+            # no dropout or ALiBi; an elementwise bias runs one workgroup a CU
+            for mask, lse, qscale, sink, bias in itertools.product(
+                get_mask_map(mask_impl).keys(),
+                ["f", "t"],
+                GFX125_QR_TDM_PINGPONG_FP8_QSCALES,
+                ["f", "t"],
+                ["no", "bias"],
             ):
-                # Packed GQA decode first: the one-wavefront tile, then the full tile.
-                for mask, lse, qscale, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(),
-                    ["f", "t"],
-                    ["no", "pertensor", "perhead", "blockscale"],
-                    ["f", "t"],
-                ):
-                    if cls._qr_tdm_fp8_sched_left_nothing(
-                        hdim, hdim_v, qscale, packed=True
-                    ):
-                        continue
-                    sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa="t"))  # fmt: skip
-                # No alibi/dropout; bias runs one workgroup per CU. Dispatched ahead of qr_tdm.
-                for mask, lse, qscale, sink, bias in itertools.product(
-                    get_mask_map(mask_impl).keys(),
-                    ["f", "t"],
-                    ["no", "pertensor", "perhead", "blockscale"],
-                    ["f", "t"],
-                    ["no", "bias"],
-                ):
-                    if cls._qr_tdm_fp8_sched_left_nothing(hdim, hdim_v, qscale):
-                        continue
-                    sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, qscale, sink, bias)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=sched_fp8_constraint))  # fmt: skip
-
-            for logits, qscale, mask, bias in itertools.product(
-                ["f"], ["no", "pertensor"], get_mask_map(mask_impl).keys(), ["no"]
-            ):
-                # its 64-row tile comes ahead of qr_tdm_pingpong's 128-row ones: the queries
-                # pingpong takes are left to it
-                leave_pp = _gfx125_qr_tdm_pingpong_leave_constraint(
-                    (hdim, hdim_v), fp8=True, qscale=qscale
-                )
-                pipelines.append(FmhaFwdPipeline("qr", "row", "f", "f", "f", "f", logits, bias, "f", "f", qscale, mask, "f", "f", "f", F_constraint=leave_pp))  # fmt: skip
-                pipelines.append(FmhaFwdPipeline("qr", "row", "t", "t", "t", "t", logits, bias, "f", "f", qscale, mask, "f", "f", "f", F_constraint=leave_pp))  # fmt: skip
-        elif dtype in cls._DT_MXFP8:
-            # qr_tdm_pingpong: the fp16/bf16 features at MX scales, packed-GQA decode first
-            if (hdim, hdim_v) in GFX125_QR_TDM_PINGPONG_HDIMS:
-                pipelines += qr_tdm_pingpong_packgqa_pipelines(
-                    (hdim, hdim_v), mask_impl, ("mx",)
-                )
-                pipelines += qr_tdm_pingpong_feature_pipelines(
-                    (hdim, hdim_v), mask_impl, ("mx",)
-                )
-            # The scheduled FP8 pipeline: no bias/dropout; packed GQA, and the queries
-            # qr_tdm_pingpong leaves.
-            if (hdim, hdim_v) in cls._QR_TDM_SCHED_FP8_TILES:
-                # Packed GQA decode first, as for FP8.
-                for mask, lse, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["f", "t"], ["f", "t"]
-                ):
-                    if cls._qr_tdm_fp8_sched_left_nothing(
-                        hdim, hdim_v, "mx", packed=True
-                    ):
-                        continue
-                    sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, "mx", sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=sched_fp8_constraint, F_packgqa="t"))  # fmt: skip
-                for mask, lse, sink in itertools.product(
-                    get_mask_map(mask_impl).keys(), ["f", "t"], ["f", "t"]
-                ):
-                    if cls._qr_tdm_fp8_sched_left_nothing(hdim, hdim_v, "mx"):
-                        continue
-                    sched_fp8_constraint = cls.qr_tdm_fp8_sched_constraint(hdim, hdim_v, "mx", sink)  # fmt: skip
-                    pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", "no", lse, "f", "mx", mask, "f", "f", sink, F_constraint=sched_fp8_constraint))  # fmt: skip
+                constraint = cls.qr_tdm_fp8_sched_constraint(qscale, sink)
+                pipelines.append(FmhaFwdPipeline("qr_tdm_fp8_sched", "row", "t", "t", "f", "f", "f", bias, lse, "f", qscale, mask, "f", "f", sink, F_constraint=constraint))  # fmt: skip
         return pipelines
 
 

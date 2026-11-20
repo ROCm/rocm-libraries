@@ -16,7 +16,7 @@ namespace ck_tile {
 //   kind                      scores (QK)                       O (PV)
 //   none                      -                                 -
 //   per-tensor / per-head     q*k in scale_s (kernel)           v on O (Args::o)
-//   block                     q per row, k per column           v per PV slice, o_acc rescaled
+//   block                     q per row, k per column           v per 32 keys, o_acc rescaled
 //   merged rows, per-head     q per row (its head's)            v on O
 //   MX                        Q/K E8M0 WMMA scale operands      V's E8M0 WMMA scale operands
 //
@@ -24,7 +24,7 @@ namespace ck_tile {
 // query's: tile row r is query r % rows_per_head of head r / rows_per_head (merged query
 // heads, packed GQA; else one head), and rows past `rows` take the last one's.
 //
-// The K/V scales of a trip (block: a descale per key, and per PV slice and key warp; MX: four
+// The K/V scales of a trip (block: a descale per key, and per 32 keys; MX: four
 // E8M0 bytes per key and QK slice, and per V column and 128 keys) are staged in LDS, three
 // buffers in turn:
 // the block copies trip i + 2's with async global->LDS loads in trip i, once trip i - 1 has
@@ -70,10 +70,12 @@ struct BlockFmhaQuantScales
     static_assert(kK1 % kKeyWarps == 0 && (!kMx || kVChunks % kKeyWarps == 0));
     static_assert(!kMx || kPvK == 128 || (kKeyWarps == 1 && (kN0 == 64 || kN0 % 128 == 0)));
     static constexpr index_t kVChunksPerWarp = kVChunks / kKeyWarps;
-    // block v descales: one per PV slice and warp on its keys (with the key split each warp
-    // takes 1 / kKeyWarps of the slice, so a block of keys spans whole such ranges)
-    static constexpr index_t kVBlockKeys   = kK1 / kKeyWarps;
+    // block v descales: one per 32 keys (k/v blocks of whole 32-key chunks), kVBlockChunks in a
+    // warp's part of a PV slice (with the key split each warp takes 1 / kKeyWarps of it)
+    static constexpr index_t kVBlockKeys   = 32;
     static constexpr index_t kVBlockSlots  = kN0 / kVBlockKeys;
+    static constexpr index_t kVBlockChunks = kK1 / kKeyWarps / kVBlockKeys;
+    static_assert(!kBlock || (kK1 / kKeyWarps) % kVBlockKeys == 0);
     static constexpr index_t kQkScaleBytes = kK0 / 32;
     static constexpr int32_t kE8m0One      = 0x7f7f7f7f;
 
@@ -411,7 +413,8 @@ struct BlockFmhaQuantScales
 
     // gemm_1 on PV slice i_k1 of trip `trip`. With block scales o_acc is held in units of the
     // current v block descale (O takes it at the end, see O()); the slice's block takes it
-    // over, and a zero descale's slice adds nothing (its P stays in l).
+    // over, and a zero descale's keys add nothing (their P stays in l). A slice whose 32-key
+    // chunks lie in blocks of different descales takes a gemm a chunk, P zeroed past it.
     template <typename Gemm, typename OAcc, typename PSlice, typename VSlice, typename IK1>
     CK_TILE_DEVICE void Pv(const Gemm& gemm,
                            OAcc& o_acc,
@@ -422,17 +425,28 @@ struct BlockFmhaQuantScales
     {
         if constexpr(kBlock)
         {
-            const index_t slot =
-                IK1::value * kKeyWarps + (kKeyWarps > 1 ? index_t(get_warp_id()) % kKeyWarps : 0);
-            const float v_block = reinterpret_cast<const float*>(Trip(trip) + kTripKDwords)[slot];
-            if(v_block == 0.f)
-                return;
-            if(v_block != v_block_)
-            {
-                const float ratio = v_block_ / v_block;
-                tile_elementwise_inout([ratio](auto& x) { x *= ratio; }, o_acc);
-                v_block_ = v_block;
-            }
+            const index_t warp_k = kKeyWarps > 1 ? index_t(get_warp_id()) % kKeyWarps : 0;
+            const float* const v = reinterpret_cast<const float*>(Trip(trip) + kTripKDwords) +
+                                   (IK1::value * kKeyWarps + warp_k) * kVBlockChunks;
+            const auto block_gemm = [&](float v_block, const auto& p) {
+                if(v_block == 0.f)
+                    return;
+                if(v_block != v_block_)
+                {
+                    const float ratio = v_block_ / v_block;
+                    tile_elementwise_inout([ratio](auto& x) { x *= ratio; }, o_acc);
+                    v_block_ = v_block;
+                }
+                gemm(o_acc, p, v_slice);
+            };
+            bool uniform = true;
+            static_for<1, kVBlockChunks, 1>{}([&](auto c) { uniform &= v[c] == v[0]; });
+            if(uniform)
+                block_gemm(v[0], p_slice);
+            else
+                static_for<0, kVBlockChunks, 1>{}(
+                    [&](auto c) { block_gemm(v[c], KeepChunk(p_slice, c)); });
+            return;
         }
         if constexpr(kMx)
         {
@@ -447,6 +461,23 @@ struct BlockFmhaQuantScales
         }
         else
             gemm(o_acc, p_slice, v_slice);
+    }
+
+    // P with the keys of the warp's 32-key chunk c alone
+    template <typename PSlice, typename IC>
+    CK_TILE_DEVICE static PSlice KeepChunk(PSlice p, IC)
+    {
+        constexpr auto spans = PSlice::get_distributed_spans();
+        sweep_tile_span(spans[number<0>{}], [&](auto idx0) {
+            sweep_tile_span(spans[number<1>{}], [&](auto idx1) {
+                const index_t key = get_x_indices_from_distributed_indices(
+                                        PSlice::get_tile_distribution(), make_tuple(idx0, idx1))
+                                        .at(number<1>{});
+                if((key / kVBlockKeys) % kVBlockChunks != IC::value)
+                    p(make_tuple(idx0, idx1)) = type_convert<typename PSlice::DataType>(0.f);
+            });
+        });
+        return p;
     }
 
     // ---- end ------------------------------------------------------------------------------
