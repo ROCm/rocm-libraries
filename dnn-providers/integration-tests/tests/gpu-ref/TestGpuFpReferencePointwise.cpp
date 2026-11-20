@@ -1167,7 +1167,7 @@ TEST(TestGpuPointwiseBroadcast, TernaryBroadcast5D)
 
 // --- Test fp16 and bf16 compute types ---
 
-TEST(TestGpuPointwiseOwnTypeCompute, BinaryFp16)
+TEST(TestGpuPointwiseOwnTypeComputeFp16, Binary)
 {
     SKIP_IF_NO_DEVICES();
 
@@ -1180,7 +1180,7 @@ TEST(TestGpuPointwiseOwnTypeCompute, BinaryFp16)
     }
 }
 
-TEST(TestGpuPointwiseOwnTypeCompute, BinaryBfp16)
+TEST(TestGpuPointwiseOwnTypeComputeBfp16, Binary)
 {
     SKIP_IF_NO_DEVICES();
 
