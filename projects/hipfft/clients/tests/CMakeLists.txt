@@ -258,7 +258,7 @@ foreach( target ${TEST_TARGETS} )
     # specified a build time
     # TODO: amdgcnspirv is not compatible with ASAN.
     get_target_property(test_opts ${target} COMPILE_OPTIONS)
-    if( NOT WIN32 AND NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
+    if( NOT test_opts MATCHES "-fsanitize=address" AND NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize=address" )
       target_compile_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
       target_link_options( ${target} PRIVATE --offload-arch=amdgcnspirv )
     endif()

@@ -6,6 +6,7 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdint>
 #include <filesystem>
@@ -473,6 +474,7 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
           "tree_data",
           "table",
           "linear_data",
+          "mlp_data",
           "onnx",
           "custom_library",
           "trained_against",
@@ -491,16 +493,20 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
     result.name = text(root, "name", where);
     result.adapterType = text(root, "adapter", where);
     size_t bodies = 0;
-    for(const auto* adapter :
-        {"static_order", "native", "tree_data", "table", "linear_data", "onnx", "custom_library"})
+    static constexpr std::array<std::string_view, 8> ADAPTERS = {"static_order",
+                                                                 "native",
+                                                                 "tree_data",
+                                                                 "table",
+                                                                 "linear_data",
+                                                                 "mlp_data",
+                                                                 "onnx",
+                                                                 "custom_library"};
+    for(const auto adapter : ADAPTERS)
     {
-        bodies += root.contains(adapter) ? size_t{1} : size_t{0};
+        bodies += root.contains(std::string(adapter)) ? size_t{1} : size_t{0};
     }
     if(bodies != 1 || !root.contains(result.adapterType)
-       || (result.adapterType != "static_order" && result.adapterType != "native"
-           && result.adapterType != "tree_data" && result.adapterType != "table"
-           && result.adapterType != "linear_data" && result.adapterType != "onnx"
-           && result.adapterType != "custom_library"))
+       || std::find(ADAPTERS.begin(), ADAPTERS.end(), result.adapterType) == ADAPTERS.end())
     {
         fail("UHD requires exactly one body matching its adapter in " + where);
     }
@@ -626,6 +632,14 @@ inline UhdConfig parseUhdConfig(const nlohmann::json& root, const std::filesyste
         fail("linear_data requires objective min and no score.metric, calibration or transform "
              "in "
              + where);
+    }
+    // An mlp_data network's output is the log of the metric its artifact names (checked
+    // against score.metric at load), so the score must declare both. `calibrated` is left to
+    // the L1 binding, like any other adapter.
+    if(result.adapterType == "mlp_data"
+       && (result.scoreMetric.empty() || result.scoreTransform != "log"))
+    {
+        fail("mlp_data requires score.metric and score.transform log in " + where);
     }
     if(root.contains("trained_against"))
     {

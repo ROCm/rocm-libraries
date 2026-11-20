@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -363,12 +363,15 @@ namespace rocsparse
                - dw[batch_stride * (m - 3) + gid] * x[batch_stride * (m - 1) + gid])
               / d[batch_stride * (m - 3) + gid];
 
-        x[batch_stride * (m - 4) + gid]
-            = (x[batch_stride * (m - 4) + gid]
-               - du[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 3) + gid]
-               - dw[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 2) + gid]
-               - r3[batch_count * (m - 4) + gid] * x[batch_stride * (m - 1) + gid])
-              / d[batch_stride * (m - 4) + gid];
+        if(m >= 4)
+        {
+            x[batch_stride * (m - 4) + gid]
+                = (x[batch_stride * (m - 4) + gid]
+                   - du[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 3) + gid]
+                   - dw[batch_stride * (m - 4) + gid] * x[batch_stride * (m - 2) + gid]
+                   - r3[batch_count * (m - 4) + gid] * x[batch_stride * (m - 1) + gid])
+                  / d[batch_stride * (m - 4) + gid];
+        }
 
         for(rocsparse_int i = m - 5; i >= 0; i--)
         {

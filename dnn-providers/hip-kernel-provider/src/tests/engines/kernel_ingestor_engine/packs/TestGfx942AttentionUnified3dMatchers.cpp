@@ -365,6 +365,8 @@ TEST(TestGfx942AttentionUnified3dMatchers, DeclinesEveryUnsupportedOptionalFeatu
         {"max_seq_len_kv", [](Builder& b) { b.add_max_seq_len_kv(512); }},
         {"ragged seq_len_q", [](Builder& b) { b.add_seq_len_q_tensor_uid(EXTRA_UID); }},
         {"ragged seq_len_kv", [](Builder& b) { b.add_seq_len_kv_tensor_uid(EXTRA_UID); }},
+        {"cumulative cu_seq_len_q", [](Builder& b) { b.add_cu_seq_len_q_tensor_uid(EXTRA_UID); }},
+        {"cumulative cu_seq_len_kv", [](Builder& b) { b.add_cu_seq_len_kv_tensor_uid(EXTRA_UID); }},
         {"block mask", [](Builder& b) { b.add_block_mask_tensor_uid(EXTRA_UID); }},
         {"fp8 descale q", [](Builder& b) { b.add_descale_q_tensor_uid(EXTRA_UID); }},
         {"fp8 descale k", [](Builder& b) { b.add_descale_k_tensor_uid(EXTRA_UID); }},
@@ -591,6 +593,30 @@ TEST(TestGfx942AttentionUnified3dMatchers, WorkspaceIsTheGeometryHeadersLayoutFo
                   gfx942AttentionUnified3dWorkspace(3, spec.numQueryHeads, segments, spec.headSize)
                       .totalBytes)
             << segments;
+    }
+}
+
+TEST(TestGfx942AttentionUnified3dMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = base();
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = base();
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
     }
 }
 

@@ -259,7 +259,6 @@ namespace rocsparse
     {
         switch(T_datatype)
         {
-            // LCOV_EXCL_START
         case rocsparse_datatype_f16_r:
             return launch<I, _Float16>;
         case rocsparse_datatype_i32_r:
@@ -272,7 +271,6 @@ namespace rocsparse
             return launch<I, uint8_t>;
         case rocsparse_datatype_bf16_r:
             return launch<I, rocsparse_bfloat16>;
-            // LCOV_EXCL_STOP
 
         case rocsparse_datatype_f32_r:
             return launch<I, float>;

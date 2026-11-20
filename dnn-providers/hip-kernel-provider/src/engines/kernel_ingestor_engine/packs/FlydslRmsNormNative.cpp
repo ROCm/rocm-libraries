@@ -262,6 +262,12 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
     {
         return std::nullopt;
     }
+    // Gamma is one buffer view of its own element type, so its bytes stay within the same
+    // 32-bit offsets.
+    if(columns > MAX_OPERAND_BYTES / elementBytes(scale->data_type()))
+    {
+        return std::nullopt;
+    }
 
     // Epsilon is one scalar: a tensor of more than one element would be read as its first.
     const auto* epsilonTensor = findTensor(context, attributes.epsilon_tensor_uid());
@@ -292,6 +298,11 @@ std::optional<BoundTokens> flydslRmsNormGraphMatches(const MatchContext& context
         const auto* invRms = findTensor(context, *attributes.inv_rms_tensor_uid());
         if(invRms == nullptr || !isDeviceOperand(*invRms) || !hasUsableShape(*invRms, 2)
            || !isPerRowStatistic(*invRms, *x, *split))
+        {
+            return std::nullopt;
+        }
+        // inv_rms is its own buffer view of one f32 per row.
+        if(rows > MAX_OPERAND_BYTES / elementBytes(invRms->data_type()))
         {
             return std::nullopt;
         }

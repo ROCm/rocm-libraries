@@ -279,6 +279,9 @@ class _SetupNewTilePapTdmWriter:
     def calculateLoopNumIter(self, kernel, tpa, tpb, loop_idx):
         return self._module("calculateLoopNumIter")
 
+    def openA2AShardLoop(self, kernel, tpa, tpb):
+        return self._module("openA2AShardLoop")
+
     def localReadInitPointers(self, kernel, tpa, tpb):
         return self._module("localReadInitPointers_%s" % tpb["tensorChar"])
 
@@ -1611,9 +1614,9 @@ def _emit_asm(gfx1250_iim, assembler, **overrides):
     from tensilelite.Common.Types import DebugConfig
     from tensilelite.KernelWriterAssembly import KernelWriterAssembly
     from tensilelite.SolutionStructs.Naming import getKernelFileBase
-    from tensilelite.TensileCreateLibrary.Run import (generateKernelObjectsFromSolutions,
+    from tensilelite.create_library.run import (generateKernelObjectsFromSolutions,
                                                   processKernelSource)
-    from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+    from rocisa_test_state import preserve_rocisa_kernel_state
 
     sol = Solution(_make_params(gfx1250_iim, **overrides), False, True, False,
                    assembler, gfx1250_iim)

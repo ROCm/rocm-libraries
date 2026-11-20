@@ -145,7 +145,7 @@ def test_ragged_cross_length_top_left_accepted(sq, sk, persistent):
         ("sliding_window", {"sliding_window": 64}),
         ("varlen", {"varlen": True}),
         (
-            "paged=True",
+            "paged KV",
             {
                 # Otherwise-valid paged dense: paging itself requires an SWA window.
                 "paged": True,

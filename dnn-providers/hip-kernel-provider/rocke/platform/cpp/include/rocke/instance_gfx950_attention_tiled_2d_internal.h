@@ -24,7 +24,7 @@
  *     acc index:       _acc_idx (1386), _acc_get (2505), _acc_final_get (3605)
  *     fast paged-KV:   _fast_paged_kv_blocks (1550), _fast_paged_kv_voff (1573)
  *     K/V loaders:     _issue_k_load_runtime (1631), _issue_v_load_runtime (1691),
- *                      _issue_k (2184), _issue_v (2204), _read_k8_mfma_operand (2229)
+ *                      _issue_k (2184), _issue_v (2204), _read_k8_mfma_operand
  *     fp8 K/V cache:   _issue_kv_fp8_async_load (1798), _dequant_fp8_lds_to_bf16 (1870),
  *                      _issue_fp8_dequant_loads (1928), _issue_k_fp8_mfma_async (2050),
  *                      _issue_v_fp8_mfma_async (2106), _issue_v_fp8_mfma_stripe (2143)
@@ -462,7 +462,7 @@ void rocke_gfx950_attn2d_issue_k(rocke_gfx950_attn2d_build_ctx_t* ctx,
 void rocke_gfx950_attn2d_issue_v(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                  rocke_value_t* tile_idx,
                                  rocke_value_t* buf_idx);
-/* _read_k8_mfma_operand: per-lane K8 MFMA B operand (line 2229). */
+/* _read_k8_mfma_operand: per-lane K8 MFMA B operand; no KQ pad or swizzle (Python-only). */
 rocke_value_t* rocke_gfx950_attn2d_read_k8_mfma_operand(rocke_gfx950_attn2d_build_ctx_t* ctx,
                                                         rocke_value_t* buf_idx,
                                                         rocke_value_t* k_row,

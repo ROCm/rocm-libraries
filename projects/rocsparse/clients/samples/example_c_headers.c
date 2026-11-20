@@ -27,7 +27,7 @@
 // This file is to make sure including rocsparse C headers
 // are C-compilable.
 //
-int main()
+int main(void)
 {
     return 0;
 }

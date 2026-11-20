@@ -710,6 +710,10 @@ public:
                 }
 
                 floating_data_t<T> nrm_residual = static_cast<floating_data_t<T>>(0);
+
+                //
+                // CALCULATE CORRECTION.
+                //
                 if(compute_nrm_residual)
                 {
                     //
@@ -717,43 +721,67 @@ public:
                     //
                     RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                         p_nrm_residual, 0, sizeof(floating_data_t<T>), handle_->stream));
+
+                    rocsparse::kernel_correction_dispatch<BLOCKSIZE, T, I, J>(
+                        m_,
+                        mean,
+                        handle_->wavefront_size,
+                        handle_->stream,
+                        m_,
+                        nnz_,
+                        ptr_begin_,
+                        ptr_end_,
+                        ind_,
+                        val_,
+                        base_, //
+                        lptr_begin_,
+                        lptr_end_,
+                        lind_,
+                        lval_,
+                        lbase_, //
+                        uptr_begin_,
+                        uptr_end_,
+                        uind_,
+                        uval_,
+                        ubase_, //
+                        dval_,
+                        p_nrm_residual,
+                        p_nrm_matrix);
+
+                    if(convergence_history)
+                    {
+                        //
+                        // Log convergence of residual.
+                        //
+                        RETURN_IF_HIP_ERROR(rocsparse::stay_on_device(
+                            &log_mxresidual[iter], p_nrm_residual, stream));
+                    }
                 }
-
-                //
-                // CALCULATE CORRECTION.
-                //
-
-                rocsparse::kernel_correction_dispatch<BLOCKSIZE, T, I, J>(m_,
-                                                                          mean,
-                                                                          handle_->wavefront_size,
-                                                                          handle_->stream,
-                                                                          m_,
-                                                                          nnz_,
-                                                                          ptr_begin_,
-                                                                          ptr_end_,
-                                                                          ind_,
-                                                                          val_,
-                                                                          base_, //
-                                                                          lptr_begin_,
-                                                                          lptr_end_,
-                                                                          lind_,
-                                                                          lval_,
-                                                                          lbase_, //
-                                                                          uptr_begin_,
-                                                                          uptr_end_,
-                                                                          uind_,
-                                                                          uval_,
-                                                                          ubase_, //
-                                                                          dval_,
-                                                                          p_nrm_residual,
-                                                                          p_nrm_matrix);
-                if(convergence_history)
+                else
                 {
-                    //
-                    // Log convergence of residual.
-                    //
-                    RETURN_IF_HIP_ERROR(
-                        rocsparse::stay_on_device(&log_mxresidual[iter], p_nrm_residual, stream));
+                    rocsparse::kernel_correction_no_norm_dispatch<BLOCKSIZE, T, I, J>(
+                        m_,
+                        mean,
+                        handle_->wavefront_size,
+                        handle_->stream,
+                        m_,
+                        nnz_,
+                        ptr_begin_,
+                        ptr_end_,
+                        ind_,
+                        val_,
+                        base_, //
+                        lptr_begin_,
+                        lptr_end_,
+                        lind_,
+                        lval_,
+                        lbase_, //
+                        uptr_begin_,
+                        uptr_end_,
+                        uind_,
+                        uval_,
+                        ubase_, //
+                        dval_);
                 }
 
                 if(stopping_criteria)

@@ -30,7 +30,7 @@ private:
                                            const std::vector<int64_t>& ioDims);
 
     static void checkActivationModeSupported(
-        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr);
+        const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwiseAttr, bool isBwd);
 
 public:
     RMSnormValidator(

@@ -122,6 +122,7 @@ class TestPredicateOrdering:
             Predicate("FreeSizeMatching"),
             Predicate("EqualityMatching"),
             Predicate("GridBasedMatching"),
+            Predicate("MeshBasedMatching"),
             Predicate("PredictionMatching"),
             Predicate("RangeMatching"),
         ]
@@ -129,6 +130,7 @@ class TestPredicateOrdering:
             "EqualityMatching",
             "RangeMatching",
             "PredictionMatching",
+            "MeshBasedMatching",
             "GridBasedMatching",
             "FreeSizeMatching",
             "TruePred",

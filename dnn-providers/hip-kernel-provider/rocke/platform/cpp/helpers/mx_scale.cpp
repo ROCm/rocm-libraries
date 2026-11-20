@@ -1,12 +1,12 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 /*
- * helper_rocke.helpers.mx_scale.c -- C99 port of
+ * mx_scale.cpp -- the C++ engine port of
  * rocke.helpers.mx_scale.decode_mx_scale_e8m0,
- * rocke.helpers.mx_scale.exact_mx_scale_split and
- * rocke.helpers.mx_scale.fma_with_mx_scale_pair.
+ * rocke.helpers.mx_scale.largest_safe_mx_scale_code and
+ * rocke.helpers.mx_scale.add_mx_scaled_dot.
  *
- * Faithful translation of (decoder shown; the pair helper follows the same
+ * Faithful translation of (decoder shown; add_mx_scaled_dot follows the same
  * rules and is quoted step by step below):
  *
  *     def decode_mx_scale_e8m0(b: IRBuilder, e8m0: Value) -> Value:
@@ -25,124 +25,51 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <vector>
+
 #include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live */
 
 #define E8M0_BIAS 127
 #define E8M0_NAN_CODE 255
-/* ea + eb for two finite E8M0 codes (0..254) spans -254..254. */
-#define SMALLEST_EXPONENT_SUM (-2 * E8M0_BIAS)
-#define LARGEST_EXPONENT_SUM (2 * E8M0_BIAS)
-/* The f32 powers of two: 2^-149 (the smallest subnormal) .. 2^127. */
-#define F32_SMALLEST_EXPONENT (-149)
-#define F32_LARGEST_EXPONENT 127
-#define F32_SIGNIFICAND_BITS 24
+#define E8M0_LARGEST_FINITE_CODE 254
+/* The f32 overflow threshold is 2^128 (less half an ulp); a sum bounded by
+ * 2^127 stays a full binade below it. */
+#define F32_SAFE_SUM_EXPONENT 127
 
 /* Python FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ. */
-const rocke_mx_element_format_t ROCKE_FP8_E4M3_OCP = {"OCP E4M3", -9, 448.0};
-const rocke_mx_element_format_t ROCKE_BF8_E5M2_OCP = {"OCP E5M2", -16, 57344.0};
-const rocke_mx_element_format_t ROCKE_FP8_E4M3_FNUZ = {"E4M3 FNUZ", -10, 240.0};
-const rocke_mx_element_format_t ROCKE_BF8_E5M2_FNUZ = {"E5M2 FNUZ", -17, 57344.0};
+const rocke_mx_element_format_t ROCKE_FP8_E4M3_OCP = {"OCP E4M3", 448.0};
+const rocke_mx_element_format_t ROCKE_BF8_E5M2_OCP = {"OCP E5M2", 57344.0};
+const rocke_mx_element_format_t ROCKE_FP8_E4M3_FNUZ = {"E4M3 FNUZ", 240.0};
+const rocke_mx_element_format_t ROCKE_BF8_E5M2_FNUZ = {"E5M2 FNUZ", 57344.0};
 
-/* Python _f32_top_exponent(magnitude): e with 2^e <= y < 2^(e + 1), for y the
- * smallest f32 that is at least `magnitude` (a positive double holding its
- * exact value). */
-static int f32_top_exponent(double magnitude)
+rocke_status_t rocke_largest_safe_mx_scale_code(const rocke_mx_element_format_t* a_format,
+                                                const rocke_mx_element_format_t* b_format,
+                                                int products,
+                                                int* out,
+                                                char* err,
+                                                size_t err_cap)
 {
-    int exponent;
+    double bound;
     int top;
+    int code;
 
-    (void)frexp(magnitude, &exponent); /* magnitude = fraction * 2^exponent */
-    top = exponent - 1;
-    /* Above the largest 24-bit significand at 2^top, an f32 rounds up to
-     * 2^(top + 1). */
-    if(magnitude > (2.0 - ldexp(1.0, 1 - F32_SIGNIFICAND_BITS)) * ldexp(1.0, top))
+    if(a_format == NULL || b_format == NULL || out == NULL || products <= 0)
     {
-        top += 1;
+        if(err != NULL && err_cap > 0)
+        {
+            snprintf(err,
+                     err_cap,
+                     "largest_safe_mx_scale_code: products must be positive, got %d",
+                     products);
+        }
+        return ROCKE_ERR_VALUE;
     }
-    return top;
-}
-
-static rocke_status_t split_refusal(char* err, size_t err_cap, const char* msg)
-{
-    if(err != NULL && err_cap > 0)
-    {
-        snprintf(err, err_cap, "%s", msg);
-    }
-    return ROCKE_ERR_VALUE;
-}
-
-rocke_status_t rocke_exact_mx_scale_split(const rocke_mx_element_format_t* a_format,
-                                          const rocke_mx_element_format_t* b_format,
-                                          int group_size,
-                                          rocke_mx_scale_split_t* out,
-                                          char* err,
-                                          size_t err_cap)
-{
-    char pair[192];
-    char msg[512];
-    int low;
-    int top;
-    int pre_min;
-    int exponent_cap;
-
-    if(a_format == NULL || b_format == NULL || out == NULL)
-    {
-        return split_refusal(err, err_cap, "exact_mx_scale_split: NULL argument");
-    }
-    low = a_format->smallest_exponent + b_format->smallest_exponent;
-    top = f32_top_exponent((double)group_size * a_format->largest_value * b_format->largest_value);
-    snprintf(pair,
-             sizeof(pair),
-             "%d products of %s and %s values",
-             group_size,
-             a_format->name,
-             b_format->name);
-    if(top > F32_LARGEST_EXPONENT)
-    {
-        snprintf(msg,
-                 sizeof(msg),
-                 "exact_mx_scale_split: the dot product of %s can reach 2^%d, "
-                 "beyond the f32 range",
-                 pair,
-                 top);
-        return split_refusal(err, err_cap, msg);
-    }
-    pre_min = F32_SMALLEST_EXPONENT - low;
-    if(SMALLEST_EXPONENT_SUM - F32_SMALLEST_EXPONENT < pre_min)
-    {
-        snprintf(msg,
-                 sizeof(msg),
-                 "exact_mx_scale_split: the dot product of %s can be as small as "
-                 "2^%d; at the smallest scales (ea + eb = %d) it needs a factor of "
-                 "2^%d before the fma, which would round it",
-                 pair,
-                 low,
-                 SMALLEST_EXPONENT_SUM,
-                 SMALLEST_EXPONENT_SUM - F32_SMALLEST_EXPONENT);
-        return split_refusal(err, err_cap, msg);
-    }
-    exponent_cap = 2 * F32_LARGEST_EXPONENT - top;
-    if(exponent_cap < LARGEST_EXPONENT_SUM && low + exponent_cap < F32_LARGEST_EXPONENT + 2)
-    {
-        snprintf(msg,
-                 sizeof(msg),
-                 "exact_mx_scale_split: the dot product of %s spans 2^%d to 2^%d, "
-                 "too wide to saturate ea + eb at %d without changing a result",
-                 pair,
-                 low,
-                 top + 1,
-                 exponent_cap);
-        return split_refusal(err, err_cap, msg);
-    }
-    out->exponent_cap = exponent_cap;
-    out->fused_min = F32_SMALLEST_EXPONENT;
-    out->fused_max = F32_LARGEST_EXPONENT;
+    bound = (double)products * a_format->largest_value * b_format->largest_value;
+    top = (int)ceil(log2(bound)); /* bound <= 2^top */
+    /* 2c - 2 * bias + top <= 127 (Python floor division of a positive value) */
+    code = (F32_SAFE_SUM_EXPONENT + 2 * E8M0_BIAS - top) / 2;
+    *out = code < E8M0_LARGEST_FINITE_CODE ? code : E8M0_LARGEST_FINITE_CODE;
     return ROCKE_OK;
-}
-
-int rocke_mx_scale_split_pre_max(const rocke_mx_scale_split_t* split)
-{
-    return split->exponent_cap - split->fused_max;
 }
 
 /* Python: _read_e8m0_code(caller, b, e8m0) -> (code, is_nan).
@@ -209,103 +136,112 @@ rocke_value_t* rocke_decode_mx_scale_e8m0(rocke_ir_builder_t* b, rocke_value_t* 
     return rocke_b_select(b, is_nan_code, nan_value, scale);
 }
 
-rocke_value_t* rocke_fma_with_mx_scale_pair(rocke_ir_builder_t* b,
-                                            rocke_value_t* value,
-                                            rocke_value_t* a_e8m0,
-                                            rocke_value_t* b_e8m0,
-                                            rocke_value_t* addend,
-                                            const rocke_mx_scale_split_t* split)
+rocke_value_t* rocke_add_mx_scaled_dot(rocke_ir_builder_t* b,
+                                       rocke_value_t* acc,
+                                       rocke_value_t* dot,
+                                       rocke_value_t* const* a_codes,
+                                       size_t n_a_codes,
+                                       rocke_value_t* const* b_codes,
+                                       size_t n_b_codes)
 {
-    rocke_value_t* a_code;
-    rocke_value_t* a_is_nan;
-    rocke_value_t* b_code;
-    rocke_value_t* b_is_nan;
-    rocke_value_t* exponent;
-    rocke_value_t* fused;
-    rocke_value_t* pre;
-    rocke_value_t* pre_scale;
-    rocke_value_t* fused_scale;
-    rocke_value_t* pre_scaled;
-    int lanes;
+    /* Each distinct code Value is read once (Python's `read` dict keyed by
+     * id): (byte, code, is_nan). */
+    struct read_code
+    {
+        rocke_value_t* byte;
+        rocke_value_t* code;
+        rocke_value_t* is_nan;
+    };
+    std::vector<read_code> read;
+    std::vector<rocke_value_t*> terms;
+    rocke_value_t* nan_value;
+    rocke_value_t* two_biases;
+    int count;
 
     if(!rocke_i_live(b))
     {
         return NULL;
     }
-    /* Python: split must be an MxScaleSplit (checked first, as in Python). */
-    if(split == NULL)
+    if(dot == NULL || dot->type == NULL || dot->type->kind != ROCKE_TYPE_VECTOR
+       || strcmp(dot->type->elem->name, "f32") != 0)
     {
+        const char* got = (dot != NULL && dot->type != NULL) ? dot->type->name : "None";
         return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "fma_with_mx_scale_pair expects an MxScaleSplit, got None");
+            b, ROCKE_ERR_VALUE, "add_mx_scaled_dot expects an f32 vector dot, got %s", got);
     }
-
-    /* Python: value must be an f32 vector; the addend must match its type. */
-    if(value == NULL || value->type == NULL || value->type->kind != ROCKE_TYPE_VECTOR
-       || strcmp(value->type->elem->name, "f32") != 0)
+    if(acc == NULL || acc->type == NULL || strcmp(acc->type->name, dot->type->name) != 0)
     {
-        const char* got = (value != NULL && value->type != NULL) ? value->type->name : "None";
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "fma_with_mx_scale_pair expects an f32 vector value, got %s", got);
-    }
-    if(addend == NULL || addend->type == NULL || strcmp(addend->type->name, value->type->name) != 0)
-    {
-        const char* got = (addend != NULL && addend->type != NULL) ? addend->type->name : "None";
+        const char* got = (acc != NULL && acc->type != NULL) ? acc->type->name : "None";
         return (rocke_value_t*)rocke_i_set_err(b,
                                                ROCKE_ERR_VALUE,
-                                               "fma_with_mx_scale_pair expects the addend type to "
-                                               "match the value type %s, got %s",
-                                               value->type->name,
+                                               "add_mx_scaled_dot expects the accumulator type "
+                                               "to match the dot type %s, got %s",
+                                               dot->type->name,
                                                got);
     }
+    count = dot->type->count;
+    if(n_a_codes != (size_t)count || n_b_codes != (size_t)count)
+    {
+        return (rocke_value_t*)rocke_i_set_err(b,
+                                               ROCKE_ERR_VALUE,
+                                               "add_mx_scaled_dot expects %d A and %d B scale "
+                                               "bytes, got %zu and %zu",
+                                               count,
+                                               count,
+                                               n_a_codes,
+                                               n_b_codes);
+    }
 
-    a_code = read_e8m0_code("fma_with_mx_scale_pair", b, a_e8m0, &a_is_nan);
-    if(a_code == NULL)
-    {
-        return NULL;
-    }
-    b_code = read_e8m0_code("fma_with_mx_scale_pair", b, b_e8m0, &b_is_nan);
-    if(b_code == NULL)
-    {
-        return NULL;
-    }
+    /* code_of(e8m0): read each distinct byte once. */
+    auto code_of = [&](rocke_value_t* byte) -> const read_code* {
+        for(const read_code& r : read)
+        {
+            if(r.byte == byte)
+            {
+                return &r;
+            }
+        }
+        rocke_value_t* is_nan = NULL;
+        rocke_value_t* code = read_e8m0_code("add_mx_scaled_dot", b, byte, &is_nan);
+        if(code == NULL)
+        {
+            return NULL;
+        }
+        read.push_back({byte, code, is_nan});
+        return &read.back();
+    };
 
-    /* Every step below is sequenced in Python's left-to-right evaluation
-     * order: each emission consumes one SSA value-counter tick, so the order
-     * is load-bearing for byte-identical value numbering.
-     *
-     * exponent = b.sub(b.add(a_code, b_code), b.const_i32(2 * 127)) */
+    /* nan = b.const_f32(math.nan); two_biases = b.const_i32(2 * _E8M0_BIAS) */
+    nan_value = rocke_b_const_f32(b, (double)NAN);
+    two_biases = rocke_b_const_i32(b, 2 * E8M0_BIAS);
+    terms.reserve((size_t)count);
+    for(int i = 0; i < count; ++i)
     {
-        rocke_value_t* code_sum = rocke_b_add(b, a_code, b_code);
-        rocke_value_t* double_bias = rocke_b_const_i32(b, 2 * E8M0_BIAS);
-        exponent = rocke_b_sub(b, code_sum, double_bias);
+        /* a_code, a_is_nan = code_of(a_codes[i]); then the B code. The
+         * pointers are copied out: a later push_back may move `read`. */
+        const read_code* a_read = code_of(a_codes[i]);
+        if(a_read == NULL)
+        {
+            return NULL;
+        }
+        rocke_value_t* a_code = a_read->code;
+        rocke_value_t* a_is_nan = a_read->is_nan;
+        const read_code* b_read = code_of(b_codes[i]);
+        if(b_read == NULL)
+        {
+            return NULL;
+        }
+        rocke_value_t* b_code = b_read->code;
+        rocke_value_t* b_is_nan = b_read->is_nan;
+        /* exponent = b.sub(b.add(a_code, b_code), two_biases) */
+        rocke_value_t* exponent = rocke_b_sub(b, rocke_b_add(b, a_code, b_code), two_biases);
+        /* term = b.ldexp(b.vec_extract(dot, i), exponent) */
+        rocke_value_t* term = rocke_b_ldexp(b, rocke_b_vec_extract(b, dot, i), exponent);
+        /* term = b.select(b.lor(a_is_nan, b_is_nan), nan, term) */
+        term = rocke_b_select(b, rocke_b_lor(b, a_is_nan, b_is_nan), nan_value, term);
+        /* terms.append(b.fadd(b.vec_extract(acc, i), term)) */
+        terms.push_back(rocke_b_fadd(b, rocke_b_vec_extract(b, acc, i), term));
     }
-    /* fused = b.smin(b.smax(exponent, b.const_i32(split.fused_min)),
-     *                b.const_i32(split.fused_max)) */
-    {
-        rocke_value_t* low = rocke_b_const_i32(b, split->fused_min);
-        rocke_value_t* at_least_low = rocke_b_smax(b, exponent, low);
-        rocke_value_t* high = rocke_b_const_i32(b, split->fused_max);
-        fused = rocke_b_smin(b, at_least_low, high);
-    }
-    /* pre = b.smin(b.sub(exponent, fused), b.const_i32(split.pre_max)) */
-    {
-        rocke_value_t* unsaturated = rocke_b_sub(b, exponent, fused);
-        rocke_value_t* pre_max = rocke_b_const_i32(b, rocke_mx_scale_split_pre_max(split));
-        pre = rocke_b_smin(b, unsaturated, pre_max);
-    }
-    /* pre_scale = b.exp2(b.sitofp_f32(pre)) */
-    pre_scale = rocke_b_exp2(b, rocke_b_sitofp_f32(b, pre));
-    /* fused_scale = b.select(b.lor(a_is_nan, b_is_nan), b.const_f32(math.nan),
-     *                        b.exp2(b.sitofp_f32(fused))) */
-    {
-        rocke_value_t* is_nan = rocke_b_lor(b, a_is_nan, b_is_nan);
-        rocke_value_t* nan_value = rocke_b_const_f32(b, (double)NAN);
-        rocke_value_t* scale = rocke_b_exp2(b, rocke_b_sitofp_f32(b, fused));
-        fused_scale = rocke_b_select(b, is_nan, nan_value, scale);
-    }
-    /* pre_scaled = b.vector_mul(value, b.vector_splat(pre_scale, lanes)) */
-    lanes = value->type->count;
-    pre_scaled = rocke_b_vector_mul(b, value, rocke_b_vector_splat(b, pre_scale, lanes));
-    /* return b.vector_fma(pre_scaled, b.vector_splat(fused_scale, lanes), addend) */
-    return rocke_b_vector_fma(b, pre_scaled, rocke_b_vector_splat(b, fused_scale, lanes), addend);
+    /* return b.vec_pack(terms, F32) */
+    return rocke_b_vec_pack(b, terms.data(), (int)terms.size(), rocke_f32());
 }

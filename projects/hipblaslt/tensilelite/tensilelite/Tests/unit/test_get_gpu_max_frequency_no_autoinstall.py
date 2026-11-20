@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-Regression tests for tensilelite.tensilelite.get_gpu_max_frequency (ROCM-26748 / SEC-00581).
+Regression tests for tensilelite.run.get_gpu_max_frequency (ROCM-26748 / SEC-00581).
 
 When hip-python is not importable, get_gpu_max_frequency must degrade
 gracefully (return None so the caller falls back to amd-smi) and MUST NOT
@@ -19,11 +19,11 @@ from unittest.mock import patch
 
 import pytest
 
-# Importing tensilelite.Tensile pulls in the full code-generation toolchain
+# Importing tensilelite.run pulls in the full code-generation toolchain
 # (rocisa bindings, etc.). If that chain is unavailable in the current
 # environment, skip rather than error at collection time.
 try:
-    from tensilelite.Tensile import get_gpu_max_frequency
+    from tensilelite.run import get_gpu_max_frequency
     _IMPORT_ERROR = None
 except Exception as exc:  # pragma: no cover - environment dependent
     get_gpu_max_frequency = None
@@ -33,7 +33,7 @@ pytestmark = [
     pytest.mark.unit,
     pytest.mark.skipif(
         get_gpu_max_frequency is None,
-        reason=f"tensilelite.Tensile import unavailable: {_IMPORT_ERROR}",
+        reason=f"tensilelite.run import unavailable: {_IMPORT_ERROR}",
     ),
 ]
 

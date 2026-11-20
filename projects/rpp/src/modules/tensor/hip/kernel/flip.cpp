@@ -32,7 +32,9 @@ __global__ void flip_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, ui
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x) ||
+        (id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -80,7 +82,9 @@ __global__ void flip_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr, u
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x) ||
+        (id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -158,7 +162,9 @@ __global__ void flip_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstP
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x) ||
+        (id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 
@@ -206,7 +212,9 @@ __global__ void flip_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dst
     int id_y = hipBlockIdx_y * hipBlockDim_y + hipThreadIdx_y;
     int id_z = hipBlockIdx_z * hipBlockDim_z + hipThreadIdx_z;
 
-    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x)) {
+    if ((id_y >= dstDimsWH.y) || (id_x >= dstDimsWH.x) ||
+        (id_y > roiTensorPtrSrc[id_z].ltrbROI.rb.y - roiTensorPtrSrc[id_z].ltrbROI.lt.y) ||
+        (id_x > roiTensorPtrSrc[id_z].ltrbROI.rb.x - roiTensorPtrSrc[id_z].ltrbROI.lt.x)) {
         return;
     }
 

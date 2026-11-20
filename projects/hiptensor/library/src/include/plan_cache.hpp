@@ -26,10 +26,13 @@
 
 #pragma once
 
+#include <algorithm>
 #include <chrono>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <hiptensor/hiptensor_types.h>
@@ -64,30 +67,20 @@ namespace hiptensor
             std::size_t  heapIndex;
         };
 
-        UpdatablePriorityQueue() = default;
-
-        UpdatablePriorityQueue(const UpdatablePriorityQueue& other)
-            : mHeapData(other.mHeapData)
-            , mKeyToElement(other.mKeyToElement)
-        {
-        }
-
-        UpdatablePriorityQueue& operator=(const UpdatablePriorityQueue& other)
-        {
-            if(this != &other)
-            {
-                mHeapData     = other.mHeapData;
-                mKeyToElement = other.mKeyToElement;
-            }
-            return (*this);
-        }
+        // The queue owns its elements, and mKeyToElement points into them, so it can be moved
+        // but not copied. Use sorted() to read the elements without changing the queue.
+        UpdatablePriorityQueue()                                         = default;
+        UpdatablePriorityQueue(const UpdatablePriorityQueue&)            = delete;
+        UpdatablePriorityQueue& operator=(const UpdatablePriorityQueue&) = delete;
+        UpdatablePriorityQueue(UpdatablePriorityQueue&&)                 = default;
+        UpdatablePriorityQueue& operator=(UpdatablePriorityQueue&&)      = default;
 
         //Insert a new element
         void push(const T& key, const PriorityType& priority)
         {
-            Element* item = new Element{key, priority, mHeapData.size()};
-            mHeapData.push_back(item);
-            mKeyToElement[key] = mHeapData.back();
+            mHeapData.push_back(
+                std::make_unique<Element>(Element{key, priority, mHeapData.size()}));
+            mKeyToElement[key] = mHeapData.back().get();
             siftUp(mHeapData.size() - 1);
         }
 
@@ -135,7 +128,6 @@ namespace hiptensor
             mKeyToElement.erase(mHeapData[0]->key);
             std::swap(mHeapData[0], mHeapData.back());
             mHeapData[0]->heapIndex = 0;
-            delete mHeapData.back();
             mHeapData.pop_back();
             if(!empty())
             {
@@ -153,17 +145,25 @@ namespace hiptensor
             return mHeapData.size();
         }
 
-        ~UpdatablePriorityQueue()
+        //All elements as (key, priority) pairs, in the order pop() would remove them
+        std::vector<std::pair<T, PriorityType>> sorted() const
         {
-            for(auto elem : mHeapData)
-                delete elem;
-            mHeapData.clear();
+            std::vector<std::pair<T, PriorityType>> items;
+            items.reserve(mHeapData.size());
+            for(auto const& elem : mHeapData)
+            {
+                items.emplace_back(elem->key, elem->priority);
+            }
+            std::sort(items.begin(), items.end(), [this](auto const& a, auto const& b) {
+                return compare(a.second, b.second);
+            });
+            return items;
         }
 
     private:
-        std::vector<Element*>           mHeapData;
-        std::unordered_map<T, Element*> mKeyToElement;
-        Compare                         compare;
+        std::vector<std::unique_ptr<Element>> mHeapData;
+        std::unordered_map<T, Element*>       mKeyToElement;
+        Compare                               compare;
 
         void siftUp(std::size_t index)
         {

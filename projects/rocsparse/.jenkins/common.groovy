@@ -183,39 +183,77 @@ def runTestWithSanitizerCommand (platform, project, gfilter, String dirmode = "r
     platform.runCommand(this, command)
 }
 
+// Archives coverage-upload.info and, when coverage_split succeeds,
+// coverage-unit-upload.info. The job's postprocess stage merges every node's
+// report and uploads once. This function does not upload.
 def runCoverageCommand (platform, project, gfilter, String dirmode = "release")
+{
+    def command = """#!/usr/bin/env bash
+                set -ex
+                cd ${project.paths.project_build_prefix}/build/${dirmode}
+                export LD_LIBRARY_PATH=/opt/rocm/lib/
+                # Same shell step as coverage. Groovy calls before this
+                # script are not executed, so a unit-test failure must be
+                # raised here, before make coverage ignores it.
+                cmake --build . --target rocsparse-unit-test rocsparse-unit-test-device
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test-device --gtest_output=xml:test_detail_unit_device.xml --gtest_color=yes
+                GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
+                # A failed coverage_split must not leave a unit report behind for the merge.
+                if ! make coverage_split; then
+                    echo "coverage_split failed; no rocSPARSE-unit report from this node"
+                    rm -f coverage-report/coverage-unit-upload.info
+                fi
+            """
+
+    platform.runCommand(this, command)
+}
+
+// Runs on the postprocess CPU node, outside the build container. artifactDir has one
+// subdirectory per coverage node, each holding that node's coverage-report/*.info files.
+// expectedNodes is the number of nodes the job scheduled. Fewer full reports than that
+// means a node dropped out of the archive, and the upload is refused.
+def runCoverageMergeUpload(project, String artifactDir, int expectedNodes)
 {
     String commitSha
     String repoUrl
     (commitSha, repoUrl) = util.getGitHubCommitInformation(project.paths.project_src_prefix)
 
+    String mergeScript = "${project.paths.project_src_prefix}/scripts/merge_coverage_info.py"
+
     withCredentials([string(credentialsId: "mathlibs-codecov-token-rocm-libraries", variable: 'CODECOV_TOKEN')])
     {
         def command = """#!/usr/bin/env bash
                     set -ex
-                    cd ${project.paths.project_build_prefix}/build/${dirmode}
-                    export LD_LIBRARY_PATH=/opt/rocm/lib/
-                    # Same shell step as coverage. Groovy calls before this
-                    # script are not executed, so a unit-test failure must be
-                    # raised here, before make coverage ignores it.
-                    cmake --build . --target rocsparse-unit-test rocsparse-unit-test-device
-                    GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test --gtest_output=xml:test_detail_unit.xml --gtest_color=yes
-                    GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./clients/staging/rocsparse-unit-test-device --gtest_output=xml:test_detail_unit_device.xml --gtest_color=yes
-                    GTEST_LISTENER=NO_PASS_LINE_IN_LOG make coverage_cleanup coverage GTEST_FILTER=${gfilter}-*known_bug*
-                    /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage.info --name rocm-libraries --flags rocSPARSE --sha ${commitSha}
-                    # Also report the unit tests as their own flag. Upload only if
-                    # coverage_split succeeded, so a stale or partial file is never sent; a failure here
-                    # must not fail the job. coverage-integration.info is written for a local look and is not uploaded.
-                    if make coverage_split; then
-                        /usr/local/bin/codecov -v -U \$http_proxy -t ${CODECOV_TOKEN} --file coverage-report/coverage-unit.info --name rocm-libraries-unit --flags rocSPARSE-unit --sha ${commitSha} || true
+                    rm -rf coverage-merged
+                    mkdir -p coverage-merged
+                    mapfile -t reports < <(find "${artifactDir}" -name coverage-upload.info | sort)
+                    mapfile -t unit_reports < <(find "${artifactDir}" -name coverage-unit-upload.info | sort)
+                    if [ \${#reports[@]} -eq 0 ]; then
+                        echo "No coverage-upload.info found under ${artifactDir}"
+                        exit 1
+                    fi
+                    if [ \${#reports[@]} -ne ${expectedNodes} ]; then
+                        echo "Expected ${expectedNodes} coverage-upload.info files, found \${#reports[@]}"
+                        exit 1
+                    fi
+                    python3 ${mergeScript} --strict -o coverage-merged/coverage-upload.info "\${reports[@]}"
+                    curl -Os https://uploader.codecov.io/latest/linux/codecov
+                    chmod +x codecov
+                    ./codecov -v -U \$http_proxy -t \$CODECOV_TOKEN --file coverage-merged/coverage-upload.info --name rocm-libraries --flags rocSPARSE --sha ${commitSha}
+                    # The unit flag is uploaded only when every node produced a unit report,
+                    # so a partial union is never sent. A failure here must not fail the job.
+                    if [ \${#unit_reports[@]} -eq \${#reports[@]} ]; then
+                        python3 ${mergeScript} --strict -o coverage-merged/coverage-unit-upload.info "\${unit_reports[@]}" && \\
+                            ./codecov -v -U \$http_proxy -t \$CODECOV_TOKEN --file coverage-merged/coverage-unit-upload.info --name rocm-libraries-unit --flags rocSPARSE-unit --sha ${commitSha} || true
                     else
-                        echo "coverage_split failed; rocSPARSE-unit not uploaded"
+                        echo "\${#unit_reports[@]} of \${#reports[@]} nodes produced a unit report; rocSPARSE-unit not uploaded"
                     fi
                 """
 
-        platform.runCommand(this, command)
+        sh command
     }
-
+    archiveArtifacts artifacts: "coverage-merged/*.info", allowEmptyArchive: true
 }
 
 def runPackageCommand(platform, project, String dirmode = "release")

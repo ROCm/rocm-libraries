@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 
 import rocke.portable_ir.tests as _unit_tests
+from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke.tests.subprocess_launcher import (
     rocke_python_command,
     rocke_subprocess_env,
@@ -191,7 +192,8 @@ def test_parity_matrix():
     assert r.returncode == 0, r.stdout[-6000:] + r.stderr[-4000:]
 
 
-def test_standalone_cli_matches_python(tmp_path):
+@pytest.mark.parametrize("arch", COVERED_ARCHES)
+def test_standalone_cli_matches_python(tmp_path, arch):
     """A binary with no Python in it reproduces the Python lowerer's .ll.
 
     parity_matrix proves the C++ engine agrees, but it drives that engine over
@@ -218,7 +220,7 @@ kernel, recipe = record_kernel(lambda: build_elementwise(spec))
 open(out + "/k.ir.json", "w").write(ir_export.export_kernel_ir_json(kernel))
 open(out + "/k.recipe.cbor", "wb").write(recipe_bundle.cbor_encode(recipe))
 open(out + "/py.ll", "w").write(
-    lower_kernel_to_llvm(kernel, llvm_flavor="llvm20", arch="gfx950"))
+    lower_kernel_to_llvm(kernel, llvm_flavor="llvm20", arch="{arch}"))
 """
     r = _run([sys.executable, "-c", author, str(tmp_path)])
     assert r.returncode == 0, r.stderr[-4000:]
@@ -229,7 +231,7 @@ open(out + "/py.ll", "w").write(
         (["--recipe", str(tmp_path / "k.recipe.cbor"), "--cbor"], "CBOR recipe"),
     ):
         got = subprocess.run(
-            [cli, *args, "--arch", "gfx950", "--flavor", "llvm20"],
+            [cli, *args, "--arch", arch, "--flavor", "llvm20"],
             capture_output=True,
             text=True,
         )

@@ -36,15 +36,19 @@ Inclusive range for params tuning, edit these to adjust tuning grid range.
 BLOCK_SIZES = [128, 256, 512, 1024]
 IPT = [1, 4, 6, 8, 12, 16, 18, 22, 32]
 RADIX_BITS = [4, 5, 6, 7, 8]
-ALGOS = ['block_radix_rank_algorithm::basic', 'block_radix_rank_algorithm::match']
+ALGOS = ["block_radix_rank_algorithm::basic", "block_radix_rank_algorithm::match"]
 
 """
 Class to compile and run a tiny probe to check if the params passed in is valid for device radix sort onesweep
 """
+
+
 class CheckParam:
-    def __init__(self):
+    def __init__(self, shared_memory_max: int, wavefront: str):
 
         self.rocm_include = f"{BASE_DIR}/../rocprim/include"
+        self.shared_memory_max = shared_memory_max
+        self.wavefront = wavefront
 
         self.cache = {}
         self.v_params = {}
@@ -57,77 +61,103 @@ class CheckParam:
 
         using sharedmem_storage = typename rocprim::detail::onesweep_iteration_helper<
             PROBE_Key, PROBE_Value, size_t, PROBE_BlockSize, PROBE_ItemsPerThread, PROBE_RadixBits, false,
-            PROBE_RadixRankAlgorithm,  rocprim::arch::wavefront::target::size32, rocprim::identity_decomposer,
+            PROBE_RadixRankAlgorithm,  rocprim::arch::wavefront::target::PROBE_Wavefront, rocprim::identity_decomposer,
             rocprim::detail::block_id_wrapper<>>::storage_type;
 
         static_assert(sizeof(sharedmem_storage) < TUNING_SHARED_MEMORY_MAX, "exceeds LDS");
         """
 
-    def check_valid(self, key, value, bs, ipt, rb, algo) -> bool:
+    def check_valid(self, key, value, bs, sort_ipt, rb, algo) -> bool:
         param = (TYPE_CONFIGS[key].size, TYPE_CONFIGS[value].size, bs, rb, algo)
 
         """
-        self.cache[(k_size, val_size, bs, rb, algo)] -> [max_ipt]
+        self.cache[(k_size, val_size, bs, rb, algo)] -> (max_valid_ipt, min_invalid_ipt)
+        LDS usage grows with ipt, so any ipt <= max_valid_ipt fits and any ipt >= min_invalid_ipt does not.
         """
-
-        if param not in self.cache:
-            self.cache[param] = -1
-        
-        if ipt <= self.cache[param]:
+        max_valid_ipt, min_invalid_ipt = self.cache.get(param, (0, float("inf")))
+        if sort_ipt <= max_valid_ipt:
             return True
+        if sort_ipt >= min_invalid_ipt:
+            return False
 
-        src = f'{BASE_DIR}/tuner/probe.cpp'
-        with open(src, 'w') as f:
+        src = f"{BASE_DIR}/tuner/probe.cpp"
+        with open(src, "w") as f:
             f.write(self.code)
 
         cmd = [
-            'hipcc', '-fsyntax-only',
-            f'-I{self.rocm_include}',
-            f'-DPROBE_Key={key}', f'-DPROBE_Value={value}',
-            f'-DPROBE_BlockSize={bs}', f'-DPROBE_ItemsPerThread={ipt}',
-            f'-DPROBE_RadixBits={rb}', f'-DPROBE_RadixRankAlgorithm=rocprim::{algo}',
+            "hipcc",
+            "-fsyntax-only",
+            f"-I{self.rocm_include}",
+            f"-DTUNING_SHARED_MEMORY_MAX={self.shared_memory_max}u",
+            f"-DPROBE_Wavefront={self.wavefront}",
+            f"-DPROBE_Key={key}",
+            f"-DPROBE_Value={value}",
+            f"-DPROBE_BlockSize={bs}",
+            f"-DPROBE_ItemsPerThread={sort_ipt}",
+            f"-DPROBE_RadixBits={rb}",
+            f"-DPROBE_RadixRankAlgorithm=rocprim::{algo}",
             src,
         ]
         compiled = subprocess.run(cmd, capture_output=True, text=True)
         os.remove(src)
 
         valid = compiled.returncode == 0
-        if not valid and "exceeds LDS" not in compiled.stderr:
+        if valid:
+            max_valid_ipt = sort_ipt
+        elif "exceeds LDS" in compiled.stderr:
+            min_invalid_ipt = sort_ipt
+        else:
             print(f"[probe] unexpected failure for {param}:\n{compiled.stderr[:500]}")
 
-        self.cache[param] = ipt
+        self.cache[param] = (max_valid_ipt, min_invalid_ipt)
         return valid
+
 
 class Tuner(BaseTuner):
     @classmethod
     def _get_default_args(cls) -> TunerArgs:
-        return TunerArgs(algo_full_name='device_radix_sort_onesweep')
+        return TunerArgs(algo_full_name="device_radix_sort_onesweep")
 
     def __init__(self, args: TunerArgs) -> None:
-        self.param_checker = CheckParam()
         super().__init__(args)
+        # gfx950 has 160 KiB of LDS per block; older CDNA has 64 KiB.
+        shared_memory_max = (
+            self.device_properties.sharedMemPerBlock
+            if not self.simulation_mode
+            else 65536
+        )
+        wavefront = "size64" if self.arch_name.startswith("gfx9") else "size32"
+        self.param_checker = CheckParam(shared_memory_max, wavefront)
 
     def _get_tune_params(self, types: Dict[str, Any]) -> OrderedDict:
         params = OrderedDict()
-        params['block_size_x'] = BLOCK_SIZES
-        params['ipt'] = IPT
-        params['sort_block_size_x'] = BLOCK_SIZES
-        params['sort_ipt'] = IPT
-        params['radix_bits'] = RADIX_BITS
-        params['algo'] = ALGOS
+        params["block_size_x"] = BLOCK_SIZES
+        params["ipt"] = IPT
+        params["sort_block_size_x"] = BLOCK_SIZES
+        params["sort_ipt"] = IPT
+        params["radix_bits"] = RADIX_BITS
+        params["algo"] = ALGOS
 
         return params
 
     def _get_restrictions(self, types: Dict[str, Any]) -> Callable[[dict], bool]:
         def validate(params):
-            bs, ipt, rb, algo = params['block_size_x'], params['ipt'], params['radix_bits'], params['algo']
-            if  ipt < params['sort_ipt']:
+            bs, ipt, sort_ipt = (
+                params["block_size_x"],
+                params["ipt"],
+                params["sort_ipt"],
+            )
+            rb, algo = params["radix_bits"], params["algo"]
+            if ipt < sort_ipt:
                 return False
 
-            if bs != params['sort_block_size_x']:
+            if bs != params["sort_block_size_x"]:
                 return False
 
-            return self.param_checker.check_valid(types["key_type"], types["value_type"], bs, ipt, rb, algo)
+            # The onesweep iteration kernel's LDS is sized by the sort config (device_radix_sort.hpp:287).
+            return self.param_checker.check_valid(
+                types["key_type"], types["value_type"], bs, sort_ipt, rb, algo
+            )
 
         return validate
 

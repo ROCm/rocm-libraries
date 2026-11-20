@@ -32,4 +32,7 @@ typedef enum class _hipblaslt_scaling_format
     Block_32_F16_ZP         = 1015,
     Block_64_F16_ZP         = 1016,
     Block_128_F16_ZP        = 1017,
+    // E8M0 per 32 K elements in 128-row by 4-K-block tiles; FP6 with
+    // HIPBLASLT_ORDER_COL256_R128_EXT only.
+    Block_32_UE8M0_128_4_EXT = 1018,
 } hipblaslt_scaling_format;
