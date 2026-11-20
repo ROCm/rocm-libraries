@@ -6,6 +6,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Added
 
+* Added `fmha_fwd_args::max_logits_ptr` to the CK Tile FMHA forward: on gfx9, the qr, qr_async, and qr_async_trload pipelines can store the exact per-row max logits next to the LSE.
+
 ### Changed
 
 ### Removed
