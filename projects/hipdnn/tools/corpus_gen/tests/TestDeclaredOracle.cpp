@@ -37,6 +37,9 @@ ProblemPoint sdpaPoint()
                         {"alignment", std::string("top_left")},
                         {"generate_stats", false},
                         {"form", std::string("plain")},
+                        {"layout", std::string("bshd")},
+                        {"scale", std::string("inv_sqrt_d")},
+                        {"window", std::string("none")},
                         {"dtype", std::string("bf16")}};
 }
 

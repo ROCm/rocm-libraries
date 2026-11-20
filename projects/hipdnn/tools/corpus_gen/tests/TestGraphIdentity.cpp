@@ -41,6 +41,9 @@ std::vector<uint8_t> someGraph()
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
                              {"form", std::string("plain")},
+                             {"layout", std::string("bshd")},
+                             {"scale", std::string("inv_sqrt_d")},
+                             {"window", std::string("none")},
                              {"dtype", std::string("bf16")}};
 
     const auto built = buildGraphFor(metadata, point);
@@ -152,10 +155,52 @@ TEST(TestGraphIdentity, DifferentGraphsGetDifferentContentKeys)
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
                              {"form", std::string("plain")},
+                             {"layout", std::string("bshd")},
+                             {"scale", std::string("inv_sqrt_d")},
+                             {"window", std::string("none")},
                              {"dtype", std::string("bf16")}};
     const auto built = buildGraphFor(metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
     EXPECT_NE(stampGraphIdentity(built.bytes, "a_graph").key, original.key);
+}
+
+TEST(TestGraphIdentity, TheDefaultFacetsKeepTheContentKeyOfTheGraphBeforeTheyExisted)
+{
+    // plain form, bshd, inv_sqrt_d, no window: the graph the declaration built before the form,
+    // layout, scale and window facets were added, so a corpus's old measurements still join on
+    // `benchmark`. The keys are those the tool wrote for the same two problems before the facets
+    // (a decode and a prefill with statistics).
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto keyOf = [&metadata](int64_t seqlenQ,
+                                   int64_t seqlenK,
+                                   int64_t batch,
+                                   int64_t heads,
+                                   int64_t headsKv,
+                                   int64_t headDim,
+                                   bool causal,
+                                   const std::string& dtype,
+                                   bool stats) {
+        const ProblemPoint point{{"batch", batch},
+                                 {"heads", heads},
+                                 {"heads_kv", headsKv},
+                                 {"seqlen_q", seqlenQ},
+                                 {"seqlen_k", seqlenK},
+                                 {"head_dim", headDim},
+                                 {"is_causal", causal},
+                                 {"alignment", std::string("top_left")},
+                                 {"generate_stats", stats},
+                                 {"form", std::string("plain")},
+                                 {"layout", std::string("bshd")},
+                                 {"scale", std::string("inv_sqrt_d")},
+                                 {"window", std::string("none")},
+                                 {"dtype", dtype}};
+        const auto built = buildGraphFor(metadata, point);
+        EXPECT_TRUE(built.ok()) << built.error;
+        return stampGraphIdentity(built.bytes, "a_graph").key;
+    };
+
+    EXPECT_EQ(keyOf(1, 4096, 2, 32, 8, 128, true, "bf16", false), "17138204847398273196");
+    EXPECT_EQ(keyOf(2048, 2048, 1, 16, 16, 64, false, "fp16", true), "11702855325205750441");
 }
 
 TEST(TestGraphIdentity, BytesThatAreNotAGraphHaveNoContentKey)

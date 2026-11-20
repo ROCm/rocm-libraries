@@ -157,6 +157,10 @@ TEST(TestKernelCatalogSource, AParameterThePackNeverMentionsComesFromTheDeclared
     ASSERT_EQ(harvest.entries.size(), 1u) << harvest.report.shutOut;
     EXPECT_EQ(harvest.report.unbuildable, 0) << harvest.report.firstBuildError;
     EXPECT_EQ(std::get<std::string>(harvest.entries.front().point.at("alignment")), "top_left");
+    // Nor do they carry a layout, a scale or a window; each is the kernel's own default.
+    EXPECT_EQ(std::get<std::string>(harvest.entries.front().point.at("layout")), "bshd");
+    EXPECT_EQ(std::get<std::string>(harvest.entries.front().point.at("scale")), "inv_sqrt_d");
+    EXPECT_EQ(std::get<std::string>(harvest.entries.front().point.at("window")), "none");
 }
 
 TEST(TestKernelCatalogSource, TwoSpellingsOfOneShapeAreOneProblemToMeasure)
@@ -234,6 +238,9 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
                              {"form", std::string("plain")},
+                             {"layout", std::string("bshd")},
+                             {"scale", std::string("inv_sqrt_d")},
+                             {"window", std::string("none")},
                              {"dtype", std::string("bf16")}};
     const auto built = buildAdmissible(metadata, point);
     ASSERT_TRUE(built.has_value());

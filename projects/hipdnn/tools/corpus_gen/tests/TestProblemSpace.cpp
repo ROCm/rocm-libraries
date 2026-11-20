@@ -15,9 +15,13 @@
 
 #include <nlohmann/json.hpp>
 
+#include "OperationsDir.hpp"
+#include <algorithm>
+#include <fstream>
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace hipdnn_corpus_gen
 {
@@ -170,7 +174,9 @@ TEST(TestProblemSpace, SaysSoWhenItDidNotExploreEveryCombination)
 
     const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
 
-    EXPECT_LE(corpus.combinations.size(), 5U);
+    // The bound, plus one combination for each declared value the scattered sample missed.
+    EXPECT_GE(corpus.combinations.size(), 5U);
+    EXPECT_LE(corpus.combinations.size(), 5U + 4U + 4U);
     ASSERT_FALSE(corpus.skippedCombinations.empty());
     EXPECT_NE(corpus.skippedCombinations.front().find("16"), std::string::npos);
 }
@@ -602,6 +608,551 @@ TEST(TestProblemSpace, NothingServedHasNoEdges)
         EXPECT_TRUE(combination.lowest.empty());
         EXPECT_TRUE(combination.highest.empty());
     }
+}
+
+namespace
+{
+
+/// Two combinations, each with an archetype list and neighbourhoods wide enough that the
+/// anchored draws are not limited by the number of distinct points they can reach.
+OperationMetadata anchoredToy()
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":     { "type": "int64" },
+        "N":     { "type": "int64" },
+        "dtype": { "type": "enum", "values": ["fp32", "fp16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "archetypes": [
+        { "name": "layers",
+          "values": { "M": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536],
+                      "N": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536] } }
+      ],
+      "neighbourhood": {
+        "M": { "kind": "scale", "factors": [0.5, 0.75, 1, 1.5, 2] },
+        "N": { "kind": "scale", "factors": [0.5, 1, 2] }
+      },
+      "mixture": { "archetypes": 0.2, "neighbourhood": 0.6, "exploration": 0.2 }
+    })");
+}
+
+std::vector<std::string> described(const ProblemCorpus& corpus)
+{
+    std::vector<std::string> out;
+    for(const auto& point : corpus.problems())
+    {
+        out.push_back(detail::describe(point));
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(TestProblemSpace, TheAnchoredShareCollapsesAtALargeCountUnlessAnchorScalingHoldsIt)
+{
+    // The declared mixture is 80% anchored. The fixed quotas give each combination a few
+    // anchored draws however large the corpus, so at a large count the corpus is exploration;
+    // anchor scaling sizes the quotas to the target.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.corpusTarget = 300;
+    request.seed = 6;
+
+    const auto fixed = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+    request.anchorScaling = true;
+    const auto scaled = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+
+    ASSERT_GE(fixed.problems().size(), 300U);
+    ASSERT_GE(scaled.problems().size(), 300U);
+    EXPECT_LT(fixed.anchoredShare(), 0.2);
+    // Growth past the target is made of exploration, so the realised share sits below the
+    // declared 0.8; the point is that it is not the few percent the fixed quotas leave.
+    EXPECT_GT(scaled.anchoredShare(), 0.4);
+}
+
+TEST(TestProblemSpace, AnchorScalingNeverShrinksTheFixedQuotasAndNeedsATarget)
+{
+    // max(pointsPerCombination, target / combinations): a target the first pass already covers,
+    // or none, leaves the corpus exactly as it was.
+    ExplorationRequest request;
+    request.pointsPerCombination = 10;
+    request.seed = 7;
+
+    for(const int64_t target : {int64_t{0}, int64_t{12}})
+    {
+        request.corpusTarget = target;
+        request.anchorScaling = false;
+        const auto fixed = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+        request.anchorScaling = true;
+        const auto scaled = exploreProblemSpace(anchoredToy(), request, ACCEPT_EVERYTHING);
+        EXPECT_EQ(described(scaled), described(fixed)) << "target " << target;
+    }
+}
+
+TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIsDropped)
+{
+    // Past maxCombinations the product is sampled, which the manifest reports as skipped
+    // combinations. The backward fits under it; the forward, with the optional forms crossed
+    // with every facet, does not, so what it must keep is every declared value of every
+    // categorical parameter, and every value pair of the weighted facets and the form: a model
+    // trained on the corpus has seen each one (RFC 0019 section 5.2), and `--form-floor` finds
+    // a form among them. The sample is drawn from the combinations that can hold a problem.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+
+        size_t total = 0;
+        const auto all = detail::categoricalCombinations(metadata.parameters, 0, total);
+        EXPECT_EQ(all.size(), total) << operation;
+        // is_causal 2 x alignment 2 x dtype 3 x layout 3 x scale 3 x form 8, and for the
+        // forward generate_stats 2 x window 4 (the backward has 6 forms and no window).
+        EXPECT_EQ(total, operation == "sdpa_fwd" ? size_t{6912} : size_t{648}) << operation;
+
+        size_t sampledTotal = 0;
+        const auto sampled = detail::categoricalCombinations(
+            metadata.parameters,
+            ExplorationRequest{}.maxCombinations,
+            sampledTotal,
+            [&metadata](const ProblemPoint& combination) {
+                return !detail::excludedByCategoricals(metadata, combination);
+            });
+        EXPECT_EQ(sampledTotal, total) << operation;
+        if(operation == "sdpa_bwd")
+        {
+            EXPECT_EQ(sampled.size(), total) << operation;
+        }
+        else
+        {
+            EXPECT_EQ(sampled.size(), ExplorationRequest{}.maxCombinations) << operation;
+            for(const auto& combination : sampled)
+            {
+                EXPECT_FALSE(detail::excludedByCategoricals(metadata, combination))
+                    << detail::describe(combination);
+            }
+            // No triple of the weighted facets is left out: a stride that aliases with the
+            // combination index leaves some (kv_bhsd, jitter, local_4096) with none.
+            std::set<std::string> triples;
+            for(const auto& combination : sampled)
+            {
+                triples.insert(std::get<std::string>(combination.at("layout")) + "/"
+                               + std::get<std::string>(combination.at("scale")) + "/"
+                               + std::get<std::string>(combination.at("window")));
+            }
+            EXPECT_EQ(triples.size(), 36U) << operation;
+        }
+        for(const auto& parameter : metadata.parameters)
+        {
+            for(const auto& value : parameter.enumerable())
+            {
+                EXPECT_TRUE(std::any_of(
+                    sampled.begin(),
+                    sampled.end(),
+                    [&](const ProblemPoint& point) { return point.at(parameter.name) == value; }))
+                    << operation << " dropped " << parameter.name;
+            }
+        }
+    }
+}
+
+TEST(TestProblemSpace, TheShippedSdpaConstraintsKeepOnlyProblemsThatAreDistinctAndHaveKeys)
+{
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok());
+
+    struct Candidate
+    {
+        int64_t seqlenQ = 2048;
+        int64_t seqlenK = 2048;
+        int64_t heads = 8;
+        int64_t headsKv = 8;
+        bool causal = true;
+        std::string window = "none";
+        std::string layout = "bshd";
+        std::string alignment = "top_left";
+    };
+    const auto admits = [&](const Candidate& c) {
+        const ProblemPoint point{{"batch", int64_t{1}},
+                                 {"heads", c.heads},
+                                 {"heads_kv", c.headsKv},
+                                 {"seqlen_q", c.seqlenQ},
+                                 {"seqlen_k", c.seqlenK},
+                                 {"head_dim", int64_t{64}},
+                                 {"is_causal", c.causal},
+                                 {"alignment", c.alignment},
+                                 {"dtype", std::string("fp16")},
+                                 {"generate_stats", false},
+                                 {"form", std::string("plain")},
+                                 {"layout", c.layout},
+                                 {"scale", std::string("inv_sqrt_d")},
+                                 {"window", c.window}};
+        return detail::satisfiesConstraints(*parsed.metadata, point);
+    };
+
+    // Cross attention is bidirectional; a causal mask needs seqlen_q <= seqlen_k.
+    EXPECT_TRUE(admits({4096, 77, 8, 8, false}));
+    EXPECT_FALSE(admits({4096, 77, 8, 8, true}));
+    EXPECT_TRUE(admits({2048, 2048, 8, 8, true, "local_1024"}));
+    // The frontend accepts a left bound under any mask.
+    EXPECT_TRUE(admits({2048, 2048, 8, 8, false, "local_1024"}));
+    // A window over more queries than keys: top-left, every row from seqlen_k + N - 1 on keeps
+    // no key (90% of the rows at 2048 x 77, local_128), so the softmax is over nothing.
+    EXPECT_FALSE(admits({2048, 77, 8, 8, false, "local_128"}));
+    EXPECT_FALSE(admits({4096, 77, 8, 8, false, "local_4096"}));
+    // The anchor is a distinct problem where the mask is causal OR windowed and seqlen_q <
+    // seqlen_k, and pinned to top_left everywhere else.
+    EXPECT_TRUE(admits({128, 4096, 8, 8, true, "none", "bshd", "bottom_right"}));
+    EXPECT_TRUE(admits({128, 4096, 8, 8, false, "local_128", "bshd", "bottom_right"}));
+    EXPECT_FALSE(admits({128, 4096, 8, 8, false, "none", "bshd", "bottom_right"}));
+    // Extents of 1 make kv_bhsd the same graph as bhsd (seqlen_q 1, one head) or as bshd
+    // (seqlen_k 1, one kv head), so it is not listed there.
+    EXPECT_FALSE(admits({1, 4096, 1, 1, true, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({1, 4096, 8, 1, true, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({2, 4096, 1, 1, true, "none", "kv_bhsd"}));
+    EXPECT_FALSE(admits({1, 1, 8, 1, false, "none", "kv_bhsd"}));
+    EXPECT_TRUE(admits({1, 1, 8, 1, false, "none", "bhsd"}));
+}
+
+TEST(TestProblemSpace, TheShippedSdpaFacetInteractionsRefuseWhatIsDegenerateAndAdmitTheRest)
+{
+    struct Candidate
+    {
+        std::string form = "plain";
+        std::string layout = "bshd";
+        std::string scale = "inv_sqrt_d";
+        std::string window = "none";
+        int64_t seqlenQ = 2048;
+        int64_t seqlenK = 2048;
+        bool causal = false;
+    };
+    const auto admitsFor = [](const std::string& operation, const Candidate& c) {
+        ProblemPoint point{{"batch", int64_t{2}},
+                           {"heads", int64_t{8}},
+                           {"heads_kv", int64_t{2}},
+                           {"seqlen_q", c.seqlenQ},
+                           {"seqlen_k", c.seqlenK},
+                           {"head_dim", int64_t{64}},
+                           {"is_causal", c.causal},
+                           {"alignment", std::string("top_left")},
+                           {"dtype", std::string("fp16")},
+                           {"form", c.form},
+                           {"layout", c.layout},
+                           {"scale", c.scale}};
+        if(operation == "sdpa_fwd")
+        {
+            point["generate_stats"] = false;
+            point["window"] = c.window;
+        }
+        return detail::satisfiesConstraints(test::shippedOperation(operation), point);
+    };
+
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        // A form that states no scale value (scale_unset), or passes it as a tensor
+        // (scale_tensor), ignores the scale facet: three values would list one graph three times
+        // (or three tensors that differ only in their default), so only inv_sqrt_d is declared.
+        for(const std::string form : {"scale_unset", "scale_tensor"})
+        {
+            EXPECT_TRUE(admitsFor(operation, Candidate{form})) << operation << " " << form;
+            EXPECT_FALSE(admitsFor(operation, Candidate{form, "bshd", "unit"}))
+                << operation << " " << form;
+            EXPECT_FALSE(admitsFor(operation, Candidate{form, "bshd", "jitter"}))
+                << operation << " " << form;
+        }
+        // The forms that state the scale keep the whole facet, over every layout.
+        for(const std::string form : {"plain", "dropout", "padded", "bias"})
+        {
+            for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
+            {
+                for(const std::string layout : {"bshd", "bhsd", "kv_bhsd"})
+                {
+                    EXPECT_TRUE(admitsFor(operation, Candidate{form, layout, scale}))
+                        << operation << " " << form << " " << layout << " " << scale;
+                }
+            }
+        }
+    }
+
+    // Ragged packs tokens through offset tensors whose multiplier is the token stride, so it
+    // needs token-major strides: head-major Q, K or V would be addressed as if tokens were
+    // contiguous across heads.
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd"}));
+    EXPECT_FALSE(admitsFor("sdpa_fwd", Candidate{"ragged", "bhsd"}));
+    EXPECT_FALSE(admitsFor("sdpa_fwd", Candidate{"ragged", "kv_bhsd"}));
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd", "unit"}));
+    EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{"ragged", "bshd", "jitter", "local_128"}));
+
+    // Everything else crosses with a window and with the layouts, the frontend validators and
+    // references stating nothing against it and an engine's matcher declining what it does not
+    // serve (which the oracle filters): dropout, sink, bias and padded with every window.
+    for(const std::string form : {"plain", "dropout", "padded", "bias", "sink"})
+    {
+        for(const std::string window : {"local_128", "local_1024", "local_4096"})
+        {
+            for(const bool causal : {true, false})
+            {
+                EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", window}))
+                    << form << " " << window;
+                EXPECT_TRUE(admitsFor("sdpa_fwd",
+                                      Candidate{form, "bhsd", "unit", window, 2048, 2048, causal}))
+                    << form << " " << window << " causal " << causal;
+            }
+        }
+    }
+    EXPECT_TRUE(admitsFor("sdpa_fwd",
+                          Candidate{"sink", "bshd", "inv_sqrt_d", "local_128", 2048, 2048, true}));
+
+    // Cross attention (more queries than keys) is non-causal only, and never windowed, whatever
+    // the form: the forms that carry per-batch lengths (padded, ragged) keep the same bounds.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        for(const std::string form :
+            {"plain", "scale_unset", "scale_tensor", "dropout", "padded", "bias"})
+        {
+            EXPECT_TRUE(
+                admitsFor(operation, Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77}))
+                << operation << " " << form;
+            EXPECT_FALSE(
+                admitsFor(operation, Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77, true}))
+                << operation << " " << form;
+        }
+    }
+    for(const std::string form : {"padded", "ragged", "bias", "sink", "dropout"})
+    {
+        EXPECT_FALSE(
+            admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", "local_128", 4096, 77}))
+            << form;
+        EXPECT_TRUE(admitsFor("sdpa_fwd", Candidate{form, "bshd", "inv_sqrt_d", "none", 4096, 77}))
+            << form;
+    }
+}
+
+namespace
+{
+
+/// Two enums, one weighted 2:1:1, one not, over two numeric extents.
+OperationMetadata weightedToy(const std::string& weights)
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "N":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"])"
+                       + weights + R"( },
+        "dtype":  { "type": "enum", "values": ["fp32", "fp16"] }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] }
+    })");
+}
+
+double shareOf(const ProblemCorpus& corpus, const std::string& parameter, const std::string& value)
+{
+    size_t held = 0;
+    const auto problems = corpus.problems();
+    for(const auto& point : problems)
+    {
+        held += std::get<std::string>(point.at(parameter)) == value ? 1 : 0;
+    }
+    return static_cast<double>(held) / static_cast<double>(problems.size());
+}
+
+} // namespace
+
+TEST(TestProblemSpace, AWeightedValueRealisesItsShareOfTheFirstPassAndOfTheGrownCorpus)
+{
+    const auto metadata = weightedToy(R"(, "weights": {"a": 2})");
+    for(const int64_t target : {int64_t{0}, int64_t{600}})
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 40;
+        request.corpusTarget = target;
+        request.seed = 12;
+
+        const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+
+        // 2:1:1 is 0.5, 0.25, 0.25; the other enum stays even.
+        EXPECT_NEAR(shareOf(corpus, "layout", "a"), 0.5, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "layout", "b"), 0.25, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "layout", "c"), 0.25, 0.03) << "target " << target;
+        EXPECT_NEAR(shareOf(corpus, "dtype", "fp32"), 0.5, 0.03) << "target " << target;
+        if(target > 0)
+        {
+            EXPECT_GE(corpus.problems().size(), static_cast<size_t>(target));
+        }
+    }
+}
+
+TEST(TestProblemSpace, EqualWeightsAreNoWeights)
+{
+    // Weights are relative: declaring every value equal must not move a single first-pass
+    // problem or any value's share.
+    for(const int64_t target : {int64_t{0}, int64_t{250}})
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 25;
+        request.corpusTarget = target;
+        request.seed = 13;
+
+        const auto absent = exploreProblemSpace(weightedToy(""), request, ACCEPT_EVERYTHING);
+        const auto equal = exploreProblemSpace(
+            weightedToy(R"(, "weights": {"a": 3, "b": 3, "c": 3})"), request, ACCEPT_EVERYTHING);
+
+        if(target == 0)
+        {
+            EXPECT_EQ(described(equal), described(absent));
+        }
+        else
+        {
+            // Growing splits the need exactly (largest remainder) where the unweighted search
+            // rounds each share up, so the points differ; the shares must not.
+            EXPECT_NEAR(shareOf(equal, "layout", "a"), shareOf(absent, "layout", "a"), 0.03);
+            EXPECT_NEAR(shareOf(equal, "layout", "b"), shareOf(absent, "layout", "b"), 0.03);
+        }
+    }
+}
+
+TEST(TestProblemSpace, ApportionSplitsByLargestRemainderAndSumsExactly)
+{
+    // 5 exactly for the heavy part; the two equal ones split the other 5 as 3 and 2, and which
+    // gets the odd one is the tie-break's, not a fixed position.
+    const auto split = detail::apportion(10, {2.0, 1.0, 1.0});
+    EXPECT_EQ(split[0], 5);
+    EXPECT_EQ(split[1] + split[2], 5);
+    // A ceiling per part would give four here (1 each) and a rounding per part two or none.
+    for(const int64_t total : {int64_t{1}, int64_t{3}, int64_t{7}, int64_t{50}, int64_t{1001}})
+    {
+        const auto parts = detail::apportion(total, {0.25, 0.75, 1.5, 0.25, 1.25});
+        int64_t sum = 0;
+        for(const auto part : parts)
+        {
+            sum += part;
+        }
+        EXPECT_EQ(sum, total);
+    }
+    EXPECT_EQ(detail::apportion(0, {1.0, 1.0}), (std::vector<int64_t>{0, 0}));
+
+    // Every ideal below one: 300 over 864 parts of two sizes. A largest-remainder split gives
+    // nearly all 300 units to the heavy parts; the light ones must keep their share of them.
+    std::vector<double> sizes(864, 1.0);
+    std::vector<uint64_t> keys(864);
+    for(size_t i = 0; i < sizes.size(); ++i)
+    {
+        sizes[i] = i % 3 == 0 ? 2.0 : 0.5;
+        keys[i] = detail::tieKey(3, i);
+    }
+    const auto spread = detail::apportion(300, sizes, keys);
+    int64_t heavy = 0;
+    int64_t all = 0;
+    for(size_t i = 0; i < spread.size(); ++i)
+    {
+        all += spread[i];
+        heavy += i % 3 == 0 ? spread[i] : 0;
+    }
+    EXPECT_EQ(all, 300);
+    // The 288 heavy parts weigh 576 of 576 + 288 = 864: two thirds.
+    EXPECT_NEAR(static_cast<double>(heavy) / 300.0, 2.0 / 3.0, 0.07);
+}
+
+TEST(TestProblemSpace, AWeightedValueKeepsItsShareAtASmallPointsPerCombination)
+{
+    // 0.75 of two points rounds to two, and 1.5 of two to three: a per-combination rounding
+    // (and a per-combination ceiling when growing) puts every small value above its weight.
+    // The split of the whole first pass by largest remainder lands exactly on 2:1:1.
+    ExplorationRequest request;
+    request.pointsPerCombination = 2;
+    request.seed = 14;
+    const auto corpus
+        = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
+    // Exact for the heavy value; the two equal light ones split what is left, and a tie in the
+    // remainders goes to the earlier, so one of them may hold a point more than the other.
+    EXPECT_NEAR(shareOf(corpus, "layout", "a"), 0.5, 0.01);
+    EXPECT_NEAR(shareOf(corpus, "layout", "b") + shareOf(corpus, "layout", "c"), 0.5, 0.01);
+
+    request.pointsPerCombination = 2;
+    request.corpusTarget = 400;
+    const auto grown
+        = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
+    EXPECT_NEAR(shareOf(grown, "layout", "a"), 0.5, 0.03);
+    EXPECT_NEAR(shareOf(grown, "layout", "b") + shareOf(grown, "layout", "c"), 0.5, 0.03);
+}
+
+TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
+{
+    // (alignment bottom_right, non-causal, window none) is empty by the declaration's own
+    // constraints, while its windowed twins are not, so sizes taken as a product of weights over
+    // every combination leave window none under its declared 50%. The forms empty more: a scale
+    // the form does not state (scale_unset, scale_tensor) other than inv_sqrt_d, and a ragged
+    // form over a layout that is not token-major. The raking has to hold all four weighted
+    // facets at once over what is left.
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok());
+    const auto& metadata = *parsed.metadata;
+
+    size_t total = 0;
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+    ASSERT_EQ(combinations.size(), 6912U);
+    const auto sizes = detail::combinationSizes(metadata, combinations);
+
+    double all = 0.0;
+    std::map<std::string, double> window;
+    std::map<std::string, double> layout;
+    std::map<std::string, double> scale;
+    std::map<std::string, double> form;
+    size_t empty = 0;
+    for(size_t i = 0; i < combinations.size(); ++i)
+    {
+        const auto& c = combinations[i];
+        const auto text = [&c](const char* name) { return std::get<std::string>(c.at(name)); };
+        const bool scaleIgnored = text("form") == "scale_unset" || text("form") == "scale_tensor";
+        const bool emptyByDeclaration
+            = (text("alignment") == "bottom_right" && !std::get<bool>(c.at("is_causal"))
+               && text("window") == "none")
+              || (scaleIgnored && text("scale") != "inv_sqrt_d")
+              || (text("form") == "ragged" && text("layout") != "bshd");
+        if(emptyByDeclaration)
+        {
+            EXPECT_EQ(sizes[i], 0.0) << detail::describe(c);
+            ++empty;
+        }
+        else
+        {
+            EXPECT_GT(sizes[i], 0.0) << detail::describe(c);
+        }
+        all += sizes[i];
+        window[text("window")] += sizes[i];
+        layout[text("layout")] += sizes[i];
+        scale[text("scale")] += sizes[i];
+        form[text("form")] += sizes[i];
+    }
+    // Per form, 864 combinations: 54 are the bottom_right, non-causal, no-window quarter of the
+    // product. Five forms leave it at that; scale_unset and scale_tensor also lose the 576 whose
+    // scale is not inv_sqrt_d, and ragged the 576 whose layout is not bshd, each less the 36 of
+    // those already in the 54: 5 * 54 + 3 * (576 + 54 - 36) = 2052.
+    EXPECT_EQ(empty, 2052U);
+    EXPECT_NEAR(window["none"] / all, 0.5, 1e-6);
+    EXPECT_NEAR(window["local_128"] / all, 1.0 / 6.0, 1e-6);
+    EXPECT_NEAR(layout["bshd"] / all, 0.5, 1e-6);
+    EXPECT_NEAR(layout["kv_bhsd"] / all, 0.25, 1e-6);
+    EXPECT_NEAR(scale["inv_sqrt_d"] / all, 0.5, 1e-6);
+    // plain 7 of 7 + 7 forms of 1.
+    EXPECT_NEAR(form["plain"] / all, 0.5, 1e-6);
+    EXPECT_NEAR(form["sink"] / all, 1.0 / 14.0, 1e-6);
+    // The mean over combinations that can hold a problem is 1, as it is for unweighted ones.
+    EXPECT_NEAR(all, static_cast<double>(combinations.size() - empty), 1e-6);
 }
 
 } // namespace hipdnn_corpus_gen

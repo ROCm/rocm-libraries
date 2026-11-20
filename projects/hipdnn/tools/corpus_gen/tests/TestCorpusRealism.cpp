@@ -398,4 +398,102 @@ TEST(TestCorpusRealism, EveryShippedMirrorKeepsItsArchetypesProportion)
     }
 }
 
+TEST(TestCorpusRealism, TheShippedSdpaCorpusCoversHeadDimsLayoutsAndSequenceRelationsAModelUses)
+{
+    // The gaps this guards: head_dim drawn log-uniformly from 1 (43% of rows at D <= 16, none of
+    // them a real head), no layout but BSHD, and seqlen_q <= seqlen_k forced everywhere, so
+    // cross attention (seqlen_q > seqlen_k) never appeared.
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+
+    ExplorationRequest request;
+    request.pointsPerCombination = 30;
+    request.seed = 9;
+    const auto problems
+        = exploreProblemSpace(*parsed.metadata, request, ACCEPT_EVERYTHING).problems();
+    ASSERT_GT(problems.size(), 1000U);
+
+    size_t wide = 0;
+    size_t square = 0;
+    size_t cross = 0;
+    int64_t narrowest = INT64_MAX;
+    std::set<std::string> layouts;
+    for(const auto& point : problems)
+    {
+        const auto headDim = at(point, "head_dim");
+        narrowest = std::min(narrowest, headDim);
+        wide += headDim >= 32 ? 1 : 0;
+        const auto q = at(point, "seqlen_q");
+        const auto k = at(point, "seqlen_k");
+        square += q == k ? 1 : 0;
+        if(q > k)
+        {
+            ++cross;
+            EXPECT_FALSE(std::get<bool>(point.at("is_causal")))
+                << "a causal mask with more queries than keys";
+        }
+        layouts.insert(std::get<std::string>(point.at("layout")));
+    }
+    const auto share = [&problems](size_t count) {
+        return static_cast<double>(count) / static_cast<double>(problems.size());
+    };
+
+    // Measured at 0.92 and 0.18 for this seed; the floors leave room for a reseed.
+    constexpr double SDPA_WIDE_SHARE = 0.8;
+    constexpr double SDPA_SQUARE_SHARE = 0.1;
+    EXPECT_GE(narrowest, 8) << "the declared head_dim range";
+    EXPECT_GT(share(wide), SDPA_WIDE_SHARE) << "most rows should be heads of D >= 32";
+    EXPECT_GT(share(square), SDPA_SQUARE_SHARE) << "prefill is the dominant case";
+    EXPECT_GT(cross, 0U) << "no cross attention";
+    EXPECT_EQ(layouts, (std::set<std::string>{"bhsd", "bshd", "kv_bhsd"}));
+}
+
+TEST(TestCorpusRealism, TheShippedSdpaArchetypesAnchorCrossAttentionAndTheHeadWidthsOfRealModels)
+{
+    // The anchors are what a large corpus is mostly made of, so they must themselves hold the
+    // cross-attention and the head widths the model-pinned archetypes (D of 64 and 128) lack.
+    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json");
+    ASSERT_TRUE(file.good());
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    ASSERT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+    const auto& metadata = *parsed.metadata;
+
+    std::mt19937_64 rng(11);
+    std::set<int64_t> headDims;
+    size_t cross = 0;
+    for(const bool causal : {true, false})
+    {
+        const ProblemPoint categorical{{"alignment", std::string("top_left")},
+                                       {"dtype", std::string("bf16")},
+                                       {"generate_stats", false},
+                                       {"is_causal", causal},
+                                       {"form", std::string("plain")},
+                                       {"layout", std::string("bshd")},
+                                       {"scale", std::string("inv_sqrt_d")},
+                                       {"window", std::string("none")}};
+        for(const auto& archetype : metadata.archetypes)
+        {
+            for(int i = 0; i < 40; ++i)
+            {
+                const auto drawn = detail::drawFromArchetype(metadata, archetype, categorical, rng);
+                if(!drawn.has_value())
+                {
+                    continue; // the archetype fixes the other mask
+                }
+                EXPECT_TRUE(detail::satisfiesConstraints(metadata, *drawn))
+                    << archetype.name << " draws a point the declaration's own constraints refuse";
+                headDims.insert(at(*drawn, "head_dim"));
+                cross += at(*drawn, "seqlen_q") > at(*drawn, "seqlen_k") ? 1 : 0;
+            }
+        }
+    }
+    EXPECT_GT(cross, 0U) << "no archetype anchors cross attention";
+    for(const int64_t width : {40, 48, 80, 96, 112, 160, 192, 256})
+    {
+        EXPECT_EQ(headDims.count(width), 1U) << "no archetype anchors head_dim " << width;
+    }
+}
+
 } // namespace hipdnn_corpus_gen

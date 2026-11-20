@@ -259,6 +259,36 @@ TEST(TestPoolAssembly, ACutSweepPoolKeepsEveryCategoricalCombination)
     EXPECT_EQ(perStratum, expected);
 }
 
+TEST(TestPoolAssembly, ACutKeepsTheProportionOfStrataThatWeightedCombinationsGave)
+{
+    // The search hands the cut pools whose combinations are sized 2:1:1 by their declared
+    // weights; the cut must pass that proportion on, not equalise the strata.
+    std::vector<PoolEntry> pool;
+    int64_t index = 0;
+    for(const auto& [stratum, size] : std::vector<std::pair<std::string, int64_t>>{
+            {"layout=a,|", 120}, {"layout=b,|", 60}, {"layout=c,|", 60}})
+    {
+        for(int64_t i = 0; i < size; ++i)
+        {
+            auto entry = entryAt("sweep", index++, "");
+            entry.stratum = stratum;
+            pool.push_back(entry);
+        }
+    }
+
+    std::map<std::string, int64_t> allocation;
+    const auto selected = select({{"sweep", pool}}, 60, defaultShares(), allocation);
+
+    std::map<std::string, int64_t> perStratum;
+    for(const auto& entry : selected)
+    {
+        ++perStratum[entry.stratum];
+    }
+    const std::map<std::string, int64_t> expected{
+        {"layout=a,|", 30}, {"layout=b,|", 15}, {"layout=c,|", 15}};
+    EXPECT_EQ(perStratum, expected);
+}
+
 TEST(TestPoolAssembly, ARegimeQuotaIsFilledBeforeTheProportionalCut)
 {
     // A proportional cut of 20 would take 2 of the rare regime; the quota of 6 is honoured first.

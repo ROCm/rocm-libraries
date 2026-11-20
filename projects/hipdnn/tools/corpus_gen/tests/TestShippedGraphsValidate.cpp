@@ -127,11 +127,95 @@ TEST(TestShippedGraphsValidate, EveryDeclarationBuildsGraphsTheFrontendValidates
     EXPECT_GT(operations, 0) << "no shipped declaration was found";
 }
 
+TEST(TestShippedGraphsValidate, EverySdpaFormLayoutScaleWindowAndSequenceRelationValidates)
+{
+    // The sweep above draws a couple of points per combination; these are the corners the SDPA
+    // facets add: cross attention (seqlen_q > seqlen_k, non-causal), the widest head, fp32, every
+    // form, layout, scale and window the declaration admits together.
+    for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
+    {
+        const auto metadata = test::shippedOperation(operation);
+        const auto* form = metadata.find("form");
+        ASSERT_NE(form, nullptr) << operation;
+
+        struct Shape
+        {
+            int64_t seqlenQ;
+            int64_t seqlenK;
+            int64_t headDim;
+            bool causal;
+        };
+        const std::vector<Shape> shapes{{4096, 77, 40, false},
+                                        {1024, 1024, 512, true},
+                                        {1, 4096, 128, true},
+                                        {197, 197, 8, false}};
+        const std::vector<std::string> windows
+            = operation == "sdpa_fwd" ? std::vector<std::string>{"none", "local_128", "local_4096"}
+                                      : std::vector<std::string>{"none"};
+        int64_t validated = 0;
+        for(const auto& shape : shapes)
+        {
+            for(const auto& formValue : form->values)
+            {
+                for(const std::string layout : {"bshd", "bhsd", "kv_bhsd"})
+                {
+                    for(const std::string scale : {"inv_sqrt_d", "unit", "jitter"})
+                    {
+                        for(const std::string dtype : {"fp16", "fp32"})
+                        {
+                            for(const auto& window : windows)
+                            {
+                                ProblemPoint point{{"batch", int64_t{2}},
+                                                   {"heads", int64_t{8}},
+                                                   {"heads_kv", int64_t{2}},
+                                                   {"seqlen_q", shape.seqlenQ},
+                                                   {"seqlen_k", shape.seqlenK},
+                                                   {"head_dim", shape.headDim},
+                                                   {"is_causal", shape.causal},
+                                                   {"alignment", std::string("top_left")},
+                                                   {"dtype", dtype},
+                                                   {"form", formValue},
+                                                   {"layout", layout},
+                                                   {"scale", scale}};
+                                if(operation == "sdpa_fwd")
+                                {
+                                    point["generate_stats"] = false;
+                                    point["window"] = window;
+                                }
+                                const std::string where = operation + " " + detail::describe(point);
+                                if(!detail::satisfiesConstraints(metadata, point))
+                                {
+                                    // A point the declaration excludes (a window with more queries
+                                    // than keys leaves most rows with no key at all, a ragged form
+                                    // over head-major strides, a scale the form ignores) is not a
+                                    // problem the corpus would ever hold, so it is not certified.
+                                    continue;
+                                }
+                                ++validated;
+                                const auto built = buildGraphFor(metadata, point);
+                                ASSERT_TRUE(built.ok()) << where << ": " << built.error;
+                                hipdnn_frontend::graph::Graph graph;
+                                const auto restored = graph.deserialize(built.bytes);
+                                ASSERT_TRUE(restored.is_good())
+                                    << where << ": deserialize: " << restored.get_message();
+                                const auto valid = graph.validate();
+                                EXPECT_TRUE(valid.is_good())
+                                    << where << ": validate: " << valid.get_message();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        EXPECT_GT(validated, 0) << operation << " certified nothing";
+    }
+}
+
 TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
 {
     // The sweep above reaches a form only by chance; this builds each declared one over a GQA
     // shape at every element type, mask and diagonal anchor the declaration admits, with and
-    // without the training forward's statistics.
+    // without the training forward's statistics, at the default layout, scale and window.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
         const auto metadata = test::shippedOperation(operation);
@@ -150,17 +234,23 @@ TEST(TestShippedGraphsValidate, EverySdpaFormBuildsAGraphTheFrontendValidates)
                     {
                         for(const bool stats : {true, false})
                         {
-                            const ProblemPoint point{{"batch", int64_t{2}},
-                                                     {"heads", int64_t{4}},
-                                                     {"heads_kv", int64_t{2}},
-                                                     {"seqlen_q", int64_t{16}},
-                                                     {"seqlen_k", int64_t{32}},
-                                                     {"head_dim", int64_t{64}},
-                                                     {"is_causal", causal},
-                                                     {"alignment", std::string(alignment)},
-                                                     {"generate_stats", stats},
-                                                     {"dtype", std::string(dtype)},
-                                                     {"form", value}};
+                            ProblemPoint point{{"batch", int64_t{2}},
+                                               {"heads", int64_t{4}},
+                                               {"heads_kv", int64_t{2}},
+                                               {"seqlen_q", int64_t{16}},
+                                               {"seqlen_k", int64_t{32}},
+                                               {"head_dim", int64_t{64}},
+                                               {"is_causal", causal},
+                                               {"alignment", std::string(alignment)},
+                                               {"generate_stats", stats},
+                                               {"dtype", std::string(dtype)},
+                                               {"form", value},
+                                               {"layout", std::string("bshd")},
+                                               {"scale", std::string("inv_sqrt_d")}};
+                            if(operation == "sdpa_fwd")
+                            {
+                                point["window"] = std::string("none");
+                            }
                             // The declaration pins the anchor where it makes no difference.
                             if(!detail::satisfiesConstraints(metadata, point))
                             {

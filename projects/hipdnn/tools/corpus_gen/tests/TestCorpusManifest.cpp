@@ -387,6 +387,9 @@ std::vector<uint8_t> builtSdpaGraph(int64_t seqlenQ)
     point["alignment"] = std::string("top_left");
     point["generate_stats"] = false;
     point["form"] = std::string("plain");
+    point["layout"] = std::string("bshd");
+    point["scale"] = std::string("inv_sqrt_d");
+    point["window"] = std::string("none");
     const auto built = buildGraphFor(metadata, point);
     EXPECT_TRUE(built.ok()) << built.error;
     return built.bytes;
