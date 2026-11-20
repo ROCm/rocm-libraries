@@ -24,7 +24,6 @@
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_test_sdk/utilities/DynamicTolerancesConv.hpp>
 
-#include "harness/TestSettings.hpp"
 #include "harness/input-init/FillRecipe.hpp"
 
 // The dynamic tolerance for convolution outputs (forward, backward data and backward weights)
@@ -1112,57 +1111,6 @@ inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> convOutp
     default:
         return std::nullopt;
     }
-}
-
-/// convOutputTolerance() for the engine whose settings file this is: its coefficients of the
-/// scale's own direction ([conv_fwd_tolerance], [conv_dgrad_tolerance] or [conv_wrw_tolerance])
-/// and of the output type, whichever other direction or type the file also sets. With no
-/// settings file the SDK's values apply.
-inline std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
-    convOutputToleranceFor(const ConvErrorScale& scale,
-                           hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
-                           const TestSettings* settings)
-{
-    using hipdnn_flatbuffers_sdk::data_objects::DataType;
-    namespace sdk = hipdnn_test_sdk::utilities::conv;
-    if(settings == nullptr)
-    {
-        return convOutputTolerance(scale, outputType);
-    }
-    const auto direction = std::visit(
-        [](const auto& s) {
-            using Scale = std::decay_t<decltype(s)>;
-            if constexpr(std::is_same_v<Scale, sdk::ConvFpropErrorScale>)
-            {
-                return ConvToleranceDirection::FWD;
-            }
-            else if constexpr(std::is_same_v<Scale, sdk::ConvDgradErrorScale>)
-            {
-                return ConvToleranceDirection::DGRAD;
-            }
-            else
-            {
-                return ConvToleranceDirection::WRW;
-            }
-        },
-        scale);
-    std::string_view typeName;
-    switch(outputType)
-    {
-    case DataType::HALF:
-        typeName = "half";
-        break;
-    case DataType::BFLOAT16:
-        typeName = "bfloat16";
-        break;
-    case DataType::FLOAT:
-        typeName = "float";
-        break;
-    default:
-        return std::nullopt;
-    }
-    return convOutputTolerance(
-        scale, outputType, settings->convToleranceCoefficients(direction, typeName));
 }
 
 } // namespace hipdnn_integration_tests::tolerance

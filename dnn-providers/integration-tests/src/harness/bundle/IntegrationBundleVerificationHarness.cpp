@@ -13,7 +13,10 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <type_traits>
 #include <utility>
+#include <variant>
 
 #include "harness/BundleMetadata.hpp"
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
@@ -70,6 +73,59 @@ const char* modeName(VerificationMode mode)
     default:
         return "unknown";
     }
+}
+
+// The dynamic tolerance of one convolution output, with the coefficients the engine's settings
+// file sets for the direction of the scale's convolution, the output type
+// ([conv_<direction>_tolerance.<type>]); the SDK's values when there is no settings file, or the
+// file sets none for them. Nullopt when the output type is not modeled.
+std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
+    convToleranceFor(const tolerance::ConvErrorScale& scale,
+                     hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
+                     const TestSettings* settings)
+{
+    namespace sdk = hipdnn_test_sdk::utilities::conv;
+    using hipdnn_flatbuffers_sdk::data_objects::DataType;
+
+    if(settings == nullptr)
+    {
+        return tolerance::convOutputTolerance(scale, outputType);
+    }
+
+    std::string_view typeName;
+    switch(outputType)
+    {
+    case DataType::HALF:
+        typeName = "half";
+        break;
+    case DataType::BFLOAT16:
+        typeName = "bfloat16";
+        break;
+    case DataType::FLOAT:
+        typeName = "float";
+        break;
+    default:
+        return std::nullopt;
+    }
+    const auto direction = std::visit(
+        [](const auto& s) {
+            using Scale = std::decay_t<decltype(s)>;
+            if constexpr(std::is_same_v<Scale, sdk::ConvFpropErrorScale>)
+            {
+                return ConvToleranceDirection::FWD;
+            }
+            else if constexpr(std::is_same_v<Scale, sdk::ConvDgradErrorScale>)
+            {
+                return ConvToleranceDirection::DGRAD;
+            }
+            else
+            {
+                return ConvToleranceDirection::WRW;
+            }
+        },
+        scale);
+    return tolerance::convOutputTolerance(
+        scale, outputType, settings->convToleranceCoefficients(direction, typeName));
 }
 
 } // namespace
@@ -1603,8 +1659,7 @@ VerificationOutcome
             }
             if(convScale->second.has_value())
             {
-                dynamic = tolerance::convOutputToleranceFor(
-                    *convScale->second, dataType, _deps.policy.testSettings);
+                dynamic = convToleranceFor(*convScale->second, dataType, _deps.policy.testSettings);
             }
         }
         if(dynamic.has_value())

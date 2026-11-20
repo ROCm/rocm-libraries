@@ -1302,9 +1302,9 @@ TEST(TestConvFwdDynamicTolerance, OutputScaleOfAReconvergentAddIsTheSumOfItsPath
         halved.bakedScale = 0.5f;
         halved.wiring = Wiring::MUL_THEN_ADD_Y;
         halved.reverseNodes = reverseNodes;
-        const auto halvedScale = errorScale(halved);
-        ASSERT_TRUE(halvedScale.has_value()) << reverseNodes;
-        EXPECT_DOUBLE_EQ(halvedScale->outputScale, 1.5) << reverseNodes;
+        const auto small = errorScale(halved);
+        ASSERT_TRUE(small.has_value()) << reverseNodes;
+        EXPECT_DOUBLE_EQ(small->outputScale, 1.5) << reverseNodes;
 
         GraphSpec tripled;
         tripled.mul = Mul::SCALE_SECOND;
