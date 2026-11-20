@@ -1856,6 +1856,7 @@ fn may_clobber_lds(kind: OpKind) -> bool {
                 | OpKind::LdsReadTr
                 | OpKind::Permlane32Swap
                 | OpKind::ReadLane
+                | OpKind::WriteLane
                 | OpKind::BufferLoadCp
                 | OpKind::BufferStoreCp
                 | OpKind::Permlane16Swap

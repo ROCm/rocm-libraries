@@ -474,6 +474,9 @@ def render12(
 ) -> str:
     if v.name.startswith("Gfx12:"):
         mn = v.name.removeprefix("Gfx12:")
+        if mn in {"global_inv", "global_wb"}:
+            scope = {1: "SE", 2: "DEV", 3: "SYS"}[v.imm]
+            return f"{mn} scope:SCOPE_{scope}"
         if mn == "s_barrier_signal":
             if v.imm != 0xFFFF:
                 raise Unprintable("a barrier other than the workgroup's")
@@ -487,6 +490,8 @@ def render12(
     if fmt == "Global" and text.endswith(" glc"):
         # gfx11's GLC on an atomic returns the old value.
         text = text.removesuffix(" glc") + " th:TH_ATOMIC_RETURN"
+    if v.name in {"GAtomicAddU32", "GAtomicAddU32Rtn"}:
+        text += " scope:SCOPE_SYS"
     if v.name in GFX12_VOP2:
         # VOP3-only on gfx11; gfx12 has a VOP2 form, which llvm-mc prefers.
         mn, rest = text.split(" ", 1)

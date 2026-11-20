@@ -118,6 +118,14 @@ pub fn encode(
 ) -> Result<bool, CompileError> {
     let op = inst.op;
     if let Opc::Gfx12(g) = op {
+        if matches!(g, Gfx12Op::GlobalInv | Gfx12Op::GlobalWb) {
+            // Operandless VGLOBAL: SADDR=null, SCOPE in word 1 bits 19:18.
+            if !matches!((g, inst.imm), (Gfx12Op::GlobalInv, 1..=3) | (Gfx12Op::GlobalWb, 3)) {
+                return Err(bad(format!("unsupported {} scope {}", g.mnemonic(), inst.imm)));
+            }
+            out.extend([0xee00_0000 | u32::from(g.code()) << 14 | NULL, (inst.imm as u32) << 18, 0]);
+            return Ok(true);
+        }
         out.push(match g {
             // SOP1 with the inline constant -1 as its source.
             Gfx12Op::SBarrierSignal => 0xBE80_0000 | (g.code() as u32) << 8 | 0xc1,
@@ -197,7 +205,10 @@ pub fn encode(
                 return Err(bad("a return hint on an access that returns nothing"));
             }
             out.push(0xEE00_0000 | code << 14 | saddr);
-            out.push(data << 23 | u32::from(returns) * TH_ATOMIC_RETURN | vdst);
+            // The i32 atomic add's LLVM atomicrmw has default (system) scope,
+            // independently of any preceding release or following acquire.
+            let scope = if matches!(op, Opc::GAtomicAddU32 | Opc::GAtomicAddU32Rtn) { 3 << 18 } else { 0 };
+            out.push(data << 23 | u32::from(returns) * TH_ATOMIC_RETURN | scope | vdst);
             out.push(offset24("global", inst.imm, -(1 << 23)..1 << 23)? << 8 | addr);
         }
         _ => return Ok(false),
@@ -240,6 +251,15 @@ mod tests {
     }
 
     #[test]
+    fn writelane_encodes_two_sources_not_the_tied_old_value() {
+        let write = |dst, data, lane| words(MInst::new(Opc::VWritelaneB32, [v(dst, 1)], [data, Opnd::Imm(lane), v(dst, 1)]));
+        assert_eq!(write(7, s(5, 1), 0), [0xd761_0007, 0x0001_0005]); // v7, s5, 0
+        assert_eq!(write(255, s(99, 1), 31), [0xd761_00ff, 0x0001_3e63]); // v255, s99, 31
+        assert_eq!(write(7, Opnd::Imm(0x1234_5678), 31), [0xd761_0007, 0x0001_3eff, 0x1234_5678]);
+        assert_eq!(words(MInst::new(Opc::VReadlaneB32, [s(7, 1)], [v(5, 1), Opnd::Imm(31)])), [0xd760_0007, 0x0001_3f05]);
+    }
+
+    #[test]
     fn gfx11_sync_instructions_are_refused() {
         for op in [Opc::SWaitcnt, Opc::SBarrier, Opc::BufferGl0Inv] {
             let mut out = Vec::new();
@@ -271,12 +291,12 @@ mod tests {
         // global_store_b32 v0, v9, s[100:101] offset:16
         let store = MInst::new(Opc::GStoreB32, [], [v(0, 1), s(100, 2), v(9, 1)]).with_imm(16).with_mods(M_SADDR);
         assert_eq!(words(store), [0xee06_8064, 0x0480_0000, 0x0000_1000]);
-        // global_atomic_add_u32 v[0:1], v9, off
+        // global_atomic_add_u32 v[0:1], v9, off scope:SCOPE_SYS
         let add = MInst::new(Opc::GAtomicAddU32, [], [v(0, 2), v(9, 1)]);
-        assert_eq!(words(add), [0xee0d_407c, 0x0480_0000, 0x0000_0000]);
-        // global_atomic_add_u32 v5, v[0:1], v9, off th:TH_ATOMIC_RETURN
+        assert_eq!(words(add), [0xee0d_407c, 0x048c_0000, 0x0000_0000]);
+        // global_atomic_add_u32 v5, v[0:1], v9, off th:TH_ATOMIC_RETURN scope:SCOPE_SYS
         let rtn = MInst::new(Opc::GAtomicAddU32Rtn, [v(5, 1)], [v(0, 2), v(9, 1)]).with_mods(M_GLC);
-        assert_eq!(words(rtn), [0xee0d_407c, 0x0490_0005, 0x0000_0000]);
+        assert_eq!(words(rtn), [0xee0d_407c, 0x049c_0005, 0x0000_0000]);
         // scratch_load_b32 v255, off, off offset:-1
         let load = MInst::new(Opc::ScratchLoadB32, [v(255, 1)], []).with_imm(-1);
         assert_eq!(words(load), [0xed05_007c, 0x0000_00ff, 0xffff_ff00]);

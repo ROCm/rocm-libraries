@@ -11,7 +11,7 @@
 
 use super::ast::{Attr, Kernel, Op, OpKind, Region, Scalar, Type, ValueId};
 use crate::error::CompileError;
-use crate::target::TargetInfo;
+use crate::target::{Target, TargetInfo};
 
 /// Deepest region nesting accepted, counting the kernel body. Instruction
 /// selection recurses once per level; a 1 MiB thread stack takes about 2.4
@@ -75,7 +75,7 @@ fn check_type(ty: &Type) -> Result<(), String> {
 }
 
 /// The kernel-level and per-op checks; see the module documentation.
-pub fn kernel(kernel: &Kernel) -> Result<(), CompileError> {
+pub fn kernel(kernel: &Kernel, target: Target) -> Result<(), CompileError> {
     if !plain_symbol(&kernel.name) {
         return Err(malformed(format!("kernel name {:?} is not a plain symbol", kernel.name)));
     }
@@ -96,6 +96,9 @@ pub fn kernel(kernel: &Kernel) -> Result<(), CompileError> {
                 CompileError::new(e.kind, format!("{:?} {name}: {}", op.kind, e.message))
             };
             checker.op(op).map_err(context)?;
+            if op.kind == OpKind::WriteLane && !target.gfx12() {
+                return Err(unsupported(format!("tile.writelane on {}", target.name())));
+            }
             // A loop body's trailing yield was checked with its loop; any
             // other yields nothing, inside some loop (as the LLVM lowering
             // requires).
@@ -134,7 +137,7 @@ pub fn lds_pool(bytes: u32, t: &TargetInfo) -> Result<(), CompileError> {
 /// loop with per-lane bounds, which lanes leave at different trips. A buffer
 /// access takes its resource and `soffset` from SGPRs, where the LLVM
 /// backend would loop over the distinct values of divergent ones.
-pub fn uniformity(kernel: &Kernel, uniform: &[bool]) -> Result<(), CompileError> {
+pub fn uniformity(kernel: &Kernel, uniform: &[bool], target: Target) -> Result<(), CompileError> {
     let uni = |v: &ValueId| uniform.get(v.0 as usize) == Some(&true);
     let mut stack = vec![(kernel.body.ops.iter(), false)];
     while let Some((ops, divergent)) = stack.last_mut() {
@@ -147,6 +150,10 @@ pub fn uniformity(kernel: &Kernel, uniform: &[bool]) -> Result<(), CompileError>
             OpKind::Return if divergent => {
                 return Err(unsupported("cf.return under a divergent scf.if condition or loop bound"));
             }
+            // v_writelane ignores EXEC. Do not update an inactive lane in divergent control flow.
+            OpKind::WriteLane if divergent => return Err(unsupported("tile.writelane under divergent control flow")),
+            OpKind::ReadLane if divergent && target.gfx12() => return Err(unsupported("tile.readlane under divergent control flow")),
+            OpKind::WriteLane if !uni(&op.operands[0]) => return Err(unsupported("tile.writelane needs wave-uniform data")),
             OpKind::BufferLoadVec | OpKind::BufferStoreVecF16 | OpKind::BufferLoadScalar | OpKind::BufferStoreScalar
                 if !(op.operands.first().is_some_and(uni) && op.operands.get(2).is_some_and(uni)) =>
             {
@@ -993,6 +1000,12 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
             }
+            WriteLane => {
+                arity(1, 3)?;
+                if !matches!(types[0], Type::Scalar(Scalar::I32 | Scalar::F32)) || *types[1] != i32t || types[2] != types[0] || res != Some(types[0]) {
+                    return Err(mismatch());
+                }
+            }
             CvtFp8ToF32 | CvtBf8ToF32 | CvtPkF32Fp8 | CvtPkF32Bf8 | CvtF32ToFp8 | CvtF32ToBf8 | CvtPkFp8F32 | CvtPkBf8F32 => {
                 arity(1, 1)?;
                 let e = if matches!(op.kind, CvtFp8ToF32 | CvtPkF32Fp8 | CvtF32ToFp8 | CvtPkFp8F32) { Scalar::FP8E4M3 } else { Scalar::BF8E5M2 };
@@ -1554,6 +1567,42 @@ mod tests {
         };
         assert_eq!(rejection(&kernel(&buffer("%tid"))).0, "ROCKE_DIRECT_UNSUPPORTED");
         assert!(compile(&kernel(&buffer("%n"))).is_ok());
+    }
+
+    #[test]
+    fn writelane_admits_only_a_uniform_word_and_static_wave32_lane() {
+        use crate::rir::compile_for;
+        use crate::target::Target::*;
+        let op = "    %v : i32 = tile.writelane ( %n, %lane, %tid )\n";
+        let store = "    %e : f32 = arith.bitcast ( %v )\n    memref.global_store_typed ( %Y, %tid, %e ) { align = i:4 }\n";
+        let body = format!("    %lane : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:31 }}\n{op}{store}");
+        let compile = |body: &str, target| compile_for(&kernel(body), target);
+        for target in [Gfx1201, Gfx12Generic] {
+            let listing = compile(&body, target).unwrap_or_else(|e| panic!("{e}")).listing();
+            assert!(listing.contains("v_writelane_b32"), "{listing}");
+            let restore = body.replace(store, &format!("    %s : i32 = tile.readlane ( %v, %lane )\n{}", store.replace("( %v )", "( %s )")));
+            let listing = compile(&restore, target).unwrap_or_else(|e| panic!("{e}")).listing();
+            assert!(listing.contains("v_writelane_b32") && listing.contains("v_readlane_b32"), "{listing}");
+            for selector in ["%tid", "%n"] {
+                let dynamic = restore.replace("tile.readlane ( %v, %lane )", &format!("tile.readlane ( %v, {selector} )"));
+                assert_eq!(compile(&dynamic, target).err().expect("dynamic restore").kind, "ROCKE_DIRECT_UNSUPPORTED");
+            }
+        }
+        let rejects = |body: &str, target, kind| {
+            let e = compile(body, target).err().expect("accepted writelane");
+            assert_eq!(e.kind, kind, "{e}");
+        };
+        for target in [Gfx1151, Gfx950] {
+            rejects(&body, target, "ROCKE_DIRECT_UNSUPPORTED");
+        }
+        for (from, to) in [("i:31", "i:32"), ("i:31", "i:-1"), (", %lane,", ", %n,"), (", %lane,", ", %tid,"), ("( %n,", "( %tid,")] {
+            rejects(&body.replace(from, to), Gfx1201, "ROCKE_DIRECT_UNSUPPORTED");
+        }
+        let branch = format!("    %cond : i1 = arith.cmp ( %tid, %n ) {{ pred = s:\"lt\" }}\n    scf.if ( %cond )\n      region @then {{\n{body}      }}\n");
+        rejects(&branch, Gfx1201, "ROCKE_DIRECT_UNSUPPORTED");
+        for (from, to) in [("%v : i32", "%v : f32"), (", %lane,", ", %Y,"), (", %tid )", ", %Y )"), (", %lane, %tid", ", %lane")] {
+            rejects(&body.replace(from, to), Gfx1201, "ROCKE_DIRECT_MALFORMED");
+        }
     }
 
     /// `depth` nested `scf.if` regions, or `scf.for` loops when `loops`.

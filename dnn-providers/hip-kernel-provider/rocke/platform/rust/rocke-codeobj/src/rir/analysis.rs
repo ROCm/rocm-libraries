@@ -381,6 +381,12 @@ fn uniform_rule<'a>(kernel: &Kernel, op: &'a Op, written: bool) -> Rule<'a> {
         | OpKind::GlobalPtrOffset
         | OpKind::BufferRsrc => Rule::Inputs(&op.operands),
         OpKind::Extract => Rule::Inputs(op.operands.get(..1).unwrap_or(&[])),
+        // LLVM GCNTTIImpl::isSourceOfDivergence: ordinary global-AS loads
+        // at the same address return the same value to each active lane
+        // (not true of private/flat loads or RMWs). This proves a register
+        // class, NOT cacheability: gload uses VMEM for these mutable dwords.
+        OpKind::GLoad if kernel.external_writes && op.bool_attr("invariant") != Some(true)
+            && op.results.first().is_some_and(|&v| *kernel.ty(v) == Type::Scalar(Scalar::I32)) => Rule::Inputs(&op.operands),
         OpKind::GLoad if smem_eligible_statically(kernel, op, written) => Rule::Inputs(&op.operands),
         _ => Rule::Always(false),
     }
@@ -529,7 +535,7 @@ pub fn smem_eligible(kernel: &Kernel, op: &Op, uniform: &[bool], written: bool) 
 fn smem_eligible_statically(kernel: &Kernel, op: &Op, written: bool) -> bool {
     // A load through a `ptr<T,constant>` (`invariant`) reads memory no wave
     // writes during the launch, so earlier global writes do not matter.
-    if op.kind != OpKind::GLoad || (written && op.bool_attr("invariant") != Some(true)) {
+    if op.kind != OpKind::GLoad || ((written || kernel.external_writes) && op.bool_attr("invariant") != Some(true)) {
         return false;
     }
     let Some(&result) = op.results.first() else { return false };

@@ -983,6 +983,7 @@ impl Shared {
             m0_early,
             passes,
             address_reduction: false,
+            external_writes: false,
             params,
             body: body?,
             values,

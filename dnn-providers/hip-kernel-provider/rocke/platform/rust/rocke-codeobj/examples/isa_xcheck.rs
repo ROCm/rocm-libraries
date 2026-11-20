@@ -482,6 +482,8 @@ fn gfx12_imms(op: Gfx12Op) -> &'static [i64] {
         Gfx12Op::SWaitLoadcntDscnt => &[0, 0x203, 0x3f00],
         Gfx12Op::SBarrierSignal | Gfx12Op::SBarrierWait => &[0xffff],
         Gfx12Op::SWaitAlu => &[0xff9e, 0xf19f, 0xff9d],
+        Gfx12Op::GlobalInv => &[1, 2, 3],
+        Gfx12Op::GlobalWb => &[3],
         _ => &[0, 1, 3],
     }
 }
