@@ -11,6 +11,7 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include <array>
 #include <memory>
 #include <string>
 #include <tuple>
@@ -294,8 +295,8 @@ TEST(TestKernelLaunchLimit, RefusesAGridPastOneAxisBeforeAnyHipCall)
     // no function and no device throws it host-only.
     constexpr unsigned int GRID = 1U << 22;
     constexpr unsigned int BLOCK = 1024;
-    const char axes[] = {'x', 'y', 'z'};
-    for(int axis = 0; axis < 3; ++axis)
+    constexpr std::array<char, 3> AXES = {'x', 'y', 'z'};
+    for(std::size_t axis = 0; axis < AXES.size(); ++axis)
     {
         Kernel kernel(nullptr, "k", Kernel::NO_DEVICE);
         kernel.setBlockSize(axis == 0 ? BLOCK : 1, axis == 1 ? BLOCK : 1, axis == 2 ? BLOCK : 1);
@@ -303,14 +304,14 @@ TEST(TestKernelLaunchLimit, RefusesAGridPastOneAxisBeforeAnyHipCall)
         try
         {
             kernel.launch(nullptr);
-            FAIL() << "expected axis " << axes[axis] << " to be refused";
+            FAIL() << "expected axis " << AXES[axis] << " to be refused";
         }
         catch(const hipdnn_plugin_sdk::HipdnnPluginException& error)
         {
             const std::string what = error.what();
             EXPECT_EQ(error.getStatus(), HIPDNN_PLUGIN_STATUS_BAD_PARAM) << what;
             EXPECT_NE(what.find("kernel 'k'"), std::string::npos) << what;
-            EXPECT_NE(what.find(std::string("axis ") + axes[axis] + ","), std::string::npos)
+            EXPECT_NE(what.find(std::string("axis ") + AXES[axis] + ","), std::string::npos)
                 << what;
             EXPECT_NE(what.find("grid 4194304 x block 1024"), std::string::npos) << what;
         }
