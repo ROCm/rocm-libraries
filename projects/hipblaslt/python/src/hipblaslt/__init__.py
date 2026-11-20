@@ -16,7 +16,7 @@ library = _loader.load(
 
 from . import _core  # noqa: E402 - libhipblaslt must be preloaded first
 
-_loader.check_after_import(library)
+_loader.check_after_import(library, _core)
 
 __version__ = _core.__version__
 HipblasLtError = _core.HipblasLtError

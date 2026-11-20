@@ -46,6 +46,17 @@ namespace
 // the header by name.
 #define reg(e, c_enum, py_name, value) reg(e, c_enum, py_name, value, #value)
 
+bool enum_has_value(const std::string& c_enum, long long value)
+{
+    auto it = registry().find(c_enum);
+    if(it == registry().end())
+        return false;
+    for(const auto& [name, entry] : it->second)
+        if(std::get<2>(entry) == value)
+            return true;
+    return false;
+}
+
 void init_enums(nb::module_& m)
 {
     {

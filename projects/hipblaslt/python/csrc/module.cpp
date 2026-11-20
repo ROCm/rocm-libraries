@@ -79,4 +79,5 @@ NB_MODULE(_core, m)
         "Test hook: raise HipblasLtError for a nonzero hipblasStatus_t value.");
 
     init_enums(m);
+    init_descriptors(m);
 }
