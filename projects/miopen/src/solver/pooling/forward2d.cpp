@@ -3,10 +3,13 @@
 
 #include <miopen/pooling/solvers.hpp>
 
+#include <algorithm>
+
 #include <miopen/pooling/invoke_params.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/pooling.hpp>
 #include <miopen/kernel_build_params.hpp>
+#include <miopen/hipoc_kernel.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
 
@@ -174,6 +177,11 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
         const int g_wk_width  = (kp.out_width + tile_w - 1) / tile_w;
         const int g_wk_height = (kp.out_height + tile_h - 1) / tile_h;
 
+        // The Y workgroups are the vertical tiles, the Z workgroups are batch * channel.
+        const std::size_t n_channel_batch = static_cast<std::size_t>(n_outputs) * batch_sz;
+        const bool linear_grid            = std::max<std::size_t>(g_wk_height, n_channel_batch) >
+                                 GetMaxWorkgroupsYZ(context.GetStream().GetDeviceName());
+
         int pooling_method =
             (pool_d.GetMode() == miopenPoolingMax)
                 ? MLO_POOLING_OP_MAX
@@ -200,6 +208,8 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
                 {"USE_IMG_INDEX", (wsp_index == miopenPoolingWorkspaceIndexImage ? 1 : 0)},
             };
         }
+        if(linear_grid)
+            build_params << KernelBuildParameters{{"MLO_POOLING_LINEAR_GRID", 1}};
 
         build_params << GetDataTypeKBP(problem.GetXDesc().GetType(),
                                        context.GetStream().GetDeviceName());
@@ -210,14 +220,26 @@ ConvSolution PoolingForward2d::GetSolution(const ExecutionContext& context,
         kernel.l_wk.push_back(grp_tile1);
         kernel.l_wk.push_back(1);
 
-        // All workgroups go to X, in (batch * channel, vertical tile, horizontal tile) order: Y and
-        // Z are limited to 16 bits on gfx12. X then carries tiles * N * C * grp_tile0 work-items,
-        // which ValidateGlobalWorkSize() requires to stay below 2^32 (only reachable for tensors
-        // far beyond what the 32-bit offsets in the kernel can address anyway).
-        kernel.g_wk.push_back(static_cast<std::size_t>(g_wk_width) * g_wk_height * n_outputs *
-                              batch_sz * grp_tile0);
-        kernel.g_wk.push_back(grp_tile1);
-        kernel.g_wk.push_back(1);
+        // The original grid is (tiles_x * grp_tile0, tiles_y * grp_tile1, N * C) work-items. On
+        // gfx12 the Y and Z workgroup IDs are 16 bits wide, so when the Y or Z workgroup count
+        // exceeds the device limit the linear variant is used: all workgroups go to X, in
+        // (batch * channel, vertical tile, horizontal tile) order. In that variant X carries
+        // tiles * N * C * grp_tile0 work-items, which can reach 2^32 only for tensors far beyond
+        // what the 32-bit offsets in the kernel can address (ValidateGlobalWorkSize() rejects
+        // it then). Otherwise nothing differs from the original launch.
+        if(linear_grid)
+        {
+            kernel.g_wk.push_back(static_cast<std::size_t>(g_wk_width) * g_wk_height *
+                                  n_channel_batch * grp_tile0);
+            kernel.g_wk.push_back(grp_tile1);
+            kernel.g_wk.push_back(1);
+        }
+        else
+        {
+            kernel.g_wk.push_back(static_cast<std::size_t>(g_wk_width) * grp_tile0);
+            kernel.g_wk.push_back(static_cast<std::size_t>(g_wk_height) * grp_tile1);
+            kernel.g_wk.push_back(n_channel_batch);
+        }
 
         result.construction_params.push_back(kernel);
     }

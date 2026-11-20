@@ -7,10 +7,12 @@
 #include "pooling2d_common.hpp"
 
 // On gfx12 the Y and Z workgroup IDs are only 16 bits wide, so a launch with more than 65536
-// workgroups in either dimension wraps blockIdx. The 2D pooling kernels used to map N*C to Z.
-// These cases straddle that limit: N*C = 65536 is the largest count that fits, the others exceed
-// it. They are valid problems on every architecture. A 32-bit index type is used so that the image
-// index mode (wsidx = 1) fits for every shape.
+// workgroups in either dimension wraps blockIdx. The 2D pooling kernels map N*C to Z and the
+// vertical tiles to Y; only when that grid exceeds the architecture's limit do the solvers select
+// the kernel variant that linearizes all workgroups into X (otherwise the original launch is
+// used). These cases straddle that limit: N*C = 65536 is the largest count that fits (original
+// path), the others exceed it (linear path). They are valid problems on every architecture. A
+// 32-bit index type is used so that the image index mode (wsidx = 1) fits for every shape.
 
 namespace {
 

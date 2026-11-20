@@ -30,6 +30,12 @@
 #include "float_types.h"
 #include "vector_types.hpp"
 
+// 1: grid-stride loop over Y workgroups (host caps the Y grid for gfx12 Y/Z workgroup ID limits).
+// 0 (default): one position per thread in Y.
+#ifndef MIO_BN_Y_STRIDE
+#define MIO_BN_Y_STRIDE 0
+#endif
+
 // determine block size using parameters passed from the host
 constexpr int blockSize = MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2;
 
@@ -65,8 +71,8 @@ __device__ __forceinline__ void BNFwdInferPerActivationImpl(unsigned int tidx,
     FLOAT_ACCUM inhat[MIO_BN_VEC_SIZE];
     FLOAT value[MIO_BN_VEC_SIZE];
 
-    // The host caps the number of workgroups in Y (the Y and Z workgroup IDs are only 16 bits wide
-    // on gfx12), so each thread strides over the remaining spatial positions.
+    // With MIO_BN_Y_STRIDE the host caps the number of workgroups in Y (the Y and Z workgroup IDs
+    // are only 16 bits wide on gfx12), so each thread strides over the remaining positions.
     for(; tidy * vecSizeY < hw; tidy += gridDim.y * MIO_BN_GRP1)
     {
         // parameters are indexed per activation, so they are reloaded for every position
@@ -114,6 +120,11 @@ __device__ __forceinline__ void BNFwdInferPerActivationImpl(unsigned int tidx,
             *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
                 *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
         }
+
+        if constexpr(!MIO_BN_Y_STRIDE)
+        {
+            break;
+        }
     }
 }
 
@@ -137,7 +148,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidz = blockIdx.z;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || (!MIO_BN_Y_STRIDE && tidy * vecSizeY >= hw) || tidz >= batchSize)
     {
         return;
     }
@@ -180,7 +191,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidz = blockIdx.z;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || (!MIO_BN_Y_STRIDE && tidy * vecSizeY >= hw) || tidz >= batchSize)
     {
         return;
     }

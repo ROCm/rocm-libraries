@@ -159,9 +159,11 @@ INSTANTIATE_TEST_SUITE_P(
     TestNameGenerator<BN3DTestCase>());
 
 // An odd C (vector size 1) with C >= 256 gives a one-thread-high NHWC workgroup, so the number of Y
-// workgroups equals H*W. The host caps the Y workgroup count at 65535, so 255x255 (65025) runs
-// without the cap (control), while 256x256 (65536) and 300x300 are capped and exercise the stride
-// loop on every architecture.
+// workgroups equals H*W. Only when that exceeds the architecture's Y workgroup limit (65536 on
+// gfx1200/gfx1201, 65535 on gfx1250; no limit elsewhere) the solver selects the grid-stride kernel
+// variant (MIO_BN_Y_STRIDE=1) and caps the Y workgroup count at 65535. 255x255 (65025) always runs
+// the original path (control); 256x256 (65536) and 300x300 exercise the stride loop on gfx1250
+// (256x256 only there) and gfx1201 (300x300), and the original path on archs without a limit.
 // C = 2 gives vector size 2, xlocalsize = 1 and ylocalsize = 256, so the cap is 65535 * 256 =
 // 16776960 positions; 4100x4100 = 16810000 is just above it with a multi-thread Y workgroup.
 INSTANTIATE_TEST_SUITE_P(
@@ -178,9 +180,10 @@ INSTANTIATE_TEST_SUITE_P(
                      testing::ValuesIn({miopenActivationPASTHRU})),
     TestNameGenerator<BN2DTestCase>());
 
-// Per-activation mode shares the Y grid cap but indexes the parameters per position, so the stride
-// loop has to reload them. Its parameter tensors have C*H*W elements, hence the smaller shapes:
-// 300x300 and 384x384 are 1.4x and 2.2x above the 65535 workgroup cap.
+// Per-activation mode shares the Y stride variant but indexes the parameters per position, so the
+// stride loop has to reload them. Its parameter tensors have C*H*W elements, hence the smaller
+// shapes: 300x300 and 384x384 are 1.4x and 2.2x above the 65535 workgroup cap (they select the
+// stride variant on gfx12).
 INSTANTIATE_TEST_SUITE_P(
     StandardPerActivation,
     GPU_BNOCLInferYWorkgroupLimit2D_FP16,

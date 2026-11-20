@@ -31,6 +31,7 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/visit_float.hpp>
 #include <miopen/kernel_build_params.hpp>
+#include <miopen/hipoc_kernel.hpp>
 
 namespace miopen {
 
@@ -114,11 +115,17 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         xgridsize = AlignUp(xgridsize, xlocalsize);
         ygridsize = AlignUp(ygridsize, ylocalsize);
 
-        // A launch with too many workgroups in Y returns wrong results on gfx12: more than 65536
-        // wrap blockIdx.y on gfx1200/gfx1201, and 65536 or more truncate the workgroup count on
-        // gfx1250. Cap the grid below both limits; the kernel strides over the remaining positions.
-        constexpr size_t max_y_workgroups = (size_t{1} << 16) - 1;
-        ygridsize                         = std::min(ygridsize, max_y_workgroups * ylocalsize);
+        // On gfx12 the Y and Z workgroup IDs are 16 bits wide, so a launch with too many Y
+        // workgroups returns wrong results. Only in that case use the grid-stride kernel variant
+        // with the Y grid capped below every architecture's limit; otherwise keep the original
+        // path.
+        bool y_stride = false;
+        if(ygridsize / ylocalsize > GetMaxWorkgroupsYZ(handle.GetDeviceName()))
+        {
+            constexpr size_t max_y_workgroups = (size_t{1} << 16) - 1;
+            ygridsize                         = max_y_workgroups * ylocalsize;
+            y_stride                          = true;
+        }
 
         zlocalsize                = 1;
         size_t active_threads_xy  = xgridsize * ygridsize;
@@ -176,6 +183,8 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+        if(y_stride)
+            kernel.comp_options += " -DMIO_BN_Y_STRIDE=1";
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);
