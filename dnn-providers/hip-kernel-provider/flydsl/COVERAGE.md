@@ -2315,7 +2315,7 @@ declined with a named cause (data type, operand layout, mask, workspace overflow
 another engine gets the plan where one exists (on gfx11 the split engine is the only SDPA
 backward engine). The kernels and how the shipped objects are pinned are in
 [`kernels_src/kernels/attention_bwd_cdna/`](kernels_src/kernels/attention_bwd_cdna/README.md);
-the split ops also carry a 509-object-file set on each of gfx11-generic, gfx942 and gfx90a (prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op: 3 standalone dBias reduce objects and 5 tail-zero objects); the gfx11-generic set is built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md). gfx12-generic ships the split set of 594 rows and the same 8 companions (§9.4).
+the split ops also carry a 509-object-file set on each of gfx11-generic, gfx942 and gfx90a (prep 33, dK/dV 238, dQ 230 and 8 companions of the dQ op: 3 standalone dBias reduce objects and 5 tail-zero objects); the gfx11-generic set is built from [`kernels_src/kernels/attention_bwd_rdna/`](kernels_src/kernels/attention_bwd_rdna/README.md). gfx12-generic ships the split set of 642 rows and the same 8 companions (§9.4).
 
 **Regeneration needs only this tree.** The backward objects regenerate from the tree and the pulled content alone
 ([REGEN.md](REGEN.md) §2-§3): each pin is a row of `tests/data/sdpa_bwd_reference.csv` (gfx11-generic: `sdpa_bwd_gfx11_reference.csv`; gfx12-generic: `sdpa_bwd_gfx12_reference.csv`),
@@ -2459,7 +2459,7 @@ ship their pins. Residual resource cells, none with a correctness effect:
 
 ### 9.4 gfx12-generic
 
-The split engine ships for gfx12-generic (RDNA4: gfx1200, gfx1201) from the same RDNA kernels and table grammar as gfx11-generic. The 597 pins are 594 rows (prep 42, dK/dV 292, dQ 260) and 3 standalone dBias reduce objects; the dQ manifest also lists 5 unpinned tail-zero entries (3 `tailzero`, 2 `tailzero_hv` naming one object), 8 companions in all. The verdict table is `tests/data/sdpa_bwd_gfx12_verdicts.csv`.
+The split engine ships for gfx12-generic (RDNA4: gfx1200, gfx1201) from the same RDNA kernels and table grammar as gfx11-generic. The 645 pins are 642 rows (prep 42, dK/dV 316, dQ 284) and 3 standalone dBias reduce objects; the dQ manifest also lists 5 unpinned tail-zero entries (3 `tailzero`, 2 `tailzero_hv` naming one object), 8 companions in all. 48 of the rows are exact (`padded=0`) twins of the 16-bit, no-dropout dK/dV and dQ base rows at head dims 64, 96, 128 and 256: a graph with `hd == rung` takes the exact row, which ranks above the padded rows of its rung. The schedules are tuned on gfx1201 (`POLICY_GFX12` in `fmha_tuning_bwd_dkdv_gfx11.py` and `fmha_tuning_bwd_dq_gfx11.py`, and the spelled knobs of the reference keys). The verdict table is `tests/data/sdpa_bwd_gfx12_verdicts.csv`.
 
 | | gfx11-generic | gfx12-generic |
 |---|---|---|

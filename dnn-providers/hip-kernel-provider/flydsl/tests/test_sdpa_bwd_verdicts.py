@@ -517,7 +517,7 @@ G15_RUNGS = (64, 96, 128, 256)
 
 
 def _gfx12_exact_fixture(root):
-    """The shipped-shape row set plus the G15 exact twins (``padded`` 0, ``floor`` tail) of the 16-bit no-dropout dK/dV and dQ rows at
+    """The shipped-shape row set plus the exact twins (``padded`` 0, ``floor`` tail) of the 16-bit no-dropout dK/dV and dQ rows at
     64/96/128/256, plain/causal/bias, and a padded ``store_db=0`` dQ bias row at each of those rungs.
     """
     import csv  # noqa: PLC0415
@@ -583,7 +583,7 @@ def _forms(by_hash, hashes):
 def test_gfx12_exact_row_fills_default_hash_and_padded_row_exact_false_hash(
     gfx12_exact, tile
 ):
-    """G15 (4): the exact row of a rung is ``default_hash`` of its entry, the padded row ``exact_false_hash``; a key with one row has it
+    """The exact row of a rung is ``default_hash`` of its entry, the padded row ``exact_false_hash``; a key with one row has it
     in both columns (dropout, a rung without an exact twin)."""
     _, specs, sel, _ = gfx12_exact
     by_hash = {s.hash(): s for s in specs}
@@ -898,8 +898,8 @@ def test_gfx12_ids_unique_and_every_hash_is_an_installed_object(gfx12_rows):
     assert len({r["id"] for r in gfx12_rows}) == len(gfx12_rows)
     assert {r["verdict"] for r in gfx12_rows} == {"served", "declined"}
     have = sv.in_tree_hashes(arch="gfx12-generic")
-    # 594 split rows; the dQ manifest's companions are the 3 standalone reduces and the 5 tail-zero objects.
-    assert [len(have[k]) for k in ("prep", "dkdv", "dq", "reduce")] == [42, 292, 260, 8]
+    # 642 split rows (48 of them exact twins); the dQ manifest's companions are the 3 standalone reduces and the 5 tail-zero objects.
+    assert [len(have[k]) for k in ("prep", "dkdv", "dq", "reduce")] == [42, 316, 284, 8]
     for r in gfx12_rows:
         for slot in sv.SLOT_COLUMNS:
             if r[slot]:

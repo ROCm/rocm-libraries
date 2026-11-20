@@ -77,8 +77,19 @@ POLICY = {
     224: (2, 16, 16),
     256: (4, 16, 16),
 }
-# gfx12-generic: the gfx11 rows plus one row per wide rung: 4 contraction shards, 8 waves, block_n 16.
-POLICY_GFX12 = {**POLICY, **dict.fromkeys(WIDE_RUNGS, (4, 8, 16))}
+# gfx12-generic: rows measured on gfx1201 against AOTriton's gfx1201 split kernels (whole-sample J4 timing); one row serves the exact (padded=0) and the padded
+# keys of a rung. Tuples are (contraction_shards, num_waves, block_n[, sched_strategy]); the 4th field is the LLVM `amdgpu-sched-strategy` of the rung. The knobs
+# that are not policy fields (`waves_per_eu`, `kt_lds_layout`, `lpt_tile_order`; at 48, 80, 192, 224 and 512) are spelled in every key of the rung.
+POLICY_GFX12 = {
+    **POLICY,
+    128: (1, 4, 32),
+    192: (1, 16, 32),
+    224: (2, 8, 16),
+    320: (4, 8, 16),
+    384: (4, 8, 16, "max-memory-clause"),
+    448: (4, 8, 16),
+    512: (4, 12, 16),
+}
 # MFMA16 (wave64): a 16-column Q / dO pack is 2 VGPRs and an accumulator 4, so no rung to 256 needs the contraction shards; 4 waves = 256 threads.
 # (contraction_shards, num_waves, block_n): measured on gfx90a with the dK/dV policy (the dQ kernel moves the total by 2-3 %: block_n 16 at
 # hd 128, 8 waves with block_n 32 at hd >= 160; the 4-wave block_n 32 default holds at hd <= 64); 80-96 follow hd 128, 160-224 follow hd 256.

@@ -59,10 +59,10 @@
  *   three companions shared by dtype; the other dq rows (including the f32-bias rows built
  *   without the dBias store) carry the dQ and tail-zero kernels, the latter one of three
  *   companions shared by dtype.
- * - gfx12-generic (every gfx12 member's shard): 42 prep (15, 15, 12), 276 dkdv (102, 102, 72) and
- *   260 dq (94, 94, 72) rows: the gfx11 grammar on a wider ladder (16-bit 16..256 plus 320, 384,
+ * - gfx12-generic (every gfx12 member's shard): 42 prep (15, 15, 12), 300 dkdv (114, 114, 72) and
+ *   284 dq (106, 106, 72) rows: the gfx11 grammar on a wider ladder (16-bit 16..256 plus 320, 384,
  *   448 and 512; fp32 16..256 plus 512; the tile list is the union of the dkdv and dq tiles, the
- *   16-bit dq rows omitting 320 and 448). The 84 dq rows that serve a dB-storing bias carry the
+ *   16-bit dq rows omitting 320 and 448). The 92 dq rows that serve a dB-storing bias carry the
  *   same reduce and tail-zero `sources` as gfx11, with three reduce and three tail-zero
  *   companions.
  *
@@ -221,14 +221,14 @@ const SplitContent GFX11_CONTENT{
 // dV-only rows (8 per 16-bit dtype, the `dvonly` launch of a dK-only row) not counted as for gfx11. The reduce and
 // tail-zero companions are the RDNA kernels' (the gfx11-named symbols), as the gfx12 tables share the gfx11 builder.
 const SplitContent GFX12_CONTENT{
-    {{{"prep", 42, 15, 15, 12}, {"dkdv", 276, 102, 102, 72}, {"dq", 260, 94, 94, 72}}},
+    {{{"prep", 42, 15, 15, 12}, {"dkdv", 300, 114, 114, 72}, {"dq", 284, 106, 106, 72}}},
     {{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 320, 384, 448, 512}, true, true},
     {{16, 32, 48, 64, 80, 96, 128, 160, 192, 224, 256, 512}, true, true},
     {"bk"},
     0,
     {0},
     {0},
-    84,
+    92,
     "fmha_bwd_dbias_reduce_gfx11_kernel_0",
     "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",
     "fmha_bwd_dbias_reduce_f32_gfx11_kernel_0",

@@ -299,7 +299,7 @@ GFX11 = "gfx11-generic"
 GFX12 = "gfx12-generic"
 GENERIC_ARCHES = {
     GFX11: ("sdpa_bwd_gfx11_reference.csv", [33, 238, 230, 3], 82),
-    GFX12: ("sdpa_bwd_gfx12_reference.csv", [42, 292, 260, 3], 92),
+    GFX12: ("sdpa_bwd_gfx12_reference.csv", [42, 316, 284, 3], 100),
 }
 GFX11_SPLIT_OPS = [f"sdpa_bwd_{k}" for k in ("prep", "dkdv", "dq")]
 generic_arches = pytest.mark.parametrize("arch", GENERIC_ARCHES)
@@ -381,6 +381,8 @@ def test_generic_row_values_follow_the_kmd_contract(arch: str) -> None:
         )
     for instance in _instances.instances_for("sdpa_bwd_dkdv", arch):
         k = instance.knobs
+        # a padded row's floor is `g1`; a gfx12 exact twin (`padded` 0) has the `tail` floor
+        floor = "tail" if arch == GFX12 and k["padded"] == 0 else "g1"
         assert (
             k["mfma_rows"],
             k["dkv_shards"],
@@ -388,7 +390,7 @@ def test_generic_row_values_follow_the_kmd_contract(arch: str) -> None:
             k["num_stream_buffers"],
             k["gqa_pack"],
             k["floor"],
-        ) == (-1, -1, -1, -1, 0, "g1")
+        ) == (-1, -1, -1, -1, 0, floor)
     rows = _instances.instances_for("sdpa_bwd_dq", arch)
     assert sum(bool(i.knobs["has_bias"]) for i in rows) == GENERIC_ARCHES[arch][2]
     for instance in rows:

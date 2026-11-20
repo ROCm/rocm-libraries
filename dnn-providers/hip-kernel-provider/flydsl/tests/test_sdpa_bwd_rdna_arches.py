@@ -118,7 +118,7 @@ def test_only_the_split_ops_have_rows_on_gfx11_generic() -> None:
 def test_a_dq_policy_scheduler_reaches_the_build_hints_and_the_launcher_hints(
     monkeypatch,
 ) -> None:
-    """G16: ``build`` writes ``llvm_options["amdgpu-sched-strategy"]`` into the per-build hints copy when the dQ policy row spells it, and
+    """``build`` writes ``llvm_options["amdgpu-sched-strategy"]`` into the per-build hints copy when the dQ policy row spells it, and
     leaves the shared ``_COMPILE_HINTS`` and every other Spec's hints alone; the launcher's own hints (the JIT path) carry it too.
     """
     pytest.importorskip("flydsl")

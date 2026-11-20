@@ -88,9 +88,23 @@ POLICY = {
     256: (True, 2, 16, 16),
 }
 
-# gfx12-generic: the gfx11 rows plus one row per wide rung: split head dim, 4 contraction shards (a 80..128-column slice per wave), 16 waves, block_q 16. A wide
-# object spells `transposed_source=derived` (`tile` would not fit 64 KiB of LDS at 512).
-POLICY_GFX12 = {**POLICY, **dict.fromkeys(WIDE_RUNGS, (True, 4, 16, 16))}
+# gfx12-generic: rows measured on gfx1201 against AOTriton's gfx1201 split kernels (whole-sample J4 timing); one row serves the exact (padded=0) and the padded
+# keys of a rung. Tuples are (split_head_dim, contraction_shards, num_waves, block_q[, transposed_source]); the knobs that are not policy fields (`waves_per_eu`
+# 3 at 256 and 448, 2 at 320) are spelled in every key of the rung. A wide object spells `transposed_source=derived` (`tile` would not fit 64 KiB of LDS at 512).
+POLICY_GFX12 = {
+    **POLICY,
+    64: (False, 1, 4, 32, "derived"),
+    96: (False, 1, 8, 16),
+    128: (False, 1, 8, 16, "derived"),
+    160: (False, 1, 16, 16, "tile"),
+    192: (True, 1, 12, 16, "tile"),
+    224: (True, 1, 32, 16, "tile"),
+    256: (True, 1, 32, 48, "derived"),
+    320: (True, 1, 16, 32, "derived"),
+    384: (True, 1, 16, 64, "derived"),
+    448: (True, 2, 24, 48, "derived"),
+    512: (True, 2, 8, 64, "derived"),
+}
 
 # MFMA16 (wave64): a 16-column pack is 2 VGPRs and a 16-column f32 accumulator 4, so no rung to 256 needs the role split; 4 waves = 256 threads.
 # (split_head_dim, contraction_shards, num_waves, block_q, transposed_source): measured on gfx90a against AOTriton T1-auto over hd 64, 128, 256
