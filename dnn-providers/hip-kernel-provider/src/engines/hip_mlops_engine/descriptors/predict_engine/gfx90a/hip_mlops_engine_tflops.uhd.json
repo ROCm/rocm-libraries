@@ -2516,8 +2516,26 @@
   ],
   "features_hash": "sha256:45395cb6a8e37bb9",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/hip-mlops/f0af15194aa55e9e",
-    "feature_semantics_revision": 1
+    "selector_revision": "hip-kernel-provider/hip-mlops/865f2933d8f9d323",
+    "feature_semantics_revision": 1,
+    "x-restamps": [
+      {
+        "from": "hip-kernel-provider/hip-mlops/f0af15194aa55e9e",
+        "to": "hip-kernel-provider/hip-mlops/865f2933d8f9d323",
+        "proof": "measured-parity",
+        "changes": [
+          "engines/hip_mlops_engine/HipMlopsEngine.cpp"
+        ],
+        "parity": {
+          "graphs": 23995,
+          "median_change": 0.0076263497980680085,
+          "outlier_fraction": 0.02279641591998333,
+          "newly_declined": 0,
+          "newly_served": 0,
+          "unmatched": 2
+        }
+      }
+    ]
   },
   "objective": "max",
   "score": {
