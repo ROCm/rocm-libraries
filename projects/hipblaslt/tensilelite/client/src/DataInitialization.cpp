@@ -368,64 +368,6 @@ namespace TensileLite
             return stream;
         }
 
-        void calculateKforSwizzling(rocisa::DataType datatype,
-                                    size_t&          MiK,
-                                    size_t&          MiKv,
-                                    size_t&          PackK,
-                                    bool             isGfx1250 = false)
-        {
-            // gfx1250 WMMA_V3 swizzle (TDM path) uses a 32-byte K block: one 16-byte ds_load_b128
-            // per lane-half x 2 lane-halves. In elements that is BK = 32/bpe (F8/I8: 32, F16/BF16: 16),
-            // i.e. MiK = BK/PackK with PackK = 2 below. gfx942 MFMA keeps the wider blocks.
-            switch(datatype)
-            {
-            case rocisa::DataType::Float:
-                MiK  = 4;
-                MiKv = 1;
-                break;
-            case rocisa::DataType::Double:
-                MiK  = 4;
-                MiKv = 1;
-                break;
-            case rocisa::DataType::XFloat32:
-                MiK  = 8;
-                MiKv = 2;
-                break;
-            case rocisa::DataType::Half:
-            case rocisa::DataType::BFloat16:
-                MiK  = isGfx1250 ? 8 : 16;
-                MiKv = 4;
-                break;
-            case rocisa::DataType::Int8:
-                MiK  = isGfx1250 ? 16 : 32;
-                MiKv = 8;
-                break;
-            case rocisa::DataType::Float8_fnuz:
-            case rocisa::DataType::BFloat8_fnuz:
-            case rocisa::DataType::Float8BFloat8_fnuz:
-            case rocisa::DataType::BFloat8Float8_fnuz:
-            case rocisa::DataType::Float8:
-            case rocisa::DataType::BFloat8:
-            case rocisa::DataType::Float8BFloat8:
-            case rocisa::DataType::BFloat8Float8:
-            case rocisa::DataType::E8:
-            case rocisa::DataType::E5M3:
-                // gfx1250 F8 WMMA_V3 (16x16x128) swizzle uses BK=32 (MiK=16); gfx942 MFMA uses BK=64
-                // (MiK=32). PackK = 16/MiKv/1 = 2 for both, so gfx1250 gives BK=MiK*PackK=32.
-                MiK  = isGfx1250 ? 16 : 32;
-                MiKv = 8;
-                break;
-            case rocisa::DataType::Float4:
-                MiK  = 32;
-                MiKv = 16;
-                break;
-            default:
-                throw std::runtime_error("unsupported datatype for swizzling");
-            }
-
-            PackK = 16 / MiKv / rocisa::GetElementSize(datatype);
-        }
-
         template <typename T>
         std::shared_ptr<T> allocNewGPUBuffer(const char* title, size_t size)
         {
@@ -938,42 +880,6 @@ namespace TensileLite
             return stream;
         }
 
-        // K elements a swizzled tensor's rows are padded to. gfx942 pads to its swizzle K block;
-        // gfx1250 swizzles in smaller K blocks (32 B) but pads to 64 B as well. Flattening the K block
-        // indices gives the same bytes for either block size, so with the same padding the layout is
-        // identical on both architectures and one hipblasLtOrder_t (COL16_4R*, K in 64 B) covers both.
-        size_t swizzledPaddedKUnit(size_t swizzleK, float elementBytes, bool isGfx1250)
-        {
-            if(!isGfx1250)
-                return swizzleK;
-            const size_t padK = static_cast<size_t>(64.0f / elementBytes);
-            return std::max(swizzleK, padK);
-        }
-
-        size_t getSwizzledTensorNumAllocatedElements(const TensorDescriptor& desc,
-                                                     size_t                  miM_N,
-                                                     size_t                  miK,
-                                                     size_t                  packK,
-                                                     bool                    isGfx1250)
-        {
-            // TODO: currently [0][1] = k, (m or n) is based on TN, need to make this generic in the future
-            const auto k         = desc.sizes()[0];
-            const auto m_n       = desc.sizes()[1];
-            const auto b         = desc.sizes()[2];
-            const auto swizzleK
-                = swizzledPaddedKUnit(miK * packK, desc.elementBytes(), isGfx1250);
-            const auto paddedM_N = DGen::roundUp(m_n, miM_N);
-            const auto paddedK   = DGen::roundUp(k, swizzleK);
-            const auto perBatch  = paddedM_N * paddedK;
-            // Batches sit at the problem's batch stride (see copySwizzledToGPUBuffer). The same
-            // allocation also holds the unswizzled source, which follows the descriptor's own
-            // strides (e.g. a leading dimension > K), so never go below that either.
-            const size_t swizzled
-                = b <= 1 ? perBatch
-                         : std::max<size_t>(perBatch * b, desc.strides()[2] * (b - 1) + perBatch);
-            return std::max<size_t>(swizzled, desc.totalAllocatedElements());
-        }
-
         size_t getSwizzledMXTensorNumAllocatedElements(const TensorDescriptor& desc,
                                                        size_t                  dimk,
                                                        bool                    unrollMajor)
@@ -1128,8 +1034,8 @@ namespace TensileLite
                             //TODO: support more swizzle types,
                             //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            calculateKforSwizzling(dataType, MiK, MiKv, PackK, m_isGfx1250);
-                            numAllocatedElements = getSwizzledTensorNumAllocatedElements(
+                            detail::calculateKforSwizzling(dataType, MiK, MiKv, PackK, m_isGfx1250);
+                            numAllocatedElements = detail::getSwizzledTensorNumAllocatedElements(
                                 problem.tensors()[i], MiM_N, MiK, PackK, m_isGfx1250);
                             numAllocatedBytes = multiplyElementSize(
                                 numAllocatedElements, rocisa::GetElementSize(dataType));
@@ -1757,9 +1663,9 @@ namespace TensileLite
                         //TODO: support more swizzle types,
                         //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                         size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                        calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK, m_isGfx1250);
+                        detail::calculateKforSwizzling(problem.tensors()[i].dataType(), MiK, MiKv, PackK, m_isGfx1250);
                         padding = pUnit.maxElements
-                                  - getSwizzledTensorNumAllocatedElements(
+                                  - detail::getSwizzledTensorNumAllocatedElements(
                                       problem.tensors()[i], MiM_N, MiK, PackK, m_isGfx1250);
                     }
                 }
@@ -2935,9 +2841,9 @@ namespace TensileLite
                             //TODO: support more swizzle types,
                             //      currently, if A then it means MiM = 16, if B then it means MiN = 16
                             size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                            calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK, m_isGfx1250);
+                            detail::calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK, m_isGfx1250);
                             swizzlePadding
-                                = getSwizzledTensorNumAllocatedElements(
+                                = detail::getSwizzledTensorNumAllocatedElements(
                                       desc, MiM_N, MiK, PackK, m_isGfx1250)
                                   - desc.totalAllocatedElements();
                         }
@@ -3195,69 +3101,15 @@ namespace TensileLite
                 if(needSwizzle)
                 {
                     using Tensor = Tensor::Manipulation::Tensor;
-                    size_t MiM_N = 16, MiK = 0, MiKv = 0, PackK = 0;
-                    calculateKforSwizzling(desc.dataType(), MiK, MiKv, PackK, m_isGfx1250);
-                    auto unrolledSize = desc.sizes()[0];
-                    auto tiledSize    = desc.sizes()[1];
-
-                    // Sub-byte types (e.g. FP4 = 0.5 bytes/elem) need special handling:
-                    // The swizzle reshape/permute operates on byte-granularity tensors, so
-                    // we convert element counts to byte counts and treat each byte as one
-                    // "element" for the reshape dimensions.
-                    bool  isSubByte     = (desc.elementBytes() < 1.0f);
-                    float effectiveElem = isSubByte ? 1.0f : desc.elementBytes();
-                    size_t effUnrolled  = isSubByte
-                        ? multiplyElementSize(unrolledSize, desc.elementBytes())
-                        : unrolledSize;
-                    size_t effMiK  = isSubByte
-                        ? size_t(MiK * PackK * desc.elementBytes()) : MiK;
-                    size_t effMiKv = isSubByte
-                        ? size_t(MiKv * PackK * desc.elementBytes()) : MiKv;
-                    size_t effPackK = isSubByte ? size_t(1) : PackK;
-
-                    // K is padded to a whole number of swizzle K blocks (see swizzledPaddedKUnit);
-                    // the effective element is one byte for sub-byte types.
-                    const size_t padUnitK = swizzledPaddedKUnit(
-                        effMiK * effPackK, effectiveElem, m_isGfx1250);
-                    ::Tensor::Manipulation::Shape paddedShape{
-                        DGen::roundUp(tiledSize, MiM_N), DGen::roundUp(effUnrolled, padUnitK)};
-                    // Batched: each batch is swizzled on its own and placed at the problem's
-                    // batch stride, which the kernel also uses to step between batches. The
-                    // source keeps the descriptor's leading dimension; the swizzled layout is
-                    // dense (paddedK row length), so the batch stride must hold one padded batch.
-                    const size_t numBatch
-                        = desc.dimensions() > 2 ? desc.sizes()[2] : size_t(1);
-                    const size_t srcLd = desc.strides()[1];
-                    const size_t batchStride
-                        = desc.dimensions() > 2 ? desc.strides()[2] : size_t(0);
-                    const size_t perBatchEff = paddedShape[0] * paddedShape[1];
-                    const size_t perBatchNative = isSubByte
-                        ? size_t(perBatchEff / desc.elementBytes())
-                        : perBatchEff;
-                    if(numBatch > 1 && batchStride < perBatchNative)
-                    {
-                        std::stringstream ss;
-                        ss << "Swizzled tensor " << desc.getName() << ": batch stride "
-                           << batchStride << " is smaller than one padded swizzled batch ("
-                           << perBatchNative << " elements = alignUp(" << tiledSize << ", "
-                           << MiM_N << ") x alignUp(" << unrolledSize << ", "
-                           << swizzledPaddedKUnit(MiK * PackK, desc.elementBytes(), m_isGfx1250)
-                           << "))";
-                        throw std::runtime_error(ss.str());
-                    }
-                    if(isSubByte && srcLd != unrolledSize)
-                        throw std::runtime_error(
-                            "Swizzled sub-byte tensor requires a packed leading dimension");
-                    const size_t totalNative
-                        = (numBatch - 1) * batchStride + perBatchNative;
+                    const auto geom = detail::swizzleStageGeometry(desc, m_isGfx1250);
 
                     auto swizzleKey = std::make_tuple(i,
                                                       toBitWidth(desc.dataType()),
-                                                      unrolledSize,
-                                                      tiledSize,
-                                                      Size(numBatch),
-                                                      Size(batchStride),
-                                                      Size(srcLd));
+                                                      geom.unrolledSize,
+                                                      geom.tiledSize,
+                                                      Size(geom.numBatch),
+                                                      Size(geom.batchStride),
+                                                      Size(geom.srcLd));
 
                     if(g_swizzleCache.count(swizzleKey))
                     {
@@ -3267,7 +3119,7 @@ namespace TensileLite
                             ptr            = copyInputBuffers(desc,
                                                    p.gpuInput.valid.get(),
                                                    staged.as<void>(),
-                                                   totalNative,
+                                                   geom.totalNative,
                                                    hipMemcpyHostToDevice);
                         }
                         else
@@ -3277,44 +3129,12 @@ namespace TensileLite
                     }
                     else
                     {
-                        const size_t totalEff = isSubByte
-                            ? multiplyElementSize(totalNative, desc.elementBytes())
-                            : totalNative;
-                        Tensor staged({totalEff}, effectiveElem);
-                        memset(staged.as<void>(), 0, staged.getNumBytes());
-                        const size_t rowBytes
-                            = multiplyElementSize(unrolledSize, desc.elementBytes());
-                        for(size_t b = 0; b < numBatch; ++b)
-                        {
-                            auto        tmpTensor = Tensor({tiledSize, effUnrolled}, effectiveElem);
-                            const char* src       = static_cast<const char*>(p.cpuInput.valid.get())
-                                              + multiplyElementSize(b * batchStride,
-                                                                    desc.elementBytes());
-                            if(srcLd == unrolledSize)
-                                memcpy(tmpTensor.as<void>(), src, tmpTensor.getNumBytes());
-                            else
-                                for(size_t r = 0; r < tiledSize; ++r)
-                                    memcpy(tmpTensor.as<char>() + r * rowBytes,
-                                           src + multiplyElementSize(r * srcLd, desc.elementBytes()),
-                                           rowBytes);
-                            uint64_t padVal{};
-                            auto     paddedTensor = ::Tensor::Manipulation::pad(
-                                tmpTensor, paddedShape, &padVal, effectiveElem);
-                            paddedTensor.reshape({paddedShape[0] / MiM_N,
-                                                  MiM_N,
-                                                  paddedShape[1] / (effMiK * effPackK),
-                                                  effMiK / effMiKv,
-                                                  effMiKv * effPackK});
-                            Tensor permuted = permute(paddedTensor, {0, 2, 3, 1, 4});
-                            memcpy(staged.as<char>()
-                                       + multiplyElementSize(b * batchStride, desc.elementBytes()),
-                                   permuted.as<void>(),
-                                   permuted.getNumBytes());
-                        }
+                        Tensor staged
+                            = detail::stageSwizzledTensor(desc, p.cpuInput.valid.get(), geom);
                         ptr = copyInputBuffers(desc,
                                                p.gpuInput.valid.get(),
                                                staged.as<void>(),
-                                               totalNative,
+                                               geom.totalNative,
                                                hipMemcpyHostToDevice);
                         g_swizzleCache.emplace(swizzleKey, std::move(staged));
                     }
