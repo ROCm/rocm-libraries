@@ -336,6 +336,10 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
         return (config.bk + config.bc) * (config.bq + 1) * static_cast<int64_t>(sizeof(float));
     }
     const auto i = [](int64_t value) { return static_cast<int>(value); };
+    // The matrix-core ring's channels-last pitch on CDNA follows its fragment reads' bytes.
+    const bool cdna = config.atom.rfind("mfma", 0) == 0;
+    const int fragmentBytes
+        = cdna ? static_cast<int>(atomShapeOf(config.atom).kpl) * elementBytes : 0;
     return k3LdsBytes(i(config.loop),
                       i(config.layout),
                       elementBytes,
@@ -353,7 +357,8 @@ int64_t ldsBytesOf(const WrwConfig& config, int elementBytes)
                       i(config.vec),
                       i(config.align),
                       i(config.ns),
-                      i(config.wq));
+                      i(config.wq),
+                      fragmentBytes);
 }
 
 int64_t loadPassesOf(const WrwConfig& config, int elementBytes, int64_t wave)
@@ -1176,10 +1181,14 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
             return std::nullopt;
         }
     }
-    // waves_q: loop 5's items side by side, the 8 waves split wk x wc x wq; 0 elsewhere.
+    // waves_q: loop 5's items side by side, the 8 waves split wk x wc x wq. The matrix-core
+    // ring's steps a stage (2 or 4): only for output rows within one step's positions, which a
+    // step of fewer positions then fills (a wider row takes the one-step ring). 0 elsewhere.
+    const bool ringStages = config.loop == LOOP_RING && (config.wq == 2 || config.wq == 4)
+                            && a.outSpatial[2] <= config.bq;
     if(direct ? ((config.wq != 1 && config.wq != 2 && config.wq != 4)
                  || config.wk * config.wc * config.wq != 8)
-              : config.wq != 0)
+              : (config.wq != 0 && !ringStages))
     {
         return std::nullopt;
     }
