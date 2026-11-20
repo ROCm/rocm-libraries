@@ -23,6 +23,7 @@ using conv_aot::ceilDiv;
 using conv_aot::DIRECT_KERNARG_NAMES;
 using conv_aot::DW_DGRAD_MFMA_CH;
 using conv_aot::DW_DGRAD_WIN_MAX_TENSOR_BYTES;
+using conv_aot::IMPLICIT_GEMM_KERNARG_NAMES;
 using conv_aot::LaunchGeometry;
 using conv_aot::MagicDivision;
 using conv_aot::magicDivision;
@@ -168,50 +169,6 @@ inline std::optional<LaunchGeometry> launchGeometry(const Problem& problem,
 /// rocKE's ConvArgs refuses a reduction extent Y * X * C / groups at or above this
 /// (conv_args.MUL24_REDUCTION_LIMIT).
 constexpr int64_t MUL24_REDUCTION_LIMIT = int64_t{1} << 23;
-
-/// The AOT problem block that follows (A*, B*, D*, A_bytes, B_bytes, D_bytes) in the 2D
-/// forward implicit-GEMM ABI, in order: _fwd_arg_names in
-/// rocke/library/kernels/common/conv_abi.py. The kernel packs these positionally, so the
-/// names exist to be compared against the packaged symbol's recorded arguments.
-constexpr std::array<std::string_view, 39> IMPLICIT_GEMM_KERNARG_NAMES{"p_N",
-                                                                       "p_Hi",
-                                                                       "p_Wi",
-                                                                       "p_C",
-                                                                       "p_K",
-                                                                       "p_Y",
-                                                                       "p_X",
-                                                                       "p_sH",
-                                                                       "p_sW",
-                                                                       "p_pH",
-                                                                       "p_pW",
-                                                                       "p_dH",
-                                                                       "p_dW",
-                                                                       "p_groups",
-                                                                       "p_Ho",
-                                                                       "p_Wo",
-                                                                       "p_cpg",
-                                                                       "p_kpg",
-                                                                       "p_K_gemm",
-                                                                       "p_M",
-                                                                       "p_A_stride_n",
-                                                                       "p_A_stride_hi",
-                                                                       "p_A_stride_wi",
-                                                                       "p_B_stride_k",
-                                                                       "p_B_stride_y",
-                                                                       "p_B_stride_x",
-                                                                       "p_D_stride_n",
-                                                                       "p_D_stride_ho",
-                                                                       "p_D_stride_wo",
-                                                                       "p_magic_m_Ho_mult",
-                                                                       "p_magic_m_Ho_shift",
-                                                                       "p_magic_m_Wo_mult",
-                                                                       "p_magic_m_Wo_shift",
-                                                                       "p_magic_k_X_mult",
-                                                                       "p_magic_k_X_shift",
-                                                                       "p_magic_k_cpg_mult",
-                                                                       "p_magic_k_cpg_shift",
-                                                                       "p_num_pid_m",
-                                                                       "p_num_pid_n"};
 
 using ImplicitGemmKernargs = std::array<int32_t, IMPLICIT_GEMM_KERNARG_NAMES.size()>;
 
@@ -376,7 +333,7 @@ struct AotInstance
 
 /// The launch of a group-merged @p instance on @p problem. Mirrors the merged rules of
 /// rocKE's identity_supports_problem (_group_merge_fits and _grid_fits in
-/// kernels/conv/kernel_identity.py), which gfx950_conv_fwd_aot_serves applies: a
+/// kernels/conv/kernel_identity.py), which conv_fwd_aot_serves applies: a
 /// depthwise problem (cpg = kpg = 1), a merge degree that divides the group count, and a
 /// merged GEMM N (kpg * groupMerge) that fits one tile. The grid tiles that merged GEMM N
 /// and launches groups / groupMerge z slices (implicit_gemm_conv_grid); the kernel
@@ -409,7 +366,7 @@ inline std::optional<LaunchGeometry> mergedInstanceLaunch(const Problem& problem
 }
 
 /// The launch of @p instance on @p problem, or std::nullopt when the binary cannot
-/// compute it. Mirrors gfx950_conv_fwd_aot_serves in convolution_forward.py, the forward
+/// compute it. Mirrors conv_fwd_aot_serves in convolution_forward.py, the forward
 /// subset of rocKE's KernelCache.supports_problem: implicitGemmServes with the widths the
 /// identity records (A and B both run along C / groups, so both divide it exactly when
 /// their lcm does; the 3x3 probe is never the pointwise GEMM), an async chunk divides

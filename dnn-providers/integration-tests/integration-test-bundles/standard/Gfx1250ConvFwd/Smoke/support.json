@@ -1,0 +1,20 @@
+{
+  "claims": {
+    "hipkernel:Gfx1250ConvFwdAot": [
+      {
+        "cases": [
+          "dense3x3_bfloat16",
+          "dense3x3_half",
+          "depthwise3x3_bfloat16",
+          "depthwise3x3_half"
+        ],
+        "support": {
+          "gfx1250": [
+            "linux"
+          ]
+        }
+      }
+    ]
+  },
+  "version": 1
+}

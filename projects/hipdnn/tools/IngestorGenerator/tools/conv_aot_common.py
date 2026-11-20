@@ -16,6 +16,7 @@ from __future__ import annotations
 import collections
 import dataclasses
 import json
+import os
 import re
 import sys
 import uuid
@@ -37,6 +38,13 @@ INSTANCE_UUID_NAMESPACE = uuid.UUID("6b0d3b8e-6a58-5d0f-9f43-3c6f5f2a9c11")
 
 #: A UUID as ``str(uuid.UUID)`` spells it: the form of every generated kernel id.
 _UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+
+
+def default_jobs() -> int:
+    """The enumerators' default worker count: every CPU, but no more than the 61 workers
+    Windows' ``ProcessPoolExecutor`` accepts."""
+    cpus = os.cpu_count() or 1
+    return min(cpus, 61) if sys.platform == "win32" else cpus
 
 
 def bind_rocke(rocke_root: Path) -> None:

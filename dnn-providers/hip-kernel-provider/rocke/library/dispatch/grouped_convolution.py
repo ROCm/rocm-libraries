@@ -7,9 +7,9 @@ WHAT IS REGISTERED
 ------------------
 Exactly the instances in the per-arch, per-direction lists under
 ``grouped_convolution_instances/`` (``<arch>_<direction>.json``) -- currently
-forward and backward-data (dgrad) convolutions on gfx950 and backward-data
-convolutions on gfx1250. Weight-gradient (wgrad), gfx942 forward and gfx1250
-forward have no list registered at all: this rewrite moved fwd/dgrad onto the
+forward and backward-data (dgrad) convolutions on gfx950 and gfx1250.
+Weight-gradient (wgrad) and gfx942 forward have no list registered at all:
+this rewrite moved fwd/dgrad onto the
 instance-list machinery but has not yet ported those onto it, so those
 directions/arches are an explicit, declared gap rather than a silent
 regression -- a request for either is rejected with a reason, not routed to a
@@ -201,6 +201,7 @@ _INSTANCE_LISTS: dict[tuple[str, str], str] = {
     ("gfx950", "fwd"): "gfx950_fwd.json",
     ("gfx950", "dgrad"): "gfx950_dgrad.json",
     ("gfx1250", "dgrad"): "gfx1250_dgrad.json",
+    ("gfx1250", "fwd"): "gfx1250_fwd.json",
 }
 
 # The LLVM flavor a request is admitted against unless it names its own: per
@@ -363,8 +364,11 @@ def _gemm_problem(req: ConvGroupedRequest) -> ConvProblem | None:
 def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, str]:
     """The direct-conv view of ``req``: ``(problem, "ok")`` or ``(None, why)``.
 
-    Direct conv describes a 2-D convolution with one stride and one padding
-    for both axes, so a request outside that has no direct view at all.
+    Direct conv describes a 2-D convolution with one stride for both axes, so
+    a request outside that has no direct view at all. A column padding of its
+    own rides ``pad_w`` (as the direct benchmark builds it); only the
+    variants of ``PER_AXIS_PAD_VARIANTS`` take one, the others refuse it in
+    :func:`direct_spec_for_problem`.
     """
     if req.Di is not None:
         return None, "direct conv is 2-D only"
@@ -372,8 +376,6 @@ def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, 
         return None, (
             f"direct conv takes one stride (got {req.stride_h}x{req.stride_w})"
         )
-    if req.pad_h != req.pad_w:
-        return None, f"direct conv takes one padding (got {req.pad_h}x{req.pad_w})"
     return (
         DirectConvProblem(
             N=int(req.N),
@@ -389,6 +391,7 @@ def _direct_problem(req: ConvGroupedRequest) -> tuple[DirectConvProblem | None, 
             dtype=req.dtype.lower(),
             dil_h=int(req.dilation_h),
             dil_w=int(req.dilation_w),
+            pad_w=-1 if req.pad_w == req.pad_h else int(req.pad_w),
         ),
         "ok",
     )
@@ -410,6 +413,9 @@ def _request_errors(req: OperatorRequest) -> tuple[str, ...]:
     for field_name in ("N", "C", "K", "Hi", "Wi", "Y", "X", "G"):
         if int(getattr(req, field_name)) <= 0:
             errors.append(f"{field_name} must be positive")
+    for pad_name in ("pad_h", "pad_w"):
+        if int(getattr(req, pad_name)) < 0:
+            errors.append(f"{pad_name}={getattr(req, pad_name)} must be non-negative")
     if req.dtype.lower() not in ("fp16", "bf16"):
         errors.append(f"unsupported dtype {req.dtype!r}; fp16 or bf16 only")
     if req.layout.upper() != "NHWC":
@@ -1665,7 +1671,12 @@ def _no_instance_reason(req: ConvGroupedRequest) -> str:
         return "; ".join(errors)
     reasons: dict[str, int] = {}
     opt_in = []
+    # A pinned request: only the candidates the pin names say why (the rest
+    # refuse for the pin alone).
+    pinned = (req.algorithm, req.spec_id) != ("auto", "auto")
     for candidate in _registry(req).candidates():
+        if pinned and not selector_matches(req, candidate)[0]:
+            continue
         ok, why = candidate.admits(req)
         if not ok:
             reasons[why] = reasons.get(why, 0) + 1
@@ -1679,6 +1690,11 @@ def _no_instance_reason(req: ConvGroupedRequest) -> str:
         )
         reasons[note] = reasons.get(note, 0) + 1
     if not reasons:
+        if pinned:
+            return (
+                f"no candidate matches algorithm={req.algorithm!r}, "
+                f"spec_id={req.spec_id!r}"
+            )
         return "no instances registered"
     top = sorted(reasons.items(), key=lambda kv: -kv[1])[:5]
     return "; ".join(f"{n}x {why}" for why, n in top) + (

@@ -43,25 +43,14 @@ using conv_aot::MagicDivision;
 using conv_aot::magicDivision;
 using conv_aot::wideProduct;
 
-constexpr int64_t I32_MAX = std::numeric_limits<int32_t>::max();
-constexpr int64_t I32_MIN = std::numeric_limits<int32_t>::min();
-/// The hardware cap of grid y and z, and of every axis of the DirectConvSpec compute grids.
-constexpr int64_t MAX_GRID_DIM = 65535;
-/// A dispatch's x extent in work-items is 32-bit.
-constexpr int64_t MAX_DISPATCH_ITEMS = (int64_t{1} << 32) - 1;
-constexpr int64_t MAX_BLOCK_THREADS = 1024;
-
-/// One architecture's packaged dgrad engine (TARGETS in convolution_backward_data.py):
-/// its wave size and LDS per workgroup (ArchTarget.lds_capacity_bytes).
-struct Target
-{
-    std::string_view arch;
-    int64_t waveSize;
-    int64_t ldsCapacityBytes;
-};
-
-inline constexpr Target GFX950{"gfx950", 64, 163840};
-inline constexpr Target GFX1250{"gfx1250", 32, 327680};
+using conv_aot::GFX1250;
+using conv_aot::GFX950;
+using conv_aot::I32_MAX;
+using conv_aot::I32_MIN;
+using conv_aot::MAX_BLOCK_THREADS;
+using conv_aot::MAX_DISPATCH_ITEMS;
+using conv_aot::MAX_GRID_DIM;
+using conv_aot::Target;
 
 /// Record and magic-table widths of the implicit-GEMM sub_gemm_buf, in i32
 /// (SUB_GEMM_RECORD_FIELDS, SUB_GEMM_MAGIC_FIELDS in convolution_backward_data.py).

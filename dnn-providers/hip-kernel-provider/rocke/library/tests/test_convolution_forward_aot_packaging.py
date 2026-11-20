@@ -40,10 +40,10 @@ from builders.common.convolution_forward import (
     aot_direct_instance_fields,
     build_gfx950_conv_fwd_aot,
     build_gfx950_conv_fwd_aot_split_reduce,
-    gfx950_conv_fwd_aot_batch_chunks,
+    conv_fwd_aot_batch_chunks,
     gfx950_conv_fwd_aot_problem_for_request,
-    gfx950_conv_fwd_aot_runtime_candidates,
-    gfx950_conv_fwd_aot_serves,
+    conv_fwd_aot_runtime_candidates,
+    conv_fwd_aot_serves,
     gfx950_conv_fwd_aot_spec_for_identity,
     supports_gfx950_conv_fwd_aot,
     supports_gfx950_conv_fwd_aot_problem,
@@ -309,7 +309,7 @@ def test_group_merged_serves_agree_with_kernel_cache_and_launch_merged(merged_jo
             for filt, stride in ((3, 1), (5, 2), (7, 1))
         ]
         for problem in problems:
-            ours, reason = gfx950_conv_fwd_aot_serves(spec, problem)
+            ours, reason = conv_fwd_aot_serves(spec, problem)
             theirs, why = cache.supports_problem(identity, problem.to_problem())
             assert ours == theirs, (job.identity.label(), problem, reason, why)
             compared += 1
@@ -415,7 +415,7 @@ def test_served_problems_agree_with_kernel_cache_supports_problem(sweep_jobs):
         identity = replace(job.identity, llvm_flavor=kernel_sweep.current_llvm_flavor())
         spec = _spec(job.identity)
         for problem in _random_problems(60, dtype):
-            ours, reason = gfx950_conv_fwd_aot_serves(spec, problem)
+            ours, reason = conv_fwd_aot_serves(spec, problem)
             if not ours and ("2**23" in reason or "32-bit" in reason):
                 continue
             theirs, why = cache.supports_problem(identity, problem.to_problem())
@@ -430,7 +430,7 @@ def test_launch_values_and_grid_are_conv_args_for_the_runtime_problem(sweep_jobs
     _, job = sweep_jobs[0]
     spec = _spec(job.identity)
     for problem in _random_problems(20, spec.dtype):
-        if not gfx950_conv_fwd_aot_serves(spec, problem)[0]:
+        if not conv_fwd_aot_serves(spec, problem)[0]:
             continue
         args = ConvArgs.from_problem(
             problem.to_problem(), tile_m=spec.tile_m, tile_n=spec.tile_n
@@ -469,7 +469,7 @@ def test_one_instance_serves_dense_grouped_and_grouped_pointwise_problems():
         # built as pointwise, so it serves it.
         Gfx950ConvFwdSpec(N=2, Hi=8, Wi=8, C=32, K=32, Y=1, X=1, groups=4),
     ):
-        assert gfx950_conv_fwd_aot_serves(spec, problem) == (True, "ok"), problem
+        assert conv_fwd_aot_serves(spec, problem) == (True, "ok"), problem
 
 
 @pytest.mark.parametrize(
@@ -601,7 +601,7 @@ def test_runtime_candidates_are_rockes_runtime_selection(full_sweep):
             theirs = {
                 ident.stable_hash() for ident, *_ in _widest_vector_sizes(compatible)
             }
-            ours = gfx950_conv_fwd_aot_runtime_candidates(problem, specs)
+            ours = conv_fwd_aot_runtime_candidates(problem, specs)
             assert [s.instance_id for s in ours] == [
                 s.instance_id for s in specs if s.instance_id in theirs
             ], (dtype, values)
@@ -622,14 +622,14 @@ def test_runtime_candidates_fall_back_to_every_serving_instance(full_sweep):
         N=2, C=16, K=6, Hi=14, Wi=14, Y=3, X=3, sH=1, sW=1, pH=1, pW=1,
         dH=1, dW=1, groups=1, dtype="fp16",
     )  # fmt: skip
-    widest = gfx950_conv_fwd_aot_runtime_candidates(problem, specs)
+    widest = conv_fwd_aot_runtime_candidates(problem, specs)
     assert widest
     assert {(s.vector_size_a, s.vector_size_c) for s in widest} == {(8, 2)}
 
     without = [s for s in specs if (s.vector_size_a, s.vector_size_c) != (8, 2)]
-    serving = [s for s in without if gfx950_conv_fwd_aot_serves(s, problem)[0]]
+    serving = [s for s in without if conv_fwd_aot_serves(s, problem)[0]]
     assert len({(s.vector_size_a, s.vector_size_c) for s in serving}) > 1
-    assert gfx950_conv_fwd_aot_runtime_candidates(problem, without) == serving
+    assert conv_fwd_aot_runtime_candidates(problem, without) == serving
 
 
 def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
@@ -637,8 +637,8 @@ def test_runtime_candidates_keep_every_serving_direct_instance(direct_jobs):
     problem = Gfx950ConvFwdSpec(
         N=2, Hi=14, Wi=14, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=32
     )
-    serving = [s for s in specs if gfx950_conv_fwd_aot_serves(s, problem)[0]]
-    assert serving and gfx950_conv_fwd_aot_runtime_candidates(problem, specs) == serving
+    serving = [s for s in specs if conv_fwd_aot_serves(s, problem)[0]]
+    assert serving and conv_fwd_aot_runtime_candidates(problem, specs) == serving
 
 
 # ---- Direct instances ----
@@ -760,6 +760,23 @@ def test_every_direct_sweep_identity_is_packageable_on_the_sweeps_probe(direct_j
         for dtype in ("fp16", "bf16")
         for algorithm, count in _DIRECT_COUNTS.items()
     }
+
+
+def test_gfx950_direct_problems_keep_the_square_filter_and_padding_sentinels(
+    direct_jobs,
+):
+    """gfx950 never states ``kw`` / ``pad_w``: its caps and the spec's probe leave
+    the sentinels (kw 0, pad_w -1), which read as KH and PAD, so the per-axis
+    fields gfx1250 added change nothing for it. The C++ side reads pad_w -1 as PAD
+    (``test_pad_w_sentinel_reads_as_pad``) and sets KW from the filter itself."""
+    assert direct_jobs
+    for dtype, job in direct_jobs:
+        assert "kw" not in job.caps and "pad_w" not in job.caps, job.identity.label()
+        caps = direct_kernel_sweep.DirectCaps(**job.caps)
+        assert (caps.kw, caps.pad_w) == (0, -1)
+        assert (caps.KW, caps.PAD_W) == (caps.KH, caps.PAD)
+        probe = _direct_spec(job.identity).probe_problem()
+        assert (probe.KW, probe.PAD_W) == (probe.KH, probe.PAD), job.identity.label()
 
 
 def test_packaged_direct_ir_is_the_sweep_kernel_up_to_its_symbol(direct_jobs):
@@ -984,7 +1001,7 @@ def test_direct_served_problems_agree_with_the_direct_benchmarks_offer(direct_jo
         if spec.direct_variant in ("std", "spatial"):
             problems += _depthwise_problems(dtype)[::15]
         for problem in problems:
-            ours, reason = gfx950_conv_fwd_aot_serves(spec, problem)
+            ours, reason = conv_fwd_aot_serves(spec, problem)
             theirs, why = _rocke_direct_serves(identity, problem)
             # rocKE's dispatcher admits exactly what its AOT benchmark runs, but for
             # one rule only direct_plans applies: the grouped-halo kernel is offered
@@ -1015,9 +1032,7 @@ def test_direct_launch_is_rockes_for_the_runtime_problem(direct_jobs):
     for _, job in _sampled(direct_jobs, 4)[::3]:
         spec = _direct_spec(job.identity)
         problems = [
-            p
-            for p in _instance_problems(spec, 48)
-            if gfx950_conv_fwd_aot_serves(spec, p)[0]
+            p for p in _instance_problems(spec, 48) if conv_fwd_aot_serves(spec, p)[0]
         ]
         assert problems, job.identity.label()
         for problem in problems:
@@ -1102,11 +1117,11 @@ def test_batch_split_serving_is_the_direct_benchmarks_batch_split_plan(direct_jo
                 dil_h=big.dH,
                 dil_w=big.dW,
             )
-            chunks = gfx950_conv_fwd_aot_batch_chunks(big)
+            chunks = conv_fwd_aot_batch_chunks(big)
             assert chunks is not None and sum(chunks) == big.N, big
             assert chunks == direct_kernel_sweep._batch_chunks(direct)
-            assert gfx950_conv_fwd_aot_batch_chunks(problem) is None, problem
-            ours, reason = gfx950_conv_fwd_aot_serves(spec, big)
+            assert conv_fwd_aot_batch_chunks(problem) is None, problem
+            ours, reason = conv_fwd_aot_serves(spec, big)
             each = not spec.is_split_c and all(
                 _rocke_direct_serves(identity, replace(big, N=n))[0]
                 for n in set(chunks)
@@ -1145,16 +1160,16 @@ def test_one_direct_instance_serves_other_images_batches_and_group_counts(direct
         problem = Gfx950ConvFwdSpec(
             N=n, Hi=h, Wi=w, C=groups, K=groups, Y=3, X=3, pH=1, pW=1, groups=groups
         )
-        assert gfx950_conv_fwd_aot_serves(spatial, problem) == (True, "ok"), problem
-        assert gfx950_conv_fwd_aot_serves(std, problem) == (True, "ok"), problem
+        assert conv_fwd_aot_serves(spatial, problem) == (True, "ok"), problem
+        assert conv_fwd_aot_serves(std, problem) == (True, "ok"), problem
     wide = Gfx950ConvFwdSpec(
         N=2, Hi=14, Wi=14, C=96, K=96, Y=3, X=3, pH=1, pW=1, groups=96
     )
-    assert gfx950_conv_fwd_aot_serves(std, wide) == (True, "ok")
-    assert not gfx950_conv_fwd_aot_serves(spatial, wide)[0]
+    assert conv_fwd_aot_serves(std, wide) == (True, "ok")
+    assert not conv_fwd_aot_serves(spatial, wide)[0]
     # The filter, stride and padding are compiled in.
     for change in ({"Y": 5, "X": 5, "pH": 2, "pW": 2}, {"sH": 2, "sW": 2}):
-        ok, why = gfx950_conv_fwd_aot_serves(std, replace(wide, **change))
+        ok, why = conv_fwd_aot_serves(std, replace(wide, **change))
         assert not ok and "compiled for" in why, why
 
 
@@ -1173,10 +1188,10 @@ def test_col_serves_valid_padding_and_bounds_its_rows_by_the_output(direct_jobs)
     problem = Gfx950ConvFwdSpec(
         N=2, Hi=13, Wi=17, C=24, K=24, Y=5, X=5, pH=0, pW=0, groups=24
     )
-    assert gfx950_conv_fwd_aot_serves(valid, problem) == (True, "ok")
-    ok, why = gfx950_conv_fwd_aot_serves(same, problem)
+    assert conv_fwd_aot_serves(valid, problem) == (True, "ok")
+    ok, why = conv_fwd_aot_serves(same, problem)
     assert not ok and "padding" in why
-    ok, _ = gfx950_conv_fwd_aot_serves(same, replace(problem, pH=2, pW=2))
+    ok, _ = conv_fwd_aot_serves(same, replace(problem, pH=2, pW=2))
     assert ok
     # A block wider than the output is declined by rocKE's validator.
     wide = next(
@@ -1187,7 +1202,7 @@ def test_col_serves_valid_padding_and_bounds_its_rows_by_the_output(direct_jobs)
         == (5, 0, 1)
         and json.loads(job.identity.knobs)["block_w"] == 4
     )
-    ok, why = gfx950_conv_fwd_aot_serves(wide, replace(problem, Wi=6))
+    ok, why = conv_fwd_aot_serves(wide, replace(problem, Wi=6))
     assert not ok and "block_w 4 > Wo 2" in why, why
 
 
@@ -1196,9 +1211,9 @@ def test_tiled_serves_large_filters_the_row_stream_cannot(direct_jobs):
     problem = Gfx950ConvFwdSpec(
         N=1, Hi=40, Wi=37, C=96, K=96, Y=31, X=31, sH=2, sW=2, pH=15, pW=15, groups=96
     )
-    assert gfx950_conv_fwd_aot_serves(tiled, problem) == (True, "ok")
+    assert conv_fwd_aot_serves(tiled, problem) == (True, "ok")
     assert not any(
-        gfx950_conv_fwd_aot_serves(_direct_spec(job.identity), problem)[0]
+        conv_fwd_aot_serves(_direct_spec(job.identity), problem)[0]
         for _, job in direct_jobs
         if job.identity.algorithm in ("direct_depthwise", "direct_depthwise_spatial")
         and job.identity.dtype_a == "fp16"
@@ -1210,25 +1225,25 @@ def test_win_serves_depthwise_and_grouped_stride_1_and_2(direct_jobs):
     problem = Gfx950ConvFwdSpec(
         N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=32
     )
-    assert gfx950_conv_fwd_aot_serves(dw, problem) == (True, "ok")
+    assert conv_fwd_aot_serves(dw, problem) == (True, "ok")
     # Wrong group count (not cpg=kpg=1) is declined.
-    ok, why = gfx950_conv_fwd_aot_serves(dw, replace(problem, groups=16))
+    ok, why = conv_fwd_aot_serves(dw, replace(problem, groups=16))
     assert not ok and "cpg, kpg" in why, why
 
     grouped = _first(direct_jobs, "direct_depthwise_win", cpg=8, filter_h=3, stride_h=1)
     gproblem = Gfx950ConvFwdSpec(
         N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, pH=1, pW=1, groups=4
     )
-    assert gfx950_conv_fwd_aot_serves(grouped, gproblem) == (True, "ok")
+    assert conv_fwd_aot_serves(grouped, gproblem) == (True, "ok")
     # A depthwise (cpg=1) instance never serves a grouped (cpg=8) problem and vice versa.
-    assert not gfx950_conv_fwd_aot_serves(dw, gproblem)[0]
-    assert not gfx950_conv_fwd_aot_serves(grouped, problem)[0]
+    assert not conv_fwd_aot_serves(dw, gproblem)[0]
+    assert not conv_fwd_aot_serves(grouped, problem)[0]
 
     stride2 = _first(direct_jobs, "direct_depthwise_win", cpg=1, filter_h=3, stride_h=2)
     s2problem = Gfx950ConvFwdSpec(
         N=2, Hi=16, Wi=16, C=32, K=32, Y=3, X=3, sH=2, sW=2, pH=1, pW=1, groups=32
     )
-    assert gfx950_conv_fwd_aot_serves(stride2, s2problem) == (True, "ok")
+    assert conv_fwd_aot_serves(stride2, s2problem) == (True, "ok")
 
 
 @pytest.mark.parametrize("cpg", [4, 8, 16, 32])
@@ -1246,13 +1261,11 @@ def test_grouped_serves_its_compiled_channel_counts_only(direct_jobs, cpg):
         pW=1,
         groups=16,
     )
-    assert gfx950_conv_fwd_aot_serves(spec, problem) == (True, "ok")
+    assert conv_fwd_aot_serves(spec, problem) == (True, "ok")
     for change in ({"K": 32 * cpg}, {"C": 32 * cpg, "K": 32 * cpg}):
-        ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, **change))
+        ok, why = conv_fwd_aot_serves(spec, replace(problem, **change))
         assert not ok and "cpg, kpg" in why, why
-    ok, why = gfx950_conv_fwd_aot_serves(
-        replace(spec, block_groups=32), replace(problem)
-    )
+    ok, why = conv_fwd_aot_serves(replace(spec, block_groups=32), replace(problem))
     assert not ok and "not divisible by block_groups" in why, why
 
 
@@ -1279,7 +1292,7 @@ def test_nongrouped_serves_dense_runtime_channels_and_dilation(direct_jobs):
         dtype=spec.dtype,
     )
     for c, k in ((64, 96), (16, 32), (256, 64)):
-        ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, C=c, K=k))
+        ok, why = conv_fwd_aot_serves(spec, replace(problem, C=c, K=k))
         assert ok, (c, k, why)
     # Grouped graphs, unaligned channel counts and another dilation are declined.
     for change, reason in (
@@ -1287,7 +1300,7 @@ def test_nongrouped_serves_dense_runtime_channels_and_dilation(direct_jobs):
         ({"C": 60}, "C 60"),
         ({"dH": 1}, "dilation"),
     ):
-        ok, why = gfx950_conv_fwd_aot_serves(spec, replace(problem, **change))
+        ok, why = conv_fwd_aot_serves(spec, replace(problem, **change))
         assert not ok and reason in why, (change, why)
     # A sweep for Wo = 96 tries the 32- and 96-wide tiles of the 32-wide atom only.
     wider = next(
@@ -1299,7 +1312,7 @@ def test_nongrouped_serves_dense_runtime_channels_and_dilation(direct_jobs):
         )
         if (s.dilation_h, s.stride_h, s.tile_w, s.atom) == (3, 2, 64, "32x32x16")
     )
-    ok, why = gfx950_conv_fwd_aot_serves(wider, replace(problem, dtype=wider.dtype))
+    ok, why = conv_fwd_aot_serves(wider, replace(problem, dtype=wider.dtype))
     assert not ok and "does not fit Wo=96" in why, why
 
 

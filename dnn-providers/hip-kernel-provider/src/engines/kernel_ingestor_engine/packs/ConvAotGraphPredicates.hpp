@@ -13,7 +13,7 @@
 #include "engines/kernel_ingestor_engine/packs/ConvAotGeometryCommon.hpp"
 
 /// @file ConvAotGraphPredicates.hpp
-/// The tensor and attribute checks of the conv AOT engines' graph contracts (gfx950 and gfx1250), the
+/// The tensor and attribute checks of the conv AOT engines' graph contracts, the
 /// same for every direction: which tensors the kernels can address, packed NHWC strides,
 /// 2-D attributes.
 namespace hip_kernel_provider::kernel_ingestor_engine::conv_aot

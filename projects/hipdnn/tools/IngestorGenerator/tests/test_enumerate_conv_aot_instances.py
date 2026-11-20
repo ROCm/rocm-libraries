@@ -230,7 +230,9 @@ def _fake_main(tmp_path, monkeypatch, identities, swept=None):
     labels = tmp_path / "labels.txt"
     labels.write_text("".join(f"{_label(i)}\n" for i in identities))
     hashes = {tool.stable_hash(i) for i in identities} if swept is None else swept
-    monkeypatch.setattr(tool, "sweep_hashes", lambda dtype, jobs: hashes)
+    monkeypatch.setattr(
+        tool, "sweep_hashes", lambda dtype, jobs, arch=tool.ARCH: hashes
+    )
     out = tmp_path / "lists"
     argv = ["--rocke-root", str(_ROCKE), "--labels", str(labels)]
     status = tool.main(argv + ["--output-dir", str(out), "--jobs", "1"])
@@ -371,11 +373,13 @@ def test_main_applies_a_real_exclude_to_the_dispatcher_source(
     would still write the excluded instance and fail here."""
     identities = synthetic_grid[:3]
     dropped_label = _label(identities[0])
-    monkeypatch.setattr(tool, "read_dispatcher_instances", lambda root: identities)
+    monkeypatch.setattr(
+        tool, "read_dispatcher_instances", lambda root, arch=tool.ARCH: identities
+    )
     monkeypatch.setattr(
         tool,
         "sweep_hashes",
-        lambda dtype, jobs: {tool.stable_hash(i) for i in identities},
+        lambda dtype, jobs, arch=tool.ARCH: {tool.stable_hash(i) for i in identities},
     )
     excludes = tmp_path / "excludes.json"
     excludes.write_text(json.dumps([{"label": dropped_label, "reason": "a known bug"}]))

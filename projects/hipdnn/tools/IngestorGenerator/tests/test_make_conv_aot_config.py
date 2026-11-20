@@ -131,6 +131,17 @@ def test_seed_config_is_what_the_tool_generates(seed_specs):
     )
 
 
+def test_generated_kmd_field_types_are_the_shipped_gfx950_ones(seed_specs):
+    """The per-arch string-field set (``string_fields``) types every gfx950 KMD
+    field as the shipped descriptor does, name for name and type for type, so
+    the generated gfx950 KDP schema is unchanged."""
+    shipped = json.loads((_SHIPPED_DIR / "gfx950_conv_fwd_aot.kmd.json").read_text())
+    generated = tool.build_config(seed_specs, _SEED_ENGINE)["kmd_fields"]
+    assert [(f["name"], f["type"]) for f in generated] == [
+        (f["name"], f["type"]) for f in shipped["fields"]
+    ]
+
+
 def test_shipped_bundle_is_its_catalog_with_instance_derived_ids(bundle):
     engine, folder, specs, sharding = bundle
     slug = tool.engine_slug(engine)
@@ -835,25 +846,25 @@ def _runtime_problem(problem, dtype):
 
 def _serving_counts(specs, problem, dtype):
     """How many instances of each family (direct, implicit GEMM) serve the problem:
-    the capability, gfx950_conv_fwd_aot_serves."""
-    from builders.common.convolution_forward import gfx950_conv_fwd_aot_serves
+    the capability, conv_fwd_aot_serves."""
+    from builders.common.convolution_forward import conv_fwd_aot_serves
 
     runtime = _runtime_problem(problem, dtype)
     counts = [0, 0]
     for spec in specs:
-        if spec.dtype == dtype and gfx950_conv_fwd_aot_serves(spec, runtime)[0]:
+        if spec.dtype == dtype and conv_fwd_aot_serves(spec, runtime)[0]:
             counts[0 if spec.is_direct else 1] += 1
     return tuple(counts)
 
 
 def _selected(specs, problem, dtype):
     """The instances the engine selects for the problem: rocKE's runtime selection among
-    those that serve it, gfx950_conv_fwd_aot_runtime_candidates."""
+    those that serve it, conv_fwd_aot_runtime_candidates."""
     from builders.common.convolution_forward import (
-        gfx950_conv_fwd_aot_runtime_candidates,
+        conv_fwd_aot_runtime_candidates,
     )
 
-    return gfx950_conv_fwd_aot_runtime_candidates(
+    return conv_fwd_aot_runtime_candidates(
         _runtime_problem(problem, dtype), [s for s in specs if s.dtype == dtype]
     )
 
@@ -953,7 +964,7 @@ def test_unit_suite_selection_cases_are_the_python_runtime_candidates():
     selection picks from the same sample."""
     from builders.common.convolution_forward import (
         Gfx950ConvFwdAotSpec,
-        gfx950_conv_fwd_aot_runtime_candidates,
+        conv_fwd_aot_runtime_candidates,
     )
 
     text = _SELECTION_SUITE.read_text()
@@ -1101,11 +1112,11 @@ _LAUNCH_ROW = re.compile(
 def test_native_direct_launch_cases_are_the_adapters():
     """TestGfx950ConvFwdGeometry.cpp holds conv::directInstanceLaunch to a table of
     (instance, problem) cases; every row must be what the adapter decides, so the native
-    launch is checked against gfx950_conv_fwd_aot_serves, grid() and block()."""
+    launch is checked against conv_fwd_aot_serves, grid() and block()."""
     from builders.common.convolution_forward import (
         Gfx950ConvFwdAotSpec,
         Gfx950ConvFwdSpec,
-        gfx950_conv_fwd_aot_serves,
+        conv_fwd_aot_serves,
     )
 
     rows = _LAUNCH_ROW.findall(_GEOMETRY_TEST.read_text())
@@ -1139,7 +1150,7 @@ def test_native_direct_launch_cases_are_the_adapters():
             N=n, C=c, K=k, Hi=hi, Wi=wi, Y=y, X=x, sH=psh, sW=psw, pH=pph, pW=ppw,
             dH=pdh, dW=pdw, groups=groups,
         )  # fmt: skip
-        ok, why = gfx950_conv_fwd_aot_serves(spec, runtime)
+        ok, why = conv_fwd_aot_serves(spec, runtime)
         assert ok == (served == "true"), (variant, problem, why)
         if ok:
             gx, gy, gz, block = (int(v) for v in launch)
