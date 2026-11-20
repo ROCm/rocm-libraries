@@ -1078,6 +1078,22 @@ const char* rocke_arch_facts_of(const char* gfx)
     return gfx != NULL ? rocke_row_facts_of(gfx, strlen(gfx)) : NULL;
 }
 
+const rocke_ati_gemm_caps_t* rocke_ati_gemm_caps(const rocke_arch_target_t* t)
+{
+    static const rocke_ati_gemm_caps_t k_none = {};
+    if(t == NULL || t->gfx == NULL)
+        return &k_none;
+    const char* source = rocke_arch_facts_of(t->gfx);
+    const char* gfx = source != NULL ? source : t->gfx;
+    for(int i = 0; i < rocke_ati_arch_registry_len; ++i)
+    {
+        const rocke_ati_arch_row_t* row = &rocke_ati_arch_registry[i];
+        if(strcmp(row->gfx, gfx) == 0)
+            return row->gemm != NULL ? row->gemm : &k_none;
+    }
+    return &k_none;
+}
+
 /* Length of the processor part of target_id with any profile removed
  * (gfx1250-strict:xnack- -> 7); its features start at strcspn(target_id, ":"). */
 static size_t rocke_compiler_processor_length(const char* target_id)

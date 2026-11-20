@@ -1,12 +1,16 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <algorithm>
 #include <set>
+#include <vector>
 
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "MiopenUtils.hpp"
+#include "Workarounds.hpp"
 #include "engines/plans/MiopenPointwiseTensorChecks.hpp"
 #include "engines/plans/MiopenUnaryActivationChecks.hpp"
 
@@ -91,7 +95,10 @@ void checkReluParamsSupported(const PointwiseAttributes& attrs)
 }
 
 // Generic IO-tensor validation shared by every unary pointwise activation:
-// non-virtual, FLOAT/HALF only, matching dtypes, rank in [1, 4], matching element counts.
+// non-virtual, FLOAT/HALF only, matching dtypes, rank in [1, 4], matching element counts,
+// identical dims on input and output, identical memory layout when both are packed, packed
+// rank-1 tensors, and no column-strided pair that MIOpen's two-dimensional activation shortcut
+// would read as unit-column.
 // `opName` is used only to make exception/log messages activation-specific
 // (e.g. "Relu plan builder: ...").
 void checkTensorsSupported(
@@ -139,6 +146,73 @@ void checkTensorsSupported(
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             opName + " plan builder: input and output tensors must have the same element count");
+    }
+
+    // MIOpen walks two packed tensors flat, so the logical index of an element must sit at the
+    // same memory offset in the input and the output, i.e. both tensors must share one layout.
+    // Strides of unit dims never contribute to an offset. A pair that is not both packed is
+    // declined by workaround 16024: MIOpen reads it strided only when its N stride exceeds
+    // C*H*W and reuses cached kernels across problems.
+    const std::vector<int64_t> inDims(inputDims->begin(), inputDims->end());
+    const std::vector<int64_t> outDims(outputDims->begin(), outputDims->end());
+    const std::vector<int64_t> inStrides(inputTensor.strides()->begin(),
+                                         inputTensor.strides()->end());
+    const std::vector<int64_t> outStrides(outputTensor.strides()->begin(),
+                                          outputTensor.strides()->end());
+    bool sameLayout = inDims == outDims && inStrides.size() == outStrides.size()
+                      && inDims.size() == inStrides.size();
+    const bool bothPacked = sameLayout
+                            && hipdnn_data_sdk::utilities::isTensorPacked(inDims, inStrides)
+                            && hipdnn_data_sdk::utilities::isTensorPacked(outDims, outStrides);
+    for(size_t i = 0; bothPacked && sameLayout && i < inDims.size(); ++i)
+    {
+        sameLayout = inDims[i] == 1 || inStrides[i] == outStrides[i];
+    }
+    if(!sameLayout)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            opName + " plan builder: input and output tensors must have the same dims and strides");
+    }
+
+    // ActivFwdSolver0 accepts a pair that is not both packed when the pair is effectively
+    // two-dimensional (rank 2, or every leading extent is 1) and either tensor's row stride
+    // differs from its width. It then reads both tensors as rows of unit-stride columns, so a
+    // non-unit innermost stride on either side would pair the wrong elements. Width 1 has a
+    // single column and is unaffected. The condition mirrors ActivFwdSolver0::IsApplicable.
+    if(!bothPacked && rank >= 2)
+    {
+        const auto rowStrideIdx = rank - 2;
+        const auto lastIdx = rank - 1;
+        bool leadingExtentsAreOne = true;
+        for(size_t i = 0; i < rowStrideIdx; ++i)
+        {
+            leadingExtentsAreOne = leadingExtentsAreOne && inDims[i] == 1 && outDims[i] == 1;
+        }
+        const bool takesTwoDimensionalShortcut
+            = leadingExtentsAreOne
+              && (inDims[lastIdx] != inStrides[rowStrideIdx]
+                  || outDims[lastIdx] != outStrides[rowStrideIdx]);
+        if(takesTwoDimensionalShortcut && inDims[lastIdx] > 1
+           && (inStrides[lastIdx] != 1 || outStrides[lastIdx] != 1))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                opName
+                    + " plan builder: non-packed tensors with a non-unit innermost stride are "
+                      "not supported when MIOpen treats them as two-dimensional");
+        }
+    }
+
+    // MIOpen indexes strides[rank - 2] of tensors it cannot treat as packed, which does not
+    // exist at rank 1.
+    if(rank == 1
+       && (!hipdnn_data_sdk::utilities::isTensorPacked(inDims, inStrides)
+           || !hipdnn_data_sdk::utilities::isTensorPacked(outDims, outStrides)))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            opName + " plan builder: rank-1 tensors must be packed");
     }
 }
 
@@ -214,6 +288,12 @@ bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opG
         }
 
         checkTensorsSupported(attrs, opGraph.getTensorMap(), opName);
+
+        const auto& inputTensor
+            = miopen_utils::findTensorAttributes(opGraph.getTensorMap(), attrs.in_0_tensor_uid());
+        const auto& outputTensor
+            = miopen_utils::findTensorAttributes(opGraph.getTensorMap(), attrs.out_0_tensor_uid());
+        REJECT_IF_WORKAROUND_ISSUE_16024(inputTensor, outputTensor);
     }
     catch(const std::exception& e)
     {

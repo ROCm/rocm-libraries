@@ -188,11 +188,13 @@ class TestCkTileGemmPipelineCompTDMLdsPadding
     // These instances use the regular (non-cluster) launch, which also works on
     // asicRevision=0, so the base-class TDM revision skip does not apply here.
     // That also bypasses the base-class data-type skip, and Run() does nothing for an
-    // unsupported combination, so every instance here must be supported.
+    // unsupported combination, so every instance here must be supported. The base-class
+    // gfx1250 skip is repeated here because this override replaces it.
     void SetUp() override
     {
         static_assert(TestCkTileGemmPipelineCompTDMLdsPadding<T>::check_data_type(),
                       "unsupported data type combination: this case would pass without running");
+        CK_TILE_SKIP_UNLESS_GFX125();
         // Dedicated WMMA F4 instructions are not supported on gfx1250 A0. Only the revision is
         // checked: this test is built for gfx125 only, and is_gfx125_supported() is false on
         // devices named gfx1250-strict.

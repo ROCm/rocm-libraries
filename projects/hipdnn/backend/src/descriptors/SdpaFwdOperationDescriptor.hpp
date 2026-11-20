@@ -68,6 +68,14 @@ public:
     {
         return _seqLenKvDesc;
     }
+    std::shared_ptr<TensorDescriptor> getCuSeqLenQDesc() const
+    {
+        return _cuSeqLenQDesc;
+    }
+    std::shared_ptr<TensorDescriptor> getCuSeqLenKVDesc() const
+    {
+        return _cuSeqLenKvDesc;
+    }
     std::shared_ptr<TensorDescriptor> getSeedDesc() const
     {
         return _seedDesc;
@@ -185,6 +193,8 @@ private:
     std::shared_ptr<TensorDescriptor> _scaleDesc;
     std::shared_ptr<TensorDescriptor> _seqLenQDesc;
     std::shared_ptr<TensorDescriptor> _seqLenKvDesc;
+    std::shared_ptr<TensorDescriptor> _cuSeqLenQDesc;
+    std::shared_ptr<TensorDescriptor> _cuSeqLenKvDesc;
     std::shared_ptr<TensorDescriptor> _seedDesc;
     std::shared_ptr<TensorDescriptor> _offsetDesc;
     std::shared_ptr<TensorDescriptor> _dropoutMaskDesc;

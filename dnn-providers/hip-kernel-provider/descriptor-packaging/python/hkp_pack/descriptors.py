@@ -819,6 +819,7 @@ _UHD_ADAPTERS = (
     "tree_data",
     "table",
     "linear_data",
+    "mlp_data",
     "custom_library",
 )
 _BEHAVIOR_NOTES = ("runtime_compilation", "supports_graph_capture")
@@ -1053,7 +1054,7 @@ def _validate_uhd(desc, source_root, require_dvc=False):
     if adapter != "static_order" or "objective" in doc:
         _require(doc, ("objective",), where)
         _require_enum(doc, "objective", ("max", "min"), where)
-    if adapter in ("tree_data", "table", "linear_data"):
+    if adapter in ("tree_data", "table", "linear_data", "mlp_data"):
         _require(doc, ("features_signature", "features_hash", "trained_against"), where)
     if "features_signature" in doc:
         signature = doc["features_signature"]
@@ -1138,6 +1139,14 @@ def _validate_uhd(desc, source_root, require_dvc=False):
             raise HkpPackError(
                 f"{where}: linear_data requires objective 'min' and no score.metric, "
                 "calibration or transform"
+            )
+    if adapter == "mlp_data":
+        # The log of the metric the artifact names (RFC 0019 §7.6), as UhdParser requires;
+        # the loader checks the artifact's metric against score.metric.
+        score = doc.get("score", {})
+        if "metric" not in score or score.get("transform") != "log":
+            raise HkpPackError(
+                f"{where}: mlp_data requires score.metric and score.transform 'log'"
             )
     body = doc[adapter]
     if adapter == "static_order":

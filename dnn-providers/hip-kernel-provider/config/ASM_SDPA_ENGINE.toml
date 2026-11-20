@@ -122,7 +122,7 @@ filters = ["*_SdpaBackward_*.*_fp16_*_tolk1"]
 atol = 0.0003
 rtol = 0.004
 
-# class F32, fp32: fp32 IO (uncalibrated)
+# class F32, fp32: fp32 IO; reported on ROCm/dnn-benchmarking#127: its SDPA backward corpus (81 gfx950 fp32 graphs) passes split at rtol 1e-5, atol 1e-6 against a PyTorch fp32 reference
 [[tolerance_overrides]]
 filters = ["*_SdpaBackward_*.*_fp32_*_tolf32"]
 atol = 1e-05

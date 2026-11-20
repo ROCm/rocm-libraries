@@ -90,8 +90,12 @@ struct StreamKKernel
         TilePartitioner::PERSISTENT == PersistentDP,
         "Persistent flag from TilePartitioner must match Persistent flag from UniversalGemm.");
 
+    static_assert(!UniversalGemmKernel::kIsGemmKernelOnlyPipeline,
+                  "Stream-K GEMM does not support this pipeline (validated with the plain GEMM "
+                  "kernel only)");
+
     /// The named barriers this kernel arms for GemmPipeline; void when it uses none. Declared here
-    /// because the launched kernel, not the wrapped UniversalGemmKernel, owns the barrier array.
+    /// because the launched kernel, not the wrapped UniversalGemmKernel, owns the barriers.
     using barrier_pipeline = typename UniversalGemmKernel::barrier_pipeline;
     /// Stands in for the barrier token when the pipeline uses no named barriers.
     using NoBarriers = typename UniversalGemmKernel::NoBarriers;
@@ -158,30 +162,29 @@ struct StreamKKernel
 
     /**
      *@brief Stream-K gives every workgroup its own K range, so the TDM pipelines run without
-     *cluster multicast, and the plain-GEMM-only pipelines are not supported.
+     *cluster multicast.
      */
-    static_assert(!UniversalGemmKernel::kIsPlainGemmOnlyPipeline,
-                  "Stream-K GEMM does not support this pipeline (plain GEMM only)");
     static constexpr bool kClusterLaunch =
         BlockGemmShape::kclusterM * BlockGemmShape::kclusterN * BlockGemmShape::kclusterK > 1;
     static_assert(!UniversalGemmKernel::kIsTdmPipeline || !kClusterLaunch,
                   "TDM Stream-K GEMM: cluster launch unsupported (per-workgroup K ranges)");
 
     /**
-     *@brief True for comp_tdm and comp_tdm_v2: the TDM pipelines other than the wavelet
-     *comp_tdm_pc. They can return with their last, clipped TDM prefetch still writing LDS.
-     *CShuffleEpilogue and TdmEpilogue wait for it; StreamKGemm waits for it after a partial tile,
-     *which runs no epilogue. C must be row-major: CShuffleEpilogue supports nothing else, and
-     *TdmEpilogue's column-major store is not validated with these pipelines.
+     *@brief True for comp_tdm, comp_tdm_v2, and comp_tdm_v3: the TDM pipelines other than the
+     *wavelet comp_tdm_pc. V1 and V2 can return with their last, clipped TDM prefetch still writing
+     *LDS (V3 drains before returning). CShuffleEpilogue and TdmEpilogue wait for it; StreamKGemm
+     *waits for it after a partial tile, which runs no epilogue. C must be row-major:
+     *CShuffleEpilogue supports nothing else, and TdmEpilogue's column-major store is not validated
+     *with these pipelines.
      */
     static constexpr bool kIsCompTdmPipeline =
         UniversalGemmKernel::kIsTdmPipeline && !is_wavelet_pipeline<GemmPipeline>;
     static_assert(!kIsCompTdmPipeline || is_tdm_epilogue_v<EpiloguePipeline> ||
                       is_specialization_of<EpiloguePipeline, CShuffleEpilogue>::value,
-                  "Stream-K with comp_tdm or comp_tdm_v2 requires CShuffleEpilogue or "
-                  "TdmEpilogue (they wait for the pipeline's last TDM prefetch).");
+                  "Stream-K with comp_tdm, comp_tdm_v2, or comp_tdm_v3 requires CShuffleEpilogue "
+                  "or TdmEpilogue (they wait for the pipeline's last TDM prefetch).");
     static_assert(!kIsCompTdmPipeline || std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>,
-                  "Stream-K with comp_tdm or comp_tdm_v2 supports row-major C only.");
+                  "Stream-K with comp_tdm, comp_tdm_v2, or comp_tdm_v3 supports row-major C only.");
 
     struct StreamKKernelArgs : ck_tile::UniversalGemmKernelArgs<>
     {
@@ -358,9 +361,9 @@ struct StreamKKernel
         {
             // Revalidate the actual k_batch (UniversalGemmKernel substitutes 1 for a
             // split-K-capable TDM pipeline with a non-TDM epilogue, but Stream-K splits K itself)
-            // and the device (UniversalGemmKernel checks it only for named-barrier pipelines; off
-            // gfx125 the TDM instructions compile to no-ops). UniversalGemmKernel checks the rest,
-            // including the C tail with a non-TDM epilogue.
+            // and the device (off gfx125 the TDM instructions compile to no-ops;
+            // UniversalGemmKernel also rejects it, but this keeps the Stream-K message).
+            // UniversalGemmKernel checks the rest, including the C tail with a non-TDM epilogue.
             if(!UniversalGemmKernel::IsTdmArgumentSupported("Stream-K GEMM",
                                                             kargs.k_batch,
                                                             kargs.K,

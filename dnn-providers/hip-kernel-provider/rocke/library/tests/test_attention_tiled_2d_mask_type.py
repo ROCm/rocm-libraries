@@ -14,11 +14,16 @@ under another mask's key.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from dispatch.attention import attention_candidates
 from dispatch.attention.common import AttentionMaskType, AttentionRequest
 from kernels.common import attention_mask_type
+from kernels.gfx942.attention_tiled_2d import (
+    UnifiedAttention2DTiledSpec as Gfx942Spec,
+)
 from kernels.gfx950.attention_tiled_2d import UnifiedAttention2DTiledSpec
 
 _SPEC_ID = "gfx950_u2d_narrow_nw4_mw16_t4xb_llvm"
@@ -98,3 +103,66 @@ def test_mask_type_matches_what_the_dispatcher_builds(mask):
         spec_id=candidate.spec_id,
     )
     assert candidate.select_spec(request).kernel_spec.mask_type() == int(mask)
+
+
+# gfx942: the tiled 2D body computes the bottom-right causal band only, so its
+# mask_type() is bottom-right causal or, with a window, a sliding window.
+
+_GFX942_SPEC_ID = "gfx942_u2d_transposed_x8_nw4_mw32_t4xb_llvm"
+
+
+def _gfx942_spec(**band) -> Gfx942Spec:
+    return Gfx942Spec(
+        head_size=128,
+        block_size=16,
+        num_query_heads=8,
+        num_kv_heads=2,
+        dtype="bf16",
+        use_sinks=False,
+        sliding_window=band.pop("sliding_window", 0),
+        has_softcap=False,
+        **band,
+    )
+
+
+@pytest.mark.parametrize("window, expected", [(0, 2), (128, 3)])
+def test_gfx942_mask_type_names_the_band(window, expected):
+    mask = _gfx942_spec(sliding_window=window).mask_type()
+    assert type(mask) is int and mask == expected
+
+
+def test_gfx942_spec_has_no_band_field_mask_type_ignores():
+    """``mask_type()`` hard-codes the bottom-right causal band (right bound 0, bottom-right
+    alignment) and reads only ``sliding_window``. That is right only while the spec has no
+    ``right_bound`` / ``causal_top_left`` field: a spec that gains one while ``mask_type()``
+    still assumes bottom-right would ship top-left and no-mask kernels under the
+    bottom-right key. This fails the moment either field appears, so ``mask_type()`` is
+    revisited with it. A band field under any other name goes unseen here.
+    """
+    declared = {f.name for f in dataclasses.fields(Gfx942Spec)}
+    assert not {"right_bound", "causal_top_left"} & declared
+
+
+def test_gfx942_mask_type_matches_what_the_dispatcher_builds():
+    candidate = next(
+        c
+        for c in attention_candidates()
+        if getattr(c, "spec_id", "") == _GFX942_SPEC_ID
+    )
+    request = AttentionRequest(
+        batch=1,
+        nhead_q=8,
+        nhead_k=2,
+        seqlen_q=128,
+        seqlen_k=256,
+        hdim_q=128,
+        hdim_v=128,
+        arch="gfx942",
+        mask_type=AttentionMaskType.BOTTOM_RIGHT_CAUSAL,
+        dtype="bf16",
+        kv_block_size=16,
+        algorithm=candidate.algorithm,
+        spec_id=candidate.spec_id,
+    )
+    spec = candidate.select_spec(request).kernel_spec
+    assert spec.mask_type() == int(AttentionMaskType.BOTTOM_RIGHT_CAUSAL)

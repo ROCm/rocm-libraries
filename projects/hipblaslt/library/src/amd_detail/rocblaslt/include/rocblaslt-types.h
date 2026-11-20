@@ -639,6 +639,8 @@ struct RocblasltContractionProblem
     // threaded through a 60-argument constructor that every caller spells out.
     // HIPBLASLT_MATMUL_DESC_A_INT4_ENCODING_EXT. Set after construction, like streamKFlags.
     int32_t     int4EncodingA = 0;
+    // Second D buffer: every D tile is also stored there (OutputPeerD kernels only).
+    void*       dPeer = nullptr;
     void*       streamKFlags = nullptr;
     bool        swizzleA;
     bool        swizzleB;
@@ -753,7 +755,13 @@ struct RocblasltContractionProblem
 // Fields of hipblasLtFusedEpilogueDescriptor, flattened for this layer.
 struct RocblasltFusedEpilogueInfo
 {
-    bool                         hasA2APrefix      = false;
+    enum class Mode
+    {
+        Disabled,
+        GemmA2A,
+    };
+
+    Mode                         mode              = Mode::Disabled;
     const hipblasLtSdmaQueue_t*  a2aSdmaQueues     = nullptr;
     void* const*                 a2aRecvPtrs       = nullptr;
     int64_t                      a2aExtent         = 0;
@@ -764,6 +772,19 @@ struct RocblasltFusedEpilogueInfo
 // Returns false when desc is nullptr.
 bool rocblaslt_resolve_fused_epilogue(const struct hipblasLtFusedEpilogueDescriptor* desc,
                                       RocblasltFusedEpilogueInfo&                    out);
+
+// Returns false unless prob requests a fused all-to-all.
+inline bool rocblaslt_resolve_fused_a2a(const RocblasltContractionProblem& prob,
+                                        RocblasltFusedEpilogueInfo&        out)
+{
+    return rocblaslt_resolve_fused_epilogue(prob.fused_epilogue, out)
+           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+}
+
+// Every rejection is reported as rocblaslt_status_invalid_value.
+rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
+                                                            rocblaslt_matmul_desc   matmulDesc,
+                                                            rocblaslt_matrix_layout matD);
 #endif
 
 namespace rocblaslt
@@ -834,6 +855,7 @@ namespace rocblaslt
         void* scaleAlphaVec = nullptr;
         void* aux           = nullptr;
         void* amaxD         = nullptr;
+        void* dPeer         = nullptr;
         // Keep this layout in sync with hipblaslt_ext::GemmInputs::GemmInputsImpl.
         bool deviceScalarAlpha = false;
     };

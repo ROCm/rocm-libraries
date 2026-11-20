@@ -19,7 +19,7 @@ from tensilelite.Common.Capabilities import applyArchCapOverrides, makeIsaInfoMa
 from tensilelite.Common.DataType import DataType
 from tensilelite.Common.ValidParameters import makeValidWorkGroups
 from tensilelite.KernelWriterAssembly import KernelWriterAssembly
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 

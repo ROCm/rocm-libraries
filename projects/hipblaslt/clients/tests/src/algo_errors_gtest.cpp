@@ -9,6 +9,7 @@
 #include <hip/hip_runtime.h>
 #include <hipblaslt/hipblaslt-ext.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstdlib>
@@ -53,8 +54,7 @@ namespace
         return algo;
     }
 
-    // One FP16 NN problem. The buffers are never read: every call under test
-    // returns before a kernel is launched.
+    // One FP16 NN problem. Tests that launch a kernel fill the buffers it reads.
     class AlgoErrors : public ::testing::Test
     {
     protected:
@@ -150,6 +150,136 @@ namespace
         ASSERT_EQ(gemm.setProblem(size, size, size, batch, epilogue, in), HIPBLAS_STATUS_SUCCESS);
 
         EXPECT_EQ(gemm.initialize(algoWithUnknownIndex(), nullptr), HIPBLAS_STATUS_INVALID_VALUE);
+    }
+
+    // An algo index can name a grouped or a non-grouped solution, and their kernels take
+    // different arguments, so each launch refuses an algo of the other kind. Uniform
+    // summation order refuses some of these launches on its own, so both modes run.
+    TEST_F(AlgoErrors, smoke_GroupedAndNonGroupedAlgosAreRefusedByTheOtherKind)
+    {
+        constexpr size_t kWorkspace = size_t(32) << 20;
+        void*            workspace  = nullptr;
+        ASSERT_EQ(hipMalloc(&workspace, kWorkspace), hipSuccess);
+        auto freeBuffer = [](void* p) { static_cast<void>(hipFree(p)); };
+        const std::unique_ptr<void, decltype(freeBuffer)> workspaceOwner(workspace, freeBuffer);
+
+        // The grouped problems run concurrently, so the second writes its own D. Its
+        // alpha differs, so a D shared with the first problem fails the check.
+        void* secondD = nullptr;
+        ASSERT_EQ(hipMalloc(&secondD, kSize * kSize * sizeof(uint16_t)), hipSuccess);
+        const std::unique_ptr<void, decltype(freeBuffer)> secondDOwner(secondD, freeBuffer);
+        float                                             secondAlpha = 2.0f;
+
+        // FP16 bit patterns. With A and B all ones, each element of D is alpha * kSize.
+        constexpr uint16_t kOne = 0x3c00, k128 = 0x5800, k256 = 0x5c00;
+        for(void* buffer : {a, b, c})
+            ASSERT_EQ(hipMemsetD16(buffer, kOne, kSize * kSize), hipSuccess);
+        auto allEqual = [](const void* buffer, uint16_t value) {
+            std::vector<uint16_t> host(kSize * kSize);
+            EXPECT_EQ(hipMemcpy(host.data(),
+                                buffer,
+                                host.size() * sizeof(uint16_t),
+                                hipMemcpyDeviceToHost),
+                      hipSuccess);
+            return std::all_of(
+                host.begin(), host.end(), [value](uint16_t x) { return x == value; });
+        };
+
+        for(const int32_t uniformOrder : {1, 0})
+        {
+            SCOPED_TRACE("uniform summation order " + std::to_string(uniformOrder));
+            ASSERT_EQ(hipblasLtMatmulDescSetAttribute(desc,
+                                                      HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT,
+                                                      &uniformOrder,
+                                                      sizeof(uniformOrder)),
+                      HIPBLAS_STATUS_SUCCESS);
+            hipblaslt_ext::GemmPreference gemmPref;
+            gemmPref.setMaxWorkspaceBytes(kWorkspace);
+            gemmPref.setUniformSummationOrder(uniformOrder);
+
+            hipblaslt_ext::Gemm gemm(handle,
+                                     HIPBLAS_OP_N,
+                                     HIPBLAS_OP_N,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     kType,
+                                     HIPBLAS_COMPUTE_32F);
+            hipblaslt_ext::GemmEpilogue epilogue;
+            hipblaslt_ext::GemmInputs   in = inputs();
+            ASSERT_EQ(gemm.setProblem(kSize, kSize, kSize, 1, epilogue, in),
+                      HIPBLAS_STATUS_SUCCESS);
+            gemm.setMaxWorkspaceBytes(kWorkspace);
+
+            hipblaslt_ext::GroupedGemm grouped(handle,
+                                               HIPBLAS_OP_N,
+                                               HIPBLAS_OP_N,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               kType,
+                                               HIPBLAS_COMPUTE_32F);
+            std::vector<int64_t>                     size(2, kSize), batch(2, 1);
+            std::vector<hipblaslt_ext::GemmEpilogue> epilogues(2);
+            std::vector<hipblaslt_ext::GemmInputs>   ins(2, inputs());
+            ins[1].setD(secondD);
+            ins[1].setAlpha(&secondAlpha);
+            ASSERT_EQ(grouped.setProblem(size, size, size, batch, epilogues, ins),
+                      HIPBLAS_STATUS_SUCCESS);
+            grouped.setMaxWorkspaceBytes(kWorkspace);
+
+            std::vector<hipblasLtMatmulHeuristicResult_t> plainResults, groupedResults;
+            ASSERT_EQ(gemm.algoGetHeuristic(1, gemmPref, plainResults), HIPBLAS_STATUS_SUCCESS);
+            ASSERT_EQ(grouped.algoGetHeuristic(1, gemmPref, groupedResults),
+                      HIPBLAS_STATUS_SUCCESS);
+            ASSERT_FALSE(plainResults.empty());
+            if(groupedResults.empty())
+                GTEST_SKIP() << "the loaded library has no grouped solution for this problem";
+            hipblasLtMatmulAlgo_t plainAlgo   = plainResults[0].algo;
+            hipblasLtMatmulAlgo_t groupedAlgo = groupedResults[0].algo;
+
+            auto matmul = [&](const hipblasLtMatmulAlgo_t& algo) {
+                return hipblasLtMatmul(handle,
+                                       desc,
+                                       &alpha,
+                                       a,
+                                       layout,
+                                       b,
+                                       layout,
+                                       &beta,
+                                       c,
+                                       layout,
+                                       d,
+                                       layout,
+                                       &algo,
+                                       workspace,
+                                       kWorkspace,
+                                       nullptr);
+            };
+
+            // Each algo still runs on its own kind of problem.
+            EXPECT_EQ(matmul(plainAlgo), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.initialize(plainAlgo, workspace, false), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(gemm.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(grouped.initialize(groupedAlgo, workspace, false), HIPBLAS_STATUS_SUCCESS);
+            for(void* buffer : {d, secondD})
+                ASSERT_EQ(hipMemset(buffer, 0, kSize * kSize * sizeof(uint16_t)), hipSuccess);
+            EXPECT_EQ(grouped.run(nullptr), HIPBLAS_STATUS_SUCCESS);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+            EXPECT_TRUE(allEqual(d, k128));
+            EXPECT_TRUE(allEqual(secondD, k256));
+
+            EXPECT_EQ(matmul(groupedAlgo), HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(gemm.initialize(groupedAlgo, workspace, false),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(grouped.initialize(plainAlgo, workspace, false),
+                      HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+            size_t required = 0;
+            EXPECT_EQ(gemm.isAlgoSupported(groupedAlgo, required), HIPBLAS_STATUS_INVALID_VALUE);
+            EXPECT_EQ(grouped.isAlgoSupported(plainAlgo, required), HIPBLAS_STATUS_INVALID_VALUE);
+        }
     }
 
     TEST_F(AlgoErrors, smoke_HeuristicReportsZeroAlgosWhenRequestIsRejected)
