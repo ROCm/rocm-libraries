@@ -2863,14 +2863,14 @@ namespace TensileLite
                                                  customKernel.grid.z,
                                                  "] launches one GSU slice per tile"));
 
-        bool enableCluster = (sizeMapping.clusterDim.x > 1 || sizeMapping.clusterDim.y > 1);
+        bool enableCluster = (customKernel.clusterDim.x > 1 || customKernel.clusterDim.y > 1);
         if(internalArgsSupport.persistentLoopArgsVersion == 1 && enableCluster)
         {
             // DataParallel version-1 cluster kernels fold hardware clusters into
             // cluster ranks. Match the generated-kernel launch.
             const size_t clusters = launch.grid
-                / checkedMultiply(sizeMapping.clusterDim.x, sizeMapping.clusterDim.y);
-            rv.numWorkGroups = spatialClusterLaunch(clusters, sizeMapping.clusterDim);
+                / checkedMultiply(customKernel.clusterDim.x, customKernel.clusterDim.y);
+            rv.numWorkGroups = spatialClusterLaunch(clusters, customKernel.clusterDim);
         }
         bool hasNumWorkGroupsArg = std::any_of(
             customKernel.args.begin(), customKernel.args.end(),
@@ -2887,7 +2887,7 @@ namespace TensileLite
             std::cout << "Num work groups: " << rv.numWorkGroups.x << ", " << rv.numWorkGroups.y << ", " << rv.numWorkGroups.z << std::endl;
         }
 
-        rv.clusterDim = sizeMapping.clusterDim;
+        rv.clusterDim = customKernel.clusterDim;
 
         rv.numWorkItems.x = rv.workGroupSize.x * rv.numWorkGroups.x;
         rv.numWorkItems.y = rv.workGroupSize.y * rv.numWorkGroups.y;

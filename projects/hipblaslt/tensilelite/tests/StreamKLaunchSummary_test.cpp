@@ -1214,6 +1214,7 @@ TEST(PersistentLaunchSummaryTest, ClusterDataParallelInvocationsUseWholeClusterR
         solution.internalArgsSupport.useUniversalArgs = true;
         solution.customKernel.name = "cluster_data_parallel_probe";
         solution.customKernel.generated = true;
+        solution.customKernel.clusterDim = cluster;
         solution.customKernel.macrotile = TensileLite::dim3(128, 128, 64);
         solution.customKernel.threads = TensileLite::dim3(256, 1, 1);
         solution.customKernel.grid = {CustomGridSize::PersistentGrid,

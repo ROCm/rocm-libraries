@@ -12785,6 +12785,7 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
       "macrotile": [kernel["MacroTile0"], kernel["MacroTile1"], kernel["DepthU"]],
       "threads": [kernel["NumThreads"], 1, 1],
       "grid": [gridX, "One", "One"],
+      "clusterDim": kernel["ClusterDim"],
       "workspaceType": "None",
       "workspaceSizePerElemC": 0,
       "workspaceSizePerElemBias": 0,
