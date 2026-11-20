@@ -29,8 +29,9 @@ from .common import (
     _request_errors,
     _selector_matches,
 )
+from .axes import _CODEPATH_KNOBS
 from .candidate import make_tuning_candidate
-from .tuning_specs import NUM_SEGMENTS
+from .tuning_specs import NUM_SEGMENTS, additive_bias_geometry_ok
 from .unified_rules import AttentionGeometryVariant
 
 
@@ -94,6 +95,15 @@ GFX950_TUNING_VARIANTS = tuple(_variants())
 # named so a caller outside this package (the SDPA gate) does not have to
 # reconstruct the literal.
 D256_GFX950_ALGORITHM = "d256_gfx950"
+
+
+def _variant_features(variant: AttentionGeometryVariant) -> frozenset:
+    """Additive bias is declared exactly where the spec build accepts it
+    (``additive_bias_geometry_ok``, the same rule ``_bias_fields`` enforces)."""
+    knobs = _CODEPATH_KNOBS.get((variant.arch, variant.codepath), {})
+    if additive_bias_geometry_ok(variant.arch, knobs):
+        return frozenset({"attn_bias"})
+    return frozenset()
 
 
 def _make_gfx950_d256_candidate() -> KernelCandidate:
@@ -188,6 +198,6 @@ def register(route: CandidateRegistry, execution: CandidateRegistry) -> None:
     """The D256 fast path routes only; each tuning geometry goes on both."""
     route.register(_make_gfx950_d256_candidate())
     for variant in GFX950_TUNING_VARIANTS:
-        candidate = make_tuning_candidate(variant)
+        candidate = make_tuning_candidate(variant, _variant_features(variant))
         route.register(candidate)
         execution.register(candidate)

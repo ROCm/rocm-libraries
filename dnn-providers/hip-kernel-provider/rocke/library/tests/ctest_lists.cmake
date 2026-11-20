@@ -213,7 +213,8 @@ endif()
 # and K/V cache policy, the scalar fallback's cache key and block-table stride
 # kernarg, the unified attention running-max carry and keyless guards on the
 # emitted IR, the tiled 2D LSE store on the emitted IR, the
-# gfx950 tiled-2D K reads from LDS on the emitted IR, the
+# gfx950 tiled-2D K reads from LDS on the emitted IR, the gfx950 additive-bias
+# route and cohort-knob pins, the
 # gfx942 cfvst V loader's i64 K/V addressing on the emitted IR, the
 # LDS alignment claims of the backward kernel with the slices dK / dV sink, the
 # backward/gfx1250 MMA accumulator-input versus result-role regressions, the
@@ -267,6 +268,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
     "tests/library/tests/test_attention_unified_masked_tile_ir.py"
     "tests/library/tests/test_attention_unified_2d_lse_ir.py"
+    "tests/library/tests/test_attention_additive_bias_routes.py"
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
     "tests/library/tests/test_d256_gfx942_fast_routing.py"
     "tests/library/tests/test_gfx1250_tiled_3d_bounds.py"
@@ -563,16 +565,19 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 
 # Additive-bias numeric lane (the gfx950 unified and dense kernels, the gfx942 dense
 # kernel). Its own entry (selected by name, like the one above) so its runtime does
-# not eat into that entry's timeout. All files drive the torch runners and skip
-# without torch, each also off its own arch; the dense kernels' torch-free subsets
-# (test_attention_dense_bias_gfx950_gpu.py and test_attention_dense_bias_gfx942_gpu.py)
-# run in rocke_library_gpu_pytest below.
+# not eat into that entry's timeout. The torch files skip without torch, each also
+# off its own arch; the device_numeric file runs one unified case per path without
+# torch. The dense kernels' torch-free subsets (test_attention_dense_bias_gfx950_gpu.py
+# and test_attention_dense_bias_gfx942_gpu.py) run in rocke_library_gpu_pytest below.
+# Without a GPU of the files' archs every gpu-marked case skips; report the entry as
+# skipped (77, below) rather than Passed on the host-only checks alone.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-       "add_test(rocke_library_attention_bias_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx942_numeric.py\" -v -rs)\n")
+       "add_test(rocke_library_attention_bias_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_device_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx942_numeric.py\" -v -rs --rocke-exit-77-if-gpu-skipped)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  SKIP_RETURN_CODE 77\n"
        "  TIMEOUT 1200)\n")
 
 # Library GPU numeric suites: convolution, attention, KDA, and GDN. The gfx950

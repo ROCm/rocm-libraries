@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* static tile distribution (32x32 C dist)        */
 #include "rocke/helper_rocke.helpers.layouts.h" /* rocke_transpose_lds_reader_t (PV reader)         */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_additive_bias_internal.h" /* additive-bias params + add */
 #include "rocke/instance_gfx950_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -123,7 +124,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     int BLOCK_M, BLOCK_Q, NQK, NUM_KV; /* NUM_KV only for the fast-desc 64/8 pin */
     int VALID_ROWS; /* BLOCK_Q * NQK -- rows that map to complete GQA groups */
     int SLIDING_WINDOW;
-    bool USE_SOFTCAP, USE_SINKS, USE_ALIBI, USE_QQ_BIAS;
+    bool USE_SOFTCAP, USE_SINKS, USE_ALIBI, USE_QQ_BIAS, USE_ADDITIVE_BIAS;
     /* transposed-softmax + experimental predicate aliases (spec.*) */
     bool TRANSPOSED_SCALAR_STATE, TRANSPOSED_INVARIANT_HOIST;
     bool TRANSPOSED_MASK_ONCE, TRANSPOSED_HALF_LOCAL_PV;
@@ -182,6 +183,7 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* num_qh_p;
     rocke_value_t* num_kv_p;
     rocke_value_t* sliding_window_p;
+    rocke_additive_bias_params_t additive_bias; /* set only when USE_ADDITIVE_BIAS */
     rocke_value_t* lse; /* lse_ptr (spec->emit_lse only, else NULL) */
 
     /* ---- grid ids + wave decomposition ---- */
@@ -353,7 +355,8 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     rocke_value_t* hoist_q_head[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* hoist_row_mask[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     /* Python hoist_qh_r: the query head, never replaced by the ALiBi slope
-     * (hoist_q_head is). Read by the emit_lse epilogue stores. */
+     * (hoist_q_head is). Read by the additive-bias load and the emit_lse
+     * epilogue stores. */
     rocke_value_t* hoist_qh_r[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
 
     /* ---- transposed-32x32 invariant-hoist state (Python 2446-2480) ---- *

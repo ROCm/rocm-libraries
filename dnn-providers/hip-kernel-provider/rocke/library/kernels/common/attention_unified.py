@@ -600,6 +600,12 @@ _GFX942_4WARP_LSE_REFUSAL = (
 )
 
 
+def _scalar_additive_bias_refusal(kind: str) -> str:
+    """Why the scalar ``kind`` ("2D" or "3D") kernel refuses an additive-bias
+    problem: it has no bias score site, so it would drop the bias silently."""
+    return f"scalar {kind} kernel: additive bias runs on the gfx950 tiled kernels only"
+
+
 def supports_native_unified_attention(
     problem: UnifiedAttentionProblem,
     arch: str,
@@ -648,7 +654,7 @@ def supports_native_unified_attention(
     if problem.use_qq_bias:
         return False, "QQ bias is not enabled in CK DSL attention yet"
     if problem.use_additive_bias:
-        return False, "Additive bias is not enabled in CK DSL attention yet"
+        return False, _scalar_additive_bias_refusal("2D")
     rejected = _reject_mask_semantics(problem)
     if rejected is not None:
         return rejected
@@ -670,6 +676,9 @@ def supports_native_unified_attention_tiled(
         or _reject_mask_semantics(problem)
         or _reject_mask_on_arch(problem, arch)
     )
+    if rejected is not None:
+        return rejected
+    rejected = _reject_fp8_format_arch_mismatch(problem, arch)
     if rejected is not None:
         return rejected
     if arch == "gfx1250" and problem.softcap > 0:
@@ -800,29 +809,6 @@ def supports_native_unified_attention_3d_tiled(
             {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
         ),
     )
-
-
-def supports_native_unified_attention_coverage(
-    problem: UnifiedAttentionProblem,
-    arch: str,
-) -> Tuple[bool, str]:
-    """The scalar coverage gate (head size, block size, dtype, features), asked
-    about the LSE-off problem.
-
-    The scalar kernel writes no LSE, so the scalar gate refuses ``emit_lse``. The
-    path's own gate (:func:`unified_lse_path_gate`) rules on LSE; this one never does.
-    """
-    if problem.emit_lse:
-        problem = replace(problem, emit_lse=False)
-    return supports_native_unified_attention(problem, arch=arch)
-
-
-def unified_lse_path_gate(path: str) -> Callable[..., Tuple[bool, str]]:
-    """The gate of ``path`` (``"3d"`` split-KV, else tiled 2D). It owns which
-    arches and features can write LSE."""
-    if path == "3d":
-        return supports_native_unified_attention_3d_tiled
-    return supports_native_unified_attention_tiled
 
 
 _ATTN_CACHE: Dict[Tuple, bytes] = {}
@@ -6970,6 +6956,8 @@ def build_unified_attention_2d(
     p = spec.problem
     if p.dtype not in ("fp16", "bf16"):
         raise ValueError("scalar 2D kernel currently supports fp16/bf16")
+    if p.use_additive_bias:
+        raise ValueError(_scalar_additive_bias_refusal("2D"))
     dtype = spec.dtype_ir
     kv_dtype = FP8E4M3 if p.use_fp8 else dtype
     kv_vec_align = 8 if p.use_fp8 else 16
@@ -7192,6 +7180,8 @@ def build_unified_attention_3d(
     """
     validate_arch(arch)
     p = spec.problem
+    if p.use_additive_bias:
+        raise ValueError(_scalar_additive_bias_refusal("3D"))
     dtype = spec.dtype_ir
     b = IRBuilder(spec.kernel_name())
     b.kernel.attrs["max_workgroup_size"] = 64

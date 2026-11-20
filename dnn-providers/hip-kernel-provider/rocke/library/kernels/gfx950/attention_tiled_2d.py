@@ -655,15 +655,19 @@ class UnifiedAttention2DTiledSpec:
         # Additive bias is emitted only on the score paths the selectors route a
         # bias problem to (16x16 and the plain transposed 32x32 path); the hoisted
         # and mask-once query-head variants and non-transposed 32x32 are not.
-        if self.use_additive_bias and (
-            self.use_transposed_invariant_hoist
-            or self.use_transposed_mask_once
-            or (self.use_mfma_32x32 and not self.use_transposed_qk_32x32)
-        ):
-            raise ValueError(
-                "use_additive_bias does not support use_transposed_invariant_hoist, "
-                "use_transposed_mask_once, or the non-transposed 32x32 path"
-            )
+        if self.use_additive_bias:
+            if self.use_transposed_invariant_hoist:
+                raise ValueError(
+                    "use_additive_bias does not support use_transposed_invariant_hoist"
+                )
+            if self.use_transposed_mask_once:
+                raise ValueError(
+                    "use_additive_bias does not support use_transposed_mask_once"
+                )
+            if self.use_mfma_32x32 and not self.use_transposed_qk_32x32:
+                raise ValueError(
+                    "use_additive_bias does not support the non-transposed 32x32 path"
+                )
         if self.use_grouped_kv2_softmax:
             if self.dtype != "bf16":
                 raise ValueError(

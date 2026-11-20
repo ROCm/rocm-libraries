@@ -11,7 +11,9 @@
  * reduce_source() via rocke_build_unified_attention_reduce_scalar_new, and
  * configs 8-10 as the scalar split-3D segment kernel (8 segments; config 10 with
  * a sliding window) of the problem named in segment_source() via
- * rocke_build_unified_attention_3d_scalar_new. It lowers the returned KernelDef
+ * rocke_build_unified_attention_3d_scalar_new. Configs 11 and 12 are the scalar
+ * 2D and split-3D segment kernels given an additive-bias problem, which both
+ * engines refuse. It lowers the returned KernelDef
  * via rocke_lower_kernel_to_llvm_ex (arch gfx950, flavor AUTO) and prints the .ll
  * to stdout so the two outputs can be byte-compared.
  */
@@ -104,6 +106,10 @@ static int make_problem(int idx, rocke_unified_attention_problem_t* p)
         p->use_sinks = true;
         p->softcap = 50.0;
         break;
+    case 11: /* config 2 + additive bias: the scalar kernels refuse it. */
+        make_problem(2, p);
+        p->use_additive_bias = true;
+        break;
     default:
         return -1;
     }
@@ -142,6 +148,8 @@ static int segment_source(int idx)
         return 1;
     case 10:
         return 3;
+    case 12:
+        return 11;
     default:
         return -1;
     }
@@ -200,7 +208,7 @@ int main(int argc, char** argv)
     }
     if(!kernel)
     {
-        fprintf(stderr, "build failed for config %d (sticky err)\n", idx);
+        fprintf(stderr, "build failed for config %d: %s\n", idx, rocke_ir_builder_error(&b));
         return 1;
     }
 

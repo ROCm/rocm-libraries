@@ -440,10 +440,41 @@ static int make_spec(int idx, rocke_unified_attention_3d_tiled_spec_t* s, bool* 
         s->has_waves_per_eu = true;
         s->waves_per_eu = 2;
         break;
+    case 33:
+        /* QQ bias alone (no config here enabled it before). Pins the gfx950
+         * twin's mask build order fix (bind cmp_ge/cmp_lt before land, since
+         * C's argument evaluation order is unspecified), mirrored into this
+         * file's 3D compute without a parity config until now. */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_qq_bias = true;
+        s->kv_storage_dtype = NULL;
+        break;
+    case 34:
+        /* Additive bias on gfx942; both engines reject it (BOTH_REJECTED). */
+        s->head_size = 64;
+        s->block_size = 16;
+        s->num_query_heads = 16;
+        s->num_kv_heads = 4;
+        s->dtype = "fp16";
+        s->num_segments = 8;
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_additive_bias = true;
+        s->kv_storage_dtype = NULL;
+        break;
     default:
         return -1;
     }
-    if(idx >= 23)
+    if(idx >= 23 && idx <= 32)
         *strided = true;
     return 0;
 }

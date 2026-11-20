@@ -30,6 +30,9 @@
 #   IDENTICAL          both non-empty, sha equal
 #   MISMATCH           both non-empty, sha differ              (drift)
 #   BOTH_REJECTED      both empty + positive rc, not end-of-range (parity-faithful)
+#   REJECTION_MISMATCH a config the Python emitter lists in _EXPECTED_REJECTIONS
+#                      that was not rejected by both engines with stderr
+#                      matching the listed regex                (drift)
 #   ASYMMETRIC         one empty / rc disagree                 (drift)
 #   CRASH              either side died on a signal (rc < 0)   (drift)
 #   END                both report "unknown config" (range end; stops the family)
@@ -43,12 +46,14 @@
 # Build output goes to /tmp (repo tree is slow NFS). No git operations.
 
 import argparse
+import ast
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -690,12 +695,47 @@ def classify_emissions(
     return "ASYMMETRIC", (c_emission.output_sha, p_emission.output_sha)
 
 
+def expected_rejections(py_emitter: Path) -> dict[int, str]:
+    """``_EXPECTED_REJECTIONS`` ({config index: regex}) from a Python emitter.
+
+    Read with ``ast`` rather than imported: importing an emitter pulls in the
+    whole engine. A missing table means no config has a pinned reason."""
+    tree = ast.parse(py_emitter.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(t, ast.Name) and t.id == "_EXPECTED_REJECTIONS"
+            for t in node.targets
+        ):
+            return {int(k): str(v) for k, v in ast.literal_eval(node.value).items()}
+    return {}
+
+
+def check_expected_rejection(
+    verdict: str, c_emission: Emission, p_emission: Emission, pattern: str
+) -> str:
+    """Hold a config with a pinned rejection to that reason.
+
+    BOTH_REJECTED only says both engines exited non-zero; it stays green for any
+    reason, including a typo. A listed config must be rejected by both engines
+    with stderr matching ``pattern``; otherwise it is REJECTION_MISMATCH.
+    Verdicts that are already drift are kept as they are."""
+    if verdict == "BOTH_REJECTED":
+        rx = re.compile(pattern)
+        if rx.search(c_emission.error) and rx.search(p_emission.error):
+            return verdict
+        return "REJECTION_MISMATCH"
+    if verdict == "IDENTICAL":
+        return "REJECTION_MISMATCH"
+    return verdict
+
+
 # Per-config verdicts that force the family to DRIFT: the engines disagreed, or
 # one of them misbehaved outright (CRASH is either side dying, CANON_ERROR is the
 # canonicalizer refusing the text). STRUCT_DRIFT/CANON_ERROR/CANON_EQUAL come
 # from the canonical re-triage in the hashed family comparison.
 DRIFT_VERDICTS = (
     "MISMATCH",
+    "REJECTION_MISMATCH",
     "ASYMMETRIC",
     "STRUCT_DRIFT",
     "CANON_ERROR",
@@ -776,6 +816,7 @@ def _batch_complete(emissions: list[Emission], mode: str, limit: int = MAX_CFG) 
 def _run_family_hashed(name, binpath, mode, canonical, src_dir):
     """Run both emitters once when comparison needs hashes, not raw text."""
     limit = config_limit(name)
+    rejections = expected_rejections(src_dir / f"{name}_emit.py")
     emitter_workers = min(2, available_cpus())
     with ThreadPoolExecutor(max_workers=emitter_workers) as emitters:
         c_future = emitters.submit(
@@ -835,7 +876,13 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
             range_drift = {"idx": idx, "c_end": c_end, "p_end": p_end}
             break
         verdict, shas = classify_emissions(c_emission, p_emission)
-        if canonical and verdict == "MISMATCH":
+        if idx in rejections:
+            verdict = check_expected_rejection(
+                verdict, c_emission, p_emission, rejections[idx]
+            )
+        # A pinned rejection that both engines built stays a failure: canonical
+        # re-triage must not turn it into the passing CANON_EQUAL.
+        if canonical and verdict == "MISMATCH" and idx not in rejections:
             if c_emission.canonical_error or p_emission.canonical_error:
                 verdict = "CANON_ERROR"
             elif c_emission.canonical_sha == p_emission.canonical_sha:
