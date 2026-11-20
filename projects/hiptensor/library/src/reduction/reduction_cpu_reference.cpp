@@ -136,10 +136,20 @@ hiptensorStatus_t hiptensorReductionReference(const void*                       
     hiptensorTensorDescriptor sortedDescC    = *descC;
     std::vector<int>          sortingIndices = {};
 
-    CHECK_HIPTENSOR_ERROR(hiptensor::getSortingIndices(
-        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths));
-    CHECK_HIPTENSOR_ERROR(hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides));
+    auto sortStatus = hiptensor::getSortingIndices(
+        modeA, descA->mLengths.size(), modeC, sortedDescC.mLengths.size(), sortingIndices);
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mLengths);
+    }
+    if(sortStatus == HIPTENSOR_STATUS_SUCCESS)
+    {
+        sortStatus = hiptensor::applySortingIndices(sortingIndices, sortedDescC.mStrides);
+    }
+    if(sortStatus != HIPTENSOR_STATUS_SUCCESS)
+    {
+        return sortStatus;
+    }
 
     for(auto [_, pSolution] : solutionQ.solutions())
     {
