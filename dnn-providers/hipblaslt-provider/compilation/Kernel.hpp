@@ -23,7 +23,6 @@ public:
 
     void setGridSize(unsigned int x, unsigned int y = 1, unsigned int z = 1);
     void setBlockSize(unsigned int x, unsigned int y = 1, unsigned int z = 1);
-    void setSharedMemBytes(unsigned int bytes);
 
     // Launches on `stream`, passing each of `args` by value as a kernel argument;
     // throws when HIP refuses the launch.
@@ -57,7 +56,6 @@ private:
     unsigned int _blockX = 1;
     unsigned int _blockY = 1;
     unsigned int _blockZ = 1;
-    unsigned int _sharedMemBytes = 0;
 };
 
 } // namespace hipblaslt_plugin::compilation

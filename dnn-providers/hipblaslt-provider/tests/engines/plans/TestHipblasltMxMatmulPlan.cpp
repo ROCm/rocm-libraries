@@ -192,8 +192,7 @@ TEST(TestMxMatmulParams, TransposeInferenceColMajorB)
 // layout frameworks use and the only one with Tensile MX kernels.
 TEST(TestMxMatmulParams, TransposeInferenceKContiguous)
 {
-    auto fb = createValidMxMatmulGraph(
-        {32, 128}, {128, 1}, {128, 32}, {1, 128}, {32, 32}, {32, 1}, {32, 4}, {4, 32});
+    auto fb = createMxGraphWithLayout(MxOperandLayout::K_K);
     GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
     const auto attrs = getMxNodeAttrs(graph);
 

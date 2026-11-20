@@ -31,11 +31,6 @@ void Kernel::setBlockSize(unsigned int x, unsigned int y, unsigned int z)
     _blockZ = z;
 }
 
-void Kernel::setSharedMemBytes(unsigned int bytes)
-{
-    _sharedMemBytes = bytes;
-}
-
 void Kernel::launchImpl(hipStream_t stream, unsigned int gridX, void** kernelParams) const
 {
     const auto result = hipModuleLaunchKernel(_function,
@@ -45,7 +40,7 @@ void Kernel::launchImpl(hipStream_t stream, unsigned int gridX, void** kernelPar
                                               _blockX,
                                               _blockY,
                                               _blockZ,
-                                              _sharedMemBytes,
+                                              /*sharedMemBytes=*/0,
                                               stream,
                                               kernelParams,
                                               nullptr);

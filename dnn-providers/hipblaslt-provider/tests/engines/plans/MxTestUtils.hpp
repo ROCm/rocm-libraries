@@ -82,30 +82,21 @@ inline const char* toString(MxOperandLayout layout)
     }
 }
 
-// M = N = 32, K = 128 MX graph in the given operand layout. Scales are
-// K-block-contiguous ([M, K/32] row-major, [K/32, N] column-major) unless
-// mnContiguousScales is set.
+// M = N = 32, K = 128 MX graph with the given strides for A [32, 128], B [128, 32]
+// and their scales [32, 4] and [4, 32]; C is a packed row-major [32, 32].
 inline flatbuffers::FlatBufferBuilder
-    createMxGraphWithLayout(MxOperandLayout layout,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType xTypeA
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType cType
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
-                            hipdnn_flatbuffers_sdk::data_objects::DataType xTypeB
-                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
-                            bool mnContiguousScales = false)
+    createMxGraphWithStrides(const std::vector<int64_t>& aStrides,
+                             const std::vector<int64_t>& bStrides,
+                             const std::vector<int64_t>& scaleAStrides,
+                             const std::vector<int64_t>& scaleBStrides,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType cType
+                             = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType xTypeA
+                             = hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                             hipdnn_flatbuffers_sdk::data_objects::DataType xTypeB
+                             = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET)
 {
     using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-    const bool aKContiguous = layout == MxOperandLayout::K_K || layout == MxOperandLayout::K_MN;
-    const bool bKContiguous = layout == MxOperandLayout::K_K || layout == MxOperandLayout::MN_K;
-    const std::vector<int64_t> aStrides
-        = aKContiguous ? std::vector<int64_t>{128, 1} : std::vector<int64_t>{1, 32};
-    const std::vector<int64_t> bStrides
-        = bKContiguous ? std::vector<int64_t>{1, 128} : std::vector<int64_t>{32, 1};
-    const std::vector<int64_t> scaleAStrides
-        = mnContiguousScales ? std::vector<int64_t>{1, 32} : std::vector<int64_t>{4, 1};
-    const std::vector<int64_t> scaleBStrides
-        = mnContiguousScales ? std::vector<int64_t>{32, 1} : std::vector<int64_t>{1, 4};
     return hipdnn_test_sdk::utilities::createValidMxMatmulGraph({32, 128},
                                                                 aStrides,
                                                                 {128, 32},
@@ -125,6 +116,33 @@ inline flatbuffers::FlatBufferBuilder
                                                                 xTypeB,
                                                                 scaleAStrides,
                                                                 scaleBStrides);
+}
+
+// M = N = 32, K = 128 MX graph in the given operand layout. Scales are
+// K-block-contiguous ([M, K/32] row-major, [K/32, N] column-major) unless
+// mnContiguousScales is set.
+inline flatbuffers::FlatBufferBuilder
+    createMxGraphWithLayout(MxOperandLayout layout,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType xTypeA
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::FP8_E4M3,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType cType
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                            hipdnn_flatbuffers_sdk::data_objects::DataType xTypeB
+                            = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET,
+                            bool mnContiguousScales = false)
+{
+    const bool aKContiguous = layout == MxOperandLayout::K_K || layout == MxOperandLayout::K_MN;
+    const bool bKContiguous = layout == MxOperandLayout::K_K || layout == MxOperandLayout::MN_K;
+    const std::vector<int64_t> aStrides
+        = aKContiguous ? std::vector<int64_t>{128, 1} : std::vector<int64_t>{1, 32};
+    const std::vector<int64_t> bStrides
+        = bKContiguous ? std::vector<int64_t>{1, 128} : std::vector<int64_t>{32, 1};
+    const std::vector<int64_t> scaleAStrides
+        = mnContiguousScales ? std::vector<int64_t>{1, 32} : std::vector<int64_t>{4, 1};
+    const std::vector<int64_t> scaleBStrides
+        = mnContiguousScales ? std::vector<int64_t>{32, 1} : std::vector<int64_t>{1, 4};
+    return createMxGraphWithStrides(
+        aStrides, bStrides, scaleAStrides, scaleBStrides, cType, xTypeA, xTypeB);
 }
 
 } // namespace hipblaslt_plugin_test

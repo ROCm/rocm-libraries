@@ -15,21 +15,19 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
+#include "HipblasltUtils.hpp"
 #include "engines/plans/HipblasltMxScaleLayout.hpp"
 #include "engines/plans/MxTestUtils.hpp"
 
 using namespace hipblaslt_plugin;
+using hipblaslt_plugin::hipblaslt_utils::alignUp;
 using hipblaslt_plugin_test::deviceAlloc;
 using hipblaslt_plugin_test::DevicePtr;
 using hipblaslt_plugin_test::transposeHost;
+using hipblaslt_plugin_test::upload;
 
 namespace
 {
-
-size_t roundUp(size_t value, size_t multiple)
-{
-    return ((value + multiple - 1) / multiple) * multiple;
-}
 
 // Host references, written from the index formulas of mxDataGenerator's
 // PreSwizzle.hpp. Input is the natural K-contiguous scale [mn][kb].
@@ -37,8 +35,8 @@ size_t roundUp(size_t value, size_t multiple)
 // preSwizzleScalesGFX950: view(MNp/32, 2, 16, Kbp/8, 2, 4).permute(0, 3, 5, 2, 4, 1).
 std::vector<uint8_t> swizzleGfx950Host(const std::vector<uint8_t>& in, size_t mn, size_t kb)
 {
-    const size_t mnPadded = roundUp(mn, 32);
-    const size_t kbPadded = roundUp(kb, 8);
+    const size_t mnPadded = alignUp(mn, 32);
+    const size_t kbPadded = alignUp(kb, 8);
     std::vector<uint8_t> out(mnPadded * kbPadded, 0);
     for(size_t r = 0; r < mn; ++r)
     {
@@ -60,7 +58,7 @@ std::vector<uint8_t> swizzleGfx950Host(const std::vector<uint8_t>& in, size_t mn
 // preSwizzleScalesGFX1250 (mxBlock 32): [mn][Kbp/4][4] -> [Kbp/4][mn][4].
 std::vector<uint8_t> swizzleGfx1250Host(const std::vector<uint8_t>& in, size_t mn, size_t kb)
 {
-    const size_t kbPadded = roundUp(kb, 4);
+    const size_t kbPadded = alignUp(kb, 4);
     std::vector<uint8_t> out(mn * kbPadded, 0);
     for(size_t m = 0; m < mn; ++m)
     {
@@ -207,9 +205,7 @@ TEST_F(TestGpuMxScaleKernel, SwizzlesIntoAnUnalignedWorkspace)
     {
         natural[i] = static_cast<uint8_t>(i * 7 + 1);
     }
-    auto source = deviceAlloc(natural.size());
-    ASSERT_EQ(hipMemcpy(source.get(), natural.data(), natural.size(), hipMemcpyHostToDevice),
-              hipSuccess);
+    const auto source = upload(natural);
 
     for(const auto format : {MxScaleFormat::SWIZZLED_GFX950, MxScaleFormat::SWIZZLED_GFX1250})
     {
@@ -281,9 +277,7 @@ TEST_P(TestGpuMxScaleLayout, MatchesHostReference)
 
     MxScalePrep const prep(sourceOrder, operandOrder, format, mnSigned, kbSigned);
 
-    auto deviceSource = deviceAlloc(source.size());
-    ASSERT_EQ(hipMemcpy(deviceSource.get(), source.data(), source.size(), hipMemcpyHostToDevice),
-              hipSuccess);
+    const auto deviceSource = upload(source);
     // Fill the workspace with garbage so missing padding writes are caught.
     auto workspace = deviceAlloc(prep.workspaceSize());
     ASSERT_EQ(
@@ -351,11 +345,7 @@ TEST_F(TestGpuMxScaleLayoutPair, FusedRunMatchesHostReference)
             const auto source = scale.order == MxOrder::K_CONTIGUOUS
                                     ? natural
                                     : transposeHost(natural, scale.mn, scale.kb);
-            sources.push_back(deviceAlloc(source.size()));
-            ASSERT_EQ(
-                hipMemcpy(
-                    sources.back().get(), source.data(), source.size(), hipMemcpyHostToDevice),
-                hipSuccess);
+            sources.push_back(upload(source));
             preps.emplace_back(scale.order,
                                MxOrder::K_CONTIGUOUS,
                                format,

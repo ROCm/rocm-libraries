@@ -30,6 +30,7 @@ using namespace hipdnn_test_sdk::utilities;
 
 using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipblaslt_plugin_test::createMxGraphWithLayout;
+using hipblaslt_plugin_test::createMxGraphWithStrides;
 using hipblaslt_plugin_test::MxOperandLayout;
 
 namespace
@@ -215,23 +216,7 @@ class TestGpuHipblasltMxMatmulPlanBuilder : public MxGpuPlanBuilderTestBase
 static flatbuffers::FlatBufferBuilder
     createMxGraphWithTypes(DT xTypeA, DT cType, DT xTypeB = DT::UNSET)
 {
-    return createValidMxMatmulGraph({32, 128},
-                                    {1, 32},
-                                    {128, 32},
-                                    {32, 1},
-                                    {32, 32},
-                                    {32, 1},
-                                    {32, 4},
-                                    {4, 32},
-                                    xTypeA,
-                                    cType,
-                                    DT::FP8_E8M0,
-                                    DT::FP8_E8M0,
-                                    DT::FLOAT,
-                                    32,
-                                    false,
-                                    false,
-                                    xTypeB);
+    return createMxGraphWithStrides({1, 32}, {32, 1}, {4, 1}, {32, 1}, cType, xTypeA, xTypeB);
 }
 
 namespace
@@ -500,36 +485,13 @@ TEST_F(TestHipblasltMxMatmulPlanBuilder, IsApplicableRejectsWrongBlockSize)
 // accepted when packed (on every MX arch), so the decline comes from those strides.
 TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensors)
 {
-    const auto graphWithStrides = [](const std::vector<int64_t>& aStrides,
-                                     const std::vector<int64_t>& bStrides,
-                                     const std::vector<int64_t>& scaleAStrides,
-                                     const std::vector<int64_t>& scaleBStrides) {
-        return createValidMxMatmulGraph({32, 128},
-                                        aStrides,
-                                        {128, 32},
-                                        bStrides,
-                                        {32, 32},
-                                        {32, 1},
-                                        {32, 4},
-                                        {4, 32},
-                                        DT::FP8_E4M3,
-                                        DT::BFLOAT16,
-                                        DT::FP8_E8M0,
-                                        DT::FP8_E8M0,
-                                        DT::FLOAT,
-                                        32,
-                                        false,
-                                        false,
-                                        DT::UNSET,
-                                        scaleAStrides,
-                                        scaleBStrides);
-    };
     const std::vector<int64_t> aPacked = {128, 1};
     const std::vector<int64_t> bPacked = {1, 128};
     const std::vector<int64_t> scaleAPacked = {4, 1};
     const std::vector<int64_t> scaleBPacked = {1, 4};
 
-    auto packed = graphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked);
+    auto packed
+        = createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked, DT::BFLOAT16);
     GraphWrapper const packedGraph(packed.GetBufferPointer(), packed.GetSize());
     ASSERT_TRUE(_builder.isApplicable(_handle, packedGraph)) << "packed control";
 
@@ -540,16 +502,25 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensors)
     };
     std::vector<Case> cases;
     // A row-major [32, 128] with a row stride of 136.
-    cases.push_back({"padded A", graphWithStrides({136, 1}, bPacked, scaleAPacked, scaleBPacked)});
+    cases.push_back(
+        {"padded A",
+         createMxGraphWithStrides({136, 1}, bPacked, scaleAPacked, scaleBPacked, DT::BFLOAT16)});
     // B column-major [128, 32] with a column stride of 136.
-    cases.push_back({"padded B", graphWithStrides(aPacked, {1, 136}, scaleAPacked, scaleBPacked)});
+    cases.push_back(
+        {"padded B",
+         createMxGraphWithStrides(aPacked, {1, 136}, scaleAPacked, scaleBPacked, DT::BFLOAT16)});
     // Neither axis of A has unit stride.
     cases.push_back(
-        {"non-matrix A", graphWithStrides({256, 2}, bPacked, scaleAPacked, scaleBPacked)});
+        {"non-matrix A",
+         createMxGraphWithStrides({256, 2}, bPacked, scaleAPacked, scaleBPacked, DT::BFLOAT16)});
     // scale_a row-major [32, 4] with a row stride of 8.
-    cases.push_back({"padded scale_a", graphWithStrides(aPacked, bPacked, {8, 1}, scaleBPacked)});
+    cases.push_back(
+        {"padded scale_a",
+         createMxGraphWithStrides(aPacked, bPacked, {8, 1}, scaleBPacked, DT::BFLOAT16)});
     // scale_b column-major [4, 32] with a column stride of 8.
-    cases.push_back({"padded scale_b", graphWithStrides(aPacked, bPacked, scaleAPacked, {1, 8})});
+    cases.push_back(
+        {"padded scale_b",
+         createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, {1, 8}, DT::BFLOAT16)});
 
     for(auto& c : cases)
     {
@@ -567,36 +538,12 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensorsN
     {
         GTEST_SKIP() << "gfx950-only check";
     }
-    const auto graphWithStrides = [](const std::vector<int64_t>& aStrides,
-                                     const std::vector<int64_t>& bStrides,
-                                     const std::vector<int64_t>& scaleAStrides,
-                                     const std::vector<int64_t>& scaleBStrides) {
-        return createValidMxMatmulGraph({32, 128},
-                                        aStrides,
-                                        {128, 32},
-                                        bStrides,
-                                        {32, 32},
-                                        {32, 1},
-                                        {32, 4},
-                                        {4, 32},
-                                        DT::FP8_E4M3,
-                                        DT::HALF,
-                                        DT::FP8_E8M0,
-                                        DT::FP8_E8M0,
-                                        DT::FLOAT,
-                                        32,
-                                        false,
-                                        false,
-                                        DT::UNSET,
-                                        scaleAStrides,
-                                        scaleBStrides);
-    };
     const std::vector<int64_t> aPacked = {1, 32};
     const std::vector<int64_t> bPacked = {32, 1};
     const std::vector<int64_t> scaleAPacked = {4, 1};
     const std::vector<int64_t> scaleBPacked = {32, 1};
 
-    auto packed = graphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked);
+    auto packed = createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, scaleBPacked);
     GraphWrapper const packedGraph(packed.GetBufferPointer(), packed.GetSize());
     ASSERT_TRUE(_builder.isApplicable(_handle, packedGraph)) << "packed control";
 
@@ -607,13 +554,17 @@ TEST_F(TestGpuHipblasltMxMatmulPlanBuilder, IsApplicableRejectsNonPackedTensorsN
     };
     std::vector<Case> cases;
     // A column-major [32, 128] with a column stride of 40.
-    cases.push_back({"padded A", graphWithStrides({1, 40}, bPacked, scaleAPacked, scaleBPacked)});
+    cases.push_back(
+        {"padded A", createMxGraphWithStrides({1, 40}, bPacked, scaleAPacked, scaleBPacked)});
     // B row-major [128, 32] with a row stride of 40.
-    cases.push_back({"padded B", graphWithStrides(aPacked, {40, 1}, scaleAPacked, scaleBPacked)});
+    cases.push_back(
+        {"padded B", createMxGraphWithStrides(aPacked, {40, 1}, scaleAPacked, scaleBPacked)});
     // scale_a row-major [32, 4] with a row stride of 8.
-    cases.push_back({"padded scale_a", graphWithStrides(aPacked, bPacked, {8, 1}, scaleBPacked)});
+    cases.push_back(
+        {"padded scale_a", createMxGraphWithStrides(aPacked, bPacked, {8, 1}, scaleBPacked)});
     // scale_b row-major [4, 32] with a row stride of 40.
-    cases.push_back({"padded scale_b", graphWithStrides(aPacked, bPacked, scaleAPacked, {40, 1})});
+    cases.push_back(
+        {"padded scale_b", createMxGraphWithStrides(aPacked, bPacked, scaleAPacked, {40, 1})});
 
     for(auto& c : cases)
     {
