@@ -502,6 +502,11 @@ public:
 
         CHECK_NO_RAGGED_TENSORS(tensorMap);
 
+        if(exceedsMaxRank(*tensorMap.at(nodeAttributes->out_0_tensor_uid())))
+        {
+            return false;
+        }
+
         // Reject if any operand is runtime pass-by-value; the plan cannot resolve a PBV host scalar.
         return !anyOperandIsRuntimePassByValue(tensorMap,
                                                {nodeAttributes->in_0_tensor_uid(),

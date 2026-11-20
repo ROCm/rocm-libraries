@@ -90,40 +90,40 @@ void GpuReferencePointwise::launchUnary(
         opCode = detail::POINTWISE_UNARY_OP_SWISH_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::EXP:
-        opCode = POINTWISE_UNARY_OP_EXP;
+        opCode = detail::POINTWISE_UNARY_OP_EXP;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::LOG:
-        opCode = POINTWISE_UNARY_OP_LOG;
+        opCode = detail::POINTWISE_UNARY_OP_LOG;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SQRT:
-        opCode = POINTWISE_UNARY_OP_SQRT;
+        opCode = detail::POINTWISE_UNARY_OP_SQRT;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RSQRT:
-        opCode = POINTWISE_UNARY_OP_RSQRT;
+        opCode = detail::POINTWISE_UNARY_OP_RSQRT;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RECIPROCAL:
-        opCode = POINTWISE_UNARY_OP_RECIPROCAL;
+        opCode = detail::POINTWISE_UNARY_OP_RECIPROCAL;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SIN:
-        opCode = POINTWISE_UNARY_OP_SIN;
+        opCode = detail::POINTWISE_UNARY_OP_SIN;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TAN:
-        opCode = POINTWISE_UNARY_OP_TAN;
+        opCode = detail::POINTWISE_UNARY_OP_TAN;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ERF:
-        opCode = POINTWISE_UNARY_OP_ERF;
+        opCode = detail::POINTWISE_UNARY_OP_ERF;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CEIL:
-        opCode = POINTWISE_UNARY_OP_CEIL;
+        opCode = detail::POINTWISE_UNARY_OP_CEIL;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::FLOOR:
-        opCode = POINTWISE_UNARY_OP_FLOOR;
+        opCode = detail::POINTWISE_UNARY_OP_FLOOR;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ELU_FWD:
-        opCode = POINTWISE_UNARY_OP_ELU_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_ELU_FWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SOFTPLUS_FWD:
-        opCode = POINTWISE_UNARY_OP_SOFTPLUS_FWD;
+        opCode = detail::POINTWISE_UNARY_OP_SOFTPLUS_FWD;
         break;
     default:
         throw std::invalid_argument("Unsupported unary pointwise operation: "
@@ -200,13 +200,13 @@ void GpuReferencePointwise::launchBinary(
         opCode = detail::POINTWISE_BINARY_OP_RELU_BWD;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX_OP:
-        opCode = POINTWISE_BINARY_OP_MAX;
+        opCode = detail::POINTWISE_BINARY_OP_MAX;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MIN_OP:
-        opCode = POINTWISE_BINARY_OP_MIN;
+        opCode = detail::POINTWISE_BINARY_OP_MIN;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::CMP_GT:
-        opCode = POINTWISE_BINARY_OP_CMP_GT;
+        opCode = detail::POINTWISE_BINARY_OP_CMP_GT;
         break;
     default:
         throw std::invalid_argument("Unsupported binary pointwise operation: "
@@ -265,7 +265,7 @@ void GpuReferencePointwise::launchTernary(
     switch(operation)
     {
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::BINARY_SELECT:
-        opCode = POINTWISE_TERNARY_OP_BINARY_SELECT;
+        opCode = detail::POINTWISE_TERNARY_OP_BINARY_SELECT;
         break;
     default:
         throw std::invalid_argument("Unsupported ternary pointwise operation: "
@@ -286,7 +286,7 @@ void GpuReferencePointwise::launchTernary(
     auto broadCast1Strides = makeBroadcastStrides(input1Dims, input1Strides, outputDims);
     auto broadCastMaskStrides = makeBroadcastStrides(maskDims, maskStrides, outputDims);
 
-    PointwiseTernaryArgs args{};
+    detail::PointwiseTernaryArgs args{};
     args.input0 = input0Ptr;
     args.input1 = input1Ptr;
     args.mask = maskPtr;
