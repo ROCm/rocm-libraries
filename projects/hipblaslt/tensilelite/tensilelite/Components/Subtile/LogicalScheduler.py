@@ -286,6 +286,15 @@ class SchedulerConfig:
     # scale cadence.  The preloop correspondingly seeds a complete n+1 A/B
     # epoch so the first steady-state wrap has a producer.
     uniformPgrEpoch: bool = False
+    # Buffer loads that close a non-frontier uniform epoch cohort and the
+    # partition-zero overwrite cohort.  Atoms are not split, so a cohort ends
+    # on the first whole atom that reaches this many loads.  A non-frontier
+    # cohort also holds no more loads than the smallest non-frontier
+    # partition has MFMAs.
+    uniformEpochVmemCohortSize: int = 5
+    # Buffer loads one GR atom issues, per tensor.  A tensor missing here
+    # issues one load per atom.
+    grLoadsPerAtom: Dict[str, int] = field(default_factory=dict)
     # Physical traversal of the 2-D partition grid.  "m-major" preserves the
     # legacy order (M varies fastest).  "n-major" visits the 2x2 grid as
     # c00,c01,c10,c11 (N varies fastest).
@@ -400,6 +409,8 @@ class SchedulerConfig:
                 "uniformPgrEpoch currently requires PrefetchGlobalRead=2"
             assert self.prefetchNextPartition, \
                 "uniformPgrEpoch requires partition-directed prefetch"
+        assert self.uniformEpochVmemCohortSize >= 1, \
+            "uniformEpochVmemCohortSize must be >= 1"
 
         assert self.scaleReuse >= 1, f"scaleReuse must be >= 1, got {self.scaleReuse}"
         # Dual-period MXFP8: the scale epoch (256 K) spans scaleReuse data
@@ -457,18 +468,6 @@ class SchedulerConfig:
         self._prefixN = self._build_prefix(self._partitionSizesN)
         assert self.partitionOrder in ("m-major", "n-major"), \
             f"partitionOrder must be m-major or n-major, got {self.partitionOrder}"
-        if self.uniformPgrEpoch:
-            # The derived cohort exists to make the epoch span the slots
-            # without saturating the last one.  State that as the contract so
-            # a future change to either side has to keep it.  Needs the
-            # partition sizes, hence its position here.
-            slots = self.numPartitions * self.numSubIterK
-            atoms = self.uniformEpochVmemAtoms
-            cohort = self.uniformEpochVmemCohortSize
-            assert cohort >= 1, "uniform epoch cohort must be >= 1"
-            assert (atoms - 1) // cohort <= slots - 1, \
-                (f"uniform epoch cohort {cohort} overflows the last of "
-                 f"{slots} slots with {atoms} atoms")
 
         # plr=-1 auto-derives from pgr (legacy: 0 when pgr==0, else 1).
         if self.plr == -1:
@@ -559,45 +558,32 @@ class SchedulerConfig:
     def numPartitions(self) -> int:
         return self.numPartitionsM * self.numPartitionsN
 
-    @property
-    def uniformEpochVmemAtoms(self) -> int:
-        """Atomic VMEM requests one uniform epoch issues.
-
-        A and B contribute one request per `gr*.mn` tiles; the two scale
-        tensors contribute one each, since a scale dword covers the whole
-        epoch.  This is the closed form of what _distribute_grs explodes the
-        epoch's GR entries into.
-        """
-        atoms = (-(-self.numMFMATilesM // self.grA.mn)
-                 + -(-self.numMFMATilesN // self.grB.mn))
-        return atoms + (2 if self.hasScale else 0)
-
-    @property
-    def uniformEpochVmemCohortSize(self) -> int:
-        """Atomic A/B VMEM requests per non-frontier cohort.
-
-        _distribute_grs sends atom i to slot `i // cohort`, so the epoch
-        spans every slot exactly when the cohort is the atom count divided
-        over the slots.  A larger cohort leaves late slots empty and piles
-        the epoch into the early ones; a smaller one overflows the last slot,
-        because the slot index saturates.
-
-        The same width selects the partition-zero overwrite cohort, so it
-        also decides how many current-epoch local reads get hoisted ahead of
-        the first future write -- and hoisted reads serialize against the
-        MFMAs they were previously interleaved with.  Deriving the width
-        rather than fixing it keeps that hoist no larger than the overwrite
-        it has to protect.
-        """
-        slots = self.numPartitions * self.numSubIterK
-        return max(1, -(-self.uniformEpochVmemAtoms // slots))
-
     def partition_coords(self, pi: int) -> Tuple[int, int]:
         """Return (M-partition, N-partition) in configured execution order."""
         assert 0 <= pi < self.numPartitions
         if self.partitionOrder == "n-major":
             return pi // self.numPartitionsN, pi % self.numPartitionsN
         return pi % self.numPartitionsM, pi // self.numPartitionsM
+
+    def uniform_epoch_cohorts(self, tensors, cap=None) -> List[int]:
+        """Return the uniform-epoch cohort of each atom, given each atom's tensor.
+
+        A cohort closes on the first atom that brings it to
+        uniformEpochVmemCohortSize loads, or before an atom that would take
+        it past cap loads.  A cohort always holds at least one atom.
+        """
+        cohorts = []
+        cohort = 0
+        loads = 0
+        for tensor in tensors:
+            weight = max(1, int(self.grLoadsPerAtom.get(tensor, 1)))
+            if loads and (loads >= self.uniformEpochVmemCohortSize
+                          or (cap is not None and loads + weight > cap)):
+                cohort += 1
+                loads = 0
+            cohorts.append(cohort)
+            loads += weight
+        return cohorts
 
     @staticmethod
     def get_partition_candidates(tileInfoA, tileInfoB) -> list:
@@ -1223,17 +1209,17 @@ class LogicalScheduler:
         if len(partitions) < 2:
             return
 
-        first_atoms = []
-        cohortSize = cfg.uniformEpochVmemCohortSize
+        epoch_atoms = []
         for tensor, gran, num_tiles in (
                 ('A', cfg.grA, cfg.numMFMATilesM),
                 ('B', cfg.grB, cfg.numMFMATilesN)):
             for tile in range(0, num_tiles, gran.mn):
-                first_atoms.append((tensor, tile, tile + gran.mn))
-                if len(first_atoms) == cohortSize:
-                    break
-            if len(first_atoms) == cohortSize:
-                break
+                epoch_atoms.append((tensor, tile, tile + gran.mn))
+        # Uncapped, so this is never smaller than the cohort _distribute_grs
+        # puts in partition zero.
+        cohorts = cfg.uniform_epoch_cohorts([atom[0] for atom in epoch_atoms])
+        first_atoms = [
+            atom for atom, cohort in zip(epoch_atoms, cohorts) if cohort == 0]
 
         selected = {}
         for tensor, tile_start, tile_end in first_atoms:
@@ -2186,21 +2172,22 @@ class LogicalScheduler:
         total_weight = weight_prefix[-1]
         slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
 
+        uniform_cohorts = None
+        if cfg.uniformPgrEpoch and cfg.grPlacement != GRPlacementStrategy.BUNCHED:
+            # Each non-frontier cohort is sized in loads and capped by the
+            # smallest non-frontier partition.  The frontier receives the
+            # remainder immediately before its epoch wait.
+            cap = (min(mfma_per_partition[s // numK] for s in dist_slots[:-1])
+                   if len(dist_slots) > 1 else None)
+            uniform_cohorts = cfg.uniform_epoch_cohorts(
+                [atom[0] for atom in atoms], cap=cap)
+
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
             if cfg.grPlacement == GRPlacementStrategy.BUNCHED:
                 # TDM: pin every GR atom to partition 0, subIterK 0.
                 rel = 0
-            elif cfg.uniformPgrEpoch:
-                # Bound each non-frontier cohort by the derived size, and
-                # further by the smallest non-frontier partition.  The frontier
-                # receives the remainder immediately before its epoch wait.
-                nonfrontier_chunk = max(
-                    1,
-                    min(cfg.uniformEpochVmemCohortSize, min(
-                        mfma_per_partition[s // numK]
-                        for s in dist_slots[:-1]
-                    ))) if len(dist_slots) > 1 else nAtoms
-                rel = min(i // nonfrontier_chunk, len(dist_slots) - 1)
+            elif uniform_cohorts is not None:
+                rel = min(uniform_cohorts[i], len(dist_slots) - 1)
             else:
                 rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
                           len(dist_slots) - 1) if nAtoms else 0

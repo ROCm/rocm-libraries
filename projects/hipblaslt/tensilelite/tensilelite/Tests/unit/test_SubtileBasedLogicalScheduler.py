@@ -4927,6 +4927,88 @@ def _rank_placement(cfg, tensor, tile_id, partition, mt_iteration):
     )
 
 
+class TestUniformEpochLoadCohorts:
+    """Uniform epoch cohorts are sized in buffer loads, not in atoms.
+
+    An atom is never split, so a cohort closes on the first atom that
+    reaches the configured load count.
+    """
+
+    @staticmethod
+    def _cfg_6x8(loads):
+        return SchedulerConfig(
+            numMFMATilesM=6, numMFMATilesN=8, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(2, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(6, 2), grSB=ReadGranularity(8, 2),
+            partitionSizeM=4, partitionSizeN=4,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            uniformPgrEpoch=True, scaleReuse=2, grLoadsPerAtom=loads,
+        )
+
+    @staticmethod
+    def _epoch_grs(parts):
+        return [
+            [(gr.tensor, gr.tiles.tileId_start, gr.tiles.tileId_end)
+             for slot in slots for gr in slot.grs
+             if gr.mtIteration == 2 and gr.tensor in ("A", "B")]
+            for slots in parts
+        ]
+
+    def test_one_load_atoms_keep_five_atom_cohorts(self):
+        cfg = self._cfg_6x8({})
+        assert cfg.uniform_epoch_cohorts(["A"] * 6 + ["B"] * 4) == \
+            [0] * 5 + [1] * 5
+
+    def test_two_load_atoms_round_up_to_six_loads(self):
+        cfg = self._cfg_6x8({"A": 2})
+        assert cfg.uniform_epoch_cohorts(["A"] * 6 + ["B"] * 4) == \
+            [0, 0, 0, 1, 1, 1, 2, 2, 2, 2]
+
+    def test_cap_closes_a_cohort_before_it_overflows(self):
+        cfg = self._cfg_6x8({"A": 2})
+        assert cfg.uniform_epoch_cohorts(["A"] * 6, cap=4) == \
+            [0, 0, 1, 1, 2, 2]
+
+    def test_cap_below_one_atom_still_places_the_atom(self):
+        cfg = self._cfg_6x8({"A": 2})
+        assert cfg.uniform_epoch_cohorts(["A"] * 2, cap=1) == [0, 1]
+
+    def test_one_load_atoms_place_the_epoch_unchanged(self):
+        parts = LogicalScheduler(self._cfg_6x8({})).build(stop_after=Pass.GR)
+        assert self._epoch_grs(parts) == [
+            [("A", 0, 5)],
+            [("A", 5, 6), ("B", 0, 8)],
+            [],
+            [],
+        ]
+
+    def test_two_load_atoms_spread_the_epoch_over_three_partitions(self):
+        parts = LogicalScheduler(
+            self._cfg_6x8({"A": 2})).build(stop_after=Pass.GR)
+        assert self._epoch_grs(parts) == [
+            [("A", 0, 3)],
+            [("A", 3, 6)],
+            [("B", 0, 8)],
+            [],
+        ]
+
+    def test_partition_zero_hoists_only_its_own_cohort(self):
+        def hoisted(loads):
+            parts = LogicalScheduler(
+                self._cfg_6x8(loads)).build(stop_after=Pass.GR)
+            return [
+                (lr.tensor, lr.tiles.tileId_start, lr.tiles.tileId_end)
+                for slot in parts[0] for lr in slot.lrs
+                if getattr(lr, "mustPrecedeP0Overwrite", False)
+            ]
+
+        assert hoisted({}) == [("A", 4, 5)]
+        assert hoisted({"A": 2}) == []
+
+
 class TestFirstConsumerRank:
     """The emit-identity rank is the MFMA ordinal of the next consumer.
 
