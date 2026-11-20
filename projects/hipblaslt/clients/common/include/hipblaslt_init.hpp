@@ -30,6 +30,7 @@
 #include "hipblaslt_math.hpp"
 #include "hipblaslt_ostream.hpp"
 #include "hipblaslt_random.hpp"
+#include "integer_exact_sparse_k.hpp"
 #include <cinttypes>
 #include <hipblaslt/hipblaslt.h>
 #include <iostream>
@@ -83,13 +84,13 @@ bool ulp_positive_init();
 //             kept offset changes from stretch to stretch and from row to row, so with at least
 //             K / kIntegerExactSparseKTerms rows every K index is nonzero in some row, and a wrong
 //             read of B anywhere along K changes D. Partial sums stay small whatever K is.
+//             MX data follows its own sparse_k rule (makeIntegerExactMX in mxDataGen.cpp).
 enum class IntegerExactPattern
 {
     standard,
     ternary,
     sparse_k,
 };
-constexpr size_t kIntegerExactSparseKTerms = 16;
 
 // Returns false when name is not a pattern; the empty string is standard.
 bool parse_integer_exact_pattern(const char* name, IntegerExactPattern& pattern);
@@ -107,15 +108,6 @@ struct IntegerExactPatternScope
         set_integer_exact_pattern_state(IntegerExactPattern::standard, 0, false);
     }
 };
-
-// True when sparse_k keeps K index k of A's row `row` nonzero. constexpr so device fills can
-// call it.
-constexpr bool integer_exact_sparse_k_kept(size_t k, size_t K, size_t row)
-{
-    const size_t width = (K + kIntegerExactSparseKTerms - 1) / kIntegerExactSparseKTerms;
-    const size_t s     = width > 0 ? width : 1;
-    return k % s == (k / s + row) % s || k + 1 == K;
-}
 
 void hipblaslt_init_device(ABC_dims                 ABC_dims,
                            hipblaslt_initialization init,

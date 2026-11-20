@@ -103,7 +103,7 @@ namespace
             opt.initMode = DataInitMode(Infs{});
         // integer_exact generates bounded values and then replaces them (makeIntegerExactMX).
         else if(initMethod == "Bounded" || initMethod == "uniform_01" || initMethod == "hpl"
-                || initMethod == "integer_exact")
+                || initMethod == "integer_exact" || initMethod == "integer_exact_sparse_k")
             opt.initMode = DataInitMode(Bounded{});
         else if(initMethod == "uniform_low_precision")
         {
@@ -341,10 +341,16 @@ constexpr bool isMXFp6
 // of 1, 2 or 4 chosen per block, so every dequantized value is an exact integer and a read of the
 // wrong scale changes the result. The bounds are kIntegerExactMXMaxElement and
 // kIntegerExactMXMaxScale in mxDataGen.hpp.
+// With sparseK, K runs along the stored rows: element idx is K index idx % stride of row
+// idx / stride, and only K indices below K exist. A is {1, 2} where integer_exact_sparse_k_kept
+// holds and zero elsewhere, B is {-1, 0, 1}, and scales are 1 or 2 (kIntegerExactMXSparseKBound).
 template <typename DT>
 void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
                         std::vector<uint8_t>& scaleBytes,
-                        bool                  isMatrixA)
+                        bool                  isMatrixA,
+                        bool                  sparseK = false,
+                        size_t                K       = 0,
+                        size_t                stride  = 0)
 {
     constexpr bool e4m3 = std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>;
     constexpr bool e5m2 = std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>;
@@ -373,16 +379,28 @@ void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
         // fp6 elements are packed four to three bytes, LSB first.
         std::vector<uint8_t>  fp6Elements(isMXFp6<DT> ? dataBytes.size() * 8 / 6 : 0);
         std::vector<uint8_t>& elements = isMXFp6<DT> ? fp6Elements : dataBytes;
+#pragma omp parallel for
         for(size_t i = 0; i < elements.size(); i++)
         {
             const uint64_t h = mix(i * 131 + salt);
-            const int      v = isMatrixA ? int(h % 3) : int(h % 5) - 2;
-            elements[i]      = codes[v + 2];
+            int            v;
+            if(!sparseK)
+                v = isMatrixA ? int(h % 3) : int(h % 5) - 2;
+            else if(!isMatrixA)
+                v = int(h % 3) - 1;
+            else
+            {
+                const size_t k = i % stride;
+                v = k < K && integer_exact_sparse_k_kept(k, K, i / stride) ? int(1 + h % 2) : 0;
+            }
+            elements[i] = codes[v + 2];
         }
         if constexpr(isMXFp6<DT>)
             packData<DT>(fp6Elements, dataBytes.data());
+        const uint64_t scaleChoices = sparseK ? 2 : 3;
+#pragma omp parallel for
         for(size_t i = 0; i < scaleBytes.size(); i++)
-            scaleBytes[i] = uint8_t(127 + mix(i * 137 + salt + 2) % 3);
+            scaleBytes[i] = uint8_t(127 + mix(i * 137 + salt + 2) % scaleChoices);
     }
 }
 
@@ -398,9 +416,14 @@ std::vector<float> generateData(T                           dgen,
                                 bool                        isTranspose,
                                 bool                        isMatrixA,
                                 MXScaleLayout               scaleLayout,
-                                bool                        integerExact = false)
+                                bool                        integerExact = false,
+                                bool                        sparseK      = false)
 {
     using namespace DGen;
+
+    if(sparseK && isMatrixA != isTranspose)
+        throw std::runtime_error(
+            "integer_exact MX data with the sparse_k pattern requires K along the stored rows");
 
     // The non-K-major reference indexes scales canonically, whereas these device
     // swizzles use a different grid. Do not return inconsistent exact reference values.
@@ -442,7 +465,12 @@ std::vector<float> generateData(T                           dgen,
     std::vector<uint8_t> dataBytes = dgen.getDataBytes();
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
     if(integerExact)
-        makeIntegerExactMX<DT>(dataBytes, scaleBytes, isMatrixA);
+        makeIntegerExactMX<DT>(dataBytes,
+                               scaleBytes,
+                               isMatrixA,
+                               sparseK,
+                               static_cast<size_t>(sizes[0]),
+                               static_cast<size_t>(strides[1]));
 
     std::memcpy(data, dataBytes.data(), dataBytes.size() * sizeof(uint8_t));
 
@@ -574,6 +602,7 @@ std::vector<float> generateData(T                           dgen,
         // partial block at the end of a run keeps its own scale.
         size_t const       count = static_cast<size_t>(strides[1]) * static_cast<size_t>(sizes[1]);
         std::vector<float> ref(count);
+#pragma omp parallel for
         for(size_t idx = 0; idx < count; idx++)
         {
             auto const dataIndex  = static_cast<DGen::index_t>(idx);
@@ -667,6 +696,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     strides.push_back(stride);
 
     auto const elementsPerMXBlock = scaleBlockRowSize * scaleBlockColSize;
+    bool const sparseK            = initMethod == "integer_exact_sparse_k";
+    bool const integerExact       = sparseK || initMethod == "integer_exact";
 
     if(dataType == HIP_R_8F_E5M2)
     {
@@ -682,7 +713,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   scaleLayout,
-                                                                  initMethod == "integer_exact");
+                                                                  integerExact,
+                                                                  sparseK);
     }
     else if(dataType == HIP_R_8F_E4M3)
     {
@@ -698,7 +730,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   scaleLayout,
-                                                                  initMethod == "integer_exact");
+                                                                  integerExact,
+                                                                  sparseK);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E2M3)
     {
@@ -714,7 +747,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   scaleLayout,
-                                                                  initMethod == "integer_exact");
+                                                                  integerExact,
+                                                                  sparseK);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_6F_E3M2)
     {
@@ -730,7 +764,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                   isTranspose,
                                                                   isMatrixA,
                                                                   scaleLayout,
-                                                                  initMethod == "integer_exact");
+                                                                  integerExact,
+                                                                  sparseK);
     }
     else if(static_cast<hipDataType>(dataType) == HIP_R_4F_E2M1)
     {
@@ -748,8 +783,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                            isTranspose,
                                                                            isMatrixA,
                                                                            scaleLayout,
-                                                                           initMethod
-                                                                               == "integer_exact");
+                                                                           integerExact,
+                                                                           sparseK);
         }
         else if(scaleType == static_cast<hipDataType>(HIP_R_8F_E5M3_EXT))
         {
@@ -765,8 +800,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                            isTranspose,
                                                                            isMatrixA,
                                                                            scaleLayout,
-                                                                           initMethod
-                                                                               == "integer_exact");
+                                                                           integerExact,
+                                                                           sparseK);
         }
         else
         {
@@ -782,8 +817,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                                                       isTranspose,
                                                                       isMatrixA,
                                                                       scaleLayout,
-                                                                      initMethod
-                                                                          == "integer_exact");
+                                                                      integerExact,
+                                                                      sparseK);
         }
     }
     else
