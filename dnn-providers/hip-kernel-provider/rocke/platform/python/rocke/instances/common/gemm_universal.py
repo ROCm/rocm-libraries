@@ -3178,6 +3178,29 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                 off = origin if _tdm_elem_bytes == 1 else b.mul(origin, b.const_i64(_tdm_elem_bytes))
                 ptr = b.select(is_b, b.global_ptr_add(Bp, off), b.global_ptr_add(A, off))
                 b.global_prefetch(ptr, cachepolicy=_GL2_CPOL)
+            # ROCKE_EXP_GL2_SCALES=1 (MX): the cluster's A and B scale rows of
+            # the same tile too, as the prototype prefetches: per operand and
+            # 128-K step, rows x 4 B contiguous in [K/128][rows][4]; one
+            # line per thread, wrapping (a branch-free select of operand).
+            if _mx and _os_gl2.environ.get("ROCKE_EXP_GL2_SCALES") == "1":
+                ks = block_k // 128
+                a_sl = max(1, cy * block_m * 4 // line)
+                b_sl = max(1, cx * block_n * 4 // line)
+                s_total = ks * (a_sl + b_sl)
+                si = b.mod(g, b.const_i32(s_total))
+                kstep_i = b.div(si, b.const_i32(a_sl + b_sl))
+                rem = b.mod(si, b.const_i32(a_sl + b_sl))
+                s_is_b = b.cmp_ge(rem, b.const_i32(a_sl))
+                lj = b.select(s_is_b, b.sub(rem, b.const_i32(a_sl)), rem)
+                kstep = b.add(b.div(k_ahead, b.const_i32(128)), kstep_i)
+                rows = b.select(s_is_b, N, M)
+                r0 = b.select(s_is_b, n0, m0)
+                soff = b.add(
+                    b.mul(b.zext(kstep, _I64), b.zext(b.mul(rows, b.const_i32(4)), _I64)),
+                    b.zext(b.add(b.mul(r0, b.const_i32(4)), b.mul(lj, b.const_i32(line))), _I64),
+                )
+                sptr = b.select(s_is_b, b.global_ptr_add(BS, soff), b.global_ptr_add(AS, soff))
+                b.global_prefetch(sptr, cachepolicy=_GL2_CPOL)
             return
         # ROCKE_EXP_GL2_LINES=1: only each row's first line (half the volume at 256-byte rows);
         # ROCKE_EXP_GL2_OPS=a|b|ab (default ab): which operands to prefetch.
