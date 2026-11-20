@@ -2598,9 +2598,14 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableDeclinesDimensionsPastTheir32Bi
 // The head dims are narrowed to int for the kernel-registry lookup, so a head
 // dim whose low 32 bits are a supported value used to resolve a kernel built
 // for that supported value. The registry set {64, 128, 192} is what bounds the
-// head dims in practice, which is why there is no case at INT32_MAX here. One
-// batch and one head keep O inside createSdpaFwdGraphForDims's tile, so only the
-// head dim decides each case.
+// head dims in practice, which is why there is no case at INT32_MAX here. Each
+// wrapped case is declined by two checks, either of which suffices: the 32-bit
+// head-dim gate, and the rule that a sequence stride must be at least the
+// tensor's head dim (createSdpaFwdGraphForDims's sequence stride is 128). No
+// stride set isolates the gate, because a sequence stride at least the wrapped
+// head dim fails the 32-bit byte-stride check. So the test pins that a wrapped
+// head dim is declined, not which check declines it. One batch and one head
+// keep O inside the tile, so the control case is accepted.
 TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableDeclinesHeadDimsThatTruncateToASupportedValue)
 {
     constexpr int64_t K_WRAPS_TO_128 = (int64_t{1} << 32) + 128;
