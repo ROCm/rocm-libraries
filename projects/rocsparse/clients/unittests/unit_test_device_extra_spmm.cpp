@@ -761,3 +761,32 @@ TEST_F(ExtraSpmm, coo_index_base_one)
                     return;
             }
 }
+
+// ---------------------------------------------------------------------------
+// One-based BSR: block_dim 2 (small-block kernel) and 3 (large-block kernel),
+// both block directions.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, bsr_index_base_one)
+{
+    for(int64_t bd : {2, 3})
+        for(int64_t n : {1, 5, 16})
+            for(rocsparse_direction dir : {rocsparse_direction_row, rocsparse_direction_column})
+            {
+                SpmmCase c;
+                c.fmt     = SFmt::bsr;
+                c.alg     = rocsparse_spmm_alg_bsr;
+                c.bd      = bd;
+                c.dir     = dir;
+                c.n       = n;
+                c.m       = 5;
+                c.k       = 4;
+                c.max_nnz = 3;
+                c.base    = rocsparse_index_base_one;
+                run_spmm<float, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+                run_spmm<double, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+            }
+}
