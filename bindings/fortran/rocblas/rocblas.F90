@@ -121,6 +121,7 @@ module rocblas
     enumerator :: rocblas_layer_mode_log_bench = 2
     enumerator :: rocblas_layer_mode_log_profile = 4
     enumerator :: rocblas_layer_mode_log_internal = 8
+    enumerator :: rocblas_layer_mode_log_kernel_select = 16
   end enum
 
   ! rocblas_gemm_algo_
@@ -161,7 +162,7 @@ module rocblas
   end enum
 
   integer(c_int), parameter :: ROCBLAS_VERSION_MAJOR = 5
-  integer(c_int), parameter :: ROCBLAS_VERSION_MINOR = 8
+  integer(c_int), parameter :: ROCBLAS_VERSION_MINOR = 9
   integer(c_int), parameter :: ROCBLAS_VERSION_PATCH = 0
 
 
