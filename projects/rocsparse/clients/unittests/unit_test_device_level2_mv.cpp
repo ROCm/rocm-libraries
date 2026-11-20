@@ -117,6 +117,8 @@ namespace
         float                 beta      = -0.5f;
         bool                  empty     = false;
         bool                  big       = false;
+        // A symmetric product that returns not_implemented is accepted unless set.
+        bool must_succeed = false;
     };
 
     template <typename T>
@@ -191,7 +193,7 @@ namespace
         }
         // rocsparse_csrmv.h documents not_implemented for a matrix type other than
         // general; a symmetric product that succeeds is checked.
-        if(sym)
+        if(sym && !c.must_succeed)
             ASSERT_TRUE(st == rocsparse_status_success || st == rocsparse_status_not_implemented)
                 << st;
         else
@@ -290,6 +292,38 @@ namespace
                 if(::testing::Test::HasFailure())
                     return;
             }
+    }
+
+    TEST_F(L2DeviceCsrmv, symmetric_many_row_blocks)
+    {
+        // A symmetric matrix whose stored triangle spans many row blocks of the
+        // adaptive symmetric kernel (1024 entries each): every block but the last
+        // takes the unrolled streaming path, which has its own column index
+        // handling. Both index bases, analysed (adaptive) and not (row split). Both
+        // paths are implemented for real data, so the product must succeed and be
+        // checked (no not_implemented leniency).
+        for(const int base : {1, 0})
+            for(const int info_mode : {2, 0})
+                for(const bool device : {false, true})
+                {
+                    csrmv_case c;
+                    c.mtype        = rocsparse_matrix_type_symmetric;
+                    c.n            = 3000;
+                    c.base         = base;
+                    c.info_mode    = info_mode;
+                    c.device       = device;
+                    c.must_succeed = true;
+                    run_csrmv<float>(handle, c);
+                    if(::testing::Test::HasFailure())
+                        return;
+                }
+        csrmv_case c;
+        c.mtype        = rocsparse_matrix_type_symmetric;
+        c.n            = 2500;
+        c.base         = 1;
+        c.info_mode    = 2;
+        c.must_succeed = true;
+        run_csrmv<double>(handle, c);
     }
 
     TEST_F(L2DeviceCsrmv, non_square_symmetric_or_triangular_is_rejected)
