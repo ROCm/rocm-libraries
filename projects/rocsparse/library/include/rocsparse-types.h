@@ -40,8 +40,8 @@
 // Kernels are noinline so that the host launch stub of each kernel instantiation is emitted once
 // instead of being inlined into every launch site.
 #define ROCSPARSE_KERNEL_W(MAX_THREADS_PER_BLOCK, MIN_WARPS_PER_EXECUTION_UNIT) \
-    __attribute__((noinline)) __launch_bounds__(MAX_THREADS_PER_BLOCK,          \
-                                                MIN_WARPS_PER_EXECUTION_UNIT) static __global__
+    __attribute__((noinline))                                                   \
+    __launch_bounds__(MAX_THREADS_PER_BLOCK, MIN_WARPS_PER_EXECUTION_UNIT) static __global__
 #define ROCSPARSE_KERNEL(MAX_THREADS_PER_BLOCK) \
     __attribute__((noinline)) __launch_bounds__(MAX_THREADS_PER_BLOCK) static __global__
 #define ROCSPARSE_DEVICE_ILF static __device__ __forceinline__
