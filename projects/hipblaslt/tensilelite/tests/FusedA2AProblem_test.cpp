@@ -86,24 +86,11 @@ TEST(FusedA2AProblem, ShapePredicate)
     EXPECT_TRUE(mt256(plain));
 }
 
-TEST(FusedA2AProblem, SegmentNeedsOnePeerGroupPerRank)
-{
-    KernelArguments args(false);
-    appendFusedSegment(args, std::vector<FusedA2APeerFields>(4), nullptr, 0, 4, 0, 2048, 304);
-    EXPECT_EQ(args.size(), FUSED_A2A_SEGMENT_BYTES);
-
-    KernelArguments shortArgs(false);
-    EXPECT_THROW(appendFusedSegment(
-                     shortArgs, std::vector<FusedA2APeerFields>(1), nullptr, 0, 4, 0, 2048, 304),
-                 std::runtime_error);
-}
-
 TEST(FusedA2AProblem, SegmentNeedsCuCount)
 {
     KernelArguments args(false);
-    EXPECT_THROW(
-        appendFusedSegment(args, std::vector<FusedA2APeerFields>(4), nullptr, 0, 4, 0, 2048, 0),
-        std::runtime_error);
+    EXPECT_THROW(appendFusedSegment(args, FusedA2APeerTable{}, nullptr, 0, 4, 0, 2048, 0),
+                 std::runtime_error);
 }
 
 TEST(FusedA2AProblem, GemmTypeOnlyMatchesTheFusedMode)
