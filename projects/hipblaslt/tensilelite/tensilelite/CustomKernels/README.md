@@ -218,6 +218,19 @@ must not declare `unroll`. A rocRoller Stream-K kernel on gfx950 may also
 declare `occupancy`, the workgroups it keeps resident on one CU. The selector
 reads occupancy only for that grid; any other kernel leaves it unset.
 
+rocRoller passes over a ranked tile it fails to build. A build without rocRoller
+cannot build anything, so `rocroller/unbuildable_configs.def` records those
+configurations (transposes, types, tile, workgroup mapping, Stream-K) and the
+walk passes over a recorded tile too; a tile that is neither recorded nor
+checked in still ends the walk. `scripts/rocroller_unbuildable_configs.py`
+writes the table from the build records in `scripts/rocroller_build_records.csv`,
+made on a rocRoller JIT build; `scripts/README.md` gives the commands.
+`Tests/unit/test_rocroller_unbuildable_record.py` checks that no recorded
+configuration is checked in, that the table is what the records render, and
+that `shared/rocroller` is still the tree the records were built with. A
+changed tree skips that check with the commands that rebuild the records;
+`HIPBLASLT_REQUIRE_ROCROLLER_RECORD_TREE=1` makes it fail (`scripts/README.md`).
+
 ## Validation
 
 Two ways to validate:

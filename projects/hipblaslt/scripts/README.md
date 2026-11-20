@@ -53,3 +53,39 @@ The full tree (~2246 files) can take several minutes, so passing a subdirectory 
 ### run_tensile_logic_check.sh (Unix only)
 
 Thin wrapper that runs the script with `.venv/bin/python`, if it's present, and with `python3` otherwise. Use the `.py` script directly on Windows.
+
+## rocroller_unbuildable_configs.py
+
+Writes `tensilelite/tensilelite/CustomKernels/rocroller/unbuildable_configs.def`, the rocRoller GEMM configurations that rocRoller fails to build and therefore never runs, from build records. The checked-in records are `scripts/rocroller_build_records.csv`: one line per configuration rocRoller tried to build (layout, element types, tile, workgroup mapping, Stream-K), with `built` or the rocRoller pass that failed. Its `# Source:` and `# rocRoller tree:` lines name the develop commit and the `git rev-parse HEAD:shared/rocroller` tree the records were built with; `write` copies both into the table.
+
+The checked-in records cover the configurations rocRoller tried while choosing kernels for a 72,300-problem gfx950 MX probe (TN, NN, NT and TT, every MX type pair, f16, bf16 and f32 outputs, packed 32-element E8M0 scales): 13,244 configurations, 2,715 of which fail to build. A configuration outside that set is not recorded, even if rocRoller fails to build it.
+
+To regenerate the table from the checked-in records (no GPU needed), and to check that the checked-in files are what the records render:
+
+```bash
+python scripts/rocroller_unbuildable_configs.py write scripts/rocroller_build_records.csv \
+    --out tensilelite/tensilelite/CustomKernels/rocroller/unbuildable_configs.def \
+    --records-out scripts/rocroller_build_records.csv
+python scripts/rocroller_unbuildable_configs.py write scripts/rocroller_build_records.csv \
+    --out tensilelite/tensilelite/CustomKernels/rocroller/unbuildable_configs.def \
+    --records-out scripts/rocroller_build_records.csv --check
+```
+
+Rebuilding the records needs a GPU and a `HIPBLASLT_ENABLE_ROCROLLER=ON` build, so CI does not run it. Do it whenever `shared/rocroller` changes, then write the table and the records from the new ones:
+
+```bash
+python scripts/rocroller_unbuildable_configs.py build --build <ON build dir> \
+    --configs scripts/rocroller_build_records.csv --gpus 0,1 \
+    --source "develop <sha>, ROCm <version>: <how the configurations were chosen>" --out records.csv
+python scripts/rocroller_unbuildable_configs.py write records.csv \
+    --out tensilelite/tensilelite/CustomKernels/rocroller/unbuildable_configs.def \
+    --records-out scripts/rocroller_build_records.csv
+```
+
+`tensilelite/tensilelite/Tests/unit/test_rocroller_unbuildable_record.py` compares the table's `rocRoller tree` line with `git rev-parse HEAD:shared/rocroller`. When they differ, the test skips and its message gives the commands above, so a `shared/rocroller` change does not fail unrelated pull requests; the table stays in use until it is rebuilt. Set `HIPBLASLT_REQUIRE_ROCROLLER_RECORD_TREE=1` to make the mismatch a failure instead, as a maintainer check before a release or after a rocRoller update. From `tensilelite/`, in the environment the unit tests run in (rocisa importable):
+
+```bash
+HIPBLASLT_REQUIRE_ROCROLLER_RECORD_TREE=1 python -m pytest tensilelite/Tests/unit/test_rocroller_unbuildable_record.py
+```
+
+`build` builds each configuration with the ON build's `hipblaslt-bench` (one rocRoller solution index each, with temporal loads, on a problem of twice the tile in M and N and four times in K) and appends one record per configuration. It takes the rocRoller tree from the checkout the ON build was configured from (`--rocroller-tree` overrides it). `write` takes records from `build`, as CSV or JSONL (`--source` and `--rocroller-tree` are then required), or from any other log of rocRoller's build attempts in the same format, and records every configuration that failed to build. To add configurations, append them to the `--configs` list.
