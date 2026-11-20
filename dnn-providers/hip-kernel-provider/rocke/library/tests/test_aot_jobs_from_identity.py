@@ -258,3 +258,42 @@ def test_forward_k_loop_variants_are_built_for_3d_only():
         assert len(aj._fwd_k_loops(pipeline, "gfx942")) > len(flat)
         pairs = aj._fwd_kloop_caps(pipeline, "gfx942")
         assert all(kl in flat for kl, caps in pairs if not caps["is_3d"])
+
+
+def test_identity_init_and_hash_are_the_dataclass_ones():
+    """KernelIdentity's __dict__ __init__ and its field reader in stable_hash
+    stand in for the dataclass ones: same parameters and defaults, a frozen
+    instance with every field set, and the hash of asdict()."""
+    import inspect
+
+    from kernels.conv import kernel_identity as ki
+
+    params = list(inspect.signature(KernelIdentity.__init__).parameters.values())[1:]
+    fields = [f for f in dataclasses.fields(KernelIdentity) if f.init]
+    assert [p.name for p in params] == [f.name for f in fields]
+    for p, f in zip(params, fields):
+        if f.default is not dataclasses.MISSING:
+            assert p.default is f.default, f.name
+        elif f.default_factory is dataclasses.MISSING:
+            assert p.default is inspect.Parameter.empty, f.name
+    assert ki._FIELD_NAMES == tuple(f.name for f in dataclasses.fields(KernelIdentity))
+
+    job = next(iter(_grid_jobs("gfx942", "fwd", "bf16", 1)))
+    ident = job.identity
+    assert set(vars(ident)) == set(ki._FIELD_NAMES)
+    assert KernelIdentity(**dataclasses.asdict(ident)) == ident
+    assert KernelIdentity(*ki._field_values(ident)) == ident
+    llvm_free = {
+        k: v for k, v in dataclasses.asdict(ident).items() if k != "llvm_flavor"
+    }
+    (flavor,) = [f for f in fields if f.name == "llvm_flavor"]
+    assert KernelIdentity(**llvm_free).llvm_flavor == flavor.default_factory()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        ident.tile_m = 1
+    with pytest.raises(TypeError):
+        KernelIdentity()
+
+    # stable_hash reads the fields as asdict() returns them.
+    for label in sorted(_LABELS) + [ident.label()]:
+        i = KernelIdentity.from_label(label)
+        assert dict(zip(ki._FIELD_NAMES, ki._field_values(i))) == dataclasses.asdict(i)

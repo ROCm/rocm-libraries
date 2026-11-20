@@ -1808,6 +1808,9 @@ def _fwd_kloop_in_scope(
     if kloop.get("rpf_pingpong"):
         # The ping-pong loops have their own scope (ROCKE_AOT_FWD_PP_SCOPE).
         return _fwd_pp_geometry_in_scope(tm, tn, tk, wm, wn, wt)
+    if not _os.environ.get("ROCKE_AOT_FWD_KLOOP_SCOPE", "").strip():
+        # No scope set: every geometry is in it.
+        return True
     if not any(kloop.get(k) for k in _FWD_SCOPED_KNOBS):
         return True
     return _fwd_kloop_geometry_in_scope(tm, tn, tk, wm, wn, wt)
@@ -2340,16 +2343,24 @@ def _fwd_job_variants(
     loop of one geometry ``(tile_m, tile_n, tile_k, warp_m, warp_n,
     warp_tile)``; split-K on the uniform_k_decode loops and split_tail only
     on the geometries of ``ROCKE_AOT_FWD_KLOOP_SCOPE`` (when set)."""
-    in_scope = _fwd_kloop_geometry_in_scope(*geo) or (
-        bool(kloop.get("rpf_pingpong")) and _fwd_pp_geometry_in_scope(*geo)
-    )
+    scope: List[bool] = []
+
+    def in_scope() -> bool:
+        # Parsed once per call, and only where a variant asks.
+        if not scope:
+            scope.append(
+                _fwd_kloop_geometry_in_scope(*geo)
+                or (bool(kloop.get("rpf_pingpong")) and _fwd_pp_geometry_in_scope(*geo))
+            )
+        return scope[0]
+
     ukd = bool(kloop.get("uniform_k_decode") or kloop.get("reg_prefetch"))
     out = []
     for sk, sd in _fwd_small_spatial_variants(kloop, epilogue, caps, wave_size):
-        if sk > 1 and ukd and not in_scope:
+        if sk > 1 and ukd and not in_scope():
             continue
         for spt in _fwd_split_tails(kloop, sk):
-            if spt and not in_scope:
+            if spt and not in_scope():
                 continue
             out.append((sk, sd, spt))
     return out

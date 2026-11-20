@@ -25,6 +25,7 @@ import dataclasses
 import hashlib
 import json
 import math
+import operator
 from dataclasses import asdict, dataclass, field
 
 __all__ = [
@@ -515,7 +516,7 @@ class KernelIdentity:
         Suitable as a filesystem-safe filename component. Deterministic
         across Python versions (sorted JSON keys, no randomization).
         """
-        fields = asdict(self)
+        fields = dict(zip(_FIELD_NAMES, _field_values(self)))
         # Left out at its "no scratch" value so identities that predate the
         # field keep their hash (and their cache entries).
         if not fields["ws_replicas"]:
@@ -755,6 +756,49 @@ class KernelIdentity:
         # unknown flavor; "" never equals the current one, so it never matches.
         kw.setdefault("llvm_flavor", "")
         return cls(**kw)
+
+
+def _frozen_dict_init(cls):
+    """An ``__init__`` for the frozen dataclass ``cls`` that stores the fields
+    straight into the instance ``__dict__``.
+
+    The generated one sets each field through ``object.__setattr__`` (the
+    class is frozen), one call per field, and every AOT grid walk builds one
+    identity per job. This one takes the same parameters in the same order,
+    with the same defaults and default factories, and leaves the instance as
+    the generated one does.
+    """
+    globs = {"_MISSING": dataclasses.MISSING}
+    params, body = [], []
+    init_fields = [f for f in dataclasses.fields(cls) if f.init]
+    for f in init_fields:
+        if f.default is not dataclasses.MISSING:
+            globs[f"_d_{f.name}"] = f.default
+            params.append(f"{f.name}=_d_{f.name}")
+        elif f.default_factory is not dataclasses.MISSING:
+            globs[f"_f_{f.name}"] = f.default_factory
+            params.append(f"{f.name}=_MISSING")
+            body.append(
+                f"    if {f.name} is _MISSING:\n        {f.name} = _f_{f.name}()"
+            )
+        else:
+            params.append(f.name)
+    body.append("    d = self.__dict__")
+    body.extend(f"    d[{f.name!r}] = {f.name}" for f in init_fields)
+    exec(f"def __init__(self, {', '.join(params)}):\n" + "\n".join(body) + "\n", globs)
+    init = globs["__init__"]
+    init.__qualname__ = f"{cls.__qualname__}.__init__"
+    init.__module__ = cls.__module__
+    return init
+
+
+KernelIdentity.__init__ = _frozen_dict_init(KernelIdentity)
+
+# Every KernelIdentity field is an int, bool, str or None, so reading them in
+# declaration order gives what asdict() returns, without its per-field
+# recursion: stable_hash runs once per job of every AOT grid walk.
+_FIELD_NAMES = tuple(f.name for f in dataclasses.fields(KernelIdentity))
+_field_values = operator.attrgetter(*_FIELD_NAMES)
 
 
 # ---------------------------------------------------------------------------
