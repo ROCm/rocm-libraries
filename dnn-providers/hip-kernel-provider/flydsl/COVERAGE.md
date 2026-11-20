@@ -1283,13 +1283,27 @@ wins by default. The rule this provider follows:
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
 
-No trained UHD model is installed for the FlyDSL SDPA engines (`sdpa_*`), whose catalog
-this provider changed. Each SDPA engine orders its kernels by descriptor `priority` (the
-native ranker), its engine estimate is the `default` slot the loader disables, and
-autotune measures the order. SDPA models trained on this catalog are a follow-up:
-`gen_descriptors.py` binds each one per arch once it is installed under `heuristics/`
-([README](README.md)). The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their
-trained models; their catalog is unchanged.
+Trained UHD models are installed for the FlyDSL SDPA engines on these architectures
+(under each op's `heuristics/`, bound per arch by `gen_descriptors.py`, see the
+[README](README.md)):
+
+| Engine | Engine estimate (`predict_engine`) | Kernel ranker (`sort_kernel_catalog`) |
+|---|---|---|
+| `sdpa_aiw` | gfx1201 | gfx1201 |
+| `sdpa_cdna` | gfx90a, gfx942, gfx950 | gfx942 |
+| `sdpa_cdna_decode` | gfx90a, gfx942, gfx950 | -- |
+| `sdpa_cdna_dualwave` | gfx950 | -- |
+| `sdpa_rdna` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+| `sdpa_rdna_decode` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+
+Elsewhere an SDPA engine orders its kernels by descriptor `priority` (the native ranker),
+its engine estimate is the `default` slot the loader disables, and autotune measures the
+order. Each installed model records the selector revision it was trained against, which
+digests the engine's kernel catalog and ranker: a change to an SDPA catalog, its kernel
+fields or a ranker makes those models refused at run time, so such a change retrains or
+re-stamps them in the same pull request. `TestFlydslModelBinding` (the census) fails the
+build on a stale stamp. The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their trained
+models; their catalog is unchanged.
 
 ### 6.1 Runtime features audited against compiled-out builds
 
@@ -1404,7 +1418,8 @@ a class's "default" and "companions", ranking applies within one engine: the gen
 kernel's tiles against each other, by descriptor `priority` plus a bonus where a tier's
 measured rule prefers it (the engine's interim native ranker). That static order is
 provisional: autotune times every object the engine admits for a graph and caches the
-measured order, and a trained UHD ranker replaces the static one. Which engine runs a
+measured order, and a trained UHD ranker replaces the static one where one is installed
+(`sdpa_cdna` on gfx942, §6). Which engine runs a
 graph several serve is the engine-level heuristic's (UHD), or autotune's; `priority`
 never compares objects of different engines. The kernels are FlyDSL's own MFMA flash-attention forwards,
 vendored whole under
@@ -1908,8 +1923,8 @@ What came out of it:
 
 The rules were fitted on bf16 and the f16 objects share them. Bias classes are
 rare in the corpus and ship their default tier only. The process is repeated as
-features land; the rules are coarse by design, and a trained heuristic replaces
-them when the ingestor gains one.
+features land; the rules are coarse by design, and a trained ranker replaces them
+where one is installed (gfx942, §6).
 
 ### 7.7 gfx90a (MI210, MI250)
 

@@ -485,6 +485,10 @@ static const auto multi_gpu_tokens = {
     "real_inverse_len_256_double_op_batch_4_ifield_brick_lower_0_0_upper_4_129_stride_129_1_dev_1_ofield_brick_lower_0_0_upper_4_256_stride_256_1_dev_1",
     // same, with a Bluestein length requiring work memory
     "complex_forward_len_10007_single_op_batch_2_ifield_brick_lower_0_0_upper_2_10007_stride_10007_1_dev_1_ofield_brick_lower_0_0_upper_2_10007_stride_10007_1_dev_1",
+    // 2D, both input bricks on device 0 needing work memory, output split over 2 devices
+    "complex_forward_len_8_16384_double_op_batch_1_ifield_brick_lower_0_0_0_upper_1_4_16384_stride_65536_16384_1_dev_0_brick_lower_0_4_0_upper_1_8_16384_stride_65536_16384_1_dev_0_ofield_brick_lower_0_0_0_upper_1_8_8192_stride_65536_8192_1_dev_0_brick_lower_0_0_8192_upper_1_8_16384_stride_65536_8192_1_dev_1",
+    // same, with padded input strides
+    "complex_forward_len_8_16384_double_op_batch_1_ifield_brick_lower_0_0_0_upper_1_4_16384_stride_65544_16386_1_dev_0_brick_lower_0_4_0_upper_1_8_16384_stride_65544_16386_1_dev_0_ofield_brick_lower_0_0_0_upper_1_8_8192_stride_65536_8192_1_dev_0_brick_lower_0_0_8192_upper_1_8_16384_stride_65536_8192_1_dev_1",
     // clang-format on
 };
 

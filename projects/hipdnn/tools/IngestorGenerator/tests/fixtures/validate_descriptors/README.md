@@ -1,6 +1,7 @@
 # `hipdnn_validate_descriptors` mutation fixtures
 
-Each unslotted directory is a complete, standalone generic-kernel-ingestor descriptor bundle
+Each unslotted directory but the overlay fixtures below is a complete, standalone
+generic-kernel-ingestor descriptor bundle
 (KMD + UHD + UED + UMD + UDD + KDP with two inline kernels), modeled on the shipped
 `dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/conv_fwd/`
 example. `valid/` is the unmutated baseline; every malformed directory below differs by
@@ -105,6 +106,21 @@ GenericEngine evaluates it with (`uhd::prediction_detail::validateBinding` and `
   `feature_extraction_skipped` set). `model_checks`: `sort_kernel_catalog` succeeds. With
   a sample covering the engine, extraction runs for each candidate kernel, and a sample
   leaving `$graph.batch` unbound fails the run.
+- `l2_unguarded_optional/` (an overlay on `l2_dynamic_features/`, see below): the
+  `sort_kernel_catalog` UHD is a `native` scorer whose signature
+  reads `$kernel.block_size` and `$graph.nodes[0].attn_scale_value` bare, an optional operand a
+  valid SDPA graph may omit. Expected: exit 0 -- the unguarded read is a warning, not a failure.
+  `model_checks`: `sort_kernel_catalog` succeeds and lists `$graph.nodes[0].attn_scale_value`
+  under `unguarded_optional_features`.
+- `l2_guarded_optional/` (an overlay): `l2_unguarded_optional/` with the read wrapped in
+  `value_or_default(..., 1.0)`. Expected: exit 0, `model_checks`: `sort_kernel_catalog` succeeds
+  with no `unguarded_optional_features` field.
+- `l2_tflops_work_feature/` (an overlay): `l2_unguarded_optional/` with `score.metric` `tflops`
+  and `$graph.flops` added to the signature, read bare. Expected: exit 0, `model_checks`:
+  `sort_kernel_catalog` succeeds and lists only `$graph.nodes[0].attn_scale_value` under
+  `unguarded_optional_features`: a model of a metric derived from the work may read the work
+  features bare, an optional operand it may not. A validator that passed no metric would list
+  `$graph.flops` too.
 - `l1_static_order/`: `predict_engine` binds a calibrated `time` UHD whose adapter is
   `static_order`. Expected: non-zero exit -- an L1 estimate needs a `tree_data`, `native`
   or `custom_library` model, so the runtime refuses it. `model_checks`:
@@ -133,8 +149,11 @@ only `set.packs` or shared one dispatch stub between the slots would drop it.
 
 Every `slotted_*` directory but `slotted_valid/` holds only the file that changes: an overlay, or for
 `slotted_feature_samples_ws/` the `feature_samples.json` the case validates `slotted_valid/`
-against. The CTest driver copies `slotted_valid/` into the build tree, lays an overlay file
-over the copy and validates the copy (`-DHIPDNN_VALIDATE_DESCRIPTORS_OVERLAY`). The
+against. The three `l2_*` overlays (`l2_unguarded_optional/`, `l2_guarded_optional/`,
+`l2_tflops_work_feature/`) hold only their `fixture.uhd.json`, over `l2_dynamic_features/`. The
+CTest driver copies the overlay's root (`slotted_valid/`, or `l2_dynamic_features/` for these three)
+into the build tree, lays an overlay file over the copy and validates the copy
+(`-DHIPDNN_VALIDATE_DESCRIPTORS_OVERLAY`). The
 loader-side slot rules (an empty slot, a kernel in two slots, an estimate missing a slot's
 KMD, a ranker declaring a metric) are tested in `TestDescriptorLoader.cpp` and
 `test_hkp_pack_slots.py`, not here.
