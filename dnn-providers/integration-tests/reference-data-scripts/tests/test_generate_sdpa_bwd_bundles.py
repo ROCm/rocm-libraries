@@ -453,6 +453,35 @@ def test_known_keys_check_fails_on_a_misspelled_key(tmp_path):
         _check_known_keys(path)
 
 
+_SYNTHETIC_CONV_TOLERANCE = """\
+[{section}]
+{key} = 9.0
+"""
+
+
+@pytest.mark.parametrize(
+    ("section", "key", "rejected"),
+    [
+        ("conv_fwd_tolerance.float", "summation_ordr", "'summation_ordr'"),
+        ("conv_fwd_tolerance.half", "summation_order", "'conv_fwd_tolerance.half'"),
+        ("conv_fwd_tolerance", "summation_order", "'conv_fwd_tolerance'"),
+    ],
+)
+def test_known_keys_check_fails_on_a_wrong_dotted_section_entry(
+    tmp_path, section, key, rejected
+):
+    path = tmp_path / "engine.toml"
+    path.write_text(
+        _SYNTHETIC_CONV_TOLERANCE.format(
+            section="conv_fwd_tolerance.float", key="summation_order"
+        )
+    )
+    _check_known_keys(path)
+    path.write_text(_SYNTHETIC_CONV_TOLERANCE.format(section=section, key=key))
+    with pytest.raises(AssertionError, match=re.escape(rejected)):
+        _check_known_keys(path)
+
+
 @pytest.mark.parametrize(
     "unmatched",
     [
