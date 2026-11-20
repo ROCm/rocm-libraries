@@ -41,6 +41,13 @@ rocsparse_status rocsparse::internal_spmat_transfer_from(rocsparse_handle       
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size, target->rows != source->rows);
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size, target->cols != source->cols);
     RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size, target->nnz != source->nnz);
+    if(source->format == rocsparse_format_bsr)
+    {
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_size,
+                                  target->block_dim != source->block_dim);
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_invalid_value,
+                                  source->block_dim > 1 && target->block_dir != source->block_dir);
+    }
 
     int64_t size_row_data = 0;
     int64_t size_col_data = 0;
