@@ -89,6 +89,12 @@ public:
         Context& executionContext) const override;
 
 private:
+    // The first registered builder that accepts opGraph; every entry point uses it,
+    // so knobs, workspace sizing and plan building agree on one builder.
+    const IPlanBuilder* findApplicablePlanBuilder(
+        const Handle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
+
     std::vector<std::unique_ptr<IPlanBuilder>> _planBuilders;
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     /// Resolved once at construction from @ref L1_MODEL_IDS; empty (UNAVAILABLE, not an

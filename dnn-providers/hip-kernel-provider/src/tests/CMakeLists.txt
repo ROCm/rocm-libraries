@@ -638,6 +638,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set(_hkp_companion_suites CatalogTiles catalog_tiles ModelBinding model_binding)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestShippedEnginePredictors.cpp"
         PROPERTIES COMPILE_DEFINITIONS
@@ -655,7 +656,12 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         EveryCellRockeServesWithItsProductionStackShipsIt
         EveryShippedKernelIsBottomRightCausalWithoutAWindow
         TheShippedGqaRatioListIsTheCatalogsRatios)
-    set(_hkp_model_binding_cases_gfx942_unified_3d TheBoundL2KernelRankerLoads)
+    set(_hkp_model_binding_cases_gfx942_unified_3d
+        TheBoundL2KernelRankerLoads
+        TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
+    set(_hkp_model_binding_cases_gfx942_dense
+        TheBoundL2KernelRankerLoads
+        TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
 
     set(_engines ${HKP_PINNED_ATTENTION_ENGINES})
     while(_engines)

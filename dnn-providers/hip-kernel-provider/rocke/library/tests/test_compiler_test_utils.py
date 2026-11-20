@@ -28,6 +28,7 @@ from ._attention_bwd_resources import compile_or_skip
 from ._compiler_test_utils import (
     REQUIRE_COMPILER_TOOLS_ENV,
     skip_where_compiler_refuses_option,
+    skip_where_compiler_refuses_processor,
 )
 
 OPTION = "-amdgpu-mfma-vgpr-form"
@@ -147,3 +148,44 @@ def test_compile_or_skip_applies_the_policy(
         # Its own toolchain-gap skip would hide the refusal here, and pytest
         # would report this test as skipped rather than failed.
         pytest.fail(f"compile_or_skip skipped outside the shared policy: {skipped}")
+
+
+# The ValueError rocke.core.arch.target raises for a processor the loaded
+# compiler cannot target (the text test_arch_target_identity.py pins).
+PROCESSOR_REFUSAL = (
+    "the llvm20 compiler does not accept the processor 'gfx1250', and its "
+    "arch_specs.json row points at no generic target that compiler accepts -- "
+    "compile with an LLVM flavor whose compiler accepts 'gfx1250'"
+)
+
+
+def test_refused_processor_skips(monkeypatch):
+    monkeypatch.delenv(REQUIRE_COMPILER_TOOLS_ENV, raising=False)
+    with pytest.raises(unittest.SkipTest, match="cannot target this processor"):
+        with skip_where_compiler_refuses_processor():
+            raise ValueError(PROCESSOR_REFUSAL)
+
+
+def test_refused_processor_fails_where_tools_are_required(monkeypatch):
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, "1")
+    with pytest.raises(AssertionError, match=REQUIRE_COMPILER_TOOLS_ENV):
+        with skip_where_compiler_refuses_processor():
+            raise ValueError(PROCESSOR_REFUSAL)
+
+
+@pytest.mark.parametrize("required", ["0", "1"])
+@pytest.mark.parametrize(
+    "message",
+    [
+        "variant rejected",
+        # One of the two phrases alone is not the refusal.
+        "the llvm20 compiler does not accept the processor 'gfx1250'",
+    ],
+)
+def test_other_value_errors_propagate_from_the_processor_policy(
+    monkeypatch, required, message
+):
+    monkeypatch.setenv(REQUIRE_COMPILER_TOOLS_ENV, required)
+    with pytest.raises(ValueError, match="variant rejected|does not accept"):
+        with skip_where_compiler_refuses_processor():
+            raise ValueError(message)

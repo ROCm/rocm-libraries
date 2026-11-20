@@ -402,7 +402,8 @@ int runGemm(size_t         m,
             int                mxBlockA      = 0,
             int                mxBlockB      = 0,
             size_t             batchCount    = 1,
-            bool               isTF32        = false)
+            bool               isTF32        = false,
+            bool               outputAmaxD   = false)
 {
     if(batchCount == 0)
     {
@@ -701,6 +702,16 @@ int runGemm(size_t         m,
         contraction.setParams().setActivationEnum(activation);
     }
 
+    // AMAX-D: the reference writes max |D| over every batch as one AccumulateT.
+    // Start from -1, which no absolute maximum can be, so an unwritten value
+    // fails validation.
+    AccumulateT amaxD = static_cast<AccumulateT>(-1);
+    if(outputAmaxD)
+    {
+        contraction.setOutputAmaxD(true);
+        contraction.setAmaxD(accumDtypeEnum, /*isOutput=*/true);
+    }
+
 #ifndef _WIN32
     // MX scale setup (FP4 with mxBlockA/B > 0 only)
     [[maybe_unused]] std::vector<E8> mxsa, mxsb;
@@ -747,6 +758,7 @@ int runGemm(size_t         m,
     inputs.scaleAlphaVec = useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr;
     inputs.scaleA        = (useScaleAB != "none") ? scaleABuf.data() : nullptr;
     inputs.scaleB        = (useScaleAB != "none") ? scaleBBuf.data() : nullptr;
+    inputs.amaxD         = outputAmaxD ? &amaxD : nullptr;
 
 #ifndef _WIN32
     if constexpr(isFP4)
@@ -774,6 +786,8 @@ int runGemm(size_t         m,
     auto                                      end      = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "Execution Time: " << duration.count() << " ms" << std::endl;
+    if(outputAmaxD)
+        std::cout << "AmaxD: " << static_cast<double>(amaxD) << std::endl;
 
     if(injectValidationFailure)
     {
@@ -950,6 +964,28 @@ int runGemm(size_t         m,
             std::cout << "FAILED! (max diff: " << maxDiff << ")" << std::endl;
             return 1;
         }
+
+        // AMAX-D is checked against the golden D, whichever CPU path computed it.
+        if(outputAmaxD)
+        {
+            double goldenAmaxD = 0.0;
+            for(size_t i = 0; i < totalC; i++)
+                goldenAmaxD = std::max(goldenAmaxD, std::abs(static_cast<double>(dRef[i])));
+
+            double amaxDiff = std::abs(static_cast<double>(amaxD) - goldenAmaxD);
+            if(amaxDiff <= tolerance)
+            {
+                std::cout << "AmaxD PASSED! (observed=" << static_cast<double>(amaxD)
+                          << " expected=" << goldenAmaxD << ")" << std::endl;
+            }
+            else
+            {
+                std::cout << "AmaxD FAILED! (observed=" << static_cast<double>(amaxD)
+                          << " expected=" << goldenAmaxD << " diff=" << amaxDiff << ")"
+                          << std::endl;
+                return 1;
+            }
+        }
     }
     return 0;
 }
@@ -982,7 +1018,8 @@ int main(int argc, char* argv[])
         "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)")(
         "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
         "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
-        "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)");
+        "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)")(
+        "outputAmaxD", po::value<bool>()->default_value(false), "Also output AMAX-D (max |D|) and validate it against the golden GEMM");
 
     po::variables_map vm;
     try
@@ -1055,6 +1092,7 @@ int main(int argc, char* argv[])
     int         mxBlockA                 = vm["mxBlockA"].as<int>();
     int         mxBlockB                 = vm["mxBlockB"].as<int>();
     size_t      batchCount               = vm["batchCount"].as<size_t>();
+    bool        outputAmaxD              = vm["outputAmaxD"].as<bool>();
     const bool  typeAIsTF32              = (typeAStr == "tf32");
     const bool  typeBIsTF32              = (typeBStr == "tf32");
     const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
@@ -1165,7 +1203,8 @@ int main(int argc, char* argv[])
                     m, n, k, transA, transB, alpha, beta,
                     validate, injectValidationFailure, tryFastPath,
                     useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
-                    computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32);
+                    computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32,
+                    outputAmaxD);
             }
         };
         if(typeBStr == "f32")        return callB(float{});

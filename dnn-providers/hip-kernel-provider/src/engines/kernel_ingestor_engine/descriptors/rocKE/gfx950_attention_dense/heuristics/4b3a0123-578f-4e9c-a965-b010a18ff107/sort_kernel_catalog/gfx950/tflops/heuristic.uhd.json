@@ -1,11 +1,9 @@
 {
   "version": "1.0",
-  "id": "73276c7b-f432-437b-9a06-8bb62920c823",
-  "name": "hipkernel:Gfx950AttentionDense (gfx950, 136 contribution(s))",
+  "id": "df4ca2de-53c4-44d4-b92c-ead86e287fa5",
+  "name": "Generated UHD",
   "adapter": "tree_data",
   "features_signature": [
-    "$device.memory_clock_rate",
-    "$device.peak_memory_bandwidth",
     "$kernel.block_m",
     "$kernel.block_n",
     "$gfx950_attention_dense.causal",
@@ -14,12 +12,7 @@
     "$graph.flops",
     "$graph.flops_by_type.SdpaAttributes",
     "$graph.logical_bytes",
-    {
-      "value_or_default": [
-        "$graph.nodes[0].attn_scale_value",
-        1.0
-      ]
-    },
+    "$graph.nodes[0].attn_scale_value",
     "$graph.nodes[0].flops",
     "$graph.nodes[0].k.data_type",
     "$graph.nodes[0].k.dims[0]",
@@ -90,7 +83,7 @@
     "$graph.tensors[3].strides[1]",
     "$graph.tensors[3].strides[2]"
   ],
-  "features_hash": "sha256:50077411641e41fb",
+  "features_hash": "sha256:3e0b7da4755d300d",
   "trained_against": {
     "ued": {
       "id": "4b3a0123-578f-4e9c-a965-b010a18ff107",
@@ -116,6 +109,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "30d3c1ad290e536dd4d5b1f8b53fcd3bece64a5f58c36b70b96bd661f050300f"
+    "hash": "99ca3c70363f05b4e4249f8b6b77ddd7ee9d61f71ace54b837d89d163523c6d2"
   }
 }

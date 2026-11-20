@@ -38,6 +38,11 @@ TEST(TestGfx942AttentionUnified3dModelBinding, TheBoundL2KernelRankerLoads)
     expectBoundRankerLoads(loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME), METRIC, ARCH);
 }
 
+TEST(TestGfx942AttentionUnified3dModelBinding, TheBoundL1EnginePredictorLoadsAndMatchesThisBuild)
+{
+    expectBoundPredictorMatchesThisBuild(
+        loadedSet(GFX942_ATTENTION_UNIFIED_3D_ENGINE_NAME), METRIC, ARCH);
+}
 } // namespace
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

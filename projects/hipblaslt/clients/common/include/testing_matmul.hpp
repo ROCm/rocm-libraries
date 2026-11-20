@@ -26,7 +26,6 @@
 
 #pragma once
 
-#include "TensorDataManipulation.hpp"
 #include "allclose.hpp"
 #include "candidate_search.hpp"
 #include "cblas_interface.hpp"
@@ -57,6 +56,7 @@
 #include "utility.hpp"
 #include "w4a16_datagen.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -73,6 +73,7 @@
 #include <set>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 
 // Convert element count to byte count, accounting for sub-byte packing.
 // FP4 (4-bit) packs 2 elements per byte; all other types use realDataTypeSize.
@@ -383,42 +384,37 @@ void swizzle_tensor(T*               dst,
     if(ld < k)
         throw std::runtime_error("invalid value of ld in swizzle_tensor: ld must be >= k.");
 
-    using Tensor = Tensor::Manipulation::Tensor;
     // currently, if A then it means MiM = 16, if B then it means MiN = 16
     size_t MiM_N = 16;
     size_t MiK = 0, MiKv = 0, PackK = 0;
     calculateKforSwizzling(datatype, arg, MiK, MiKv, PackK);
-    const size_t numElements = b * m_n * k;
-    auto         tmpTensor   = Tensor::create<T>({b, m_n, k});
 
-    if(colMaj)
-    {
-        auto orgTensor = Tensor::create<T>({b, k, m_n});
-        for(size_t i = 0; i < b * k; i++)
+    // [b, M/16, 16, K/(MiK*PackK), MiK/MiKv, MiKv*PackK] permuted to
+    // [b, M/16, K/(MiK*PackK), MiK/MiKv, 16, MiKv*PackK], zero padded.
+    const size_t KV  = MiKv * PackK;
+    const size_t K1  = MiK / MiKv;
+    const size_t MK  = MiK * PackK;
+    const size_t nMo = (m_n + MiM_N - 1) / MiM_N;
+    const size_t nKo = (k + MK - 1) / MK;
+#pragma omp parallel for collapse(2) schedule(static)
+    for(size_t bb = 0; bb < b; bb++)
+        for(size_t mo = 0; mo < nMo; mo++)
         {
-            std::copy(src + (i * ld), src + (i * ld) + m_n, orgTensor.template as<T>() + (i * m_n));
+            T* out = dst + (bb * nMo + mo) * MiM_N * nKo * MK;
+            for(size_t ko = 0; ko < nKo; ko++)
+                for(size_t k1 = 0; k1 < K1; k1++)
+                    for(size_t mm = 0; mm < MiM_N; mm++)
+                        for(size_t k2 = 0; k2 < KV; k2++)
+                        {
+                            size_t m  = mo * MiM_N + mm;
+                            size_t kk = (ko * K1 + k1) * KV + k2;
+                            T      v  = T(0);
+                            if(m < m_n && kk < k)
+                                v = colMaj ? src[(bb * k + kk) * ld + m]
+                                           : src[(bb * m_n + m) * ld + kk];
+                            *out++ = v;
+                        }
         }
-        tmpTensor = permute(orgTensor, {0, 2, 1});
-    }
-    else
-    {
-        for(size_t i = 0; i < b * m_n; i++)
-        {
-            std::copy(src + (i * ld), src + (i * ld) + k, tmpTensor.template as<T>() + (i * k));
-        }
-    }
-
-    auto       MultipleM_N = MiM_N;
-    auto       MultipleK   = MiK * PackK;
-    const auto paddedM_N   = (m_n / MultipleM_N + !!(m_n % MultipleM_N)) * MultipleM_N;
-    const auto paddedK     = (k / MultipleK + !!(k % MultipleK)) * MultipleK;
-    ::Tensor::Manipulation::Shape paddedShape{b, paddedM_N, paddedK};
-    auto paddedTensor = ::Tensor::Manipulation::pad(tmpTensor, paddedShape, T(0));
-    paddedTensor.reshape(
-        {b, paddedM_N / MiM_N, MiM_N, paddedK / (MiK * PackK), MiK / MiKv, MiKv * PackK});
-    Tensor permuted = permute(paddedTensor, {0, 1, 3, 4, 2, 5});
-    std::copy(
-        permuted.template as<T>(), permuted.template as<T>() + (b * paddedM_N * paddedK), dst);
 }
 
 void swizzle_tensor_type(HipHostBuffer&       dst,
@@ -509,6 +505,102 @@ void swizzle_operand(HipHostBuffer&       dst,
         tile_fp6_tensor(dst, src, b, m_n, k, ld);
     else
         swizzle_tensor_type(dst, src, datatype, arg, b, m_n, k, ld, false);
+}
+
+// Device version of swizzle_tensor with colMaj == false and ld == k. Elements are moved as raw
+// bits, so the padding is the all-zero encoding, which is zero in every swizzled type.
+template <typename T>
+__global__ void swizzle_tensor_kernel(T*       dst,
+                                      const T* src,
+                                      size_t   total,
+                                      size_t   m_n,
+                                      size_t   k,
+                                      size_t   KV,
+                                      size_t   K1,
+                                      size_t   nMo,
+                                      size_t   nKo)
+{
+    constexpr size_t MiM_N = 16;
+    const size_t     step  = size_t(gridDim.x) * blockDim.x;
+    for(size_t i = size_t(blockIdx.x) * blockDim.x + threadIdx.x; i < total; i += step)
+    {
+        size_t t  = i;
+        size_t k2 = t % KV;
+        t /= KV;
+        size_t mm = t % MiM_N;
+        t /= MiM_N;
+        size_t k1 = t % K1;
+        t /= K1;
+        size_t ko = t % nKo;
+        t /= nKo;
+        size_t m  = (t % nMo) * MiM_N + mm;
+        size_t bb = t / nMo;
+        size_t kk = (ko * K1 + k1) * KV + k2;
+        dst[i]    = (m < m_n && kk < k) ? src[(bb * m_n + m) * k + kk] : T(0);
+    }
+}
+
+// Swizzles every block of dBuf on the device, producing what swizzle_operand produces on the
+// host. Block 0 must hold the b x m_n x k operand at row stride k; the host copy is the same data
+// expanded to row stride ld by synchronize(hBuf, dBuf, ..., true). Sets swizzled to false, leaving
+// dBuf untouched, when the caller has to use swizzle_operand instead.
+hipError_t swizzle_operand_device(HipDeviceBuffer& dBuf,
+                                  hipDataType      datatype,
+                                  const Arguments& arg,
+                                  size_t           b,
+                                  size_t           m_n,
+                                  size_t           k,
+                                  size_t           ld,
+                                  size_t           block_count,
+                                  hipStream_t      stream,
+                                  bool&            swizzled)
+{
+    swizzled       = false;
+    const bool fp4 = static_cast<int>(datatype) == HIP_R_4F_E2M1;
+    // The host path reads fp4 rows at a stride of ld / 2 bytes, which is the device row stride
+    // only when ld == k.
+    if(isFp6Datatype(datatype) || (fp4 && ld != k) || dBuf.use_HMM)
+        return hipSuccess;
+
+    size_t MiK = 0, MiKv = 0, PackK = 0;
+    calculateKforSwizzling(datatype, arg, MiK, MiKv, PackK);
+    const size_t kElems     = fp4 ? k / 2 : k;
+    const size_t elemBytes  = fp4 ? 1 : realDataTypeSize(datatype);
+    const size_t KV         = MiKv * PackK;
+    const size_t K1         = MiK / MiKv;
+    const size_t MK         = MiK * PackK;
+    const size_t nMo        = (m_n + 15) / 16;
+    const size_t nKo        = (kElems + MK - 1) / MK;
+    const size_t total      = b * nMo * 16 * nKo * MK;
+    const size_t outBytes   = total * elemBytes;
+    const size_t blockBytes = dBuf.getNumBytes() / block_count;
+    if((elemBytes != 1 && elemBytes != 2) || total == 0 || outBytes > blockBytes)
+        return hipSuccess;
+
+    void*      tmp = nullptr;
+    hipError_t err = hipMalloc(&tmp, outBytes);
+    // Also drops any earlier unchecked error, so the launch check below sees only this launch.
+    (void)hipGetLastError();
+    if(err != hipSuccess)
+        return hipSuccess;
+
+    const dim3 block(256);
+    const dim3 grid(std::min<size_t>((total + block.x - 1) / block.x, 1 << 20));
+    if(elemBytes == 1)
+        swizzle_tensor_kernel<<<grid, block, 0, stream>>>(
+            (uint8_t*)tmp, dBuf.as<uint8_t>(), total, m_n, kElems, KV, K1, nMo, nKo);
+    else
+        swizzle_tensor_kernel<<<grid, block, 0, stream>>>(
+            (uint16_t*)tmp, dBuf.as<uint16_t>(), total, m_n, kElems, KV, K1, nMo, nKo);
+    err = hipGetLastError();
+    for(size_t i = 0; err == hipSuccess && i < block_count; i++)
+        err = hipMemcpyAsync(
+            dBuf.as<char>() + i * blockBytes, tmp, outBytes, hipMemcpyDeviceToDevice, stream);
+    if(err == hipSuccess)
+        err = hipStreamSynchronize(stream);
+    (void)hipFree(tmp);
+    swizzled = err == hipSuccess;
+    return err;
 }
 
 template <typename Tout>
@@ -1111,6 +1203,20 @@ inline int64_t bias_vector_length(hipblaslt_bias_source source, int64_t m, int64
     return source == hipblaslt_bias_source::b ? n : m;
 }
 
+// The CPU bias-gradient reference supports one batch. Check before computing or reading it.
+inline void validate_bias_gradient_batch_count(const Arguments& arg, int64_t batches)
+{
+    if(arg.gradient && arg.bias_vector && batches > 1
+       && (arg.unit_check || arg.norm_check || arg.allclose_check))
+        throw std::invalid_argument("bias-gradient verification supports only one batch");
+}
+
+// The MX element types integer_exact data supports (makeIntegerExactMX in mxDataGen.cpp).
+inline bool integer_exact_mx_element_type(hipDataType t)
+{
+    return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2 || t == HIP_R_6F_E2M3 || t == HIP_R_6F_E3M2;
+}
+
 // Returns why fast_check cannot verify this configuration, or an empty string when it can.
 inline std::string fast_check_unsupported_reason(const Arguments&     arg,
                                                  hipblasLtBatchMode_t batchMode,
@@ -1161,8 +1267,6 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
         if(char_to_hipblas_operation(arg.transA) != HIPBLAS_OP_T
            || char_to_hipblas_operation(arg.transB) != HIPBLAS_OP_N)
             return "fast_check with MX scales requires transA=T and transB=N";
-        // The reference recomputes each element's scale as its linear index over the block size,
-        // which holds only when no K block is partial.
         if(arg.K[0] % blockSize(arg.scaleA) != 0 || arg.K[0] % blockSize(arg.scaleB) != 0)
             return "fast_check supports MX scales only when K is a multiple of the scale block";
         if(arg.batch_count > 1)
@@ -1267,15 +1371,94 @@ inline std::string solution_description(hipblasLtHandle_t      handle,
 }
 
 // After check(), names the solution that the failure lines it printed were for.
-inline void report_failed_solution(int64_t                failures_before,
+// reported_before is hipblaslt_bench_options::reported_failures() before check().
+inline void report_failed_solution(int64_t                reported_before,
                                    hipblasLtHandle_t      handle,
                                    hipblasLtMatmulAlgo_t& algo,
                                    size_t                 sol,
                                    size_t                 count)
 {
-    if(hipblaslt_bench_options::verification_failures() > failures_before)
+    if(hipblaslt_bench_options::reported_failures() > reported_before)
         hipblaslt_cerr << "the failed checks above are for "
                        << solution_description(handle, algo, sol, count, true) << std::endl;
+}
+
+// The norm check of one output of one gemm, made one batch at a time. The limit applies to each
+// batch, so many accurate batches do not add up to a failure; total_error, which the norm_error
+// column reports, sums the batches.
+struct OutputNormCheck
+{
+    double  limit       = 0.0;
+    bool    can_compare = false; // false when the type has no limit or no norm_check_general
+    double  total_error = 0.0;
+    double  worst_error = 0.0; // NaN when any batch's error is NaN
+    int64_t worst_batch = 0;
+
+    bool passed() const
+    {
+        return can_compare && worst_error < limit;
+    }
+};
+
+// Compares each of the batches of an output, read as rows x cols with leading dimension ld.
+// batch_data(batch) returns the {reference, result} pointers of that batch.
+template <typename BatchData>
+OutputNormCheck norm_check_batches(hipDataType type,
+                                   double      limit,
+                                   int64_t     rows,
+                                   int64_t     cols,
+                                   int64_t     ld,
+                                   int64_t     batches,
+                                   BatchData   batch_data)
+{
+    OutputNormCheck check;
+    check.limit       = limit;
+    check.can_compare = limit > 0.0 && norm_check_general_supports(type);
+    for(int64_t batch = 0; check.can_compare && batch < batches; batch++)
+    {
+        const auto [gold, result] = batch_data(batch);
+        const double error
+            = std::abs(norm_check_general('F', rows, cols, ld, 0, gold, result, 1, type));
+        check.total_error += error;
+        if(!std::isnan(check.worst_error) && (std::isnan(error) || error > check.worst_error))
+        {
+            check.worst_error = error;
+            check.worst_batch = batch;
+        }
+    }
+    return check;
+}
+
+// batch_data for norm_check_batches when the batches lie stride elements apart in one buffer.
+inline auto
+    strided_batches(HipHostBuffer& gold, HipHostBuffer& result, int64_t stride, hipDataType type)
+{
+    const size_t stride_bytes = stride * realDataTypeSize(type);
+    return [&gold, &result, stride_bytes](int64_t batch) {
+        return std::pair<void*, void*>{gold.as<char>() + batch * stride_bytes,
+                                       result.as<char>() + batch * stride_bytes};
+    };
+}
+
+// Prints why the norm check of output failed, if it did, and adds the failure to failures.
+inline void report_norm_check(const OutputNormCheck& check,
+                              const char*            output,
+                              int64_t                gemm,
+                              hipDataType            type,
+                              int64_t&               failures)
+{
+    if(check.passed())
+        return;
+    failures++;
+    if(!check.can_compare)
+        hipblaslt_cerr << "norm check of " << output << " of gemm " << gemm
+                       << " not done: no norm limit or comparison for "
+                       << hip_datatype_to_string(type) << ", so " << output << " was not verified"
+                       << std::endl;
+    else
+        hipblaslt_cerr << "norm check failed for " << output << " of gemm " << gemm << ": batch "
+                       << check.worst_batch << " has norm_error " << check.worst_error
+                       << ", at or above the limit of " << check.limit << std::endl;
 }
 
 // The skip_launch_solution self-test, after check(): the solution that was never launched must
@@ -1364,6 +1547,7 @@ void check(const Arguments&              arg,
 
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
+        validate_bias_gradient_batch_count(arg, num_batches[gemmIdx]);
         // Check Inf/NaN consistency first so "Inf turned into NaN" bugs fail with a clear message.
         // Mirror the unit/norm-check buffer branching: pointer-array mode uses per-batch buffers,
         // so a strided read over num_batches would compare the wrong buffers / go out of bounds.
@@ -1464,20 +1648,14 @@ void check(const Arguments&              arg,
                                            1,
                                            hAmaxD_gold[gemmIdx].buf(),
                                            hAmaxD[gemmIdx].buf(),
-                                           num_batches[gemmIdx],
+                                           1,
                                            tol[gemmIdx],
                                            Tc);
                     }
                     else
                     {
-                        unit_check_general(1,
-                                           1,
-                                           1,
-                                           1,
-                                           hAmaxD_gold[gemmIdx].buf(),
-                                           hAmaxD[gemmIdx].buf(),
-                                           num_batches[gemmIdx],
-                                           Tc);
+                        unit_check_general(
+                            1, 1, 1, 1, hAmaxD_gold[gemmIdx].buf(), hAmaxD[gemmIdx].buf(), 1, Tc);
                     }
                 }
                 if(!arg.gradient && arg.use_e)
@@ -1537,115 +1715,91 @@ void check(const Arguments&              arg,
 
         if(arg.norm_check)
         {
-            // norm_error, the reported value, sums the per-batch errors. The limit applies to
-            // each batch, so a large batch count of accurate results does not add up to a failure.
-            double       norm_error  = 0.0;
-            double       worst_error = 0.0;
-            int64_t      worst_batch = 0;
-            const double limit       = norm_tolerance(To, arg.compute_type, arg.a_type, arg.b_type);
-            const bool   can_compare = limit > 0.0 && norm_check_general_supports(To);
-            if(can_compare)
-            {
-                const bool strided      = batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY;
-                const auto stride_bytes = strided ? stride_d[gemmIdx] * realDataTypeSize(To) : 0;
-                for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
-                {
-                    const auto offset = batch * stride_bytes;
-                    void*      gold
-                        = (char*)(strided ? hD_gold[gemmIdx] : hD_gold[batch]).buf() + offset;
-                    void* result = (char*)(strided ? hD_1[gemmIdx] : hD_1[batch]).buf() + offset;
-                    const double batch_error = std::abs(norm_check_general(
-                        'F', M[gemmIdx], N[gemmIdx], ldd[gemmIdx], 0, gold, result, 1, To));
-                    norm_error += batch_error;
-                    if(!std::isnan(worst_error)
-                       && (std::isnan(batch_error) || batch_error > worst_error))
-                    {
-                        worst_error = batch_error;
-                        worst_batch = batch;
-                    }
-                }
-            }
-            hipblaslt_error += norm_error;
+            // Each check prints why it failed before its assertion can stop the run. Failed
+            // checks of D count toward --verify_strict; those of the other outputs do not.
+            const OutputNormCheck d = norm_check_batches(
+                To,
+                norm_tolerance(To, arg.compute_type, arg.a_type, arg.b_type),
+                M[gemmIdx],
+                N[gemmIdx],
+                ldd[gemmIdx],
+                num_batches[gemmIdx],
+                [&](int64_t batch) {
+                    if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+                        return std::pair<void*, void*>{hD_gold[batch].buf(), hD_1[batch].buf()};
+                    return strided_batches(hD_gold[gemmIdx], hD_1[gemmIdx], stride_d[gemmIdx], To)(
+                        batch);
+                });
+            hipblaslt_error += d.total_error;
+            report_norm_check(
+                d, "D", gemmIdx, To, hipblaslt_bench_options::verification_failures());
             if(arg.norm_check_assert)
             {
-                CHECK_SUCCESS(
-                    can_compare
-                    && norm_check(worst_error, To, arg.compute_type, arg.a_type, arg.b_type));
-            }
-            if(!can_compare)
-            {
-                hipblaslt_bench_options::verification_failures()++;
-                hipblaslt_cerr << "norm check of D of gemm " << gemmIdx
-                               << " not done: no norm limit or comparison for "
-                               << hip_datatype_to_string(To) << ", so D was not verified"
-                               << std::endl;
-            }
-            else if(!(worst_error < limit))
-            {
-                hipblaslt_bench_options::verification_failures()++;
-                hipblaslt_cerr << "norm check failed for D of gemm " << gemmIdx << ": batch "
-                               << worst_batch << " has norm_error " << worst_error
-                               << ", at or above the GEMM limit of " << limit << std::endl;
+                CHECK_SUCCESS(d.passed());
             }
             if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
             {
                 if(arg.amaxD)
                 {
-                    double norm_error = std::abs(norm_check_general('F',
-                                                                    1,
-                                                                    1,
-                                                                    1,
-                                                                    1,
-                                                                    hAmaxD_gold[gemmIdx].buf(),
-                                                                    hAmaxD[gemmIdx].buf(),
-                                                                    num_batches[gemmIdx],
-                                                                    Tc));
-                    hipblaslt_error += norm_error;
+                    // amaxD is one scalar for the entire GEMM, including all its batches.
+                    const OutputNormCheck amax = norm_check_batches(
+                        Tc,
+                        norm_tolerance(Tc),
+                        1,
+                        1,
+                        1,
+                        1,
+                        strided_batches(hAmaxD_gold[gemmIdx], hAmaxD[gemmIdx], 1, Tc));
+                    hipblaslt_error += amax.total_error;
+                    report_norm_check(amax,
+                                      "amaxD",
+                                      gemmIdx,
+                                      Tc,
+                                      hipblaslt_bench_options::extra_check_failures());
                     if(arg.norm_check_assert)
-                        CHECK_SUCCESS(norm_check(norm_error, Tc));
+                    {
+                        CHECK_SUCCESS(amax.passed());
+                    }
                 }
                 if(!arg.gradient && arg.use_e)
                 {
-                    for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
+                    const OutputNormCheck e = norm_check_batches(
+                        Taux,
+                        norm_tolerance(Taux, arg.compute_type, arg.a_type, arg.b_type),
+                        M[gemmIdx],
+                        N[gemmIdx],
+                        lde[gemmIdx],
+                        num_batches[gemmIdx],
+                        strided_batches(hE_gold[gemmIdx], hE[gemmIdx], stride_e[gemmIdx], Taux));
+                    hipblaslt_error += e.total_error;
+                    report_norm_check(
+                        e, "E", gemmIdx, Taux, hipblaslt_bench_options::extra_check_failures());
+                    if(arg.norm_check_assert)
                     {
-                        const auto   offset = batch * stride_e[gemmIdx] * realDataTypeSize(Taux);
-                        const double batch_error
-                            = std::abs(norm_check_general('F',
-                                                          M[gemmIdx],
-                                                          N[gemmIdx],
-                                                          lde[gemmIdx],
-                                                          0,
-                                                          hE_gold[gemmIdx].as<char>() + offset,
-                                                          hE[gemmIdx].as<char>() + offset,
-                                                          1,
-                                                          Taux));
-                        hipblaslt_error += batch_error;
-                        if(arg.norm_check_assert)
-                        {
-                            CHECK_SUCCESS(
-                                norm_check_general_supports(Taux)
-                                && norm_check(
-                                    batch_error, Taux, arg.compute_type, arg.a_type, arg.b_type));
-                        }
+                        CHECK_SUCCESS(e.passed());
                     }
                 }
                 if(arg.gradient && arg.bias_vector)
                 {
                     const int64_t bias_length
                         = bias_vector_length(arg.bias_source, M[gemmIdx], N[gemmIdx]);
-                    const double norm_error = std::abs(norm_check_general('F',
-                                                                          bias_length,
-                                                                          1,
-                                                                          bias_length,
-                                                                          bias_length,
-                                                                          hBias_gold[gemmIdx].buf(),
-                                                                          hBias[gemmIdx].buf(),
-                                                                          num_batches[gemmIdx],
-                                                                          Tbias));
-                    hipblaslt_error += norm_error;
+                    const OutputNormCheck bias = norm_check_batches(
+                        Tbias,
+                        norm_tolerance(Tbias),
+                        bias_length,
+                        1,
+                        bias_length,
+                        1,
+                        strided_batches(hBias_gold[gemmIdx], hBias[gemmIdx], bias_length, Tbias));
+                    hipblaslt_error += bias.total_error;
+                    report_norm_check(bias,
+                                      "the bias gradient",
+                                      gemmIdx,
+                                      Tbias,
+                                      hipblaslt_bench_options::extra_check_failures());
                     if(arg.norm_check_assert)
                     {
-                        CHECK_SUCCESS(norm_check(norm_error, Tbias));
+                        CHECK_SUCCESS(bias.passed());
                     }
                 }
             }
@@ -1701,6 +1855,10 @@ void check(const Arguments&              arg,
                 hipblaslt_cerr << "allclose check failed for D of gemm " << gemmIdx << ": "
                                << allclose_failure_message(failure) << std::endl;
             }
+            // The skip_launch_solution self-test expects the solution it never launched to fail
+            // here, and fails the case itself when any other solution does.
+            if(arg.norm_check_assert && arg.skip_launch_solution < 0)
+                CHECK_SUCCESS(failure.bad_count == 0);
         }
 
         if(arg.ulp_check)
@@ -1837,6 +1995,32 @@ void testing_matmul(const Arguments& arg)
               && std::fabs(arg.beta) <= 2 && !arg.scaleAlpha_vector && !arg.bias_vector
               && arg.scaleA == hipblaslt_scaling_format::none
               && arg.scaleB == hipblaslt_scaling_format::none && !arg.scaleC && !arg.scaleD;
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+        // MX integer_exact data is exact against the fp32 host reference only while
+        // integerExactMXSumBound(K) * |alpha| stays below 2^24 (see mxDataGen.hpp).
+        if(host_reference && (isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB)))
+        {
+            const int32_t gemm_count = std::max(1, arg.grouped_gemm);
+            for(int32_t i = 0; i < gemm_count; i++)
+            {
+                const double bound = double(integerExactMXSumBound(arg.K[i]))
+                                     * std::max(1.0, std::fabs(double(arg.alpha)));
+                if(bound >= double(kIntegerExactMXExactLimit))
+                {
+                    std::string why = "integer_exact MX data with K=" + std::to_string(arg.K[i])
+                                      + " bounds |alpha * D| by " + std::to_string(bound)
+                                      + ", which is not below 2^24, so the exact host check "
+                                        "does not hold";
+#ifdef GOOGLE_TEST
+                    FAIL() << why;
+#else
+                    hipblaslt_cerr << why << std::endl;
+                    return;
+#endif
+                }
+            }
+        }
+#endif
         if(is_16bit && (host_reference || !arg.fast_check) && !sparse_k_bounded)
         {
             // alpha=2: |2*dot|<=8K; beta=-2 adds 2*C. fp16 exact int ~2048 => K<=256 for both betas used
@@ -2055,6 +2239,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                               hipDataType      Tbias,
                               hipDataType      Taux)
 {
+    validate_bias_gradient_batch_count(arg, arg.batch_count);
     hipblasOperation_t transA(char_to_hipblas_operation(arg.transA));
     hipblasOperation_t transB(char_to_hipblas_operation(arg.transB));
 
@@ -3363,15 +3548,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
                && !(arg.initialization == hipblaslt_initialization::integer_exact
-                    && arg.fast_check))
+                    && integer_exact_mx_element_type(TiA)))
             {
 #ifdef GOOGLE_TEST
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "or integer_exact with fp8 or fp6 elements, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
@@ -3474,15 +3661,17 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
                && !(arg.initialization == hipblaslt_initialization::integer_exact
-                    && arg.fast_check))
+                    && integer_exact_mx_element_type(TiB)))
             {
 #ifdef GOOGLE_TEST
                 GTEST_SKIP() << "unsupported MX initialization: "
                              << hipblaslt_initialization2string(arg.initialization);
 #else
-                hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
-                                  "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
-                               << hipblaslt_initialization2string(arg.initialization) << std::endl;
+                hipblaslt_cout
+                    << "Initialization of microscaling data only allows hpl, trig_float, "
+                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "or integer_exact with fp8 or fp6 elements, not "
+                    << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
 #endif
             }
@@ -3708,7 +3897,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
             }
 
-            if(do_swizzle_a)
+            // hA is dA expanded by rows of A_row elements, the row stride k the device path reads.
+            bool swizzled = false;
+            if(do_swizzle_a && A_row[i] == K[i])
+                CHECK_HIP_ERROR(swizzle_operand_device(dA[i],
+                                                       TiA,
+                                                       arg,
+                                                       num_batches[i],
+                                                       M[i],
+                                                       K[i],
+                                                       lda[i],
+                                                       block_count,
+                                                       stream,
+                                                       swizzled));
+            if(do_swizzle_a && !swizzled)
             {
                 HipHostBuffer tmp(TiA, size_dA[i]);
                 CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
@@ -3716,7 +3918,19 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_HIP_ERROR(synchronize(dA[i], tmp, block_count));
             }
 
+            swizzled = false;
             if(do_swizzle_b)
+                CHECK_HIP_ERROR(swizzle_operand_device(dB[i],
+                                                       TiB,
+                                                       arg,
+                                                       num_batches[i],
+                                                       N[i],
+                                                       K[i],
+                                                       ldb[i],
+                                                       block_count,
+                                                       stream,
+                                                       swizzled));
+            if(do_swizzle_b && !swizzled)
             {
                 HipHostBuffer tmp(TiB, size_dB[i]);
                 CHECK_HOST_ALLOCATION(host_allocation_failure(tmp));
@@ -6453,6 +6667,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     copyOutputsToHost(gemm_count);
                 }
                 const int64_t failures_before = hipblaslt_bench_options::verification_failures();
+                const int64_t reported_before = hipblaslt_bench_options::reported_failures();
                 check(arg,
                       gemm_count,
                       M,
@@ -6482,7 +6697,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
-                report_failed_solution(failures_before,
+                report_failed_solution(reported_before,
                                        handle,
                                        heuristicResult[sol].algo,
                                        sol,
@@ -7073,6 +7288,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                     }
                 }
                 const int64_t failures_before = hipblaslt_bench_options::verification_failures();
+                const int64_t reported_before = hipblaslt_bench_options::reported_failures();
                 check(arg,
                       gemm_count,
                       M,
@@ -7102,7 +7318,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                       Taux,
                       Talpha,
                       batchMode);
-                report_failed_solution(failures_before,
+                report_failed_solution(reported_before,
                                        handle,
                                        heuristicResult[sol].algo,
                                        sol,
