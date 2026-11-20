@@ -273,6 +273,28 @@ namespace
               true);
     }
 
+    TEST_F(L2DeviceCsrmvRows, long_last_row)
+    {
+        // The last row spans several nnz blocks of the nnz split algorithm (1024 or
+        // 2048 entries on a wave32 or wave64 GPU once the long row selects the
+        // coarse granularity): the block starts inside it (and the sentinel one past
+        // the end) are owned by the last row, so its end offset must come from
+        // row_ptr[m] and not be clamped to row_ptr[m - 1].
+        sweep(make_csr_by_length<float>(
+                  300, 6007, 0, [](int32_t i) { return i == 299 ? 5000 : 1 + (i % 5); }),
+              true);
+        if(HasFailure())
+            return;
+        // A second shape: empty leading rows, one based, and a last row with a single
+        // interior block start on a wave64 GPU.
+        sweep(make_csr_by_length<float>(
+                  500,
+                  4001,
+                  1,
+                  [](int32_t i) { return i < 3 ? 0 : (i == 499 ? 3300 : 2 + (i % 7)); }),
+              true);
+    }
+
     //
     // beta == 0 must overwrite y without reading it: y is pre-filled with NaN.
     //
