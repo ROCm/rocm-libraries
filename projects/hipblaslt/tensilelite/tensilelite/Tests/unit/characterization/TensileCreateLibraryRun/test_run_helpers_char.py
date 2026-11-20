@@ -232,3 +232,44 @@ def test_rename_fallbacks_per_arch():
     assert "y_plain" in m.lazyLibraries
     # the deep-copied tree's placeholder was arch-suffixed
     assert m.library.rows[0]["library"].filenamePrefix == "tree_fallback_gfx942"
+
+
+# ---------------------------------------------------------------------------
+# _wantsLoopModelDump / _writeFailedLoopModelDumps
+#
+# OutputLoopIR dumps the LoopModel IR. A non-LoopModel kernel has none, so it must
+# write no file at all rather than a one-line "unavailable" stub.
+# ---------------------------------------------------------------------------
+def test_wants_loop_model_dump_off_by_default(monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "OutputLoopIR", False)
+    assert M._wantsLoopModelDump({"UseLoopModel": True}) is False
+
+
+def test_wants_loop_model_dump_only_for_a_loop_model_kernel(monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "OutputLoopIR", True)
+    assert M._wantsLoopModelDump({"UseLoopModel": True}) is True
+    assert M._wantsLoopModelDump({"UseLoopModel": False}) is False
+    assert M._wantsLoopModelDump({}) is False
+
+
+def test_failed_dumps_write_nothing_for_a_non_loop_model_kernel(tmp_path, monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "OutputLoopIR", True)
+    monkeypatch.setattr(M, "_loopModelDumpTexts", lambda w: ("ir", "gir"))
+    irDir = tmp_path / "ir"
+    M._writeFailedLoopModelDumps(object(), {"UseLoopModel": False}, "k", irDir)
+    assert not irDir.exists()  # lazy: no LoopModel kernel leaves no dir either
+
+
+def test_failed_dumps_write_both_files_for_a_loop_model_kernel(tmp_path, monkeypatch):
+    monkeypatch.setitem(M.globalParameters, "OutputLoopIR", True)
+    monkeypatch.setattr(M, "_loopModelDumpTexts", lambda w: ("ir", "gir"))
+    irDir = tmp_path / "ir"
+    M._writeFailedLoopModelDumps(object(), {"UseLoopModel": True}, "k", irDir)
+    assert (irDir / "k.txt").read_text() == "ir"
+    assert (irDir / "k.gir").read_text() == "gir"
+
+
+def test_ir_dir_is_created_on_first_write_and_reused(tmp_path):
+    irDir = tmp_path / "deep" / "ir"
+    assert M._irDir(irDir) == irDir and irDir.is_dir()
+    assert M._irDir(irDir) == irDir  # second writer must not raise

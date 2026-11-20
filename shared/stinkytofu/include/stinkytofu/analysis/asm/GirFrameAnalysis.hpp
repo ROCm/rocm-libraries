@@ -177,6 +177,10 @@ struct GirFrameAnalysis {
         /// Lowering may split one GIR block across several asm blocks -- a conditionally-issued
         /// movement branches over itself -- and those seams are not frame-graph distance.
         std::unordered_map<const BasicBlock*, uint64_t> girBlockOf;
+        /// The ring each storage id belongs to: `GirAccessSpec::operand`, the first half of the
+        /// `(operand, generation)` key that named the slot. Two storages share a ring iff they are
+        /// slots of one operand's LDS buffer set.
+        std::unordered_map<int, int> storageRing;
 
         bool empty() const {
             return !contract.loaded;
@@ -184,6 +188,10 @@ struct GirFrameAnalysis {
         bool isBackEdge(const BasicBlock* from, const BasicBlock* to) const;
         /// Whether \p from -> \p to stays within one GIR block, so a hazard must not age over it.
         bool insideOneGirBlock(const BasicBlock* from, const BasicBlock* to) const;
+        /// The block whose branch skips \p block from inside the same GIR block, or null when
+        /// every agent that enters that GIR block runs \p block. A conditionally-issued movement
+        /// branches over itself, so its seam is a place only some agents reach.
+        BasicBlock* girSkipSource(const BasicBlock* block) const;
         const std::vector<GirFrame>& frames(const BasicBlock* block) const;
     };
 

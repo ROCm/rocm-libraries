@@ -27,6 +27,7 @@
 #include <iostream>  // TODO: don't use iostream.
 #include <map>
 #include <queue>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -124,6 +125,10 @@ struct RegionDependencies {
     // and drops any that would close a cycle. Writable through a const RegionDependencies&:
     // the constness is the struct's, not the vector's.
     std::vector<HardSchedulingConstraint>& requestedConstraints;
+
+    // IN: `GirFrameAnalysis::Result::storageRing` -- which ring (operand) each LDS memtoken is a
+    // slot of, so a rule can ask whether two barriers name one buffer set. Null without GIR.
+    const std::unordered_map<int, int>* storageRing = nullptr;
 };
 
 // A Layer 2 overlap is only safe to publish after every ordering requested for

@@ -1,0 +1,52 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# PGR2 x TDMPlusLdsBuf under UseLoopModel: a 3-deep LDS ring rotating off increment SGPRs rather
+# than an xor toggle, forked over both wave counts.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    -
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 32, 1,  1,  2, 2,  1, 1]
+          - [16, 16, 32, 1,  1,  2, 2,  2, 2]
+        - DepthU: [64]
+        - WavefrontSize: [32]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [0, 1]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - TDMPlusLdsBuf: [1]
+        - UseSubtileImpl: [false]
+        - UseLoopModel: [true]
+        - TDMInst: [3]
+        - LDSTrInst: [true]
+        - SourceSwap: [false]
+        - ExpandPointerSwap: [false]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 1000]

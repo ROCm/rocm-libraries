@@ -1,0 +1,112 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# loopmodel_mxf8_scale_buffers.yaml at PrefetchLocalReadA 2 and VgprAllocA 3, where MXSA's ring
+# keeps three scale buffers beside MXSB's two. A bank-disjoint layout needs one VGPR past the
+# default scale span, which the accumulators' even start leaves free. Its VGPRs fit only once
+# StinkyTofu recolours them, so the scales reach the assembler as registers, not as the
+# interleave's symbols.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  -
+    -
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8
+      DataTypeMXSB: e8
+    -
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [True]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  8, 10,  2, 2]
+        - DepthU: [256]
+        - TDMInst: [3]
+        - TDMPlusLdsBuf: [-1]
+        - HalfPLR: [0]
+        - TDMIterateMode: [-1]
+        - InitCIterWmma: [1]
+        - SwInstructionPrefetch: [0]
+        - PrefetchGL2: [4]
+        - PrefetchGL2SAddr: [True]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LDSTrInst: [False]
+        - StaggerU: [0]
+        - ScheduleIterAlg: [4]
+        - StinkyTofuRegisterAllocation: [3]
+        - PrefetchLocalRead: [1]
+        - PrefetchGlobalRead: [2]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [1]
+        - GlobalSplitUAlgorithm: [MultipleBuffer]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [8]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - SourceSwap: [True]
+        - ClusterDim: [[4,4]]
+        - ClusterAIDMapping: [-2]
+        - LDSSegmentInterleave: [1]
+        - WorkGroupMapping: [1]
+        - StoreVectorWidth: [-1]
+        - NumElementsPerBatchStore: [16]
+        - GroupLoadStore: [True]
+        - InterleaveAlpha: [2]
+        - WavefrontSize: [32]
+        - ExpandPointerSwap: [False]
+        - CompactLoopStore: [False]
+        - PreloadKernArgs: [True]
+        - UseLoopModel: [True]
+        - TDMSplitA: [0]
+        - WmmaFactorM: [2]
+        - TDMSplitB: [0]
+        - WmmaFactorN: [2]
+        - TDMFuse: [1]
+        - WmmaInnerOrder: [2]
+        - WmmaOuterOrder: [3]
+        - PrefetchLocalReadA: [2]
+        - PrefetchLocalReadB: [1]
+        - ClusterLocalReadA: [0]
+        - ClusterLocalReadB: [0]
+        - VgprGroupA: [1]
+        - VgprGroupB: [1]
+        - VgprAllocA: [3]
+        - VgprAllocB: [2]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [4096, 5120, 1, 65536]
