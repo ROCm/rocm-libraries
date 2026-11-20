@@ -25,8 +25,7 @@
 // rocsparse_sparse_to_sparse: formats outside the dispatch table (SELL and beyond) are
 // rejected before it is indexed, intermediate CSR arrays are sized with the index types
 // stored on that descriptor and oversized counts are rejected before any allocation,
-// a null target value array is a structural conversion when the route supports it,
-// a null target index array on an identity conversion is rejected before any write, and
+// a null target value array is a structural conversion when the route supports it, and
 // an empty conversion can be captured.
 
 #include "unit_test_device_conv_common.hpp"
@@ -1626,69 +1625,6 @@ namespace
             run_symbolic(handle, pair, true);
             run_symbolic(handle, pair, false);
         }
-    }
-
-    TEST_F(ConvS2s, IdentityNullTargetColumn)
-    {
-        // Identity CSR checks each index pointer before it writes. A null target
-        // column is invalid_pointer, and the row pointer and the values stay put.
-        // nnz 0 is what lets the constructor take a null column array.
-        clear_hip_error();
-        Bytes         src_row(8);
-        Bytes         src_col(4);
-        DevBuf<float> src_val(std::vector<float>{3.f});
-        upload_i32(src_row.get(), {0, 1});
-        upload_i32(src_col.get(), {0});
-
-        Spmat source;
-        ASSERT_EQ(rocsparse_create_csr_descr(&source,
-                                             1,
-                                             1,
-                                             1,
-                                             src_row.get(),
-                                             src_col.get(),
-                                             src_val.get(),
-                                             idx32,
-                                             idx32,
-                                             base,
-                                             f32_r),
-                  st_ok);
-
-        Bytes dst_row(8);
-        Bytes dst_val(sizeof(float));
-        fill_bytes(dst_row, k_sentinel);
-        fill_bytes(dst_val, k_sentinel);
-
-        Spmat target;
-        ASSERT_EQ(rocsparse_create_csr_descr(
-                      &target, 1, 1, 0, dst_row.get(), nullptr, nullptr, idx32, idx32, base, f32_r),
-                  st_ok);
-        ASSERT_EQ(rocsparse_spmat_set_values(target, dst_val.get()), st_ok);
-
-        S2sDescr descr;
-        ASSERT_EQ(rocsparse_create_sparse_to_sparse_descr(&descr, source, target, alg), st_ok);
-        ASSERT_EQ(rocsparse_sparse_to_sparse_permissive(descr), st_ok);
-        size_t bytes = 0;
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_a, &bytes),
-            st_ok);
-        Bytes analysis(bytes);
-        ASSERT_EQ(rocsparse_sparse_to_sparse(
-                      handle, descr, source, target, stage_a, bytes, analysis.get()),
-                  st_ok);
-        EXPECT_TRUE(bytes_are(dst_row, k_sentinel));
-        EXPECT_TRUE(bytes_are(dst_val, k_sentinel));
-
-        ASSERT_EQ(
-            rocsparse_sparse_to_sparse_buffer_size(handle, descr, source, target, stage_c, &bytes),
-            st_ok);
-        Bytes compute(bytes);
-        EXPECT_EQ(rocsparse_sparse_to_sparse(
-                      handle, descr, source, target, stage_c, bytes, compute.get()),
-                  st_ptr);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        EXPECT_TRUE(bytes_are(dst_row, k_sentinel));
-        EXPECT_TRUE(bytes_are(dst_val, k_sentinel));
     }
 
     TEST_F(ConvS2s, IntermediateCountOverflow)

@@ -1509,25 +1509,30 @@ namespace
         }
     }
 
-    // CSR -> CSR with a supported value conversion (f32 -> f64) into a target created with
-    // zero nonzeros and no column index array: the analysis stage gives the target the
-    // nonzeros of the source, and the pointer check fails before any target array is
-    // written.
-    TEST_F(ConvInternal, SparseToSparseChecksPointersFirst)
+    // CSR -> CSR from f32 values into a target with values of type T, created with zero
+    // nonzeros and no column index array: the analysis stage gives the target the nonzeros
+    // of the source, and the pointer check fails before any target array is written.
+    template <typename T>
+    void sparse_to_sparse_checks_pointers_first(rocsparse_handle handle, rocsparse_datatype dt)
     {
-        Silence                    silence;
+        SCOPED_TRACE(testing::Message() << "target data type " << dt);
         S2sMat<float>              source(rocsparse_format_csr, f32, false);
         const std::vector<int32_t> ptr_guard(s2s_m + 1, -7);
-        const std::vector<double>  val_guard(source.host.nnz, -7.0);
+        const std::vector<T>       val_guard(source.host.nnz, T(-7));
         DevBuf<int32_t>            t_ptr(ptr_guard);
-        DevBuf<double>             t_val(val_guard);
+        DevBuf<T>                  t_val(val_guard);
         Spmat                      target;
-        ASSERT_EQ(
-            create_s2s(
-                target, rocsparse_format_csr, rocsparse_datatype_f64_r, 0, t_ptr, nullptr, t_val),
-            st_ok);
+        ASSERT_EQ(create_s2s(target, rocsparse_format_csr, dt, 0, t_ptr, nullptr, t_val), st_ok);
         EXPECT_EQ(sparse_to_sparse(handle, source.descr, target), st_ptr);
         EXPECT_EQ(t_ptr.read(), ptr_guard);
         EXPECT_EQ(t_val.read(), val_guard);
+    }
+
+    // With a value conversion (f32 -> f64) and with a same-type copy (f32 -> f32).
+    TEST_F(ConvInternal, SparseToSparseChecksPointersFirst)
+    {
+        Silence silence;
+        sparse_to_sparse_checks_pointers_first<double>(handle, rocsparse_datatype_f64_r);
+        sparse_to_sparse_checks_pointers_first<float>(handle, f32);
     }
 } // namespace
