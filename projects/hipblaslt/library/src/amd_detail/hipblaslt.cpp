@@ -258,7 +258,7 @@ namespace
  *******************************************************************************/
 struct hipblasLtFusionDescriptor
 {
-    std::vector<hipblasLtFuseableEpilogue_t> stages;
+    std::vector<hipblasLtFuseableEpilogue_t> epilogue_stages;
     std::vector<hipblasLtFuseablePrologue_t> prologue_stages;
 
     // HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX parameters. The per-rank arrays are
@@ -280,7 +280,7 @@ namespace
 {
     bool fused_epilogue_has_stage(const hipblasLtFusionDescriptor* d, hipblasLtFuseableEpilogue_t e)
     {
-        for(auto s : d->stages)
+        for(auto s : d->epilogue_stages)
             if(s == e)
                 return true;
         return false;
@@ -322,7 +322,7 @@ namespace
     bool fused_epilogue_stage_composes(const hipblasLtFusionDescriptor* desc,
                                        hipblasLtFuseableEpilogue_t      stage)
     {
-        if(desc->stages.empty())
+        if(desc->epilogue_stages.empty())
             return true;
         if(stage == HIPBLASLT_FUSEABLE_EPILOGUE_A2A_PREFIX)
             return false;
@@ -532,17 +532,17 @@ namespace
 
     // Runs the checks a matmul carrying a fused epilogue or prologue owes before
     // it is dispatched. A descriptor with no communicating stage passes through.
-    hipblasStatus_t validate_fused_epilogue_dispatch(hipblasLtHandle_t       handle,
-                                                     hipblasLtMatmulDesc_t   matmulDesc,
-                                                     hipblasLtMatrixLayout_t Bdesc,
-                                                     hipblasLtMatrixLayout_t Ddesc)
+    hipblasStatus_t validate_fusion_dispatch(hipblasLtHandle_t       handle,
+                                             hipblasLtMatmulDesc_t   matmulDesc,
+                                             hipblasLtMatrixLayout_t Bdesc,
+                                             hipblasLtMatrixLayout_t Ddesc)
     {
         if(matmulDesc == nullptr)
             return HIPBLAS_STATUS_SUCCESS;
 
         const rocblaslt_matmul_desc desc = (rocblaslt_matmul_desc)matmulDesc;
-        RocblasltFusedEpilogueInfo  info;
-        if(!rocblaslt_resolve_fused_epilogue(desc->fused_epilogue, desc->fused_prologue, info))
+        RocblasltFusionInfo         info;
+        if(!rocblaslt_resolve_fusion(desc->fused_epilogue, desc->fused_prologue, info))
             return HIPBLAS_STATUS_SUCCESS;
 
         if(info.misattached)
@@ -555,7 +555,7 @@ namespace
 
         switch(info.mode)
         {
-        case RocblasltFusedEpilogueInfo::Mode::GemmA2A:
+        case RocblasltFusionInfo::Mode::GemmA2A:
         {
             const hipblasStatus_t contents = validate_fused_epilogue_contents(desc->fused_epilogue);
             if(contents != HIPBLAS_STATUS_SUCCESS)
@@ -563,12 +563,12 @@ namespace
             return validate_fused_a2a_launch(
                 (rocblaslt_handle)handle, desc->fused_epilogue, (rocblaslt_matrix_layout)Ddesc);
         }
-        case RocblasltFusedEpilogueInfo::Mode::A2AGemm:
+        case RocblasltFusionInfo::Mode::A2AGemm:
             return validate_fused_prologue_launch((rocblaslt_handle)handle,
                                                   desc->fused_prologue,
                                                   (rocblaslt_matrix_layout)Bdesc,
                                                   (rocblaslt_matrix_layout)Ddesc);
-        case RocblasltFusedEpilogueInfo::Mode::Disabled:
+        case RocblasltFusionInfo::Mode::Disabled:
             break;
         }
         return HIPBLAS_STATUS_SUCCESS;
@@ -626,9 +626,9 @@ namespace
 
 // The pointers alias the descriptor's own storage; they stay valid only as long as
 // the descriptor does.
-bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusionDescriptor* epilogue,
-                                      const hipblasLtFusionDescriptor* prologue,
-                                      RocblasltFusedEpilogueInfo&      out)
+bool rocblaslt_resolve_fusion(const hipblasLtFusionDescriptor* epilogue,
+                              const hipblasLtFusionDescriptor* prologue,
+                              RocblasltFusionInfo&             out)
 {
     if(epilogue == nullptr && prologue == nullptr)
         return false;
@@ -639,10 +639,10 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusionDescriptor* epilogue,
         = prologue && fused_prologue_has_stage(prologue, HIPBLASLT_FUSEABLE_PROLOGUE_A2A_PREFIX);
 
     out.misattached = (epilogue && !epilogue->prologue_stages.empty())
-                      || (prologue && !prologue->stages.empty()) || (gemmA2A && a2aGemm);
-    out.mode = a2aGemm   ? RocblasltFusedEpilogueInfo::Mode::A2AGemm
-               : gemmA2A ? RocblasltFusedEpilogueInfo::Mode::GemmA2A
-                         : RocblasltFusedEpilogueInfo::Mode::Disabled;
+                      || (prologue && !prologue->epilogue_stages.empty()) || (gemmA2A && a2aGemm);
+    out.mode = a2aGemm   ? RocblasltFusionInfo::Mode::A2AGemm
+               : gemmA2A ? RocblasltFusionInfo::Mode::GemmA2A
+                         : RocblasltFusionInfo::Mode::Disabled;
 
     const hipblasLtFusionDescriptor* desc = a2aGemm || epilogue == nullptr ? prologue : epilogue;
     out.a2aSdmaQueues     = desc->a2a_queues.empty() ? nullptr : desc->a2a_queues.data();
@@ -656,15 +656,15 @@ bool rocblaslt_resolve_fused_epilogue(const hipblasLtFusionDescriptor* epilogue,
     return true;
 }
 
-rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle        handle,
-                                                            rocblaslt_matmul_desc   matmulDesc,
-                                                            rocblaslt_matrix_layout matB,
-                                                            rocblaslt_matrix_layout matD)
+rocblaslt_status rocblaslt_validate_fusion_dispatch(rocblaslt_handle        handle,
+                                                    rocblaslt_matmul_desc   matmulDesc,
+                                                    rocblaslt_matrix_layout matB,
+                                                    rocblaslt_matrix_layout matD)
 {
-    return validate_fused_epilogue_dispatch((hipblasLtHandle_t)handle,
-                                            (hipblasLtMatmulDesc_t)matmulDesc,
-                                            (hipblasLtMatrixLayout_t)matB,
-                                            (hipblasLtMatrixLayout_t)matD)
+    return validate_fusion_dispatch((hipblasLtHandle_t)handle,
+                                    (hipblasLtMatmulDesc_t)matmulDesc,
+                                    (hipblasLtMatrixLayout_t)matB,
+                                    (hipblasLtMatrixLayout_t)matD)
                    == HIPBLAS_STATUS_SUCCESS
                ? rocblaslt_status_success
                : rocblaslt_status_invalid_value;
@@ -1107,7 +1107,7 @@ try
     }
     else
     {
-        desc->stages.push_back(epilogue);
+        desc->epilogue_stages.push_back(epilogue);
     }
 
     rocblaslt::Debug::Instance().markerStop();
@@ -1129,7 +1129,7 @@ try
     {
         status = HIPBLAS_STATUS_INVALID_VALUE;
     }
-    else if(!desc->prologue_stages.empty() || !desc->stages.empty())
+    else if(!desc->prologue_stages.empty() || !desc->epilogue_stages.empty())
     {
         log_error(__func__, "prologue stage does not compose with the stages already added");
         status = HIPBLAS_STATUS_INVALID_VALUE;
@@ -1549,8 +1549,7 @@ try
     // Everything a communicating stage can be judged on before a solution exists
     // is judged here: an all-to-all's extent participates in tile selection, so a
     // request that cannot be served must not come back as a usable algo.
-    hipblasStatus_t fused_status
-        = validate_fused_epilogue_dispatch(handle, matmulDesc, Bdesc, Ddesc);
+    hipblasStatus_t fused_status = validate_fusion_dispatch(handle, matmulDesc, Bdesc, Ddesc);
     if(fused_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();
@@ -1615,7 +1614,7 @@ try
     hipblasStatus_t return_status = HIPBLAS_STATUS_SUCCESS;
 
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
-    return_status = validate_fused_epilogue_dispatch(handle, matmul_descr, matB, matD);
+    return_status = validate_fusion_dispatch(handle, matmul_descr, matB, matD);
     if(return_status != HIPBLAS_STATUS_SUCCESS)
     {
         rocblaslt::Debug::Instance().markerStop();

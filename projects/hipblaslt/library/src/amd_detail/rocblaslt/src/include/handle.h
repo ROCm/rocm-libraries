@@ -484,10 +484,10 @@ struct _rocblaslt_matmul_desc
 #if HIPBLASLT_HAS_GEMM_A2A_FUSION
 // Returns false unless desc requests a fused all-to-all.
 inline bool rocblaslt_resolve_fused_a2a(const _rocblaslt_matmul_desc& desc,
-                                        RocblasltFusedEpilogueInfo&   out)
+                                        RocblasltFusionInfo&          out)
 {
-    return rocblaslt_resolve_fused_epilogue(desc.fused_epilogue, desc.fused_prologue, out)
-           && out.mode != RocblasltFusedEpilogueInfo::Mode::Disabled;
+    return rocblaslt_resolve_fusion(desc.fused_epilogue, desc.fused_prologue, out)
+           && out.mode != RocblasltFusionInfo::Mode::Disabled;
 }
 #endif
 
