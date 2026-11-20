@@ -3,8 +3,8 @@
 /*
  * helper_rocke.helpers.io.c -- C99 port of rocke.helpers.io.io_ir_type,
  * store_scalar_from_f32, load_scalar, load_scalar_as_f32, load_vec,
- * load_vec_as_f32, load_lane_slice_f32, store_vec, pack_f32_to and
- * vector_row_copy.
+ * load_vec_as_f32, load_lane_slice_f32, store_vec, pack_f32_to,
+ * vector_row_copy, concat_tree and smem_load_fragment.
  *
  * Faithful translation of:
  *
@@ -25,6 +25,8 @@
 #include "rocke/helper_rocke.helpers.io.h"
 
 #include <string.h>
+
+#include <vector>
 
 #include "rocke/arena.h" /* rocke_arena_alloc */
 #include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live */
@@ -432,4 +434,62 @@ void rocke_b_vector_row_copy(rocke_ir_builder_t* b,
         rocke_b_store_scalar_from_f32(
             b, dst, rocke_b_add(b, dst_base, rocke_b_const_i32(b, d)), s, dtype);
     }
+}
+
+rocke_value_t* rocke_b_concat_tree(rocke_ir_builder_t* b, rocke_value_t* const* parts, int count)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(count <= 0 || (count & (count - 1)) != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b, ROCKE_ERR_VALUE, "concat_tree needs a power-of-two part count, got %d", count);
+    std::vector<rocke_value_t*> level(parts, parts + count);
+    /* Python: while len(parts) > 1: parts = [vec_concat(parts[i], parts[i + 1]) ...] */
+    while(level.size() > 1)
+    {
+        std::vector<rocke_value_t*> next;
+        for(size_t i = 0; i < level.size(); i += 2)
+            next.push_back(rocke_b_vec_concat(b, level[i], level[i + 1]));
+        level.swap(next);
+    }
+    return level[0];
+}
+
+rocke_value_t* rocke_b_smem_load_fragment(rocke_ir_builder_t* b,
+                                          rocke_value_t* smem,
+                                          rocke_value_t* row,
+                                          rocke_value_t* idx,
+                                          const rocke_type_t* dtype,
+                                          int n,
+                                          int max_elems,
+                                          int stride)
+{
+    if(!rocke_i_live(b))
+        return NULL;
+    if(n <= max_elems)
+    {
+        rocke_value_t* ind[2] = {row, idx};
+        return rocke_b_smem_load_vN(b, smem, ind, 2, dtype, n);
+    }
+    if(n % max_elems != 0)
+        return (rocke_value_t*)rocke_i_set_err(
+            b,
+            ROCKE_ERR_VALUE,
+            "LDS fragment of %d elements is not a multiple of the %d-element load",
+            n,
+            max_elems);
+    const int step = stride > 0 ? stride : max_elems;
+    std::vector<rocke_value_t*> parts;
+    for(int h = 0; h < n / max_elems; ++h)
+    {
+        rocke_value_t* ind[2] = {row, idx};
+        if(h != 0)
+        {
+            /* Sequenced: Python evaluates const_i32 before add before the load. */
+            rocke_value_t* k = rocke_b_const_i32(b, (int64_t)h * step);
+            ind[1] = rocke_b_add(b, idx, k);
+        }
+        parts.push_back(rocke_b_smem_load_vN(b, smem, ind, 2, dtype, max_elems));
+    }
+    return rocke_b_concat_tree(b, parts.data(), (int)parts.size());
 }

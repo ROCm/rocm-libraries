@@ -867,6 +867,77 @@ def test_pinned_branch_writes_lse(branch, d, dtype, q_lens, kv_lens):
     _assert_2d_result(out, off, lse, o_ref, lse_ref, dtype)
 
 
+def _token_major_view(head_major, q_lens, heads):
+    """Reorder a flat head-major LSE buffer to [total_q, Hq, 1]."""
+    rows, start = [], 0
+    for q_len in q_lens:
+        block = head_major[start * heads : (start + q_len) * heads]
+        rows.append(block.view(heads, q_len).transpose(0, 1))
+        start += q_len
+    return torch.cat(rows).unsqueeze(-1)
+
+
+@pytest.mark.skipif(_arch() != "gfx950", reason="head-major LSE is gfx950-only")
+@pytest.mark.gpu
+@pytest.mark.parametrize(
+    "q_lens,kv_lens",
+    [([256, 256], [256, 256]), ([37, 300, 1], [37, 812, 900]), ([5], [3])],
+)
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+@pytest.mark.parametrize("branch", _BRANCHES)
+def test_gfx950_head_major_lse(branch, dtype, q_lens, kv_lens):
+    """lse_layout="head_major" writes each sequence as [Hq, q_len]; for equal
+    lengths that is the [B, Hq, S, 1] SDPA stats tensor. O is unchanged."""
+    problem, q, kc, vc, cu, su, bt = _case2d(q_lens, kv_lens, dtype=dtype)
+    spec = _branch_spec(problem, branch)
+    spec = dataclasses.replace(
+        spec,
+        kernel_spec=dataclasses.replace(spec.kernel_spec, lse_layout="head_major"),
+    )
+    assert spec.kernel_name().endswith("_lsehm")
+    lse = _nan_lse(problem)  # same element count; the kernel writes it flat
+    out = _run2d(
+        problem,
+        q,
+        kc,
+        vc,
+        cu,
+        su,
+        bt,
+        lse=lse,
+        softcap=0.0,
+        backend="tiled",
+        tuning_spec=spec,
+    )
+    off_problem = dataclasses.replace(problem, emit_lse=False)
+    off = _run2d(
+        off_problem,
+        q,
+        kc,
+        vc,
+        cu,
+        su,
+        bt,
+        lse=None,
+        softcap=0.0,
+        backend="tiled",
+        tuning_spec=_branch_spec(off_problem, branch),
+    )
+    o_ref, lse_ref = _paged_reference(
+        q, kc, vc, q_lens, kv_lens, bt, 1.0 / math.sqrt(q.shape[-1]), 0.0
+    )
+    hq = problem.num_query_heads
+    got = _token_major_view(lse.view(-1), q_lens, hq)
+    _assert_2d_result(out, off, got, o_ref, lse_ref, dtype)
+    if len(set(q_lens)) == 1:
+        bhs1 = lse.view(len(q_lens), hq, q_lens[0], 1)
+        ref = lse_ref.view(len(q_lens), q_lens[0], hq, 1).transpose(1, 2)
+        finite = torch.isfinite(ref)
+        torch.testing.assert_close(
+            bhs1[finite], ref[finite], atol=_LSE_ATOL, rtol=_LSE_RTOL
+        )
+
+
 @requires_cdna3_or_4
 @pytest.mark.gpu
 @pytest.mark.parametrize("branch", ["transposed32", "mfma32", "striped16"])

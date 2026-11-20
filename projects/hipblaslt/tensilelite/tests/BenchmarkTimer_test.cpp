@@ -4,6 +4,8 @@
 #include <gtest/gtest.h>
 
 #include "BenchmarkTimer.hpp"
+#include "ClientArgsTestUtils.hpp"
+#include "ClientProblemFactory.hpp"
 #include "ProgramOptions.hpp"
 #include "ResultReporter.hpp"
 #include "TimingEvents.hpp"
@@ -49,8 +51,14 @@ namespace
     {
     public:
         void reportValue_string(std::string const& key, std::string const& value) override {}
-        void reportValue_uint(std::string const& key, uint64_t value) override {}
-        void reportValue_int(std::string const& key, int64_t value) override {}
+        void reportValue_uint(std::string const& key, uint64_t value) override
+        {
+            doubles[key] = static_cast<double>(value);
+        }
+        void reportValue_int(std::string const& key, int64_t value) override
+        {
+            doubles[key] = static_cast<double>(value);
+        }
         void reportValue_double(std::string const& key, double value) override
         {
             doubles[key] = value;
@@ -166,4 +174,61 @@ TEST_F(BenchmarkTimerTest, EnqueueTimesCountTowardRunsInSolution)
     EXPECT_TRUE(timer.needMoreRunsInSolution());
     runBatch(timer, 1.0);
     EXPECT_FALSE(timer.needMoreRunsInSolution());
+}
+
+// --split-devices: the timer sees the full problem, and the slices ran on several devices.
+namespace
+{
+    class SplitTimerTest : public BenchmarkTimerTest
+    {
+    protected:
+        SplitTimerTest()
+            : factory(TensileLite::TestUtils::makeSplitClientArgs({256, 256, 1, 256}, 2, "M"))
+            , full(factory.problems()[0].get())
+        {
+        }
+
+        ClientProblemFactory factory;
+        ContractionProblem*  full;
+    };
+
+    // Exposes the timing a batch really reports (the scripted timer replaces it).
+    class SpanTimer : public BenchmarkTimer
+    {
+    public:
+        using BenchmarkTimer::BenchmarkTimer;
+        double take()
+        {
+            return takeBatchTimeMs();
+        }
+    };
+}
+
+TEST_F(SplitTimerTest, ReportsTheWorkOfTheFullProblem)
+{
+    ScriptedTimer timer(makeTimerArgs(1, 1), device, 0.0f);
+    timer.setSplit(&factory);
+    timer.setReporter(reporter);
+    timer.preProblem(full);
+    runSolution(timer, {100.0});
+
+    // The slices ran together, so the speed is the full problem's work over the time of the batch.
+    const double flops = dynamic_cast<ContractionProblemGemm*>(full)->flopCount();
+    EXPECT_NEAR(reported(ResultKey::SpeedGFlops), flops / 100.0 / 1000.0, 1e-6);
+    EXPECT_NEAR(reported(ResultKey::TimeUS), 100.0, 1e-9);
+}
+
+TEST_F(SplitTimerTest, ASplitRunIsTimedOnTheHostClock)
+{
+    TimingEvents events({}, 1, 0);
+    SpanTimer    timer(makeTimerArgs(1, 1), device, 0.0f);
+    timer.setSplit(&factory);
+    timer.setReporter(reporter);
+    timer.preProblem(full);
+    timer.preSolution(&solution);
+    timer.preEnqueues();
+    timer.postEnqueues(events, events);
+    // Events of different devices cannot be compared, so the span between the two host stamps is
+    // reported, which is never negative.
+    EXPECT_GE(timer.take(), 0.0);
 }

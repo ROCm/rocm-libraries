@@ -98,6 +98,16 @@ public:
                                                  miopenDataType_t dtype,
                                                  bool use_tf32) const;
 
+    /// Validate a kernel_id when only kernel_id is trustworthy (e.g. a perf-db-restored config,
+    /// whose use_tf32 was dropped in serialization). Recomputes TF32 from the problem and accepts
+    /// the id if it is supported as TF32 (when requested) or as FP32 -- the same tf32->fp32
+    /// availability fallback GetSolutionTf32Aware applies at build time, so IsValid and GetSolution
+    /// agree on a restored config.
+    MIOPEN_INTERNALS_EXPORT bool
+    IsArgsSupportedTf32Aware(CKSolverType solver,
+                             const miopen::conv::ProblemDescription& problem,
+                             const std::string& kernel_id) const;
+
     MIOPEN_INTERNALS_EXPORT size_t GetWorkspaceSize(CKSolverType solver,
                                                     const miopen::conv::ProblemDescription& problem,
                                                     miopenDataType_t dtype,
@@ -109,6 +119,16 @@ public:
                 const miopen::conv::ProblemDescription& problem,
                 const std::string& kernel_id,
                 bool use_tf32) const;
+
+    /// Build the solution when only kernel_id is trustworthy (e.g. a perf-db-restored config, whose
+    /// use_tf32 was dropped in serialization). Recomputes TF32 from the problem, but uses it only
+    /// if kernel_id is in the TF32 valid set, so a kernel chosen via the FP32 fallback (no TF32
+    /// instance) builds as FP32 -- the same tf32->fp32 availability fallback the config build used.
+    MIOPEN_INTERNALS_EXPORT ConvSolution
+    GetSolutionTf32Aware(CKSolverType solver,
+                         const ExecutionContext& ctx,
+                         const miopen::conv::ProblemDescription& problem,
+                         const std::string& kernel_id) const;
 
     MIOPEN_INTERNALS_EXPORT std::vector<std::string>
     GetAllKernelTypeStrings(CKSolverType solver) const;
@@ -233,12 +253,20 @@ inline std::vector<std::string> GetKernelAsTokens2D(const std::string& kernel)
 inline auto MakeCKValidatorCreator(const CkImplLibLoader& loader,
                                    CKSolverType solver_type,
                                    miopenDataType_t data_type,
-                                   bool use_tf32)
+                                   bool use_tf32,
+                                   bool uses_split_k)
 {
-    return [&loader, solver_type, data_type, use_tf32](const miopen::conv::ProblemDescription& p) {
-        return [&loader, solver_type, data_type, use_tf32, &p](const std::string& kid, int sk) {
-            auto combined_id = kid + "+" + std::to_string(sk);
-            return loader.IsArgsSupported(solver_type, p, combined_id, data_type, use_tf32);
+    return [&loader, solver_type, data_type, use_tf32, uses_split_k](
+               const miopen::conv::ProblemDescription& p) {
+        return [&loader, solver_type, data_type, use_tf32, uses_split_k, &p](
+                   const std::string& kid, int sk, bool fp32_pass) {
+            // Split-k solvers key their instances on "<base>+<split_k>"; non-split solvers key on
+            // the bare type string, so appending a suffix there would miss every instance.
+            const std::string combined_id = uses_split_k ? (kid + "+" + std::to_string(sk)) : kid;
+            // Two-pass TF32: the first pass checks the TF32 instance set (use_tf32); the FP32
+            // fallback pass re-checks the same candidates against the FP32 set.
+            const bool tf32 = use_tf32 && !fp32_pass;
+            return loader.IsArgsSupported(solver_type, p, combined_id, data_type, tf32);
         };
     };
 }

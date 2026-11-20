@@ -12,7 +12,11 @@ ROCm Performance Primitives (RPP) supports HIP and CPU-only backends. The CPU ba
 
 .. note::
 
-    RPP packages built by TheRock are currently built with audio augmentations disabled (``RPP_AUDIO_SUPPORT=OFF``). Build :doc:`from source <./rpp-build>` to enable audio augmentation support.
+    Audio augmentations are always enabled. The HIP spectrogram needs the rocFFT
+    runtime. rocFFT is a ``Recommends`` dependency on Debian and a ``Suggests``
+    dependency on RPM, so the package manager might not install it. If rocFFT is
+    missing, the HIP spectrogram returns ``RPP_ERROR_NOT_IMPLEMENTED``. Every
+    other RPP function works without it. For more information, see :doc:`./rpp-build`.
 
 Before you begin, verify that your system is supported. For more information,
 see :ref:`ROCm Core SDK components <rocm:release-components>`.

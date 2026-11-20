@@ -24,8 +24,8 @@
  * lengths from `seq_lens` and ragged Q offsets from `query_start_len`, and a contiguous BSHD
  * K/V tensor IS that cache with an identity block table. What differs per architecture is
  * the wave width, whether the grid is kv-major or q-major, and the geometry the builder
- * accepts. Those are the traits; a pack for another architecture (e.g. a future gfx942
- * pack) supplies its own traits and its own builder-legality check and reuses everything here.
+ * accepts. Those are the traits; each architecture's pack supplies its own traits and its
+ * own builder-legality check and reuses everything here.
  *
  * Pure functions of KMD fields and graph dimensions: testable with no HIP context.
  */
@@ -54,10 +54,25 @@ struct UnifiedAttentionArchTraits
     /// `num_warps` and `block_m_per_warp` values the 2D builder takes.
     std::array<int64_t, 4> numWarps = {1, 2, 4, 8};
     std::array<int64_t, 2> blockMPerWarp = {16, 32};
+    /// Whether the architecture ships LSE-on kernels, so a graph asking for the stats output
+    /// can be served. When false, the graph match declines every softmax statistics output.
+    bool servesStats = true;
 };
 
-/// gfx950 (CDNA4): wave64, kv-major grid.
+/// gfx950 (CDNA4): wave64, kv-major grid. Ships LSE-on kernels.
 inline constexpr UnifiedAttentionArchTraits GFX950_UNIFIED_ATTENTION_TRAITS{"gfx950"};
+
+/// gfx942 (CDNA3): wave64, kv-major grid. The 2D builder takes the same block sizes, warp
+/// counts and rows per warp as gfx950; the q-major grid (`use_q_major_grid`) is a codegen
+/// stack no shipped kernel enables. No LSE-on kernel ships, so a stats output is declined.
+constexpr UnifiedAttentionArchTraits gfx942UnifiedAttentionTraits()
+{
+    UnifiedAttentionArchTraits traits{"gfx942"};
+    traits.servesStats = false;
+    return traits;
+}
+inline constexpr UnifiedAttentionArchTraits GFX942_UNIFIED_ATTENTION_TRAITS
+    = gfx942UnifiedAttentionTraits();
 
 /// Each workspace section starts on this boundary.
 inline constexpr std::size_t UNIFIED_ATTENTION_WORKSPACE_ALIGNMENT = 256;
@@ -92,7 +107,24 @@ inline std::size_t alignWorkspaceSection(std::size_t bytes)
 inline bool isSupportedUnifiedAttentionBlockSize(const UnifiedAttentionArchTraits& traits,
                                                  int64_t blockSize)
 {
-    return detail::isOneOf(traits.blockSizes, blockSize);
+    // `blockSizes` is fixed-size, so an architecture listing fewer sizes leaves zero slots.
+    // A slot is not a block size, and a caller must never divide by one.
+    return blockSize > 0 && detail::isOneOf(traits.blockSizes, blockSize);
+}
+
+/// The smallest `block_size` any candidate of the architecture is built with. `blockSizes` is
+/// fixed-size, so an architecture listing fewer sizes leaves zero slots; those are skipped.
+constexpr int64_t unifiedAttentionSmallestBlockSize(const UnifiedAttentionArchTraits& traits)
+{
+    int64_t smallest = 0;
+    for(const auto blockSize : traits.blockSizes)
+    {
+        if(blockSize > 0 && (smallest == 0 || blockSize < smallest))
+        {
+            smallest = blockSize;
+        }
+    }
+    return smallest;
 }
 
 /// The grid and block a candidate must launch with.

@@ -67,4 +67,26 @@ inline std::string regimeLabel(const OperationMetadata& metadata, const ProblemP
     return regimeLabel(metadata.regimeLabel, point);
 }
 
+/// @brief The key a form label is counted and reported under: `<axis>:<label>`.
+///
+/// Neither part may contain ':' (checked when the declaration loads), so a form key never reads
+/// as a regime label or as another form.
+inline std::string formQuotaKey(const std::string& axis, const std::string& label)
+{
+    return axis + ":" + label;
+}
+
+/// @brief The form key @p point carries under each of @p metadata's form axes, in declaration
+/// order. Empty for an operation that declares no forms.
+inline std::vector<std::string> formQuotaKeys(const OperationMetadata& metadata,
+                                              const ProblemPoint& point)
+{
+    std::vector<std::string> keys;
+    for(const auto& facet : regimeFacets(metadata.formLabel, point))
+    {
+        keys.push_back(formQuotaKey(facet.first, facet.second));
+    }
+    return keys;
+}
+
 } // namespace hipdnn_corpus_gen

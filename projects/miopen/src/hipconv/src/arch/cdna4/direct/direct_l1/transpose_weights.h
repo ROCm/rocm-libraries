@@ -113,7 +113,10 @@ __device__ inline void store_frag(ToSplitType<DT>* dst_v8_raw, int tile_slot, in
 //
 // blockIdx.z (0 .. WavesK-1) selects the K partition; all sub-tensors share shape,
 // so it is a pure offset on src (+wg*Kwg) and dst (+wg*sub-tensor).
-template <int Kh, int Kw, int Kwg, hipconv::DataType DT>
+//
+// blockIdx.y carries (group, depth tap) as g*Kd + kd. Both axes are pure base
+// shifts on src and dst, so one flat index addresses them both.
+template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int Kd = 1>
 __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ src,
                                                  ToSplitType<DT>* __restrict__ dst,
                                                  int K,
@@ -135,17 +138,20 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
     //
     // The dest base is the layout's wave_group axis (stride = one sub-tensor), scaled
     // by planes (see weights_loader.h).
-    using DstSubLayout               = WeightsLayout<Kh, Kw, Kwg, 1>;
+    using DstSubLayout               = WeightsLayout<Kh, Kw, Kwg, 1, Kd>;
     const int wg                     = blockIdx.z;
     const int src_k_offset_in_stripe = wg * Kwg;
     ToSplitType<DT>* sub_dst =
         dst + static_cast<size_t>(planes * DstSubLayout(Kq * Kwg, C_padded).wave_group(wg).offset);
 
-    // Group (blockIdx.y): a base-pointer shift on both src and dst (each contiguous).
-    const int g = blockIdx.y;
-    src += static_cast<size_t>(g) * K * Kh * Kw * C;
+    // Group and depth tap (blockIdx.y = g*Kd + kd): base-pointer shifts on both
+    // src and dst. The tap is a kd step on the dest, which sits inside kq.
+    const int g     = blockIdx.y / Kd;
+    const int wg_kd = blockIdx.y % Kd;
+    src += static_cast<size_t>(g) * K * Kd * Kh * Kw * C;
     sub_dst += static_cast<size_t>(g) * planes * (static_cast<size_t>(Kq) * Kwg_total) * C_padded *
-               Kh * Kw;
+               Kd * Kh * Kw;
+    sub_dst += static_cast<size_t>(planes * DstSubLayout(Kq * Kwg, C_padded).kd(wg_kd).offset);
 
     // Decode (c64, kh, kw, kq) from blockIdx.x, c64 fastest (k16 is a wave axis now).
     const int c64_count = C_padded / 64;
@@ -182,7 +188,8 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
     const int c_vec_num_bytes = valid_bytes < row_bytes ? valid_bytes : row_bytes;
 
     // Source canonical layout positioned at (kh, kw, c_base); k advances per row.
-    auto src_layout         = ChannelsLastWeightsLayout<Kh, Kw>(K, C).kh(wg_kh).kw(wg_kw).c(c_base);
+    auto src_layout =
+        ChannelsLastWeightsLayout<Kh, Kw, Kd>(K, C).kd(wg_kd).kh(wg_kh).kw(wg_kw).c(c_base);
     const int k_stripe_base = wg_kq * Kwg_total + src_k_offset_in_stripe;
 
     // Strength-reduce the per-row source offset to a running scalar add.
@@ -220,7 +227,8 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
         return;
     const int k16 = wave;
 
-    auto base = WeightsLayout<Kh, Kw, Kwg, 8>(Kq * Kwg, C_padded)
+    // sub_dst already carries the tap, so this steps only within one tap's slice.
+    auto base = WeightsLayout<Kh, Kw, Kwg, 8, Kd>(Kq * Kwg, C_padded)
                     .kq(wg_kq)
                     .c64(wg_c64)
                     .kw(wg_kw)
@@ -241,7 +249,7 @@ __device__ void transpose_weights_subtensor_impl(const ToType<DT>* __restrict__ 
     }
 }
 
-template <int Kh, int Kw, int Kwg, hipconv::DataType DT>
+template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int Kd = 1>
 __global__ void transpose_weights_kernel(const ToType<DT>* __restrict__ src,
                                          ToSplitType<DT>* __restrict__ dst,
                                          int K,
@@ -252,7 +260,8 @@ __global__ void transpose_weights_kernel(const ToType<DT>* __restrict__ src,
 {
     if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_raw_ptr_buffer_load_lds))
     {
-        transpose_weights_subtensor_impl<Kh, Kw, Kwg, DT>(src, dst, K, C, C_padded, Kq, Kwg_total);
+        transpose_weights_subtensor_impl<Kh, Kw, Kwg, DT, Kd>(
+            src, dst, K, C, C_padded, Kq, Kwg_total);
     }
 }
 
@@ -267,8 +276,8 @@ __global__ void transpose_weights_kernel(const ToType<DT>* __restrict__ src,
 //      load it into LDS then DS_READ_B64_TR_B16 reads it back with din as the
 //      operand M and dout as the reduction (as grouped_32c's dgrad does). The
 //      8-per-lane tr-read fragment IS the operand, stored straight to dest slot lane*8.
-//   2. Spatial 180-degree tap flip. Dgrad needs tap (Kh-1-kh, Kw-1-kw); baked in at
-//      the source read so the compute loop's tap pairing is unchanged.
+//   2. Tap flip in every filter axis. Dgrad needs tap (Kd-1-kd, Kh-1-kh, Kw-1-kw);
+//      baked in at the source read so the compute loop's tap pairing is unchanged.
 //
 // The dest is WeightsLayout with its "K" (output) bound to din and "C" (reduction)
 // to dout. The wavegroup split is over din; dout is shared by both wavegroups.
@@ -293,7 +302,7 @@ constexpr int dgrad_lds_dout_stride()
     return sizeof(T) == 4 ? DGRAD_LDS_DOUT_STRIDE_FP32 : DGRAD_LDS_DOUT_STRIDE;
 }
 
-template <int Kh, int Kw, int Kwg, hipconv::DataType DT>
+template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int Kd = 1>
 __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restrict__ src,
                                                        ToSplitType<DT>* __restrict__ dst,
                                                        int K_dout,
@@ -319,18 +328,22 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
     //
     // The dest base is the layout's wave_group axis (stride = one sub-tensor), scaled
     // by planes (see weights_loader.h).
-    using DstSubLayout                 = WeightsLayout<Kh, Kw, Kwg, 1>;
+    using DstSubLayout                 = WeightsLayout<Kh, Kw, Kwg, 1, Kd>;
     const int wg                       = blockIdx.z;
     const int src_din_offset_in_stripe = wg * Kwg;
     ToSplitType<DT>* sub_dst =
         dst +
         static_cast<size_t>(planes * DstSubLayout(Kq * Kwg, C_padded_dout).wave_group(wg).offset);
 
-    // Group (blockIdx.y): a base-pointer shift on both src and dst (each contiguous).
-    const int g = blockIdx.y;
-    src += static_cast<size_t>(g) * K_dout * Kh * Kw * C_din;
+    // Group and depth tap (blockIdx.y = g*Kd + kd): base-pointer shifts on both src
+    // and dst, as in the fprop formatter. The tap is a kd step on the dest, which sits
+    // inside kq.
+    const int g     = blockIdx.y / Kd;
+    const int wg_kd = blockIdx.y % Kd;
+    src += static_cast<size_t>(g) * K_dout * Kd * Kh * Kw * C_din;
     sub_dst += static_cast<size_t>(g) * planes * (static_cast<size_t>(Kq) * Kwg_total) *
-               C_padded_dout * Kh * Kw;
+               C_padded_dout * Kd * Kh * Kw;
+    sub_dst += static_cast<size_t>(planes * DstSubLayout(Kq * Kwg, C_padded_dout).kd(wg_kd).offset);
 
     // Decode (c64, kh, kw, kq) from blockIdx.x, c64 fastest (k16 is a wave axis now).
     //
@@ -365,11 +378,12 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
     const int dout_base = wg_c64 * 64;
 
     // Flipped filter taps.
+    const int src_kd = Kd - 1 - wg_kd;
     const int src_kh = Kh - 1 - wg_kh;
     const int src_kw = Kw - 1 - wg_kw;
 
-    // Source canonical layout: w[K=dout][Kh][Kw][C=din], din innermost.
-    auto src_layout = ChannelsLastWeightsLayout<Kh, Kw>(K_dout, C_din);
+    // Source canonical layout: w[K=dout][Kd][Kh][Kw][C=din], din innermost.
+    auto src_layout = ChannelsLastWeightsLayout<Kh, Kw, Kd>(K_dout, C_din);
 
     // Load phase: one buffer_load_lds per dout row, 32 lanes over the din(Kwg) run.
     //
@@ -387,7 +401,7 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
     // din base are fixed, so only the dout term advances. readfirstlane keeps it scalar.
     const int row_stride = __builtin_amdgcn_readfirstlane(src_layout.strides().k());
     int src_off          = __builtin_amdgcn_readfirstlane(
-        src_layout.k(dout_base + wave * 16).kh(src_kh).kw(src_kw).c(din_base).offset);
+        src_layout.k(dout_base + wave * 16).kd(src_kd).kh(src_kh).kw(src_kw).c(din_base).offset);
 
     // Each of four waves loads 16 of the 64 dout rows.
     for(int d_iter = 0; d_iter < 16; ++d_iter, src_off += row_stride)
@@ -416,7 +430,8 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
         return;
     const int k16 = wave;
 
-    using DstLayout = WeightsLayout<Kh, Kw, Kwg, 8>;
+    // sub_dst already carries the tap, so this steps only within one tap's slice.
+    using DstLayout = WeightsLayout<Kh, Kw, Kwg, 8, Kd>;
     auto base =
         DstLayout(Kq * Kwg, C_padded_dout).kq(wg_kq).c64(wg_c64).kw(wg_kw).kh(wg_kh).k16(k16);
 
@@ -473,7 +488,7 @@ __device__ void transpose_weights_dgrad_subtensor_impl(const ToType<DT>* __restr
     }
 }
 
-template <int Kh, int Kw, int Kwg, hipconv::DataType DT>
+template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int Kd = 1>
 __global__ void transpose_weights_dgrad_kernel(const ToType<DT>* __restrict__ src,
                                                ToSplitType<DT>* __restrict__ dst,
                                                int K_dout,
@@ -484,7 +499,7 @@ __global__ void transpose_weights_dgrad_kernel(const ToType<DT>* __restrict__ sr
 {
     if(__builtin_amdgcn_is_invocable(__builtin_amdgcn_ds_read_tr16_b64_v4i16))
     {
-        transpose_weights_dgrad_subtensor_impl<Kh, Kw, Kwg, DT>(
+        transpose_weights_dgrad_subtensor_impl<Kh, Kw, Kwg, DT, Kd>(
             src, dst, K_dout, C_din, C_padded_dout, Kq, Kwg_total);
     }
 }
@@ -511,13 +526,13 @@ get_padded_channels(int K, int C, int& K_padded, int& C_padded, int k_padded_ove
 // Host launch wrapper (fprop).
 //
 // Caller owns device allocations:
-//   src: K * Kh * Kw * C elements, channels-last (raw, unpadded).
-//   dst: >= WavesK * sub_elts (sub_elts = Kq*Kwg*Kh*Kw*C_padded,
+//   src: K * Kd * Kh * Kw * C elements, channels-last (raw, unpadded).
+//   dst: >= WavesK * sub_elts (sub_elts = Kq*Kwg*Kd*Kh*Kw*C_padded,
 //        Kq = ceil(K / (WavesK*Kwg))). OOB src coords land 0 in dst.
 // The WavesK sub-tensors live adjacently, partition i owning K rows
-// [q*WavesK*Kwg + i*Kwg, +Kwg). K/C are per-group; groups format via blockIdx.y.
-// WavesK defaults to 2; 4 packs K(256).
-template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int WavesK = 2>
+// [q*WavesK*Kwg + i*Kwg, +Kwg). K/C are per-group; groups and depth taps format
+// together via blockIdx.y as g*Kd + kd. WavesK defaults to 2; 4 packs K(256).
+template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int WavesK = 2, int Kd = 1>
 inline void launch_transpose_weights(const ToType<DT>* d_src,
                                      ToSplitType<DT>* d_dst,
                                      int K,
@@ -536,23 +551,26 @@ inline void launch_transpose_weights(const ToType<DT>* d_src,
     const int Kq = K_padded / Kwg_total;
 
     const dim3 block(BLOCK_SIZE);
-    // x = Kq * (C/64) * Kw * Kh (c64 fastest); y = group; z = K partition (WavesK).
+    // x = Kq * (C/64) * Kw * Kh (c64 fastest); y = group * Kd + depth tap;
+    // z = K partition (WavesK).
     const int total = Kq * (C_padded / 64) * Kw * Kh;
 
-    transpose_weights_kernel<Kh, Kw, Kwg, DT><<<dim3(total, groups, WavesK), block, 0, stream>>>(
-        d_src, d_dst, K, C, C_padded, Kq, Kwg_total);
+    transpose_weights_kernel<Kh, Kw, Kwg, DT, Kd>
+        <<<dim3(total, groups * Kd, WavesK), block, 0, stream>>>(
+            d_src, d_dst, K, C, C_padded, Kq, Kwg_total);
 }
 
 // Dgrad host launch wrapper.
 //
 // Mirrors launch_transpose_weights but binds the dest "K" axis to din and "C" to
 // dout, and runs the dgrad kernel (C<->K swap + tap flip).
-//   d_src: canonical K_dout x Kh x Kw x C_din (raw, unpadded).
-//   d_dst: >= WavesK * sub_elts (sub_elts = Kq*Kwg*Kh*Kw*C_padded_dout,
+//   d_src: canonical K_dout x Kd x Kh x Kw x C_din (raw, unpadded).
+//   d_dst: >= WavesK * sub_elts (sub_elts = Kq*Kwg*Kd*Kh*Kw*C_padded_dout,
 //          Kq = ceil(C_din / (WavesK*Kwg))). din-OOB / dout padding land 0.
 //   Kwg: din output channels per K-partition wave.
-// K_dout/C_din are per-group. WavesK defaults to 2; 4 packs din(256).
-template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int WavesK = 2>
+// K_dout/C_din are per-group; groups and depth taps format together via blockIdx.y as
+// g*Kd + kd. WavesK defaults to 2; 4 packs din(256).
+template <int Kh, int Kw, int Kwg, hipconv::DataType DT, int WavesK = 2, int Kd = 1>
 inline void launch_transpose_weights_dgrad(const ToType<DT>* d_src,
                                            ToSplitType<DT>* d_dst,
                                            int K_dout,
@@ -574,11 +592,12 @@ inline void launch_transpose_weights_dgrad(const ToType<DT>* d_src,
     const int Kq = din_padded / Kwg_total;
 
     const dim3 block(BLOCK_SIZE);
-    // x = Kq * (dout/64) * Kw * Kh (c64 fastest); y = group; z = K partition (WavesK).
+    // x = Kq * (dout/64) * Kw * Kh (c64 fastest); y = group * Kd + depth tap;
+    // z = K partition (WavesK).
     const int total = Kq * (dout_padded / 64) * Kw * Kh;
 
-    transpose_weights_dgrad_kernel<Kh, Kw, Kwg, DT>
-        <<<dim3(total, groups, WavesK), block, 0, stream>>>(
+    transpose_weights_dgrad_kernel<Kh, Kw, Kwg, DT, Kd>
+        <<<dim3(total, groups * Kd, WavesK), block, 0, stream>>>(
             d_src, d_dst, K_dout, C_din, dout_padded, Kq, Kwg_total);
 }
 

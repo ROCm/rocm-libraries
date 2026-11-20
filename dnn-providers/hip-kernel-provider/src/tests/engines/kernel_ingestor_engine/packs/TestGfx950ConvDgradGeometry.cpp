@@ -6,14 +6,15 @@
 #include <cstdint>
 #include <map>
 #include <optional>
+#include <random>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include <gtest/gtest.h>
 
-#include "engines/kernel_ingestor_engine/packs/Gfx950ConvDgradGeometry.hpp"
-#include "tests/engines/kernel_ingestor_engine/packs/Gfx950ConvDgradTestCatalog.hpp"
+#include "engines/kernel_ingestor_engine/packs/ConvDgradAotGeometry.hpp"
+#include "tests/engines/kernel_ingestor_engine/packs/ConvDgradTestCatalog.hpp"
 
 /**
  * @file TestGfx950ConvDgradGeometry.cpp
@@ -27,19 +28,11 @@
 namespace
 {
 
-namespace dgrad = hip_kernel_provider::kernel_ingestor_engine::gfx950_conv_dgrad;
+namespace dgrad = hip_kernel_provider::kernel_ingestor_engine::conv_dgrad_aot;
 namespace vectors = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_vectors;
 namespace catalog = hip_kernel_provider::kernel_ingestor_engine::dgrad_test_catalog;
 
-std::string describe(const dgrad::Problem& p)
-{
-    return "{N" + std::to_string(p.n) + " C" + std::to_string(p.c) + " K" + std::to_string(p.k)
-           + " " + std::to_string(p.hi) + "x" + std::to_string(p.wi) + " f" + std::to_string(p.y)
-           + "x" + std::to_string(p.x) + " s" + std::to_string(p.strideH) + "x"
-           + std::to_string(p.strideW) + " p" + std::to_string(p.padH) + "x"
-           + std::to_string(p.padW) + " d" + std::to_string(p.dilationH) + "x"
-           + std::to_string(p.dilationW) + " g" + std::to_string(p.groups) + "}";
-}
+using catalog::describe;
 
 /// A dense-path implicit-GEMM instance with the tile under test: a 2x2 warp grid, scalar
 /// widths, the grouped code path and the catalog's 1024-record table.
@@ -73,7 +66,7 @@ TEST(TestGfx950ConvDgradGeometry, EveryCatalogInstanceParses)
 
 TEST(TestGfx950ConvDgradGeometry, PlansMatchTheAdapterOverTheCatalog)
 {
-    // gfx950_conv_dgrad_aot_plan over every catalog instance of the problem's dtype: the same
+    // conv_dgrad_aot_plan over every catalog instance of the problem's dtype: the same
     // instances serve, and their plans fold to the adapter's digest. On a digest mismatch,
     // make_conv_dgrad_aot_test_vectors.py's render() names each serving plan's digest.
     std::map<std::string, size_t> servedByVariant;
@@ -82,7 +75,7 @@ TEST(TestGfx950ConvDgradGeometry, PlansMatchTheAdapterOverTheCatalog)
         const auto problem = catalog::toProblem(row.problem);
         const auto& entries = catalog::catalog(row.dtype);
         ASSERT_EQ(std::string_view(row.served).size(), entries.size());
-        uint64_t folded = 0xCBF29CE484222325ULL;
+        uint64_t folded = catalog::FNV_OFFSET;
         for(size_t i = 0; i < entries.size(); ++i)
         {
             const auto& entry = entries[i];
@@ -97,11 +90,7 @@ TEST(TestGfx950ConvDgradGeometry, PlansMatchTheAdapterOverTheCatalog)
                 continue;
             }
             const auto digest = dgrad::planDigest(*plan);
-            for(int byte = 0; byte < 8; ++byte)
-            {
-                folded ^= (digest >> (8 * byte)) & 0xFFU;
-                folded *= 0x100000001B3ULL;
-            }
+            catalog::foldPlanDigest(folded, digest);
             ++servedByVariant[entry.text("direct_variant")];
         }
         EXPECT_EQ(folded, row.digest) << describe(problem) << " " << row.dtype;
@@ -348,6 +337,72 @@ TEST(TestGfx950ConvDgradGeometry, DxIsZeroFilledOnlyWhereTheRecordsLeaveItUnwrit
     EXPECT_FALSE(zeroFill({1, 8, 8, 15, 15, 2, 2, 2, 2, 0, 0, 1, 1, 1}));
 }
 
+/// coversExtent by marking every position: the definition it must match.
+bool coveredByMarking(int64_t extent, const std::vector<dgrad::CoverageRun>& runs)
+{
+    std::vector<char> hit(static_cast<size_t>(extent), 0);
+    for(const auto& run : runs)
+    {
+        for(int64_t t = 0; t < run.count; ++t)
+        {
+            const auto start = run.offset + run.stride * t;
+            for(auto pos = std::max<int64_t>(start, 0); pos < std::min(start + run.width, extent);
+                ++pos)
+            {
+                hit[static_cast<size_t>(pos)] = 1;
+            }
+        }
+    }
+    return std::all_of(hit.begin(), hit.end(), [](char value) { return value != 0; });
+}
+
+TEST(TestGfx950ConvDgradGeometry, CoverageIsDecidedAsMarkingEveryPositionWould)
+{
+    std::mt19937 rng(0);
+    const auto draw = [&rng](int64_t lo, int64_t hi) {
+        return std::uniform_int_distribution<int64_t>(lo, hi)(rng);
+    };
+    int covered = 0;
+    for(int i = 0; i < 20000; ++i)
+    {
+        const auto extent = draw(0, 40);
+        std::vector<dgrad::CoverageRun> runs(static_cast<size_t>(draw(0, 4)));
+        for(auto& run : runs)
+        {
+            run = {draw(-6, 12), draw(-4, 7), draw(-1, 12), draw(-1, 6)};
+        }
+        const auto expected = coveredByMarking(extent, runs);
+        ASSERT_EQ(dgrad::coversExtent(extent, runs), expected) << "case " << i;
+        covered += expected ? 1 : 0;
+    }
+    EXPECT_GT(covered, 0);
+    EXPECT_LT(covered, 20000);
+}
+
+TEST(TestGfx950ConvDgradGeometry, CoverageCostsNothingPerPosition)
+{
+    // Decided from the runs: an extent of 2^31 - 1 allocates and visits nothing per
+    // position (marking it would take 2 GiB).
+    const int64_t extent = dgrad::I32_MAX;
+    const auto residues = [](int64_t n) {
+        std::vector<dgrad::CoverageRun> runs;
+        runs.reserve(static_cast<size_t>(n));
+        for(int64_t r = 0; r < n; ++r)
+        {
+            runs.push_back({r, 3, extent / 3 + 1, 1});
+        }
+        return runs;
+    };
+    EXPECT_TRUE(dgrad::coversExtent(extent, residues(3)));
+    EXPECT_FALSE(dgrad::coversExtent(extent, residues(2)));
+    EXPECT_FALSE(dgrad::coversExtent(extent, {{0, 1, extent - 1, 1}}));
+    // A long, narrow problem: a 1-D convolution down Hi = 2^22 rows.
+    const auto plan
+        = dgrad::implicitPlan({1, 64, 64, 1 << 22, 1, 3, 1, 1, 1, 1, 0, 1, 1, 1}, scalarInstance());
+    ASSERT_TRUE(plan);
+    EXPECT_FALSE(plan->zeroDx);
+}
+
 TEST(TestGfx950ConvDgradGeometry, ABatchPastTheAbiRunsAsSlices)
 {
     // bf16 16 x 256 x 768 x 768: 4.8 GB of dX, 302 MB an image.
@@ -525,7 +580,7 @@ TEST(TestGfx950ConvDgradGeometry, UnknownOrIncompleteMetadataIsRefused)
     });
     for(const auto* entry : {&implicit, &fused})
     {
-        ASSERT_TRUE(dgrad::parseAotInstance(catalog::FieldsMetadata{entry->fields}));
+        ASSERT_TRUE(dgrad::parseAotInstance(catalog::FieldsMetadata{entry->fields}, dgrad::GFX950));
         for(const auto& [field, value] : std::vector<std::pair<std::string, catalog::FieldValue>>{
                 {"direct_variant", std::string("bogus")},
                 {"kernel_family", int64_t{3}},
@@ -537,7 +592,7 @@ TEST(TestGfx950ConvDgradGeometry, UnknownOrIncompleteMetadataIsRefused)
         {
             auto fields = entry->fields;
             fields[field] = value;
-            EXPECT_FALSE(dgrad::parseAotInstance(catalog::FieldsMetadata{fields}))
+            EXPECT_FALSE(dgrad::parseAotInstance(catalog::FieldsMetadata{fields}, dgrad::GFX950))
                 << entry->text("direct_variant") << " " << field;
         }
         for(const auto& [field, value] : entry->fields)
@@ -548,7 +603,7 @@ TEST(TestGfx950ConvDgradGeometry, UnknownOrIncompleteMetadataIsRefused)
             }
             auto fields = entry->fields;
             fields.erase(field);
-            EXPECT_FALSE(dgrad::parseAotInstance(catalog::FieldsMetadata{fields}))
+            EXPECT_FALSE(dgrad::parseAotInstance(catalog::FieldsMetadata{fields}, dgrad::GFX950))
                 << entry->text("direct_variant") << " without " << field;
         }
     }

@@ -281,11 +281,30 @@ def validate_tuning_attention_tensors(
 # Declared runner contracts. Inferring them with inspect.signature drops
 # arguments the runner does not list and launches a different kernel.
 _DENSE_OPTIONAL_INPUTS = {
-    "gfx942": frozenset({"cu_seqlens_q", "cu_seqlens_kv", "sinks", "lse"}),
+    "gfx942": frozenset(
+        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
+    ),
     "gfx950": frozenset(
         {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
     ),
 }
+
+
+_DENSE_SCALAR_OPTIONS = frozenset({"scale", "stream"})
+_DENSE_LAUNCH_OPTIONS = _DENSE_SCALAR_OPTIONS.union(*_DENSE_OPTIONAL_INPUTS.values())
+_DENSE_BIND_OPTIONS = _DENSE_SCALAR_OPTIONS | {"unsafe_skip_paged_value_validation"}
+# Taken only by an fp8 KV spec: on any other spec a scale would be dropped silently.
+_DENSE_FP8_SCALE_OPTIONS = frozenset({"k_scale", "v_scale"})
+
+
+def _refuse_unknown_keywords(where: str, got: Mapping[str, Any], allowed) -> None:
+    # Refused, not ignored: an option of another call or binding, or a misspelled
+    # keyword, would otherwise be dropped silently.
+    if unknown := got.keys() - allowed:
+        raise TypeError(
+            f"dense attention {where} got unexpected keyword(s) "
+            f"{', '.join(sorted(unknown))}; it takes {', '.join(sorted(allowed))}"
+        )
 
 
 def _dense_runner(arch: str):
@@ -298,6 +317,24 @@ def _dense_runner(arch: str):
     return run_attention_dense_torch
 
 
+def _resolve_fp8_scale(name: str, kwargs: Mapping[str, Any], label: str) -> float:
+    """One per-tensor fp8 dequant scale, resolved to a float at bind time.
+
+    Every fp8 binding reads its scales through here, so one rule holds at every
+    entry point: a scale is a bind kwarg. It is a scalar, not an input tensor,
+    so it is not sourced from the ``tensors`` mapping even where that mapping
+    happens to carry the name.
+
+    Resolving at bind time host-syncs a device-tensor scale once, not on every
+    launch, which keeps graph capture intact. The missing-scale rule itself lives
+    in ``require_fp8_kv_scale`` beside ``require_ocp_fp8_kv``, so this binding
+    and the runner refuse with one wording.
+    """
+    from kernels.common.attention_dense_spec import require_fp8_kv_scale
+
+    return require_fp8_kv_scale(name, kwargs.get(name), label)
+
+
 def bind_dense_attention_torch(
     request, tuning_spec, tensors: Mapping[str, Any], **kwargs
 ) -> TorchBinding:
@@ -305,16 +342,43 @@ def bind_dense_attention_torch(
 
     Grid and block come from the spec, the same values the candidate reports.
     An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
-    buffer the kernel fills in place (the runner validates it).
+    buffer the kernel fills in place (the runner validates it). For a paged spec,
+    ``unsafe_skip_paged_value_validation=True`` skips the runner's synchronized
+    block-table/kv_lens value checks (graph capture, hot paths), as for the
+    unified binding; the structural checks stay. Only for callers that guarantee
+    ``kv_lens[i] == seqlen_kv`` and in-range block ids: the kernel trusts both.
     """
+    fp8_scales = (
+        _DENSE_FP8_SCALE_OPTIONS
+        if getattr(tuning_spec.kernel_spec, "kv_storage_dtype", None) is not None
+        else frozenset()
+    )
+    _refuse_unknown_keywords("bind_torch()", kwargs, _DENSE_BIND_OPTIONS | fp8_scales)
     run = _dense_runner(str(getattr(request, "arch", "")))
+    if tuning_spec.kernel_spec.paged:
+        tuning_spec = tuning_spec.with_num_kv_blocks(int(tensors["k"].shape[0]))
     spec = tuning_spec.kernel_spec
+    if getattr(spec, "kv_storage_dtype", None) == "fp8e4m3":
+        from kernels.common.attention_dense_spec import require_ocp_fp8_kv
+
+        require_ocp_fp8_kv((name, tensors[name]) for name in ("k", "v"))
     scale = kwargs.get("scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(getattr(request, "hdim_q", spec.head_size)))
     stream = kwargs.get("stream", 0)
+    unsafe_skip = kwargs.get("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
+    bind_k_scale = bind_v_scale = None
+    if getattr(spec, "kv_storage_dtype", None) is not None:
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 dense")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 dense")
 
     def launch(**_kw):
+        _refuse_unknown_keywords("launch()", _kw, _DENSE_LAUNCH_OPTIONS | fp8_scales)
         call = {
             "spec": spec,
             "q": tensors["q"],
@@ -325,6 +389,11 @@ def bind_dense_attention_torch(
             "stream": int(_kw.get("stream", stream)),
             "arch": str(request.arch),
         }
+        # fp8 KV dequant reads per-tensor k_scale/v_scale. Resolved at bind time
+        # above; a launch kwarg may still override (e.g. a sweep varying scale).
+        if bind_k_scale is not None:
+            call["k_scale"] = float(_kw.get("k_scale", bind_k_scale))
+            call["v_scale"] = float(_kw.get("v_scale", bind_v_scale))
         optional = {
             "cu_seqlens_q": _kw.get("cu_seqlens_q", tensors.get("cu_seqlens_q")),
             "cu_seqlens_kv": _kw.get("cu_seqlens_kv", tensors.get("cu_seqlens_kv")),
@@ -342,6 +411,8 @@ def bind_dense_attention_torch(
                     f"{request.arch} dense runner does not accept {name!r}"
                 )
             call[name] = value
+        if spec.paged:
+            call["validate_paged"] = not unsafe_skip
         return run(**call)
 
     return TorchBinding(
@@ -411,7 +482,12 @@ def bind_tuning_attention_torch(
     if problem.use_additive_bias:
         raise ValueError("explicit tuning bindings do not support additive bias")
     _reject_additive_bias_inputs(tensors, "tensors")
-    unsafe_skip = bool(kwargs.pop("unsafe_skip_paged_value_validation", False))
+    unsafe_skip = kwargs.pop("unsafe_skip_paged_value_validation", False)
+    if type(unsafe_skip) is not bool:
+        raise ValueError(
+            "unsafe_skip_paged_value_validation must be a bool, got "
+            f"{type(unsafe_skip).__name__}"
+        )
     num_blocks = validate_tuning_attention_tensors(
         problem,
         tensors,
@@ -426,10 +502,17 @@ def bind_tuning_attention_torch(
     scale = kwargs.get("softmax_scale")
     if scale is None:
         scale = 1.0 / math.sqrt(int(problem.head_size))
-    # FP8 K/V dequant scales (per tensor); the runner defaults them to 1.0, so
-    # they must be forwarded or an FP8 cache is read unscaled.
-    k_scale = float(kwargs.get("k_scale", 1.0))
-    v_scale = float(kwargs.get("v_scale", 1.0))
+    if bool(getattr(problem, "use_fp8", False)):
+        # Resolve once: a device-tensor scale costs a host readback, so the
+        # non-fp8 capture below must not also run and then be overwritten.
+        bind_k_scale = _resolve_fp8_scale("k_scale", kwargs, "fp8 attention")
+        bind_v_scale = _resolve_fp8_scale("v_scale", kwargs, "fp8 attention")
+    else:
+        # Non-fp8 keeps the unconditional bind-time capture unchanged: the kernel
+        # only folds the scale in under fp8, but the strided decode path refuses a
+        # non-unit scale, and dropping the kwarg here would swallow that error.
+        bind_k_scale = float(kwargs.get("k_scale", 1.0))
+        bind_v_scale = float(kwargs.get("v_scale", 1.0))
 
     def launch(**_kw):
         _reject_additive_bias_inputs(_kw, "launch kwargs")
@@ -442,6 +525,8 @@ def bind_tuning_attention_torch(
             cu_seqlens_q=tensors["cu_seqlens_q"],
             seqused_k=tensors["seqused_k"],
             softmax_scale=float(_kw.get("softmax_scale", scale)),
+            k_scale=float(_kw.get("k_scale", bind_k_scale)),
+            v_scale=float(_kw.get("v_scale", bind_v_scale)),
             block_table=tensors["block_table"],
             softcap=float(_kw.get("softcap", tensors.get("softcap", 0.0))),
             sinks=_kw.get("sinks", tensors.get("sinks")),
@@ -449,8 +534,6 @@ def bind_tuning_attention_torch(
             qq_bias=_kw.get("qq_bias", tensors.get("qq_bias")),
             backend=backend,
             stream=int(_kw.get("stream", stream)),
-            k_scale=float(_kw.get("k_scale", k_scale)),
-            v_scale=float(_kw.get("v_scale", v_scale)),
             tuning_spec=spec,
             lse=_kw.get("lse", tensors.get("lse")),
         )
@@ -608,6 +691,8 @@ class _RdnaView:
     alibi: bool
     qq_bias: bool
     bias: Optional[str]  # None | "f32" | "q"
+    dense_q: bool = False  # paged prefill: batch-strided Q / O / LSE, no cu_seqlens_q
+    seqused_q: bool = False  # packed prefill: live query rows from seqused_q
 
 
 def _rdna_view(spec) -> _RdnaView:
@@ -641,6 +726,8 @@ def _rdna_view(spec) -> _RdnaView:
         alibi=spec.use_alibi,
         qq_bias=spec.use_qq_bias,
         bias=spec.bias,
+        dense_q=spec.dense_q,
+        seqused_q=spec.seqused_q,
     )
 
 
@@ -657,7 +744,8 @@ def _check_byte_extent_i32(tensor, name: str, element_bytes: int) -> None:
     The kernels form element offsets in I32 (``token * stride + head *
     stride``) and scale them to I32 byte offsets for buffer loads against a
     descriptor of at most 2 GiB, so the bound is on bytes, not elements.
-    Matches the native pack's ``addressFitsI32``.
+    Matches the native pack's ``addressFitsI32``. Paged prefill K / V use
+    :func:`_check_page_extent_i32` instead.
     """
     shape = _shape(tensor, name)
     stride = getattr(tensor, "stride", None)
@@ -672,6 +760,30 @@ def _check_byte_extent_i32(tensor, name: str, element_bytes: int) -> None:
             f"{name} spans {extent} bytes, which does not fit the I32 "
             "offset arithmetic of the RDNA attention kernels; split the tensor "
             "(e.g. per batch or per page range) before launching"
+        )
+
+
+def _check_page_extent_i32(tensor, name: str, element_bytes: int) -> None:
+    """Reject a paged K / V cache ``[num_blocks, page, H, D]`` whose page of
+    one head exceeds I32 bytes.
+
+    The prefill kernel steps to a head and to a page in 64 bits and addresses
+    the rows of that page from its base in I32 bytes, so the cache itself may
+    pass 2 GiB. Matches the native pack's ``pageFitsI32`` (the page count is
+    an I32 argument, checked as ``num_blocks``).
+    """
+    shape = _shape(tensor, name)
+    stride = getattr(tensor, "stride", None)
+    if not callable(stride):
+        raise ValueError(f"{name} must expose strides")
+    if any(int(extent) <= 0 for extent in shape):
+        return
+    highest = sum((int(shape[i]) - 1) * int(stride(i)) for i in (1, 3))
+    extent = (highest + 1) * int(element_bytes)
+    if extent > 0x7FFF_FFFF:
+        raise ValueError(
+            f"{name} spans {extent} bytes in one page of one head, which does "
+            "not fit the I32 offset arithmetic of the RDNA attention kernels"
         )
 
 
@@ -854,9 +966,10 @@ def _rdna_validate_and_collect(
         raise ValueError(
             "RDNA WMMA FP8 KV storage is OCP fp8e4m3 (not FNUZ); got fp8_fnuz for k"
         )
+    q_rank = 4 if layout == "dense" or view.dense_q else 3
     for name, tensor, rank in (
-        ("q", q, 4 if layout == "dense" else 3),
-        ("out", out, 4 if layout == "dense" else 3),
+        ("q", q, q_rank),
+        ("out", out, q_rank),
         ("k", k, 3 if layout == "ragged" else 4),
         ("v", v, 3 if layout == "ragged" else 4),
     ):
@@ -864,13 +977,20 @@ def _rdna_validate_and_collect(
             raise ValueError(f"{name} must be rank-{rank} for {layout} layout")
     _check_rdna_device(tensors)
     kv_bytes = 1 if view.kv_fp8 else 2
-    for name, tensor, element_bytes in (
-        ("q", q, 2),
-        ("k", k, kv_bytes),
-        ("v", v, kv_bytes),
-        ("out", out, 2),
+    # The prefill kernel addresses paged K / V heads and pages in 64 bits; the
+    # decode kernel forms its head and per-row page offsets in I32, so its
+    # caches keep the whole-tensor cap.
+    paged_kv = layout == "paged" and not view.decode
+    for name, tensor, element_bytes, paged in (
+        ("q", q, 2, False),
+        ("k", k, kv_bytes, paged_kv),
+        ("v", v, kv_bytes, paged_kv),
+        ("out", out, 2, False),
     ):
-        _check_byte_extent_i32(tensor, name, element_bytes)
+        if paged:
+            _check_page_extent_i32(tensor, name, element_bytes)
+        else:
+            _check_byte_extent_i32(tensor, name, element_bytes)
         # 16-bit rows load as 16-byte vectors, FP8 K/V rows as 8-byte ones.
         _check_rows_aligned(
             tensor, name, element_bytes, 8 if element_bytes == 1 else 16
@@ -1001,31 +1121,50 @@ def _rdna_validate_and_collect(
             ("out", out, 2),
         ):
             _check_storage(tensor, name, itemsize)
+        batch = int(request.batch)
+        heads = int(request.nhead_q)
+        # A dense Q / O is [B, Sq, Hq, D] with batch strides; a packed one is
+        # [total_q, Hq, D] addressed through cu_seqlens_q.
+        lead = (batch,) if view.dense_q else ()
+        token_axis, head_axis = len(lead), len(lead) + 1
+        if view.dense_q:
+            if _shape(q, "q")[:2] != (batch, int(request.seqlen_q)):
+                raise ValueError(
+                    f"dense_q needs q [B, Sq, Hq, D] with B={batch} and "
+                    f"Sq={int(request.seqlen_q)}, got {_shape(q, 'q')}"
+                )
+            values["stride_q_batch"] = _fits_i32(q.stride(0), "stride_q_batch")
+            values["stride_o_batch"] = _fits_i32(out.stride(0), "stride_o_batch")
         values.update(
             {
-                "stride_q_token": _fits_i32(q.stride(0), "stride_q_token"),
-                "stride_q_head": _fits_i32(q.stride(1), "stride_q_head"),
-                "stride_o_token": _fits_i32(out.stride(0), "stride_o_token"),
-                "stride_o_head": _fits_i32(out.stride(1), "stride_o_head"),
+                "stride_q_token": _fits_i32(q.stride(token_axis), "stride_q_token"),
+                "stride_q_head": _fits_i32(q.stride(head_axis), "stride_q_head"),
+                "stride_o_token": _fits_i32(out.stride(token_axis), "stride_o_token"),
+                "stride_o_head": _fits_i32(out.stride(head_axis), "stride_o_head"),
             }
         )
         if bool(request.emit_lse):
             lse_shape = _shape(lse, "lse")
-            total_q = _shape(q, "q")[0]
-            heads = int(request.nhead_q)
+            rows = _shape(q, "q")[token_axis]
             if _dtype_kind(lse, "lse") != "fp32":
                 raise ValueError("lse dtype must be FP32")
-            if lse_shape == (heads, total_q):
-                lse_head_axis, lse_token_axis = 0, 1
-            elif lse_shape in ((total_q, heads), (total_q, heads, 1)):
-                lse_token_axis, lse_head_axis = 0, 1
+            if lse_shape == lead + (heads, rows):
+                lse_head_axis, lse_token_axis = len(lead), len(lead) + 1
+            elif lse_shape in (lead + (rows, heads), lead + (rows, heads, 1)):
+                lse_token_axis, lse_head_axis = len(lead), len(lead) + 1
             else:
-                raise ValueError(
-                    "lse must be packed [H,total_q], [total_q,H], or "
-                    f"[total_q,H,1], got {lse_shape}"
+                forms = (
+                    "[B,H,Sq], [B,Sq,H], or [B,Sq,H,1]"
+                    if view.dense_q
+                    else "packed [H,total_q], [total_q,H], or [total_q,H,1]"
                 )
+                raise ValueError(f"lse must be {forms}, got {lse_shape}")
             _check_storage(lse, "lse", 4)
             _check_byte_extent_i32(lse, "lse", 4)
+            if view.dense_q:
+                values["stride_lse_batch"] = _fits_i32(
+                    lse.stride(0), "stride_lse_batch"
+                )
             values["stride_lse_token"] = _fits_i32(
                 lse.stride(lse_token_axis), "stride_lse_token"
             )
@@ -1033,16 +1172,29 @@ def _rdna_validate_and_collect(
                 lse.stride(lse_head_axis), "stride_lse_head"
             )
 
-        cu_seqlens_q = tensors.get("cu_seqlens_q")
-        if cu_seqlens_q is None:
-            raise ValueError(f"{layout} layout requires tensors['cu_seqlens_q']")
-        batch = int(request.batch)
-        if _dtype_kind(cu_seqlens_q, "cu_seqlens_q") != "int32":
-            raise ValueError("cu_seqlens_q dtype must be int32")
-        if _shape(cu_seqlens_q, "cu_seqlens_q") != (batch + 1,):
-            raise ValueError(f"cu_seqlens_q must have shape [{batch + 1}]")
-        _check_last_dim_contiguous(cu_seqlens_q, "cu_seqlens_q")
-        values["cu_seqlens_q"] = cu_seqlens_q
+        if not view.dense_q:
+            cu_seqlens_q = tensors.get("cu_seqlens_q")
+            if cu_seqlens_q is None:
+                raise ValueError(f"{layout} layout requires tensors['cu_seqlens_q']")
+            if _dtype_kind(cu_seqlens_q, "cu_seqlens_q") != "int32":
+                raise ValueError("cu_seqlens_q dtype must be int32")
+            if _shape(cu_seqlens_q, "cu_seqlens_q") != (batch + 1,):
+                raise ValueError(f"cu_seqlens_q must have shape [{batch + 1}]")
+            _check_last_dim_contiguous(cu_seqlens_q, "cu_seqlens_q")
+            values["cu_seqlens_q"] = cu_seqlens_q
+        if view.seqused_q:
+            # Live query rows per sequence; with dense_q the kernel writes rows
+            # past them as padding (O = 0, LSE = -inf), with cu_seqlens_q it
+            # neither reads nor writes them.
+            seqused_q = tensors.get("seqused_q")
+            if seqused_q is None:
+                raise ValueError("seqused_q objects require tensors['seqused_q']")
+            if _dtype_kind(seqused_q, "seqused_q") != "int32":
+                raise ValueError("seqused_q dtype must be int32")
+            if _shape(seqused_q, "seqused_q") != (batch,):
+                raise ValueError(f"seqused_q must have shape [{batch}]")
+            _check_last_dim_contiguous(seqused_q, "seqused_q")
+            values["seqused_q"] = seqused_q
 
         if layout == "ragged":
             cu_seqlens_k = tensors.get("cu_seqlens_k")
@@ -1077,6 +1229,15 @@ def _rdna_validate_and_collect(
                 raise ValueError(
                     f"block_table shape must be [{batch}, max_pages], got {table_shape}"
                 )
+            # The kernels bound each sequence's key count by seqlen_k, so a
+            # seqlen_k past the table's pages would read another row's entries.
+            capacity = table_shape[1] * int(view.page_block_size)
+            if int(request.seqlen_k) > capacity:
+                raise ValueError(
+                    f"seqlen_k={int(request.seqlen_k)} exceeds the page table's "
+                    f"capacity of {capacity} keys ({table_shape[1]} pages of "
+                    f"{int(view.page_block_size)})"
+                )
             table_stride = getattr(block_table, "stride", None)
             if not callable(table_stride) or int(table_stride(1)) != 1:
                 raise ValueError("block_table innermost stride must be 1")
@@ -1088,10 +1249,17 @@ def _rdna_validate_and_collect(
                     f"k cache page length must be {view.page_block_size}, "
                     f"got {_shape(k, 'k')}"
                 )
+            # The prefill's dead key rows of a page smaller than a tile still
+            # load from page 0 (and discard the value), so its caches must hold
+            # at least one page.
+            if not view.decode and _shape(k, "k")[0] <= 0:
+                raise ValueError("paged k / v caches must hold at least one page")
             values.update(
                 {
                     "seqused_k": seqused_k,
                     "block_table": block_table,
+                    # One table maps both caches' pages.
+                    "block_table_v": block_table,
                     "block_table_stride": row_stride,
                     "stride_k_block": _fits_i32(k.stride(0), "stride_k_block"),
                     "stride_v_block": _fits_i32(v.stride(0), "stride_v_block"),
@@ -1110,14 +1278,18 @@ def _rdna_validate_and_collect(
         sinks = tensors.get("sinks")
         if sinks is None:
             raise ValueError("sinks require tensors['sinks']")
-        if _dtype_kind(sinks, "sinks") != q_kind:
-            raise ValueError(
-                f"sinks dtype must be {q_kind}, got {_dtype_kind(sinks, 'sinks')}"
-            )
+        sink_kind = _dtype_kind(sinks, "sinks")
+        # The prefill kernel reads f32 or Q-dtype sinks (sink_is_f32); the decode
+        # kernel reads the Q dtype only.
+        if sink_kind != q_kind and (view.decode or sink_kind != "fp32"):
+            allowed = q_kind if view.decode else f"{q_kind} or float32"
+            raise ValueError(f"sinks dtype must be {allowed}, got {sink_kind}")
         if _shape(sinks, "sinks") != (int(request.nhead_q),):
             raise ValueError(f"sinks must have shape [{request.nhead_q}]")
         _check_last_dim_contiguous(sinks, "sinks")
         values["sink_ptr"] = sinks
+        if not view.decode:
+            values["sink_is_f32"] = int(sink_kind == "fp32")
     if view.alibi:
         alibi = tensors.get("alibi_slopes")
         if alibi is None:
@@ -1215,12 +1387,12 @@ def _rdna_scalars(view: _RdnaView, head_q: int, kwargs: Mapping[str, Any]):
         softcap = float(softcap)
         if not math.isfinite(softcap) or softcap <= 0:
             raise ValueError("softcap must be finite and positive")
-    if view.kv_fp8 and ("k_scale" not in kwargs or "v_scale" not in kwargs):
-        raise ValueError(
-            "FP8 K/V objects require explicit kwargs['k_scale'] and kwargs['v_scale']"
-        )
-    k_scale = float(kwargs.get("k_scale", 1.0))
-    v_scale = float(kwargs.get("v_scale", 1.0))
+    if view.kv_fp8:
+        k_scale = _resolve_fp8_scale("k_scale", kwargs, "RDNA WMMA fp8 attention")
+        v_scale = _resolve_fp8_scale("v_scale", kwargs, "RDNA WMMA fp8 attention")
+    else:
+        k_scale = float(kwargs.get("k_scale", 1.0))
+        v_scale = float(kwargs.get("v_scale", 1.0))
     stream_default = kwargs.get("stream", 0)
     fence_default = bool(kwargs.get("fence", True))
 
@@ -1253,10 +1425,16 @@ def bind_rdna_prefill_torch(
     strides, packed ragged/paged layouts, FP16/BF16, and OCP fp8e4m3 KV
     storage. Tensor keys are ``q``/``k``/``v``/``out`` plus caller-owned
     ``lse`` when ``request.emit_lse`` is true, layout metadata
-    (``cu_seqlens_q``/``cu_seqlens_k``/``seqused_k``/``block_table``) and the
-    enabled score inputs (``sinks``, ``alibi_slopes``, ``qq_bias``,
-    ``attn_bias``). LSE accepts live-head ``[B,H,S]`` / ``[H,total_q]``
-    layouts and layout-shaped forms.
+    (``cu_seqlens_q``/``cu_seqlens_k``/``seqused_k``/``block_table``, and
+    ``seqused_q`` for a ``seqused_q`` spec) and the enabled score inputs
+    (``sinks``, ``alibi_slopes``, ``qq_bias``, ``attn_bias``). LSE accepts
+    live-head ``[B,H,S]`` / ``[H,total_q]`` layouts and layout-shaped forms.
+
+    A paged ``dense_q`` spec takes a batch-strided ``[B, Sq, Hq, D]`` Q / O
+    (LSE ``[B,H,Sq]`` or ``[B,Sq,H(,1)]``) and no ``cu_seqlens_q``. With
+    ``seqused_q``, INT32 ``seqused_q[b]`` live rows of sequence ``b`` are
+    computed and its rows past them are written as O = 0, LSE = -inf. Paged
+    K / V caches may pass 2 GiB; one page of one head must fit I32 bytes.
 
     Head widths are the request's ``hdim_q``/``hdim_v``: multiples of 8 inside
     the object's buckets. Rows load as 16-byte vectors (8-byte for FP8 K/V),

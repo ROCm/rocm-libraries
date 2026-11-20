@@ -27,10 +27,14 @@
  * (rocke_ir_builder_t.arena). Nothing is freed individually; rocke_ir_builder_free()
  * (or arena reset) bulk-frees the whole graph -- mirroring Python GC lifetime.
  *
- * Error model: the builder is sticky-failing. The first operation that fails
- * sets builder->status != ROCKE_OK and records a message in builder->err; every
- * subsequent builder call is a no-op that returns NULL / the error status. This
- * lets kernel authors write straight-line builder code (as in Python) and check
+ * Error model: a builder call that refuses its input throws a ckc::Error
+ * (rocke/error.hpp) carrying the status and the message, and does not return.
+ * The extern "C" entries that build through ckc::guard_builder /
+ * ckc::guard_status (rocke/error_boundary.hpp) catch it, record the status in
+ * builder->status and the message in builder->err, and return NULL / the
+ * status. Once a builder's status is set it is sticky: every later builder
+ * call is a no-op that returns NULL / the error status. This lets a guarded
+ * build run straight-line builder code (as in Python) and check
  * rocke_ir_builder_ok() once at the end, instead of checking every call.
  */
 #ifndef ROCKE_IR_H
@@ -497,6 +501,14 @@ typedef enum rocke_opcode
 
     /* tile.global_addr_of: a global pointer's address as an i64 (appended). */
     ROCKE_OP_TILE_GLOBAL_ADDR_OF,
+
+    /* tile.buffer_atomic_fadd_f32 (raw_ptr_buffer_atomic_fadd with a cache
+     * policy). Appended so no existing opcode index shifts. */
+    ROCKE_OP_TILE_BUFFER_ATOMIC_FADD_F32,
+
+    /* value * 2^exponent rounded once (Python IRBuilder.ldexp). Appended so no
+     * existing index shifts. */
+    ROCKE_OP_MATH_LDEXP,
 
     ROCKE_OP__COUNT
 } rocke_opcode_t;
@@ -981,6 +993,9 @@ rocke_value_t*
 /* ----- math ----- */
 rocke_value_t* rocke_b_exp2(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_exp2_fast(rocke_ir_builder_t* b, rocke_value_t* a);
+/* value * 2^exponent rounded once (Python IRBuilder.ldexp): an f32 value and an
+ * i32 exponent give an f32; llvm.ldexp.f32.i32, one v_ldexp_f32. */
+rocke_value_t* rocke_b_ldexp(rocke_ir_builder_t* b, rocke_value_t* value, rocke_value_t* exponent);
 rocke_value_t* rocke_b_log2(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rcp(rocke_ir_builder_t* b, rocke_value_t* a);
 rocke_value_t* rocke_b_rcp_fast(rocke_ir_builder_t* b, rocke_value_t* a);
@@ -1118,11 +1133,18 @@ rocke_value_t* rocke_b_smem_alloc_ex(rocke_ir_builder_t* b,
                                      int rank,
                                      const char* name_hint,
                                      int exclusive);
+/* Scalar global loads and stores. `align` is the alignment, in bytes, the
+ * caller guarantees for the accessed element: 0 records the op's default (1
+ * for rocke_b_global_load and rocke_b_global_store, 2 for
+ * rocke_b_global_load_f16, the element width for the typed wrappers); a
+ * negative `align` or one that is not a power of two is refused with
+ * ROCKE_ERR_VALUE and the Python engine's text (see the error model above).
+ * rocke_b_masked_global_load passes its `align` to rocke_b_global_load. */
 rocke_value_t* rocke_b_global_load(rocke_ir_builder_t* b,
                                    rocke_value_t* ptr,
                                    rocke_value_t* idx,
                                    const rocke_type_t* dtype,
-                                   int align /* <=0 => 1 */);
+                                   int align /* 0 => 1 */);
 rocke_value_t* rocke_b_global_load_f16(rocke_ir_builder_t* b,
                                        rocke_value_t* ptr,
                                        rocke_value_t* idx,
@@ -1172,20 +1194,25 @@ rocke_value_t* rocke_b_masked_global_load(rocke_ir_builder_t* b,
                                           int align);
 void rocke_b_global_store(
     rocke_ir_builder_t* b, rocke_value_t* ptr, rocke_value_t* idx, rocke_value_t* value, int align);
+/* `align` 0 records the natural alignment of the access: its byte width when
+ * that is a power of two, else the element width. A negative `align` or one
+ * that is not a power of two is refused with ROCKE_ERR_VALUE and the Python
+ * engine's text (see the error model above). The same holds for
+ * rocke_b_global_store_vN and the _ex / _f16 forms of both. */
 rocke_value_t* rocke_b_global_load_vN(rocke_ir_builder_t* b,
                                       rocke_value_t* ptr,
                                       rocke_value_t* idx,
                                       const rocke_type_t* dtype,
                                       int n,
-                                      int align /* <=0 => default */);
+                                      int align /* 0 => default */);
 /* Like rocke_b_global_load_vN with options; opts == NULL means all defaults,
  * and the plain rocke_b_global_load_vN forwards here with NULL.
  * ROCKE_TEMPORAL_STREAMING records the `nontemporal=True` attr (lowered to
  * LLVM `!nontemporal`); on gfx942 / gfx950 the backend sets only `nt`, i.e.
  * ROCKE_CACHE_STREAM, NOT ROCKE_NON_TEMPORAL (which also sets SC0). Lowering a
  * streaming op for any other target fails with ROCKE_ERR_VALUE. An
- * out-of-range temporal_hint puts the builder in its error state
- * (ROCKE_ERR_VALUE). */
+ * out-of-range temporal_hint is refused with ROCKE_ERR_VALUE (see the error
+ * model above). */
 rocke_value_t* rocke_b_global_load_vN_ex(rocke_ir_builder_t* b,
                                          rocke_value_t* ptr,
                                          rocke_value_t* idx,
@@ -1229,6 +1256,9 @@ void rocke_b_smem_store_f16(rocke_ir_builder_t* b,
                             rocke_value_t* const* indices,
                             int num_indices,
                             rocke_value_t* value);
+/* rocke_b_smem_store_vN and rocke_b_smem_load_vN mirror IRBuilder.smem_store_vN
+ * and IRBuilder.smem_load_vN (core/ir.py), including the alignment each access
+ * claims and the index rule that follows from it. */
 void rocke_b_smem_store_vN(rocke_ir_builder_t* b,
                            rocke_value_t* smem,
                            rocke_value_t* const* indices,
@@ -1759,6 +1789,22 @@ void rocke_b_buffer_store_f32(rocke_ir_builder_t* b,
                               rocke_value_t* voffset,
                               rocke_value_t* soffset,
                               rocke_value_t* value);
+/* rocke.core.ir.CPOL_ATOMIC_CASCADE_DEV: gfx12+ atomic cache-policy immediate
+ * for a device-scope cascade add, th = TH_ATOMIC_CASCADE (4), scope =
+ * SCOPE_DEV (2) in bits [4:3]. gfx11 and gfx9 read the same bits as
+ * glc/slc/dlc, so only gfx12 targets may carry it. */
+#define ROCKE_CPOL_ATOMIC_CASCADE_DEV (4 | (2 << 3))
+/* IRBuilder.buffer_atomic_fadd_f32: f32 atomic add through a buffer resource;
+ * cachepolicy is the raw immediate (0..31; gfx12+: th bits [2:0], scope [4:3]).
+ * Callers must guard invalid offsets (e.g. with scf_if) instead of steering
+ * them out of range: unlike a buffer load, which reads 0 there, a buffer
+ * atomic at the out-of-range sentinel offset faults on gfx1250. */
+void rocke_b_buffer_atomic_fadd_f32(rocke_ir_builder_t* b,
+                                    rocke_value_t* rsrc,
+                                    rocke_value_t* voffset,
+                                    rocke_value_t* soffset,
+                                    rocke_value_t* value,
+                                    int cachepolicy);
 void rocke_b_buffer_store_vN_f32(rocke_ir_builder_t* b,
                                  rocke_value_t* rsrc,
                                  rocke_value_t* voffset,
@@ -1799,7 +1845,7 @@ void rocke_b_global_store_vN(rocke_ir_builder_t* b,
                              rocke_value_t* idx,
                              rocke_value_t* value,
                              int n,
-                             int align /* <=0 => default */);
+                             int align /* 0 => default */);
 /* Like rocke_b_global_store_vN with options (NULL = all defaults); the plain
  * form forwards here with NULL. temporal_hint as for rocke_b_global_load_vN_ex
  * (gfx942 / gfx950: `nt` only; other targets fail at lowering). */
@@ -1930,10 +1976,10 @@ int rocke_b_tdm_descriptor_2d(rocke_ir_builder_t* b,
                               rocke_value_t* out[5]);
 void rocke_b_s_setprio(rocke_ir_builder_t* b, int level);
 /* Abort the kernel (Python IRBuilder.trap): llvm.trap, which the backend emits
- * as s_trap 2 (gfx11: its simulated trap, s_trap 2 then s_sendmsg then an
- * s_sethalt loop). A taken trap aborts the process on Linux (ROCr), never
- * returns from the launch on Windows, and stops the wave under a debugger, so
- * it is a last resort. */
+ * as s_trap 2 or, on some processors, as its simulated trap. Which processors,
+ * and what a taken trap does on each host, is stated in the tile.trap section
+ * of dsl_docs/reference/op_vocabulary.md. A taken trap does not let the process
+ * carry on, so it is a last resort. */
 void rocke_b_trap(rocke_ir_builder_t* b);
 void rocke_b_iglp_opt(rocke_ir_builder_t* b, int level);
 void rocke_b_sched_barrier(rocke_ir_builder_t* b, int mask);
@@ -1958,10 +2004,15 @@ rocke_for_t rocke_b_scf_for_iter(rocke_ir_builder_t* b,
                                  const char* iv_name /* NULL=>"k0" */,
                                  bool unroll,
                                  bool elide_trailing_barrier);
+/* An scf.yield belongs directly in an scf.for body or in a branch of an
+ * scf.if_else with results; the verifier and the lowerings refuse one anywhere
+ * else (the kernel body, an scf.if, an scf.if_else without results). */
 void rocke_b_scf_yield(rocke_ir_builder_t* b, rocke_value_t* const* values, int num_values);
 rocke_if_t rocke_b_scf_if(rocke_ir_builder_t* b, rocke_value_t* cond);
 /* scf.if_else: both then and else converge at the same join block.
- * Use rocke_b_region_enter/leave to emit into then_region then else_region. */
+ * Use rocke_b_region_enter/leave to emit into then_region then else_region.
+ * Neither region holds an scf.yield, directly or in an scf.if within it: the
+ * verifier and the lowerings refuse one. */
 rocke_if_else_t rocke_b_scf_if_else(rocke_ir_builder_t* b, rocke_value_t* cond);
 /* scf.if_else that yields one value per type in `result_types` (Python
  * scf_if_else(cond, result_types)): each region ends in rocke_b_scf_yield of

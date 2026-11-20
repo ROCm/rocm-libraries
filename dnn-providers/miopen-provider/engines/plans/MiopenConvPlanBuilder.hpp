@@ -31,6 +31,10 @@ public:
     MiopenConvPlanBuilder(const MiopenConvPlanBuilder&) = delete;
     MiopenConvPlanBuilder& operator=(const MiopenConvPlanBuilder&) = delete;
 
+    // The checks of isApplicable that do not need a handle.
+    static bool
+        isGraphApplicable(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
+
     bool isApplicable(
         const HipdnnMiopenHandle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;

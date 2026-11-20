@@ -61,8 +61,18 @@ protected:
         }
     }
 
-    /// Builds a standard SdpaFwd graph for round-trip testing.
-    static std::shared_ptr<TestableGraph> buildGraph()
+    /// The attributes of the standard round-trip graph.
+    static SdpaAttributes defaultAttributes()
+    {
+        SdpaAttributes attrs;
+        attrs.set_name("test_op");
+        attrs.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
+        return attrs;
+    }
+
+    /// Builds an SdpaFwd graph over the standard Q/K/V tensors for round-trip testing.
+    static std::shared_ptr<TestableGraph> buildGraph(const SdpaAttributes& attrs
+                                                     = defaultAttributes())
     {
         auto graph = std::make_shared<TestableGraph>();
         graph->set_name("SdpaFwdLiftingTestGraph")
@@ -81,10 +91,6 @@ protected:
         auto v = std::make_shared<TensorAttributes>();
         v->set_uid(K_SDPA_TENSOR_V_UID).set_name("v").set_data_type(DataType::FLOAT);
         v->set_dim(toVec(K_SDPA_TENSOR_V_DIMS)).set_stride(toVec(K_SDPA_TENSOR_V_STRIDES));
-
-        SdpaAttributes attrs;
-        attrs.set_name("test_op");
-        attrs.set_diagonal_alignment(DiagonalAlignment::TOP_LEFT);
 
         auto results = graph->sdpa(q, k, v, attrs);
         results[0]->set_uid(K_SDPA_TENSOR_O_UID).set_output(true).set_name("o");
@@ -751,6 +757,74 @@ TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdMmaCoreModeSetRoundTrip)
     ASSERT_NE(opNode, nullptr);
 
     EXPECT_EQ(opNode->attributes.mma_core_mode, DataType::HALF);
+}
+
+// cu_seq_len_q / cu_seq_len_kv: 1-D (B+1) INT32 tensors set on the frontend attributes are
+// promoted to (B+1,1,1,1), lowered to the backend descriptor, and lifted back with their
+// uids, names, type and promoted shape.
+TEST_F(IntegrationSdpaFwdDescriptorLifting, SdpaFwdCuSeqLenRoundTrip)
+{
+    // Batch is 2, so each cumulative tensor holds B+1 = 3 prefix sums as a 1-D tensor.
+    auto cuSeqLenQ = std::make_shared<TensorAttributes>();
+    cuSeqLenQ->set_uid(K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID)
+        .set_name("cu_seq_len_q")
+        .set_data_type(DataType::INT32);
+    cuSeqLenQ->set_dim({K_SDPA_TENSOR_Q_DIMS[0] + 1}).set_stride({1});
+
+    auto cuSeqLenKv = std::make_shared<TensorAttributes>();
+    cuSeqLenKv->set_uid(K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID)
+        .set_name("cu_seq_len_kv")
+        .set_data_type(DataType::INT32);
+    cuSeqLenKv->set_dim({K_SDPA_TENSOR_K_DIMS[0] + 1}).set_stride({1});
+
+    auto attrs = defaultAttributes();
+    attrs.set_padding_mask(true).set_cu_seq_len_q(cuSeqLenQ).set_cu_seq_len_kv(cuSeqLenKv);
+    auto graph = buildGraph(attrs);
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto rawDesc = graph->get_raw_graph_descriptor();
+    ASSERT_NE(rawDesc, nullptr);
+
+    auto liftedGraph = std::make_shared<TestableGraph>();
+    result = liftedGraph->fromBackendDescriptor(rawDesc);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 6u);
+
+    const auto expectedDims = toVec(K_SDPA_TENSOR_CU_SEQ_LEN_DIMS);
+    const auto expectedStrides = toVec(K_SDPA_TENSOR_CU_SEQ_LEN_STRIDES);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID,
+                                      "cu_seq_len_q",
+                                      expectedDims,
+                                      expectedStrides,
+                                      DataType::INT32);
+    hipdnn_tests::verifyTensorInGraph(tensorMap,
+                                      K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID,
+                                      "cu_seq_len_kv",
+                                      expectedDims,
+                                      expectedStrides,
+                                      DataType::INT32);
+
+    auto& subNodes = liftedGraph->getSubNodes();
+    ASSERT_EQ(subNodes.size(), 1u);
+
+    auto* opNode = dynamic_cast<SdpaFwdNode*>(subNodes[0].get());
+    ASSERT_NE(opNode, nullptr);
+
+    EXPECT_TRUE(opNode->attributes.padding_mask);
+    ASSERT_NE(opNode->attributes.get_cu_seq_len_q(), nullptr);
+    ASSERT_NE(opNode->attributes.get_cu_seq_len_kv(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_cu_seq_len_q()->get_uid(), K_SDPA_TENSOR_CU_SEQ_LEN_Q_UID);
+    EXPECT_EQ(opNode->attributes.get_cu_seq_len_kv()->get_uid(), K_SDPA_TENSOR_CU_SEQ_LEN_KV_UID);
+    EXPECT_EQ(opNode->attributes.get_seq_len_q(), nullptr);
+    EXPECT_EQ(opNode->attributes.get_seq_len_kv(), nullptr);
 }
 
 } // namespace

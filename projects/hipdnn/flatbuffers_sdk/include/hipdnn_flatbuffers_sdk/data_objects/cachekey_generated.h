@@ -3836,6 +3836,22 @@ inline void hashAppend(Hasher& hasher, const SdpaAttributes* value, const UidCan
     hasher.raw(static_cast<int64_t>(value->diagonal_alignment()));
     hasher.raw(static_cast<int64_t>(value->mma_core_mode()));
     hasher.raw(static_cast<int64_t>(value->implementation()));
+    {
+        const auto optional = value->cu_seq_len_q_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
+    {
+        const auto optional = value->cu_seq_len_kv_tensor_uid();
+        hasher.tag(optional ? 1 : 0);
+        if(optional)
+        {
+            hashAppend(hasher, canon(*optional));
+        }
+    }
 }
 
 inline bool logicallyEqual(const SdpaAttributes* a, const SdpaAttributes* b, const UidCanon& aCanon, const UidCanon& bCanon)
@@ -4219,6 +4235,30 @@ inline bool logicallyEqual(const SdpaAttributes* a, const SdpaAttributes* b, con
     if(a->implementation() != b->implementation())
     {
         return false;
+    }
+    {
+        const auto aUid = a->cu_seq_len_q_tensor_uid();
+        const auto bUid = b->cu_seq_len_q_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
+    }
+    {
+        const auto aUid = a->cu_seq_len_kv_tensor_uid();
+        const auto bUid = b->cu_seq_len_kv_tensor_uid();
+        if(aUid.has_value() != bUid.has_value())
+        {
+            return false;
+        }
+        if(aUid.has_value() && aCanon(*aUid) != bCanon(*bUid))
+        {
+            return false;
+        }
     }
     return true;
 }

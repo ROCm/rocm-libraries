@@ -246,6 +246,11 @@ struct OperationMetadata
     /// Facets of each entry's regime label, in join order. Empty means empty labels.
     std::vector<RegimeAxis> regimeLabel;
 
+    /// Facets of each entry's form: which optional attributes and tensors its graph binds. Not
+    /// part of @ref regimeLabel, so regime names (and the quotas keyed on them) do not change
+    /// when an operation starts declaring forms; each axis is reported as a facet of its own.
+    std::vector<RegimeAxis> formLabel;
+
     /// See KernelCatalogSource.hpp. Empty means the operation has no kernel pool.
     KernelCatalog kernelCatalog;
 
@@ -468,6 +473,146 @@ inline ParameterValue jsonToValue(const nlohmann::json& value)
     return value.is_string() ? value.get<std::string>() : std::string();
 }
 
+/// @brief Checks an axis that labels the values of one enum parameter, one `==` clause each
+/// (`{"==": ["$q.form", "padded"]}`).
+///
+/// Such an axis spells the parameter's vocabulary a second time, so each clause must compare a
+/// value the parameter declares, and each declared value must be compared by a clause or be the
+/// `otherwise` label: a value left out would be labelled `otherwise`, a misspelt one would
+/// never match. An axis with any other clause is not of this shape and is not checked.
+inline void checkEnumAxis(const RegimeAxis& axis,
+                          const std::string& block,
+                          const OperationMetadata& metadata,
+                          MetadataLoad& load)
+{
+    const Parameter* parameter = nullptr;
+    std::vector<std::string> compared;
+    for(const auto& when : axis.whens)
+    {
+        const auto operands = when.is_object() && when.size() == 1 && when.contains("==")
+                                  ? when.at("==")
+                                  : nlohmann::json();
+        if(!operands.is_array() || operands.size() != 2 || !operands[0].is_string()
+           || !operands[1].is_string())
+        {
+            return;
+        }
+        const auto* compares = metadata.find(queryReference(operands[0].get<std::string>()));
+        if(compares == nullptr || compares->type != ParameterType::ENUM
+           || (parameter != nullptr && compares != parameter))
+        {
+            return;
+        }
+        parameter = compares;
+        compared.push_back(operands[1].get<std::string>());
+    }
+    if(parameter == nullptr)
+    {
+        return;
+    }
+
+    const auto declares = [&](const std::string& value) {
+        return std::find(parameter->values.begin(), parameter->values.end(), value)
+               != parameter->values.end();
+    };
+    for(const auto& value : compared)
+    {
+        if(!declares(value))
+        {
+            auto error = block;
+            error.append(" axis '").append(axis.name).append("' compares '");
+            error.append(parameter->name).append("' to '").append(value);
+            load.errors.push_back(error.append("', which it does not declare"));
+        }
+    }
+    for(const auto& value : parameter->values)
+    {
+        if(value != axis.otherwise
+           && std::find(compared.begin(), compared.end(), value) == compared.end())
+        {
+            auto error = block;
+            error.append(" axis '").append(axis.name).append("' has no clause for '");
+            error.append(parameter->name).append("' value '").append(value);
+            load.errors.push_back(error.append("' and does not name it 'otherwise'"));
+        }
+    }
+}
+
+/// @brief The axes of a `regime_label` or `form_label` block, in declaration order.
+///
+/// @p block names the block in an error. An array, not an object: axis order is part of the
+/// joined label.
+inline std::vector<RegimeAxis> parseLabelAxes(const nlohmann::json& axes,
+                                              const std::string& block,
+                                              const OperationMetadata& metadata,
+                                              MetadataLoad& load)
+{
+    std::vector<RegimeAxis> parsed;
+    for(const auto& entry : axes)
+    {
+        RegimeAxis axis;
+        axis.name = entry.value("name", "");
+        axis.otherwise = entry.value("otherwise", "");
+        if(axis.otherwise.empty())
+        {
+            load.errors.push_back(block + " axis '" + axis.name
+                                  + "' declares no 'otherwise' label");
+        }
+
+        std::vector<nlohmann::json> clauses;
+        for(const auto& clause : entry.value("labels", nlohmann::json::array()))
+        {
+            axis.labels.push_back(clause.value("label", ""));
+            clauses.push_back(clause.value("when", nlohmann::json()));
+        }
+        axis.whens = clauses;
+
+        // A form's quota key is `<axis>:<label>` (see formQuotaKey), so a ':' in any of the three
+        // would let a form key read as a regime, or as another form.
+        for(const auto* spelling : {&axis.name, &axis.otherwise})
+        {
+            if(spelling->find(':') != std::string::npos)
+            {
+                load.errors.push_back(block + " axis '" + axis.name + "': '" + *spelling
+                                      + "' contains ':'");
+            }
+        }
+        for(const auto& label : axis.labels)
+        {
+            if(label.find(':') != std::string::npos)
+            {
+                auto error = block;
+                error.append(" axis '").append(axis.name).append("': label '").append(label);
+                load.errors.push_back(error.append("' contains ':'"));
+            }
+        }
+
+        try
+        {
+            axis.clauses = hipdnn_plugin_sdk::uhd::ExpressionSet(clauses);
+            for(const auto& variable : axis.clauses.variables())
+            {
+                const auto name = queryReference(variable);
+                if(!name.empty() && metadata.find(name) == nullptr)
+                {
+                    auto error = block;
+                    error.append(" axis '").append(axis.name);
+                    error.append("' references undeclared parameter '").append(name);
+                    load.errors.push_back(error.append("'"));
+                }
+            }
+        }
+        catch(const std::exception& error)
+        {
+            load.errors.push_back(block + " axis '" + axis.name
+                                  + "': " + std::string(error.what()));
+        }
+        checkEnumAxis(axis, block, metadata, load);
+        parsed.push_back(std::move(axis));
+    }
+    return parsed;
+}
+
 } // namespace detail
 
 /// The three axes §4.3.4 permits.
@@ -586,46 +731,14 @@ inline MetadataLoad parseOperationMetadata(const nlohmann::json& root)
 
     if(root.contains("regime_label"))
     {
-        // An array, not an object: facet order is part of the label.
-        for(const auto& entry : root.at("regime_label"))
-        {
-            RegimeAxis axis;
-            axis.name = entry.value("name", "");
-            axis.otherwise = entry.value("otherwise", "");
-            if(axis.otherwise.empty())
-            {
-                load.errors.push_back("regime_label axis '" + axis.name
-                                      + "' declares no 'otherwise' label");
-            }
+        metadata.regimeLabel
+            = detail::parseLabelAxes(root.at("regime_label"), "regime_label", metadata, load);
+    }
 
-            std::vector<nlohmann::json> clauses;
-            for(const auto& clause : entry.value("labels", nlohmann::json::array()))
-            {
-                axis.labels.push_back(clause.value("label", ""));
-                clauses.push_back(clause.value("when", nlohmann::json()));
-            }
-            axis.whens = clauses;
-
-            try
-            {
-                axis.clauses = hipdnn_plugin_sdk::uhd::ExpressionSet(clauses);
-                for(const auto& variable : axis.clauses.variables())
-                {
-                    const auto name = detail::queryReference(variable);
-                    if(!name.empty() && metadata.find(name) == nullptr)
-                    {
-                        load.errors.push_back("regime_label axis '" + axis.name
-                                              + "' references undeclared parameter '" + name + "'");
-                    }
-                }
-            }
-            catch(const std::exception& error)
-            {
-                load.errors.push_back("regime_label axis '" + axis.name
-                                      + "': " + std::string(error.what()));
-            }
-            metadata.regimeLabel.push_back(std::move(axis));
-        }
+    if(root.contains("form_label"))
+    {
+        metadata.formLabel
+            = detail::parseLabelAxes(root.at("form_label"), "form_label", metadata, load);
     }
 
     if(root.contains("kernel_catalog"))

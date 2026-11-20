@@ -465,10 +465,15 @@ namespace precond_ut
 
     // boost_tol < 0 disables the numeric boost. Otherwise a pivot with
     // |pivot| <= boost_tol is replaced by |boost_val| * pivot / |pivot|.
+    // `pivots` (optional) receives every |pivot| before the boost.
     template <typename T>
-    std::vector<T>
-        host_ilu0(const csr_matrix<T>& a, double boost_tol = -1.0, double boost_val = 0.0)
+    std::vector<T> host_ilu0(const csr_matrix<T>& a,
+                             double               boost_tol = -1.0,
+                             double               boost_val = 0.0,
+                             std::vector<double>* pivots    = nullptr)
     {
+        if(pivots != nullptr)
+            pivots->assign(static_cast<size_t>(a.n), 0.0);
         std::vector<std::complex<double>> v(a.val.size());
         for(size_t i = 0; i < v.size(); ++i)
             v[i] = to_cd(a.val[i]);
@@ -496,6 +501,8 @@ namespace precond_ut
                     }
                 }
             }
+            if(pivots != nullptr && diag[i] >= 0)
+                (*pivots)[i] = std::abs(v[diag[i]]);
             if(boost_tol >= 0.0 && diag[i] >= 0)
             {
                 const double mag = std::abs(v[diag[i]]);
@@ -560,11 +567,16 @@ namespace precond_ut
     // Incomplete LDL^H of the lower triangle: A ~ L * D * L^H with a unit lower
     // L (strictly lower part stored) and a real D stored on the diagonal.
     // boost_tol < 0 disables the numeric boost; otherwise d_i with |d_i| <= boost_tol
-    // is replaced by boost_val.
+    // is replaced by |boost_val| with the sign of d_i (+|boost_val| for d_i = 0).
+    // `pivots` (optional) receives every d_i before the boost.
     template <typename T>
-    std::vector<T>
-        host_ildlt0(const csr_matrix<T>& a, double boost_tol = -1.0, double boost_val = 0.0)
+    std::vector<T> host_ildlt0(const csr_matrix<T>& a,
+                               double               boost_tol = -1.0,
+                               double               boost_val = 0.0,
+                               std::vector<double>* pivots    = nullptr)
     {
+        if(pivots != nullptr)
+            pivots->assign(static_cast<size_t>(a.n), 0.0);
         std::vector<std::complex<double>> v(a.val.size());
         for(size_t i = 0; i < v.size(); ++i)
             v[i] = to_cd(a.val[i]);
@@ -599,7 +611,10 @@ namespace precond_ut
                 diag_sum += std::norm(v[j]) * d_c;
             }
             const double d = v[diag[i]].real() - diag_sum;
-            v[diag[i]]     = (boost_tol >= 0.0 && std::abs(d) <= boost_tol) ? boost_val : d;
+            if(pivots != nullptr)
+                (*pivots)[i] = d;
+            const double boosted = (d < 0.0) ? -std::abs(boost_val) : std::abs(boost_val);
+            v[diag[i]]           = (boost_tol >= 0.0 && std::abs(d) <= boost_tol) ? boosted : d;
         }
         std::vector<T> out(v.size());
         for(size_t i = 0; i < v.size(); ++i)
@@ -1057,14 +1072,19 @@ namespace precond_ut
 
     struct run_options
     {
-        rocsparse_analysis_policy policy       = rocsparse_analysis_policy_reuse;
-        bool                      boost        = false;
-        double                    boost_tol    = 0.0;
-        double                    boost_val    = 1.0;
-        bool                      set_sing_tol = false;
-        double                    sing_tol     = 0.0;
-        bool                      tol_after    = false; // set the tolerance after the analysis
-        size_t device_memory = 0; // > 0: size of the internal buffer of the handle
+        rocsparse_analysis_policy policy    = rocsparse_analysis_policy_reuse;
+        bool                      boost     = false;
+        double                    boost_tol = 0.0;
+        double                    boost_val = 1.0;
+        bool   boost_tol_float              = false; // the boost tolerance is passed as a float
+        bool   boost_device                 = false; // boost tolerance and value in device memory
+        bool   set_boost_tol  = true; // false: the boost is enabled without a tolerance
+        bool   set_boost_val  = true; // false: the boost is enabled without a value
+        bool   set_boost_late = false; // set the unset boost inputs after a compute, compute again
+        bool   set_sing_tol   = false;
+        double sing_tol       = 0.0;
+        bool   tol_after      = false; // set the tolerance after the analysis
+        size_t device_memory  = 0; // > 0: size of the internal buffer of the handle
     };
 
     template <typename T>
@@ -1075,6 +1095,9 @@ namespace precond_ut
         std::vector<T>                     values;
         std::vector<rocsparse_singularity> singularity;
         std::vector<int64_t>               position;
+        // With set_boost_late: the status and the values of the first compute.
+        rocsparse_status early_compute_status = rocsparse_status_internal_error;
+        std::vector<T>   early_values;
     };
 
     // Destroys the descriptor when a failed ASSERT leaves the function early.
@@ -1127,21 +1150,65 @@ namespace precond_ut
         ASSERT_EQ((set_value<K>(handle, descr, In::policy, &opt.policy, sizeof(opt.policy))),
                   rocsparse_status_success);
 
-        const int32_t boost_enable  = opt.boost ? 1 : 0;
-        const double  boost_tol     = opt.boost_tol;
-        const T       boost_val     = make_value<T>(opt.boost_val, 0.0);
-        const void*   boost_val_ptr = &boost_val;
-        const double  sing_tol      = opt.sing_tol;
-        const void*   sing_tol_ptr  = &sing_tol;
+        const int32_t boost_enable = opt.boost ? 1 : 0;
+        const double  boost_tol    = opt.boost_tol;
+        const T       boost_val    = make_value<T>(opt.boost_val, 0.0);
+        const double  sing_tol     = opt.sing_tol;
+        const void*   sing_tol_ptr = &sing_tol;
+        // The 4 bytes after a float tolerance are the high word of a huge double.
+        // A library that reads 8 bytes boosts every pivot; sizeof(float) must not.
+        struct float_tol_bytes
+        {
+            float    f;
+            uint32_t pad;
+        };
+        static_assert(sizeof(float_tol_bytes) == sizeof(double),
+                      "a float tolerance is followed by 4 bytes");
+        float_tol_bytes host_tol_f{};
+        host_tol_f.f   = static_cast<float>(opt.boost_tol);
+        host_tol_f.pad = 0x7fefffffu;
+        device_vector<double>          d_boost_tol;
+        device_vector<float_tol_bytes> d_boost_tol_f;
+        device_vector<T>               d_boost_val;
+        const void* tol_ptr = opt.boost_tol_float ? static_cast<const void*>(&host_tol_f.f)
+                                                  : static_cast<const void*>(&boost_tol);
+        const void* val_ptr = &boost_val;
+        // The pointer mode of the handle at set_input time is the mode of the scalar.
+        const auto set_boost = [&](bool tol, bool val) {
+            ScopedOverride<rocsparse_pointer_mode> mode(
+                handle->pointer_mode,
+                opt.boost_device ? rocsparse_pointer_mode_device : rocsparse_pointer_mode_host);
+            if(tol)
+            {
+                ASSERT_EQ((set_value<K>(handle,
+                                        descr,
+                                        In::boost_tol,
+                                        tol_ptr,
+                                        opt.boost_tol_float ? sizeof(float) : sizeof(double))),
+                          rocsparse_status_success);
+            }
+            if(val)
+            {
+                ASSERT_EQ((set_value<K>(handle, descr, In::boost_val, val_ptr, sizeof(void*))),
+                          rocsparse_status_success);
+            }
+        };
         if(opt.boost)
         {
             ASSERT_EQ(
                 (set_value<K>(handle, descr, In::boost_enable, &boost_enable, sizeof(int32_t))),
                 rocsparse_status_success);
-            ASSERT_EQ((set_value<K>(handle, descr, In::boost_tol, &boost_tol, sizeof(double))),
-                      rocsparse_status_success);
-            ASSERT_EQ((set_value<K>(handle, descr, In::boost_val, boost_val_ptr, sizeof(void*))),
-                      rocsparse_status_success);
+            if(opt.boost_device)
+            {
+                upload(d_boost_tol, std::vector<double>{boost_tol});
+                upload(d_boost_tol_f, std::vector<float_tol_bytes>{host_tol_f});
+                upload(d_boost_val, std::vector<T>{boost_val});
+                ASSERT_TRUE(d_boost_tol.ptr && d_boost_tol_f.ptr && d_boost_val.ptr);
+                tol_ptr = opt.boost_tol_float ? static_cast<const void*>(d_boost_tol_f.ptr)
+                                              : static_cast<const void*>(d_boost_tol.ptr);
+                val_ptr = d_boost_val.ptr;
+            }
+            ASSERT_NO_FATAL_FAILURE(set_boost(opt.set_boost_tol, opt.set_boost_val));
         }
         if(opt.set_sing_tol && !opt.tol_after)
         {
@@ -1177,15 +1244,25 @@ namespace precond_ut
         device_vector<char> compute_buffer{compute_size ? compute_size : size_t{1}};
         ASSERT_TRUE(compute_buffer.ptr);
 
-        out.compute_status = api<K>::run(handle,
-                                         descr,
-                                         A,
-                                         A,
-                                         api<K>::stage(Stage::compute),
-                                         compute_size,
-                                         compute_size ? compute_buffer.ptr : nullptr);
-        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-        out.values = to_host(val);
+        const auto compute = [&] {
+            out.compute_status = api<K>::run(handle,
+                                             descr,
+                                             A,
+                                             A,
+                                             api<K>::stage(Stage::compute),
+                                             compute_size,
+                                             compute_size ? compute_buffer.ptr : nullptr);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            out.values = to_host(val);
+        };
+        ASSERT_NO_FATAL_FAILURE(compute());
+        if(opt.boost && opt.set_boost_late)
+        {
+            out.early_compute_status = out.compute_status;
+            out.early_values         = out.values;
+            ASSERT_NO_FATAL_FAILURE(set_boost(!opt.set_boost_tol, !opt.set_boost_val));
+            ASSERT_NO_FATAL_FAILURE(compute());
+        }
 
         // The header makes each output an array of batch_count elements, but does not say
         // whether the data size covers the array or one element: the array size is tried
@@ -1360,7 +1437,12 @@ namespace precond_ut
     template <Kind K, typename T>
     std::vector<T> reference(const csr_matrix<T>& a, const run_options& opt)
     {
-        const double boost_tol = opt.boost ? opt.boost_tol : -1.0;
+        // The tolerance the device reads: rounded to float for a float tolerance.
+        const double boost_tol
+            = !opt.boost
+                  ? -1.0
+                  : (opt.boost_tol_float ? static_cast<double>(static_cast<float>(opt.boost_tol))
+                                         : opt.boost_tol);
         if constexpr(K == Kind::ilu)
             return host_ilu0(a, boost_tol, opt.boost_val);
         else if constexpr(K == Kind::ic)

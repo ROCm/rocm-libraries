@@ -31,7 +31,7 @@
 // tests execute a real GPU op into a non-packed (gapped) output buffer and
 // verify the physical device layout matches the requested strides. All three
 // public entry points share the same output-stride code path in
-// ElementwiseSolutionImpl::initArgs, so each is exercised here.
+// ElementwiseSolutionImpl::makeArgs, so each is exercised here.
 
 #include <hip/hip_runtime.h>
 #include <hiptensor/hiptensor.h>

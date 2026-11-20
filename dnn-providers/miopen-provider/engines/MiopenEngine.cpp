@@ -4,11 +4,16 @@
 #include "MiopenEngine.hpp"
 #include "plans/MiopenBatchnormPlanBuilder.hpp"
 
+#include <algorithm>
+#include <string>
+
+#include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/knob_value_generated.h>
 #include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/KnobFactory.hpp>
+#include <hipdnn_plugin_sdk/NumericalNote.h>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -133,8 +138,16 @@ void MiopenEngine::getDetails(HipdnnMiopenHandle& handle,
 
     auto knobs = builder.CreateVector(knobsVector);
 
-    auto engineDetails
-        = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(builder, _id, knobs);
+    // Determinism is the only numerical claim: MIOPEN_ENGINE_DETERMINISTIC reports an explicit
+    // empty note list (the field is present), every other engine is NONDETERMINISTIC.
+    const std::vector<int32_t> numericalNotesList
+        = _id == hipdnn_data_sdk::utilities::MIOPEN_ENGINE_DETERMINISTIC_ID
+              ? std::vector<int32_t>{}
+              : std::vector<int32_t>{HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC};
+    auto numericalNotes = builder.CreateVector(numericalNotesList);
+
+    auto engineDetails = hipdnn_flatbuffers_sdk::data_objects::CreateEngineDetails(
+        builder, _id, knobs, 0, 0, 0, numericalNotes);
     builder.Finish(engineDetails);
     auto detachedBuffer = std::make_unique<flatbuffers::DetachedBuffer>(builder.Release());
     detailsOut.ptr = detachedBuffer->data();
@@ -178,26 +191,21 @@ void MiopenEngine::initializeExecutionContext(
     HipdnnMiopenSettings executionSettings;
     initializeMiopenSettings(engineConfig, executionSettings);
 
-    for(const auto& planBuilder : _planBuilders)
+    const auto applicableBuilder
+        = std::find_if(_planBuilders.begin(), _planBuilders.end(), [&](const auto& planBuilder) {
+              return planBuilder->isApplicable(handle, opGraph);
+          });
+    if(applicableBuilder == _planBuilders.end())
     {
-        if(planBuilder->isApplicable(handle, opGraph))
-        {
-            planBuilder->initializeExecutionSettings(
-                handle, opGraph, engineConfig, executionSettings);
-            break;
-        }
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
+            "No MIOpen plan builder is applicable to the graph for engine " + std::to_string(_id));
     }
 
+    (*applicableBuilder)
+        ->initializeExecutionSettings(handle, opGraph, engineConfig, executionSettings);
     executionContext.setExecutionSettings(executionSettings);
-
-    for(const auto& planBuilder : _planBuilders)
-    {
-        if(planBuilder->isApplicable(handle, opGraph))
-        {
-            planBuilder->buildPlan(handle, opGraph, engineConfig, executionContext);
-            break;
-        }
-    }
+    (*applicableBuilder)->buildPlan(handle, opGraph, engineConfig, executionContext);
 }
 
 void MiopenEngine::addPlanBuilder(

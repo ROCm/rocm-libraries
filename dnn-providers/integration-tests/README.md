@@ -42,7 +42,7 @@ src/integration-tests/      C++ integration tests (mostly opt-in)
 tests/                      harness unit tests; tests/gpu-ref/ reference-executor tests
 cmake/                      add_external_integration_test_target() for providers
 migration-scripts/          capture/import tooling (import_graph.py, find_case.py, ...)
-reference-data-scripts/     golden-data generators and verify_golden_bundles.py
+reference-data-scripts/     golden-data generators, per-op bundle generators (generate_conv_fwd_bundles.py, generate_sdpa_bwd_bundles.py) and verify_golden_bundles.py
 scripts/                    verify_support_claims.py, harvest_support_claims.py (+ support_sidecar.py)
 ```
 
@@ -51,6 +51,7 @@ scripts/                    verify_support_claims.py, harvest_support_claims.py 
 - [RFC 0006 — Plugin-Agnostic Integration Tests](../../projects/hipdnn/docs/rfcs/0006_PluginAgnosticIntegrationTests.md)
 - [RFC 0011 — Bundle Test Framework](../../projects/hipdnn/docs/rfcs/0011_BundleTestFramework.md)
 - [RFC 0015 — Engine Support Claims](../../projects/hipdnn/docs/rfcs/0015_EngineSupportClaims.md)
+- [Per-op test plans](docs/test-plans/README.md): what each op's bundles must cover, and the plan-to-file mapping
 
 ## Project policies
 

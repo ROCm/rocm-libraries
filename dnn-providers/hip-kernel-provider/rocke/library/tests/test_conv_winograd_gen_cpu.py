@@ -13,6 +13,8 @@ from kernels.common._conv_implicit_gemm_common import ConvProblem
 from kernels.common import conv_winograd_gen as WG
 from kernels.common.conv_winograd_fwd import toom_cook
 
+from ._compiler_test_utils import skip_where_compiler_refuses_processor
+
 
 def _direct(x, w, p):
     n, h, wd, c = x.shape
@@ -55,7 +57,7 @@ def test_cpp_toom_cook_tables_match_generator():
     the same reduced ``(numerator, denominator)`` of every coefficient, so a
     transcription error in any entry fails here whether or not a parity case
     happens to use that ``F(m, r)``."""
-    eng = pytest.importorskip("rocke_engine")
+    eng = pytest.importorskip("rocke_library_engine")
     tables = eng.conv_winograd_toom_cook_tables()
     assert set(tables) == set(WG.POINTS), (
         f"only in C++: {sorted(set(tables) - set(WG.POINTS))}, "
@@ -201,9 +203,13 @@ def test_kernels_build(case):
 
     p, ay, ax = _CASES[case]
     spec = WG.WinogradGenSpec(problem=p, ax_y=WG.WinoAxis(*ay), ax_x=WG.WinoAxis(*ax))
+    built = []
     for st in WG.transform_stages(spec):
         assert min(st.grid) > 0
-        compile_kernel(st.build(spec, arch="gfx1250"), arch="gfx1250")
+        built.append(st.build(spec, arch="gfx1250"))
+    with skip_where_compiler_refuses_processor():
+        for kernel in built:
+            compile_kernel(kernel, arch="gfx1250")
 
 
 def test_k3_taps_spec():
@@ -283,7 +289,8 @@ def test_fused_builds(kw):
     from kernels.common.conv_winograd_fused_1d_wmma import build_fused_wino_1d
 
     s = _fspec(**kw)
-    compile_kernel(build_fused_wino_1d(s), arch="gfx1250")
+    with skip_where_compiler_refuses_processor():
+        compile_kernel(build_fused_wino_1d(s), arch="gfx1250")
 
 
 def _op_names(region):
@@ -314,7 +321,8 @@ def test_fused_f47_builds():
     )
     k = build_fused_wino_1d(s)
     assert any("async" in nm for nm in _op_names(k.body))
-    compile_kernel(k, arch="gfx1250")
+    with skip_where_compiler_refuses_processor():
+        compile_kernel(k, arch="gfx1250")
 
 
 @pytest.mark.parametrize(
@@ -346,11 +354,11 @@ def test_driver_rejected_variant_fails_verify(driver, monkeypatch):
 
 def _binding_cases():
     """``(name, serialize_ir, good dict)`` for each Winograd binding."""
-    from rocke.core import backend as BE
+    from kernels.conv import engine_bridge as BE
     from kernels.common.conv_winograd_fwd import WinogradFwdSpec
     from kernels.common.conv_winograd_gemm_wmma import WinogradGemmWmmaSpec
 
-    eng = pytest.importorskip("rocke_engine")
+    eng = pytest.importorskip("rocke_library_engine")
     p3 = ConvProblem(N=1, Hi=8, Wi=8, C=16, K=16, Y=3, X=3, pH=1, pW=1)
     p1 = ConvProblem(N=1, Hi=1, Wi=64, C=32, K=32, Y=1, X=3, pW=1)
     gen = WG.WinogradGenSpec(problem=p1, ax_y=WG.WinoAxis(1, 1), ax_x=WG.WinoAxis(4, 3))

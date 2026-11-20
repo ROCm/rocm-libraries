@@ -101,6 +101,8 @@ struct GraphSpec
     bool alibiMask = false;
     bool paddingMask = false;
     data_objects::DataType mmaCoreMode = data_objects::DataType::UNSET;
+    /// The SDPA node's compute_data_type.
+    data_objects::DataType computeDataType = data_objects::DataType::FLOAT;
 
     /// Adds optional SDPA attributes the fields above do not already set (refusal cases).
     /// Never a field the builder below always writes: a flatbuffer table must not carry a
@@ -200,7 +202,7 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     std::vector<flatbuffers::Offset<data_objects::Node>> nodes;
     nodes.push_back(data_objects::CreateNodeDirect(builder,
                                                    "sdpa",
-                                                   data_objects::DataType::FLOAT,
+                                                   spec.computeDataType,
                                                    data_objects::NodeAttributes::SdpaAttributes,
                                                    attributesFor().Union()));
     if(spec.twoNodes)

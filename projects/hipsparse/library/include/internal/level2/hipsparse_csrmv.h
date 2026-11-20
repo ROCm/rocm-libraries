@@ -85,7 +85,7 @@ extern "C" {
 *  @param[in]
 *  nnz                 number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA              descriptor of the sparse CSR matrix. Currently, only
 *                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -101,7 +101,7 @@ extern "C" {
 *  x                   array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y                   array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -187,7 +187,7 @@ hipsparseStatus_t hipsparseScsrmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz                 number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA              descriptor of the sparse CSR matrix. Currently, only
 *                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -203,7 +203,7 @@ hipsparseStatus_t hipsparseScsrmv(hipsparseHandle_t         handle,
 *  x                   array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y                   array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -288,7 +288,7 @@ hipsparseStatus_t hipsparseDcsrmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz                 number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA              descriptor of the sparse CSR matrix. Currently, only
 *                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -304,7 +304,7 @@ hipsparseStatus_t hipsparseDcsrmv(hipsparseHandle_t         handle,
 *  x                   array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y                   array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
@@ -389,7 +389,7 @@ hipsparseStatus_t hipsparseCcsrmv(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnz                 number of non-zero entries of the sparse CSR matrix. Must be non-negative.
 *  @param[in]
-*  alpha               scalar \f$\alpha\f$.
+*  alpha               scalar \f$\alpha\f$, which can be in host or device memory.
 *  @param[in]
 *  descrA              descriptor of the sparse CSR matrix. Currently, only
 *                      \ref HIPSPARSE_MATRIX_TYPE_GENERAL is supported.
@@ -405,7 +405,7 @@ hipsparseStatus_t hipsparseCcsrmv(hipsparseHandle_t         handle,
 *  x                   array of \p n elements (\f$op(A) == A\f$) or \p m elements
 *                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).
 *  @param[in]
-*  beta                scalar \f$\beta\f$.
+*  beta                scalar \f$\beta\f$, which can be in host or device memory.
 *  @param[inout]
 *  y                   array of \p m elements (\f$op(A) == A\f$) or \p n elements
 *                      (\f$op(A) == A^T\f$ or \f$op(A) == A^H\f$).

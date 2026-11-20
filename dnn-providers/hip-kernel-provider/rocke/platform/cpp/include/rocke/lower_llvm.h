@@ -68,6 +68,14 @@ const char* rocke_llvm_flavor_at(int index);
 /* True for a concrete flavor; false for AUTO or an out-of-range value. */
 bool rocke_llvm_flavor_is_known(rocke_llvm_flavor_t flavor);
 
+/* ------------------------------------------------------------ LDS pool */
+
+/* Alignment (bytes) of the single LDS pool global that backs every smem
+ * allocation (Python core.lower_llvm.SMEM_POOL_ALIGN). No segment can be
+ * aligned more strictly than the pool it lives in. Public: the fused-MoE LDS
+ * budget (rocke_mega_lds_pool_bytes) bounds the pool with it. */
+#define ROCKE_SMEM_POOL_ALIGN 16
+
 /* ------------------------------------------------------------ entry point */
 
 /* Lower `kernel` to AMDGPU LLVM IR text.

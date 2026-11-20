@@ -460,6 +460,185 @@ inline GraphBytes toBytes(const flatbuffers::FlatBufferBuilder& builder)
     return {data, data + builder.GetSize()};
 }
 
+/// Uids of an attention graph's optional operands, clear of the nine its roles take.
+enum SdpaOperandUid : int64_t
+{
+    SDPA_SCALE_UID = 11,
+    SDPA_BIAS_UID,
+    SDPA_SEQ_LEN_Q_UID,
+    SDPA_SEQ_LEN_KV_UID,
+    SDPA_SEED_UID,
+    SDPA_DROPOUT_OFFSET_UID,
+    SDPA_SINK_UID,
+    SDPA_Q_OFFSETS_UID,
+    SDPA_KV_OFFSETS_UID
+};
+
+/// What the `dropout` form drops. Any non-zero rate selects the dropout kernel; this one is the
+/// rate the test SDK's dropout graphs use.
+constexpr float SDPA_FORM_DROPOUT_PROBABILITY = 0.1F;
+
+/// @brief One optional attention operand from `<role>Dims`, `<role>Strides` and
+/// `<role>DataType`, or nullopt with @p error set when one is undeclared.
+///
+/// The element type is required, not defaulted to the graph's: an operand's type is part of what
+/// it is (INT32 lengths, an INT64 seed, FLOAT sink logits).
+inline std::optional<builders::TensorSpec> sdpaOperand(const ArgumentResolution& resolved,
+                                                       const std::string& builder,
+                                                       const std::string& form,
+                                                       int64_t uid,
+                                                       const char* name,
+                                                       const std::string& role,
+                                                       std::string& error)
+{
+    const auto* d = dims(resolved, (role + "Dims").c_str());
+    const auto* st = dims(resolved, (role + "Strides").c_str());
+    const auto type = dtype(resolved, (role + "DataType").c_str());
+    if(d == nullptr || st == nullptr || !type.has_value())
+    {
+        error = builder + ": form '" + form + "' needs " + role + "Dims/" + role + "Strides/" + role
+                + "DataType";
+        return std::nullopt;
+    }
+    return tensorFrom(uid, name, *d, *st, *type);
+}
+
+/// @brief Applies the declared `form` of an attention graph that both directions have: which
+/// optional attributes and tensors it binds, everything else as the plain graph has it.
+///
+/// Absent or `plain` binds none, so a declaration without a form builds the graph it always did.
+/// Returns the reason a form cannot be built, empty on success. The forms only the forward
+/// carries (`sink`, `ragged`) are the forward adapter's; here they are unknown, which is what
+/// the backward adapter reports.
+inline std::string applySdpaCommonForm(const ArgumentResolution& resolved,
+                                       const std::string& builder,
+                                       const std::string& form,
+                                       builders::SdpaOptions& options,
+                                       builders::SdpaOperands& operands)
+{
+    std::string error;
+    if(form.empty() || form == "plain")
+    {
+        return {};
+    }
+    if(form == "scale_unset")
+    {
+        options.attnScale = 0.0F;
+        return {};
+    }
+    if(form == "scale_tensor")
+    {
+        // The scale is the tensor's default, so the graph executes as stated whether or not the
+        // caller overrides it; the frontend requires a pass-by-value scalar here.
+        if(options.attnScale == 0.0F)
+        {
+            return builder + ": form 'scale_tensor' needs attnScale, the tensor's default";
+        }
+        auto scale = sdpaOperand(resolved, builder, form, SDPA_SCALE_UID, "scale", "scale", error);
+        if(!scale.has_value())
+        {
+            return error;
+        }
+        scale->scalarValue = options.attnScale;
+        scale->runtimePassByValue = true;
+        options.attnScale = 0.0F;
+        operands.scale = std::move(scale);
+        return {};
+    }
+    if(form == "dropout")
+    {
+        // One role for both: Philox's seed and offset are alike scalars.
+        auto seed = sdpaOperand(resolved, builder, form, SDPA_SEED_UID, "seed", "seed", error);
+        auto offset = sdpaOperand(
+            resolved, builder, form, SDPA_DROPOUT_OFFSET_UID, "dropoutOffset", "seed", error);
+        if(!seed.has_value() || !offset.has_value())
+        {
+            return error;
+        }
+        options.dropoutProbability = SDPA_FORM_DROPOUT_PROBABILITY;
+        operands.seed = std::move(seed);
+        operands.dropoutOffset = std::move(offset);
+        return {};
+    }
+    if(form == "padded")
+    {
+        auto seqLenQ
+            = sdpaOperand(resolved, builder, form, SDPA_SEQ_LEN_Q_UID, "seqLenQ", "seqLen", error);
+        auto seqLenKv = sdpaOperand(
+            resolved, builder, form, SDPA_SEQ_LEN_KV_UID, "seqLenKv", "seqLen", error);
+        if(!seqLenQ.has_value() || !seqLenKv.has_value())
+        {
+            return error;
+        }
+        options.paddingMask = true;
+        operands.seqLenQ = std::move(seqLenQ);
+        operands.seqLenKv = std::move(seqLenKv);
+        return {};
+    }
+    if(form == "bias")
+    {
+        auto bias = sdpaOperand(resolved, builder, form, SDPA_BIAS_UID, "bias", "bias", error);
+        if(!bias.has_value())
+        {
+            return error;
+        }
+        operands.bias = std::move(bias);
+        return {};
+    }
+    return builder + ": form '" + form + "' is not one it builds";
+}
+
+/// @brief Packs the forward's operands into the compact THD form: one offset tensor for Q, O and
+/// the statistics, one for K and V, no sequence-length tensors (as the test SDK's vLLM-form
+/// graph with a ragged Q and KV). Each tensor's elements per token is its token stride, so
+/// the strides must lay the tokens out contiguously. Returns the reason it cannot, empty on
+/// success.
+inline std::string applySdpaRaggedForm(const ArgumentResolution& resolved,
+                                       const std::string& form,
+                                       builders::TensorSpec& q,
+                                       builders::TensorSpec& k,
+                                       builders::TensorSpec& v,
+                                       builders::TensorSpec& o,
+                                       std::optional<builders::TensorSpec>& stats,
+                                       builders::SdpaForwardOperands& operands)
+{
+    std::string error;
+    auto qOffsets = sdpaOperand(
+        resolved, "sdpaForward", form, SDPA_Q_OFFSETS_UID, "qOffsets", "offsets", error);
+    auto kvOffsets = sdpaOperand(
+        resolved, "sdpaForward", form, SDPA_KV_OFFSETS_UID, "kvOffsets", "offsets", error);
+    if(!qOffsets.has_value() || !kvOffsets.has_value())
+    {
+        return error;
+    }
+
+    constexpr size_t TOKEN_AXIS = 2;
+    const auto pack = [&](builders::TensorSpec& tensor, const builders::TensorSpec& offsets) {
+        if(tensor.strides.size() <= TOKEN_AXIS || tensor.strides[TOKEN_AXIS] < 1)
+        {
+            error = "sdpaForward: form '" + form + "' needs " + tensor.name
+                    + "Strides with a positive token stride at axis 2";
+            return;
+        }
+        tensor.raggedOffsetUid = offsets.uid;
+        tensor.raggedOffsetMultiplier = tensor.strides[TOKEN_AXIS];
+    };
+    pack(q, *qOffsets);
+    pack(o, *qOffsets);
+    pack(k, *kvOffsets);
+    pack(v, *kvOffsets);
+    if(stats.has_value())
+    {
+        pack(*stats, *qOffsets);
+    }
+    if(!error.empty())
+    {
+        return error;
+    }
+    operands.raggedOffsets = {*qOffsets, *kvOffsets};
+    return {};
+}
+
 } // namespace detail
 
 /// One adapter: resolved arguments in, serialized graph out.
@@ -592,15 +771,44 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
              options.leftBound = detail::integer(resolved, "leftBound", -1);
              options.rightBound = detail::integer(resolved, "rightBound", -1);
              options.diagonalAlignment = *alignment;
-             return {builders::sdpaForward(detail::tensorFrom(1, "q", *q, *qs, *type),
-                                           detail::tensorFrom(2, "k", *k, *ks, *type),
-                                           detail::tensorFrom(3, "v", *v, *vs, *type),
-                                           detail::tensorFrom(4, "o", *o, *os, *type),
+
+             auto qTensor = detail::tensorFrom(1, "q", *q, *qs, *type);
+             auto kTensor = detail::tensorFrom(2, "k", *k, *ks, *type);
+             auto vTensor = detail::tensorFrom(3, "v", *v, *vs, *type);
+             auto oTensor = detail::tensorFrom(4, "o", *o, *os, *type);
+             auto stats = options.generateStats ? detail::tensorRole(resolved, 5, "stats", *type)
+                                                : std::nullopt;
+
+             const auto form = detail::enumName(resolved, "form");
+             builders::SdpaForwardOperands operands;
+             std::string error;
+             if(form == "sink")
+             {
+                 operands.sink = detail::sdpaOperand(
+                     resolved, "sdpaForward", form, detail::SDPA_SINK_UID, "sink", "sink", error);
+             }
+             else if(form == "ragged")
+             {
+                 error = detail::applySdpaRaggedForm(
+                     resolved, form, qTensor, kTensor, vTensor, oTensor, stats, operands);
+             }
+             else
+             {
+                 error = detail::applySdpaCommonForm(
+                     resolved, "sdpaForward", form, options, operands);
+             }
+             if(!error.empty())
+             {
+                 return {{}, error};
+             }
+             return {builders::sdpaForward(qTensor,
+                                           kTensor,
+                                           vTensor,
+                                           oTensor,
                                            options,
                                            detail::graphTypesFrom(resolved, *type),
-                                           options.generateStats
-                                               ? detail::tensorRole(resolved, 5, "stats", *type)
-                                               : std::nullopt),
+                                           stats,
+                                           operands),
                      ""};
          }},
 
@@ -769,6 +977,14 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                  return {{}, "sdpaBackward: diagonalAlignment must be top_left or bottom_right"};
              }
              options.diagonalAlignment = *alignment;
+
+             builders::SdpaOperands operands;
+             const auto error = detail::applySdpaCommonForm(
+                 resolved, "sdpaBackward", detail::enumName(resolved, "form"), options, operands);
+             if(!error.empty())
+             {
+                 return {{}, error};
+             }
              return {builders::sdpaBackward(t[0],
                                             t[1],
                                             t[2],
@@ -779,7 +995,8 @@ inline const std::map<std::string, BuilderAdapter>& builderRegistry()
                                             t[7],
                                             t[8],
                                             options,
-                                            detail::graphTypesFrom(resolved, *type)),
+                                            detail::graphTypesFrom(resolved, *type),
+                                            operands),
                      ""};
          }},
 

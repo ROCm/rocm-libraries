@@ -111,6 +111,59 @@ void checkTensorShapesSupported(
 
 // --- High-Level Configuration Validators ---
 
+// The tensor uids of one batchnorm node, grouped by the role that selects the data type
+// and shape rule. Optional operands are listed only when present. `stat` holds the saved
+// and running statistics of a training node, which share one data type and shape rule.
+struct BatchnormTensorGroups
+{
+    std::vector<int64_t> io;
+    std::vector<int64_t> affine;
+    std::vector<int64_t> stat;
+
+    std::vector<int64_t> all() const;
+};
+
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr);
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributesVarianceExt& bnInfAttr);
+BatchnormTensorGroups
+    batchnormTensorGroups(const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr);
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);
+
+// Saved mean and inv_variance are written as a pair: both present or both absent.
+bool hasPairedSavedStatistics(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr);
+
+// An unconsumed virtual saved pair means "saved statistics not requested": true iff saved mean and
+// inv_variance are both present and both virtual, and no running-statistics uid and no momentum
+// uid is present. A pair with exactly one virtual tensor stays declined. The
+// builders and the plan share this rule.
+bool hasUnrequestedSavedPair(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+// The groups of batchnormTensorGroups(bnAttr) without the saved mean and inv_variance when
+// hasUnrequestedSavedPair is true.
+BatchnormTensorGroups batchnormTensorGroups(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+// Running statistics must be a complete set (prev/next running mean and variance plus momentum)
+// and saved mean / inv_variance a pair. When running statistics are used or the training node
+// is fused with an activation, the saved pair must also be present: the training plan passes
+// null saved-statistic descriptors to the running-statistics (V3) and activation (V2) MIOpen
+// entry points, which dereference them (null saved pointers are legal), so serving those graphs
+// without the saved pair is a limitation of this provider's plan, not of MIOpen. Throws
+// BAD_PARAM otherwise.
+void checkBatchnormFwdTrainingStatisticsSupported(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr, bool hasActivation);
+
 void checkBatchnormInferenceTensorConfigSupported(
     const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes& bnInfAttr,
     const std::unordered_map<int64_t,

@@ -46,6 +46,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *gemvN_matrix_sizes
+    iters: 100
+    cold_iters: 20
 
 
   - name: gemvt_bench
@@ -57,6 +59,8 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *gemvT_matrix_sizes
+    iters: 100
+    cold_iters: 20
 
   - name: gemv_batched_bench
     category: bench
@@ -67,4 +71,6 @@ Tests:
     incx: 1
     incy: 1
     matrix_size: *gemv_batched_matrix_sizes
+    iters: 100
+    cold_iters: 20
 ...
