@@ -11,6 +11,7 @@
 #include "ck/tensor_description/tensor_descriptor.hpp"
 #include "ck/tensor_description/tensor_descriptor_helper.hpp"
 #include "ck/tensor_description/multi_index_transform_helper.hpp"
+#include "ck/tensor_operation/operator_transform/transform_conv_bwd_data_to_gemm_v1.hpp"
 
 using namespace ck;
 
@@ -920,5 +921,172 @@ TEST(TensorDescriptorFunctorsIntegration, ForwardConvInputTransformMatchesGeneri
     for(const auto& cfg : extreme3d)
     {
         CheckForwardConvInputTransformLowerIndices<3>(cfg);
+    }
+}
+
+// =============================================================================
+// Backward data output (A) descriptor: fused custom transform (index_t) against the generic chain
+// of Pad / Embed / Slice / Merge / Pad / UnMerge transforms (long_index_t)
+// =============================================================================
+
+namespace {
+
+struct BwdDataCase
+{
+    index_t N, C, K;
+    index_t Hi, Wi;
+    index_t Y, X;
+    index_t StrideH, StrideW, DilationH, DilationW;
+    index_t LeftPadH, LeftPadW, RightPadH, RightPadW;
+};
+
+template <typename IndexType, bool MergeOutPadding = false>
+auto MakeBwdDataADescriptor(const BwdDataCase& c, index_t ytilde, index_t xtilde)
+{
+    namespace ctc   = ck::tensor_layout::convolution;
+    using Transform = ck::tensor_operation::TransformConvBwdDataToGemm_v1<
+        2,
+        ck::tensor_operation::device::ConvolutionBackwardDataSpecialization::Default,
+        8,
+        8,
+        64,
+        64,
+        32,
+        true,
+        true,
+        ctc::NHWGK,
+        ctc::GKYXC,
+        ctc::NHWGC,
+        false,
+        float,
+        float,
+        1,
+        IndexType,
+        false,
+        MergeOutPadding>;
+
+    const IndexType Ho =
+        (c.Hi + c.LeftPadH + c.RightPadH - c.DilationH * (c.Y - 1) - 1) / c.StrideH + 1;
+    const IndexType Wo =
+        (c.Wi + c.LeftPadW + c.RightPadW - c.DilationW * (c.X - 1) - 1) / c.StrideW + 1;
+    const IndexType G = 1, N = c.N, K = c.K, C = c.C;
+
+    // NHWGK output, GKYXC weight, NHWGC input
+    const std::array<IndexType, 5> a_lengths{G, N, K, Ho, Wo};
+    const std::array<IndexType, 5> a_strides{K, Ho * Wo * K, 1, Wo * K, K};
+    const std::array<IndexType, 5> b_lengths{G, K, C, c.Y, c.X};
+    const std::array<IndexType, 5> b_strides{K * c.Y * c.X * C, c.Y * c.X * C, 1, c.X * C, C};
+    const std::array<IndexType, 5> c_lengths{G, N, C, c.Hi, c.Wi};
+    const std::array<IndexType, 5> c_strides{C, c.Hi * c.Wi * C, 1, c.Wi * C, C};
+    const std::array<IndexType, 2> conv_strides{c.StrideH, c.StrideW};
+    const std::array<IndexType, 2> conv_dilations{c.DilationH, c.DilationW};
+    const std::array<IndexType, 2> left_pads{c.LeftPadH, c.LeftPadW};
+    const std::array<IndexType, 2> right_pads{c.RightPadH, c.RightPadW};
+    const std::array<IndexType, 2> tildes{ytilde, xtilde};
+
+    return Transform{a_lengths,
+                     a_strides,
+                     b_lengths,
+                     b_strides,
+                     c_lengths,
+                     c_strides,
+                     conv_strides,
+                     conv_dilations,
+                     left_pads,
+                     right_pads,
+                     tildes}
+        .MakeADescriptor_AK0_M_AK1();
+}
+
+template <bool MergePadding>
+void CheckBwdDataOutTransformMatchesGeneric(const BwdDataCase& c)
+{
+    std::ostringstream os;
+    os << "N=" << c.N << " C=" << c.C << " K=" << c.K << " In=" << c.Hi << "x" << c.Wi
+       << " Filter=" << c.Y << "x" << c.X << " Stride=" << c.StrideH << "x" << c.StrideW
+       << " Dilation=" << c.DilationH << "x" << c.DilationW << " Pad=" << c.LeftPadH << ","
+       << c.LeftPadW << "," << c.RightPadH << "," << c.RightPadW;
+    SCOPED_TRACE(os.str() + (MergePadding ? " merged padding" : " separate padding"));
+
+    const index_t y_tilde = c.StrideH / math::gcd(c.StrideH, c.DilationH);
+    const index_t x_tilde = c.StrideW / math::gcd(c.StrideW, c.DilationW);
+
+    for(index_t ytilde = 0; ytilde < y_tilde; ++ytilde)
+    {
+        for(index_t xtilde = 0; xtilde < x_tilde; ++xtilde)
+        {
+            SCOPED_TRACE("ytilde=" + std::to_string(ytilde) + " xtilde=" + std::to_string(xtilde));
+
+            // Skip (ytilde, xtilde) pairs without filter taps (same condition as the device op)
+            if(ytilde >= c.Y || xtilde >= c.X)
+            {
+                continue;
+            }
+
+            const auto custom  = MakeBwdDataADescriptor<index_t, MergePadding>(c, ytilde, xtilde);
+            const auto generic = MakeBwdDataADescriptor<long_index_t>(c, ytilde, xtilde);
+
+            const index_t k0 = custom.GetLength(Number<0>{});
+            const index_t m  = custom.GetLength(Number<1>{});
+            const index_t k1 = custom.GetLength(Number<2>{});
+            ASSERT_EQ(k0, static_cast<index_t>(generic.GetLength(Number<0>{})));
+            ASSERT_EQ(m, static_cast<index_t>(generic.GetLength(Number<1>{})));
+            ASSERT_EQ(k1, static_cast<index_t>(generic.GetLength(Number<2>{})));
+
+            index_t mismatches  = 0;
+            index_t valid_count = 0;
+            for(index_t i0 = 0; i0 < k0; ++i0)
+            {
+                for(index_t i1 = 0; i1 < m; ++i1)
+                {
+                    for(index_t i2 = 0; i2 < k1; ++i2)
+                    {
+                        const auto cc =
+                            make_tensor_coordinate(custom, make_multi_index(i0, i1, i2));
+                        const auto gc =
+                            make_tensor_coordinate(generic, make_multi_index(i0, i1, i2));
+                        const bool cv = coordinate_has_valid_offset(custom, cc);
+                        const bool gv = coordinate_has_valid_offset(generic, gc);
+                        if(cv != gv || (cv && cc.GetOffset() != gc.GetOffset()))
+                        {
+                            if(mismatches++ < 5)
+                            {
+                                ADD_FAILURE()
+                                    << "(" << i0 << "," << i1 << "," << i2
+                                    << ") custom valid=" << cv << " offset=" << cc.GetOffset()
+                                    << ", generic valid=" << gv << " offset=" << gc.GetOffset();
+                            }
+                        }
+                        valid_count += gv;
+                    }
+                }
+            }
+            EXPECT_EQ(mismatches, 0);
+            EXPECT_GT(valid_count, 0);
+        }
+    }
+}
+
+} // namespace
+
+TEST(TensorDescriptorFunctorsIntegration, BackwardDataOutputTransformMatchesGeneric)
+{
+    // {N, C, K, Hi, Wi, Y, X, StrideH, StrideW, DilationH, DilationW, PadL_H, PadL_W, PadR_H,
+    // PadR_W}
+    const BwdDataCase cases[] = {
+        {2, 8, 8, 9, 9, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
+        {2, 8, 24, 11, 7, 3, 3, 2, 2, 1, 1, 1, 1, 1, 1},
+        {3, 8, 8, 10, 13, 5, 3, 1, 2, 2, 1, 2, 1, 2, 1},
+        {1, 8, 40, 12, 12, 3, 3, 2, 3, 1, 1, 0, 2, 0, 2},
+        {2, 8, 8, 6, 6, 1, 1, 2, 2, 1, 1, 0, 0, 0, 0},
+        {2, 8, 8, 8, 9, 4, 4, 3, 2, 2, 3, 3, 4, 2, 1},
+        // K * YDotSlice * XDotSlice and N * HTildeSlice * WTildeSlice are not block multiples
+        {3, 8, 8, 7, 5, 3, 3, 1, 1, 1, 1, 1, 1, 1, 1},
+        {1, 8, 72, 5, 9, 3, 3, 1, 1, 1, 1, 0, 0, 0, 0},
+    };
+    for(const auto& c : cases)
+    {
+        CheckBwdDataOutTransformMatchesGeneric<false>(c);
+        CheckBwdDataOutTransformMatchesGeneric<true>(c);
     }
 }

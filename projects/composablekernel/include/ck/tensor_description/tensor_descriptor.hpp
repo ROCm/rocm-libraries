@@ -614,9 +614,10 @@ struct has_valid_lane_mask : false_type
 {
 };
 // Transforms that provide IsValidLaneMask() (a wave lane mask) mark themselves with
-// HasValidLaneMask
+// HasValidLaneMask = true
 template <typename Tran>
-struct has_valid_lane_mask<Tran, void_t<decltype(Tran::HasValidLaneMask)>> : true_type
+struct has_valid_lane_mask<Tran, void_t<decltype(Tran::HasValidLaneMask)>>
+    : integral_constant<bool, Tran::HasValidLaneMask>
 {
 };
 } // namespace detail

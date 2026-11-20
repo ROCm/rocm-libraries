@@ -31,18 +31,18 @@ template <
     typename CDataType        = float,
     index_t NumGroupsToMerge_ = 1,
     typename IndexType        = index_t,
-    bool CTranspose           = false>
+    bool CTranspose           = false,
+    bool MergeOutPadding      = false>
 struct TransformConvBwdDataToGemm_v1
 {
     private:
-    /**
-     * @brief Enable custom tensor transform for convolution backward data output.
-     *
-     * When set to 1, this variable enables a custom transformation of the output tensor
-     * in convolution backward data operations.
-     */
-    static constexpr bool UsePaddingOnKDim             = std::is_same_v<IndexType, long_index_t>;
+    static constexpr bool UsePaddingOnKDim = std::is_same_v<IndexType, long_index_t>;
+    // The 2D output (A) descriptor is built by ConvBwdDataImplicitGemmOutTransform
     static constexpr bool CustomTensorTransformBwdData = std::is_same_v<IndexType, index_t>;
+    // Opt-in: the Ho / Wo bounds and the GEMM M / K padding are handled by the custom transform
+    // itself (see ConvBwdDataImplicitGemmOutTransform) instead of by outer Pad transforms.
+    static constexpr bool MergePaddingInCustomTransform =
+        MergeOutPadding && CustomTensorTransformBwdData;
 
     template <index_t N>
     using NumberType =
@@ -815,39 +815,51 @@ struct TransformConvBwdDataToGemm_v1
                 }
                 else
                 {
-                    const auto out_n_hop_wop_k_grid_desc = transform_tensor_descriptor(
-                        out_grid_desc,
-                        make_tuple(make_pass_through_transform(N_),
-                                   make_pad_transform(Ho_, I0, I0),
-                                   make_pad_transform(Wo_, I0, I0),
-                                   make_pass_through_transform(K_)),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+                    const auto out_n_hop_wop_k_grid_desc = [&]() {
+                        if constexpr(MergePaddingInCustomTransform)
+                        {
+                            return out_grid_desc;
+                        }
+                        else
+                        {
+                            return transform_tensor_descriptor(
+                                out_grid_desc,
+                                make_tuple(make_pass_through_transform(N_),
+                                           make_pad_transform(Ho_, I0, I0),
+                                           make_pad_transform(Wo_, I0, I0),
+                                           make_pass_through_transform(K_)),
+                                make_tuple(
+                                    Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
+                                make_tuple(
+                                    Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+                        }
+                    }();
 
                     const auto out_n_hop_wop_k_grid_desc_final = transform_tensor_descriptor(
                         out_n_hop_wop_k_grid_desc,
-                        make_tuple(make_conv_bwd_data_out_transform(N_,
-                                                                    Ho_,
-                                                                    Wo_,
-                                                                    K_,
-                                                                    YDot_,
-                                                                    XDot_,
-                                                                    HTilde_,
-                                                                    WTilde_,
-                                                                    ConvDilationH_,
-                                                                    ConvDilationW_,
-                                                                    HTildeSlice,
-                                                                    WTildeSlice,
-                                                                    YDotSlice,
-                                                                    XDotSlice,
-                                                                    IHTildeSliceBegin,
-                                                                    IWTildeSliceBegin,
-                                                                    GcdStrideDilationH_,
-                                                                    GcdStrideDilationW_,
-                                                                    AK0 * batch_k_,
-                                                                    AK1,
-                                                                    GemmMPerBlock,
-                                                                    GemmKPerBlock)),
+                        make_tuple(make_conv_bwd_data_out_transform<MergePaddingInCustomTransform>(
+                            N_,
+                            Ho_,
+                            Wo_,
+                            K_,
+                            YDot_,
+                            XDot_,
+                            HTilde_,
+                            WTilde_,
+                            ConvDilationH_,
+                            ConvDilationW_,
+                            HTildeSlice,
+                            WTildeSlice,
+                            YDotSlice,
+                            XDotSlice,
+                            IHTildeSliceBegin,
+                            IWTildeSliceBegin,
+                            GcdStrideDilationH_,
+                            GcdStrideDilationW_,
+                            AK0 * batch_k_,
+                            AK1,
+                            GemmMPerBlock,
+                            GemmKPerBlock)),
                         make_tuple(Sequence<0, 1, 2, 3>{}),
                         make_tuple(Sequence<0, 1, 2>{}));
 

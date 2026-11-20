@@ -1578,7 +1578,22 @@ struct UnMerge
  * convolution backward data operation to the corresponding indices (K0, M, K1) used in the
  * implicit GEMM computation. It encapsulates the necessary parameters and transformation logic
  * required to efficiently perform the index conversion.
+ *
+ * MergePadding = false: the lower dimensions are the Ho / Wo padded output tensor (outer Pad
+ * transforms report Ho / Wo out of range) and this transform only reports the GEMM rows / columns
+ * beyond the real M and K as invalid.
+ *
+ * MergePadding = true: the lower dimensions are the output tensor itself and no separate Pad
+ * transform is needed. This transform reports as invalid the output rows that fall outside
+ * [0, Ho) x [0, Wo) and the GEMM rows / columns beyond the real M and K. The latter are made
+ * invalid by adding a large value to the Ho coordinate (the M part to the term that only depends
+ * on m, the K part to the term that only depends on k), so that the unsigned range check fails.
+ * A poisoned coordinate must never wrap back into [0, Ho), which holds when Ho is at most 2^29
+ * and the Ho coordinate of every valid row stays above -2^29.
+ *
+ * Indices must be non-negative and below 2^31 (magic division limitation).
  */
+template <bool MergePadding = false>
 struct ConvBwdDataImplicitGemmOutTransform
 {
     static constexpr auto I0 = Number<0>{};
@@ -1598,6 +1613,8 @@ struct ConvBwdDataImplicitGemmOutTransform
     index_t XDotSlice_K_;
     index_t MPad_, KPad_;
     Tuple<index_t, index_t, index_t> up_lengths_; // K0_, MPadded, K1_;
+
+    static constexpr uint32_t kPoison = 1u << 30;
 
     Tuple<index_t, index_t, index_t, index_t>
         low_lengths_magic_divisor_multiplier_; // XDotSlice_K_, K_, TildeSlice_, WTildeSlice_
@@ -1711,11 +1728,46 @@ struct ConvBwdDataImplicitGemmOutTransform
         return make_tuple(0, YStep, XStep, KStep);
     }
 
+    // MergePadding: the lower index of a padding row / column is made invalid by adding a large
+    // value to the Ho coordinate. The M and K parts are kept in separate terms (unsigned
+    // arithmetic, no signed overflow) so that each can be hoisted independently.
+    template <typename LowIdx, typename UpIdx>
+    __host__ __device__ constexpr void CalculateMergedLowerIndex(LowIdx& idx_low,
+                                                                 const UpIdx& idx_up) const
+    {
+        const auto n_part = CalculateLowerIndexN(idx_up);
+        const auto k_part = CalculateLowerIndexK(idx_up);
+
+        const index_t K_idx = idx_up[I0] * up_lengths_[I2] + idx_up[I2];
+        const uint32_t m_poison =
+            static_cast<uint32_t>(idx_up[I1]) >= static_cast<uint32_t>(up_lengths_[I1] - MPad_)
+                ? kPoison
+                : 0u;
+        const uint32_t k_poison =
+            static_cast<uint32_t>(K_idx) >=
+                    static_cast<uint32_t>(up_lengths_[I0] * up_lengths_[I2] - KPad_)
+                ? kPoison
+                : 0u;
+
+        idx_low(I0) = n_part[I0];
+        idx_low(I1) = static_cast<index_t>(static_cast<uint32_t>(n_part[I1]) + m_poison +
+                                           static_cast<uint32_t>(k_part[I1]) + k_poison);
+        idx_low(I2) = n_part[I2] + k_part[I2];
+        idx_low(I3) = k_part[I3];
+    }
+
     template <typename LowIdx, typename UpIdx>
     __host__ __device__ constexpr void CalculateLowerIndex(LowIdx& idx_low,
                                                            const UpIdx& idx_up) const
     {
-        idx_low = CalculateLowerIndexN(idx_up) + CalculateLowerIndexK(idx_up);
+        if constexpr(MergePadding)
+        {
+            CalculateMergedLowerIndex(idx_low, idx_up);
+        }
+        else
+        {
+            idx_low = CalculateLowerIndexN(idx_up) + CalculateLowerIndexK(idx_up);
+        }
     }
 
     template <typename LowIdxDiff,
@@ -1730,8 +1782,8 @@ struct ConvBwdDataImplicitGemmOutTransform
                                               Number<Hack>) const
     {
         LowIdx low_old = idx_low;
-        idx_low        = CalculateLowerIndexN(idx_up) + CalculateLowerIndexK(idx_up);
-        idx_diff_low   = idx_low - low_old;
+        CalculateLowerIndex(idx_low, idx_up);
+        idx_diff_low = idx_low - low_old;
     }
 
     __host__ __device__ static constexpr bool IsLinearTransform() { return false; }
@@ -1745,13 +1797,50 @@ struct ConvBwdDataImplicitGemmOutTransform
     __host__ __device__ constexpr bool
     IsValidUpperIndexMappedToValidLowerIndex(const UpIdx& idx_up) const
     {
-        // Padding
-        index_t K_idx     = idx_up[Number<0>{}] * up_lengths_[Number<2>{}] + idx_up[Number<2>{}];
-        const auto& M_idx = idx_up[Number<1>{}];
+        if constexpr(MergePadding)
+        {
+            LowerIndex idx_low;
+            CalculateLowerIndex(idx_low, idx_up);
+            // Unsigned compares check both bounds: a negative or poisoned index becomes >= 2^30,
+            // larger than any valid length.
+            return static_cast<uint32_t>(idx_low[I1]) < static_cast<uint32_t>(Ho_) &&
+                   static_cast<uint32_t>(idx_low[I2]) < static_cast<uint32_t>(Wo_);
+        }
+        else
+        {
+            // Padding
+            index_t K_idx = idx_up[Number<0>{}] * up_lengths_[Number<2>{}] + idx_up[Number<2>{}];
+            const auto& M_idx = idx_up[Number<1>{}];
 
-        bool pad_valid = M_idx < up_lengths_[Number<1>{}] - MPad_ &&
-                         K_idx < up_lengths_[Number<0>{}] * up_lengths_[Number<2>{}] - KPad_;
-        return pad_valid;
+            bool pad_valid = M_idx < up_lengths_[Number<1>{}] - MPad_ &&
+                             K_idx < up_lengths_[Number<0>{}] * up_lengths_[Number<2>{}] - KPad_;
+            return pad_valid;
+        }
+    }
+
+    // The lane mask replaces the validity of the whole descriptor, so it is only available when
+    // the Ho / Wo bounds are part of this transform.
+    static constexpr bool HasValidLaneMask = MergePadding;
+
+    // Lane mask version of the validity check (wave32, gfx125): one ballot per dimension so that
+    // each ballot argument is a single compare, which is lowered to a v_cmp writing an SGPR lane
+    // mask. Must be called by all the lanes of the wave.
+    template <typename UpIdx>
+    __device__ uint32_t IsValidLaneMask(const UpIdx& idx_up) const
+    {
+        static_assert(MergePadding, "the lane mask needs the Ho / Wo bounds in the transform");
+#if defined(__gfx125__)
+        LowerIndex idx_low;
+        CalculateLowerIndex(idx_low, idx_up);
+
+        return __builtin_amdgcn_ballot_w32(static_cast<uint32_t>(idx_low[I1]) <
+                                           static_cast<uint32_t>(Ho_)) &
+               __builtin_amdgcn_ballot_w32(static_cast<uint32_t>(idx_low[I2]) <
+                                           static_cast<uint32_t>(Wo_));
+#else
+        ignore = idx_up;
+        return 0;
+#endif
     }
 
     __host__ __device__ static constexpr bool IsKnownAtCompileTime() { return false; }

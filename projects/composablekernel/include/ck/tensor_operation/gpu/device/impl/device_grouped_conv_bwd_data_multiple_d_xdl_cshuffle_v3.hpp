@@ -660,23 +660,26 @@ struct DeviceGroupedConvBwdDataMultipleD_Xdl_CShuffleV3
     // TODO: Add support for different A and B data types.
     using ABDataType = ADataType;
 
-    using ConvToGemmBwdDataTransform = TransformConvBwdDataToGemm_v1<NDimSpatial,
-                                                                     ConvBackwardDataSpecialization,
-                                                                     AK1,
-                                                                     BK1,
-                                                                     MPerBlock,
-                                                                     NPerBlock,
-                                                                     KPerBlock,
-                                                                     DoPadGemmM,
-                                                                     DoPadGemmN,
-                                                                     ALayout,
-                                                                     BLayout,
-                                                                     ELayout,
-                                                                     false, /*SplitConvN*/
-                                                                     ABDataType,
-                                                                     EDataType,
-                                                                     1,
-                                                                     IndexType>;
+    using ConvToGemmBwdDataTransform =
+        TransformConvBwdDataToGemm_v1<NDimSpatial,
+                                      ConvBackwardDataSpecialization,
+                                      AK1,
+                                      BK1,
+                                      MPerBlock,
+                                      NPerBlock,
+                                      KPerBlock,
+                                      DoPadGemmM,
+                                      DoPadGemmN,
+                                      ALayout,
+                                      BLayout,
+                                      ELayout,
+                                      false, /*SplitConvN*/
+                                      ABDataType,
+                                      EDataType,
+                                      1,
+                                      IndexType,
+                                      false,                         /*CTranspose*/
+                                      WaveletEnabled && DirectLoad>; // MergeOutPadding
 
     // Dummy function just used to create an alias to Grid Descriptors
     static auto

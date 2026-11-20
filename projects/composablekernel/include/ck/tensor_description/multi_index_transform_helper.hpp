@@ -104,6 +104,7 @@ __host__ __device__ constexpr auto make_unmerge_transform(
     return UnMerge<UpLengths, Use24BitIntegerCalculation>{up_lengths};
 }
 
+template <bool MergePadding = false>
 __host__ __device__ constexpr auto make_conv_bwd_data_out_transform(index_t N,
                                                                     index_t Ho,
                                                                     index_t Wo,
@@ -136,25 +137,25 @@ __host__ __device__ constexpr auto make_conv_bwd_data_out_transform(index_t N,
     const auto KPadded = math::integer_divide_ceil(KRaw, GemmKPerBlock) * GemmKPerBlock;
     const auto KPad    = KPadded - KRaw;
 
-    return ConvBwdDataImplicitGemmOutTransform{N,
-                                               Ho,
-                                               Wo,
-                                               K,
-                                               XDot,
-                                               HTilde,
-                                               WTilde,
-                                               WTildeSlice,
-                                               HTildeSlice * WTildeSlice,
-                                               IHTildeSliceBegin,
-                                               IWTildeSliceBegin,
-                                               -ConvDilationH / GcdStrideDilationH,
-                                               -ConvDilationW / GcdStrideDilationW,
-                                               XDotSlice * K,
-                                               K0,
-                                               MPadded,
-                                               K1,
-                                               MPad,
-                                               KPad};
+    return ConvBwdDataImplicitGemmOutTransform<MergePadding>{N,
+                                                             Ho,
+                                                             Wo,
+                                                             K,
+                                                             XDot,
+                                                             HTilde,
+                                                             WTilde,
+                                                             WTildeSlice,
+                                                             HTildeSlice * WTildeSlice,
+                                                             IHTildeSliceBegin,
+                                                             IWTildeSliceBegin,
+                                                             -ConvDilationH / GcdStrideDilationH,
+                                                             -ConvDilationW / GcdStrideDilationW,
+                                                             XDotSlice * K,
+                                                             K0,
+                                                             MPadded,
+                                                             K1,
+                                                             MPad,
+                                                             KPad};
 }
 
 template <index_t NDimSpatial>
