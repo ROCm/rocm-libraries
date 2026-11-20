@@ -3165,6 +3165,46 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             m0 = b.sub(block_m_off, b.mul(cwy, b.const_i32(block_m)))
             n0 = b.sub(block_n_off, b.mul(cwx, b.const_i32(block_n)))
             g = b.add(b.mul(b.add(cwx, b.mul(cwy, b.const_i32(cx))), b.const_i32(nthr)), tid)
+            # ROCKE_EXP_GL2_SCALES=2: the scale lines join the data lines in one
+            # pool, one line per thread (the prototype's PrefetchGL2), instead
+            # of a second prefetch per thread over only the scale lines.
+            pooled = _mx and _os_gl2.environ.get("ROCKE_EXP_GL2_SCALES") == "2"
+            if pooled:
+                ks = block_k // 128
+                a_sl = max(1, cy * block_m * 4 // line)
+                b_sl = max(1, cx * block_n * 4 // line)
+                pool = total + ks * (a_sl + b_sl)
+                for base in range(0, pool, threads):
+                    li = b.mod(b.add(g, b.const_i32(base)) if base else g, b.const_i32(pool))
+                    in_data = b.cmp_lt(li, b.const_i32(total))
+                    # data line (index li, valid when in_data)
+                    ld = b.select(in_data, li, b.const_i32(0))
+                    is_b = b.cmp_ge(ld, b.const_i32(a_lines))
+                    lj = b.select(is_b, b.sub(ld, b.const_i32(a_lines)), ld)
+                    row = b.div(lj, b.const_i32(lpr))
+                    part = b.mod(lj, b.const_i32(lpr))
+                    rowabs = b.select(is_b, b.add(n0, row), b.add(m0, row))
+                    batch = b.select(is_b, tdm_batch_b, tdm_batch_a)
+                    col = b.add(k_ahead, b.mul(part, b.const_i32(epl)))
+                    origin = b.add(batch, b.add(b.mul(b.zext(rowabs, _I64), b.zext(K, _I64)), b.zext(col, _I64)))
+                    off = origin if _tdm_elem_bytes == 1 else b.mul(origin, b.const_i64(_tdm_elem_bytes))
+                    dptr = b.select(is_b, b.global_ptr_add(Bp, off), b.global_ptr_add(A, off))
+                    # scale line (index li - total, valid otherwise)
+                    si = b.select(in_data, b.const_i32(0), b.sub(li, b.const_i32(total)))
+                    kstep_i = b.div(si, b.const_i32(a_sl + b_sl))
+                    rem = b.mod(si, b.const_i32(a_sl + b_sl))
+                    s_is_b = b.cmp_ge(rem, b.const_i32(a_sl))
+                    sj = b.select(s_is_b, b.sub(rem, b.const_i32(a_sl)), rem)
+                    kstep = b.add(b.div(k_ahead, b.const_i32(128)), kstep_i)
+                    srows = b.select(s_is_b, N, M)
+                    r0 = b.select(s_is_b, n0, m0)
+                    soff = b.add(
+                        b.mul(b.zext(kstep, _I64), b.zext(b.mul(srows, b.const_i32(4)), _I64)),
+                        b.zext(b.add(b.mul(r0, b.const_i32(4)), b.mul(sj, b.const_i32(line))), _I64),
+                    )
+                    sptr = b.select(s_is_b, b.global_ptr_add(BS, soff), b.global_ptr_add(AS, soff))
+                    b.global_prefetch(b.select(in_data, dptr, sptr), cachepolicy=_GL2_CPOL)
+                return
             for base in range(0, total, threads):
                 li = b.mod(b.add(g, b.const_i32(base)) if base else g, b.const_i32(total))
                 is_b = b.cmp_ge(li, b.const_i32(a_lines))
