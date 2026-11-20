@@ -506,10 +506,12 @@ TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesMalformedRecords)
 }
 
 // The base cell (Hq 32, D128) puts 32 * 16 * 128 = 2^16 segm_output elements in each batch
-// row of a 16-segment kernel, so batch 2^15 reaches 2^31 elements: the kernels' i32 offsets
-// would wrap. graph_match still accepts the graph, and a kernel with fewer segments still
-// serves it.
-constexpr int64_t I32_WRAP_BATCH = int64_t{1} << 15;
+// row of a 16-segment kernel. Batch 2^15 is exactly 2^31 elements: its last offset is
+// INT32_MAX, so it still addresses. One more batch row goes past it and the kernels' i32
+// offsets would wrap. graph_match still accepts the graph, and a kernel with fewer segments
+// still serves it.
+constexpr int64_t I32_AT_LIMIT_BATCH = int64_t{1} << 15;
+constexpr int64_t I32_WRAP_BATCH = I32_AT_LIMIT_BATCH + 1;
 
 TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesACandidateWhoseIndicesWrapInt32)
 {
@@ -517,13 +519,13 @@ TEST(TestGfx942AttentionUnified3dMatchers, KernelMatchDeclinesACandidateWhoseInd
     spec.batch = I32_WRAP_BATCH;
     EXPECT_TRUE(graphMatches(spec));
     KernelSpec kernel;
-    kernel.numSegments = 8; // 2^30 elements
+    kernel.numSegments = 8; // 2^30 + 2^15 elements
     EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "8 segments fit";
-    kernel.numSegments = 16; // exactly 2^31 elements
-    EXPECT_FALSE(kernelMatchesGraph(spec, kernel)) << "16 segments reach 2^31";
+    kernel.numSegments = 16; // 2^31 + 2^16 elements
+    EXPECT_FALSE(kernelMatchesGraph(spec, kernel)) << "16 segments go past 2^31";
 
-    spec.batch = I32_WRAP_BATCH - 1; // 2^31 - 2^16 elements
-    EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "one batch row fewer fits";
+    spec.batch = I32_AT_LIMIT_BATCH; // exactly 2^31 elements
+    EXPECT_TRUE(kernelMatchesGraph(spec, kernel)) << "exactly 2^31 elements still addresses";
 }
 
 /// The message prepare() throws for @p kernel against @p spec; empty if it returned.
@@ -549,8 +551,8 @@ std::string prepareFailure(const GraphSpec& spec, const KernelSpec& kernel)
 }
 
 /// Defence in depth: prepare() refuses the same candidate kernelMatches declines, for a
-/// caller that reaches the handler without matching. The 8-segment control fails later
-/// (no archive), never on the index limit.
+/// caller that reaches the handler without matching. The controls (8 segments, and 16
+/// segments at exactly 2^31 elements) fail later (no archive), never on the index limit.
 TEST(TestGfx942AttentionUnified3dMatchers, PrepareRefusesACandidateWhoseIndicesWrapInt32)
 {
     constexpr const char* MARKER = "past 2^31 elements";
@@ -565,6 +567,12 @@ TEST(TestGfx942AttentionUnified3dMatchers, PrepareRefusesACandidateWhoseIndicesW
     const std::string control = prepareFailure(spec, kernel);
     ASSERT_FALSE(control.empty()) << "prepare() cannot succeed without an archive";
     EXPECT_EQ(control.find(MARKER), std::string::npos) << control;
+
+    spec.batch = I32_AT_LIMIT_BATCH;
+    kernel.numSegments = 16;
+    const std::string atLimit = prepareFailure(spec, kernel);
+    ASSERT_FALSE(atLimit.empty()) << "prepare() cannot succeed without an archive";
+    EXPECT_EQ(atLimit.find(MARKER), std::string::npos) << atLimit;
 }
 
 // =============================================================================

@@ -38,17 +38,42 @@ def segment_extent(batch, seqlen_q, num_query_heads, head_size, segments) -> int
     )
 
 
+def max_segments_for_extent(
+    rows, num_query_heads, head_size, max_segments, max_extent
+) -> int:
+    """Largest power of two ``S <= max_segments`` whose ``[rows, Hq, S, D]`` fp32
+    segment workspace holds at most ``max_extent`` elements (at least 1).
+
+    Shared with the split-KV 3D path (``_num_segments``), whose workspace has the
+    same layout with ``rows = total_q``. ``max_extent`` is the caller's, because
+    the two routes do not currently agree on it: the 3D route allows the extent
+    whose last index is ``INT32_MAX``, which is where the fault was measured,
+    and the dense route stays one element stricter pending a parity run of its
+    own kernel pair at that boundary.
+
+    At least 1 is always returned: a single segment that does not fit is the
+    caller's to refuse, since there is no smaller split to fall back to.
+    """
+    s = 1
+    while s * 2 <= max_segments and (
+        int(rows) * int(num_query_heads) * (s * 2) * int(head_size) <= max_extent
+    ):
+        s *= 2
+    return s
+
+
 def max_kv_segments_for_extent(
     batch, seqlen_q, num_query_heads, head_size, max_segments=MAX_KV_SEGMENTS
 ) -> int:
     """Largest power of two ``S <= max_segments`` whose workspace extent stays below
     the 32-bit addressing limit (at least 1)."""
-    s = 1
-    while s * 2 <= max_segments and (
-        segment_extent(batch, seqlen_q, num_query_heads, head_size, s * 2) < INT32_LIMIT
-    ):
-        s *= 2
-    return s
+    return max_segments_for_extent(
+        int(batch) * int(seqlen_q),
+        num_query_heads,
+        head_size,
+        max_segments,
+        max_extent=INT32_LIMIT - 1,
+    )
 
 
 def kv_split_admits(spec) -> bool:
