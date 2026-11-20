@@ -2519,8 +2519,32 @@
   ],
   "features_hash": "sha256:0214eb4277b69dfc",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/hip-mlops/f0af15194aa55e9e",
-    "feature_semantics_revision": 1
+    "selector_revision": "hip-kernel-provider/hip-mlops/865f2933d8f9d323",
+    "feature_semantics_revision": 1,
+    "x-restamps": [
+      {
+        "from": "hip-kernel-provider/hip-mlops/f0af15194aa55e9e",
+        "to": "hip-kernel-provider/hip-mlops/865f2933d8f9d323",
+        "proof": "measured-parity",
+        "changes": [
+          "engines/hip_mlops_engine/HipMlopsEngine.cpp"
+        ],
+        "parity": {
+          "graphs": 23997,
+          "median_change": 0.016310487497084077,
+          "outlier_fraction": 0.08455223569612869,
+          "newly_declined": 0,
+          "newly_served": 0,
+          "unmatched": 0,
+          "thresholds": {
+            "max_median_change": 0.03,
+            "outlier_change": 0.1,
+            "max_outlier_fraction": 0.1,
+            "min_graphs": 30
+          }
+        }
+      }
+    ]
   },
   "objective": "max",
   "score": {
