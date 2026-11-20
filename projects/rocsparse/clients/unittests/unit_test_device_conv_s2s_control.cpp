@@ -1002,8 +1002,9 @@ namespace
     };
 
     // A null target value pointer is a symbolic conversion between the COO, COO AoS,
-    // CSR, and CSC formats, including an identity copy. The index arrays are still
-    // written. The other formats store values unconditionally and are not listed.
+    // CSR, and CSC formats, including an identity copy, and in an ELL or BSR identity
+    // copy. The index arrays are still written. The other ELL and BSR routes store
+    // values unconditionally and are not listed.
     constexpr SymbolicPair k_symbolic[] = {
         {rocsparse_format_coo_aos, rocsparse_format_coo},
         {rocsparse_format_coo_aos, rocsparse_format_csr},
@@ -1012,6 +1013,8 @@ namespace
         {rocsparse_format_csr, rocsparse_format_coo},
         {rocsparse_format_csr, rocsparse_format_csc},
         {rocsparse_format_csc, rocsparse_format_csr},
+        {rocsparse_format_csc, rocsparse_format_coo},
+        {rocsparse_format_csc, rocsparse_format_coo_aos},
         {rocsparse_format_csr, rocsparse_format_coo_aos},
         {rocsparse_format_coo, rocsparse_format_csc},
         {rocsparse_format_coo_aos, rocsparse_format_csc},
@@ -1019,6 +1022,8 @@ namespace
         {rocsparse_format_csr, rocsparse_format_csr},
         {rocsparse_format_csc, rocsparse_format_csc},
         {rocsparse_format_coo_aos, rocsparse_format_coo_aos},
+        {rocsparse_format_ell, rocsparse_format_ell},
+        {rocsparse_format_bsr, rocsparse_format_bsr},
     };
 
     // nnz 0 accepts a null value pointer. set_pointers does not, so the value pointer
@@ -1052,6 +1057,29 @@ namespace
         {
             ASSERT_EQ(rocsparse_create_csc_descr(
                           &descr, 1, 1, nnz, primary, secondary, values, idx32, idx32, base, f32_r),
+                      st_ok);
+        }
+        else if(format == rocsparse_format_ell)
+        {
+            ASSERT_EQ(
+                rocsparse_create_ell_descr(&descr, 1, 1, primary, values, nnz, idx32, base, f32_r),
+                st_ok);
+        }
+        else if(format == rocsparse_format_bsr)
+        {
+            ASSERT_EQ(rocsparse_create_bsr_descr(&descr,
+                                                 1,
+                                                 1,
+                                                 nnz,
+                                                 dir_r,
+                                                 1,
+                                                 primary,
+                                                 secondary,
+                                                 values,
+                                                 idx32,
+                                                 idx32,
+                                                 base,
+                                                 f32_r),
                       st_ok);
         }
     }
@@ -1167,12 +1195,17 @@ namespace
             EXPECT_EQ(ind[0], 0);
             EXPECT_EQ(ind[1], 0);
         }
-        else if(pair.target == rocsparse_format_csr)
+        else if(pair.target == rocsparse_format_csr || pair.target == rocsparse_format_bsr)
         {
             const auto ptr = download_idx(dst_primary.get(), idx32, 2);
             const auto col = download_idx(dst_secondary.get(), idx32, 1);
             EXPECT_EQ(ptr[0], 0);
             EXPECT_EQ(ptr[1], 1);
+            EXPECT_EQ(col[0], 0);
+        }
+        else if(pair.target == rocsparse_format_ell)
+        {
+            const auto col = download_idx(dst_primary.get(), idx32, 1);
             EXPECT_EQ(col[0], 0);
         }
         else if(pair.target == rocsparse_format_csc)
@@ -1745,6 +1778,38 @@ namespace
         {
             WideBsr bsr(idx32, too_wide);
             expect_count_rejected(handle, bsr.source, bsr.target, "i32 2^28 block columns");
+        }
+        {
+            // One block in 2^28 block rows. The host pointers are never read: the
+            // expansion is rejected before any allocation.
+            int   dummy = 0;
+            Spmat source, target;
+            ASSERT_EQ(rocsparse_create_bsr_descr(&source,
+                                                 too_wide,
+                                                 1,
+                                                 1,
+                                                 dir_r,
+                                                 k_wide_block_dim,
+                                                 &dummy,
+                                                 &dummy,
+                                                 &dummy,
+                                                 idx32,
+                                                 idx32,
+                                                 base,
+                                                 f32_r),
+                      st_ok);
+            ASSERT_EQ(rocsparse_create_coo_descr(&target,
+                                                 k_wide_block_dim * too_wide,
+                                                 k_wide_block_dim,
+                                                 k_wide_block_nnz,
+                                                 &dummy,
+                                                 &dummy,
+                                                 &dummy,
+                                                 idx64,
+                                                 base,
+                                                 f32_r),
+                      st_ok);
+            expect_count_rejected(handle, source, target, "i32 2^28 block rows");
         }
         {
             // The widest int32_t expansion still converts.
