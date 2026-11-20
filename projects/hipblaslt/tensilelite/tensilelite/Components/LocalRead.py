@@ -32,7 +32,7 @@ from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftO
                             ECvtPkFP8toF32, ECvtF32toF16, DSLoadU8
 
 from ..Component import LocalRead
-from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile
+from ..Common.MxScaleLayout import mxFreePhase, mxFreeTile, mxReadVectorWidth
 from ..Common.LdsReadPlan import (
     gfx1250_lds_offset_bytes,
     make_local_read_loop_plan,
@@ -172,7 +172,7 @@ class LocalReadMFMA(LocalRead):
         tileSpanInfo = cls.getMxsTileSpanInfo(kernel, tc, tile01, asmCaps)
         if tileSpanInfo is not None:
             return tileSpanInfo["numGroups"]
-        return kernel["MIWaveTile"][tile01] // kernel["VectorWidth%s" % tc]
+        return kernel["MIWaveTile"][tile01] // mxReadVectorWidth(kernel, tc)
 
     @staticmethod
     def getMxsTileSpanInfo(kernel, tc, tile01, asmCaps):
@@ -209,7 +209,7 @@ class LocalReadMFMA(LocalRead):
                 or not asmCaps.get("HasWMMA_V3", False) \
                 or kernel.get("MXScaleFormat") != "InMemorySwizzle":
             return None
-        vectorWidth = kernel["VectorWidth%s" % tc]
+        vectorWidth = mxReadVectorWidth(kernel, tc)
         miWaveTile = kernel["MIWaveTile"][tile01]
         miWaveTileVectors = miWaveTile // vectorWidth
         # The tile is handled as (miWaveTileVectors // 2) independent ratio-2 groups. Each
@@ -666,7 +666,7 @@ class LocalReadMFMA(LocalRead):
         instruction      = tP["localReadInstruction"]
         bpr              = 4 # bytes/register
 
-        vectorWidth      = kernel["VectorWidth%s"%tc]
+        vectorWidth      = mxReadVectorWidth(kernel, tc)
         mxBlock: int     = kernel["ProblemType"][f"MXBlock{mxTc}"]
         mxUnit: int      = kernel["MatrixInstK"] // mxBlock
         mxTile           = mxFreeTile(kernel, tc)
@@ -676,6 +676,7 @@ class LocalReadMFMA(LocalRead):
                 "localReadMX: invalid MX scale unit for tc=%s "
                 "(MatrixInstK=%s < MXBlock%s=%s => mxUnit=%s)"
                 % (tc, kernel["MatrixInstK"], mxTc, mxBlock, mxUnit))
+        contiguousA = kernel.get("WaveTileContiguousA", False) and mxTc == "A"
         stridePerRead    = instruction.blockWidth * bpr
         tilePerRead      = stridePerRead // mxUnit
         if tilePerRead == 0:
@@ -754,6 +755,9 @@ class LocalReadMFMA(LocalRead):
                 # wave-split), so the per-group stride is twice the per-vector stride.
                 blockStep = (2 * vIdx) if mxsTileSpan else vIdx
                 mStep = MIWaveGroupShape[tile01]
+                if contiguousA:
+                    offset_val *= kernel["MatrixInstM"]
+                    mStep = kernel["MatrixInstM"] * vectorWidth
                 if mxPhase:
                     pass
                 elif mx2d:
@@ -1787,6 +1791,7 @@ class LocalReadMFMA(LocalRead):
                             # gfx1250 LDS offset formula shared by XF32 and BF16/Half/FP8/etc paths.
                             # The WMMA V3 LDS layout uses a *2 factor on the unroll stride.
                             def calcGfx1250LdsOffset():
+                                tileWidth = 1 if kernel.get("WaveTileContiguousA") and tc == "A" else vectorWidth
                                 return gfx1250_lds_offset_bytes(
                                     rIdx=rIdx,
                                     tiIdx=tiIdx,
@@ -1798,7 +1803,7 @@ class LocalReadMFMA(LocalRead):
                                     unrollStrideElements=UnrollStride,
                                     tileStrideElements=tileStride,
                                     matrixInstTO=matrixInstTO,
-                                    vectorWidth=vectorWidth,
+                                    vectorWidth=tileWidth,
                                     bpeDS=tP["bpeDS"],
                                     unrollMajorLDS=kernel[
                                         "UnrollMajorLDS%s" % tP["tensorChar"]],
@@ -1821,7 +1826,9 @@ class LocalReadMFMA(LocalRead):
                                 _componentSplit = (_segOff.get("componentSplit", False)
                                              and _segOff.get("activeTC") == tc
                                              and numVectorsPerTile > 1)
-                                if _portSplit:
+                                if kernel.get("WaveTileContiguousA") and tc == "A":
+                                    vCols = (vIdx * numOffsets + oIdx) * matrixInstT * vectorWidth
+                                elif _portSplit:
                                     # Drop the wave-group factor from the per-vIdx column stride so the
                                     # two vIdx stay within this port's segment; the A0->A1 segment jump
                                     # is on the wave stride, not here.
@@ -1852,7 +1859,8 @@ class LocalReadMFMA(LocalRead):
                                     perpStrideInv = permBlock // perpStride
                                     offset_val = (eIdx * (perpStrideInv) + vCols) * tileStride
                                 else:
-                                    offset_val = (eIdx + vCols) * tileStride
+                                    freeStep = matrixInstT if kernel.get("WaveTileContiguousA") and tc == "A" else 1
+                                    offset_val = (eIdx * freeStep + vCols) * tileStride
 
                                 if kernel["ProblemType"]["Sparse"] != 0:
                                     if blocksPerTGroupSMFMA > 1:

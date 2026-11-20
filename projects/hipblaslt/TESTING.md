@@ -260,6 +260,7 @@ in [`clients/tests/src/`](clients/tests/src/). The last three rows are in
 | `unit_gtest.cpp` | `UnitCheckIdentical` | Exact-storage checks used to skip element-by-element output comparisons when the addressed values have identical bytes |
 | `fast_check_gtest.cpp` | `FastCheck_pre_checkin`, `FastCheckDevice_pre_checkin` | The `fast_check` verifier: fault injection into host-computed results and the per-solution failure summary (`FastCheck_pre_checkin`, no GPU), and the device padding, poison and probe-sum kernels plus 4 GiB-boundary buffer placement on small buffers (`FastCheckDevice_pre_checkin`, no hipBLASLt kernels) |
 | `host_memory_gtest.cpp` | `HostMemory_pre_checkin` | How the client holds pinned host memory: an idle buffer of 1 GiB or more stays cached only while consecutive tests reuse it (released after a test that does not, or when a test of another shape needs new memory), a smaller one until 100 consecutive tests have not reused it, large buffers get no 20% reuse slack, and a failed host allocation is reported instead of used. The `query_*` tests point the host-memory query (`host_memory.hpp`) at temporary copies of `/proc/meminfo` and the cgroup files, and check that it takes the smaller of `MemAvailable` and the tightest container memory limit (cgroup v1 or v2, up to the root). The `limit_*` tests check that `HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT` caps that budget and never raises it, and that it makes the memory preflight skip. Pins at most about 3.3 GiB; no hipBLASLt kernels |
+| `maf_init_gtest.cpp` | `MafInitDevice_pre_checkin` | The `maf1_0` / `maf2_0` / `maf2_0_unit_scale` device fills on small buffers: sin/cos of the logical index with ld padding, batch strides and pointer-array batch indices, one rounding from double (BF16), interleaved batches all written, repeatable and distinct A/B/C/batch Gaussian streams, unit scale equal to `maf2_0` for non-block-scaled operands, and the 0.5 constant scale fill; no hipBLASLt kernels |
 | `cotenant_gtest.cpp` | `CotenantOptions`, `CotenantLds`, `CotenantScoped` | In-process cotenant helper (Linux only): option validation and LDS-reservation sizing (host-only), plus `Scoped` start/stop and argument-error cases that need a GPU and skip without one |
 | `unit/parser_gtest.cpp` | `HostUnitInitParser`, `HostUnitActivationParser`, `HostUnitBiasSourceParser`, `HostUnitComputeInputType`, `HostUnitBiasType` | The client's string parsers for initialization, activation and bias source, with round-trips through their `*_to_string` helpers; independent validation and defaulting of A and B compute-input types; bias-type validation only when bias is enabled |
 | `unit/scaling_format_gtest.cpp` | `HostUnitScalingFormat` | Scaling-format helpers, including the two independent paddings in scale-buffer sizing |
@@ -665,9 +666,10 @@ the C++ build and test.
 | Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
 | Logic corpus checks (`TensileLogic --check-all --strict-known-bugs`, `@needs_logic_corpus` tests) | Yes, when the logic or its validators are touched | Component team / CI | Enforced by the `Component CI: hipBLASLt Logic Corpus` lane, which rolls up to the required `Component CI Summary`. Unlike the build-wired call, it checks every architecture the change touches, and the whole corpus when a validator changes |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
+| CPU reference GEMM (`cpu-gemm-driver`, TensileLite C++ gtests) | Yes, in the selected standard tier | Component team | TheRock's TensileLite job runs the installed CTest suite and reports through `Multi-Arch CI Summary`. Math CI separately runs the build-tree cases for C++ coverage. AMAX-D uses thread limits 1, 3 and 8; see [CPU reference GEMM tests](tensilelite/TESTING.md#cpu-reference-gemm-tests) |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
-| AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests for relevant PRs, standard tests nightly, and the selected test type manually, but its summary check is not required. Keep it green anyway |
+| AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests for relevant PRs and pushes to `develop`, standard tests nightly, and the selected test type manually, but its summary check is not required. Keep it green anyway |
 | Code coverage floor and ratchet (TensileLite) | Yes, when `tensilelite/` is touched | Component team / CI | Enforced by the `Component CI: TensileLite coverage` lane, which rolls up to the required `Component CI Summary`. Floors move up only, on the honor system |
 | Formatting and lint (`pre-commit`) | Yes | CI / DevOps | Maintain hooks |
 | Sensitive-word scan (the Math CI job named `static-analysis`) | Yes | CI / DevOps | Gating, but it is a disclosure gate rather than code analysis |
@@ -708,9 +710,9 @@ tracked as a gap.
 
 **Informational.** Worth reading, cannot block a merge.
 
-- The hipBLASLt ASAN lane runs host-only ASAN quick tests on relevant pull requests, standard
-  tests nightly, and the selected test type manually. Multi-Arch CI ASAN (host-only ASAN on
-  gfx94X and gfx950) runs on every pull request. Neither is a required check
+- The hipBLASLt ASAN lane runs host-only ASAN quick tests on relevant pull requests and pushes
+  to `develop`, standard tests nightly, and the selected test type manually. Multi-Arch CI ASAN
+  (host-only ASAN on gfx94X and gfx950) runs on every pull request. Neither is a required check
 - The characterization-versus-unit coverage summary card
 - The `tensilelite-unit-codecov` and `codecov` checks and the codecov reports
 
@@ -904,7 +906,7 @@ the set of architectures the library supports or builds for.
 | Linux, gfx94X-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | Primary GitHub Actions test target. 6 shards |
 | Linux, gfx950-dcgpu | Full | PR (`standard`), nightly (`comprehensive`), via TheRock Multi-Arch CI | On the pull-request path since the TheRock pin of 2026-10-02. Also covered per PR by Math CI |
 | Linux, gfx90a | Partial | TheRock nightly | Per-PR client testing remains in Math CI |
-| Linux, gfx942 / gfx950 | Partial | PR (host-only ASAN, quick tier); nightly (standard tier); manual (selected tier); not a required check | Separate hipBLASLt and hipSPARSELt GPU jobs share one build per architecture |
+| Linux, gfx942 / gfx950 | Partial | Relevant PRs and pushes to `develop` (host-only ASAN, quick tier); nightly (standard tier); manual (selected tier); not a required check | Separate hipBLASLt and hipSPARSELt GPU jobs share one build per architecture |
 | Windows, gfx110X | Partial | PR, via TheRock Multi-Arch CI | 1 shard |
 | Windows, gfx1151 | Partial | Nightly | Forced to the quick tier regardless of requested tier, for memory reasons |
 | Linux, gfx950 (MI350) | Benchmarks only | Nightly, in the rocPTS lane outside this repository | Non-gating, and not surfaced on a pull request. See [Performance and Benchmarking Testing](#performance-and-benchmarking-testing) |
@@ -960,10 +962,11 @@ red sanitizer run does not block a merge.
 
 **What runs.** The `hipBLASLt ASAN CI` workflow
 ([`.github/workflows/hipblaslt-asan-ci.yml`](../../.github/workflows/hipblaslt-asan-ci.yml)) triggers
-on pull requests touching either library, either test driver, the suppression file, or the workflow,
+on pull requests and pushes to `develop` touching either library, either test driver, the
+suppression file, the workflow, or the shared CI environment,
 nightly at 07:00 UTC, and on manual dispatch.
 It builds through TheRock using its `linux-release-host-asan` preset directly for host-only
-ASAN, runs quick tests for relevant PRs, and runs standard tests
+ASAN, runs quick tests for relevant PRs and pushes to `develop`, and runs standard tests
 nightly on gfx942 and gfx950. Both architectures test hipBLASLt and hipSPARSELt.
 Manual dispatch accepts the test type as a workflow input.
 The selected type is passed to the test runners for every architecture.
@@ -974,7 +977,7 @@ manually dispatched runs.
 
 | Sanitizer | What it catches | Where it runs | Gating |
 | --- | --- | --- | --- |
-| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | `hipBLASLt ASAN CI` on gfx942/gfx950: quick tests on relevant PRs; standard tests nightly; manually selected test type | No. `hipBLASLt ASAN CI Summary` is not a required check |
+| **HOST_ASAN** (host-side AddressSanitizer) | Host-side heap and stack overflows, use-after-free, and leaks (via LeakSanitizer) in the library and client code | `hipBLASLt ASAN CI` on gfx942/gfx950: quick tests on relevant PRs and pushes to `develop`; standard tests nightly; manually selected test type | No. `hipBLASLt ASAN CI Summary` is not a required check |
 | **HOST_ASAN** | Same as the first row | Every PR, via Multi-Arch CI ASAN, gfx94X and gfx950 | No. `Multi-Arch CI ASAN Summary` is not a required check |
 | **Full ASAN** (host plus device instrumentation) | Adds device-side memory errors in kernels | Nightly Multi-Arch ASAN and manual dispatch, gfx94X and gfx950 | No |
 | **rocjitsu race detector** (CPU emulation) | GPU kernel races within one workgroup: register or LDS reads before the required `s_waitcnt` or `s_barrier`. Not races between workgroups through global memory | Nightly Multi-Arch sidecar, 100 fixed-seed GEMMs per emulated target (currently gfx950); see [Nightly Validation](#nightly-validation) | No |
