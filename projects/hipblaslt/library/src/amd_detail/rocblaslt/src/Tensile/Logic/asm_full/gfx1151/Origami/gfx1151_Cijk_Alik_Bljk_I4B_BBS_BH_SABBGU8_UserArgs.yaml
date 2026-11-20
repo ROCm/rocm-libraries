@@ -4811,7 +4811,7 @@ Solutions:
   LdsNumElementsAlignedMetadata: 0
   AssignedDerivedParameters: true
   _DepthU: 1024
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsPadB: 0
   ExpandPointerSwap: false
   ClusterLocalRead: 0
@@ -5032,7 +5032,7 @@ Solutions:
   LdsNumElementsAlignedMetadata: 0
   AssignedDerivedParameters: true
   _DepthU: 2048
-  CUOccupancy: 5
+  CUOccupancy: 20
   LdsPadB: 0
   ExpandPointerSwap: false
   ClusterLocalRead: 0
@@ -5253,7 +5253,7 @@ Solutions:
   LdsNumElementsAlignedMetadata: 0
   AssignedDerivedParameters: true
   _DepthU: 512
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsPadB: 0
   ExpandPointerSwap: false
   ClusterLocalRead: 0
@@ -5474,7 +5474,7 @@ Solutions:
   LdsNumElementsAlignedMetadata: 0
   AssignedDerivedParameters: true
   _DepthU: 512
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsPadB: 0
   ExpandPointerSwap: false
   ClusterLocalRead: 0
@@ -5695,7 +5695,7 @@ Solutions:
   LdsNumElementsAlignedMetadata: 0
   AssignedDerivedParameters: true
   _DepthU: 512
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsPadB: 0
   ExpandPointerSwap: false
   ClusterLocalRead: 0
@@ -5916,7 +5916,7 @@ Solutions:
   LdsNumElementsAlignedMetadata: 0
   AssignedDerivedParameters: true
   _DepthU: 512
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsPadB: 0
   ExpandPointerSwap: false
   ClusterLocalRead: 0
@@ -6137,7 +6137,7 @@ Solutions:
   LdsNumElementsAlignedMetadata: 0
   AssignedDerivedParameters: true
   _DepthU: 512
-  CUOccupancy: 10
+  CUOccupancy: 32
   LdsPadB: 0
   ExpandPointerSwap: false
   ClusterLocalRead: 0

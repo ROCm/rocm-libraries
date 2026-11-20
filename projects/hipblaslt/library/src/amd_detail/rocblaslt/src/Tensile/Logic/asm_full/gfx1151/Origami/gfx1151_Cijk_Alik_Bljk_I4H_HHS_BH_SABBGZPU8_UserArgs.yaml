@@ -4379,7 +4379,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 16
+  CUOccupancy: 32
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -4600,7 +4600,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 9
+  CUOccupancy: 32
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -4821,7 +4821,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 16
+  CUOccupancy: 32
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -5042,7 +5042,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 16
+  CUOccupancy: 32
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -5263,7 +5263,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 16
+  CUOccupancy: 32
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -5484,7 +5484,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 5
+  CUOccupancy: 20
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -5705,7 +5705,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 16
+  CUOccupancy: 32
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -5926,7 +5926,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 9
+  CUOccupancy: 32
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -6147,7 +6147,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 10
+  CUOccupancy: 32
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]
@@ -6368,7 +6368,7 @@ Solutions:
   GlobalReadPerMfma: 1.0
   NonDTLTailLoopA: false
   LdsOffsetB: 0
-  CUOccupancy: 5
+  CUOccupancy: 20
   UseGeneralizedNLCOneMXSA: false
   LdsPadMXSB: 0
   PackedC0IdxChars: [I]

@@ -4060,7 +4060,7 @@ Solutions:
   ThreadTileA: 1
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 5
+  CUOccupancy: 20
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -4281,7 +4281,7 @@ Solutions:
   ThreadTileA: 1
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 4
+  CUOccupancy: 16
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -4502,7 +4502,7 @@ Solutions:
   ThreadTileA: 1
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 4
+  CUOccupancy: 16
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -4723,7 +4723,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 12
+  CUOccupancy: 32
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -4944,7 +4944,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 16
+  CUOccupancy: 32
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -5165,7 +5165,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 12
+  CUOccupancy: 32
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -5386,7 +5386,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 10
+  CUOccupancy: 32
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false
@@ -5607,7 +5607,7 @@ Solutions:
   ThreadTileA: 2
   MinGRIncPerMfma: 1
   StoreSwapAddr: false
-  CUOccupancy: 8
+  CUOccupancy: 32
   _GlobalAccumulation: MultipleBuffer
   ExpertSchedulingMode: 0
   HalfPLRB: false

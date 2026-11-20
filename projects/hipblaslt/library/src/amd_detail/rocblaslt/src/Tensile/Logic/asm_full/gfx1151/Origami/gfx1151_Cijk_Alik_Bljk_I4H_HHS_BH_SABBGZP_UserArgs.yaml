@@ -4243,7 +4243,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -4464,7 +4464,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 9
+  CUOccupancy: 32
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -4685,7 +4685,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -4906,7 +4906,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -5127,7 +5127,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -5348,7 +5348,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 5
+  CUOccupancy: 20
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -5569,7 +5569,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -5790,7 +5790,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 9
+  CUOccupancy: 32
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -6011,7 +6011,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 10
+  CUOccupancy: 32
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0
@@ -6232,7 +6232,7 @@ Solutions:
   HalfPLRB: false
   DirectToLdsB: false
   NumLdsBlk: 2
-  CUOccupancy: 5
+  CUOccupancy: 20
   LdsInitCVgprs: false
   NonDTLTailLoopB: false
   NumElementsPerBatchStore: 0

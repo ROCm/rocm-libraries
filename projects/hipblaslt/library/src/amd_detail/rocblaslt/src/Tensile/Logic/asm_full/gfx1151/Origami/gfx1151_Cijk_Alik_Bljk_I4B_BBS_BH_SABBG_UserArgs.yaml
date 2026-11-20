@@ -4712,7 +4712,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 1
-  CUOccupancy: 16
+  CUOccupancy: 32
   NumGlobalWriteVectorsPerThread: 1
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -4933,7 +4933,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 3
-  CUOccupancy: 5
+  CUOccupancy: 20
   NumGlobalWriteVectorsPerThread: 3
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -5154,7 +5154,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 1
-  CUOccupancy: 16
+  CUOccupancy: 32
   NumGlobalWriteVectorsPerThread: 2
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -5375,7 +5375,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 2
-  CUOccupancy: 16
+  CUOccupancy: 32
   NumGlobalWriteVectorsPerThread: 4
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -5596,7 +5596,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 3
-  CUOccupancy: 16
+  CUOccupancy: 32
   NumGlobalWriteVectorsPerThread: 6
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -5817,7 +5817,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 4
-  CUOccupancy: 16
+  CUOccupancy: 32
   NumGlobalWriteVectorsPerThread: 8
   enableLDSTrMXSB: false
   UseDotInstruction: true
@@ -6038,7 +6038,7 @@ Solutions:
   LdsPadMXSB: 0
   LocalWritePerMfma: -1
   NumLoadsPerpendicularB: 5
-  CUOccupancy: 10
+  CUOccupancy: 32
   NumGlobalWriteVectorsPerThread: 10
   enableLDSTrMXSB: false
   UseDotInstruction: true

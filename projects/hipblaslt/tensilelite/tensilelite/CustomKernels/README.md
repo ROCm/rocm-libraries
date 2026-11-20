@@ -129,7 +129,9 @@ kernels get it computed from the resources their `.s` declares, and other
 kernels keep `-1`, which the host treats as 1. The gfx1151 and gfx1150 W4A16
 kernels declare the value TensileLite's gfx11 occupancy rule gives for the
 resources of their `.s` on that architecture (gfx1150 has a smaller VGPR file
-than gfx1151, so the same kernel has a lower occupancy there). Every logic
+than gfx1151, so the same kernel has a lower occupancy there). The value counts
+workgroups per WGP: the decode kernels are one-wave workgroups, of which a WGP
+holds four SIMDs' worth, and what caps them at 32 is the LDS they request. Every logic
 entry of a kernel must declare that value: `test_custom_kernel_occupancy.py`
 recomputes it with `OccupancyMeasure.compute_gfx11_occupancy_from_asm_source`.
 

@@ -339,6 +339,26 @@ class KernelWriterAssembly(KernelWriter):
   def getSgprOccupancy(self, sgprs):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
+  def wavesOfSmallWorkgroup(self, numThreads):
+    """Waves of a workgroup that has fewer of them than a gfx11 WGP has SIMDs (4), else 0.
+
+    Such a workgroup leaves SIMDs without any of its waves, so what one SIMD holds (its VGPR
+    and SGPR files, MaxWavesPerSimd) is not what the WGP holds: see workgroupsOfSmallWaves.
+    TODO: the other architectures (and gfx117x) still count these workgroups per SIMD.
+    """
+    version = tuple(self.states.version[:2])
+    if version[0] != 11 or version == (11, 7):
+      return 0
+    waves = int(ceil(numThreads / float(self.states.kernel["WavefrontSize"])))
+    return waves if waves < 4 else 0
+
+  @staticmethod
+  def workgroupsOfSmallWaves(wavesPerSimd, wavesPerWorkgroup):
+    """Workgroups of wavesPerWorkgroup (< 4) waves on a gfx11 WGP whose SIMDs hold wavesPerSimd
+    of their waves each, counted as hipModuleOccupancyMaxActiveBlocksPerMultiprocessor does:
+    per CU (2 SIMDs), for the 2 CUs of the WGP."""
+    return 2 * ((2 * wavesPerSimd) // wavesPerWorkgroup)
+
   def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
     version = tuple(self.states.version[:2])
     # TODO: gfx10, gfx117x and gfx1250 keep the legacy model until their occupancy is validated.
@@ -362,6 +382,13 @@ class KernelWriterAssembly(KernelWriter):
       # The per-SIMD VGPR file splits into 64 allocation blocks.
       vgprAllocateAligned = totalVgprs // 64
     vgprsAligned = int(ceil(vgprs/vgprAllocateAligned))*vgprAllocateAligned
+    smallWaves = self.wavesOfSmallWorkgroup(numThreads)
+    if smallWaves:
+      if vgprsAligned > totalVgprs: return 0
+      wavesPerSimd = self.states.archCaps["MaxWavesPerSimd"]
+      if vgprsAligned >= 1:
+        wavesPerSimd = min(totalVgprs//vgprsAligned, wavesPerSimd)
+      return self.workgroupsOfSmallWaves(wavesPerSimd, smallWaves)
     vgprsAligned *= wavesPerSimdPerWorkgroup
 
     if   vgprsAligned > totalVgprs:  return 0
@@ -389,6 +416,10 @@ class KernelWriterAssembly(KernelWriter):
       vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, ceil(vgprs/8)*8+accvgprs, doubleVgpr)
       accvgprLimitedOccupancy = vgprLimitedOccupancy
     sgprLimitedOccupancy = self.getSgprOccupancy(sgprs)
+    smallWaves = self.wavesOfSmallWorkgroup(numThreads)
+    if smallWaves:
+      # getSgprOccupancy counts the waves of one SIMD.
+      sgprLimitedOccupancy = self.workgroupsOfSmallWaves(sgprLimitedOccupancy, smallWaves)
 
     return min(ldsLimitedOccupancy, vgprLimitedOccupancy, accvgprLimitedOccupancy, sgprLimitedOccupancy)
 

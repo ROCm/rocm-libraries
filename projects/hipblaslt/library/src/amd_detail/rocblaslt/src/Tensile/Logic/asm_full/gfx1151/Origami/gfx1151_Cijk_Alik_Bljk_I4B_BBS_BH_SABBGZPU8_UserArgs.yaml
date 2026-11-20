@@ -3762,7 +3762,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 16
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false
@@ -3982,7 +3982,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 16
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -4202,7 +4202,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 16
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -4422,7 +4422,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 10
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false
@@ -4642,7 +4642,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 16
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -4862,7 +4862,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 9
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false
@@ -5082,7 +5082,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 10
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -5302,7 +5302,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 9
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false
@@ -5522,7 +5522,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 10
+  CUOccupancy: 32
   NoTailLoop: true
   _DepthUA: 512
   Multicast: false
@@ -5742,7 +5742,7 @@ Solutions:
   SubGroupA: 1
   NoLdsWriteCode: true
   TileProcessingStrategy: None
-  CUOccupancy: 5
+  CUOccupancy: 20
   NoTailLoop: true
   _DepthUA: 1024
   Multicast: false

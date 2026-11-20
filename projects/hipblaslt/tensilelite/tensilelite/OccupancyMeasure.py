@@ -172,8 +172,9 @@ def compute_gfx11_occupancy_from_asm_source(asm_source: str, isa, num_threads: O
 
     Mirrors KernelWriterAssembly.getOccupancy for gfx11 (not gfx117x): the per-SIMD VGPR file
     in wave32 registers (1536 on gfx1100/gfx1101/gfx1151, 1024 on the others, half for wave64)
-    split into 64 allocation blocks, a workgroup's waves spread over the 4 SIMDs of the WGP,
-    16 waves per SIMD, and the WGP's 128 KB LDS pool in 1 KB granules.  The logic entries of
+    split into 64 allocation blocks, a workgroup's waves spread over the 4 SIMDs of the WGP
+    (a workgroup of fewer than 4 waves takes that many of the WGP's wave slots), 16 waves per
+    SIMD, and the WGP's 128 KB LDS pool in 1 KB granules.  The logic entries of
     custom kernels declare this value (they skip code generation), so a test compares them.
 
     The workgroup size and the wavefront size default to the kernel's own metadata
@@ -198,7 +199,8 @@ def compute_gfx11_occupancy_from_asm_source(asm_source: str, isa, num_threads: O
     physical_vgpr = 1536 if isa in {(11, 0, 0), (11, 0, 1), (11, 5, 1)} else 1024
     if wavefront_size == 64:
         physical_vgpr //= 2
-    waves_per_simd = int(ceil(num_threads / float(wavefront_size * 4)))
+    waves          = int(ceil(num_threads / float(wavefront_size)))
+    waves_per_simd = int(ceil(waves / 4.0))
     max_workgroups = 16 // waves_per_simd
     block          = physical_vgpr // 64
     vgprs_aligned  = int(ceil(max(vgprs, 1) / block)) * block * waves_per_simd
@@ -206,4 +208,10 @@ def compute_gfx11_occupancy_from_asm_source(asm_source: str, isa, num_threads: O
     lds_pool, granule = 2 * 65536, 1024
     lds_occ = lds_pool // granule if lds == 0 else lds_pool // (min(lds + granule - 1, lds_pool) & ~(granule - 1))
     sgpr_occ = 1696 // max(sgprs, 1)
+    if waves < 4:
+        # Fewer waves than SIMDs: the register limits count the waves of one SIMD, and the
+        # workgroups are counted per CU (2 SIMDs) for the 2 CUs of the WGP
+        # (KernelWriterAssembly.workgroupsOfSmallWaves).
+        vgpr_occ = 2 * ((2 * vgpr_occ) // waves)
+        sgpr_occ = 2 * ((2 * sgpr_occ) // waves)
     return max(1, min(vgpr_occ, lds_occ, sgpr_occ))

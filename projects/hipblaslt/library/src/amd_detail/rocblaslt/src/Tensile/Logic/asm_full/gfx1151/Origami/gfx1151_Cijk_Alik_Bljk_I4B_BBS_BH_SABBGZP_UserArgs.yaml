@@ -3739,7 +3739,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -3959,7 +3959,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -4179,7 +4179,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -4399,7 +4399,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 10
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -4619,7 +4619,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 16
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -4839,7 +4839,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 9
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -5059,7 +5059,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 10
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -5279,7 +5279,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 9
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -5499,7 +5499,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 10
+  CUOccupancy: 32
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
@@ -5719,7 +5719,7 @@ Solutions:
   LdsNumElementsAlignedA: 0
   UnrollMajorLDSA: true
   LocalWriteUseSgprMetadata: false
-  CUOccupancy: 5
+  CUOccupancy: 20
   LdsBlockSizePerPadMXSB: 0
   ISA: [11, 5, 1]
   NoLdsWriteCode: true
