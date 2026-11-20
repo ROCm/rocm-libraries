@@ -29,7 +29,7 @@ pytestmark = pytest.mark.unit
 _PROBLEM_TYPE_KEYS = {
   "DestDataType", "ComputeDataType", "HighPrecisionAccumulate", "FusedA2A", "UseE", "Gradient",
   "UseGateResidual", "GroupedGemm", "UseBias", "UseScaleAlphaVec", "UseScaleAB", "UseScaleCD",
-  "ActivationType", "OutputAmaxD",
+  "ActivationType", "OutputAmaxD", "OutputPeerD",
 }
 
 
@@ -170,6 +170,7 @@ _STREAMK = {"TileProcessingStrategy": "StreamK", "GlobalSplitU": 0}
   ({"GlobalSplitU": 2}, "TDMStoreInst requires GlobalSplitU=1 or -1, or MultipleBufferSingleKernel"),
   ({"UseSubtileImpl": True}, "TDMStoreInst does not support UseSubtileImpl"),
   ({"FusedA2A": "GemmA2A"}, "TDMStoreInst does not support FusedA2A"),
+  ({"OutputPeerD": True}, "TDMStoreInst does not support OutputPeerD"),
 ])
 def test_rejects_unsupported(overrides, reason):
   assert tdmStoreRejectReason(_state(**overrides)) == reason
