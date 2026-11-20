@@ -17,6 +17,7 @@ import shutil
 import sys
 
 import pytest
+from rocke.tests.subprocess_launcher import rocke_python_command
 
 
 @pytest.fixture
@@ -231,7 +232,9 @@ def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(
     tools.mkdir()
     script = tests / "run_all.py"
     shutil.copy2(runner.TESTS / "run_all.py", script)
-    shutil.copy2(runner.TOOLS / "_hostcaps.py", tools / "_hostcaps.py")
+    # Standalone installs stage these helpers outside the source layout.
+    shutil.copy2(inspect.getfile(runner.available_cpus), tools / "_hostcaps.py")
+    launcher = inspect.getfile(rocke_python_command)
 
     for root, marker in (
         (selected, "SELECTED_GATE"),
@@ -245,10 +248,7 @@ def test_gemm_gpu_runner_keeps_selected_package_from_other_checkout(
             f"print({marker!r})\n", encoding="utf-8"
         )
         # Both checkouts can launch a gate, so a wrong import could exit green.
-        shutil.copy2(
-            runner.ROCKE / "python/rocke/tests/subprocess_launcher.py",
-            package / "tests" / "subprocess_launcher.py",
-        )
+        shutil.copy2(launcher, package / "tests" / "subprocess_launcher.py")
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     if python_path_roots:
