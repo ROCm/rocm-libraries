@@ -3071,6 +3071,25 @@ namespace
         return tensile;
     }
 
+    // Helper to compute spatial cluster blocks.
+    size_t computeSpatialClusterBlocks(const TensileLite::ContractionSolution&    solution,
+                                       const TensileLite::ContractionProblemGemm& tensile)
+    {
+        // Get physical tile dimensions
+        TensileLite::dim3 workGroupSize, tiles;
+        solution.calculateGrid(workGroupSize, tiles, tensile);
+
+        // Get cluster dimensions from solution
+        const auto& clusterDim = solution.sizeMapping.clusterDim;
+
+        // Compute spatial blocks: divide tiles by cluster dimensions
+        const size_t blocksX = (tiles.x + clusterDim.x - 1) / clusterDim.x;  // divideUp
+        const size_t blocksY = (tiles.y + clusterDim.y - 1) / clusterDim.y;  // divideUp
+        const size_t blocksZ = tiles.z;
+
+        return blocksX * blocksY * blocksZ;
+    }
+
     StreamKResolution resolveStreamK(const TensileLite::ContractionSolution&    solution,
                                      const TensileLite::ContractionProblemGemm& tensile,
                                      const TensileLite::Hardware&               hardware)
@@ -3087,15 +3106,21 @@ namespace
         out.staticPacking           = solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::StaticGrid
                                       || (solution.sizeMapping.workAssignment == TensileLite::WorkAssignment::Hybrid && !effectiveDynamic);
 
-        const origami::reduction_t reduction
+        const origami::reduction_t rawReduction
             = effectiveDynamic ? origami::reduction_t::tree
                                : solution.getSKReduction(tensile, hardware);
-        out.tree = reduction == origami::reduction_t::tree;
 
-        out.tiles = tensile.getNumTiles(solution.sizeMapping, 1);
-        out.itersPerTile
-            = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
-        out.grid = solution.getSKGrid(tensile, hardware, out.tiles, reduction);
+        // For PLAV2, the tile count for row-uniformity validation is the number
+        // of spatial blocks.
+        const bool usesSpatialCluster = solution.usesStreamKSpatialCluster();
+        const size_t physicalTiles = tensile.getNumTiles(solution.sizeMapping, 1);
+
+        out.tiles = usesSpatialCluster ? computeSpatialClusterBlocks(solution, tensile)
+                                       : physicalTiles;
+        out.itersPerTile = std::max(size_t{1}, tensile.getItersPerTile(solution.sizeMapping));
+
+        out.grid = solution.getSKGrid(tensile, hardware, out.tiles, rawReduction);
+        out.tree = rawReduction == origami::reduction_t::tree;
 
         if(!out.staticPacking || !out.tree || out.grid == 0)
             return out;
