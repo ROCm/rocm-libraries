@@ -1285,4 +1285,5 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                          // (gfx120140). 32 makes StaticFDBSync skip other CU
                                          // counts, such as the 56-CU part (28 WGP), instead of
                                          // failing on a missing file.
-                                         std::make_pair("gfx1201", 32)));
+                                         std::make_pair("gfx1201", 32),
+                                         std::make_pair("gfx1250", 256)));
