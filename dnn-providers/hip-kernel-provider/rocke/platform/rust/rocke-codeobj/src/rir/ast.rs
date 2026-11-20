@@ -1069,6 +1069,9 @@ pub struct Kernel {
     /// bits it keeps. `false` from the parsers; the compile driver sets its
     /// target's `TargetInfo::address_reduction`.
     pub address_reduction: bool,
+    /// Mutable global data may be communicated between waves. No pass may
+    /// classify a load of it as a read through the immutable scalar cache.
+    pub external_writes: bool,
     pub params: Vec<Param>,
     pub body: Region,
     pub values: Vec<ValueDef>,

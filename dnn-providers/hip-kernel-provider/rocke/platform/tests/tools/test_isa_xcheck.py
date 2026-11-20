@@ -134,10 +134,13 @@ def test_gfx1201_instructions_render_in_gfx12_syntax():
         text("BufLoadB32", ["v2x1"], ["v2x1", "s4x4", "i0"], imm=16)
         == "buffer_load_b32 v2, v2, s[4:7], null offen offset:16"
     )
-    assert (
-        text("GAtomicAddU32Rtn", ["v2x1"], ["v2x2", "v4x1"], mods=1 << 12)
-        == "global_atomic_add_u32 v2, v[2:3], v4, off th:TH_ATOMIC_RETURN"
-    )
+    # Discarding the old value changes the return hint, not the atomic's scope.
+    for name, defs in (("GAtomicAddU32", []), ("GAtomicAddU32Rtn", ["v2x1"])):
+        operands = text(
+            name, defs, ["v2x2", "v4x1"], mods=(1 << 12) if defs else 0
+        ).split()
+        assert "scope:SCOPE_SYS" in operands
+        assert ("th:TH_ATOMIC_RETURN" in operands) == bool(defs)
     # The VOP3 form of an instruction that gained a VOP2 one on gfx12.
     assert (
         text("VAddF64", ["v2x2"], ["v3x2", "v3x2"], words="d5020002,00020703")

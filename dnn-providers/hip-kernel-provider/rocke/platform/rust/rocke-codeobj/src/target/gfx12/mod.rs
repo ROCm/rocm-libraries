@@ -24,6 +24,7 @@
 //! encoding reference, offline.
 
 pub mod asm;
+pub mod fence;
 pub mod lanes;
 pub mod sgpr;
 
@@ -31,9 +32,8 @@ use crate::error::CompileError;
 use crate::rir::gen_isa::{lat, Lat};
 use crate::rir::mir::{Fmt, MFunc, MInst, Opc, Opnd, F_BRANCH, F_END, F_FENCE, F_LDS, F_SMEM, F_VMEM_LOAD, F_VMEM_STORE};
 
-/// The opcodes gfx12 has and gfx11 does not. `Opc::Gfx12` carries them; they
-/// are created after scheduling and allocation, so the gfx11 tables hold
-/// only pseudo facts for them.
+/// Instructions specific to gfx12. Explicit fence instructions can enter
+/// the MIR before scheduling; their ordering is carried by `F_FENCE`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Gfx12Op {
     /// `s_wait_loadcnt n`: at most `n` VMEM loads outstanding.
@@ -52,10 +52,13 @@ pub enum Gfx12Op {
     SBarrierWait,
     /// `s_wait_alu`: wait for the dependency counters whose field is 0.
     SWaitAlu,
+    /// Operandless cache controls; `imm` holds the ISA scope field.
+    GlobalInv,
+    GlobalWb,
 }
 
 impl Gfx12Op {
-    pub const ALL: [Gfx12Op; 8] = [
+    pub const ALL: [Gfx12Op; 10] = [
         Gfx12Op::SWaitLoadcnt,
         Gfx12Op::SWaitStorecnt,
         Gfx12Op::SWaitDscnt,
@@ -64,11 +67,14 @@ impl Gfx12Op {
         Gfx12Op::SBarrierSignal,
         Gfx12Op::SBarrierWait,
         Gfx12Op::SWaitAlu,
+        Gfx12Op::GlobalInv,
+        Gfx12Op::GlobalWb,
     ];
 
     pub fn fmt(self) -> Fmt {
         match self {
             Gfx12Op::SBarrierSignal => Fmt::Sop1,
+            Gfx12Op::GlobalInv | Gfx12Op::GlobalWb => Fmt::Global,
             _ => Fmt::Sopp,
         }
     }
@@ -84,6 +90,8 @@ impl Gfx12Op {
             Gfx12Op::SBarrierSignal => 0x4e,
             Gfx12Op::SBarrierWait => 0x14,
             Gfx12Op::SWaitAlu => 0x08,
+            Gfx12Op::GlobalInv => 0x2b,
+            Gfx12Op::GlobalWb => 0x2c,
         }
     }
 
@@ -97,12 +105,15 @@ impl Gfx12Op {
             Gfx12Op::SBarrierSignal => "s_barrier_signal",
             Gfx12Op::SBarrierWait => "s_barrier_wait",
             Gfx12Op::SWaitAlu => "s_wait_alu",
+            Gfx12Op::GlobalInv => "global_inv",
+            Gfx12Op::GlobalWb => "global_wb",
         }
     }
 
     pub fn flags(self) -> u32 {
         match self {
-            Gfx12Op::SBarrierSignal | Gfx12Op::SBarrierWait => F_FENCE,
+            Gfx12Op::SBarrierSignal | Gfx12Op::SBarrierWait | Gfx12Op::GlobalInv | Gfx12Op::GlobalWb
+            | Gfx12Op::SWaitStorecnt | Gfx12Op::SWaitLoadcntDscnt => F_FENCE,
             _ => 0,
         }
     }
@@ -111,9 +122,8 @@ impl Gfx12Op {
 /// Whether gfx12 removed the shared (gfx11) opcode `op`: the single wait
 /// word, the store wait, the one-instruction barrier, the cache
 /// invalidations and the always-false and always-true compares.
-/// `lower_sync` replaces the first three kinds; nothing lowers the
-/// invalidations yet, so instruction selection refuses the fences that need
-/// them.
+/// `lower_sync` replaces the first three kinds. gfx12 fences select their
+/// own scoped cache operations, never these legacy invalidations.
 pub fn removed(op: Opc) -> bool {
     match op {
         Opc::SWaitcnt

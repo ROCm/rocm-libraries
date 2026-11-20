@@ -1830,18 +1830,21 @@ impl<'a> Isel<'a> {
             // `tile.sync` waits for every counter, `sync_lds_only` for LDS
             // only and `s_barrier_bare` for nothing; a "workgroup" fence adds
             // the release and acquire fences around the barrier, as the LLVM
-            // lowering writes them. One wave needs neither.
+            // lowering writes them. Keep explicit gfx12 memory semantics
+            // even if the workgroup contains just one wave.
             Sync | SyncLdsOnly | BarrierBare => {
-                if !self.single_wave {
+                let barrier = match op.kind {
+                    Sync => Opc::SBarrier,
+                    SyncLdsOnly => Opc::SBarrierLds,
+                    _ => Opc::SBarrierBare,
+                };
+                if self.t.target.gfx12() && crate::target::gfx12::fence::workgroup_barrier(op) {
+                    crate::target::gfx12::fence::emit("workgroup", "acq_rel", Some(barrier), |i| self.emit(i))?;
+                } else if !self.single_wave {
                     let fenced = op.str_attr("fence") == Some("workgroup");
                     if fenced {
                         self.memory_fence("workgroup", false)?;
                     }
-                    let barrier = match op.kind {
-                        Sync => Opc::SBarrier,
-                        SyncLdsOnly => Opc::SBarrierLds,
-                        _ => Opc::SBarrierBare,
-                    };
                     self.emit(MInst::new(barrier, [], []));
                     if fenced {
                         self.memory_fence("workgroup", true)?;
@@ -2064,6 +2067,11 @@ impl<'a> Isel<'a> {
                 }
             }
             GAtomicAdd => self.atomic_add_op(op)?,
+            Fence if self.t.target.gfx12() => {
+                let scope = op.str_attr("scope").ok_or_else(|| unsupported("missing memref.fence scope"))?;
+                let order = op.str_attr("ordering").ok_or_else(|| unsupported("missing memref.fence ordering"))?;
+                crate::target::gfx12::fence::emit(scope, order, None, |i| self.emit(i))?;
+            }
             Fence => {
                 let scope = op.str_attr("scope").unwrap_or("agent");
                 let ordering = op.str_attr("ordering").unwrap_or("acq_rel");
@@ -3262,9 +3270,10 @@ impl<'a> Isel<'a> {
             return Ok(());
         }
         self.gfx11_only("memory fences")?;
-        // gfx12 has no `buffer_gl*_inv`; its `global_inv` is not lowered.
+        // The legacy pre/post-atomic fence path cannot supply a gfx12
+        // RMW's own cache policy. Standalone fences are selected separately.
         if self.t.target.gfx12() {
-            return Err(unsupported(format!("memory fences on {}", self.t.name)));
+            return Err(unsupported(format!("ordered global atomics on {}", self.t.name)));
         }
         let l1 = match scope {
             "agent" | "system" => true,
@@ -4601,7 +4610,8 @@ impl<'a> Isel<'a> {
             Type::Vec(e, n) => e.bytes() * n,
             other => other.elem().bytes(),
         };
-        if self.uni(v) {
+        let uniform_vmem = self.uni(v) && self.k.external_writes && op.bool_attr("invariant") != Some(true);
+        if self.uni(v) && !uniform_vmem {
             let (lo, hi) = self.d(op.operands[0])?;
             let dwords = bytes.div_ceil(4) as u8;
             let (opc, n) = match dwords {
@@ -4689,6 +4699,7 @@ impl<'a> Isel<'a> {
         let val = match ty {
             Type::Scalar(s) if s.is_half() => Val::H(r(dst), false),
             Type::Scalar(Scalar::I64 | Scalar::F64) | Type::Ptr(_) => Val::D(r(sub(dst, 0, 1)), r(sub(dst, 1, 1))),
+            Type::Scalar(Scalar::I32) if uniform_vmem => Val::W(self.to_s(r(dst))),
             Type::Scalar(_) => Val::W(r(dst)),
             _ => Val::T(dst),
         };

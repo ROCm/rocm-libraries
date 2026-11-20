@@ -1411,6 +1411,7 @@ fn compile_with(
     validate::kernel(&kernel, target)?;
     if target.gfx12() {
         crate::target::gfx12::lanes::check(&kernel)?;
+        kernel.external_writes = crate::target::gfx12::fence::check_kernel(&kernel)?;
     }
     let (mut lds, lds_size) = analysis::lds_layout(&kernel);
     validate::lds_pool(lds_size, target.info())?;

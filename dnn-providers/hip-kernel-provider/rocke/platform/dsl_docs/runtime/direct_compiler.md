@@ -90,8 +90,25 @@ supplies what gfx12 changed:
   per lane, and each changed object needs the on-silicon numeric check of
   [Comparing code objects](#comparing-code-objects) first.
 
-Not lowered on gfx1201: memory fences (gfx12 has no `buffer_gl0_inv` /
-`buffer_gl1_inv`), the integer WMMA atoms, and the always-false and always-true
+Both gfx12 targets use the WGP-mode [LLVM GFX12 memory model](https://llvm.org/docs/AMDGPUUsage.html#amdgpu-amdhsa-memory-model-gfx12).
+For `memref.fence`, `workgroup`, `agent` and `system` map to `SCOPE_SE`,
+`SCOPE_DEV` and `SCOPE_SYS`. Every admitted fence drains outstanding global
+loads, stores and LDS accesses. A `release` at system scope first issues
+`global_wb scope:SCOPE_SYS` (completed by the store wait); an `acquire`
+ends with `global_inv` at its scope. `acq_rel` and `seq_cst` standalone
+fences use both sides, as in LLVM. Other orderings or scopes are refused.
+A workgroup-fenced sync places its rendezvous between release and acquire;
+a plain or compiler-fenced barrier does not imply a cache invalidate.
+Mutable global data in a fenced kernel is read via VMEM, not the scalar
+cache. The monotonic i32 `memref.global_atomic_add` used to publish data
+has LLVM's default system scope (`SCOPE_SYS`), with `TH_ATOMIC_RETURN` only
+if its old value is used. A surrounding agent fence does **not** narrow it.
+Ordered global RMWs, explicit flag operations and fenced kernels using
+floating-point global RMWs remain refused: their access policies are not
+established by a standalone fence sequence. System scope does not turn
+device-local memory into a CPU- or peer-coherent allocation.
+
+Also not lowered on gfx1201: the integer WMMA atoms and the always-false and always-true
 compares, which gfx12 dropped. A kernel written for a 64-lane wave is refused
 where its IR says so: a `tile.ds_bpermute` whose source lane is
 `tile.lane_id()` combined (`^`, `+` or `|`) with a constant that puts it at or
