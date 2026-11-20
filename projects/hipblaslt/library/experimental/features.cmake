@@ -14,15 +14,6 @@ set(HIPBLASLT_EXPERIMENTAL_MAX_RELEASES 4)
 # At most this many features may be experimental at once.
 set(HIPBLASLT_EXPERIMENTAL_MAX_FEATURES 3)
 
-# SPIKE ONLY: a trivial feature that exercises the deadline and revision-bump checks.
-hipblaslt_experimental_feature(DEMO
-    HEADER       hipblaslt-experimental-demo.h
-    OWNER        "@talumbau"
-    TRACKING     "https://github.com/ROCm/rocm-libraries/pull/14065"
-    INTRODUCED   10.3
-    LAST_RELEASE 11.0
-)
-
 # hipblaslt_experimental::PartitionedGemm: one GEMM run as slices on the partitions of a
 # partitioned GPU (DPX), one stream per partition.
 hipblaslt_experimental_feature(PARTITIONED_GEMM

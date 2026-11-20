@@ -21,6 +21,7 @@ on:
       - "projects/hipblaslt/tools/scripts/check_experimental_api.py"
       - "projects/hipblaslt/tools/scripts/tests/test_check_experimental_api.py"
       - "projects/hipblaslt/tools/scripts/tests/test_experimental_registry.py"
+      - "projects/hipblaslt/tools/scripts/tests/data/**"
       - "projects/hipblaslt/CMakeLists.txt"
       - ".github/workflows/hipblaslt-experimental-api.yml"
   workflow_dispatch:

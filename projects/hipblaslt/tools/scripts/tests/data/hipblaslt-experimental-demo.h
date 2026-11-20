@@ -2,10 +2,10 @@
 // SPDX-License-Identifier: MIT
 
 /*! \file
- *  \brief Experimental feature DEMO (spike only): a trivial API that exercises the
- *  experimental-API deadline and revision-bump checks. Not for real use.
+ *  \brief Test fixture, not part of hipBLASLt: a trivial C feature, DEMO, that the tests of
+ *  tools/scripts/check_experimental_api.py copy into a scratch tree and edit.
  *
- *  Contract tests: clients/tests/src/experimental/contract_demo_gtest.cpp.
+ *  Its contract tests are the fixture contract_demo_gtest.cpp next to this file.
  */
 
 #pragma once

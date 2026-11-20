@@ -5,7 +5,8 @@
 """Tests for check_experimental_api.py: does a change need a feature revision bump?
 
 Each test copies the real experimental headers and contract tests into a "base" and a
-"head" tree, edits the head the way a PR would, and checks the verdict.
+"head" tree, edits the head the way a PR would, and checks the verdict. The trees also get the
+fixture feature DEMO from data/, a small C feature that exercises the C rules.
 
 Pure standard library, so it runs in any Python env:
     python3 -m pytest tools/scripts/tests/test_check_experimental_api.py
@@ -24,6 +25,7 @@ sys.path.insert(0, str(_SCRIPTS))
 import check_experimental_api as cea
 
 _REAL_ROOT = cea.PROJECT_ROOT
+_FIXTURES = Path(__file__).resolve().parent / "data"
 _DEMO_HEADER = f"{cea.HEADER_DIR}/hipblaslt-experimental-demo.h"
 _DEMO_CONTRACT = f"{cea.CONTRACT_DIR}/contract_demo_gtest.cpp"
 _DEMO_FUNC = "HIPBLASLT_EXPORT\nhipblasStatus_t hipblasLtExperimentalDemoAlignSize"
@@ -40,6 +42,9 @@ def _copy_tree(dst: Path) -> Path:
     for rel in files:
         (dst / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(_REAL_ROOT / rel, dst / rel)
+    for rel in (_DEMO_HEADER, _DEMO_CONTRACT):
+        (dst / rel).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(_FIXTURES / Path(rel).name, dst / rel)
     return dst
 
 
@@ -97,11 +102,18 @@ def test_identical_trees_pass(trees):
 def test_real_headers_parse_cleanly():
     surface = cea.load_surface(cea.DirTree(_REAL_ROOT))
     assert surface.errors == []
-    assert surface.revisions == {"DEMO": 1, "PARTITIONED_GEMM": 1}
+    assert surface.revisions == {"PARTITIONED_GEMM": 1}
     assert surface.high_water is not None
     assert surface.decls["function hipblasLtExperimentalGetFeatureRevision"][0] == cea.CORE
-    assert surface.decls["function hipblasLtExperimentalDemoAlignSize"][0] == "DEMO"
     assert "macro HIPBLASLT_EXPERIMENTAL_ENUM_BIT" in surface.decls
+
+
+def test_fixture_feature_parses_cleanly(trees):
+    surface = cea.load_surface(cea.DirTree(trees[0]))
+    assert surface.errors == []
+    assert surface.revisions == {"DEMO": 1, "PARTITIONED_GEMM": 1}
+    assert surface.decls["function hipblasLtExperimentalDemoAlignSize"][0] == "DEMO"
+    assert surface.contracts[_DEMO_CONTRACT][0] == "DEMO"
 
 
 def test_feature_names_from_paths():
@@ -399,7 +411,7 @@ _PG = "hipblaslt_experimental::PartitionedGemm"
 _PG_COUNT = "        HIPBLASLT_EXPORT size_t getPartitionCount() const;\n"
 _PG_WORKSPACE = "HIPBLASLT_EXPORT void setMaxWorkspaceBytes(size_t workspaceBytes);"
 _PG_PIMPL = "        std::unique_ptr<PartitionedGemmImpl> pimpl;\n"
-_PG_BATCH = "        Batch = 4,"
+_PG_BATCH = "        Batch = 2,"
 
 
 def _bump_pg(root: Path) -> None:
@@ -423,7 +435,7 @@ def test_cpp_header_declarations():
     assert len(runs) == 2
     assert f"method {_PG}::initialize(const hipblasLtMatmulAlgo_t&,const std::vector<void*>&,bool,"\
            "const std::vector<hipStream_t>&)" in decls
-    assert surface.enums["enumerator hipblaslt_experimental::SplitDim::Batch"] == 4
+    assert surface.enums["enumerator hipblaslt_experimental::SplitDim::Batch"] == 2
     # Private members are layout, not API.
     assert not any("PartitionedGemmImpl" in k for k in decls if not k.startswith("class "))
     assert "pimpl" in surface.decls[f"class {_PG}"][1]
@@ -504,7 +516,7 @@ def test_cpp_private_method_is_not_api(trees):
 
 def test_cpp_scoped_enum_value_is_never_changed(trees):
     base, head = trees
-    _edit(head, _PG_HEADER, _PG_BATCH, "        Batch = 5,")
+    _edit(head, _PG_HEADER, _PG_BATCH, "        Batch = 3,")
     _raise_high_water(head)
     _bump_pg(head)
     report = _check(base, head)

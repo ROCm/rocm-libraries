@@ -11,20 +11,12 @@
 //
 // The feature is supported on gfx1250 only, so every CI lane checks part of the contract: on
 // gfx1250 the tests of its behavior run, and on any other architecture NotSupportedOffGfx1250
-// checks that setProblem refuses. The revision check runs everywhere.
+// checks that setProblem refuses.
 
 #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
 #include "contract_partitioned_gemm_helpers.hpp"
 
 using namespace partitioned_gemm_test;
-
-TEST(pre_checkin_partitioned_gemm_contract, RuntimeRevisionMatchesHeader)
-{
-    // In-tree tests track the current revision; consumers compare against the literal revision
-    // they wrote their code for.
-    EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM"),
-              HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM);
-}
 
 TEST(pre_checkin_partitioned_gemm_contract, PartitionCountAndSliceRule)
 {

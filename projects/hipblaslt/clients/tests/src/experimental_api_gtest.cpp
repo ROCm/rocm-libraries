@@ -20,13 +20,14 @@ namespace
     {
         // In-tree tests always track the current revision; consumers compare against the
         // literal revision they wrote their code for.
-        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("DEMO"), HIPBLASLT_EXPERIMENTAL_DEMO);
+        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM"),
+                  HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM);
     }
 
     TEST(ExperimentalApiSmoke, UnknownFeatureHasRevisionZero)
     {
         EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("NO_SUCH_FEATURE"), 0);
-        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("demo"), 0);
+        EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision("partitioned_gemm"), 0);
         EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision(""), 0);
         EXPECT_EQ(hipblasLtExperimentalGetFeatureRevision(nullptr), 0);
     }

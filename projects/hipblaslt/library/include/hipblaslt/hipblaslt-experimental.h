@@ -18,12 +18,12 @@
  *  loaded library with hipblasLtExperimentalGetFeatureRevision(); on a
  *  mismatch, either fall back to the stable API or fail:
  *
- *  \code{.c}
+ *  \code{.cpp}
  *  #define ROCM_ENABLE_EXPERIMENTAL_APIS 1
  *  #include <hipblaslt/hipblaslt-experimental.h>
  *
- *  #if defined(HIPBLASLT_EXPERIMENTAL_DEMO) && HIPBLASLT_EXPERIMENTAL_DEMO == 1
- *      if(hipblasLtExperimentalGetFeatureRevision("DEMO") == 1) { ... }
+ *  #if defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) && HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM == 1
+ *      if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") == 1) { ... }
  *      else { ... fallback ... }
  *  #else
  *      ... fallback ...
@@ -68,7 +68,7 @@
  *  the mark is raised to match. It never goes down.
  *  tools/scripts/check_experimental_api.py enforces this.
  */
-#define HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER 4
+#define HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER 2
 
 #ifdef __cplusplus
 extern "C" {
@@ -85,7 +85,7 @@ extern "C" {
  *
  *  This function never changes and is never removed.
  *
- *  @param[in] feature The feature name without the prefix, for example "DEMO".
+ *  @param[in] feature The feature name without the prefix, for example "PARTITIONED_GEMM".
  *
  *  @retval int The feature's revision, or 0 if the library does not have the
  *  feature or \p feature is null.

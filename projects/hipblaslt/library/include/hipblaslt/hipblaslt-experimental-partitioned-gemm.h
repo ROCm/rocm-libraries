@@ -47,14 +47,14 @@ namespace hipblaslt_experimental
      * strides) to multiples of 256 bytes: that is enough for ``N`` and ``Batch``; for ``M``
      * also make ``M`` a multiple of ``parts * 256 / element size``.
      *
-     *  The values are above HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER as it stood when the
-     * feature was added: experimental enumerator values are never reused.
+     *  Experimental enumerator values are never reused (see
+     * HIPBLASLT_EXPERIMENTAL_ENUM_HIGH_WATER).
      */
     enum class SplitDim
     {
-        M     = 2, //!< Split rows of op(A), C and D.
-        N     = 3, //!< Split columns of op(B), C and D.
-        Batch = 4, //!< Split the batch: whole matrices, a range of batches per partition.
+        M     = 0, //!< Split rows of op(A), C and D.
+        N     = 1, //!< Split columns of op(B), C and D.
+        Batch = 2, //!< Split the batch: whole matrices, a range of batches per partition.
     };
 
     /*! \ingroup experimental_module

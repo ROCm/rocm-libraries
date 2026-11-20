@@ -61,10 +61,10 @@ that the loaded library implements the revision you compiled against.
 0 if it doesn't have the feature. Code that uses a feature should check both and fall back when
 either doesn't match:
 
-.. code-block:: c
+.. code-block:: cpp
 
-   #if defined(HIPBLASLT_EXPERIMENTAL_DEMO) && HIPBLASLT_EXPERIMENTAL_DEMO == 1
-       if(hipblasLtExperimentalGetFeatureRevision("DEMO") == 1)
+   #if defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) && HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM == 1
+       if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") == 1)
        {
            /* Use the experimental feature. */
        }
@@ -81,7 +81,7 @@ Experimental enumerators
 ========================
 
 Experimental values of stable enum types, such as new epilogues or matmul descriptor attributes,
-are declared in ``hipblaslt-experimental.h`` with ``HIPBLASLT_EXPERIMENTAL_ENUM_BIT`` set. They are
+are declared in their feature's header with ``HIPBLASLT_EXPERIMENTAL_ENUM_BIT`` set. They are
 passed to the existing stable functions, for example ``hipblasLtMatmulDescSetAttribute``. When an
 experimental enumerator graduates, it is assigned a new value in the stable enum.
 
@@ -178,14 +178,6 @@ Experimental API reference
 hipblasLtExperimentalGetFeatureRevision()
 -----------------------------------------
 .. doxygenfunction:: hipblasLtExperimentalGetFeatureRevision
-
-Experimental feature DEMO
--------------------------
-.. doxygendefine:: HIPBLASLT_EXPERIMENTAL_DEMO
-
-.. doxygenfunction:: hipblasLtExperimentalDemoAlignSize
-
-.. doxygenenum:: hipblasLtExperimentalDemoRounding_t
 
 Experimental feature PARTITIONED_GEMM
 -------------------------------------
