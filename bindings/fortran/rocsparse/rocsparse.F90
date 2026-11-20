@@ -9750,25 +9750,6 @@ module rocsparse
   end interface
 
   interface
-    function rocsparse_spmat_scale_(handle,alpha,source,target,p_error) &
-        bind(c, name="rocsparse_spmat_scale")
-      import
-      implicit none
-      integer(c_int) :: rocsparse_spmat_scale_
-      type(c_ptr),value :: handle
-      type(c_ptr),value :: alpha
-      type(c_ptr),value :: source
-      type(c_ptr),value :: target
-      type(c_ptr),value :: p_error
-    end function
-  end interface
-
-  interface rocsparse_spmat_scale
-
-    module procedure rocsparse_spmat_scale_opt
-  end interface
-
-  interface
     function rocsparse_spildlt0_buffer_size_(handle,spildlt0_descr,A,P,spildlt0_stage, &
         p_buffer_size_in_bytes,p_error) &
         bind(c, name="rocsparse_spildlt0_buffer_size")
@@ -9886,6 +9867,25 @@ module rocsparse
     end function
 
     module procedure rocsparse_spitsv_typed
+  end interface
+
+  interface
+    function rocsparse_spmat_scale_(handle,alpha,source,target,p_error) &
+        bind(c, name="rocsparse_spmat_scale")
+      import
+      implicit none
+      integer(c_int) :: rocsparse_spmat_scale_
+      type(c_ptr),value :: handle
+      type(c_ptr),value :: alpha
+      type(c_ptr),value :: source
+      type(c_ptr),value :: target
+      type(c_ptr),value :: p_error
+    end function
+  end interface
+
+  interface rocsparse_spmat_scale
+
+    module procedure rocsparse_spmat_scale_opt
   end interface
 
   interface rocsparse_spmm
@@ -25220,21 +25220,6 @@ module rocsparse
         buffer_size_in_bytes,buffer,p_error__p)
     end function
 
-    function rocsparse_spmat_scale_opt(handle,alpha,source,target,p_error)
-      implicit none
-      integer(kind(rocsparse_status_success)) :: rocsparse_spmat_scale_opt
-      type(c_ptr), value :: handle
-      type(c_ptr), value :: alpha
-      type(c_ptr), value :: source
-      type(c_ptr), value :: target
-      type(c_ptr),optional,target :: p_error
-      type(c_ptr) :: p_error__p
-      !
-      p_error__p = c_null_ptr
-      if (present(p_error)) p_error__p = c_loc(p_error)
-      rocsparse_spmat_scale_opt = rocsparse_spmat_scale_(handle,alpha,source,target,p_error__p)
-    end function
-
     function rocsparse_spildlt0_buffer_size_opt(handle,spildlt0_descr,A,P,spildlt0_stage, &
         p_buffer_size_in_bytes,p_error)
       implicit none
@@ -25375,6 +25360,21 @@ module rocsparse
       if (present(buffer_size)) buffer_size__p = c_loc(buffer_size)
       rocsparse_spitsv_typed = rocsparse_spitsv_(handle,c_loc(host_nmaxiter),host_tol, &
         host_history,trans,alpha,mat,x,y,compute_type,alg,stage,buffer_size__p,temp_buffer)
+    end function
+
+    function rocsparse_spmat_scale_opt(handle,alpha,source,target,p_error)
+      implicit none
+      integer(kind(rocsparse_status_success)) :: rocsparse_spmat_scale_opt
+      type(c_ptr), value :: handle
+      type(c_ptr), value :: alpha
+      type(c_ptr), value :: source
+      type(c_ptr), value :: target
+      type(c_ptr),optional,target :: p_error
+      type(c_ptr) :: p_error__p
+      !
+      p_error__p = c_null_ptr
+      if (present(p_error)) p_error__p = c_loc(p_error)
+      rocsparse_spmat_scale_opt = rocsparse_spmat_scale_(handle,alpha,source,target,p_error__p)
     end function
 
     function rocsparse_spmm_typed(handle,trans_A,trans_B,alpha,mat_A,mat_B,beta,mat_C, &
