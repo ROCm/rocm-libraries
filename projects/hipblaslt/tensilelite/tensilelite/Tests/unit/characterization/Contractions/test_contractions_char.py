@@ -94,7 +94,8 @@ def test_internal_args_support_does_not_duplicate_alpha_capability(solution_stat
     serialized = state(C.InternalArgsSupport.FromOriginalState(source))
     assert set(serialized) == {
         "version", "persistentLoopArgsVersion", "gsu", "wgm", "staggerU",
-        "perTileExtraIters", "arrivalFixup", "useUniversalArgs", "useSFC",
+        "perTileExtraIters", "arrivalFixup", "dynamicParallel", "useUniversalArgs",
+        "useSFC",
     }
     problem = C.ProblemType.FromOriginalState(source["ProblemType"])
     assert problem.useScaleAlphaVec == mode
