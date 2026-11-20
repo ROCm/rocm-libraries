@@ -138,9 +138,6 @@ namespace rocalution
                                 LocalVector<int>*   trans)
             = 0;
 
-        /** \brief Moves op to the backend of src, keeping the parallel manager of op */
-        void MoveToBackendOf_(OperatorType* op, const OperatorType& src) const;
-
         /** \brief Maximal coarse grid size */
         int coarse_size_;
 

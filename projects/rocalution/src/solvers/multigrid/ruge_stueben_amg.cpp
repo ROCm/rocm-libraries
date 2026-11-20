@@ -24,6 +24,7 @@
 #include "ruge_stueben_amg.hpp"
 #include "../../utils/def.hpp"
 
+#include "../../base/backend_placement.hpp"
 #include "../../base/global_matrix.hpp"
 #include "../../base/global_vector.hpp"
 #include "../../base/local_matrix.hpp"
@@ -252,13 +253,13 @@ namespace rocalution
         // Create coarse operator, on the backend of the finest operator
         this->op_level_[0]->Clear();
         this->op_level_[0]->ConvertToCSR();
-        this->op_level_[0]->CloneBackend(*this->op_);
+        BackendPlacement::MoveToBackendOf(*this->op_level_[0], *this->op_);
 
         // If all coarse levels are on the host, move the transfer operators for the product
         if(this->host_level_ == this->levels_ - 1)
         {
-            this->MoveToBackendOf_(this->restrict_op_level_[0], *this->op_);
-            this->MoveToBackendOf_(this->prolong_op_level_[0], *this->op_);
+            BackendPlacement::MoveToBackendOf(*this->restrict_op_level_[0], *this->op_);
+            BackendPlacement::MoveToBackendOf(*this->prolong_op_level_[0], *this->op_);
         }
 
         if(this->op_->GetFormat() != CSR)
@@ -291,7 +292,7 @@ namespace rocalution
             // Create coarse operator, on the backend of its transfer operators
             this->op_level_[i]->Clear();
             this->op_level_[i]->ConvertToCSR();
-            this->MoveToBackendOf_(this->op_level_[i], *this->restrict_op_level_[i]);
+            BackendPlacement::MoveToBackendOf(*this->op_level_[i], *this->restrict_op_level_[i]);
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
@@ -303,7 +304,8 @@ namespace rocalution
 
             if(i == this->levels_ - this->host_level_ - 1)
             {
-                this->MoveToBackendOf_(this->op_level_[i - 1], *this->restrict_op_level_[i - 1]);
+                BackendPlacement::MoveToBackendOf(*this->op_level_[i - 1],
+                                                  *this->restrict_op_level_[i - 1]);
             }
         }
 

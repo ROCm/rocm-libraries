@@ -36,8 +36,7 @@ namespace rocalution
     class GlobalVector;
     template <typename ValueType>
     class GlobalMatrix;
-    template <class OperatorType, class VectorType, typename ValueType>
-    class BaseAMG;
+    class BackendPlacement;
     class ParallelManager;
 
     /** \private */
@@ -184,8 +183,7 @@ namespace rocalution
         friend class GlobalMatrix<float>;
         friend class GlobalMatrix<double>;
 
-        template <class OperatorType, class VectorType, typename ValueType2>
-        friend class BaseAMG;
+        friend class BackendPlacement;
     };
 
 } // namespace rocalution
