@@ -106,6 +106,12 @@ WaitReconstruction waitReconstruction(const StinkyInstruction& inst);
 /// the answer is a full drain. Never derive a wait from a queue index directly.
 int waitToDrain(CounterKind c, int countFrom);
 
+/// Drains already proved by an `s_wait_*` in the input stream: true when `inst` IS a wait, with
+/// `counts[c]` the immediate it drains.  The counter comes from the OPCODE and the value from the
+/// literal operand, because `legalizeWaitCnt` attaches the whole pre-split spec to the last member
+/// of a split group and none to the others.
+bool observedWaitDrains(const StinkyInstruction& inst, int counts[CK_Count]);
+
 /// One queue of in-flight memops on a given counter, tagged by the CFG
 /// predecessor it was seeded from. For an op OP, the wait value is
 /// waitToDrain(counter, countFrom(OP)). Ops older than the bounded tail are
