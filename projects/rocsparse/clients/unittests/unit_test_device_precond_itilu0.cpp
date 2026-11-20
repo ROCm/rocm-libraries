@@ -1200,6 +1200,40 @@ TEST_F(PrecondItilu0, stopping_criterion_with_unreachable_tolerance)
     }
 }
 
+// A diverging iteration is reported. The residual indicator of a sweep is the residual
+// norm divided by ||A||_inf; with every stored value of A zero that norm is 0, and the
+// residual of a sweep that starts from a finite, non-zero iterate is finite and non-zero,
+// so the indicator of the first sweep is +inf (not NaN: nothing in the input is NaN).
+// With the stopping criteria on, every driver must return rocsparse_status_zero_pivot
+// after that sweep and report nmaxiter == 1, rather than run every sweep and return
+// success. The starting iterate is set before each compute: the library reads L_0 and
+// U_0 from `ilu0`, and from a zero start the all-zero input would converge at once.
+TEST_F(PrecondItilu0, all_zero_matrix_reports_divergence_after_one_sweep)
+{
+    for(const auto alg : algorithms)
+    {
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            SCOPED_TRACE("alg " + std::to_string(alg));
+            const auto    start = make_band_matrix<T>(6, 1); // tridiagonal, finite, non-zero
+            csr_matrix<T> zero  = start;
+            std::fill(zero.val.begin(), zero.val.end(), make_value<T>(0.0));
+            for(const rocsparse_int options :
+                {stopping | nrm_residual, stopping | nrm_residual | nrm_correction})
+            {
+                SCOPED_TRACE("options " + std::to_string(options));
+                itilu0_run<T> r;
+                r.prepare(handle, alg, zero, options, 10);
+                upload(r.dilu, start.val);
+                ASSERT_TRUE(r.dilu.ptr);
+                const auto out = r.compute(handle, real_of<T>(1.0e-8));
+                EXPECT_EQ(out.compute_status, rocsparse_status_zero_pivot);
+                EXPECT_EQ(out.nmaxiter, 1);
+            }
+        });
+    }
+}
+
 // The history can only be queried if the history option was given to the compute
 // call.
 TEST_F(PrecondItilu0, history_without_the_history_option)
