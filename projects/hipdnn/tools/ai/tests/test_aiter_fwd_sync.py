@@ -335,7 +335,7 @@ def of_kind(report: Path, kind: str, key: str = KEY) -> list[dict]:
 
 
 def pin(kernels: Path, key: str = KEY) -> dict:
-    return json.loads((kernels / "aiter_fwd_pins.json").read_text())["modules"][key]
+    return json.loads((kernels / "aiter_pins.json").read_text())["modules"][key]
 
 
 def test_round_trip_keeps_the_vendored_subset_and_verifies(sync, env, capsys):
@@ -716,7 +716,7 @@ def test_host_code_change_names_the_archs_the_plan_leaves_alone(
     # gfx942 already mirrors the target's host code: nothing reaches it.
     plan(sync, env, "v0.2.0", "--baseline", base, arch="gfx942")
     apply(sync, env)
-    pins_path = kernels / "aiter_fwd_pins.json"
+    pins_path = kernels / "aiter_pins.json"
     pins = json.loads(pins_path.read_text())
     pins["modules"][KEY]["abi_commit"] = target
     pins_path.write_text(json.dumps(pins))
@@ -775,7 +775,7 @@ def test_new_arch_diffs_from_the_merge_base_of_linear_host_code_commits(sync, en
         MHA_FWD_H.replace("p2 _p0;", "p2 _p0;\n    int nsplit;"),
     )
     second = aiter.commit("v0.2.0", date="2030-01-01T00:00:00")
-    pins_path = kernels / "aiter_fwd_pins.json"
+    pins_path = kernels / "aiter_pins.json"
     pins = json.loads(pins_path.read_text())
     assert pins["modules"][KEY]["abi_commit"] == first
     pins["modules"]["gfx950/fmha_v3_fwd"]["abi_commit"] = second
@@ -813,7 +813,7 @@ def test_new_arch_diffs_from_the_merge_base_of_diverging_host_code_commits(sync,
         )
         recorded.append(aiter.commit(f"v0.1.1-{branch}"))
     git(aiter.root, "checkout", "-q", "main")
-    pins_path = kernels / "aiter_fwd_pins.json"
+    pins_path = kernels / "aiter_pins.json"
     pins = json.loads(pins_path.read_text())
     pins["modules"][KEY]["abi_commit"] = recorded[0]
     pins["modules"]["gfx950/fmha_v3_fwd"]["abi_commit"] = recorded[1]
@@ -834,7 +834,7 @@ def test_host_code_baseline_precedence(sync, env):
     shipped = aiter.commit("v0.1.1")
     plan(sync, env, "v0.1.1", arch="gfx942,gfx950")
     apply(sync, env)
-    pins_path = kernels / "aiter_fwd_pins.json"
+    pins_path = kernels / "aiter_pins.json"
     pins = json.loads(pins_path.read_text())
     assert pins["modules"][KEY]["abi_commit"] is None
     # Another module, pinned at another commit, shares no host code with these.
@@ -940,16 +940,41 @@ def test_apply_refuses_a_tree_changed_since_the_plan(sync, env, capsys):
     assert "changed since the plan" in capsys.readouterr().err
 
 
-def test_apply_never_writes_outside_tracked_forward_modules(sync, env, capsys):
+def test_apply_never_writes_outside_tracked_modules(sync, env, capsys):
     aiter, tree, kernels, cache, report = env
     base_upstream(aiter)
     plan(sync, env, "v0.1.0")
     doctored = json.loads(report.read_text())
-    doctored["modules"]["gfx942/fmha_v3_bwd"] = doctored["modules"].pop(KEY)
+    doctored["modules"]["gfx942/fmha_v4_fwd"] = doctored["modules"].pop(KEY)
     report.write_text(json.dumps(doctored))
     assert apply(sync, env) == 2
-    assert "not a tracked forward ASM module" in capsys.readouterr().err
+    assert "not a tracked ASM module" in capsys.readouterr().err
     assert not (kernels / "gfx942").exists()
+
+
+def test_apply_with_an_untracked_pin_rewrites_nothing(sync, env, capsys):
+    """A pin naming a module this tool does not write fails apply before any
+    module file is rewritten, so the tree still matches its pin."""
+    aiter, tree, kernels, cache, report = env
+    base_upstream(aiter)
+    plan(sync, env, "v0.1.0")
+    assert apply(sync, env) == 0
+    pins_path = kernels / "aiter_pins.json"
+    pins = json.loads(pins_path.read_text())
+    pins["modules"]["gfx942/fmha_v4_fwd"] = pins["modules"][KEY]
+    pins_path.write_text(json.dumps(pins, indent=2) + "\n")
+    aiter.write("hsa/gfx942/fmha_v3_fwd/MI300/fwd_hd128.co", kernel(ROW_HD128, "v2"))
+    aiter.commit("v0.2.0")
+    assert plan(sync, env, "v0.2.0") == 0
+
+    def snapshot() -> dict[Path, bytes]:
+        return {p: p.read_bytes() for p in kernels.rglob("*") if p.is_file()}
+
+    before = snapshot()
+    capsys.readouterr()
+    assert apply(sync, env) == 2
+    assert "not a tracked ASM module" in capsys.readouterr().err
+    assert snapshot() == before
 
 
 def test_verify_catches_tampering(sync, env, capsys):
@@ -986,7 +1011,7 @@ def _delete_object(module: Path, kernels: Path) -> None:
 
 
 def _exclude_a_kept_row(module: Path, kernels: Path) -> None:
-    path = kernels / "aiter_fwd_pins.json"
+    path = kernels / "aiter_pins.json"
     pins = json.loads(path.read_text())
     pins["modules"][KEY]["exclude"].append(
         {"match": {"dtype": ["fp8bf16"]}, "reason": "no fp8"}
@@ -1089,6 +1114,55 @@ def test_extract_region_skips_declarations(sync):
         "float fmha_fwd_v3(mha_fwd_args a, const stream_config& s)\n{"
     )
     assert "return -1" in region and "fmha_fwd_ck" not in region
+
+
+def test_extract_region_keeps_a_return_type_on_its_own_line(sync):
+    text = (
+        "    auto [y, x] = compute_mask_coordinates(l, r, 0, sq, sk, true);\n"
+        "inline std::pair<int, int>\n"
+        "compute_mask_coordinates(int l,\n"
+        "                         int r)\n"
+        "{\n"
+        "    return {l, r};\n"
+        "}\n"
+    )
+    ref = sync.Ref("x.h", "function", "compute_mask_coordinates", 3, "mask")
+    assert sync.extract_region(text, ref) == text[text.index("inline") :].rstrip()
+
+
+def test_extract_region_reads_python_defs_by_dotted_name(sync):
+    """A region is the def by its dotted name plus the functions it calls. A def in
+    the function's own body shadows a module-level one of the same name, as AITER's
+    _flash_attn_varlen_backward() does with can_impl_fmha_v3_bwd()."""
+    gate = (
+        "def can_impl_fmha_v3_bwd(\n"
+        "    q,\n"
+        "    k,\n"
+        ") -> bool:\n"
+        "    def nested():\n"
+        "        return True\n"
+        "\n"
+        "    return nested() and q > 16\n"
+    )
+    varlen = (
+        "def _flash_attn_varlen_backward(q):\n"
+        "    def can_impl_fmha_v3_bwd():\n"
+        "        return q > 0\n"
+        "\n"
+        "    return can_impl_fmha_v3_bwd()\n"
+    )
+    text = f"{gate}\n\n# trailing comment\ndef other():\n    pass\n\n\n{varlen}"
+
+    def region(name: str) -> str | None:
+        ref = sync.Ref("aiter/ops/mha.py", "pyfunction", name, 3, "gate")
+        return sync.extract_region(text, ref)
+
+    assert region("can_impl_fmha_v3_bwd") == gate
+    assert region("can_impl_fmha_v3_bwd.nested") == (
+        "    def nested():\n        return True\n"
+    )
+    assert region("nested") is None  # a nested def needs its dotted name
+    assert region("_flash_attn_varlen_backward") == varlen
 
 
 def test_host_code_baseline_lags_until_marked_ported(sync, env):
@@ -1249,3 +1323,140 @@ def test_apply_refuses_a_report_that_escapes_the_module(sync, env, capsys):
     assert apply(sync, env) == 2
     assert "does not write" in capsys.readouterr().err
     assert not (kernels / "gfx942").exists()
+
+
+BWD_HEADER = "dtype,hdim_q,hdim_v,mask,atomic32,pssk,pddv,mode,bf16_cvt,ts_qo,ts,knl_name,co_name"
+ROW_BWD = "bf16,128,128,0,1,1,1,0,3,16,256,_ZN5aiter9bwd_hd128E,bwd_hd128.co"
+ROW_SHUFFLE = "bf16,128,128,0,0,0,0,0,3,0,64,_ZN5aiter11bwd_shuffleE,bwd_shuffle.co"
+
+
+def bwd_upstream(aiter: Aiter) -> None:
+    """A backward module: one dqdkdv row, a dq_shuffle table with one row, and a
+    CSV that holds only its header."""
+    base = "hsa/gfx942/fmha_v3_bwd"
+    aiter.write(f"{base}/fmha_bwd_dqdkdv.csv", f"{BWD_HEADER}\n{ROW_BWD}\n")
+    aiter.write(f"{base}/fmha_bwd_dq_shuffle.csv", f"{BWD_HEADER}\n{ROW_SHUFFLE}\n")
+    aiter.write(f"{base}/fmha_bwd_empty.csv", f"{BWD_HEADER}\n")
+    for row in (ROW_BWD, ROW_SHUFFLE):
+        aiter.write(f"{base}/{row.split(',')[-1]}", kernel(row))
+
+
+def test_backward_first_update_keeps_the_vendored_csvs(sync, env, capsys):
+    """The first backward update leaves out the CSVs the tree lacked at the
+    baseline, takes its own scoped baselines, and keeps a CSV only on --include."""
+    aiter, tree, kernels, cache, report = env
+    bwd_key = "gfx942/fmha_v3_bwd"
+    abi = base_upstream(aiter)
+    bwd_upstream(aiter)
+    base = aiter.commit("v0.1.1")
+    vendor(kernels, "gfx942", [ROW_HD128, ROW_HD128_RTNA, ROW_FP8], ("MI300", "MI308"))
+    module = kernels / bwd_key
+    module.mkdir()
+    (module / "fmha_bwd_dqdkdv.csv").write_text(f"{BWD_HEADER}\n{ROW_BWD}\n")
+    for row in (ROW_BWD, ROW_SHUFFLE):  # the dq_shuffle object ships unreferenced
+        (module / row.split(",")[-1]).write_bytes(kernel(row))
+    baselines = ("--baseline", f"fwd={abi}", "--baseline", f"bwd={base}")
+    baselines += ("--abi-baseline", f"bwd={abi}")
+
+    assert plan(sync, env, "v0.1.1", *baselines) == 0
+    fwd, bwd = module_plan(report), module_plan(report, bwd_key)
+    assert (fwd["baseline"], fwd["abi_baseline"]) == (abi, abi)
+    assert (bwd["baseline"], bwd["abi_baseline"]) == (base, abi)
+    assert "abi_unported" in kinds(report, bwd_key)
+    assert [r["match"] for r in bwd["auto_exclude"]] == [
+        {"csv": ["fmha_bwd_dq_shuffle.csv"]},
+        {"csv": ["fmha_bwd_empty.csv"]},
+    ]
+    assert sorted(p for p in bwd["target"] if p.endswith(".csv")) == [
+        "fmha_bwd_dqdkdv.csv"
+    ]
+    assert ("object_removed", "bwd_shuffle.co") in {
+        (f["kind"], f["detail"]) for f in findings(report, bwd_key)
+    }
+
+    include = ("--include", bwd_key)
+    include = (*include, "fmha_bwd_dq_shuffle.csv", *include, "fmha_bwd_empty.csv")
+    assert plan(sync, env, "v0.1.1", *baselines, *include) == 0
+    assert "csv_added" in kinds(report, bwd_key)
+    assert apply(sync, env) == 0
+    assert (module / "fmha_bwd_empty.csv").read_text() == f"{BWD_HEADER}\n"
+    assert "ASM backward kernels" in (module / "SOURCE.md").read_text()
+    capsys.readouterr()
+    assert run(sync, env, "verify", "--direction", "bwd") == 0
+    assert f"checked: {bwd_key}\n" in capsys.readouterr().out
+
+    rule = ("--exclude", bwd_key, "csv=fmha_bwd_dqdkdv.csv", "unused")
+    assert plan(sync, env, "v0.1.1", "--direction", "bwd", *rule) == 0
+    assert "csv_added" not in kinds(report, bwd_key)
+    assert "csv_dropped_by_rule" in kinds(report, bwd_key)
+    bwd = module_plan(report, bwd_key)
+    assert sorted(bwd["target"]) == [
+        "bwd_shuffle.co",
+        "fmha_bwd_dq_shuffle.csv",
+        "fmha_bwd_empty.csv",
+    ]
+
+
+def test_included_csv_keeps_its_rows_despite_a_csv_rule(sync, env, capsys):
+    """--include of a whole CSV that a pinned csv rule leaves out keeps its rows
+    and objects, and verify accepts the result."""
+    aiter, tree, kernels, cache, report = env
+    bwd_key = "gfx942/fmha_v3_bwd"
+    abi = base_upstream(aiter)
+    bwd_upstream(aiter)
+    base = aiter.commit("v0.1.1")
+    module = kernels / bwd_key
+    module.mkdir(parents=True)
+    (module / "fmha_bwd_dqdkdv.csv").write_text(f"{BWD_HEADER}\n{ROW_BWD}\n")
+    (module / ROW_BWD.split(",")[-1]).write_bytes(kernel(ROW_BWD))
+    first = ("--direction", "bwd", "--baseline", f"bwd={base}")
+    assert plan(sync, env, "v0.1.1", *first, "--abi-baseline", f"bwd={abi}") == 0
+    assert apply(sync, env) == 0  # pins {"csv": ["fmha_bwd_dq_shuffle.csv"]}
+
+    include = ("--include", bwd_key, "fmha_bwd_dq_shuffle.csv")
+    assert plan(sync, env, "v0.1.1", "--direction", "bwd", *include) == 0
+    assert apply(sync, env) == 0
+    assert (module / "fmha_bwd_dq_shuffle.csv").read_text() == (
+        f"{BWD_HEADER}\n{ROW_SHUFFLE}\n"
+    )
+    assert (module / "bwd_shuffle.co").read_bytes() == kernel(ROW_SHUFFLE)
+    capsys.readouterr()
+    assert run(sync, env, "verify", "--direction", "bwd") == 0
+
+
+def test_pin_keeps_only_includes_that_override_a_pinned_rule(sync, env):
+    """An include that only countered the first update's baseline overrides no
+    pinned rule afterwards, so it is not pinned."""
+    aiter, tree, kernels, cache, report = env
+    bwd_key = "gfx942/fmha_v3_bwd"
+    abi = base_upstream(aiter)
+    bwd_upstream(aiter)
+    base = aiter.commit("v0.1.1")
+    module = kernels / bwd_key
+    module.mkdir(parents=True)
+    (module / "fmha_bwd_dqdkdv.csv").write_text(f"{BWD_HEADER}\n{ROW_BWD}\n")
+    (module / ROW_BWD.split(",")[-1]).write_bytes(kernel(ROW_BWD))
+    first = ("--direction", "bwd", "--baseline", f"bwd={base}")
+    first += ("--abi-baseline", f"bwd={abi}")
+    include = ("--include", bwd_key, "fmha_bwd_dq_shuffle.csv")
+    assert plan(sync, env, "v0.1.1", *first, *include) == 0
+    assert apply(sync, env) == 0
+    pin = json.loads((kernels / "aiter_pins.json").read_text())["modules"][bwd_key]
+    assert "include" not in pin
+    assert (module / "fmha_bwd_dq_shuffle.csv").read_text() == (
+        f"{BWD_HEADER}\n{ROW_SHUFFLE}\n"
+    )
+
+    rule = ("--exclude", bwd_key, "csv=fmha_bwd_dq_shuffle.csv", "unused")
+    assert plan(sync, env, "v0.1.1", "--direction", "bwd", *rule, *include) == 0
+    assert apply(sync, env) == 0
+    pin = json.loads((kernels / "aiter_pins.json").read_text())["modules"][bwd_key]
+    assert pin["include"] == ["fmha_bwd_dq_shuffle.csv"]
+
+
+def test_baseline_scope_must_name_a_planned_module(sync, env, capsys):
+    aiter, tree, kernels, cache, report = env
+    base = base_upstream(aiter)
+    vendor(kernels, "gfx942", [ROW_HD128], ("MI300", "MI308"))
+    assert plan(sync, env, "v0.1.0", "--baseline", f"bwd={base}") == 2
+    assert "applies to none of the planned modules" in capsys.readouterr().err
