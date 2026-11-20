@@ -548,6 +548,18 @@ TEST_F(ExtraSpmm, legacy_csrmm_values_and_errors)
     EXPECT_EQ(call.set<OP_A>(T_).set<LDC>(5)(), rocsparse_status_invalid_size);
     EXPECT_EQ(call.set<OP_A>(T_).set<OP_B>(T_).set<LDB>(3).set<LDC>(6)(),
               rocsparse_status_invalid_size);
+
+    // An empty product (k == 0, or m == 0 with a transposed A) still has to
+    // scale a non-empty C, so a missing C is rejected even though the sparse
+    // matrix is never touched. beta == 1 on purpose: for a library that skips
+    // the check the scale is then a no-op that reports success (a clean wrong
+    // status) instead of a kernel launch on a null C. The null-beta half of
+    // the check is not probed here for the same reason: the host would
+    // dereference the null scalar.
+    EXPECT_EQ(call.set<K>(0).set<NNZ>(0).set<C>(nullptr).set<BETA>(&one)(),
+              rocsparse_status_invalid_pointer);
+    EXPECT_EQ(call.set<OP_A>(T_).set<M>(0).set<NNZ>(0).set<C>(nullptr).set<BETA>(&one)(),
+              rocsparse_status_invalid_pointer);
 }
 
 // ---------------------------------------------------------------------------
