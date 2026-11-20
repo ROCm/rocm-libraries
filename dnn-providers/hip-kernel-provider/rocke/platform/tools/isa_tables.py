@@ -1924,7 +1924,11 @@ def _match_fn(
     arms: dict[str, list[str]],
     family: str | None,
     gfx9: str | None = None,
+    gfx12: str | None = None,
 ) -> str:
+    """`gfx9` is the value of the other back ends' own opcodes (`Opc::Gfx9`
+    and `Opc::Gfx12`, pseudos to the gfx11 tables); `gfx12` gives
+    `Opc::Gfx12` a value of its own."""
     out = [
         f"/// {doc}",
         "#[inline]",
@@ -1935,8 +1939,11 @@ def _match_fn(
         out.append(f"        {_wrap_alts([f'Opc::{o}' for o in ops], 8)} => {value},")
     if family is not None:
         out.append(f"        Opc::VCmp(_) => {family},")
-    if gfx9 is not None:
+    if gfx9 is not None and gfx12 is not None:
         out.append(f"        Opc::Gfx9(_) => {gfx9},")
+        out.append(f"        Opc::Gfx12(_) => {gfx12},")
+    elif gfx9 is not None:
+        out.append(f"        Opc::Gfx9(_) | Opc::Gfx12(_) => {gfx9},")
     out.append("    }")
     out.append("}")
     return "\n".join(out)
@@ -2187,6 +2194,7 @@ def generate_isa(desc: Desc, digest: int) -> str:
             {f'"{n}"': [n] for n in names},
             '"VCmp"',
             '"Gfx9"',
+            '"Gfx12"',
         )
     )
     o.append("")
@@ -2516,7 +2524,7 @@ def generate_isa(desc: Desc, digest: int) -> str:
     o += [f"        Opc::{r.args[0]} => {i}," for i, r in enumerate(insts)]
     o += [
         f"        Opc::VCmp(_) => {len(insts)},",
-        f"        Opc::Gfx9(_) => {len(insts) + 1},",
+        f"        Opc::Gfx9(_) | Opc::Gfx12(_) => {len(insts) + 1},",
         "    }",
         "}",
         "",
@@ -2689,7 +2697,7 @@ def generate_isa(desc: Desc, digest: int) -> str:
         out.append(f"        {_wrap_alts([f'Opc::{x}' for x in ops], 8)} => {value},")
     out.append(f"        Opc::VCmp(c) if VCMP64.contains(&c) => &{fam64},")
     out.append(f"        Opc::VCmp(_) => &{sig_of['VCmp']},")
-    out.append(f"        Opc::Gfx9(_) => &{g9sig},")
+    out.append(f"        Opc::Gfx9(_) | Opc::Gfx12(_) => &{g9sig},")
     out += ["    }", "}"]
     o.append("\n".join(out))
     o.append("")

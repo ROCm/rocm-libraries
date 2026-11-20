@@ -89,7 +89,8 @@ diagnostic only; no performance threshold is enforced by the correctness test.
 
 `rocke_codeobj_compile_rocke_ir_v2` (also declared in `code_object_ffi.h`)
 compiles any serialized kernel the direct compiler supports, for the target its
-request names (`gfx1151` or `gfx950`). `rocke_codeobj_compile_rocke_ir_v1` does
+request names (`gfx1151`, `gfx950`, `gfx1201` or `gfx12-generic`).
+`rocke_codeobj_compile_rocke_ir_v1` does
 the same for gfx1151 and takes the GEMM entry point's request layout. Both
 reject unsupported IR with a diagnostic. The entry points, sessions and
 diagnostics are described in [`direct_compiler.md`](./direct_compiler.md).
@@ -97,7 +98,9 @@ diagnostics are described in [`direct_compiler.md`](./direct_compiler.md).
 The `rocke_native_direct_code_object` target drives the v1 entry point from the
 C++ instance builders with no Python: gfx1151 WMMA forward attention,
 implicit-GEMM forward convolution, and the WMMA GEMM (through the GEMM entry
-point). For each case it checks the image and its determinism, and it reports
+point). It drives the v2 entry point with the gfx12 WMMA GEMM, for gfx1201 and
+for gfx12-generic, and checks the processor in each image's ELF flags. For
+each case it checks the image and its determinism, and it reports
 the median time of the C++ build, the C++ serialization, and the Rust compile
 with the compiler's own phase split:
 
@@ -128,6 +131,7 @@ builder.
 ```text
 cargo test --locked --manifest-path platform/rust/rocke-codeobj/Cargo.toml
 python -m pytest platform/tests/runtime/test_direct_gemm.py \
+  platform/tests/runtime/test_direct_gfx12.py \
   platform/tests/runtime/test_direct_targets.py \
   platform/tests/runtime/test_direct_session.py \
   platform/tests/runtime/test_code_object.py \
@@ -135,7 +139,8 @@ python -m pytest platform/tests/runtime/test_direct_gemm.py \
 ctest -R "rocke_native_(gemm|direct)_code_object"
 ```
 
-The GPU numeric case in `test_direct_gemm.py` runs only on a gfx1151 device.
+The GPU numeric case in `test_direct_gemm.py` runs only on a gfx1151 device,
+and the cases of `test_direct_gfx12.py` only on a gfx12 device.
 The direct compiler's other gates, the instruction-table checks among them, are
 listed in [`direct_compiler.md`](./direct_compiler.md#gates).
 Store measurements in CI artifacts, not in the repository.

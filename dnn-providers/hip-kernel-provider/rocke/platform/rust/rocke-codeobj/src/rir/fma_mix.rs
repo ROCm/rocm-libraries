@@ -33,7 +33,6 @@
 use super::mir::*;
 use super::regalloc::Allocation;
 use super::Unallocated;
-use crate::target::Target;
 
 /// `super::schedule_with_facts` for `func`, and again with its shared
 /// conversions folded, taking the folded schedule unless it costs the kernel.
@@ -57,7 +56,7 @@ pub(super) fn schedule_folding(
     spill: bool,
     threads: usize,
 ) -> Result<(Allocation, usize), Unallocated> {
-    let off = func.target != Target::Gfx1151 || super::debug_flag("nofuse") || super::debug_flag("nomix");
+    let off = !func.target.gfx11_pipeline() || super::debug_flag("nofuse") || super::debug_flag("nomix");
     // `fold_shared_conversions` folds nothing past `MAX_INSTS`.
     let large = func.blocks.iter().map(|b| b.insts.len()).sum::<usize>() > MAX_INSTS;
     if off || large || !func.blocks.iter().any(|b| b.insts.iter().any(|i| i.op == Opc::VCvtF32F16)) {

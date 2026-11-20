@@ -120,7 +120,7 @@ pub struct SourceMap {
 fn mnemonic(target: Target, op: crate::rir::mir::Opc) -> String {
     match target {
         Target::Gfx950 => crate::target::gfx9::gen_isa::mnemonic(op).map_or_else(|| op.name(), str::to_string),
-        Target::Gfx1151 => op.name(),
+        Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => op.name(),
     }
 }
 
@@ -134,7 +134,7 @@ impl SourceMap {
         }
         let starts = match f.target {
             Target::Gfx950 => crate::target::gfx9::asm::inst_starts(f)?,
-            Target::Gfx1151 => crate::rir::asm::inst_starts(f)?,
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => crate::rir::asm::inst_starts(f)?,
         };
         let chains: Vec<Vec<Frame>> = f.locs.iter().map(|loc| parse_loc(loc)).collect();
         let usable = |loc: u32| loc != NO_LOC && !chains[loc as usize - 1].is_empty();
@@ -942,6 +942,27 @@ mod tests {
         let (text_vaddr, _) = crate::hsaco_writer::text_section(&with.hsaco).unwrap();
         let (_, lines) = decode_lines(section(&with.hsaco, ".debug_line").unwrap());
         assert_eq!(lines.iter().find(|l| l.1 != 0).map(|l| l.0), Some(text_vaddr + 256));
+    }
+
+    #[test]
+    fn gfx12_code_maps_its_own_waits() {
+        let compile = |text: &str| crate::rir::compile_any_target(text, Target::Gfx1201).unwrap_or_else(|e| panic!("{e}"));
+        let plain = compile(&probe(""));
+        let with = compile(&located(&probe(", debug_info = b:true")));
+        assert_eq!(with.listing(), plain.listing());
+        crate::elf::validate_hsaco(&with.hsaco, &["loc_probe".to_string()]).unwrap_or_else(|e| panic!("{e}"));
+        let map = with.source_map.as_ref().expect("a source map");
+        let mut at = 0;
+        for row in &map.rows {
+            assert_eq!(row.offset, at);
+            at += row.size;
+            assert!(row.chain.is_some(), "{row:?}");
+        }
+        assert_eq!((at, plain.stats.code_bytes as u32), (map.code_bytes, map.code_bytes));
+        // The wait gfx12 writes for the load, not gfx11's `s_waitcnt`.
+        let wait = map.rows.iter().find(|r| r.mnemonic == "s_wait_loadcnt").expect("a gfx12 wait");
+        assert!(wait.synthetic && map.rows.iter().all(|r| r.mnemonic != "s_waitcnt"));
+        assert!(with.srcmap.as_ref().is_some_and(|json| json.contains("\"target\":\"gfx1201\"")));
     }
 
     #[test]

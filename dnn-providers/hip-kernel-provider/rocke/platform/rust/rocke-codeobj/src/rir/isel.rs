@@ -306,7 +306,7 @@ impl<'a> Isel<'a> {
     fn gfx11_only(&self, what: &str) -> Result<(), CompileError> {
         match self.t.target {
             Target::Gfx950 => Err(unsupported(format!("{what} on gfx950"))),
-            Target::Gfx1151 => Ok(()),
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => Ok(()),
         }
     }
 
@@ -1197,7 +1197,9 @@ impl<'a> Isel<'a> {
             }
             Select => self.select_op(op)?,
             Zext | Sext | Trunc | Bitcast => self.convert_op(op)?,
-            GlobalPtrAdd => {
+            // The 64-bit sum wraps, so `global_ptr_offset`, whose result may
+            // leave the allocation, takes the same add.
+            GlobalPtrAdd | GlobalPtrOffset => {
                 let v = res.unwrap();
                 let ptr = self.d(op.operands[0])?;
                 let off_ty = self.k.ty(op.operands[1]).clone();
@@ -1605,13 +1607,13 @@ impl<'a> Isel<'a> {
                 crate::target::gfx9::lds_dma::tag_from(&mut self.f, block, from, tag);
                 self.mark_manual(op.operands[0], block, from);
             }
-            SmemAddrOf | SmemPtrAdd | BufferLoadLds | GlobalLoadLds if self.t.target == Target::Gfx1151 => {
+            SmemAddrOf | SmemPtrAdd | BufferLoadLds | GlobalLoadLds if self.t.target.gfx11_pipeline() => {
                 let name = match op.kind {
                     SmemAddrOf => "tile.smem_addr_of",
                     SmemPtrAdd => "tile.smem_ptr_add",
                     _ => "an LDS DMA load",
                 };
-                return Err(unsupported(format!("{name} on gfx1151")));
+                return Err(unsupported(format!("{name} on {}", self.t.name)));
             }
             SmemAddrOf => self.smem_addr_of(op)?,
             SmemPtrAdd => self.smem_ptr_add(op)?,
@@ -1626,9 +1628,9 @@ impl<'a> Isel<'a> {
             }
             LdsReadTr => return Err(unsupported("a transposing LDS read on gfx1151")),
             DsReadTr16 | DsReadTr8 => return Err(unsupported("a transposing LDS read before address legalization")),
-            Permlane32Swap | ReadLane if self.t.target == Target::Gfx1151 => {
+            Permlane32Swap | ReadLane if self.t.target.gfx11_pipeline() => {
                 let name = if op.kind == ReadLane { "tile.readlane" } else { "tile.permlane32_swap" };
-                return Err(unsupported(format!("{name} on gfx1151")));
+                return Err(unsupported(format!("{name} on {}", self.t.name)));
             }
             Permlane32Swap => {
                 let (a, b) = (self.w(op.operands[0])?, self.w(op.operands[1])?);
@@ -1642,8 +1644,8 @@ impl<'a> Isel<'a> {
             ReadLane => self.readlane(op)?,
             CvtFp8ToF32 | CvtBf8ToF32 | CvtPkF32Fp8 | CvtPkF32Bf8 | CvtF32ToFp8 | CvtF32ToBf8 | CvtPkFp8F32 | CvtPkBf8F32 => {
                 use crate::target::gfx9::fp8::{self, Cvt};
-                if self.t.target == Target::Gfx1151 {
-                    return Err(unsupported("an fp8 or bf8 conversion on gfx1151"));
+                if self.t.target.gfx11_pipeline() {
+                    return Err(unsupported(format!("an fp8 or bf8 conversion on {}", self.t.name)));
                 }
                 let bf8 = matches!(op.kind, CvtBf8ToF32 | CvtPkF32Bf8 | CvtF32ToBf8 | CvtPkBf8F32);
                 let (cvt, srcs) = match op.kind {
@@ -1779,6 +1781,14 @@ impl<'a> Isel<'a> {
                 let d = mfma::select(&mut self.f, self.cur, op_id, a, b, c, scales, scale_sel)?;
                 self.set(op.results[0], Val::T(d));
             }
+            // gfx12's WMMA takes A and B in four registers (eight halves a
+            // lane), where gfx11 takes eight; the instruction's encoding is
+            // the same, so the operand types select it (`validate`).
+            Mma if self.t.target.gfx12() => match op.str_attr("op_id") {
+                Some("wmma_gfx12_f32_16x16x16_f16") => self.wmma(op, Opc::VWmmaF32F16, Opc::VWmmaF32F16Early, 0)?,
+                Some("wmma_gfx12_f32_16x16x16_bf16") => self.wmma(op, Opc::VWmmaF32Bf16, Opc::VWmmaF32Bf16Early, 0)?,
+                other => return Err(unsupported(format!("tile.mma {other:?} on {}", self.t.name))),
+            },
             Mma if op.str_attr("op_id") == Some("wmma_f32_16x16x16_bf16") => {
                 self.wmma(op, Opc::VWmmaF32Bf16, Opc::VWmmaF32Bf16Early, 0)?;
             }
@@ -2104,9 +2114,9 @@ impl<'a> Isel<'a> {
             | AtomicAddScoped | L2TouchLoad | L2TouchDrain | Exp | CvtScalePkFp8F32 | CvtScalePkBf8F32 | MfmaScaleMx | Maximum3
             | DppOp | MovDpp | CvtF32ToF64 | CvtF64ToF32 | Sqrt | GlobalStoreCp | GlobalLoadCp | Bcnt | SFf1 | MemTime | SNop
             | CompilerFence | DsOrRaw | DsWriteRaw | DsReadRaw
-                if self.t.target == Target::Gfx1151 =>
+                if self.t.target.gfx11_pipeline() =>
             {
-                return Err(unsupported(format!("{:?} on gfx1151", op.kind)));
+                return Err(unsupported(format!("{:?} on {}", op.kind, self.t.name)));
             }
             IntToPtr => {
                 let (lo, hi) = self.d(op.operands[0])?;
@@ -3253,6 +3263,10 @@ impl<'a> Isel<'a> {
             return Ok(());
         }
         self.gfx11_only("memory fences")?;
+        // gfx12 has no `buffer_gl*_inv`; its `global_inv` is not lowered.
+        if self.t.target.gfx12() {
+            return Err(unsupported(format!("memory fences on {}", self.t.name)));
+        }
         let l1 = match scope {
             "agent" | "system" => true,
             "workgroup" => false,
@@ -6274,8 +6288,8 @@ pub fn select_for(
 ) -> Result<IselResult, CompileError> {
     let mut wg_ids = [false; 3];
     find_block_ids(&kernel.body, &mut wg_ids);
-    // Workgroup id x is always delivered; it anchors the SGPR layout.
-    wg_ids[0] = true;
+    // Workgroup id x is always delivered where the ids arrive in user SGPRs; it anchors their layout.
+    wg_ids[0] |= !target.gfx12();
     let mut uses = vec![0u32; kernel.values.len()];
     count_uses(&kernel.body, &mut uses);
     let mut gathers = FxHashSet::default();
@@ -6290,8 +6304,8 @@ pub fn select_for(
     find_chains(&cx, &kernel.body, &mut chains);
     // Lever `ldsquads`: gfx950 merges four aligned dword LDS loads too.
     // Read per load: the first load's scope decides.
-    if target == Target::Gfx1151 || super::kernel_lever("ldsquads") || super::scoped_anywhere(kernel, "ldsquads") {
-        find_dword_quads(&cx, &kernel.body, &gathers, &mut chains, target == Target::Gfx1151);
+    if target.gfx11_pipeline() || super::kernel_lever("ldsquads") || super::scoped_anywhere(kernel, "ldsquads") {
+        find_dword_quads(&cx, &kernel.body, &gathers, &mut chains, target.gfx11_pipeline());
     }
     // Lever `ldsduos` (PLAN decision 18): two aligned dword LDS loads of one address merge into one
     // `ds_read_b64` (the loads `ldsquads` left), as LLVM's load-store optimizer merges a value / index pair.
@@ -6344,7 +6358,7 @@ pub fn select_for(
         mem_tags: if super::debug_flag("noalias") { Vec::new() } else { super::alias::value_tags(kernel) },
         lds_dma: match target {
             Target::Gfx950 => crate::target::gfx9::lds_dma::Facts::of(kernel),
-            Target::Gfx1151 => Default::default(),
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => Default::default(),
         },
         ds_bases: FxHashMap::default(),
         loop_frames: Vec::new(),
@@ -6368,8 +6382,8 @@ pub fn select_for(
     isel.kernarg_ptr = kernarg;
     // Kernarg preload (gfx950): the hardware writes the preloaded arguments
     // into the user SGPRs after the kernarg pointer.
-    if target == Target::Gfx1151 && (kernel.passes.kernarg_preload || kernel.params.iter().any(|p| p.inreg)) {
-        return Err(unsupported("kernarg preload (inreg) on gfx1151"));
+    if target.gfx11_pipeline() && (kernel.passes.kernarg_preload || kernel.params.iter().any(|p| p.inreg)) {
+        return Err(unsupported(format!("kernarg preload (inreg) on {}", target.name())));
     }
     let (preloaded, preload) = super::opt::kernarg_preload(kernel);
     for (index, first) in preloaded {
@@ -6380,14 +6394,31 @@ pub fn select_for(
     }
     let mut next_sgpr = 2 + preload as u16;
     for axis in 0..3 {
-        if wg_ids[axis] {
+        if !wg_ids[axis] {
+            continue;
+        }
+        let id = if target.gfx12() {
+            // gfx12 delivers the ids in trap temporaries, not user SGPRs.
+            use crate::target::gfx12::{TTMP7, TTMP9};
+            let ttmp7 = Opnd::P(Phys::S(TTMP7), 1);
+            let id = isel.sreg(1);
+            match axis {
+                0 => isel.copy(id, Opnd::P(Phys::S(TTMP9), 1)),
+                // All of ttmp7 is y while z is not enabled.
+                1 if !wg_ids[2] => isel.copy(id, ttmp7),
+                1 => isel.salu(Opc::SAndB32, [r(id)], [ttmp7, Opnd::Imm(0xffff)]),
+                _ => isel.salu(Opc::SLshrB32, [r(id)], [ttmp7, Opnd::Imm(16)]),
+            }
+            id
+        } else {
             let fixed = isel.vreg(Class::S, 1, 1);
             isel.f.vregs[fixed.reg as usize].fixed = Some(next_sgpr);
             next_sgpr += 1;
             let copy = isel.sreg(1);
             isel.copy(copy, r(fixed));
-            isel.bid[axis] = Some(copy);
-        }
+            copy
+        };
+        isel.bid[axis] = Some(id);
     }
     let tid_fixed = isel.vreg(Class::V, 1, 1);
     isel.f.vregs[tid_fixed.reg as usize].fixed = Some(0);
@@ -6506,6 +6537,39 @@ mod tests {
         assert_eq!(count(&insts, Opc::VCmp(0x51)), 1);
         assert_eq!(count(&insts, Opc::SCmpLtI32), 1);
         assert_eq!((count(&insts, Opc::SCselectB64), count(&insts, Opc::SCselectB32)), (2, 0));
+    }
+
+    #[test]
+    fn global_ptr_offset_is_a_wrapping_64_bit_add() {
+        let params = "    %X : ptr<f32,global>\n    %Y : ptr<f32,global>\n    %off : i64\n";
+        let c0 = "    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n";
+        let store = "    memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:\"f32\" }\n";
+        // The same offset for every lane: the sum is an SGPR pair.
+        let uniform = format!(
+            "{c0}    %p : ptr<f32,global> = tile.global_ptr_offset ( %X, %off )\n    \
+             %x : f32 = memref.global_load_typed ( %p, %c0 ) {{ align = i:4, elem_type = s:\"f32\" }}\n{store}"
+        );
+        // An offset per lane, sign-extended: the sum is a VGPR pair.
+        let per_lane = format!(
+            "{c0}    %neg : i32 = arith.sub ( %c0, %tid )\n    %sx : i64 = arith.sext ( %neg )\n    \
+             %p : ptr<f32,global> = tile.global_ptr_offset ( %X, %sx )\n    \
+             %x : f32 = memref.global_load_typed ( %p, %c0 ) {{ align = i:4, elem_type = s:\"f32\" }}\n{store}"
+        );
+        for target in crate::target::Target::ALL {
+            let compile = |body: &str| -> Vec<MInst> {
+                let c = super::super::compile_for(&kernel(params, body), target).unwrap_or_else(|e| panic!("{target:?}: {e}"));
+                c.func.blocks.into_iter().flat_map(|b| b.insts).collect()
+            };
+            let insts = compile(&uniform);
+            assert_eq!((count(&insts, Opc::SAddU32), count(&insts, Opc::SAddcU32)), (1, 1), "{target:?}");
+            // The high word of the offset feeds the carry add: no zero extension.
+            let high = insts.iter().find(|i| i.op == Opc::SAddcU32).unwrap();
+            assert!(high.uses.iter().all(|u| !matches!(u, Opnd::Imm(_))), "{target:?}: {high:?}");
+            let insts = compile(&per_lane);
+            assert_eq!((count(&insts, Opc::VAddCoU32), count(&insts, Opc::VAddCoCiU32)), (1, 1), "{target:?}");
+            let high = insts.iter().find(|i| i.op == Opc::VAddCoCiU32).unwrap();
+            assert!(high.uses.iter().all(|u| !matches!(u, Opnd::Imm(_))), "{target:?}: {high:?}");
+        }
     }
 
     #[test]

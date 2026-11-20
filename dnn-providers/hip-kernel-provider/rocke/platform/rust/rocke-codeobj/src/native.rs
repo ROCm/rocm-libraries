@@ -223,7 +223,7 @@ pub struct RockeIrCompileRequestV2 {
     pub struct_size: u32,
     pub serialized_ir: *const u8,
     pub serialized_ir_size: usize,
-    /// NUL-terminated target name (`"gfx1151"`, `"gfx950"`); an unknown or unsupported
+    /// NUL-terminated target name (`"gfx1151"`, `"gfx950"`, `"gfx1201"`); an unknown or unsupported
     /// one is a `request` error.
     pub target: *const c_char,
 }
@@ -270,7 +270,7 @@ pub unsafe extern "C" fn rocke_codeobj_compile_rocke_ir_v2(
 }
 
 /// The targets this library compiles for: a static NUL-terminated,
-/// comma-separated list of names (`"gfx1151,gfx950"`).
+/// comma-separated list of names (`"gfx1151,gfx950,gfx1201,gfx12-generic"`).
 #[no_mangle]
 pub extern "C" fn rocke_codeobj_supported_targets_v1() -> *const c_char {
     crate::target::SUPPORTED_NAMES.as_ptr()
@@ -359,7 +359,7 @@ pub struct RockeCodeobjSessionOptionsV2 {
     /// Worker threads the session starts; 0 picks a default.
     pub worker_threads: u32,
     /// NUL-terminated name of the target every compile of the session is
-    /// for (`"gfx1151"`, `"gfx950"`).
+    /// for (`"gfx1151"`, `"gfx950"`, `"gfx1201"`).
     pub target: *const c_char,
 }
 
@@ -663,7 +663,7 @@ mod tests {
         let status = unsafe { rocke_codeobj_compile_rocke_ir_v2(&request, &mut result) };
         assert!(outcome(status, &mut result).2.contains("struct_size"));
         let supported = unsafe { CStr::from_ptr(rocke_codeobj_supported_targets_v1()) };
-        assert_eq!(supported.to_str().ok(), Some("gfx1151,gfx950"));
+        assert_eq!(supported.to_str().ok(), Some("gfx1151,gfx950,gfx1201,gfx12-generic"));
     }
 
     #[test]

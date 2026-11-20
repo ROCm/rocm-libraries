@@ -50,15 +50,28 @@ def _e_flags(hsaco: bytes) -> int:
     return struct.unpack_from("<I", hsaco, 48)[0]
 
 
+def _text(hsaco: bytes) -> bytes:
+    """The bytes of the ``.text`` section."""
+    shoff, shentsize, shnum, shstrndx = struct.unpack_from("<Q", hsaco, 0x28) + struct.unpack_from("<HHH", hsaco, 0x3A)
+    sections = [struct.unpack_from("<IIQQQQ", hsaco, shoff + i * shentsize) for i in range(shnum)]
+    names = sections[shstrndx]
+    for name, _kind, _flags, _addr, offset, size in sections:
+        end = hsaco.index(b"\0", names[4] + name)
+        if hsaco[names[4] + name : end] == b".text":
+            return hsaco[offset : offset + size]
+    raise AssertionError("no .text section")
+
+
+_TARGETS = ["gfx1151", "gfx950", "gfx1201", "gfx12-generic"]
+
+
 def test_the_library_reports_its_targets() -> None:
     _require_direct_library()
-    assert code_object.direct_supported_targets() == ["gfx1151", "gfx950"]
-    assert "amdgcn-amd-amdhsa--gfx950" in code_object.supported_isas("direct")
+    assert code_object.direct_supported_targets() == _TARGETS
+    isas = code_object.supported_isas("direct")
+    assert isas == [f"amdgcn-amd-amdhsa--{target}" for target in _TARGETS]
     info = code_object.loaded_compiler_info("direct")
-    assert info is not None and info.details["supported_targets"] == [
-        "gfx1151",
-        "gfx950",
-    ]
+    assert info is not None and info.details["supported_targets"] == _TARGETS
 
 
 def test_gfx950_compiles_through_the_target_entry() -> None:
@@ -72,6 +85,38 @@ def test_gfx950_compiles_through_the_target_entry() -> None:
         _SUPPORTED
     )
     assert _e_flags(gfx1151) != 0x54F
+
+
+def test_gfx12_targets_compile_through_the_target_entry() -> None:
+    _require_direct_library()
+    gfx1201, _timings, _info, diagnostics = code_object.build_direct_rocke_ir_hsaco(
+        _SUPPORTED, isa="amdgcn-amd-amdhsa--gfx1201"
+    )
+    # EF_AMDGPU_MACH_AMDGCN_GFX1201.
+    assert _e_flags(gfx1201) == 0x4E
+    assert diagnostics.startswith("instructions=")
+    generic, _timings, _info, diagnostics = code_object.build_direct_rocke_ir_hsaco(
+        _SUPPORTED, isa="amdgcn-amd-amdhsa--gfx12-generic"
+    )
+    # EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC with generic version 1, in a code
+    # object of version 6 (ELF ABI version 4), as the generic processor needs.
+    assert _e_flags(generic) == 0x0100_0059
+    assert generic[8] == 4 and gfx1201[8] == 4
+    assert b"amdgcn-amd-amdhsa--gfx12-generic" in generic
+    assert diagnostics.startswith("instructions=")
+    # The same code under either processor.
+    assert _text(generic) == _text(gfx1201)
+    with DirectSession(worker_threads=1, isa="amdgcn-amd-amdhsa--gfx12-generic") as session:
+        assert session.compile(_SUPPORTED)[0] == generic
+
+
+def test_gfx1200_is_refused() -> None:
+    """No direct code object has run on a gfx1200: the name is no target."""
+    _require_direct_library()
+    with pytest.raises(DirectUnsupported, match="gfx1200"):
+        code_object.build_direct_rocke_ir_hsaco(_SUPPORTED, isa="amdgcn-amd-amdhsa--gfx1200")
+    with pytest.raises(DirectUnsupported):
+        DirectSession(isa="amdgcn-amd-amdhsa--gfx1200")
 
 
 def test_unsupported_targets_and_operations_are_direct_unsupported() -> None:

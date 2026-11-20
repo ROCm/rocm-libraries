@@ -498,7 +498,7 @@ fn block_dag(
     // scheduler then keeps a run of MFMAs that read prefetched operands together instead of slotting each MFMA
     // result's LDS store (and its hazard wait) between them (LLVM's model latency of a VMEM load is in this range).
     let result_latency = |inst: &MInst| match target {
-        crate::target::Target::Gfx1151 => result_latency(inst),
+        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => result_latency(inst),
         crate::target::Target::Gfx950 => {
             let l = crate::target::gfx9::model::result_latency(inst);
             if inst.op.flags() & F_VMEM_LOAD != 0 {
@@ -513,11 +513,11 @@ fn block_dag(
         }
     };
     let mut mfma = match target {
-        crate::target::Target::Gfx1151 => None,
+        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => None,
         crate::target::Target::Gfx950 => crate::target::gfx9::sched::MfmaEdges::new(insts),
     };
     let mut m0 = match target {
-        crate::target::Target::Gfx1151 => None,
+        crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => None,
         crate::target::Target::Gfx950 => crate::target::gfx9::m0_order::M0Order::new(insts),
     };
     let n = insts.len();
@@ -1558,6 +1558,9 @@ struct WaitState {
     lgkm: [u8; NREGS],
     vm_any: bool,
     lgkm_any: bool,
+    /// An LDS operation, and a scalar load, is outstanding: the two kinds
+    /// lgkmcnt counts.
+    lds: bool,
     smem: bool,
 }
 
@@ -1568,6 +1571,7 @@ impl WaitState {
             lgkm: [NONE; NREGS],
             vm_any: false,
             lgkm_any: false,
+            lds: false,
             smem: false,
         }
     }
@@ -1581,6 +1585,7 @@ impl WaitState {
         }
         self.vm_any |= other.vm_any;
         self.lgkm_any |= other.lgkm_any;
+        self.lds |= other.lds;
         self.smem |= other.smem;
     }
 }
@@ -1633,6 +1638,7 @@ struct Waits {
     lgkm: Counter,
     vm_any: bool,
     lgkm_any: bool,
+    lds: bool,
     smem: bool,
 }
 
@@ -1643,6 +1649,7 @@ impl Waits {
             lgkm: Counter::new(&state.lgkm),
             vm_any: state.vm_any,
             lgkm_any: state.lgkm_any,
+            lds: state.lds,
             smem: state.smem,
         }
     }
@@ -1653,10 +1660,16 @@ impl Waits {
             lgkm: self.lgkm.counts(),
             vm_any: self.vm_any,
             lgkm_any: self.lgkm_any,
+            lds: self.lds,
             smem: self.smem,
         }
     }
 }
+
+/// A wait to insert: the vmcnt and lgkmcnt counts (`NONE`: no wait on that
+/// counter) and, as `gfx12::M_WAIT_NO_*`, the kinds of lgkmcnt operation
+/// that were not outstanding.
+type Wait = (u8, u8, u32);
 
 fn reg_keys(o: &Opnd) -> impl Iterator<Item = usize> {
     let (start, n) = match o {
@@ -1697,7 +1710,7 @@ fn tied_source(inst: &MInst) -> Option<usize> {
 }
 
 /// One step of the wait model; returns the wait to insert before `inst`.
-fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
+fn step(state: &mut Waits, inst: &MInst) -> Option<Wait> {
     let flags = inst.op.flags();
     let vmem_load = flags & F_VMEM_LOAD != 0;
     let lds_merge = lds_merge(inst);
@@ -1738,6 +1751,7 @@ fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
         if lgkm == 0 || (lgkm < 0x3f && !state.smem) {
             state.lgkm.wait(lgkm as u8);
             state.lgkm_any &= lgkm != 0;
+            state.lds &= lgkm != 0;
             state.smem &= lgkm != 0;
         }
     }
@@ -1748,6 +1762,8 @@ fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
         need_lgkm = 0;
     }
     let wait = if need_vm != NONE || need_lgkm != NONE {
+        use crate::target::gfx12::{M_WAIT_NO_DS, M_WAIT_NO_SMEM};
+        let idle = if state.lds { 0 } else { M_WAIT_NO_DS } | if state.smem { 0 } else { M_WAIT_NO_SMEM };
         if need_vm != NONE {
             state.vm.wait(need_vm);
             if need_vm == 0 {
@@ -1758,10 +1774,11 @@ fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
             state.lgkm.wait(need_lgkm);
             if need_lgkm == 0 {
                 state.lgkm_any = false;
+                state.lds = false;
                 state.smem = false;
             }
         }
-        Some((need_vm, need_lgkm))
+        Some((need_vm, need_lgkm, idle))
     } else {
         None
     };
@@ -1775,6 +1792,8 @@ fn step(state: &mut Waits, inst: &MInst) -> Option<(u8, u8)> {
         state.lgkm_any = true;
         if counters & super::gen_isa::CNT_SMEM != 0 {
             state.smem = true;
+        } else {
+            state.lds = true;
         }
     }
     wait
@@ -1805,7 +1824,7 @@ pub(super) fn insert_waitcnt_with(f: &mut MFunc, spare: &mut Vec<MInst>) {
     stale[0] = true;
     // The waits each block's last stepping found, by instruction: once the
     // entry states settle, every block was last stepped from its own.
-    let mut found: Vec<Option<Vec<(u32, (u8, u8))>>> = vec![None; n];
+    let mut found: Vec<Option<Vec<(u32, Wait)>>> = vec![None; n];
     loop {
         let mut changed = false;
         for b in 0..n {
@@ -1846,6 +1865,8 @@ pub(super) fn insert_waitcnt_with(f: &mut MFunc, spare: &mut Vec<MInst>) {
         }
     }
     let wait_all = super::debug_flag("waitall");
+    // Only gfx12's lowering of the wait reads what was outstanding.
+    let kinds = f.target.gfx12();
     for b in 0..n {
         // Blocks never stepped (unreachable ones) start from nothing pending.
         let mut known = found[b].as_deref().map(|at| at.iter().peekable());
@@ -1858,8 +1879,8 @@ pub(super) fn insert_waitcnt_with(f: &mut MFunc, spare: &mut Vec<MInst>) {
                 (None, Some(waits)) => step(waits, &inst),
                 (None, None) => unreachable!("a block is stepped or has its waits"),
             };
-            if let Some((vm, lgkm)) = wait {
-                out.push(MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(vm, lgkm)));
+            if let Some((vm, lgkm, idle)) = wait {
+                out.push(MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(vm, lgkm)).with_mods(if kinds { idle } else { 0 }));
             }
             let loads = inst.op.flags() & (F_VMEM_LOAD | F_LDS | F_SMEM) != 0;
             out.push(inst);
@@ -1977,18 +1998,21 @@ fn clause_kind(op: Opc) -> Option<ClauseKind> {
     }
 }
 
-/// The most instructions one `s_clause` may cover on gfx11: longer clauses
-/// can trigger a hardware bug (LLVM's `FeatureMaxHardClauseLength32`).
+/// The most instructions one `s_clause` may cover on gfx11 and gfx12: longer
+/// clauses can trigger a hardware bug (LLVM's `FeatureMaxHardClauseLength32`).
 const MAX_CLAUSE: usize = 32;
 
 /// Puts `s_clause` before each run of two or more adjacent VMEM stores of
 /// one encoding, so that the run issues without other waves' memory
 /// instructions in between. A wait, SALU or VALU instruction ends a run.
-/// Loads and atomics stay unclaused: their clauses run no faster on gfx1151.
+/// Atomics stay unclaused, and so do loads on gfx1151, where their clauses
+/// run no faster; on gfx1201 a long K loop of buffer loads ran faster with
+/// them, and no measured kernel slower, so loads are claused there.
 pub fn form_clauses(f: &mut MFunc) {
     let mut kinds = Vec::new();
+    let loads = f.target.gfx12();
     for block in f.blocks.iter_mut() {
-        let kind_of: Vec<Option<ClauseKind>> = block.insts.iter().map(|i| store_kind(&mut kinds, i.op)).collect();
+        let kind_of: Vec<Option<ClauseKind>> = block.insts.iter().map(|i| claused_kind(&mut kinds, i.op, loads)).collect();
         if !forms_clause(&kind_of) {
             continue;
         }
@@ -2010,16 +2034,17 @@ pub fn form_clauses(f: &mut MFunc) {
     }
 }
 
-/// `clause_kind(op)` if it is a store's, as `form_clauses` reads it, through
-/// `kinds`, those found so far (`clause_kind` spells the mnemonic out).
-fn store_kind(kinds: &mut Vec<(Opc, Option<ClauseKind>)>, op: Opc) -> Option<ClauseKind> {
+/// `clause_kind(op)` if `form_clauses` clauses it (a store's, and a load's
+/// with `loads`), through `kinds`, those found so far (`clause_kind` spells
+/// the mnemonic out).
+fn claused_kind(kinds: &mut Vec<(Opc, Option<ClauseKind>)>, op: Opc, loads: bool) -> Option<ClauseKind> {
     if !matches!(op.fmt(), Fmt::Global | Fmt::Mubuf) || op.flags() & (F_VMEM_LOAD | F_VMEM_STORE) == 0 {
         return None;
     }
     if let Some(&(_, kind)) = kinds.iter().find(|(o, _)| *o == op) {
         return kind;
     }
-    let kind = clause_kind(op).filter(|k| matches!(k, ClauseKind::Store(_)));
+    let kind = clause_kind(op).filter(|k| matches!(k, ClauseKind::Store(_)) || (loads && matches!(k, ClauseKind::Load(_))));
     kinds.push((op, kind));
     kind
 }
@@ -2425,7 +2450,7 @@ pub(super) mod tests {
     /// reference the shared graphs are checked against.
     fn schedule_block_reference(insts: Vec<MInst>, window: usize, units: &UnitIndex, target: crate::target::Target) -> Vec<MInst> {
         let result_latency = |inst: &MInst| match target {
-            crate::target::Target::Gfx1151 => result_latency(inst),
+            crate::target::Target::Gfx1151 | crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => result_latency(inst),
             crate::target::Target::Gfx950 => crate::target::gfx9::model::result_latency(inst),
         };
         let n = insts.len();
@@ -2777,7 +2802,7 @@ pub(super) mod tests {
             let insts = std::mem::take(&mut f.blocks[b].insts);
             let mut out = Vec::with_capacity(insts.len() + 8);
             for inst in insts {
-                if let Some((vm, lgkm)) = step(&mut waits, &inst) {
+                if let Some((vm, lgkm, _)) = step(&mut waits, &inst) {
                     out.push(MInst::new(Opc::SWaitcnt, [], []).with_imm(waitcnt_imm(vm, lgkm)));
                 }
                 let loads = inst.op.flags() & (F_VMEM_LOAD | F_LDS | F_SMEM) != 0;

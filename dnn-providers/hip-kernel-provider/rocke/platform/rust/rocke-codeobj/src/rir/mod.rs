@@ -3,6 +3,8 @@
 
 //! Direct rocKE IR (`ck.dsl.ir/v1`) to gfx1151 HSACO compiler.
 
+#[cfg(test)]
+mod access_trace;
 pub mod alias;
 pub mod analysis;
 pub mod asm;
@@ -785,7 +787,7 @@ fn spill_best(
         agpr_slots: match f.target {
             Target::Gfx950 if !agprs => 0,
             Target::Gfx950 => crate::target::gfx9::spill::agpr_slots(t, hw.vgprs, lds_size, wg).min(agpr_cap()),
-            Target::Gfx1151 => 0,
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => 0,
         },
     };
     // gfx950: also the accumulator webs in AGPRs beside the spilled values; the cheapest wins (`gfx9::agpr_spill`).
@@ -905,16 +907,22 @@ fn widen_schedule(
 
 /// The passes after allocation: pseudo expansion, wait counts, VOPD pairing,
 /// the WMMA hazard, clauses, ALU delay hints, the VGPR release, FMAC
-/// shrinking. Returns the VOPD pair counts.
+/// shrinking; on gfx1201 also gfx12's waits, barriers and SGPR read hazard.
+/// Returns the VOPD pair counts.
 fn finish(func: &mut mir::MFunc, num_vgprs: u32) -> Result<(u32, u64), CompileError> {
     if func.target == Target::Gfx950 {
         crate::target::gfx9::finish(func, num_vgprs)?;
         return Ok((0, 0));
     }
+    let gfx12 = func.target.gfx12();
     // The block instructions a pass rebuilt, for the next pass to build in.
     let mut spare = Vec::new();
     post::expand_pseudos_with(func, &mut spare)?;
     post::insert_waitcnt_with(func, &mut spare);
+    if gfx12 {
+        crate::target::gfx12::lower_sync(func)?;
+        crate::target::gfx12::sink_barrier_waits(func);
+    }
     if !debug_flag("novopd") {
         vopd::form_pairs_with(func, &mut spare);
     }
@@ -922,6 +930,9 @@ fn finish(func: &mut mir::MFunc, num_vgprs: u32) -> Result<(u32, u64), CompileEr
     post::fix_wmma_hazards(func);
     if !debug_flag("noclause") {
         post::form_clauses(func);
+    }
+    if gfx12 {
+        crate::target::gfx12::sgpr::insert_waits(func);
     }
     if !debug_flag("nodelay") {
         post::insert_delay_alu_with(func, &mut spare);
@@ -1146,7 +1157,7 @@ impl CompiledKernel {
     /// Text listing of the machine code with byte offsets and encodings.
     pub fn listing(&self) -> String {
         match self.target {
-            Target::Gfx1151 => asm::listing(&self.func),
+            Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => asm::listing(&self.func),
             Target::Gfx950 => crate::target::gfx9::asm::listing(&self.func),
         }
         .expect("the code assembled once")
@@ -1222,7 +1233,7 @@ pub(crate) fn compile_parsed_by_on(
     // gfx950 weighs an unrolled compile that loses waves by its cost (`gfx9::unrolled`).
     let keeps = |u: &CompiledKernel, r: &CompiledKernel| match target {
         Target::Gfx950 => crate::target::gfx9::unrolled::keeps(&u.func, &u.stats, &r.func, &r.stats),
-        Target::Gfx1151 => keeps_unrolled(&u.stats, &r.stats),
+        Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => keeps_unrolled(&u.stats, &r.stats),
     };
     match (first, rolled) {
         (Ok(u), Ok(r)) => Ok(if keeps(&u, &r) { u } else { r }),
@@ -1391,12 +1402,16 @@ fn compile_with(
     };
     force_attrs(&mut kernel)?;
     kernel.wave = target.info().wave;
+    kernel.address_reduction = target.info().address_reduction;
     opt::inherit_scopes(&mut kernel);
     if target == Target::Gfx950 {
         crate::target::gfx9::mask_splat::fold(&mut kernel);
         crate::target::gfx9::cpol::take_nontemporal(&mut kernel);
     }
     validate::kernel(&kernel)?;
+    if target.gfx12() {
+        crate::target::gfx12::lanes::check(&kernel)?;
+    }
     let (mut lds, lds_size) = analysis::lds_layout(&kernel);
     validate::lds_pool(lds_size, target.info())?;
     laps.lap("parse");
@@ -1417,7 +1432,7 @@ fn compile_with(
         crate::target::gfx9::widen::after_unroll(&mut kernel);
     }
     let merged_loads = facts.merged_loads;
-    if target == Target::Gfx1151 {
+    if target.gfx11_pipeline() {
         fma_chains::interleave(&mut kernel);
     }
     laps.lap("optimize");
@@ -1562,14 +1577,14 @@ fn complete(
     let (vopd_pairs, vopd_weighted) = match target {
         // gfx950's passes lap themselves: `expand`, `waitcnt`, `hazards`.
         Target::Gfx950 => crate::target::gfx9::finish_lapped(&mut sel.func, alloc.num_vgprs, &mut |name| laps.lap(name)).map(|()| (0, 0))?,
-        Target::Gfx1151 => {
+        Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => {
             let pairs = finish(&mut sel.func, alloc.num_vgprs)?;
             laps.lap("post");
             pairs
         }
     };
     let code = match target {
-        Target::Gfx1151 => asm::assemble(&sel.func)?,
+        Target::Gfx1151 | Target::Gfx1201 | Target::Gfx12Generic => asm::assemble(&sel.func)?,
         // Kernarg preload: the 256-byte entry that loads the preloaded
         // arguments for firmware that does not preload (which skips it).
         Target::Gfx950 if sel.preload > 0 => {
@@ -1592,6 +1607,10 @@ fn complete(
     let rsrc3 = (code.len().div_ceil(128).min(63) as u32) << 4;
     let (rsrc1, rsrc2, rsrc3, sgpr_count) = match target {
         Target::Gfx1151 => (rsrc1, rsrc2, rsrc3, alloc.num_sgprs + 2),
+        Target::Gfx1201 | Target::Gfx12Generic => {
+            let (rsrc1, rsrc3) = crate::target::gfx12::program_resources(rsrc1, code.len());
+            (rsrc1, rsrc2, rsrc3, alloc.num_sgprs + 2)
+        }
         Target::Gfx950 => {
             let scratch = alloc.spill.scratch_bytes > 0;
             let agprs = alloc.spill.agpr_dwords;

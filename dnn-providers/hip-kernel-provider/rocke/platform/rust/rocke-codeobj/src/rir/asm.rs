@@ -198,15 +198,40 @@ fn vop3_words(
     push_literal(e, &lits)
 }
 
-/// Encodes one instruction: the table-driven encoder over the gfx11
-/// description (`isa.rs`), or the hand encoder below for the opcodes the
-/// description leaves to it (`table_encoded`).
-fn encode(inst: &MInst, e: &mut Enc) -> Result<(), CompileError> {
+/// Encodes one instruction for `target`. gfx1201 writes what gfx12 encodes
+/// differently (`target::gfx12::asm`) and reads gfx11's words for the rest.
+fn encode(inst: &MInst, e: &mut Enc, target: crate::target::Target) -> Result<(), CompileError> {
     lane_mask_source(inst)?;
-    if super::isa::encode(inst, &mut e.words)? {
+    match target {
+        crate::target::Target::Gfx1201 | crate::target::Target::Gfx12Generic => {
+            if !crate::target::gfx12::asm::encode(inst, &mut e.words, encode_gfx11_into)? {
+                encode_gfx11_into(inst, &mut e.words)?;
+            }
+            Ok(())
+        }
+        _ if matches!(inst.op, Opc::Gfx12(_)) => Err(bad(format!("{} is a gfx12 instruction", inst.op.name()))),
+        _ => encode_gfx11_into(inst, &mut e.words),
+    }
+}
+
+/// The gfx11 encoding: the table-driven encoder over the gfx11 description
+/// (`isa.rs`), or the hand encoder below for the opcodes the description
+/// leaves to it (`table_encoded`).
+fn encode_gfx11_into(inst: &MInst, words: &mut Vec<u32>) -> Result<(), CompileError> {
+    if super::isa::encode(inst, words)? {
         return Ok(());
     }
-    encode_legacy(inst, e)
+    let mut e = Enc { words: std::mem::take(words) };
+    let done = encode_legacy(inst, &mut e);
+    *words = e.words;
+    done
+}
+
+/// The words of one instruction as `target` encodes it.
+pub fn encode_words(inst: &MInst, target: crate::target::Target) -> Result<Vec<u32>, CompileError> {
+    let mut e = Enc { words: Vec::new() };
+    encode(inst, &mut e, target)?;
+    Ok(e.words)
 }
 
 /// Source 2 of v_cndmask_b32 (the lane mask) and of v_add_co_ci_u32 /
@@ -478,7 +503,7 @@ fn encode_blocks(f: &MFunc) -> Result<(Vec<u32>, Vec<u32>, Vec<(usize, usize)>),
             if inst.is_branch() {
                 branches.push((e.words.len(), inst.imm as usize));
             }
-            encode(inst, &mut e)?;
+            encode(inst, &mut e, f.target)?;
         }
     }
     block_word.push(e.words.len() as u32);
@@ -491,7 +516,7 @@ pub fn inst_starts(f: &MFunc) -> Result<Vec<u32>, CompileError> {
     let mut starts = Vec::with_capacity(f.blocks.iter().map(|b| b.insts.len()).sum::<usize>() + 1);
     for inst in f.blocks.iter().flat_map(|b| &b.insts) {
         starts.push(e.words.len() as u32);
-        encode(inst, &mut e)?;
+        encode(inst, &mut e, f.target)?;
     }
     starts.push(e.words.len() as u32);
     Ok(starts)
@@ -534,7 +559,7 @@ pub fn listing(f: &MFunc) -> Result<String, CompileError> {
                 inst.imm = branch_delta(&block_word, words, inst.imm as usize)? & 0xffff;
             }
             let mut e = Enc { words: Vec::new() };
-            encode(&inst, &mut e)?;
+            encode(&inst, &mut e, f.target)?;
             let hex: Vec<String> = e.words.iter().map(|w| format!("{w:08X}")).collect();
             let _ = writeln!(listing, "  {:<60} // {:06X}: {}", inst_text(f, &inst), words * 4, hex.join(" "));
             words += e.words.len();

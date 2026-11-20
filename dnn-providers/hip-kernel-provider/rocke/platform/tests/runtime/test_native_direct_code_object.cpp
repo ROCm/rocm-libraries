@@ -11,7 +11,9 @@
  * implicit-GEMM forward convolution and WMMA GEMM. Attention and convolution
  * go through rocke_codeobj_compile_rocke_ir_v1; the GEMM goes through
  * rocke_codeobj_compile_gfx1151_wmma_gemm_v1, and the generic entry point's
- * verdict on the same IR is recorded alongside.
+ * verdict on the same IR is recorded alongside. The gfx12 WMMA GEMM goes
+ * through rocke_codeobj_compile_rocke_ir_v2 for gfx1201 and for
+ * gfx12-generic, and each image must carry its processor's ELF flags.
  *
  * Each case runs once untimed (checked and optionally dumped), then
  * --warmup - 1 more untimed runs, then --reps timed runs; the median wall time
@@ -51,6 +53,7 @@
 #include "rocke/instance_conv_implicit_gemm.h"
 #include "rocke/instance_gfx1151_wmma_fmha_fwd.h"
 #include "rocke/instance_gfx1151_wmma_gemm.h"
+#include "rocke/instance_gfx1201_wmma_gemm.h"
 #include "rocke/ir.h"
 #include "rocke/ir_serialize.h"
 
@@ -113,6 +116,11 @@ struct Case
     /* For --ir-case: the kernel, parsed once into `parsed_builder`. */
     std::shared_ptr<rocke_ir_builder_t> parsed_builder;
     rocke_kernel_def_t* parsed = nullptr;
+    /* The target of rocke_codeobj_compile_rocke_ir_v2; NULL: the gfx1151
+     * entry points. */
+    const char* target = nullptr;
+    /* The ELF e_flags the image must have; 0: unchecked. */
+    uint32_t e_flags = 0;
 };
 
 enum class Mode
@@ -555,6 +563,24 @@ Case gemm_case()
     return c;
 }
 
+/* The gfx12 WMMA GEMM for `arch`, compiled for the target of the same name. */
+Case gfx12_gemm_case(const char* arch, uint32_t e_flags)
+{
+    rocke_wmma_gemm_gfx1201_spec_t spec = rocke_wmma_gemm_gfx1201_spec_default();
+    char reason[512] = {};
+    if(!rocke_wmma_gemm_gfx1201_is_valid_spec(&spec, arch, reason, sizeof(reason)))
+        throw std::runtime_error(std::string("invalid gfx12 WMMA GEMM spec: ") + reason);
+    Case c;
+    c.name = std::string("gemm_f16_rcr_") + arch;
+    c.family = "gemm";
+    c.target = arch;
+    c.e_flags = e_flags;
+    c.build = [spec, arch](rocke_ir_builder_t* b) {
+        return rocke_build_wmma_gemm_gfx1201_new(b, &spec, arch);
+    };
+    return c;
+}
+
 /* The case list mirrors the Python benchmarks so both paths time the same
  * kernels: forward attention as in compile_times/bench_ab/diff_fwd, the
  * compile_times/bench_ab conv shapes at both tiles, the diff_conv problems at
@@ -591,6 +617,9 @@ std::vector<Case> all_cases()
         cases.push_back(conv_case(name.str(), p, tiles[0]));
     }
     cases.push_back(gemm_case());
+    /* EF_AMDGPU_MACH_AMDGCN_GFX1201, and GFX12_GENERIC with generic version 1. */
+    cases.push_back(gfx12_gemm_case("gfx1201", 0x4e));
+    cases.push_back(gfx12_gemm_case("gfx12-generic", 0x01000059));
     return cases;
 }
 
@@ -738,12 +767,22 @@ Outcome run_once(const Case& c, Mode mode = Mode::Plain, bool keep_ir = true)
         request.serialized_ir = reinterpret_cast<const uint8_t*>(text);
         request.serialized_ir_size = text_size;
         t3 = Clock::now();
-        const int32_t status
-            = c.entry == Entry::WmmaGemm
-                  ? rocke_codeobj_compile_gfx1151_wmma_gemm_v1(&request, &result)
-              : mode == Mode::Session
-                  ? rocke_codeobj_session_compile_v1(g_settings.session, &request, &result)
-                  : rocke_codeobj_compile_rocke_ir_v1(&request, &result);
+        int32_t status = 0;
+        if(c.target)
+        {
+            rocke_codeobj_compile_request_v2 targeted = {};
+            targeted.struct_size = sizeof(targeted);
+            targeted.serialized_ir = request.serialized_ir;
+            targeted.serialized_ir_size = request.serialized_ir_size;
+            targeted.target = c.target;
+            status = rocke_codeobj_compile_rocke_ir_v2(&targeted, &result);
+        }
+        else
+            status = c.entry == Entry::WmmaGemm
+                         ? rocke_codeobj_compile_gfx1151_wmma_gemm_v1(&request, &result)
+                     : mode == Mode::Session
+                         ? rocke_codeobj_session_compile_v1(g_settings.session, &request, &result)
+                         : rocke_codeobj_compile_rocke_ir_v1(&request, &result);
         t4 = Clock::now();
         if(status != 0 && result.status == 0)
             result.status = status;
@@ -810,6 +849,15 @@ void check_image(const Case& c, const Outcome& o)
        || std::search(o.hsaco.begin(), o.hsaco.end(), begin, begin + o.symbol.size())
               == o.hsaco.end())
         throw std::runtime_error(c.name + ": image does not contain kernel symbol " + o.symbol);
+    if(c.e_flags != 0)
+    {
+        uint32_t flags = 0;
+        if(o.hsaco.size() >= 52)
+            std::memcpy(&flags, o.hsaco.data() + 48, sizeof(flags));
+        if(flags != c.e_flags)
+            throw std::runtime_error(c.name + ": image has e_flags " + std::to_string(flags)
+                                     + ", not " + std::to_string(c.e_flags));
+    }
 }
 
 void write_file(const std::string& path, const void* data, size_t size)
@@ -862,10 +910,11 @@ Report report_mode(const Case& c,
                    double first_ms,
                    bool rejected);
 
-/* The modes a case runs in: the GEMM entry point has no session variant. */
+/* The modes a case runs in: the GEMM entry point has no session variant, and
+ * the session is gfx1151's. */
 std::vector<Mode> modes_for(const Case& c)
 {
-    if(c.entry == Entry::WmmaGemm)
+    if(c.entry == Entry::WmmaGemm || c.target)
         return {Mode::Plain};
     return g_settings.modes;
 }
@@ -991,6 +1040,7 @@ Report report_mode(const Case& c,
     json << "{\"case\":\"" << c.name << "\",\"family\":\"" << c.family << "\",\"mode\":\""
          << mode_name(mode) << "\",\"entry\":\""
          << (c.entry == Entry::WmmaGemm ? "rocke_codeobj_compile_gfx1151_wmma_gemm_v1"
+             : c.target                 ? "rocke_codeobj_compile_rocke_ir_v2"
              : mode == Mode::Plain      ? "rocke_codeobj_compile_rocke_ir_v1"
              : mode == Mode::Session
                  ? "rocke_codeobj_session_compile_v1"

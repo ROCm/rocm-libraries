@@ -455,6 +455,56 @@ def render(
 
 
 # --------------------------------------------------------------------------
+# gfx1201 (`--isa gfx1201`): the gfx11 variants as gfx1201 encodes them, in
+# gfx12 syntax. llvm-mc reads gfx11's mnemonics as aliases of the renamed
+# instructions (`s_add_i32`, `v_min_f32`), except within a VOPD pair.
+# --------------------------------------------------------------------------
+
+GFX12_VOPD = {
+    "v_dual_max_f32": "v_dual_max_num_f32",
+    "v_dual_min_f32": "v_dual_min_num_f32",
+}
+
+
+GFX12_VOP2 = {"VAddF64", "VMulF64", "VMinF64", "VMaxF64", "VLshlrevB64"}
+
+
+def render12(
+    v: Variant, info: dict[str, Info], vcmp: dict[int, str], vopd: dict[int, str]
+) -> str:
+    if v.name.startswith("Gfx12:"):
+        mn = v.name.removeprefix("Gfx12:")
+        if mn == "s_barrier_signal":
+            if v.imm != 0xFFFF:
+                raise Unprintable("a barrier other than the workgroup's")
+            return "s_barrier_signal -1"
+        return f"{mn} {v.imm & 0xFFFF:#x}"
+    text = render(v, info, vcmp, {c: GFX12_VOPD.get(n, n) for c, n in vopd.items()})
+    fmt = info["VCmp" if v.name == "VCmp" else v.name].fmt
+    if fmt == "Mubuf":
+        # gfx11's inline 0 as the offset register is no register.
+        text = text.replace(", 0 offen", ", null offen")
+    if fmt == "Global" and text.endswith(" glc"):
+        # gfx11's GLC on an atomic returns the old value.
+        text = text.removesuffix(" glc") + " th:TH_ATOMIC_RETURN"
+    if v.name in GFX12_VOP2:
+        # VOP3-only on gfx11; gfx12 has a VOP2 form, which llvm-mc prefers.
+        mn, rest = text.split(" ", 1)
+        text = f"{mn}_e64 {rest}"
+    if v.name.startswith("VWmma"):
+        # gfx12's A and B are half as wide; the encoding names their first register.
+        ops = text.split(", ")
+        for k in (1, 2):
+            m = re.fullmatch(r"v\[(\d+):(\d+)\]", ops[k])
+            if m is None:
+                continue
+            first, n = int(m[1]), (int(m[2]) - int(m[1]) + 1) // 2
+            ops[k] = f"v{first}" if n == 1 else f"v[{first}:{first + n - 1}]"
+        text = ", ".join(ops)
+    return text
+
+
+# --------------------------------------------------------------------------
 # gfx950 (`--isa gfx950`): the description isa/gfx950.isa and gfx9 syntax
 # --------------------------------------------------------------------------
 
@@ -932,6 +982,10 @@ def literal_for_inline(v: Variant) -> bool:
 # --------------------------------------------------------------------------
 
 
+# The processors of the gfx12 encoder (`--isa`).
+GFX12 = ("gfx1201", "gfx12-generic")
+
+
 def report(vs: list[Variant], path: Path, isa: str = "gfx11") -> str:
     counts = collections.Counter(v.verdict for v in vs)
     by_op = collections.defaultdict(collections.Counter)
@@ -946,6 +1000,13 @@ def report(vs: list[Variant], path: Path, isa: str = "gfx11") -> str:
             f"{sum(v.table == v.hand for v in vs)} of {len(vs)}."
         )
         if isa == "gfx11"
+        else (
+            f"Variants: {len(vs)} over {len(by_op)} opcodes (the table-encoded opcodes of `isa/gfx11.isa` "
+            "that gfx12 keeps, as gfx1201 encodes them, and gfx12's own waits and barrier; operands, "
+            f"modifiers and immediates as for gfx11). Reference: `llvm-mc -arch=amdgcn -mcpu={isa} "
+            "-show-encoding`. One encoder (`src/target/gfx12/asm.rs` over `src/rir/asm.rs`)."
+        )
+        if isa in GFX12
         else (
             f"Variants: {len(vs)} over {len(by_op)} opcodes (the rows of `isa/gfx950.isa`; operands by class: "
             "VGPRs below and above v127, SGPRs up to s101, special registers and the 64-bit lane masks vcc and "
@@ -1046,18 +1107,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--json", type=Path)
     ap.add_argument(
         "--isa",
-        choices=("gfx11", "gfx950"),
+        choices=("gfx11", "gfx950", *GFX12),
         default="gfx11",
-        help="the encoder: gfx11 (rir, llvm-mc -mcpu=gfx1151) or gfx950 (target::gfx9, -mcpu=gfx950)",
+        help="the encoder: gfx11 (rir, llvm-mc -mcpu=gfx1151), gfx950 (target::gfx9, -mcpu=gfx950), "
+        "gfx1201 (target::gfx12 over rir, -mcpu=gfx1201) or gfx12-generic (the gfx1201 encoder "
+        "against -mcpu=gfx12-generic)",
     )
     args = ap.parse_args(argv)
     gfx950 = args.isa == "gfx950"
+    # The crate's example names the encoder: gfx12-generic has gfx1201's.
+    encoder = "gfx1201" if args.isa in GFX12 else args.isa
     if args.variants:
         text = args.variants.read_text(encoding="utf-8-sig")
     else:
         proc = subprocess.run(
             ["cargo", "run", "-q", "--release", "--example", "isa_xcheck"]
-            + (["--", "--target", "gfx950"] if gfx950 else []),
+            + (["--", "--target", encoder] if encoder != "gfx11" else []),
             cwd=args.crate,
             capture_output=True,
             text=True,
@@ -1073,12 +1138,13 @@ def main(argv: list[str] | None = None) -> int:
     else:
         info = load_info(args.crate)
         vcmp, vopd = vcmp_names(), vopd_names(args.crate)
+    render11 = render12 if args.isa in GFX12 else render
     for v in vs:
         try:
-            v.asm = render9(v, info9, vcmp9) if gfx950 else render(v, info, vcmp, vopd)
+            v.asm = render9(v, info9, vcmp9) if gfx950 else render11(v, info, vcmp, vopd)
         except Unprintable as e:
             v.why = str(e)
-    classify(vs, args.llvm_bin, "gfx950" if gfx950 else "gfx1151")
+    classify(vs, args.llvm_bin, "gfx1151" if args.isa == "gfx11" else args.isa)
     text = report(vs, args.out, args.isa)
     if args.json:
         args.json.write_text(

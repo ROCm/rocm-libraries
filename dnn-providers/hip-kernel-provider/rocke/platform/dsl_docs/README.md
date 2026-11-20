@@ -80,7 +80,7 @@ New to the DSL? Read in this order:
 16. [`runtime/manifest_schema.md`](./runtime/manifest_schema.md)
 17. [`runtime/comgr_and_hipmodule.md`](./runtime/comgr_and_hipmodule.md)
 18. [`runtime/code_object_compiler.md`](./runtime/code_object_compiler.md) — the code-object compiler contract: COMGR results and the direct compiler's C ABI entry points
-19. [`runtime/direct_compiler.md`](./runtime/direct_compiler.md) — the direct rocKE IR to HSACO compiler for gfx1151 and gfx950: usage, stages, limits, debug controls
+19. [`runtime/direct_compiler.md`](./runtime/direct_compiler.md) — the direct rocKE IR to HSACO compiler for gfx1151, gfx950 and gfx12: usage, stages, limits, debug controls
 20. [`runtime/limitations.md`](./runtime/limitations.md)
 21. [`optimization/optimization_runbook.md`](./optimization/optimization_runbook.md) — current evidence-first optimization workflow
 22. [`optimization/scheduler-policy.md`](./optimization/scheduler-policy.md) — typed AMDGPU machine-scheduler tuning
@@ -126,7 +126,7 @@ spec dataclass
 Hard facts:
 
 - The production compile path is **LLVM IR text -> libamd_comgr -> HSACO -> hipModule**. There is no MLIR pipeline at runtime. `print_ir()` emits MLIR-style text for humans only.
-- An optional second code-object compiler, the [direct compiler](./runtime/direct_compiler.md) (`ROCKE_CODEOBJ_BACKEND=direct`), compiles serialized rocKE IR to HSACO for gfx1151 and gfx950 with no LLVM component. COMGR stays the default, and it is the reference the direct compiler is tested against.
+- An optional second code-object compiler, the [direct compiler](./runtime/direct_compiler.md) (`ROCKE_CODEOBJ_BACKEND=direct`), compiles serialized rocKE IR to HSACO for gfx1151, gfx950 and gfx12 (gfx1201 and gfx12-generic) with no LLVM component. COMGR stays the default, and it is the reference the direct compiler is tested against.
 - `core/lower_hip.py` (`lower_kernel_to_hip`) is a debugging/inspection backend that emits readable HIP C++. It is not the production runtime path. Op coverage is narrower than LLVM lowering.
 - `core/lower_cktile.py` emits CK Tile C++ from selected high-level specs (`UniversalGemmSpec`, `ImplicitGemmConvSpec`). It does not consume `KernelDef`. It exists for parity/reference.
 - Default target ISA is `amdgcn-amd-amdhsa--gfx950`. Supported target facts

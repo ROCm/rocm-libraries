@@ -181,14 +181,16 @@ fn push_attrs(words: &mut Vec<u32>, attrs: &[(Text, Attr)]) {
 }
 
 /// Defining op of a pure value: its kind, first two operands, whether it
-/// carries a `wrap` attribute (no signed no-overflow guarantee), and whether
-/// all its operands are the same value.
+/// carries a `wrap` attribute (no signed no-overflow guarantee), whether it
+/// is a shift left that does not overflow, and whether all its operands are
+/// the same value.
 #[derive(Clone, Copy)]
 struct Def {
     kind: OpKind,
     operands: [ValueId; 2],
     count: u8,
     wrap: bool,
+    shl_nsw: bool,
     splat: bool,
     /// The third operand of a ternary op (a select's false value), else `u32::MAX`.
     third: ValueId,
@@ -202,6 +204,7 @@ impl Def {
             operands: [at(0), at(1)],
             count: op.operands.len().min(2) as u8,
             wrap: op.attr("wrap").is_some(),
+            shl_nsw: op.kind == OpKind::Shl && op.attr(SHL_NSW).is_some(),
             splat: op.operands.iter().all(|&v| v == at(0)),
             third: at(2),
         }
@@ -384,6 +387,9 @@ struct Simplifier<'k> {
     defs: Vec<Option<Def>>,
     nosimplify: bool,
     lds_cse: bool,
+    /// Whether a masked right shift of a sum drops the part of the sum's
+    /// constant above the bits the mask keeps (`Kernel::address_reduction`).
+    shifted_masks: bool,
     /// Advances at every op that may change what a later LDS load reads,
     /// except LDS stores with a known extent, which go to `lds_writes`.
     lds_epoch: u32,
@@ -815,6 +821,22 @@ impl<'k> Simplifier<'k> {
             OpKind::For => {
                 let body = op.regions.pop().ok_or_else(|| malformed("scf.for without a body"))?;
                 let iv = op.block_args[0];
+                // Constant bounds that give the loop no trip: its results are the values carried in. A rolled
+                // loop runs while `iv < ub`; one the IR unrolls counts `(ub - lb) // step`, the same with a
+                // positive step.
+                if let (Some(lb), Some(ub)) = (self.int(op.operands[0]), self.int(op.operands[1])) {
+                    let counted = op.bool_attr("unroll") == Some(true);
+                    if lb >= ub && (!counted || self.int(op.operands[2]).is_some_and(|step| step > 0)) {
+                        for (i, &result) in op.results.iter().enumerate() {
+                            let carried_in = op.operands[3 + i];
+                            self.replace(result, carried_in);
+                        }
+                        self.changed = true;
+                        self.rewrote = true;
+                        self.step = Step::Done;
+                        return Ok(());
+                    }
+                }
                 if let (Some(lb), Some(ub)) = (self.range(op.operands[0]), self.range(op.operands[1])) {
                     let step = self.int(op.operands[2]).unwrap_or(0);
                     if step > 0 {
@@ -1241,6 +1263,25 @@ impl<'k> Simplifier<'k> {
                                     self.emit(OpKind::Add, ty.clone(), [x, kv], modular(), out)
                                 };
                                 return Ok(Some(self.emit(OpKind::And, ty, [x, b], [], out)));
+                            }
+                            // The same under a right shift by s: the mask keeps bits s.. of the sum,
+                            // which depend on the constant's bits below s + n only (the swizzle term
+                            // of a tile's rows, 16 apart).
+                            let shifted = self.def_of(a).filter(|d| self.shifted_masks && d.kind == OpKind::Lshr && d.count == 2);
+                            if let (Some(mask), Some(d)) = (cb, shifted) {
+                                let limit = if ty == Type::Scalar(Scalar::I64) { 62 } else { 31 };
+                                let s = self.int(d.operand(1)).filter(|s| (1..limit).contains(s));
+                                let kept = s.filter(|s| mask > 0 && mask < 1 << (limit - s)).map(|s| mask << s | ((1 << s) - 1));
+                                if let Some((x, k)) = kept.and_then(|kept| self.masked_add_parts(d.operand(0), kept)) {
+                                    let x = if k == 0 {
+                                        x
+                                    } else {
+                                        let kv = self.int_const(&ty, k);
+                                        self.emit(OpKind::Add, ty.clone(), [x, kv], modular(), out)
+                                    };
+                                    let high = self.emit(OpKind::Lshr, ty.clone(), [x, d.operand(1)], [], out);
+                                    return Ok(Some(self.emit(OpKind::And, ty, [high, b], [], out)));
+                                }
                             }
                             // Lever `selxor`: (x ^ s) & K -> x ^ (s & K) for a high mask K = -2^j
                             // when x has j low zero bits (x & K = x); s & K of a select of
@@ -1967,6 +2008,7 @@ impl<'k> Simplifier<'k> {
         lds_writes.clear();
         let nosimplify = super::debug_flag("nosimplify");
         let lds_cse = !nosimplify && !ws.keep_lds_loads && !super::debug_flag("noldscse");
+        let shifted_masks = kernel.address_reduction && !super::debug_flag("noshiftmask");
         let mut s = Self {
             kernel,
             facts,
@@ -1978,6 +2020,7 @@ impl<'k> Simplifier<'k> {
             defs,
             nosimplify,
             lds_cse,
+            shifted_masks,
             lds_epoch: 0,
             lds_writes,
             lds_since: std::mem::take(&mut ws.lds_since),
@@ -2332,6 +2375,115 @@ pub fn dce(kernel: &mut Kernel) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Low-word narrowing
+// ---------------------------------------------------------------------------
+
+/// Whether `op` is a 64-bit add, multiply or left shift by a constant below
+/// 32 (`shift` marks those constants): the low word of its result depends
+/// only on the low words of the values it combines.
+fn low_word_op(kernel: &Kernel, shift: &[bool], op: &Op) -> bool {
+    let wide = |v: &ValueId| *kernel.ty(*v) == Type::Scalar(Scalar::I64);
+    match (op.kind, &op.operands[..], &op.results[..]) {
+        (OpKind::Add | OpKind::Mul, [a, b], [r]) => wide(r) && wide(a) && wide(b),
+        (OpKind::Shl, [a, k], [r]) => wide(r) && wide(a) && shift[k.0 as usize],
+        _ => false,
+    }
+}
+
+/// Turns the 64-bit adds, multiplies and constant left shifts of which every
+/// reader takes the low word only (a `trunc` to i32, or another such op)
+/// into 32-bit ops over the truncated operands, and their truncations into
+/// the results. The new ops wrap. Runs for a target with
+/// `TargetInfo::address_reduction`.
+fn narrow_low_words(kernel: &mut Kernel) -> bool {
+    if !kernel.address_reduction || super::debug_flag("nonarrow") {
+        return false;
+    }
+    let i32t = Type::Scalar(Scalar::I32);
+    let count = kernel.values.len();
+    // Per value: 1 when every reader takes its low word, 2 when one takes
+    // all of it. Readers come before definitions in reverse program order.
+    let mut demand = vec![0u8; count];
+    let mut shift = vec![false; count];
+    {
+        let kernel = &*kernel;
+        let mut ops = Vec::new();
+        super::analysis::preorder(&kernel.body, |op| ops.push(op));
+        if !ops.iter().any(|op| op.kind == OpKind::Trunc) {
+            return false;
+        }
+        for op in &ops {
+            if let (OpKind::Constant, [r], Some(k)) = (op.kind, &op.results[..], op.int_attr("value")) {
+                shift[r.0 as usize] = (0..32).contains(&k) && *kernel.ty(*r) == Type::Scalar(Scalar::I64);
+            }
+        }
+        for op in ops.iter().rev() {
+            let low = match op.kind {
+                OpKind::Trunc => op.results.len() == 1 && *kernel.ty(op.results[0]) == i32t,
+                _ => low_word_op(kernel, &shift, op) && demand[op.results[0].0 as usize] == 1,
+            };
+            for (i, v) in op.operands.iter().enumerate() {
+                let whole = !low || (op.kind == OpKind::Shl && i == 1);
+                let d = &mut demand[v.0 as usize];
+                *d = (*d).max(1 + whole as u8);
+            }
+        }
+    }
+    // The 32-bit value of each narrowed op, and of each `trunc` of one.
+    let mut narrow: Vec<Option<ValueId>> = vec![None; count];
+    let mut changed = false;
+    let mut body = std::mem::take(&mut kernel.body);
+    // Regions are rebuilt outermost first, so a narrowed value is known
+    // before the regions that read it.
+    let mut pending = vec![&mut body];
+    while let Some(region) = pending.pop() {
+        let ops = std::mem::take(&mut region.ops);
+        let mut out = Vec::with_capacity(ops.len());
+        for mut op in ops {
+            let low = |kernel: &mut Kernel, narrow: &[Option<ValueId>], v: ValueId, out: &mut Vec<Op>| match narrow[v.0 as usize] {
+                Some(n) => n,
+                None => {
+                    let n = kernel.new_value("%lo", Type::Scalar(Scalar::I32));
+                    out.push(mk_op(OpKind::Trunc, [n], [v], []));
+                    n
+                }
+            };
+            if op.kind == OpKind::Trunc && op.results.len() == 1 && op.operands.len() == 1 {
+                if let (Some(n), true) = (narrow[op.operands[0].0 as usize], *kernel.ty(op.results[0]) == i32t) {
+                    narrow[op.results[0].0 as usize] = Some(n);
+                    continue;
+                }
+            }
+            if low_word_op(kernel, &shift, &op) && demand[op.results[0].0 as usize] == 1 {
+                let a = low(kernel, &narrow, op.operands[0], &mut out);
+                let b = low(kernel, &narrow, op.operands[1], &mut out);
+                let result = kernel.new_value("%lo", Type::Scalar(Scalar::I32));
+                narrow[op.results[0].0 as usize] = Some(result);
+                let attrs = if op.kind == OpKind::Shl { Vec::new() } else { modular() };
+                op = mk_op(op.kind, [result], [a, b], attrs);
+                changed = true;
+            }
+            out.push(op);
+        }
+        region.ops = out;
+        for op in region.ops.iter_mut() {
+            pending.extend(op.regions.iter_mut());
+        }
+    }
+    if changed {
+        // Only a truncation stands for the value its operand narrowed to.
+        for (v, n) in narrow.iter_mut().enumerate() {
+            if *kernel.ty(ValueId(v as u32)) != i32t {
+                *n = None;
+            }
+        }
+        substitute(&mut body, &narrow);
+    }
+    kernel.body = body;
+    changed
+}
+
+// ---------------------------------------------------------------------------
 // Address legalization
 // ---------------------------------------------------------------------------
 
@@ -2381,12 +2533,25 @@ struct ScalarBase {
     value: ValueId,
 }
 
+/// A 64-bit address `root + form + konst` (in bytes) already built in scope:
+/// `root` is the pointer under every `global_ptr_add` / `global_ptr_offset`
+/// by an i64 the address goes through.
+struct FlatBase {
+    root: ValueId,
+    form: Form,
+    konst: i64,
+    value: ValueId,
+}
+
 struct Legalizer<'k> {
     kernel: &'k mut Kernel,
     facts: &'k Facts,
     defs: Vec<Option<Def>>,
     uniform: Vec<bool>,
     bases: Vec<ScalarBase>,
+    flat: Vec<FlatBase>,
+    /// Whether `flat_address` reuses the addresses in `flat`.
+    reuse_flat: bool,
     /// Emptied term lists for reuse.
     spare: Vec<Vec<ValueId>>,
     /// Pointers into memory no wave writes during the launch: `tile.int_to_ptr`
@@ -2787,9 +2952,141 @@ impl<'k> Legalizer<'k> {
         hi <= I32_MAX && (shift <= 1 || hi < (1i64 << 32) >> shift)
     }
 
+    /// The i32 that `d` widens to its own value as a signed integer: the
+    /// operand of a sign extension, or of a zero extension of a value known
+    /// not to be negative (how the optimizer writes such a sign extension).
+    fn widened(&self, d: Def) -> Option<ValueId> {
+        let exact = match d.kind {
+            OpKind::Sext => true,
+            OpKind::Zext => self.facts.nonneg(d.operand(0)),
+            _ => false,
+        };
+        (exact && *self.kernel.ty(d.operand(0)) == Type::Scalar(Scalar::I32)).then(|| d.operand(0))
+    }
+
+    /// `linear` for a 64-bit byte offset: also through the widening of an
+    /// i32 (`widened`), a shift that does not overflow, and the nsw product
+    /// of a sum with one value, which distributes over the sum's terms.
+    /// Atoms are the values under the widenings, so an i32 atom stands for
+    /// its value as a signed integer. Coefficients wrap, as the address does.
+    fn linear_wide(&self, v: ValueId, depth: u32, scale: i64, form: &mut (Form, i64)) {
+        if let Some(k) = self.facts.int(v) {
+            form.1 = form.1.wrapping_add(scale.wrapping_mul(k));
+            return;
+        }
+        // A value past the depth or term bound stays whole.
+        let def = if depth < 12 && form.0.len() < 64 { self.def(v) } else { None };
+        match def {
+            Some(d) if d.kind == OpKind::Add && !d.wrap => {
+                self.linear_wide(d.operand(0), depth + 1, scale, form);
+                self.linear_wide(d.operand(1), depth + 1, scale, form);
+            }
+            Some(d) if self.widened(d).is_some() => {
+                self.linear_wide(d.operand(0), depth + 1, scale, form);
+            }
+            Some(d) if d.shl_nsw && self.facts.int(d.operand(1)).is_some_and(|k| (0..63).contains(&k)) => {
+                let k = self.facts.int(d.operand(1)).expect("a constant shift");
+                self.linear_wide(d.operand(0), depth + 1, scale.wrapping_shl(k as u32), form);
+            }
+            Some(d) if d.kind == OpKind::Mul && !d.wrap => {
+                let (a, b) = (d.operand(0), d.operand(1));
+                for (x, k) in [(a, self.facts.int(b)), (b, self.facts.int(a))] {
+                    if let Some(k) = k {
+                        return self.linear_wide(x, depth + 1, scale.wrapping_mul(k), form);
+                    }
+                }
+                for (sum, other) in [(a, b), (b, a)] {
+                    let Some(other) = self.plain_factor(other) else { continue };
+                    // The sum's terms land at the end of `form`, each to
+                    // multiply by `other`; a product among them does not.
+                    let (start, konst) = (form.0.len(), std::mem::take(&mut form.1));
+                    self.linear_wide(sum, depth + 1, scale, form);
+                    let k = std::mem::replace(&mut form.1, konst);
+                    if form.0[start..].iter().all(|(atom, _)| matches!(atom, Atom::Val(_))) {
+                        for term in &mut form.0[start..] {
+                            if let Atom::Val(x) = term.0 {
+                                term.0 = Atom::prod(x, other);
+                            }
+                        }
+                        form.0.push((Atom::Val(other), k));
+                        return;
+                    }
+                    form.0.truncate(start);
+                }
+                form.0.push((Atom::prod(a, b), scale));
+            }
+            _ => form.0.push((Atom::Val(v), scale)),
+        }
+    }
+
+    /// `v`, or the i32 it widens, when `linear_wide` keeps that value
+    /// whole: a factor a sum can distribute over.
+    fn plain_factor(&self, v: ValueId) -> Option<ValueId> {
+        let v = self.def(v).and_then(|d| self.widened(d)).unwrap_or(v);
+        let composite = self.facts.int(v).is_some()
+            || self.def(v).is_some_and(|d| (matches!(d.kind, OpKind::Add | OpKind::Mul) && !d.wrap) || d.shl_nsw);
+        (!composite).then_some(v)
+    }
+
+    /// The root pointer, byte form and constant of element `index` of `ptr`.
+    fn address_form(&self, ptr: ValueId, index: ValueId, bytes: u32) -> (ValueId, Form, i64) {
+        let mut form = (Form::new(), 0i64);
+        self.linear_wide(index, 0, bytes as i64, &mut form);
+        let mut root = ptr;
+        for _ in 0..4 {
+            match self.def(root) {
+                Some(d)
+                    if matches!(d.kind, OpKind::GlobalPtrAdd | OpKind::GlobalPtrOffset)
+                        && d.count == 2
+                        && *self.kernel.ty(d.operand(1)) == Type::Scalar(Scalar::I64) =>
+                {
+                    self.linear_wide(d.operand(1), 0, 1, &mut form);
+                    root = d.operand(0);
+                }
+                _ => break,
+            }
+        }
+        normalize_form(&mut form.0);
+        (root, form.0, form.1)
+    }
+
     /// `(addr, offset)` for element `index` of a global pointer, as one
-    /// 64-bit address.
+    /// 64-bit address. An address of the same root already in scope serves
+    /// again when the two differ by a constant the offset field holds, and
+    /// becomes this one with a single 64-bit add when they differ, beyond
+    /// such a constant, by one power-of-two multiple of a uniform value: the
+    /// rows of a tile then cost one add each and no multiply.
     fn flat_address(&mut self, ptr: ValueId, index: ValueId, bytes: u32, out: &mut Vec<Op>) -> (ValueId, i64) {
+        if !self.reuse_flat {
+            return self.new_flat_address(ptr, index, bytes, out);
+        }
+        let (root, form, konst) = self.address_form(ptr, index, bytes);
+        let mut step = None;
+        for b in self.flat.iter().rev() {
+            let offset = konst.wrapping_sub(b.konst);
+            if b.root != root || !(GLOBAL_OFFSET_MIN..=GLOBAL_OFFSET_MAX).contains(&offset) {
+                continue;
+            }
+            if b.form == form {
+                return (b.value, offset);
+            }
+            if step.is_none() {
+                step = self.single_step(&b.form, &form).map(|step| (b.value, step, offset));
+            }
+        }
+        let (addr, offset) = if let Some((prev, (v, p), offset)) = step {
+            let delta = self.scaled64(v, p, out);
+            let ptr_ty = self.kernel.ty(ptr).clone();
+            (self.new_op(OpKind::GlobalPtrAdd, ptr_ty, [prev, delta], out), offset)
+        } else {
+            self.new_flat_address(ptr, index, bytes, out)
+        };
+        self.flat.push(FlatBase { root, form, konst: konst.wrapping_sub(offset), value: addr });
+        (addr, offset)
+    }
+
+    /// `flat_address` built from `ptr` and `index` alone.
+    fn new_flat_address(&mut self, ptr: ValueId, index: ValueId, bytes: u32, out: &mut Vec<Op>) -> (ValueId, i64) {
         let index_ty = self.kernel.ty(index).clone();
         let (base, k) = self.split(index);
         // The constant of the whole add tree folds into the offset, so
@@ -2908,9 +3205,9 @@ impl<'k> Legalizer<'k> {
     }
 
     /// Legalizes `body`, each op after its regions, nesting through an
-    /// explicit stack. Scalar bases are scoped to the region they are built in.
+    /// explicit stack. Scalar bases and flat addresses are scoped to the region they are built in.
     fn region(&mut self, body: &mut Region) -> Result<(), CompileError> {
-        let mut stack = vec![Rebuild::new(std::mem::take(body), self.bases.len())];
+        let mut stack = vec![Rebuild::new(std::mem::take(body), (self.bases.len(), self.flat.len()))];
         loop {
             let top = stack.last_mut().expect("the body stays open until the end");
             let mut nested = None;
@@ -2926,7 +3223,8 @@ impl<'k> Legalizer<'k> {
             }
             let Some(mut op) = nested else {
                 let mut done = stack.pop().expect("an open region");
-                self.bases.truncate(done.data);
+                self.bases.truncate(done.data.0);
+                self.flat.truncate(done.data.1);
                 let region = Region { ops: std::mem::take(&mut done.out) };
                 let Some(parent) = stack.last_mut() else {
                     *body = region;
@@ -2937,7 +3235,7 @@ impl<'k> Legalizer<'k> {
                 if index + 1 < op.regions.len() {
                     let next = std::mem::take(&mut op.regions[index + 1]);
                     parent.parked = Some((op, index + 1));
-                    let scope = self.bases.len();
+                    let scope = (self.bases.len(), self.flat.len());
                     stack.push(Rebuild::new(next, scope));
                     continue;
                 }
@@ -2948,7 +3246,7 @@ impl<'k> Legalizer<'k> {
             };
             let first = std::mem::take(&mut op.regions[0]);
             top.parked = Some((op, 0));
-            let scope = self.bases.len();
+            let scope = (self.bases.len(), self.flat.len());
             stack.push(Rebuild::new(first, scope));
         }
     }
@@ -2976,7 +3274,7 @@ impl<'k> Legalizer<'k> {
             let is_constant = |c: &Vec<bool>, v: ValueId| c.get(v.0 as usize).copied().unwrap_or(false);
             let constant_result = match op.kind {
                 OpKind::IntToPtr => op.str_attr("space") == Some("constant"),
-                OpKind::GlobalPtrAdd => is_constant(&self.constant, op.operands[0]),
+                OpKind::GlobalPtrAdd | OpKind::GlobalPtrOffset => is_constant(&self.constant, op.operands[0]),
                 _ => false,
             };
             if constant_result {
@@ -3150,6 +3448,7 @@ fn index_step(kind: OpKind, ty: &Type) -> u32 {
 
 pub fn legalize_addresses(kernel: &mut Kernel, facts: &Facts) -> Result<(), CompileError> {
     let uniform = super::analysis::classify(kernel);
+    let reuse_flat = kernel.address_reduction && !super::debug_flag("noaddrreuse");
     let mut body = std::mem::take(&mut kernel.body);
     let mut legalizer = Legalizer {
         kernel,
@@ -3157,6 +3456,8 @@ pub fn legalize_addresses(kernel: &mut Kernel, facts: &Facts) -> Result<(), Comp
         defs: Vec::new(),
         uniform,
         bases: Vec::new(),
+        flat: Vec::new(),
+        reuse_flat,
         spare: Vec::new(),
         constant: Vec::new(),
     };
@@ -3358,6 +3659,7 @@ fn optimize_with(kernel: &mut Kernel, lds: &mut FxHashMap<ValueId, u32>, mut ws:
     let keep_lds_loads = std::mem::replace(&mut ws.keep_lds_loads, true);
     sweep(kernel, &mut ws)?;
     compact(kernel, &mut ws, lds);
+    narrow_low_words(kernel);
     // rustgemm lever `sreassoc`: LDS DMA soffsets as (leaves) + constant, before LICM / CSE share the leaves.
     if super::kernel_lever("sreassoc") || super::scoped_anywhere(kernel, "sreassoc") {
         super::reassoc::run(kernel);
@@ -3826,6 +4128,37 @@ kernel @smem_offset_probe {
         assert_eq!(ops.iter().filter(|op| op.kind == OpKind::GStore).count(), 2);
         let code = insts(&text);
         assert!(code.iter().any(|i| i.op == super::super::mir::Opc::SCbranchScc1));
+    }
+
+    #[test]
+    fn constant_loops_without_a_trip_go() {
+        let looped = |ub: i64| {
+            let body = format!(
+                "    %c1 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:1 }}\n    \
+                 %c4 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:4 }}\n    \
+                 %ub : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{ub} }}\n    \
+                 %f0 : f32 = arith.bitcast ( %tid )\n    \
+                 %r : f32 = scf.for ( %c4, %ub, %c1, %f0 ) {{ iter_args = l:[ {{ name = s:\"%acc\", type = s:\"f32\" }} ], iv = s:\"%i\", \
+                 iv_type = s:\"i32\", num_iter_args = i:1 }}\n      region @body {{\n        \
+                 %s : f32 = arith.fadd ( %acc, %acc )\n        memref.global_store_typed ( %Y, %i, %s ) {{ align = i:4 }}\n        \
+                 scf.yield ( %s ) {{ num = i:1 }}\n      }}\n    memref.global_store_typed ( %Y, %tid, %r ) {{ align = i:4 }}\n"
+            );
+            let mut kernel = super::super::parse::parse(&probe("", &body)).unwrap();
+            let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+            optimize(&mut kernel, &mut lds).unwrap();
+            kernel
+        };
+        // 4..4 and 4..3: the body's store goes with the loop, and the value carried in is stored.
+        for ub in [4, 3] {
+            let kernel = looped(ub);
+            let ops = all_ops(&kernel.body);
+            assert!(ops.iter().all(|op| op.kind != OpKind::For), "ub {ub}");
+            let stores: Vec<_> = ops.iter().filter(|op| op.kind == OpKind::GStore).collect();
+            let cast = ops.iter().find(|op| op.kind == OpKind::Bitcast).expect("the value carried in");
+            assert_eq!((stores.len(), stores[0].operands[2]), (1, cast.results[0]), "ub {ub}");
+        }
+        // 4..5 runs once.
+        assert!(all_ops(&looped(5).body).iter().any(|op| op.kind == OpKind::For));
     }
 
     #[test]

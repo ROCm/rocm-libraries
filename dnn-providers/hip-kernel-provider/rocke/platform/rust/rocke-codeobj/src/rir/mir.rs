@@ -144,20 +144,38 @@ macro_rules! opcodes {
         /// `Gfx9` holds the gfx9 back end's own opcodes (rows of `isa/gfx950.isa`
         /// with `opc=gfx9`): they have no gfx11 format or opcode (`Fmt::Pseudo`,
         /// which the gfx11 encoders refuse), only their flags and mnemonic.
+        /// `Gfx12` holds the instructions gfx12 added (`target::gfx12`), with
+        /// their gfx12 format and opcode: real instructions to the passes
+        /// that count them, which only gfx1201's encoder writes.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-        pub enum Opc { $($name),*, VCmp(u8), Gfx9(crate::target::gfx9::gen_isa::Gfx9Op) }
+        pub enum Opc {
+            $($name),*,
+            VCmp(u8),
+            Gfx9(crate::target::gfx9::gen_isa::Gfx9Op),
+            Gfx12(crate::target::gfx12::Gfx12Op),
+        }
 
         impl Opc {
             #[inline(always)]
             pub fn fmt(self) -> Fmt {
-                match self { $(Opc::$name => Fmt::$fmt),*, Opc::VCmp(_) => Fmt::Vopc, Opc::Gfx9(_) => Fmt::Pseudo }
+                match self {
+                    $(Opc::$name => Fmt::$fmt),*,
+                    Opc::VCmp(_) => Fmt::Vopc,
+                    Opc::Gfx9(_) => Fmt::Pseudo,
+                    Opc::Gfx12(op) => op.fmt(),
+                }
             }
             #[inline(always)]
             pub fn code(self) -> u16 {
-                match self { $(Opc::$name => $code),*, Opc::VCmp(op) => op as u16, Opc::Gfx9(_) => 0 }
+                match self { $(Opc::$name => $code),*, Opc::VCmp(op) => op as u16, Opc::Gfx9(_) => 0, Opc::Gfx12(op) => op.code() }
             }
             pub fn name(self) -> String {
-                match self { $(Opc::$name => $mn.to_string()),*, Opc::VCmp(op) => vcmp_name(op), Opc::Gfx9(op) => op.mnemonic().to_string() }
+                match self {
+                    $(Opc::$name => $mn.to_string()),*,
+                    Opc::VCmp(op) => vcmp_name(op),
+                    Opc::Gfx9(op) => op.mnemonic().to_string(),
+                    Opc::Gfx12(op) => op.mnemonic().to_string(),
+                }
             }
             #[inline(always)]
             pub fn flags(self) -> u32 {
@@ -165,6 +183,7 @@ macro_rules! opcodes {
                     $(Opc::$name => $flags),*,
                     Opc::VCmp(op) => F_USE_EXEC | if (op & 0xf0) == 0x50 { F_64BIT_SRC } else { 0 },
                     Opc::Gfx9(op) => op.flags(),
+                    Opc::Gfx12(op) => op.flags(),
                 }
             }
         }
@@ -470,6 +489,8 @@ impl MFunc {
 
 pub fn phys_name(phys: Phys, n: u8) -> String {
     match phys {
+        // The trap temporaries follow the SGPRs (gfx12's workgroup ids).
+        Phys::S(i @ 108..=123) if n == 1 => format!("ttmp{}", i - 108),
         Phys::S(i) if n == 1 => format!("s{i}"),
         Phys::S(i) => format!("s[{}:{}]", i, i + n as u16 - 1),
         Phys::V(i) if n == 1 => format!("v{i}"),

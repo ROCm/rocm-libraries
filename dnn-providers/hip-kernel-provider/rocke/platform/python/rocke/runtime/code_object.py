@@ -377,7 +377,8 @@ def _direct_supported_targets(path: str) -> tuple[str, ...]:
 
 def direct_supported_targets() -> list[str]:
     """Targets the direct code-object library compiles for, as it reports
-    them (``["gfx1151", "gfx950"]``); loads the library, queries no GPU."""
+    them (``["gfx1151", "gfx950", "gfx1201", "gfx12-generic"]``); loads the
+    library, queries no GPU."""
     return list(_direct_supported_targets(_require_direct_library()))
 
 

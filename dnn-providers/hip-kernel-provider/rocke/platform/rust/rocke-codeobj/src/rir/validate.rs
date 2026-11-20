@@ -523,6 +523,13 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
             }
+            // The byte offset is i64 and signed: an i32 is not widened here.
+            GlobalPtrOffset => {
+                arity(1, 2)?;
+                if !matches!(types[0], Type::Ptr(_)) || res != Some(types[0]) || *types[1] != Type::Scalar(Scalar::I64) {
+                    return Err(mismatch());
+                }
+            }
             GlobalLoad | GlobalLoadVec => {
                 arity(1, 2)?;
                 let t = res.expect("one result");
@@ -662,11 +669,15 @@ impl Checker<'_> {
                 // (`vec<i8x16>` for iu8; i4 has no values).
                 let (f16, bf16, f32x8, i32x8) = (Type::Vec(Scalar::F16, 16), Type::Vec(Scalar::BF16, 16), Type::Vec(Scalar::F32, 8), Type::Vec(Scalar::I32, 8));
                 let (i32x4, i8x16, i32x2) = (Type::Vec(Scalar::I32, 4), Type::Vec(Scalar::I8, 16), Type::Vec(Scalar::I32, 2));
+                // gfx12's atoms take eight A and B elements a lane.
+                let (f16x8, bf16x8) = (Type::Vec(Scalar::F16, 8), Type::Vec(Scalar::BF16, 8));
                 let shape: Option<(&[&Type], &Type)> = match self.str(op, "op_id")? {
                     Some("wmma_f32_16x16x16_f16") => Some((&[&f16], &f32x8)),
                     Some("wmma_f32_16x16x16_bf16") => Some((&[&bf16], &f32x8)),
                     Some("wmma_i32_16x16x16_iu8") => Some((&[&i32x4, &i8x16], &i32x8)),
                     Some("wmma_i32_16x16x16_iu4") => Some((&[&i32x2], &i32x8)),
+                    Some("wmma_gfx12_f32_16x16x16_f16") => Some((&[&f16x8], &f32x8)),
+                    Some("wmma_gfx12_f32_16x16x16_bf16") => Some((&[&bf16x8], &f32x8)),
                     _ => None,
                 };
                 if let Some((ab, cd)) = shape {
@@ -1473,6 +1484,9 @@ mod tests {
               %d : vec<f32x8> = tile.mma ( %a, %a, %c ) { op_id = s:\"wmma_f32_16x16x16_bf16\" }\n    %e : f32 = vector.extract ( %d ) { index = i:0 }\n".into(), "MALFORMED"),
             ("    %v : vec<f32x4> = arith.constant_vec (  ) { fill = f:1.0 }\n    %a : vec<f32x4> = arith.fabs ( %v )\n    \
               %e : f32 = vector.extract ( %a ) { index = i:0 }\n".into(), "MALFORMED"),
+            // `global_ptr_offset` takes an i64 byte offset only.
+            ("    %p : ptr<f32,global> = tile.global_ptr_offset ( %Y, %tid )\n    \
+              %e : f32 = memref.global_load_typed ( %p, %n ) { align = i:4, elem_type = s:\"f32\" }\n".into(), "MALFORMED"),
         ];
         for (body, kind) in cases {
             let text = kernel(&format!("{body}{store}"));
