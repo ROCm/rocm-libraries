@@ -2390,8 +2390,8 @@ public:
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                     "gfx1151 WMMA attention prefill grid of " + std::to_string(grid)
-                        + " workgroups x " + std::to_string(traits.blockSize)
-                        + " threads exceeds 4294967295 work-items");
+                        + " workgroups x " + std::to_string(traits.blockSize) + " threads exceeds "
+                        + std::to_string(compilation::LAUNCH_AXIS_ITEM_LIMIT) + " work-items");
             }
             code.setBlockSize(static_cast<uint32_t>(traits.blockSize), 1, 1);
             code.setGridSize(static_cast<uint32_t>(grid), 1, 1);
