@@ -186,6 +186,12 @@ namespace
     // raises a TypeError instead of being copied silently.
 } // namespace
 
+size_t hipblaslt_py::host_itemsize(hipDataType dtype)
+{
+    auto it = host_types().find(dtype);
+    return it == host_types().end() ? 0 : it->second.itemsize;
+}
+
 void init_device_array(nb::module_& m)
 {
     nb::class_<DeviceArray>(m, "DeviceArray", "Device memory holding one hipBLASLt data type.")
@@ -205,6 +211,27 @@ void init_device_array(nb::module_& m)
             "Copy a C-contiguous NumPy array to the device. Its dtype must match `dtype`. For an "
             "ml_dtypes array, pass its same-width unsigned view and its dtype name as `host_dtype` "
             "(hipblaslt.from_numpy does this).")
+        .def_static(
+            "empty",
+            [](std::vector<int64_t> shape, hipDataType dtype) {
+                auto it = host_types().find(dtype);
+                if(it == host_types().end())
+                    throw nb::value_error(
+                        ("empty: DeviceArray doesn't support " + type_name(dtype) + " yet")
+                            .c_str());
+                size_t count = 1;
+                for(int64_t d : shape)
+                {
+                    if(d < 0)
+                        throw nb::value_error("empty: a shape can't have negative dimensions");
+                    count *= static_cast<size_t>(d);
+                }
+                return new DeviceArray(count * it->second.itemsize, dtype, std::move(shape));
+            },
+            nb::arg("shape"),
+            nb::arg("dtype"),
+            nb::rv_policy::take_ownership,
+            "Allocate an uninitialized DeviceArray, for outputs and workspaces.")
         .def(
             "copy_from_host",
             [](DeviceArray& self, HostArray arr, std::optional<std::string> host_dtype) {
