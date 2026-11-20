@@ -26,6 +26,7 @@ from .ir import (
     I64,
     F32,
     I32,
+    I16,
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
@@ -292,6 +293,7 @@ _ROCKE_VEC(float, f32x, 8); _ROCKE_VEC(float, f32x, 16);
 _ROCKE_VEC(double, f64x, 1); _ROCKE_VEC(double, f64x, 2); _ROCKE_VEC(double, f64x, 4);
 _ROCKE_VEC(int, i32x, 1); _ROCKE_VEC(int, i32x, 2); _ROCKE_VEC(int, i32x, 3);
 _ROCKE_VEC(int, i32x, 4); _ROCKE_VEC(int, i32x, 8); _ROCKE_VEC(int, i32x, 16);
+_ROCKE_VEC(unsigned int, u32x, 2); _ROCKE_VEC(unsigned int, u32x, 4);
 _ROCKE_VEC(int16_t, i16x, 1); _ROCKE_VEC(int16_t, i16x, 2);
 _ROCKE_VEC(int16_t, i16x, 4); _ROCKE_VEC(int16_t, i16x, 8);
 _ROCKE_VEC(int8_t, i8x, 1); _ROCKE_VEC(int8_t, i8x, 2);
@@ -355,14 +357,17 @@ _VEC_PREFIX = {
 }
 
 
+# The register type of A and B of the bf16 `_1k` MFMAs.
+_BF16_1K_OPERAND = VectorType(I16, 4)
+
 # One buffer access per width in bytes (core/ir.py _BUFFER_ACCESS_BYTES): the
 # raw buffer builtin's suffix and the integer type it loads or stores.
 _HIP_BUFFER_ACCESS = {
     1: ("_b8", "unsigned char"),
     2: ("_b16", "unsigned short"),
     4: ("_b32", "int"),
-    8: ("_b64", "i32x2"),
-    16: ("_b128", "i32x4"),
+    8: ("_b64", "u32x2"),
+    16: ("_b128", "u32x4"),
 }
 
 
@@ -976,10 +981,12 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
         validate_mfma(op)
-        a, b, c = op.operands
+        op_id = "mfma_f32_32x32x8_bf16"
+        a = self._mma_operand(op, op_id, "a", _BF16_1K_OPERAND)
+        b = self._mma_operand(op, op_id, "b", _BF16_1K_OPERAND)
         self._emit(
             f"f32x16 {_name(op.result)} = __builtin_amdgcn_mfma_f32_32x32x8bf16_1k("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
         )
 
     def _op_tile_mfma_f32_32x32x8_f16(self, op: Op) -> None:
@@ -1008,10 +1015,12 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
         validate_mfma(op)
-        a, b, c = op.operands
+        op_id = "mfma_f32_4x4x4_bf16"
+        a = self._mma_operand(op, op_id, "a", _BF16_1K_OPERAND)
+        b = self._mma_operand(op, op_id, "b", _BF16_1K_OPERAND)
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_4x4x4bf16_1k("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
         )
 
     # ---- WMMA f16 (RDNA3/3.5, gfx11, wave32) ----
@@ -1365,14 +1374,14 @@ class _Lowerer:
     def _op_tile_buffer_load_vN_f16(self, op: Op) -> None:
         # Lowers to ``__builtin_amdgcn_raw_buffer_load_b{32,64,128}``,
         # which on ROCm 7 / clang 20 takes ``__amdgpu_buffer_rsrc_t`` (aka
-        # ``rsrc_t`` in the prologue) and returns the matching i32 /
-        # i32x2 / i32x4 raw payload. We then bitcast to ``f16xN`` via
+        # ``rsrc_t`` in the prologue) and returns the matching u32 /
+        # u32x2 / u32x4 raw payload. We then bitcast to ``f16xN`` via
         # memcpy because that's the canonical ABI-safe punning in HIP C++.
         rsrc, voffset, soffset = op.operands
         dwords = int(op.attrs["dwords"])
         halves = dwords * 2
         b_suffix = {1: "_b32", 2: "_b64", 4: "_b128"}[dwords]
-        raw_t = "int" if dwords == 1 else f"i32x{dwords}"
+        raw_t = "int" if dwords == 1 else f"u32x{dwords}"
         tmp = f"_blraw_{_name(op.result).lstrip('%')}"
         self._emit(
             f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{b_suffix}("
@@ -1475,7 +1484,7 @@ class _Lowerer:
         else:
             b_suffix = {2: "_b64", 4: "_b128"}[dwords]
             self._emit(
-                f"i32x{dwords} {tmp}; "
+                f"u32x{dwords} {tmp}; "
                 f"__builtin_memcpy(&{tmp}, &{_name(val)}, {dwords * 4}); "
                 f"__builtin_amdgcn_raw_buffer_store{b_suffix}({tmp}, "
                 f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
@@ -1509,7 +1518,7 @@ class _Lowerer:
         dwords = int(op.attrs["dwords"])
         halves = dwords * 2
         b_suffix = {1: "_b32", 2: "_b64", 4: "_b128"}[dwords]
-        raw_t = "int" if dwords == 1 else f"i32x{dwords}"
+        raw_t = "int" if dwords == 1 else f"u32x{dwords}"
         tmp = f"_blraw_{_name(op.result).lstrip('%')}"
         self._emit(
             f"{raw_t} {tmp} = __builtin_amdgcn_raw_buffer_load{b_suffix}("
@@ -1544,7 +1553,7 @@ class _Lowerer:
         else:
             b_suffix = {2: "_b64", 4: "_b128"}[dwords]
             self._emit(
-                f"i32x{dwords} {tmp}; "
+                f"u32x{dwords} {tmp}; "
                 f"__builtin_memcpy(&{tmp}, &{_name(val)}, {dwords * 4}); "
                 f"__builtin_amdgcn_raw_buffer_store{b_suffix}({tmp}, "
                 f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
@@ -1574,7 +1583,7 @@ class _Lowerer:
         else:
             b_suffix = {2: "_b64", 4: "_b128"}[dwords]
             self._emit(
-                f"i32x{dwords} {tmp}; "
+                f"u32x{dwords} {tmp}; "
                 f"__builtin_memcpy(&{tmp}, &{_name(val)}, {dwords * 4}); "
                 f"__builtin_amdgcn_raw_buffer_store{b_suffix}({tmp}, "
                 f"{_name(rsrc)}, {_name(voffset)}, {_name(soffset)}, 0);"
@@ -2336,9 +2345,9 @@ class _Lowerer:
         """
         ptr, idx, val = op.operands
         self._emit(
-            f"bf16x2 {_name(op.result)} = "
+            f"bf16x2 {_name(op.result)} = __builtin_bit_cast(bf16x2, "
             f"__builtin_amdgcn_global_atomic_fadd_v2bf16("
-            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
+            f"{_name(ptr)} + {_name(idx)}, {_name(val)}));"
         )
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
@@ -2754,10 +2763,12 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         validate_mfma(op)
-        a, b, c = op.operands
+        op_id = "mfma_f32_16x16x16_bf16"
+        a = self._mma_operand(op, op_id, "a", _BF16_1K_OPERAND)
+        b = self._mma_operand(op, op_id, "b", _BF16_1K_OPERAND)
         self._emit(
             f"f32x4 {_name(op.result)} = __builtin_amdgcn_mfma_f32_16x16x16bf16_1k("
-            f"{_name(a)}, {_name(b)}, {_name(c)}, 0, 0, 0);"
+            f"{a}, {b}, {_name(op.operands[2])}, 0, 0, 0);"
         )
 
     def _op_tile_mfma_f32_16x16x32_bf16(self, op: Op) -> None:
