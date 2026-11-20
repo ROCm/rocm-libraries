@@ -302,20 +302,18 @@ class Fp8KvSyncLoader:
         compiler's instruction scheduler interleaves the back-to-back
         chunks' loads, dequant, and stores.
 
-        Cvt chain: uses ``cvt_pk_f32_fp8x4`` (lowers to two packed
-        ``v_cvt_pk_f32_fp8`` instructions per 4 fp8 inputs) instead of
-        the per-element ``cvt_fp8_to_f32`` (which the compiler does NOT
-        fuse into the packed variant on its own — ISA inspection of the
-        round-1 sync loader showed 48 separate ``v_cvt_f32_fp8_e32``
-        instructions instead of 24 ``v_cvt_pk_f32_fp8`` for the same
-        kernel). The packed primitive matches AITER's ``to_float_fp8x4``
-        helper in ``csrc/include/attention_common.cuh`` which is what
-        AITER's production paged-attention FP8 K/V path uses.
+        Cvt chain: uses the packed ``cvt_pk_f32_fp8x4`` primitive
+        (lowers to packed ``v_cvt_pk_f32_fp8`` instructions) instead of
+        the per-element ``cvt_fp8_to_f32``. The compiler does not fuse
+        per-element fp8 converts into the packed form on its own, so the
+        loader requests the packed form explicitly; it converts two fp8
+        values per instruction instead of one. The packed primitive
+        matches AITER's ``to_float_fp8x4`` helper in
+        ``csrc/include/attention_common.cuh``, which AITER's
+        paged-attention FP8 K/V path uses.
 
-        For each ``fp8_elems_per_chunk = 8``-fp8 chunk we issue two
-        packed cvts (4 fp8 each) — 4 ``v_cvt_pk_f32_fp8`` total per
-        chunk vs the previous 8 scalar ``v_cvt_f32_fp8`` (50% fewer
-        cvt-class instructions).
+        Each 8-fp8 chunk is split into two 4-fp8 halves, and each half
+        goes through one packed cvt.
         """
         b = self.b
         scale = self.k_scale if lds_token == "K" else self.v_scale
@@ -380,18 +378,14 @@ class Fp8KvSyncLoader:
             # 0.011`` the hardware silently rounds to the nearest
             # power-of-two (0.0078 instead of 0.011), giving outputs
             # ~0.71x of expected. Power-of-two scales happen to work
-            # bit-correctly by coincidence, which is why the original
-            # bench-driven "win" measurement looked correct on shapes
-            # whose extracted ``k_scale`` rounded toward the right
-            # exponent.
+            # bit-correctly by coincidence, so a check that only uses
+            # power-of-two scales does not catch the error.
             #
             # The correct sequence is unfused: ``cvt_pk_f32_fp8`` (no
             # scaling) followed by a regular ``v_pk_mul`` against the
-            # f32 scale. We pay ~4 extra packed muls per inner-loop
-            # iter; that's the cost of being correct for non-pow2
-            # scales. A future fast path can detect pow2 scales and
-            # opt into the fused intrinsic, but the production trace
-            # has only non-pow2 scales.
+            # f32 scale. The extra packed multiplies are the cost of
+            # being correct for non-pow2 scales. A future fast path can
+            # detect pow2 scales and opt into the fused intrinsic.
             lo_f32x4 = b.cvt_pk_f32_fp8x4(lo_quad)
             hi_f32x4 = b.cvt_pk_f32_fp8x4(hi_quad)
             lo_scaled = []
