@@ -111,6 +111,16 @@ struct FmhaFwdSplitKVKernel
     static constexpr auto kKVCoherence = amd_buffer_coherence_enum::coherence_default;
 #endif
 
+    // With the fused combine, the splits' o_acc/lse_acc go to and come back from the device
+    // scope directly, so the hand-off needs no cache writeback or invalidate (see FuseCombine).
+#if defined(__gfx12__)
+    static constexpr auto kAccCoherence = kFuseCombine
+                                              ? amd_buffer_coherence_enum::DEVICE
+                                              : amd_buffer_coherence_enum::coherence_default;
+#else
+    static constexpr auto kAccCoherence = amd_buffer_coherence_enum::coherence_default;
+#endif
+
     // with a mask or a sink, only the TDM pipelines merge: their merged rows take the mask of
     // row 0, and the sink logit of their own Q head
     static_assert(!kMergeNumHeadGroupsSeqLenQ ||
@@ -770,10 +780,10 @@ struct FmhaFwdSplitKVKernel
         auto* is_last = static_cast<int32_t*>(smem);
         auto* weights = reinterpret_cast<float*>(static_cast<char*>(smem) + 16); // [split][row]
 
-        // The barrier orders every wave's o_acc/lse_acc stores (and the pipeline's last LDS
-        // use) before one lane's agent-scope release on the counter. A device-scope fence in
-        // every wave of every split writes back and invalidates the caches each time and costs
-        // far more than the combine kernel it replaces.
+        // o_acc/lse_acc are stored and loaded at device scope (kAccCoherence), so once every
+        // wave's stores are acknowledged a relaxed count hands them over. A release/acquire
+        // pair would instead write back and invalidate the whole cache on each split.
+        asm volatile("s_wait_storecnt 0x0" ::: "memory");
         __syncthreads();
         if(threadIdx.x == 0)
         {
@@ -783,7 +793,7 @@ struct FmhaFwdSplitKVKernel
                 static_cast<index_t>(blockIdx.x) / kargs.num_splits;
             int32_t* counter = kargs.split_counter_ptr + tile;
             const bool last =
-                __scoped_atomic_fetch_add(counter, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE) ==
+                __scoped_atomic_fetch_add(counter, 1, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE) ==
                 kargs.num_splits - 1;
             if(last) // zeroed again for the next launch; every split has counted
                 __scoped_atomic_store_n(counter, 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
@@ -792,8 +802,6 @@ struct FmhaFwdSplitKVKernel
         __syncthreads();
         if(*is_last == 0)
             return;
-        // acquire the other splits' stores
-        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
 
         // tile row r is merged row g = i_m0 + r: q head (g / seqlen_q) of the group, query
         // (g % seqlen_q); without merging g < seqlen_q, so the head offset is 0
@@ -812,6 +820,9 @@ struct FmhaFwdSplitKVKernel
         const auto* o_acc = static_cast<const OaccDataType*>(kargs.o_acc_ptr) +
                             i_nhead_q0 * kargs.nhead_stride_o_acc +
                             static_cast<long_index_t>(i_batch) * kargs.batch_stride_o_acc;
+        // byte offsets from these bases fit in 32 bits for the workspace of one batch/head
+        const auto lse_acc_res = make_wave_buffer_resource(lse_acc, 0x7ffffffe);
+        const auto o_acc_res   = make_wave_buffer_resource(o_acc, 0x7ffffffe);
         auto* o = static_cast<CombineODataType*>(kargs.o_ptr) + i_nhead_q0 * kargs.nhead_stride_o +
                   static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
         auto* lse = static_cast<LSEDataType*>(kargs.lse_ptr);
@@ -849,12 +860,14 @@ struct FmhaFwdSplitKVKernel
         // are given weight 0 below
         const auto load_chunk = [&](index_t i0, vec_t(&part)[kChunk][kIters]) {
             static_for<0, kChunk, 1>{}([&](auto j) {
-                const OaccDataType* split =
-                    o_acc + static_cast<long_index_t>(min(i0 + j, num_splits - 1)) *
-                                kargs.split_stride_o_acc;
+                const long_index_t split = static_cast<long_index_t>(min(i0 + j, num_splits - 1)) *
+                                           kargs.split_stride_o_acc;
                 static_for<0, kIters, 1>{}([&](auto it) {
                     part[j][it] =
-                        *static_cast<const vec_t*>(static_cast<const void*>(split + src[it]));
+                        bit_cast<vec_t>(amd_buffer_load_impl<OaccDataType, kVec, kAccCoherence>(
+                            o_acc_res,
+                            static_cast<index_t>((split + src[it]) * sizeof(OaccDataType)),
+                            0));
                 });
             });
         };
@@ -864,13 +877,18 @@ struct FmhaFwdSplitKVKernel
         constexpr index_t kLsePerLane = kMaxFusedSplits * kM0 / FmhaPipeline::kBlockSize;
         LSEDataType lse_in[kLsePerLane];
         static_for<0, kLsePerLane, 1>{}([&](auto j) {
-            const index_t idx = threadIdx.x + j * FmhaPipeline::kBlockSize;
-            const index_t g   = i_m0 + idx % kM0;
+            const index_t idx   = threadIdx.x + j * FmhaPipeline::kBlockSize;
+            const index_t g     = i_m0 + idx % kM0;
+            const LSEDataType v = amd_buffer_load_impl<LSEDataType, 1, kAccCoherence>(
+                lse_acc_res,
+                static_cast<index_t>(
+                    (static_cast<long_index_t>(min(idx / kM0, num_splits - 1)) *
+                         kargs.split_stride_lse_acc +
+                     row_offset(min(g, total_rows - 1), kargs.nhead_stride_lse_acc, 1)) *
+                    sizeof(LSEDataType)),
+                0)[number<0>{}];
             lse_in[j] =
-                idx < num_splits * kM0 && g < total_rows
-                    ? lse_acc[static_cast<long_index_t>(idx / kM0) * kargs.split_stride_lse_acc +
-                              row_offset(g, kargs.nhead_stride_lse_acc, 1)]
-                    : -numeric<LSEDataType>::infinity();
+                idx < num_splits * kM0 && g < total_rows ? v : -numeric<LSEDataType>::infinity();
         });
         static_for<0, kLsePerLane, 1>{}([&](auto j) {
             const index_t idx = threadIdx.x + j * FmhaPipeline::kBlockSize;
@@ -1405,7 +1423,9 @@ struct FmhaFwdSplitKVKernel
                     if constexpr(kMergeNumHeadGroupsSeqLenQ)
                     {
                         // reshape: (nhead_ratio_qk, seqlen_q) -> (nhead_ratio_qk * seqlen_q)
-                        const auto view = make_naive_tensor_view<address_space_enum::global>(
+                        const auto view = make_naive_tensor_view<address_space_enum::global,
+                                                                 memory_operation_enum::set,
+                                                                 kAccCoherence>(
                             lse_acc_ptr,
                             make_tuple(kargs.nhead_ratio_qk, kargs.seqlen_q),
                             make_tuple(nhead_stride_lse_acc, 1),
@@ -1420,12 +1440,13 @@ struct FmhaFwdSplitKVKernel
                     }
                     else
                     {
-                        return make_naive_tensor_view<address_space_enum::global>(
-                            lse_acc_ptr,
-                            make_tuple(kargs.seqlen_q),
-                            make_tuple(1),
-                            number<1>{},
-                            number<1>{});
+                        return make_naive_tensor_view<address_space_enum::global,
+                                                      memory_operation_enum::set,
+                                                      kAccCoherence>(lse_acc_ptr,
+                                                                     make_tuple(kargs.seqlen_q),
+                                                                     make_tuple(1),
+                                                                     number<1>{},
+                                                                     number<1>{});
                     }
                 }();
                 return pad_tensor_view(
@@ -1606,7 +1627,9 @@ struct FmhaFwdSplitKVKernel
                 {
                     // reshape: (nhead_ratio_qk, seqlen_q, hdim_v) -> (nhead_ratio_qk * seqlen_q,
                     // hdim_v)
-                    const auto view = make_naive_tensor_view<address_space_enum::global>(
+                    const auto view = make_naive_tensor_view<address_space_enum::global,
+                                                             memory_operation_enum::set,
+                                                             kAccCoherence>(
                         o_acc_ptr,
                         make_tuple(kargs.nhead_ratio_qk, kargs.seqlen_q, kargs.hdim_v),
                         make_tuple(kargs.nhead_stride_o_acc, kargs.stride_o_acc, 1),
@@ -1623,7 +1646,9 @@ struct FmhaFwdSplitKVKernel
                 }
                 else
                 {
-                    return make_naive_tensor_view<address_space_enum::global>(
+                    return make_naive_tensor_view<address_space_enum::global,
+                                                  memory_operation_enum::set,
+                                                  kAccCoherence>(
                         o_acc_ptr,
                         make_tuple(kargs.seqlen_q, kargs.hdim_v),
                         make_tuple(kargs.stride_o_acc, 1),
