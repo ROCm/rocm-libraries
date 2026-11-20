@@ -194,18 +194,25 @@ def _upload(rt, stack, arrays):
     return ptrs
 
 
-def _run_buffers(rt, artifact, a, b, output, grid, block_size, scalars):
+def _launch_buffers(rt, artifact, arrays, grid, block_size, pack):
     from rocke.runtime.host_buffers import as_u8_buffer
 
+    output = arrays[2]
     with ExitStack() as stack:
         mod = rt.load_module(artifact.hsaco)
         stack.callback(mod.unload)
-        ptrs = _upload(rt, stack, (a, b, output))
-        args = struct.pack("<QQQ" + "i" * len(scalars), *ptrs, *scalars)
+        ptrs = _upload(rt, stack, arrays)
         rt.launch_blocking(
-            mod.get_function(artifact.kernel_name), grid, (block_size, 1, 1), args
+            mod.get_function(artifact.kernel_name), grid, (block_size, 1, 1), pack(ptrs)
         )
         rt.memcpy_d2h(as_u8_buffer(output), ptrs[2], output.nbytes)
+
+
+def _run_buffers(rt, artifact, a, b, output, grid, block_size, scalars):
+    def pack(ptrs):
+        return struct.pack("<QQQ" + "i" * len(scalars), *ptrs, *scalars)
+
+    _launch_buffers(rt, artifact, (a, b, output), grid, block_size, pack)
 
 
 def _compile(kernel, arch):
@@ -294,6 +301,53 @@ def _batched_gfx950(rt, rng):
     return 1
 
 
+def _multi_abd_gfx950(rt, rng):
+    import numpy as np
+
+    from rocke.instances.common.gemm_multi_abd import (
+        GemmMultiAbdSpec,
+        build_gemm_multi_abd,
+        gemm_multi_abd_grid,
+        gemm_multi_abd_signature,
+    )
+    from rocke.runtime.packing import pack_args
+
+    label = "multi_abd_swizzled"
+    spec = GemmMultiAbdSpec(
+        base=UniversalGemmSpec(
+            name=label,
+            tile=TileSpec(64, 128, 32, 1, 2),
+            trait=TraitSpec(pipeline="mem", epilogue="cshuffle", lds_swizzle=True),
+        ),
+        d_operands=(("D0", "add"),),
+        d_load_kind="stock",
+    )
+    artifact = _compile(build_gemm_multi_abd(spec, arch="gfx950"), "gfx950")
+    signature = gemm_multi_abd_signature(spec)
+    m, n, k = 128, 256, 96
+    a, b, c = _fp16_arrays(rng, m, n, k)
+    # Use a nonzero, varying addend so omitting the fusion fails independently
+    # of the GEMM. Small integer inputs keep the reference exactly representable.
+    d0 = rng.integers(1, 8, (m, n), dtype=np.int16).astype(np.float16)
+
+    def pack(ptrs):
+        pa, pb, pc, pd = ptrs
+        return pack_args(signature, dict(A=pa, B=pb, C=pc, M=m, N=n, K=k, D0=pd))
+
+    _launch_buffers(
+        rt,
+        artifact,
+        (a, b, c, d0),
+        gemm_multi_abd_grid(spec, m, n),
+        spec.base.block_size,
+        pack,
+    )
+    ref = a.astype(np.float32) @ b.astype(np.float32).T + d0.astype(np.float32)
+    np.testing.assert_array_equal(c, ref.astype(c.dtype), err_msg=label)
+    _numeric_pass(label, k, c)
+    return 1
+
+
 def _gfx950(rt, rng):
     count = 0
     for label, trait, _, sizes in tile_copy_cases():
@@ -302,7 +356,12 @@ def _gfx950(rt, rng):
         for k in sizes:
             _launch_and_compare(rt, spec, artifact, rng, label, k)
             count += 1
-    return count + _grouped_gfx950(rt, rng) + _batched_gfx950(rt, rng)
+    return (
+        count
+        + _grouped_gfx950(rt, rng)
+        + _batched_gfx950(rt, rng)
+        + _multi_abd_gfx950(rt, rng)
+    )
 
 
 def _gfx942(rt, rng):

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Host-only checks of the explicit UniversalGemm gate's verdicts."""
 
+import struct
 from types import SimpleNamespace
 
 import numpy as np
@@ -40,6 +41,56 @@ def test_gate_rejects_missing_compiler_and_zero_comparisons(monkeypatch):
     assert gate.main(["--arch", "gfx950"]) == 1
     monkeypatch.setitem(gate._GPU_CASES, "gfx950", lambda rt, rng: 1)
     assert gate.main(["--arch", "gfx950"]) == 0
+
+
+@pytest.mark.parametrize("omit_d0", [False, True])
+def test_gfx950_gate_checks_fused_multi_abd_addend(monkeypatch, capsys, omit_d0):
+    from rocke.instances.common import gemm_multi_abd
+
+    build = gemm_multi_abd.build_gemm_multi_abd
+
+    def build_swizzled(spec, *, arch):
+        tile = spec.base.tile
+        assert (tile.tile_m, tile.tile_n, tile.tile_k) == (64, 128, 32)
+        assert spec.base.trait.lds_swizzle and spec.base.trait.epilogue == "cshuffle"
+        assert spec.d_operands == (("D0", "add"),)
+        return build(spec, arch=arch)
+
+    monkeypatch.setattr(gemm_multi_abd, "build_gemm_multi_abd", build_swizzled)
+    monkeypatch.setattr(gate, "tile_copy_cases", tuple)
+    monkeypatch.setattr(gate, "_grouped_gfx950", lambda rt, rng: 0)
+    monkeypatch.setattr(gate, "_batched_gfx950", lambda rt, rng: 0)
+    monkeypatch.setattr(gate, "_compile", lambda kernel, arch: kernel)
+
+    def launch(rt, kernel, arrays, grid, block_size, pack):
+        a, b, c, d0 = arrays
+        assert a.shape == (128, 96) and b.shape == (256, 96)
+        assert c.shape == d0.shape == (128, 256)
+        assert np.isnan(c).all() and np.all(d0 != 0)
+        assert grid == (2, 2, 1) and block_size == 128
+        assert "multi_abd_swizzled" in kernel.name
+        assert struct.unpack("<QQQiii4xQ", pack((1, 2, 3, 4))) == (
+            1,
+            2,
+            3,
+            128,
+            256,
+            96,
+            4,
+        )
+        c[:] = a.astype(np.float32) @ b.astype(np.float32).T
+        if not omit_d0:
+            c += d0
+
+    monkeypatch.setattr(gate, "_launch_buffers", launch)
+    rng = np.random.default_rng(6)
+    if omit_d0:
+        with pytest.raises(AssertionError, match="multi_abd_swizzled"):
+            gate._gfx950(None, rng)
+        assert "numeric_pass" not in capsys.readouterr().out
+    else:
+        assert gate._gfx950(None, rng) == 1
+        assert '"case": "multi_abd_swizzled"' in capsys.readouterr().out
 
 
 @pytest.mark.parametrize("damage_canary", [False, True])
