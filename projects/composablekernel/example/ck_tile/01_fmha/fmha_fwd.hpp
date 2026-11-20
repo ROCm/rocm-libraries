@@ -505,6 +505,9 @@ struct fmha_fwd_splitkv_args
     // every instance), left zeroed after each launch. When set, instances that fuse the
     // combine into the split kernel are eligible and no combine kernel runs.
     void* split_counter_ptr = nullptr;
+    // with split_counter_ptr: launch the splits of a tile as one workgroup cluster (gfx1250,
+    // num_splits <= 16) and merge them after a cluster barrier instead of counting
+    bool split_cluster = false;
 
     float logits_soft_cap;
 
@@ -1258,7 +1261,8 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
                                      args.nhead_stride_o,
                                      args.batch_stride_o,
                                      args.nhead_stride_lse,
-                                     args.batch_stride_lse);
+                                     args.batch_stride_lse,
+                                     args.split_cluster);
         }
     }();
 

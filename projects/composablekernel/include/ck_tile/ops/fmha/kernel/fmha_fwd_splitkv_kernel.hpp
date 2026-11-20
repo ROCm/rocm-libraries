@@ -80,6 +80,8 @@ struct FmhaFwdSplitKVKernel
     static constexpr bool kFuseCombine = !std::is_void_v<CombineODataType>;
     // weights of every split for each row of the tile live in LDS
     static constexpr index_t kMaxFusedSplits = 128;
+    // the largest workgroup cluster
+    static constexpr index_t kMaxClusterSplits = 16;
     static_assert(!kFuseCombine || (!kIsGroupMode && !kDoFp8StaticQuant),
                   "the fused combine supports batch mode without the static-quant O scale");
 
@@ -292,6 +294,8 @@ struct FmhaFwdSplitKVKernel
         ck_tile::index_t batch_stride_o   = 0;
         ck_tile::index_t nhead_stride_lse = 0;
         ck_tile::index_t batch_stride_lse = 0;
+        // the splits of one tile form a workgroup cluster and merge after a cluster barrier
+        int32_t cluster = 0;
     };
 
     // one fp32 descale each, read on the device
@@ -436,7 +440,8 @@ struct FmhaFwdSplitKVKernel
               ck_tile::index_t nhead_stride_o   = 0,
               ck_tile::index_t batch_stride_o   = 0,
               ck_tile::index_t nhead_stride_lse = 0,
-              ck_tile::index_t batch_stride_lse = 0)
+              ck_tile::index_t batch_stride_lse = 0,
+              bool cluster                      = false)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -541,12 +546,14 @@ struct FmhaFwdSplitKVKernel
             kargs.batch_stride_o    = batch_stride_o;
             kargs.nhead_stride_lse  = nhead_stride_lse;
             kargs.batch_stride_lse  = batch_stride_lse;
+            kargs.cluster           = cluster ? 1 : 0;
         }
         else
         {
             ignore = o_ptr;
             ignore = lse_ptr;
             ignore = split_counter_ptr;
+            ignore = cluster;
             ignore = stride_o;
             ignore = nhead_stride_o;
             ignore = batch_stride_o;
@@ -770,10 +777,21 @@ struct FmhaFwdSplitKVKernel
     CK_TILE_DEVICE static void FuseCombine(const Kargs& kargs,
                                            index_t i_m0,
                                            index_t i_n1,
+                                           index_t i_split,
                                            index_t i_nhead,
                                            index_t i_batch,
                                            void* smem)
     {
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+        if(kargs.cluster)
+        {
+            FuseCombineInCluster(kargs, i_m0, i_n1, i_split, i_nhead, i_batch);
+            return;
+        }
+#else
+        ignore = i_split;
+#endif
+
         constexpr index_t kM0 = FmhaPipeline::kM0;
         constexpr index_t kN1 = FmhaPipeline::kN1;
 
@@ -942,6 +960,108 @@ struct FmhaFwdSplitKVKernel
                 });
         });
     }
+
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    // The fused combine with the num_splits workgroups of a tile launched as one cluster: after a
+    // cluster barrier each of them merges its own share of the tile's elements, every lane
+    // straight from the partials of its row (no counter, no LDS).
+    CK_TILE_DEVICE static void FuseCombineInCluster(const Kargs& kargs,
+                                                    index_t i_m0,
+                                                    index_t i_n1,
+                                                    index_t i_split,
+                                                    index_t i_nhead,
+                                                    index_t i_batch)
+    {
+        constexpr index_t kM0   = FmhaPipeline::kM0;
+        constexpr index_t kN1   = FmhaPipeline::kN1;
+        constexpr index_t kVec  = 4;
+        constexpr index_t kVecs = kM0 * kN1 / kVec;
+        static_assert(kN1 % kVec == 0);
+        using vec_t = ext_vector_t<float, kVec>;
+
+        asm volatile("s_wait_storecnt 0x0" ::: "memory");
+        __builtin_amdgcn_s_cluster_barrier();
+
+        const index_t ratio           = kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : 1;
+        const index_t total_rows      = kargs.seqlen_q * ratio;
+        const index_t num_splits      = kargs.num_splits;
+        const long_index_t i_nhead_q0 = static_cast<long_index_t>(i_nhead) * ratio;
+        const auto row_offset         = [&](index_t g, index_t nhead_stride, index_t row_stride) {
+            return static_cast<long_index_t>(g / kargs.seqlen_q) * nhead_stride +
+                   static_cast<long_index_t>(g % kargs.seqlen_q) * row_stride;
+        };
+        const auto* lse_acc = static_cast<const LSEDataType*>(kargs.lse_acc_ptr) +
+                              i_nhead_q0 * kargs.nhead_stride_lse_acc +
+                              static_cast<long_index_t>(i_batch) * kargs.batch_stride_lse_acc;
+        const auto* o_acc = static_cast<const OaccDataType*>(kargs.o_acc_ptr) +
+                            i_nhead_q0 * kargs.nhead_stride_o_acc +
+                            static_cast<long_index_t>(i_batch) * kargs.batch_stride_o_acc;
+        auto* o = static_cast<CombineODataType*>(kargs.o_ptr) + i_nhead_q0 * kargs.nhead_stride_o +
+                  static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
+        auto* lse              = static_cast<LSEDataType*>(kargs.lse_ptr);
+        const auto lse_acc_res = make_wave_buffer_resource(lse_acc, 0x7ffffffe);
+        const auto o_acc_res   = make_wave_buffer_resource(o_acc, 0x7ffffffe);
+
+        const index_t per   = integer_divide_ceil(kVecs, num_splits);
+        const index_t v_end = min((i_split + 1) * per, kVecs);
+        for(index_t vid = i_split * per + static_cast<index_t>(threadIdx.x); vid < v_end;
+            vid += FmhaPipeline::kBlockSize)
+        {
+            const index_t r   = vid / (kN1 / kVec);
+            const index_t g   = i_m0 + r;
+            const index_t col = i_n1 + vid % (kN1 / kVec) * kVec;
+            if(total_rows <= g || kargs.hdim_v <= col)
+                continue;
+            const long_index_t src =
+                row_offset(g, kargs.nhead_stride_o_acc, kargs.stride_o_acc) + col;
+            const long_index_t lse_src = row_offset(g, kargs.nhead_stride_lse_acc, 1);
+
+            LSEDataType lse_in[kMaxClusterSplits];
+            vec_t part[kMaxClusterSplits];
+            static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
+                const long_index_t s = min(static_cast<index_t>(i), num_splits - 1);
+                lse_in[i]            = amd_buffer_load_impl<LSEDataType, 1, kAccCoherence>(
+                    lse_acc_res,
+                    static_cast<index_t>((s * kargs.split_stride_lse_acc + lse_src) *
+                                         sizeof(LSEDataType)),
+                    0)[number<0>{}];
+                part[i] = bit_cast<vec_t>(amd_buffer_load_impl<OaccDataType, kVec, kAccCoherence>(
+                    o_acc_res,
+                    static_cast<index_t>((s * kargs.split_stride_o_acc + src) *
+                                         sizeof(OaccDataType)),
+                    0));
+            });
+            LSEDataType lse_max = -numeric<LSEDataType>::infinity();
+            static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
+                if(i < num_splits)
+                    lse_max = max(lse_max, lse_in[i]);
+            });
+            LSEDataType lse_sum = 0;
+            if(lse_max != -numeric<LSEDataType>::infinity())
+                static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
+                    if(i < num_splits)
+                        lse_sum += ck_tile::exp(lse_in[i] - lse_max);
+                });
+            const LSEDataType logsum =
+                lse_sum == 0 ? -numeric<LSEDataType>::infinity() : ck_tile::log(lse_sum) + lse_max;
+            vec_t acc{0.f, 0.f, 0.f, 0.f};
+            if(logsum != -numeric<LSEDataType>::infinity())
+                static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
+                    if(i < num_splits)
+                        acc += ck_tile::exp(lse_in[i] - logsum) * part[i];
+                });
+            const long_index_t dst = row_offset(g, kargs.nhead_stride_o, kargs.stride_o) + col;
+            static_for<0, kVec, 1>{}([&](auto v) {
+                if(col + v < kargs.hdim_v)
+                    o[dst + v] = type_convert<CombineODataType>(acc[v.value]);
+            });
+            if(lse != nullptr && col == 0)
+                lse[static_cast<long_index_t>(i_batch) * kargs.batch_stride_lse +
+                    i_nhead_q0 * kargs.nhead_stride_lse +
+                    row_offset(g, kargs.nhead_stride_lse, 1)] = logsum;
+        }
+    }
+#endif
 
     // With one split there is nothing to merge: O goes out in its final type, and the LSE window
     // already points at the final LSE.
@@ -1671,7 +1791,7 @@ struct FmhaFwdSplitKVKernel
         EpiloguePipeline{}(o_acc_dram_window, o_acc_tile, nullptr);
 
         if constexpr(kFuseCombine)
-            FuseCombine(kargs, i_m0, i_n1, i_nhead, i_batch, smem_ptr);
+            FuseCombine(kargs, i_m0, i_n1, i_split, i_nhead, i_batch, smem_ptr);
     }
 };
 

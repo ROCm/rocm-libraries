@@ -140,6 +140,14 @@ static void run(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
     constexpr ck_tile::index_t kBlockPerCu = k_::kBlockPerCu;
     using attr_ = std::conditional_t<k_::kMaxWavesPerEu == 0, {F_arch.tag},
         ck_tile::kernel_attr_for<{F_arch.tag}, ck_tile::kernel_attr_max_waves_per_eu<k_::kMaxWavesPerEu>>>;
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+    if constexpr(k_::kFuseCombine)
+        if(a.split_cluster)
+        {{
+            ck_tile::make_kernel_cluster<kBlockPerCu, attr_>(k_{{}}, dim3(a.num_splits, 1, 1), grids, blocks, 0, kargs)(ck_tile::stream_config{{s.stream_id_}});
+            return;
+        }}
+#endif
     ck_tile::make_kernel<kBlockPerCu, attr_>(k_{{}}, grids, blocks, 0, kargs)(ck_tile::stream_config{{s.stream_id_}});
 }}
 }}; // struct instance

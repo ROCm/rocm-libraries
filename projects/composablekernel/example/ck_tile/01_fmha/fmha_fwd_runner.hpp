@@ -1170,8 +1170,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::DeviceMem o_acc_buf(o_acc_host.get_element_space_size_in_bytes());
     // Experimental: CK_TILE_FMHA_SPLITKV_FUSED_COMBINE=1 passes per-tile split counters, which
     // makes the instances that fuse the combine into the split kernel eligible.
-    const bool use_fused_combine =
-        split_direct || std::getenv("CK_TILE_FMHA_SPLITKV_FUSED_COMBINE") != nullptr;
+    const bool use_split_cluster =
+        std::getenv("CK_TILE_FMHA_SPLITKV_CLUSTER") != nullptr && num_splits <= 16;
+    const bool use_fused_combine = split_direct || use_split_cluster ||
+                                   std::getenv("CK_TILE_FMHA_SPLITKV_FUSED_COMBINE") != nullptr;
     ck_tile::DeviceMem split_counter_buf(
         use_fused_combine ? sizeof(int32_t) * static_cast<std::size_t>(batch) * nhead *
                                 std::max(1, max_seqlen_q) * ck_tile::integer_divide_ceil(hdim_v, 32)
@@ -1738,6 +1740,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 args.num_splits = num_splits;
                 args.split_counter_ptr =
                     use_fused_combine ? split_counter_buf.GetDeviceBuffer() : nullptr;
+                args.split_cluster = use_split_cluster;
                 // the direct single-split path writes LSE only where one was asked for
                 if(split_direct && !lse)
                     args.lse_ptr = nullptr;

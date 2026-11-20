@@ -168,6 +168,43 @@ CK_TILE_HOST auto make_kernel(KernelImpl /*f*/,
     };
 }
 
+#if CK_TILE_ENABLE_CLUSTER_LAUNCH
+// make_kernel<MinBlockPerCu, Attr> launched with workgroup clusters of cluster_dim
+template <int MinBlockPerCu, typename Attr, typename KernelImpl, typename... Args>
+CK_TILE_HOST auto make_kernel_cluster(KernelImpl /*f*/,
+                                      dim3 cluster_dim,
+                                      dim3 grid_dim,
+                                      dim3 block_dim,
+                                      std::size_t lds_byte,
+                                      Args... args)
+{
+    const auto kernel = []() {
+        if constexpr(std::is_void_v<Attr>)
+            return kentry<MinBlockPerCu, KernelImpl, Args...>;
+        else if constexpr(kattr_max_waves_per_eu_v<Attr> > 0)
+            return kentry_max_waves<Attr, KernelImpl, Args...>;
+        else
+            return kentry<Attr, MinBlockPerCu, KernelImpl, Args...>;
+    }();
+    return [=](const stream_config& s) {
+        hipLaunchConfig_t config{};
+        config.gridDim          = grid_dim;
+        config.blockDim         = block_dim;
+        config.dynamicSmemBytes = lds_byte;
+        config.stream           = s.stream_id_;
+
+        hipLaunchAttribute attrs[1];
+        attrs[0].id               = hipLaunchAttributeClusterDimension;
+        attrs[0].val.clusterDim.x = cluster_dim.x;
+        attrs[0].val.clusterDim.y = cluster_dim.y;
+        attrs[0].val.clusterDim.z = cluster_dim.z;
+        config.attrs              = attrs;
+        config.numAttrs           = 1;
+        HIP_CHECK_ERROR(hipLaunchKernelEx(&config, kernel, args...));
+    };
+}
+#endif
+
 //
 // overload of make_kernel: Cluster launch version of make_kernel
 //
