@@ -183,7 +183,7 @@ reduction:
       - {name: pv_loop_order, unset_resolves_by: resolved_pv_loop_order}
       - {name: causal_diag_split}
       - {name: o_store_width}
-    ignored: []
+    ignored: [kv_segments]
   aot_budget_per_arch: 1000
 packs:
 - name: gfx950_attention_dense
