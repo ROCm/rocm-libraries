@@ -111,7 +111,11 @@ def test_custom_config_bias_and_activation_stay_off_the_shared_problem_type(
     # The library ProblemType enables bias and hipblaslt_all. A kernel whose
     # custom.config turns both off must not inherit that, and must not change
     # the other solutions that still share the library problem type.
-    monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {})
+    monkeypatch.setattr(
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: {},
+    )
     monkeypatch.setattr(
         L,
         "readCustomKernelConfig",
@@ -199,7 +203,7 @@ def test_custom_config_is_read_once_and_shared(assembler, isa_info_map, monkeypa
         reads.append(name)
         return raw
 
-    def _get(name, isp, kernelConfig=None):
+    def _get(name, isp, directory=None, kernelConfig=None, *, problemType=None):
         received.append(kernelConfig)
         return {}
 
@@ -223,7 +227,11 @@ def _parse_with_config(assembler, isa_info_map, monkeypatch, declared, configure
     `file_default` is an AssertSizeLessThan placed in the file's DefaultSolution.
     """
     monkeypatch.setattr(
-        L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {"AssertSizeLessThan": configured}
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: {
+            "AssertSizeLessThan": configured
+        },
     )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "replaced_predicate_kernel"
