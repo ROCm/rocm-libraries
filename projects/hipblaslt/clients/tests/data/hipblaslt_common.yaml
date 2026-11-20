@@ -661,6 +661,7 @@ Arguments:
   - fast_check_repeat: c_int32
   - fast_check_inject: c_int32
   - requires_streamk: c_int8
+  - expected_kernel: c_char*256
   - skip_launch_solution: c_int32
   - integer_exact_pattern: c_char*16
   - allow_no_solution: c_int8
@@ -711,7 +712,6 @@ Arguments:
   - print_kernel_info: c_bool
   - flush: c_bool
   - tensile_solution_selection_method: c_int32
-  - expected_kernel: c_char*256
 
 # These named dictionary lists [ {dict1}, {dict2}, etc. ] supply subsets of
 # test arguments in a structured way. The dictionaries are applied to the test
@@ -789,6 +789,7 @@ Defaults:
   fast_check_repeat: 1
   fast_check_inject: -1
   requires_streamk: 0
+  expected_kernel: ''
   skip_launch_solution: -1
   integer_exact_pattern: ''
   allow_no_solution: 0
@@ -860,7 +861,6 @@ Defaults:
   print_kernel_info: false
   flush: false
   tensile_solution_selection_method: -1
-  expected_kernel: ''
   compute_input_typeA: hipblaslt_datatype_invalid
   compute_input_typeB: hipblaslt_datatype_invalid
   scale_type: hipblaslt_datatype_invalid

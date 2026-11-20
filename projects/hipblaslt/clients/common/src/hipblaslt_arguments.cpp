@@ -150,6 +150,7 @@ void Arguments::init()
     fast_check_repeat = 1;
     fast_check_inject = -1;
     requires_streamk  = 0;
+    expected_kernel[0]       = 0;
     skip_launch_solution = -1;
     integer_exact_pattern[0] = 0;
     allow_no_solution        = 0;
@@ -206,7 +207,6 @@ void Arguments::init()
     print_solution_found              = false;
     flush                             = false;
     tensile_solution_selection_method = -1;
-    expected_kernel[0]                = '\0';
 }
 
 // Function to print Arguments out to stream in YAML format
