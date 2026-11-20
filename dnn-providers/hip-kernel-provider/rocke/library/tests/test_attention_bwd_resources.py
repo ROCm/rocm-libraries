@@ -12,11 +12,22 @@ missing.
 from __future__ import annotations
 
 import copy
+import os
 import struct
 
 import pytest
 
 from tests import _attention_bwd_resources as res
+from tests._compiler_test_utils import require_tools_or_skip
+
+# Flavors measured to compile ``agpr_alloc=(128, 128)`` to zero AGPRs. Measured
+# 2026-11-18: llvm20 (comgr3.0, ROCm 7.1) gives agpr == 0, and its plain build
+# of this kernel also spills (vgpr_spill_count 17 at vgpr_count 256), which the
+# ``r0`` spill check below would report; the skip covers both. A newer compiler
+# honours the attribute on gfx942 and gfx950 (its flavor
+# reads "unknown" there). llvm22 is not measured, so it is not listed and every
+# assertion stays active there.
+_AGPR_ALLOC_IGNORED = frozenset({"llvm20"})
 
 
 # --------------------------------------------------------------------------- builders
@@ -219,7 +230,44 @@ def test_agpr_copy_ceiling_model():
     assert (c.reads, c.writes) == (2 * 32 * 128 // 256, 0)
 
 
+# --------------------------------------------------------------------------- tools
+def test_find_objdump_accepts_relocated_rocm_lib_layout(tmp_path, monkeypatch):
+    executable = tmp_path / "lib" / "llvm" / "bin" / "llvm-objdump"
+    executable.parent.mkdir(parents=True)
+    executable.touch()
+    monkeypatch.setenv("LLVM_OBJDUMP", "")
+    monkeypatch.delenv("ROCM_HOME", raising=False)
+    monkeypatch.setenv("ROCM_PATH", str(tmp_path))
+    monkeypatch.setattr(res.shutil, "which", lambda _name: None)
+    assert res.find_objdump() == str(executable)
+    assert os.environ["LLVM_OBJDUMP"] == str(executable)
+
+
 # --------------------------------------------------------------------------- gate
+def test_validate_objdump_reports_execution_failure_once(monkeypatch):
+    def denied(*_args, **_kwargs):
+        raise PermissionError("not executable")
+
+    monkeypatch.setattr(res.subprocess, "run", denied)
+    assert "PermissionError" in res.validate_objdump("llvm-objdump")
+
+
+def test_validate_objdump_accepts_version_probe(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+
+    monkeypatch.setattr(res.subprocess, "run", run)
+    assert res.validate_objdump("llvm-objdump") is None
+    assert calls == [
+        (
+            ["llvm-objdump", "--version"],
+            {"check": True, "capture_output": True, "timeout": 60},
+        )
+    ]
+
+
 def test_gate_flags_copy_traffic_and_records_flavor():
     blob = _elf(META, _kd(128), "k0")
     g = res.evaluate_resource_gate(
@@ -233,7 +281,12 @@ def test_gate_flags_copy_traffic_and_records_flavor():
         flavor="llvm22",
         comgr="comgr3.0/rocm7.2",
     )
-    assert "agpr_copy_traffic" in g.failures and not g.passed and g.valid
+    assert (
+        "agpr_copy_traffic" in g.failures
+        and not g.passes_reference_policy
+        and g.matches_reference_toolchain
+        and g.valid
+    )
     rec = g.record()
     assert rec["flavor"] == "llvm22" and rec["q_loop_agpr_copies"]["reads"] == 1
 
@@ -243,7 +296,12 @@ def test_gate_is_invalid_off_the_production_flavor():
     g = res.evaluate_resource_gate(
         blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm20"
     )
-    assert not g.failures and not g.valid and not g.passed
+    assert (
+        not g.failures
+        and not g.matches_reference_toolchain
+        and not g.valid
+        and not g.passes_reference_policy
+    )
 
 
 @pytest.mark.parametrize(
@@ -310,6 +368,7 @@ def _compile_dense_gfx942(agpr_alloc=None):
         pytest.skip(f"comgr unavailable: {exc}")
 
 
+@pytest.mark.compiler_integration
 def test_compiled_code_object_resources_and_loop_copies():
     """The AGPR-reserving variant splits arch VGPR / AGPR and shows loop copies."""
     if res.find_objdump() is None:
@@ -319,6 +378,11 @@ def test_compiled_code_object_resources_and_loop_copies():
     r0 = res.read_code_object_resources(plain, arch="gfx942")
     r1 = res.read_code_object_resources(forced, arch="gfx942")
     assert r0.agpr == 0 and r0.arch_vgpr == r0.vgpr_total
+    if r1.agpr == 0 and res.current_flavor() in _AGPR_ALLOC_IGNORED:
+        require_tools_or_skip(
+            f"{res.current_flavor()} compiles agpr_alloc=(128, 128) to 0 AGPRs "
+            "and its plain build spills (measured)"
+        )
     assert r1.agpr > 0 and r1.arch_vgpr + r1.agpr <= r1.vgpr_total
     assert r0.scratch_bytes == 0 and r0.vgpr_spill == 0
     for blob, expect_copies in ((plain, False), (forced, True)):
@@ -476,6 +540,6 @@ def test_gate_is_invalid_with_a_non_production_comgr(monkeypatch):
         g = res.evaluate_resource_gate(
             blob, arch="gfx942", lds_capacity_bytes=65536, flavor="llvm22", comgr=comgr
         )
-        assert g.valid is ok, comgr
+        assert g.matches_reference_toolchain is ok, comgr
     assert res.comgr_is_production("comgr3.0/rocm7.2")
     assert not res.comgr_is_production("comgr3.0/rocm7.21")

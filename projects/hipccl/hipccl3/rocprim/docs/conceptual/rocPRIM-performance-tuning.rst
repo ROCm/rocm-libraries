@@ -11,7 +11,14 @@ rocPRIM Performance tuning
 Algorithms often perform better if their launch parameters (number of blocks, block size, items per thread, etc.) are tailored for the particular architecture they are run on.
 rocPRIM achieves this by passing structs called configs to algorithms as template parameters. A config struct encapsulates all the information that's needed to run a particular algorithm in the most performant way for a specific device. Default configurations (non custom-defined by users) can be selected by device code at compile time, since the architecture is known, while device algorithms detect at runtime which configuration should be used.
 
-What we call *autotuning* is a method of generating the above-mentioned architecture-optimized default configurations for algorithms. The process to run the autotune is described below, as well as all the templates and scripts used.
+What we call *autotuning* is a method of generating the above-mentioned architecture-optimized default configurations for algorithms.
+
+.. note::
+
+  The configs are tuned with Kernel Tuner and generated with ``tuning/confgen/generate.py``. See ``tuning/README.md`` for the current process.
+  The benchmark-based process below is deprecated, and ``scripts/autotune/create_optimization.py`` no longer runs, because it would overwrite the generated configs.
+
+The deprecated process is described below, as well as all the templates and scripts used.
 
 1. Configure the project for autotuning. Autotune is an extension on top of the regular benchmarking process and it is enabled with a CMake option ``BENCHMARK_CONFIG_TUNING``, which doubles as a C++ macro to determine whether autotuning is enabled.
 2. When the project is configured, a large amount of C++ benchmark files are generated with variation in parameters such as block size, items per thread, and method. The files are generated based on a template (``benchmark/benchmark_*.parallel.cpp.in``) and arguments defined in ``ConfigAutotuneSettings.cmake``. CMake will automatically detect when the input template changes and will reconfigure the required files as necessary.

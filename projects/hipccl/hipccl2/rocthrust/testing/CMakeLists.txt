@@ -253,8 +253,8 @@ add_thrust_test("reduce")
 add_thrust_test("reduce_by_key")
 add_thrust_test("reduce_large")
 add_thrust_test("remove")
-# Temporarily disable this test for gfx950 when CODE_COVERAGE is ON due to a compiler issue
-if((NOT CODE_COVERAGE) OR (NOT (("gfx950" IN_LIST GPU_TARGETS) OR (GPU_TARGETS STREQUAL "all"))))
+# Temporarily disable this test for gfx950 when ROCTHRUST_ENABLE_COVERAGE is ON due to a compiler issue
+if((NOT ROCTHRUST_ENABLE_COVERAGE) OR (NOT (("gfx950" IN_LIST GPU_TARGETS) OR (GPU_TARGETS STREQUAL "all"))))
     add_thrust_test("replace")
 endif()
 add_thrust_test("reverse")

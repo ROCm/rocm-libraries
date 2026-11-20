@@ -1,0 +1,25 @@
+{
+  "version": "1.0",
+  "id": "7bd1634d-b1dc-4486-a2e6-7e576b327258",
+  "name": "hipkernel:Gfx942AttentionUnified2D",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.gfx942_attention_unified_2d.graph_match"
+  },
+  "metadata": "323ecbb7-94db-45a4-ad26-818a986a258d",
+  "sort_kernel_catalog": {
+    "default": "8db17369-bc30-4ae7-b5cf-bd573b082ebe"
+  },
+  "knobs": [
+    "tile_size",
+    "num_warps",
+    "block_m_per_warp",
+    "use_mfma_32x32x8",
+    "use_transposed_qk_32x32",
+    "use_k_sliced_ring",
+    "use_q_direct_global",
+    "use_conflict_free_v_store",
+    "use_transposed_mask_limit",
+    "use_transposed_invariant_hoist"
+  ]
+}

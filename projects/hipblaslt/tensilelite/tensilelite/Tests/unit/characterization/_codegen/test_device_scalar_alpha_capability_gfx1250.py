@@ -176,7 +176,7 @@ def test_grouped_scalar_alpha_selects_record_layout(tmp_path, support_user_args)
 def test_conversion_applies_device_scalar_alpha_once(tmp_path, algorithm, vector_mode):
     """SingleBuffer workspace already includes alpha*A*B and beta*C."""
     from tensilelite.KernelHelperNaming import initConversionKernelObjects
-    from tensilelite.TensileCreateLibrary.Run import generateKernelObjectsFromSolutions
+    from tensilelite.create_library.run import generateKernelObjectsFromSolutions
     from config_harness import _toolchain_for
 
     source_config = (Path(__file__).resolve().parents[3]

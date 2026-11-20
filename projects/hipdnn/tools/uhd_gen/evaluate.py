@@ -1633,6 +1633,57 @@ def _linear_scorer(
     return score
 
 
+def _mlp_scorer(
+    artifact: Path,
+    features: list[str],
+    categorical_encoding: dict[str, dict[str, int]] | None = None,
+    *,
+    signature: list | None = None,
+    feature_evaluator: str | None = None,
+    expected_hash: str | None = None,
+    model_hash: str | None = None,
+    metric: str | None = None,
+    score_transform: str = TRAINED_TRANSFORM,
+) -> Scorer:
+    """Score with the shipped mlp_data `model.bin`, as `MlpDataAdapter::score()` does.
+
+    The bytes pass the loader's own checks (`load_mlp_artifact`, the UHD's metric, features
+    hash) first, so a file the engine would refuse is never reported with a regret. The
+    network predicts the log of its metric; `score_transform` maps it to the metric's units.
+    A row the runtime declines (an infinite feature) scores NaN.
+    """
+    from .artifact import load_mlp_artifact, mlp_features_hash
+    from .train_uhd import build_feature_matrix
+
+    ensemble, artifact_metric = load_mlp_artifact(
+        artifact,
+        model_hash,
+        feature_count=len(signature) if signature else None,
+    )
+    if metric is not None and artifact_metric != metric:
+        raise ValueError(
+            f"{artifact}: the model predicts {artifact_metric!r} but the descriptor "
+            f"scores {metric!r}; the engine refuses it"
+        )
+    if expected_hash is not None:
+        if mlp_features_hash(Path(artifact).read_bytes()) != expected_hash:
+            raise ValueError(
+                "descriptor features_hash does not match the shipped model artifact"
+            )
+
+    def score(frame: pd.DataFrame) -> np.ndarray:
+        matrix = build_feature_matrix(
+            frame,
+            features,
+            categorical_encoding,
+            signature=signature,
+            feature_evaluator=feature_evaluator,
+        )
+        return invert_score(ensemble.predict(matrix), score_transform)
+
+    return score
+
+
 def load_model(
     model_dir: Path,
     model_file: Path | None = None,
@@ -1751,7 +1802,9 @@ def load_model(
                 "native/custom models require --predictions from hipdnn_bench --predict-engine"
             )
         body_key = (
-            "linear_data" if descriptor.get("adapter") == "linear_data" else "tree_data"
+            descriptor["adapter"]
+            if descriptor.get("adapter") in ("linear_data", "mlp_data")
+            else "tree_data"
         )
         declared = descriptor.get(body_key, {})
         named = None
@@ -1794,6 +1847,27 @@ def load_model(
                 expected_hash=expected_hash,
                 model_hash=model_hash,
                 objective=objective,
+            )
+        elif body_key == "mlp_data":
+            model_hash = (
+                declared.get("hash")
+                if named is not None and candidate.resolve() == named.resolve()
+                else None
+            )
+            scorer = _mlp_scorer(
+                candidate,
+                features,
+                categorical_encoding,
+                signature=signature,
+                feature_evaluator=feature_evaluator,
+                expected_hash=expected_hash,
+                model_hash=model_hash,
+                metric=(
+                    l1_metric.name
+                    if l1_metric
+                    else (descriptor.get("score") or {}).get("metric")
+                ),
+                score_transform=transform,
             )
         elif candidate.suffix in (".lgbm", ".txt"):
             scorer = _booster_scorer(
@@ -1922,7 +1996,8 @@ def add_evaluate_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--model",
         default=None,
-        help="Model artifact override (default: the descriptor's tree_data (or linear_data).artifact, "
+        help="Model artifact override (default: the descriptor's tree_data (or linear_data "
+        "or mlp_data).artifact, "
         "the file the engine itself loads)",
     )
     parser.add_argument(

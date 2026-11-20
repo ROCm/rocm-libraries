@@ -10,7 +10,9 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/sdpa_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <hipdnn_test_sdk/utilities/FloatOperandTestUtils.hpp>
+#include <nlohmann/json.hpp>
 
 namespace hipdnn_integration_tests::test_utils
 {
@@ -125,6 +127,51 @@ inline flatbuffers::FlatBufferBuilder createSdpaFwdGraph(
 
     builder.Finish(graph);
     return builder;
+}
+
+// Uids of the SDPA forward graph of optionalSdpaFwdGraphJson(). The sink sorts first, so
+// without it every other input without a seed of its own gets a different seed.
+constexpr int64_t K_OPTIONAL_SDPA_SINK_UID = 0;
+constexpr int64_t K_OPTIONAL_SDPA_Q_UID = 1;
+constexpr int64_t K_OPTIONAL_SDPA_K_UID = 2;
+constexpr int64_t K_OPTIONAL_SDPA_V_UID = 3;
+constexpr int64_t K_OPTIONAL_SDPA_O_UID = 4;
+constexpr int64_t K_OPTIONAL_SDPA_STATS_UID = 5;
+
+// The JSON graph of one SDPA forward node with Q, K, V and O, plus a Stats output and a
+// sink input when asked for. The tensors are in the order Q, K, V, O, Stats, sink.
+inline nlohmann::json optionalSdpaFwdGraphJson(bool withStats, bool withSink)
+{
+    const std::vector<int64_t> dims = {1, 2, 4, 8};
+    hipdnn_flatbuffers_sdk::data_objects::SdpaAttributesT attrs;
+    if(withSink)
+    {
+        attrs.sink_token_tensor_uid = K_OPTIONAL_SDPA_SINK_UID;
+    }
+    const auto builder = createSdpaFwdGraph(
+        K_OPTIONAL_SDPA_Q_UID,
+        K_OPTIONAL_SDPA_K_UID,
+        K_OPTIONAL_SDPA_V_UID,
+        K_OPTIONAL_SDPA_O_UID,
+        dims,
+        dims,
+        dims,
+        dims,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        attrs,
+        withStats ? std::optional<int64_t>(K_OPTIONAL_SDPA_STATS_UID) : std::nullopt);
+    nlohmann::json graph
+        = *hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+    if(withSink)
+    {
+        auto sink = graph.at("tensors").at(0);
+        sink["uid"] = K_OPTIONAL_SDPA_SINK_UID;
+        sink["name"] = "Sink";
+        sink["dims"] = std::vector<int64_t>{1, 2, 1, 1};
+        sink["strides"] = std::vector<int64_t>{2, 1, 1, 1};
+        graph.at("tensors").push_back(std::move(sink));
+    }
+    return graph;
 }
 
 } // namespace hipdnn_integration_tests::test_utils
