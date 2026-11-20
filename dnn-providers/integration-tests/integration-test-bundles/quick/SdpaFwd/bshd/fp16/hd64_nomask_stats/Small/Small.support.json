@@ -4,6 +4,37 @@
       "gfx942": [
         "linux"
       ]
+    },
+    "hipkernel:flydsl_sdpa_cdna": {
+      "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_cdna_decode": {
+      "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_cdna_dualwave": {
+      "gfx950": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_rdna": {
+      "gfx1151": [
+        "windows"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_rdna_decode": {
+      "gfx1151": [
+        "windows"
+      ]
     }
   },
   "version": 1

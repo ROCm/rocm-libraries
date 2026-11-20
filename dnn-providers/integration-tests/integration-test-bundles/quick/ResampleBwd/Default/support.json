@@ -44,10 +44,19 @@
           "2_3_7_5_fp32_nhwc_padding_modezero_pad_postpad1x1_prepad1x1"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx1201": [
             "linux"
           ],
           "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }

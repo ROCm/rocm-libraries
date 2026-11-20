@@ -44,10 +44,19 @@
           "2_3_7_5_fp32_nhwc_postpad1x0_prepad0x1_resample_modeavgpool_include_padding"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx1201": [
             "linux"
           ],
           "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
+          "gfx950": [
             "linux"
           ]
         }

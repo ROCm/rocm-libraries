@@ -77,6 +77,9 @@
           "gfx1100": [
             "linux"
           ],
+          "gfx1151": [
+            "windows"
+          ],
           "gfx90a": [
             "linux"
           ],

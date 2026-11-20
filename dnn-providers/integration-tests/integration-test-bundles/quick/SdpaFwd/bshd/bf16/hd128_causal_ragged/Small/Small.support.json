@@ -7,6 +7,19 @@
       "gfx950": [
         "linux"
       ]
+    },
+    "hipkernel:flydsl_sdpa_cdna": {
+      "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    },
+    "hipkernel:flydsl_sdpa_rdna": {
+      "gfx1151": [
+        "windows"
+      ]
     }
   },
   "version": 1

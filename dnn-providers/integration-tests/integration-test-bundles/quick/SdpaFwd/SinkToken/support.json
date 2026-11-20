@@ -20,6 +20,9 @@
         "support": {
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
@@ -32,6 +35,9 @@
         "support": {
           "gfx942": [
             "linux"
+          ],
+          "gfx950": [
+            "linux"
           ]
         }
       }
@@ -42,6 +48,9 @@
           "1_2_256_64_bfp16_nchw"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx1201": [
             "linux"
           ]
@@ -54,6 +63,9 @@
           "1_2_256_64_bfp16_nchw"
         ],
         "support": {
+          "gfx1151": [
+            "windows"
+          ],
           "gfx1201": [
             "linux"
           ]
