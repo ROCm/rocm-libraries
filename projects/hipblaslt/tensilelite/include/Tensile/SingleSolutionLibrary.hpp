@@ -30,6 +30,7 @@
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionBlobCache.hpp>
 #include <Tensile/SolutionLibrary.hpp>
+#include <Tensile/Utils.hpp>
 
 #include <tensilelitehost/export.h>
 
