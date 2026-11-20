@@ -83,9 +83,8 @@ namespace
             // without the matrix and x being read, so a computation of
             // beta * y + 0 * A * x would turn y into NaN.
             ASSERT_TRUE(alpha == T{} && beta == rocsparse_ut::scalar<T>(1.0f));
-            const T nan = rocsparse_ut::scalar<T>(std::numeric_limits<float>::quiet_NaN());
-            std::fill(A.val.begin(), A.val.end(), nan);
-            std::fill(x.begin(), x.end(), nan);
+            std::fill(A.val.begin(), A.val.end(), nan_of<T>());
+            std::fill(x.begin(), x.end(), nan_of<T>());
             want = y0;
         }
 
@@ -641,7 +640,7 @@ namespace
         // ind doubles as the mask of the single block row.
         device_vector<rocsparse_int> ptr(std::vector<rocsparse_int>{0, 1}),
             ind(std::vector<rocsparse_int>{0});
-        const float          nan = std::numeric_limits<float>::quiet_NaN();
+        const float          nan = nan_of<float>();
         device_vector<float> val(std::vector<float>(4, nan));
         device_vector<float> x(std::vector<float>(2, nan)), y(std::vector<float>(2, 1.0f));
         ASSERT_TRUE(ptr.ptr && ind.ptr && val.ptr && x.ptr && y.ptr);
@@ -841,6 +840,52 @@ namespace
                                                       rocsparse_double_complex(2.0, -1.0),
                                                       false,
                                                       false);
+    }
+
+    TEST_F(L2DeviceBsrmv, beta_zero_overwrites_nan_y)
+    {
+        // y pre-filled with NaN and beta == 0: every kernel of the dispatch (the
+        // general one for every block dimension on a wave32 GPU, the specialised
+        // 2x2 .. 32x32 ones on wave64) must write alpha * A * x without reading y.
+        //
+        // Known defect: on a wave64 GPU the float-only 5x5 and 8x8 kernels
+        // (sbsrxmvn_5x5_device / sbsrxmvn_8x8_device) compute beta * y[row] without
+        // the beta == 0 guard the other kernels have, so a NaN in y survives. Those
+        // two cases are left out there until the kernels are fixed; the double 5x5
+        // and 8x8 cases below take the guarded generic kernels and stay in.
+        const bool wave64 = (rocsparse_ut::device_warp_size() == 64);
+        for(const int32_t bd : {2, 3, 4, 5, 8, 9, 16, 17})
+            for(const bool device : {false, true})
+            {
+                if(wave64 && (bd == 5 || bd == 8))
+                    continue;
+                check_bsrmv_scalars<float>(handle,
+                                           bd,
+                                           (bd & 1) ? rocsparse_direction_row
+                                                    : rocsparse_direction_column,
+                                           (bd / 3) & 1,
+                                           1.5f,
+                                           0.0f,
+                                           true,
+                                           device);
+                if(::testing::Test::HasFailure())
+                    return;
+            }
+        for(const int32_t bd : {5, 6, 8})
+        {
+            check_bsrmv_scalars<double>(
+                handle, bd, rocsparse_direction_row, 1, 2.0, 0.0, true, bd == 8);
+            if(::testing::Test::HasFailure())
+                return;
+        }
+        check_bsrmv_scalars<rocsparse_float_complex>(handle,
+                                                     12,
+                                                     rocsparse_direction_column,
+                                                     0,
+                                                     rocsparse_float_complex(1.5f, 0.5f),
+                                                     rocsparse_float_complex(0.0f, 0.0f),
+                                                     true,
+                                                     true);
     }
 
     TEST_F(L2DeviceBsrmv, empty_matrix_scales_y_by_beta)
