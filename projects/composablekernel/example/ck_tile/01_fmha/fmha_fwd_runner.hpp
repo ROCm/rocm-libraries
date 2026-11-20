@@ -754,6 +754,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                                       p_drop,
                                                       num_splits);
     }
+    // Experimental: CK_TILE_FMHA_SPLITKV_DIRECT=1 sends a single split through the split-KV API,
+    // where the instances that fuse the combine write O and LSE themselves.
+    const bool split_direct =
+        num_splits == 1 && std::getenv("CK_TILE_FMHA_SPLITKV_DIRECT") != nullptr;
     if(128 < num_splits)
     {
         std::cerr << "num_splits greater than 128 is not supported" << std::endl;
@@ -878,18 +882,20 @@ fwd_result fmha_fwd_run(mode_enum mode,
         std::max(shape_seqlen_q, shape_seqlen_k), rotary_dim, next_seed());
 
     ck_tile::HostTensor<LSEDataType> lse_acc_host(
-        1 < num_splits || use_kvcache ? std::array<ck_tile::index_t, 4>{shape_batch,
-                                                                        pack_gqa_nhead,
-                                                                        num_splits,
-                                                                        pack_gqa_seqlen_q}
-                                      : std::array<ck_tile::index_t, 4>{1, 1, 1, 1});
+        1 < num_splits || use_kvcache || split_direct
+            ? std::array<ck_tile::index_t, 4>{shape_batch,
+                                              pack_gqa_nhead,
+                                              num_splits,
+                                              pack_gqa_seqlen_q}
+            : std::array<ck_tile::index_t, 4>{1, 1, 1, 1});
     ck_tile::HostTensor<OaccDataType> o_acc_host(
-        1 < num_splits || use_kvcache ? std::array<ck_tile::index_t, 5>{shape_batch,
-                                                                        pack_gqa_nhead,
-                                                                        num_splits,
-                                                                        pack_gqa_seqlen_q,
-                                                                        hdim_v}
-                                      : std::array<ck_tile::index_t, 5>{1, 1, 1, 1, 1});
+        1 < num_splits || use_kvcache || split_direct
+            ? std::array<ck_tile::index_t, 5>{shape_batch,
+                                              pack_gqa_nhead,
+                                              num_splits,
+                                              pack_gqa_seqlen_q,
+                                              hdim_v}
+            : std::array<ck_tile::index_t, 5>{1, 1, 1, 1, 1});
 
     const ck_tile::index_t hdim_q_scale = ck_tile::integer_divide_ceil(hdim_q, kQKScaleGranularity);
     // batch mode stores V scales per batch; group mode packs all batches along seqlen
@@ -1164,7 +1170,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::DeviceMem o_acc_buf(o_acc_host.get_element_space_size_in_bytes());
     // Experimental: CK_TILE_FMHA_SPLITKV_FUSED_COMBINE=1 passes per-tile split counters, which
     // makes the instances that fuse the combine into the split kernel eligible.
-    const bool use_fused_combine = std::getenv("CK_TILE_FMHA_SPLITKV_FUSED_COMBINE") != nullptr;
+    const bool use_fused_combine =
+        split_direct || std::getenv("CK_TILE_FMHA_SPLITKV_FUSED_COMBINE") != nullptr;
     ck_tile::DeviceMem split_counter_buf(
         use_fused_combine ? sizeof(int32_t) * static_cast<std::size_t>(batch) * nhead *
                                 std::max(1, max_seqlen_q) * ck_tile::integer_divide_ceil(hdim_v, 32)
@@ -1731,6 +1738,9 @@ fwd_result fmha_fwd_run(mode_enum mode,
                 args.num_splits = num_splits;
                 args.split_counter_ptr =
                     use_fused_combine ? split_counter_buf.GetDeviceBuffer() : nullptr;
+                // the direct single-split path writes LSE only where one was asked for
+                if(split_direct && !lse)
+                    args.lse_ptr = nullptr;
                 if(qscale.type == quant_scale_enum::pertensor)
                 {
                     args.q_descale_ptr = q_descale_buf.GetDeviceBuffer();
@@ -1903,7 +1913,7 @@ fwd_result fmha_fwd_run(mode_enum mode,
         }
 #endif // CK_TILE_FMHA_FWD_PAGEDKV_API
 #if CK_TILE_FMHA_FWD_SPLITKV_API
-        if(1 < num_splits || use_kvcache)
+        if(1 < num_splits || use_kvcache || split_direct)
         {
             fmha_fwd_splitkv_traits fmha_splitkv_traits;
             init_traits(fmha_splitkv_traits);

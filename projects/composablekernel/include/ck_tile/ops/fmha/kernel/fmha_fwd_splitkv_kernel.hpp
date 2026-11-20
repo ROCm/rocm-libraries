@@ -925,6 +925,57 @@ struct FmhaFwdSplitKVKernel
         });
     }
 
+    // With one split there is nothing to merge: O goes out in its final type, and the LSE window
+    // already points at the final LSE.
+    template <typename OaccTile>
+    CK_TILE_DEVICE static void StoreFinalO(const Kargs& kargs,
+                                           const OaccTile& o_acc_tile,
+                                           index_t i_m0,
+                                           index_t i_n1,
+                                           index_t i_nhead,
+                                           index_t i_batch)
+    {
+        const index_t ratio = kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : 1;
+        auto* o_ptr         = static_cast<CombineODataType*>(kargs.o_ptr) +
+                      static_cast<long_index_t>(i_nhead) * ratio * kargs.nhead_stride_o +
+                      static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
+        const auto o_dram_naive = [&] {
+            if constexpr(kMergeNumHeadGroupsSeqLenQ)
+            {
+                const auto view = make_naive_tensor_view<address_space_enum::global>(
+                    o_ptr,
+                    make_tuple(kargs.nhead_ratio_qk, kargs.seqlen_q, kargs.hdim_v),
+                    make_tuple(kargs.nhead_stride_o, kargs.stride_o, 1),
+                    number<1>{},
+                    number<1>{});
+                return transform_tensor_view(view,
+                                             make_tuple(make_merge_transform(make_tuple(
+                                                            kargs.nhead_ratio_qk, kargs.seqlen_q)),
+                                                        make_pass_through_transform(kargs.hdim_v)),
+                                             make_tuple(sequence<0, 1>{}, sequence<2>{}),
+                                             make_tuple(sequence<0>{}, sequence<1>{}));
+            }
+            else
+            {
+                return make_naive_tensor_view<address_space_enum::global>(
+                    o_ptr,
+                    make_tuple(kargs.seqlen_q, kargs.hdim_v),
+                    make_tuple(kargs.stride_o, 1),
+                    number<1>{},
+                    number<1>{});
+            }
+        }();
+        const auto o_dram =
+            pad_tensor_view(o_dram_naive,
+                            make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
+                            sequence<kPadSeqLenQ, kPadHeadDimV>{});
+        auto o_dram_window =
+            make_tile_window(o_dram,
+                             make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
+                             {i_m0, i_n1});
+        store_tile(o_dram_window, cast_tile<CombineODataType>(o_acc_tile));
+    }
+
     CK_TILE_DEVICE void operator()(Kargs kargs) const
     {
         // allocate LDS
@@ -1320,13 +1371,34 @@ struct FmhaFwdSplitKVKernel
         }();
 
         // lse acc
-        auto lse_acc_dram_window = [&, i_nhead_ = i_nhead, i_split_ = i_split]() {
+        auto lse_acc_dram_window = [&,
+                                    i_nhead_ = i_nhead,
+                                    i_split_ = i_split,
+                                    i_batch_ = i_batch]() {
             constexpr auto lse_acc_dram_window_lengths = make_tuple(number<FmhaPipeline::kM0>{});
             LSEDataType* lse_acc_ptr = reinterpret_cast<LSEDataType*>(kargs.lse_acc_ptr) +
                                        static_cast<long_index_t>(i_nhead_) *
                                            (kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : 1) *
                                            kargs.nhead_stride_lse_acc +
                                        batch_offset_lse_acc + i_split_ * kargs.split_stride_lse_acc;
+            index_t nhead_stride_lse_acc = kargs.nhead_stride_lse_acc;
+            // a single split writes the final LSE itself (see StoreFinalO)
+            if constexpr(kFuseCombine)
+            {
+                if(kargs.num_splits == 1 && kargs.lse_ptr != nullptr)
+                {
+                    lse_acc_ptr = static_cast<LSEDataType*>(kargs.lse_ptr) +
+                                  static_cast<long_index_t>(i_nhead_) *
+                                      (kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : 1) *
+                                      kargs.nhead_stride_lse +
+                                  static_cast<long_index_t>(i_batch_) * kargs.batch_stride_lse;
+                    nhead_stride_lse_acc = kargs.nhead_stride_lse;
+                }
+            }
+            else
+            {
+                ignore = i_batch_;
+            }
 
             const auto lse_acc_dram = [&] {
                 const auto lse_acc_dram_naive = [&] {
@@ -1336,7 +1408,7 @@ struct FmhaFwdSplitKVKernel
                         const auto view = make_naive_tensor_view<address_space_enum::global>(
                             lse_acc_ptr,
                             make_tuple(kargs.nhead_ratio_qk, kargs.seqlen_q),
-                            make_tuple(kargs.nhead_stride_lse_acc, 1),
+                            make_tuple(nhead_stride_lse_acc, 1),
                             number<1>{},
                             number<1>{});
 
@@ -1517,6 +1589,15 @@ struct FmhaFwdSplitKVKernel
                                       sink_v);
             }
         }();
+
+        if constexpr(kFuseCombine)
+        {
+            if(kargs.num_splits == 1)
+            {
+                StoreFinalO(kargs, o_acc_tile, i_m0, i_n1, i_nhead, i_batch);
+                return;
+            }
+        }
 
         // Oacc DRAM and Oacc DRAM window
         auto o_acc_dram = [&] {

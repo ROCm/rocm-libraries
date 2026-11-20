@@ -1019,9 +1019,11 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             # The experimental qr_tdm_wave entries go first (see WAVE_OPT_IN), then the
             # fused-combine entries, which need a.split_counter_ptr.
             if hdim == 128:
-                for mask in get_mask_map(mask_impl).keys():
-                    pipelines.append(Pipeline("qr_tdm_wave", "row", "t", "f", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor"))  # fmt: skip
-                    pipelines.append(Pipeline("qr_tdm_wave", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor"))  # fmt: skip
+                for fuse, mask in itertools.product(
+                    ["t", "f"], get_mask_map(mask_impl).keys()
+                ):
+                    pipelines.append(Pipeline("qr_tdm_wave", "row", "t", "f", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor", fuse))  # fmt: skip
+                    pipelines.append(Pipeline("qr_tdm_wave", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor", fuse))  # fmt: skip
                 for fuse, mask in itertools.product(
                     ["t", "f"], get_mask_map(mask_impl).keys()
                 ):
