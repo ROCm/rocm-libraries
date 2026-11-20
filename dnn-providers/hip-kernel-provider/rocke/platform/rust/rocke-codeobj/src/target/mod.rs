@@ -144,6 +144,13 @@ pub struct TargetInfo {
     /// The alignment, in registers, of a VGPR tuple's first register
     /// (gfx90a and later keep tuples at even registers).
     pub vgpr_tuple_align: u8,
+    /// Whether the optimizer reduces address arithmetic
+    /// (`Kernel::address_reduction`). The reductions change the code objects
+    /// of most kernels that access global memory per lane or read staged
+    /// LDS tiles, so a target turns this on only together with an
+    /// on-silicon numeric check, against COMGR's objects for the same IR and
+    /// inputs, of every object of its corpus that the switch changes.
+    pub address_reduction: bool,
     /// What the code object states about the processor.
     pub(crate) object: ObjectTarget,
 }
@@ -164,6 +171,7 @@ pub const GFX1151: TargetInfo = TargetInfo {
     lds_bytes_shared: 128 << 10,
     simds_per_lds: 4,
     vgpr_tuple_align: 1,
+    address_reduction: false,
     object: GFX1151_OBJECT,
 };
 
@@ -185,13 +193,15 @@ pub const GFX950: TargetInfo = TargetInfo {
     lds_bytes_shared: 160 << 10,
     simds_per_lds: 4,
     vgpr_tuple_align: 2,
+    address_reduction: false,
     object: GFX950_OBJECT,
 };
 
 /// gfx1201 in wave32 WGP mode. The register file, wave count and LDS facts
 /// are gfx1151's: LLVM gives gfx12 the same 1536 VGPRs per SIMD, and the
 /// device reports 16 waves per SIMD and 64 KiB of LDS per workgroup.
-pub const GFX1201: TargetInfo = TargetInfo { target: Target::Gfx1201, name: "gfx1201", object: GFX1201_OBJECT, ..GFX1151 };
+pub const GFX1201: TargetInfo =
+    TargetInfo { target: Target::Gfx1201, name: "gfx1201", address_reduction: true, object: GFX1201_OBJECT, ..GFX1151 };
 
 impl TargetInfo {
     /// Waves per SIMD that can be resident with `vgprs` VGPRs per lane and

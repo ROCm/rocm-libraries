@@ -982,6 +982,7 @@ impl Shared {
             lds_dma_explicit,
             m0_early,
             passes,
+            address_reduction: false,
             params,
             body: body?,
             values,

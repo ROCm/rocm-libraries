@@ -105,6 +105,7 @@ fn main() {
         let selected = (|| {
             let mut kernel = parse::parse(&text)?;
             kernel.wave = target.info().wave;
+            kernel.address_reduction = target.info().address_reduction;
             let (mut lds, lds_size) = analysis::lds_layout(&kernel);
             let facts = opt::optimize(&mut kernel, &mut lds)?;
             let uniform = analysis::classify(&kernel);

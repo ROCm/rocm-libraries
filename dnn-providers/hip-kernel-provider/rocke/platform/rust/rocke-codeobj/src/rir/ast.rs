@@ -1056,6 +1056,14 @@ pub struct Kernel {
     pub m0_early: bool,
     /// The optional passes its attributes turn on.
     pub passes: Passes,
+    /// Whether the optimizer reduces address arithmetic: a 64-bit address
+    /// already in scope serves again where another differs from it by a
+    /// constant or by one uniform step (`opt::legalize_addresses`); 64-bit
+    /// arithmetic read only through `trunc` narrows to 32 bits; and a masked
+    /// right shift of a sum drops the part of the sum's constant above the
+    /// bits it keeps. `false` from the parsers; the compile driver sets its
+    /// target's `TargetInfo::address_reduction`.
+    pub address_reduction: bool,
     pub params: Vec<Param>,
     pub body: Region,
     pub values: Vec<ValueDef>,

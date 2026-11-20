@@ -3,6 +3,8 @@
 
 //! Direct rocKE IR (`ck.dsl.ir/v1`) to gfx1151 HSACO compiler.
 
+#[cfg(test)]
+mod access_trace;
 pub mod alias;
 pub mod analysis;
 pub mod asm;
@@ -1400,6 +1402,7 @@ fn compile_with(
     };
     force_attrs(&mut kernel)?;
     kernel.wave = target.info().wave;
+    kernel.address_reduction = target.info().address_reduction;
     opt::inherit_scopes(&mut kernel);
     if target == Target::Gfx950 {
         crate::target::gfx9::mask_splat::fold(&mut kernel);
