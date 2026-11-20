@@ -2001,6 +2001,18 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
 
+    // maf2_0_unit_scale is the MAF2.0 plan for block-scaled FP8 and FP4 (all scales 1, N(0,1)
+    // data); reject block-scaled FP6 before any resources are created.
+    auto const unitScaleType = [](hipDataType t) {
+        return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2
+               || t == static_cast<hipDataType>(HIP_R_4F_E2M1);
+    };
+    if(arg.initialization == hipblaslt_initialization::maf2_0_unit_scale
+       && ((isBlockScaling(arg.scaleA) && !unitScaleType(arg.a_type))
+           || (isBlockScaling(arg.scaleB) && !unitScaleType(arg.b_type))))
+        throw std::invalid_argument(
+            "maf2_0_unit_scale applies to block-scaled fp8 and fp4 inputs only; use maf2_0");
+
     // integer_exact: skip gfx11 only for 16-bit A (fp16/bf16)—GPU vs CPU exact match unreliable there;
     // f32/f64 (and TF32x1 f32 path) still run on Navi.
     if(arg.initialization == hipblaslt_initialization::integer_exact)
@@ -2318,7 +2330,18 @@ public:
         {
             std::vector<hipblasLtHandle_t> handles{handle0};
             m_streams.push_back(stream0);
-            check(hipEventCreate(&m_start), "hipEventCreate");
+            // One counter per partition, in host memory every device can reach: run() orders
+            // the partitions with stream writes and waits on them. Created here, so that run()
+            // only enqueues.
+            for(int i = 0; i < int(arg.partitions); i++)
+            {
+                void* word = nullptr;
+                check(hipHostMalloc(
+                          &word, sizeof(uint64_t), hipHostMallocCoherent | hipHostMallocPortable),
+                      "hipHostMalloc");
+                m_counters.push_back(static_cast<uint64_t*>(word));
+                *m_counters.back() = 0;
+            }
             for(int i = 1; i < int(arg.partitions); i++)
             {
                 check(hipSetDevice(m_devices[i]), "hipSetDevice");
@@ -2375,12 +2398,9 @@ public:
                     static_cast<void>(hipFree(replica[i - 1]));
         }
         static_cast<void>(hipSetDevice(previous));
-        if(m_start != nullptr)
-            static_cast<void>(hipEventDestroy(m_start));
-        m_start = nullptr;
-        for(hipEvent_t event : m_done)
-            static_cast<void>(hipEventDestroy(event));
-        m_done.clear();
+        for(uint64_t* word : m_counters)
+            static_cast<void>(hipHostFree(word));
+        m_counters.clear();
         m_streams.resize(std::min<size_t>(m_streams.size(), 1));
         m_workspaces.clear();
         for(auto& replica : m_replica)
@@ -2559,36 +2579,30 @@ public:
         return m_gemm->initialize(algo, workspaces, true, m_streams);
     }
 
-    // One launch of every partition. Partitions wait for work already queued on stream0, and
-    // stream0 waits for every other partition at the end (PartitionedGemm::run does not join
-    // them), so stream0 sees the whole span.
+    // One launch of every partition, joined on the GPU (PartitionedGemm::run does not join
+    // them). stream0 writes the launch number into its counter after the work already queued on
+    // it, and the other partitions wait for that before their slice. After its slice every other
+    // partition writes the number into its own counter, and stream0 waits for all of them, so
+    // stream0 sees the whole span and the next launch starts when this one has finished
+    // everywhere.
     hipblasStatus_t run()
     {
-        check(hipEventRecord(m_start, m_streams[0]), "hipEventRecord");
+        const uint64_t launch = ++m_launch;
+        check(hipStreamWriteValue64(m_streams[0], m_counters[0], launch, 0),
+              "hipStreamWriteValue64");
         for(size_t i = 1; i < m_streams.size(); i++)
-            check(hipStreamWaitEvent(m_streams[i], m_start, 0), "hipStreamWaitEvent");
+            check(hipStreamWaitValue64(m_streams[i], m_counters[0], launch, hipStreamWaitValueGte),
+                  "hipStreamWaitValue64");
         auto status = m_gemm->run(m_streams);
         if(status != HIPBLAS_STATUS_SUCCESS)
             return status;
-        // An event belongs to the device that is current when it is created, and is recorded on
-        // a stream of that device.
-        int previous = 0;
-        check(hipGetDevice(&previous), "hipGetDevice");
         for(size_t i = 1; i < m_streams.size(); i++)
         {
-            check(hipSetDevice(m_devices[i]), "hipSetDevice");
-            if(m_done.size() < i)
-            {
-                hipEvent_t event = nullptr;
-                check(hipEventCreateWithFlags(&event, hipEventDisableTiming),
-                      "hipEventCreateWithFlags");
-                m_done.push_back(event);
-            }
-            check(hipEventRecord(m_done[i - 1], m_streams[i]), "hipEventRecord");
+            check(hipStreamWriteValue64(m_streams[i], m_counters[i], launch, 0),
+                  "hipStreamWriteValue64");
+            check(hipStreamWaitValue64(m_streams[0], m_counters[i], launch, hipStreamWaitValueGte),
+                  "hipStreamWaitValue64");
         }
-        check(hipSetDevice(previous), "hipSetDevice");
-        for(size_t i = 1; i < m_streams.size(); i++)
-            check(hipStreamWaitEvent(m_streams[0], m_done[i - 1], 0), "hipStreamWaitEvent");
         return status;
     }
 
@@ -2610,8 +2624,8 @@ private:
     std::vector<int>                                       m_devices; // device of each partition
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
-    hipEvent_t                                             m_start = nullptr;
-    std::vector<hipEvent_t>                                m_done; // partitions 1.. finished
+    std::vector<uint64_t*>                                 m_counters; // per partition, host memory
+    uint64_t                                               m_launch = 0;
     std::unique_ptr<hipblaslt_ext::experimental::PartitionedGemm>        m_gemm;
 };
 
@@ -3966,6 +3980,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf1_0
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && integer_exact_mx_element_type(TiA)))
             {
@@ -3975,7 +3992,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 #else
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
-                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf1_0, maf2_0, maf2_0_unit_scale, "
                        "or integer_exact with fp8 or fp6 elements, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
@@ -4015,7 +4033,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutA,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      mxSeedIndex(/*isMatrixA=*/true, b, stride_a[i]));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -4081,6 +4101,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf1_0
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && integer_exact_mx_element_type(TiB)))
             {
@@ -4090,7 +4113,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 #else
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
-                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf1_0, maf2_0, maf2_0_unit_scale, "
                        "or integer_exact with fp8 or fp6 elements, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
@@ -4132,7 +4156,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutB,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      mxSeedIndex(/*isMatrixA=*/false, b, stride_b[i]));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));

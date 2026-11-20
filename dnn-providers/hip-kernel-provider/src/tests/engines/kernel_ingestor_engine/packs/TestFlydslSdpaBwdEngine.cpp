@@ -4,6 +4,7 @@
 // Redundant with the CMake gate on purpose; see TestFlydslRmsNormEngine.cpp.
 #if defined(HIPDNN_ENABLE_KERNEL_INGESTOR) && defined(HIPDNN_ENGINE_FLYDSL)
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -17,6 +18,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -2264,6 +2266,7 @@ struct RepeatCell
 /// packed objects; dropout) and a bias with its gradient. A bias with a mask is outside both
 /// engines' contract, so the bias cell is unmasked. The merged engine declines head dim 192
 /// with a mask, a bias or dropout, so no cell reaches those objects: the per-object suite does.
+/// The standard tier runs the `plain q288k480`, `dropout` and `bias and dBias` cells.
 std::vector<RepeatCell> repeatLaunchCells(DataType dtype, int64_t headDim)
 {
     const auto cell = [&](int64_t heads, int64_t kvHeads, int64_t seqQ, int64_t seqKv) {
@@ -2315,14 +2318,30 @@ std::vector<RepeatCell> repeatLaunchCells(DataType dtype, int64_t headDim)
     return cells;
 }
 
-/// Launches every cell REPEAT_LAUNCHES times on @p engine on NaN-poisoned outputs: each launch is
-/// bit-for-bit the first, and the first is within the engine tolerance of the reference.
-void expectRepeatLaunches(std::string_view engine, DataType dtype, int64_t headDim)
+/// Launches the cells REPEAT_LAUNCHES times on @p engine on NaN-poisoned outputs: each launch is
+/// bit-for-bit the first, and the first is within the engine tolerance of the reference. All
+/// cells, or with @p smoke the dense multi-tile one, the dropout one and the bias with dBias one:
+/// the dense, the Philox and the dBias-reduce paths.
+void expectRepeatLaunches(std::string_view engine, DataType dtype, int64_t headDim, bool smoke)
 {
+    constexpr std::array<std::string_view, 3> SMOKE_CELLS{
+        "plain q288k480", "dropout", "bias and dBias"};
+    size_t launched = 0;
     for(const auto& cell : repeatLaunchCells(dtype, headDim))
     {
+        if(smoke
+           && std::find(SMOKE_CELLS.begin(), SMOKE_CELLS.end(), cell.label) == SMOKE_CELLS.end())
+        {
+            continue;
+        }
+        ++launched;
         SCOPED_TRACE(std::string(engine) + " d" + std::to_string(headDim) + " " + cell.label);
         bwd::expectCase(engine, cell.graph);
+    }
+    // A renamed label would otherwise silently shrink the smoke subset.
+    if(smoke)
+    {
+        ASSERT_EQ(launched, SMOKE_CELLS.size());
     }
 }
 
@@ -2344,51 +2363,55 @@ protected:
     }
 };
 
-// One suite per dtype: the datatype token ends the suite name.
+// Standard runs the smoke cells at bf16 head dim 64 per engine. Comprehensive runs every cell at
+// both head dims and both dtypes: the suite name ends in the datatype token, so each dtype is its
+// own sweep suite.
 using TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16 = TestGpuFlydslSdpaBwdMergedRepeatLaunch;
-using TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16 = TestGpuFlydslSdpaBwdMergedRepeatLaunch;
 using TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16 = TestGpuFlydslSdpaBwdSplitRepeatLaunch;
-using TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16 = TestGpuFlydslSdpaBwdSplitRepeatLaunch;
 
 TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
 {
-    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 64);
-}
-
-TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchBfp16, HeadDim128IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 128);
-}
-
-TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16, HeadDim64IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::HALF, 64);
-}
-
-TEST_F(TestGpuFlydslSdpaBwdMergedRepeatLaunchFp16, HeadDim128IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::HALF, 128);
+    expectRepeatLaunches(bwd::MERGED_ENGINE, DataType::BFLOAT16, 64, true);
 }
 
 TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim64IsBitwiseStable)
 {
-    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 64);
+    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 64, true);
 }
 
-TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchBfp16, HeadDim128IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::BFLOAT16, 128);
-}
+#define FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(SUITE, BASE, ENGINE, DTYPE)                        \
+    class SUITE : public BASE, public ::testing::WithParamInterface<int>                       \
+    {                                                                                          \
+    };                                                                                         \
+    TEST_P(SUITE, HeadDim64AllCells)                                                           \
+    {                                                                                          \
+        expectRepeatLaunches(ENGINE, DTYPE, 64, false);                                        \
+    }                                                                                          \
+    TEST_P(SUITE, HeadDim128)                                                                  \
+    {                                                                                          \
+        expectRepeatLaunches(ENGINE, DTYPE, 128, false);                                       \
+    }                                                                                          \
+    INSTANTIATE_TEST_SUITE_P(                                                                  \
+        Comprehensive, SUITE, ::testing::Values(0), [](const ::testing::TestParamInfo<int>&) { \
+            return std::string("Sweep");                                                       \
+        });
 
-TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16, HeadDim64IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::HALF, 64);
-}
-
-TEST_F(TestGpuFlydslSdpaBwdSplitRepeatLaunchFp16, HeadDim128IsBitwiseStable)
-{
-    expectRepeatLaunches(bwd::SPLIT_ENGINE, DataType::HALF, 128);
-}
+FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(TestGpuFlydslSdpaBwdMergedRepeatLaunchSweepBfp16,
+                                    TestGpuFlydslSdpaBwdMergedRepeatLaunch,
+                                    bwd::MERGED_ENGINE,
+                                    DataType::BFLOAT16)
+FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(TestGpuFlydslSdpaBwdMergedRepeatLaunchSweepFp16,
+                                    TestGpuFlydslSdpaBwdMergedRepeatLaunch,
+                                    bwd::MERGED_ENGINE,
+                                    DataType::HALF)
+FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(TestGpuFlydslSdpaBwdSplitRepeatLaunchSweepBfp16,
+                                    TestGpuFlydslSdpaBwdSplitRepeatLaunch,
+                                    bwd::SPLIT_ENGINE,
+                                    DataType::BFLOAT16)
+FLYDSL_SDPA_BWD_REPEAT_LAUNCH_SWEEP(TestGpuFlydslSdpaBwdSplitRepeatLaunchSweepFp16,
+                                    TestGpuFlydslSdpaBwdSplitRepeatLaunch,
+                                    bwd::SPLIT_ENGINE,
+                                    DataType::HALF)
 
 /// B2 H4 with a bias of one [1, 1] plane, broadcast over batch and heads, and its gradient: the
 /// engine sums the gradient of every (batch, head) plane through the dBias reduce launch.
