@@ -311,6 +311,42 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForInputPlusPaddingAboveIntMax
                    "plus the padding at spatial dimension 0 exceeds INT_MAX");
 }
 
+// Workaround for ALMIOPEN-3373 (see Workarounds.hpp): every spatial dimension is checked, not only
+// the first. The same overflow as above, in spatial dimension 1.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForInputPlusPaddingAboveIntMaxInSecondDimension)
+{
+    const auto big = INT_MAX_VALUE;
+    expectDeclined(ResampleFwdGraphSpec::packed(
+                       ResampleMode::MAXPOOL, {1, 2, 1, 2}, {1, big}, {1, big}, {0, big - 1}),
+                   "plus the padding at spatial dimension 1 exceeds INT_MAX");
+}
+
+// Workaround for ALMIOPEN-3373 (see Workarounds.hpp): in 3D, input 2 plus padding INT_MAX - 2 in
+// the last spatial dimension ends the last window at INT_MAX. The stride keeps MIOpen's 3D tile
+// width estimate within 32 bits.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetricInputPlusPaddingAtIntMax)
+{
+    const auto big = INT_MAX_VALUE;
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 2, 1, 1, 2},
+                                                {1, 1, big - 1},
+                                                {1, 1, 715827883},
+                                                {0, 0, big - 2}));
+}
+
+// Workaround for ALMIOPEN-3373 (see Workarounds.hpp): one more padding in the last spatial
+// dimension of a 3D graph.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForVolumetricInputPlusPaddingAboveIntMax)
+{
+    const auto big = INT_MAX_VALUE;
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 2, 1, 1, 2},
+                                                {1, 1, big},
+                                                {1, 1, 715827883},
+                                                {0, 0, big - 1}),
+                   "plus the padding at spatial dimension 2 exceeds INT_MAX");
+}
+
 // Workaround for ALMIOPEN-3375 (see Workarounds.hpp): MIOpen divides AVGPOOL_INCLUDE_PADDING by
 // the window volume in 32 bits. 65537 * 65535 is UINT32_MAX, the largest volume that fits.
 TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForIncludePaddingWindowVolumeAtUint32Max)
@@ -342,6 +378,31 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForExcludePaddingWindowVolumeAb
                                                 {65536, 65536},
                                                 {65536, 65536},
                                                 {65535, 65535}));
+}
+
+// Workaround for ALMIOPEN-3375 (see Workarounds.hpp): the volume is the product of every window
+// value. 1625^3 is 4291015625, below UINT32_MAX.
+TEST(TestMiopenResampleFwdChecks,
+     IsSupportedTrueForVolumetricIncludePaddingWindowVolumeBelowUint32Max)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::AVGPOOL_INCLUDE_PADDING,
+                                                {1, 1, 1, 1, 1},
+                                                {1625, 1625, 1625},
+                                                {1625, 1625, 1625},
+                                                {1624, 1624, 1624}));
+}
+
+// Workaround for ALMIOPEN-3375 (see Workarounds.hpp): 1626^3 is 4298942376, above UINT32_MAX,
+// while the product of the first two values alone is far below it.
+TEST(TestMiopenResampleFwdChecks,
+     IsSupportedFalseForVolumetricIncludePaddingWindowVolumeAboveUint32Max)
+{
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::AVGPOOL_INCLUDE_PADDING,
+                                                {1, 1, 1, 1, 1},
+                                                {1626, 1626, 1626},
+                                                {1626, 1626, 1626},
+                                                {1625, 1625, 1625}),
+                   "window volume above UINT32_MAX");
 }
 
 // For FP32 and FP16, MIOpen's max pooling does not select padded positions, as NEG_INF_PAD would
@@ -814,9 +875,9 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForChannelsLastGlobalPoolingTha
 
 TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForChannelsLastIntMaxWindowWithoutOverflow)
 {
-    // Padding INT_MAX - 2 is the most the ALMIOPEN-3373 decline allows with an input of 2. With an
-    // INT_MAX - 1 window and stride it gives two outputs, so nothing is normalized and the tile
-    // estimate would overflow without the early stop.
+    // Padding INT_MAX - 2 keeps the input plus the padding within INT_MAX. With an INT_MAX - 1
+    // window and stride it gives two outputs, so nothing is normalized; the tile is over the limit
+    // without wrapping.
     const auto big = INT_MAX_VALUE;
     expectDeclined(tileSpec({1, 2, 2, 2},
                             {big - 1, 1},
@@ -824,6 +885,19 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForChannelsLastIntMaxWindowWit
                             true,
                             DataType::FLOAT,
                             std::vector<int64_t>{big - 2, 0}),
+                   TILE_LIMIT_REASON);
+}
+
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForChannelsLastTileBytesThatWrapToZero)
+{
+    // 4 * (15 * 2^29 + 2^29) * 2^29 is 2^64 bytes: without the early stop the product wraps to 0
+    // and passes the limit.
+    expectDeclined(tileSpec({1, 2, 1, 1},
+                            {536870912, 536870912},
+                            {536870912, 1},
+                            true,
+                            DataType::FLOAT,
+                            std::vector<int64_t>{536870911, 536870911}),
                    TILE_LIMIT_REASON);
 }
 
@@ -902,5 +976,73 @@ TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarTileBytesAboveSizeMax
                                                 {2147483641, TWO_POW_30},
                                                 {143165577, TWO_POW_30},
                                                 {2147483640, TWO_POW_30 - 1}),
+                   TILE_ESTIMATE_REASON);
+}
+
+// 3D: the uint32 tile width is checked in every spatial dimension. The W case above, in D.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForVolumetricTileDepthAboveUint32Max)
+{
+    const auto big = INT_MAX_VALUE;
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1, 1},
+                                                {big, 1, 1},
+                                                {715827883, 1, 1},
+                                                {big - 1, 0, 0}),
+                   TILE_ESTIMATE_REASON);
+}
+
+// 3D: the W case above, in H.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForVolumetricTileHeightAboveUint32Max)
+{
+    const auto big = INT_MAX_VALUE;
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1, 1},
+                                                {1, big, 1},
+                                                {1, 715827883, 1},
+                                                {0, big - 1, 0}),
+                   TILE_ESTIMATE_REASON);
+}
+
+// 3D: the 2^64-byte FP32 tile above is 2^63 bytes in FP16.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForVolumetricHalfTileBytesThatOverflowInFloat)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1, 1},
+                                                {1, TWO_POW_30 - 3, TWO_POW_30 - 3},
+                                                {1, 1, 1},
+                                                {0, TWO_POW_30 / 2 - 2, TWO_POW_30 / 2 - 2},
+                                                DataType::HALF));
+}
+
+// 2D: the 2^64-byte FP32 tile above is 2^63 bytes in BFLOAT16.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanarBfloat16TileBytesThatOverflowInFloat)
+{
+    expectAccepted(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1},
+                                                {2147483641, TWO_POW_30},
+                                                {143165577, TWO_POW_30},
+                                                {2147483640, TWO_POW_30 - 1},
+                                                DataType::BFLOAT16));
+}
+
+// 2D: 4 * (15 + 2147483633) * INT_MAX is 2^64 - 2^33 bytes, below the limit after MIOpen's rounding
+// and its 64 accumulator bytes.
+TEST(TestMiopenResampleFwdChecks, IsSupportedTrueForPlanarTileBytesBelowRoundingHeadroom)
+{
+    const auto big = INT_MAX_VALUE;
+    expectAccepted(ResampleFwdGraphSpec::packed(
+        ResampleMode::MAXPOOL, {1, 1, 1, 1}, {2147483633, big}, {1, big}, {2147483632, big - 1}));
+}
+
+// 2D: 4 * (15 + 2147483634) * INT_MAX is 2^64 - 4 bytes. It fits in size_t, but MIOpen's rounding
+// to 16 bytes wraps it.
+TEST(TestMiopenResampleFwdChecks, IsSupportedFalseForPlanarTileBytesInRoundingHeadroom)
+{
+    const auto big = INT_MAX_VALUE;
+    expectDeclined(ResampleFwdGraphSpec::packed(ResampleMode::MAXPOOL,
+                                                {1, 1, 1, 1},
+                                                {2147483634, big},
+                                                {1, big},
+                                                {2147483633, big - 1}),
                    TILE_ESTIMATE_REASON);
 }
