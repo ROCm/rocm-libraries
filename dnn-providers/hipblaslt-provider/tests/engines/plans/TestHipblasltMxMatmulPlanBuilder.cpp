@@ -682,6 +682,52 @@ TEST(TestMxGraphConstraints, DeclinesOutputThatIsNotPackedRowMajor)
     }
 }
 
+// hipBLASLt reads A and B and writes C as packed matrices (#14290), so the graph-only
+// checks decline a padded A or B in either order, and a C whose row stride is not N.
+TEST(TestMxGraphConstraints, DeclinesMatricesThatAreNotPacked)
+{
+    struct Case
+    {
+        std::string name;
+        flatbuffers::FlatBufferBuilder graph;
+    };
+    std::vector<Case> cases;
+    cases.push_back(
+        {"K-contiguous A, row stride 136",
+         createValidMxMatmulGraph(
+             {32, 128}, {136, 1}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32})});
+    cases.push_back(
+        {"M-contiguous A, column stride 40",
+         createValidMxMatmulGraph(
+             {32, 128}, {1, 40}, {128, 32}, {32, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32})});
+    cases.push_back(
+        {"K-contiguous B, column stride 136",
+         createValidMxMatmulGraph(
+             {32, 128}, {1, 32}, {128, 32}, {1, 136}, {32, 32}, {32, 1}, {32, 4}, {4, 32})});
+    cases.push_back(
+        {"N-contiguous B, row stride 40",
+         createValidMxMatmulGraph(
+             {32, 128}, {1, 32}, {128, 32}, {40, 1}, {32, 32}, {32, 1}, {32, 4}, {4, 32})});
+    for(const int64_t cRowStride : {16, 0, -32})
+    {
+        cases.push_back({"C row stride " + std::to_string(cRowStride),
+                         createValidMxMatmulGraph({32, 128},
+                                                  {1, 32},
+                                                  {128, 32},
+                                                  {32, 1},
+                                                  {32, 32},
+                                                  {cRowStride, 1},
+                                                  {32, 4},
+                                                  {4, 32})});
+    }
+
+    for(auto& c : cases)
+    {
+        GraphWrapper const graph(c.graph.GetBufferPointer(), c.graph.GetSize());
+        EXPECT_THROW(checkMxGraphConstraints(graph), HipdnnPluginException) << c.name;
+    }
+}
+
 // The swizzled scale formats run on hipBLASLt's Tensile kernels, which exist only for
 // K-contiguous A and B (#13715). Natural scales take every packed operand order.
 TEST(TestMxGraphConstraints, SwizzledScaleFormatsNeedKContiguousOperands)

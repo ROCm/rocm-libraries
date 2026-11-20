@@ -420,18 +420,6 @@ TEST_F(TestGpuMxMatmulPlan, CreatesPlanWithValidGraph)
     EXPECT_NO_THROW(MxMatmulPlan(_handle, std::move(params)));
 }
 
-TEST_F(TestGpuMxMatmulPlan, PlanReturnsValidWorkspaceSize)
-{
-    auto fb = createValidMxMatmulGraph();
-    GraphWrapper const graph(fb.GetBufferPointer(), fb.GetSize());
-    const auto attrs = getMxNodeAttrs(graph);
-
-    MxMatmulParams params(attrs.deqA, attrs.deqB, attrs.matmul, graph.getTensorMap());
-    MxMatmulPlan const plan(_handle, std::move(params));
-
-    EXPECT_GE(plan.getWorkspaceSize(_handle), 0u);
-}
-
 // execute() must reject a null workspace when the plan needs one, as this graph's
 // does (our A's K-contiguous scale is transposed into it). The check runs before
 // any device-buffer lookup, so no buffers are passed.
@@ -707,6 +695,7 @@ class StreamHold
 {
 public:
     explicit StreamHold(hipStream_t stream)
+        : _stream(stream)
     {
         EXPECT_EQ(hipLaunchHostFunc(stream, &StreamHold::wait, &_released), hipSuccess);
     }
@@ -714,9 +703,12 @@ public:
     StreamHold& operator=(const StreamHold&) = delete;
     StreamHold(StreamHold&&) = delete;
     StreamHold& operator=(StreamHold&&) = delete;
+    // The host function reads _released, so it must finish before the members go,
+    // also when execute() threw before release().
     ~StreamHold()
     {
         release();
+        EXPECT_EQ(hipStreamSynchronize(_stream), hipSuccess);
     }
 
     void release()
@@ -734,6 +726,7 @@ private:
         static_cast<std::shared_future<void>*>(released)->wait();
     }
 
+    hipStream_t _stream;
     std::promise<void> _promise;
     std::shared_future<void> _released = _promise.get_future().share();
     bool _done = false;
@@ -908,7 +901,9 @@ void expectMatchesHostReference(const MxExecution& run, const MxInputs& in, cons
                 magnitude += std::abs(a * b);
             }
             const auto actual = static_cast<double>(c[static_cast<size_t>(row * n + col)]);
-            mismatches += std::abs(actual - sum) > 1e-3 * magnitude + 1e-6 ? 1 : 0;
+            // A NaN in C fails `<=`, so it counts as a mismatch (it would pass a `>` test).
+            const bool close = std::abs(actual - sum) <= 1e-3 * magnitude + 1e-6;
+            mismatches += close ? 0 : 1;
         }
     }
     EXPECT_EQ(mismatches, 0u) << name << ": C differs from the host reference";
