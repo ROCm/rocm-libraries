@@ -753,6 +753,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
                                                       hdim_v,
                                                       p_drop,
                                                       num_splits);
+        // Experimental cluster combine (fp8 pingpong, 128-key tiles): one tile per split up
+        // to the 16 a cluster holds, while the workgroups stay within about two per CU.
+        if(std::getenv("CK_TILE_FMHA_SPLITKV_CLUSTER") != nullptr && tdm && data_type == "fp8bf16")
+        {
+            const int tiles    = std::max(1, ck_tile::integer_divide_ceil(seqlen_k_in_mask, 128));
+            const int m_blocks = ck_tile::integer_divide_ceil(max_seqlen_q_merged, 16);
+            const int budget   = std::max(1, 256 / (batch * nhead_merged * m_blocks));
+            num_splits         = std::min({16, tiles, budget});
+        }
     }
     // Experimental: CK_TILE_FMHA_SPLITKV_DIRECT=1 sends a single split through the split-KV API,
     // where the instances that fuse the combine write O and LSE themselves.
