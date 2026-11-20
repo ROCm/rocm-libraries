@@ -17,7 +17,9 @@
 #include <utility>
 #include <vector>
 
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/CompiledGraphPattern.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledLaunch.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
@@ -272,13 +274,21 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
     selector["rankers"] = nlohmann::json::object();
     detail::describeRankers(
         selector["rankers"], set.heuristicsByMetric, set.heuristic, set.unavailableHeuristicArches);
+    // A native matcher is its symbol; a declarative one is its expression, so editing
+    // criteria changes the selector revision as swapping a symbol does.
     for(const auto& matcher : set.matchers)
     {
-        selector["matchers"][toString(matcher.id)] = matcher.matchSymbol;
+        selector["matchers"][toString(matcher.id)] = matcher.criteria != nullptr
+                                                         ? matcher.criteria->source()
+                                                         : nlohmann::json(matcher.matchSymbol);
     }
+    // Likewise a native dispatch is its symbol and a declarative one its formulas: every
+    // declarative UDD shares one reserved symbol, so the symbol alone would hide an edit.
     for(const auto& dispatch : set.dispatches)
     {
-        selector["dispatches"][toString(dispatch.id)] = dispatch.dispatchSymbol;
+        selector["dispatches"][toString(dispatch.id)]
+            = dispatch.launch != nullptr ? dispatch.launch->source()
+                                         : nlohmann::json(dispatch.dispatchSymbol);
     }
     detail::describePacks(selector, set.packs);
     if(!set.slots.empty())

@@ -65,6 +65,11 @@ struct KernelDefinition
     /// the same reason as treeRoot. A native handler reaches one entry through the
     /// provider's launchKernelDefinition(), which returns a single-launch definition.
     std::map<std::string, KernelSource> sources;
+    /// The compiled launch of the pack's UDD when it is declarative, set by the state
+    /// manager for every kernel of such a pack; null for a native UDD. The handler under
+    /// DECLARATIVE_LAUNCH_SYMBOL evaluates it. Shared and immutable, so a plan that copies
+    /// the definition carries the launch with it.
+    std::shared_ptr<const CompiledLaunch> launch = nullptr;
     /// What `preparedBy` computed from this definition when the state manager was built;
     /// null when the kernel's pack registers no KernelPrepareFn, and for a definition
     /// built anywhere else (a test, a restored plan). Shared and immutable, so copying a
@@ -138,7 +143,7 @@ struct KernelDefinition
     }
 };
 
-// KernelDefinition is built positionally, up to eleven initializers at a time (the two
+// KernelDefinition is built positionally, up to twelve initializers at a time (the two
 // trailing prepared fields are set afterwards), so its field count is pinned here the way
 // KernelSource's is in Descriptors.hpp. std::string converts implicitly to
 // std::filesystem::path, so a path field inserted ahead of originDirectory would
@@ -156,6 +161,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                std::string,
                                                std::filesystem::path,
                                                std::map<std::string, KernelSource>,
+                                               std::shared_ptr<const CompiledLaunch>,
                                                std::shared_ptr<const void>,
                                                KernelPrepareFn>
                   && !detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
@@ -170,6 +176,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelDefinition,
                                                        std::string,
                                                        std::filesystem::path,
                                                        std::map<std::string, KernelSource>,
+                                                       std::shared_ptr<const CompiledLaunch>,
                                                        std::shared_ptr<const void>,
                                                        KernelPrepareFn,
                                                        std::string>,

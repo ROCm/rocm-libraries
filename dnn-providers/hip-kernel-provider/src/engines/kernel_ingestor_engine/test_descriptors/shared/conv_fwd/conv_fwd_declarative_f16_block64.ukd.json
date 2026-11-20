@@ -1,0 +1,39 @@
+{
+  "version": "1.0",
+  "id": "3d815f1b-e380-446f-a480-9a2bcaf546bb",
+  "name": "conv_fwd_declarative.f16_block64",
+  "kernel_source": {
+    "kind": "hip",
+    "source": "kernels/ConvFwd.cpp",
+    "entry": "ConvFwd",
+    "build": {
+      "defines": {
+        "HIP_PLUGIN_CONV_TYPE": "_Float16",
+        "HIP_PLUGIN_CONV_BLOCK_SIZE": 64
+      }
+    }
+  },
+  "metadata": {
+    "block_size": 64,
+    "dtype": "HALF"
+  },
+  "priority": 0,
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "7228baba-b63c-4c5e-bf32-0d6649c44bbd",
+          "kmd_id": "1a9d24f3-52a5-434f-8a69-2d59ae0557d4",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "block_size",
+            "dtype"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  }
+}

@@ -2,8 +2,8 @@
 
 - Contributors: TBD
 - **Status**: In progress
-- **Status notes**: The UED loads and registers a generic engine (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). `graph_match` has both arms: the declarative `nodes` pattern, compiled against the generated op-schema registry when the UED is read, and the `native` arm, a C++ function resolved through `GraphMatchRegistry`. The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The JSON Schema file is `plugin_sdk/schemas/universal_engine_descriptor.schema.json`. The cross-engine root-opcode index and the per-consumer published-symbol validation are not built.
-- **Last verified**: 2026-11-10 against `develop` (1c63e26254a)
+- **Status notes**: The UED loads and registers a generic engine (`plugin_sdk/include/hipdnn_plugin_sdk/ingestor/DescriptorLoader.hpp`; #10606, #10679, #10850, #11033). `graph_match` has both arms: the declarative `nodes` pattern, compiled against the generated op-schema registry when the UED is read, and the `native` arm, a C++ function resolved through `GraphMatchRegistry`. The loader reads the three role-scoped heuristic maps and the runtime resolves them by arch (#13028). The JSON Schema file is `plugin_sdk/schemas/universal_engine_descriptor.schema.json`. Each UMD `criteria`, and each declarative UDD's launch formulas, is validated against the published symbol set of every engine a pack pairs it with (`CompiledCriteria.hpp`, `CompiledLaunch.hpp`). The cross-engine root-opcode index and the same validation for the UHD `features_signature` are not built.
+- **Last verified**: 2026-10-29 against `develop` (4a3fc208880) with #13177 and #14705 applied
 - **Follows**: [RFC 0017](0017_UniversalKernelDescriptor.md) (Universal Kernel Descriptors). This is the "UED + graph matching" follow-up named in RFC 0017 § 14.2: the engine format together with the graph-matching specification: the `nodes` structural pattern, the symbols matching publishes, and the op-schema registry behind them.
 
 ## Table of Contents
@@ -1258,17 +1258,25 @@ performed at build time and run time alike:
   half-ships never advertises an engine it cannot serve. The diagnostic names the UED and the
   symbol. The loader checks this together with the match, dispatch, and score symbols, so no
   exception is raised when the match is first attempted.
-- **The published symbol set is validated per consumer pair** (declarative arm only). Not yet built. A pattern
+- **The published symbol set is validated per consumer pair** (declarative arm only). A pattern
   publishes a set (§ 6.1), and every descriptor written against it — a UMD listed by a pack naming
   this engine, that pack's UDD, and the engine's own UHD `features_signature` — is checked against
-  that set. This is the UED half of the check; the reader's half, including that a failure names
-  the matcher, the engine, the reference, **and the pack that paired them**, is
+  that set. The UMD and UDD checks are built: `criteriaReferenceError()` (`CompiledCriteria.hpp`)
+  checks each `criteria` reference, and `launchReferenceError()` (`CompiledLaunch.hpp`) checks each
+  reference a declarative UDD's launch formulas read and that each tensor argument names a pattern
+  variable. A failure drops the pack. An engine with no `graph_match` publishes nothing, so there
+  only `$kernel.*` and `$device.*` resolve, and a UDD with a tensor argument cannot pair with it.
+  Not yet built: the same check for the UHD `features_signature`. This is the UED half of the
+  check; the reader's half, including that a failure names the matcher, the engine, the reference,
+  **and the pack that paired them**, is
   [RFC 0018 A.5](0018_UniversalMatchDescriptor.md#a5-compile-time-validation-normative). The
   pairing is cached on `(matcher, engine)` and re-run when either side changes, so a pattern edit
   that drops or renames a bound variable invalidates every consumer written against it, loudly, at
   load. **Under the native arm this check cannot run**: the token set is not known until the
   function returns on a live graph (§ 4.5), so a consumer's `$`-reference is unvalidated at load and
-  fails closed at match time instead. This is one of the § 4.5 trade-offs between the two arms.
+  fails closed at match time instead. This is one of the § 4.5 trade-offs between the two arms. `$kernel.*` and
+  `$device.*` references are still checked on either arm, against the KMD and the device
+  vocabulary, since neither comes from the binding.
 - **Uniqueness (§ 13.2.1).** No two loaded UEDs may share a descriptor `id`, and independently
   none may share a `name`, except for the content-identical case (§ 13.2.1).
 

@@ -550,6 +550,26 @@ nlohmann::json pointwisePatternNodes()
                                    {"results", {{"out_0", "$output"}}}}});
 }
 
+/// The `.umd.json` body in @p documents whose scope is @p scope.
+nlohmann::json& matcherOfScope(Documents& documents, std::string_view scope)
+{
+    for(auto& document : documents)
+    {
+        if(document.suffix == ".umd.json" && document.body.at("scope").get<std::string>() == scope)
+        {
+            return document.body;
+        }
+    }
+    throw std::runtime_error("no matcher of scope " + std::string(scope));
+}
+
+/// Replaces @p matcher's native symbol with declarative @p criteria.
+void declareCriteria(nlohmann::json& matcher, nlohmann::json criteria)
+{
+    matcher.erase("match_symbol");
+    matcher["criteria"] = std::move(criteria);
+}
+
 } // namespace
 
 TEST(TestDescriptorLoader, ResolvesACompleteSetIntoOneEngine)
@@ -2065,6 +2085,306 @@ TEST(TestDescriptorLoader, CollapsesCopiesDifferingOnlyInExtensionKeysAndProvena
     EXPECT_EQ(sets.front().engine.name, "test:extension_keys");
 }
 
+namespace
+{
+
+/// A graph-scope `criteria` expression that admits pointwise operation @p op.
+nlohmann::json pointwiseOperationIs(const char* op)
+{
+    return {{"==", nlohmann::json::array({"$pointwise.operation", op})}};
+}
+
+/// A complete set over a declarative pointwise pattern whose graph UMD admits operation @p op.
+Documents pointwiseCriteriaSet(const std::string& engineName, const char* op)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    declareCriteria(matcherOfScope(documents, "graph"), pointwiseOperationIs(op));
+    return documents;
+}
+
+/// @p documents' graph UMD admitting operation @p op instead: the same id, name, scope and
+/// revision, so the copies differ in `criteria` alone.
+TestDocument graphUmdAdmitting(Documents& documents, const char* op)
+{
+    auto body = matcherOfScope(documents, "graph");
+    body["criteria"] = pointwiseOperationIs(op);
+    return {".umd.json", std::move(body)};
+}
+
+DescriptorId graphUmdId(Documents& documents)
+{
+    return hipdnn_flatbuffers_sdk::utilities::parseUuid(
+        matcherOfScope(documents, "graph").at("id").get<std::string>());
+}
+
+} // namespace
+
+/// `criteria` is part of a UMD's content: copies of one id in one root that differ only
+/// there poison the id, whichever file the walk meets first (RFC 0020 §13.2.1).
+TEST(TestDescriptorLoader, DropsTheIdWhenTwoUmdsInOneRootDifferOnlyInCriteria)
+{
+    for(const auto& [first, second] :
+        std::vector<std::pair<const char*, const char*>>{{"ADD", "SUB"}, {"SUB", "ADD"}})
+    {
+        SCOPED_TRACE(std::string("a/ admits ") + first + ", b/ admits " + second);
+        const ScopedSymbols symbols;
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(std::string("criteria_same_root_") + first));
+        auto documents = pointwiseCriteriaSet("test:criteria_same_root", first);
+        writeDocuments(dir.path() / "a", documents);
+        writeDocument(dir.path() / "b", graphUmdAdmitting(documents, second));
+
+        const auto catalog = loadDescriptorCatalog(dir.path());
+
+        EXPECT_EQ(tallyOf(catalog.matchers, graphUmdId(documents)).conflicted, 1u);
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"))
+            << recorder.getRecordedLogsAsString();
+        EXPECT_TRUE(resolveDescriptorSets(catalog).empty());
+    }
+}
+
+/// Each file compiles its own criteria, so two copies hold different compiled instances;
+/// identical authored criteria are still one definition.
+TEST(TestDescriptorLoader, CollapsesUmdCopiesWithIdenticalCriteria)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("criteria_identical"));
+    auto documents = pointwiseCriteriaSet("test:criteria_identical", "ADD");
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", graphUmdAdmitting(documents, "ADD"));
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(tallyOf(catalog.matchers, graphUmdId(documents)).conflicted, 0u);
+    EXPECT_EQ(recorder.countLogsAtLevel(HIPDNN_SEV_ERROR), 0u)
+        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(resolveDescriptorSets(catalog).size(), 1u);
+}
+
+/// A later root's UMD that differs from the earlier root's only in `criteria` is a
+/// redefinition: it is refused at ERROR and the earlier root's criteria stay in force.
+TEST(TestDescriptorLoader, RefusesALaterRootsUmdDifferingOnlyInCriteria)
+{
+    const ScopedSymbols symbols;
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("criteria_roots"));
+    auto documents = pointwiseCriteriaSet("test:criteria_roots", "ADD");
+    writeDocuments(dir.path() / "a", documents);
+    writeDocument(dir.path() / "b", graphUmdAdmitting(documents, "SUB"));
+
+    const auto catalog = loadDescriptorCatalog(
+        std::vector<std::filesystem::path>{dir.path() / "a", dir.path() / "b"});
+
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "under an earlier root"))
+        << recorder.getRecordedLogsAsString();
+    const auto id = graphUmdId(documents);
+    EXPECT_EQ(tallyOf(catalog.matchers, id).conflicted, 0u);
+    const auto* matcher = detail::findDescriptor(catalog.matchers, id);
+    ASSERT_NE(matcher, nullptr);
+    EXPECT_EQ(matcher->criteriaJson, pointwiseOperationIs("ADD"));
+}
+
+namespace
+{
+
+/// A declarative launch body over pointwisePatternNodes(): pointers to the pattern's three
+/// tensors and the output's leading extent as an i32, with @p blockX threads per block.
+nlohmann::json pointwiseLaunch(int64_t blockX)
+{
+    const auto pointer = [](const char* name, const char* ref) {
+        return nlohmann::json{
+            {"name", name}, {"kind", "pointer"}, {"source", {{"from", "tensor"}, {"ref", ref}}}};
+    };
+    return {{"grid", {{"x", 1}, {"y", 1}, {"z", 1}}},
+            {"block", {{"x", blockX}, {"y", 1}, {"z", 1}}},
+            {"args_signature",
+             {pointer("a", "$input_a"),
+              pointer("b", "$input_b"),
+              pointer("y", "$output"),
+              {{"name", "n"},
+               {"kind", "scalar"},
+               {"type", "i32"},
+               {"source", {{"from", "dim"}, {"ref", "$output"}, {"axis", 0}}}}}}};
+}
+
+/// Replaces @p documents' native UDD arm with the declarative @p launch.
+nlohmann::json& declareLaunch(Documents& documents, const nlohmann::json& launch)
+{
+    auto& udd = documentOfType(documents, ".udd.json");
+    udd.erase("dispatch_symbol");
+    udd.update(launch);
+    return udd;
+}
+
+/// A complete set over a declarative pointwise pattern whose UDD launches declaratively.
+Documents pointwiseLaunchSet(const std::string& engineName, int64_t blockX = 64)
+{
+    auto documents = makeSetDocuments('1', engineName);
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    declareLaunch(documents, pointwiseLaunch(blockX));
+    return documents;
+}
+
+DescriptorId uddId(Documents& documents)
+{
+    return hipdnn_flatbuffers_sdk::utilities::parseUuid(
+        documentOfType(documents, ".udd.json").at("id").get<std::string>());
+}
+
+} // namespace
+
+/// A declarative UDD compiles while the file is read, keeps its authored body for
+/// equality, and takes the reserved symbol of the one handler that runs any launch.
+TEST(TestDescriptorLoader, LoadsADeclarativeUddUnderTheReservedSymbol)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declarative_udd"));
+    writeDocuments(dir.path(), pointwiseLaunchSet("test:declarative_udd"));
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().dispatches.size(), 1u);
+    const auto& dispatch = sets.front().dispatches.front();
+    ASSERT_NE(dispatch.launch, nullptr);
+    EXPECT_EQ(dispatch.dispatchSymbol, DECLARATIVE_LAUNCH_SYMBOL);
+    EXPECT_EQ(dispatch.launchJson, pointwiseLaunch(64));
+    EXPECT_EQ(dispatch.launch->signature().size(), 4u);
+}
+
+/// A UDD states one way to launch: both arms, or neither, is refused with the rule's own
+/// message, and the valid engine sharing the directory still loads.
+TEST(TestDescriptorLoader, RefusesAUddWithBothOrNeitherOfDispatchSymbolAndALaunch)
+{
+    for(const bool both : {true, false})
+    {
+        SCOPED_TRACE(both ? "both arms" : "neither arm");
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(
+            uniqueDirectory(both ? "udd_both_arms" : "udd_no_arm"));
+        writeDocuments(dir.path(), makeSetDocuments('1', "test:valid"));
+        auto broken = makeSetDocuments('2', "test:broken");
+        auto& udd = documentOfType(broken, ".udd.json");
+        if(both)
+        {
+            udd["grid"] = {{"x", 1}, {"y", 1}, {"z", 1}};
+        }
+        else
+        {
+            udd.erase("dispatch_symbol");
+        }
+        writeDocuments(dir.path(), broken);
+
+        const auto sets = loadFrom(dir.path());
+
+        ASSERT_EQ(sets.size(), 1u);
+        EXPECT_EQ(sets.front().engine.name, "test:valid");
+        EXPECT_TRUE(recorder.hasLogContaining(
+            HIPDNN_SEV_ERROR,
+            "must declare exactly one of 'dispatch_symbol' and the declarative launch keys"))
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// The reserved name and its versioned aliases belong to the declarative handler: a native
+/// UDD naming one would run that handler with no compiled launch. A name merely sharing
+/// the prefix is an ordinary symbol.
+TEST(TestDescriptorLoader, RefusesAnAuthoredDispatchSymbolInTheReservedNamespace)
+{
+    const std::string reserved(DECLARATIVE_LAUNCH_SYMBOL);
+    for(const auto& [symbol, refused] : std::vector<std::pair<std::string, bool>>{
+            {reserved, true}, {reserved + ".v1", true}, {reserved + "_custom", false}})
+    {
+        SCOPED_TRACE(symbol);
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("reserved_symbol"));
+        auto documents = makeSetDocuments('1', "test:reserved_symbol");
+        documentOfType(documents, ".udd.json")["dispatch_symbol"] = symbol;
+        writeDocuments(dir.path(), documents);
+
+        const auto sets = loadFrom(dir.path());
+
+        EXPECT_EQ(sets.empty(), refused);
+        EXPECT_EQ(recorder.hasLogContaining(HIPDNN_SEV_ERROR,
+                                            "which is reserved for declarative launches"),
+                  refused)
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// A launch that binds a tensor the engine's pattern does not publish drops only the pack
+/// pairing them, and the diagnostic names the reference, the UDD, the engine and the pack.
+/// A sibling pack of the same engine on a native UDD still loads.
+TEST(TestDescriptorLoader, DropsOnlyThePackWhoseLaunchReferenceDoesNotResolve)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unresolved_launch"));
+    auto documents = makeSetDocuments('1', "test:unresolved_launch");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+
+    const auto nativeDispatchId = testUuid('1', 'b');
+    auto nativePack = documentOfType(documents, ".kdp.json");
+    nativePack["id"] = testUuid('1', 'c');
+    nativePack["name"] = "native pack";
+    nativePack["dispatch"] = nativeDispatchId;
+    const std::array<char, 3> slots = {'e', 'f', '0'};
+    for(size_t i = 0; i < nativePack.at("kernelDescriptors").size(); ++i)
+    {
+        nativePack["kernelDescriptors"][i]["id"] = testUuid('1', slots[i]);
+    }
+    documents.push_back({".kdp.json", nativePack});
+    documents.push_back({".udd.json",
+                         {{"version", "1.0"},
+                          {"id", nativeDispatchId},
+                          {"name", "native dispatch"},
+                          {"dispatch_symbol", DISPATCH_SYMBOL}}});
+
+    auto launch = pointwiseLaunch(64);
+    launch["args_signature"][0]["source"]["ref"] = "$weights";
+    declareLaunch(documents, launch);
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    ASSERT_EQ(sets.front().packs.size(), 1u);
+    EXPECT_EQ(sets.front().packs.front().name, "native pack");
+    for(const char* part : {"$weights", "dispatch 'dispatch'", "test:unresolved_launch", "'pack'"})
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, part))
+            << part << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
+}
+
+/// The formulas are part of a UDD's content: two copies of one id in one root that differ
+/// only there poison the id.
+TEST(TestDescriptorLoader, DropsTheIdWhenTwoUddsInOneRootDifferOnlyInFormulas)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("launch_same_root"));
+    auto documents = pointwiseLaunchSet("test:launch_same_root", 64);
+    writeDocuments(dir.path() / "a", documents);
+    auto other = pointwiseLaunchSet("test:launch_same_root", 128);
+    writeDocument(dir.path() / "b", {".udd.json", documentOfType(other, ".udd.json")});
+
+    const auto catalog = loadDescriptorCatalog(dir.path());
+
+    EXPECT_EQ(tallyOf(catalog.dispatches, uddId(documents)).conflicted, 1u);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "with different contents"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(resolveDescriptorSets(catalog).empty());
+}
+
 TEST(TestDescriptorLoader, LoadsNothingFromAnEmptyDirectory)
 {
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("empty"));
@@ -2433,6 +2753,43 @@ INSTANTIATE_TEST_SUITE_P(
                           spellAsMultiLaunch(documents).at("sources").at("merge").erase(
                               "signature");
                       }},
+        ViolationCase{"umd_declares_both_arms",
+                      [](Documents& documents) {
+                          matcherOfScope(documents, "graph")["criteria"]
+                              = nlohmann::json::parse(R"({"==": ["$graph.node_count", 1]})");
+                      }},
+        ViolationCase{
+            "umd_declares_neither_arm",
+            [](Documents& documents) { matcherOfScope(documents, "graph").erase("match_symbol"); }},
+        ViolationCase{"umd_criteria_is_a_literal",
+                      [](Documents& documents) {
+                          declareCriteria(matcherOfScope(documents, "graph"), true);
+                      }},
+        ViolationCase{"umd_criteria_do_not_compile",
+                      [](Documents& documents) {
+                          declareCriteria(matcherOfScope(documents, "graph"),
+                                          nlohmann::json::parse(R"({"var": "graph.node_count"})"));
+                      }},
+        ViolationCase{"graph_scoped_criteria_read_kernel_metadata",
+                      [](Documents& documents) {
+                          declareCriteria(
+                              matcherOfScope(documents, "graph"),
+                              nlohmann::json::parse(R"({"==": ["$kernel.dtype", "FLOAT"]})"));
+                      }},
+        // The pack is dropped at pairing, which leaves the engine with none.
+        ViolationCase{"criteria_read_what_the_pattern_does_not_publish",
+                      [](Documents& documents) {
+                          documentOfType(documents, ".ued.json")["graph_match"]
+                              = {{"nodes", pointwisePatternNodes()}};
+                          declareCriteria(
+                              matcherOfScope(documents, "graph"),
+                              nlohmann::json::parse(R"({"==": ["$weights.dtype", "FLOAT"]})"));
+                      }},
+        ViolationCase{"criteria_read_a_field_the_kmd_does_not_declare",
+                      [](Documents& documents) {
+                          declareCriteria(matcherOfScope(documents, "kernel"),
+                                          nlohmann::json::parse(R"({"==": ["$kernel.tile", 1]})"));
+                      }},
         ViolationCase{"arch_has_duplicate_entries",
                       [](Documents& documents) {
                           documentOfType(documents, ".kdp.json")["arch"]
@@ -2474,6 +2831,55 @@ TEST(TestDescriptorLoader, CarriesTheNativeGraphMatchSymbol)
     const auto* native = std::get_if<NativeGraphMatch>(&sets.front().engine.graphMatch);
     ASSERT_NE(native, nullptr);
     EXPECT_EQ(native->symbol, "descriptorloader.native");
+}
+
+/// Both UMDs carry criteria over a declarative pattern's binding: they compile while the
+/// files are read, pair with the engine, and need no registered match symbol.
+TEST(TestDescriptorLoader, LoadsDeclarativeCriteriaPairedWithADeclarativePattern)
+{
+    const ScopedSymbols symbols;
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("criteria"));
+    auto documents = makeSetDocuments('1', "test:criteria");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    declareCriteria(matcherOfScope(documents, "graph"),
+                    nlohmann::json::parse(R"({"==": ["$pointwise.operation", "ADD"]})"));
+    declareCriteria(matcherOfScope(documents, "kernel"),
+                    nlohmann::json::parse(R"({"==": ["$input_a.dtype", "$kernel.dtype"]})"));
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadValidatedDescriptorSets<LoaderHandle>(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& matchers = sets.front().set.matchers;
+    ASSERT_EQ(matchers.size(), 2u);
+    for(const auto& matcher : matchers)
+    {
+        ASSERT_NE(matcher.criteria, nullptr) << matcher.name;
+        EXPECT_TRUE(matcher.matchSymbol.empty()) << matcher.name;
+    }
+}
+
+/// A pack pairing criteria with an engine that does not publish what they read is dropped,
+/// and the diagnostic names the reference, the matcher, the engine, and the pack, since
+/// the UMD alone cannot say which pairing to correct.
+TEST(TestDescriptorLoader, NamesEveryPartyToAnUnresolvedCriteriaReference)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("unresolved_criteria"));
+    auto documents = makeSetDocuments('1', "test:unresolved_criteria");
+    documentOfType(documents, ".ued.json")["graph_match"] = {{"nodes", pointwisePatternNodes()}};
+    declareCriteria(matcherOfScope(documents, "graph"),
+                    nlohmann::json::parse(R"({"==": ["$weights.dtype", "FLOAT"]})"));
+    writeDocuments(dir.path(), documents);
+
+    EXPECT_TRUE(loadFrom(dir.path()).empty());
+    for(const char* part : {"$weights.dtype", "graph shape", "test:unresolved_criteria", "'pack'"})
+    {
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, part))
+            << part << "\n"
+            << recorder.getRecordedLogsAsString();
+    }
 }
 
 /// nlohmann silently keeps the last of two equal keys, so without this check the operand map
@@ -6119,6 +6525,36 @@ TEST(TestDescriptorLoader, NativeEngineSelectorRevisionIsStableForTrainedModels)
               "dd35c754f320f476b00c38b87c966be1addf80a1bd0319a41b8322d89991a312");
 }
 
+/// The selector revision digests each declarative matcher's criteria, so editing a UMD's
+/// criteria without bumping its revision does not keep a revision a ranker was trained against.
+TEST(TestDescriptorLoader, ChangingAMatchersCriteriaChangesTheEngineSelectorRevision)
+{
+    const ScopedSymbols symbols;
+    const auto revisionWith = [](const char* op, const std::string& label) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(label));
+        writeDocuments(dir.path(), pointwiseCriteriaSet("test:" + label, op));
+        return engineSelectorRevision(loadFrom(dir.path()).at(0));
+    };
+
+    EXPECT_EQ(revisionWith("ADD", "criteria_revision"), revisionWith("ADD", "criteria_revision"));
+    EXPECT_NE(revisionWith("ADD", "criteria_revision"), revisionWith("SUB", "criteria_revision"));
+}
+
+/// The selector revision digests each declarative UDD's formulas. Every declarative UDD
+/// shares one reserved symbol, so without them editing a formula would keep a revision a
+/// ranker was trained against.
+TEST(TestDescriptorLoader, ChangingAUddsFormulasChangesTheEngineSelectorRevision)
+{
+    const auto revisionWith = [](int64_t blockX, const std::string& label) {
+        const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory(label));
+        writeDocuments(dir.path(), pointwiseLaunchSet("test:" + label, blockX));
+        return engineSelectorRevision(loadFrom(dir.path()).at(0));
+    };
+
+    EXPECT_EQ(revisionWith(64, "launch_revision"), revisionWith(64, "launch_revision"));
+    EXPECT_NE(revisionWith(64, "launch_revision"), revisionWith(128, "launch_revision"));
+}
+
 /// A launch name is `^[a-z][a-z0-9_]*$`: underscores and digits after the first letter are
 /// part of the name.
 TEST(TestDescriptorLoader, AcceptsLaunchNamesWithUnderscoresAndDigits)
@@ -6913,6 +7349,27 @@ TEST(TestDescriptorLoader, LoadsAThreeSlotSetWithPerSlotState)
     EXPECT_TRUE(set.heuristicsByMetric.empty());
     EXPECT_EQ(set.matchers.size(), 2u);
     EXPECT_EQ(set.dispatches.size(), 1u);
+}
+
+/// A slotted engine has no engine-level KMD: kernel-scoped criteria resolve `$kernel.*`
+/// against the KMD of the slot each pack serves, so a field only one slot's KMD declares
+/// keeps that slot's pack and drops the others'.
+TEST(TestDescriptorLoader, ResolvesKernelCriteriaAgainstEachSlotsKmd)
+{
+    const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("slot_criteria"));
+    auto documents = makeSlottedDocuments('1', "test:slot_criteria");
+    declareCriteria(matcherOfScope(documents, "kernel"),
+                    nlohmann::json::parse(R"({"==": ["$kernel.variant", "a"]})"));
+    writeDocuments(dir.path(), documents);
+
+    const auto sets = loadFrom(dir.path());
+
+    ASSERT_EQ(sets.size(), 1u);
+    const auto& slots = sets.front().slots;
+    ASSERT_EQ(slots.size(), 3u);
+    EXPECT_TRUE(slots[0].packs.empty());
+    EXPECT_EQ(slots[1].packs.size(), 1u);
+    EXPECT_TRUE(slots[2].packs.empty());
 }
 
 TEST(TestDescriptorLoader, ParsesASlottedUedToOneDescriptorWhateverItsStorageHeld)

@@ -327,7 +327,8 @@ public:
 
     /// The scratch a call needs: the largest any surviving kernel needs, reused, not
     /// partitioned, since kernels launch one at a time on one stream. A slotted engine adds
-    /// the aligned shared region to the largest per-slot scratch.
+    /// the aligned shared region to the largest per-slot scratch. A kernel whose workspace
+    /// formula does not fit this graph (see workspaceBytesFor) needs none.
     size_t getMaxWorkspaceSize(const THandle& handle,
                                const IGraph& opGraph,
                                const TSettings& executionSettings) const override
@@ -342,9 +343,10 @@ public:
             {
                 for(const KernelDefinition* kernel : kernels)
                 {
-                    const auto* handler = _stateManager.dispatchHandlerFor(*kernel);
-                    maxScratch = std::max(
-                        maxScratch, handler->workspaceBytes(context, selection.bound, *kernel));
+                    if(const auto bytes = workspaceBytesFor(context, selection.bound, *kernel))
+                    {
+                        maxScratch = std::max(maxScratch, *bytes);
+                    }
                 }
             }
             return selection.alignedSharedBytes + maxScratch;
@@ -366,8 +368,10 @@ public:
         size_t maxBytes = 0;
         for(const KernelDefinition* kernel : filtered)
         {
-            const auto* handler = _stateManager.dispatchHandlerFor(*kernel);
-            maxBytes = std::max(maxBytes, handler->workspaceBytes(context, catalog.bound, *kernel));
+            if(const auto bytes = workspaceBytesFor(context, catalog.bound, *kernel))
+            {
+                maxBytes = std::max(maxBytes, *bytes);
+            }
         }
         return maxBytes;
     }
@@ -1047,6 +1051,31 @@ private:
         return ranking;
     }
 
+    /// The kernel's workspace for this graph, or nullopt when its handler answers
+    /// BAD_PARAM: a declarative launch's workspace formula that evaluates to a value its
+    /// rule refuses on this shape. Such a kernel declines the graph, as a failed
+    /// applicability check would. Any other failure propagates.
+    std::optional<size_t> workspaceBytesFor(const MatchContext& context,
+                                            const BoundTokens& bound,
+                                            const KernelDefinition& kernel) const
+    {
+        try
+        {
+            return _stateManager.dispatchHandlerFor(kernel)->workspaceBytes(context, bound, kernel);
+        }
+        catch(const HipdnnPluginException& error)
+        {
+            if(error.getStatus() != HIPDNN_PLUGIN_STATUS_BAD_PARAM)
+            {
+                throw;
+            }
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: "
+                                   << describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                                   << " declined the graph: " << error.what());
+            return std::nullopt;
+        }
+    }
+
     /// Builds the first plan of @p ranked, a benchmarked record's order over the candidates,
     /// that constructs, and sets it on @p executionContext; false when none does.
     ///
@@ -1103,7 +1132,9 @@ private:
         return false;
     }
 
-    /// @p kernels whose workspace for @p context, added to @p offset, stays within @p limit.
+    /// @p kernels whose workspace for @p context, added to @p offset, stays within @p limit. A
+    /// kernel whose workspace does not evaluate for this graph (see workspaceBytesFor) is
+    /// removed too.
     /// @param offset Bytes already taken before the kernel's own scratch: a slotted engine's
     ///        aligned shared region.
     std::vector<const KernelDefinition*>
@@ -1113,15 +1144,15 @@ private:
                         int64_t limit,
                         size_t offset = 0) const
     {
-        kernels.erase(
-            std::remove_if(kernels.begin(),
-                           kernels.end(),
-                           [&](const KernelDefinition* kernel) {
-                               const auto* handler = _stateManager.dispatchHandlerFor(*kernel);
-                               return offset + handler->workspaceBytes(context, bound, *kernel)
-                                      > static_cast<uint64_t>(limit);
-                           }),
-            kernels.end());
+        kernels.erase(std::remove_if(kernels.begin(),
+                                     kernels.end(),
+                                     [&](const KernelDefinition* kernel) {
+                                         const auto bytes
+                                             = workspaceBytesFor(context, bound, *kernel);
+                                         return !bytes.has_value()
+                                                || offset + *bytes > static_cast<uint64_t>(limit);
+                                     }),
+                      kernels.end());
         return kernels;
     }
 

@@ -21,6 +21,7 @@ from .rocke_compile import (
     rocke_variant_key,
 )
 from .descriptors import (
+    DECLARATIVE_LAUNCH_SYMBOL,
     KPACK_DIR_NAME,
     canonical_id,
     _selected_entries,
@@ -1774,8 +1775,9 @@ def _launch_set(inter, entry):
 def _check_launch_sets(flat, inter):
     """Every kernel one dispatch handler serves names the same launch set, per shard.
 
-    One native dispatch handler declares one launch set, and the loader resolves it
-    from the `dispatch_symbol` of the KDP's UDD. A handler therefore serves every
+    One dispatch handler declares one launch set, and the loader resolves it from the
+    `dispatch_symbol` of the KDP's UDD, or to the reserved declarative-launch handler for
+    a declarative UDD. A handler therefore serves every
     kernel of every KDP whose UDD names that symbol, whether the KDPs share one UDD or
     name the symbol from two. A kernel with a different set, or a single-launch kernel
     beside a multi-launch one (whose set is empty), needs a KDP whose UDD names a
@@ -1790,7 +1792,10 @@ def _check_launch_sets(flat, inter):
     for kdp in inter.kdps:
         udd = udds.get(canonical_id(kdp.header["dispatch"]))
         if udd is not None:
-            scope = f"dispatch handler '{udd.doc['dispatch_symbol']}'"
+            # A declarative UDD resolves to the one reserved handler, which is
+            # single-launch like any handler that declares no launch names.
+            symbol = udd.doc.get("dispatch_symbol", DECLARATIVE_LAUNCH_SYMBOL)
+            scope = f"dispatch handler '{symbol}'"
         else:
             scope = f"KDP '{kdp.id}', whose dispatch names no UDD in this root,"
         by_set = by_handler.setdefault(scope, {})

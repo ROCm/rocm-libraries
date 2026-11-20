@@ -283,7 +283,8 @@ inline size_t packModuleCacheEntries()
            + gfx950AttentionDenseKpackModuleCache().size()
            + gfx950AttentionUnified2DKpackModuleCache().size()
            + gfx950AttentionUnified3DKpackModuleCache().size()
-           + gfx942AttentionDenseKpackModuleCache().size();
+           + gfx942AttentionDenseKpackModuleCache().size()
+           + declarativeLaunchKpackModuleCache().size();
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

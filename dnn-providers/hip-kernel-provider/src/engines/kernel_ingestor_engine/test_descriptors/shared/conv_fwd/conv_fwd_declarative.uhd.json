@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "6d0c2a52-3c0d-4664-947a-c52ba65260c4",
+  "name": "conv_fwd declarative selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.conv_fwd.score"
+  }
+}

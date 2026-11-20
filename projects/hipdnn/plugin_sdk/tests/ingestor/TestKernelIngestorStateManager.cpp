@@ -16,8 +16,10 @@
 #include <vector>
 
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_plugin_sdk/ingestor/BindingPublication.hpp>
+#include <hipdnn_plugin_sdk/ingestor/CompiledCriteria.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IKernelHeuristic.hpp>
 #include <hipdnn_plugin_sdk/ingestor/KernelIngestorStateManager.hpp>
@@ -957,6 +959,102 @@ TEST(TestKernelIngestorStateManager, ACompiledPatternBindsTheCatalogOrDeclinesIt
     EXPECT_EQ(counters().kernelCalls, kernelCallsBefore);
 }
 
+TEST(TestKernelIngestorStateManager, DeclarativeCriteriaNarrowTheCatalogOverThePatternsBinding)
+{
+    // Both UMDs are expressions over what the compiled pattern published: the graph-scoped
+    // one reads a node attribute, the kernel-scoped one relates a bound tensor's dtype to
+    // each candidate's metadata. No native criterion is registered.
+    const ScopedBlockSizeScore score;
+    const DescriptorId addMatcherId = testId(0xC1);
+    const DescriptorId kernelMatcherId = testId(0xC2);
+    const auto criteria = [](const char* text, MatchScope scope) {
+        return compileCriteria(nlohmann::json::parse(text), scope, "criteria");
+    };
+
+    const StateManager manager(
+        makeSchema(),
+        {{addMatcherId,
+          "operation is add",
+          MatchScope::GRAPH,
+          "",
+          {},
+          criteria(R"({"==": ["$pointwise.operation", "ADD"]})", MatchScope::GRAPH)},
+         {kernelMatcherId,
+          "kernel serves the dtype",
+          MatchScope::KERNEL,
+          "",
+          {},
+          criteria(R"({"and": [{"==": ["$input_a.dtype", "$kernel.dtype"]},
+                               {">=": ["$kernel.block_size", 128]}]})",
+                   MatchScope::KERNEL)}},
+        makeTestDispatches(),
+        {makePack({addMatcherId, kernelMatcherId})},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GraphMatch{compilePatternText(BINARY_POINTWISE_PATTERN)});
+    const auto properties = testDeviceProperties();
+
+    PatternGraphBuilder add;
+    add.tensor(1).tensor(2).tensor(3).node(pointwiseNode(PointwiseMode::ADD, 1, 2, 3));
+    const auto addGraph = add.build();
+    const auto matched
+        = manager.unsortedCatalog(MatchContext{addGraph.context().graph, 0, properties});
+
+    // Of FLOAT/64, FLOAT/256 and HALF/64, only FLOAT/256 serves a FLOAT graph at >= 128.
+    ASSERT_EQ(matched.entries.size(), 1U);
+    EXPECT_EQ(matched.entries.front()->kernelId, testId(0x65));
+
+    PatternGraphBuilder mul;
+    mul.tensor(1).tensor(2).tensor(3).node(pointwiseNode(PointwiseMode::MUL, 1, 2, 3));
+    const auto mulGraph = mul.build();
+    const auto declined
+        = manager.unsortedCatalog(MatchContext{mulGraph.context().graph, 0, properties});
+
+    EXPECT_TRUE(declined.entries.empty());
+}
+
+TEST(TestKernelIngestorStateManager, DeclarativeKernelCriteriaReadTheQueriedDevicesProperties)
+{
+    // A kernel-scoped criterion relating each candidate's metadata to a `$device.*` value:
+    // the catalog follows the properties of the device the query names.
+    const ScopedBlockSizeScore score;
+    const DescriptorId ldsMatcherId = testId(0xC3);
+
+    auto pack = makePack({ldsMatcherId});
+    pack.kernels = {makeKernel(testId(0x64), "kernel_64_float", 64, "FLOAT"),
+                    makeKernel(testId(0x65), "kernel_256_float", 256, "FLOAT")};
+
+    const StateManager manager(
+        makeSchema(),
+        {{ldsMatcherId,
+          "kernel fits the device's lds",
+          MatchScope::KERNEL,
+          "",
+          {},
+          compileCriteria(
+              nlohmann::json::parse(R"({"<=": ["$kernel.block_size", "$device.lds_size"]})"),
+              MatchScope::KERNEL,
+              "criteria")}},
+        makeTestDispatches(),
+        {std::move(pack)},
+        std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+        GraphMatch{});
+    const TestGraph graph(makeGraphId(0x25));
+
+    // `$device.lds_size` is the device's sharedMemPerBlock.
+    auto smallDevice = testDeviceProperties();
+    smallDevice.sharedMemPerBlock = 128;
+    const auto small = manager.unsortedCatalog(MatchContext{graph, 0, smallDevice});
+
+    ASSERT_EQ(small.entries.size(), 1U);
+    EXPECT_EQ(small.entries.front()->kernelId, testId(0x64));
+
+    auto largeDevice = testDeviceProperties();
+    largeDevice.sharedMemPerBlock = 256;
+    const auto large = manager.unsortedCatalog(MatchContext{graph, 1, largeDevice});
+
+    EXPECT_EQ(large.entries.size(), 2U);
+}
+
 TEST(TestKernelIngestorStateManager, RefusesToConstructAgainstAnUnregisteredGraphMatchSymbol)
 {
     // Same eager-resolution contract the matcher and dispatch symbols get: a misspelled
@@ -1789,6 +1887,114 @@ TEST(TestKernelIngestorStateManager, DropsOnlyTheUnadaptedKernelAndKeepsItsPack)
     EXPECT_EQ(definitions.front()->name, "kernel_sibling");
     EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'kernel_hsaco'"))
         << recorder.getRecordedLogsAsString();
+}
+
+namespace
+{
+
+/// A FLOAT kernel packaged as kpack with @p signature.
+KernelDescriptor makeKpackKernel(const DescriptorId& id,
+                                 const std::string& name,
+                                 int64_t blockSize,
+                                 const std::vector<KernelArgument>& signature)
+{
+    KernelDescriptor kernel = makeKernel(id, name, blockSize, "FLOAT");
+    kernel.source = makeKpackSource();
+    kernel.source.signature = signature;
+    return kernel;
+}
+
+/// The catalog of one pack holding @p kernels under a declarative UDD whose launch passes
+/// only the workspace, for the graph and device the other tests here use.
+std::vector<KernelDefinition>
+    definitionsUnderDeclarativeLaunch(const std::vector<KernelDescriptor>& kernels)
+{
+    const ScopedSymbols symbols("test.graph", acceptGraph, "test.kernel", countingFloatKernels);
+    const auto criterion = scopedGraphMatcher("test.graph_criterion", &acceptCriterion);
+
+    KernelDescriptorPack pack = makePack({KERNEL_MATCHER_ID});
+    pack.kernels = kernels;
+
+    const StateManager manager(makeSchema(),
+                               makeTestMatchers(),
+                               {makeDeclarativeDispatch<TestHandle>(workspaceOnlyLaunch())},
+                               {pack},
+                               std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
+                               GraphMatch{});
+
+    const TestGraph graph(makeGraphId(0x90));
+    const auto properties = testDeviceProperties();
+    std::vector<KernelDefinition> owned;
+    for(const KernelDefinition* definition :
+        manager.unsortedDefinitions(MatchContext{graph, 0, properties}))
+    {
+        owned.push_back(*definition);
+    }
+    return owned;
+}
+
+} // namespace
+
+/// The declarative handler reads the launch from the kernel it is handed, so every kernel
+/// of a declarative pack carries its UDD's compiled launch.
+TEST(TestKernelIngestorStateManager, AttachesTheDeclarativeLaunchToEveryKernelOfItsPack)
+{
+    const auto definitions = definitionsUnderDeclarativeLaunch(
+        {makeKpackKernel(testId(0x91), "kernel_64", 64, {{"global_buffer", 8, 0, ""}}),
+         makeKpackKernel(testId(0x92), "kernel_256", 256, {{"global_buffer", 8, 0, ""}})});
+
+    ASSERT_EQ(definitions.size(), 2U);
+    for(const auto& definition : definitions)
+    {
+        ASSERT_NE(definition.launch, nullptr) << definition.name;
+        EXPECT_EQ(definition.launch->source(), workspaceOnlyLaunch()) << definition.name;
+    }
+}
+
+/// A declarative launch carries no compile options, so it runs precompiled code only: an
+/// EMBEDDED_SOURCE kernel under it is dropped alone, and its sibling still serves.
+TEST(TestKernelIngestorStateManager, DropsAnEmbeddedSourceKernelUnderADeclarativeLaunch)
+{
+    auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    const auto definitions = definitionsUnderDeclarativeLaunch(
+        {makeKernel(testId(0x93), "embedded", 64, "FLOAT"),
+         makeKpackKernel(testId(0x94), "kpack", 256, {{"global_buffer", 8, 0, ""}})});
+
+    ASSERT_EQ(definitions.size(), 1U);
+    EXPECT_EQ(definitions.front().name, "kpack");
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'embedded'"))
+        << recorder.getRecordedLogsAsString();
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "precompiled kernels only"))
+        << recorder.getRecordedLogsAsString();
+}
+
+/// The launch marshals exactly what its args_signature lists, so a kernel packaged with a
+/// different argument count, kind or size could never launch. An empty packaged signature
+/// is a kernel that takes no arguments, not an unknown one. Each is dropped alone.
+TEST(TestKernelIngestorStateManager, DropsAKernelWhoseSignatureDisagreesWithTheDeclarativeLaunch)
+{
+    const std::vector<std::pair<std::string, std::vector<KernelArgument>>> mismatches{
+        {"count", {{"global_buffer", 8, 0, ""}, {"global_buffer", 8, 8, ""}}},
+        {"none", {}},
+        {"kind", {{"by_value", 8, 0, ""}}},
+        {"size", {{"global_buffer", 4, 0, ""}}}};
+    for(const auto& [label, signature] : mismatches)
+    {
+        SCOPED_TRACE(label);
+        auto recorder
+            = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+        const auto definitions = definitionsUnderDeclarativeLaunch(
+            {makeKpackKernel(testId(0x95), "mismatched", 64, signature),
+             makeKpackKernel(testId(0x96), "matching", 256, {{"global_buffer", 8, 0, ""}})});
+
+        ASSERT_EQ(definitions.size(), 1U);
+        EXPECT_EQ(definitions.front().name, "matching");
+        EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "kernel 'mismatched'"))
+            << recorder.getRecordedLogsAsString();
+    }
 }
 
 namespace

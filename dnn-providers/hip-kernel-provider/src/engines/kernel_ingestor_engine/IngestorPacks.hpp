@@ -305,6 +305,12 @@ void setConvDgradAotBatchChunkByteLimitForTesting(int64_t limit);
 /// process, one per batch slice: how a test sees that a plan ran sliced. FOR TESTS ONLY.
 int64_t convDgradAotImplicitLaunchCountForTesting();
 
+/// @see DeclarativeLaunchDispatch.cpp: the one handler every declarative UDD dispatches
+/// to, registered under DECLARATIVE_LAUNCH_SYMBOL and its versioned alias. It belongs to
+/// no single pack, so its table entry is labelled with that symbol.
+void registerDeclarativeLaunchSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetDeclarativeLaunchModuleCache();
+
 /// Drops every pack's cached kpack modules and closes every kpack archive
 /// SharedKpackArchives retains, so the next dispatch re-reads its archive from disk. Leases
 /// stay held: the archive that next dispatch opens is retained again.

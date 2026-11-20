@@ -676,6 +676,7 @@ TEST(TestKernelIngestorEngine, EveryHandlerReportsSupportsSavingExactlyWhenItSav
         "hipkernel.gfx942_attention_dense.dispatch",
         "hipkernel.gfx1151_wmma_attention.dispatch",
         "hipkernel.gfx1151_wmma_attention_decode.dispatch",
+        "hipdnn.declarative_launch",
     };
     EXPECT_EQ(packDispatchSymbols.size(), ingestorPacks().size())
         << "add the dispatch symbol of each new pack to this list";
