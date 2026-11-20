@@ -309,8 +309,9 @@ private:
                                             || std::is_same_v<T, hipdnn_data_sdk::types::half>
                                             || std::is_same_v<T, hipdnn_data_sdk::types::bfloat16>;
 
-    // Binary comparison (CMP_GT) takes int32 operands and produces bool, as on the CPU. The other
-    // binary modes use the floating-point types.
+    // Binary operands and outputs may also be int32 or bool (CMP_GT takes int32 operands and
+    // produces bool, as on the CPU). This only checks the types: which modes accept them is decided
+    // by the plan builders and the signature key.
     template <class T>
     static constexpr bool IS_SUPPORTED_DATA_TYPE
         = IS_FP_DATA_TYPE<T> || std::is_same_v<T, int32_t> || std::is_same_v<T, bool>;

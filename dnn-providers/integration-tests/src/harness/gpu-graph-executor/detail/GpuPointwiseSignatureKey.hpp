@@ -220,8 +220,7 @@ struct GpuPointwiseSignatureKey
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
-        // CMP_GT: same-type operands, BOOLEAN output. Registered for the operand types the CPU
-        // reference has.
+        // CMP_GT: BOOLEAN output. Registered for the operand types the CPU reference has.
         addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
@@ -236,6 +235,31 @@ struct GpuPointwiseSignatureKey
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
         addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::INT32,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        // CMP_GT also accepts operands of different floating-point types.
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
+        addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+                       hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BOOLEAN,
                        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT>(map);
 
