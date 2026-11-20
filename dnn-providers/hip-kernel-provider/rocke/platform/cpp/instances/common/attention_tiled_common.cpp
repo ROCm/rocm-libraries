@@ -26,6 +26,7 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t, calculate_x */
 #include "rocke/instance_attention_tiled_common_internal.h"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h" /* rocke_i_set_err */
 
 /* ------------------------------------------------------ _C32_DIST (cached) */
 /* make_static_tile_distribution(make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16()))
@@ -587,6 +588,25 @@ rocke_value_t* rocke_attn_tiled_kv_swz_src_linear(const rocke_attn_tiled_kv_swiz
 
 /* ------------------------------------------------- 16x16 C row (C16_DIST) */
 
+const rocke_tile_distribution_t* rocke_attn_tiled_make_c16_dist(rocke_ir_builder_t* b)
+{
+    const rocke_mfma_atom_t* c_atom;
+    const rocke_tile_distribution_encoding_t* enc;
+
+    c_atom = rocke_mfma_atom("f16", 16, 16, 16);
+    if(c_atom == NULL)
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "attn_tiled_3d: no f16 16x16x16 MFMA atom");
+        return NULL;
+    }
+    enc = rocke_make_c_warp_dstr_encoding(b, c_atom);
+    if(enc == NULL)
+    {
+        return NULL;
+    }
+    return rocke_make_static_tile_distribution(b, enc);
+}
+
 rocke_value_t* rocke_attn_tiled_mfma_16x16_c_row(rocke_ir_builder_t* b,
                                                  const rocke_tile_distribution_t* c16_dist,
                                                  rocke_value_t* lane,
@@ -602,12 +622,9 @@ rocke_value_t* rocke_attn_tiled_mfma_16x16_c_row(rocke_ir_builder_t* b,
 
     if(!(0 <= reg && reg < 4))
     {
-        if(b != NULL && b->status == ROCKE_OK)
-        {
-            snprintf(b->err, (size_t)ROCKE_ERR_MSG_CAP, "mfma_16x16 reg must be 0..3, got %d", reg);
-            b->status = ROCKE_ERR_VALUE;
-        }
-        return NULL;
+        /* Raised as a ckc::Error; the public entry boundary records it on b. */
+        ckc::raise_status(ROCKE_ERR_VALUE,
+                          ckc::format_error("mfma_16x16 reg must be 0..3, got %d", reg).c_str());
     }
 
     m_blk = rocke_b_div(b, lane, rocke_b_const_i32(b, 16));

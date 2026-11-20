@@ -383,7 +383,8 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
 /* _mfma_16x16_c_row(b, lane, reg) (lines 79-88): MFMA-local output row for a
  * 16x16 C element reg (0..3). Drives ctx->C16_DIST.calculate_x with
  * ys=[0, reg], ps=[[lane//16, lane%16]] and returns the row X-coord. reg
- * outside 0..3 is a Python ValueError -> sticky error + NULL. */
+ * outside 0..3 is a Python ValueError -> ckc::Error (ROCKE_ERR_VALUE), recorded
+ * on b by the segment build's ckc::guard_builder boundary. */
 rocke_value_t* rocke_gfx942_attention_tiled_3d_mfma_16x16_c_row(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* lane, int reg);
 

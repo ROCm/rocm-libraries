@@ -90,10 +90,20 @@ rocke_value_t* rocke_attn_tiled_pack_p_a32(const rocke_attn_tiled_lane_map_t* lm
                                            rocke_value_t* const* p_regs1_f32,
                                            int n);
 
+/* _C16_DIST = make_static_tile_distribution(
+ *                 make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16()))
+ * CK Tile's C-warp distribution of the f16 16x16x16 atom. The C accumulator
+ * layout is dtype/arch independent, so both 3D engines build it here for their
+ * segment and reduce ctx. Returns NULL on failure; a missing atom records
+ * ROCKE_ERR_VALUE on ``b`` (sticky, no throw: the reduce ctx_init runs outside
+ * a ckc::guard_builder boundary). */
+const rocke_tile_distribution_t* rocke_attn_tiled_make_c16_dist(rocke_ir_builder_t* b);
+
 /* mfma_16x16_c_row(b, lane, reg): MFMA-local output row for a 16x16 C element
- * ``reg`` (0..3), through the arch ctx's C16_DIST (CK Tile's C-warp
- * distribution of the f16 16x16x16 atom). ``reg`` outside 0..3 records
- * ROCKE_ERR_VALUE on ``b`` and returns NULL. */
+ * ``reg`` (0..3), through the arch ctx's C16_DIST (see
+ * rocke_attn_tiled_make_c16_dist). ``reg`` outside 0..3 is a Python
+ * ValueError: raised as a ckc::Error (ROCKE_ERR_VALUE), which the segment
+ * build's ckc::guard_builder boundary records on ``b``. */
 rocke_value_t* rocke_attn_tiled_mfma_16x16_c_row(rocke_ir_builder_t* b,
                                                  const rocke_tile_distribution_t* c16_dist,
                                                  rocke_value_t* lane,
