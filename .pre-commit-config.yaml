@@ -350,7 +350,7 @@ repos:
           sys.argv = [s];
           exec(compile(src, s, 'exec'), {'__name__': '__main__', '__file__': os.path.abspath(s)})"
         language: python
-        files: ^projects/(hipblaslt/library/include/hipblaslt/(hipblaslt\.h|hipblaslt-ext\.hpp)|hipblas-common/library/include/hipblas-common/hipblas-common\.h|hipblaslt/python/(src/enums\.cpp|hipblaslt/_coverage\.py|scripts/check_enum_sync\.py))$
+        files: ^projects/(hipblaslt/library/include/hipblaslt/(hipblaslt\.h|hipblaslt-ext\.hpp)|hipblas-common/library/include/hipblas-common/hipblas-common\.h|hipblaslt/python/(csrc/enums\.cpp|src/hipblaslt/_coverage\.py|scripts/check_enum_sync\.py))$
         pass_filenames: false
 
       # Runs in pre-commit, which provides pytest, rather than in a component CI lane.
@@ -359,7 +359,7 @@ repos:
         entry: python -m pytest projects/hipblaslt/python/scripts/test_check_enum_sync.py -q -p no:cacheprovider
         language: python
         additional_dependencies: ["pytest==8.4.2"]
-        files: ^projects/hipblaslt/python/(scripts/(check_enum_sync|test_check_enum_sync)\.py|hipblaslt/_coverage\.py)$
+        files: ^projects/hipblaslt/python/(scripts/(check_enum_sync|test_check_enum_sync)\.py|src/hipblaslt/_coverage\.py)$
         pass_filenames: false
 
       - id: kpack-pin-sync

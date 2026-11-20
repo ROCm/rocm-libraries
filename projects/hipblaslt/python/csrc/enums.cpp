@@ -4,7 +4,7 @@
 // Every public enum in hipBLASLt's headers, plus HIP's hipDataType and hipBLAS's common enums.
 // Bind each value with one reg(e, "<C enum>", "<Python name>", <C value>) call: the
 // hipblaslt-python-enum-sync pre-commit hook reads this file as text and compares it with the
-// headers. Values left out on purpose are in ALLOWED_MISSING in hipblaslt/_coverage.py.
+// headers. Values left out on purpose are in ALLOWED_MISSING in src/hipblaslt/_coverage.py.
 #include "init.hpp"
 
 #include <hipblaslt/hipblaslt-ext.hpp>

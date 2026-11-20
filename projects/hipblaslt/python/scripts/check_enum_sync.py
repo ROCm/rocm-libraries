@@ -7,8 +7,8 @@ This is the `hipblaslt-python-enum-sync` pre-commit hook. It compares the enums 
 - projects/hipblaslt/library/include/hipblaslt/hipblaslt.h,
 - projects/hipblaslt/library/include/hipblaslt/hipblaslt-ext.hpp (GemmType),
 - projects/hipblas-common/library/include/hipblas-common/hipblas-common.h
-with the reg(...) calls in projects/hipblaslt/python/src/enums.cpp and ALLOWED_MISSING in
-projects/hipblaslt/python/hipblaslt/_coverage.py. It needs only the standard library and builds
+with the reg(...) calls in projects/hipblaslt/python/csrc/enums.cpp and ALLOWED_MISSING in
+projects/hipblaslt/python/src/hipblaslt/_coverage.py. It needs only the standard library and builds
 nothing, so it flags a new enum value on the PR that adds it.
 
 CI's pre-commit checkout is sparse: it has only the projects a PR changed. Files that aren't on
@@ -31,8 +31,8 @@ HEADERS = [
     "projects/hipblaslt/library/include/hipblaslt/hipblaslt-ext.hpp",
     "projects/hipblas-common/library/include/hipblas-common/hipblas-common.h",
 ]
-ENUMS_CPP = "projects/hipblaslt/python/src/enums.cpp"
-COVERAGE = "projects/hipblaslt/python/hipblaslt/_coverage.py"
+ENUMS_CPP = "projects/hipblaslt/python/csrc/enums.cpp"
+COVERAGE = "projects/hipblaslt/python/src/hipblaslt/_coverage.py"
 
 # Enums the bindings own in these headers.
 _COMMON = {"hipblasStatus_t", "hipblasOperation_t", "hipblasComputeType_t", "GemmType"}

@@ -744,8 +744,8 @@ The opt-in Python bindings (`projects/hipblaslt/python/`) bind every value of ev
 
 If it fires on your PR, you added an enum value. Fix it in one of two ways, as the message says:
 
-- add a `reg(e, "<C enum>", "<Python name>", <C value>);` line to `projects/hipblaslt/python/src/enums.cpp`, under the same `#if HIPBLASLT_HAS_...` guard if the value has one;
-- or, for a sentinel or a value the header marks "Not supported yet", add it to `ALLOWED_MISSING` in `projects/hipblaslt/python/hipblaslt/_coverage.py` with a one-line reason.
+- add a `reg(e, "<C enum>", "<Python name>", <C value>);` line to `projects/hipblaslt/python/csrc/enums.cpp`, under the same `#if HIPBLASLT_HAS_...` guard if the value has one;
+- or, for a sentinel or a value the header marks "Not supported yet", add it to `ALLOWED_MISSING` in `projects/hipblaslt/python/src/hipblaslt/_coverage.py` with a one-line reason.
 
 The bindings' coverage test is the backstop. It reads the headers after the preprocessor has run, in the bindings' Component CI lanes.
 

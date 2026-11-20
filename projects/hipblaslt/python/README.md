@@ -6,7 +6,7 @@ The bindings are a development and testing tool for hipBLASLt and its consumers,
 
 ## Enums
 
-`hipblaslt._core` binds every public enum as a Python `IntEnum`, with the C prefix dropped: `HIPBLASLT_EPILOGUE_RELU` is `Epilogue.RELU`, `HIP_R_16F` is `DataType.R_16F`, and `hipblaslt_ext::GemmType::HIPBLASLT_GEMM` is `GemmType.GEMM`. Values that exist only with an opt-in build feature (`HIPBLASLT_HAS_...`) are bound only when the hipBLASLt you build against turns that feature on. The few values left out on purpose, sentinels and values the header marks "Not supported yet", are listed with a reason in `hipblaslt/_coverage.py`.
+`hipblaslt._core` binds every public enum as a Python `IntEnum`, with the C prefix dropped: `HIPBLASLT_EPILOGUE_RELU` is `Epilogue.RELU`, `HIP_R_16F` is `DataType.R_16F`, and `hipblaslt_ext::GemmType::HIPBLASLT_GEMM` is `GemmType.GEMM`. Values that exist only with an opt-in build feature (`HIPBLASLT_HAS_...`) are bound only when the hipBLASLt you build against turns that feature on. The few values left out on purpose, sentinels and values the header marks "Not supported yet", are listed with a reason in `src/hipblaslt/_coverage.py`.
 
 ## Building
 

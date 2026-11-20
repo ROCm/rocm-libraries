@@ -80,12 +80,12 @@ The bindings' Component CI lanes build them against an installed ROCm, the way a
 
 `_core` binds every value of every public enum in `hipblaslt.h`, `hipblaslt-ext.hpp` and `hipblas-common.h`, plus the `hipDataType` values hipBLASLt accepts, as Python `IntEnum`s with the C prefix dropped (`HIPBLASLT_EPILOGUE_RELU` is `Epilogue.RELU`). A missing or misnumbered value makes every call that uses it quietly wrong, so completeness is checked, not hoped for.
 
-- **One registration form.** Each value is one `reg(e, "<C enum>", "<Python name>", <C value>)` call in `src/enums.cpp`, which also records it in a registry the tests read.
+- **One registration form.** Each value is one `reg(e, "<C enum>", "<Python name>", <C value>)` call in `csrc/enums.cpp`, which also records it in a registry the tests read.
 - **Opt-in values.** A value inside `#if HIPBLASLT_HAS_...` is bound under the same `#if`, so it exists exactly when the hipBLASLt the bindings are built against turns that feature on.
-- **What's left out.** `ALLOWED_MISSING` in `hipblaslt/_coverage.py` lists the values deliberately not bound, each with a reason. Only three kinds belong there:
+- **What's left out.** `ALLOWED_MISSING` in `src/hipblaslt/_coverage.py` lists the values deliberately not bound, each with a reason. Only three kinds belong there:
   - sentinels such as `..._MAX`, which grow whenever a value is added;
   - values the header marks "Not supported yet";
   - the HIP data types and hipBLAS compute types hipBLASLt doesn't accept.
-- **One parser, two checks.** `hipblaslt/_coverage.py` reads enums from C and C++ headers: comments containing braces, implicit, hex and expression values, `typedef enum` with or without a tag, `enum class`, CRLF line endings, and values under `#if HIPBLASLT_HAS_...`. It uses only the standard library.
+- **One parser, two checks.** `src/hipblaslt/_coverage.py` reads enums from C and C++ headers: comments containing braces, implicit, hex and expression values, `typedef enum` with or without a tag, `enum class`, CRLF line endings, and values under `#if HIPBLASLT_HAS_...`. It uses only the standard library.
   - The `hipblaslt-python-enum-sync` pre-commit hook (`scripts/check_enum_sync.py`) compares the raw headers with `enums.cpp`, with nothing built. It's the first line of defense, and fires on the PR that adds a value. CI's pre-commit checkout can be sparse, so files that aren't on disk are read from git, and an unreadable one is an error.
   - The coverage tests compare the headers after the real preprocessor has run, so the build configuration decides which opt-in values count. In a source checkout they read the checkout's own headers.
