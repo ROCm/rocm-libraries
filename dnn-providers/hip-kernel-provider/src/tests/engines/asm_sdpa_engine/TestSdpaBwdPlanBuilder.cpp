@@ -3558,6 +3558,7 @@ struct AccumulatorKnobCase
 std::vector<AccumulatorKnobCase> accumulatorKnobCases()
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
 
     const std::vector<std::string> both = {"a32", "a16"};
     const std::vector<std::string> a32Only = {"a32"};
@@ -3586,6 +3587,17 @@ std::vector<AccumulatorKnobCase> accumulatorKnobCases()
     cases.push_back({createSdpaBwdGraph({1, 2, 256, 192}), "D = 192", a32Only, a32Only});
     cases.push_back(
         {createSdpaBwdGraph({1, 2, 256, 64}), "S_q == S_kv == 256, D = 64", both, both});
+    // gfx942 runs a square bottom-right causal mask on its top-left A16 kernel;
+    // gfx950 hd64 has no such remap and no bottom-right A16 row.
+    cases.push_back({createSdpaBwdGraphWithMask(/*causalMask=*/false,
+                                                /*causalMaskBottomRight=*/true,
+                                                flatbuffers::nullopt,
+                                                flatbuffers::nullopt,
+                                                DiagonalAlignment::BOTTOM_RIGHT,
+                                                {1, 2, 256, 64}),
+                     "Bottom-right causal, S_q == S_kv == 256, D = 64",
+                     both,
+                     a32Only});
     cases.push_back({withLayouts(createSdpaBwdGraph(qDims), {{"dq", paddedRows, {}}}),
                      "dQ rows padded, Q packed",
                      a32Only,
@@ -3690,8 +3702,9 @@ TEST_F(TestSdpaBwdPlanBuilder, WorkspaceSizeDefaultSettingsIsA32)
               _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, a32Settings));
 }
 
-// The A16 workspace holds a 16-bit dq_acc on gfx950, where a dq_shuffle post
-// stage reads it, and only the D buffer on gfx942, where dqdkdv writes dQ.
+// The A16 workspace holds a 16-bit dq_acc where a dq_shuffle post stage reads
+// it (gfx950 at D_qk != 64), and only the D buffer where dqdkdv writes dQ
+// (gfx942, and gfx950 at D_qk = 64).
 TEST_F(TestSdpaBwdPlanBuilder, A16WorkspaceSizeFollowsTheArch)
 {
     SKIP_IF_NO_DEVICES();
@@ -3701,15 +3714,19 @@ TEST_F(TestSdpaBwdPlanBuilder, A16WorkspaceSizeFollowsTheArch)
         GTEST_SKIP();
     }
 
-    auto graphBuilder = createSdpaBwdGraph({2, 8, 200, 128});
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
-        graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
     Settings a16Settings;
     a16Settings.accumulatorType = AccumulatorType::A16;
+    const auto a16WorkspaceSize = [&](const std::vector<int64_t>& dims) {
+        auto graphBuilder = createSdpaBwdGraph(dims);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+            graphBuilder.GetBufferPointer(), graphBuilder.GetSize());
+        return _planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, a16Settings);
+    };
 
     // D buffer 2*8*200*4 = 12800; gfx950 dq_acc 2*8*208*128*2 = 851968
-    const size_t expected = arch == "gfx950" ? 12800u + 851968u : 12800u;
-    EXPECT_EQ(_planBuilder.getMaxWorkspaceSize(_handle, graphWrapper, a16Settings), expected);
+    EXPECT_EQ(a16WorkspaceSize({2, 8, 200, 128}), arch == "gfx950" ? 12800u + 851968u : 12800u);
+    // D buffer 2*8*256*4 = 16384 on both archs
+    EXPECT_EQ(a16WorkspaceSize({2, 8, 256, 64}), 16384u);
 }
 
 // An A16 request the A16 kernels cannot serve is declined with BAD_PARAM
@@ -3718,6 +3735,7 @@ TEST_F(TestSdpaBwdPlanBuilder, A16WorkspaceSizeFollowsTheArch)
 TEST_F(TestSdpaBwdPlanBuilder, BuildPlanDeclinesA16GraphsTheA16KernelsDoNotServe)
 {
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
+    using hipdnn_flatbuffers_sdk::data_objects::DiagonalAlignment;
 
     SKIP_IF_NO_DEVICES();
     const auto arch = deviceString();
@@ -3730,11 +3748,12 @@ TEST_F(TestSdpaBwdPlanBuilder, BuildPlanDeclinesA16GraphsTheA16KernelsDoNotServe
         return hipdnn_data_sdk::utilities::generateStrides(dims);
     };
     std::vector<std::pair<flatbuffers::FlatBufferBuilder, std::string>> declineTests;
-    if(arch == "gfx942")
-    {
-        // Every gfx942 A16 row is pssk = 0: S_q == S_kv, S_kv % 64 == 0.
-        const std::vector<int64_t> qDims = {1, 2, 256, 128};
-        const std::vector<int64_t> kvDims = {1, 2, 512, 128};
+    // The A16 rows that write dQ directly (every gfx942 one, and gfx950 hd64)
+    // are pssk = 0: S_q == S_kv, S_kv % 64 == 0, and dQ with Q's strides.
+    const auto addPssk0Declines = [&](int64_t headDim) {
+        const auto suffix = ", D = " + std::to_string(headDim);
+        const std::vector<int64_t> qDims = {1, 2, 256, headDim};
+        const std::vector<int64_t> kvDims = {1, 2, 512, headDim};
         declineTests.emplace_back(
             hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(qDims,
                                                                 packed(qDims),
@@ -3745,19 +3764,32 @@ TEST_F(TestSdpaBwdPlanBuilder, BuildPlanDeclinesA16GraphsTheA16KernelsDoNotServe
                                                                 qDims,
                                                                 packed(qDims),
                                                                 DataType::BFLOAT16),
-            "S_q != S_kv");
-        declineTests.emplace_back(createSdpaBwdGraph({1, 2, 200, 128}), "S_kv % 64 != 0");
+            "S_q != S_kv" + suffix);
+        declineTests.emplace_back(createSdpaBwdGraph({1, 2, 200, headDim}),
+                                  "S_kv % 64 != 0" + suffix);
+        const int64_t rowPitch = headDim + 8;
+        const std::vector<int64_t> paddedRows = {2 * 256 * rowPitch, 256 * rowPitch, rowPitch, 1};
+        declineTests.emplace_back(withLayouts(createSdpaBwdGraph(qDims), {{"dq", paddedRows, {}}}),
+                                  "dQ rows padded, Q packed" + suffix);
+    };
+    if(arch == "gfx942")
+    {
+        addPssk0Declines(128);
         // No A16 rows above D = 128.
         declineTests.emplace_back(createSdpaBwdGraph({1, 2, 256, 192}), "D = 192");
-        // dqdkdv writes dQ with Q's strides.
-        const std::vector<int64_t> paddedRows
-            = {int64_t{2} * 256 * 136, int64_t{256} * 136, 136, 1};
-        declineTests.emplace_back(
-            withLayouts(createSdpaBwdGraph({1, 2, 256, 128}), {{"dq", paddedRows, {}}}),
-            "dQ rows padded, Q packed");
     }
     else
     {
+        addPssk0Declines(64);
+        // gfx950 ships no bottom-right causal A16 row at hd64, and unlike gfx942
+        // does not run a square one on the top-left kernel.
+        declineTests.emplace_back(createSdpaBwdGraphWithMask(/*causalMask=*/false,
+                                                             /*causalMaskBottomRight=*/true,
+                                                             flatbuffers::nullopt,
+                                                             flatbuffers::nullopt,
+                                                             DiagonalAlignment::BOTTOM_RIGHT,
+                                                             {1, 2, 256, 64}),
+                                  "Bottom-right causal, D = 64");
         // The non-window dqdkdv kernels address dq_acc in 32 bits:
         // ceil16(S_q) * 128 * 2 bytes per head past UINT32_MAX.
         declineTests.emplace_back(createSdpaBwdGraph({1, 1, 16777232, 128}),
