@@ -27,7 +27,8 @@
 // rocsparse_check_spmat on every format. Converted matrices are read back, expanded to a
 // dense matrix on the host and compared with the dense matrix the source was built from.
 // The fill mode of CSC and BSC matrices is also checked through rocsparse_Xcheck_matrix_csc
-// and rocsparse_Xcheck_matrix_gebsc.
+// and rocsparse_Xcheck_matrix_gebsc. The CSR-to-ELL analysis is checked against an ELL
+// width whose product with the row count does not fit in int64_t.
 
 #include "unit_test_device_conv_common.hpp"
 
@@ -599,6 +600,48 @@ namespace
             EXPECT_REJECTED(status_of(other, b0));
             EXPECT_REJECTED(status_of(b0, other));
         }
+    }
+
+    // The width kernel reads only the rows + 1 row pointers, so two rows whose pointers
+    // differ by 2^62 give an ELL width of 2^62 and rows * width = 2^63 without any column
+    // or value array. The analysis must reject it before it writes the width or the
+    // number of entries of the target.
+    TEST_F(ConvSpmat, CsrToEllWidthOverflow)
+    {
+        constexpr int64_t big = int64_t(1) << 62;
+        constexpr auto    i64 = rocsparse_indextype_i64;
+        DevBuf<int64_t>   d_ptr(std::vector<int64_t>{0, big, big});
+
+        Spmat source, target;
+        ASSERT_EQ(rocsparse_create_csr_descr(
+                      &source, 2, 2, 0, d_ptr, nullptr, nullptr, i64, i64, base0, f32),
+                  st_ok);
+        ASSERT_EQ(rocsparse_create_ell_descr(&target, 2, 2, nullptr, nullptr, 0, i64, base0, f32),
+                  st_ok);
+
+        EXPECT_EQ(analysis_status(handle, source, target), st_size);
+
+        int64_t rows = 0, cols = 0, nnz = 717;
+        ASSERT_EQ(rocsparse_spmat_get_size(target, &rows, &cols, &nnz), st_ok);
+        EXPECT_EQ(rows, 2);
+        EXPECT_EQ(cols, 2);
+        EXPECT_EQ(nnz, 0);
+
+        nnz = 717;
+        EXPECT_EQ(rocsparse_spmat_get_nnz(target, &nnz), st_ok);
+        EXPECT_EQ(nnz, 0);
+
+        void*                col_ind   = nullptr;
+        void*                val       = nullptr;
+        int64_t              ell_width = 717;
+        rocsparse_indextype  idx_type;
+        rocsparse_index_base idx_base;
+        rocsparse_datatype   data_type;
+        ASSERT_EQ(
+            rocsparse_ell_get(
+                target, &rows, &cols, &col_ind, &val, &ell_width, &idx_type, &idx_base, &data_type),
+            st_ok);
+        EXPECT_EQ(ell_width, 0);
     }
 
     // ------------------------------------------------------------------

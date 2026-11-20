@@ -1775,9 +1775,9 @@ namespace
         EXPECT_EQ(rocsparse_bell_set_pointers(d, nullptr, nullptr), st_size);
     }
 
-    // rocsparse_sparse_to_sparse writes ell_width after create, so rows * ell_width can
-    // overflow in rocsparse_spmat_get_nnz. The ELL branch of get_nnz must reject it and
-    // leave nnz unchanged.
+    // ell_width can change after create, so rows * ell_width can overflow in
+    // rocsparse_spmat_get_nnz. The ELL branch of get_nnz must reject it and leave nnz
+    // unchanged. ConvSpmat.CsrToEllWidthOverflow covers the sparse_to_sparse writer.
     TEST_F(ConvDescr, EllNnzAfterWidthUpdate)
     {
         Spmat d;
