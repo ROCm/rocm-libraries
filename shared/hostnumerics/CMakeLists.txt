@@ -13,6 +13,9 @@ option(HOSTNUMERICS_BUILD_TESTING "Build HostNumerics tests." ${PROJECT_IS_TOP_L
 option(HOSTNUMERICS_BUILD_PYTHON "Build the HostNumerics Python module."
        ${PROJECT_IS_TOP_LEVEL})
 
+# HostNumerics parallelizes CPU work with OpenMP and has no serial-only build.
+find_package(OpenMP REQUIRED COMPONENTS CXX)
+
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/include/roc/hostnumerics/version.hpp.in"
     "${CMAKE_CURRENT_BINARY_DIR}/include/roc/hostnumerics/version.hpp"
@@ -23,6 +26,7 @@ configure_file(
 add_library(hostnumerics-core STATIC src/reshape_permutation.cpp)
 add_library(roc::hostnumerics-core ALIAS hostnumerics-core)
 target_compile_features(hostnumerics-core PUBLIC cxx_std_20)
+target_link_libraries(hostnumerics-core PRIVATE OpenMP::OpenMP_CXX)
 target_sources(hostnumerics-core
     PUBLIC
         FILE_SET HEADERS

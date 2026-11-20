@@ -138,6 +138,24 @@ TEST(ReshapePermutationTest, CopiesScalarsEmptyTensorsAndWholeTiles) {
     EXPECT_EQ(copied, matrix);
 }
 
+// 25,000 elements split into uneven chunks that run on several threads.
+TEST(ReshapePermutationTest, LargePaddedTileCopyCoversEveryChunk) {
+    constexpr size_t rows = 250, columns = 100, paddedRows = 256, paddedColumns = 104;
+    const ReshapePermutation transform({rows, columns}, {paddedRows, paddedColumns},
+                                       {paddedRows / 32, 32, paddedColumns / 8, 8},
+                                       Permutation{0, 2, 1, 3});
+    std::vector<int> input(rows * columns);
+    std::iota(input.begin(), input.end(), 0);
+    std::vector<int> output(transform.physicalElementCount(), -1);
+    copyWithReshapePermutation<int>(input, output, transform);
+    std::vector<int> expected(output.size(), -1);
+    for (size_t row = 0; row < rows; ++row)
+        for (size_t column = 0; column < columns; ++column)
+            expected[((row / 32 * (paddedColumns / 8) + column / 8) * 32 + row % 32) * 8 +
+                     column % 8] = input[row * columns + column];
+    EXPECT_EQ(output, expected);
+}
+
 TEST(ReshapePermutationTest, CopyPreservesFloatingPointBits) {
     const std::array<uint32_t, 4> bits{0x7fc01234u, 0x80000000u, 0x7f800000u, 0xff800000u};
     const auto input = std::bit_cast<std::array<float, 4>>(bits);

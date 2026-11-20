@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include "parallel_chunks.hpp"
+
 namespace roc::hostnumerics {
 
 ReshapePermutation::ReshapePermutation(Shape naturalShape, Shape paddedShape, Shape reshapedShape,
@@ -83,9 +85,11 @@ void detail::copyReshapePermutationBytes(const std::byte* input, std::byte* outp
         return;
     }
     // Natural elements have distinct destinations; padding keeps its initial value.
-    for (size_t index = 0; index < count; ++index)
-        std::memcpy(output + transform.physicalIndex(index) * elementSize,
-                    input + index * elementSize, elementSize);
+    parallelForChunks(count, count, [&](size_t begin, size_t end) noexcept {
+        for (size_t index = begin; index < end; ++index)
+            std::memcpy(output + transform.physicalIndex(index) * elementSize,
+                        input + index * elementSize, elementSize);
+    });
 }
 
 }  // namespace roc::hostnumerics
