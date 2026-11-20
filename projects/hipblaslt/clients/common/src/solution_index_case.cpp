@@ -3,21 +3,24 @@
 
 #include "solution_index_case.hpp"
 
-#include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_scaling_format.hpp"
 
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/FusedA2A.hpp>
+#include <Tensile/MXScaleFormat.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <limits>
 #include <memory>
 #include <numeric>
 #include <optional>
+#include <utility>
 #include <vector>
 
 namespace
@@ -137,11 +140,15 @@ namespace
                                                       int              format,
                                                       bool             transposed,
                                                       bool             isA,
-                                                      bool             anyLayout,
-                                                      bool             gfx1250)
+                                                      bool             anyLayout)
     {
         using S = hipblaslt_scaling_format;
-        if(format == 1)
+        using F = TensileLite::MXScaleFormat;
+        if(format == static_cast<int>(F::HostPreSwizzle128x4))
+            return block == 32 && scaleType == rocisa::DataType::E8
+                       ? std::optional{S::Block_32_UE8M0_128_4_EXT}
+                       : std::nullopt;
+        if(format == static_cast<int>(F::HostPreSwizzle))
         {
             // Otherwise the gfx950 host-preswizzled layout needs A transposed
             // and B normal.
@@ -150,7 +157,8 @@ namespace
             return std::nullopt;
         }
         // The client prepares the gfx1250 tensor-data-movement layout itself.
-        if((format == 2) != gfx1250 || (format != 0 && format != 2))
+        if(format != static_cast<int>(F::NoSwizzle)
+           && format != static_cast<int>(F::InMemorySwizzle))
             return std::nullopt;
         bool const b32 = block == 32;
         if(block != 32 && block != 16)
@@ -172,7 +180,8 @@ namespace
     {
         // The client ignores swizzle flags for other storage types.
         return type == rocisa::DataType::Half || type == rocisa::DataType::BFloat16
-               || type == rocisa::DataType::Float8_fnuz || type == rocisa::DataType::Float4;
+               || type == rocisa::DataType::Float8_fnuz || type == rocisa::DataType::Float4
+               || type == rocisa::DataType::Float6 || type == rocisa::DataType::BFloat6;
     }
 
     using ProblemPredicate
@@ -205,8 +214,11 @@ namespace
         if(auto any = std::dynamic_pointer_cast<TensileLite::Predicates::Or<Problem>>(predicate))
         {
             for(auto const& child : any->value)
-                if(!sizePredicates(child) || !sizePredicates(child)->empty())
+            {
+                auto sizes = sizePredicates(child);
+                if(!sizes || !sizes->empty())
                     return std::nullopt;
+            }
             return result;
         }
         if(auto none = std::dynamic_pointer_cast<TensileLite::Predicates::Not<Problem>>(predicate))
@@ -223,8 +235,21 @@ namespace
 
     struct Sizes
     {
-        int64_t m, n, k;
+        int64_t m, n, k, batch = 1;
     };
+
+    bool multiplySize(int64_t& size, size_t factor)
+    {
+        if(size <= 0 || factor == 0 || factor > std::numeric_limits<int64_t>::max() / size)
+            return false;
+        size *= factor;
+        return true;
+    }
+
+    bool includeMultiple(int64_t& multiple, size_t factor)
+    {
+        return factor != 0 && multiplySize(multiple, factor / std::gcd(size_t(multiple), factor));
+    }
 
     // The size closest to the preferred one that the solution's own size
     // predicates accept. Bounds and multiples named by the predicates suggest
@@ -240,36 +265,63 @@ namespace
         std::array<int64_t, 4>              want{preferred.m, preferred.n, 1, preferred.k};
         std::array<int64_t, 4>              multiple{1, 1, 1, kMultiple};
         std::array<std::vector<int64_t>, 4> hints;
+        auto                                hint = [&](size_t index, size_t value) {
+            if(index >= hints.size() || value > std::numeric_limits<int64_t>::max())
+                return false;
+            hints[index].push_back(value);
+            return true;
+        };
+        auto factor = [&](size_t index, size_t value) {
+            return index < multiple.size() && includeMultiple(multiple[index], value);
+        };
         for(auto const& check : checks)
         {
+            bool valid = true;
             if(auto c = std::dynamic_pointer_cast<C::SizeEqual>(check))
-                hints[c->index].push_back(c->value);
+                valid = hint(c->index, c->value);
+            else if(auto c = std::dynamic_pointer_cast<C::ProblemSizeEqual>(check))
+                valid = hint(c->index, c->value);
             else if(auto c = std::dynamic_pointer_cast<C::SizeGreaterThan>(check))
-                hints[c->index].push_back(c->value + 1);
+                valid = c->value < std::numeric_limits<int64_t>::max()
+                        && hint(c->index, c->value + 1);
             else if(auto c = std::dynamic_pointer_cast<C::SizeLessThan>(check))
-                hints[c->index].push_back(c->value - 1);
+                valid
+                    = c->value != 0
+                      && hint(c->index,
+                              std::min<size_t>(c->value - 1, std::numeric_limits<int64_t>::max()));
             else if(auto c = std::dynamic_pointer_cast<C::SizeInRange>(check))
             {
-                hints[c->index].push_back(static_cast<int64_t>(c->value.min));
-                if(c->value.max != std::numeric_limits<size_t>::max())
-                    hints[c->index].push_back(static_cast<int64_t>(c->value.max) - 1);
+                valid = c->value.min < c->value.max && hint(c->index, c->value.min);
+                if(valid && c->value.max <= std::numeric_limits<int64_t>::max())
+                    valid = hint(c->index, c->value.max - 1);
             }
             else if(auto c = std::dynamic_pointer_cast<C::SizeMultiple>(check))
-                multiple[c->index] = std::lcm(multiple[c->index], int64_t(c->value));
+                valid = factor(c->index, c->value);
             else if(auto c = std::dynamic_pointer_cast<C::Free0SizeMultiple>(check))
-                multiple[0] = std::lcm(multiple[0], int64_t(c->value));
+                valid = c->index == 0 && factor(0, c->value);
             else if(auto c = std::dynamic_pointer_cast<C::Free1SizeMultiple>(check))
-                multiple[1] = std::lcm(multiple[1], int64_t(c->value));
+                valid = c->index == 0 && factor(1, c->value);
+            else if(auto c = std::dynamic_pointer_cast<C::BatchSizeMultiple>(check))
+                valid = c->index == 0 && factor(2, c->value);
+            else if(auto c = std::dynamic_pointer_cast<C::BatchSizeEqual>(check))
+                valid = c->index == 0 && hint(2, c->value);
             else if(auto c = std::dynamic_pointer_cast<C::BoundSizeMultiple>(check))
-                multiple[3] = std::lcm(multiple[3], int64_t(c->value));
+                valid = (c->index == 0 || c->index == -1) && factor(3, c->value);
+            else if(auto c = std::dynamic_pointer_cast<C::LeadingFree0SizesGreaterOrEqual>(check))
+                valid = hint(0, c->value);
+            else if(auto c = std::dynamic_pointer_cast<C::LeadingFree1SizesGreaterOrEqual>(check))
+                valid = hint(1, c->value);
             // With the problem's split unset, the minimum K is the solution's
             // split times a per-split minimum; one split or an automatic split
             // (-1) imposes none.
             else if(auto c = std::dynamic_pointer_cast<C::GlobalSplitUCheckMinK>(check))
             {
+                valid = c->value[0] >= 0 && c->value[1] >= -1;
                 if(c->value[1] > 1)
                     hints[3].push_back(int64_t(c->value[0]) * c->value[1]);
             }
+            if(!valid)
+                return std::nullopt;
         }
         std::array<std::vector<int64_t>, 4> candidates;
         for(int d = 0; d < 4; ++d)
@@ -279,7 +331,10 @@ namespace
             for(int64_t value : values)
             {
                 int64_t const below = value / multiple[d] * multiple[d];
-                for(int64_t v : {below, below + multiple[d]})
+                int64_t const above = below <= std::numeric_limits<int64_t>::max() - multiple[d]
+                                          ? below + multiple[d]
+                                          : 0;
+                for(int64_t v : {below, above})
                     if(v > 0
                        && std::find(candidates[d].begin(), candidates[d].end(), v)
                               == candidates[d].end())
@@ -291,62 +346,82 @@ namespace
                 return da != db ? da < db : a > b;
             });
         }
-        std::optional<Sizes>    best;
-        std::pair<int, int64_t> bestCost{5, 0};
+        // The sum of distances can exceed the range of a single dimension.
+        std::optional<Sizes>        best;
+        std::pair<int, long double> bestCost{5, 0};
         for(int64_t m : candidates[0])
             for(int64_t n : candidates[1])
                 for(int64_t k : candidates[3])
-                {
-                    auto problem
-                        = TensileLite::ContractionProblemGemm::GEMM_Strides(p.transA,
-                                                                            p.transB,
-                                                                            p.aType,
-                                                                            p.bType,
-                                                                            p.cType,
-                                                                            p.dType,
-                                                                            m,
-                                                                            n,
-                                                                            k,
-                                                                            1,
-                                                                            p.transA ? k : m,
-                                                                            m * k,
-                                                                            p.transB ? n : k,
-                                                                            n * k,
-                                                                            m,
-                                                                            m * n,
-                                                                            m,
-                                                                            m * n,
-                                                                            0);
-                    bool accepted
-                        = std::all_of(checks.begin(), checks.end(), [&](auto const& check) {
-                              return (*check)(problem);
-                          });
-                    if(!accepted)
-                        continue;
-                    std::array<int64_t, 3> chosen{m, n, k}, preferredMNK{want[0], want[1], want[3]};
-                    std::pair<int, int64_t> cost{0, 0};
-                    for(int d = 0; d < 3; ++d)
+                    for(int64_t batch : candidates[2])
                     {
-                        cost.first += chosen[d] != preferredMNK[d];
-                        cost.second += std::abs(chosen[d] - preferredMNK[d]);
+                        int64_t mk = m, nk = n, mn = m;
+                        if(batch > std::numeric_limits<int32_t>::max() || !multiplySize(mk, k)
+                           || !multiplySize(nk, k) || !multiplySize(mn, n))
+                            continue;
+                        // Tensor extents and packed batch strides must fit the client.
+                        int64_t elements = std::max({mk, nk, mn});
+                        if(!multiplySize(elements, batch))
+                            continue;
+                        auto problem
+                            = TensileLite::ContractionProblemGemm::GEMM_Strides(p.transA,
+                                                                                p.transB,
+                                                                                p.aType,
+                                                                                p.bType,
+                                                                                p.cType,
+                                                                                p.dType,
+                                                                                m,
+                                                                                n,
+                                                                                k,
+                                                                                batch,
+                                                                                p.transA ? k : m,
+                                                                                mk,
+                                                                                p.transB ? n : k,
+                                                                                nk,
+                                                                                m,
+                                                                                mn,
+                                                                                m,
+                                                                                mn,
+                                                                                0);
+                        problem.setGroupedGemm(p.groupedGemm);
+                        problem.setGroupedGemmCount(p.groupedGemm ? 2 : 1);
+                        bool accepted
+                            = std::all_of(checks.begin(), checks.end(), [&](auto const& check) {
+                                  return (*check)(problem);
+                              });
+                        if(!accepted)
+                            continue;
+                        std::array<int64_t, 4>      chosen{m, n, batch, k};
+                        std::pair<int, long double> cost{0, 0};
+                        for(int d = 0; d < 4; ++d)
+                        {
+                            cost.first += chosen[d] != want[d];
+                            cost.second += std::abs(chosen[d] - want[d]);
+                        }
+                        if(cost.first == 0)
+                            return Sizes{m, n, k, batch};
+                        if(cost < bestCost)
+                            best = Sizes{m, n, k, batch}, bestCost = cost;
                     }
-                    if(cost < bestCost)
-                        best = Sizes{m, n, k}, bestCost = cost;
-                }
         return best;
     }
 
 }
 
-std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
-    int index, TensileLite::ContractionSolution const& solution, SolutionCaseOptions const& options)
+std::variant<Arguments, UnsupportedSolution>
+    solutionIndexCase(TensileLite::ContractionSolution const& solution,
+                      SolutionCaseOptions const&              options)
 {
     using Result        = std::variant<Arguments, UnsupportedSolution>;
     auto unsupported    = [](std::string reason) { return Result{UnsupportedSolution{reason}}; };
     auto const& p       = solution.problemType;
     auto const& mapping = solution.sizeMapping;
 
-    if(p.sparse || p.useGateResidual || p.fusedGemmA2A)
+    if(options.reductionBlocks <= 0 || !std::isfinite(options.alpha)
+       || !std::isfinite(options.beta))
+        return unsupported("invalid case options");
+    if(solution.index < 0 || !mapping.macroTile.x || !mapping.macroTile.y)
+        return unsupported("invalid solution index or macro tile");
+    if(p.sparse || p.useGateResidual || p.fusedA2A != TensileLite::FusedA2A::Disabled)
         return unsupported("sparse, gate residual or fused all-to-all");
     if(p.useInitialStridesAB || p.useInitialStridesCD || !p.stridedBatched)
         return unsupported("unusual strides or batching");
@@ -385,12 +460,21 @@ std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
     int64_t const kSplits  = mapping.isPersistent()       ? 1
                              : mapping.globalSplitU == -1 ? 2
                                                           : mapping.globalSplitU;
-    int64_t       multiple = static_cast<int64_t>(mapping.depthU) * fixedSplit;
+    int64_t       multiple = fixedSplit;
+    if(!multiplySize(multiple, mapping.depthU))
+        return unsupported("invalid or overflowing reduction size");
     for(int block : {p.mxBlockA, p.mxBlockB})
-        if(block)
-            multiple = std::lcm(multiple, int64_t(block));
-    int64_t const preferredK
-        = options.reductionBlocks * static_cast<int64_t>(mapping.depthU) * kSplits;
+        if(block && !includeMultiple(multiple, block))
+            return unsupported("invalid or overflowing MX block size");
+    int64_t preferredK = options.reductionBlocks;
+    if(!multiplySize(preferredK, mapping.depthU) || !multiplySize(preferredK, kSplits))
+        return unsupported("invalid or overflowing reduction size");
+    if(auto remainder = preferredK % multiple)
+    {
+        if(preferredK > std::numeric_limits<int64_t>::max() - (multiple - remainder))
+            return unsupported("overflowing aligned reduction size");
+        preferredK += multiple - remainder;
+    }
     auto checks = sizePredicates(solution.problemPredicate);
     if(!checks)
         return unsupported("size predicates under Or or Not");
@@ -398,18 +482,16 @@ std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
                              *checks,
                              {static_cast<int64_t>(mapping.macroTile.x),
                               static_cast<int64_t>(mapping.macroTile.y),
-                              (preferredK + multiple - 1) / multiple * multiple},
+                              preferredK},
                              multiple);
     if(!sizes)
         return unsupported("no size satisfies the solution's size predicates");
     int64_t const m = sizes->m, n = sizes->n, k = sizes->k;
 
-    // Value-initialized: init() leaves fields such as batch_mode, the batch
-    // offsets and bias_stride unset.
     Arguments arg{};
     arg.init();
     std::strcpy(arg.function, "matmul");
-    std::snprintf(arg.name, sizeof(arg.name), "idx%d", index);
+    std::snprintf(arg.name, sizeof(arg.name), "idx%d", solution.index);
     std::strcpy(arg.category, "solution_index");
     arg.a_type = *a;
     arg.b_type = *b;
@@ -424,19 +506,18 @@ std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
         = p.f32XdlMathOp == rocisa::DataType::XFloat32 ? HIPBLAS_COMPUTE_32F_FAST_TF32 : *cmp;
     arg.transA      = operation(p.transA, conjA);
     arg.transB      = operation(p.transB, conjB);
-    arg.batch_count = 1;
+    arg.batch_count = sizes->batch;
     arg.alpha       = options.alpha;
     arg.beta        = options.beta;
     // Bounded inputs keep MX products within FP16 outputs at large DepthU.
     arg.initialization         = (p.mxBlockA || p.mxBlockB) ? hipblaslt_initialization::hpl
                                                             : hipblaslt_initialization::rand_int;
     arg.algo_method            = 2;
-    arg.solution_index         = index;
+    arg.solution_index         = solution.index;
     arg.requested_solution_num = 1;
     arg.norm_check             = 1;
     arg.norm_check_assert      = true;
-    // The norm check is the verdict; an exact comparison flags reference
-    // rounding in scaled mixed FP8 and MX outputs.
+    // Exact comparison flags reference rounding in scaled mixed FP8 and MX outputs.
     arg.unit_check     = 0;
     arg.allclose_check = 1;
     // The requested solution must run even if it does not guarantee a
@@ -460,7 +541,7 @@ std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
 
     // Outputs the solution always writes: a gradient reduces into its bias or
     // differentiates its E input; E is used with ReLU (forward) or its
-    // derivative (gradient). A solution with bias support runs with a bias.
+    // derivative (gradient).
     bool const gradient = p.useGradient, aux = p.useE;
     if(gradient && !aux && !p.useBias)
         return unsupported("gradient epilogue without bias or E");
@@ -511,14 +592,15 @@ std::variant<Arguments, UnsupportedSolution> solutionIndexCase(
         (isA ? arg.swizzle_a : arg.swizzle_b) = swz;
         if(!block)
             continue;
+        if((isA ? p.mxBlockFreeA : p.mxBlockFreeB) != 1)
+            return unsupported("MX scaling across the free dimension");
         auto mode
             = mxScaling(block,
                         isA ? p.mxTypeA : p.mxTypeB,
                         p.mxScaleFormat,
                         isA ? p.transA : p.transB,
                         isA,
-                        p.aType == rocisa::DataType::Float4 && p.bType == rocisa::DataType::Float4,
-                        options.gfx1250);
+                        p.aType == rocisa::DataType::Float4 && p.bType == rocisa::DataType::Float4);
         if(!mode)
             return unsupported("MX scale layout the client cannot express");
         (isA ? arg.scaleA : arg.scaleB) = *mode;

@@ -9,10 +9,15 @@
 #include <gtest/gtest.h>
 
 #include <Tensile/ContractionProblemPredicates.hpp>
+#include <Tensile/MXScaleFormat.hpp>
 
+#include <array>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <variant>
+#include <vector>
 
 namespace
 {
@@ -22,6 +27,7 @@ namespace
     // A TN HHS solution with a 64x128 macro tile, DepthU 32 and no split.
     void makeHalfSolution(TensileLite::ContractionSolution& solution)
     {
+        solution.index        = 7;
         auto& p               = solution.problemType;
         p.operationIdentifier = "Contraction_l_Alik_Bljk_Cijk_Dijk";
         p.transA              = true;
@@ -44,7 +50,7 @@ namespace
     Arguments made(TensileLite::ContractionSolution const& solution,
                    SolutionCaseOptions const&              options = {})
     {
-        auto result = solutionIndexCase(7, solution, options);
+        auto result = solutionIndexCase(solution, options);
         if(auto const* unsupported = std::get_if<UnsupportedSolution>(&result))
             ADD_FAILURE() << unsupported->reason;
         return std::holds_alternative<Arguments>(result) ? std::get<Arguments>(result)
@@ -54,7 +60,7 @@ namespace
     std::string unsupported(TensileLite::ContractionSolution const& solution,
                             SolutionCaseOptions const&              options = {})
     {
-        auto        result = solutionIndexCase(7, solution, options);
+        auto        result = solutionIndexCase(solution, options);
         auto const* reason = std::get_if<UnsupportedSolution>(&result);
         return reason ? reason->reason : "";
     }
@@ -83,10 +89,47 @@ TEST(HostUnitSolutionIndexCase, smoke_OrdinaryGemm)
     EXPECT_EQ(arg.algo_method, 2);
     EXPECT_EQ(arg.alpha, 2);
     EXPECT_EQ(arg.beta, 1);
+    EXPECT_TRUE(arg.norm_check);
+    EXPECT_TRUE(arg.norm_check_assert);
+    EXPECT_TRUE(arg.allclose_check);
     EXPECT_EQ(arg.lda[0], 256);
     EXPECT_EQ(arg.stride_a[0], 256 * 64);
     EXPECT_EQ(arg.lde[0], 64);
     EXPECT_EQ(arg.stride_e[0], 64 * 128);
+}
+
+TEST(HostUnitSolutionIndexCase, smoke_PackedLayoutPreservesPaddingAndExplicitStrides)
+{
+    for(char transpose : {'N', 'T', 'C'})
+    {
+        SCOPED_TRACE(transpose);
+        Arguments arg{};
+        arg.init();
+        arg.transA = arg.transB = transpose;
+        arg.grouped_gemm        = 2;
+        arg.M[0] = arg.M[1] = 3;
+        arg.N[0] = arg.N[1] = 5;
+        arg.K[0] = arg.K[1] = 7;
+        arg.ldd[0]          = 32;
+        arg.stride_b[1]     = 1000;
+
+        arg.raise_to_packed_layout(false);
+        EXPECT_EQ(arg.lda[0], transpose == 'N' ? 3 : 7);
+        EXPECT_EQ(arg.ldb[1], transpose == 'N' ? 7 : 5);
+        EXPECT_EQ(arg.ldc[0], 3);
+        EXPECT_EQ(arg.ldd[0], 32);
+        EXPECT_EQ(arg.lde[1], 3);
+        EXPECT_EQ(arg.stride_a[0], 0);
+        EXPECT_EQ(arg.stride_b[1], 1000);
+
+        arg.raise_to_packed_layout(true);
+        EXPECT_EQ(arg.stride_a[0], 21);
+        EXPECT_EQ(arg.stride_b[0], 35);
+        EXPECT_EQ(arg.stride_b[1], 1000);
+        EXPECT_EQ(arg.stride_c[0], 15);
+        EXPECT_EQ(arg.stride_d[0], 160);
+        EXPECT_EQ(arg.stride_e[1], 15);
+    }
 }
 
 // The size predicates move the shape: N is pinned to 1 (a GEMV kernel) and
@@ -118,6 +161,7 @@ TEST(HostUnitSolutionIndexCase, smoke_SizePredicatesMoveTheShape)
 // preswizzled layout needs A transposed and B normal.
 TEST(HostUnitSolutionIndexCase, smoke_MXScaleLayout)
 {
+    using F = TensileLite::MXScaleFormat;
     TensileLite::ContractionSolution solution;
     makeHalfSolution(solution);
     auto& p = solution.problemType;
@@ -127,7 +171,7 @@ TEST(HostUnitSolutionIndexCase, smoke_MXScaleLayout)
     EXPECT_EQ(arg.scaleA, hipblaslt_scaling_format::Block_32_UE8M0);
     EXPECT_EQ(arg.initialization, hipblaslt_initialization::hpl);
 
-    p.mxScaleFormat = 1;
+    p.mxScaleFormat = static_cast<int>(F::HostPreSwizzle);
     arg             = made(solution);
     EXPECT_EQ(arg.scaleA, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT);
     EXPECT_EQ(arg.scaleB, hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT);
@@ -142,17 +186,86 @@ TEST(HostUnitSolutionIndexCase, smoke_MXScaleLayout)
     p.operationIdentifier = "Contraction_l_Alik_Bljk_Cijk_Dijk";
     p.aType = p.bType = p.computeInputTypeA = p.computeInputTypeB = rocisa::DataType::Float8;
 
-    p.mxScaleFormat = 2;
-    EXPECT_EQ(unsupported(solution), "MX scale layout the client cannot express");
-    SolutionCaseOptions gfx1250;
-    gfx1250.gfx1250 = true;
-    EXPECT_EQ(made(solution, gfx1250).scaleA, hipblaslt_scaling_format::Block_32_UE8M0);
+    p.mxScaleFormat = static_cast<int>(F::InMemorySwizzle);
+    EXPECT_EQ(made(solution).scaleA, hipblaslt_scaling_format::Block_32_UE8M0);
+
+    p.mxScaleFormat = static_cast<int>(F::HostPreSwizzle128x4);
+    p.aType = p.bType = p.computeInputTypeA = p.computeInputTypeB = rocisa::DataType::Float6;
+    p.swizzleTensorA = p.swizzleTensorB = true;
+    arg                                 = made(solution);
+    EXPECT_EQ(arg.scaleA, hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT);
+    EXPECT_EQ(arg.scaleB, hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT);
+    EXPECT_TRUE(arg.swizzle_a);
+    EXPECT_TRUE(arg.swizzle_b);
+
+    p.mxBlockFreeA = 2;
+    EXPECT_EQ(unsupported(solution), "MX scaling across the free dimension");
+    p.mxBlockFreeA = 1;
 
     // Grouped MX solutions also report scalar input scaling; the block scales stay.
-    p.mxScaleFormat = 0;
-    p.groupedGemm   = true;
-    p.useScaleAB    = "Scalar";
+    p.aType = p.bType = p.computeInputTypeA = p.computeInputTypeB = rocisa::DataType::Float8;
+    p.swizzleTensorA = p.swizzleTensorB = false;
+    p.mxScaleFormat                     = static_cast<int>(F::NoSwizzle);
+    p.groupedGemm                       = true;
+    p.useScaleAB                        = "Scalar";
     EXPECT_EQ(made(solution).scaleB, hipblaslt_scaling_format::Block_32_UE8M0);
+}
+
+TEST(HostUnitSolutionIndexCase, smoke_BatchedSizeConstraints)
+{
+    namespace C = Predicates::Contraction;
+    TensileLite::ContractionSolution solution;
+    makeHalfSolution(solution);
+    requireSizes(solution,
+                 {std::make_shared<C::SizeInRange>(0, C::Range{70, 100}),
+                  std::make_shared<C::Free0SizeMultiple>(0, 16),
+                  std::make_shared<C::SizeMultiple>(0, 24),
+                  std::make_shared<C::BatchSizeEqual>(0, 3),
+                  std::make_shared<C::BoundSizeMultiple>(-1, 96)});
+    auto const arg = made(solution);
+    EXPECT_EQ(arg.M[0], 96);
+    EXPECT_EQ(arg.N[0], 128);
+    EXPECT_EQ(arg.K[0], 288);
+    EXPECT_EQ(arg.batch_count, 3);
+    EXPECT_EQ(arg.stride_a[0], 96 * 288);
+
+    requireSizes(
+        solution,
+        {std::make_shared<C::BatchSizeMultiple>(0, 4), std::make_shared<C::SizeLessThan>(3, 200)});
+    EXPECT_EQ(made(solution).batch_count, 4);
+    EXPECT_EQ(made(solution).K[0], 192);
+}
+
+TEST(HostUnitSolutionIndexCase, smoke_InvalidSizesAreUnsupported)
+{
+    namespace C = Predicates::Contraction;
+    TensileLite::ContractionSolution solution;
+    makeHalfSolution(solution);
+    auto const maxSize = std::numeric_limits<int64_t>::max();
+    for(auto check : std::vector<std::shared_ptr<Predicates::Predicate<Problem>>>{
+            std::make_shared<C::SizeEqual>(4, 1),
+            std::make_shared<C::SizeLessThan>(0, 0),
+            std::make_shared<C::SizeGreaterThan>(0, maxSize),
+            std::make_shared<C::SizeMultiple>(3, 0),
+            std::make_shared<C::SizeMultiple>(3, maxSize),
+            std::make_shared<C::BoundSizeMultiple>(1, 32),
+            std::make_shared<C::SizeEqual>(0, maxSize),
+            std::make_shared<C::BatchSizeEqual>(0, maxSize)})
+    {
+        SCOPED_TRACE(check->type());
+        requireSizes(solution, {check});
+        EXPECT_FALSE(unsupported(solution).empty());
+    }
+
+    requireSizes(solution, {});
+    SolutionCaseOptions options;
+    for(int64_t blocks : {int64_t{0}, int64_t{-1}, maxSize})
+    {
+        options.reductionBlocks = blocks;
+        EXPECT_FALSE(unsupported(solution, options).empty());
+    }
+    solution.sizeMapping.depthU = 0;
+    EXPECT_FALSE(unsupported(solution).empty());
 }
 
 // A grouped solution gets two equal members; mixed A/B storage goes through
