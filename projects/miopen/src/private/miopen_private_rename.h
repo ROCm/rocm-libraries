@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 //
 // GENERATED FILE. Do not edit.
-// Source: projects/miopen/include/miopen/miopen.h
+// Source: projects/miopen/include/miopen/miopen.h and
+//         projects/miopen/src/include/miopen/miopen_internal.h
 // Regenerate: python3 projects/miopen/script/generate_wrapper_sources.py
 //
 // Symbol-rename header for the MIOpen public/private library split. When
@@ -299,3 +300,13 @@
 #define miopenMultiMarginLossForward miopenMultiMarginLossForward_impl
 #define miopenSetTuningPolicy miopenSetTuningPolicy_impl
 #define miopenGetTuningPolicy miopenGetTuningPolicy_impl
+#define miopenConvolutionABBackwardWeightsGetWorkSpaceSize \
+    miopenConvolutionABBackwardWeightsGetWorkSpaceSize_impl
+#define miopenConvolutionForwardGetWorkSpaceSizeRange \
+    miopenConvolutionForwardGetWorkSpaceSizeRange_impl
+#define miopenConvolutionBackwardDataGetWorkSpaceSizeRange \
+    miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl
+#define miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange \
+    miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl
+#define miopenHiddenSetConvolutionFindMode miopenHiddenSetConvolutionFindMode_impl
+#define miopenHiddenGetConvolutionFindMode miopenHiddenGetConvolutionFindMode_impl

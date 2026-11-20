@@ -118,8 +118,8 @@ Frontend API control flow
                                                                      prediction-ranked policies only]
               [No engine details are loaded here; see get_knobs_for_engine()]
         e. initializeEngineConfig() [selects best engine config from heuristic results]
-     4. graph.check_support()         [validates descriptors exist]
-     5. graph.build_plans()          [finalizes the active plan; on failure tries the other ranked plans]
+     4. graph.check_support()         [validates descriptors exist; with an engine filter set, checks that a created plan passes the filters]
+     5. graph.build_plans()          [finalizes the active plan; if a filter removes it or it fails, tries the other ranked plans]
         a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
         b. Backend: hipdnnBackendFinalize(execPlan)
            -> ExecutionPlanDescriptor::finalize()
@@ -127,9 +127,10 @@ Frontend API control flow
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
               -> Record the device of the graph handle's stream
         c. If finalize fails (any error), log a warning and repeat a-b for another
-           ranked plan (the list is scanned from the top) until one finalizes. If none
-           does, build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing
-           every attempted engine's failure.
+           ranked plan (the list is scanned from the top) until one finalizes. A plan
+           an engine filter removes is skipped before a-b. If none finalizes,
+           build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing every
+           skipped or failed engine and its reason.
 
 
 ``graph.get_workspace_size()``

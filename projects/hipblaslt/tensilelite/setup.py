@@ -63,7 +63,7 @@ class StampedSdist(sdist):
 
 
 setup(
-    version=_metadata["distribution_version"]("5.0.0", _REVISION),
+    version=_metadata["distribution_version"](_REVISION),
     install_requires=[
         "packaging",
         "pyyaml",
