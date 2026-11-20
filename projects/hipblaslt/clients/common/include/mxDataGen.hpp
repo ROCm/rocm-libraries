@@ -54,10 +54,9 @@ constexpr int64_t integerExactMXSumBound(int64_t K)
 
 // integer_exact supports fp8 and fp6 data. With swizzled scales it currently requires K along
 // stored rows (transposed A or non-transposed B); other orientations throw before writing.
-// With K along the stored rows, a non-positive row or column throws std::invalid_argument
-// before writing: the row count divides the padded-layout check. Otherwise the reference
-// covers all stride * col elements the generator writes, and stride * col must be a multiple
-// of row, or it throws before writing.
+// Data and scales are generated from the logical dense dimensions, then data and reference values
+// are placed at the requested leading dimension with zero padding. The leading dimension must be
+// at least the stored row count, and non-positive dimensions throw before writing.
 // With K along the stored columns (non-transposed A or transposed B), K must be a multiple of
 // the scale block. A partial block makes getAlignedFloat read past the packed buffer, so
 // integer_exact throws before writing.
