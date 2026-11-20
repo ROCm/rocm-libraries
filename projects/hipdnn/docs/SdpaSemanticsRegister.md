@@ -236,6 +236,8 @@ batch when `seq_len_q/kv` are set).
 - **hipDNN today:** the CPU backward computes dBias in the bias tensor's shape and dtype, summing over broadcast
   dims. Band-masked positions and dead rows give 0. Pinned by finite differences
   (`TestCpuFpReferenceSdpaGradCheckDBias`, mutation-checked against using the scaled dS).
+  `SdpaBwdNode` rejects a dBias with no bias, or whose dims or dtype differ from the bias's, and fills empty dBias
+  dims and dtype from the bias.
 - **Contract:** cuDNN. A dBias whose shape or dtype differs from the bias is declined.
 
 ### SEM-015: Dropout
@@ -456,8 +458,8 @@ batch when `seq_len_q/kv` are set).
 - **cuDNN:** frontend 1.24 requires both seq_len tensors with `padding_mask` (SEM-008), ragged operands included
   (`node/sdpa_support_surface.h`). cuDNN 9.25 (cudnn-frontend from v1.27.0; v1.25.0 and v1.26.0 reject the mixed form) spells the same
   form `cu_seq_len_q` (cumulative query offsets) + `seq_len_kv`. The hipDNN frontend accepts `cu_seq_len_q`, but every engine and reference declines
-  it (see `KNOWN_DIVERGENCES.md`, "SDPA cumulative sequence lengths"), so the cuDNN spelling does not run yet;
-  the hipDNN spelling below does.
+  this mixed form (see `KNOWN_DIVERGENCES.md`, "SDPA cumulative sequence lengths"; the ASM SDPA engine takes
+  `cu_seq_len_*` only on both sides), so the cuDNN spelling does not run yet; the hipDNN spelling below does.
 - **PyTorch / AOTriton:** varlen attention packs Q through `cu_seqlens_q` and K/V through `cu_seqlens_k`; `seqused_k`
   gives each sequence's used keys (at most its K slot) and there is no `seqused_q`. AOTriton reads Q's lengths from
   `cu_seqlens_q` and K's from `seqused_k` (its `varlen_seqused_k` bits). vLLM's non-paged call has dense or packed
