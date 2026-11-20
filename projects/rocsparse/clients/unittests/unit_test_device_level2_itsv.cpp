@@ -65,6 +65,9 @@ namespace
         bool                  ex      = true;
         int32_t               m       = 20;
         int32_t               per_row = 3;
+        // Complex data only: a diagonal whose imaginary part dominates its real
+        // part, with small off-diagonal entries.
+        bool imaginary_diagonal = false;
         // Analysis calls made before the solve (each one with its own policy).
         std::vector<rocsparse_analysis_policy> policies = {rocsparse_analysis_policy_force};
     };
@@ -117,7 +120,8 @@ namespace
         std::ostringstream s;
         s << "csritsv type=" << c.mtype << " fill=" << c.fill << " diag=" << c.diag
           << " trans=" << c.trans << " base=" << c.base << " device=" << c.device
-          << " nfree=" << c.nfree << " tol=" << c.tol << " hist=" << c.hist << " ex=" << c.ex;
+          << " nfree=" << c.nfree << " tol=" << c.tol << " hist=" << c.hist << " ex=" << c.ex
+          << " imag_diag=" << c.imaginary_diagonal;
         return s.str();
     }
 
@@ -135,11 +139,22 @@ namespace
                                                    general ? true : !lower,
                                                    non_unit || general,
                                                    c.base);
-        if(!non_unit)
+        if(!non_unit || c.imaginary_diagonal)
         {
             // Small off-diagonal entries keep the Jacobi iteration contractive.
             for(auto& v : A.val)
                 v = v * rocsparse_ut::scalar<T>(0.125f);
+        }
+        if(c.imaginary_diagonal)
+        {
+            // d = 0.5 + (3 .. 3.75) i: the Jacobi step scales the residual by
+            // 1 / conj(d) under a conjugate transpose. With 1 / d instead the
+            // diagonal of the iteration matrix is 1 - conj(d) / d, of modulus
+            // 2 |Im d| / |d| > 1, and the iteration diverges.
+            for(int32_t i = 0; i < A.m; ++i)
+                for(int32_t k = A.ptr[i] - A.base; k < A.ptr[i + 1] - A.base; ++k)
+                    if(A.ind[k] - A.base == i)
+                        A.val[k] = scalar_of<T>(0.5f, 3.0f + 0.25f * static_cast<float>(i % 4));
         }
         return A;
     }
@@ -157,6 +172,9 @@ namespace
     {
         using R = typename real_of<T>::type;
         SCOPED_TRACE(describe(c));
+        // A real matrix with the 0.5 diagonal of that option is not diagonally dominant.
+        constexpr bool is_real = std::is_same<R, T>::value;
+        ASSERT_TRUE(!c.imaginary_diagonal || !is_real) << "imaginary_diagonal needs complex data";
 
         const host_csr<T>    A     = make_itsv_matrix<T>(c);
         const int32_t        m     = A.m;
@@ -323,6 +341,37 @@ namespace
                     if(::testing::Test::HasFailure())
                         return;
                 }
+    }
+
+    TEST_F(L2DeviceCsritsv, conjugate_transpose_inverts_conjugated_diagonal)
+    {
+        // Complex matrices whose diagonal is mostly imaginary. The Jacobi step of a
+        // conjugate transpose solve must divide by the conjugated diagonal: with
+        // the plain diagonal the iteration diverges instead of converging, so the
+        // solution is wrong even after all the iterations. The transposed solve on
+        // the same matrix must keep the plain diagonal.
+        for(const auto trans :
+            {rocsparse_operation_conjugate_transpose, rocsparse_operation_transpose})
+            for(const auto mtype :
+                {rocsparse_matrix_type_triangular, rocsparse_matrix_type_general})
+                for(const auto fill : {rocsparse_fill_mode_lower, rocsparse_fill_mode_upper})
+                    for(const bool device : {false, true})
+                    {
+                        itsv_case c;
+                        c.trans              = trans;
+                        c.mtype              = mtype;
+                        c.fill               = fill;
+                        c.device             = device;
+                        c.base               = device ? 1 : 0;
+                        c.imaginary_diagonal = true;
+                        c.ex                 = (fill == rocsparse_fill_mode_lower);
+                        run_csritsv<rocsparse_float_complex>(handle, c);
+                        if(::testing::Test::HasFailure())
+                            return;
+                        run_csritsv<rocsparse_double_complex>(handle, c);
+                        if(::testing::Test::HasFailure())
+                            return;
+                    }
     }
 
     // A matrix whose diagonal entry of row `p` is missing (`zero_value` false) or
