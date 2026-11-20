@@ -1157,7 +1157,6 @@ struct BlockFmhaFwdSplitKVPingPongProblem : Problem_
     using RandValOutputDataType = uint8_t;
 
     static constexpr bool kHasDropout     = false;
-    static constexpr auto QScaleEnum      = BlockAttentionQuantScaleEnum::NO_SCALE;
     static constexpr bool kSkipMinSeqlenQ = false;
 };
 
@@ -1173,9 +1172,10 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong
     using FmhaMask = remove_cvref_t<typename Problem::FmhaMask>;
 
     // qr_tdm_pingpong reads K and V through one tensor view each, and would fold
-    // the sink logit into the softmax of every split.
+    // the sink logit into the softmax of every split. fp8 goes through QScaleEnum
+    // (per-tensor descales), not the static-quant P scale.
     static_assert(!Problem::kIsPagedKV && !Problem::kHasSink && !Problem::kDoFp8StaticQuant,
-                  "qr_tdm_pingpong split-kv supports neither paged kv, sink nor fp8");
+                  "qr_tdm_pingpong split-kv supports neither paged kv, sink nor static fp8 quant");
 
     template <typename QDramBlockWindowTmp,
               typename KDramBlockWindowLengths,
@@ -1204,7 +1204,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong
                                         const BlockIndices&,
                                         index_t, // kv_l2p_offset, 0 without paged kv
                                         void* smem_ptr,
-                                        float sink_v) const
+                                        float sink_v,
+                                        float v_descale = 1.0f) const
     {
         // without paged kv, each navigator holds one tensor view
         return Base::operator()(
@@ -1219,7 +1220,8 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong
             position_encoding,
             scale_s,
             smem_ptr,
-            sink_v);
+            sink_v,
+            v_descale);
     }
 };
 

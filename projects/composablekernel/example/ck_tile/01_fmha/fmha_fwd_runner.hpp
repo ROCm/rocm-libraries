@@ -711,10 +711,10 @@ fwd_result fmha_fwd_run(mode_enum mode,
         int nhead_merged        = nhead;
         int max_seqlen_q_merged = max_seqlen_q;
         // When max_seqlen_q == 1 and multiple head groups are merged (kMergeNumHeadGroupsSeqLenQ)
-        // then more splits are required. With a mask or a sink, only the gfx125 fp16/bf16 (TDM)
-        // instances merge, and not with both.
-        const bool tdm =
-            ck_tile::is_gfx125_supported() && (data_type == "fp16" || data_type == "bf16");
+        // then more splits are required. With a mask or a sink, only the gfx125 TDM instances
+        // (fp16/bf16/fp8bf16) merge, and not with both.
+        const bool tdm = ck_tile::is_gfx125_supported() &&
+                         (data_type == "fp16" || data_type == "bf16" || data_type == "fp8bf16");
         const bool has_sink = mask.sink > 0 || init_sink_value != 0;
         const bool merges_heads =
             mask.type == mask_enum::no_mask ? (!has_sink || tdm) : (tdm && !has_sink);
@@ -1350,6 +1350,11 @@ fwd_result fmha_fwd_run(mode_enum mode,
             {
                 traits.use_pagedkv = (0 < page_block_size);
             }
+            else if constexpr(std::is_same_v<fmha_fwd_splitkv_traits,
+                                             std::decay_t<decltype(traits)>>)
+            {
+                traits.qscale_type = qscale.type;
+            }
             else if constexpr(std::is_same_v<fmha_batch_prefill_traits,
                                              std::decay_t<decltype(traits)>>)
             {
@@ -1715,6 +1720,12 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     (use_cache_batch_idx ? cache_batch_idx_buf.GetDeviceBuffer() : nullptr);
 
                 args.num_splits = num_splits;
+                if(qscale.type == quant_scale_enum::pertensor)
+                {
+                    args.q_descale_ptr = q_descale_buf.GetDeviceBuffer();
+                    args.k_descale_ptr = k_descale_buf.GetDeviceBuffer();
+                    args.v_descale_ptr = v_descale_buf.GetDeviceBuffer();
+                }
                 // the kernel reads each group's seqlen_q, so the grid and the head merging
                 // choice need the longest one rather than the total
                 if(mode == mode_enum::group)

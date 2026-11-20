@@ -496,6 +496,11 @@ struct fmha_fwd_splitkv_args
     float scale_p;
     float scale_o;
 
+    // one fp32 each, used with fmha_fwd_splitkv_traits::qscale_type == pertensor
+    const void* q_descale_ptr = nullptr;
+    const void* k_descale_ptr = nullptr;
+    const void* v_descale_ptr = nullptr;
+
     float logits_soft_cap;
 
     ck_tile::index_t stride_q;
@@ -1185,7 +1190,10 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
                                      args.window_size_right,
                                      args.sink_size,
                                      args.mask_type,
-                                     args.sink_ptr);
+                                     args.sink_ptr,
+                                     args.q_descale_ptr,
+                                     args.k_descale_ptr,
+                                     args.v_descale_ptr);
         }
         else
         { // create batch mode kernel arguments
@@ -1234,7 +1242,10 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
                                      args.window_size_right,
                                      args.sink_size,
                                      args.mask_type,
-                                     args.sink_ptr);
+                                     args.sink_ptr,
+                                     args.q_descale_ptr,
+                                     args.k_descale_ptr,
+                                     args.v_descale_ptr);
         }
     }();
 
@@ -1850,8 +1861,9 @@ struct fmha_fwd_splitkv_traits
     mask_enum mask_type;
     bias_enum bias_type; // 0:no bias, 1:elementwise bias, 2:alibi. sync with BlockAttentionBiasEnum
     bool has_lse;
-    bool do_fp8_static_quant = false;
-    bool has_sink            = false;
+    bool do_fp8_static_quant     = false;
+    bool has_sink                = false;
+    quant_scale_enum qscale_type = quant_scale_enum::no_scale;
     // TODO: padding check is inside this api
 };
 float fmha_fwd_splitkv(fmha_fwd_splitkv_traits,

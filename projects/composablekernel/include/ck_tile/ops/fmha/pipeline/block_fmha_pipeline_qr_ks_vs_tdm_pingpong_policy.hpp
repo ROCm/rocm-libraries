@@ -19,6 +19,12 @@ inline constexpr bool is_qr_tdm_pingpong_qkv_v =
      std::is_same_v<typename Problem::KDataType, half_t> &&
      std::is_same_v<typename Problem::VDataType, half_t>);
 
+template <typename Problem>
+inline constexpr bool is_qr_tdm_pingpong_fp8_qkv_v =
+    std::is_same_v<typename Problem::QDataType, fp8_t> &&
+    std::is_same_v<typename Problem::KDataType, fp8_t> &&
+    std::is_same_v<typename Problem::VDataType, fp8_t>;
+
 // One pad per row, expressed as a row stride: the layout the TDM writer produces with a
 // padding interval of one row, with affine reader address math (no merge/unmerge div/mod).
 template <typename DataType, index_t Rows, index_t Cols, typename PaddingConfig>

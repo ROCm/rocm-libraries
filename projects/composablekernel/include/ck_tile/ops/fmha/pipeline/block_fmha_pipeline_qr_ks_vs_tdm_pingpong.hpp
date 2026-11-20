@@ -10,11 +10,11 @@
 
 namespace ck_tile {
 
-// qr_tdm with a single V LDS buffer and a whole-tile K ping/pong, for gfx1250 fp16/bf16:
-// trip i reads K buffer (i & 1) while the TDM fills the other with tile i + 1, and V
-// streams through one buffer under the QK gemm. It shares qr_tdm's problem, gemms and
-// register layouts; only the LDS layout (see BlockFmhaPipelineQRKSVSTdmPingPongPolicy)
-// and the main loop differ.
+// qr_tdm with a single V LDS buffer and a whole-tile K ping/pong, for gfx1250 fp16/bf16 and
+// per-tensor scaled fp8: trip i reads K buffer (i & 1) while the TDM fills the other with
+// tile i + 1, and V streams through one buffer under the QK gemm. It shares qr_tdm's problem,
+// gemms, register layouts and fp8 P quantization; only the LDS layout (see
+// BlockFmhaPipelineQRKSVSTdmPingPongPolicy) and the main loop differ.
 template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmPingPongPolicy>
 struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_, Policy_>
 {
@@ -49,6 +49,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     using Base::kQuantized;
     using Base::kStoreLSE;
     using Base::kSubQKHeaddim;
+    using Base::kVScaleOnOacc;
+    using Base::QScaleEnum;
 
     using Base::ReduceRowSync;
 
@@ -60,8 +62,10 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
     static constexpr bool kKLoadOnce = true;
 
-    static_assert(detail::is_qr_tdm_pingpong_qkv_v<Problem> && !kQuantized,
-                  "qr_tdm_pingpong: fp16/bf16 Q/K/V without quantization scales");
+    static_assert((detail::is_qr_tdm_pingpong_qkv_v<Problem> && !kQuantized) ||
+                      (detail::is_qr_tdm_pingpong_fp8_qkv_v<Problem> &&
+                       QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR),
+                  "qr_tdm_pingpong: fp16/bf16 Q/K/V without scales, or per-tensor scaled fp8");
     static_assert(!kHasLogitsSoftCap && !Problem::kHasDropout,
                   "qr_tdm_pingpong: softcap/dropout require the basic qr_tdm pipeline");
     static_assert(!Problem::kUseDoubleKVLdsBuffer && !Problem::kProgressiveDsLoadK,
@@ -73,6 +77,10 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     // takes the fp32 sum, which the LSE then shares.
     static constexpr bool kRowSumOnMatrixUnit = BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1;
     static constexpr bool kSeparateLseSum     = kStoreLSE && kRowSumOnMatrixUnit;
+
+    // The matrix-unit row sum multiplies P by ones without P's per-block scale.
+    static_assert(!kQuantized || !kRowSumOnMatrixUnit,
+                  "qr_tdm_pingpong: quantized P needs the fp32 row sum (gemm_1 warps on N)");
 
     // Row sum of P as a pairwise tree per thread, then the cross-lane sync. The
     // serial fold of block_tile_reduce is a dependent v_add_f32 chain the
@@ -382,7 +390,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                                         PositionEncoding position_encoding,
                                         float scale_s,
                                         void* smem_arena,
-                                        float sink_v) const
+                                        float sink_v,
+                                        float v_descale = 1.0f) const
     {
         using Layout = typename Policy::template LdsArenaLayout<Problem>;
 
@@ -432,6 +441,10 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         // row max o_acc and l are normalised to; trails m by up to
         // kRebaseThreshold (see the lazy rebasing in the main loop)
         auto m_base = MLBlockTileType{};
+        // row sum of the quantized P gemm_1 consumes (see Base::CorrectQuantizedMass)
+        [[maybe_unused]] auto l_quant = MLBlockTileType{};
+        if constexpr(kQuantized)
+            clear_tile(l_quant);
 
         clear_tile(o_acc);
         InitRowMaxSum(m, l, sink_v, scale_s);
@@ -770,6 +783,8 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                         l(i_idx) *= tmp;
                         if constexpr(kSeparateLseSum)
                             l_lse(i_idx) *= tmp;
+                        if constexpr(kQuantized)
+                            l_quant(i_idx) *= tmp;
                         m_base(i_idx) = m[i_idx];
                         sweep_tile_span(o_spans[I1],
                                         [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= tmp; });
@@ -807,21 +822,42 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             static_assert(BlockFmhaShape::Gemm1BlockWarps::at(I1) == 1 ||
                           remove_cvref_t<decltype(gemm_1)>::MIterPerWarp == 1);
             [[maybe_unused]] int32_t p_scale = 0;
+            if constexpr(kQuantized)
+            {
+                // l sums the unrounded P, before MakePForGemm1 overwrites p_compute with
+                // the dequantized q(P) that l_quant sums.
+                const auto rowsum_p = BlockRowSum(p_compute);
+                sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                    constexpr auto i_idx = make_tuple(idx0);
+                    l(i_idx) += rowsum_p[i_idx];
+                });
+            }
             auto p_tile = Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
 
             // l{j}; o_acc is already in p's m_base frame.
-            if constexpr(kRowSumOnMatrixUnit)
-                AccumulateRowSumOnMatrixUnit(l, p_tile);
-            if constexpr(!kRowSumOnMatrixUnit || kSeparateLseSum)
+            if constexpr(kQuantized)
             {
-                const auto rowsum_p = BlockRowSum(p_compute); // rowsum(Pcompute{j})
+                const auto rowsum_p_quant = BlockRowSum(p_compute);
                 sweep_tile_span(o_spans[I0], [&](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
-                    if constexpr(kSeparateLseSum)
-                        l_lse(i_idx) += rowsum_p[i_idx];
-                    else
-                        l(i_idx) += rowsum_p[i_idx];
+                    l_quant(i_idx) += rowsum_p_quant[i_idx];
                 });
+            }
+            else
+            {
+                if constexpr(kRowSumOnMatrixUnit)
+                    AccumulateRowSumOnMatrixUnit(l, p_tile);
+                if constexpr(!kRowSumOnMatrixUnit || kSeparateLseSum)
+                {
+                    const auto rowsum_p = BlockRowSum(p_compute); // rowsum(Pcompute{j})
+                    sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                        constexpr auto i_idx = make_tuple(idx0);
+                        if constexpr(kSeparateLseSum)
+                            l_lse(i_idx) += rowsum_p[i_idx];
+                        else
+                            l(i_idx) += rowsum_p[i_idx];
+                    });
+                }
             }
 
             // In flight: V, then the next K. <1> retires V and leaves K running
@@ -830,14 +866,26 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
             auto v_tile = load_tile_transpose(v_lds_read_window);
 
+            // fp8: the scaled MMA applies P's per-block exponent; V's scale is neutral and
+            // v_descale is applied to O at the end (kVScaleOnOacc).
+            const auto pv_gemm = [&](const auto& p_slice, const auto& v) {
+                if constexpr(kQuantized)
+                    gemm_1(o_acc,
+                           p_slice,
+                           v,
+                           Base::template make_gemm1_scale<decltype(gemm_1)>(p_scale),
+                           Base::template make_gemm1_scale<decltype(gemm_1)>(Base::e8m0_one()));
+                else
+                    gemm_1(o_acc, p_slice, v);
+            };
+
             if constexpr(1 < k1_loops)
             {
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
-                    gemm_1(o_acc,
-                           get_slice_tile(p_tile,
-                                          sequence<0, i_k1 * kK1>{},
-                                          sequence<kM0, (i_k1 + 1) * kK1>{}),
-                           v_tile);
+                    pv_gemm(get_slice_tile(p_tile,
+                                           sequence<0, i_k1 * kK1>{},
+                                           sequence<kM0, (i_k1 + 1) * kK1>{}),
+                            v_tile);
 
                     // loop over along the [V]alue Sequence length
                     move_tile_window(v_lds_read_window, {kK1, 0});
@@ -847,11 +895,10 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 move_tile_window(v_lds_read_window, {-kK1 * (k1_loops - 1), 0});
             }
 
-            gemm_1(o_acc,
-                   get_slice_tile(p_tile,
-                                  sequence<0, (k1_loops - 1) * kK1>{},
-                                  sequence<kM0, k1_loops * kK1>{}),
-                   v_tile);
+            pv_gemm(get_slice_tile(p_tile,
+                                   sequence<0, (k1_loops - 1) * kK1>{},
+                                   sequence<kM0, k1_loops * kK1>{}),
+                    v_tile);
 
             // two V reads per WMMA, as for K above
             using Gemm1T = remove_cvref_t<decltype(gemm_1)>;
@@ -886,7 +933,12 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 StoreLse(lse_acc_dram_window_tmp, m_lse, l, scale_s);
         }
 
+        Base::CorrectQuantizedMass(l, l_quant, o_acc);
         NormalizeO(o_acc, l);
+        if constexpr(kVScaleOnOacc)
+            tile_elementwise_inout([v_descale](auto& x) { x *= v_descale; }, o_acc);
+        else
+            ignore = v_descale;
         return o_acc;
     }
 

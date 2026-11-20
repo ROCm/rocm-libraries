@@ -2930,6 +2930,58 @@ class SplitKVDecodeDispatch(unittest.TestCase):
                 receipt,
             )
 
+    def test_fp8bf16_runs_on_pingpong_with_per_tensor_scales_only(self):
+        # The scaled fp8 gemm_1 needs kN0 = kK1 = 128; no paged kv, sink or bias.
+        kernels = self._kernels("gfx1250", 0)
+        fp8 = [k for k in kernels if k.F_dtype == "fp8bf16"]
+        self.assertTrue(fp8)
+        for kernel in fp8:
+            self.assertEqual(
+                (
+                    kernel.F_pipeline.tag,
+                    kernel.F_hdim,
+                    kernel.F_mode,
+                    kernel.F_tile.F_bm0,
+                    kernel.F_tile.F_bn0,
+                    kernel.F_tile.F_bk1,
+                ),
+                ("qr_tdm_pingpong", 128, "batch", 16, 128, 128),
+                kernel.filename,
+            )
+            self.assertEqual(
+                (
+                    kernel.F_pipeline.F_qscale,
+                    kernel.F_pipeline.F_squant,
+                    kernel.F_pipeline.F_sink,
+                    kernel.F_pipeline.F_bias,
+                    kernel.F_pipeline.F_pagedkv,
+                ),
+                ("pertensor", "f", "f", "no", "f"),
+                kernel.filename,
+            )
+            self.assertIn("<= 16", str(kernel.F_tile.F_constraint), kernel.filename)
+        # every other split instance keeps the unscaled dispatch
+        self.assertFalse(
+            [
+                k
+                for k in kernels
+                if k.F_dtype != "fp8bf16" and k.F_pipeline.F_qscale != "no"
+            ]
+        )
+        for receipt in (2, 100, 200, 600):
+            self.assertFalse(
+                [
+                    k
+                    for k in self._kernels("gfx1250", receipt)
+                    if k.F_dtype == "fp8bf16"
+                ],
+                receipt,
+            )
+        for target in ("gfx942", "gfx950"):
+            self.assertFalse(
+                [k for k in self._kernels(target, 0) if k.F_dtype == "fp8bf16"], target
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

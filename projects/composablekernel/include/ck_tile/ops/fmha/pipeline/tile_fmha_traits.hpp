@@ -163,9 +163,10 @@ template <bool kPadSeqLenQ_ /* padding for seqlen_q */,
           bool kDoFp8StaticQuant_,
           bool kIsPagedKV_,
           bool kHasUnevenSplits_,
-          bool kMergeNumHeadGroupsSeqLenQ_ = false,
-          index_t kBlockPerCu_             = -1, /* overwrite occupancy if not -1 */
-          bool kHasSink_                   = false>
+          bool kMergeNumHeadGroupsSeqLenQ_         = false,
+          index_t kBlockPerCu_                     = -1, /* overwrite occupancy if not -1 */
+          bool kHasSink_                           = false,
+          BlockAttentionQuantScaleEnum QScaleEnum_ = BlockAttentionQuantScaleEnum::NO_SCALE>
 struct TileFmhaFwdSplitKVTraits
 {
     static constexpr bool kPadSeqLenQ       = kPadSeqLenQ_;
@@ -183,6 +184,7 @@ struct TileFmhaFwdSplitKVTraits
     static constexpr bool kMergeNumHeadGroupsSeqLenQ = kMergeNumHeadGroupsSeqLenQ_;
     static constexpr index_t kBlockPerCu             = kBlockPerCu_;
     static constexpr bool kHasSink                   = kHasSink_;
+    static constexpr auto QScaleEnum                 = QScaleEnum_;
 };
 
 template <bool kPadSeqLenQ_ /* padding for seqlen_q */,

@@ -62,6 +62,8 @@ struct FmhaFwdSplitKVKernel
     static constexpr auto BiasEnum          = FmhaPipeline::BiasEnum;
     static constexpr bool kStoreLSE         = FmhaPipeline::kStoreLSE;
     static constexpr bool kDoFp8StaticQuant = FmhaPipeline::Problem::kDoFp8StaticQuant;
+    static constexpr auto QScaleEnum        = FmhaPipeline::Problem::QScaleEnum;
+    static constexpr bool kPerTensorQScale  = QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR;
     static constexpr bool kIsPagedKV        = FmhaPipeline::Problem::kIsPagedKV;
     static constexpr bool kHasSink          = FmhaPipeline::Problem::kHasSink;
     static constexpr bool kMergeNumHeadGroupsSeqLenQ =
@@ -104,6 +106,11 @@ struct FmhaFwdSplitKVKernel
                   (kMergeNumHeadGroupsSeqLenQ && BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
                    ((!kHasMask && !kHasSink) || kUsesTdmAffineDramPath)));
 
+    // fp8 takes either the static-quant P scale or per-tensor q/k/v descales, not both
+    static_assert(QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE ||
+                      (kPerTensorQScale && !kDoFp8StaticQuant),
+                  "split-kv supports per-tensor descales only");
+
     // clang-format off
     template <typename T> struct t2s;
     template <> struct t2s<float> { static constexpr const char * name = "fp32"; };
@@ -144,7 +151,8 @@ struct FmhaFwdSplitKVKernel
             "v" + (std::is_same_v<VLayout, ck_tile::tensor_layout::gemm::RowMajor> ? "r" : "c") + (pn.empty() ? "_npad" : "_" + pn) +
             (kHasLogitsSoftCap ? "_logits" : "_nlogits" ) + (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? _SS_("_nbias") : (_SS_("_") + BlockAttentionBiasEnumToStr<BiasEnum>::name)) +
             (kHasMask ? "_" + _SS_(FmhaMask::name) : "_nmask") + (kStoreLSE ? "_lse" : "_nlse" ) +
-            (kDoFp8StaticQuant ? "_squant" : "_nsquant") + (kIsPagedKV ? "_pagedkv" : "_npagedkv" ) + (kHasSink ? "_sink" : "_nsink" );
+            (kDoFp8StaticQuant ? "_squant" : "_nsquant") + (kIsPagedKV ? "_pagedkv" : "_npagedkv" ) + (kHasSink ? "_sink" : "_nsink" ) +
+            (kPerTensorQScale ? _SS_("_") + BlockAttentionQuantScaleEnumToStr<QScaleEnum>::name : _SS_(""));
         #undef _SS_
         #undef _TS_
         // clang-format on
@@ -251,6 +259,14 @@ struct FmhaFwdSplitKVKernel
         float scale_p;
     };
 
+    // one fp32 descale each, read on the device
+    struct PerTensorQScaleKargs
+    {
+        const void* q_descale_ptr = nullptr;
+        const void* k_descale_ptr = nullptr;
+        const void* v_descale_ptr = nullptr;
+    };
+
     struct CommonPageBlockTableKargs
     {
         const int32_t* block_table_ptr;
@@ -278,7 +294,8 @@ struct FmhaFwdSplitKVKernel
           std::conditional_t<kHasMask, MaskKargs, EmptyKargs<1>>,
           std::conditional_t<kDoFp8StaticQuant, Fp8StaticQuantKargs, EmptyKargs<2>>,
           std::conditional_t<kIsPagedKV, CommonPageBlockTableKargs, CacheBatchIdxKargs>,
-          std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<3>>
+          std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<3>>,
+          std::conditional_t<kPerTensorQScale, PerTensorQScaleKargs, EmptyKargs<5>>
     {
         const int32_t* seqlen_k_ptr;
 
@@ -301,7 +318,8 @@ struct FmhaFwdSplitKVKernel
           std::conditional_t<kHasMask, MaskKargs, EmptyKargs<1>>,
           std::conditional_t<kDoFp8StaticQuant, Fp8StaticQuantKargs, EmptyKargs<2>>,
           std::conditional_t<kIsPagedKV, GroupModePageBlockTableKargs, EmptyKargs<3>>,
-          std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<4>>
+          std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<4>>,
+          std::conditional_t<kPerTensorQScale, PerTensorQScaleKargs, EmptyKargs<5>>
     {
         const int32_t* seqstart_q_ptr;
         const int32_t* seqstart_k_ptr;
@@ -371,7 +389,10 @@ struct FmhaFwdSplitKVKernel
               ck_tile::index_t window_size_right,
               ck_tile::index_t sink_size,
               ck_tile::index_t mask_type,
-              const void* sink_ptr = nullptr)
+              const void* sink_ptr      = nullptr,
+              const void* q_descale_ptr = nullptr,
+              const void* k_descale_ptr = nullptr,
+              const void* v_descale_ptr = nullptr)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -408,6 +429,7 @@ struct FmhaFwdSplitKVKernel
                     {},                   // placeholder for fp8_static_quant args
                     {},                   // placeholder for paged-block table or cache_batch_idx
                     {},                   // placeholder for logits_soft_cap
+                    {},                   // placeholder for per-tensor descales
                     reinterpret_cast<const int32_t*>(seqlen_k_ptr),
                     batch_stride_q,
                     batch_stride_k,
@@ -451,6 +473,18 @@ struct FmhaFwdSplitKVKernel
         if constexpr(kHasLogitsSoftCap)
         {
             kargs.init_logits_soft_cap(logits_soft_cap);
+        }
+        if constexpr(kPerTensorQScale)
+        {
+            kargs.q_descale_ptr = q_descale_ptr;
+            kargs.k_descale_ptr = k_descale_ptr;
+            kargs.v_descale_ptr = v_descale_ptr;
+        }
+        else
+        {
+            ignore = q_descale_ptr;
+            ignore = k_descale_ptr;
+            ignore = v_descale_ptr;
         }
 
         return kargs;
@@ -501,7 +535,10 @@ struct FmhaFwdSplitKVKernel
               ck_tile::index_t window_size_right,
               ck_tile::index_t sink_size,
               ck_tile::index_t mask_type,
-              const void* sink_ptr = nullptr)
+              const void* sink_ptr      = nullptr,
+              const void* q_descale_ptr = nullptr,
+              const void* k_descale_ptr = nullptr,
+              const void* v_descale_ptr = nullptr)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -538,6 +575,7 @@ struct FmhaFwdSplitKVKernel
                     {},                   // placeholder for fp8_static_quant args
                     {},                   // placeholder for paged-block table
                     {},                   // placeholder for logits_soft_cap
+                    {},                   // placeholder for per-tensor descales
                     reinterpret_cast<const int32_t*>(seqstart_q_ptr),
                     reinterpret_cast<const int32_t*>(seqstart_k_ptr),
                     reinterpret_cast<const int32_t*>(seqlen_k_ptr),
@@ -576,6 +614,18 @@ struct FmhaFwdSplitKVKernel
         if constexpr(kHasLogitsSoftCap)
         {
             kargs.init_logits_soft_cap(logits_soft_cap);
+        }
+        if constexpr(kPerTensorQScale)
+        {
+            kargs.q_descale_ptr = q_descale_ptr;
+            kargs.k_descale_ptr = k_descale_ptr;
+            kargs.v_descale_ptr = v_descale_ptr;
+        }
+        else
+        {
+            ignore = q_descale_ptr;
+            ignore = k_descale_ptr;
+            ignore = v_descale_ptr;
         }
         return kargs;
     }
@@ -664,6 +714,17 @@ struct FmhaFwdSplitKVKernel
         long_index_t batch_offset_o_acc   = 0;
         index_t kv_l2p_offset =
             0; // logical-to-physical offset of seqlen_k coordinate. only used for paged-kvcache
+
+        // Per-tensor q/k descales fold into scale_s before anything reads it (the sink
+        // logit and LSE share the folded scale, as in FmhaFwdKernel::GetSoftmaxScale).
+        [[maybe_unused]] float v_descale = 1.0f;
+        if constexpr(kPerTensorQScale)
+        {
+            kargs.scale_s *= *reinterpret_cast<const float*>(kargs.q_descale_ptr) *
+                             *reinterpret_cast<const float*>(kargs.k_descale_ptr);
+            v_descale = *reinterpret_cast<const float*>(kargs.v_descale_ptr);
+        }
+
         const float sink_value =
             kargs.sink_ptr != nullptr
                 ? (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / kargs.scale_s
@@ -1178,6 +1239,28 @@ struct FmhaFwdSplitKVKernel
                                       kv_l2p_offset,
                                       smem_ptr,
                                       sink_v);
+            }
+            else if constexpr(kPerTensorQScale)
+            {
+                return FmhaPipeline{}(q_dram_window,
+                                      k_dram_window_lengths,
+                                      k_page_block_navigator,
+                                      v_dram_window_lengths,
+                                      v_page_block_navigator,
+                                      bias_dram_window,
+                                      lse_acc_dram_window,
+                                      kargs.num_splits,
+                                      i_split_,
+                                      mask,
+                                      position_encoding,
+                                      kargs.scale_s,
+                                      variant,
+                                      variant_params,
+                                      block_indices,
+                                      kv_l2p_offset,
+                                      smem_ptr,
+                                      sink_v,
+                                      v_descale);
             }
             else
             {

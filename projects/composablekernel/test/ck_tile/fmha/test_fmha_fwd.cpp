@@ -3744,6 +3744,77 @@ TEST_P(SplitKVMaskedMergedHeads, DataTypeConfig)
     CHECK_SPLITKV_RESULT(result);
 }
 
+// gfx1250 fp8bf16 split-KV decode runs on qr_tdm_pingpong with per-tensor descales (d128, up
+// to 16 rows). Every case has an instance there, so no_instance fails rather than skips. 16
+// keys with 4 splits leave the later splits empty; pack_gqa 0 merges the q heads in the kernel,
+// 1 folds them on the host.
+class SplitKVFp8PingPong
+    : public TestWithParam<std::tuple<bool, std::tuple<int, int>, int, std::string, int, bool, int>>
+{
+};
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(SplitKVFp8PingPong);
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         SplitKVFp8PingPong,
+                         Combine(EnableTestIf(std::is_same_v<DataTypeConfig, FmhaFwdFp8Bf16>),
+                                 Values(std::tuple{16, 1}, std::tuple{16, 2}, std::tuple{8, 8}),
+                                 Values(16, 80, 1001, 5000), // seqlen_k
+                                 Values("0", "b:127,0", "t:127,127", "b:2047,0"),
+                                 Values(2, 4), // num_splits
+                                 Bool(),       // lse
+                                 Values(0, 1)  // pack_gqa
+                                 ));
+
+TEST_P(SplitKVFp8PingPong, DataTypeConfig)
+{
+    auto [_, nheads, seqlen_k, mask_str, num_splits, lse, pack_gqa] = GetParam();
+    auto [nhead, nhead_k]                                           = nheads;
+
+    if(!ck_tile::is_gfx125_supported())
+        GTEST_SKIP() << "fp8 split-kv runs on the gfx1250 qr_tdm_pingpong pipeline only";
+
+    auto result = fmha_fwd_run<DataTypeConfig>(
+        mode_enum::batch,
+        2, // batch
+        nhead,
+        nhead_k,
+        {1},
+        {seqlen_k},
+        128,
+        -1,
+        0,                 // seqlen_knew
+        {-1},              // seqlen_qpads
+        {-1},              // seqlen_kpads
+        {},                // q_eff_lens_per_batch
+        {},                // kv_eff_lens_per_batch
+        0,                 // rotary_dim
+        true,              // i_perm
+        true,              // o_perm
+        0,                 // scale_s
+        0,                 // logits_soft_cap
+        def_is_v_rowmajor, // is_v_rowmajor
+        lse,
+        0,     // page_block_size
+        false, // use_cache_batch_idx
+        "n",   // bias_str
+        0.0f,  // p_drop
+        0,     // drop_seed
+        0,     // drop_offset
+        false, // drop_prefs
+        mask_str,
+        "pt",
+        true, // is_rotary_interleaved
+        num_splits,
+        init_method,
+        static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
+        1, // do_validation
+        0, // init_sink
+        pack_gqa,
+        stream_config);
+    ASSERT_EQ(result, fwd_result::success);
+}
+
 #endif // CK_TILE_FMHA_FWD_SPLITKV_API
 
 #if CK_TILE_FMHA_FWD_APPENDKV_API

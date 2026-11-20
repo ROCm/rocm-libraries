@@ -21,6 +21,8 @@ from codegen.cpp_symbol_map import (
     BIAS_MAP,
     get_mask_map,
     BOOL_MAP,
+    QSCALE_CHECK_MAP,
+    QSCALE_MAP,
 )
 from codegen.utils import check_duplicates_and_paddings, if_, indent, update_file
 
@@ -84,7 +86,8 @@ using fmha_trait = ck_tile::TileFmhaFwdSplitKVTraits<{F_spad},
                                                      kHasUnevenSplits,
                                                      kMergeNumHeadGroupsSeqLenQ,
                                                      {F_occupancy},
-                                                     {F_sink}>;
+                                                     {F_sink},
+                                                     {F_qscale}>;
 
 using fmha_pipeline_problem = ck_tile::BlockFmhaFwdSplitKVPipelineProblem<
     typename FmhaFwdTypeConfig<fmha_dtype_{F_idx}>::QDataType,
@@ -295,7 +298,7 @@ float fmha_fwd_splitkv(fmha_fwd_splitkv_traits t, fmha_fwd_splitkv_args a, const
 """
 
 FMHA_FWD_SPLITKV_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.do_fp8_static_quant == {F_squant}) &&
-        ((a.block_table_ptr != nullptr) == {F_pagedkv}) && (t.has_sink == {F_sink}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
+        ((a.block_table_ptr != nullptr) == {F_pagedkv}) && (t.has_sink == {F_sink}) && (t.qscale_type == {F_qscale_check}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
     using traits_ = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, {F_squant}, {F_pagedkv},{F_sink}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_occupancy}>;
 
     // get combine kernel tile sizes
@@ -350,13 +353,14 @@ class FmhaFwdSplitKVApiTrait:
     # fmha_fwd_traits_::kOccupancy for rationale.
     occupancy: int = -1
     constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
+    qscale: str = "no"
 
     @property
     def name(self) -> str:
         return (
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.squant}-{self.spad}-{self.skpad}-{self.dpad}-"
-            + f"{self.dvpad}-{self.pagedkv}-{self.sink}"
+            + f"{self.dvpad}-{self.pagedkv}-{self.sink}-{self.qscale}"
         )
 
     @property
@@ -460,6 +464,7 @@ class FmhaFwdSplitKVPipeline:
     F_pagedkv: str  # t/f
     F_sink: str  # t/f
     F_mask: str  # value from MASK_MAP
+    F_qscale: str = "no"  # no/pertensor
 
     @property
     def name(self) -> str:
@@ -523,6 +528,8 @@ class FmhaFwdSplitKVPipeline:
             n += "_sink"
         else:
             n += "_nsink"
+        if self.F_qscale != "no":
+            n += f"_{self.F_qscale}"
         return n
 
 
@@ -607,6 +614,7 @@ class FmhaFwdSplitKVApiPool:
                             F_squant=BOOL_MAP[trait.squant],
                             F_pagedkv=BOOL_MAP[trait.pagedkv],
                             F_sink=BOOL_MAP[trait.sink],
+                            F_qscale_check=QSCALE_CHECK_MAP[trait.qscale],
                             F_scheck=trait.scheck,
                             F_seqtune=trait.seqtune(max_bm0),
                             F_skcheck=trait.skcheck,
@@ -711,6 +719,7 @@ class FmhaFwdSplitKVKernel:
             F_pagedkv=BOOL_MAP[self.F_pipeline.F_pagedkv],
             F_occupancy=self.F_tile.F_occupancy,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
+            F_qscale=QSCALE_MAP[self.F_pipeline.F_qscale],
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
             F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
             F_mode=MODE_MAP[self.F_mode],
@@ -967,7 +976,13 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             ):
                 pipelines.append(Pipeline("qr", "row", "f", "f", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
                 pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
-        elif dtype in ["fp8fp16", "fp8bf16"]:
+        elif dtype in ["fp8bf16"]:
+            # Per-tensor scaled fp8 runs on qr_tdm_pingpong only, so up to 16 rows at d128.
+            if hdim == 128:
+                for mask in get_mask_map(mask_impl).keys():
+                    pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "f", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor"))  # fmt: skip
+                    pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor"))  # fmt: skip
+        elif dtype in ["fp8fp16"]:
             # TODO
             None
         else:
@@ -976,9 +991,9 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
 
     @staticmethod
     def get_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
+        # Rows of a block: seqlen_q, or the q heads of a kv head when they are merged.
+        num_rows = "(a.max_seqlen_q == 1 && a.nhead_k < a.nhead_q ? a.nhead_q / a.nhead_k : a.max_seqlen_q)"
         if dtype in ["fp16", "bf16"]:
-            # Rows of a block: seqlen_q, or the q heads of a kv head when they are merged.
-            num_rows = "(a.max_seqlen_q == 1 && a.nhead_k < a.nhead_q ? a.nhead_q / a.nhead_k : a.max_seqlen_q)"
             return {
                 #                      bm0, bn0, bk0, bn1, bk1,
                 "32" : FmhaFwdTileSize( 64,  64,  32,  32,  32,   64,  4, 1, 1,  4, 1, 1,  16, 16, 32,  16, 16, 32,  -1),
@@ -993,8 +1008,28 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 "64" : FmhaFwdTileSize(128,  64,  64,  64,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1),
                 "128": FmhaFwdTileSize( 64,  64,  64, 128,  64,  128,  4, 1, 1,  4, 1, 1,  16, 16, 64,  16, 16, 64,  -1),
             }  # fmt: skip
+        elif dtype in ["fp8bf16"]:
+            # The scaled fp8 gemm_1 takes K = 128 in one WMMA, so kN0 = kK1 = 128 (see
+            # BlockFmhaPipelineQRKSVSTdm::kHwGemm1Scale).
+            return {
+                #                      bm0, bn0, bk0, bn1, bk1,
+                "128": [FmhaFwdTileSize(16, 128, 128, 128, 128, 128,  1, 4, 1,  1, 4, 1,  16, 16, 128,  16, 16, 128,  -1, CppConstraint(f"{num_rows} <= 16"), "qr_tdm_pingpong")],
+            }  # fmt: skip
         else:
             return None
+
+    @staticmethod
+    def get_combine_pipelines(dtype, hdim) -> List[FmhaFwdSplitKVCombinePipeline]:
+        if dtype in ["fp8bf16"]:
+            # combine reads the fp32 o_acc, so it is the bf16 one with a bf16 O
+            return KernelComponentFactoryBase.get_combine_pipelines("bf16", hdim)
+        return KernelComponentFactoryBase.get_combine_pipelines(dtype, hdim)
+
+    @staticmethod
+    def get_combine_hdim_tile_size_dict(dtype: str) -> Optional[dict]:
+        if dtype in ["fp8bf16"]:
+            return {"128": FmhaFwdSplitKVCombineTileSize(32, -1)}
+        return KernelComponentFactoryBase.get_combine_hdim_tile_size_dict(dtype)
 
 
 def get_factory(target: str):
@@ -1283,6 +1318,7 @@ def write_blobs(
                 bn1comb=combine_kernel.F_tile.F_bn1,
                 occupancy=int(kernel.F_tile.F_occupancy),
                 constraint=kernel.F_tile.F_constraint,
+                qscale=kernel.F_pipeline.F_qscale,
             )
         )
     write_fwd_splitkv_api(api_pool, output_dir)
