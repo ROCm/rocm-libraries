@@ -563,6 +563,28 @@ TEST(TestContainer, GetApplicableEngineIdsSdpaGraph)
         }
     }
 #endif
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+    // The rocKE dense engine of gfx942 and gfx950 serves this head-major (BHSD) graph: the
+    // strides are launch arguments, so only a graph whose layout the engine cannot address is
+    // declined. It ships for these two devices only, and only where the pack is built in, so it
+    // is counted where it applies; the dense matcher tests pin that it does.
+    {
+        std::string_view denseEngine;
+        if(deviceString == "gfx942")
+        {
+            denseEngine = kernel_ingestor_engine::GFX942_ATTENTION_DENSE_ENGINE_NAME;
+        }
+        else if(deviceString == "gfx950")
+        {
+            denseEngine = kernel_ingestor_engine::GFX950_ATTENTION_DENSE_ENGINE_NAME;
+        }
+        if(!denseEngine.empty()
+           && applies(hipdnn_data_sdk::utilities::engineNameToId(std::string(denseEngine))))
+        {
+            ++expected;
+        }
+    }
+#endif
     EXPECT_EQ(applicableEngines.size(), expected);
 }
 
