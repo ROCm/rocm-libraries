@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -571,7 +571,10 @@ void testing_trmm(const Arguments& arg)
         for(int i = 0; i < total_calls; i++)
         {
             if(i == number_cold_calls)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(rocblas_trmm_fn,
                           (handle,
@@ -591,6 +594,7 @@ void testing_trmm(const Arguments& arg)
         }
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         ArgumentModel<e_side,
                       e_uplo,
