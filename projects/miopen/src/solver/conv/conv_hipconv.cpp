@@ -931,7 +931,7 @@ ConvSolution ConvHipConv::GetSolution(const ExecutionContext& ctx,
     catch(const std::exception& ex)
     {
         LogHipConvError("GetSolution", ex);
-        return ConvSolution(miopenStatusInternalError);
+        return {miopenStatusInternalError};
     }
 }
 
