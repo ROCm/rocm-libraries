@@ -1323,9 +1323,9 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
-    // The output-rows loops take filter rows of the (depth, height) rows flattened: a block of
-    // more rows than the filter height serves only filters with at least that many rows.
-    if(rows && !generic && config.fr > a.filter[1] && config.fr > a.filter[0] * a.filter[1])
+    // Small-C rows take filter rows of the (depth, height) rows flattened: a block of more rows
+    // than the filter height serves only filters with at least that many rows.
+    if(smallc && config.fr > a.filter[1] && config.fr > a.filter[0] * a.filter[1])
     {
         return std::nullopt;
     }
