@@ -3156,7 +3156,8 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     // The newest issued step's steps left (replayed ones included) and replayed steps left.
     unsigned long long leftI = left;
     int replayI = replay;
-    // What a step's multiply needs, taken when it is issued.
+    // What a step's multiply needs: taken when the step is issued at several steps a stage,
+    // when it is computed at one.
     struct Meta
     {
         bool trackStart, math;
@@ -3228,9 +3229,20 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
         Meta mt[P];
         k3ForEach<P>([&](auto ic) {
             constexpr int I = decltype(ic)::value;
-            mt[I] = mCur[I];
-            next();
-            mCur[I] = metaOf();
+            if constexpr(P == 1)
+            {
+                // One step a stage: the cursor is still on the computed step, so its multiply's
+                // meta is taken here. Carried across the loop as at several steps a stage, it
+                // pushed the large channels-first tiles' multiplies into VGPR spills.
+                mt[I] = metaOf();
+                next();
+            }
+            else
+            {
+                mt[I] = mCur[I];
+                next();
+                mCur[I] = metaOf();
+            }
             issue(ic);
         });
         // The loads above stay ahead of the multiplies.
