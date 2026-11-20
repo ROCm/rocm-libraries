@@ -2,8 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 """End-to-end GPU correctness of an addr64 implicit-GEMM forward conv kernel
-(Phase 1 slice A -- 2D, MFMA, non-split, non-grouped): see
-``library/kernels/conv/docs/large_tensor_addr64_plan.md``.
+(Phase 1 slice A -- 2D, MFMA, non-split, non-grouped).
 
 Builds a real kernel with ``ImplicitGemmConvSpec(addr64=True)``, launches it
 on a small conv problem, and compares against the same float32 torch

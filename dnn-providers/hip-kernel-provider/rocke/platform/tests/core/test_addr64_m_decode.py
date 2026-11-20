@@ -5,7 +5,6 @@
 pair: an exact i64 division decoding the workgroup-uniform tile origin
 ``m0 -> (n0, ho0, wo0)`` once per workgroup, and a small i32 carry-propagation
 decoding each lane's ``m = m0 + d -> (n, ho, wo)`` without any magic numbers.
-See ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` sections 3 and 5.
 
 CPU only: these are pure index-arithmetic helpers with no GPU-measured value.
 The op-sequence assertions pin the lowering (sdiv/srem chains peeling the

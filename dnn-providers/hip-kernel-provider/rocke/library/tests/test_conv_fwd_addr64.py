@@ -2,8 +2,6 @@
 # SPDX-License-Identifier: MIT
 """Host-side gate for forward ``addr64`` (large-tensor addressing). Phase 0:
 
-library/kernels/conv/docs/large_tensor_addr64_plan.md
-
 No GPU and no comgr: the field is declared on ``ImplicitGemmConvSpec`` and
 ``KernelIdentity`` and threaded through ``kernel_name()`` / ``stable_hash()`` /
 ``label()`` -- the naming and cache-key plumbing a future addressing variant

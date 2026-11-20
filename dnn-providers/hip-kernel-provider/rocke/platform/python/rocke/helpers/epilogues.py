@@ -172,8 +172,7 @@ class DirectEpilogue:
         `N` is always i32. `M` is i32, unless `m_origin_i64` is set, in which
         case it must be i64 (see below).
 
-        `m_origin_i64`: the large-tensor (``addr64``) tile origin -- see
-        ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3.
+        `m_origin_i64`: the large-tensor (``addr64``) tile origin.
         Pass `grid.block_m_off_i64` (from `grid.bind(m_origin_i64=True)`) to
         opt in. `grid.block_m_off` is `block_id * tile_m` in i32 -- exactly
         the product `addr64` exists to avoid overflowing for a huge M -- so

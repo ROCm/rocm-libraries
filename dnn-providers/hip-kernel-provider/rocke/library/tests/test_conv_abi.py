@@ -154,8 +154,7 @@ def test_fwd_abi_is_pipeline_independent(label, pipeline, extra):
 
 
 def test_fwd_addr64_abi_widens_only_the_n_facing_fields():
-    """addr64 (``library/kernels/conv/docs/large_tensor_addr64_plan.md``
-    section 4): only the byte triple, ``p_M``, and the strides that
+    """addr64: only the byte triple, ``p_M``, and the strides that
     multiply a possibly-huge leading coord widen to i64; every other
     field, and the field *order*, matches the i32 ABI exactly (minus the
     dropped ``m_`` magic pair)."""
@@ -205,8 +204,7 @@ def test_fwd_addr64_signature_matches_arg_names():
 
 
 def test_i64_kernarg_kind_is_8_byte_aligned():
-    """The ``"i64"`` ``ArgSpec`` kind (large-tensor ``addr64`` ABI; see
-    ``library/kernels/conv/docs/large_tensor_addr64_plan.md``) is now
+    """The ``"i64"`` ``ArgSpec`` kind (large-tensor ``addr64`` ABI) is now
     produced by the fwd addr64 arg-name list -- this pins the signature
     builder's handling of it in isolation regardless. Existing i32/pointer
     entries (the non-addr64 ABI) must be unaffected."""

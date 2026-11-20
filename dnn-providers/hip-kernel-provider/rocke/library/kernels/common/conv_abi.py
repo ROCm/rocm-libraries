@@ -118,15 +118,14 @@ def _fwd_arg_names(
     store into, then the slice width and degree (wgrad's ``ks`` /
     ``ks_count``).
 
-    ``addr64`` is the large-tensor forward-addressing variant (see
-    ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 4):
-    the byte-size triple, ``p_M``, and the strides that multiply a
+    ``addr64`` is the large-tensor forward-addressing variant: the
+    byte-size triple, ``p_M``, and the strides that multiply a
     possibly-huge leading coordinate (``p_A_stride_n``/``_di``,
     ``p_D_stride_n``/``_do``, ``p_B_stride_k``) widen to ``"i64"``; the
     ``m_`` magic pairs are dropped since the addr64 M-decode uses exact
-    division, not magic numbers (section 3). Mutually exclusive with
-    ``split_k`` -- addr64 does not yet support the split-K binary (see the
-    plan's Phase 1 slice scope).
+    division, not magic numbers. Mutually exclusive with
+    ``split_k`` -- addr64 does not yet support the split-K binary (Phase 1
+    slice scope).
     """
     if addr64 and split_k:
         raise ValueError("addr64 does not yet support split_k (no split-K ABI/builder)")
@@ -504,8 +503,7 @@ def _conv_signature(
         "f32*": "ptr<f32, global>",
         "i32*": "ptr<i32, global>",
         "i32": "i32",
-        # Large-tensor (addr64) scalars: see
-        # library/kernels/conv/docs/large_tensor_addr64_plan.md.
+        # Large-tensor (addr64) scalars.
         # ``runtime/packing.py`` packs it via SCALAR_ARG_FORMATS["i64"].
         "i64": "i64",
     }

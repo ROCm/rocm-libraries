@@ -946,8 +946,7 @@ def _fwd_jobs(
 
     ``addr64`` (default ``False``, so every existing cache build is
     unaffected) additionally yields the large-tensor forward-addressing
-    subset from :func:`_fwd_addr64_jobs` for each geometry it accepts -- see
-    ``library/kernels/conv/docs/large_tensor_addr64_plan.md``.
+    subset from :func:`_fwd_addr64_jobs` for each geometry it accepts.
     """
     da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
@@ -1268,9 +1267,8 @@ def _fwd_addr64_geometry(geometry: tuple, mma_family: str) -> bool:
     """Whether an addr64 (large-tensor forward addressing) kernel is built
     for ``geometry``: Phase 1 slice A's scope only -- MFMA, pipeline "mem"
     (the only pipeline this slice has been numerically verified against).
-    See ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section
-    6.3/10: deliberately a config subset, not a full product over the
-    existing axes, so this never doubles the catalog.
+    Deliberately a config subset, not a full product over the existing
+    axes, so this never doubles the catalog.
     """
     _tm, _tn, _tk, _wm, _wn, _wt, pipeline, _epilogue, _atom = geometry
     return mma_family == "mma" and pipeline == "mem"

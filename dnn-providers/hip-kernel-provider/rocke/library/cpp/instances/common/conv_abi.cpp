@@ -111,8 +111,7 @@ void grid(rocke_conv_arg_list_t* out)
 }
 
 /* Pointer triple + byte-size triple that opens every direction's list.
- * ``addr64`` widens the byte triple to i64 (large-tensor forward addressing;
- * see library/kernels/conv/docs/large_tensor_addr64_plan.md section 4). */
+ * ``addr64`` widens the byte triple to i64 (large-tensor forward addressing). */
 void leading(rocke_conv_arg_list_t* out,
              const char* a,
              const char* b,
@@ -135,8 +134,7 @@ const int kLeadingArgs = 6;
 
 /* split_k: the split-K binary's ABI -- the fp32 workspace its slices store
  * into, then the slice width and degree (wgrad's ks / ks_count). addr64:
- * the large-tensor forward-addressing ABI (see
- * library/kernels/conv/docs/large_tensor_addr64_plan.md section 4) --
+ * the large-tensor forward-addressing ABI --
  * widens the byte triple, p_M, and the strides multiplying a possibly-huge
  * leading coord (p_A_stride_n[_di], p_B_stride_k, p_D_stride_n[_do]) to i64,
  * and drops the m_ magic pair (exact i64 division instead of magic

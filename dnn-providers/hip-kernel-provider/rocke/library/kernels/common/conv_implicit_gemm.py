@@ -364,8 +364,7 @@ class ImplicitGemmConvSpec:
     split_k_cluster: int = 0
 
     # Large-tensor forward addressing (64-bit tile origin + i32 per-lane
-    # delta, no magic division on the M decode): see
-    # library/kernels/conv/docs/large_tensor_addr64_plan.md. Phase 0 only --
+    # delta, no magic division on the M decode). Phase 0 only --
     # no builder reads this yet, so ``validate()`` refuses ``True`` rather
     # than silently building the plain i32 kernel under a tagged name.
     addr64: bool = False
@@ -484,8 +483,7 @@ class ImplicitGemmConvSpec:
 
     def validate(self) -> None:
         if self.addr64:
-            # Phase 1 slice A's scope (see
-            # library/kernels/conv/docs/large_tensor_addr64_plan.md):
+            # Phase 1 slice A's scope:
             # 2D, MFMA, non-split, non-grouped, non-merged, non-pointwise,
             # no chiplet swizzle (it computes block_m_off differently,
             # bypassing grid.block_m_off/_i64 -- see conv_implicit_gemm.py's

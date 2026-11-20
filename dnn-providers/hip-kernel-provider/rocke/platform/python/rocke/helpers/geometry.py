@@ -81,9 +81,8 @@ class WarpGrid:
     block_n_off: Optional[Value] = None
     block_k_off: Optional[Value] = None
     # i64 tile-origin companion of ``block_m_off`` -- the large-tensor
-    # (addr64) forward-addressing variant (see
-    # library/kernels/conv/docs/large_tensor_addr64_plan.md section 3 item
-    # 1). ``block_m_off`` multiplies the M-axis block id by ``tile_m`` in
+    # (addr64) forward-addressing variant.
+    # ``block_m_off`` multiplies the M-axis block id by ``tile_m`` in
     # i32, which is exactly the product addr64 exists to avoid overflowing;
     # this field is the same product computed in i64 instead, populated only
     # when ``bind(..., m_origin_i64=True)``. None for every existing caller.

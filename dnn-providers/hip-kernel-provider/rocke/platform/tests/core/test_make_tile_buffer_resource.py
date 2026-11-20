@@ -4,8 +4,7 @@
 """``make_tile_buffer_resource`` -- the large-tensor (``addr64``) forward
 addressing primitive: a 64-bit tile origin folded into the pointer, with an
 i32 ``num_records`` clamped to ``2**31-1`` so the existing OOB-zero buffer
-trick keeps working. See
-``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 5.
+trick keeps working.
 
 CPU only: no kernel in this file reads a GPU-measured value. The op-sequence
 assertions pin the lowering (readfirstlane.i64, the un-``inbounds`` GEP,

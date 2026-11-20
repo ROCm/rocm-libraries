@@ -694,8 +694,7 @@ def main() -> int:
         action="store_true",
         dest="addr64",
         help=(
-            "large-tensor forward-addressing (addr64) kernels -- fwd only "
-            "(see library/kernels/conv/docs/large_tensor_addr64_plan.md). "
+            "large-tensor forward-addressing (addr64) kernels -- fwd only. "
             "Forwarded to benchmark_implicit_gemm_conv.py, where it only "
             "affects that script's own --compile-all (it has no effect here "
             "unless that script is later run with --compile-all too). "

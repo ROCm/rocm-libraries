@@ -4,8 +4,7 @@
 """GPU numeric verification of ``make_a_descriptor_addr64`` /
 ``make_d_descriptor_addr64`` (``kernels/common/_conv_implicit_gemm_common.py``):
 the addr64 forward-conv descriptors that exclude the ``n``/``p_*_stride_n``
-term entirely (folded into the i64 tile origin instead, per
-``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3).
+term entirely (folded into the i64 tile origin instead).
 
 Cross-checks ``.offset(b, m=d, k=...)`` against a plain-Python reference that
 recomputes the same conv addressing formula (y/x/c channel decode, the

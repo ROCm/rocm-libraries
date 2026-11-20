@@ -2586,8 +2586,7 @@ def _cache_dispatch(args, arch: str, cases: list) -> int:
     if getattr(args, "addr64", False):
         print(
             "error: --addr64: direct conv has no addr64 variant (large-tensor "
-            "forward addressing is implicit-GEMM only -- see "
-            "library/kernels/conv/docs/large_tensor_addr64_plan.md)",
+            "forward addressing is implicit-GEMM only)",
             file=sys.stderr,
         )
         return 2
@@ -3201,9 +3200,8 @@ def main() -> int:
         "--addr64",
         action="store_true",
         dest="addr64",
-        help="large-tensor forward addressing (addr64) is implicit-GEMM only "
-        "(see library/kernels/conv/docs/large_tensor_addr64_plan.md) -- direct "
-        "conv has no addr64 variant. This flag exists for CLI consistency with "
+        help="large-tensor forward addressing (addr64) is implicit-GEMM only -- "
+        "direct conv has no addr64 variant. This flag exists for CLI consistency with "
         "benchmark_implicit_gemm_conv.py / benchmark_conv_compare.py; passing "
         "it here is an error.",
     )

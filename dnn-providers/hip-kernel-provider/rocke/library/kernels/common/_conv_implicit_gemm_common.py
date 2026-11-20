@@ -1439,8 +1439,7 @@ def spatial_unmerge_addr64(
     """addr64 counterpart of :func:`spatial_unmerge_dynamic`: ``d`` (the
     per-lane delta from the tile's i64 origin) -> ``(n, ho, wo)`` via
     :class:`rocke.helpers.transforms.UnmergeAddr64`'s carry propagation, no
-    magic numbers. 2D only (no ``is_3d`` branch -- Phase 1 slice A's scope;
-    see ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3).
+    magic numbers. 2D only (no ``is_3d`` branch -- Phase 1 slice A's scope).
 
     ``origin_coords`` is ``[leading, ho0, wo0]`` -- the tile origin decoded
     by :func:`rocke.helpers.tensor_view.tile_origin_decode_i64`, each
@@ -1723,8 +1722,7 @@ def make_a_descriptor_addr64(
     product (an operand large enough to need i64 for a huge ``N``) is
     already folded into the i64 tile origin by
     :func:`rocke.helpers.tensor_view.make_tile_buffer_resource` /
-    :func:`addr64_a_origin_bytes`, not recomputed per lane in i32 -- see
-    ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3.
+    :func:`addr64_a_origin_bytes`, not recomputed per lane in i32.
 
     **Precondition the caller must uphold:** every lane's delta ``d`` in
     one call (i.e. the whole tile, ``[0, block_m)``) must decode to the

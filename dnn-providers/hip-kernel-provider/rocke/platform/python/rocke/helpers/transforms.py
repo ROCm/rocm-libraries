@@ -684,8 +684,7 @@ def unmerge_magic_dynamic(
 class UnmergeAddr64(Transform):
     """``Unmerge`` via the addr64 tile-origin + per-lane carry decode: no
     magic numbers, since the dividend (``m``) is no longer guaranteed to
-    fit i32. See ``library/kernels/conv/docs/large_tensor_addr64_plan.md``
-    section 3.
+    fit i32.
 
     Unlike :class:`UnmergeMagicDynamic`, whose upper coord is the raw flat
     index, this transform's upper coord is the **per-lane delta**

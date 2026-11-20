@@ -40,8 +40,7 @@ typedef enum
     ROCKE_CONV_ARG_F32_PTR, /* "f32*" */
     ROCKE_CONV_ARG_I32_PTR, /* "i32*" */
     ROCKE_CONV_ARG_I32, /* "i32"  -- scalar */
-    /* "i64" -- scalar. Large-tensor (addr64) ABI; see
-     * library/kernels/conv/docs/large_tensor_addr64_plan.md. Produced by
+    /* "i64" -- scalar. Large-tensor (addr64) ABI. Produced by
      * rocke_conv_arg_names_ex(..., addr64=true, ...) for direction="fwd". */
     ROCKE_CONV_ARG_I64
 } rocke_conv_arg_kind_t;
@@ -78,8 +77,7 @@ bool rocke_conv_arg_names(const char* direction,
  * variant: `streamk` names the reduction ("atomic", "workspace", "linear" or
  * "tree") of a stream-K kernel, or is NULL for a kernel without stream-K. A
  * stream-K list carries the reduction's buffers after ks_count and then the
- * partition block. `addr64` selects the large-tensor forward-addressing ABI
- * (see library/kernels/conv/docs/large_tensor_addr64_plan.md section 4):
+ * partition block. `addr64` selects the large-tensor forward-addressing ABI:
  * fwd-only, 2D-only, and mutually exclusive with two_stage (no split-K
  * builder for it yet) -- widens the byte triple, p_M, and the strides
  * multiplying a possibly-huge leading coord to i64, and drops the m_ magic

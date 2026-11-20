@@ -167,8 +167,7 @@ class KernelIdentity:
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
     # Large-tensor forward addressing (64-bit tile origin + i32 per-lane
-    # delta, no magic division on the M decode): see
-    # library/kernels/conv/docs/large_tensor_addr64_plan.md. Left out of the
+    # delta, no magic division on the M decode). Left out of the
     # hash while False, like prefetch_addr, so identities that predate the
     # field keep their hash and their cache entries.
     addr64: bool = False

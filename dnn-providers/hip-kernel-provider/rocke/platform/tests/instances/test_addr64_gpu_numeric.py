@@ -2,13 +2,12 @@
 # SPDX-License-Identifier: MIT
 
 """GPU numeric verification of the addr64 (large-tensor forward-addressing)
-primitives: see ``library/kernels/conv/docs/large_tensor_addr64_plan.md``
-sections 3 and 5. Unlike the CPU-only golden-IR tests in
+primitives. Unlike the CPU-only golden-IR tests in
 ``platform/tests/core/test_make_tile_buffer_resource.py`` and
 ``test_addr64_m_decode.py`` (which pin the emitted LLVM text), this module
 *launches* the primitives on a real GPU and checks their numeric result --
-plan section 5's "Test GPU: mikrokernel czytający z originem > 4 GiB", and a
-numeric cross-check of the M-decode pair against a plain-Python reference.
+a microkernel reading from an origin > 4 GiB, and a numeric cross-check of
+the M-decode pair against a plain-Python reference.
 
 Requires a ROCm GPU; skips otherwise (see ``rocke.tests.gpu``).
 """

@@ -473,8 +473,7 @@ class TestUnmergeMagicDynamic:
 
 class TestUnmergeAddr64:
     """addr64 counterpart of TestUnmergeMagicDynamic: no magic numbers, the
-    upper coord is the per-lane delta ``d`` rather than the raw ``m``. See
-    ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3.
+    upper coord is the per-lane delta ``d`` rather than the raw ``m``.
     """
 
     def _build(self):

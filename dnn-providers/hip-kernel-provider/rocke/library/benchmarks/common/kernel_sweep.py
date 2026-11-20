@@ -214,9 +214,8 @@ def enumerate_jobs(
 
     ``addr64`` (default ``False``, so every existing cache build is
     unaffected) additionally includes the large-tensor forward-addressing
-    subset (fwd-only; see ``kernels.conv.aot_jobs._fwd_addr64_jobs`` and
-    ``library/kernels/conv/docs/large_tensor_addr64_plan.md``) for every
-    geometry it accepts.
+    subset (fwd-only; see ``kernels.conv.aot_jobs._fwd_addr64_jobs``) for
+    every geometry it accepts.
 
     With ``validate=True`` (the default) each candidate is run through its
     direction's spec validator first, so the returned list is what will

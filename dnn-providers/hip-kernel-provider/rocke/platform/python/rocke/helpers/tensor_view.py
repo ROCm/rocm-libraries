@@ -285,7 +285,6 @@ def make_tile_buffer_resource(
 ) -> BufferResource:
     """Build a :class:`BufferResource` whose tile origin is a 64-bit byte
     offset -- the large-tensor (``addr64``) forward addressing primitive.
-    See ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 5.
 
     Two-level address: ``origin_i64`` (a workgroup-uniform i64 byte offset
     that may exceed 2 GiB) is scalarized to SGPR and folded into the
@@ -321,9 +320,7 @@ def tile_origin_decode_i64(
     division -- the ``addr64`` counterpart of ``spatial_unmerge_dynamic``'s
     magic-division decode, done once per workgroup (``m0`` is the
     workgroup-uniform tile origin, not a per-lane value) and without any
-    magic numbers, since ``m0`` is no longer guaranteed to fit i32. See
-    ``library/kernels/conv/docs/large_tensor_addr64_plan.md`` section 3
-    item 1.
+    magic numbers, since ``m0`` is no longer guaranteed to fit i32.
 
     ``dims_i64`` holds the trailing extents (each an i64 ``Value``) in the
     same order :class:`rocke.helpers.transforms.UnmergeMagicDynamic`'s

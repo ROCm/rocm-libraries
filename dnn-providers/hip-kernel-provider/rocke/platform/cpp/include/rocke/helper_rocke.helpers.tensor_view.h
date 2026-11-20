@@ -170,8 +170,7 @@ rocke_status_t rocke_tv_make_buffer_resource(rocke_ir_builder_t* b,
                                              rocke_value_t* soffset /* NULL => const_i32(0) */);
 
 /* make_tile_buffer_resource(b, ptr, origin_i64=, total_bytes_i64=, soffset=None):
- * the large-tensor (addr64) forward-addressing primitive. See
- * library/kernels/conv/docs/large_tensor_addr64_plan.md section 5.
+ * the large-tensor (addr64) forward-addressing primitive.
  *
  * Scalarizes origin_i64 to SGPR (to_sgpr_u32), folds it into ptr via
  * global_ptr_offset (not global_ptr_add: an empty/fully-masked tile's
@@ -190,8 +189,7 @@ rocke_status_t rocke_tv_make_tile_buffer_resource(rocke_ir_builder_t* b,
 
 /* tile_origin_decode_i64(b, m0_i64, dims_i64, num_dims, out): the addr64
  * tile-origin M-decode, ``m0 -> (n0, [do0,] ho0, wo0)`` by exact i64
- * division (no magic numbers), once per workgroup. See
- * library/kernels/conv/docs/large_tensor_addr64_plan.md section 3 item 1.
+ * division (no magic numbers), once per workgroup.
  *
  * ``dims_i64`` holds ``num_dims`` trailing extents (i64 Values), innermost
  * last (e.g. {Ho, Wo} for 2D), matching UnmergeMagicDynamic's magic_triples
@@ -209,8 +207,7 @@ rocke_status_t rocke_tv_tile_origin_decode_i64(rocke_ir_builder_t* b,
  * ``num_dims + 1`` entries in [leading, *trailing] order (as produced by
  * rocke_tv_tile_origin_decode_i64, each narrowed to i32 by the caller);
  * ``dims_i32`` is ``num_dims`` entries, same trailing order. Writes this
- * lane's [leading, *trailing] coords to out[0..num_dims]. See
- * library/kernels/conv/docs/large_tensor_addr64_plan.md section 3 item 2.
+ * lane's [leading, *trailing] coords to out[0..num_dims].
  * Returns ROCKE_ERR_VALUE if num_dims < 0. */
 rocke_status_t rocke_tv_carry_decode_i32(rocke_ir_builder_t* b,
                                          rocke_value_t* d_i32,

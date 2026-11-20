@@ -1768,8 +1768,7 @@ def main() -> int:
         dest="addr64",
         help="--compile-all only: also compile the large-tensor forward-"
         "addressing (addr64) subset -- fwd, MFMA, 2D, pipeline=mem, "
-        "non-grouped (Phase 1 slice A; see "
-        "library/kernels/conv/docs/large_tensor_addr64_plan.md). Off by "
+        "non-grouped (Phase 1 slice A). Off by "
         "default: these kernels have no C++ engine mirror yet.",
     )
     cache_grp.add_argument(
