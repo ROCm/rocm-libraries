@@ -594,10 +594,13 @@ static bool
     {
         // Heads write disjoint slots only when the head stride covers every physical Q token
         // row, which hipDNN's ragged layout rule requires of any non-zero stride. That row count
-        // lives in the device-resident offset table, so the check takes the bound the graph
-        // states: the longest batch, Sq. It also declines a zero (broadcast) head stride, which
-        // the layout rule exempts but which makes every head write the same slots. A single
-        // head is never stepped.
+        // lives in the device-resident offset table, so the check takes Sq, the longest batch
+        // the graph allows, as a conservative bound. Heads overlap whenever a batch reaches Sq
+        // rows; the check also declines valid layouts whose physical rows are fewer than Sq,
+        // which fall back to another engine. B * Sq would decline AITER's packed [H, total_q]
+        // layout whenever batches are shorter than Sq. It also declines a zero (broadcast) head
+        // stride, which the layout rule exempts but which makes every head write the same
+        // slots. A single head is never stepped.
         const int64_t heads = stats.dims()->Get(1);
         const int64_t seqLenQ = stats.dims()->Get(2);
         const int64_t headStride = stats.strides()->Get(1);
@@ -672,8 +675,11 @@ static bool isNonOverlappingView(std::vector<std::pair<int64_t, int64_t>> stride
 // elements, so:
 // - a head-dim stride other than 1 is taken as 1: rows read the gaps between elements, and a
 //   strided O is left partly unwritten;
-// - a sequence stride below the tensor's own head dim, zero included, ends each (batch, head)
-//   slice early: the tail of the last row reads as zero and writes there are dropped.
+// - a sequence stride below the tensor's own head dim ends each (batch, head) slice early:
+//   the tail of the last row reads as zero and writes there are dropped. A zero sequence
+//   stride is declined with it: on Q and V it gives wrong results, and the kernels bound each
+//   buffer at S * sequence stride. A zero K sequence stride (one key row broadcast over the
+//   sequence) computed correctly where measured, so for K the decline is conservative.
 // Q, K and V may broadcast a batch or head with a zero stride; the kernels only re-read a
 // slice. O must not overlap itself, because each (batch, head) slice is written by its own
 // workgroups and aliased slices overwrite each other. Group mode locates each batch through

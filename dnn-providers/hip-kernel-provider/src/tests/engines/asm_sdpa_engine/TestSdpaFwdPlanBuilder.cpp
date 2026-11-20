@@ -1006,7 +1006,9 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableStatsLayoutFollowsBatchMode)
                    "Group mode stats with ragged_offset_multiplier 8"},
          false},
         // With H > 1, heads write disjoint slots only when the head stride is at least the
-        // physical Q token count; the graph bounds that count from below by Sq.
+        // physical Q token count, which only the device-resident offsets give. The engine takes
+        // Sq, the longest batch, as its bound; B * Sq would decline AITER's packed [H, total_q]
+        // layout whenever the batches are shorter than Sq.
         {GraphTest{withOneBatchGroupStats([](GraphT& /*graph*/) {}),
                    "Group mode one-batch stats with the packed head stride Sq"},
          true},
@@ -1014,6 +1016,10 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableStatsLayoutFollowsBatchMode)
                        [&](GraphT& graph) { findTensor(graph, "stats").strides[1] = seqLenQ - 1; }),
                    "Group mode stats with a head stride below Sq"},
          false},
+        {GraphTest{withGroupStats(
+                       [&](GraphT& graph) { findTensor(graph, "stats").strides[1] = 2 * seqLenQ; }),
+                   "Group mode B = 4 stats with a head stride between Sq and B * Sq"},
+         true},
         {GraphTest{withGroupStats([](GraphT& graph) { findTensor(graph, "stats").strides[1] = 0; }),
                    "Group mode stats with a zero head stride"},
          false},
