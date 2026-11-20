@@ -33,6 +33,7 @@
 // below carry the `smoke` token so this fast, host-only guard runs on the PR
 // gate, not only in the full/nightly lane.
 
+#include "client_process.hpp"
 #include <gtest/gtest.h>
 
 // Included by relative path on purpose. rocblaslt_secure_env.hpp is a
@@ -50,24 +51,6 @@
 namespace
 {
     constexpr const char* kTestVar = "HIPBLASLT_SECURE_ENV_GTEST";
-
-    void setTestEnv(const char* value)
-    {
-#if defined(_WIN32)
-        _putenv_s(kTestVar, value);
-#else
-        setenv(kTestVar, value, /*overwrite=*/1);
-#endif
-    }
-
-    void unsetTestEnv()
-    {
-#if defined(_WIN32)
-        _putenv_s(kTestVar, "");
-#else
-        unsetenv(kTestVar);
-#endif
-    }
 }
 
 // The hipBLASLt CI test process is not set-uid/set-gid, so it must be
@@ -87,7 +70,7 @@ TEST(SecureEnv, smoke_TestProcessIsNotPrivileged)
 // every deployment that relies on it; this test catches that.
 TEST(SecureEnv, smoke_HonorsEnvForNonPrivilegedProcess)
 {
-    setTestEnv("/tmp/hipblaslt-secure-env-test");
+    hipblaslt_clients::setEnv(kTestVar, "/tmp/hipblaslt-secure-env-test", 1);
 
     const char* value = rocblaslt_secure_getenv(kTestVar);
     ASSERT_NE(value, nullptr)
@@ -99,14 +82,14 @@ TEST(SecureEnv, smoke_HonorsEnvForNonPrivilegedProcess)
     // A set variable is not "suppressed for security" in a non-privileged process.
     EXPECT_FALSE(rocblaslt_env_suppressed_for_security(kTestVar));
 
-    unsetTestEnv();
+    hipblaslt_clients::unsetEnv(kTestVar);
 }
 
 // An unset variable yields nullptr (same as getenv), and a nullptr name must be
 // handled without dereferencing it.
 TEST(SecureEnv, smoke_ReturnsNullWhenUnsetOrNullName)
 {
-    unsetTestEnv();
+    hipblaslt_clients::unsetEnv(kTestVar);
 
     EXPECT_EQ(rocblaslt_secure_getenv(kTestVar), nullptr);
     EXPECT_FALSE(rocblaslt_env_suppressed_for_security(kTestVar));
@@ -122,7 +105,7 @@ TEST(SecureEnv, smoke_ReturnsNullWhenUnsetOrNullName)
 // escalation vector from ROCM-26729 is covered without a set-uid test harness.
 TEST(SecureEnv, smoke_SuppressesEnvForPrivilegedProcess)
 {
-    setTestEnv("/tmp/hipblaslt-secure-env-test");
+    hipblaslt_clients::setEnv(kTestVar, "/tmp/hipblaslt-secure-env-test", 1);
 
     // Privileged: the set variable is refused ...
     EXPECT_EQ(rocblaslt_secure_getenv_impl(kTestVar, /*is_privileged=*/true), nullptr)
@@ -138,7 +121,7 @@ TEST(SecureEnv, smoke_SuppressesEnvForPrivilegedProcess)
                  "/tmp/hipblaslt-secure-env-test");
     EXPECT_FALSE(rocblaslt_env_suppressed_for_security_impl(kTestVar, /*is_privileged=*/false));
 
-    unsetTestEnv();
+    hipblaslt_clients::unsetEnv(kTestVar);
 }
 
 // A privileged process with the variable UNSET has nothing to suppress: the
@@ -146,7 +129,7 @@ TEST(SecureEnv, smoke_SuppressesEnvForPrivilegedProcess)
 // diagnostic log does not fire spuriously. A nullptr name is handled safely.
 TEST(SecureEnv, smoke_PrivilegedProcessHandlesUnsetAndNullName)
 {
-    unsetTestEnv();
+    hipblaslt_clients::unsetEnv(kTestVar);
 
     EXPECT_EQ(rocblaslt_secure_getenv_impl(kTestVar, /*is_privileged=*/true), nullptr);
     EXPECT_FALSE(rocblaslt_env_suppressed_for_security_impl(kTestVar, /*is_privileged=*/true));

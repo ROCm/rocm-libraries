@@ -12,8 +12,8 @@
 #include "hipBuffer.hpp"
 #include "hipblaslt_test.hpp"
 #include "host_memory.hpp"
+#include "scoped_env.hpp"
 
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -44,40 +44,14 @@ namespace
             GTEST_SKIP() << "could not pin " #PTR " on this host"; \
     } while(0)
 
-    // Sets HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT, or unsets it for nullptr, for one scope, and then
-    // restores the value the run started with.
-    class ScopedLimit
+    // Sets HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT, or unsets it for nullptr, for one scope.
+    class ScopedLimit : public test_env::ScopedEnv
     {
     public:
         explicit ScopedLimit(const char* value)
+            : ScopedEnv("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", value)
         {
-            if(const char* old = std::getenv(kName))
-                saved = old;
-            set(value);
         }
-        ~ScopedLimit()
-        {
-            set(saved ? saved->c_str() : nullptr);
-        }
-        ScopedLimit(const ScopedLimit&)            = delete;
-        ScopedLimit& operator=(const ScopedLimit&) = delete;
-
-    private:
-        static constexpr const char* kName = "HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT";
-
-        static void set(const char* value)
-        {
-#ifdef _WIN32
-            _putenv_s(kName, value ? value : "");
-#else
-            if(value)
-                setenv(kName, value, 1);
-            else
-                unsetenv(kName);
-#endif
-        }
-
-        std::optional<std::string> saved;
     };
 
     TEST(HostMemory_pre_checkin, large_buffer_released_after_a_test_that_does_not_reuse_it)

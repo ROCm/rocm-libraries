@@ -8,6 +8,8 @@ target_sources(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/allclose.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/argument_model.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cblas_interface.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/client_process.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/client_reporting.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/cotenant.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/multi_gpu.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/datatype_interface.hpp"
