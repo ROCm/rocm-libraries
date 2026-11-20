@@ -188,9 +188,21 @@ def _backend():
 # logical backend only inside those helpers' logical_region(); everywhere else --
 # including the subtile path, which emits pure rocisa via str(module) and never
 # runs the converter -- they still build rocisa.
+#
+# The set covers the clean scalar-ALU opcodes the TDM descriptor/offset block
+# emits directly and via the TensorDataMover setters it calls inside the region
+# (setTensorDim0/1, setPadding, setTensorStride0, ... -> s_and/s_or/s_lshl on top
+# of the s_mov/s_add/s_mul/s_sub/s_cselect/readfirstlane already here). Every one
+# is a concrete-operand write with no deferred Holder / memToken / branch, so it
+# lowers to a self-contained logical leaf. Branch/load/waitcnt opcodes that can
+# appear in the same region (e.g. the general-batched path in _resolveTDMGlobalAddr)
+# are deliberately NOT migrated and stay rocisa; the logical passes treat them as
+# lane-reset boundaries. Opcodes used only by not-yet-migrated siblings (e.g.
+# s_mul_hi in tdmApplyTileKOffset) are added when those methods join a region.
 _MIGRATED = {
-    "SMovB32", "SMovB64", "SLShiftRightB32", "SMulI32",
-    "SAddU32", "SAddCU32", "SSubI32", "SCSelectB32", "VReadfirstlaneB32",
+    "SMovB32", "SMovB64", "SLShiftRightB32", "SLShiftLeftB32",
+    "SMulI32", "SAddU32", "SAddCU32", "SSubI32", "SSubU32",
+    "SAndB32", "SOrB32", "SCSelectB32", "VReadfirstlaneB32",
 }
 _MIGRATE_ALL = False
 
