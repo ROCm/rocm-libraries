@@ -42,6 +42,47 @@ To qualify, a shim-surface test must:
 
 See `hipdnn_shim_conv.cpp` for worked examples.
 
+### Tolerances
+
+Every shim test that checks a floating-point result does it through `CheckWithinTolerance` in
+`hipdnn_shim_helpers.hpp`, which fails when `miopen::rms_range(reference, result)` reaches
+`Tolerance<T>()`. `rms_range` is the root-mean-square difference divided by the largest
+magnitude in the reference, so the threshold is relative to the size of the output. `T` is
+the tensor's element type, so the threshold depends on the data type, not on the operation:
+
+| Type | Threshold |
+|---|---|
+| `float` | `80 * epsilon`, about 9.5e-6 |
+| `half` | `80 * epsilon`, about 7.8e-2 |
+| `bfloat16` | `4 * epsilon`, about 3.1e-2 |
+
+These are the values `ConvFwdSolverTestBase::ThresholdChecks()` uses for MIOpen against the
+CPU reference. They have not been re-derived for MIOpen against hipDNN. The tests do not rely
+on the threshold being generous: inputs are whole numbers small enough that the exact result
+is representable, so the threshold only has to cover rounding the kernel adds. Per operation
+family:
+
+- **Convolution forward, backward data and backward weights, `float`.** Inputs are whole numbers
+  below 17 (below 13 for `dy`), and every sum is at most about 4e4, far below 2^24. A kernel
+  that adds the products directly is therefore exact. Winograd and FFT algorithms round in
+  their transforms, and `EveryFoundAlgorithmMatchesCpuReference` runs every algorithm Find
+  returns, so that test is where the `float` threshold is exercised.
+- **Convolution in `half` and `bfloat16`** (`hipdnn_shim_conv_translation.cpp`). Inputs are
+  whole numbers below 5, so that a backward-weights sum cannot pass `half`'s maximum of 65504.
+  Forward sums reach 2304. `half` holds every whole number to 2048, so only the top of that
+  range is rounded. `bfloat16` holds whole numbers only to 256, so most outputs are rounded
+  once when stored (at most about 2^-8 relative), which the `bfloat16` threshold absorbs.
+- **Fused convolution, bias and ReLU, `half`.** Inputs are whole numbers in [-4, 4] and every
+  product and partial sum is at most 2048, so the expected result is exact in `half`. A
+  disagreement beyond the threshold is a real one, not accumulated rounding.
+- **Grouped, transposed and rank-varied convolution, scaled convolution.** `float` data, whole
+  numbers below 17, checked with the `float` threshold.
+- **`int8` input.** There is no tolerance: the result is integer-valued and compared for
+  equality.
+
+If a new shim test needs a different threshold, add it next to the case that needs it with
+the reason, rather than raising `Tolerance<T>()` for every test.
+
 ## Forwarding parity harness
 
 With `MIOPEN_ENABLE_HIPDNN_WRAPPER=ON`, each `*_forwarding_parity` ctest entry runs
@@ -50,6 +91,35 @@ With `MIOPEN_ENABLE_HIPDNN_WRAPPER=ON`, each `*_forwarding_parity` ctest entry r
 agree test for test. The runs can differ only for entry points listed in
 `kForwardingEntries` in `src/private/routing.cpp`, so a shim test that reaches an entry point
 outside that list runs the same code twice and checks nothing.
+
+"Agree" means the same set of tests with the same outcome in both runs. It does not mean
+the two runs produced bit-identical output. Each test judges its own result against a CPU
+reference within the tolerance above, so parity is "no regression under tolerance". Where
+one run serves a call and the other declines it (or the reverse), the test records that with
+a `parity_*` property, and `known_forwarding_divergences.txt` lists the gaps that are
+accepted for now (see "Known divergences" below).
+
+### Adding an entry point to the forwarding set
+
+A change that adds an entry point to `kForwardingEntries` needs all of these, and reviewers
+should check each one:
+
+1. A hipDNN implementation of the entry point. Until it has one, its generated stub in
+   `wrapper_passthrough.cpp` sends a forwarded call to `hipdnn::ForwardingNotImplemented`, which
+   fails with `miopenStatusNotImplemented` instead of running MIOpen. To add the implementation,
+   move the stub into `wrapper.cpp`, replace its dispatch line with a `MIOPEN_WRAPPER_FORWARD`
+   call to the new function (as the convolution stubs do), and rerun the generator (see
+   "Wrapper sources are generated" below).
+2. A test in the shim surface (suite name contains `HipdnnShim`) that reaches the entry point
+   through the public `miopen.h` API, checks against a CPU or analytically-known reference
+   within tolerance, and checks that the call was actually served. See "hipDNN shim surface"
+   above for what qualifies.
+3. A tolerance note for the new operation family in "Tolerances" above, if its data or
+   accumulation differs from the families listed there.
+4. An update to `DefaultSetIsTheConvolutionFamily` in `wrapper_routing.cpp`. It makes the
+   addition deliberate; it does not check that item 2 exists.
+5. A `known_forwarding_divergences.txt` line for any case where forwarding serves a call that
+   MIOpen declines, or the reverse.
 
 Why it is set up this way:
 
@@ -210,6 +280,34 @@ outcomes into the file, and write down the reason. The list's own rules are cove
 `test_forwarding_parity_scripts`, or by hand with
 `python3 -m unittest test_compare_forwarding_runs` from `script/`; neither needs a build or GPU.
 
+## Wrapper sources are generated
+
+`include/miopen/miopen.h` is the only place a public entry point is written by hand. Four files
+copy its list of entry points, and `script/generate_wrapper_sources.py` writes them:
+`src/private/miopen_private_rename.h`, `src/private/miopen_impl.h`,
+`src/private/wrapper_passthrough.cpp`, and the provider's `MiopenApiPrivateRename.hpp`. They are
+committed, so a change to the public API shows up in the PR diff. Do not edit them by hand.
+
+After you change `miopen.h`, run this from the repository root and commit the files it changes:
+
+```shell
+python3 projects/miopen/script/generate_wrapper_sources.py
+```
+
+If the pinned `clang-format` release is not installed, run
+`pre-commit run --hook-stage manual miopen-wrapper-sources-regenerate --all-files` instead. It
+installs that release for you.
+
+- `generate_wrapper_sources.py --check` (a pre-commit hook, and a step in MIOpen's component CI)
+  fails when a generated file was edited by hand or is out of date.
+- `check_public_abi.py check-headers` covers the parts that are still written by hand: the stubs in
+  `wrapper.cpp`, the wrapper's own functions in `include_wrapper/miopen/hipdnn_forwarding.h`, and
+  the provider's declarations of the three `miopenConvolution*GetWorkSpaceSizeRange` functions.
+- The generator exits with an error naming the line instead of skipping a declaration it cannot
+  read exactly, such as an entry point inside an `#if`, or an unnamed or array parameter.
+- `wrapper.cpp` holds the stubs that do more than pass a call through. The generator skips every
+  entry point defined there, and refuses one whose signature differs from `miopen.h`.
+
 ## Forwarding failure modes
 
 `forwarding_failure_modes` checks what a flag-ON build does when forwarding is turned on but
@@ -238,3 +336,63 @@ as a missing backend.
 The fake is built as a CMake `MODULE` library, not `SHARED`. On Windows a `SHARED` library's DLL
 is written next to `MIOpen.dll`, where hipDNN looks for its backend, so every other test would
 load the fake. A `MODULE` library goes to its own directory on every platform.
+
+## Re-entry from a hipDNN plugin
+
+A hipDNN MIOpen plugin built against the public `libMIOpen.so` calls the wrapper from inside
+hipDNN. The wrapper fails that call with `miopenStatusInternalError` instead of forwarding it
+again (`ScopedHipdnnCall` and `RejectReentrantCall` in `src/private/hipdnn_graph.cpp`, checked in
+`MIOPEN_WRAPPER_FORWARD`); the full account is in RFC 0001 section 4.7. These tests cover it:
+
+- `CPU_WrapperRoutingReentry_NONE.*` in `wrapper_routing.cpp` test the per-thread guard, the
+  failure it records, the trace line, and the build and run steps (`AcquireGraphWith`,
+  `RunGraphWith`) against a stand-in for hipDNN. A re-entry fails the call even when hipDNN
+  succeeded, outranks hipDNN's own failure, and is never cached. Like every `CPU_` test in
+  `miopen_gtest`, they need a visible device.
+- `CPU_HipdnnEraseOutsideLock_NONE.*` test the two helpers that create and release a handle's
+  hipDNN state without holding the map lock. The plugin's handle destructor takes that lock again
+  (when the plugin is built against the public library), which would deadlock `miopenDestroy`.
+- `CPU_WrapperRoutingReentryMacro_NONE.*` run the dispatch macro itself, through a stub named
+  like an entry point. The route is read from `MIOPEN_HIPDNN_FORWARDING` once per process, so the
+  tests skip unless it enables forwarding. The `wrapper_reentry_macro` ctest entry sets it and
+  fails when a test skips: gtest exits 0 for a skip, and a stray `MIOPEN_DISABLE_HIPDNN_FOR`
+  would otherwise leave an entry that checks nothing. It needs a visible device (without one,
+  `miopen_gtest` aborts at start-up) but no compute, and no hipDNN install: with hipDNN missing
+  the route is still hipDNN, so the tests do not skip. It is registered for the build tree and, in
+  a combined build, the packaged test list, with the per-architecture entries
+  `check_wrapper_registration.py` checks.
+  The flag-on workflow does not run it because its runner has no device.
+- `miopen-provider-plugin-reentry-guard` (registered by `dnn-providers/miopen-provider` in a
+  superbuild that has both) runs `script/check_plugin_reentry.py`, which runs
+  `GPU_HipdnnReentry_FP32.RejectedCallThenDestroyReturns` (`hipdnn_reentry.cpp`): one forwarded
+  convolution on a fresh handle, then `miopenDestroy`. The script makes a stand-in plugin (the
+  provider's own sources built against the public library) the only engine through
+  `HIPDNN_PLUGIN_DIR` and sets `MIOPEN_TEST_EXPECT_REENTRY_REJECTION=1`. The test then passes only
+  if the convolution failed with `miopenStatusInternalError`, `miopenGetLastForwardedError` agrees,
+  the error string has the `[hipDNN-forwarded]` prefix and `miopenDestroy` returned within 30 s.
+  The script also requires MIOpen's message in the output. Without the guard the process recurses
+  until `hipblasLtCreate` fails and exits without a message.
+
+  The entry needs a built test binary, a GPU the test supports and a usable hipDNN. It is
+  **skipped** (exit 77, `SKIP_RETURN_CODE`) when the machine lacks any of them: a run that did not
+  pass is repeated with hipDNN's default plugins, and if that control run fails too, the machine
+  cannot run the test. Only a machine that passes the control and still fails with the stand-in has
+  a real failure. A binary without the test is a failure, not a skip. The script drops the caller's
+  shard, filter, deny-list, plugin-directory and log-level settings, which would hide a failure or
+  the message.
+
+`script/check_public_abi.py check-plugin` checks a plugin binary without running it. The provider
+registers it for the plugin it builds (must pass) and for the stand-in (must fail), and the flag-on
+workflow's provider job runs both. It is never given a plugin built elsewhere.
+
+No pull-request lane builds the wrapper, so none of these run automatically. The flag-on workflow
+(`miopen-wrapper-flag-on.yml`, manual dispatch) builds the wrapper and runs the two plugin ABI
+entries in its provider job. The routing and macro entries run where MIOpen's ctest suite runs on
+a machine with a device and the wrapper flag on. The re-entry entry is registered only by the
+provider's CMake, in a build tree of a superbuild that has both, so it is not in the installed test
+list.
+
+A default discrete build's ctest does not register the plain-named re-entry and erase tests (it
+keeps only `Smoke` names unless `MIOPEN_TEST_ALL` is on), like most `CPU_` tests. A combined
+build's quick tier runs them; in a discrete build run `bin/test_wrapper_routing` and
+`bin/test_hipdnn_erase_outside_lock` directly.

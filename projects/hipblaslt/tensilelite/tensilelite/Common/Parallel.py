@@ -32,7 +32,7 @@ import time
 from joblib import Parallel, delayed
 from joblib import cpu_count as lokyCpuCount
 
-from .Utilities import tqdm
+from .Utilities import printWarning, tqdm
 
 # All pools started concurrently by one machine's pytest-xdist workers together use at most this
 # many processes per available CPU; a single process never uses more than one per CPU.
@@ -93,6 +93,61 @@ def poolSizeBudget():
     concurrent workers, at most the available CPUs, at least 1."""
     cpus = availableCPUCount()
     return max(1, min(cpus, (OVERSUBSCRIPTION_FACTOR * cpus) // concurrentWorkerCount()))
+
+
+def shutdownWorkerPool():
+    """Terminate the idle joblib (loky) worker pool, if one exists.
+
+    loky keeps its workers alive between Parallel calls, including any heap
+    pages their allocators retain after temporary objects are freed. Call this
+    after a phase's results have been consumed to release the workers' private
+    memory. The next ParallelMap2 call creates fresh workers. No-op when no
+    reusable executor exists.
+    """
+    try:
+        from joblib.externals.loky import reusable_executor
+    except ImportError:  # pragma: no cover - joblib without loky
+        return
+    # loky has no public call for "end the reusable pool", so this reaches its
+    # module-level executor. Say so if a joblib upgrade moves it, rather than
+    # silently keeping every worker alive.
+    if not hasattr(reusable_executor, "_executor"):
+        printWarning(
+            "loky's reusable_executor has no _executor attribute; the worker "
+            "pool is not recycled between phases"
+        )
+        return
+    executor = reusable_executor._executor
+    if executor is None:
+        return
+    executor.shutdown(wait=True, kill_workers=False)
+
+
+_libc = None
+
+
+def releaseFreedMemory():
+    """Hand freed heap pages back to the OS (glibc malloc_trim).
+
+    Allocators can retain pages after Python and rocisa objects are freed.
+    malloc_trim can return whole free pages throughout glibc's arenas; it
+    cannot release live allocations or free blocks held by other allocators.
+    A no-op where libc has no malloc_trim.
+    """
+    global _libc
+    if _libc is False:
+        return
+    if _libc is None:
+        try:
+            import ctypes
+
+            _libc = ctypes.CDLL("libc.so.6")
+            _libc.malloc_trim.argtypes = [ctypes.c_size_t]
+            _libc.malloc_trim.restype = ctypes.c_int
+        except (OSError, AttributeError):
+            _libc = False
+            return
+    _libc.malloc_trim(0)
 
 
 def CPUThreadCount(enable=True):

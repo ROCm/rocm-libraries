@@ -6,6 +6,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [MultiMarginLoss] Fixed incorrect results and HIP kernel launch failures on Windows caused by
+  packing the `p` argument as a 32-bit `long` instead of the kernel's 64-bit integer.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
   elements per output when the compute type is wider than the input type (for example FP16 `AVG`
   with FP32 compute). The workspace size now follows the compute type: allocate the workspace with the
@@ -85,11 +87,20 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   workspace is reported.
 
 ### Added
+* [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
+  thin public `libMIOpen.so` over the new `libMIOpen_private.so`; set it to `Off` for the previous
+  single-library build. Programs that link a hand-written `-lMIOpen` and call functions not
+  declared in `miopen.h` must also link `-lMIOpen_private`; see `docs/install/build-source.rst`.
+* [hipDNN] Added experimental hipDNN forwarding of `miopenConvolutionForward`,
+  `miopenConvolutionBackwardData`, `miopenConvolutionBackwardWeights` and
+  `miopenConvolutionBiasActivationForward`. It is off by default and not intended for production
+  use; enable it with `MIOPEN_HIPDNN_FORWARDING=1`. See `docs/how-to/use-hipdnn-forwarding.rst`.
+* [hipDNN] Added the experimental `miopenGetLastForwardedError` API, which reports whether the last
+  call failed in hipDNN.
+* [hipDNN] Added `stderr` logging for hipDNN forwarding. See `docs/how-to/debug-log.rst`.
 * [Conv] Added `ConvDirectDepthwiseFwd2D`, a direct 2D depthwise forward convolution solver for
   RDNA3, RDNA3.5 and RDNA4 (`gfx110X`, `gfx115X`, `gfx120X`). It covers fp16, bf16 and fp32 NCHW
   filters up to 7x7 and is selected through Find mode.
-* [DB] Added validated gfx1101 (Navi 32) find-db and perf-db files, so gfx1101 uses tuned
-  solver selection and performance configs instead of untuned defaults.
 * [Conv] Updated the bundled hipconv from v0.4.0 to v0.5.0. This adds `ConvHipConv` kernels for
   gfx950 (including `direct_flex`, dilated layers, conv3d, more filter shapes and layers past
   2 GiB) and wider filter coverage on gfx1250, and fixes wrong backward-weights results from the

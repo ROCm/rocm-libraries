@@ -534,6 +534,14 @@ _CONFIG_OPTIONAL_COMMON = {
     "ONE_SIZE_PER_CONFIG": True,
     "MI_FILTER": 2,
     "EPILOGUES": True,
+    # Give each MI group the GlobalSplitU that MIDesign picks for it (the smallest GSU that
+    # fills the CUs at this size), with or without StreamK. False leaves the gfx1250 generic
+    # profile on its single GlobalSplitU -1, which Tensile resolves at run time.
+    "GSU_PER_MI": False,
+    # Overrides for the DataInit* entries of the emitted GlobalParameters, e.g.
+    # {"DataInitTypeD": 2} to initialise buffers like a hand-written Tensile config.
+    # Keys must be Tensile DataInitType* names or DataInitSeed; values are integers.
+    "DATA_INIT": None,
     "CLUSTER": 0,
     "DUCTILE_VALIDATION_PROFILE": 1,
 }
@@ -553,12 +561,14 @@ ENV_UPDATABLE_KEYS = {
 # again when the rows are grouped into GemmConfigs, as for a workload log.
 LIST_FORWARDED_KEYS = (
     "StreamK",
-    "LIBRARY_TYPE", 
+    "LIBRARY_TYPE",
     "MACROTILE_OPT",
     "MT_DU",
     "ONE_SIZE_PER_CONFIG",
     "MI_FILTER",
-    "EPILOGUES", 
+    "EPILOGUES",
+    "GSU_PER_MI",
+    "DATA_INIT",
     "CLUSTER",
     "DUCTILE_VALIDATION_PROFILE",
 )
@@ -575,12 +585,12 @@ CONFIG_DEFAULTS_BY_ARCH = {
     "gfx942_38cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_20cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
     "gfx942_228cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX942_FAMILY},
-    "gfx1250": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250-strict": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250-strict_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
-    "gfx1250-strict_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250, "StreamK": False},
+    "gfx1250": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250-strict": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250-strict_96cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
+    "gfx1250-strict_192cu": {**_CONFIG_OPTIONAL_COMMON, **_CMS_DEFAULTS_GFX1250},
 }
 
 assert set(CONFIG_DEFAULTS_BY_ARCH) == set(SUPPORTED_ARCH), (
