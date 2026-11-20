@@ -134,7 +134,7 @@ def test_every_header_attribute_has_a_table_entry(enum_name):
     # Sentinels such as ..._MAX aren't bound at all (ALLOWED_MISSING), so every bound value counts.
     missing = [m.name for m in getattr(c, enum_name) if int(m) not in TYPES[enum_name]]
     assert not missing, (
-        f"{enum_name} values with no entry in the attribute type table in src/descriptors.cpp: "
+        f"{enum_name} values with no entry in the attribute type table in csrc/descriptors.cpp: "
         f"{missing}. Add each with its C storage type."
     )
 
