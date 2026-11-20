@@ -38,6 +38,8 @@
 //
 #include "unit_test_extra_common.hpp"
 
+#include <limits>
+
 using namespace extra_ut;
 
 namespace
@@ -61,6 +63,9 @@ namespace
         bool                 long_rows  = false; // one row touching all columns, one empty row
         int64_t              ld_pad     = 3;
         rocsparse_index_base base       = rocsparse_index_base_zero;
+        // Start from a C filled with quiet NaN: only meaningful with beta == 0,
+        // where the library must overwrite C instead of scaling it.
+        bool nan_C = false;
         // BSR only: block dimension and block direction; m and k count blocks.
         int64_t             bd  = 3;
         rocsparse_direction dir = rocsparse_direction_row;
@@ -139,7 +144,16 @@ namespace
         const Dense opB_logical = random_dense<T>(K, c.n, rng);
         // apply_op is an involution, so applying it gives the stored operand.
         const Dense B_stored = apply_op(opB_logical, c.opB);
-        const Dense C0       = random_dense<T>(M, c.n, rng);
+        Dense       C0       = random_dense<T>(M, c.n, rng);
+        if(c.nan_C)
+        {
+            ASSERT_EQ(c.beta, cplx(0.0, 0.0)) << "nan_C needs beta == 0";
+            // Host-side fill of the cplx reference; can switch to
+            // rocsparse_ut::nan_of<T>() once that helper lands.
+            const double qnan = std::numeric_limits<double>::quiet_NaN();
+            for(auto& x : C0.v)
+                x = cplx(qnan, is_complex_t<T>::value ? qnan : 0.0);
+        }
 
         const int64_t ldb = min_ld(B_stored, c.order_B) + c.ld_pad;
         const int64_t ldc = min_ld(C0, c.order_C) + c.ld_pad;
@@ -220,10 +234,12 @@ namespace
             return;
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
 
+        // With beta == 0 the initial C (NaN here) must not take part: close()
+        // rejects a non-finite difference, so any NaN left in C fails below.
         const Dense want = axpby(to_c<T>(alpha.h),
                                  matmul(apply_op(dense_of(A), c.opA), opB_logical),
-                                 to_c<T>(beta.h),
-                                 C0);
+                                 c.nan_C ? cplx(0.0, 0.0) : to_c<T>(beta.h),
+                                 c.nan_C ? Dense(M, c.n) : C0);
         expect_dense_equal<T>(dC.host(), want, c.order_C, ldc, "C");
         // B is an input only.
         expect_dense_equal<T>(dB.host(), B_stored, c.order_B, ldb, "B");
@@ -646,4 +662,35 @@ TEST_F(ExtraSpmm, alpha_zero_beta_one_is_a_no_op)
             if(HasFatalFailure())
                 return;
         }
+}
+
+// ---------------------------------------------------------------------------
+// beta == 0 must overwrite C, not scale it: a C that starts as NaN comes out
+// finite. Row-split CSR for both the n <= 32 (shared) and the n > 32 (8 and 1
+// column) NN kernels, host and device scalars.
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, csr_row_split_beta_zero_overwrites_nan_C)
+{
+    for(int64_t n : {5, 32, 33, 40, 64, 72})
+        for(rocsparse_order oC : all_orders)
+            for(bool device : {false, true})
+            {
+                SpmmCase c;
+                c.alg       = rocsparse_spmm_alg_csr_row_split;
+                c.n         = n;
+                c.m         = 11;
+                c.k         = 9;
+                c.max_nnz   = 5;
+                c.long_rows = true;
+                c.order_C   = oC;
+                c.device    = device;
+                c.beta      = cplx(0.0, 0.0);
+                c.nan_C     = true;
+                run_spmm<float, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+                run_spmm<rocsparse_double_complex, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+            }
 }
