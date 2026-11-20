@@ -219,9 +219,9 @@ Tests:
 
 # The kernels compute D = bf16(alpha * A^T B + beta * C) for any alpha and beta, with C and D in
 # distinct buffers. Only ExactLogic shapes use the skinny kernels; the rest run the generic kernels,
-# and a generic MXFP8 kernel with beta != 0 and N % 16 != 0 over-reads C (AIHPBLAS-5511). The four
-# shapes that run a generic kernel (29584x4x8192, 4x16385x2304, 10240x3x9216 and 16384x2x5120) are
-# quarantined in known_bugs.yaml until that fix lands. The other shapes are ExactLogic shard keys or
+# and a generic MXFP8 kernel with beta != 0 and N % 16 != 0 used to over-read C (AIHPBLAS-5511).
+# Four shapes run a generic kernel (29584x4x8192, 4x16385x2304, 10240x3x9216 and 16384x2x5120) and
+# cover that fix. The other shapes are ExactLogic shard keys or
 # their mirrors and run skinny kernels: the VALU kernel (solution 2) for 51200x1x5120, and MFMA kernels
 # for the rest, covering beta != 0 for solutions 0 (28672x4x4096), 1 (32768x2x14336) and 4 (3x16384x25600).
 - name: matmul_skinny_mxfp8_tn_alpha_beta
@@ -261,9 +261,8 @@ Tests:
   norm_check: 1
   gpu_arch: '950'
 
-# Negative alpha and a beta of 2, over the same shape classes. The same C over-read applies to the
-# shapes that run generic kernels, which are quarantined in known_bugs.yaml: all but 5120x2x8192, a
-# shard key that runs a skinny kernel.
+# Negative alpha and a beta of 2, over the same shape classes. All shapes but 5120x2x8192, a shard
+# key that runs a skinny kernel, run generic kernels and cover the same C over-read fix.
 - name: matmul_skinny_mxfp8_tn_alpha_beta_negative
   category: pre_checkin
   function:
