@@ -588,6 +588,9 @@ def test_resource_gate_per_value(arch, sched, var):
     SGPR-margin warning, no AGPR copy in the key loops except under the AGPR
     reservation lever) for every legal value, head size and problem class."""
     pytest.importorskip("rocke.runtime.comgr")
+    from ._attention_bwd_resources import skip_unless_gate_toolchain
+
+    skip_unless_gate_toolchain(arch)  # before any kernel is compiled
     from ._attention_bwd_resources import (
         GATE_FLAVOR,
         comgr_is_production,

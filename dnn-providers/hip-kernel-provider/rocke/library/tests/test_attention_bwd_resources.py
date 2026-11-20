@@ -543,3 +543,18 @@ def test_gate_is_invalid_with_a_non_production_comgr(monkeypatch):
         assert g.matches_reference_toolchain is ok, comgr
     assert res.comgr_is_production("comgr3.0/rocm7.2")
     assert not res.comgr_is_production("comgr3.0/rocm7.21")
+
+
+def test_gate_toolchain_skip_happens_before_any_build(monkeypatch):
+    """``skip_unless_gate_toolchain`` skips with the gap's reason off the
+    gate's toolchain, skips without llvm-objdump, and passes on it."""
+    monkeypatch.setattr(res, "pin_production_comgr", lambda: None)
+    monkeypatch.setattr(res, "find_objdump", lambda: "/bin/llvm-objdump")
+    monkeypatch.setattr(res, "gate_toolchain_gap", lambda arch: "flavor llvm24")
+    with pytest.raises(pytest.skip.Exception, match="flavor llvm24"):
+        res.skip_unless_gate_toolchain("gfx942")
+    monkeypatch.setattr(res, "gate_toolchain_gap", lambda arch: None)
+    res.skip_unless_gate_toolchain("gfx942")
+    monkeypatch.setattr(res, "find_objdump", lambda: None)
+    with pytest.raises(pytest.skip.Exception, match="llvm-objdump"):
+        res.skip_unless_gate_toolchain("gfx942")
