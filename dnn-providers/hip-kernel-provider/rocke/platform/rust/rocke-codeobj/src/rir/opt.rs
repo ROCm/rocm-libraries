@@ -2976,7 +2976,7 @@ impl<'k> Legalizer<'k> {
             let is_constant = |c: &Vec<bool>, v: ValueId| c.get(v.0 as usize).copied().unwrap_or(false);
             let constant_result = match op.kind {
                 OpKind::IntToPtr => op.str_attr("space") == Some("constant"),
-                OpKind::GlobalPtrAdd => is_constant(&self.constant, op.operands[0]),
+                OpKind::GlobalPtrAdd | OpKind::GlobalPtrOffset => is_constant(&self.constant, op.operands[0]),
                 _ => false,
             };
             if constant_result {

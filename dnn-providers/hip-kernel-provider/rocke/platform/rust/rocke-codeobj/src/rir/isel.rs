@@ -1197,7 +1197,9 @@ impl<'a> Isel<'a> {
             }
             Select => self.select_op(op)?,
             Zext | Sext | Trunc | Bitcast => self.convert_op(op)?,
-            GlobalPtrAdd => {
+            // The 64-bit sum wraps, so `global_ptr_offset`, whose result may
+            // leave the allocation, takes the same add.
+            GlobalPtrAdd | GlobalPtrOffset => {
                 let v = res.unwrap();
                 let ptr = self.d(op.operands[0])?;
                 let off_ty = self.k.ty(op.operands[1]).clone();
@@ -6506,6 +6508,39 @@ mod tests {
         assert_eq!(count(&insts, Opc::VCmp(0x51)), 1);
         assert_eq!(count(&insts, Opc::SCmpLtI32), 1);
         assert_eq!((count(&insts, Opc::SCselectB64), count(&insts, Opc::SCselectB32)), (2, 0));
+    }
+
+    #[test]
+    fn global_ptr_offset_is_a_wrapping_64_bit_add() {
+        let params = "    %X : ptr<f32,global>\n    %Y : ptr<f32,global>\n    %off : i64\n";
+        let c0 = "    %c0 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n";
+        let store = "    memref.global_store_typed ( %Y, %tid, %x ) { align = i:4, elem_type = s:\"f32\" }\n";
+        // The same offset for every lane: the sum is an SGPR pair.
+        let uniform = format!(
+            "{c0}    %p : ptr<f32,global> = tile.global_ptr_offset ( %X, %off )\n    \
+             %x : f32 = memref.global_load_typed ( %p, %c0 ) {{ align = i:4, elem_type = s:\"f32\" }}\n{store}"
+        );
+        // An offset per lane, sign-extended: the sum is a VGPR pair.
+        let per_lane = format!(
+            "{c0}    %neg : i32 = arith.sub ( %c0, %tid )\n    %sx : i64 = arith.sext ( %neg )\n    \
+             %p : ptr<f32,global> = tile.global_ptr_offset ( %X, %sx )\n    \
+             %x : f32 = memref.global_load_typed ( %p, %c0 ) {{ align = i:4, elem_type = s:\"f32\" }}\n{store}"
+        );
+        for target in crate::target::Target::ALL {
+            let compile = |body: &str| -> Vec<MInst> {
+                let c = super::super::compile_for(&kernel(params, body), target).unwrap_or_else(|e| panic!("{target:?}: {e}"));
+                c.func.blocks.into_iter().flat_map(|b| b.insts).collect()
+            };
+            let insts = compile(&uniform);
+            assert_eq!((count(&insts, Opc::SAddU32), count(&insts, Opc::SAddcU32)), (1, 1), "{target:?}");
+            // The high word of the offset feeds the carry add: no zero extension.
+            let high = insts.iter().find(|i| i.op == Opc::SAddcU32).unwrap();
+            assert!(high.uses.iter().all(|u| !matches!(u, Opnd::Imm(_))), "{target:?}: {high:?}");
+            let insts = compile(&per_lane);
+            assert_eq!((count(&insts, Opc::VAddCoU32), count(&insts, Opc::VAddCoCiU32)), (1, 1), "{target:?}");
+            let high = insts.iter().find(|i| i.op == Opc::VAddCoCiU32).unwrap();
+            assert!(high.uses.iter().all(|u| !matches!(u, Opnd::Imm(_))), "{target:?}: {high:?}");
+        }
     }
 
     #[test]

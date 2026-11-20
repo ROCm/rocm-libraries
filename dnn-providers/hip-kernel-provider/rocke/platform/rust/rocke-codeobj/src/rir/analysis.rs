@@ -378,6 +378,7 @@ fn uniform_rule<'a>(kernel: &Kernel, op: &'a Op, written: bool) -> Rule<'a> {
         | OpKind::Trunc
         | OpKind::Bitcast
         | OpKind::GlobalPtrAdd
+        | OpKind::GlobalPtrOffset
         | OpKind::BufferRsrc => Rule::Inputs(&op.operands),
         OpKind::Extract => Rule::Inputs(op.operands.get(..1).unwrap_or(&[])),
         OpKind::GLoad if smem_eligible_statically(kernel, op, written) => Rule::Inputs(&op.operands),

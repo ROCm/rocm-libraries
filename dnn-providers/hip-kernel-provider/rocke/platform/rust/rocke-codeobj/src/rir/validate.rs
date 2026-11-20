@@ -523,6 +523,13 @@ impl Checker<'_> {
                     return Err(mismatch());
                 }
             }
+            // The byte offset is i64 and signed: an i32 is not widened here.
+            GlobalPtrOffset => {
+                arity(1, 2)?;
+                if !matches!(types[0], Type::Ptr(_)) || res != Some(types[0]) || *types[1] != Type::Scalar(Scalar::I64) {
+                    return Err(mismatch());
+                }
+            }
             GlobalLoad | GlobalLoadVec => {
                 arity(1, 2)?;
                 let t = res.expect("one result");
@@ -1473,6 +1480,9 @@ mod tests {
               %d : vec<f32x8> = tile.mma ( %a, %a, %c ) { op_id = s:\"wmma_f32_16x16x16_bf16\" }\n    %e : f32 = vector.extract ( %d ) { index = i:0 }\n".into(), "MALFORMED"),
             ("    %v : vec<f32x4> = arith.constant_vec (  ) { fill = f:1.0 }\n    %a : vec<f32x4> = arith.fabs ( %v )\n    \
               %e : f32 = vector.extract ( %a ) { index = i:0 }\n".into(), "MALFORMED"),
+            // `global_ptr_offset` takes an i64 byte offset only.
+            ("    %p : ptr<f32,global> = tile.global_ptr_offset ( %Y, %tid )\n    \
+              %e : f32 = memref.global_load_typed ( %p, %n ) { align = i:4, elem_type = s:\"f32\" }\n".into(), "MALFORMED"),
         ];
         for (body, kind) in cases {
             let text = kernel(&format!("{body}{store}"));

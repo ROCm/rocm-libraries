@@ -79,7 +79,7 @@ pub fn value_tags(kernel: &Kernel) -> Vec<u16> {
                 Some(p) if p >= 0 && pointer(p as usize) => p as u32,
                 _ => UNTRACED,
             },
-            OpKind::GlobalPtrAdd | OpKind::BufferRsrc => operand0(&base),
+            OpKind::GlobalPtrAdd | OpKind::GlobalPtrOffset | OpKind::BufferRsrc => operand0(&base),
             _ => UNTRACED,
         };
         if let [result] = op.results[..] {
