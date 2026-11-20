@@ -1,7 +1,6 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
-// SPDX-License-Identifier:  MIT
-#ifndef GUARD_MIOPEN_TEST_GTEST_MULTI_PROCESS_CHILD_HPP
-#define GUARD_MIOPEN_TEST_GTEST_MULTI_PROCESS_CHILD_HPP
+// SPDX-License-Identifier: MIT
+#pragma once
 
 #include <optional>
 
@@ -14,7 +13,7 @@ namespace miopen::test {
 //
 // Workers must not go through gtest: InitGoogleTest() evaluates every test-case generator, and
 // several of them initialize the GPU to pick cases. Many workers doing that at once hangs or runs
-// out of memory on small APUs (ALMIOPEN-3129).
+// out of memory on small APUs.
 using ChildProcessMain = std::optional<int> (*)(int argc, char** argv);
 
 inline ChildProcessMain& child_process_main()
@@ -25,5 +24,3 @@ inline ChildProcessMain& child_process_main()
 }
 
 } // namespace miopen::test
-
-#endif // GUARD_MIOPEN_TEST_GTEST_MULTI_PROCESS_CHILD_HPP
