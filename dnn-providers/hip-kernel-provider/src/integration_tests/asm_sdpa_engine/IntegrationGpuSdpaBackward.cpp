@@ -681,10 +681,11 @@ TEST_P(IntegrationGpuSdpaBwdFp16, Correctness)
     //
     // atol = rtol = 1e-2 on both paths; the S_q = 1 caps are above it and change nothing.
     // Measured as for BF16: the largest error uses 27% of the bound, and a halved dQ, dK
-    // or dV exceeds it at least 5.7 times. atol = 5e-3 would reach 53%. On the
-    // round-toward-zero kernels |gpu| averages 0.07% below |ref| and the mean |error| is
-    // 0.07% of the mean |ref|, against no measurable bias and 0.02% on the round-to-nearest
-    // ones, and 0.15% for BF16.
+    // or dV exceeds it at least 5.7 times. atol = 5e-3 would reach 53%. Where a
+    // round-toward-zero kernel writes the output, |gpu| averages 0.07% below |ref| and the
+    // mean |error| is 0.07% of the mean |ref| (0.04% for gfx950 A32 dQ, which its
+    // round-to-nearest dq_convert writes), against no measurable bias and 0.02% where
+    // round-to-nearest kernels write it, and 0.15% for BF16.
     const SdpaBwdTolerance a32{1e-2f, 1e-2f};
     const SdpaBwdTolerance a16{1e-2f, 1e-2f};
 
