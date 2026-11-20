@@ -1613,21 +1613,30 @@ CK_TILE_DEVICE void s_waitcnt_barrier()
 template <index_t lgkmcnt = 0>
 CK_TILE_DEVICE void block_sync_lds()
 {
-    // LDS fence: synchronize LDS across a workgroup barrier. The release/acquire fences make the
-    // barrier visible to the LLVM memory model so the optimizer cannot move LDS accesses across
-    // it; "local" keeps them LDS-only (no VMEM synchronization is added). The explicit
-    // lgkmcnt/dscnt wait is kept as a workaround for ROCm 7.2-10.1 where a release fence's wait
-    // could be elided when it was the first memory op in a loop (loop-carried counts mishandled);
-    // see ac4f0dc9 / ck::block_sync_lds.
-    s_waitcnt_lgkm<lgkmcnt>();
-    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    if constexpr(lgkmcnt != 0)
+    {
+        // Partial or no LDS wait: the caller keeps ds_loads in flight across the barrier. A
+        // workgroup fence would drain them (s_wait_dscnt 0), so use the unfenced barrier.
+        s_waitcnt_barrier<waitcnt_arg::kMaxVmCnt, waitcnt_arg::kMaxExpCnt, lgkmcnt>();
+    }
+    else
+    {
+        // LDS fence: synchronize LDS across a workgroup barrier. The release/acquire fences make
+        // the barrier visible to the LLVM memory model so the optimizer cannot move LDS accesses
+        // across it; "local" keeps them LDS-only (no VMEM synchronization is added). The explicit
+        // lgkmcnt/dscnt wait is kept as a workaround for ROCm 7.2-10.1 where a release fence's
+        // wait could be elided when it was the first memory op in a loop (loop-carried counts
+        // mishandled); see ac4f0dc9 / ck::block_sync_lds.
+        s_waitcnt_lgkm<lgkmcnt>();
+        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
 #if defined(__gfx12__)
-    __builtin_amdgcn_s_barrier_signal(-1);
-    __builtin_amdgcn_s_barrier_wait(-1);
+        __builtin_amdgcn_s_barrier_signal(-1);
+        __builtin_amdgcn_s_barrier_wait(-1);
 #else
-    __builtin_amdgcn_s_barrier();
+        __builtin_amdgcn_s_barrier();
 #endif
-    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+    }
 }
 
 // Pre-asyncmark gfx9 FALLBACK for publishing direct/async global->LDS data across a barrier. The
