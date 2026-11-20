@@ -63,6 +63,8 @@ def test_list_yaml_forwards_epilogue_and_library_keys(tmp_path: Path) -> None:
     assert set(overrides) == set(LIST_FORWARDED_KEYS)
     assert overrides["EPILOGUES"] is False
     assert overrides["LIBRARY_TYPE"] == "OOB"
+    assert overrides["GSU_PER_MI"] is False
+    assert overrides["DATA_INIT"] is None
 
 
 def test_list_yaml_forwards_tuning_shape_keys(tmp_path: Path) -> None:
