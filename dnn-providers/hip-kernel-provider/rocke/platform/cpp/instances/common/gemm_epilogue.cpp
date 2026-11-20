@@ -389,7 +389,7 @@ static void gemm_default_store_masked(gemm_default_store_user_t* u,
     }
 }
 
-/* _store_cell(c_m, c_n, acc_h, i): the per-cell callback for the MFMA scatter. */
+/* _store_cell(c_m, c_n, acc_h, i): the per-cell callback for both scatters. */
 static void gemm_default_store_cell(rocke_ir_builder_t* b,
                                     rocke_value_t* c_m,
                                     rocke_value_t* c_n,
@@ -451,15 +451,13 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         rocke_gemm_fe_declare_and_record(b, fused_epilogue, N);
     }
 
-    /* ---- WMMA (RDNA) accumulator scatter (op.family == "wmma"). ---- */
-    if(op->family != NULL && strcmp(op->family, "wmma") == 0)
+    /* One accumulator -> (row, col) walk per ISA family, shared with the
+     * cshuffle epilogue. Here the base offsets are block + warp and each cell
+     * is one scalar global store. */
     {
-        const rocke_layout_map_t* c_map = rocke_mma_op_dst_layout(op, b);
         rocke_value_t* block_warp_m_off = rocke_b_add(b, block_m_off, warp_m_off);
         rocke_value_t* block_warp_n_off = rocke_b_add(b, block_n_off, warp_n_off);
         gemm_default_store_user_t u;
-        int flat = 0;
-        int mi, ni, i;
 
         u.b = b;
         u.spec = spec;
@@ -474,77 +472,38 @@ void rocke_gemm_emit_epilogue_default(rocke_ir_builder_t* b,
         /* C element size: C is 16-bit even when A/B are 8-bit. */
         u.elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_c);
 
-        for(mi = 0; mi < mfmas_m; ++mi)
+        if(op->family != NULL && strcmp(op->family, "wmma") == 0)
         {
-            rocke_value_t* atom_m
-                = rocke_b_add(b, block_warp_m_off, rocke_b_const_i32(b, mi * t->warp_tile_m));
-            for(ni = 0; ni < mfmas_n; ++ni)
-            {
-                rocke_value_t* acc = accs[flat];
-                rocke_value_t* atom_n;
-                rocke_value_t* acc_h;
-                flat += 1;
-                atom_n
-                    = rocke_b_add(b, block_warp_n_off, rocke_b_const_i32(b, ni * t->warp_tile_n));
-                acc_h = rocke_b_vec_cast_f32_to(b, acc, storage_dtype);
-                for(i = 0; i < c_per_lane; ++i)
-                {
-                    rocke_value_t* row_in_atom = NULL;
-                    rocke_value_t* col_in_atom = NULL;
-                    rocke_value_t* c_m;
-                    rocke_value_t* c_n;
-                    rocke_value_t* c_off;
-                    rocke_value_t* h;
-                    rocke_layout_map_coord(c_map, b, lane, i, &row_in_atom, &col_in_atom);
-                    c_m = rocke_b_add(b, atom_m, row_in_atom);
-                    c_n = rocke_b_add(b, atom_n, col_in_atom);
-                    c_off = rocke_b_add(b, rocke_b_mul(b, c_m, N), c_n);
-                    if(batch_off_c != NULL)
-                        c_off = rocke_b_add(b, batch_off_c, c_off);
-                    h = rocke_b_vec_extract(b, acc_h, i);
-                    if(fused_epilogue != NULL)
-                    {
-                        /* h = fused_epilogue.apply_scalar(b, h, c_m, c_n) */
-                        h = rocke_gemm_fe_apply_scalar(b, fused_epilogue, h, c_m, c_n);
-                    }
-                    gemm_default_store_masked(&u, c_m, c_n, c_off, h);
-                }
-            }
+            /* WMMA (RDNA): (row, col) from the op's destination layout map. */
+            rocke_gemm_emit_wmma_acc_scatter(b,
+                                             spec,
+                                             op,
+                                             lane,
+                                             accs,
+                                             num_accs,
+                                             block_warp_m_off,
+                                             block_warp_n_off,
+                                             c_per_lane,
+                                             storage_dtype,
+                                             gemm_default_store_cell,
+                                             &u);
         }
-        return;
-    }
-
-    /* ---- MFMA (CDNA): shared accumulator -> (row, col) scatter. ---- */
-    {
-        rocke_value_t* block_warp_m_off = rocke_b_add(b, block_m_off, warp_m_off);
-        rocke_value_t* block_warp_n_off = rocke_b_add(b, block_n_off, warp_n_off);
-        gemm_default_store_user_t u;
-
-        u.b = b;
-        u.spec = spec;
-        u.M = M;
-        u.N = N;
-        u.C = C;
-        u.batch_off_c = batch_off_c;
-        u.fused_epilogue = fused_epilogue;
-        u.fused_is_mde = fused_is_mde;
-        u.pad_m = pad_m;
-        u.pad_n = pad_n;
-        /* C element size: C is 16-bit even when A/B are 8-bit. */
-        u.elem_bytes = rocke_gemm_dtype_bytes(spec->data.dtype_c);
-
-        rocke_gemm_emit_mfma_acc_scatter(b,
-                                         spec,
-                                         lane,
-                                         accs,
-                                         num_accs,
-                                         block_warp_m_off,
-                                         block_warp_n_off,
-                                         c_per_lane,
-                                         storage_dtype,
-                                         gemm_default_store_cell,
-                                         &u,
-                                         false);
+        else
+        {
+            /* MFMA (CDNA): the 16x16 / 32x32 output layouts. */
+            rocke_gemm_emit_mfma_acc_scatter(b,
+                                             spec,
+                                             lane,
+                                             accs,
+                                             num_accs,
+                                             block_warp_m_off,
+                                             block_warp_n_off,
+                                             c_per_lane,
+                                             storage_dtype,
+                                             gemm_default_store_cell,
+                                             &u,
+                                             false);
+        }
     }
 }
 

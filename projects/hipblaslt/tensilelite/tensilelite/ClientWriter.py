@@ -638,7 +638,7 @@ def problemSizeParams(problemType, problem, factorDim):
         gatestrides[index.d] = sc[1]
       rv.append(('gate-strides', ",".join(map(str, gatestrides))))
 
-    if problemType.fusedGemmA2A:
+    if problemType.fusedA2A != 'Disabled':
       rv.append(('world', problem.world))
       rv.append(('fused-a2a-extent', problem.a2aExtent))
 
@@ -742,6 +742,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('use-e', problemType.useE)
         param('use-gate-residual', problemType.useGateResidual)
         param('output-amaxD', problemType.outputAmaxD)
+        if problemType.outputPeerD: # only when on, so the config text of other problems is unchanged
+            param('output-peerD', problemType.outputPeerD)
         param('use-scaleAB',   problemType.useScaleAB)
         param('use-scaleCD',   problemType.useScaleCD)
         param('use-scaleAlphaVec',   problemType.useScaleAlphaVec)
@@ -750,7 +752,7 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param('device-scalar-alpha', scaleAlphaSupportsDeviceScalar(problemType.useScaleAlphaVec))
         param('swizzle-tensor-a', problemType.swizzleTensorA)
         param('swizzle-tensor-b', problemType.swizzleTensorB)
-        param('fused-gemm-a2a', problemType.fusedGemmA2A)
+        param('fused-a2a', problemType.fusedA2A)
         if problemType.mxBlockA:
             param('mx-a-block', problemType.mxBlockA)
             param('mx-a-free-block', problemType.mxBlockFreeA)
@@ -882,11 +884,30 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
         param("library-update-comment",   globalParameters["LibraryUpdateComment"])
 
         param("use-user-args",            globalParameters["UseUserArgs"])
+        if globalParameters["SplitDevices"] > 1:
+            param("split-devices",        globalParameters["SplitDevices"])
+            splitDim = globalParameters["SplitDim"]
+            if splitDim not in ("M", "N"):
+                printExit("SplitDim must be M or N, got %r" % (splitDim,))
+            param("split-dim",            splitDim)
+            # Only the operand the split does not cut (B for M, A for N) and D can be shared; the
+            # client applies the same rule (client/include/SplitPlacement.hpp).
+            uncut = "B" if splitDim == "M" else "A"
+            placement = ""
+            for tensor in "ABCD":
+                value = globalParameters["SplitPlacement" + tensor]
+                if value not in ("Replicated", "Shared"):
+                    printExit("SplitPlacement%s must be Replicated or Shared, got %r" % (tensor, value))
+                if value == "Shared" and tensor not in (uncut, "D"):
+                    printExit("SplitPlacement%s cannot be Shared with SplitDim %s: only %s and D can be"
+                              " shared" % (tensor, splitDim, uncut))
+                placement += value[0]
+            param("split-placement",      placement)
         param("rotating-buffer-size",     globalParameters["RotatingBufferSize"])
         param("rotating-buffer-mode",     globalParameters["RotatingMode"])
         param("icache-rotate-copies",     globalParameters["IcacheRotateCopies"])
         param("icache-rotate-size",       globalParameters["IcacheRotateSize"])
-        if problemType.fusedGemmA2A:
+        if problemType.fusedA2A != 'Disabled':
             for world in globalParameters["WorldFilter"]:
                 param("world-filter", world)
         if globalParameters["RocProfCounter"]:
