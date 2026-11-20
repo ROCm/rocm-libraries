@@ -175,6 +175,6 @@ namespace
                 std::exit(status == HIPBLAS_STATUS_NOT_SUPPORTED ? 0 : 1);
             },
             ::testing::ExitedWithCode(0),
-            "no algorithm supports this problem: arch=.* m=64 n=64 k=64 .*type_a=f32_r");
+            "no algorithm supports this problem: arch=.* m=64 n=64 k=64 .*lda=64 .*type_a=f32_r");
     }
 } // namespace
