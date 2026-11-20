@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstring>
 #include <roc/hostnumerics/reshape_permutation.hpp>
+#include <span>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -74,6 +75,47 @@ size_t ReshapePermutation::physicalIndex(size_t naturalIndex) const noexcept {
     return physicalIndex;
 }
 
+namespace {
+// Copies natural elements [begin, end). Consecutive elements of a natural row
+// are consecutive in the padded tensor, so along a row the physical offset
+// advances like a mixed-radix counter whose digits are the reshaped factor
+// coordinates. Divisions are needed only where the range starts or enters a row.
+void copyNaturalRange(const std::byte* input, std::byte* output, size_t elementSize,
+                      const ReshapePermutation& transform, std::span<const size_t> strides,
+                      std::span<size_t> digits, size_t begin, size_t end) noexcept {
+    const Shape& natural = transform.naturalShape();
+    const Shape& padded = transform.paddedShape();
+    const Shape& factors = transform.reshapedShape();
+    const size_t rowLength = natural.rank() == 0 ? 1 : natural[natural.rank() - 1];
+    for (size_t index = begin; index < end;) {
+        size_t remaining = index;
+        size_t paddedIndex = 0;
+        size_t paddedStride = 1;
+        for (size_t axis = natural.rank(); axis-- > 0;) {
+            paddedIndex += remaining % natural[axis] * paddedStride;
+            remaining /= natural[axis];
+            paddedStride *= padded[axis];
+        }
+        size_t offset = 0;
+        for (size_t axis = factors.rank(); axis-- > 0;) {
+            digits[axis] = paddedIndex % factors[axis];
+            paddedIndex /= factors[axis];
+            offset += digits[axis] * strides[axis];
+        }
+        const size_t rowEnd = std::min(end, index - index % rowLength + rowLength);
+        for (; index < rowEnd; ++index) {
+            std::memcpy(output + offset * elementSize, input + index * elementSize, elementSize);
+            for (size_t axis = factors.rank(); axis-- > 0;) {
+                offset += strides[axis];
+                if (++digits[axis] < factors[axis]) break;
+                offset -= factors[axis] * strides[axis];
+                digits[axis] = 0;
+            }
+        }
+    }
+}
+}  // namespace
+
 void detail::copyReshapePermutationBytes(const std::byte* input, std::byte* output,
                                          size_t elementSize, const ReshapePermutation& transform) {
     const size_t count = transform.naturalElementCount();
@@ -84,11 +126,22 @@ void detail::copyReshapePermutationBytes(const std::byte* input, std::byte* outp
         std::memcpy(output, input, count * elementSize);
         return;
     }
+    const Shape& factors = transform.reshapedShape();
+    const Layout physicalLayout = Layout::contiguous(factors, transform.order());
+    std::vector<size_t> strides(factors.rank());
+    for (size_t axis = 0; axis < strides.size(); ++axis)
+        strides[axis] = static_cast<size_t>(physicalLayout.stride(axis));
+    const size_t chunkCount = parallelChunkCount(count);
+    // Each chunk updates its counter for every element, so keep the counters of
+    // different chunks at least one 64-byte cache line apart.
+    constexpr size_t wordsPerCacheLine = 64 / sizeof(size_t);
+    const size_t digitStride = factors.rank() + wordsPerCacheLine;
+    std::vector<size_t> digits(chunkCount * digitStride);
     // Natural elements have distinct destinations; padding keeps its initial value.
-    parallelForChunks(count, count, [&](size_t begin, size_t end) noexcept {
-        for (size_t index = begin; index < end; ++index)
-            std::memcpy(output + transform.physicalIndex(index) * elementSize,
-                        input + index * elementSize, elementSize);
+    parallelForChunks(count, chunkCount, [&](size_t chunk, size_t begin, size_t end) noexcept {
+        copyNaturalRange(input, output, elementSize, transform, strides,
+                         std::span(digits).subspan(chunk * digitStride, factors.rank()), begin,
+                         end);
     });
 }
 

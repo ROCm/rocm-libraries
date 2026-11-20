@@ -156,6 +156,19 @@ TEST(ReshapePermutationTest, LargePaddedTileCopyCoversEveryChunk) {
     EXPECT_EQ(output, expected);
 }
 
+// Factors of 4 do not align with padded rows of 6: padded index p maps to
+// offset 6 * (p % 4) + p / 4, so offsets jump within rows and rows begin
+// partway through a factor.
+TEST(ReshapePermutationTest, CopiesFactorsThatSpanPaddedRows) {
+    const ReshapePermutation transform({3, 5}, {4, 6}, {6, 4}, Permutation{1, 0});
+    std::vector<int> input(15);
+    std::iota(input.begin(), input.end(), 0);
+    std::vector<int> output(transform.physicalElementCount(), -1);
+    copyWithReshapePermutation<int>(input, output, transform);
+    EXPECT_EQ(output, (std::vector<int>{0, 4, 7, 10, 14, -1, 1, -1, 8,  11, -1, -1,
+                                        2, 5, 9, 12, -1, -1, 3, 6,  -1, 13, -1, -1}));
+}
+
 TEST(ReshapePermutationTest, CopyPreservesFloatingPointBits) {
     const std::array<uint32_t, 4> bits{0x7fc01234u, 0x80000000u, 0x7f800000u, 0xff800000u};
     const auto input = std::bit_cast<std::array<float, 4>>(bits);
