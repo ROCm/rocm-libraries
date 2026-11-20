@@ -6,6 +6,19 @@ This file records the decisions behind the bindings that a maintainer would othe
 
 The bindings are a development and testing tool for hipBLASLt and its consumers, not a ROCm deliverable. They're opt-in and source-build only: built from a rocm-libraries checkout against an installed ROCm, and installed into the active Python environment. hipBLASLt's CMake never adds or installs them, and TheRock never builds them, so nothing about hipBLASLt's own build, install rules or packages depends on them.
 
+## HIP Python
+
+AMD's [HIP Python](https://github.com/ROCm/hip-python) (`rocm-bindings-libraries` on PyPI) includes `rocm.bindings.hipblaslt`, Cython bindings generated from `hipblaslt.h`. These bindings are separate from it, and a program can use both.
+
+- **They follow the checkout.** HIP Python is generated from a released header, once per ROCm release, so it trails hipBLASLt's development branch. These build against the checkout's headers, so the PR that changes hipBLASLt's API can update and test them in the same change.
+- **They reach the C++ API.** HIP Python binds the C header only. The solution-index calls in `hipblaslt-ext.hpp` are C++, and they're much of what a tuning or testing tool needs from Python.
+- **They check before they call.** HIP Python maps C calls directly, so a wrong scale type, a short workspace or an undersized buffer reaches hipBLASLt as is, and several such mistakes give a wrong answer, corrupt memory or crash. These bindings validate those inputs and raise instead.
+- **They build on Windows.** HIP Python publishes Linux wheels only.
+
+## Name
+
+The import name is `hipblaslt` and the distribution reports hipBLASLt's own version (see Version). The package is named for what it wraps. It's never published (see Scope), so it doesn't claim a name on PyPI, and HIP Python's module is `rocm.bindings.hipblaslt`, so the two don't collide. If ROCm settles on a common naming scheme for its libraries' bindings, the package follows it.
+
 ## Layout
 
 `src/hipblaslt/` is the Python package and `csrc/` is the nanobind extension, with the `_build_info.py` template CMake fills in. The `src/` layout, which origami's bindings also use, means a Python started in this directory imports the installed package rather than the source tree, which has no `_core`, and nothing outside the package ends up in the wheel.
