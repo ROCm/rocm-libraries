@@ -40,6 +40,7 @@
 #include "rocsparse_coo2dense_aos.hpp"
 #include "rocsparse_csxsldu.hpp"
 #include "rocsparse_ell2dense.hpp"
+#include "rocsparse_floating_data_t.hpp"
 #include "rocsparse_ggthr.hpp"
 
 #include <algorithm>
@@ -374,18 +375,12 @@ namespace
                                                         0x3f80});
     }
 
-    template <typename T>
-    using real_part_t = std::conditional_t<
-        std::is_same_v<T, rocsparse_float_complex>,
-        float,
-        std::conditional_t<std::is_same_v<T, rocsparse_double_complex>, double, T>>;
-
     // The exact widening of s into D, computed on the host. A complex D gets an imaginary
     // part of +0.
     template <typename D, typename S>
     D widen(const S& s)
     {
-        using R = real_part_t<D>;
+        using R = rocsparse::floating_data_t<D>;
         if constexpr(is_complex_v<D>)
             return D(static_cast<R>(s), R(0));
         else
