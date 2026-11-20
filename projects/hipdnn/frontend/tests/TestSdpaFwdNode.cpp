@@ -398,6 +398,146 @@ TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskRankTooLarge)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
+// ATTN_MASK leading dims, right-aligned to the score [B, H_q, S_q, S_kv], broadcast: batch is
+// B or 1, heads is H_q or 1.
+namespace
+{
+Error preValidateWithAttnMask(const std::vector<int64_t>& maskDims)
+{
+    auto attrs = makeMinimalAttrs(
+        makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+    auto mask = std::make_shared<TensorAttributes>();
+    mask->set_dim(maskDims);
+    attrs.set_bias(mask);
+
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    return node.pre_validate_node();
+}
+} // namespace
+
+TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskBatchDimMismatch)
+{
+    auto err = preValidateWithAttnMask({3, 8, 16, 32});
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("batch"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsAttnMaskHeadsDimMismatch)
+{
+    for(const auto& maskDims :
+        {std::vector<int64_t>{2, 4, 16, 32}, std::vector<int64_t>{4, 16, 32}})
+    {
+        auto err = preValidateWithAttnMask(maskDims);
+        EXPECT_EQ(err.code, error_code_t::INVALID_VALUE) << err.err_msg;
+        EXPECT_NE(err.err_msg.find("num_heads"), std::string::npos) << err.err_msg;
+    }
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsAttnMaskBroadcastLeadingDims)
+{
+    for(const auto& maskDims : {std::vector<int64_t>{1, 1, 16, 32},
+                                std::vector<int64_t>{2, 1, 16, 32},
+                                std::vector<int64_t>{1, 8, 16, 32},
+                                std::vector<int64_t>{8, 16, 32},
+                                std::vector<int64_t>{1, 16, 32},
+                                std::vector<int64_t>{16, 32}})
+    {
+        auto err = preValidateWithAttnMask(maskDims);
+        EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    }
+}
+
+// A positive dropout_probability needs the seed and offset tensors its Philox mask is drawn
+// from; probability 0 and a custom dropout mask with its scale need neither. A custom mask
+// with any dropout_probability is rejected.
+namespace
+{
+SdpaAttributes makeDropoutAttrs()
+{
+    return makeMinimalAttrs(
+        makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+}
+
+Error preValidateDropout(SdpaAttributes attrs)
+{
+    const GraphAttributes graphAttrs;
+    const SdpaFwdNode node(std::move(attrs), graphAttrs);
+    return node.pre_validate_node();
+}
+} // namespace
+
+TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutSeedAndOffset)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout_probability(0.1f);
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("seed and offset"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutOffset)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout_probability(0.1f);
+    attrs.set_seed(makeTensor4D(1, 1, 1, 1));
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+}
+
+// Fails if the `!attributes.get_seed()` term of the dropout rule is removed.
+TEST(TestSdpaFwdNode, PreValidateFailsDropoutWithoutSeed)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout_probability(0.1f);
+    attrs.set_offset(makeTensor4D(1, 1, 1, 1));
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("seed and offset"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsDropoutWithSeedAndOffset)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout(0.1f, makeTensor4D(1, 1, 1, 1), makeTensor4D(1, 1, 1, 1));
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsZeroDropoutWithoutSeed)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout_probability(0.0f);
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsCustomDropoutMaskWithoutSeed)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout(makeTensor4D(2, 8, 16, 32), makeTensor4D(1, 1, 1, 1));
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsDropoutProbabilityWithCustomMask)
+{
+    auto attrs = makeDropoutAttrs();
+    attrs.set_dropout_probability(0.1f);
+    attrs.set_dropout(makeTensor4D(2, 8, 16, 32), makeTensor4D(1, 1, 1, 1));
+
+    auto err = preValidateDropout(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("custom dropout mask and dropout_probability"), std::string::npos)
+        << err.err_msg;
+}
+
 TEST(TestSdpaFwdNode, PreValidateFailsAttnScaleTensorAndValueBothSet)
 {
     auto q = makeTensor4D(2, 8, 16, 64);
@@ -1184,4 +1324,64 @@ TEST(TestSdpaFwdNode, PreValidateFailsCuSeqLenNotInt32)
     auto err = preValidate(std::move(attrs));
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
     EXPECT_NE(err.err_msg.find("cu_seq_len_kv must have INT32"), std::string::npos) << err.err_msg;
+}
+
+// padding_mask needs a Q-side length (seq_len_q, cu_seq_len_q or a ragged Q's offsets) and a
+// KV-side length (seq_len_kv or cu_seq_len_kv), as cuDNN does.
+namespace
+{
+SdpaAttributes makePaddingMaskAttrs()
+{
+    auto attrs = makeMinimalAttrs(
+        makeTensor4D(2, 8, 16, 64), makeTensor4D(2, 8, 32, 64), makeTensor4D(2, 8, 32, 64));
+    attrs.set_padding_mask(true);
+    return attrs;
+}
+} // namespace
+
+TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithoutSeqLens)
+{
+    auto err = preValidate(makePaddingMaskAttrs());
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithOnlySeqLenQ)
+{
+    auto attrs = makePaddingMaskAttrs();
+    attrs.set_seq_len_q(makeSeqLen(2));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
+}
+
+// A KV-side length without a Q-side one, with a non-ragged Q: fails if `!hasQLengths ||` is
+// removed from the padding_mask rule. (cu_seq_len_kv alone is rejected earlier, by the
+// cu_seq_len rule that a Q-side and a KV-side length are provided together.)
+TEST(TestSdpaFwdNode, PreValidateFailsPaddingMaskWithOnlySeqLenKv)
+{
+    auto attrs = makePaddingMaskAttrs();
+    attrs.set_seq_len_kv(makeSeqLen(2));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::ATTRIBUTE_NOT_SET) << err.err_msg;
+    EXPECT_NE(err.err_msg.find("padding_mask requires"), std::string::npos) << err.err_msg;
+}
+
+TEST(TestSdpaFwdNode, PreValidateSucceedsPaddingMaskWithSeqLens)
+{
+    auto attrs = makePaddingMaskAttrs();
+    attrs.set_seq_len_q(makeSeqLen(2));
+    attrs.set_seq_len_kv(makeSeqLen(2));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+}
+
+// SdpaSemanticsRegister SEM-028: a ragged Q's offsets give the query lengths.
+TEST(TestSdpaFwdNode, PreValidateSucceedsPaddingMaskRaggedQWithSeqLenKv)
+{
+    auto attrs = makePaddingMaskAttrs();
+    attrs.get_q()->set_ragged_offset(makeCuSeqLen({3, 1, 1, 1}));
+    attrs.set_seq_len_kv(makeSeqLen(2));
+    auto err = preValidate(std::move(attrs));
+    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
 }

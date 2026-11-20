@@ -77,7 +77,7 @@ export HIPDNN_PLUGIN_DIR=/opt/rocm/lib/hipdnn/plugins/engines
 **Notes:**
 - Engine plugins must implement the Engine Plugin API (see `EnginePluginApi.h`)
 - Plugin libraries are typically named `libhipdnn_provider_*.so` (Linux) or `hipdnn_provider_*.dll` (Windows)
-- Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) will be loaded
+- Only plugins whose API version major matches `HIPDNN_ENGINE_API_VERSION_MAJOR` (declared in `hipdnn_plugin_sdk/engine_api_version.h`) are loaded. A transitional exception also loads engine plugins that report major 0 (an info message is logged); it is removed at the next engine API major version.
 - See the [Plugin Development Guide](PluginDevelopment.md) for details on creating engine plugins
 - On Linux, ignored in a secure execution environment (a set-user-ID or set-group-ID process, or one that gained capabilities across `execve`), since it replaces the default search set and every shared library in the named directory is then loaded. Windows has no equivalent execution mode, so this variable is always honored there.
 
@@ -161,6 +161,8 @@ Overrides the heuristic policy order for the outer loop. Read by every `EngineHe
 | `<list>`   | Comma-separated tokens consulted in the order written. Each token is either a policy name (hashed via `policyNameToId`) or a raw decimal int64 policy ID. Whitespace around tokens is trimmed; empty tokens are skipped. |
 
 This variable has the **highest priority**: it overrides both the descriptor attribute and the built-in default.
+
+The list **replaces** the defaults: nothing is appended, so `SelectionHeuristic::StaticOrdering` runs only if it is listed. When the graph has applicable engines and no listed policy succeeds (each one declines, throws or is not loaded), `finalize()` fails with `HIPDNN_STATUS_INTERNAL_ERROR` ("No heuristic policy succeeded"). A value with no usable token (for example `,`) is an empty list and fails the same way. The default list is used only when the variable is unset or empty and the descriptor attribute is not set.
 
 **Example:**
 ```bash

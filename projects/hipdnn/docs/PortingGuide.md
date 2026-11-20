@@ -110,7 +110,7 @@ Statistics are computed per-channel over the batch and spatial dimensions.
 | Scale, Bias | `(1, ...)` | Batch dim = 1, remaining dims match input feature dims |
 | Mean, Inv Variance | Stats dims | Batch dims from input, normalized dims = 1 |
 
-Normalization is performed over the feature dimensions (all dims where scale > 1).
+Normalization covers the dims of x from the first scale dim that is not 1 through the last dim; a scale that omits the batch dims covers as many trailing dims of x as it has. For example, x `(N, C, H, W)` with scale `(1, C, H, W)` or `(C, H, W)` normalizes the last three dims.
 
 #### Matrix Multiplication
 
@@ -118,7 +118,7 @@ Normalization is performed over the feature dimensions (all dims where scale > 1
 |--------|-------|-------------|
 | A | `(...batch, M, K)` | Leading batch dims, last two are matrix dims |
 | B | `(...batch, K, N)` | K must match A's last dim |
-| C (output) | `(...batch, M, N)` | Batch dims are broadcast |
+| C (output) | `(...batch, M, N)` | Same rank as A; each batch dim is the larger of A's and B's; M from A, N from B |
 
 Batch dimensions support broadcasting (dims must be equal or divisible).
 

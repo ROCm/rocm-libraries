@@ -32,6 +32,7 @@
 #include <filesystem>
 #include <functional>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -1789,6 +1790,183 @@ TEST_F(TestGraph, ValidateUnsetTensorDataTypeSetGraphDataTypes)
     auto validationResult = graph.validate();
 
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+// Builds y = x + b, where x carries @p raggedOffset as its ragged-offset tensor.
+// x and b leave their data types unset so they take the graph's I/O type.
+// Returns b.
+static std::shared_ptr<TensorAttributes>
+    createRaggedPointwiseGraph(Graph& graph, const std::shared_ptr<TensorAttributes>& raggedOffset)
+{
+    graph.set_name("RaggedGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1).set_name("X").set_dim({4, 4}).set_stride({4, 1});
+    x->set_ragged_offset(raggedOffset);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_uid(2).set_name("B").set_dim({4, 4}).set_stride({4, 1});
+
+    PointwiseAttributes attributes;
+    attributes.set_name("Add");
+    attributes.set_mode(PointwiseMode::ADD);
+
+    auto y = graph.pointwise(x, b, attributes);
+    y->set_uid(3).set_name("Y").set_output(true);
+    return b;
+}
+
+TEST_F(TestGraph, ValidateRejectsRaggedAuxWithDuplicateUid)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7)
+        .set_name("RaggedOffset")
+        .set_data_type(DataType::INT32)
+        .set_dim({5})
+        .set_stride({1});
+
+    Graph graph;
+    auto b = createRaggedPointwiseGraph(graph, raggedOffset);
+    b->set_uid(7);
+
+    const auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE) << result.get_message();
+    EXPECT_NE(result.get_message().find("Duplicate tensor UIDs"), std::string::npos)
+        << result.get_message();
+
+    b->set_uid(8);
+    const auto distinct = graph.validate();
+    EXPECT_TRUE(distinct.is_good()) << distinct.get_message();
+}
+
+// The ragged-offset tensor is an offset table: it does not take the graph's
+// (floating-point) I/O type, so an unset data type is an error.
+TEST_F(TestGraph, ValidateRejectsRaggedAuxWithoutDataType)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7).set_name("RaggedOffset").set_dim({5}).set_stride({1});
+
+    Graph graph;
+    createRaggedPointwiseGraph(graph, raggedOffset);
+
+    const auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
+    EXPECT_NE(result.get_message().find("RaggedOffset"), std::string::npos) << result.get_message();
+    EXPECT_EQ(raggedOffset->get_data_type(), DataType::NOT_SET);
+
+    raggedOffset->set_data_type(DataType::INT32);
+    const auto withDataType = graph.validate();
+    EXPECT_TRUE(withDataType.is_good()) << withDataType.get_message();
+}
+
+TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxDims)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7).set_name("RaggedOffset").set_data_type(DataType::INT32);
+
+    Graph graph;
+    createRaggedPointwiseGraph(graph, raggedOffset);
+
+    const auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
+    EXPECT_NE(result.get_message().find("RaggedOffset"), std::string::npos) << result.get_message();
+}
+
+TEST_F(TestGraph, ValidateAcceptsInt64RaggedAux)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7)
+        .set_name("RaggedOffset")
+        .set_data_type(DataType::INT64)
+        .set_dim({5})
+        .set_stride({1});
+
+    Graph graph;
+    createRaggedPointwiseGraph(graph, raggedOffset);
+
+    const auto result = graph.validate();
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+}
+
+// Every gathered tensor's ragged-offset tensor is validated, not only those of graph inputs.
+TEST_F(TestGraph, ValidateRejectsInvalidRaggedAuxOnNodeOutput)
+{
+    auto raggedOffset = std::make_shared<TensorAttributes>();
+    raggedOffset->set_uid(7).set_name("RaggedOffset").set_dim({5}).set_stride({1});
+
+    Graph graph;
+    createRaggedPointwiseGraph(graph, nullptr);
+    const auto tensorsByName = graph.getTensorsByName();
+    ASSERT_EQ(tensorsByName.count("Y"), 1u);
+    tensorsByName.at("Y")->set_ragged_offset(raggedOffset);
+
+    const auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
+    EXPECT_NE(result.get_message().find("RaggedOffset"), std::string::npos) << result.get_message();
+
+    raggedOffset->set_data_type(DataType::INT32);
+    const auto withDataType = graph.validate();
+    EXPECT_TRUE(withDataType.is_good()) << withDataType.get_message();
+}
+
+// A batchnorm peer statistic's ragged-offset tensor is gathered like any other node
+// tensor's, so it takes part in the duplicate-UID check. A peer statistic is not a graph
+// input, and its ragged-offset tensor is validated all the same.
+TEST_F(TestGraph, ValidateCoversPeerStatRaggedAux)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_name("InputX")
+        .set_dim({1, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2).set_name("ScaleTensor").set_dim({64}).set_stride({1});
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3).set_name("BiasTensor").set_dim({64}).set_stride({1});
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4).set_name("Epsilon");
+
+    auto peerStatOffset = std::make_shared<TensorAttributes>();
+    peerStatOffset->set_name("PeerStatOffset").set_dim({5}).set_stride({1});
+
+    auto peerStat = std::make_shared<TensorAttributes>();
+    peerStat->set_uid(20)
+        .set_name("PeerStat")
+        .set_dim({1, 64, 1, 1})
+        .set_stride({64, 1, 1, 1})
+        .set_data_type(DataType::FLOAT);
+    peerStat->set_ragged_offset(peerStatOffset);
+
+    BatchnormAttributes bnAttrs;
+    bnAttrs.set_name("BN");
+    bnAttrs.set_epsilon(epsilon);
+    bnAttrs.set_peer_stats({peerStat});
+    graph.batchnorm(x, scale, bias, bnAttrs);
+
+    peerStatOffset->set_uid(3);
+    const auto duplicate = graph.validate();
+    EXPECT_EQ(duplicate.code, ErrorCode::INVALID_VALUE) << duplicate.get_message();
+    EXPECT_NE(duplicate.get_message().find("Duplicate tensor UIDs found in the graph: 3"),
+              std::string::npos)
+        << duplicate.get_message();
+
+    peerStatOffset->set_uid(22);
+    const auto withoutDataType = graph.validate();
+    EXPECT_EQ(withoutDataType.code, ErrorCode::ATTRIBUTE_NOT_SET) << withoutDataType.get_message();
+    EXPECT_NE(withoutDataType.get_message().find("PeerStatOffset"), std::string::npos)
+        << withoutDataType.get_message();
 }
 
 TEST_F(TestGraph, SetAndGetAttributes)
@@ -4478,6 +4656,185 @@ TEST_F(TestGraph, BuildOperationGraphPopulatesOnlyMissingUids)
     EXPECT_NE(biasUid, 500);
 }
 
+// Builds a chain of RELU pointwise nodes X -> T1 -> ... -> T<nodeCount>. Every tensor is
+// named and none has a UID; only the last output is a real graph output.
+static void createUnsetUidPointwiseChain(Graph& graph, int nodeCount)
+{
+    graph.set_name("PointwiseChain")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_name("X")
+        .set_dim({1, 2, 3, 4})
+        .set_stride({24, 12, 4, 1})
+        .set_data_type(DataType::FLOAT);
+
+    for(int node = 1; node <= nodeCount; ++node)
+    {
+        PointwiseAttributes attributes;
+        attributes.set_name("Relu" + std::to_string(node));
+        attributes.set_mode(PointwiseMode::RELU_FWD);
+        tensor = graph.pointwise(tensor, attributes);
+        tensor->set_name("T" + std::to_string(node));
+    }
+    tensor->set_output(true);
+}
+
+static std::map<std::string, int64_t> tensorUidsByName(const Graph& graph)
+{
+    std::map<std::string, int64_t> uids;
+    for(const auto& [name, tensor] : graph.getTensorsByName())
+    {
+        uids.emplace(name, tensor->get_uid());
+    }
+    return uids;
+}
+
+TEST_F(TestGraph, AssignedTensorUidsFollowNodeOrder)
+{
+    Graph graph;
+    createUnsetUidPointwiseChain(graph, 8);
+
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    // Nodes in the order they were added; per node its inputs, then its outputs.
+    const std::map<std::string, int64_t> expected = {{"X", 0},
+                                                     {"T1", 1},
+                                                     {"T2", 2},
+                                                     {"T3", 3},
+                                                     {"T4", 4},
+                                                     {"T5", 5},
+                                                     {"T6", 6},
+                                                     {"T7", 7},
+                                                     {"T8", 8}};
+    EXPECT_EQ(tensorUidsByName(graph), expected);
+}
+
+// Builds BUILD_COUNT graphs with @p createGraph, moving each one's tensors to other heap
+// addresses, and returns the name -> UID map of each build.
+static std::vector<std::map<std::string, int64_t>>
+    buildUidsAcrossHeapLayouts(hipdnnHandle_t handle,
+                               const std::function<void(Graph&)>& createGraph)
+{
+    constexpr int BUILD_COUNT = 20;
+
+    std::vector<std::unique_ptr<Graph>> graphs;
+    std::vector<std::vector<char>> heapNoise;
+    std::vector<std::map<std::string, int64_t>> uidsPerBuild;
+
+    for(int build = 0; build < BUILD_COUNT; ++build)
+    {
+        // Move the next graph's tensors to other heap addresses: a different number of
+        // live blocks of varying size before each build, every other new one freed again
+        // to leave holes. Earlier graphs stay alive, so their memory is not reused either.
+        const size_t firstNewBlock = heapNoise.size();
+        for(int block = 0; block <= build; ++block)
+        {
+            heapNoise.emplace_back(static_cast<size_t>(64 * (block % 8 + 1)));
+        }
+        for(size_t block = firstNewBlock + 1; block < heapNoise.size(); block += 2)
+        {
+            heapNoise[block] = std::vector<char>();
+        }
+
+        graphs.push_back(std::make_unique<Graph>());
+        createGraph(*graphs.back());
+
+        auto buildResult = graphs.back()->build_operation_graph(handle);
+        EXPECT_TRUE(buildResult.is_good()) << buildResult.get_message();
+        uidsPerBuild.push_back(tensorUidsByName(*graphs.back()));
+    }
+
+    return uidsPerBuild;
+}
+
+TEST_F(TestGraph, IdenticalGraphsGetIdenticalUids)
+{
+    const auto uidsPerBuild = buildUidsAcrossHeapLayouts(
+        _handle, [](Graph& graph) { createUnsetUidPointwiseChain(graph, 8); });
+
+    for(size_t build = 1; build < uidsPerBuild.size(); ++build)
+    {
+        EXPECT_EQ(uidsPerBuild[build], uidsPerBuild[0]) << "build " << build;
+    }
+}
+
+// Builds T = X + B followed by a batchnorm of T with outputs Y, Mean and InvVariance.
+// Every tensor is named and none has a UID.
+static void createUnsetUidMultiOperandGraph(Graph& graph)
+{
+    graph.set_name("MultiOperandGraph")
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_io_data_type(DataType::FLOAT);
+
+    const std::vector<int64_t> dims = {1, 2, 3, 4};
+    const auto strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const auto derivedStrides = hipdnn_data_sdk::utilities::generateStrides(derivedDims);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_name("X").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    auto b = std::make_shared<TensorAttributes>();
+    b->set_name("B").set_dim(dims).set_stride(strides).set_data_type(DataType::FLOAT);
+
+    PointwiseAttributes addAttributes;
+    addAttributes.set_name("Add");
+    addAttributes.set_mode(PointwiseMode::ADD);
+    auto t = graph.pointwise(x, b, addAttributes);
+    t->set_name("T");
+
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_name("Scale").set_dim(derivedDims).set_stride(derivedStrides);
+
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_name("Bias").set_dim(derivedDims).set_stride(derivedStrides);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_name("Epsilon");
+
+    BatchnormAttributes bnAttributes;
+    bnAttributes.set_name("BN");
+    bnAttributes.set_epsilon(epsilon);
+    auto [y, mean, invVariance, nextRunningMean, nextRunningVariance]
+        = graph.batchnorm(t, scale, bias, bnAttributes);
+    y->set_name("Y").set_output(true);
+    mean->set_name("Mean");
+    invVariance->set_name("InvVariance");
+}
+
+// Nodes with several inputs and outputs insert them in the iteration order of their
+// attributes' maps, which must not depend on where the tensors live.
+TEST_F(TestGraph, IdenticalMultiOperandGraphsGetIdenticalUids)
+{
+    const auto uidsPerBuild = buildUidsAcrossHeapLayouts(_handle, createUnsetUidMultiOperandGraph);
+    ASSERT_FALSE(uidsPerBuild.empty());
+
+    // Per node, its inputs get UIDs before its outputs.
+    const auto& uids = uidsPerBuild[0];
+    ASSERT_EQ(uids.size(), 9u);
+    for(const char* input : {"X", "B"})
+    {
+        EXPECT_LT(uids.at(input), uids.at("T")) << input;
+    }
+    for(const char* input : {"T", "Scale", "Bias", "Epsilon"})
+    {
+        for(const char* output : {"Y", "Mean", "InvVariance"})
+        {
+            EXPECT_LT(uids.at(input), uids.at(output)) << input << " < " << output;
+        }
+    }
+
+    for(size_t build = 1; build < uidsPerBuild.size(); ++build)
+    {
+        EXPECT_EQ(uidsPerBuild[build], uidsPerBuild[0]) << "build " << build;
+    }
+}
+
 TEST_F(TestGraph, GetTensorsByUidReturnsMap)
 {
     Graph graph;
@@ -7069,6 +7426,278 @@ TEST_F(TestGraph, ValidateFailsNegativeStrideOnRaggedOffset)
                 HasSubstr("Tensor X ragged offset RaggedOffset strides must be non-negative"));
 }
 
+namespace
+{
+
+// Adds one node through a Graph builder, passing nullptr for the tensor argument at position
+// nullArg, or every tensor argument when nullArg is ALL_TENSOR_ARGS.
+using NullTensorArgBuilder = std::function<void(Graph&, int nullArg)>;
+
+constexpr int ALL_TENSOR_ARGS = -1;
+
+struct NullTensorArgParam
+{
+    std::string name;
+    NullTensorArgBuilder build;
+    int nullArg;
+
+    friend std::ostream& operator<<(std::ostream& os, const NullTensorArgParam& p)
+    {
+        return os << p.name;
+    }
+};
+
+std::shared_ptr<TensorAttributes> packedTensor(const std::vector<int64_t>& dims,
+                                               DataType dataType = DataType::FLOAT)
+{
+    auto tensor = std::make_shared<TensorAttributes>();
+    tensor->set_dim(dims)
+        .set_stride(hipdnn_data_sdk::utilities::generateStrides(dims))
+        .set_data_type(dataType);
+    return tensor;
+}
+
+std::shared_ptr<TensorAttributes> tensorOrNull(int position,
+                                               int nullArg,
+                                               const std::vector<int64_t>& dims,
+                                               DataType dataType = DataType::FLOAT)
+{
+    return position == nullArg ? nullptr : packedTensor(dims, dataType);
+}
+
+// One row per tensor argument of the builder; argNames are in argument order.
+void addNullTensorArgRows(std::vector<NullTensorArgParam>& params,
+                          const std::string& builderName,
+                          const std::vector<std::string>& argNames,
+                          const NullTensorArgBuilder& build)
+{
+    for(size_t i = 0; i < argNames.size(); ++i)
+    {
+        params.push_back({builderName + "Null" + argNames[i], build, static_cast<int>(i)});
+    }
+}
+
+ResampleFwdAttributes maxPoolFwdAttributes()
+{
+    ResampleFwdAttributes attributes;
+    attributes.set_resample_mode(ResampleMode::MAXPOOL);
+    attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+    attributes.set_pre_padding({0, 0});
+    attributes.set_post_padding({0, 0});
+    attributes.set_stride({2, 2});
+    attributes.set_window({2, 2});
+    return attributes;
+}
+
+} // namespace
+
+class TestGraphNullTensorArg : public TestGraph,
+                               public ::testing::WithParamInterface<NullTensorArgParam>
+{
+};
+
+TEST_P(TestGraphNullTensorArg, BuilderAcceptsNullAndValidateReportsAttributeNotSet)
+{
+    const auto& param = GetParam();
+
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+    param.build(graph, param.nullArg);
+
+    auto result = graph.validate();
+    EXPECT_EQ(result.code, ErrorCode::ATTRIBUTE_NOT_SET) << result.get_message();
+
+    // The same node with every tensor argument set validates, so the error above comes from
+    // the null argument.
+    Graph control;
+    control.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+    param.build(control, ALL_TENSOR_ARGS);
+
+    auto controlResult = control.validate();
+    EXPECT_TRUE(controlResult.is_good()) << controlResult.get_message();
+}
+
+// This needs to be a helper function rather than being defined inline so that we can use
+// preprocessor directives in it.
+static std::vector<NullTensorArgParam> getNullTensorArgParams()
+{
+    std::vector<NullTensorArgParam> params;
+
+    addNullTensorArgRows(params, "Layernorm", {"X", "Scale", "Bias"}, [](Graph& g, int nullArg) {
+        auto epsilon = std::make_shared<TensorAttributes>();
+        epsilon->set_value(1e-5f);
+        LayernormAttributes attributes;
+        attributes.set_forward_phase(NormFwdPhase::INFERENCE);
+        attributes.set_epsilon(epsilon);
+        g.layernorm(tensorOrNull(0, nullArg, {2, 6, 4}),
+                    tensorOrNull(1, nullArg, {6, 4}),
+                    tensorOrNull(2, nullArg, {6, 4}),
+                    attributes);
+    });
+
+    addNullTensorArgRows(
+        params, "LayernormBackward", {"Dy", "X", "Scale"}, [](Graph& g, int nullArg) {
+            LayernormBackwardAttributes attributes;
+            attributes.set_mean(packedTensor({16, 1, 1, 1}));
+            attributes.set_inv_variance(packedTensor({16, 1, 1, 1}));
+            attributes.set_epsilon(packedTensor({1}));
+            g.layernorm_backward(tensorOrNull(0, nullArg, {16, 64, 32, 32}),
+                                 tensorOrNull(1, nullArg, {16, 64, 32, 32}),
+                                 tensorOrNull(2, nullArg, {1, 64, 32, 32}),
+                                 attributes);
+        });
+
+    addNullTensorArgRows(params, "PointwiseUnary", {"In0"}, [](Graph& g, int nullArg) {
+        PointwiseAttributes attributes;
+        attributes.set_mode(PointwiseMode::RELU_FWD);
+        g.pointwise(tensorOrNull(0, nullArg, {1, 2, 3, 4}), attributes);
+    });
+
+    addNullTensorArgRows(params, "PointwiseBinary", {"In0", "In1"}, [](Graph& g, int nullArg) {
+        PointwiseAttributes attributes;
+        attributes.set_mode(PointwiseMode::ADD);
+        g.pointwise(tensorOrNull(0, nullArg, {1, 2, 3, 4}),
+                    tensorOrNull(1, nullArg, {1, 2, 3, 4}),
+                    attributes);
+    });
+
+    addNullTensorArgRows(
+        params, "PointwiseTernary", {"In0", "In1", "In2"}, [](Graph& g, int nullArg) {
+            PointwiseAttributes attributes;
+            attributes.set_mode(PointwiseMode::BINARY_SELECT);
+            g.pointwise(tensorOrNull(0, nullArg, {1, 2, 3, 4}),
+                        tensorOrNull(1, nullArg, {1, 2, 3, 4}),
+                        tensorOrNull(2, nullArg, {1, 2, 3, 4}),
+                        attributes);
+        });
+
+    addNullTensorArgRows(params, "Reduction", {"X"}, [](Graph& g, int nullArg) {
+        ReductionAttributes attributes;
+        attributes.set_mode(ReductionMode::ADD);
+        auto y = g.reduction(tensorOrNull(0, nullArg, {2, 8, 16, 64}), attributes);
+        y->set_dim({2, 8, 1, 1}).set_stride({8, 1, 1, 1});
+    });
+
+    addNullTensorArgRows(params, "ReductionWithOutput", {"X", "Y"}, [](Graph& g, int nullArg) {
+        ReductionAttributes attributes;
+        attributes.set_mode(ReductionMode::ADD);
+        g.reduction(tensorOrNull(0, nullArg, {2, 8, 16, 64}),
+                    tensorOrNull(1, nullArg, {2, 8, 1, 1}),
+                    attributes);
+    });
+
+    addNullTensorArgRows(params, "Matmul", {"A", "B"}, [](Graph& g, int nullArg) {
+        g.matmul(
+            tensorOrNull(0, nullArg, {4, 8}), tensorOrNull(1, nullArg, {8, 5}), MatmulAttributes{});
+    });
+
+    addNullTensorArgRows(params,
+                         "MoeGroupedMatmul",
+                         {"Token", "Weight", "FirstTokenOffset", "TokenIndex", "TokenKs"},
+                         [](Graph& g, int nullArg) {
+                             MoeGroupedMatmulAttributes attributes;
+                             attributes.set_mode(MoeGroupedMatmulMode::SCATTER);
+                             attributes.set_top_k(2);
+                             g.moe_grouped_matmul(
+                                 tensorOrNull(0, nullArg, {1, 8, 16}),
+                                 tensorOrNull(1, nullArg, {2, 16, 32}),
+                                 tensorOrNull(2, nullArg, {2, 1, 1}, DataType::INT32),
+                                 tensorOrNull(3, nullArg, {1, 8, 1}, DataType::INT32),
+                                 tensorOrNull(4, nullArg, {1, 8, 1}, DataType::INT32),
+                                 attributes);
+                         });
+
+#ifdef HIPDNN_ENABLE_SDPA
+    addNullTensorArgRows(params, "Sdpa", {"Q", "K", "V"}, [](Graph& g, int nullArg) {
+        g.sdpa(tensorOrNull(0, nullArg, {2, 8, 16, 64}),
+               tensorOrNull(1, nullArg, {2, 8, 32, 64}),
+               tensorOrNull(2, nullArg, {2, 8, 32, 64}),
+               SdpaAttributes{});
+    });
+
+    addNullTensorArgRows(
+        params, "SdpaBackward", {"Q", "K", "V", "O", "DO", "Stats"}, [](Graph& g, int nullArg) {
+            g.sdpa_backward(tensorOrNull(0, nullArg, {2, 8, 16, 64}),
+                            tensorOrNull(1, nullArg, {2, 8, 32, 64}),
+                            tensorOrNull(2, nullArg, {2, 8, 32, 64}),
+                            tensorOrNull(3, nullArg, {2, 8, 16, 64}),
+                            tensorOrNull(4, nullArg, {2, 8, 16, 64}),
+                            tensorOrNull(5, nullArg, {2, 8, 16, 1}),
+                            SdpaBackwardAttributes{});
+        });
+#endif // HIPDNN_ENABLE_SDPA
+
+    addNullTensorArgRows(params, "Resample", {"X"}, [](Graph& g, int nullArg) {
+        g.resample(tensorOrNull(0, nullArg, {1, 3, 4, 4}), maxPoolFwdAttributes());
+    });
+
+    addNullTensorArgRows(params, "ResampleFwd", {"X"}, [](Graph& g, int nullArg) {
+        g.resample_fwd(tensorOrNull(0, nullArg, {1, 3, 4, 4}), maxPoolFwdAttributes());
+    });
+
+    addNullTensorArgRows(params, "ResampleBwd", {"Dy", "Index"}, [](Graph& g, int nullArg) {
+        ResampleBwdAttributes attributes;
+        attributes.set_pre_padding({1, 1});
+        attributes.set_post_padding({1, 1});
+        attributes.set_stride({2, 2});
+        attributes.set_window({3, 3});
+        attributes.set_resample_mode(ResampleMode::MAXPOOL);
+        attributes.set_padding_mode(PaddingMode::ZERO_PAD);
+        g.resample_bwd(tensorOrNull(0, nullArg, {1, 3, 16, 16}),
+                       attributes,
+                       tensorOrNull(1, nullArg, {1, 3, 16, 16}, DataType::INT32));
+    });
+
+    addNullTensorArgRows(params, "ConvFprop", {"X", "W"}, [](Graph& g, int nullArg) {
+        ConvFpropAttributes attributes;
+        attributes.set_pre_padding({1, 1});
+        attributes.set_post_padding({1, 1});
+        attributes.set_stride({1, 1});
+        attributes.set_dilation({1, 1});
+        g.conv_fprop(tensorOrNull(0, nullArg, {1, 3, 32, 32}),
+                     tensorOrNull(1, nullArg, {64, 3, 3, 3}),
+                     attributes);
+    });
+
+    addNullTensorArgRows(params, "ConvDgrad", {"Dy", "W"}, [](Graph& g, int nullArg) {
+        ConvDgradAttributes attributes;
+        attributes.set_pre_padding({1, 1});
+        attributes.set_post_padding({1, 1});
+        attributes.set_stride({1, 1});
+        attributes.set_dilation({1, 1});
+        auto dx = g.conv_dgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
+                               tensorOrNull(1, nullArg, {64, 3, 3, 3}),
+                               attributes);
+        dx->set_dim({1, 3, 32, 32});
+    });
+
+    addNullTensorArgRows(params, "ConvWgrad", {"Dy", "X"}, [](Graph& g, int nullArg) {
+        ConvWgradAttributes attributes;
+        attributes.set_pre_padding({1, 1});
+        attributes.set_post_padding({1, 1});
+        attributes.set_stride({1, 1});
+        attributes.set_dilation({1, 1});
+        auto dw = g.conv_wgrad(tensorOrNull(0, nullArg, {1, 64, 32, 32}),
+                               tensorOrNull(1, nullArg, {1, 3, 32, 32}),
+                               attributes);
+        dw->set_dim({64, 3, 3, 3});
+    });
+
+    return params;
+}
+
+// NOLINTNEXTLINE(cert-err58-cpp)
+INSTANTIATE_TEST_SUITE_P(Builders,
+                         TestGraphNullTensorArg,
+                         ::testing::ValuesIn(getNullTensorArgParams()),
+                         [](const ::testing::TestParamInfo<NullTensorArgParam>& info) {
+                             return info.param.name;
+                         });
+
 // ============================================================================
 // is_supported_ext() Tests
 // ============================================================================
@@ -7384,6 +8013,187 @@ TEST_F(TestGraph, GetRankedEngineIdsReturnsGraphNotSupportedWhenRetrievedCountZe
     auto result = graph.get_ranked_engine_ids(rankedEngineIds);
     EXPECT_FALSE(result.is_good());
     EXPECT_EQ(result.code, ErrorCode::GRAPH_NOT_SUPPORTED);
+}
+
+// As in cuDNN, an empty heuristic-mode list queries no heuristic: create_execution_plans()
+// succeeds with no plans, and build_plans() then reports that there is nothing to build.
+TEST_F(TestGraph, CreateExecutionPlansWithEmptyModesReturnsNoPlans)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+    graph.injectDummyCompiledPlan();
+
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, _, _, _))
+        .Times(0);
+
+    const auto result = graph.create_execution_plans({});
+    EXPECT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(graph.get_execution_plan_count(), 0);
+
+    const auto buildPlans = graph.build_plans();
+    EXPECT_EQ(buildPlans.code, ErrorCode::INVALID_VALUE) << buildPlans.get_message();
+}
+
+// The other heuristic queries give their empty result for an empty mode list and
+// never reach the backend with an empty HIPDNN_ATTR_ENGINEHEUR_MODE.
+TEST_F(TestGraph, EmptyHeuristicModesReturnEmptyResultsWithoutBackendQuery)
+{
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+    auto buildResult = graph.build_operation_graph(_handle);
+    ASSERT_TRUE(buildResult.is_good()) << buildResult.get_message();
+
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
+        .Times(0);
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, _, _, _))
+        .Times(0);
+
+    std::vector<int64_t> rankedEngineIds{1, 2};
+    const auto ranked = graph.get_ranked_engine_ids(rankedEngineIds, {});
+    EXPECT_TRUE(ranked.is_good()) << ranked.get_message();
+    EXPECT_TRUE(rankedEngineIds.empty());
+
+    std::vector<EngineConfigInfo> configs = {{42, "", {}, false, 0}};
+    const auto configsResult = graph.get_engine_configs(_handle, configs, {});
+    EXPECT_TRUE(configsResult.is_good()) << configsResult.get_message();
+    EXPECT_TRUE(configs.empty());
+
+    EXPECT_EQ(graph.is_supported_ext(_handle, {}).code, ErrorCode::GRAPH_NOT_SUPPORTED);
+    EXPECT_EQ(graph.add_all_engines({}).code, ErrorCode::INVALID_VALUE);
+    EXPECT_EQ(graph.build(_handle, {}).code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+// The backend may fill fewer engine configurations than it counted; the unfilled
+// descriptors are dropped so the configurations and the engine ids stay index-aligned.
+TEST_F(TestGraph, GetEngineConfigsTrimsDescriptorsToRetrievedCount)
+{
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+    auto engineDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9abc);
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    0,
+                                    _,
+                                    IsNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    3,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 1;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(_,
+                                    HIPDNN_ATTR_ENGINECFG_ENGINE,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    IsNull(),
+                                    NotNull()))
+        .WillOnce([engineDesc](hipdnnBackendDescriptor_t,
+                               hipdnnBackendAttributeName_t,
+                               hipdnnBackendAttributeType_t,
+                               int64_t,
+                               int64_t*,
+                               void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements) = engineDesc;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(
+        *_mockBackend,
+        backendGetAttribute(
+            engineDesc, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, IsNull(), NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t*,
+                     void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements) = 42;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
+    std::vector<int64_t> engineIds;
+    const auto result = detail::getEngineConfigs(engineConfigs, engineIds, heurDesc, true);
+
+    ASSERT_TRUE(result.is_good()) << result.get_message();
+    EXPECT_EQ(engineIds, std::vector<int64_t>{42});
+    EXPECT_EQ(engineConfigs.size(), engineIds.size());
+}
+
+// A backend that reports more retrieved configurations than were requested breaks the
+// retrieval contract; the ids past the requested count would have no descriptor.
+TEST_F(TestGraph, GetEngineConfigsRejectsMoreConfigsThanRequested)
+{
+    auto heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x5678);
+
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    0,
+                                    _,
+                                    IsNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 3;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(heurDesc,
+                                    HIPDNN_ATTR_ENGINEHEUR_RESULTS,
+                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                    1,
+                                    _,
+                                    NotNull()))
+        .WillOnce([](hipdnnBackendDescriptor_t,
+                     hipdnnBackendAttributeName_t,
+                     hipdnnBackendAttributeType_t,
+                     int64_t,
+                     int64_t* elementCount,
+                     void*) {
+            *elementCount = 2;
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
+    std::vector<int64_t> engineIds;
+    const auto result
+        = detail::getEngineConfigs(engineConfigs, engineIds, heurDesc, /*getAll=*/false);
+
+    EXPECT_EQ(result.code, ErrorCode::HIPDNN_BACKEND_ERROR) << result.get_message();
 }
 
 TEST_F(TestGraph, IsSupportedAutoBuildsGraphIfNotBuilt)

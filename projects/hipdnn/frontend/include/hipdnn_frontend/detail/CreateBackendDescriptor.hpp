@@ -83,6 +83,8 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
 /// @p rankingMetric names the registered metric the prediction policies rank by and the
 /// result configurations carry into plan build (RFC 0019 §11.4). Empty leaves the attribute
 /// unset, so HIPDNN_HEUR_RANKING_METRIC and the backend default keep deciding.
+/// @p modes must not be empty: HIPDNN_ATTR_ENGINEHEUR_MODE takes exactly one element. The
+/// Graph callers return their empty result for an empty list before reaching this function.
 inline Error
     createEngineHeuristicDescriptorForGraph(ScopedHipdnnBackendDescriptor& engineHeuristicDesc,
                                             hipdnnBackendDescriptor_t graphDesc,
@@ -90,6 +92,13 @@ inline Error
                                             bool findFirst = false,
                                             std::string_view rankingMetric = {})
 {
+    if(modes.empty())
+    {
+        return {ErrorCode::INVALID_VALUE,
+                "At least one heuristic mode is required to create an engine heuristic "
+                "descriptor."};
+    }
+
     engineHeuristicDesc = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR);
 
     HIPDNN_RETURN_ON_BACKEND_FAILURE(

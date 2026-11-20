@@ -8,7 +8,7 @@
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 
-// NOTE: Frontend allows broadcastable shapes for scale/bias.
+// NOTE: Frontend checks only the channel dimension of scale/bias.
 // Backend providers (e.g. MIOpen) may still reject unsupported shapes.
 TEST(TestBatchnormNode, PreValidateAcceptsBroadcastableScaleBias)
 {
@@ -126,6 +126,78 @@ TEST(TestBatchnormNode, PreValidateAcceptsDifferentBroadcastRanks)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+namespace
+{
+
+Error preValidateWithScaleBiasDims(const std::vector<int64_t>& xDims,
+                                   const std::vector<int64_t>& scaleBiasDims)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim(xDims);
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim(scaleBiasDims);
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim(scaleBiasDims);
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    epsilonTensor->set_dim({1}).set_value(1e-5);
+    batchnormAttributes.set_epsilon(epsilonTensor);
+
+    const GraphAttributes graphAttributes;
+    const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+    return node.pre_validate_node();
+}
+
+} // namespace
+
+TEST(TestBatchnormNode, PreValidateRejectsScaleBiasChannelMismatch)
+{
+    auto error = preValidateWithScaleBiasDims({2, 8, 4, 4}, {1, 6, 1, 1});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("Scale"), std::string::npos) << error.get_message();
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsRank1ScaleBiasChannelMismatch)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {32});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsRank2ScaleBiasChannelMismatch)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {1, 32});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+}
+
+TEST(TestBatchnormNode, PreValidateAcceptsReducedRankScaleBias)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {64, 1, 1});
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsReducedRankScaleBiasChannelMismatch)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {32, 1, 1});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("(index 0) must be 64, got 32"), std::string::npos)
+        << error.get_message();
+}
+
+TEST(TestBatchnormNode, PreValidateAcceptsChannelFirstRank2ScaleBias)
+{
+    auto error = preValidateWithScaleBiasDims({2, 64, 32, 32}, {64, 1});
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
 }
 
 TEST(TestBatchnormNode, PreValidateNode)
@@ -351,7 +423,7 @@ TEST(TestBatchnormNode, GatherHipdnnTensors)
     const GraphAttributes graphAttributes;
     const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
 
-    std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
     node.gather_hipdnn_tensors(allTensors);
 
     EXPECT_TRUE(allTensors.find(xTensor) != allTensors.end());
@@ -362,6 +434,33 @@ TEST(TestBatchnormNode, GatherHipdnnTensors)
     EXPECT_TRUE(allTensors.find(peerStat1) != allTensors.end());
     EXPECT_TRUE(allTensors.find(peerStat2) != allTensors.end());
     EXPECT_EQ(allTensors.size(), 7);
+}
+
+TEST(TestBatchnormNode, GatherHipdnnTensorsIncludesPeerStatRaggedOffset)
+{
+    // The aux tensor carries no UID; gathering it is what lets the graph assign one.
+    auto peerStatOffset = std::make_shared<TensorAttributes>();
+    peerStatOffset->set_name("PeerStatOffset").set_dim({5}).set_stride({1});
+
+    auto peerStat = std::make_shared<TensorAttributes>();
+    peerStat->set_uid(9).set_name("PeerStat");
+    peerStat->set_ragged_offset(peerStatOffset);
+
+    BatchnormAttributes batchnormAttributes;
+    batchnormAttributes.set_peer_stats({peerStat});
+
+    const GraphAttributes graphAttributes;
+    const BatchnormNode node(std::move(batchnormAttributes), graphAttributes);
+
+    hipdnn_frontend::detail::OrderedTensorSet allTensors;
+    node.gather_hipdnn_tensors(allTensors);
+
+    // The aux tensor directly follows the tensor that carries it.
+    auto it = allTensors.find(peerStat);
+    ASSERT_TRUE(it != allTensors.end());
+    ++it;
+    ASSERT_TRUE(it != allTensors.end());
+    EXPECT_EQ(*it, peerStatOffset);
 }
 
 // ============================================================================
@@ -613,6 +712,56 @@ TEST(TestBatchnormNode, PreValidateAcceptsCompleteRunningStats)
 
     auto error = node.pre_validate_node();
     EXPECT_EQ(error.code, ErrorCode::OK);
+}
+
+TEST(TestBatchnormNode, PreValidateRejectsMomentumWithoutPreviousRunningStats)
+{
+    BatchnormAttributes batchnormAttributes;
+
+    auto xTensor = std::make_shared<TensorAttributes>();
+    xTensor->set_dim({2, 64, 32, 32}).set_stride({65536, 1024, 32, 1});
+    batchnormAttributes.set_x(xTensor);
+
+    batchnormAttributes.set_y(std::make_shared<TensorAttributes>());
+
+    auto scaleTensor = std::make_shared<TensorAttributes>();
+    scaleTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_scale(scaleTensor);
+
+    auto biasTensor = std::make_shared<TensorAttributes>();
+    biasTensor->set_dim({1, 64, 1, 1});
+    batchnormAttributes.set_bias(biasTensor);
+
+    auto epsilonTensor = std::make_shared<TensorAttributes>();
+    epsilonTensor->set_dim({1}).set_value(1e-5);
+    batchnormAttributes.set_epsilon(epsilonTensor);
+
+    auto momentumTensor = std::make_shared<TensorAttributes>();
+    momentumTensor->set_value(0.1);
+    batchnormAttributes.set_momentum(momentumTensor);
+
+    const GraphAttributes graphAttributes;
+
+    // Momentum without any running statistics.
+    auto withoutStats = batchnormAttributes;
+    const BatchnormNode nodeWithoutStats(std::move(withoutStats), graphAttributes);
+    auto error = nodeWithoutStats.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("momentum"), std::string::npos) << error.get_message();
+
+    // Momentum with the complete running statistics.
+    auto runningStat = [] {
+        auto tensor = std::make_shared<TensorAttributes>();
+        tensor->set_dim({1, 64, 1, 1});
+        return tensor;
+    };
+    batchnormAttributes.set_prev_running_mean(runningStat())
+        .set_prev_running_variance(runningStat())
+        .set_next_running_mean(runningStat())
+        .set_next_running_variance(runningStat());
+    const BatchnormNode nodeWithStats(std::move(batchnormAttributes), graphAttributes);
+    error = nodeWithStats.pre_validate_node();
+    EXPECT_EQ(error.code, ErrorCode::OK) << error.get_message();
 }
 
 // ============================================================================

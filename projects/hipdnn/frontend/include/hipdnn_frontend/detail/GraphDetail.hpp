@@ -8,6 +8,7 @@
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace hipdnn_frontend::detail
@@ -40,6 +41,10 @@ inline Error hasEngineConfigs(hipdnnBackendDescriptor_t engineHeuristicDesc)
     return {ErrorCode::OK, ""};
 }
 
+// Appends the retrieved engine-config descriptors to @p engineConfigs, in heuristic rank order,
+// and replaces the contents of @p engineIds with their engine ids. On success, engineIds[i] is
+// the id of the i-th appended descriptor: when @p engineConfigs starts empty, as for every
+// caller, engineConfigs.size() == engineIds.size().
 inline Error
     getEngineConfigs(std::vector<std::unique_ptr<ScopedHipdnnBackendDescriptor>>& engineConfigs,
                      std::vector<int64_t>& engineIds,
@@ -69,6 +74,7 @@ inline Error
     // already reflected in the ranked list — no extra frontend search is needed
     // for that knob.
     const int64_t requiredCount = getAll ? availableEngineCount : 1;
+    const size_t firstConfigIndex = engineConfigs.size();
     std::vector<hipdnnBackendDescriptor_t> engineConfigsShallow;
     for(size_t i = 0; i < static_cast<size_t>(requiredCount); ++i)
     {
@@ -99,6 +105,16 @@ inline Error
         return {ErrorCode::GRAPH_NOT_SUPPORTED,
                 "No engine configurations retrieved from the heuristic desc."};
     }
+
+    if(count > static_cast<int64_t>(engineConfigsShallow.size()))
+    {
+        return {ErrorCode::HIPDNN_BACKEND_ERROR,
+                "Backend returned " + std::to_string(count) + " engine configurations after "
+                    + std::to_string(engineConfigsShallow.size()) + " were requested."};
+    }
+
+    // The backend may fill fewer descriptors than were requested; drop the unfilled ones.
+    engineConfigs.resize(firstConfigIndex + static_cast<size_t>(count));
 
     // Finalize and get ids for engine configs
     engineIds.resize(static_cast<size_t>(count), -1);
