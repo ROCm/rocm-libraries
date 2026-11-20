@@ -43,7 +43,8 @@ struct K1Args
     /// Patch backward data (K1_PATCH 1): the graph is a patch convolution (stride equal to the
     /// filter, no padding) run as one GEMM over dy's positions, c = the filter's T R S C. Its
     /// columns n = ((t R + r) S + s) C + c scatter to dx pixel (od T + t, oh R + r, ow S + s):
-    /// the filter's depth and height extents (T, R). Unused otherwise.
+    /// the filter's depth and height extents (T, R). Unused otherwise (col2im, K1_PATCH 3, runs
+    /// the same GEMM and writes its columns to the partials for ConvIgemmCol2im).
     int patchT;
     int patchR;
     /// XCD-contiguous block order (CONV_IGEMM_XCD): the device's XCDs, dealt workgroups
@@ -62,6 +63,27 @@ struct K1ReduceArgs
     long long elems;
     int splits;
     int padding0;
+};
+
+/// Col2im backward data (K1_PATCH 3): the GEMM over dy's positions q = (n, od, oh, ow) wrote
+/// fp32 columns partial[split][q][column] (splitElems a split), the column of (tap, c) in the
+/// filter's own order: tap C + c for a K T R S C filter (tapMajor 1), c T R S + tap for K C T R S. dx, packed
+/// N D H W C, at (n, id, ih, iw, c) is their sum over the splits and over the taps (t, r, s)
+/// whose dy position exists: od = (id + pd - t dd) / sd exact and within dout, likewise h, w.
+struct K1Col2imArgs
+{
+    const float* partial;
+    void* dx;
+    long long splitElems;
+    int splits;
+    int n, c;
+    int di, hi, wi;
+    int dout, ho, wo;
+    int ft, fr, fs;
+    int sd, sh, sw;
+    int pd, ph, pw;
+    int dd, dh, dw;
+    int tapMajor;
 };
 
 #define CONV_IGEMM_COPY_RANK 6

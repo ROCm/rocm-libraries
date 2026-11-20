@@ -891,7 +891,13 @@ __device__ inline long long
     }
     else
     {
-#if K1_PATCH
+#if K1_PATCH == 3
+        // Col2im: the GEMM over dy's positions, its T R S C columns stored row by row.
+        (void)gather;
+        (void)g;
+        (void)phase;
+        return m * a.c + n;
+#elif K1_PATCH
         // Patch convolution as one GEMM (one group, unit stride over dy's positions): column n
         // is the filter element ((t R + r) S + s) C + c, and dx is (D T) x (H R) x (W S) x C, so
         // a row of S C columns is one contiguous run of dx.
@@ -2594,6 +2600,14 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     constexpr int CFR = WTM < 64 ? WTM : 64;
     constexpr int OLDC = CFR + 16 / static_cast<int>(sizeof(T));
     constexpr int OUT = CF ? WM * WN * DIM * OLDC : WM * WN * DIM * OLD;
+    // The epilogues store 16-byte output vectors wherever a strip row (a run of CFR rows
+    // channels-first) holds whole ones, whatever the reduction's channel vector VEC: narrow
+    // reductions (VEC 1) write wide outputs as vectors, not one element and one decoded output
+    // position at a time. Patch backward data keeps VEC: its columns are contiguous in dx only
+    // within runs of S C, which VEC divides.
+    constexpr int OV = 16 / static_cast<int>(sizeof(T));
+    constexpr int OVEC = WTN % OV == 0 && !(K1_PATCH && DIR == K1_BACKWARD_DATA) ? OV : VEC;
+    constexpr int OVECC = CFR % OV == 0 ? OV : VEC;
     // Halo: A is [PLANES][AROWS][LD], the staged rows and one zero row, then one B tile.
     constexpr int HRPP = THREADS / (BK / VEC);
     // Channels-first halo rows: up to a vector of pixels more, for its aligned base.
@@ -3111,9 +3125,10 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         }
     }
 
-    if(splits > 1)
+    if(splits > 1 || K1_PATCH == 3)
     {
         // Split-K: this split's fp32 partial, indexed like the output; the reduce adds them.
+        // Col2im (K1_PATCH 3) always writes its columns there, for ConvIgemmCol2im.
         float* partial = a.partial + static_cast<long long>(split) * a.outElems;
 #pragma unroll
         for(int i = 0; i < FM; ++i)
@@ -3137,16 +3152,16 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     }
 
     T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
-    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
     if constexpr(CF != 0)
     {
         // Channels-first epilogue: per DIM-column slab and CFR-row chunk, accumulators to the
-        // wave's column-major LDS strip, then runs of VEC rows (consecutive positions of one
+        // wave's column-major LDS strip, then runs of OVECC rows (consecutive positions of one
         // channel) to global; single elements where a run is not contiguous in the output (an
         // image boundary, a stride phase) or past the last row.
+        typedef typename K1Raw<OVECC * sizeof(T)>::type Raw;
         k1LdsBarrier();
         T* strip = lds + wave * DIM * OLDC;
-        constexpr int RUNS = CFR / VEC;
+        constexpr int RUNS = CFR / OVECC;
         K1CfWalk walk;
         walk.template init<DIR>(a, gather);
 #pragma unroll
@@ -3175,31 +3190,31 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                 {
                     const int col = v / RUNS;
                     const int run = v - col * RUNS;
-                    const long long m = m0 + wm * WTM + rc * CFR + run * VEC;
+                    const long long m = m0 + wm * WTM + rc * CFR + run * OVECC;
                     const int nn = n0 + wn * WTN + j * DIM + col;
                     if(m >= gather.rows || nn >= ncols)
                     {
                         continue;
                     }
-                    const T* src = strip + col * OLDC + run * VEC;
+                    const T* src = strip + col * OLDC + run * OVECC;
                     const long long o = k1OutIndexCf<DIR>(a, gather, g, phase, m, nn);
                     walk.start(m, o);
-                    long long at[VEC];
+                    long long at[OVECC];
 #pragma unroll
-                    for(int e = 0; e < VEC; ++e)
+                    for(int e = 0; e < OVECC; ++e)
                     {
                         at[e] = walk.o;
                         walk.next();
                     }
-                    // Positions only increase with m, so a span of VEC - 1 means contiguous.
-                    if(m + VEC <= gather.rows && o % VEC == 0 && at[VEC - 1] == o + VEC - 1)
+                    // Positions only increase with m, so a span of OVECC - 1 means contiguous.
+                    if(m + OVECC <= gather.rows && o % OVECC == 0 && at[OVECC - 1] == o + OVECC - 1)
                     {
                         *reinterpret_cast<Raw*>(out + o) = *reinterpret_cast<const Raw*>(src);
                     }
                     else
                     {
 #pragma unroll
-                        for(int e = 0; e < VEC; ++e)
+                        for(int e = 0; e < OVECC; ++e)
                             if(m + e < gather.rows)
                                 out[at[e]] = src[e];
                     }
@@ -3214,11 +3229,12 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         return;
     }
 
-    // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then rows of VEC columns
+    // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then rows of OVEC columns
     // to global (single columns past the last full vector).
+    typedef typename K1Raw<OVEC * sizeof(T)>::type Raw;
     k1LdsBarrier();
     T* strip = lds + wave * DIM * OLD;
-    constexpr int ROW_VECS = WTN / VEC;
+    constexpr int ROW_VECS = WTN / OVEC;
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
@@ -3238,7 +3254,7 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         for(int v = lane; v < DIM * ROW_VECS; v += WAVE)
         {
             const int r = v / ROW_VECS;
-            const int col = (v - r * ROW_VECS) * VEC;
+            const int col = (v - r * ROW_VECS) * OVEC;
             const long long m = m0 + wm * WTM + i * DIM + r;
             const int nn = n0 + wn * WTN + col;
             if(m >= gather.rows || nn >= ncols)
@@ -3246,14 +3262,14 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                 continue;
             }
             const long long o = k1OutIndex<DIR>(a, gather, g, phase, m, nn);
-            if(nn + VEC <= ncols && o % VEC == 0)
+            if(nn + OVEC <= ncols && o % OVEC == 0)
             {
                 *reinterpret_cast<Raw*>(out + o)
                     = *reinterpret_cast<const Raw*>(strip + r * OLD + col);
             }
             else
             {
-                for(int e = 0; e < VEC && nn + e < ncols; ++e)
+                for(int e = 0; e < OVEC && nn + e < ncols; ++e)
                     out[o + e] = strip[r * OLD + col + e];
             }
         }
@@ -3494,7 +3510,7 @@ __device__ void k1ConvFma(const K1Args& a CONV_EPI_FN_PARAM)
             if(m < gather.rows && nn < ncols)
             {
                 const long long o = k1OutIndex<DIR>(a, gather, g, phase, m, nn);
-                if(splits > 1)
+                if(splits > 1 || K1_PATCH == 3)
                     partial[o] = acc[i][j];
                 else
 #if defined(CONV_EPI) && CONV_EPI
@@ -3685,6 +3701,93 @@ __device__ inline void k1ReduceSplits(const K1ReduceArgs& a)
         for(int sp = 0; sp < a.splits; ++sp)
             sum += a.partial[static_cast<long long>(sp) * a.elems + i];
         out[i] = K1Elem<T>::store(sum);
+    }
+}
+
+// Col2im backward data: each dx element (packed N D H W C) sums, tap by tap in filter order and
+// split by split, the GEMM columns of the dy positions it reaches. A thread takes four channels of
+// one position (whole vectors where the channels are a multiple of four).
+template <class T>
+__device__ inline void k1Col2im(const K1Col2imArgs& a)
+{
+    T* dx = static_cast<T*>(a.dx);
+    const int quads = (a.c + 3) / 4;
+    const long long cols = static_cast<long long>(a.c) * a.ft * a.fr * a.fs;
+    const long long elems = static_cast<long long>(a.n) * a.di * a.hi * a.wi * quads;
+    const bool whole = a.c % 4 == 0 && a.tapMajor != 0;
+    const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
+    const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
+    for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < elems;
+        i += step)
+    {
+        long long r = i / quads;
+        const int c0 = static_cast<int>(i - r * quads) * 4;
+        const int iw = static_cast<int>(r % a.wi);
+        r /= a.wi;
+        const int ih = static_cast<int>(r % a.hi);
+        r /= a.hi;
+        const int id = static_cast<int>(r % a.di);
+        const long long n = r / a.di;
+        float sum[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+        for(int t = 0; t < a.ft; ++t)
+        {
+            const int zd = id + a.pd - t * a.dd;
+            const int od = zd / a.sd;
+            if(zd < 0 || od * a.sd != zd || od >= a.dout)
+                continue;
+            for(int q = 0; q < a.fr; ++q)
+            {
+                const int zh = ih + a.ph - q * a.dh;
+                const int oh = zh / a.sh;
+                if(zh < 0 || oh * a.sh != zh || oh >= a.ho)
+                    continue;
+                for(int s = 0; s < a.fs; ++s)
+                {
+                    const int zw = iw + a.pw - s * a.dw;
+                    const int ow = zw / a.sw;
+                    if(zw < 0 || ow * a.sw != zw || ow >= a.wo)
+                        continue;
+                    const long long row
+                        = ((n * a.dout + od) * a.ho + oh) * static_cast<long long>(a.wo) + ow;
+                    const long long tap = (static_cast<long long>(t) * a.fr + q) * a.fs + s;
+                    const long long col = a.tapMajor != 0 ? tap * a.c + c0 : c0 * taps + tap;
+                    const long long cstep = a.tapMajor != 0 ? 1 : taps;
+                    for(int sp = 0; sp < a.splits; ++sp)
+                    {
+                        const float* p = a.partial + sp * a.splitElems + row * cols + col;
+                        if(whole)
+                        {
+                            typedef float F4 __attribute__((ext_vector_type(4)));
+                            const F4 v = *reinterpret_cast<const F4*>(p);
+#pragma unroll
+                            for(int e = 0; e < 4; ++e)
+                                sum[e] += v[e];
+                        }
+                        else
+                        {
+                            for(int e = 0; e < 4 && c0 + e < a.c; ++e)
+                                sum[e] += p[e * cstep];
+                        }
+                    }
+                }
+            }
+        }
+        T* o = dx + (((n * a.di + id) * a.hi + ih) * static_cast<long long>(a.wi) + iw) * a.c + c0;
+        if(whole)
+        {
+            T v[4];
+            for(int e = 0; e < 4; ++e)
+                v[e] = K1Elem<T>::store(sum[e]);
+            typedef typename K1Raw<4 * sizeof(T)>::type Raw4;
+            Raw4 raw;
+            __builtin_memcpy(&raw, v, sizeof(raw));
+            *reinterpret_cast<Raw4*>(o) = raw;
+        }
+        else
+        {
+            for(int e = 0; e < 4 && c0 + e < a.c; ++e)
+                o[e] = K1Elem<T>::store(sum[e]);
+        }
     }
 }
 

@@ -1155,6 +1155,64 @@ SMALLC_FILTERS = [
 SMALLC_5X5_TILES = {"mfma": [(32, 4, 2, 64)], "wmma": [(64, 8, 4, 32)]}
 
 
+# Configs appended after every other legacy config of a dtype (their priorities follow the
+# others', which keep theirs): (dtype) -> configs.
+LATE = {"FLOAT": [], "HALF": [], "BFLOAT16": []}
+# 3-D small-C stems: every (depth, height) row of a 3x3x3 filter a block (fr 9), so a long
+# reduction reads dy once instead of once a depth tap.
+SMALLC_LATE_FILTERS = [("3x3x3", 3, 1, 9)]
+# Ring stages for the 3-D small-map layers' 8- and 16-wide rows on the 32 x 32 16-bit atoms,
+# channels-last: tiles of 128 output channels by 64 input ones (wide-channel layers).
+STAGE_RING_LATE = {
+    ("mfma32_f16", "mfma32_bf16"): [
+        ((128, 64, 4, 2, 16), 2),
+        ((128, 64, 4, 2, 8), 4),
+    ]
+}
+
+
+def build_late():
+    """The LATE configs: small-C rows over all (depth, height) filter rows, wide ring stages."""
+    dropped = 0
+    for atoms, xcd in SMALLC_ATOMS:
+        for dtype, atom in atoms.items():
+            if not atom.startswith("mfma"):
+                continue  # measured on the CDNA atoms
+            vec = 16 // eb(dtype)
+            for tag, s, sw, fr in SMALLC_LATE_FILTERS:
+                for lay in (CF, CL):
+                    tiles = SMALLC_TILES + (SMALLC_TILES_CL if lay == CL else [])
+                    for bk, bc, wk, bq in tiles:
+                        c = C(
+                            atom,
+                            6,
+                            lay,
+                            (bk, bc, wk, 1, bq),
+                            s,
+                            sw,
+                            1,
+                            fr,
+                            vec,
+                            xcd,
+                            0,
+                            0,
+                        )
+                        if valid(c, dtype):
+                            LATE[dtype].extend(with_bpu(c))
+                        else:
+                            dropped += 1
+    for atoms, extra in STAGE_RING_LATE.items():
+        for atom in atoms:
+            dtype = "HALF" if atom.endswith("f16") else "BFLOAT16"
+            for t, wq in extra:
+                c = dict(C(atom, 1, CL, t, 3, 1, 1, 3, 8, 0, 0, 0), wq=wq)
+                if valid(c, dtype):
+                    LATE[dtype].extend(with_bpu(c))
+                else:
+                    dropped += 1
+    return dropped
+
+
 def build_smallc():
     dropped = 0
     for atoms, xcd in SMALLC_ATOMS:
@@ -2072,6 +2130,7 @@ def emit():
                 for c in (CATALOGX3 if dtype == "FLOAT" else [])
             ]
             + [(c, family_of(c)) for c in cfgs if c["loop"] == 8]
+            + [(c, family_of(c)) for c in LATE[dtype]]
             + [(c, "accurate") for c in cfgs if c["loop"] == 10]
         )
         legacy_i = native_i = accurate_i = 0
@@ -2176,6 +2235,7 @@ if __name__ == "__main__":
     dropped += build_fma906()
     dropped += build_fmardna()
     build_x3()
+    dropped += build_late()
     n = emit()
     print(n, "kernel configs;", dropped, "candidates dropped (LDS, passes or tile)")
     for dtype, cfgs in CATALOG.items():
