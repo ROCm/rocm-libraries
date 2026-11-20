@@ -1673,29 +1673,37 @@ class KernelComponentFactoryGfx1151(KernelComponentFactoryGfx115):
     arch = ArchTrait("gfx1151")
 
     @staticmethod
-    def _stages_whole_kv(tile) -> bool:
-        # One K and one V LDS stage per key step (bk0 = head dim, bk1 = bn0).
-        return tile.F_bk0 == tile.F_bk0max and tile.F_bk1 == tile.F_bn0
+    def _stages_whole_k(tile) -> bool:
+        # One K LDS stage per key step (bk0 = head dim).
+        return tile.F_bk0 == tile.F_bk0max
 
     @staticmethod
     def _is_plain(pipeline) -> bool:
-        # Whole-K/V staging is validated with padded head dims, but not consistently
+        # Whole-K staging is validated with padded head dims, but not consistently
         # faster there. Dropout is not measured.
         return pipeline.F_dropout == "f" and pipeline.F_dpad == "f"
 
     @classmethod
     def check_d128_tile(cls, tile, pipeline) -> bool:
-        if cls._is_plain(pipeline):
-            return cls._stages_whole_kv(tile)
-        return not cls._stages_whole_kv(tile) and super().check_d128_tile(
-            tile, pipeline
-        )
+        if cls._stages_whole_k(tile):
+            return cls._is_plain(pipeline)
+        return super().check_d128_tile(tile, pipeline)
 
     @classmethod
     def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
         result = super().get_hdim_tile_size_dict(dtype)
         if dtype in cls._DT_FP16_BF16:
-            result[(128, 128)] = [FmhaFwdTileSize( 64,  32, 128, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1)] + result[(128, 128)]  # fmt: skip
+            # 64 rows and 32-key steps for short queries; 128 rows and 64-key steps (the
+            # gfx115 tile shape, K and V staged once per step) for longer ones. Short
+            # queries over long keys keep the gfx115 tiles.
+            m64_d128_constraint = "a.max_seqlen_q <= 384 && a.seqlen_k <= 4096"
+            # ALiBi already stages K in 64-dim chunks and loses 2-4% beyond 4096.
+            m128_d128_constraint = (
+                "a.max_seqlen_q > 384 && "
+                "(t.bias_type != bias_enum::alibi || a.max_seqlen_q <= 4096)"
+            )
+            result[(128, 128)] = [FmhaFwdTileSize( 64,  32, 128, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(m64_d128_constraint)),
+                                 FmhaFwdTileSize(128,  64, 128, 128,  64,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6, CppConstraint(m128_d128_constraint))] + result[(128, 128)]  # fmt: skip
         return result
 
 

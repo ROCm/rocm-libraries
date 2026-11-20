@@ -62,13 +62,28 @@ class TestGfx1151Codegen(unittest.TestCase):
         self.assertTrue(whole)
         self.assertTrue(all(_plain(k) for k in whole))
 
-    def test_d128_plain_uses_only_the_whole_kv_tile(self):
+    def test_d128_plain_has_both_whole_k_tiles_and_the_family_fallback(self):
         d128 = [k for k in _kernels(["gfx1151"]) if k.F_hdim == 128 and _plain(k)]
-        self.assertTrue(d128)
+        tiles = {(k.F_tile.F_bm0, k.F_tile.F_bn0, k.F_tile.F_bk0) for k in d128}
         self.assertEqual(
-            {(k.F_tile.F_bm0, k.F_tile.F_bn0, k.F_tile.F_bk0) for k in d128},
-            {(64, 32, 128)},
+            {t for t in tiles if t[2] == 128}, {(64, 32, 128), (128, 64, 128)}
         )
+        # Short queries over long keys fall back to the gfx115 tile: every plain
+        # pipeline keeps one.
+        fallback = {k.F_pipeline.name for k in d128 if k.F_tile.F_bk0 != 128}
+        self.assertEqual(fallback, {k.F_pipeline.name for k in d128})
+
+    def test_d128_whole_k_tiles_are_bounded_by_sequence_length(self):
+        d128 = [k for k in _kernels(["gfx1151"]) if k.F_hdim == 128 and _plain(k)]
+        constraints = {
+            k.F_tile.F_bm0: str(k.F_tile.F_constraint)
+            for k in d128
+            if k.F_tile.F_bk0 == 128
+        }
+        self.assertIn("a.max_seqlen_q <= 384", constraints[64])
+        self.assertIn("a.seqlen_k <= 4096", constraints[64])
+        self.assertIn("a.max_seqlen_q > 384", constraints[128])
+        self.assertIn("bias_enum::alibi", constraints[128])
 
     def test_non_plain_pipelines_match_the_family_tiles(self):
         def tiles(target):
