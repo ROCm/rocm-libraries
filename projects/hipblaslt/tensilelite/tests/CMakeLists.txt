@@ -56,10 +56,12 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/PredictionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceInt8Accumulation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidatorLifecycle_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RangeLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReadMostlyMap_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ResultComparison_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/RotatingBuffer_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceMXFastPath_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/RocRollerWgmKernargs_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/SolutionIteratorSelection_test.cpp"
@@ -103,6 +105,7 @@ if(NOT TENSILELITE_ENABLE_YAML)
             "${CMAKE_CURRENT_SOURCE_DIR}/MessagePackWriting_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/SolutionState_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/SolutionRecord_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/MeshBasedTableBin_test.cpp"
     )
 endif()
 
@@ -208,11 +211,18 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         # discarded. Instead, tell it the real (nested) install location via
         # THEROCK_INSTALL_RPATH_ORIGIN, mirroring e.g.
         # core/post_hook_amdsmi.cmake's amdsmitst -> share/amd_smi/tests.
-        set_property(TARGET tensilelite-tests PROPERTY
+        set_property(TARGET tensilelite-tests cpu-gemm-driver PROPERTY
             THEROCK_INSTALL_RPATH_ORIGIN "${CMAKE_INSTALL_BINDIR}/${TENSILELITE_TESTS_INSTALL_SUBDIR}"
         )
+        # Standalone installs need the same relative layout. TheRock replaces
+        # this RPATH using THEROCK_INSTALL_RPATH_ORIGIN above.
+        file(RELATIVE_PATH tests_libdir
+            "/${CMAKE_INSTALL_BINDIR}/${TENSILELITE_TESTS_INSTALL_SUBDIR}"
+            "/${CMAKE_INSTALL_LIBDIR}")
+        set_target_properties(tensilelite-tests cpu-gemm-driver PROPERTIES
+            INSTALL_RPATH "$ORIGIN/${tests_libdir};$ORIGIN/${tests_libdir}/llvm/lib")
         install(
-            TARGETS tensilelite-tests
+            TARGETS tensilelite-tests cpu-gemm-driver
             RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}/${TENSILELITE_TESTS_INSTALL_SUBDIR}"
             COMPONENT tests
         )
@@ -244,14 +254,8 @@ enable_testing()
 #        Tests for cpu-gemm-driver              #
 #################################################
 
-function(add_cpu_gemm_test TEST_NAME)
-    cmake_parse_arguments(ARG "" "" "ARGS" ${ARGN})
-
-    add_test(
-        NAME "CPUGemm.${TEST_NAME}"
-        COMMAND cpu-gemm-driver ${ARG_ARGS}
-    )
-endfunction()
+set(CPU_GEMM_TEST_NAMES "")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/CPUGemmTests.cmake")
 
 # Default test sizes. Non-tile-aligned to stress remainder handling.
 # f32, f64, and f16/bf16 use different sizes to increase coverage diversity.
@@ -364,11 +368,10 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
-add_test(
-    NAME "CPUGemm.validation_InjectedFailure_Rejected"
-    COMMAND cpu-gemm-driver -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
+add_cpu_gemm_test(validation_InjectedFailure_Rejected
+    WILL_FAIL
+    ARGS -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
 )
-set_tests_properties("CPUGemm.validation_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
 
 #################################################
 #        FP8 tests (fast & slow)                #
@@ -530,17 +533,15 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
-add_test(
-    NAME "CPUGemm.tf32_MixedA_Rejected"
-    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
+add_cpu_gemm_test(tf32_MixedA_Rejected
+    WILL_FAIL
+    ARGS -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
 )
-set_tests_properties("CPUGemm.tf32_MixedA_Rejected" PROPERTIES WILL_FAIL TRUE)
 
-add_test(
-    NAME "CPUGemm.tf32_MixedB_Rejected"
-    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
+add_cpu_gemm_test(tf32_MixedB_Rejected
+    WILL_FAIL
+    ARGS -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
 )
-set_tests_properties("CPUGemm.tf32_MixedB_Rejected" PROPERTIES WILL_FAIL TRUE)
 
 #################################################
 #        FP4 / MX Scale tests (fast & slow)     #
@@ -632,18 +633,16 @@ if(NOT WIN32)
     )
 
     # Negative test: slow path must reject asymmetric MX.
-    add_test(
-        NAME "CPUGemm.slow_f4_MX_A32_B64_Rejected"
-        COMMAND cpu-gemm-driver ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate
+    add_cpu_gemm_test(slow_f4_MX_A32_B64_Rejected
+        WILL_FAIL
+        ARGS ${F4_SIZES_64} --type f4 --mxBlockA 32 --mxBlockB 64 --validate
     )
-    set_tests_properties("CPUGemm.slow_f4_MX_A32_B64_Rejected" PROPERTIES WILL_FAIL TRUE)
 
     # Negative test: one-sided MX (only A or only B) must be rejected.
-    add_test(
-        NAME "CPUGemm.f4_MX_OneSided_Rejected"
-        COMMAND cpu-gemm-driver ${F4_SIZES_32} --type f4 --mxBlockA 32 --validate
+    add_cpu_gemm_test(f4_MX_OneSided_Rejected
+        WILL_FAIL
+        ARGS ${F4_SIZES_32} --type f4 --mxBlockA 32 --validate
     )
-    set_tests_properties("CPUGemm.f4_MX_OneSided_Rejected" PROPERTIES WILL_FAIL TRUE)
 
     # Edge-size mxfp4 coverage: K equal to mxBlock (single MX block per row),
     # M=1 / N=1 strips, and alpha=0 short-circuit. Both fast and slow paths.
@@ -673,29 +672,86 @@ if(NOT WIN32)
     )
 
     # Negative tests: invalid K/mxBlock combos should fail with clear error
-    add_test(
-        NAME "CPUGemm.slow_f4_MX32_BadK_Unaligned"
-        COMMAND cpu-gemm-driver -M 16 -N 16 -K 33 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
+    add_cpu_gemm_test(slow_f4_MX32_BadK_Unaligned
+        WILL_FAIL
+        ARGS -M 16 -N 16 -K 33 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
     )
-    set_tests_properties("CPUGemm.slow_f4_MX32_BadK_Unaligned" PROPERTIES WILL_FAIL TRUE)
 
-    add_test(
-        NAME "CPUGemm.slow_f4_MX32_BadK_TooSmall"
-        COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
+    add_cpu_gemm_test(slow_f4_MX32_BadK_TooSmall
+        WILL_FAIL
+        ARGS -M 16 -N 16 -K 16 --type f4 --mxBlockA 32 --mxBlockB 32 --validate
     )
-    set_tests_properties("CPUGemm.slow_f4_MX32_BadK_TooSmall" PROPERTIES WILL_FAIL TRUE)
 
     # Negative test: non-power-of-2 mxBlock should be rejected
-    add_test(
-        NAME "CPUGemm.slow_f4_MX6_BadPow2"
-        COMMAND cpu-gemm-driver -M 4 -N 4 -K 12 --type f4 --mxBlockA 6 --mxBlockB 6 --validate
+    add_cpu_gemm_test(slow_f4_MX6_BadPow2
+        WILL_FAIL
+        ARGS -M 4 -N 4 -K 12 --type f4 --mxBlockA 6 --mxBlockB 6 --validate
     )
-    set_tests_properties("CPUGemm.slow_f4_MX6_BadPow2" PROPERTIES WILL_FAIL TRUE)
 
     # Negative test: mxBlock with non-FP4 types should be rejected
-    add_test(
-        NAME "CPUGemm.slow_f32_MX32_Rejected"
-        COMMAND cpu-gemm-driver -M 16 -N 16 -K 32 --type f32 --mxBlockA 32 --mxBlockB 32 --validate
+    add_cpu_gemm_test(slow_f32_MX32_Rejected
+        WILL_FAIL
+        ARGS -M 16 -N 16 -K 32 --type f32 --mxBlockA 32 --mxBlockB 32 --validate
     )
-    set_tests_properties("CPUGemm.slow_f32_MX32_Rejected" PROPERTIES WILL_FAIL TRUE)
+endif()
+
+#################################################
+#     AMAX-D output tests                       #
+#################################################
+# --outputAmaxD makes the reference also write AMAX-D (max |D| over every
+# batch); the driver checks it against max |D| of the golden GEMM, so the
+# check does not depend on which CPU path ran. The fast path does not support
+# AMAX-D (isFastPathEligible rejects "amaxD"), so these run without
+# --tryFastPath, on the slow path.
+foreach(TYPE f32 f16 bf16)
+    get_test_sizes(${TYPE} SIZES)
+    add_cpu_gemm_test(slow_${TYPE}_AmaxD
+        ARGS ${SIZES} --type ${TYPE} --validate --outputAmaxD
+    )
+    add_cpu_gemm_test(slow_${TYPE}_AmaxD_AllFeatures
+        ARGS ${SIZES} --transA --type ${TYPE} --beta 0.5 --validate --bias --activation relu --scaleAlphaVec --useScaleAB Vector --outputAmaxD
+    )
+endforeach()
+add_cpu_gemm_test(slow_f64_AmaxD
+    ARGS ${F64_SIZES} --type f64 --validate --outputAmaxD
+)
+add_cpu_gemm_test(slow_tf32_AmaxD
+    ARGS ${F32_SIZES} --type tf32 --validate --outputAmaxD
+)
+# Max over every batch, not only the first.
+add_cpu_gemm_test(slow_f32_AmaxD_Batched
+    ARGS ${F32_SIZES} --type f32 --validate --batchCount 3 --outputAmaxD
+)
+# All-zero D: AMAX-D must be written as 0 (the driver starts it at -1).
+add_cpu_gemm_test(slow_f32_AmaxD_Alpha0
+    ARGS ${F32_SIZES} --type f32 --alpha 0 --validate --outputAmaxD
+)
+# Fewer output elements than threads. The single D element is negative with
+# the driver's fixed seed, so this also checks that AMAX-D is |D|, not D.
+add_cpu_gemm_test(slow_f32_AmaxD_1x1
+    ARGS -M 1 -N 1 -K 165 --type f32 --validate --outputAmaxD
+)
+if(NOT WIN32)
+    foreach(TYPE f8 bf8)
+        add_cpu_gemm_test(slow_${TYPE}_AmaxD
+            ARGS ${F16_SIZES} --type ${TYPE} --validate --outputAmaxD
+        )
+    endforeach()
+    add_cpu_gemm_test(slow_f4_MX32_AmaxD
+        ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate --outputAmaxD
+    )
+endif()
+
+if(COMMAND apply_ctest_category_labels)
+    apply_ctest_category_labels(
+        "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_test_categories.yaml"
+        EXPLICIT_TESTS ${CPU_GEMM_TEST_NAMES}
+    )
+    if(TENSILELITE_TESTS_CTEST_INSTALL_FILE)
+        apply_ctest_category_labels(
+            "${CMAKE_CURRENT_SOURCE_DIR}/cpu_gemm_test_categories.yaml"
+            INSTALL_TEST_FILE "${TENSILELITE_TESTS_CTEST_INSTALL_FILE}"
+            EXPLICIT_TESTS ${CPU_GEMM_TEST_NAMES}
+        )
+    endif()
 endif()

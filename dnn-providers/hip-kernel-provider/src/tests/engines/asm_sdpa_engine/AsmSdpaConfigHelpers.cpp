@@ -2,7 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "AsmSdpaConfigHelpers.hpp"
+#include "../../../engines/asm_sdpa_engine/asm/AsmKernelPath.hpp"
 #include "../../../engines/asm_sdpa_engine/plans/SdpaPlanUtils.hpp"
+#include "AsmSdpaTestSupport.hpp"
 #include "hip_kernel_provider_common/SdpaConfigConstants.hpp"
 #include "hip_kernel_provider_common/SdpaConfigEnumerations.hpp"
 
@@ -390,6 +392,34 @@ SdpaFwdGraph buildSdpaFwdReferenceGraph(const GraphTestCase& testCase)
                                     + testCase.name + ")");
     }
     return buildGraph(testCase, LengthInputs::PER_BATCH);
+}
+
+std::vector<std::string> getFwdKernelTocKeys(const fmha_v3_fwdConfig& config,
+                                             const std::string& arch)
+{
+    std::vector<std::string> tocKeys{asm_kernels::getFwdKernelTocKey(config.co_name, arch, false)};
+    if(arch == "gfx942")
+    {
+        tocKeys.push_back(asm_kernels::getFwdKernelTocKey(config.co_name, arch, true));
+    }
+    return tocKeys;
+}
+
+std::vector<AsmKernelTocEntry> getFwdKernelTocEntries(const std::string& arch)
+{
+    std::vector<AsmKernelTocEntry> entries;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        if(config.arch != arch)
+        {
+            continue;
+        }
+        for(auto& tocKey : getFwdKernelTocKeys(config, arch))
+        {
+            entries.push_back({std::move(tocKey), config.knl_name});
+        }
+    }
+    return entries;
 }
 
 } // namespace asm_sdpa_engine
