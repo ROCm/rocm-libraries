@@ -117,7 +117,7 @@ using fmha_epilogue =
                                            false, false>>;
 
 using fmha_kernel =
-    ck_tile::FmhaFwdSplitKVKernel<fmha_pipeline, fmha_epilogue>;
+    ck_tile::FmhaFwdSplitKVKernel<fmha_pipeline, fmha_epilogue{F_combine_otype}>;
 
 static void run(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
 {{
@@ -134,7 +134,7 @@ static void run(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
 
 using trait_{F_idx} = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout},
                         {F_pipeline_enum}, {F_logits}, fmha_mask_{F_idx}, {F_bias}, {F_lse}, {F_squant}, {F_pagedkv}, {F_sink}, {F_spad}, {F_skpad}, {F_dpad},
-                        {F_dvpad}, {F_occupancy}>;
+                        {F_dvpad}, {F_occupancy}, {F_fuse}>;
 
 #ifdef __clang__
 #pragma clang diagnostic push
@@ -275,6 +275,15 @@ FMHA_FWD_SPLITKV_API = """
 template<typename fmha_fwd_splitkv_traits_, typename fmha_fwd_splitkv_combine_traits_, typename Arch>
 float fmha_fwd_splitkv_(const ck_tile::stream_config& s, fmha_fwd_splitkv_args a)
 {{
+    if constexpr(fmha_fwd_splitkv_traits_::kFuseCombine)
+    {{
+        if(s.log_level_ > 0)
+            std::cout << ", " << fmha_fwd_splitkv_get_name_<fmha_fwd_splitkv_traits_, Arch>()
+                      << std::flush;
+        return ck_tile::launch_kernel(s,
+            [=](const ck_tile::stream_config& s_){{ fmha_fwd_splitkv_oneshot_<fmha_fwd_splitkv_traits_, Arch>(s_, a); }}
+        );
+    }}
     if(s.log_level_ > 0)
         std::cout
             << ", " << fmha_fwd_splitkv_get_name_<fmha_fwd_splitkv_traits_, Arch>()
@@ -298,8 +307,8 @@ float fmha_fwd_splitkv(fmha_fwd_splitkv_traits t, fmha_fwd_splitkv_args a, const
 """
 
 FMHA_FWD_SPLITKV_API_INNER_DISPATCH = """{F_if}((t.is_group_mode == {F_mode}) && (t.is_v_rowmajor == {F_vlayout}) && (t.has_logits_soft_cap == {F_logits}) && ({F_mask_check}) && (t.bias_type == {F_bias_check}) && (t.do_fp8_static_quant == {F_squant}) &&
-        ((a.block_table_ptr != nullptr) == {F_pagedkv}) && (t.has_sink == {F_sink}) && (t.qscale_type == {F_qscale_check}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
-    using traits_ = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, {F_squant}, {F_pagedkv},{F_sink}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_occupancy}>;
+        ((a.block_table_ptr != nullptr) == {F_pagedkv}) && (t.has_sink == {F_sink}) && (t.qscale_type == {F_qscale_check}) && ({F_fuse_check}) && ({F_scheck}) && ({F_seqtune}) && ({F_skcheck}) && ({F_dcheck}) && ({F_dvcheck}) && ({F_constraint})) {{
+    using traits_ = fmha_fwd_splitkv_traits_<{F_hdim}, {F_dtype}, {F_mode}, {F_bm0}, {F_bn0}, {F_bk0}, {F_bn1}, {F_bk1}, {F_bk0max}, {F_vlayout}, {F_pipeline_enum}, {F_logits}, {F_mask}, {F_bias}, true, {F_squant}, {F_pagedkv},{F_sink}, {F_spad}, {F_skpad}, {F_dpad}, {F_dvpad}, {F_occupancy}, {F_fuse}>;
 
     // get combine kernel tile sizes
     using OaccDataType = typename FmhaFwdTypeConfig<{F_dtype}>::OaccDataType;
@@ -354,13 +363,14 @@ class FmhaFwdSplitKVApiTrait:
     occupancy: int = -1
     constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
     qscale: str = "no"
+    fuse: str = "f"  # split kernel merges the splits itself
 
     @property
     def name(self) -> str:
         return (
             f"{self.hdim}-{self.dtype}-{self.mode}-{self.bm0}-{self.bn0}-{self.bk0}-{self.bn0}-{self.bk1}-{self.bk0max}-"
             + f"{self.vlayout}-{self.logits}-{self.mask}-{self.bias}-{self.lse}-{self.squant}-{self.spad}-{self.skpad}-{self.dpad}-"
-            + f"{self.dvpad}-{self.pagedkv}-{self.sink}-{self.qscale}"
+            + f"{self.dvpad}-{self.pagedkv}-{self.sink}-{self.qscale}-{self.fuse}"
         )
 
     @property
@@ -465,6 +475,7 @@ class FmhaFwdSplitKVPipeline:
     F_sink: str  # t/f
     F_mask: str  # value from MASK_MAP
     F_qscale: str = "no"  # no/pertensor
+    F_fuse: str = "f"  # t: the split kernel merges the splits, no combine kernel
 
     @property
     def name(self) -> str:
@@ -530,6 +541,8 @@ class FmhaFwdSplitKVPipeline:
             n += "_nsink"
         if self.F_qscale != "no":
             n += f"_{self.F_qscale}"
+        if self.F_fuse == "t":
+            n += "_fcomb"
         return n
 
 
@@ -615,6 +628,12 @@ class FmhaFwdSplitKVApiPool:
                             F_pagedkv=BOOL_MAP[trait.pagedkv],
                             F_sink=BOOL_MAP[trait.sink],
                             F_qscale_check=QSCALE_CHECK_MAP[trait.qscale],
+                            F_fuse=BOOL_MAP[trait.fuse],
+                            F_fuse_check=(
+                                "a.split_counter_ptr != nullptr"
+                                if trait.fuse == "t"
+                                else "true"
+                            ),
                             F_scheck=trait.scheck,
                             F_seqtune=trait.seqtune(max_bm0),
                             F_skcheck=trait.skcheck,
@@ -720,6 +739,12 @@ class FmhaFwdSplitKVKernel:
             F_occupancy=self.F_tile.F_occupancy,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_qscale=QSCALE_MAP[self.F_pipeline.F_qscale],
+            F_fuse=BOOL_MAP[self.F_pipeline.F_fuse],
+            F_combine_otype=(
+                f", typename FmhaFwdTypeConfig<{FWD_DTYPE_MAP[self.F_dtype]}>::ODataType"
+                if self.F_pipeline.F_fuse == "t"
+                else ""
+            ),
             F_pipeline_enum=PIPELINE_ENUM_MAP[self.F_pipeline.tag],
             F_mask=get_mask_map(self.mask_impl)[self.F_pipeline.F_mask],
             F_mode=MODE_MAP[self.F_mode],
@@ -978,10 +1003,13 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
         elif dtype in ["fp8bf16"]:
             # Per-tensor scaled fp8 runs on qr_tdm_pingpong only, so up to 16 rows at d128.
+            # The fused-combine entries come first; they need a.split_counter_ptr.
             if hdim == 128:
-                for mask in get_mask_map(mask_impl).keys():
-                    pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "f", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor"))  # fmt: skip
-                    pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor"))  # fmt: skip
+                for fuse, mask in itertools.product(
+                    ["t", "f"], get_mask_map(mask_impl).keys()
+                ):
+                    pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "f", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor", fuse))  # fmt: skip
+                    pipelines.append(Pipeline("qr_tdm_pingpong", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor", fuse))  # fmt: skip
         elif dtype in ["fp8fp16"]:
             # TODO
             None
@@ -1319,6 +1347,7 @@ def write_blobs(
                 occupancy=int(kernel.F_tile.F_occupancy),
                 constraint=kernel.F_tile.F_constraint,
                 qscale=kernel.F_pipeline.F_qscale,
+                fuse=kernel.F_pipeline.F_fuse,
             )
         )
     write_fwd_splitkv_api(api_pool, output_dir)

@@ -25,7 +25,11 @@ template <typename T>
 using has_max_waves_per_eu = decltype(T::kMaxWavesPerEu);
 } // namespace detail
 
-template <typename FmhaPipeline_, typename EpiloguePipeline_>
+// With a non-void CombineODataType_ the split kernel also merges the splits: the last
+// workgroup to finish an output tile (counted in split_counter_ptr, which must start zeroed and
+// is left zeroed) reads every split's o_acc/lse_acc back and writes O and LSE, so no combine
+// kernel runs.
+template <typename FmhaPipeline_, typename EpiloguePipeline_, typename CombineODataType_ = void>
 struct FmhaFwdSplitKVKernel
 {
     using FmhaPipeline                            = ck_tile::remove_cvref_t<FmhaPipeline_>;
@@ -71,6 +75,13 @@ struct FmhaFwdSplitKVKernel
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
     static constexpr bool kHasMask = FmhaMask::IsMasking;
+
+    using CombineODataType             = CombineODataType_;
+    static constexpr bool kFuseCombine = !std::is_void_v<CombineODataType>;
+    // weights of every split for each row of the tile live in LDS
+    static constexpr index_t kMaxFusedSplits = 128;
+    static_assert(!kFuseCombine || (!kIsGroupMode && !kDoFp8StaticQuant),
+                  "the fused combine supports batch mode without the static-quant O scale");
 
     // Markers are described in fmha_fwd_kernel_path_markers.hpp. Unlike
     // fmha_fwd_kernel.hpp there is no name-based fallback: a pipeline that
@@ -152,7 +163,8 @@ struct FmhaFwdSplitKVKernel
             (kHasLogitsSoftCap ? "_logits" : "_nlogits" ) + (BiasEnum == BlockAttentionBiasEnum::NO_BIAS ? _SS_("_nbias") : (_SS_("_") + BlockAttentionBiasEnumToStr<BiasEnum>::name)) +
             (kHasMask ? "_" + _SS_(FmhaMask::name) : "_nmask") + (kStoreLSE ? "_lse" : "_nlse" ) +
             (kDoFp8StaticQuant ? "_squant" : "_nsquant") + (kIsPagedKV ? "_pagedkv" : "_npagedkv" ) + (kHasSink ? "_sink" : "_nsink" ) +
-            (kPerTensorQScale ? _SS_("_") + BlockAttentionQuantScaleEnumToStr<QScaleEnum>::name : _SS_(""));
+            (kPerTensorQScale ? _SS_("_") + BlockAttentionQuantScaleEnumToStr<QScaleEnum>::name : _SS_("")) +
+            (kFuseCombine ? "_fcomb" : "");
         #undef _SS_
         #undef _TS_
         // clang-format on
@@ -259,6 +271,19 @@ struct FmhaFwdSplitKVKernel
         float scale_p;
     };
 
+    // final O/LSE and the per-tile split counter of the fused combine
+    struct FusedCombineKargs
+    {
+        void* o_ptr                       = nullptr;
+        void* lse_ptr                     = nullptr; // LSE is stored only when not null
+        int32_t* split_counter_ptr        = nullptr;
+        ck_tile::index_t stride_o         = 0;
+        ck_tile::index_t nhead_stride_o   = 0;
+        ck_tile::index_t batch_stride_o   = 0;
+        ck_tile::index_t nhead_stride_lse = 0;
+        ck_tile::index_t batch_stride_lse = 0;
+    };
+
     // one fp32 descale each, read on the device
     struct PerTensorQScaleKargs
     {
@@ -295,7 +320,8 @@ struct FmhaFwdSplitKVKernel
           std::conditional_t<kDoFp8StaticQuant, Fp8StaticQuantKargs, EmptyKargs<2>>,
           std::conditional_t<kIsPagedKV, CommonPageBlockTableKargs, CacheBatchIdxKargs>,
           std::conditional_t<kHasLogitsSoftCap, LogitsSoftCapKargs, EmptyKargs<3>>,
-          std::conditional_t<kPerTensorQScale, PerTensorQScaleKargs, EmptyKargs<5>>
+          std::conditional_t<kPerTensorQScale, PerTensorQScaleKargs, EmptyKargs<5>>,
+          std::conditional_t<kFuseCombine, FusedCombineKargs, EmptyKargs<6>>
     {
         const int32_t* seqlen_k_ptr;
 
@@ -389,10 +415,18 @@ struct FmhaFwdSplitKVKernel
               ck_tile::index_t window_size_right,
               ck_tile::index_t sink_size,
               ck_tile::index_t mask_type,
-              const void* sink_ptr      = nullptr,
-              const void* q_descale_ptr = nullptr,
-              const void* k_descale_ptr = nullptr,
-              const void* v_descale_ptr = nullptr)
+              const void* sink_ptr              = nullptr,
+              const void* q_descale_ptr         = nullptr,
+              const void* k_descale_ptr         = nullptr,
+              const void* v_descale_ptr         = nullptr,
+              void* o_ptr                       = nullptr,
+              void* lse_ptr                     = nullptr,
+              void* split_counter_ptr           = nullptr,
+              ck_tile::index_t stride_o         = 0,
+              ck_tile::index_t nhead_stride_o   = 0,
+              ck_tile::index_t batch_stride_o   = 0,
+              ck_tile::index_t nhead_stride_lse = 0,
+              ck_tile::index_t batch_stride_lse = 0)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -430,6 +464,7 @@ struct FmhaFwdSplitKVKernel
                     {},                   // placeholder for paged-block table or cache_batch_idx
                     {},                   // placeholder for logits_soft_cap
                     {},                   // placeholder for per-tensor descales
+                    {},                   // placeholder for the fused combine
                     reinterpret_cast<const int32_t*>(seqlen_k_ptr),
                     batch_stride_q,
                     batch_stride_k,
@@ -485,6 +520,28 @@ struct FmhaFwdSplitKVKernel
             ignore = q_descale_ptr;
             ignore = k_descale_ptr;
             ignore = v_descale_ptr;
+        }
+        if constexpr(kFuseCombine)
+        {
+            kargs.o_ptr             = o_ptr;
+            kargs.lse_ptr           = lse_ptr;
+            kargs.split_counter_ptr = static_cast<int32_t*>(split_counter_ptr);
+            kargs.stride_o          = stride_o;
+            kargs.nhead_stride_o    = nhead_stride_o;
+            kargs.batch_stride_o    = batch_stride_o;
+            kargs.nhead_stride_lse  = nhead_stride_lse;
+            kargs.batch_stride_lse  = batch_stride_lse;
+        }
+        else
+        {
+            ignore = o_ptr;
+            ignore = lse_ptr;
+            ignore = split_counter_ptr;
+            ignore = stride_o;
+            ignore = nhead_stride_o;
+            ignore = batch_stride_o;
+            ignore = nhead_stride_lse;
+            ignore = batch_stride_lse;
         }
 
         return kargs;
@@ -689,7 +746,183 @@ struct FmhaFwdSplitKVKernel
 
     CK_TILE_HOST_DEVICE static constexpr ck_tile::index_t GetSmemSize()
     {
-        return ck_tile::max(FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize());
+        constexpr index_t kFusedCombineBytes =
+            kFuseCombine
+                ? 16 + kMaxFusedSplits * FmhaPipeline::kM0 * static_cast<index_t>(sizeof(float))
+                : 0;
+        return ck_tile::max(
+            FmhaPipeline::GetSmemSize(), EpiloguePipeline::GetSmemSize(), kFusedCombineBytes);
+    }
+
+    // The combine of FmhaFwdSplitKVCombineKernel for one output tile, run by the last of its
+    // num_splits workgroups after all of them stored o_acc/lse_acc. Same math: logsum of the
+    // split LSEs, O = sum_i exp(lse_i - logsum) * o_acc_i, and 0 / -inf for a row no split saw.
+    CK_TILE_DEVICE static void FuseCombine(const Kargs& kargs,
+                                           index_t i_m0,
+                                           index_t i_n1,
+                                           index_t i_nhead,
+                                           index_t i_batch,
+                                           void* smem)
+    {
+        constexpr index_t kM0 = FmhaPipeline::kM0;
+        constexpr index_t kN1 = FmhaPipeline::kN1;
+
+        auto* is_last = static_cast<int32_t*>(smem);
+        auto* weights = reinterpret_cast<float*>(static_cast<char*>(smem) + 16); // [split][row]
+
+        // The barrier orders every wave's o_acc/lse_acc stores (and the pipeline's last LDS
+        // use) before one lane's agent-scope release on the counter. A device-scope fence in
+        // every wave of every split writes back and invalidates the caches each time and costs
+        // far more than the combine kernel it replaces.
+        __syncthreads();
+        if(threadIdx.x == 0)
+        {
+            const index_t num_mn = static_cast<index_t>(gridDim.x) / kargs.num_splits;
+            const long_index_t tile =
+                (static_cast<long_index_t>(blockIdx.z) * gridDim.y + blockIdx.y) * num_mn +
+                static_cast<index_t>(blockIdx.x) / kargs.num_splits;
+            int32_t* counter = kargs.split_counter_ptr + tile;
+            const bool last =
+                __scoped_atomic_fetch_add(counter, 1, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE) ==
+                kargs.num_splits - 1;
+            if(last) // zeroed again for the next launch; every split has counted
+                __scoped_atomic_store_n(counter, 0, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
+            *is_last = last ? 1 : 0;
+        }
+        __syncthreads();
+        if(*is_last == 0)
+            return;
+        // acquire the other splits' stores
+        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "agent");
+
+        // tile row r is merged row g = i_m0 + r: q head (g / seqlen_q) of the group, query
+        // (g % seqlen_q); without merging g < seqlen_q, so the head offset is 0
+        const index_t ratio           = kMergeNumHeadGroupsSeqLenQ ? kargs.nhead_ratio_qk : 1;
+        const index_t total_rows      = kargs.seqlen_q * ratio;
+        const index_t num_splits      = kargs.num_splits;
+        const long_index_t i_nhead_q0 = static_cast<long_index_t>(i_nhead) * ratio;
+        const auto row_offset         = [&](index_t g, index_t nhead_stride, index_t row_stride) {
+            return static_cast<long_index_t>(g / kargs.seqlen_q) * nhead_stride +
+                   static_cast<long_index_t>(g % kargs.seqlen_q) * row_stride;
+        };
+
+        const auto* lse_acc = static_cast<const LSEDataType*>(kargs.lse_acc_ptr) +
+                              i_nhead_q0 * kargs.nhead_stride_lse_acc +
+                              static_cast<long_index_t>(i_batch) * kargs.batch_stride_lse_acc;
+        const auto* o_acc = static_cast<const OaccDataType*>(kargs.o_acc_ptr) +
+                            i_nhead_q0 * kargs.nhead_stride_o_acc +
+                            static_cast<long_index_t>(i_batch) * kargs.batch_stride_o_acc;
+        auto* o = static_cast<CombineODataType*>(kargs.o_ptr) + i_nhead_q0 * kargs.nhead_stride_o +
+                  static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
+        auto* lse = static_cast<LSEDataType*>(kargs.lse_ptr);
+
+        // The partial results are read in as few dependent rounds as possible: one round
+        // carries this lane's LSEs and the o_acc of up to kChunk splits, and each further
+        // kChunk splits take one more. A lane walking the splits one load at a time is
+        // latency bound and costs more than the combine kernel this replaces.
+        constexpr index_t kVec   = 4; // contiguous columns per access
+        constexpr index_t kIters = kM0 * kN1 / (kVec * FmhaPipeline::kBlockSize);
+        constexpr index_t kChunk = 8;
+        static_assert(kN1 % kVec == 0 && kIters * kVec * FmhaPipeline::kBlockSize == kM0 * kN1,
+                      "the fused combine splits the tile evenly over the lanes");
+        static_assert(kMaxFusedSplits * kM0 % FmhaPipeline::kBlockSize == 0);
+        using vec_t = ext_vector_t<float, kVec>;
+
+        long_index_t src[kIters];
+        long_index_t dst[kIters];
+        index_t wrow[kIters];
+        bool valid[kIters];
+        static_for<0, kIters, 1>{}([&](auto it) {
+            const index_t idx = threadIdx.x + it * FmhaPipeline::kBlockSize;
+            const index_t r   = idx / (kN1 / kVec);
+            const index_t g   = i_m0 + r;
+            const index_t col = i_n1 + idx % (kN1 / kVec) * kVec;
+            valid[it]         = g < total_rows && col < kargs.hdim_v;
+            // lanes past the tile still load, from a clamped in-bounds address
+            const index_t g_in   = min(g, total_rows - 1);
+            const index_t col_in = min(col, kargs.hdim_v - kVec);
+            src[it]  = row_offset(g_in, kargs.nhead_stride_o_acc, kargs.stride_o_acc) + col_in;
+            dst[it]  = row_offset(g_in, kargs.nhead_stride_o, kargs.stride_o) + col;
+            wrow[it] = r;
+        });
+        // loads of kChunk splits from i0 on; splits past num_splits reread the last one and
+        // are given weight 0 below
+        const auto load_chunk = [&](index_t i0, vec_t(&part)[kChunk][kIters]) {
+            static_for<0, kChunk, 1>{}([&](auto j) {
+                const OaccDataType* split =
+                    o_acc + static_cast<long_index_t>(min(i0 + j, num_splits - 1)) *
+                                kargs.split_stride_o_acc;
+                static_for<0, kIters, 1>{}([&](auto it) {
+                    part[j][it] =
+                        *static_cast<const vec_t*>(static_cast<const void*>(split + src[it]));
+                });
+            });
+        };
+
+        vec_t part[kChunk][kIters];
+        load_chunk(0, part);
+        constexpr index_t kLsePerLane = kMaxFusedSplits * kM0 / FmhaPipeline::kBlockSize;
+        LSEDataType lse_in[kLsePerLane];
+        static_for<0, kLsePerLane, 1>{}([&](auto j) {
+            const index_t idx = threadIdx.x + j * FmhaPipeline::kBlockSize;
+            const index_t g   = i_m0 + idx % kM0;
+            lse_in[j] =
+                idx < num_splits * kM0 && g < total_rows
+                    ? lse_acc[static_cast<long_index_t>(idx / kM0) * kargs.split_stride_lse_acc +
+                              row_offset(g, kargs.nhead_stride_lse_acc, 1)]
+                    : -numeric<LSEDataType>::infinity();
+        });
+        static_for<0, kLsePerLane, 1>{}([&](auto j) {
+            const index_t idx = threadIdx.x + j * FmhaPipeline::kBlockSize;
+            if(idx < num_splits * kM0)
+                weights[idx] = lse_in[j];
+        });
+        __syncthreads();
+
+        for(index_t r = threadIdx.x; r < kM0; r += blockDim.x)
+        {
+            const index_t g = i_m0 + r;
+            if(total_rows <= g)
+                continue;
+            LSEDataType lse_max = -numeric<LSEDataType>::infinity();
+            for(index_t i = 0; i < num_splits; ++i)
+                lse_max = max(lse_max, weights[i * kM0 + r]);
+            LSEDataType lse_sum = 0;
+            if(lse_max != -numeric<LSEDataType>::infinity())
+                for(index_t i = 0; i < num_splits; ++i)
+                    lse_sum += ck_tile::exp(weights[i * kM0 + r] - lse_max);
+            const LSEDataType logsum =
+                lse_sum == 0 ? -numeric<LSEDataType>::infinity() : ck_tile::log(lse_sum) + lse_max;
+            for(index_t i = 0; i < num_splits; ++i)
+                weights[i * kM0 + r] = logsum == -numeric<LSEDataType>::infinity()
+                                           ? 0.f
+                                           : ck_tile::exp(weights[i * kM0 + r] - logsum);
+            if(lse != nullptr && i_n1 == 0)
+                lse[static_cast<long_index_t>(i_batch) * kargs.batch_stride_lse +
+                    i_nhead_q0 * kargs.nhead_stride_lse +
+                    row_offset(g, kargs.nhead_stride_lse, 1)] = logsum;
+        }
+        __syncthreads();
+
+        vec_t acc[kIters];
+        static_for<0, kIters, 1>{}([&](auto it) { acc[it] = vec_t{0.f, 0.f, 0.f, 0.f}; });
+        for(index_t i0 = 0; i0 < num_splits; i0 += kChunk)
+        {
+            if(i0 > 0)
+                load_chunk(i0, part);
+            static_for<0, kChunk, 1>{}([&](auto j) {
+                if(i0 + j < num_splits)
+                    static_for<0, kIters, 1>{}([&](auto it) {
+                        acc[it] += weights[(i0 + j) * kM0 + wrow[it]] * part[j][it];
+                    });
+            });
+        }
+        static_for<0, kIters, 1>{}([&](auto it) {
+            if(valid[it])
+                static_for<0, kVec, 1>{}([&](auto v) {
+                    o[dst[it] + v] = type_convert<CombineODataType>(acc[it][v.value]);
+                });
+        });
     }
 
     CK_TILE_DEVICE void operator()(Kargs kargs) const
@@ -1330,6 +1563,9 @@ struct FmhaFwdSplitKVKernel
                              {i_m0, i_n1});
 
         EpiloguePipeline{}(o_acc_dram_window, o_acc_tile, nullptr);
+
+        if constexpr(kFuseCombine)
+            FuseCombine(kargs, i_m0, i_n1, i_nhead, i_batch, smem_ptr);
     }
 };
 

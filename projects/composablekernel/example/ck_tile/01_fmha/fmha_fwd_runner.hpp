@@ -1162,6 +1162,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
     ck_tile::DeviceMem scale_seqstart_v_buf(seqstart_v_scale_host.size() * sizeof(int32_t));
     ck_tile::DeviceMem lse_acc_buf(lse_acc_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem o_acc_buf(o_acc_host.get_element_space_size_in_bytes());
+    // Experimental: CK_TILE_FMHA_SPLITKV_FUSED_COMBINE=1 passes per-tile split counters, which
+    // makes the instances that fuse the combine into the split kernel eligible.
+    const bool use_fused_combine = std::getenv("CK_TILE_FMHA_SPLITKV_FUSED_COMBINE") != nullptr;
+    ck_tile::DeviceMem split_counter_buf(
+        use_fused_combine ? sizeof(int32_t) * static_cast<std::size_t>(batch) * nhead *
+                                std::max(1, max_seqlen_q) * ck_tile::integer_divide_ceil(hdim_v, 32)
+                          : 0);
+    if(use_fused_combine)
+        split_counter_buf.SetZero();
     ck_tile::DeviceMem lse_buf(lse_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem o_buf(o_host.get_element_space_size_in_bytes());
     ck_tile::DeviceMem seqstart_q_buf(seqstart_q_host.size() * sizeof(int32_t));
@@ -1720,6 +1729,8 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     (use_cache_batch_idx ? cache_batch_idx_buf.GetDeviceBuffer() : nullptr);
 
                 args.num_splits = num_splits;
+                args.split_counter_ptr =
+                    use_fused_combine ? split_counter_buf.GetDeviceBuffer() : nullptr;
                 if(qscale.type == quant_scale_enum::pertensor)
                 {
                     args.q_descale_ptr = q_descale_buf.GetDeviceBuffer();

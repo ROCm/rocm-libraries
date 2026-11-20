@@ -501,6 +501,11 @@ struct fmha_fwd_splitkv_args
     const void* k_descale_ptr = nullptr;
     const void* v_descale_ptr = nullptr;
 
+    // Zeroed int32 per output tile (batch * nhead_q * max_seqlen_q * ceil(hdim_v / 32) covers
+    // every instance), left zeroed after each launch. When set, instances that fuse the
+    // combine into the split kernel are eligible and no combine kernel runs.
+    void* split_counter_ptr = nullptr;
+
     float logits_soft_cap;
 
     ck_tile::index_t stride_q;
@@ -1245,7 +1250,15 @@ auto fmha_fwd_splitkv_create_kargs_and_grids(fmha_fwd_splitkv_args args)
                                      args.sink_ptr,
                                      args.q_descale_ptr,
                                      args.k_descale_ptr,
-                                     args.v_descale_ptr);
+                                     args.v_descale_ptr,
+                                     args.o_ptr,
+                                     args.lse_ptr,
+                                     args.split_counter_ptr,
+                                     args.stride_o,
+                                     args.nhead_stride_o,
+                                     args.batch_stride_o,
+                                     args.nhead_stride_lse,
+                                     args.batch_stride_lse);
         }
     }();
 
@@ -1703,7 +1716,8 @@ template <ck_tile::index_t HDim_,
           bool kPadSK_,
           bool kPadD_,
           bool kPadDv_,
-          int kOccupancy_ = -1>
+          int kOccupancy_    = -1,
+          bool kFuseCombine_ = false>
 struct fmha_fwd_splitkv_traits_
 {
     static constexpr ck_tile::index_t HDim           = HDim_;
@@ -1731,6 +1745,8 @@ struct fmha_fwd_splitkv_traits_
     // See fmha_fwd_traits_::kOccupancy for rationale (per-tile symbol split
     // to keep occupancy-only variants from colliding at link time).
     static constexpr int kOccupancy = kOccupancy_;
+    // the split kernel merges the splits itself (see fmha_fwd_splitkv_args::split_counter_ptr)
+    static constexpr bool kFuseCombine = kFuseCombine_;
 };
 
 template <typename Traits_, typename Arch = void>
