@@ -4,10 +4,10 @@
 #pragma once
 
 // Production-side workarounds for known MIOpen-provider issues. Each macro is
-// keyed by its upstream issue so it is easy to grep and remove once the
-// underlying problem is fixed. Test-side counterparts live in
-// `tests/common/TestWorkarounds.hpp` (kept separate so production TUs never
-// pull in gtest).
+// keyed by its tracking issue (a GitHub issue number or an ALMIOPEN ticket) so it
+// is easy to grep and remove once the underlying problem is fixed. The test-side
+// helpers for issue 6979 live in `tests/common/TestWorkarounds.hpp` (kept
+// separate so production TUs never pull in gtest).
 //
 // ----------------------------------------------------------------------------
 // ROCm/rocm-libraries#5409 — MIOpen Conv-Bias-Activation (CBA) fusion produces
@@ -129,8 +129,9 @@
 // engines/plans/MiopenResampleFwdChecks.cpp (and that file's
 // `#include "Workarounds.hpp"` once no workaround there remains), and the decline
 // test tagged ALMIOPEN-3295 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp;
-// drop the BFLOAT16 index rule from the Resample Forward notes in
-// docs/OperationSupport.md and
+// drop the BFLOAT16 aside of the padding-mode comments in that checks file and
+// in that test file, which also name the key; drop the BFLOAT16 index rule from
+// the Resample Forward notes in docs/OperationSupport.md and
 // projects/hipdnn/docs/user-guides/reference/miopen-plugin.rst. `git grep
 // ALMIOPEN.3295` finds the code sites.
 // ----------------------------------------------------------------------------
@@ -168,7 +169,7 @@
 // ALMIOPEN-3375 — for average pooling that includes padding, MIOpen's naive
 // pooling forward kernel (MIOpenPoolingForwardNaive.cpp) divides by the window
 // volume computed as an unsigned 32-bit product. A volume of 2^32 or more wraps,
-// so the divisor is 0 (Y is inf) or a small residue (Y is too large). Windows
+// so the divisor is 0 (Y is inf or NaN) or a small residue (Y is too large). Windows
 // that large fit only the naive kernel, so MIOpen selects it.
 //
 // WORKAROUND_ALMIOPEN_3375_DECLINES_WINDOW(mode, window) is true for the graphs
@@ -229,7 +230,8 @@ inline bool windowVolumeExceedsUint32(const std::vector<int>& window)
 // channels-last tile check.
 //
 // To remove after the fix: delete this section, its helper and its macro, its
-// call site in engines/plans/MiopenResampleFwdChecks.cpp (and that file's
+// call site in engines/plans/MiopenResampleFwdChecks.cpp together with the
+// `elementSize` computed only for it (and that file's
 // `#include "Workarounds.hpp"` once no workaround there remains), and the tests
 // tagged ALMIOPEN-3419 in tests/engines/plans/TestMiopenResampleFwdChecks.cpp;
 // drop the channels-first tile rule from the Resample Forward notes in
