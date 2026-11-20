@@ -6,7 +6,7 @@
 
 Usage: run_rocjitsu.py -- <command...>
 TheRock's tensilelite-rocjitsu job runs ``-- python pytest_runner.py`` with
-TEST_CATEGORY=emu-pr. This script:
+TEST_CATEGORY=rocjitsu-fast. This script:
 - picks the emulator profile and device config for AMDGPU_TARGETS (or the
   AMDGPU_FAMILIES family), from the rocjitsu/mirage installed with ROCm;
 - splits the host's CPUs between pytest-xdist workers and each worker's

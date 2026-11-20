@@ -360,10 +360,10 @@ def test_main_requires_a_command():
         launcher.main([], {})
 
 
-def test_durations_cover_emu_slow_configs():
+def test_durations_cover_rocjitsu_slow_configs():
     durations = json.loads(plugin.DEFAULT_DURATIONS.read_text())
     common = EMULATION.parent / "common"
-    slow = [p for p in common.rglob("*.yaml") if "emu_slow" in p.read_text()]
+    slow = [p for p in common.rglob("*.yaml") if "rocjitsu_slow" in p.read_text()]
     assert len(slow) == 5
     for path in slow:
         key = f"test_config[tensilelite/Tests/common/{path.relative_to(common).as_posix()}]"
