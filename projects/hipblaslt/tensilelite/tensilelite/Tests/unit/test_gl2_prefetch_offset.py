@@ -660,6 +660,7 @@ _INC64_CONFIGS = {
     "ab_fp8_mixed_layout", "abmx_fp8", "a_sparse_tlu_mlayout1",
     "gsu4_interleaved", "gsu4_contiguous_rem", "gsu2_mx_cluster",
     "pgr1_nl2", "pgr3_ntlu", "pgr2_guard_taken",
+    "ab_swizzled_tdm",  # the swizzled-TDM increment is MI*DepthU*bpe, widened to a pair
 }
 CONFIGS += [replace(c, name=f"{c.name}_inc64", inc64=True)
             for c in CONFIGS if c.name in _INC64_CONFIGS]

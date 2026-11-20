@@ -79,6 +79,10 @@ REJECTED = [
     (_c("lsi_B_f4", dtype="f4", LDSSegmentInterleave=1), "swizzle-B LSI: F4 not validated"),
     (_c("lsi_B_wg41", wt=(1, 2), wg=(4, 1), VectorWidthB=2, LDSSegmentInterleave=1),
      "swizzle-B LSI: only MIWaveGroup=[2,2]"),
+    # LSI, B not spanning its LDS component, with the nO rows of a vIdx group not dividing evenly over
+    # the components: a group would straddle two components.
+    (_c("lsi_B_straddle", wt=(2, 6), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
+     "swizzle-B LSI: a vIdx group straddles an LDS component"),
     (_c("brot_A", side="A", wt=(2, 4), VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1,
         LDSSegmentBRotate=1), "SwizzleTensorA not supported"),
     (_c("lsi_A_vwa1", side="A", LDSSegmentInterleave=1), "A: VWA must be WaveTileA"),
