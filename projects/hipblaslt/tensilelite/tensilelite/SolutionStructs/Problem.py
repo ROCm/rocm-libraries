@@ -441,8 +441,15 @@ def getRealDataTypeB(dataType):
     else:
         return dataType
 
-def _isNarrowFloat(dataType):
-    return dataType.is8bitFloat() or dataType.is6bitFloat() or dataType.isFloat4()
+def _isFloatWithAtMostBits(dataType, nBits):
+    """Return True if dataType is a floating-point type with at most nBits bits.
+
+    For example, with nBits=8 it returns True for FP8, BF8, FP6, BF6 and FP4,
+    and False for FP16 and INT8.
+    """
+    isInt = dataType.isInt8() or dataType.isInt8x4() or dataType.isInt32() \
+        or dataType.isInt64() or dataType.isInt4()
+    return not isInt and dataType.numBytes() * 8 <= nBits
 
 _INT4_ENCODING_CHAR = {"Signed": "", "UnsignedBias8": "U8"}
 
@@ -1005,11 +1012,12 @@ class ProblemType(Mapping):
       self["DataTypeB"] = self["MacDataTypeB"]
     self["DataTypeB"] = getRealDataTypeB(self["DataTypeB"])
 
-    # Kernels cannot convert between two of these types, so an operand stored in one is
-    # also its MAC type (e.g. DataType F4 with DataTypeB F8 is an F4 x F8 MFMA).
+    # Kernels cannot convert between two floats of 8 bits or fewer, so an operand stored in
+    # one is also its MAC type (e.g. DataType F4 with DataTypeB F8 is an F4 x F8 MFMA).
     for tc in ("A", "B"):
       dataType, macDataType = self["DataType%s"%tc], self["MacDataType%s"%tc]
-      if dataType != macDataType and _isNarrowFloat(dataType) and _isNarrowFloat(macDataType):
+      if dataType != macDataType and _isFloatWithAtMostBits(dataType, 8) \
+          and _isFloatWithAtMostBits(macDataType, 8):
         if "MacDataType%s"%tc in config:
           raise Exception("Unsupported input conversion DataType%s (%s) -> MacDataType%s (%s)" \
                           % (tc, dataType.toChar(), tc, macDataType.toChar()))

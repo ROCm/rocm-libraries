@@ -6,14 +6,27 @@ DataType seeds both MacDataTypeA and MacDataTypeB, so a mixed problem such as
 DataType F4 with DataTypeB F8 used to get MacDataTypeB F4. The kernel then
 treated B as converted from F8 to F4, a conversion it does not implement, and
 loaded only B's scalar scale. An operand whose storage and MAC types are both
-8-, 6- or 4-bit floats now takes its storage type as its MAC type.
+floats of 8 bits or fewer now takes its storage type as its MAC type.
 """
 
 import pytest
 
-from tensilelite.SolutionStructs.Problem import ProblemType
+from tensilelite.Common.DataType import DataType
+from tensilelite.SolutionStructs.Problem import ProblemType, _isFloatWithAtMostBits
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.mark.parametrize(
+    "typeChar, nBits, expected",
+    [
+        ("F8", 8, True), ("B8", 8, True), ("F8N", 8, True), ("F6", 8, True),
+        ("B6", 8, True), ("F4", 8, True), ("H", 8, False), ("I8", 8, False),
+        ("I4", 8, False), ("H", 16, True), ("B", 16, True), ("S", 16, False),
+    ],
+)
+def test_float_with_at_most_bits(typeChar, nBits, expected):
+    assert _isFloatWithAtMostBits(DataType(typeChar), nBits) == expected
 
 
 def _problemType(**overrides):
