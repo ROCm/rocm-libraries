@@ -8,6 +8,8 @@ on:
       - reopened
     paths: &host_asan_paths
       - "projects/hipblaslt/**"
+      # The Python bindings are tested by Component CI; negations must follow what they negate.
+      - "!projects/hipblaslt/python/**"
       - "projects/hipsparselt/**"
       - "test/therock/test_hipblaslt.py"
       - "test/therock/test_hipsparselt.py"

@@ -1,0 +1,211 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# hipBLASLt's opt-in Python bindings (projects/hipblaslt/python/). The lanes:
+#   - Linux CPU and Linux gfx942 GPU, on every PR that changes the bindings or the public headers;
+#   - gfx950, with the ci:run-gfx950 label;
+#   - Windows CPU, non-blocking and never a required check;
+#   - Windows GPU (gfx1151), only when the lanes themselves change or on a manual run.
+# The plan job picks the GPU lanes, which run as a Linux matrix and a Windows matrix. Every lane
+# installs the TheRock nightly pinned below into a fresh venv, builds the bindings against it,
+# and runs their tests, one step each, with projects/hipblaslt/python/scripts/ci_lane.sh.
+name: "Component CI: hipBLASLt Python bindings"
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      windows_runner:
+        type: string
+        required: true
+      all_lanes:
+        description: "Also run the opt-in gfx950 and Windows GPU lanes"
+        type: string
+        default: "false"
+
+permissions:
+  contents: read
+
+env:
+  # The one place the bindings' ROCm is pinned. Bump it deliberately, and switch to
+  # --latest-release once TheRock#9530 is fixed.
+  HIPBLASLT_PY_ROCM_VERSION: "10.3.0a20261116"
+  PYTHONDONTWRITEBYTECODE: "1"
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      linux_gpu: ${{ steps.plan.outputs.linux_gpu }}
+      windows: ${{ steps.plan.outputs.windows }}
+    steps:
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          ALL_LANES: ${{ inputs.all_lanes }}
+          WINDOWS_RUNNER: ${{ inputs.windows_runner }}
+        run: |
+          set -euo pipefail
+          labels=""
+          # Read the labels now, not from the event, so a re-run after adding one sees it.
+          if [ -n "${PR}" ]; then
+            labels="$(gh api "repos/${REPO}/issues/${PR}/labels" --jq '.[].name')"
+          fi
+          opt_in=false
+          if [ "${ALL_LANES}" = "true" ]; then
+            opt_in=true
+          fi
+          gfx950="${opt_in}"
+          if grep -qx 'ci:run-gfx950' <<<"${labels}"; then
+            gfx950=true
+          fi
+          # One entry per lane. A GPU lane names its device wheel; the CPU lane leaves it empty.
+          linux_gpu="$(jq -cn --argjson gfx950 "${gfx950}" '
+            [{name: "gfx942", runner: "linux-gfx942-1gpu-ccs-csp-ossci-rocm", device: "gfx942"}]
+            + if $gfx950 then
+                [{name: "gfx950 (ci:run-gfx950)", runner: "linux-gfx950-1gpu-ccs-ossci-rocm",
+                  device: "gfx950"}]
+              else [] end')"
+          windows="$(jq -cn --arg runner "${WINDOWS_RUNNER}" --argjson gpu "${opt_in}" '
+            [{name: "CPU (non-blocking)", runner: $runner, device: "", require_gpu: ""}]
+            + if $gpu then
+                [{name: "gfx1151 (opt-in)", runner: "windows-gfx1151-gpu-rocm", device: "gfx1151",
+                  require_gpu: "1"}]
+              else [] end')"
+          echo "linux_gpu=${linux_gpu}" >> "${GITHUB_OUTPUT}"
+          echo "windows=${windows}" >> "${GITHUB_OUTPUT}"
+          echo "Linux GPU lanes: ${linux_gpu}"
+          echo "Windows lanes: ${windows}"
+
+  linux-cpu:
+    name: Linux CPU
+    needs: plan
+    # Downloads a built ROCm and runs pytest; it doesn't need the shared build pool.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    container:
+      image: ${{ inputs.docker_image }}
+    steps:
+      - name: Checkout the bindings
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The public headers too: the enum coverage test reads the PR's own.
+          sparse-checkout: |
+            projects/hipblaslt/python
+            projects/hipblaslt/library/include
+            projects/hipblas-common/library/include
+      - name: Create the venv
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh venv
+      - name: Install ROCm ${{ env.HIPBLASLT_PY_ROCM_VERSION }}
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh rocm
+      - name: Build the bindings
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh build
+      - name: Run the tests
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh test
+      - name: Remove the venv
+        if: always()
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh clean
+
+  linux-gpu:
+    name: Linux ${{ matrix.lane.name }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJSON(needs.plan.outputs.linux_gpu) }}
+    runs-on: ${{ matrix.lane.runner }}
+    timeout-minutes: 60
+    container:
+      image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
+      options: --ipc host
+        --group-add video
+        --device /dev/kfd
+        --device /dev/dri
+        --group-add 993
+        --group-add 992
+        --group-add 110
+        --env-file /etc/podinfo/gha-gpu-isolation-settings
+    env:
+      HIPBLASLT_PY_DEVICE: ${{ matrix.lane.device }}
+      HIPBLASLT_PY_REQUIRE_GPU: "1"
+    steps:
+      - name: Checkout the bindings
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The public headers too: the enum coverage test reads the PR's own.
+          sparse-checkout: |
+            projects/hipblaslt/python
+            projects/hipblaslt/library/include
+            projects/hipblas-common/library/include
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends g++ python3-dev python3-venv
+      - name: Create the venv
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh venv
+      - name: Install ROCm ${{ env.HIPBLASLT_PY_ROCM_VERSION }} with ${{ matrix.lane.device }}
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh rocm
+      - name: Build the bindings
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh build
+      - name: Run the tests
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh test
+      - name: Remove the venv
+        if: always()
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh clean
+
+  windows:
+    name: Windows ${{ matrix.lane.name }}
+    needs: plan
+    strategy:
+      fail-fast: false
+      matrix:
+        lane: ${{ fromJSON(needs.plan.outputs.windows) }}
+    runs-on: ${{ matrix.lane.runner }}
+    timeout-minutes: 60
+    # Informational only: no decision may make Windows harder later, but these lanes are never
+    # a required check.
+    continue-on-error: true
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHON: python
+      HIPBLASLT_PY_DEVICE: ${{ matrix.lane.device }}
+      HIPBLASLT_PY_REQUIRE_GPU: ${{ matrix.lane.require_gpu }}
+    steps:
+      - name: Configure git long paths
+        run: git config --global core.longpaths true
+      - name: Checkout the bindings
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # The public headers too: the enum coverage test reads the PR's own.
+          sparse-checkout: |
+            projects/hipblaslt/python
+            projects/hipblaslt/library/include
+            projects/hipblas-common/library/include
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+      - name: Create the venv
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh venv
+      - name: Install ROCm ${{ env.HIPBLASLT_PY_ROCM_VERSION }}
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh rocm
+      - name: Build the bindings
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh build
+      - name: Run the tests
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh test
+      # Some Windows runners are persistent, so a venv left behind would pile up.
+      - name: Remove the venv
+        if: always()
+        run: bash projects/hipblaslt/python/scripts/ci_lane.sh clean

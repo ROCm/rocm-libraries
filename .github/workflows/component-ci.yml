@@ -27,6 +27,8 @@ jobs:
       tensilelite-coverage: ${{ steps.configure.outputs.tensilelite_coverage }}
       logic-corpus: ${{ steps.configure.outputs.hipblaslt_logic_corpus }}
       hipblaslt-rocjitsu-scripts: ${{ steps.configure.outputs.hipblaslt_rocjitsu_scripts }}
+      hipblaslt-python: ${{ steps.configure.outputs.hipblaslt_python }}
+      hipblaslt-python-all-lanes: ${{ steps.configure.outputs.hipblaslt_python_all_lanes }}
       docker-image: ${{ steps.env.outputs.docker-image }}
       linux-runner: ${{ steps.env.outputs.linux-runner }}
       windows-runner: ${{ steps.env.outputs.windows-runner }}
@@ -105,6 +107,20 @@ jobs:
     if: needs.changes.outputs.hipblaslt-rocjitsu-scripts == 'true'
     uses: ./.github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml
 
+  hipblaslt-python:
+    name: "hipBLASLt Python bindings"
+    needs: changes
+    if: needs.changes.outputs.hipblaslt-python == 'true'
+    permissions:
+      contents: read
+      # The lane plan reads the PR's labels (ci:run-gfx950) when it runs.
+      pull-requests: read
+    uses: ./.github/workflows/component-ci-hipblaslt-python.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      windows_runner: ${{ needs.changes.outputs.windows-runner }}
+      all_lanes: ${{ needs.changes.outputs.hipblaslt-python-all-lanes }}
+
   component-ci-summary:
     name: "Component CI Summary"
     if: always()
@@ -119,6 +135,8 @@ jobs:
       - tensilelite-coverage
       - logic-corpus
       - hipblaslt-rocjitsu-scripts
+      # hipblaslt-python joins once its Linux lanes have 20 green runs; until then they're
+      # informational, and a failure shows on the lane, not the summary.
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout TheRock repository

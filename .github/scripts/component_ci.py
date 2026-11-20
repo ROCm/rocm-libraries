@@ -9,6 +9,8 @@ Outputs boolean flags per component via GITHUB_OUTPUT:
   - tensilelite_coverage=true/false
   - hipblaslt_logic_corpus=true/false
   - hipblaslt_rocjitsu_scripts=true/false
+  - hipblaslt_python=true/false
+  - hipblaslt_python_all_lanes=true/false
 
 Each component defines a set of path patterns. If any changed file matches,
 that component is marked as triggered. A component may also list exclusions:
@@ -72,6 +74,14 @@ COMPONENTS = {
         ".github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh",
         ".github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml",
     ],
+    # The opt-in Python bindings. The public headers are here on purpose: an enum
+    # added to them re-runs the bindings' coverage test on the PR that adds it.
+    "hipblaslt_python": [
+        "projects/hipblaslt/python/**",
+        "projects/hipblaslt/library/include/hipblaslt/**",
+        "projects/hipblas-common/library/include/**",
+        ".github/workflows/component-ci-hipblaslt-python.yml",
+    ],
 }
 
 # Prose that no step of a component's CI reads. A change confined to these
@@ -92,6 +102,13 @@ EXCLUSION_EXCEPTIONS = {
         "projects/miopen/LICENSE.md",
     ],
 }
+
+# A change to the bindings' lane definitions also runs their opt-in lanes (gfx950 and
+# Windows GPU), so the PR that edits a lane proves it still works.
+HIPBLASLT_PYTHON_ALL_LANES_PATHS = [
+    ".github/workflows/component-ci-hipblaslt-python.yml",
+    "projects/hipblaslt/python/scripts/ci_lane.sh",
+]
 
 # Paths that affect every component's CI run: the workflow, this script,
 # and the shared ci-env action. A change here re-triggers all components.
@@ -127,14 +144,17 @@ def main():
 
     if is_workflow_dispatch:
         changed = {key: True for key in COMPONENTS}
+        all_lanes = True
     else:
         # Both sides of a rename: moving a source file to an excluded or
         # unrelated path must still trigger the component it left.
         changed_files = get_modified_paths(base_ref, detect_renames=False)
         changed = detect_changed_components(changed_files)
+        all_lanes = matches_paths(changed_files, HIPBLASLT_PYTHON_ALL_LANES_PATHS)
 
     print(f"Changed components: {changed}")
     outputs = {k: str(v).lower() for k, v in changed.items()}
+    outputs["hipblaslt_python_all_lanes"] = str(all_lanes).lower()
     set_github_output(outputs)
 
 
