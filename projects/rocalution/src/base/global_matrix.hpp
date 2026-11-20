@@ -48,10 +48,10 @@ namespace rocalution
   *                     std::complex<double>
   *
   * A number of matrix formats are supported. These are CSR, BCSR, MCSR, COO, DIA, ELL, HYB, and DENSE.
-  * \note For CSR type matrices, the column indices must be sorted in increasing order. For COO matrices, the row
-  * indices must be sorted in increasing order. The function \p Check can be used to check whether a matrix
-  * contains valid data. For CSR and COO matrices, the function \p Sort can be used to sort the row or column
-  * indices respectively.
+  * \note For CSR type matrices, the column indices must be sorted in increasing order. For COO matrices, the
+  * entries must be sorted by row index and, within each row, by column index. The function \p Check can be used
+  * to check whether a matrix contains valid data. For CSR and COO matrices, the function \p Sort can be used to
+  * sort the indices.
   */
     template <typename ValueType>
     class GlobalMatrix : public Operator<ValueType>
@@ -225,7 +225,12 @@ namespace rocalution
         /** \brief Convert the matrix to MCSR structure */
         ROCALUTION_EXPORT
         void ConvertToMCSR(void);
-        /** \brief Convert the matrix to BCSR structure */
+        /** \brief Convert the matrix to BCSR structure
+      * \details
+      * For a matrix that is not BCSR yet, \p blockdim must be greater than 1. A BCSR
+      * matrix keeps its block dimension for a \p blockdim of 1 or less. A matrix whose
+      * sizes are not a multiple of the block dimension falls back to CSR.
+      */
         ROCALUTION_EXPORT
         void ConvertToBCSR(int blockdim);
         /** \brief Convert the matrix to COO structure */
@@ -243,7 +248,13 @@ namespace rocalution
         /** \brief Convert the matrix to DENSE structure */
         ROCALUTION_EXPORT
         void ConvertToDENSE(void);
-        /** \brief Convert the matrix to specified matrix ID format */
+        /** \brief Convert the matrix to specified matrix ID format
+      * \details
+      * \p blockdim is the block dimension for BCSR. For a matrix that is not BCSR yet, it
+      * must be greater than 1. A BCSR matrix keeps its block dimension for a \p blockdim
+      * of 1 or less. A matrix whose sizes are not a multiple of the block dimension falls
+      * back to CSR.
+      */
         ROCALUTION_EXPORT
         void ConvertTo(unsigned int matrix_format, int blockdim = 1);
 
@@ -302,8 +313,8 @@ namespace rocalution
         /** \brief Sort the matrix indices
         * \details
         * Sorts the matrix by indices.
-        * - For CSR matrices, column values are sorted.
-        * - For COO matrices, row indices are sorted.
+        * - For CSR matrices, the column indices of each row are sorted.
+        * - For COO matrices, the entries are sorted by row index, then by column index.
         */
         ROCALUTION_EXPORT
         void Sort(void);
