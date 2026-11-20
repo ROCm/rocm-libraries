@@ -5844,6 +5844,15 @@ size_t tuningCandidatesForTest(const RocblasltContractionProblem& prob,
 
 static bool readsStreamKFlags(const TensileLite::ContractionSolution& solution)
 {
+    // A handwritten rocRoller Stream-K custom kernel has sizeMapping.isStreamK()
+    // == false. Its Stream-K flags live on customKernel: one int per workgroup,
+    // zeroed before and after each launch, private to the stream. The GSU
+    // region is shared across streams.
+    if(solution.customKernel.workspaceType
+           == TensileLite::CustomWorkspaceType::RocRollerStreamK
+       && solution.handwrittenCustomKernel())
+        return true;
+
     // Amax uses Synchronizer for its counter, so retain its GSU region.
     return solution.sizeMapping.isStreamK() && solution.sizeMapping.streamKAtomic == 0
            && !solution.problemType.outputAmaxD;
@@ -6703,6 +6712,11 @@ rocblaslt_status runContractionProblem(rocblaslt_handle                   handle
     }
     // Must precede the generic handler: a user-input rejection, not an internal
     // failure.
+    catch(const TensileLite::RocRollerStreamKDataParallelError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt::statusForRocRollerStreamKDataParallel(e);
+    }
     catch(const TensileLite::UniformSummationOrderError& e)
     {
         log_error(__func__, e.what());
@@ -7195,6 +7209,11 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             }
         }
         status = rocblaslt_status_success;
+    }
+    catch(const TensileLite::RocRollerStreamKDataParallelError& e)
+    {
+        log_error(__func__, e.what());
+        status = rocblaslt::statusForRocRollerStreamKDataParallel(e);
     }
     catch(const TensileLite::UniformSummationOrderError& e)
     {
@@ -8471,6 +8490,13 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
             }
 
             log_error(__func__, "Solution is not supported");
+            return rocblaslt_status_invalid_value;
+        }
+        if(solution->rocRollerStreamKHasDataParallelTiles(tensile_prob, *hardware))
+        {
+            log_error(__func__,
+                      "rocRoller Stream-K solution would run data-parallel tiles for this "
+                      "problem; not supported");
             return rocblaslt_status_invalid_value;
         }
         *workspaceSizeInBytes = solution->requiredWorkspaceSize(tensile_prob, *hardware);

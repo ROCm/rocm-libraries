@@ -27,6 +27,8 @@
 #include <Tensile/ContractionSolution.hpp>
 #include <Tensile/FusedA2AKernArg.hpp>
 #include <Tensile/MagicDivision.hpp>
+#include <Tensile/RocRollerStreamKGrid.hpp>
+#include <Tensile/RocRollerStreamKKernargs.hpp>
 #include <Tensile/RocRollerWgmKernargs.hpp>
 #include <Tensile/ScaleAlphaVec.hpp>
 
@@ -240,6 +242,8 @@ namespace TensileLite
         case CustomGridSize::TilesXYBatchGSU:  return "TilesXYBatchGSU";
         case CustomGridSize::TilesYGSU:        return "TilesYGSU";
         case CustomGridSize::ComputeUnits:     return "ComputeUnits";
+        // String deliberately unsuffixed; see the enum declaration.
+        case CustomGridSize::RocRollerStreamKGrid: return "RocRollerStreamK";
         case CustomGridSize::CustomGridSize_Count:
             break;
         }
@@ -264,6 +268,7 @@ namespace TensileLite
             {"TilesXYBatchGSU",  CustomGridSize::TilesXYBatchGSU},
             {"TilesYGSU",        CustomGridSize::TilesYGSU},
             {"ComputeUnits",     CustomGridSize::ComputeUnits},
+            {"RocRollerStreamK", CustomGridSize::RocRollerStreamKGrid},
         };
 
         auto it = lookup.find(str);
@@ -298,6 +303,8 @@ namespace TensileLite
             return "StreamK";
         case CustomWorkspaceType::StreamKWithReduction:
             return "StreamKWithReduction";
+        case CustomWorkspaceType::RocRollerStreamK:
+            return "RocRollerStreamK";
         case CustomWorkspaceType::CustomWorkspaceType_Count:
             break;
         }
@@ -315,6 +322,8 @@ namespace TensileLite
             return CustomWorkspaceType::StreamK;
         else if(str == toString(CustomWorkspaceType::StreamKWithReduction))
             return CustomWorkspaceType::StreamKWithReduction;
+        else if(str == toString(CustomWorkspaceType::RocRollerStreamK))
+            return CustomWorkspaceType::RocRollerStreamK;
         else
             throw std::runtime_error(concatenate("Invalid CustomWorkspaceType value: ", str));
         return CustomWorkspaceType::CustomWorkspaceType_Count;
@@ -2695,6 +2704,47 @@ namespace TensileLite
             throw std::runtime_error(
                 concatenate("Solution ", kernelName, " has uninitialized customKernel metadata"));
 
+        // Resolved once, and only for a kernel that reads it: the launch geometry
+        // and the numWGs kernarg are the same value by construction, and so is
+        // the workspace sized from it.
+        std::optional<uint32_t> rrSKGridValue;
+
+        auto rrSKGrid = [&]() -> uint32_t {
+            if(!rrSKGridValue)
+            {
+                if(problem.problemSizes().size() < 3)
+                    throw std::runtime_error(
+                        "rocRoller Stream-K launches need M, N and K problem sizes");
+                uint32_t grid = rocRollerStreamKGrid(problem, hardware);
+                if(TensileLite::rocRollerStreamKHasDataParallelTiles(
+                       static_cast<int64_t>(problem.problemSizes()[0]),
+                       static_cast<int64_t>(problem.problemSizes()[1]),
+                       static_cast<int64_t>(
+                           problem.problemSizes()[problem.problemSizes().size() - 1]),
+                       customKernel.macrotile.x,
+                       customKernel.macrotile.y,
+                       customKernel.macrotile.z,
+                       grid))
+                    throw RocRollerStreamKDataParallelError(concatenate(
+                        "rocRoller Stream-K kernel ",
+                        customKernel.name,
+                        " cannot run data-parallel tiles: grid ",
+                        grid,
+                        " is too small for problem ",
+                        problem.problemSizes()[0],
+                        "x",
+                        problem.problemSizes()[1],
+                        " with macrotile ",
+                        customKernel.macrotile.x,
+                        "x",
+                        customKernel.macrotile.y));
+                rrSKGridValue = grid;
+            }
+            return *rrSKGridValue;
+        };
+        if(usesRocRollerStreamK())
+            rrSKGrid();
+
         dim3 tiles;
         calculateTiles(tiles, problem);
 
@@ -2821,6 +2871,9 @@ namespace TensileLite
                     break;
                 case CustomGridSize::ComputeUnits:
                     dim = static_cast<size_t>(computeUnits);
+                    break;
+                case CustomGridSize::RocRollerStreamKGrid:
+                    dim = static_cast<size_t>(rrSKGrid());
                     break;
                 default:
                     throw std::runtime_error(concatenate("Invalid CustomGridSize value: ", static_cast<int>(size)));
@@ -2993,6 +3046,28 @@ namespace TensileLite
             return *wgmKernargs;
         };
 
+        // rocRoller Stream-K kernels read M, N, K, the macrotile and the grid.
+        // Same memoisation: computed only if a custom kernel argument asks for
+        // one of these semantics.
+        std::optional<RocRollerStreamKKernargs> skKernargs;
+        auto skKernarg = [&]() -> RocRollerStreamKKernargs const& {
+            if(!skKernargs)
+            {
+                if(problem.problemSizes().size() < 3)
+                    throw std::runtime_error(
+                        "rocRoller Stream-K kernargs need M, N and K problem sizes");
+                skKernargs = evaluateRocRollerStreamKKernargs(
+                    static_cast<int64_t>(problem.problemSizes()[0]),
+                    static_cast<int64_t>(problem.problemSizes()[1]),
+                    static_cast<int64_t>(problem.problemSizes()[problem.problemSizes().size() - 1]),
+                    customKernel.macrotile.x,
+                    customKernel.macrotile.y,
+                    customKernel.macrotile.z,
+                    rrSKGrid());
+            }
+            return *skKernargs;
+        };
+
         for(auto arg : customKernel.args)
         {
             if(T_Debug)
@@ -3036,6 +3111,18 @@ namespace TensileLite
                         problem.problemSizes().size() >= 3
                             ? problem.problemSizes()[problem.problemSizes().size() - 3]
                             : 1,
+                        arg.type);
+                    break;
+                // rocRoller sizes A's scale tensor {M, K / block} and reads the
+                // second extent; the division truncates as it does there.
+                case CustomArgSemantic::SizeSumScaleA:
+                    if(problem.mxBlockA() == 0)
+                        throw std::runtime_error(
+                            "SizeSumScaleA needs an MX block size for A");
+                    rv.args.appendCustomType(
+                        "SizeSumScaleA",
+                        problem.problemSizes()[problem.problemSizes().size() - 1]
+                            / problem.mxBlockA(),
                         arg.type);
                     break;
                 case CustomArgSemantic::StrideA0:
@@ -3654,6 +3741,64 @@ namespace TensileLite
                     break;
                 case CustomArgSemantic::RR_MagicShiftAndSignWgmMainBlock:
                     rv.args.appendCustomType("RR_MagicShiftAndSignWgmMainBlock", wgmKernarg().magicShiftAndSignWgmMainBlock, arg.type);
+                    break;
+                // ceil(size / tile) as int64. Every other RR_* kernarg is 32-bit;
+                // appendCustomType would follow a 32-bit declaration and truncate.
+                case CustomArgSemantic::RR_NumTilesM:
+                case CustomArgSemantic::RR_NumTilesN:
+                {
+                    if(arg.type != CustomArgType::int64 && arg.type != CustomArgType::uint64)
+                        throw std::runtime_error(concatenate(
+                            toString(arg.semantic),
+                            " must be a 64-bit integer kernarg, declared ",
+                            toString(arg.type)));
+                    if(arg.semantic == CustomArgSemantic::RR_NumTilesM)
+                        rv.args.template append<int64_t>("RR_NumTilesM", wgmKernarg().numTilesM);
+                    else
+                        rv.args.template append<int64_t>("RR_NumTilesN", wgmKernarg().numTilesN);
+                    break;
+                }
+
+                // rocRoller Stream-K. The work decomposition is hoisted into
+                // kernargs; see RocRollerStreamKKernargs.hpp.
+                case CustomArgSemantic::RR_SKNumTilesN:
+                    rv.args.appendCustomType("RR_SKNumTilesN", skKernarg().numTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumWGs:
+                    rv.args.appendCustomType("RR_SKNumWGs", skKernarg().numWGs, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumSKTiles:
+                    rv.args.appendCustomType("RR_SKNumSKTiles", skKernarg().numSKTiles, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumSKTilesPerWG:
+                    rv.args.appendCustomType("RR_SKNumSKTilesPerWG", skKernarg().numSKTilesPerWG, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumDPTiles:
+                    rv.args.appendCustomType("RR_SKNumDPTiles", skKernarg().numDPTiles, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKNumDPTilesPerWG:
+                    rv.args.appendCustomType("RR_SKNumDPTilesPerWG", skKernarg().numDPTilesPerWG, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKMagicMultipleIters:
+                    rv.args.appendCustomType("RR_SKMagicMultipleIters", skKernarg().magicMultipleIters, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKMagicShiftsIters:
+                    rv.args.appendCustomType("RR_SKMagicShiftsIters", skKernarg().magicShiftsIters, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKMagicMultipleNumTilesN:
+                    rv.args.appendCustomType("RR_SKMagicMultipleNumTilesN", skKernarg().magicMultipleNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKMagicShiftsNumTilesN:
+                    rv.args.appendCustomType("RR_SKMagicShiftsNumTilesN", skKernarg().magicShiftsNumTilesN, arg.type);
+                    break;
+                case CustomArgSemantic::RR_SKAddressPartials:
+                    rv.args.template append<void const*>("RR_SKAddressPartials", inputs.ws);
+                    break;
+                case CustomArgSemantic::RR_SKAddressFlags:
+                    // Unconditionally the real pointer. Tensile's own AddressFlags
+                    // case nulls it for parallel reduction; rocRoller's kernel
+                    // always dereferences it, so that rule must not be copied.
+                    rv.args.template append<void*>("RR_SKAddressFlags", inputs.Synchronizer);
                     break;
 
                 default:
@@ -5851,6 +5996,16 @@ namespace TensileLite
                 }
             }
         }
+        else if(workspaceType == CustomWorkspaceType::RocRollerStreamK)
+        {
+            // One partial tile per workgroup, reserved unconditionally: unlike
+            // Tensile's Stream-K, rocRoller emits partials whenever tiles >=
+            // grid, so there is no `tiles % grid` exemption to test. The grid
+            // comes from the same helper the launch uses.
+            size += sizeMapping.macroTile.x * sizeMapping.macroTile.y
+                    * sizeMapping.workspaceSizePerElemC
+                    * rocRollerStreamKGrid(problem, hardware);
+        }
         else if(workspaceType == CustomWorkspaceType::SplitK)
         {
             // TODO: Pass GSU from problem and change value[2] to gsu if gsu != default value
@@ -6256,6 +6411,52 @@ namespace TensileLite
         return !customKernel.name.empty() && !customKernel.generated;
     }
 
+    bool ContractionSolution::usesRocRollerStreamK() const
+    {
+        if(!handwrittenCustomKernel())
+            return false;
+        if(customKernel.grid.x == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.grid.y == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.grid.z == CustomGridSize::RocRollerStreamKGrid
+           || customKernel.workspaceType == CustomWorkspaceType::RocRollerStreamK)
+            return true;
+        for(auto const& arg : customKernel.args)
+        {
+            switch(arg.semantic)
+            {
+            case CustomArgSemantic::RR_SKNumTilesN:
+            case CustomArgSemantic::RR_SKNumWGs:
+            case CustomArgSemantic::RR_SKNumSKTiles:
+            case CustomArgSemantic::RR_SKNumSKTilesPerWG:
+            case CustomArgSemantic::RR_SKNumDPTiles:
+            case CustomArgSemantic::RR_SKNumDPTilesPerWG:
+            case CustomArgSemantic::RR_SKMagicMultipleIters:
+            case CustomArgSemantic::RR_SKMagicShiftsIters:
+            case CustomArgSemantic::RR_SKMagicMultipleNumTilesN:
+            case CustomArgSemantic::RR_SKMagicShiftsNumTilesN:
+                return true;
+            default:
+                break;
+            }
+        }
+        return false;
+    }
+
+    bool ContractionSolution::rocRollerStreamKHasDataParallelTiles(Problem const&  problem,
+                                                                   Hardware const& hardware) const
+    {
+        if(!usesRocRollerStreamK() || problem.problemSizes().size() < 3)
+            return false;
+        return TensileLite::rocRollerStreamKHasDataParallelTiles(
+            static_cast<int64_t>(problem.problemSizes()[0]),
+            static_cast<int64_t>(problem.problemSizes()[1]),
+            static_cast<int64_t>(problem.problemSizes()[problem.problemSizes().size() - 1]),
+            customKernel.macrotile.x,
+            customKernel.macrotile.y,
+            customKernel.macrotile.z,
+            rocRollerStreamKGrid(problem, hardware));
+    }
+
     StreamKSettings ContractionSolution::resolveClusteredStreamKSettings(
         Problem const& problem, Hardware const& hardware) const
     {
@@ -6459,6 +6660,70 @@ namespace TensileLite
         }
         cluster.physicalGrid = checkedMultiply(launch.grid, cluster.clusterSize);
         return launch;
+    }
+
+    uint32_t ContractionSolution::rocRollerStreamKGrid(Problem const&  problem,
+                                                       Hardware const& hardware) const
+    {
+        AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+        if(pAMDGPU == nullptr)
+            throw std::runtime_error("rocRoller Stream-K grid needs AMDGPU hardware");
+
+        auto extents = [](size_t n, auto&& at) {
+            std::vector<size_t> out;
+            out.reserve(n);
+            for(size_t i = 0; i < n; ++i)
+                out.push_back(static_cast<size_t>(at(i)));
+            return out;
+        };
+
+        RocRollerStreamKGridRequest req;
+        req.freeA = extents(problem.freeIndicesA().size(),
+                            [&](size_t i) { return problem.freeSizeA(i); });
+        req.freeB = extents(problem.freeIndicesB().size(),
+                            [&](size_t i) { return problem.freeSizeB(i); });
+        req.bound = extents(problem.boundIndices().size(),
+                            [&](size_t i) { return problem.boundSize(i); });
+        req.batch = extents(problem.batchIndices().size(),
+                            [&](size_t i) { return problem.batchSize(i); });
+        req.smCountTarget          = problem.getParams().smCountTarget();
+        req.computeUnitCount       = pAMDGPU->computeUnitCount;
+        req.persistentMaxCUs       = pAMDGPU->persistentMaxCUs;
+        req.tileM                  = static_cast<size_t>(customKernel.macrotile.x);
+        req.tileN                  = static_cast<size_t>(customKernel.macrotile.y);
+        req.tileK                  = static_cast<size_t>(customKernel.macrotile.z);
+        req.occupancy              = static_cast<int>(customKernel.occupancy);
+        req.workspaceSize          = problem.workspaceSize();
+        req.workspaceSizePerElemC  = sizeMapping.workspaceSizePerElemC;
+
+        hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        req.hasAnalyticalHardware
+            = hipAMDGPU != nullptr && hipAMDGPU->analyticalHardware != nullptr;
+        // rocRoller reads the element widths off its kernel's own A/B types;
+        // for the kernel selected to serve this problem those are the problem's
+        // types, which is all TensileLite has here.
+        if(req.hasAnalyticalHardware)
+        {
+            auto elementBits = [](rocisa::DataType type) -> size_t {
+                return static_cast<size_t>(rocisa::GetElementSize(type) * 8.0f + 0.5f);
+            };
+            req.aDtype       = datatypeToAnalyticalDatatype(problem.a().dataType());
+            req.bDtype       = datatypeToAnalyticalDatatype(problem.b().dataType());
+            req.aElementBits = elementBits(problem.a().dataType());
+            req.bElementBits = elementBits(problem.b().dataType());
+        }
+
+        // occupancy 0, missing analytical hardware, and an empty M, N or batch
+        // do not call origami. The grid is then the CU count capped by
+        // smCountTarget, persistentMaxCUs and the flag region.
+        RocRollerStreamKGridPlan plan = assembleRocRollerStreamKGrid(req, StreamKFlagElements);
+        if(!plan.useOrigami)
+            return plan.fallbackGrid;
+
+        // The flag region holds StreamKFlagElements ints, one per workgroup.
+        // The numWGs kernarg and the partial-tile workspace use this same grid.
+        uint32_t grid = TensileLite::rocRollerStreamKGrid(plan.inputs, *(hipAMDGPU->analyticalHardware));
+        return rocRollerStreamKApplyFlagClamp(grid, StreamKFlagElements);
     }
 
     StreamKSettings ContractionSolution::resolveStreamKSettings(Problem const&  problem,

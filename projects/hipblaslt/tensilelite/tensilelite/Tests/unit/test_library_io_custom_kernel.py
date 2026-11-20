@@ -46,7 +46,11 @@ def test_custom_kernel_legacy_name_is_resolved(assembler, isa_info_map, monkeypa
     # Legacy flat CustomKernelName + an (empty) config -> the merge branch runs
     # and the solution constructs normally (no handwritten-kernel path).
     seen = []
-    monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: seen.append(name) or {})
+    monkeypatch.setattr(
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: seen.append(name) or {},
+    )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "synthetic_legacy_kernel"
     # Present InternalSupportParams -> the isp-extraction branch also runs.
@@ -67,7 +71,7 @@ def test_custom_kernel_mapping_name_skipped_on_missing_config(
     # an aggregate "Skipped N" warning. Appending (rather than replacing) keeps
     # the vendored fixture's solution-index table intact so only the new,
     # dropped kernel is exercised.
-    def _raise(name, isp, kernelConfig=None):
+    def _raise(name, isp, directory=None, kernelConfig=None, *, problemType=None):
         raise RuntimeError("no custom.config")
 
     monkeypatch.setattr(L, "getCustomKernelConfig", _raise)
@@ -89,7 +93,9 @@ def test_custom_kernel_mapping_name_skipped_on_missing_config(
 
 def test_custom_kernel_bad_matrix_instruction_raises(assembler, isa_info_map, monkeypatch):
     monkeypatch.setattr(
-        L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {"MatrixInstruction": [1, 2, 3]}
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: {"MatrixInstruction": [1, 2, 3]},
     )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "bad_mi_kernel"
@@ -105,7 +111,11 @@ def test_custom_config_bias_and_activation_stay_off_the_shared_problem_type(
     # The library ProblemType enables bias and hipblaslt_all. A kernel whose
     # custom.config turns both off must not inherit that, and must not change
     # the other solutions that still share the library problem type.
-    monkeypatch.setattr(L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {})
+    monkeypatch.setattr(
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: {},
+    )
     monkeypatch.setattr(
         L,
         "readCustomKernelConfig",
@@ -193,7 +203,7 @@ def test_custom_config_is_read_once_and_shared(assembler, isa_info_map, monkeypa
         reads.append(name)
         return raw
 
-    def _get(name, isp, kernelConfig=None):
+    def _get(name, isp, directory=None, kernelConfig=None, *, problemType=None):
         received.append(kernelConfig)
         return {}
 
@@ -217,7 +227,11 @@ def _parse_with_config(assembler, isa_info_map, monkeypatch, declared, configure
     `file_default` is an AssertSizeLessThan placed in the file's DefaultSolution.
     """
     monkeypatch.setattr(
-        L, "getCustomKernelConfig", lambda name, isp, kernelConfig=None: {"AssertSizeLessThan": configured}
+        L,
+        "getCustomKernelConfig",
+        lambda name, isp, directory=None, kernelConfig=None, *, problemType=None: {
+            "AssertSizeLessThan": configured
+        },
     )
     data = _raw_dict()
     data["Solutions"][0]["CustomKernelName"] = "replaced_predicate_kernel"
