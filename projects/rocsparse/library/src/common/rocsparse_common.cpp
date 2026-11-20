@@ -380,26 +380,30 @@ INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
 #undef INSTANTIATE
 
+#define INSTANTIATE_SCALE(ITYPE, ATYPE, TTYPE)                                                  \
+    template rocsparse_status rocsparse::scale_array(                                           \
+        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array);  \
+    template rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,             \
+                                                     ITYPE                  length,             \
+                                                     rocsparse_pointer_mode pointer_mode,       \
+                                                     const TTYPE*           scalar_device_host, \
+                                                     ATYPE*                 array);
+
+// axpby_array_batched: gamma, beta and the x arrays have the compute type TTYPE, y has ATYPE.
 #define INSTANTIATE(ITYPE, ATYPE, TTYPE)                                                          \
-    template rocsparse_status rocsparse::scale_array(                                             \
-        rocsparse_handle handle, ITYPE length, const TTYPE* scalar_device_host, ATYPE* array);    \
-    template rocsparse_status rocsparse::scale_array(rocsparse_handle       handle,               \
-                                                     ITYPE                  length,               \
-                                                     rocsparse_pointer_mode pointer_mode,         \
-                                                     const TTYPE*           scalar_device_host,   \
-                                                     ATYPE*                 array);                               \
+    INSTANTIATE_SCALE(ITYPE, ATYPE, TTYPE)                                                        \
     template rocsparse_status rocsparse::axpby_array_batched(rocsparse_handle handle,             \
                                                              ITYPE            length,             \
                                                              rocsparse_int    num_extra,          \
                                                              const TTYPE*     gamma_device_array, \
-                                                             const ATYPE**    x_arrays,           \
+                                                             const TTYPE**    x_arrays,           \
                                                              const TTYPE*     beta_device_host,   \
                                                              ATYPE*           y_array);
 
 INSTANTIATE(int32_t, rocsparse_bfloat16, float);
 INSTANTIATE(int32_t, _Float16, float);
-INSTANTIATE(int32_t, float, _Float16);
-INSTANTIATE(int32_t, float, rocsparse_bfloat16);
+INSTANTIATE_SCALE(int32_t, float, _Float16);
+INSTANTIATE_SCALE(int32_t, float, rocsparse_bfloat16);
 INSTANTIATE(int32_t, int32_t, int32_t);
 INSTANTIATE(int32_t, float, float);
 INSTANTIATE(int32_t, double, double);
@@ -408,14 +412,15 @@ INSTANTIATE(int32_t, rocsparse_double_complex, rocsparse_double_complex);
 
 INSTANTIATE(int64_t, rocsparse_bfloat16, float);
 INSTANTIATE(int64_t, _Float16, float);
-INSTANTIATE(int64_t, float, _Float16);
-INSTANTIATE(int64_t, float, rocsparse_bfloat16);
+INSTANTIATE_SCALE(int64_t, float, _Float16);
+INSTANTIATE_SCALE(int64_t, float, rocsparse_bfloat16);
 INSTANTIATE(int64_t, int32_t, int32_t);
 INSTANTIATE(int64_t, float, float);
 INSTANTIATE(int64_t, double, double);
 INSTANTIATE(int64_t, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex, rocsparse_double_complex);
 #undef INSTANTIATE
+#undef INSTANTIATE_SCALE
 
 #define INSTANTIATE(I, A, T)                                                                 \
     template rocsparse_status rocsparse::scale_2d_array(rocsparse_handle handle,             \

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -107,7 +107,7 @@ namespace rocsparse
     {
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
         ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
-        if(alpha != 0 || beta != 1)
+        if(alpha != 0 || beta != 1 || num_extra > 0)
         {
             rocsparse::csrmvn_general_device<BLOCKSIZE, WF_SIZE>(conj,
                                                                  m,
@@ -228,7 +228,7 @@ rocsparse_status rocsparse::csrmv_rowsplit_template_dispatch(rocsparse_handle   
     ROCSPARSE_ROUTINE_TRACE;
 
     // Extract gamma arrays and z vectors for batched operation
-    using Z                      = Y;
+    using Z                      = T;
     T*        gamma_device_array = nullptr;
     const Z** z_array            = nullptr;
 

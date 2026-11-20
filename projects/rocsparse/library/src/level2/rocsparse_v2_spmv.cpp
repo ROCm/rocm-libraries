@@ -297,14 +297,12 @@ public:
             return reinterpret_cast<T*>(gamma_device_array);
         }
 
-        template <typename T>
-        const T** get_z_array() const
+        template <typename Z>
+        const Z** get_z_array() const
         {
             if(count == 0 || !device_arrays_allocated)
                 return nullptr;
-            // z_array starts after gamma array
-            size_t gamma_size = count * sizeof(T);
-            return reinterpret_cast<const T**>(static_cast<char*>(gamma_device_array) + gamma_size);
+            return reinterpret_cast<const Z**>(z_array);
         }
 
         bool has_device_arrays() const
@@ -395,7 +393,7 @@ public:
         }
 
         // Method to allocate and extract device arrays
-        template <typename T, typename Y>
+        template <typename T, typename Z>
         rocsparse_status extract_device_arrays(rocsparse_handle handle)
         {
             ROCSPARSE_ROUTINE_TRACE;
@@ -405,23 +403,26 @@ public:
                 return rocsparse_status_success;
             }
 
-            // Calculate required buffer size
-            device_array_size = count * sizeof(T) + count * sizeof(const Y*);
+            // The z pointers follow the gamma values, aligned for a pointer load.
+            const size_t gamma_size
+                = ((count * sizeof(T) - 1) / sizeof(const Z*) + 1) * sizeof(const Z*);
+            device_array_size = gamma_size + count * sizeof(const Z*);
 
-            // Allocate device memory
+            // Allocate device memory. The flag is set before the copies so a later failure
+            // still frees this buffer from clear().
             RETURN_IF_HIP_ERROR(rocsparse_hipMalloc(&gamma_device_array, device_array_size));
+            device_arrays_allocated = true;
 
             // Setup pointers
-            z_array = static_cast<char*>(gamma_device_array) + count * sizeof(T);
+            z_array = static_cast<char*>(gamma_device_array) + gamma_size;
 
             // Extract the data using the helper function
             T*        gamma_ptr = reinterpret_cast<T*>(gamma_device_array);
-            const Y** z_ptr     = reinterpret_cast<const Y**>(z_array);
+            const Z** z_ptr     = reinterpret_cast<const Z**>(z_array);
 
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmv_extract_gamma_and_z_arrays(
                 handle, static_cast<rocsparse_int>(count), gamma_vec, z_vecs, gamma_ptr, z_ptr));
 
-            device_arrays_allocated = true;
             return rocsparse_status_success;
         }
     } extras;
@@ -1434,8 +1435,6 @@ INSTANTIATE_GAMMA_DEVICE_ARRAY(double)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_float_complex)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_double_complex)
 INSTANTIATE_GAMMA_DEVICE_ARRAY(int)
-INSTANTIATE_GAMMA_DEVICE_ARRAY(_Float16)
-INSTANTIATE_GAMMA_DEVICE_ARRAY(rocsparse_bfloat16)
 
 // ETI for z array
 INSTANTIATE_Z_ARRAY(float)
@@ -1443,8 +1442,6 @@ INSTANTIATE_Z_ARRAY(double)
 INSTANTIATE_Z_ARRAY(rocsparse_float_complex)
 INSTANTIATE_Z_ARRAY(rocsparse_double_complex)
 INSTANTIATE_Z_ARRAY(int)
-INSTANTIATE_Z_ARRAY(_Float16)
-INSTANTIATE_Z_ARRAY(rocsparse_bfloat16)
 
 // Cleanup macros
 #undef INSTANTIATE_GAMMA_DEVICE_ARRAY
