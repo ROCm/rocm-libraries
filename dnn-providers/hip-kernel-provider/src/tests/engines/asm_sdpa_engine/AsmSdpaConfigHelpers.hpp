@@ -72,8 +72,8 @@ struct GraphTestCase
     };
     std::optional<QkStress> qkStress;
     /// ASM_SDPA_ENGINE declines this graph while its vendored kernel is defective
-    /// (ALMIOPEN-3392, AITER issue #7593). A decline passes; once the engine accepts
-    /// the graph, its result must match the reference.
+    /// (ALMIOPEN-3392, AITER issue #7593). A decline skips the case; once the engine
+    /// accepts the graph, its result must match the reference.
     bool mayDeclineForKernelDefect = false;
 
     std::string name;

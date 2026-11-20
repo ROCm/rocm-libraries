@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
-#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -365,8 +364,8 @@ protected:
 
         if(testCase.mayDeclineForKernelDefect && !asmEngineOffersToServe(*graph))
         {
-            std::cout << "[ DECLINED ] " << testCase.name << " (ALMIOPEN-3392)\n";
-            return;
+            GTEST_SKIP() << "ASM_SDPA_ENGINE declines this graph while the fp8 causal kernel is "
+                            "defective (ALMIOPEN-3392, AITER issue #7593)";
         }
 
         // Pinned to the ASM engine: other hip-kernel-provider engines serve some of these
