@@ -49,15 +49,14 @@ try
     ROCSOLVER_ENTER_TOP(name, "--evect", evect, "--uplo", uplo, "-n", n, "--lda", lda, "--strideD",
                         strideD, "--strideE", strideE, "--batch_count", batch_count_arg);
 
+    if(!handle)
+        return rocblas_status_invalid_handle;
     {
         auto const A = A_arg;
         auto const D = D_arg;
         auto const E = E_arg;
         auto const info = info_arg;
         auto const batch_count = batch_count_arg;
-
-        if(!handle)
-            return rocblas_status_invalid_handle;
 
         // argument checking
         rocblas_status st = rocsolver_syevd_heevd_argCheck(handle, evect, uplo, n, A, lda, D, E,
