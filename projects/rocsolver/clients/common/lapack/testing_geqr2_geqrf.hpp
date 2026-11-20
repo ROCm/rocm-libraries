@@ -147,7 +147,7 @@ void geqr2_geqrf_initData(const rocblas_handle handle,
                 {
                     for(I i = 0; i < m; i++)
                     {
-                        hA[b][i + j * lda] = (i == j ? T(1) : T(0));
+                        hA[b][i + rocblas_stride(j) * lda] = (i == j ? T(1) : T(0));
                     }
                 }
             }
@@ -264,7 +264,7 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     {
         // Copy R: upper trapezoid of A, zero elsewhere.
         // todo: laset and lacpy on GPU.
-        std::vector<T> hC(lda * n, T(0));
+        std::vector<T> hC(rocblas_stride(lda) * n, T(0));
         cpu_lacpy(rocblas_fill_upper, min_mn, n, hARes[b], lda, hC.data(), lda);
 
         // Upload R to GPU.
@@ -282,7 +282,7 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
         // todo: geadd and lange on GPU.
         for(I j = 0; j < n; ++j)
             for(I i = 0; i < m; ++i)
-                hC[i + j * lda] -= hA[b][i + j * lda];
+                hC[i + rocblas_stride(j) * lda] -= hA[b][i + rocblas_stride(j) * lda];
 
         double err = cpu_lange('1', (rocblas_int)m, (rocblas_int)n, hC.data(), (rocblas_int)lda,
                                hrwork.data());
@@ -309,9 +309,9 @@ void geqr2_geqrf_getError(const rocblas_handle handle,
     CHECK_HIP_ERROR(dR.memcheck());
 
     // Build identity matrix on host for upload into dR before each gemm.
-    std::vector<T> hR_id(min_mn * min_mn, T(0));
+    std::vector<T> hR_id(rocblas_stride(min_mn) * min_mn, T(0));
     for(rocblas_int i = 0; i < min_mn; ++i)
-        hR_id[i + i * min_mn] = T(1);
+        hR_id[i + rocblas_stride(i) * min_mn] = T(1);
 
     max_errors[1] = 0;
     for(I b = 0; b < bc; ++b)
@@ -456,7 +456,7 @@ void testing_geqr2_geqrf(Arguments& argus)
     I m = argus.get<I>("m");
     I n = argus.get<I>("n", m);
     I lda = argus.get<I>("lda", m);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", min(m, n));
     std::string matrix = argus.get<std::string>("matrix", "randint");
 

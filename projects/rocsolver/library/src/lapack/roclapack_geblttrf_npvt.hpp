@@ -160,17 +160,17 @@ rocblas_status rocsolver_geblttrf_npvt_template(rocblas_handle handle,
                                                 const rocblas_int nb,
                                                 const rocblas_int nblocks,
                                                 U A,
-                                                const rocblas_int shiftA,
+                                                const rocblas_stride shiftA,
                                                 const rocblas_int inca,
                                                 const rocblas_int lda,
                                                 const rocblas_stride strideA,
                                                 U B,
-                                                const rocblas_int shiftB,
+                                                const rocblas_stride shiftB,
                                                 const rocblas_int incb,
                                                 const rocblas_int ldb,
                                                 const rocblas_stride strideB,
                                                 U C,
-                                                const rocblas_int shiftC,
+                                                const rocblas_stride shiftC,
                                                 const rocblas_int incc,
                                                 const rocblas_int ldc,
                                                 const rocblas_stride strideC,
@@ -207,9 +207,9 @@ rocblas_status rocsolver_geblttrf_npvt_template(rocblas_handle handle,
     T minone = T(-1);
 
     // block strides
-    rocblas_int bsa = lda * nb;
-    rocblas_int bsb = ldb * nb;
-    rocblas_int bsc = ldc * nb;
+    rocblas_stride bsa = rocblas_stride(lda) * nb;
+    rocblas_stride bsb = rocblas_stride(ldb) * nb;
+    rocblas_stride bsc = rocblas_stride(ldc) * nb;
 
     rocsolver_getrf_template<BATCHED, STRIDED, T>(handle, nb, nb, B, shiftB, incb, ldb, strideB,
                                                   (rocblas_int*)nullptr, 0, 0, info, batch_count,

@@ -144,7 +144,8 @@ void potf2_potrf_initData(const rocblas_handle handle,
         {
             // scale to ensure positive definiteness
             for(I i = 0; i < n; i++)
-                hA[b][i + i * lda] = hA[b][i + i * lda] * sconj(hA[b][i + i * lda]) * 400;
+                hA[b][i + rocblas_stride(i) * lda] = hA[b][i + rocblas_stride(i) * lda]
+                    * sconj(hA[b][i + rocblas_stride(i) * lda]) * 400;
 
             if(singular && (b == bc / 4 || b == bc / 2 || b == bc - 1))
             {
@@ -154,13 +155,13 @@ void potf2_potrf_initData(const rocblas_handle handle,
                 // in those matrices in the batch that are non positive definite
                 I i = n / 4 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
                 i = n / 2 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
                 i = n - 1 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
             }
         }
     }
@@ -324,7 +325,7 @@ void testing_potf2_potrf(Arguments& argus)
     char uploC = argus.get<char>("uplo");
     I n = argus.get<I>("n");
     I lda = argus.get<I>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
     I bc = argus.batch_count;

@@ -181,9 +181,9 @@ void cholqr_initData(const rocblas_handle handle,
                 for(auto i = 0; i < m; i++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 100;
+                        hA[b][i + rocblas_stride(j) * lda] += 100;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
@@ -218,9 +218,9 @@ void cholqr_initData(const rocblas_handle handle,
                 {
                     for(auto j = j_start; j < n; j += j_step)
                     {
-                        T val = (mn == n) ? hA[b][i + (j - j_start) * lda]
-                                          : hA[b][(i - i_start) + j * lda];
-                        hA[b][i + j * lda] = (singular > 1) ? val : 0;
+                        T val = (mn == n) ? hA[b][i + rocblas_stride(j - j_start) * lda]
+                                          : hA[b][(i - i_start) + rocblas_stride(j) * lda];
+                        hA[b][i + rocblas_stride(j) * lda] = (singular > 1) ? val : 0;
                     }
                 }
 
@@ -236,7 +236,7 @@ void cholqr_initData(const rocblas_handle handle,
                     val *= eps;
                     for(auto i = 0; i < mn; ++i)
                     {
-                        hA[b][i + i * lda] += val;
+                        hA[b][i + rocblas_stride(i) * lda] += val;
                     }
                 }
             }
@@ -506,8 +506,8 @@ void testing_cholqr(Arguments& argus)
     I lda = argus.get<I>("lda", m);
     I ldw = argus.get<I>("ldw", mn);
     S sigma = S(argus.get<double>("sigma", 0));
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stW = argus.get<rocblas_stride>("strideW", ldw * mn);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stW = argus.get<rocblas_stride>("strideW", rocblas_stride(ldw) * mn);
 
     rocsolver_cholqr_shift cholshift = char2rocsolver_cholqr_shift(cholshift_char);
     I bc = argus.batch_count;

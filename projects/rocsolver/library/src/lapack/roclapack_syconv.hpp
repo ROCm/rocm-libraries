@@ -93,10 +93,10 @@ static __global__
 
     for(I bid = 0 + bid_start; bid < batch_count; bid += bid_inc)
     {
-        T const* const E_bid = E_arg + bid * strideE;
+        T const* const E_bid = E_arg + rocblas_stride(bid) * strideE;
         T* const A_bid = load_ptr_batch<T>(A_arg, bid, shiftA, strideA);
-        I const* const icount_bid = icount_arg + bid * n;
-        I const* const ipiv_bid = ipiv_arg + bid * strideP;
+        I const* const icount_bid = icount_arg + rocblas_stride(bid) * n;
+        I const* const ipiv_bid = ipiv_arg + rocblas_stride(bid) * strideP;
 
         auto A = [=](I i, I j) -> T& { return (A_bid[idx2F(i, j, lda)]); };
         auto E = [=](I i) -> T { return (E_bid[(i - 1)]); };
@@ -189,10 +189,10 @@ static __global__
 
     for(I bid = 0 + bid_start; bid < batch_count; bid += bid_inc)
     {
-        T* const E_bid = E_arg + bid * strideE;
+        T* const E_bid = E_arg + rocblas_stride(bid) * strideE;
         T* const A_bid = load_ptr_batch<T>(A_arg, bid, shiftA, strideA);
-        I const* const icount_bid = icount_arg + bid * n;
-        I const* const ipiv_bid = ipiv_arg + bid * strideP;
+        I const* const icount_bid = icount_arg + rocblas_stride(bid) * n;
+        I const* const ipiv_bid = ipiv_arg + rocblas_stride(bid) * strideP;
 
         auto A = [=](I i, I j) -> T& { return (A_bid[idx2F(i, j, lda)]); };
         auto E = [=](I i) -> T& { return (E_bid[(i - 1)]); };
@@ -345,7 +345,7 @@ static __global__ __launch_bounds__(SYCONV_MAX_THDS) void syconv_kernel(bool con
     for(I bid = 0 + bid_start; bid < batch_count; bid += bid_inc)
     {
         T* const A_bid = load_ptr_batch<T>(A_arg, bid, shiftA, strideA);
-        I* const ipiv_bid = ipiv_arg + bid * strideP;
+        I* const ipiv_bid = ipiv_arg + rocblas_stride(bid) * strideP;
 
         // ----------------------------------------------------
         // use 1-based indexing compatible with  Fortran/matlab

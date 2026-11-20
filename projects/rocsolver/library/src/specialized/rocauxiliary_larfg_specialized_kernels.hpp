@@ -78,7 +78,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) larfg_kernel_small(const I n,
     T norm2 = 0;
     for(I i = tid; i < n - 1; i += MAX_THDS)
     {
-        T temp = x[i * incX];
+        T temp = x[rocblas_stride(i) * incX];
         norm2 += temp * conj(temp);
     }
 
@@ -104,7 +104,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) larfg_kernel_small(const I n,
 
     // scale x by scaling factor
     for(I i = tid; i < n - 1; i += MAX_THDS)
-        x[i * incX] *= sval[0];
+        x[rocblas_stride(i) * incX] *= sval[0];
 }
 
 /*************************************************************

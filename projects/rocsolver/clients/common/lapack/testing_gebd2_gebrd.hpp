@@ -192,9 +192,9 @@ void gebd2_gebrd_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j || (m >= n && j == i + 1) || (m < n && i == j + 1))
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
         }
@@ -258,7 +258,7 @@ void gebd2_gebrd_getError(const rocblas_handle handle,
         // CPU lapack
         for(rocblas_int b = 0; b < bc; ++b)
         {
-            memcpy(hARes[b], hA[b], lda * n * sizeof(T));
+            memcpy(hARes[b], hA[b], rocblas_stride(lda) * n * sizeof(T));
             GEBRD
             ? cpu_gebrd(m, n, hARes[b], lda, hD[b], hE[b], hTauq[b], hTaup[b], hW.data(),
                         std::max(m, n))
@@ -284,26 +284,26 @@ void gebd2_gebrd_getError(const rocblas_handle handle,
                     if(COMPLEX)
                     {
                         cpu_lacgv(1, taup + j, 1);
-                        cpu_lacgv(n - j - 1, a + j + (j + 1) * lda, lda);
+                        cpu_lacgv(n - j - 1, a + j + rocblas_stride(j + 1) * lda, lda);
                     }
                     for(int i = 1; i < n - j - 1; i++)
                     {
-                        vec[i] = a[j + (j + i + 1) * lda];
-                        a[j + (j + i + 1) * lda] = 0;
+                        vec[i] = a[j + rocblas_stride(j + i + 1) * lda];
+                        a[j + rocblas_stride(j + i + 1) * lda] = 0;
                     }
                     cpu_larf(rocblas_side_right, m - j, n - j - 1, vec.data(), 1, taup + j,
-                             a + j + (j + 1) * lda, lda, hW.data());
+                             a + j + rocblas_stride(j + 1) * lda, lda, hW.data());
                     if(COMPLEX)
                         cpu_lacgv(1, taup + j, 1);
                 }
 
                 for(int i = 1; i < m - j; i++)
                 {
-                    vec[i] = a[(j + i) + j * lda];
-                    a[(j + i) + j * lda] = 0;
+                    vec[i] = a[(j + i) + rocblas_stride(j) * lda];
+                    a[(j + i) + rocblas_stride(j) * lda] = 0;
                 }
-                cpu_larf(rocblas_side_left, m - j, n - j, vec.data(), 1, tauq + j, a + j + j * lda,
-                         lda, hW.data());
+                cpu_larf(rocblas_side_left, m - j, n - j, vec.data(), 1, tauq + j,
+                         a + j + rocblas_stride(j) * lda, lda, hW.data());
             }
         }
         else
@@ -314,25 +314,25 @@ void gebd2_gebrd_getError(const rocblas_handle handle,
                 {
                     for(int i = 1; i < m - j - 1; i++)
                     {
-                        vec[i] = a[(j + i + 1) + j * lda];
-                        a[(j + i + 1) + j * lda] = 0;
+                        vec[i] = a[(j + i + 1) + rocblas_stride(j) * lda];
+                        a[(j + i + 1) + rocblas_stride(j) * lda] = 0;
                     }
                     cpu_larf(rocblas_side_left, m - j - 1, n - j, vec.data(), 1, tauq + j,
-                             a + (j + 1) + j * lda, lda, hW.data());
+                             a + (j + 1) + rocblas_stride(j) * lda, lda, hW.data());
                 }
 
                 if(COMPLEX)
                 {
                     cpu_lacgv(1, taup + j, 1);
-                    cpu_lacgv(n - j, a + j + j * lda, lda);
+                    cpu_lacgv(n - j, a + j + rocblas_stride(j) * lda, lda);
                 }
                 for(int i = 1; i < n - j; i++)
                 {
-                    vec[i] = a[j + (j + i) * lda];
-                    a[j + (j + i) * lda] = 0;
+                    vec[i] = a[j + rocblas_stride(j + i) * lda];
+                    a[j + rocblas_stride(j + i) * lda] = 0;
                 }
-                cpu_larf(rocblas_side_right, m - j, n - j, vec.data(), 1, taup + j, a + j + j * lda,
-                         lda, hW.data());
+                cpu_larf(rocblas_side_right, m - j, n - j, vec.data(), 1, taup + j,
+                         a + j + rocblas_stride(j) * lda, lda, hW.data());
                 if(COMPLEX)
                     cpu_lacgv(1, taup + j, 1);
             }
@@ -448,7 +448,7 @@ void testing_gebd2_gebrd(Arguments& argus)
     rocblas_int m = argus.get<rocblas_int>("m");
     rocblas_int n = argus.get<rocblas_int>("n", m);
     rocblas_int lda = argus.get<rocblas_int>("lda", m);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", std::min(m, n));
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", std::min(m, n) - 1);
     rocblas_stride stQ = argus.get<rocblas_stride>("strideQ", std::min(m, n));
@@ -463,7 +463,7 @@ void testing_gebd2_gebrd(Arguments& argus)
     // N/A
 
     // determine sizes
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     size_t size_D = std::min(m, n);
     size_t size_E = std::min(m, n) - 1;
     size_t size_Q = std::min(m, n);

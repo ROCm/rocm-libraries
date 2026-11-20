@@ -167,25 +167,31 @@ void sygsx_hegsx_initData(const rocblas_handle handle,
                 {
                     if(i == j)
                     {
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 100;
-                        U[b][i + j * ldu] = std::real(U[b][i + j * ldu]) / 100 + 1;
-                        hB[b][i + j * ldb] = U[b][i + j * ldu];
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = std::real(hA[b][i + rocblas_stride(j) * lda]) + 100;
+                        U[b][i + rocblas_stride(j) * ldu]
+                            = std::real(U[b][i + rocblas_stride(j) * ldu]) / 100 + 1;
+                        hB[b][i + rocblas_stride(j) * ldb] = U[b][i + rocblas_stride(j) * ldu];
                     }
                     else
                     {
-                        hA[b][i + j * lda] = (hA[b][i + j * lda] - 5) / 10;
-                        hA[b][j + i * lda] = sconj(hA[b][i + j * lda]);
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = (hA[b][i + rocblas_stride(j) * lda] - 5) / 10;
+                        hA[b][j + rocblas_stride(i) * lda]
+                            = sconj(hA[b][i + rocblas_stride(j) * lda]);
 
-                        U[b][i + j * ldu] = (U[b][i + j * ldu] - 5) / 100;
+                        U[b][i + rocblas_stride(j) * ldu]
+                            = (U[b][i + rocblas_stride(j) * ldu] - 5) / 100;
                         if(uplo == rocblas_fill_upper)
                         {
-                            hB[b][i + j * ldb] = U[b][i + j * ldu];
-                            hB[b][j + i * ldb] = 0;
+                            hB[b][i + rocblas_stride(j) * ldb] = U[b][i + rocblas_stride(j) * ldu];
+                            hB[b][j + rocblas_stride(i) * ldb] = 0;
                         }
                         else
                         {
-                            hB[b][j + i * ldb] = sconj(U[b][i + j * ldu]);
-                            hB[b][i + j * ldb] = 0;
+                            hB[b][j + rocblas_stride(i) * ldb]
+                                = sconj(U[b][i + rocblas_stride(j) * ldu]);
+                            hB[b][i + rocblas_stride(j) * ldb] = 0;
                         }
                     }
                 }
@@ -196,7 +202,7 @@ void sygsx_hegsx_initData(const rocblas_handle handle,
             {
                 for(rocblas_int i = 0; i < n; i++)
                     for(rocblas_int j = 0; j < n; j++)
-                        M[b][i + j * lda] = hA[b][i + j * lda];
+                        M[b][i + rocblas_stride(j) * lda] = hA[b][i + rocblas_stride(j) * lda];
             }
 
             T one = T(1);
@@ -257,7 +263,7 @@ void sygsx_hegsx_getError(const rocblas_handle handle,
                           double* max_err)
 {
     constexpr bool VERIFY_IMPLICIT_TEST = false;
-    host_strided_batch_vector<T> M(lda * n, 1, lda * n, bc);
+    host_strided_batch_vector<T> M(rocblas_stride(lda) * n, 1, rocblas_stride(lda) * n, bc);
 
     // input data initialization
     sygsx_hegsx_initData<true, true, T>(handle, itype, uplo, n, dA, lda, stA, dB, ldb, stB, bc, hA,
@@ -278,7 +284,7 @@ void sygsx_hegsx_getError(const rocblas_handle handle,
         // CPU lapack
         for(rocblas_int b = 0; b < bc; ++b)
         {
-            memcpy(hARes[b], hA[b], lda * n * sizeof(T));
+            memcpy(hARes[b], hA[b], rocblas_stride(lda) * n * sizeof(T));
             SYGST ? cpu_sygst_hegst(itype, uplo, n, hARes[b], lda, hB[b], ldb)
                   : cpu_sygs2_hegs2(itype, uplo, n, hARes[b], lda, hB[b], ldb);
         }
@@ -319,7 +325,7 @@ void sygsx_hegsx_getPerfData(const rocblas_handle handle,
                              const bool profile_kernels,
                              const bool perf)
 {
-    host_strided_batch_vector<T> M(lda * n, 1, lda * n, bc);
+    host_strided_batch_vector<T> M(rocblas_stride(lda) * n, 1, rocblas_stride(lda) * n, bc);
 
     if(!perf)
     {
@@ -387,8 +393,8 @@ void testing_sygsx_hegsx(Arguments& argus)
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldb = argus.get<rocblas_int>("ldb", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * n);
 
     rocblas_eform itype = char2rocblas_eform(itypeC);
     rocblas_fill uplo = char2rocblas_fill(uploC);

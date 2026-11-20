@@ -183,21 +183,21 @@ void bdsqr_initData(const rocblas_handle handle,
         // of B
         if(nv > 0)
         {
-            memset(hV[0], 0, ldv * nv * sizeof(T));
+            memset(hV[0], 0, rocblas_stride(ldv) * nv * sizeof(T));
             for(rocblas_int i = 0; i < std::min(n, nv); ++i)
-                hV[0][i + i * ldv] = T(1.0);
+                hV[0][i + rocblas_stride(i) * ldv] = T(1.0);
         }
         if(nu > 0)
         {
-            memset(hU[0], 0, ldu * n * sizeof(T));
+            memset(hU[0], 0, rocblas_stride(ldu) * n * sizeof(T));
             for(rocblas_int i = 0; i < std::min(n, nu); ++i)
-                hU[0][i + i * ldu] = T(1.0);
+                hU[0][i + rocblas_stride(i) * ldu] = T(1.0);
         }
         if(nc > 0)
         {
-            memset(hC[0], 0, ldc * nc * sizeof(T));
+            memset(hC[0], 0, rocblas_stride(ldc) * nc * sizeof(T));
             for(rocblas_int i = 0; i < std::min(n, nc); ++i)
-                hC[0][i + i * ldc] = T(1.0);
+                hC[0][i + rocblas_stride(i) * ldc] = T(1.0);
         }
     }
 
@@ -324,10 +324,12 @@ void bdsqr_getError(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; ++j)
                 {
                     if(i > 0)
-                        tmp = D[i] * hU[0][i + j * ldu] + E[i - 1] * hU[0][(i - 1) + j * ldu]
-                            - hDRes[0][j] * hV[0][j + i * ldv];
+                        tmp = D[i] * hU[0][i + rocblas_stride(j) * ldu]
+                            + E[i - 1] * hU[0][(i - 1) + rocblas_stride(j) * ldu]
+                            - hDRes[0][j] * hV[0][j + rocblas_stride(i) * ldv];
                     else
-                        tmp = D[i] * hU[0][i + j * ldu] - hDRes[0][j] * hV[0][j + i * ldv];
+                        tmp = D[i] * hU[0][i + rocblas_stride(j) * ldu]
+                            - hDRes[0][j] * hV[0][j + rocblas_stride(i) * ldv];
                     err += std::abs(tmp) * std::abs(tmp);
                 }
             }
@@ -340,10 +342,12 @@ void bdsqr_getError(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; ++j)
                 {
                     if(i > 0)
-                        tmp = D[i] * hV[0][j + i * ldv] + E[i - 1] * hV[0][j + (i - 1) * ldv]
-                            - hDRes[0][j] * hU[0][i + j * ldu];
+                        tmp = D[i] * hV[0][j + rocblas_stride(i) * ldv]
+                            + E[i - 1] * hV[0][j + rocblas_stride(i - 1) * ldv]
+                            - hDRes[0][j] * hU[0][i + rocblas_stride(j) * ldu];
                     else
-                        tmp = D[i] * hV[0][j + i * ldv] - hDRes[0][j] * hU[0][i + j * ldu];
+                        tmp = D[i] * hV[0][j + rocblas_stride(i) * ldv]
+                            - hDRes[0][j] * hU[0][i + rocblas_stride(j) * ldu];
                     err += std::abs(tmp) * std::abs(tmp);
                 }
             }
@@ -363,7 +367,7 @@ void bdsqr_getError(const rocblas_handle handle,
         {
             for(rocblas_int j = 0; j < n; ++j)
             {
-                tmp = hC[0][j + i * ldc] - hU[0][i + j * ldu];
+                tmp = hC[0][j + rocblas_stride(i) * ldc] - hU[0][i + rocblas_stride(j) * ldu];
                 err += std::abs(tmp) * std::abs(tmp);
             }
         }

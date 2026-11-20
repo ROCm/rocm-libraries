@@ -206,12 +206,14 @@ void sygvd_hegvd_initData(const rocblas_handle handle,
                 {
                     if(i == j)
                     {
-                        hA[b][i + j * lda] = std::real(hA[b][i + j * lda]) + 400;
-                        hB[b][i + j * ldb] = std::real(hB[b][i + j * ldb]) + 400;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = std::real(hA[b][i + rocblas_stride(j) * lda]) + 400;
+                        hB[b][i + rocblas_stride(j) * ldb]
+                            = std::real(hB[b][i + rocblas_stride(j) * ldb]) + 400;
                     }
                     else
                     {
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                     }
                 }
             }
@@ -224,13 +226,13 @@ void sygvd_hegvd_initData(const rocblas_handle handle,
                 // in those matrices in the batch that are non positive definite
                 rocblas_int i = n / 4 + b;
                 i -= (i / n) * n;
-                hB[b][i + i * ldb] = 0;
+                hB[b][i + rocblas_stride(i) * ldb] = 0;
                 i = n / 2 + b;
                 i -= (i / n) * n;
-                hB[b][i + i * ldb] = 0;
+                hB[b][i + rocblas_stride(i) * ldb] = 0;
                 i = n - 1 + b;
                 i -= (i / n) * n;
-                hB[b][i + i * ldb] = 0;
+                hB[b][i + rocblas_stride(i) * ldb] = 0;
             }
 
             // store A and B for testing purposes
@@ -242,13 +244,13 @@ void sygvd_hegvd_initData(const rocblas_handle handle,
                     {
                         if(itype != rocblas_eform_bax)
                         {
-                            A[b][i + j * lda] = hA[b][i + j * lda];
-                            B[b][i + j * ldb] = hB[b][i + j * ldb];
+                            A[b][i + rocblas_stride(j) * lda] = hA[b][i + rocblas_stride(j) * lda];
+                            B[b][i + rocblas_stride(j) * ldb] = hB[b][i + rocblas_stride(j) * ldb];
                         }
                         else
                         {
-                            A[b][i + j * lda] = hB[b][i + j * ldb];
-                            B[b][i + j * ldb] = hA[b][i + j * lda];
+                            A[b][i + rocblas_stride(j) * lda] = hB[b][i + rocblas_stride(j) * ldb];
+                            B[b][i + rocblas_stride(j) * ldb] = hA[b][i + rocblas_stride(j) * lda];
                         }
                     }
                 }
@@ -311,8 +313,8 @@ void sygvd_hegvd_getError(const rocblas_handle handle,
     std::vector<T> work(lwork);
     std::vector<S> rwork(lrwork);
     std::vector<int> iwork(liwork);
-    host_strided_batch_vector<T> A(lda * n, 1, lda * n, bc);
-    host_strided_batch_vector<T> B(ldb * n, 1, ldb * n, bc);
+    host_strided_batch_vector<T> A(rocblas_stride(lda) * n, 1, rocblas_stride(lda) * n, bc);
+    host_strided_batch_vector<T> B(rocblas_stride(ldb) * n, 1, rocblas_stride(ldb) * n, bc);
 
     // input data initialization
     sygvd_hegvd_initData<true, true, T>(handle, itype, evect, n, dA, lda, stA, dB, ldb, stB, bc, hA,
@@ -386,14 +388,15 @@ void sygvd_hegvd_getError(const rocblas_handle handle,
                     for(int j = 0; j < n; j++)
                     {
                         alpha = T(1) / hDRes[b][j];
-                        cpu_symv_hemv(uplo, n, alpha, A[b], lda, hARes[b] + j * lda, 1, beta,
-                                      hA[b] + j * lda, 1);
+                        cpu_symv_hemv(uplo, n, alpha, A[b], lda, hARes[b] + rocblas_stride(j) * lda,
+                                      1, beta, hA[b] + rocblas_stride(j) * lda, 1);
                     }
 
                     // move B*x into hARes
                     for(rocblas_int i = 0; i < n; i++)
                         for(rocblas_int j = 0; j < n; j++)
-                            hARes[b][i + j * lda] = hB[b][i + j * ldb];
+                            hARes[b][i + rocblas_stride(j) * lda]
+                                = hB[b][i + rocblas_stride(j) * ldb];
                 }
                 else
                 {
@@ -403,8 +406,8 @@ void sygvd_hegvd_getError(const rocblas_handle handle,
                     for(int j = 0; j < n; j++)
                     {
                         alpha = T(1) / hDRes[b][j];
-                        cpu_symv_hemv(uplo, n, alpha, A[b], lda, hB[b] + j * ldb, 1, beta,
-                                      hA[b] + j * lda, 1);
+                        cpu_symv_hemv(uplo, n, alpha, A[b], lda, hB[b] + rocblas_stride(j) * ldb, 1,
+                                      beta, hA[b] + rocblas_stride(j) * lda, 1);
                     }
                 }
 
@@ -539,8 +542,8 @@ void testing_sygvd_hegvd(Arguments& argus)
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldb = argus.get<rocblas_int>("ldb", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stB = argus.get<rocblas_stride>("strideB", ldb * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stB = argus.get<rocblas_stride>("strideB", rocblas_stride(ldb) * n);
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", n);
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", n);
 

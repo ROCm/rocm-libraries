@@ -163,9 +163,9 @@ void getri_outofplace_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
 
@@ -175,9 +175,9 @@ void getri_outofplace_initData(const rocblas_handle handle,
             {
                 for(rocblas_int j = 0; j < n; j++)
                 {
-                    tmp = hA[b][i + j * lda];
-                    hA[b][i + j * lda] = hA[b][n - 1 - i + j * lda];
-                    hA[b][n - 1 - i + j * lda] = tmp;
+                    tmp = hA[b][i + rocblas_stride(j) * lda];
+                    hA[b][i + rocblas_stride(j) * lda] = hA[b][n - 1 - i + rocblas_stride(j) * lda];
+                    hA[b][n - 1 - i + rocblas_stride(j) * lda] = tmp;
                 }
             }
 
@@ -192,13 +192,13 @@ void getri_outofplace_initData(const rocblas_handle handle,
                 // matrices in the batch that are singular
                 rocblas_int i = n / 4 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
                 i = n / 2 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
                 i = n - 1 + b;
                 i -= (i / n) * n;
-                hA[b][i + i * lda] = 0;
+                hA[b][i + rocblas_stride(i) * lda] = 0;
             }
         }
     }
@@ -369,8 +369,8 @@ void testing_getri_outofplace(Arguments& argus)
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
     rocblas_int ldc = argus.get<rocblas_int>("ldc", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
-    rocblas_stride stC = argus.get<rocblas_stride>("strideC", ldc * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
+    rocblas_stride stC = argus.get<rocblas_stride>("strideC", rocblas_stride(ldc) * n);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", n);
 
     rocblas_int bc = argus.batch_count;

@@ -164,9 +164,9 @@ void sytxx_hetxx_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j || i == j + 1 || i == j - 1)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
         }
@@ -199,11 +199,12 @@ void sytxx_hetxx_initData(const rocblas_handle handle,
                 for(rocblas_int j = 0; j < n; j++)
                 {
                     if(i == j)
-                        hA[b][i + j * lda] = hA[b][i + j * lda].real() + 400;
+                        hA[b][i + rocblas_stride(j) * lda]
+                            = hA[b][i + rocblas_stride(j) * lda].real() + 400;
                     else if(i == j + 1 || i == j - 1)
-                        hA[b][i + j * lda] += 400;
+                        hA[b][i + rocblas_stride(j) * lda] += 400;
                     else
-                        hA[b][i + j * lda] -= 4;
+                        hA[b][i + rocblas_stride(j) * lda] -= 4;
                 }
             }
         }
@@ -263,31 +264,31 @@ void sytxx_hetxx_getError(const rocblas_handle handle,
         if(uplo == rocblas_fill_lower)
         {
             for(rocblas_int i = 0; i < n - 2; ++i)
-                a[i + (n - 1) * lda] = 0;
-            a[(n - 2) + (n - 1) * lda] = a[(n - 1) + (n - 2) * lda];
+                a[i + rocblas_stride(n - 1) * lda] = 0;
+            a[(n - 2) + rocblas_stride(n - 1) * lda] = a[(n - 1) + rocblas_stride(n - 2) * lda];
 
             // for each column
             for(rocblas_int j = n - 2; j >= 0; --j)
             {
                 // prepare T and v
                 for(rocblas_int i = 0; i < j - 1; ++i)
-                    a[i + j * lda] = 0;
+                    a[i + rocblas_stride(j) * lda] = 0;
                 if(j > 0)
-                    a[(j - 1) + j * lda] = a[j + (j - 1) * lda];
+                    a[(j - 1) + rocblas_stride(j) * lda] = a[j + rocblas_stride(j - 1) * lda];
                 for(rocblas_int i = j + 2; i < n; ++i)
                 {
-                    v[i - j - 1] = a[i + j * lda];
-                    a[i + j * lda] = 0;
+                    v[i - j - 1] = a[i + rocblas_stride(j) * lda];
+                    a[i + rocblas_stride(j) * lda] = 0;
                 }
                 v[0] = 1;
 
                 // apply householder reflector
                 cpu_larf(rocblas_side_left, n - 1 - j, n - j, v.data(), 1, t + j,
-                         a + (j + 1) + j * lda, lda, hW.data());
+                         a + (j + 1) + rocblas_stride(j) * lda, lda, hW.data());
                 if(COMPLEX)
                     cpu_lacgv(1, t + j, 1);
                 cpu_larf(rocblas_side_right, n - j, n - 1 - j, v.data(), 1, t + j,
-                         a + j + (j + 1) * lda, lda, hW.data());
+                         a + j + rocblas_stride(j + 1) * lda, lda, hW.data());
             }
         }
 
@@ -303,14 +304,14 @@ void sytxx_hetxx_getError(const rocblas_handle handle,
                 // prepare T and v
                 for(rocblas_int i = 0; i < j - 1; ++i)
                 {
-                    v[i] = a[i + j * lda];
-                    a[i + j * lda] = 0;
+                    v[i] = a[i + rocblas_stride(j) * lda];
+                    a[i + rocblas_stride(j) * lda] = 0;
                 }
                 v[j - 1] = 1;
                 if(j < n - 1)
-                    a[(j + 1) + j * lda] = a[j + (j + 1) * lda];
+                    a[(j + 1) + rocblas_stride(j) * lda] = a[j + rocblas_stride(j + 1) * lda];
                 for(rocblas_int i = j + 2; i < n; ++i)
-                    a[i + j * lda] = 0;
+                    a[i + rocblas_stride(j) * lda] = 0;
 
                 // apply householder reflector
                 cpu_larf(rocblas_side_left, j, j + 1, v.data(), 1, t + j - 1, a, lda, hW.data());
@@ -424,7 +425,7 @@ void testing_sytxx_hetxx(Arguments& argus)
     char uploC = argus.get<char>("uplo");
     rocblas_int n = argus.get<rocblas_int>("n");
     rocblas_int lda = argus.get<rocblas_int>("lda", n);
-    rocblas_stride stA = argus.get<rocblas_stride>("strideA", lda * n);
+    rocblas_stride stA = argus.get<rocblas_stride>("strideA", rocblas_stride(lda) * n);
     rocblas_stride stD = argus.get<rocblas_stride>("strideD", n);
     rocblas_stride stE = argus.get<rocblas_stride>("strideE", n - 1);
     rocblas_stride stP = argus.get<rocblas_stride>("strideP", n - 1);
@@ -456,7 +457,7 @@ void testing_sytxx_hetxx(Arguments& argus)
     }
 
     // determine sizes
-    size_t size_A = lda * n;
+    size_t size_A = rocblas_stride(lda) * n;
     size_t size_D = n;
     size_t size_E = n - 1;
     size_t size_tau = n - 1;

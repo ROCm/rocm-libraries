@@ -76,7 +76,8 @@ void cpu_stmm(rocblas_int m,
             // C[:,0] = A[:,0]*D[0] + A[:,1]*E[0]
             for(rocblas_int i = 0; i < m; ++i)
             {
-                C[i + j * ldc] = A[i + j * lda] * D[j] + A[i + (j + 1) * lda] * E[j];
+                C[i + rocblas_stride(j) * ldc] = A[i + rocblas_stride(j) * lda] * D[j]
+                    + A[i + rocblas_stride(j + 1) * lda] * E[j];
             }
         }
         else if(j == n - 1)
@@ -84,7 +85,8 @@ void cpu_stmm(rocblas_int m,
             // C[:,n-1] = A[:,n-2]*E[n-2] + A[:,n-1]*D[n-1]
             for(rocblas_int i = 0; i < m; ++i)
             {
-                C[i + j * ldc] = A[i + (j - 1) * lda] * E[j - 1] + A[i + j * lda] * D[j];
+                C[i + rocblas_stride(j) * ldc] = A[i + rocblas_stride(j - 1) * lda] * E[j - 1]
+                    + A[i + rocblas_stride(j) * lda] * D[j];
             }
         }
         else
@@ -92,8 +94,9 @@ void cpu_stmm(rocblas_int m,
             // C[:,j] = A[:,j-1]*E[j-1] + A[:,j]*D[j] + A[:,j+1]*E[j]
             for(rocblas_int i = 0; i < m; ++i)
             {
-                C[i + j * ldc] = A[i + (j - 1) * lda] * E[j - 1] + A[i + j * lda] * D[j]
-                    + A[i + (j + 1) * lda] * E[j];
+                C[i + rocblas_stride(j) * ldc] = A[i + rocblas_stride(j - 1) * lda] * E[j - 1]
+                    + A[i + rocblas_stride(j) * lda] * D[j]
+                    + A[i + rocblas_stride(j + 1) * lda] * E[j];
             }
         }
     }
@@ -144,12 +147,13 @@ void cpu_hbadd(rocblas_fill uplo,
         {
             for(rocblas_int i = j; i < min(j + kd + 1, n); ++i)
             {
-                T Aij = Aband[i - j + j * ldab];
+                T Aij = Aband[i - j + rocblas_stride(j) * ldab];
                 if(i == j)
                     assert(imag(Aij) == 0);
-                C[i + j * ldc] = alpha * Aij + beta * C[i + j * ldc];
+                C[i + rocblas_stride(j) * ldc] = alpha * Aij + beta * C[i + rocblas_stride(j) * ldc];
                 if(i != j)
-                    C[j + i * ldc] = alpha * sconj(Aij) + beta * C[j + i * ldc];
+                    C[j + rocblas_stride(i) * ldc]
+                        = alpha * sconj(Aij) + beta * C[j + rocblas_stride(i) * ldc];
             }
         }
     }
@@ -159,12 +163,13 @@ void cpu_hbadd(rocblas_fill uplo,
         {
             for(rocblas_int i = max(j - kd, 0); i <= j; ++i)
             {
-                T Aij = Aband[kd - (i - j) + j * ldab];
+                T Aij = Aband[kd - (i - j) + rocblas_stride(j) * ldab];
                 if(i == j)
                     assert(imag(Aij) == 0);
-                C[i + j * ldc] = alpha * Aij + beta * C[i + j * ldc];
+                C[i + rocblas_stride(j) * ldc] = alpha * Aij + beta * C[i + rocblas_stride(j) * ldc];
                 if(i != j)
-                    C[j + i * ldc] = alpha * sconj(Aij) + beta * C[j + i * ldc];
+                    C[j + rocblas_stride(i) * ldc]
+                        = alpha * sconj(Aij) + beta * C[j + rocblas_stride(i) * ldc];
             }
         }
     }
