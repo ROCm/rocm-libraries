@@ -80,9 +80,9 @@ constexpr HWModel kGfx1250Model = {
     .waitHide =
         {
             .forms = kGfx1250WaitHideForms,
-            .vmVsrcLds = 11,
-            .vmVsrcTex = 11,
-            .vmVsrcBridge = 11,
+            .vmVsrcLds = 10,
+            .vmVsrcTex = 10,
+            .vmVsrcBridge = 10,
         },
 };
 
