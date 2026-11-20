@@ -7,13 +7,48 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ## (Unreleased) rocSOLVER 3.39
 
 ### Added
+
+* Eigenvalues and Schur factorization of Hessenberg matrices
+    * HSEQR (complex precisions, with batched and strided\_batched versions; also in hybrid
+      mode, with rocsolver_function_hseqr)
+
+* Reordering of the Schur factorization
+    * TREXC (complex precisions, with batched and strided\_batched versions)
+
+* Eigenvectors of upper triangular matrices
+    * TREVC3 (complex precisions, with batched and strided\_batched versions)
+
+* Eigensolver for general matrices
+    * GEEV (complex precisions, with batched and strided\_batched versions; also in hybrid
+      mode for its HSEQR stage, with rocsolver_function_geev or rocsolver_function_hseqr)
+
+* Balancing routines for general matrices
+    * GEBAL (all precisions, with batched and strided\_batched versions)
+    * GEBAK (all precisions, with batched and strided\_batched versions)
+
+* New enumerations rocsolver_balance, rocsolver_schur_job, rocsolver_schur_vectors and
+  rocsolver_eigenvectors, and the values rocsolver_function_hseqr and rocsolver_function_geev
+  of rocsolver_function
+
+* Orthonormal/Unitary matrix generator routines from Hessenberg reduction
+    * ORGHR and UNGHR
+
 ### Changed
 ### Removed
 ### Optimized
+
+* Improved the performance of GEHRD for large matrices (LAHR2).
+* Improved the performance of LARFT with forward direction and column-wise storage for tall
+  matrices, and of ORGQR/UNGQR and ORGQL/UNGQL for large matrices.
+
 ### Resolved issues
 
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
 ### Known issues
+
+* HSEQR (when it uses the multishift QR algorithm), GEBAL (for n >= 256) and GEEV synchronize
+  the stream, so they cannot be captured in a HIP graph.
+
 ### Upcoming changes
 
 
