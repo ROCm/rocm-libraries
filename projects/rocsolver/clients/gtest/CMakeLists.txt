@@ -83,6 +83,7 @@ set(rocauxiliary_test_source
   # vector & matrix manipulations
   auxiliary/lacgv_gtest.cpp
   auxiliary/laswp_gtest.cpp
+  auxiliary/lacpy_gtest.cpp
   # householder reflections
   auxiliary/larf_gtest.cpp
   auxiliary/larfg_gtest.cpp
