@@ -129,6 +129,8 @@ def getRequiredParametersMin() -> set:
         'ScheduleGROverBarrier',
         'SourceSwap',
         'UseDualFMAC',
+        'ScalarLoadB',
+        'ScalarLoadBPrefetch',
         'SpaceFillingAlgo',
         'StorePriorityOpt',
         'StoreRemapVectorWidth',

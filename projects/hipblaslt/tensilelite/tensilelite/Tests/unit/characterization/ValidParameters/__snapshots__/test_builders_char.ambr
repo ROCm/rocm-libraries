@@ -1489,6 +1489,8 @@
     'PreloadKernArgs',
     'ReuseAcrossPersistent',
     'SFCWGM',
+    'ScalarLoadB',
+    'ScalarLoadBPrefetch',
     'ScheduleGROverBarrier',
     'ScheduleGlobalRead',
     'ScheduleIterAlg',
@@ -2637,6 +2639,24 @@
     'SFCWGM': dict({
       'type': 'int',
       'value': -1,
+    }),
+    'ScalarLoadB': dict({
+      'head': list([
+        0,
+        2,
+        4,
+      ]),
+      'len': 5,
+      'type': 'list',
+    }),
+    'ScalarLoadBPrefetch': dict({
+      'head': list([
+        0,
+        1,
+        2,
+      ]),
+      'len': 5,
+      'type': 'list',
     }),
     'ScheduleGROverBarrier': dict({
       'head': list([
