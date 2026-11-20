@@ -96,7 +96,19 @@ namespace rocalution
         ROCALUTION_EXPORT
         void SetScaling(bool scaling);
 
-        /** \brief Force computation of coarser levels on the host backend */
+        /** \brief Force computation of coarser levels on the host backend
+         *  \details
+         *  The number of host levels is kept by \p ReBuildNumeric, \p MoveToHost,
+         *  \p MoveToAccelerator, \p Clear and \p Build. \p Build of an AMG solver moves the
+         *  coarsest levels of the new hierarchy and its coarse grid solver to the host, at
+         *  most all levels but the finest, as \p SetHostLevels does. It keeps this clamped
+         *  number, also if a later \p Build has more levels again.
+         *
+         *  \p SetHostLevels only moves levels to the host. After a smaller number than
+         *  before, also after \p Build, call \p MoveToAccelerator to move the other levels
+         *  back to the accelerator. To compute all levels on the accelerator again, use a
+         *  new solver.
+         */
         ROCALUTION_EXPORT
         void SetHostLevels(int levels);
 

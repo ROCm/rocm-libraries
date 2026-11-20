@@ -35,6 +35,7 @@
 
 #include "../../utils/log.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <list>
 
@@ -198,6 +199,15 @@ namespace rocalution
         }
 
         this->build_ = true;
+
+        // A rebuild keeps the host levels of SetHostLevels(), but creates all levels on the
+        // backend of the finest operator. The new hierarchy can be shallower, so clamp the
+        // host levels as SetHostLevels() does
+        if(this->host_level_ != 0)
+        {
+            this->host_level_ = std::min(this->host_level_, this->levels_ - 1);
+            this->MoveHostLevels_();
+        }
 
         log_debug(this, "BaseAMG::Build()", this->build_, " #*# end");
     }

@@ -2489,6 +2489,199 @@ TYPED_TEST(multigrid_backends, rebuild_numeric_keeps_the_host_levels)
     }
 }
 
+// Build of an AMG keeps the host levels, with and without Clear. Both builds are on the
+// accelerator, or both on the host with the solver moved to the accelerator afterwards, so
+// that they give the same hierarchy. The placement is checked again after a round trip
+// through the host, which a lost count would change. The default smoothers, because a
+// second Build with the user smoothers of ManualAmg is a known bug
+TYPED_TEST(multigrid_backends, build_keeps_the_host_levels_of_an_amg)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = grid<T>(8, 8, 1.0, 1.0, true);
+    const Csr<T> next
+        = transformed(ref, [](int i, int j, T v) { return i == j ? v + static_cast<T>(2) : v; });
+    const Vec<T> b  = rhs<T>(ref.n);
+    const Vec<T> x0 = initial_guess<T>(ref.n);
+    for(const AmgCase<T>& c : amg_classes<T>())
+    {
+        for(bool clear : {false, true})
+        {
+            for(bool on_host : {false, true})
+            {
+                SCOPED_TRACE(c.name + (clear ? ", Clear and Build" : ", Build")
+                             + (on_host ? " on the host" : " on the accelerator"));
+                const Backend backend = on_host ? Backend::Host : Backend::Accelerator;
+
+                const std::unique_ptr<Matrix<T>> A   = make_local_matrix(backend, ref);
+                const std::unique_ptr<AMG<T>>    amg = c.make();
+                amg->SetOperator(*A);
+                amg->SetCoarsestLevel(4);
+                set_cycle(*amg, c.cycle);
+                amg->Build();
+                if(on_host)
+                {
+                    A->MoveToAccelerator();
+                    amg->MoveToAccelerator();
+                }
+                const int levels = amg->GetNumLevels();
+                ASSERT_IN_LOOP(levels >= 3);
+                const Vec<T> first = solve(*amg, *A, b, x0, 1);
+
+                amg->SetHostLevels(1);
+                if(on_host)
+                {
+                    A->MoveToHost();
+                    amg->MoveToHost();
+                }
+                if(clear)
+                {
+                    amg->Clear();
+                }
+                amg->Build();
+                if(on_host)
+                {
+                    A->MoveToAccelerator();
+                    amg->MoveToAccelerator();
+                }
+                ASSERT_IN_LOOP(amg->GetNumLevels() == levels);
+                std::vector<bool> host(levels - 1, false);
+                host[levels - 2] = true;
+                ASSERT_IN_LOOP(coarse_on_host(*amg) == host);
+                ASSERT_IN_LOOP(transfers_on_host(*amg) == host);
+
+                A->MoveToHost();
+                amg->MoveToHost();
+                A->MoveToAccelerator();
+                amg->MoveToAccelerator();
+                ASSERT_IN_LOOP(coarse_on_host(*amg) == host);
+                ASSERT_IN_LOOP(transfers_on_host(*amg) == host);
+                expect_near(solve(*amg, *A, b, x0, 1), first, tol<T>());
+
+                const Hierarchy<T> before = hierarchy_of(*amg, ref);
+                Vec<T>             val    = csr_values(next);
+                A->UpdateValuesCSR(val.data());
+                amg->ReBuildNumeric();
+                EXPECT_EQ(coarse_on_host(*amg), host);
+                EXPECT_EQ(transfers_on_host(*amg), host);
+                const Hierarchy<T> expected = with_finest(before, next);
+                const Hierarchy<T> after    = hierarchy_of(*amg, next);
+                for(int l = 1; l < levels; ++l)
+                {
+                    SCOPED_TRACE("level " + std::to_string(l));
+                    expect_dense_near(after.A[l], expected.A[l], tol<T>());
+                }
+            }
+        }
+    }
+}
+
+// A shallower rebuild clamps the host levels to all coarse levels, and keeps the clamped
+// number when the hierarchy grows again. Without the clamp, Build moves operators before
+// the start of the level arrays
+TYPED_TEST(multigrid_backends, build_clamps_the_host_levels_of_a_shallower_amg)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = grid<T>(8, 8, 1.0, 1.0, true);
+    const Csr<T> next
+        = transformed(ref, [](int i, int j, T v) { return i == j ? v + static_cast<T>(2) : v; });
+    const Vec<T> b  = rhs<T>(ref.n);
+    const Vec<T> x0 = initial_guess<T>(ref.n);
+    for(const AmgCase<T>& c : amg_classes<T>())
+    {
+        SCOPED_TRACE(c.name);
+        const std::unique_ptr<Matrix<T>> A   = make_local_matrix(Backend::Accelerator, ref);
+        const std::unique_ptr<AMG<T>>    amg = c.make();
+        amg->SetOperator(*A);
+        amg->SetCoarsestLevel(4);
+        set_cycle(*amg, c.cycle);
+        amg->Build();
+        const int levels = amg->GetNumLevels();
+        ASSERT_IN_LOOP(levels >= 3);
+        const Vec<T> first = solve(*amg, *A, b, x0, 1);
+
+        const std::unique_ptr<AMG<T>> two = c.make();
+        two->SetOperator(*A);
+        two->SetCoarsestLevel(4);
+        two->SetMaxLevels(2);
+        set_cycle(*two, c.cycle);
+        two->Build();
+        ASSERT_IN_LOOP(two->GetNumLevels() == 2);
+        const Vec<T> shallow = solve(*two, *A, b, x0, 1);
+
+        amg->SetHostLevels(levels - 1);
+        amg->Clear();
+        amg->SetMaxLevels(2);
+        amg->Build();
+        ASSERT_IN_LOOP(amg->GetNumLevels() == 2);
+        ASSERT_IN_LOOP(coarse_on_host(*amg) == std::vector<bool>{true});
+        ASSERT_IN_LOOP(transfers_on_host(*amg) == std::vector<bool>{true});
+
+        A->MoveToHost();
+        amg->MoveToHost();
+        A->MoveToAccelerator();
+        amg->MoveToAccelerator();
+        ASSERT_IN_LOOP(coarse_on_host(*amg) == std::vector<bool>{true});
+        ASSERT_IN_LOOP(transfers_on_host(*amg) == std::vector<bool>{true});
+        expect_near(solve(*amg, *A, b, x0, 1), shallow, tol<T>());
+
+        const Hierarchy<T> before = hierarchy_of(*amg, ref);
+        Vec<T>             val    = csr_values(next);
+        A->UpdateValuesCSR(val.data());
+        amg->ReBuildNumeric();
+        EXPECT_EQ(coarse_on_host(*amg), std::vector<bool>{true});
+        EXPECT_EQ(transfers_on_host(*amg), std::vector<bool>{true});
+        const Hierarchy<T> expected = with_finest(before, next);
+        const Hierarchy<T> after    = hierarchy_of(*amg, next);
+        expect_dense_near(after.A[1], expected.A[1], tol<T>());
+
+        // The count is 1 now, so the deeper hierarchy has one host level
+        val = csr_values(ref);
+        A->UpdateValuesCSR(val.data());
+        amg->Clear();
+        amg->SetMaxLevels(levels);
+        amg->Build();
+        ASSERT_IN_LOOP(amg->GetNumLevels() == levels);
+        std::vector<bool> host(levels - 1, false);
+        host[levels - 2] = true;
+        ASSERT_IN_LOOP(coarse_on_host(*amg) == host);
+        ASSERT_IN_LOOP(transfers_on_host(*amg) == host);
+        expect_near(solve(*amg, *A, b, x0, 1), first, tol<T>());
+    }
+}
+
+// Build keeps the host levels, and SetHostLevels only moves levels to the host, so a smaller
+// number after Build needs MoveToAccelerator to move the other levels back
+TYPED_TEST(multigrid_backends, fewer_host_levels_after_build_need_move_to_accelerator)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = grid<T>(8, 8, 1.0, 1.0, true);
+    const Vec<T> b   = rhs<T>(ref.n);
+    const Vec<T> x0  = initial_guess<T>(ref.n);
+    for(const AmgCase<T>& c : amg_classes<T>())
+    {
+        SCOPED_TRACE(c.name);
+        const std::unique_ptr<Matrix<T>> A   = make_local_matrix(Backend::Accelerator, ref);
+        const std::unique_ptr<AMG<T>>    amg = c.make();
+        amg->SetOperator(*A);
+        amg->SetCoarsestLevel(4);
+        set_cycle(*amg, c.cycle);
+        amg->Build();
+        const int levels = amg->GetNumLevels();
+        ASSERT_IN_LOOP(levels >= 3);
+        const Vec<T> first = solve(*amg, *A, b, x0, 1);
+
+        amg->SetHostLevels(levels - 1);
+        amg->Build();
+        amg->SetHostLevels(1);
+        amg->MoveToAccelerator();
+        std::vector<bool> host(levels - 1, false);
+        host[levels - 2] = true;
+        ASSERT_IN_LOOP(coarse_on_host(*amg) == host);
+        ASSERT_IN_LOOP(transfers_on_host(*amg) == host);
+        expect_near(solve(*amg, *A, b, x0, 1), first, tol<T>());
+    }
+}
+
 namespace
 {
     template <typename P>
