@@ -482,4 +482,116 @@ TEST(HostUnitMXIntegerExact, smoke_Fp6PartialSumsStayExactAtK131584)
     }
 }
 
+// sparse_k MX data: A is nonzero only at the sparse_k indices of its row, with values in {1, 2};
+// B is in {-1, 0, 1}; both scales are 1 or 2; and the sum of |A * B| over K, which bounds |D| in
+// any summation order, stays at or below kIntegerExactMXSparseKBound, so a bf16 D stores every
+// result exactly. Checked at the shortest and longest K the MXFP6 kernels are registered for.
+TEST(HostUnitMXIntegerExact, smoke_Fp6SparseKKeepsDExactInBf16)
+{
+    static_assert(kIntegerExactMXSparseKBound < 256);
+    const size_t mn = 32;
+    for(int64_t K : {int64_t(2048), int64_t(131584)})
+        for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2})
+        {
+            std::vector<uint8_t>     dataA(fp6Bytes(K * mn)), scaleA(K / 32 * mn);
+            std::vector<uint8_t>     dataB(fp6Bytes(K * mn)), scaleB(K / 32 * mn);
+            const std::vector<float> a = generateMXInput(type,
+                                                         HIP_R_8U,
+                                                         dataA.data(),
+                                                         scaleA.data(),
+                                                         K,
+                                                         mn,
+                                                         K,
+                                                         /*isTranspose=*/true,
+                                                         32,
+                                                         1,
+                                                         /*isMatrixA=*/true,
+                                                         MXScaleLayout::None,
+                                                         "integer_exact_sparse_k");
+            const std::vector<float> b = generateMXInput(type,
+                                                         HIP_R_8U,
+                                                         dataB.data(),
+                                                         scaleB.data(),
+                                                         K,
+                                                         mn,
+                                                         K,
+                                                         /*isTranspose=*/false,
+                                                         1,
+                                                         32,
+                                                         /*isMatrixA=*/false,
+                                                         MXScaleLayout::None,
+                                                         "integer_exact_sparse_k");
+            ASSERT_EQ(a.size(), size_t(K) * mn);
+            ASSERT_EQ(b.size(), size_t(K) * mn);
+
+            for(uint8_t s : scaleA)
+                ASSERT_TRUE(s == 127 || s == 128) << int(s);
+            for(uint8_t s : scaleB)
+                ASSERT_TRUE(s == 127 || s == 128) << int(s);
+            bool sawScale2 = false;
+            for(size_t m = 0; m < mn; m++)
+            {
+                size_t nonzeros = 0;
+                for(int64_t k = 0; k < K; k++)
+                {
+                    const float v    = a[m * K + k];
+                    const float e    = decodeFp6(type, fp6At(dataA, m * K + k));
+                    const bool  kept = integer_exact_sparse_k_kept(size_t(k), size_t(K), m);
+                    ASSERT_EQ(e != 0, kept) << "m=" << m << " k=" << k;
+                    ASSERT_TRUE(e == 0 || e == 1 || e == 2) << e;
+                    nonzeros += e != 0;
+                    sawScale2 |= v != e;
+                }
+                ASSERT_LE(nonzeros, kIntegerExactSparseKTerms + 1) << "m=" << m;
+            }
+            EXPECT_TRUE(sawScale2);
+            for(size_t idx = 0; idx < b.size(); idx++)
+            {
+                const float e = decodeFp6(type, fp6At(dataB, idx));
+                ASSERT_TRUE(e == -1 || e == 0 || e == 1) << e;
+            }
+
+            int64_t maxAbsSum = 0, maxAbsD = 0;
+            for(size_t m = 0; m < mn; m++)
+                for(size_t n = 0; n < mn; n++)
+                {
+                    int64_t exact = 0, absSum = 0;
+                    for(int64_t k = 0; k < K; k++)
+                    {
+                        const float product = a[m * K + k] * b[n * K + k];
+                        exact += int64_t(product);
+                        absSum += int64_t(std::fabs(product));
+                    }
+                    maxAbsSum = std::max(maxAbsSum, absSum);
+                    maxAbsD   = std::max(maxAbsD, exact < 0 ? -exact : exact);
+                }
+            std::cout << (type == HIP_R_6F_E3M2 ? "E3M2" : "E2M3") << " sparse_k K=" << K
+                      << ": max |D| = " << maxAbsD << ", max sum |A * B| = " << maxAbsSum
+                      << ", bound = " << kIntegerExactMXSparseKBound << std::endl;
+            EXPECT_LE(maxAbsSum, kIntegerExactMXSparseKBound);
+            EXPECT_GT(maxAbsD, 0) << "D is zero, so the data cannot detect an error";
+        }
+}
+
+// The sparse_k rule indexes K along the stored rows; other orientations are refused.
+TEST(HostUnitMXIntegerExact, smoke_SparseKWithKAlongColumnsIsRefused)
+{
+    std::vector<uint8_t> data(fp6Bytes(64 * 64)), scale(64 * 64 / 32);
+    for(bool isMatrixA : {true, false})
+        EXPECT_THROW(generateMXInput(HIP_R_6F_E2M3,
+                                     HIP_R_8U,
+                                     data.data(),
+                                     scale.data(),
+                                     64,
+                                     64,
+                                     64,
+                                     /*isTranspose=*/!isMatrixA,
+                                     isMatrixA ? 1 : 32,
+                                     isMatrixA ? 32 : 1,
+                                     isMatrixA,
+                                     MXScaleLayout::None,
+                                     "integer_exact_sparse_k"),
+                     std::runtime_error);
+}
+
 #endif

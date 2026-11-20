@@ -2558,6 +2558,17 @@ void testing_matmul_with_bias(const Arguments& arg,
         else if(!parse_integer_exact_pattern(arg.integer_exact_pattern, iePattern))
             why = std::string("unknown integer_exact_pattern '") + arg.integer_exact_pattern
                   + "'; use ternary or sparse_k";
+        else if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+        {
+            // The MX generator implements sparse_k only, with K along the stored rows of A and B.
+            if(iePattern == IntegerExactPattern::ternary)
+                why = "integer_exact_pattern ternary does not apply to MX data; use sparse_k";
+            else if(iePattern == IntegerExactPattern::sparse_k
+                    && (char_to_hipblas_operation(arg.transA) != HIPBLAS_OP_T
+                        || char_to_hipblas_operation(arg.transB) != HIPBLAS_OP_N))
+                why = "integer_exact_pattern sparse_k with MX data requires transA=T and "
+                      "transB=N";
+        }
         if(!why.empty())
         {
 #ifdef GOOGLE_TEST
@@ -2568,6 +2579,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 #endif
         }
     }
+    const std::string mxInitMethod = iePattern == IntegerExactPattern::sparse_k
+                                         ? std::string("integer_exact_sparse_k")
+                                         : hipblaslt_initialization2string(arg.initialization);
 
     if(arg.requires_streamk)
     {
@@ -3451,7 +3465,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       1,
                                       /*isMatrixA=*/true,
                                       scaleLayoutA,
-                                      hipblaslt_initialization2string(arg.initialization),
+                                      mxInitMethod,
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
@@ -3566,7 +3580,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       blockSize(arg.scaleB),
                                       /*isMatrixA=*/false,
                                       scaleLayoutB,
-                                      hipblaslt_initialization2string(arg.initialization),
+                                      mxInitMethod,
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());

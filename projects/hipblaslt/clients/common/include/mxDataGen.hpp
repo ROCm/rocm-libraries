@@ -13,6 +13,7 @@ enum class MXScaleLayout
 };
 
 #include "hipblaslt_scaling_format.hpp"
+#include "integer_exact_sparse_k.hpp"
 #include <cstdint>
 #include <string_view>
 
@@ -42,6 +43,21 @@ constexpr int64_t integerExactMXSumBound(int64_t K)
     return K * kIntegerExactMXMaxProduct;
 }
 
+// integer_exact_sparse_k ("integer_exact" with integer_exact_pattern sparse_k) bounds D whatever K
+// is, so a 16-bit D stores every result exactly and fast_check compares every element directly.
+// A, K along its stored rows, is nonzero only where integer_exact_sparse_k_kept holds (at most
+// kIntegerExactSparseKTerms + 1 indices per row), with values in {1, 2}; B is in {-1, 0, 1}; and
+// both E8M0 scales are 1 or 2, so each product is at most 2 * 2 * 1 * 2 = 8 in magnitude and
+// |D| <= 17 * 8 = 136, below the 256 that bf16 stores exactly.
+constexpr int     kIntegerExactMXSparseKMaxA     = 2;
+constexpr int     kIntegerExactMXSparseKMaxB     = 1;
+constexpr int     kIntegerExactMXSparseKMaxScale = 2;
+constexpr int64_t kIntegerExactMXSparseKMaxProduct
+    = int64_t(kIntegerExactMXSparseKMaxA) * kIntegerExactMXSparseKMaxScale
+      * kIntegerExactMXSparseKMaxB * kIntegerExactMXSparseKMaxScale;
+constexpr int64_t kIntegerExactMXSparseKBound
+    = (int64_t(kIntegerExactSparseKTerms) + 1) * kIntegerExactMXSparseKMaxProduct;
+
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 #include <hip/hip_bfloat16.h>
@@ -61,6 +77,9 @@ constexpr int64_t integerExactMXSumBound(int64_t K)
 // With K along the stored columns (non-transposed A or transposed B), K must be a multiple of
 // the scale block. A partial block makes getAlignedFloat read past the packed buffer, so
 // integer_exact throws before writing.
+// initMethod "integer_exact_sparse_k" is integer_exact with the sparse_k pattern
+// (kIntegerExactMXSparseKBound above). It requires K along the stored rows, where row is K, and
+// throws before writing otherwise.
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
                                    void*                  data,

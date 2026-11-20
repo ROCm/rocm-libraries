@@ -5563,8 +5563,10 @@ Tests:
 
 # MXFP6 with 128x4 scales (scale mode 1018) and A in HIPBLASLT_ORDER_COL256_R128_EXT: the
 # rocKE kernels at their registered sizes, checked by fast_check with no host reference.
-# integer_exact fp6 data keeps every partial sum an integer below 2^24 (K < 262144), and
-# fast_check reads the dequantized values, so the tiled device order does not reach it.
+# D is bf16, which stores integers exactly only below 256, so the data uses the sparse_k pattern:
+# A has at most 17 nonzeros per row, B is in {-1, 0, 1} and the scales are 1 or 2, which keeps
+# |D| <= 136 at any K (kIntegerExactMXSparseKBound). fast_check reads the dequantized values, so
+# the tiled device order does not reach it.
 # The kernels need alpha 1 and beta 0, which only the ext API sets up. On chips 0x75a0 and
 # 0x75a3 a missing solution fails; other parts decline.
 - name: matmul_fast_check_mx_fp6_tile128x4
@@ -5588,6 +5590,7 @@ Tests:
   use_ext_setproblem: 1
   fast_check_repeat: 2
   initialization: integer_exact
+  integer_exact_pattern: sparse_k
   unit_check: 0
   fast_check: 1
   allow_no_solution: 1
@@ -5613,6 +5616,7 @@ Tests:
   use_ext_setproblem: 1
   fast_check_repeat: 2
   initialization: integer_exact
+  integer_exact_pattern: sparse_k
   unit_check: 0
   fast_check: 1
   allow_no_solution: 1
@@ -5635,6 +5639,7 @@ Tests:
   use_ext_setproblem: 1
   fast_check_repeat: 2
   initialization: integer_exact
+  integer_exact_pattern: sparse_k
   unit_check: 0
   fast_check: 1
   allow_no_solution: 1
@@ -5661,6 +5666,7 @@ Tests:
   fast_check_repeat: 4
   fast_check_inject: 2
   initialization: integer_exact
+  integer_exact_pattern: sparse_k
   unit_check: 0
   fast_check: 1
   allow_no_solution: 1
