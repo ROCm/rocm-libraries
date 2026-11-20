@@ -240,6 +240,11 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
             COMPONENT tests
             RENAME "CTestTestfile.cmake"
         )
+        install(
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/cmake/CheckCpuGemmFailure.cmake"
+            DESTINATION "${CMAKE_INSTALL_BINDIR}/${TENSILELITE_TESTS_INSTALL_SUBDIR}"
+            COMPONENT tests
+        )
     else()
         message(STATUS "tensilelite-tests: shared/ctest not found (e.g. standalone checkout), falling back to gtest_discover_tests()")
         include(GoogleTest)
@@ -742,6 +747,102 @@ if(NOT WIN32)
         ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate --outputAmaxD
     )
 endif()
+
+#################################################
+#     Int8 input tests (slow path)              #
+#################################################
+# A/B are Int8 drawn from [-128, 127]. Each combination is one of the
+# reference's TypedGemm_I8_* ids: C/D type (--typeCD) x alpha/beta type
+# (--typeAlpha), which is also the reference's epilogue type. The golden GEMM
+# accumulates exactly in integers, applies the epilogue in that type and casts
+# to C/D with the reference's SaturateCast rules, so D must match exactly.
+# The fast path does not support Int8 inputs yet (isFastPathEligible rejects
+# them), so these run on the slow path only.
+#
+# The slow reference reduces in integers before converting once to the
+# alpha/beta type (#15765). Float precision no longer limits K. The large-K
+# cases allow sums above 2^24; the golden still requires the completed sum and
+# integer epilogue intermediates to fit Int32. Output-range constraints below
+# also apply. Dedicated ReferenceInt8Accumulation gtests check exact boundary
+# values and modulo 2^32 reduction with a signed Int32 interpretation.
+#
+# Each entry: NAME;typeCD;typeAlpha;alpha;beta;alpha for ScaleAB. Alphas keep D
+# in range: Half output below 65504, no int32 overflow (the golden throws on
+# int32 overflow), and a mix of saturated and in-range Int8 values with
+# round-half-to-even ties (I8_I8_S); 2^-16 for ScaleAB, whose scales go up to
+# 100 x 100.
+foreach(COMBO
+        "I8_I8_I32;i8;i32;1;2;1"
+        "I8_I32_I32;i32;i32;1;2;1"
+        "I8_I32_S;i32;f32;0.5;0.5;0.0000152587890625"
+        "I8_I8_S;i8;f32;0.001953125;0.5;0.0000152587890625"
+        "I8_H_S;f16;f32;0.015625;0.5;0.0000152587890625"
+        "I8_B_S;bf16;f32;1;0.5;0.0000152587890625")
+    list(GET COMBO 0 NAME)
+    list(GET COMBO 1 TYPE_CD)
+    list(GET COMBO 2 TYPE_ALPHA)
+    list(GET COMBO 3 ALPHA)
+    list(GET COMBO 4 BETA)
+    list(GET COMBO 5 SCALEAB_ALPHA)
+    set(I8_ARGS ${F32_SIZES} --type i8 --typeCD ${TYPE_CD} --typeAlpha ${TYPE_ALPHA} --validate)
+
+    # Integer ScaleAB has no fractional alpha; retain the smaller
+    # output-range case while large-K reduction coverage runs separately.
+    set(I8_SCALE_ARGS ${I8_ARGS})
+    if("${TYPE_ALPHA}" STREQUAL "i32")
+        set(I8_SCALE_ARGS ${F16_SIZES} --type i8 --typeCD ${TYPE_CD}
+            --typeAlpha ${TYPE_ALPHA} --validate)
+    endif()
+
+    foreach(TRANS NN TN NT TT)
+        get_trans_flags(${TRANS} TFLAGS)
+        add_cpu_gemm_test(slow_${NAME}_${TRANS}
+            ARGS ${I8_ARGS} ${TFLAGS} --alpha ${ALPHA}
+        )
+        add_cpu_gemm_test(slow_${NAME}_LargeK_${TRANS}
+            ARGS -M 3 -N 5 -K 1044 --type i8 --typeCD ${TYPE_CD}
+                --typeAlpha ${TYPE_ALPHA} ${TFLAGS} --alpha ${ALPHA} --validate
+        )
+    endforeach()
+    add_cpu_gemm_test(slow_${NAME}_Beta
+        ARGS ${I8_ARGS} --alpha ${ALPHA} --beta ${BETA}
+    )
+    add_cpu_gemm_test(slow_${NAME}_Bias
+        ARGS ${I8_ARGS} --alpha ${ALPHA} --bias
+    )
+    add_cpu_gemm_test(slow_${NAME}_TN_AllFeatures
+        ARGS ${I8_ARGS} --transA --alpha ${ALPHA} --beta ${BETA} --bias --activation relu --scaleAlphaVec
+    )
+    foreach(MODE Scalar Vector)
+        add_cpu_gemm_test(slow_${NAME}_ScaleAB_${MODE}
+            ARGS ${I8_SCALE_ARGS} --alpha ${SCALEAB_ALPHA} --useScaleAB ${MODE}
+        )
+    endforeach()
+    add_cpu_gemm_test(slow_${NAME}_Batched
+        ARGS ${I8_ARGS} --alpha ${ALPHA} --batchCount 3
+    )
+endforeach()
+
+# Option checks: these must be rejected.
+foreach(CASE
+        "I8_MixedA;--typeA i8 --typeB f32;Error: mixed i8 / non-i8 input is not supported"
+        "I8_UnsupportedCD;--type i8 --typeCD f32;Error: unsupported i8 type combination --typeCD f32 --typeAlpha f32"
+        "I8_NonIntegerAlpha;--type i8 --typeCD i32 --typeAlpha i32 --alpha 0.5;Error: --typeAlpha i32 needs integer --alpha and --beta"
+        "F32_TypeCD;--type f32 --typeCD f16;Error: --typeCD f16 / --typeAlpha f32 is only supported for i8 inputs")
+    list(GET CASE 0 NAME)
+    list(GET CASE 1 FLAGS)
+    list(GET CASE 2 EXPECTED_ERROR)
+    separate_arguments(FLAGS)
+    add_cpu_gemm_test(${NAME}_Rejected
+        EXPECTED_ERROR "${EXPECTED_ERROR}"
+        ARGS -M 16 -N 16 -K 16 ${FLAGS} --validate
+    )
+endforeach()
+
+# A valid int32 scalar that cannot be represented in float must survive CLI parsing.
+add_cpu_gemm_test(slow_I8_I32_I32_Int32BetaBoundary
+    ARGS -M 1 -N 1 -K 0 --type i8 --typeCD i32 --typeAlpha i32 --alpha 0 --beta 2147483647 --validate
+)
 
 if(COMMAND apply_ctest_category_labels)
     apply_ctest_category_labels(

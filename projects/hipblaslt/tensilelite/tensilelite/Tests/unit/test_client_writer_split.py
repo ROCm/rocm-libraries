@@ -110,6 +110,15 @@ def test_the_split_options_are_written(tmp_path, _restore_gp):
     assert options["split-placement"] == "RRRR"
 
 
+def test_a_split_joins_every_launch_unless_free_run_is_set(tmp_path, _restore_gp):
+    # The client joins by default, so the option is only written to turn the join off.
+    assert "split-free-run" not in _options(_write_ini(tmp_path, SplitDevices=2))
+    options = _options(_write_ini(tmp_path, SplitDevices=2, SplitFreeRun=True))
+    assert options["split-free-run"] == "True"
+    # Without a split there is nothing to join.
+    assert "split-free-run" not in _options(_write_ini(tmp_path, SplitFreeRun=True))
+
+
 def test_each_tensor_has_its_own_placement(tmp_path, _restore_gp):
     options = _options(
         _write_ini(

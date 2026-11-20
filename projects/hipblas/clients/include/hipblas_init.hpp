@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,7 @@
 #ifdef _OPENMP
 #include <omp.h>
 #endif
+#include <algorithm>
 #include <assert.h>
 
 #include "hipblas.h"
@@ -102,6 +103,8 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
     auto N   = hA.n();
     auto lda = hA.lda();
 
+    hipblas_parallel_fill_seeder seeder;
+
     for(int64_t batch_index = 0; batch_index < hA.batch_count(); ++batch_index)
     {
         auto* A = hA[batch_index];
@@ -112,11 +115,14 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < M; ++i)
+            {
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value     = rand_gen();
                     A[i + j * lda] = (i ^ j) & 1 ? T(value) : T(hipblas_negate(value));
                 }
+            }
         }
         else if(matrix_type == hipblas_triangular_matrix)
         {
@@ -124,12 +130,15 @@ void hipblas_init_matrix_alternating_sign(hipblas_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < M; ++i)
+            {
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
                                                  : (j <= i ? rand_gen() : T(0.0f));
                     A[i + j * lda] = (i ^ j) & 1 ? T(value) : T(hipblas_negate(value));
                 }
+            }
         }
         else
         {
@@ -146,13 +155,21 @@ void hipblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t
     if(incx < 0)
         x -= (N - 1) * incx;
 
+    hipblas_parallel_fill_seeder seeder;
+    int64_t blocks = (N + hipblas_fill_block_size - 1) / hipblas_fill_block_size;
+
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-    for(int64_t j = 0; j < N; ++j)
+    for(int64_t block = 0; block < blocks; ++block)
     {
-        auto value  = rand_gen();
-        x[j * incx] = j & 1 ? T(value) : T(hipblas_negate(value));
+        seeder.reseed_thread_rng(0, block);
+        int64_t end = std::min(N, (block + 1) * hipblas_fill_block_size);
+        for(int64_t j = block * hipblas_fill_block_size; j < end; ++j)
+        {
+            auto value  = rand_gen();
+            x[j * incx] = j & 1 ? T(value) : T(hipblas_negate(value));
+        }
     }
 }
 
@@ -160,6 +177,8 @@ template <typename U, typename T>
 void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T rand_gen(), U& hA)
 {
     using R = real_t<T>;
+
+    hipblas_parallel_fill_seeder seeder;
 
     for(int64_t batch_index = 0; batch_index < hA.batch_count(); ++batch_index)
     {
@@ -173,8 +192,11 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #pragma omp parallel for
 #endif
             for(size_t j = 0; j < N; ++j)
+            {
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                     A[i + j * lda] = rand_gen();
+            }
         }
         else if(matrix_type == hipblas_hermitian_matrix)
         {
@@ -182,6 +204,8 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < N; ++i)
+            {
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j <= i; ++j)
                 {
                     auto value = rand_gen();
@@ -203,6 +227,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
                         A[i + j * lda] = hipblas_conjugate(value);
                     }
                 }
+            }
         }
         else if(matrix_type == hipblas_symmetric_matrix)
         {
@@ -210,6 +235,8 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < N; ++i)
+            {
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j <= i; ++j)
                 {
                     auto value = rand_gen();
@@ -231,6 +258,7 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
                         A[i + j * lda] = value;
                     }
                 }
+            }
         }
         else if(matrix_type == hipblas_triangular_matrix)
         {
@@ -238,12 +266,15 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #pragma omp parallel for
 #endif
             for(size_t j = 0; j < N; ++j)
+            {
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                 {
                     auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
                                                  : (j <= i ? rand_gen() : T(0.0f));
                     A[i + j * lda] = value;
                 }
+            }
         }
         else if(matrix_type == hipblas_diagonally_dominant_triangular_matrix)
         {
@@ -256,12 +287,15 @@ void hipblas_init_matrix(hipblas_matrix_type matrix_type, const char uplo, T ran
 #pragma omp parallel for
 #endif
             for(size_t j = 0; j < N; ++j)
+            {
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                 {
                     auto value     = uplo == 'U' ? (j >= i ? rand_gen() : T(0.0f))
                                                  : (j <= i ? rand_gen() : T(0.0f));
                     A[i + j * lda] = value;
                 }
+            }
 
             const R multiplier = R(
                 1.01f); // Multiplying factor to slightly increase the base value of (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) dominant diagonal element. If tests fail and it seems that there are numerical stability problems, try increasing multiplier, it should decrease the condition number of the matrix and thereby avoid numerical stability issues.
@@ -336,11 +370,19 @@ void hipblas_init_vector(T rand_gen(), T* x, int64_t N, int64_t incx)
     if(incx < 0)
         x -= (N - 1) * incx;
 
+    hipblas_parallel_fill_seeder seeder;
+    int64_t blocks = (N + hipblas_fill_block_size - 1) / hipblas_fill_block_size;
+
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-    for(int64_t j = 0; j < N; ++j)
-        x[j * incx] = rand_gen();
+    for(int64_t block = 0; block < blocks; ++block)
+    {
+        seeder.reseed_thread_rng(0, block);
+        int64_t end = std::min(N, (block + 1) * hipblas_fill_block_size);
+        for(int64_t j = block * hipblas_fill_block_size; j < end; ++j)
+            x[j * incx] = rand_gen();
+    }
 }
 
 template <typename T, typename U>
