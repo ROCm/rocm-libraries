@@ -58,6 +58,14 @@ ORIGAMI_EXPORT prediction_result_t select_config(const problem_t& problem,
  * @param config Kernel configuration.
  * @param skGrid StreamK grid size.
  * @return workgroup_mapping_t Workgroup mapping parameters (wgmxccchunk, wgmxcc, wgm).
+ *
+ * gfx1151, non-persistent kernel (skGrid == 0, config.stream_k == 0) with TensileLite params:
+ * takes a rule fitted on measurements: band in N when re-reading A from DRAM is expensive, or
+ * when a store-dominated kernel's M-grid fills the resident set; the output stride caps the band.
+ * It reads problem.ld_d / ld_e / use_e, config.mt, tensile().global_split_u and
+ * config.occupancy as TensileLite's CUOccupancy (workgroups per WGP there).  With A not
+ * transposed and B transposed it returns config.workgroup_mapping if nonzero, else
+ * ceil(sqrt(N_CU / NUM_XCD)).  The rule assumes the magic-number WGM remap of gfx115X kernels.
  */
 ORIGAMI_EXPORT workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
                                              const hardware_t& hardware,

@@ -1626,6 +1626,41 @@ namespace TensileLite
         return numWorkGroupsX * numWorkGroupsY * numWorkGroupsZ;
     }
 
+    namespace
+    {
+        // Origami's view of the problem for the WGM selection: sizes, layouts, leading
+        // dimensions and the E output.
+        origami::problem_t autoWGMOrigamiProblem(ContractionSolution::Problem const& problem)
+        {
+            auto sizes      = problem.problemSizes();
+            auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
+            if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+                miDataType = origami::data_type_t::XFloat32;
+            auto ld = [](TensorDescriptor const& t) {
+                return t.strides().size() > 1 ? t.strides()[1] : size_t{0};
+            };
+            return {
+                .size  = {sizes[0], sizes[1], sizes[3]},
+                .batch = sizes[2],
+                // CU budget hint; 0 = use all CUs.
+                .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
+                .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
+                .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
+                .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
+                .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
+                .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
+                .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
+                .mi_dtype    = miDataType,
+                .ld_a        = ld(problem.a()),
+                .ld_b        = ld(problem.b()),
+                .ld_c        = ld(problem.c()),
+                .ld_d        = ld(problem.d()),
+                .use_e       = problem.useE(),
+                .ld_e        = problem.useE() ? ld(problem.e()) : size_t{0},
+            };
+        }
+    } // namespace
+
     std::tuple<int32_t, size_t, size_t, size_t> ContractionSolution::calculateAutoWGM(
         Problem const& problem, Hardware const* hardware, uint32_t const skgrid) const
     {
@@ -1655,24 +1690,7 @@ namespace TensileLite
                 {
                     // Built as PredictionLibrary builds the ranking's problem, so both see
                     // the same operand layouts and pick the same WGM.
-                    auto miDataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
-                    if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
-                        miDataType = origami::data_type_t::XFloat32;
-                    origami::problem_t origami_problem = {
-                        .size        = {sizes[0], sizes[1], sizes[3]},
-                        .batch       = sizes[2],
-                        // CU budget hint; 0 = use all CUs.
-                        .num_cus     = static_cast<size_t>(problem.getParams().smCountTarget()),
-                        .a_transpose = problem.transA() ? origami::transpose_t::T
-                                                        : origami::transpose_t::N,
-                        .b_transpose = problem.transB() ? origami::transpose_t::T
-                                                        : origami::transpose_t::N,
-                        .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),
-                        .b_dtype     = datatypeToAnalyticalDatatype(problem.b().dataType()),
-                        .c_dtype     = datatypeToAnalyticalDatatype(problem.c().dataType()),
-                        .d_dtype     = datatypeToAnalyticalDatatype(problem.d().dataType()),
-                        .mi_dtype    = miDataType,
-                    };
+                    origami::problem_t origami_problem = autoWGMOrigamiProblem(problem);
                     // Origami ranks an auto mapping with this same call.
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1713,7 +1731,40 @@ namespace TensileLite
         else
         {
             // Default WGM
-            if(sizeMapping.workGroupMapping == 0)
+            if(sizeMapping.workGroupMapping == 0
+               && hipAMDGPU->analyticalHardware->arch
+                      == origami::hardware_t::architecture_t::gfx1151
+               && !sizeMapping.isPersistent() && problem.problemSizes().size() >= 4)
+            {
+                // gfx1151, non-persistent kernel: Origami's measured rule. Not cached: the
+                // pick is a few flops and depends on the strides.
+                const uint32_t    gsu            = problem.getParams().gsu() > 0
+                                                       ? problem.getParams().gsu()
+                                                       : calculateAutoGSU(problem, hardware);
+                origami::config_t origami_config = {
+                    .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
+                           static_cast<size_t>(sizeMapping.macroTile.y),
+                           static_cast<size_t>(sizeMapping.depthU)},
+                    .mi = {static_cast<size_t>(sizeMapping.matrixInstruction[0]),
+                           static_cast<size_t>(sizeMapping.matrixInstruction[1]),
+                           static_cast<size_t>(sizeMapping.matrixInstruction[2])},
+                    // CUOccupancy counts workgroups per WGP on gfx1151.
+                    .occupancy     = sizeMapping.CUOccupancy,
+                    .cache_hints_a = sizeMapping.cacheHintA(),
+                    .cache_hints_b = sizeMapping.cacheHintB(),
+                    .stream_k      = 0,
+                };
+                origami_config.tensile().global_split_u = static_cast<std::int16_t>(gsu);
+
+                defaultWGM = origami::select_workgroup_mapping(autoWGMOrigamiProblem(problem),
+                                                               *(hipAMDGPU->analyticalHardware),
+                                                               origami_config,
+                                                               0)
+                                 .wgm;
+                if(Debug::Instance().printPropertyEvaluation())
+                    std::cout << "AutoWGM (gfx1151) - WGM: " << defaultWGM << std::endl;
+            }
+            else if(sizeMapping.workGroupMapping == 0)
             {
                 auto numCU  = hipAMDGPU->analyticalHardware->N_CU;
                 auto numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;

@@ -23,6 +23,7 @@ target_sources(
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_formocast.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_logger.cpp"
                           "${CMAKE_CURRENT_SOURCE_DIR}/test_streamk.cpp"
+                          "${CMAKE_CURRENT_SOURCE_DIR}/test_wgm_gfx1151.cpp"
 )
 
 target_include_directories(origami-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")

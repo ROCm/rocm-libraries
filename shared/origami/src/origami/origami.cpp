@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <tuple>
 
 #include "origami/attention.hpp"
@@ -82,6 +83,138 @@ static workgroup_mapping_t select_workgroup_mapping_gfx1250(const problem_t& pro
   return best;
 }
 
+namespace gfx1151_wgm {
+// Constants fitted on gfx1151 measurements (Strix Halo, 40 CUs, shader clock 1900 MHz).
+constexpr double kMiB = 1048576.0;
+// Peak compute rate in flops per microsecond: f64, f32, and WMMA / int4 kernels.
+constexpr double kPeakFlopsPerUsF64 = 2.5e6;
+constexpr double kPeakFlopsPerUsF32 = 7e6;
+constexpr double kPeakFlopsPerUsMi  = 22e6;
+// DRAM read rate (MiB per microsecond) that bounds a sweep over A at WGM 1.
+constexpr double kDramReadMiBPerUs = 0.2;
+// A sweep is read-bound when its DRAM read time reaches this share of the sweep's compute time.
+constexpr double kReadBoundComputeShare = 0.5;
+// A + one output band + one B tile above this many MiB: A does not survive a sweep in MALL + L2.
+constexpr double kMallReuseMiB = 35.0;
+// Few-bands branch: at most this many column bands and A of at least this many MiB.
+constexpr size_t kFewBandsMaxBands = 8;
+constexpr double kFewBandsMinAMiB  = 12.0;
+// Output tile bytes over A + B tile bytes from which a kernel is store-dominated.
+constexpr double kStoreDominatedShare = 0.15;
+// Aliased output columns written concurrently per DRAM unit: store-dominated / other kernels.
+constexpr double kColumnsPerUnitStore = 256.0;
+constexpr double kColumnsPerUnitOther = 512.0;
+// Smallest band width once re-sweeping A is expensive: store-dominated / other kernels.
+constexpr double kMinBandStore = 2.0;
+constexpr double kMinBandOther = 4.0;
+// Store-dominated kernel whose M-grid fills the resident set (nwg0 >= this x resident workgroups):
+// band in N even when A stays cached.
+constexpr double kStoreBandMinGridShare = 1.0;
+// Its aliased output columns per DRAM unit, and the band width it takes.
+constexpr double kStoreBandColumnsPerUnit = 128.0;
+constexpr size_t kStoreBandWidth          = 2;
+// With at most this many column bands and a stride that tolerates all of them, it takes all.
+constexpr size_t kStoreBandWholeMaxBands = 8;
+// DRAM units an output can spread over: address bits [11:8] within a page.
+constexpr size_t kDramUnits      = 16;
+constexpr size_t kDramUnitPeriod = 4096;
+// Workgroups per WGP assumed when the config carries no occupancy.
+constexpr int kDefaultOccupancyPerWgp = 2;
+
+// DRAM units the rows of an output with this row size (bytes) cycle through.
+size_t dram_units(size_t row_bytes) {
+  return std::min(kDramUnits, kDramUnitPeriod / std::gcd(row_bytes, kDramUnitPeriod));
+}
+}  // namespace gfx1151_wgm
+
+// gfx1151 (one XCD) non-persistent kernels: WGM bands the grid along N so that A is re-read from
+// the cache rather than from DRAM, capped by how many aliased output columns the stride lets one
+// band write.  Store-dominated kernels whose M-grid fills the resident set take a band of 2 (or all
+// of up to 8 bands) even when A stays cached.  WGMXCC 1, chunk 0, split-K 0.
+// Assumes the magic-number remap prologue of gfx115X kernels; an fp64 prologue makes WGM > 1 cost a
+// few ns per workgroup more.
+// Reads sizes, batch, transposes, element sizes, ld_d / ld_e (0 = natural), use_e, the macro tile,
+// GlobalSplitU and the occupancy.  config.occupancy is TensileLite's CUOccupancy, which on gfx1151
+// counts workgroups per WGP (2 CUs): resident workgroups = N_CU / 2 x occupancy.
+// NT (A not transposed, B transposed): automatic selection is off; returns config.workgroup_mapping
+// if nonzero, else ceil(sqrt(N_CU / NUM_XCD)).
+// Unpadded, page-aliased inputs are not modeled (ld_a / ld_b are not read).
+static workgroup_mapping_t select_workgroup_mapping_gfx1151(const problem_t& problem,
+                                                            const hardware_t& hardware,
+                                                            const config_t& config) {
+  using namespace gfx1151_wgm;
+  auto result = [](size_t wgm) { return workgroup_mapping_t{0, 0, 1, static_cast<int32_t>(wgm)}; };
+
+  if (problem.a_transpose == transpose_t::N && problem.b_transpose == transpose_t::T) {
+    if (config.workgroup_mapping != 0)
+      return workgroup_mapping_t{0, 0, 1, config.workgroup_mapping};
+    return result(static_cast<size_t>(
+        std::ceil(std::sqrt(static_cast<double>(hardware.N_CU / hardware.NUM_XCD)))));
+  }
+
+  const size_t m = problem.size.m, n = problem.size.n, k = problem.size.k;
+  const size_t n0 = math::safe_ceil_div(m, config.mt.m);
+  const size_t n1 = math::safe_ceil_div(n, config.mt.n);
+  if (n0 <= 1 || n1 <= 1) return result(1);  // any WGM launches the same order
+
+  const size_t gsu    = static_cast<size_t>(std::max<int>(config.tensile().global_split_u, 1));
+  const double nout   = problem.use_e ? 2.0 : 1.0;
+  const double mt0    = static_cast<double>(std::min(config.mt.m, m));
+  const double mt1    = static_cast<double>(std::min(config.mt.n, n));
+  const double k_eff  = static_cast<double>(math::safe_ceil_div(k, gsu));
+  const double a_size = data_type_to_bytes(problem.a_dtype);
+  const double b_size = data_type_to_bytes(problem.b_dtype);
+  const double d_size = data_type_to_bytes(problem.d_dtype);
+
+  const double a_mib      = static_cast<double>(m) * k * a_size / kMiB;           // A, one batch
+  const double band_mib   = static_cast<double>(m) * mt1 * d_size * nout / kMiB;  // per A sweep
+  const double b_tile_mib = mt1 * k_eff * b_size / kMiB;
+  const double peak       = problem.a_dtype == data_type_t::Double  ? kPeakFlopsPerUsF64
+                            : problem.a_dtype == data_type_t::Float ? kPeakFlopsPerUsF32
+                                                                    : kPeakFlopsPerUsMi;
+  const double compute_us = 2.0 * m * n * k / peak;  // one batch
+  const int occupancy     = config.occupancy > 0 ? config.occupancy : kDefaultOccupancyPerWgp;
+  const double resident   = static_cast<double>(hardware.N_CU / 2) * occupancy;
+
+  // DRAM units the output rows spread over, and whether the output dominates the traffic.
+  const size_t ld_d = problem.ld_d != 0 ? problem.ld_d : m;
+  const size_t ld_e = problem.ld_e != 0 ? problem.ld_e : m;
+  size_t units      = dram_units(static_cast<size_t>(static_cast<double>(ld_d) * d_size));
+  if (problem.use_e)
+    units = std::min(units, dram_units(static_cast<size_t>(static_cast<double>(ld_e) * d_size)));
+  const double store_share =
+      mt0 * mt1 * d_size * nout / (mt0 * k_eff * a_size + mt1 * k_eff * b_size);
+  const bool store = store_share >= kStoreDominatedShare;
+  // Aliased output columns a band of `per_unit` columns per DRAM unit allows.
+  auto band_cap = [&](double per_unit) {
+    return per_unit * static_cast<double>(units) / (mt1 * nout * nout);
+  };
+
+  // Is re-reading A at WGM 1 expensive?
+  const bool read_bound =
+      a_mib / kDramReadMiBPerUs >= kReadBoundComputeShare * compute_us / static_cast<double>(n1);
+  const bool far = a_mib + band_mib + b_tile_mib > kMallReuseMiB;
+  const bool few = n1 <= kFewBandsMaxBands && a_mib >= kFewBandsMinAMiB &&
+                   resident < static_cast<double>(n0) * static_cast<double>(n1);
+  if (!(read_bound && (far || few))) {
+    if (!store || static_cast<double>(n0) < kStoreBandMinGridShare * resident) return result(1);
+    // Store-dominated, M-grid covers the resident set: a narrow band in N.
+    const double cap_store = units == kDramUnits ? static_cast<double>(n1)
+                                                 : std::max(static_cast<double>(kStoreBandWidth),
+                                                            band_cap(kStoreBandColumnsPerUnit));
+    if (n1 <= kStoreBandWholeMaxBands && cap_store >= static_cast<double>(n1)) return result(n1);
+    return result(kStoreBandWidth);
+  }
+
+  // Largest band the output stride tolerates.
+  const double cap = units == kDramUnits
+                         ? static_cast<double>(n1)
+                         : std::max(store ? kMinBandStore : kMinBandOther,
+                                    band_cap(store ? kColumnsPerUnitStore : kColumnsPerUnitOther));
+  if (cap >= static_cast<double>(n1)) return result(n1);
+  return result(size_t{1} << static_cast<int>(std::floor(std::log2(cap))));
+}
+
 /**
  * @brief Selects the best workgroup mapping parameters (maximizing cache hits) given fixed macro
  * tile sizes.
@@ -114,6 +247,11 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
 
   if (hardware.arch == hardware_t::architecture_t::gfx1250)
     return select_workgroup_mapping_gfx1250(problem, hardware, config);
+
+  // gfx1151: non-persistent TensileLite kernels (no StreamK grid) take the measured rule.
+  if (hardware.arch == hardware_t::architecture_t::gfx1151 && config.has_tensile_params() &&
+      skGrid == 0 && config.stream_k == 0)
+    return select_workgroup_mapping_gfx1151(problem, hardware, config);
 
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
