@@ -26,16 +26,16 @@
 # Handle::GetDbBasename's gfx11xx/gfx12xx branch, which uses GetMaxHardwareComputeUnits() ==
 # GetMaxComputeUnits() * 2 (CUs per WGP) in hex. The "cus" values below are therefore the arch's
 # PHYSICAL CU count, i.e. the number encoded in the shipped DB basename: gfx110060 = 0x60 = 96,
-# gfx120020 = 0x20 = 32, gfx120140 = 0x40 = 64.
+# gfx110136 = 0x36 = 54, gfx120020 = 0x20 = 32, gfx120140 = 0x40 = 64.
 # Second, a family can span several shipped DBs (gfx120X-all covers gfx1200 and gfx1201), so
 # FAMILY_MAP's value is a LIST of targets and each one gets its own rocjitsu run.
 #
 # A wrong "cus" value or a missing "retarget" can make gtest pass with nothing checked: every
 # StaticFDBSync param skips when the device reports another arch, and a param with a nonzero
-# num_cu (gfx90a, gfx942, gfx950, gfx1201) skips when the device's CU count selects another system
-# DB. Only a num_cu == 0 param that runs against a missing DB file fails on its own (SetupPaths).
-# So each run writes gtest's JSON report, and the runner fails unless exactly one StaticFDBSync
-# param for the target arch ran and was not skipped.
+# num_cu (gfx90a, gfx942, gfx950, gfx1101, gfx1201) skips when the device's CU count selects
+# another system DB. Only a num_cu == 0 param that runs against a missing DB file fails on its own
+# (SetupPaths). So each run writes gtest's JSON report, and the runner fails unless exactly one
+# StaticFDBSync param for the target arch ran and was not skipped.
 #
 # Env (provided by TheRock's test_component.yml): AMDGPU_FAMILIES (required), THEROCK_BIN_DIR
 # (default ./build/bin), OUTPUT_ARTIFACTS_DIR (default ./build), TEST_TYPE (quick/standard/...).
@@ -55,9 +55,9 @@ ROCJITSU_REF = "b2099a6b8703c089134ad526253752d26bbbf43a"  # 2026-09-10
 # each CU count in "cus" is one CU-corrected rocjitsu run. gfx94X-dcgpu covers BOTH MI300X
 # (304 -> gfx942130) and MI300A (228 -> gfx942e4) with a single arch.
 #
-# "retarget": the upstream rocjitsu configs dir has no KMD config for gfx1102 or gfx1200, so we
-# derive one from the same-generation sibling that does exist (gfx1100_w7900.json for RDNA3,
-# gfx1201_r9700.json for RDNA4) by rewriting gfx_target_version. Both pairs share family_id, wave
+# "retarget": the upstream rocjitsu configs dir has no KMD config for gfx1101, gfx1102 or gfx1200,
+# so we derive one from the same-generation sibling that does exist (gfx1100_w7900.json for RDNA3,
+# gfx1201_r9700.json for RDNA4) by rewriting gfx_target_version. Each pair shares family_id, wave
 # size and LDS size, and HIP only needs the target version to pick the right code object. Without
 # the rewrite the device reports the sibling arch and every param skips, which
 # check_one_param_ran turns into a failure.
@@ -78,6 +78,13 @@ FAMILY_MAP = {
     "gfx110X-all": [
         # gfx110060, Radeon Pro W7900 / RX 7900 XTX
         {"arch": "gfx1100", "rj_config": "gfx1100_w7900.json", "cus": [96]},
+        # gfx110136, Radeon Pro V710. No upstream config, so derived from the gfx1100 one.
+        {
+            "arch": "gfx1101",
+            "rj_config": "gfx1100_w7900.json",
+            "retarget": True,
+            "cus": [54],
+        },
     ],
     "gfx120X-all": [
         # gfx120020, RX 9060 XT. No upstream config; derived from the gfx1201 one.
