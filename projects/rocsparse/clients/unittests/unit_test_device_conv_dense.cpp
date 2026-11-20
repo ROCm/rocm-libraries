@@ -24,8 +24,10 @@
 
 // csr2dense / csc2dense / dense2csr / dense2csc: every value type, both index bases, empty
 // matrices and the pointer checks; rocsparse_sparse_to_dense for the CSR, CSC and COO
-// formats, both index types, both index bases and both orders of the dense matrix.
+// formats, both index types, both index bases and both orders of the dense matrix;
+// rocsparse_dense_to_sparse and rocsparse_sparse_to_dense with mismatched dimensions.
 
+#include "rocsparse_spmat_descr.hpp"
 #include "unit_test_device_conv_common.hpp"
 
 #include <cstdint>
@@ -249,4 +251,266 @@ namespace
         run_sparse_to_dense<int32_t, int32_t>(handle, rocsparse_format_coo);
         run_sparse_to_dense<int64_t, int64_t>(handle, rocsparse_format_coo);
     }
+
+    // rocsparse_dense_to_sparse sizes its buffer from the sparse descriptor and
+    // writes with the dense matrix dimensions. Each call differs in only one
+    // dimension, so a check of rows alone or columns alone still fails a case.
+    void expect_dense_to_sparse_dim_mismatch(rocsparse_handle handle,
+                                             rocsparse_format format,
+                                             bool             row_mismatch,
+                                             bool             sparse_to_dense = false)
+    {
+        const int64_t sparse_rows = 2;
+        const int64_t sparse_cols = 3;
+        const int64_t dense_rows  = sparse_rows + (row_mismatch ? 1 : 0);
+        const int64_t dense_cols  = sparse_cols + (row_mismatch ? 0 : 1);
+        const int32_t sentinel_i  = 0x5a5a5a5a;
+        const float   sentinel_v  = 42.0f;
+        const size_t  sentinel_b  = 0xA5A5A5A5u;
+        const int64_t nnz         = 2;
+
+        const std::vector<int32_t> idx(8, sentinel_i);
+        const std::vector<float>   val(8, sentinel_v);
+        DevBuf<int32_t>            d_idx(idx);
+        DevBuf<int32_t>            d_col(idx);
+        DevBuf<float>              d_val(val);
+        DevBuf<float>              d_dense(
+            std::vector<float>(static_cast<size_t>(dense_rows * dense_cols), 1.0f));
+
+        Dnmat mat_A;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&mat_A,
+                                               dense_rows,
+                                               dense_cols,
+                                               dense_rows,
+                                               d_dense.get(),
+                                               f32,
+                                               rocsparse_order_column),
+                  st_ok);
+
+        Spmat mat_B;
+        if(format == rocsparse_format_csr)
+        {
+            ASSERT_EQ(rocsparse_create_csr_descr(&mat_B,
+                                                 sparse_rows,
+                                                 sparse_cols,
+                                                 nnz,
+                                                 d_idx.get(),
+                                                 d_col.get(),
+                                                 d_val.get(),
+                                                 i32,
+                                                 i32,
+                                                 base0,
+                                                 f32),
+                      st_ok);
+        }
+        else if(format == rocsparse_format_csc)
+        {
+            ASSERT_EQ(rocsparse_create_csc_descr(&mat_B,
+                                                 sparse_rows,
+                                                 sparse_cols,
+                                                 nnz,
+                                                 d_col.get(),
+                                                 d_idx.get(),
+                                                 d_val.get(),
+                                                 i32,
+                                                 i32,
+                                                 base0,
+                                                 f32),
+                      st_ok);
+        }
+        else if(format == rocsparse_format_coo)
+        {
+            ASSERT_EQ(rocsparse_create_coo_descr(&mat_B,
+                                                 sparse_rows,
+                                                 sparse_cols,
+                                                 nnz,
+                                                 d_idx.get(),
+                                                 d_col.get(),
+                                                 d_val.get(),
+                                                 i32,
+                                                 base0,
+                                                 f32),
+                      st_ok);
+        }
+        else if(format == rocsparse_format_ell)
+        {
+            ASSERT_EQ(
+                rocsparse_create_ell_descr(
+                    &mat_B, sparse_rows, sparse_cols, d_col.get(), d_val.get(), 2, i32, base0, f32),
+                st_ok);
+        }
+        else if(format == rocsparse_format_bell)
+        {
+            ASSERT_EQ(rocsparse_create_bell_descr(&mat_B,
+                                                  sparse_rows,
+                                                  sparse_cols,
+                                                  dir_r,
+                                                  2,
+                                                  2,
+                                                  d_col.get(),
+                                                  d_val.get(),
+                                                  i32,
+                                                  base0,
+                                                  f32),
+                      st_ok);
+        }
+        else
+        {
+            FAIL() << "unexpected format";
+        }
+
+        const int64_t nnz_before       = mat_B.get()->nnz;
+        const int64_t ell_cols_before  = mat_B.get()->ell_cols;
+        const int64_t ell_width_before = mat_B.get()->ell_width;
+
+        size_t buffer_size = sentinel_b;
+        if(sparse_to_dense)
+        {
+            ASSERT_EQ(rocsparse_sparse_to_dense(handle,
+                                                mat_B,
+                                                mat_A,
+                                                rocsparse_sparse_to_dense_alg_default,
+                                                &buffer_size,
+                                                nullptr),
+                      st_size)
+                << "buffer-size query";
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                                mat_A,
+                                                mat_B,
+                                                rocsparse_dense_to_sparse_alg_default,
+                                                &buffer_size,
+                                                nullptr),
+                      st_size)
+                << "buffer-size query";
+        }
+        EXPECT_EQ(buffer_size, sentinel_b);
+
+        DevBuf<char> temp(64);
+        size_t       compute_buffer_size = sentinel_b;
+        if(sparse_to_dense)
+        {
+            ASSERT_EQ(rocsparse_sparse_to_dense(handle,
+                                                mat_B,
+                                                mat_A,
+                                                rocsparse_sparse_to_dense_alg_default,
+                                                &compute_buffer_size,
+                                                temp.get()),
+                      st_size)
+                << "compute";
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                                mat_A,
+                                                mat_B,
+                                                rocsparse_dense_to_sparse_alg_default,
+                                                &compute_buffer_size,
+                                                temp.get()),
+                      st_size)
+                << "compute";
+        }
+        EXPECT_EQ(compute_buffer_size, sentinel_b);
+
+        if(sparse_to_dense)
+        {
+            ASSERT_EQ(rocsparse_sparse_to_dense(handle,
+                                                mat_B,
+                                                mat_A,
+                                                rocsparse_sparse_to_dense_alg_default,
+                                                nullptr,
+                                                temp.get()),
+                      st_size)
+                << "compute with buffer";
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_dense_to_sparse(handle,
+                                                mat_A,
+                                                mat_B,
+                                                rocsparse_dense_to_sparse_alg_default,
+                                                nullptr,
+                                                temp.get()),
+                      st_size)
+                << "analysis";
+        }
+
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(mat_B.get()->nnz, nnz_before);
+        EXPECT_EQ(mat_B.get()->ell_cols, ell_cols_before);
+        EXPECT_EQ(mat_B.get()->ell_width, ell_width_before);
+        EXPECT_EQ(d_idx.read(), idx);
+        EXPECT_EQ(d_col.read(), idx);
+        EXPECT_EQ(d_val.read(), val);
+        if(sparse_to_dense)
+        {
+            EXPECT_EQ(d_dense.read(),
+                      std::vector<float>(static_cast<size_t>(dense_rows * dense_cols), 1.0f));
+        }
+    }
+
+    TEST_F(ConvDense, DenseToSparseDimMismatchCsr)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csr, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csr, false);
+    }
+
+    TEST_F(ConvDense, DenseToSparseDimMismatchCsc)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csc, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csc, false);
+    }
+
+    TEST_F(ConvDense, DenseToSparseDimMismatchCoo)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_coo, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_coo, false);
+    }
+
+    // dense_to_sparse has no ELL conversion. This still guards the dimension
+    // check, which runs before the not_implemented return.
+    TEST_F(ConvDense, DenseToSparseDimMismatchEll)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_ell, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_ell, false);
+    }
+
+    TEST_F(ConvDense, DenseToSparseDimMismatchBell)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell, false);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchCsr)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csr, true, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csr, false, true);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchCsc)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csc, true, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_csc, false, true);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchCoo)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_coo, true, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_coo, false, true);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchEll)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_ell, true, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_ell, false, true);
+    }
+
+    TEST_F(ConvDense, SparseToDenseDimMismatchBell)
+    {
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell, true, true);
+        expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell, false, true);
+    }
+
 } // namespace
