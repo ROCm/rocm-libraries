@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <span>
 #include <string>
 #include <string_view>
@@ -68,6 +69,14 @@ inline void keep_top_ranked(std::vector<ScoredKernel>& scored, std::size_t max_r
     if(scored.size() > max_ranked)
         scored.resize(max_ranked);
 }
+
+// What max_workgroups_yz returns where the architecture has no Y/Z workgroup-count limit.
+inline constexpr std::size_t no_workgroup_limit = std::numeric_limits<std::size_t>::max();
+
+// The most workgroups a launch may have along Y or along Z on `dev`, or no_workgroup_limit.
+//
+// Mirrors miopen::GetMaxWorkgroupsYZ(); a test keeps the two tables equal.
+HIPCONV_INTERNAL_API std::size_t max_workgroups_yz(const hipconv::Device& dev);
 
 class HIPCONV_INTERNAL_API ConvKernel
 {
@@ -136,6 +145,13 @@ public:
 
     virtual LaunchParams get_launch_params(const hipconv::Device& dev,
                                            const hipconv::ConvParams& par) const = 0;
+
+    // Whether the launch grid for `par` fits the device's Y/Z workgroup-count limit.
+    //
+    // gfx1200/gfx1201 wrap and gfx1250 truncates a larger count to 16 bits, so the launch is
+    // accepted and returns wrong results. Mirrors miopen::GetMaxWorkgroupsYZ(); true on every
+    // other architecture without computing the launch params.
+    bool grid_fits(const hipconv::Device& dev, const hipconv::ConvParams& par) const;
 
     // Enqueue the kernel; throw on a launch-time failure.
     //

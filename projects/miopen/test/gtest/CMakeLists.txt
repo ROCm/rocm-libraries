@@ -134,6 +134,13 @@ function(add_gtest TEST_NAME TEST_CPP)
     target_compile_definitions(${TEST_NAME} PRIVATE MIOPEN_USE_HIPCONV=1)
   endif()
 
+  # libMIOpen.so exports nothing from its vendored hipconv, so hipconv_workgroup_limit.cpp tests
+  # hipconv's internals (ConvKernel::grid_fits and launch) through its own copy of the static
+  # library. The other tests, which never name hipconv, do not need it.
+  if(MIOPEN_USE_HIPCONV AND (NOT MIOPEN_TEST_DISCRETE OR TEST_CPP STREQUAL "hipconv_workgroup_limit.cpp"))
+    target_link_libraries(${TEST_NAME} hipconv)
+  endif()
+
   target_link_libraries(${TEST_NAME} miopen_gtest_common)
   if(MIOPEN_ENABLE_AI_KERNEL_TUNING)
     target_link_libraries(${TEST_NAME} frugally-deep::fdeep Eigen3::Eigen)
@@ -321,6 +328,14 @@ function(add_gtest TEST_NAME TEST_CPP)
     target_link_libraries(${TEST_NAME} stdc++fs)
   endif()
 endfunction()
+
+# hipconv's internal headers (ConvKernel, ConvAlgorithm, the arch registry) sit in a directory of
+# generically named files (types.h, memory.h, ...). Only this source sees it, so no other test can
+# pick one of them up by accident.
+if(MIOPEN_USE_HIPCONV)
+  set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/hipconv_workgroup_limit.cpp
+    PROPERTIES INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/src/hipconv/src)
+endif()
 
 file(GLOB TESTS *.cpp)
 # Remove files that do not contain tests

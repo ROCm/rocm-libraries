@@ -69,4 +69,27 @@ __device__ float approxRcp(float x)
     return __builtin_amdgcn_rcpf(x);
 }
 
+// The workgroup coordinates of 2D pooling: (batch * channel, vertical tile, horizontal tile).
+// Default (LinearGrid == false): the original launch, one grid dimension per coordinate.
+// LinearGrid == true: all workgroups are launched along blockIdx.x (horizontal tile fastest),
+// for architectures where blockIdx.y/z are only 16 bits wide (gfx12) and the original grid would
+// not fit; the tile counts then come from the kernel arguments.
+struct PoolingWorkgroup
+{
+    unsigned int x_tile;
+    unsigned int y_tile;
+    unsigned int ob;
+};
+
+template <bool LinearGrid>
+__device__ inline PoolingWorkgroup poolingWorkgroup(unsigned int n_x_tiles, unsigned int n_y_tiles)
+{
+    if(LinearGrid)
+    {
+        const unsigned int rest = blockIdx.x / n_x_tiles;
+        return {blockIdx.x % n_x_tiles, rest % n_y_tiles, rest / n_y_tiles};
+    }
+    return {blockIdx.x, blockIdx.y, blockIdx.z};
+}
+
 #endif // GUARD_POOLING_FUNCTIONS_H

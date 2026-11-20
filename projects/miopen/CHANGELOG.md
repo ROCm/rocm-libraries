@@ -85,6 +85,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
   return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
   workspace is reported.
+* [Pooling][BatchNorm][Conv] Fixed wrong results on gfx12 for launches with more than 65535
+  workgroups in Y or Z ([#15001](https://github.com/ROCm/rocm-libraries/issues/15001)); launches
+  still over the limit are rejected or fail with `miopenStatusInternalError`.
 
 ### Added
 * [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a

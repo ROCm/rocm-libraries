@@ -3,10 +3,13 @@
 
 #include <miopen/pooling/solvers.hpp>
 
+#include <algorithm>
+
 #include <miopen/pooling/invoke_params.hpp>
 #include <miopen/datatype.hpp>
 #include <miopen/pooling.hpp>
 #include <miopen/kernel_build_params.hpp>
+#include <miopen/hipoc_kernel.hpp>
 #include <miopen/mlo_internal.hpp>
 #include <miopen/target_properties.hpp>
 #include <miopen/solver/implicitgemm_util.hpp>
@@ -155,6 +158,8 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
     auto result = ConvSolution{miopenStatusSuccess};
 
     const kernel_params kp(problem, config);
+    const int tile_w = kp.grp_tile0 * kp.out_pix_tile0;
+    const int tile_h = kp.grp_tile1 * kp.out_pix_tile1;
 
     {
         auto kernel = KernelInfo{};
@@ -177,12 +182,16 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                                               ? MLO_POOLING_OP_AVE
                                               : MLO_POOLING_OP_AVE_INCLUSIVE);
 
-        const int g_wk_width  = ((kp.in_width + kp.grp_tile0 * kp.out_pix_tile0 - 1) /
-                                (kp.grp_tile0 * kp.out_pix_tile0));
-        const int g_wk_height = ((kp.in_height + kp.grp_tile1 * kp.out_pix_tile1 - 1) /
-                                 (kp.grp_tile1 * kp.out_pix_tile1));
+        const int g_wk_width  = (kp.in_width + tile_w - 1) / tile_w;
+        const int g_wk_height = (kp.in_height + tile_h - 1) / tile_h;
 
-        const auto build_params =
+        // The Y workgroups are the vertical tiles, the Z workgroups are batch * channel. gfx12 has
+        // 16-bit Y/Z workgroup IDs: when the original grid does not fit, use the linear variant.
+        const std::size_t n_channel_batch = static_cast<std::size_t>(kp.n_inputs) * kp.batch_sz;
+        const bool linear_grid            = std::max<std::size_t>(g_wk_height, n_channel_batch) >
+                                 GetMaxWorkgroupsYZ(context.GetStream().GetDeviceName());
+
+        auto build_params =
             KernelBuildParameters{
                 {"MLO_POOLING_OP_ID", pooling_method},
                 {"MLO_POOLING_KERNEL_SZ1", kp.kernel_size_h},
@@ -202,19 +211,44 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
             }
             << GetDataTypeKBP(problem.GetXDesc().GetType(), context.GetStream().GetDeviceName());
 
+        if(linear_grid)
+            build_params << KernelBuildParameters{{"MLO_POOLBWD_LINEAR_GRID", 1}};
+
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
 
         kernel.l_wk = {kp.grp_tile0, kp.grp_tile1, 1};
-        kernel.g_wk = {
-            g_wk_width * kp.grp_tile0, g_wk_height * kp.grp_tile1, kp.n_inputs * kp.batch_sz};
+        // The original grid is (tiles_x * grp_tile0, tiles_y * grp_tile1, N * C) work-items. In the
+        // linear variant all workgroups go to X, in (batch * channel, vertical tile, horizontal
+        // tile) order, and X carries tiles * N * C * grp_tile0 work-items, which can reach 2^32
+        // only for tensors far beyond what the 32-bit offsets in the kernel can address
+        // (ValidateGlobalWorkSize() rejects it then). Otherwise nothing differs from the
+        // original launch.
+        if(linear_grid)
+        {
+            kernel.g_wk = {static_cast<std::size_t>(g_wk_width) * g_wk_height * n_channel_batch *
+                               kp.grp_tile0,
+                           kp.grp_tile1,
+                           1};
+        }
+        else
+        {
+            kernel.g_wk = {static_cast<std::size_t>(g_wk_width) * kp.grp_tile0,
+                           static_cast<std::size_t>(g_wk_height) * kp.grp_tile1,
+                           n_channel_batch};
+        }
 
         result.construction_params.push_back(kernel);
     }
 
-    result.invoker_factory = [](const std::vector<Kernel>& kernels) {
+    result.invoker_factory = [tile_w, tile_h](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
             decltype(auto) kernel = handle_.Run(kernels.front());
             decltype(auto) params = raw_params.CastTo<miopen::pooling::BwdInvokeParams>();
+
+            const int n_x_tiles =
+                (static_cast<int>(params.dxDesc.GetLengths()[3]) + tile_w - 1) / tile_w;
+            const int n_y_tiles =
+                (static_cast<int>(params.dxDesc.GetLengths()[2]) + tile_h - 1) / tile_h;
 
             if(params.pooling.GetMode() == miopenPoolingMax)
             {
@@ -233,7 +267,9 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                        static_cast<int>(params.dxDesc.GetStrides()[2]),
                        static_cast<int>(params.dyDesc.GetStrides()[0]),
                        static_cast<int>(params.dyDesc.GetStrides()[1]),
-                       static_cast<int>(params.dyDesc.GetStrides()[2]));
+                       static_cast<int>(params.dyDesc.GetStrides()[2]),
+                       n_x_tiles,
+                       n_y_tiles);
             }
             else
             {
@@ -251,7 +287,9 @@ ConvSolution PoolingBackward2d::GetSolution(const ExecutionContext& context,
                        static_cast<int>(params.dxDesc.GetStrides()[2]),
                        static_cast<int>(params.dyDesc.GetStrides()[0]),
                        static_cast<int>(params.dyDesc.GetStrides()[1]),
-                       static_cast<int>(params.dyDesc.GetStrides()[2]));
+                       static_cast<int>(params.dyDesc.GetStrides()[2]),
+                       n_x_tiles,
+                       n_y_tiles);
             }
         };
     };

@@ -158,7 +158,8 @@ bool kernel_supports(const ConvKernel* kernel, const Device& device, const ConvP
         return false;
     };
     return algorithm_supports() && kernel->supports_dims(par.dims) &&
-           kernel->is_applicable(device, par) && kernel->is_valid_config(device, par);
+           kernel->is_applicable(device, par) && kernel->is_valid_config(device, par) &&
+           kernel->grid_fits(device, par);
 }
 
 void check_kernel(ConvKernelHandle kernel, const Device& device)

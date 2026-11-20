@@ -31,6 +31,12 @@
 #include "float_types.h"
 #include "vector_types.hpp"
 
+// 1: grid-stride loop over Y workgroups (host caps the Y grid for gfx12 Y/Z workgroup ID limits).
+// 0 (default): one position per thread in Y.
+#ifndef MIO_BN_Y_STRIDE
+#define MIO_BN_Y_STRIDE 0
+#endif
+
 // determine block size using parameters passed from the host
 constexpr int blockSize = MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2;
 
@@ -48,6 +54,7 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
                                                       const FLOAT_ACCUM* invVariance,
                                                       const FLOAT_ACCUM* scale,
                                                       const FLOAT_ACCUM* bias,
+                                                      unsigned int hw,
                                                       unsigned int batchSize,
                                                       unsigned int cStride,
                                                       unsigned int hwStride,
@@ -58,33 +65,45 @@ __device__ __forceinline__ void BNFwdInferSpatialImpl(unsigned int tidx,
     FLOAT_ACCUM inhat[MIO_BN_VEC_SIZE];
     FLOAT value[MIO_BN_VEC_SIZE];
 
-    // loop over the batches
-    // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So the
-    // idea here is to use the blocks in z-dimension to cover the batch dimension first, and then
-    // each block will loop over the remaining batches with stride of gridDim.z if necessary.
-    for(unsigned int n = blockIdx.z; n < batchSize; n += gridDim.z)
+    // With MIO_BN_Y_STRIDE the host caps the number of workgroups in Y (the Y and Z workgroup IDs
+    // are only 16 bits wide on gfx12), so each thread strides over the remaining positions.
+    for(; tidy * vecSizeY < hw; tidy += gridDim.y * MIO_BN_GRP1)
     {
-        // load input value
-        const unsigned int batchIndex =
-            (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
-            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
-
-        // perform batchnorm and activation
-#pragma unroll
-        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+        // loop over the batches
+        // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So
+        // the idea here is to use the blocks in z-dimension to cover the batch dimension first,
+        // and then each block will loop over the remaining batches with stride of gridDim.z if
+        // necessary.
+        for(unsigned int n = blockIdx.z; n < batchSize; n += gridDim.z)
         {
-            inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
-            inhat[i] = scale[i] * inhat[i] + bias[i];
-            inhat[i] = miopen::batchnorm::activation_op<FLOAT_ACCUM,
-                                                        miopen::neuron_op_type{MIOPEN_NRN_OP_ID}>(
-                inhat[i], alpha, beta);
-            value[i] = CVT_ACCUM2FLOAT(inhat[i]);
+            // load input value
+            const unsigned int batchIndex =
+                (n * batchStride) + (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
+            *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
+                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
+
+            // perform batchnorm and activation
+#pragma unroll
+            for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+            {
+                inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
+                inhat[i] = scale[i] * inhat[i] + bias[i];
+                inhat[i] =
+                    miopen::batchnorm::activation_op<FLOAT_ACCUM,
+                                                     miopen::neuron_op_type{MIOPEN_NRN_OP_ID}>(
+                        inhat[i], alpha, beta);
+                value[i] = CVT_ACCUM2FLOAT(inhat[i]);
+            }
+
+            // write output value
+            *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
+                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
         }
 
-        // write output value
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
-            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
+        if constexpr(!MIO_BN_Y_STRIDE)
+        {
+            break;
+        }
     }
 }
 
@@ -114,7 +133,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || (!MIO_BN_Y_STRIDE && tidy * vecSizeY >= hw) || tidz >= batchSize)
     {
         return;
     }
@@ -168,6 +187,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                               invVariance,
                                               pscale,
                                               pbias,
+                                              hw,
                                               batchSize,
                                               cStride,
                                               hwStride,
@@ -203,7 +223,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
 
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || (!MIO_BN_Y_STRIDE && tidy * vecSizeY >= hw) || tidz >= batchSize)
     {
         return;
     }
@@ -251,6 +271,7 @@ extern "C" __global__ void __launch_bounds__(blockSize)
                                               invVariance,
                                               pscale,
                                               pbias,
+                                              hw,
                                               batchSize,
                                               cStride,
                                               hwStride,

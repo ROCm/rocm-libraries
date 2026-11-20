@@ -31,6 +31,7 @@
 #include <miopen/stringutils.hpp>
 #include <miopen/visit_float.hpp>
 #include <miopen/kernel_build_params.hpp>
+#include <miopen/hipoc_kernel.hpp>
 
 namespace miopen {
 
@@ -114,6 +115,18 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
         xgridsize = AlignUp(xgridsize, xlocalsize);
         ygridsize = AlignUp(ygridsize, ylocalsize);
 
+        // On gfx12 the Y and Z workgroup IDs are 16 bits wide, so a launch with too many Y
+        // workgroups returns wrong results. Only in that case use the grid-stride kernel variant
+        // with the Y grid capped below every architecture's limit; otherwise keep the original
+        // path.
+        bool y_stride = false;
+        if(ygridsize / ylocalsize > GetMaxWorkgroupsYZ(handle.GetDeviceName()))
+        {
+            constexpr size_t max_y_workgroups = (size_t{1} << 16) - 1;
+            ygridsize                         = max_y_workgroups * ylocalsize;
+            y_stride                          = true;
+        }
+
         zlocalsize                = 1;
         size_t active_threads_xy  = xgridsize * ygridsize;
         size_t max_active_threads = handle.GetMaxComputeUnits() * 32 *
@@ -170,6 +183,8 @@ ConvSolution BnFwdInference::GetSolution(const ExecutionContext& context,
             {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
+        if(y_stride)
+            kernel.comp_options += " -DMIO_BN_Y_STRIDE=1";
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);

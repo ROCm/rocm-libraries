@@ -30,6 +30,12 @@
 #include "float_types.h"
 #include "vector_types.hpp"
 
+// 1: grid-stride loop over Y workgroups (host caps the Y grid for gfx12 Y/Z workgroup ID limits).
+// 0 (default): one position per thread in Y.
+#ifndef MIO_BN_Y_STRIDE
+#define MIO_BN_Y_STRIDE 0
+#endif
+
 // determine block size using parameters passed from the host
 constexpr int blockSize = MIO_BN_GRP0 * MIO_BN_GRP1 * MIO_BN_GRP2;
 
@@ -38,42 +44,87 @@ using FLOAT_VEC_TYPE = typename miopen::mapped_vector_type<FLOAT, MIO_BN_VEC_SIZ
 using FLOAT_ACCUM_VEC_TYPE =
     typename miopen::mapped_vector_type<FLOAT_ACCUM, MIO_BN_VEC_SIZE>::type;
 
-__device__ __forceinline__ void BNFwdInferPerActivationImpl(unsigned int adjIndex,
+// decide vector sizes based on problem layout
+constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
+constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
+
+template <bool UseInvVariance>
+__device__ __forceinline__ void BNFwdInferPerActivationImpl(unsigned int tidx,
+                                                            unsigned int tidy,
                                                             const FLOAT* in,
                                                             FLOAT* out,
-                                                            const FLOAT_ACCUM* mean,
-                                                            const FLOAT_ACCUM* invVariance,
+                                                            const FLOAT_ACCUM* estimatedMean,
+                                                            const FLOAT_ACCUM* estimatedVarOrInv,
                                                             const FLOAT_ACCUM* scale,
                                                             const FLOAT_ACCUM* bias,
+                                                            double epsilon,
+                                                            unsigned int hw,
                                                             unsigned int batchSize,
+                                                            unsigned int cStride,
+                                                            unsigned int hwStride,
                                                             unsigned int batchStride)
 {
+    FLOAT_ACCUM mean[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM invVariance[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM pscale[MIO_BN_VEC_SIZE];
+    FLOAT_ACCUM pbias[MIO_BN_VEC_SIZE];
     FLOAT_ACCUM inhat[MIO_BN_VEC_SIZE];
     FLOAT value[MIO_BN_VEC_SIZE];
 
-    // loop over the batches
-    // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So the
-    // idea here is to use the blocks in z-dimension to cover the batch dimension first, and then
-    // each block will loop over the remaining batches with stride of gridDim.z if necessary.
-    for(unsigned int n = blockIdx.z; n < batchSize; n += gridDim.z)
+    // With MIO_BN_Y_STRIDE the host caps the number of workgroups in Y (the Y and Z workgroup IDs
+    // are only 16 bits wide on gfx12), so each thread strides over the remaining positions.
+    for(; tidy * vecSizeY < hw; tidy += gridDim.y * MIO_BN_GRP1)
     {
-        // load input value
-        const unsigned int batchIndex = (n * batchStride) + adjIndex;
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
-            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
+        // parameters are indexed per activation, so they are reloaded for every position
+        const unsigned int adjIndex = (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
 
-        // perform batchnorm operation
-#pragma unroll
-        for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(mean)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(invVariance)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedVarOrInv + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + adjIndex));
+        *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
+            *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + adjIndex));
+        if constexpr(!UseInvVariance)
         {
-            inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
-            inhat[i] = scale[i] * inhat[i] + bias[i];
-            value[i] = CVT_ACCUM2FLOAT(inhat[i]);
+#pragma unroll
+            for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+            {
+                invVariance[i] = rsqrt(fabs(invVariance[i] + static_cast<FLOAT_ACCUM>(epsilon)));
+            }
         }
 
-        // write output value
-        *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
-            *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
+        // loop over the batches
+        // NOTE: We use zlocalsize = 1 and zgridsize = min(batchSize, maxGridSizeToFillTheGPU). So
+        // the idea here is to use the blocks in z-dimension to cover the batch dimension first,
+        // and then each block will loop over the remaining batches with stride of gridDim.z if
+        // necessary.
+        for(unsigned int n = blockIdx.z; n < batchSize; n += gridDim.z)
+        {
+            // load input value
+            const unsigned int batchIndex = (n * batchStride) + adjIndex;
+            *(reinterpret_cast<FLOAT_VEC_TYPE*>(value)) =
+                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(in + batchIndex));
+
+            // perform batchnorm operation
+#pragma unroll
+            for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
+            {
+                inhat[i] = (CVT_FLOAT2ACCUM(value[i]) - mean[i]) * invVariance[i];
+                inhat[i] = pscale[i] * inhat[i] + pbias[i];
+                value[i] = CVT_ACCUM2FLOAT(inhat[i]);
+            }
+
+            // write output value
+            *(reinterpret_cast<FLOAT_VEC_TYPE*>(out + batchIndex)) =
+                *(reinterpret_cast<const FLOAT_VEC_TYPE*>(value));
+        }
+
+        if constexpr(!MIO_BN_Y_STRIDE)
+        {
+            break;
+        }
     }
 }
 
@@ -96,40 +147,26 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
     unsigned int tidz = blockIdx.z;
 
-    // decide vector sizes based on problem layout
-    constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
-    constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
-
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || (!MIO_BN_Y_STRIDE && tidy * vecSizeY >= hw) || tidz >= batchSize)
     {
         return;
     }
 
-    // indices for current thread
-    unsigned int adjIndex = (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
-
-    // batch parameters and values for current thread
-    FLOAT_ACCUM mean[MIO_BN_VEC_SIZE];
-    FLOAT_ACCUM variance[MIO_BN_VEC_SIZE];
-    FLOAT_ACCUM pscale[MIO_BN_VEC_SIZE];
-    FLOAT_ACCUM pbias[MIO_BN_VEC_SIZE];
-    FLOAT_ACCUM invVariance[MIO_BN_VEC_SIZE];
-    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(mean)) =
-        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + adjIndex));
-    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(variance)) =
-        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedVariance + adjIndex));
-    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale)) =
-        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + adjIndex));
-    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
-        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + adjIndex));
-#pragma unroll
-    for(unsigned int i = 0; i < MIO_BN_VEC_SIZE; ++i)
-    {
-        invVariance[i] = rsqrt(fabs(variance[i] + static_cast<FLOAT_ACCUM>(epsilon)));
-    }
-    BNFwdInferPerActivationImpl(
-        adjIndex, in, out, mean, invVariance, pscale, pbias, batchSize, batchStride);
+    BNFwdInferPerActivationImpl<false>(tidx,
+                                       tidy,
+                                       in,
+                                       out,
+                                       estimatedMean,
+                                       estimatedVariance,
+                                       scale,
+                                       bias,
+                                       epsilon,
+                                       hw,
+                                       batchSize,
+                                       cStride,
+                                       hwStride,
+                                       batchStride);
 }
 
 // Uses estimated inverse variance rather than inverse variance, which avoids need for an
@@ -153,33 +190,24 @@ extern "C" __global__ void __launch_bounds__(blockSize)
     unsigned int tidy = blockIdx.y * MIO_BN_GRP1 + threadIdx.y;
     unsigned int tidz = blockIdx.z;
 
-    // decide vector sizes based on problem layout
-    constexpr unsigned int vecSizeX = MIO_LAYOUT_NHWC ? MIO_BN_VEC_SIZE : 1;
-    constexpr unsigned int vecSizeY = MIO_LAYOUT_NHWC ? 1 : MIO_BN_VEC_SIZE;
-
     // skip execution for out-of-bound threads
-    if(tidx * vecSizeX >= c || tidy * vecSizeY >= hw || tidz >= batchSize)
+    if(tidx * vecSizeX >= c || (!MIO_BN_Y_STRIDE && tidy * vecSizeY >= hw) || tidz >= batchSize)
     {
         return;
     }
 
-    // indices for current thread
-    unsigned int adjIndex = (tidx * cStride * vecSizeX) + (tidy * hwStride * vecSizeY);
-
-    // batch parameters and values for current thread
-    FLOAT_ACCUM mean[MIO_BN_VEC_SIZE];
-    FLOAT_ACCUM pscale[MIO_BN_VEC_SIZE];
-    FLOAT_ACCUM pbias[MIO_BN_VEC_SIZE];
-    FLOAT_ACCUM invVariance[MIO_BN_VEC_SIZE];
-    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(mean)) =
-        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedMean + adjIndex));
-    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(invVariance)) =
-        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(estimatedInvVariance + adjIndex));
-    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pscale)) =
-        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(scale + adjIndex));
-    *(reinterpret_cast<FLOAT_ACCUM_VEC_TYPE*>(pbias)) =
-        *(reinterpret_cast<const FLOAT_ACCUM_VEC_TYPE*>(bias + adjIndex));
-
-    BNFwdInferPerActivationImpl(
-        adjIndex, in, out, mean, invVariance, pscale, pbias, batchSize, batchStride);
+    BNFwdInferPerActivationImpl<true>(tidx,
+                                      tidy,
+                                      in,
+                                      out,
+                                      estimatedMean,
+                                      estimatedInvVariance,
+                                      scale,
+                                      bias,
+                                      0.0,
+                                      hw,
+                                      batchSize,
+                                      cStride,
+                                      hwStride,
+                                      batchStride);
 }
