@@ -238,8 +238,9 @@ DW_WIN_PAIR_WAVES = (2,)
 DW_WIN_UNROLL_BUDGET = 1 << 14
 # Toeplitz MFMA form: "same"-padded filters, images folded 1/2/4 per tile,
 # 4- and 8-wave blocks, and row tiles that keep up to 16-row maps whole or
-# chunk taller ones.
-DW_WIN_MFMA_FILTERS = (5, 7, 9)
+# chunk taller ones. 3x3 serves the narrow (16-channel) and 30x30 depthwise
+# dgrad layers where the scalar windowed form loses to the WMMA one.
+DW_WIN_MFMA_FILTERS = (3, 5, 7, 9)
 DW_WIN_MFMA_FOLDS = (1, 2, 4)
 DW_WIN_MFMA_WAVES = (4, 8)
 DW_WIN_MFMA_BLOCK_H = (4, 7, 8, 12, 14, 16)
@@ -2753,7 +2754,7 @@ def _dw_win_policy_reason(caps: DirectCaps, knobs: dict, arch: str) -> Optional[
 
     if knobs.get("mfma"):
         if caps.KH not in DW_WIN_MFMA_FILTERS or caps.PAD != _same_pad(caps.KH):
-            return "the MFMA form is cached for 'same'-padded 5x5..9x9 only"
+            return "the MFMA form is cached for 'same'-padded 3x3..9x9 only"
         return None
     want_dot2 = caps.KW >= 5 and arch in DW_DGRAD_WIN_DOT2_ARCHES
     if knobs["dot2"] != want_dot2:
