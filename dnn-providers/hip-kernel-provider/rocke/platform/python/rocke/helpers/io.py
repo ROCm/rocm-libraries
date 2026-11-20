@@ -20,6 +20,7 @@ the most common dtype-promote-on-read pattern.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Literal
 
 from ..core.ir import BF16, F16, IRBuilder, TemporalHint, Type, Value
@@ -27,6 +28,7 @@ from ..core.ir import BF16, F16, IRBuilder, TemporalHint, Type, Value
 
 __all__ = [
     "DType",
+    "concat_tree",
     "io_ir_type",
     "load_lane_slice_f32",
     "load_scalar",
@@ -35,6 +37,7 @@ __all__ = [
     "load_vec_as_f32",
     "pack_f32_to",
     "pack_quant_chunk_f32",
+    "smem_load_fragment",
     "store_packed_chunk",
     "store_scalar",
     "store_scalar_from_f32",
@@ -335,3 +338,63 @@ def store_packed_chunk(
     transaction when alignments line up.
     """
     b.global_store_vN(dst, dst_base, packed_vec, 4, align=4)
+
+
+def concat_tree(b: IRBuilder, parts: Sequence[Value]) -> Value:
+    """Join vector ``parts`` in order by pairwise ``vec_concat``.
+
+    Each round concatenates neighbours ``(0, 1), (2, 3), ...`` until one value
+    remains, so four parts become ``(p0 ++ p1) ++ (p2 ++ p3)``. The part count
+    must be a power of two.
+    """
+    parts = list(parts)
+    if not parts or len(parts) & (len(parts) - 1):
+        raise ValueError(
+            f"concat_tree needs a power-of-two part count, got {len(parts)}"
+        )
+    while len(parts) > 1:
+        parts = [b.vec_concat(parts[i], parts[i + 1]) for i in range(0, len(parts), 2)]
+    return parts[0]
+
+
+def smem_load_fragment(
+    b: IRBuilder,
+    smem: Value,
+    row: Value,
+    idx: Value,
+    *,
+    dtype: Type,
+    n: int,
+    max_elems: int = 4,
+    stride: int | None = None,
+) -> Value:
+    """LDS read of an ``n``-element ``dtype`` fragment at ``[row, idx]``.
+
+    A fragment of at most ``max_elems`` elements is one ``smem_load_vN``.
+    A wider one is read as ``n // max_elems`` loads of ``max_elems`` elements,
+    piece ``h`` at ``idx + h * stride`` (``stride`` defaults to ``max_elems``:
+    contiguous pieces), joined in K order by :func:`concat_tree`. With fp32
+    and the default ``max_elems=4`` each piece is one 16-byte
+    ``ds_read_b128``, so no access claims more than 16-byte alignment.
+    """
+    if n <= max_elems:
+        return b.smem_load_vN(smem, row, idx, dtype=dtype, n=n)
+    if n % max_elems:
+        raise ValueError(
+            f"LDS fragment of {n} elements is not a multiple of the "
+            f"{max_elems}-element load"
+        )
+    if stride is not None and stride <= 0:
+        raise ValueError(f"smem_load_fragment stride must be positive, got {stride}")
+    step = max_elems if stride is None else stride
+    parts = [
+        b.smem_load_vN(
+            smem,
+            row,
+            idx if h == 0 else b.add(idx, b.const_i32(h * step)),
+            dtype=dtype,
+            n=max_elems,
+        )
+        for h in range(n // max_elems)
+    ]
+    return concat_tree(b, parts)
