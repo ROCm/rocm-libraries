@@ -1323,6 +1323,12 @@ std::optional<WrwLaunch> wrwLaunchFor(const WrwProblem& problem,
     {
         return std::nullopt;
     }
+    // Small-C rows take filter rows of the (depth, height) rows flattened: a block of more rows
+    // than the filter height serves only filters with at least that many rows.
+    if(smallc && config.fr > a.filter[1] && config.fr > a.filter[0] * a.filter[1])
+    {
+        return std::nullopt;
+    }
     // (The generic loop's channel vectors are the problem's vectorChannels, gated above.)
     if(!generic && !runtime && cf)
     {
