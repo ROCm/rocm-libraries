@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -94,12 +94,91 @@ namespace rocsparse
                 if(j > 0)
                 {
                     const I prev_col = ell_col_ind[index - m] - idx_base;
-                    if(prev_col >= col)
+                    if(prev_col == col)
+                    {
+                        record_data_status(data_status, rocsparse_data_status_duplicate_entry);
+                        return;
+                    }
+
+                    if(prev_col > col)
                     {
                         record_data_status(data_status, rocsparse_data_status_invalid_sorting);
                         return;
                     }
                 }
+            }
+        }
+    }
+
+    // Copies each row into a contiguous segment of zero-based column indices. Every slot
+    // from the first -1 of a row onward is padding, stored as n so that it sorts last.
+    template <uint32_t BLOCKSIZE, typename I>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void check_matrix_ell_gather_device(I m,
+                                        I n,
+                                        I ell_width,
+                                        const I* __restrict__ in,
+                                        rocsparse_index_base idx_base,
+                                        I* __restrict__ out)
+    {
+        const int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+
+        if(row >= m)
+        {
+            return;
+        }
+
+        bool padding = false;
+        for(I j = 0; j < ell_width; ++j)
+        {
+            const I col = in[static_cast<int64_t>(m) * j + row];
+            padding     = padding || (col == static_cast<I>(-1));
+
+            out[row * ell_width + j] = padding ? n : static_cast<I>(col - idx_base);
+        }
+    }
+
+    template <uint32_t BLOCKSIZE>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void check_matrix_ell_offsets_device(int64_t m, int64_t ell_width, int64_t* offsets)
+    {
+        const int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+
+        if(row > m)
+        {
+            return;
+        }
+
+        offsets[row] = row * ell_width;
+    }
+
+    // Each row is a sorted segment of zero-based column indices followed by padding
+    // stored as n.
+    template <uint32_t BLOCKSIZE, typename I>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void check_matrix_ell_duplicate_device(
+        I m, I n, I ell_width, const I* __restrict__ cols, rocsparse_data_status* data_status)
+    {
+        const int64_t row = static_cast<int64_t>(hipBlockIdx_x) * BLOCKSIZE + hipThreadIdx_x;
+
+        if(row >= m)
+        {
+            return;
+        }
+
+        const int64_t begin = row * ell_width;
+        for(I j = 0; j + 1 < ell_width; ++j)
+        {
+            const I col = cols[begin + j];
+            if(col == n)
+            {
+                return;
+            }
+
+            if(col == cols[begin + j + 1])
+            {
+                record_data_status(data_status, rocsparse_data_status_duplicate_entry);
+                return;
             }
         }
     }

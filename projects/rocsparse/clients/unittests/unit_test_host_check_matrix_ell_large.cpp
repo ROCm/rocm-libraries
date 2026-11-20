@@ -38,6 +38,21 @@
 
 using namespace rocsparse_ut;
 
+// Slot j of every row stores column j, which is unique and inside [0, n).
+__global__ void check_matrix_ell_large_fill_columns(rocsparse_int* col, int64_t m, int64_t width)
+{
+    const int64_t row = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    if(row >= m)
+    {
+        return;
+    }
+
+    for(int64_t j = 0; j < width; ++j)
+    {
+        col[m * j + row] = static_cast<rocsparse_int>(j);
+    }
+}
+
 class CheckMatrixEllLarge : public HandleTest
 {
 };
@@ -122,8 +137,10 @@ TEST_F(CheckMatrixEllLarge, kernel_indexes_beyond_int32_max)
     device_vector<float>         val(static_cast<size_t>(total));
     ASSERT_NE(col.ptr, nullptr);
     ASSERT_NE(val.ptr, nullptr);
-    // Every column index 0 and every value 0 is valid.
-    UT_CHECK_HIP(hipMemset(col.ptr, 0, static_cast<size_t>(total) * sizeof(rocsparse_int)));
+    // Sorted storage rejects repeated columns, so every row holds 0, 1, ..., w - 1.
+    check_matrix_ell_large_fill_columns<<<(m + 255) / 256, 256>>>(col.ptr, m, w);
+    UT_CHECK_HIP(hipGetLastError());
+    UT_CHECK_HIP(hipDeviceSynchronize());
     UT_CHECK_HIP(hipMemset(val.ptr, 0, static_cast<size_t>(total) * sizeof(float)));
 
     size_t buffer_size = 0;
@@ -136,7 +153,7 @@ TEST_F(CheckMatrixEllLarge, kernel_indexes_beyond_int32_max)
                                                       rocsparse_index_base_zero,
                                                       rocsparse_matrix_type_general,
                                                       rocsparse_fill_mode_lower,
-                                                      rocsparse_storage_mode_unsorted,
+                                                      rocsparse_storage_mode_sorted,
                                                       &buffer_size),
               rocsparse_status_success);
     device_vector<char> buffer(buffer_size > 0 ? buffer_size : size_t{256});
@@ -153,7 +170,7 @@ TEST_F(CheckMatrixEllLarge, kernel_indexes_beyond_int32_max)
                                               rocsparse_index_base_zero,
                                               rocsparse_matrix_type_general,
                                               rocsparse_fill_mode_lower,
-                                              rocsparse_storage_mode_unsorted,
+                                              rocsparse_storage_mode_sorted,
                                               &data_status,
                                               buffer.ptr),
                   rocsparse_status_success);

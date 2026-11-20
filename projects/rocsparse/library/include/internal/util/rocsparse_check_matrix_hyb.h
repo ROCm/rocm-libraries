@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -54,10 +54,11 @@ extern "C" {
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
-*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_sorted.
+*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_unsorted.
 *  @param[out]
 *  buffer_size number of bytes of the temporary storage buffer required by
 *              rocsparse_check_matrix_hyb().
+*              The size can be larger for \ref rocsparse_storage_mode_unsorted.
 *
 *  \retval rocsparse_status_success the operation completed successfully.
 *  \retval rocsparse_status_invalid_handle the library context was not initialized.
@@ -87,6 +88,10 @@ rocsparse_status rocsparse_check_matrix_hyb_buffer_size(rocsparse_handle        
 *  to determine the required buffer size. Then allocate this buffer and pass it to \p rocsparse_Xcheck_matrix_hyb.
 *  Any issues detected will be written to the \p data_status parameter, which is always a host variable regardless of the pointer mode.
 *
+*  The ELL and COO parts are checked separately. A coordinate that is stored once in the ELL part and once in the COO
+*  part is not reported as a duplicate entry. The COO part is checked only when the ELL part has no issue, so an issue
+*  in the ELL part is reported even if the COO part also has one.
+*
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
@@ -102,7 +107,7 @@ rocsparse_status rocsparse_check_matrix_hyb_buffer_size(rocsparse_handle        
 *  @param[in]
 *  uplo        \ref rocsparse_fill_mode_lower or \ref rocsparse_fill_mode_upper.
 *  @param[in]
-*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_sorted.
+*  storage     \ref rocsparse_storage_mode_sorted or \ref rocsparse_storage_mode_unsorted.
 *  @param[out]
 *  data_status modified to indicate the status of the data.
 *  @param[in]
