@@ -31,6 +31,8 @@
 //   library/src/level3/rocsparse_csrmm_template_row_split.cpp
 //                                                  (row-split kernels for every
 //                                                   dense column count)
+//   library/src/level3/rocsparse_coomm_*.cpp       (COO atomic / segmented)
+//   library/src/level3/rocsparse_bsrmm_*.cpp       (BSR small / large blocks)
 //
 // All tests go through the public API (rocsparse_spmm, rocsparse_?csrmm). The
 // complete C matrix is compared with a host reference computed in double
@@ -725,4 +727,37 @@ TEST_F(ExtraSpmm, csr_index_base_one)
                     if(HasFatalFailure())
                         return;
                 }
+}
+
+// ---------------------------------------------------------------------------
+// One-based COO: atomic (the 64- and 128-column main kernels, which exist for
+// 64, 128, 192 and 256 columns at a time, plus the remainder kernel for n % 64
+// columns), segmented and segmented-atomic. B stays column major, so
+// transpose selects the TRANSB kernels (row-major B with a transpose would be
+// the same bytes and the same kernels as column-major B without).
+// ---------------------------------------------------------------------------
+TEST_F(ExtraSpmm, coo_index_base_one)
+{
+    const std::vector<rocsparse_spmm_alg> algs = {rocsparse_spmm_alg_coo_atomic,
+                                                  rocsparse_spmm_alg_coo_segmented,
+                                                  rocsparse_spmm_alg_coo_segmented_atomic};
+    for(rocsparse_spmm_alg alg : algs)
+        for(int64_t n : {1, 5, 64, 65, 72, 128, 130})
+            for(rocsparse_operation opB : op_nt)
+            {
+                SpmmCase c;
+                c.fmt       = SFmt::coo;
+                c.alg       = alg;
+                c.n         = n;
+                c.m         = 11;
+                c.k         = 9;
+                c.max_nnz   = 5;
+                c.long_rows = true;
+                c.opB       = opB;
+                c.order_B   = rocsparse_order_column; // none -> NN, transpose -> NT kernels
+                c.base      = rocsparse_index_base_one;
+                run_spmm<float, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+            }
 }
