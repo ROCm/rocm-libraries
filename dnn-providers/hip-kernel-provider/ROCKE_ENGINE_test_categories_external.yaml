@@ -70,6 +70,7 @@ test_categories:
     test_patterns:
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
+      - "rocke_barrier_fence"
       - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
@@ -166,6 +167,7 @@ test_categories:
     test_patterns:
       - "rocke_f64_mma"
       - "rocke_optimization_barrier"
+      - "rocke_barrier_fence"
       - "rocke_optimization_barrier_hip_pair"
       - "rocke_arch_target_identity"
       - "rocke_ir_serialize_roundtrip"
