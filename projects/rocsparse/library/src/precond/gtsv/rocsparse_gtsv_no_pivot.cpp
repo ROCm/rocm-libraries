@@ -27,9 +27,12 @@
 #include "rocsparse_grid.hpp"
 
 #include "gtsv_nopivot_device.h"
+#include "gtsv_nopivot_index.hpp"
 #include "gtsv_nopivot_medium_device.h"
 #include "gtsv_nopivot_thomas_device.h"
 
+#include <algorithm>
+#include <cstdint>
 #include <map>
 
 namespace rocsparse
@@ -529,28 +532,29 @@ namespace rocsparse
                                                          const T*         B_spike,
                                                          T*               B)
     {
-        const int64_t nblocks_rhs = (static_cast<int64_t>(n) - 1) / NUM_RHS + 1;
-        for(int64_t bidy_offset = 0; bidy_offset < nblocks_rhs;)
+        const int64_t chunk = rocsparse::gtsv_no_pivot_medium_chunk<rocsparse_int>(
+            m, NUM_RHS, num_spikes, handle->properties.maxGridSize[1]);
+        rocsparse_host_assert(chunk > 0, "The chunk must hold at least one right-hand side.");
+
+        for(int64_t first = 0; first < n; first += chunk)
         {
-            const uint32_t grid_y = rocsparse::get_grid_size_y(handle, nblocks_rhs - bidy_offset);
+            const rocsparse_int columns = static_cast<rocsparse_int>(std::min(chunk, n - first));
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_no_pivot_pcr_tiled_backward_kernel<BLOCKSIZE, NUM_RHS>),
-                dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
+                dim3((m - 1) / BLOCKSIZE + 1, rocsparse::ceil_div(columns, NUM_RHS), 1),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
                 m,
-                n,
-                bidy_offset,
+                columns,
                 ldb,
                 num_spikes,
                 dl_modified,
                 d_modified,
                 du_modified,
-                B_modified,
-                B_spike,
-                B);
-            bidy_offset += grid_y;
+                B_modified + static_cast<int64_t>(m) * first,
+                B_spike + static_cast<int64_t>(num_spikes) * first,
+                B + ldb * first);
         }
         return rocsparse_status_success;
     }
@@ -574,34 +578,38 @@ namespace rocsparse
                                                        T*               du_spike,
                                                        T*               B_spike)
     {
-        const int64_t nblocks_rhs = (static_cast<int64_t>(n) - 1) / NUM_RHS + 1;
-        for(int64_t bidy_offset = 0; bidy_offset < nblocks_rhs;)
+        // The forward and backward kernels handle each right-hand side column on its
+        // own, so they run over chunks of columns that fit in grid.y and keep their
+        // indices in range. The spike solve in between covers all n columns at once.
+        const int64_t chunk = rocsparse::gtsv_no_pivot_medium_chunk<rocsparse_int>(
+            m, NUM_RHS, num_spikes, handle->properties.maxGridSize[1]);
+        rocsparse_host_assert(chunk > 0, "The chunk must hold at least one right-hand side.");
+
+        for(int64_t first = 0; first < n; first += chunk)
         {
-            const uint32_t grid_y = rocsparse::get_grid_size_y(handle, nblocks_rhs - bidy_offset);
+            const rocsparse_int columns = static_cast<rocsparse_int>(std::min(chunk, n - first));
             RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
                 (rocsparse::gtsv_no_pivot_pcr_tiled_forward_kernel<BLOCKSIZE, NUM_RHS>),
-                dim3((m - 1) / BLOCKSIZE + 1, grid_y, 1),
+                dim3((m - 1) / BLOCKSIZE + 1, rocsparse::ceil_div(columns, NUM_RHS), 1),
                 dim3(BLOCKSIZE),
                 0,
                 handle->stream,
                 m,
-                n,
-                bidy_offset,
+                columns,
                 ldb,
                 num_spikes,
                 dl,
                 d,
                 du,
-                B,
+                B + ldb * first,
                 dl_modified,
                 d_modified,
                 du_modified,
-                B_modified,
+                B_modified + static_cast<int64_t>(m) * first,
                 dl_spike,
                 d_spike,
                 du_spike,
-                B_spike);
-            bidy_offset += grid_y;
+                B_spike + static_cast<int64_t>(num_spikes) * first);
         }
         return rocsparse_status_success;
     }

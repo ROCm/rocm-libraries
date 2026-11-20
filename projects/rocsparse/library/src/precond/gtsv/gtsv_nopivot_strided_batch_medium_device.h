@@ -190,13 +190,13 @@ namespace rocsparse
         }
     }
 
-    // n is the batch count and bidy_offset the first system in this launch. The host
-    // splits the batch over launches that fit in grid.y.
+    // The host launches over chunks of the batch that fit in grid.y, with the pointers
+    // already offset to the first system of the chunk and n the system count of the
+    // chunk, so the workspace offsets below stay in rocsparse_int.
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_strided_batch_pcr_tiled_forward_kernel(rocsparse_int m,
                                                              rocsparse_int n,
-                                                             int64_t       bidy_offset,
                                                              int64_t       stride,
                                                              int64_t       ldb,
                                                              rocsparse_int num_spikes,
@@ -213,7 +213,7 @@ namespace rocsparse
                                                              T* __restrict__ du_spike,
                                                              T* __restrict__ B_spike)
     {
-        const int64_t bidy = bidy_offset + hipBlockIdx_y;
+        const rocsparse_int bidy = hipBlockIdx_y;
 
         rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_forward_device<BLOCKSIZE>(
             m,
@@ -357,13 +357,11 @@ namespace rocsparse
         B[gidx] = x_final;
     }
 
-    // n is the batch count and bidy_offset the first system in this launch. The host
-    // splits the batch over launches that fit in grid.y.
+    // Launched over the same chunks as the forward kernel.
     template <uint32_t BLOCKSIZE, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_nopivot_strided_batch_pcr_tiled_backward_kernel(rocsparse_int m,
                                                               rocsparse_int n,
-                                                              int64_t       bidy_offset,
                                                               int64_t       ldb,
                                                               int           num_spikes,
                                                               const T* __restrict__ dl_modified,
@@ -373,7 +371,7 @@ namespace rocsparse
                                                               const T* __restrict__ B_spike,
                                                               T* __restrict__ B)
     {
-        const int64_t bidy = bidy_offset + hipBlockIdx_y;
+        const rocsparse_int bidy = hipBlockIdx_y;
 
         rocsparse::gtsv_nopivot_strided_batch_pcr_tiled_backward_device<BLOCKSIZE>(
             m,

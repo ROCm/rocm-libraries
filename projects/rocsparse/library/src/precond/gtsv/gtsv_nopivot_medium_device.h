@@ -31,9 +31,15 @@ namespace rocsparse
     // n_remaining is the number of right-hand sides left from the base of the block
     // of NUM_RHS handled by this call, so the tail block is bounded by rhs <
     // n_remaining.
+    //
+    // col is the first right-hand side of the block, and B is not offset to it. B is
+    // read at ldb * (col + rhs) so that the column offsets stay scalar multiplies; with
+    // the offset folded into the pointer the compiler forms them with vector
+    // multiply-adds, which on gfx942 serializes the loads of B in single precision.
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
     ROCSPARSE_DEVICE_ILF void gtsv_no_pivot_pcr_tiled_forward_device(rocsparse_int m,
                                                                      rocsparse_int n_remaining,
+                                                                     uint32_t      col,
                                                                      int64_t       ldb,
                                                                      rocsparse_int num_spikes,
                                                                      const T* __restrict__ dl,
@@ -60,7 +66,8 @@ namespace rocsparse
         T x[NUM_RHS];
         for(int rhs = 0; rhs < NUM_RHS; ++rhs)
         {
-            x[rhs] = (gid < m && rhs < n_remaining) ? B[ldb * rhs + gid] : static_cast<T>(0);
+            x[rhs]
+                = (gid < m && rhs < n_remaining) ? B[ldb * (col + rhs) + gid] : static_cast<T>(0);
         }
 
         __shared__ T a_shared[BLOCKSIZE];
@@ -223,13 +230,13 @@ namespace rocsparse
         }
     }
 
-    // bidy_offset is the first block of NUM_RHS right-hand sides in this launch. The
-    // host splits the blocks over launches that fit in grid.y.
+    // The host launches over chunks of right-hand sides that fit in grid.y, with the
+    // pointers already offset to the first column of the chunk and n the column count
+    // of the chunk, so the per-block offsets below stay in 32 bits.
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_no_pivot_pcr_tiled_forward_kernel(rocsparse_int m,
                                                 rocsparse_int n,
-                                                int64_t       bidy_offset,
                                                 int64_t       ldb,
                                                 rocsparse_int num_spikes,
                                                 const T* __restrict__ dl,
@@ -245,27 +252,27 @@ namespace rocsparse
                                                 T* __restrict__ du_spike,
                                                 T* __restrict__ B_spike)
     {
-        const int64_t       bidy = bidy_offset + hipBlockIdx_y;
-        const rocsparse_int n_remaining
-            = static_cast<rocsparse_int>(static_cast<int64_t>(n) - NUM_RHS * bidy);
+        const uint32_t bidy = hipBlockIdx_y;
+        const uint32_t col  = NUM_RHS * bidy;
 
         rocsparse::gtsv_no_pivot_pcr_tiled_forward_device<BLOCKSIZE, NUM_RHS>(
             m,
-            n_remaining,
+            n - col,
+            col,
             ldb,
             num_spikes,
             dl,
             d,
             du,
-            load_pointer(B, bidy, ldb * NUM_RHS),
+            B,
             dl_modified,
             d_modified,
             du_modified,
-            load_pointer(B_modified, bidy, static_cast<int64_t>(m) * NUM_RHS),
+            load_pointer(B_modified, bidy, m * NUM_RHS),
             dl_spike,
             d_spike,
             du_spike,
-            load_pointer(B_spike, bidy, static_cast<int64_t>(num_spikes) * NUM_RHS));
+            load_pointer(B_spike, bidy, num_spikes * NUM_RHS));
     }
 
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
@@ -430,13 +437,11 @@ namespace rocsparse
         }
     }
 
-    // bidy_offset is the first block of NUM_RHS right-hand sides in this launch. The
-    // host splits the blocks over launches that fit in grid.y.
+    // Launched over the same chunks as the forward kernel.
     template <uint32_t BLOCKSIZE, uint32_t NUM_RHS, typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void gtsv_no_pivot_pcr_tiled_backward_kernel(rocsparse_int m,
                                                  rocsparse_int n,
-                                                 int64_t       bidy_offset,
                                                  int64_t       ldb,
                                                  int           num_spikes,
                                                  const T* __restrict__ dl_modified,
@@ -446,20 +451,18 @@ namespace rocsparse
                                                  const T* __restrict__ B_spike,
                                                  T* __restrict__ B)
     {
-        const int64_t       bidy = bidy_offset + hipBlockIdx_y;
-        const rocsparse_int n_remaining
-            = static_cast<rocsparse_int>(static_cast<int64_t>(n) - NUM_RHS * bidy);
+        const uint32_t bidy = hipBlockIdx_y;
 
         rocsparse::gtsv_no_pivot_pcr_tiled_backward_device<BLOCKSIZE, NUM_RHS>(
             m,
-            n_remaining,
+            n - NUM_RHS * bidy,
             ldb,
             num_spikes,
             dl_modified,
             d_modified,
             du_modified,
-            load_pointer(B_modified, bidy, static_cast<int64_t>(m) * NUM_RHS),
-            load_pointer(B_spike, bidy, static_cast<int64_t>(num_spikes) * NUM_RHS),
+            load_pointer(B_modified, bidy, m * NUM_RHS),
+            load_pointer(B_spike, bidy, num_spikes * NUM_RHS),
             load_pointer(B, bidy, ldb * NUM_RHS));
     }
 }
