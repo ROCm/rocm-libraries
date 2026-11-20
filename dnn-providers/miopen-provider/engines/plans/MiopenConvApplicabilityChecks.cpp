@@ -576,6 +576,161 @@ void checkBwdDataElementCount(const char* name, const TensorAttributes& attr)
     }
 }
 
+// MIOpen's TensorDescriptor::IsPossibleLayout in StrictDecreasingStrides mode
+// (projects/miopen/src/tensor.cpp) on the descriptor the plugin hands MIOpen: the strides, read in
+// the order of the layout (N, C, spatial.. or N, spatial.., C), never increase, extent-1
+// dimensions included. A rank-3 tensor is first padded to rank 4 as createPaddedTensor does
+// (MiopenUtils.cpp): a trailing extent-1 dimension of stride C when the channel stride is below
+// the length stride, else of stride 1.
+bool isStrictlyInLayout(const TensorInfo& tensor, bool channelsLast)
+{
+    auto dims = tensor.dims;
+    auto strides = tensor.strides;
+    if(dims.size() == MIN_RANK)
+    {
+        const bool lengthOutside = strides[1] < strides[2];
+        dims.push_back(1);
+        strides.push_back(lengthOutside ? dims[1] : 1);
+    }
+
+    std::vector<size_t> order;
+    order.reserve(dims.size());
+    order.push_back(0);
+    if(!channelsLast)
+    {
+        order.push_back(1);
+    }
+    for(size_t i = 2; i < dims.size(); ++i)
+    {
+        order.push_back(i);
+    }
+    if(channelsLast)
+    {
+        order.push_back(1);
+    }
+
+    for(size_t k = 1; k < order.size(); ++k)
+    {
+        if(strides[order[k - 1]] < strides[order[k]])
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Layout, forward. The layout classes judge the strides of extent-1 dimensions (classifyLayout),
+// so a graph whose tensors differ only there is mixed for checkLayout. MIOpen labels a problem
+// in ProblemDescription::HeuristicUpdateLayouts (projects/miopen/src/conv/problem_description.cpp)
+// and tries the strict mode first: when the three packed tensors are all strictly in one layout,
+// MIOpen labels them with that layout without ignoring any stride, and it computed every such
+// graph tested correctly. Graphs that reach a label only by ignoring extent-1 strides stay
+// declined, which keeps the failing degenerate shapes of ALMIOPEN-3017 declined. Common shapes
+// this accepts: a 1x1 convolution on a [N, C, 1, 1] input whose output is channels-last (what
+// PyTorch allocates for such an input), and a batch-1 channel slice whose batch stride is that of
+// its parent. Only packed graphs are accepted this way; no non-packed one was tested.
+void checkForwardLayout(const TensorInfo& x, const TensorInfo& w, const TensorInfo& y)
+{
+    if(x.packed && w.packed && y.packed)
+    {
+        for(const bool channelsLast : {false, true})
+        {
+            if(isStrictlyInLayout(x, channelsLast) && isStrictlyInLayout(w, channelsLast)
+               && isStrictlyInLayout(y, channelsLast))
+            {
+                return;
+            }
+        }
+    }
+    checkLayout(FWD_OPERATION, x, w, y);
+}
+
+// True when no two elements of the tensor share an address: the dimensions of extent above 1,
+// taken by increasing stride, each start at or beyond the span of the ones inside them, starting
+// from stride 1. A broadcast axis (stride 0), a negative stride and strides that interleave two
+// dimensions fail it. A tensor with a zero extent has no elements and passes. The strides passed
+// packingArithmeticFits, so only the span of the last dimension can overflow, and it needs no
+// room for another dimension.
+bool hasDisjointElements(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+{
+    std::vector<size_t> axes;
+    for(size_t i = 0; i < dims.size(); ++i)
+    {
+        if(dims[i] == 0)
+        {
+            return true;
+        }
+        if(dims[i] > 1)
+        {
+            axes.push_back(i);
+        }
+    }
+    std::sort(axes.begin(), axes.end(), [&strides](size_t a, size_t b) {
+        return strides[a] < strides[b];
+    });
+
+    int64_t span = 1;
+    for(size_t k = 0; k < axes.size(); ++k)
+    {
+        const size_t axis = axes[k];
+        if(strides[axis] < span)
+        {
+            return false;
+        }
+        if(!productFits(strides[axis], dims[axis]))
+        {
+            return k + 1 == axes.size();
+        }
+        span = strides[axis] * dims[axis];
+    }
+    return true;
+}
+
+// Packing, forward. A non-packed tensor is accepted when the convolution is ungrouped, not 3D
+// channels-last, and the tensor has no two elements at one address: MIOpen computed every such
+// graph tested correctly (padded rows, channel and batch slices, an output written into a wider
+// buffer), also next to a packed problem of the same shape in either order. The declined cases:
+// - grouped: ConvDirectNaiveConvFwd and ConvHipImplicitGemm3DGroupFwdXdlops return wrong output
+//   and write outside the logical output tensor. Workaround tracked by ALMIOPEN-3018; remove it
+//   when the MIOpen defect ALMIOPEN-3013 is fixed.
+// - 3D channels-last: a plane-padded problem is wrong on its own, and any padded problem reuses
+//   the invoker of a same-shape packed problem run before it in the process, and the packed one
+//   reuses its invoker when it runs first: MIOpen's invoker cache key leaves out the strides
+//   (ALMIOPEN-3356). Remove it when that is fixed.
+// - elements that share an address (a broadcast axis, interleaved strides): not tested, and an
+//   output of that kind cannot be written correctly at all.
+void checkForwardPacking(const TensorInfo& x, const TensorInfo& w, const TensorInfo& y)
+{
+    const bool grouped = x.dims[1] != w.dims[1];
+    const bool channelsLast3d
+        = x.dims.size() == 5
+          && (x.layoutMask & w.layoutMask & y.layoutMask & LAYOUT_CHANNELS_LAST) != 0U;
+
+    for(const TensorInfo* tensor : {&x, &w, &y})
+    {
+        if(tensor->packed)
+        {
+            continue;
+        }
+        const std::string prefix = std::string(FWD_OPERATION) + ": tensor " + tensor->name;
+        if(grouped)
+        {
+            decline(prefix + " is not packed; a grouped convolution needs x, w and y packed");
+        }
+        if(channelsLast3d)
+        {
+            decline(prefix
+                    + " is not packed; a 3D channels-last convolution needs x, w and y packed");
+        }
+        if(!hasDisjointElements(tensor->dims, tensor->strides))
+        {
+            decline(prefix
+                    + " is not packed and has elements that share an address (a zero, negative "
+                      "or overlapping stride)");
+        }
+    }
+}
+
 } // namespace
 
 bool hasPassByValueTensor(const TensorMap& tensorMap)
@@ -619,20 +774,8 @@ void validateConvFwdIoTensors(const TensorAttributes& x,
     const TensorInfo yInfo = readTensor(FWD_OPERATION, "y", y);
 
     checkDataType(FWD_OPERATION, xInfo, wInfo, yInfo);
-    checkLayout(FWD_OPERATION, xInfo, wInfo, yInfo);
-
-    // Packing. Padded (non-packed) strides make ConvDirectNaiveConvFwd and
-    // ConvHipImplicitGemm3DGroupFwdXdlops return wrong output and write outside the logical
-    // output tensor. Workaround tracked by ALMIOPEN-3018; remove it when the MIOpen defect
-    // ALMIOPEN-3013 is fixed.
-    for(const TensorInfo* tensor : {&xInfo, &wInfo, &yInfo})
-    {
-        if(!tensor->packed)
-        {
-            decline(std::string(FWD_OPERATION) + ": tensor " + tensor->name
-                    + " is not packed; x, w and y must all be packed");
-        }
-    }
+    checkForwardLayout(xInfo, wInfo, yInfo);
+    checkForwardPacking(xInfo, wInfo, yInfo);
 }
 
 void validateConvBwdDataIoTensors(const TensorAttributes& dy,

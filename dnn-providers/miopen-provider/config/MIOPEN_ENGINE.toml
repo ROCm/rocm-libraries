@@ -66,7 +66,7 @@ rtol = 1e-5
 # run (docs/test-plans/convolution-fwd.md). MIOpen and the GPU reference accumulate in
 # different orders, so the absolute error of a long fp32 reduction grows with the
 # accumulation length A = C/G x filter volume. Observed worst absolute error:
-#   A <= 1,152 (L, M, H shapes)        5.2e-5
+#   A <= 1,152 (L, M, H, E shapes)     5.2e-5
 #   A 3,200 - 4,608 (L10, A1, A2)      1.9e-4
 #   A >= 65,536 (S19, L19, X4)         8.2e-3
 # Each class takes about 2x its observed maximum in atol; rtol stays at the 1e-5
@@ -83,6 +83,7 @@ filters = [
     "*_ConvolutionFwd*.m*_fp32_*",
     "*_ConvolutionFwd*.h*_fp32_*",
     "*_ConvolutionFwd*.x*_fp32_*",
+    "*_ConvolutionFwd*.e*_fp32_*",
     "*_ConvolutionFwd*.s31_*_fp32_*",
     "*_ConvolutionFwd*.s59_*_fp32_*",
     "*_ConvolutionFwd*.r029_*_fp32_*",
@@ -152,12 +153,13 @@ rtol = 0.01
 # First matching entry wins.
 
 # conv-fwd test plan (docs/test-plans/convolution-fwd.md): the cases are probes (a typed
-# rejection or a correct accept is the pass criterion). The plugin declines the graphs
-# MIOpen computes wrongly or faults on (mixed data types, mixed layouts, non-packed
-# tensors, a bias that is not per-channel, a bias data type different from the io type;
-# epic ALMIOPEN-3008), so those cases end as skips with the engine-does-not-support-this-
-# graph reason and need no entry here. The entries below quarantine the cases the
-# applicability check cannot decline.
+# rejection or a correct accept is the pass criterion). The plugin declines graphs of the kinds
+# MIOpen can compute wrongly or fault on (mixed data types, mixed layouts, non-packed tensors of
+# grouped or 3D channels-last convolutions, a bias that is not per-channel, a bias data type
+# different from the io type; epic ALMIOPEN-3008); the rules are conservative and also decline
+# some graphs MIOpen computes correctly. Declined cases end as skips with the
+# engine-does-not-support-this-graph reason and need no entry here. The entries below quarantine
+# the cases the applicability check cannot decline.
 
 # Reference gap, not an MIOpen defect: MIOpen executes these graphs, but no hipDNN
 # reference implements the add with the bias as its first operand and a half bias node.
@@ -173,9 +175,9 @@ reason  = "conv -> bias -> relu with the bias as the add's first operand: MIOpen
 # The order dependence is shown for the three comprehensive cases (fail after the
 # sibling, pass alone; ALMIOPEN-3356) and inferred for the six full cases, whose packed
 # siblings are comprehensive cases that the full suite runs in the same process
-# (ALMIOPEN-3241 reports them failing in full runs). The plugin declines non-packed
-# forward tensors, so these padded-stride cases end as skips on their own; the entry
-# stays until ALMIOPEN-3356 is fixed.
+# (ALMIOPEN-3241 reports them failing in full runs). The plugin declines non-packed 3-D
+# channels-last forward tensors, so these padded-stride cases end as skips on their own; the
+# entry stays until ALMIOPEN-3356 is fixed.
 # Applies on every arch (the cache key is not arch-specific). Temporary: remove when
 # ALMIOPEN-3356 is fixed.
 [[test_skips]]

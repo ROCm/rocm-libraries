@@ -308,6 +308,27 @@ static ConvGraphSpec channelsFirstNonPackedSpec()
     return spec;
 }
 
+// A grouped convolution (2 groups: x has twice the channels of w) with dx padded rows, in
+// channels-first.
+static ConvGraphSpec groupedNonPackedSpec()
+{
+    const std::vector<int64_t> groupedWDims = {CONV_2D_W_DIMS[0], CONV_2D_X_DIMS[1] / 2, 3, 3};
+    ConvGraphSpec spec = uniformPackedSpec(/*channelsLastLayout=*/false);
+    spec.w = {groupedWDims, packedStrides(groupedWDims, /*channelsLastLayout=*/false)};
+    spec.dx.strides = {512, 128, 16, 1};
+    return spec;
+}
+
+// A 1x1 convolution on a [8, 16, 1, 1] channels-first input with a channels-last output, as
+// PyTorch allocates it for such an input: the strides differ from the canonical ones only on the
+// extent-1 dimensions, and all three are strictly in the channels-last order.
+static ConvGraphSpec strictlyChannelsLastSpec()
+{
+    return {{{8, 4, 1, 1}, {4, 1, 4, 4}},
+            {{4, 16, 1, 1}, {16, 1, 1, 1}},
+            {{8, 16, 1, 1}, {16, 1, 1, 1}}};
+}
+
 // A single-channel 46341 x 46341 image as dy and dx (2,147,488,281 elements) with a 1x1 filter.
 static ConvGraphSpec aboveSizeLimitSpec()
 {
@@ -542,14 +563,35 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForMixedLayoutForwa
                        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16));
 }
 
-// ALMIOPEN-3018: x with padded rows (strides keep the channels-first order, so the layout is
-// uniform) next to packed w and y.
-TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedForward)
+// ALMIOPEN-3018: a grouped convolution with x padded rows (strides keep the channels-first order,
+// so the layout is uniform) next to packed w and y.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedGroupedForward)
 {
     expectDeclined(_planBuilder,
                    *_handle,
                    ConvKind::FORWARD,
-                   createGraph(ConvKind::FORWARD, channelsFirstNonPackedSpec()));
+                   createGraph(ConvKind::FORWARD, groupedNonPackedSpec()));
+}
+
+// An ungrouped 2D convolution with x padded rows stays applicable in either layout: MIOpen
+// computes it correctly.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForNonPackedUngroupedForward)
+{
+    for(const auto& spec : {channelsFirstNonPackedSpec(), channelsLastNonPackedSpec()})
+    {
+        expectApplicable(
+            _planBuilder, *_handle, ConvKind::FORWARD, createGraph(ConvKind::FORWARD, spec));
+    }
+}
+
+// Packed tensors strictly in one layout stay applicable for forward even though their extent-1
+// strides are not the canonical ones.
+TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForStrictlyOneLayoutForward)
+{
+    expectApplicable(_planBuilder,
+                     *_handle,
+                     ConvKind::FORWARD,
+                     createGraph(ConvKind::FORWARD, strictlyChannelsLastSpec()));
 }
 
 // ALMIOPEN-3015: x and w HALF with y FLOAT, layouts uniform and packed. MIOpen reports a solution
@@ -591,8 +633,8 @@ TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsFalseForNonPackedChannel
     }
 }
 
-// Unlike forward, channels-first tensors with padded rows stay applicable: MIOpen computes them
-// correctly. Posed as backward data and as backward weights.
+// Channels-first tensors with padded rows stay applicable: MIOpen computes them correctly. Posed
+// as backward data and as backward weights.
 TEST_F(TestGpuMiopenConvPlanBuilder, IsApplicableReturnsTrueForNonPackedChannelsFirstBackwardData)
 {
     for(const auto kind : BACKWARD_KINDS)

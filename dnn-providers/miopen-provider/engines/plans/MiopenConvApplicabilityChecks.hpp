@@ -52,14 +52,17 @@ void checkConvFwdBiasActivLayouts(
 // Forward convolution: x, w and y must
 //   - share one data type, one of FLOAT, HALF, BFLOAT16;
 //   - share one layout class: all channels-first or all channels-last (see the .cpp for how a
-//     tensor is classified, including tensors with extent-1 dimensions);
-//   - all be packed.
+//     tensor is classified, including tensors with extent-1 dimensions). Three packed tensors
+//     whose strides MIOpen's strict layout check places in one layout are accepted as well, even
+//     when the strides of their extent-1 dimensions differ from the canonical ones;
+//   - for a non-packed tensor: belong to an ungrouped convolution that is not 3D channels-last,
+//     and have no two elements at one address.
 //
 // Backward data (dy, w, dx) and backward weights (x, dy, dw): the three tensors must
 //   - share one data type, one of FLOAT, HALF, BFLOAT16;
-//   - share one layout class, classified as for forward;
-//   - none be both channels-last and non-packed. Unlike forward, a channels-first non-packed
-//     tensor is accepted: MIOpen computes it correctly.
+//   - share one layout class, classified as for forward (without the strict-layout acceptance);
+//   - none be both channels-last and non-packed. A channels-first non-packed tensor is accepted:
+//     MIOpen computes it correctly.
 // Backward data additionally has a size limit: dy and dx must each have at most 2^31 - 1 elements.
 //
 // Throws hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM, reason) when the
