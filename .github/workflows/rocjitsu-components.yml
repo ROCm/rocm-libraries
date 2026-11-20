@@ -117,7 +117,11 @@ jobs:
             args+=(--components "$COMPONENTS")
           fi
           matrix="$("${args[@]}")"
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          {
+            echo "matrix<<EOF"
+            printf '%s\n' "$matrix"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "Selected components:"
           echo "$matrix" | python3 -c 'import json,sys; print("\n".join(item["component"] for item in json.load(sys.stdin)["include"]))'
 

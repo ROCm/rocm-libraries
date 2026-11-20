@@ -6,6 +6,8 @@ import sys
 import tempfile
 import textwrap
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1]
@@ -120,6 +122,29 @@ class ParseInstalledCTestTest(unittest.TestCase):
             self.assertEqual(
                 sweep.missing_components(root, "^quick$", ["hipRAND", "missing"]),
                 ["missing"],
+            )
+
+    def test_list_json_stdout_is_only_the_matrix(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_ctest(root / "bin" / "hipsolver", ["quick"], ["api"])
+            captured = StringIO()
+            with redirect_stdout(captured):
+                code = sweep.main(
+                    [
+                        "--rocm-root",
+                        str(root),
+                        "--label",
+                        "quick",
+                        "--components",
+                        "hipsolver",
+                        "--list-json",
+                    ]
+                )
+            self.assertEqual(code, 0)
+            self.assertEqual(
+                json.loads(captured.getvalue()),
+                {"include": [{"component": "hipsolver"}]},
             )
 
     def test_matrix_payload_lists_components(self):

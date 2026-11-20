@@ -420,12 +420,20 @@ def main(argv: list[str] | None = None) -> int:
         components=selected_names or None,
     )
     total = sum(len(group["tests"]) for group in groups)
+    # --list-json stdout is the matrix only. The workflow writes that stream
+    # into GITHUB_OUTPUT, which rejects a second text line.
+    listing = sys.stderr if args.list_json else sys.stdout
     print(
         f"label={args.label} directories: {len(groups)} tests: {total}",
+        file=listing,
         flush=True,
     )
     for group in groups:
-        print(f"  {len(group['tests']):4d}  {group['component']}", flush=True)
+        print(
+            f"  {len(group['tests']):4d}  {group['component']}",
+            file=listing,
+            flush=True,
+        )
 
     if args.list_json:
         print(json.dumps(matrix_payload(groups), separators=(",", ":")))
