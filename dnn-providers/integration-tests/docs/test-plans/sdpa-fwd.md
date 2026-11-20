@@ -794,7 +794,11 @@ of the hip-kernel provider, the rocKE attention engines
 `hipkernel:Gfx942AttentionUnified3d`, `hipkernel:Gfx950AttentionDense`,
 `hipkernel:Gfx950AttentionUnified2D` and `hipkernel:Gfx950AttentionUnified3D`) and the FlyDSL SDPA engines
 (`hipkernel:flydsl_sdpa_*`), select `<tier>_SdpaFwdPlan_*` in each tier of
-their tier YAML file, beside their own `SdpaFwd` bundles. A case that an engine
+their tier YAML file, beside their own `SdpaFwd` bundles. The FlyDSL SDPA lanes
+start at the `standard` tier, because no FlyDSL device test runs in `quick` or
+`ffm-quick`. Their `standard` tier selects `quick_SdpaFwdPlan_*` and
+`standard_SdpaFwdPlan_*`, so the quick-tier cases run on the FlyDSL SDPA lanes
+from `standard` up, and in `quick` on the other lanes. A case that an engine
 does not accept is declined, and the suite skips it. The HIP_MLOPS, MIOPEN and
 hipBLASLt lanes have no SDPA support. Their tier YAML files exclude
 `*_SdpaFwdPlan_*`, so they do not load these cases only to decline them.
