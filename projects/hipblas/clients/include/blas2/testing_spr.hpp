@@ -237,13 +237,17 @@ void testing_spr(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(
                 hipblasSprFn,
                 (handle, uplo, N, d_alpha, dx_rot[flush_index], incx, dAp_rot[flush_index]));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasSprModel{}.log_args<T>(std::cout,
                                       arg,

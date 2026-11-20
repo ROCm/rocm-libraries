@@ -296,7 +296,10 @@ void testing_spmv(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(hipblasSpmvFn,
                           (handle,
@@ -311,6 +314,7 @@ void testing_spmv(const Arguments& arg)
                            incy));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasSpmvModel{}.log_args<T>(std::cout,
                                        arg,

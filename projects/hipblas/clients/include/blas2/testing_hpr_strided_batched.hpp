@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -291,13 +291,17 @@ void testing_hpr_strided_batched(const Arguments& arg)
         for(int iter = 0; iter < runs; iter++)
         {
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(
                 hipblasHprStridedBatchedFn,
                 (handle, uplo, N, d_alpha, dx, incx, stride_x, dAp, stride_A, batch_count));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasHprStridedBatchedModel{}.log_args<U>(std::cout,
                                                     arg,

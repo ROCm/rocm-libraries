@@ -371,7 +371,10 @@ void testing_her2k(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(hipblasHer2kFn,
                           (handle,
@@ -389,6 +392,7 @@ void testing_her2k(const Arguments& arg)
                            ldc));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used; // in microseconds
+        getFrequencyMonitor().stop();
 
         hipblasHer2kModel{}.log_args<T>(std::cout,
                                         arg,

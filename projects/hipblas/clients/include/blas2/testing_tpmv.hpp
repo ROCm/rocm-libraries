@@ -202,13 +202,17 @@ void testing_tpmv(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(
                 hipblasTpmvFn,
                 (handle, uplo, transA, diag, N, dAp_rot[flush_index], dx_rot[flush_index], incx));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used; // in microseconds
+        getFrequencyMonitor().stop();
 
         hipblasTpmvModel{}.log_args<T>(std::cout,
                                        arg,

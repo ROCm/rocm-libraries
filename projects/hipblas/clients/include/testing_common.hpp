@@ -30,6 +30,7 @@
 #include "bytes.hpp"
 #include "cblas_interface.h"
 #include "flops.hpp"
+#include "frequency_monitor.hpp"
 #include "hipblas.hpp"
 #ifndef WIN32
 #include "hipblas_fortran.hpp"

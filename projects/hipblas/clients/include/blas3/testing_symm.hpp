@@ -342,7 +342,10 @@ void testing_symm(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(hipblasSymmFn,
                           (handle,
@@ -360,6 +363,7 @@ void testing_symm(const Arguments& arg)
                            ldc));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used; // in microseconds
+        getFrequencyMonitor().stop();
 
         hipblasSymmModel{}.log_args<T>(std::cout,
                                        arg,

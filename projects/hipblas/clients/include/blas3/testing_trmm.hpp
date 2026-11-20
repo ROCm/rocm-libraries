@@ -499,7 +499,10 @@ void testing_trmm(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             auto* dB_iter   = dB_rot[flush_index];
             auto* dOut_iter = inplace ? dB_iter : dOut_rot[flush_index];
@@ -520,6 +523,7 @@ void testing_trmm(const Arguments& arg)
                            ldOut));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasTrmmModel{}.log_args<T>(std::cout,
                                        arg,

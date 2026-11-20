@@ -38,13 +38,14 @@
      Adjusting the ceilings to the clocks the run actually got:
          --clock-scale <f>    multiplies the compute peaks (sclk during run / sclk_peak_mhz)
          --mclk-scale <f>     multiplies the bandwidth (mclk during run / mclk_max_mhz)
-         --auto-clock-scale   samples clocks with amd-smi during the run and uses the medians of the
-                              samples taken while the GPU is busy; needs sclk_peak_mhz / mclk_max_mhz.
-                              sclk is the mean over the GFX clock domains on parts that report several;
-                              the memory clock is mem_0_clk, or uclk_* where that is N/A. The slowest
-                              domain, fabric clock, power and hotspot temperature are recorded too.
+         --auto-clock-scale   runs hipblas-bench with HIPBLAS_BENCH_FREQ=1, so each result reports the clocks
+                              sampled while its timed calls ran (hipblas-bench must be built with amd-smi).
+                              The ceiling of each result is scaled by its own lowest-avg-freq (the slowest
+                              XCD) / sclk_peak_mhz and avg-MCLK / mclk_max_mhz; the roofline lines use the
+                              medians over all results. Needs sclk_peak_mhz / mclk_max_mhz; an explicit
+                              --clock-scale or --mclk-scale takes precedence.
          --partitions <n>     divides bandwidth and peaks by n when the GPU is partitioned
-     machine_spec.yaml records the published and the effective values, the clock samples and the perf level.
+     machine_spec.yaml records the published and the effective values, the clock statistics and the perf level.
 
      Cache residency: with --l2-mb, results whose bytes moved are below 4 x L2 are drawn hollow; they measure
      cache bandwidth, not memory bandwidth. Use --sizes large (blas1/large, blas2/large; about 0.8 GB and up per

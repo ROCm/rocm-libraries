@@ -460,7 +460,10 @@ void testing_gemm(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(hipblasGemmFn,
                           (handle,
@@ -479,6 +482,7 @@ void testing_gemm(const Arguments& arg)
                            ldc));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasGemmModel{}.log_args<T>(std::cout,
                                        arg,

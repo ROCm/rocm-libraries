@@ -213,13 +213,17 @@ void testing_axpy(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_CHECK(
                 hipblasAxpyFn,
                 (handle, N, d_alpha, dx_rot[flush_index], incx, dy_device_rot[flush_index], incy));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasAxpyModel{}.log_args<T>(std::cout,
                                        arg,

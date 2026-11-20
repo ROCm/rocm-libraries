@@ -263,6 +263,23 @@ def footprint_bytes(func, compute_type, params):
     return None if fb is None else fb[1]
 
 
+# Columns hipblas-bench adds to each result with HIPBLAS_BENCH_FREQ: the clocks sampled while the
+# result's timed calls ran, in MHz. The slowest XCD bounds work split evenly across XCDs.
+SCLK_COLUMN = 'lowest-avg-freq'
+MCLK_COLUMN = 'avg-MCLK'
+
+
+def result_clocks(params):
+    """(engine clock, memory clock) in MHz reported with a result; None for each one missing."""
+    def mhz(key):
+        try:
+            value = float(params.get(key, ''))
+        except ValueError:
+            return None
+        return value if value > 0 else None
+    return mhz(SCLK_COLUMN), mhz(MCLK_COLUMN)
+
+
 def parse_peak_gflops(text):
     """'f32=100000,f64=2000' -> {'f32': 100000.0, 'f64': 2000.0}"""
     peaks = {}

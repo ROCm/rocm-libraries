@@ -165,12 +165,16 @@ void testing_scal(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_CHECK(hipblasScalFn,
                        (handle, N, reinterpret_cast<Ts*>(&alpha), dx_rot[flush_index], incx));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasScalModel{}.log_args<T>(std::cout,
                                        arg,

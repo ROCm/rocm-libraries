@@ -261,7 +261,10 @@ void testing_syr2(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_DISPATCH(hipblasSyr2Fn,
                           (handle,
@@ -276,6 +279,7 @@ void testing_syr2(const Arguments& arg)
                            lda));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasSyr2Model{}.log_args<T>(std::cout,
                                        arg,

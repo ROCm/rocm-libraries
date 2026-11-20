@@ -168,11 +168,15 @@ void testing_nrm2(const Arguments& arg)
         {
             size_t flush_index = (iter + 1) % flush_batch_count;
             if(iter == arg.cold_iters)
+            {
+                getFrequencyMonitor().start();
                 gpu_time_used = get_time_us_sync(stream);
+            }
 
             DAPI_CHECK(hipblasNrm2Fn, (handle, N, dx_rot[flush_index], incx, d_hipblas_result));
         }
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
+        getFrequencyMonitor().stop();
 
         hipblasNrm2Model{}.log_args<T>(std::cout,
                                        arg,

@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,7 @@ set( hipblas_benchmark_common
       ../common/near.cpp
       ../common/arg_check.cpp
       ../common/argument_model.cpp
+      ../common/frequency_monitor.cpp
       ../common/host_alloc.cpp
       ${BLIS_CPP}
     )
@@ -83,6 +84,15 @@ endif()
 
 if(NOT USE_CUDA)
   target_link_libraries( hipblas-bench PRIVATE hip::host )
+
+  # amd-smi samples the GPU clocks during timing loops (HIPBLAS_BENCH_FREQ)
+  find_package( amd_smi CONFIG QUIET )
+  if( amd_smi_FOUND )
+    target_link_libraries( hipblas-bench PRIVATE amd_smi )
+    target_compile_definitions( hipblas-bench PRIVATE HIPBLAS_HAVE_AMD_SMI )
+  else()
+    message( STATUS "amd_smi not found: hipblas-bench will not report GPU clocks" )
+  endif()
 
   if( CUSTOM_TARGET )
     target_link_libraries( hipblas-bench PRIVATE hip::${CUSTOM_TARGET} )
