@@ -4,7 +4,7 @@
 
 One parser serves two checks:
 - the `hipblaslt-python-enum-sync` pre-commit hook, which reads the raw headers and
-  src/enums.cpp as text, with nothing built (scripts/check_enum_sync.py);
+  csrc/enums.cpp as text, with nothing built (scripts/check_enum_sync.py);
 - the coverage tests, which read the headers after the real preprocessor has run.
 
 This module uses only the standard library and never imports hipblaslt._core, so the hook can
@@ -262,7 +262,7 @@ class BoundValue:
 
 
 def bound_values(enums_cpp: str) -> dict[str, dict[str, BoundValue]]:
-    """What src/enums.cpp binds: {C enum name: {C value name: BoundValue}}.
+    """What csrc/enums.cpp binds: {C enum name: {C value name: BoundValue}}.
 
     It reads `reg(e, "<C enum>", "<Python name>", <C value>)` calls, the one registration form
     enums.cpp uses, and records the `#if HIPBLASLT_HAS_...` guard each sits under.

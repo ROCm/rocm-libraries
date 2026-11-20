@@ -102,8 +102,8 @@ def test_every_value_is_bound_or_allowed(c_enum):
     ]
     assert not missing, (
         f"{c_enum} in {_SOURCE} has values the bindings don't bind: {missing}. Add a reg(...) line for each to "
-        "projects/hipblaslt/python/src/enums.cpp, or add it to ALLOWED_MISSING in "
-        "hipblaslt/_coverage.py with a reason."
+        "projects/hipblaslt/python/csrc/enums.cpp, or add it to ALLOWED_MISSING in "
+        "src/hipblaslt/_coverage.py with a reason."
     )
 
 
