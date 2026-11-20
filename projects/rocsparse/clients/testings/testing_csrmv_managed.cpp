@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -158,21 +158,25 @@ void testing_csrmv_managed(const Arguments& arg)
     rocsparse_int nnz;
     matrix_factory.init_csr(trow_ptr, tcol_ind, tval, M, N, nnz, base);
 
+    // Transpose and conjugate transpose read x along rows and write y along columns.
+    const rocsparse_int x_size = (trans == rocsparse_operation_none) ? N : M;
+    const rocsparse_int y_size = (trans == rocsparse_operation_none) ? M : N;
+
     // Allocate host memory for vectors
-    host_vector<T> tx(N);
-    host_vector<T> ty(M);
+    host_vector<T> tx(x_size);
+    host_vector<T> ty(y_size);
 
     // Initialize data on CPU
-    rocsparse_init<T>(tx, 1, N, 1, arg.convert_to_int);
-    rocsparse_init<T>(ty, 1, M, 1, arg.convert_to_int);
+    rocsparse_init<T>(tx, 1, x_size, 1, arg.convert_to_int);
+    rocsparse_init<T>(ty, 1, y_size, 1, arg.convert_to_int);
 
     // Allocate managed memory
     managed_dense_vector<rocsparse_int> csr_row_ptr(M + 1);
     managed_dense_vector<rocsparse_int> csr_col_ind(nnz);
     managed_dense_vector<T>             csr_val(nnz);
-    managed_dense_vector<T>             x(N);
-    managed_dense_vector<T>             y_1(M);
-    managed_dense_vector<T>             y_2(M);
+    managed_dense_vector<T>             x(x_size);
+    managed_dense_vector<T>             y_1(y_size);
+    managed_dense_vector<T>             y_2(y_size);
     managed_scalar<T>                   alpha;
     managed_scalar<T>                   beta;
 
@@ -188,12 +192,12 @@ void testing_csrmv_managed(const Arguments& arg)
         csr_val[i]     = tval[i];
     }
 
-    for(rocsparse_int i = 0; i < N; i++)
+    for(rocsparse_int i = 0; i < x_size; i++)
     {
         x[i] = tx[i];
     }
 
-    for(rocsparse_int i = 0; i < M; i++)
+    for(rocsparse_int i = 0; i < y_size; i++)
     {
         y_1[i] = ty[i];
         y_2[i] = ty[i];
@@ -254,8 +258,8 @@ void testing_csrmv_managed(const Arguments& arg)
         }
 
         // CPU y
-        host_vector<T> y_gold(M);
-        for(rocsparse_int i = 0; i < M; i++)
+        host_vector<T> y_gold(y_size);
+        for(rocsparse_int i = 0; i < y_size; i++)
         {
             y_gold[i] = ty[i];
         }
@@ -277,8 +281,8 @@ void testing_csrmv_managed(const Arguments& arg)
                    alg,
                    false);
 
-        near_check_segments<T>(M, &y_gold[0], y_1);
-        near_check_segments<T>(M, &y_gold[0], y_2);
+        near_check_segments<T>(y_size, &y_gold[0], y_1);
+        near_check_segments<T>(y_size, &y_gold[0], y_2);
     }
 
     if(arg.timing)

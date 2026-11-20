@@ -10,14 +10,17 @@ The tests below check that contract four ways: every one of the 256 codes run
 through the decoder on the GPU against an independent reference; the decoder's
 lowered text (it zero-extends the byte, never sign-extends it, so the signed
 int-to-float conversion that follows sees 0..255) in LLVM IR and in HIP; the two engines lowering the
-decoder to the same LLVM IR; and the MX GEMM, the decoder's caller, building
-the same unsigned decoder in both engines. The MX GEMM targets a GPU this test
-host may not have, so it is compile-checked only.
+decoder to the same LLVM IR; and the MX GEMM reading its scale bytes the same
+unsigned way in both engines. They also check the scaled-dot helper (its
+refusals and its ldexp form) and the largest code the scaled MFMA takes
+directly. The MX GEMM's numerics across the scale range are checked in
+tests/instances/test_mx_gemm_scale_range.py.
 """
 
 import ctypes
 import importlib.util
 import math
+import re
 import struct
 
 import numpy as np
@@ -27,9 +30,17 @@ from rocke.core.backend import lower_mx_gemm
 from rocke.core.ir import F32, I8, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
-from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
 from rocke.helpers import compile_kernel
-from rocke.helpers.mx_scale import decode_mx_scale_e8m0
+from rocke.helpers.mx_scale import (
+    BF8_E5M2_FNUZ,
+    BF8_E5M2_OCP,
+    FP8_E4M3_FNUZ,
+    FP8_E4M3_OCP,
+    add_mx_scaled_dot,
+    decode_mx_scale_e8m0,
+    largest_safe_mx_scale_code,
+)
 from rocke.instances.common.mx_gemm import MxGemmSpec, build_mx_gemm
 
 _CODES = 256
@@ -85,14 +96,7 @@ def _reference_bits(code):
 
 def _mx_gemm_spec():
     return MxGemmSpec(
-        M=16,
-        N=16,
-        K=64,
-        mantissa_dtype="fp8e4m3",
-        group_k=32,
-        block_tile_m=16,
-        block_tile_n=16,
-        per_input_row=True,
+        M=16, N=16, K=64, block_tile_m=32, block_tile_n=128, mantissa_dtype="fp8e4m3"
     )
 
 
@@ -109,7 +113,7 @@ def test_decoder_hip_reads_the_byte_unsigned():
     assert _EXPECTED_HIP in hip
 
 
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
+@pytest.mark.parametrize("flavor", LLVM_FLAVORS)
 def test_engines_lower_the_decoder_identically(flavor):
     if not _has_cpp_engine():
         pytest.skip("needs the rocke_engine binding")
@@ -131,7 +135,7 @@ def test_non_byte_input_is_rejected():
         decode_mx_scale_e8m0(b, b.const_i32(0))
 
 
-def test_mx_gemm_builds_the_unsigned_decoder_in_both_engines():
+def test_mx_gemm_reads_the_scale_bytes_unsigned_in_both_engines():
     # The C++ MX GEMM builder must emit the same LLVM IR as the Python one;
     # backend="both" lowers through each and fails on any byte difference.
     if not _has_cpp_engine():
@@ -139,7 +143,105 @@ def test_mx_gemm_builds_the_unsigned_decoder_in_both_engines():
     ll = lower_mx_gemm(_mx_gemm_spec(), arch="gfx950", backend="both").llvm_text
     assert ll.count("zext i8") >= 2  # the A and the B scale bytes
     assert "sext i8" not in ll
-    assert ll.count("float 0x7FF8000000000000") == 2
+    assert ll.count("icmp eq i32") >= 2  # each byte checked for the NaN code
+    assert "float 0x7FF8000000000000" in ll
+
+
+@pytest.mark.parametrize(
+    "case, message",
+    [
+        ("scalar dot", "add_mx_scaled_dot expects an f32 vector dot, got f32"),
+        (
+            "mismatched accumulator",
+            (
+                "add_mx_scaled_dot expects the accumulator type to match the dot type "
+                "vec<f32x4>, got vec<f32x2>"
+            ),
+        ),
+        (
+            "wrong code count",
+            "add_mx_scaled_dot expects 4 A and 4 B scale bytes, got 3 and 4",
+        ),
+        ("i32 scale code", "add_mx_scaled_dot expects i8 input, got i32"),
+    ],
+)
+def test_scaled_dot_refuses_wrong_types(case, message):
+    """The C++ engine's test (test_mx_scale_decode.cpp) checks the same texts."""
+    b = IRBuilder("mx_scaled_dot_refusal")
+    dot = b.vector_splat(b.const_f32(1.0), 4)
+    acc = dot
+    codes = b.param("Codes", PtrType(I8, "global"))
+    code = b.global_load_i8(codes, b.const_i32(0))
+    a_codes, b_codes = [code] * 4, [code] * 4
+    if case == "scalar dot":
+        dot = b.const_f32(1.0)
+    elif case == "mismatched accumulator":
+        acc = b.vector_splat(b.const_f32(1.0), 2)
+    elif case == "wrong code count":
+        a_codes = a_codes[:3]
+    elif case == "i32 scale code":
+        b_codes = [b.const_i32(0)] * 4
+    with pytest.raises(ValueError, match=re.escape(message)):
+        add_mx_scaled_dot(b, acc, dot, a_codes, b_codes)
+
+
+def test_scaled_dot_scales_with_ldexp_and_selects_nan():
+    """Each element is ``acc + select(nan, NaN, ldexp(dot, ca + cb - 254))``;
+    a byte shared by several elements is read once."""
+    b = IRBuilder("mx_scaled_dot_shape")
+    codes = b.param("Codes", PtrType(I8, "global"))
+    out = b.param("Out", PtrType(F32, "global"))
+    a_code = b.global_load_i8(codes, b.const_i32(0))
+    b_code = b.global_load_i8(codes, b.const_i32(1))
+    dot = b.vector_splat(b.const_f32(3.0), 2)
+    acc = b.vector_splat(b.const_f32(1.0), 2)
+    total = add_mx_scaled_dot(b, acc, dot, [a_code, a_code], [b_code, b_code])
+    b.global_store(out, b.const_i32(0), b.vec_extract(total, 0), align=4)
+    b.ret()
+    ll = _lower_kernel_to_llvm_python(b.kernel, arch="gfx950", llvm_flavor="llvm20")
+    assert ll.count("zext i8") == 2  # each distinct byte read once
+    assert ll.count("call float @llvm.ldexp.f32.i32(") == 2
+    assert ll.count("float 0x7FF8000000000000") >= 1
+    assert "fmul" not in ll
+
+
+# The largest code each fp8 / bf8 encoding the matrix cores read may take on
+# both sides of the scaled MFMA (64 products per output): 64 * largest^2 is
+# below 2^24 for OCP E4M3, 2^22 for E4M3 FNUZ and 2^38 for both E5M2
+# encodings, and 2c - 254 + that power is at most 127.
+_SAFE_CODES = (
+    (FP8_E4M3_OCP, 178),
+    (BF8_E5M2_OCP, 171),
+    (FP8_E4M3_FNUZ, 179),
+    (BF8_E5M2_FNUZ, 171),
+)
+
+
+@pytest.mark.parametrize(
+    "element_format, code", _SAFE_CODES, ids=[f.name for f, _ in _SAFE_CODES]
+)
+def test_safe_code_for_the_mfma_formats(element_format, code):
+    """The C++ engine's test (test_mx_scale_decode.cpp) pins the same codes."""
+    assert largest_safe_mx_scale_code(element_format, element_format, 64) == code
+
+
+@pytest.mark.parametrize(
+    "element_format, code", _SAFE_CODES, ids=[f.name for f, _ in _SAFE_CODES]
+)
+def test_safe_code_keeps_the_largest_sum_a_binade_below_overflow(element_format, code):
+    """At the code, the largest sum of 64 scaled products is at most 2^127;
+    one code higher it is not."""
+    largest_sum = 64 * element_format.largest_value**2
+    assert largest_sum * 2.0 ** (2 * code - 254) <= 2.0**127
+    assert largest_sum * 2.0 ** (2 * (code + 1) - 254) > 2.0**127
+
+
+def test_safe_code_refuses_a_count_that_is_not_positive():
+    with pytest.raises(
+        ValueError,
+        match=re.escape("largest_safe_mx_scale_code: products must be positive, got 0"),
+    ):
+        largest_safe_mx_scale_code(FP8_E4M3_OCP, FP8_E4M3_OCP, 0)
 
 
 def _skip_unless_comgr_targets(isa: str) -> None:

@@ -87,3 +87,68 @@ def test_forward_grid_keeps_the_old_lds_budget():
     )
     assert lds(within) <= budget
     assert aj._spec_is_valid(within, _ARCH, "bf16")
+
+
+@pytest.mark.parametrize("dtype", ["fp16", "bf16"])
+def test_gfx950_packed_wgrad_atomics_store_two_wide(dtype):
+    """gfx950's packed 16-bit split-K atomic kernels store dW one pair per lane.
+
+    Every other wgrad kernel keeps its width: the default epilogue and the
+    two-stage kernels store scalar, the split_k = 1 cshuffle kernels at the X
+    width, and other arches tie dW to the X width throughout.
+    """
+    target = ArchTarget.from_gfx("gfx950")
+    geo = next(
+        g
+        for g in aj._geometry_list(target, dtype, "wgrad")
+        if g[:5] == (64, 64, 64, 2, 2) and g[7] == "cshuffle"
+    )
+    jobs = list(
+        aj._wgrad_jobs("gfx950", dtype, 64, "mfma", target, (1, 2), geometries=[geo])
+    )
+    atomic = [
+        j
+        for j in jobs
+        if j.spec_kwargs["split_k"] > 1 and not j.spec_kwargs["two_stage"]
+    ]
+    assert atomic
+    for j in atomic:
+        vb = j.spec_kwargs["vector_size_b"]
+        assert j.spec_kwargs["vector_size_c"] == (2 if vb and vb % 2 == 0 else vb)
+    for j in jobs:
+        if j.spec_kwargs["split_k"] == 1:
+            assert j.spec_kwargs["vector_size_c"] == j.spec_kwargs["vector_size_b"]
+    assert aj._wgrad_vec_c("gfx942", dtype, "cshuffle", 8, 2, False) == 8
+    assert aj._wgrad_vec_c("gfx950", dtype, "cshuffle", 8, 2, True) == 8
+    assert aj._wgrad_vec_c("gfx950", "fp32", "cshuffle", 4, 2, False) == 4
+    assert aj._wgrad_vec_c("gfx950", dtype, "default", 8, 2, False) == 1
+
+
+@pytest.mark.parametrize("gfx", ["gfx1250", "gfx1151", "gfx1201"])
+def test_wmma_wgrad_deepk_geometries_only_valid_on_their_arches(gfx):
+    """The deep-K wgrad geometries survive the spec prefilter, with the
+    cover's variants, on gfx1250 only: the RDNA parts lack the LDS for a
+    64x64x512 16-bit tile pair (128 KB vs a 64 KB cap), and
+    :func:`aj._spec_is_valid` (the validator, not a per-arch list) refuses
+    every such job there.
+    """
+    # Hard-coded so that emptying CACHE_WGRAD_DEEPK_GEOMETRIES does not let the
+    # test self-validate.
+    expected = {
+        (64, 64, 256, 4, 4),
+        (64, 64, 512, 4, 4),
+        (128, 128, 128, 4, 4),
+    }
+    target = ArchTarget.from_gfx(gfx)
+    found: dict = {}
+    for job in aj._wgrad_jobs(gfx, "fp16", 32, "wmma", target, (1,)):
+        i = job.identity
+        geo = (i.tile_m, i.tile_n, i.tile_k, i.warp_m, i.warp_n)
+        if geo in expected and aj._spec_is_valid(job, gfx, "fp16"):
+            found.setdefault(geo, set()).add(i.async_dma)
+    if gfx == "gfx1250":
+        assert set(found) == expected
+        # On the cover: the async loop next to the synchronous one.
+        assert all(v == {False, True} for v in found.values())
+    else:
+        assert not found

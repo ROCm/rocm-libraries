@@ -59,7 +59,7 @@ import tensilelite.KernelWriter  # noqa: F401
 def _make_writer():
     """Return a minimal mock writer with rocisa register pools."""
 
-    from rocisa._rocisa.enum import Vgpr, Sgpr
+    from rocisa.enum import Vgpr, Sgpr
     from rocisa.register import RegisterPool
     from tensilelite.Common.RegisterPool import allocTmpGpr
 

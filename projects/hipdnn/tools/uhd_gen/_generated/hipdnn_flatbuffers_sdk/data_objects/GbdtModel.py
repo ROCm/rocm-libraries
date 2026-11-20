@@ -199,8 +199,59 @@ class GbdtModel(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(28))
         return o == 0
 
+    # GbdtModel
+    def ThresholdTableType(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(30))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # The distinct split thresholds that split/leaf-encoded trees index. Absent when no
+    # tree uses that encoding.
+    # GbdtModel
+    def ThresholdTable(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(32))
+        if o != 0:
+            from flatbuffers.table import Table
+            obj = Table(bytearray(), 0)
+            self._tab.Union(obj, o)
+            return obj
+        return None
+
+    # Early-exit schedule for ranking a whole catalog: stages strictly increasing in
+    # `trees` and strictly decreasing in `keep`. Absent or empty scores every candidate with
+    # every tree. It changes only which candidates get a full score, never a full score: a
+    # pruned candidate ranks below every candidate scored by the whole model and carries no
+    # estimate. Single-layer models only; a grouped model's schedule is ignored. A runtime
+    # that predates this field ignores it and scores every candidate fully, which is still
+    # correct.
+    # GbdtModel
+    def EarlyExit(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(34))
+        if o != 0:
+            x = self._tab.Vector(o)
+            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
+            x = self._tab.Indirect(x)
+            from hipdnn_flatbuffers_sdk.data_objects.EarlyExitStage import EarlyExitStage
+            obj = EarlyExitStage()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+    # GbdtModel
+    def EarlyExitLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(34))
+        if o != 0:
+            return self._tab.VectorLen(o)
+        return 0
+
+    # GbdtModel
+    def EarlyExitIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(34))
+        return o == 0
+
 def GbdtModelStart(builder):
-    builder.StartObject(13)
+    builder.StartObject(16)
 
 def Start(builder):
     GbdtModelStart(builder)
@@ -301,16 +352,44 @@ def GbdtModelStartGroupsVector(builder, numElems):
 def StartGroupsVector(builder, numElems):
     return GbdtModelStartGroupsVector(builder, numElems)
 
+def GbdtModelAddThresholdTableType(builder, thresholdTableType):
+    builder.PrependUint8Slot(13, thresholdTableType, 0)
+
+def AddThresholdTableType(builder, thresholdTableType):
+    GbdtModelAddThresholdTableType(builder, thresholdTableType)
+
+def GbdtModelAddThresholdTable(builder, thresholdTable):
+    builder.PrependUOffsetTRelativeSlot(14, flatbuffers.number_types.UOffsetTFlags.py_type(thresholdTable), 0)
+
+def AddThresholdTable(builder, thresholdTable):
+    GbdtModelAddThresholdTable(builder, thresholdTable)
+
+def GbdtModelAddEarlyExit(builder, earlyExit):
+    builder.PrependUOffsetTRelativeSlot(15, flatbuffers.number_types.UOffsetTFlags.py_type(earlyExit), 0)
+
+def AddEarlyExit(builder, earlyExit):
+    GbdtModelAddEarlyExit(builder, earlyExit)
+
+def GbdtModelStartEarlyExitVector(builder, numElems):
+    return builder.StartVector(4, numElems, 4)
+
+def StartEarlyExitVector(builder, numElems):
+    return GbdtModelStartEarlyExitVector(builder, numElems)
+
 def GbdtModelEnd(builder):
     return builder.EndObject()
 
 def End(builder):
     return GbdtModelEnd(builder)
 
+import hipdnn_flatbuffers_sdk.data_objects.EarlyExitStage
+import hipdnn_flatbuffers_sdk.data_objects.Float32Array
+import hipdnn_flatbuffers_sdk.data_objects.Float64Array
 import hipdnn_flatbuffers_sdk.data_objects.GbdtGroup
 import hipdnn_flatbuffers_sdk.data_objects.GbdtTree
+import hipdnn_flatbuffers_sdk.data_objects.RealArray
 try:
-    from typing import List
+    from typing import List, Union
 except:
     pass
 
@@ -332,6 +411,9 @@ class GbdtModelT(object):
         modelVersion = None,
         groupByFeatureIndex = -1,
         groups = None,
+        thresholdTableType = 0,
+        thresholdTable = None,
+        earlyExit = None,
     ):
         self.trees = trees  # type: Optional[List[hipdnn_flatbuffers_sdk.data_objects.GbdtTree.GbdtTreeT]]
         self.numFeatures = numFeatures  # type: int
@@ -346,6 +428,9 @@ class GbdtModelT(object):
         self.modelVersion = modelVersion  # type: Optional[str]
         self.groupByFeatureIndex = groupByFeatureIndex  # type: int
         self.groups = groups  # type: Optional[List[hipdnn_flatbuffers_sdk.data_objects.GbdtGroup.GbdtGroupT]]
+        self.thresholdTableType = thresholdTableType  # type: int
+        self.thresholdTable = thresholdTable  # type: Union[None, 'hipdnn_flatbuffers_sdk.data_objects.Float32Array.Float32ArrayT', 'hipdnn_flatbuffers_sdk.data_objects.Float64Array.Float64ArrayT']
+        self.earlyExit = earlyExit  # type: Optional[List[hipdnn_flatbuffers_sdk.data_objects.EarlyExitStage.EarlyExitStageT]]
 
     @classmethod
     def InitFromBuf(cls, buf, pos):
@@ -398,6 +483,16 @@ class GbdtModelT(object):
                 else:
                     gbdtGroup_ = hipdnn_flatbuffers_sdk.data_objects.GbdtGroup.GbdtGroupT.InitFromObj(gbdtModel.Groups(i))
                     self.groups.append(gbdtGroup_)
+        self.thresholdTableType = gbdtModel.ThresholdTableType()
+        self.thresholdTable = hipdnn_flatbuffers_sdk.data_objects.RealArray.RealArrayCreator(self.thresholdTableType, gbdtModel.ThresholdTable())
+        if not gbdtModel.EarlyExitIsNone():
+            self.earlyExit = []
+            for i in range(gbdtModel.EarlyExitLength()):
+                if gbdtModel.EarlyExit(i) is None:
+                    self.earlyExit.append(None)
+                else:
+                    earlyExitStage_ = hipdnn_flatbuffers_sdk.data_objects.EarlyExitStage.EarlyExitStageT.InitFromObj(gbdtModel.EarlyExit(i))
+                    self.earlyExit.append(earlyExitStage_)
 
     # GbdtModelT
     def Pack(self, builder):
@@ -435,6 +530,16 @@ class GbdtModelT(object):
             for i in reversed(range(len(self.groups))):
                 builder.PrependUOffsetTRelative(groupslist[i])
             groups = builder.EndVector()
+        if self.thresholdTable is not None:
+            thresholdTable = self.thresholdTable.Pack(builder)
+        if self.earlyExit is not None:
+            earlyExitlist = []
+            for i in range(len(self.earlyExit)):
+                earlyExitlist.append(self.earlyExit[i].Pack(builder))
+            GbdtModelStartEarlyExitVector(builder, len(self.earlyExit))
+            for i in reversed(range(len(self.earlyExit))):
+                builder.PrependUOffsetTRelative(earlyExitlist[i])
+            earlyExit = builder.EndVector()
         GbdtModelStart(builder)
         if self.trees is not None:
             GbdtModelAddTrees(builder, trees)
@@ -457,5 +562,10 @@ class GbdtModelT(object):
         GbdtModelAddGroupByFeatureIndex(builder, self.groupByFeatureIndex)
         if self.groups is not None:
             GbdtModelAddGroups(builder, groups)
+        GbdtModelAddThresholdTableType(builder, self.thresholdTableType)
+        if self.thresholdTable is not None:
+            GbdtModelAddThresholdTable(builder, thresholdTable)
+        if self.earlyExit is not None:
+            GbdtModelAddEarlyExit(builder, earlyExit)
         gbdtModel = GbdtModelEnd(builder)
         return gbdtModel

@@ -31,14 +31,30 @@ enum struct GemmPipelineType
     CompAsyncEightWaves,
     CompTDMV1,
     CompTDMV2,
-    CompTDMProducerConsumer
+    CompTDMProducerConsumer,
+    // GemmPipelineAgBgCrCompTDMProducerConsumer with a CShuffleEpilogue instead of TdmEpilogue,
+    // which is what lets it accumulate split-K partial tiles.
+    CompTDMProducerConsumerCShuffle
 };
 
-// Pipelines that load A and B with TDM: no padding, no split-K (TdmEpilogue), ragged extents.
+// Both GemmPipelineType values that instantiate GemmPipelineAgBgCrCompTDMProducerConsumer.
+constexpr bool is_tdm_producer_consumer(GemmPipelineType pt)
+{
+    return pt == GemmPipelineType::CompTDMProducerConsumer ||
+           pt == GemmPipelineType::CompTDMProducerConsumerCShuffle;
+}
+
+// Pipelines that load A and B with TDM: no padding, ragged extents.
 constexpr bool is_tdm_pipeline(GemmPipelineType pt)
 {
     return pt == GemmPipelineType::CompTDMV1 || pt == GemmPipelineType::CompTDMV2 ||
-           pt == GemmPipelineType::CompTDMProducerConsumer;
+           is_tdm_producer_consumer(pt);
+}
+
+// TDM pipelines that store C through TdmEpilogue, which cannot do split-K.
+constexpr bool uses_tdm_epilogue(GemmPipelineType pt)
+{
+    return is_tdm_pipeline(pt) && pt != GemmPipelineType::CompTDMProducerConsumerCShuffle;
 }
 
 // Tail coverage loop shared by the async pipeline tests: calls run(M, N, K) for every {M, N}
@@ -234,16 +250,51 @@ struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMProducerConsumer, Probl
     static constexpr auto GetName() { return "GemmPipelineAgBgCrCompTDMProducerConsumer"; }
 };
 
-template <GemmPipelineType PT, typename Problem, typename Enable = void>
+// Same pipeline; only the epilogue differs (see GemmEpilogueTypeSelector).
+template <typename Problem>
+struct GemmPipelineTypeSelector<GemmPipelineType::CompTDMProducerConsumerCShuffle, Problem>
+    : GemmPipelineTypeSelector<GemmPipelineType::CompTDMProducerConsumer, Problem>
+{
+};
+
+// <MIterPerStage, NumStageBuffers> of the TdmEpilogueStaged that a TDM pipeline test uses, given
+// as tuple element 17. It has a type of its own because derived fixtures keep their own data in
+// element 17 (the LDS padding test keeps a ck_tile::sequence there).
+template <ck_tile::index_t MIterPerStage_, ck_tile::index_t NumStageBuffers_>
+struct TdmStage
+{
+    static constexpr ck_tile::index_t MIterPerStage   = MIterPerStage_;
+    static constexpr ck_tile::index_t NumStageBuffers = NumStageBuffers_;
+};
+
+// MIterPerStage 0: the full-tile TdmEpilogue<Problem>
+using TdmStageFullTile = TdmStage<0, 2>;
+
+template <typename T>
+struct is_tdm_stage : std::false_type
+{
+};
+
+template <ck_tile::index_t MIterPerStage, ck_tile::index_t NumStageBuffers>
+struct is_tdm_stage<TdmStage<MIterPerStage, NumStageBuffers>> : std::true_type
+{
+};
+
+template <GemmPipelineType PT, typename Problem, typename TdmStageConfig, typename Enable = void>
 struct GemmEpilogueTypeSelector
 {
     using epilogue = ck_tile::CShuffleEpilogue<Problem>;
 };
 
-template <GemmPipelineType PT, typename Problem>
-struct GemmEpilogueTypeSelector<PT, Problem, std::enable_if_t<is_tdm_pipeline(PT)>>
+template <GemmPipelineType PT, typename Problem, typename TdmStageConfig>
+struct GemmEpilogueTypeSelector<PT,
+                                Problem,
+                                TdmStageConfig,
+                                std::enable_if_t<uses_tdm_epilogue(PT)>>
 {
-    using epilogue = ck_tile::TdmEpilogue<Problem>;
+    static_assert(is_tdm_stage<TdmStageConfig>::value, "TdmStageConfig must be a TdmStage");
+    using epilogue = ck_tile::
+        TdmEpilogueStaged<Problem, TdmStageConfig::MIterPerStage, TdmStageConfig::NumStageBuffers>;
 };
 
 template <GemmPipelineType PT, typename Enable = void>
@@ -263,6 +314,25 @@ struct PipelineDefaultParams<PT, std::enable_if_t<is_tdm_pipeline(PT)>>
     static constexpr bool PadK       = false;
     static constexpr bool Preshuffle = false;
 };
+
+// Skips the current test unless the device has hardware named barriers (gfx1250). A skip
+// reports as PASS; CK_TILE_REQUIRE_GFX125=1 turns it into a failure on runners that are meant to
+// be gfx1250. A macro because GTEST_SKIP/FAIL return from the calling test function.
+#define CK_TILE_SKIP_UNLESS_GFX125()                                                    \
+    do                                                                                  \
+    {                                                                                   \
+        if(!ck_tile::is_gfx125_supported())                                             \
+        {                                                                               \
+            const char* ck_tile_required_ = std::getenv("CK_TILE_REQUIRE_GFX125");      \
+            if(ck_tile_required_ != nullptr && ck_tile_required_[0] == '1')             \
+            {                                                                           \
+                FAIL() << "CK_TILE_REQUIRE_GFX125=1 but the device reports '"           \
+                       << ck_tile::get_device_name() << "'";                            \
+            }                                                                           \
+            GTEST_SKIP() << "hardware named barriers require gfx1250; device reports '" \
+                         << ck_tile::get_device_name() << "'";                          \
+        }                                                                               \
+    } while(false)
 
 template <typename Tuple, typename Derived>
 class TestCkTileGemmPipeline : public ::testing::Test
@@ -319,6 +389,12 @@ class TestCkTileGemmPipeline : public ::testing::Test
         16,
         ck_tile::sequence<PipelineType == GemmPipelineType::CompAsyncEightWaves ? 4 : 2, 2, 1>>;
 
+    // TDM pipelines: the TdmStage in tuple element 17 (default: TdmEpilogue). An element 17 of any
+    // other type is a derived fixture's own data and keeps the default.
+    using TdmStageElement = ck_tile::tuple_element_or_default_t<Tuple, 17, TdmStageFullTile>;
+    using TdmStageConfig =
+        std::conditional_t<is_tdm_stage<TdmStageElement>::value, TdmStageElement, TdmStageFullTile>;
+
     protected:
     // The kernel type the fixture instantiates for a given pad/preshuffle combination.
     // Factored out of invoke_gemm so host-side argument-validation tests can reach
@@ -366,8 +442,7 @@ class TestCkTileGemmPipeline : public ::testing::Test
              PipelineType == GemmPipelineType::CompAsync ||
              PipelineType == GemmPipelineType::CompAsyncV2 ||
              PipelineType == GemmPipelineType::CompTDMV1 ||
-             PipelineType == GemmPipelineType::CompTDMV2 ||
-             PipelineType == GemmPipelineType::CompTDMProducerConsumer);
+             PipelineType == GemmPipelineType::CompTDMV2 || is_tdm_producer_consumer(PipelineType));
 
 #if defined(CK_USE_GFX1250)
         static constexpr bool TransposeC =
@@ -458,7 +533,8 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                              1,                /*BlockedXDLN_PerWarp_*/
                                              DoubleSmemBuffer, /*DoubleSmemBuffer*/
                                              AComputeDataType, /*AComputeDataType_*/
-                                             BComputeDataType /*BComputeDataType_*/>>::epilogue;
+                                             BComputeDataType /*BComputeDataType_*/>,
+            TdmStageConfig>::epilogue;
 
         using Kernel = ck_tile::GemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
     };
@@ -549,21 +625,9 @@ class TestCkTileGemmPipeline : public ::testing::Test
         {
             GTEST_SKIP() << "Unsupported data type combination for gemm pipeline test.";
         }
-        if constexpr(PipelineType == GemmPipelineType::CompTDMProducerConsumer)
+        if constexpr(is_tdm_producer_consumer(PipelineType))
         {
-            if(!ck_tile::is_gfx125_supported())
-            {
-                // A skip reports as PASS; CK_TILE_REQUIRE_GFX125=1 turns it into a failure on
-                // runners that are meant to be gfx1250.
-                const char* required = std::getenv("CK_TILE_REQUIRE_GFX125");
-                if(required != nullptr && required[0] == '1')
-                {
-                    FAIL() << "CK_TILE_REQUIRE_GFX125=1 but the device reports '"
-                           << ck_tile::get_device_name() << "'";
-                }
-                GTEST_SKIP() << "hardware named barriers require gfx1250; device reports '"
-                             << ck_tile::get_device_name() << "'";
-            }
+            CK_TILE_SKIP_UNLESS_GFX125();
         }
         // TDM pipelines use cluster launch (multicast), not supported on gfx1250 A0 (revision 0)
         if constexpr(PipelineType == GemmPipelineType::CompTDMV1 ||
@@ -587,11 +651,15 @@ class TestCkTileGemmPipeline : public ::testing::Test
                                 "gfx1250 asicRevision=0.";
             }
         }
-        // for TDM it used tdm_epilogue which don't support split-k
-        if constexpr(PipelineType == GemmPipelineType::CompV4 ||
-                     PipelineType == GemmPipelineType::CompAsyncV2 ||
-                     PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v || IsTdm ||
-                     std::is_same_v<BDataType, ck_tile::pk_int4_t>)
+        // TdmEpilogue cannot accumulate, so TDM pipelines only split K with a CShuffleEpilogue.
+        if constexpr(PipelineType == GemmPipelineType::CompTDMProducerConsumerCShuffle)
+        {
+            k_batches_ = {1, 2, 4};
+        }
+        else if constexpr(PipelineType == GemmPipelineType::CompV4 ||
+                          PipelineType == GemmPipelineType::CompAsyncV2 ||
+                          PipelineType == GemmPipelineType::CompAsyncEightWaves || IsAsync_v ||
+                          IsTdm || std::is_same_v<BDataType, ck_tile::pk_int4_t>)
         {
             // Only do k_batch = 1 when pipeline is CompV4, BDataType is I4 or async pipeline.
             // CompAsyncV2 pins k_batch = 1 so the tests control num_loop (tail) exactly.
@@ -622,6 +690,11 @@ class TestCkTileGemmPipeline : public ::testing::Test
             {
                 // skip test when split k' number is not evenly distributed
                 if((K / K_Tile) % kb != 0)
+                {
+                    continue;
+                }
+                // A TDM pipeline cannot pad K, so every split must hold whole K tiles.
+                if(IsTdm && kb > 1 && K % (K_Tile * kb) != 0)
                 {
                     continue;
                 }

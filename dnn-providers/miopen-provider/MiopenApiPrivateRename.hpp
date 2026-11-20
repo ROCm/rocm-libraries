@@ -1,29 +1,31 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 //
-// Symbol-rename header for the hipDNN MIOpen provider, force-included (via the
-// compiler's -include flag, see CMakeLists.txt) into every provider and provider-
-// test translation unit ONLY when the provider links MIOpen's private
-// implementation library (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON in the MIOpen build,
-// detected as TARGET MIOpen_private).
+// GENERATED FILE. Do not edit.
+// Source: projects/miopen/include/miopen/miopen.h and
+//         projects/miopen/src/include/miopen/miopen_internal.h
+// Regenerate: python3 projects/miopen/script/generate_wrapper_sources.py
+//
+// Symbol-rename header for the hipDNN MIOpen provider, force-included (-include,
+// see CMakeLists.txt) into every provider and provider-test translation unit
+// only when the provider links MIOpen's private library
+// (MIOPEN_ENABLE_HIPDNN_WRAPPER=ON in the MIOpen build, detected as
+// TARGET MIOpen_private).
 //
 // Each #define renames a public MIOpen C entry point to its _impl form, so the
-// provider — whose sources call the public names — binds the private
-// implementation entry points exported by libMIOpen_private.so, without routing
-// back out through the public wrapper. When the split is OFF this
-// header is not force-included, the provider sources are left untouched, and they
-// call the public C API exactly as before the split.
+// provider, whose sources call the public names, binds the private library's
+// entry points directly instead of going back through the public wrapper. With
+// the split off, this header is not force-included and the provider calls the
+// public C API exactly as before.
 //
-// This mirrors the library's own src/private/miopen_private_rename.h and MUST be
-// kept in sync with it — it renames exactly the entry points declared in
-// <miopen/miopen.h>, no more and no less. It contains only preprocessor
-// #defines, so it is safe to force-include across all provider sources.
-//
-// The three miopenConvolution*GetWorkSpaceSizeRange entry points are
-// deliberately NOT renamed here. They are exported with MIOPEN_EXPORT from
-// src/convolution_api.cpp but never declared in <miopen/miopen.h>, so the split
-// leaves them on libMIOpen_private.so under their original, un-suffixed names.
-// The provider forward-declares them in MiopenApi.hpp and binds them directly.
+// It is generated from the same list as the library's own
+// src/private/miopen_private_rename.h, so the two cannot differ: it renames
+// every entry point declared in <miopen/miopen.h> or in the library's
+// src/include/miopen/miopen_internal.h, which includes the three
+// miopenConvolution*GetWorkSpaceSizeRange entry points that the provider
+// declares itself in MiopenApi.hpp. Those declarations are renamed with the rest
+// and bind the private library's _impl symbols. It holds only #defines, so it is
+// safe to force-include everywhere.
 #pragma once
 
 #define miopenGetErrorString miopenGetErrorString_impl
@@ -302,3 +304,13 @@
 #define miopenMultiMarginLossForward miopenMultiMarginLossForward_impl
 #define miopenSetTuningPolicy miopenSetTuningPolicy_impl
 #define miopenGetTuningPolicy miopenGetTuningPolicy_impl
+#define miopenConvolutionABBackwardWeightsGetWorkSpaceSize \
+    miopenConvolutionABBackwardWeightsGetWorkSpaceSize_impl
+#define miopenConvolutionForwardGetWorkSpaceSizeRange \
+    miopenConvolutionForwardGetWorkSpaceSizeRange_impl
+#define miopenConvolutionBackwardDataGetWorkSpaceSizeRange \
+    miopenConvolutionBackwardDataGetWorkSpaceSizeRange_impl
+#define miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange \
+    miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange_impl
+#define miopenHiddenSetConvolutionFindMode miopenHiddenSetConvolutionFindMode_impl
+#define miopenHiddenGetConvolutionFindMode miopenHiddenGetConvolutionFindMode_impl

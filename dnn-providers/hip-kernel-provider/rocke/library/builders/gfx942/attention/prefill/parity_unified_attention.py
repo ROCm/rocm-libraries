@@ -774,7 +774,7 @@ def _build_kernel(s: Shape):
     """
     from rocke import compile_kernel
     from kernels import build_unified_attention_2d_tiled, supports_tiled_2d
-    from kernels.common.attention_unified import _attn_signature
+    from kernels.common.attention_unified import _tiled_2d_signature
     from rocke.runtime import KernelLauncher
 
     spec, config = _build_spec(s)
@@ -810,9 +810,7 @@ def _build_kernel(s: Shape):
     launcher = KernelLauncher(
         hsaco=artifact.hsaco,
         kernel_name=artifact.kernel_name,
-        signature=_attn_signature(
-            s.dtype, include_bt_stride=True, include_qq_bias_stride=True
-        ),
+        signature=_tiled_2d_signature("gfx942", s.dtype),
         cache_key=("gfx942_attn_example", spec.kernel_name(), config),
     )
     return launcher, spec, config

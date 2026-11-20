@@ -67,11 +67,12 @@ def _derive_states(cfg_path):
 # Select StreamK explicitly so the inherited DataParallel policy cannot cause
 # an unrelated rejection before the cluster guard is reached.
 @pytest.mark.parametrize("assignment", ["DynamicWorkQueue", "Hybrid"])
-def test_sk45_cluster_rejected(tmp_path, assignment):
+@pytest.mark.parametrize("cluster", [[4, 1], [1, 4]])
+def test_sk45_cluster_rejected(tmp_path, assignment, cluster):
     """StreamK dynamic/hybrid + ClusterDim != [1,1] derives no solutions."""
     cfg = _write_variant(tmp_path, f"{assignment}_cluster.yaml",
                          {"TileProcessingStrategy": ["StreamK"],
-                          "WorkAssignment": [assignment]})
+                          "WorkAssignment": [assignment], "ClusterDim": [cluster]})
     assert _derive_states(cfg) == [], (
         f"StreamK/{assignment} with ClusterDim != [1,1] must be rejected "
         "(cluster support requires StaticGrid)")

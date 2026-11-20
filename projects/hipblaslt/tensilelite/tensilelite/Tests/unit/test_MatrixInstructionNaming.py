@@ -296,6 +296,9 @@ def test_restores_the_kernel_after_the_query(monkeypatch, unpinned):
         def getVgprMsb(self):
             return 0
 
+        def getForceScaledWMMA(self):
+            return real.getForceScaledWMMA()
+
         def setKernel(self, isa, wavefrontSize):
             self.setKernelCalls.append((isa, wavefrontSize))
             real.setKernel(isa, wavefrontSize)

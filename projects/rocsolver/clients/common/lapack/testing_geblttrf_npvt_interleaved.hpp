@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -401,7 +401,7 @@ void geblttrf_npvt_interleaved_getError(const rocblas_handle handle,
             // IT MIGHT BE REVISITED IN THE FUTURE)
             // using frobenius norm
             err = norm_error('F', n, n, n, M.data(), MRes.data());
-            *max_err = err > *max_err ? err : *max_err;
+            *max_err = rocblas_max_nan(err, *max_err);
         }
     }
 }

@@ -233,7 +233,7 @@ class TestConvFwdGroupMergeGate(unittest.TestCase):
         # The C++ engine binding builds from this dict. Without group_merge it
         # silently emits an unmerged kernel; without problem.groups every
         # grouped spec contradicts its own groups field.
-        from rocke.core.backend import conv_implicit_gemm_spec_to_dict
+        from kernels.conv.engine_bridge import conv_implicit_gemm_spec_to_dict
 
         d = conv_implicit_gemm_spec_to_dict(self._spec(group_merge=8))
         self.assertEqual(d["group_merge"], 8)

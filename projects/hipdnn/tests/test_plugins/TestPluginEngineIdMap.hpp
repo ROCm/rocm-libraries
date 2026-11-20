@@ -84,6 +84,19 @@ HIPDNN_MAP_TO_ID(LyingEngineNamePluginErrorStatus, -28);
 // this id. See TestMismatchedNamePlugin.cpp.
 HIPDNN_MAP_TO_ID(MismatchedNamePlugin, -29);
 
+// No-solver fake: applicable for every graph, but plan creation always fails with
+// HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR. See TestNoSolverPlugin.cpp.
+HIPDNN_MAP_TO_ID(NoSolverPlugin, -31);
+
+// Resource-failure fake: applicable for every graph, but plan creation always fails with
+// HIPDNN_PLUGIN_STATUS_ALLOC_FAILED. See TestResourceFailPlugin.cpp.
+HIPDNN_MAP_TO_ID(ResourceFailPlugin, -32);
+
+// cuDNN v8 compatibility layer fake: E1 exposes one cuDNN-projectable knob plus hidden ones and
+// serializes plans; E2 fails at execution-context creation (plan build).
+HIPDNN_MAP_TO_ID(CudnnCompatibilityV8Plugin, -33);
+HIPDNN_MAP_TO_ID(CudnnCompatibilityV8PluginContextFails, -34);
+
 namespace hipdnn_tests::plugin_constants
 {
 // Engine names reported by the named test plugins. All are deliberately absent from

@@ -20,9 +20,13 @@ Programmatic use (for attention specs, use the library-side driver
     probe_occupancy([(label, kernel_def, waves_per_wg) for ...])
 
 Notes:
-- Occupancy math is intentionally conservative: gfx950 VGPR allocation
-  granularity is 16 VGPRs and waves-per-EU is a soft hint, not a hard
-  cap. Use this for relative ranking, not for absolute predictions.
+- Occupancy math is intentionally conservative. VGPRs are allocated in
+  steps of 8 on gfx90a, gfx942 and gfx950, as in the compiler's own
+  occupancy report, but this script gives the AGPRs a separate pool,
+  while the compiler counts them in the same 512-entry file (and the
+  notes' ``.vgpr_count`` already includes them). Waves-per-EU is a soft
+  hint, not a hard cap. Use this for relative ranking, not for absolute
+  predictions.
 - For absolute numbers, prefer rocprof's ``OccupancyPct`` column or the
   ``ROCm Compute Profiler`` reports — but those need a live kernel
   launch; this script is static, runs in <1 s per spec, and works in
@@ -37,6 +41,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -68,6 +73,7 @@ def _bootstrap_rocke() -> None:
 
 _bootstrap_rocke()
 
+from rocke.core.lower_llvm import ArchDomainWarning
 from rocke.helpers.compile import compile_kernel  # noqa: E402
 
 
@@ -95,7 +101,7 @@ ARCH_GFX950 = ArchCaps(
     max_waves_per_cu=32,
     vgpr_per_cu=512 * 4,  # 512 VGPRs/SIMD × 4 SIMDs (per CU sum)
     agpr_per_cu=256 * 4,
-    vgpr_alloc_granularity=16,
+    vgpr_alloc_granularity=8,
     waves_per_simd=8,
     simds_per_cu=4,
 )
@@ -105,7 +111,7 @@ ARCH_GFX942 = ArchCaps(  # MI300X
     max_waves_per_cu=32,
     vgpr_per_cu=512 * 4,
     agpr_per_cu=256 * 4,
-    vgpr_alloc_granularity=16,
+    vgpr_alloc_granularity=8,
     waves_per_simd=8,
     simds_per_cu=4,
 )
@@ -297,10 +303,11 @@ def probe_occupancy(
     print_header: bool = True,
     waves_per_eu_hint: int | None = None,
 ) -> list[dict]:
-    """Compile each entry and report occupancy.
+    """Compile each entry for ``arch.name`` and report occupancy.
 
     Each ``entries`` item is ``(label, kernel_def, waves_per_workgroup)``.
-    Returns a list of dicts with the parsed numbers, one per entry.
+    Returns a list of dicts with the parsed numbers, one per entry. Caps exist
+    for CDNA targets only (``ARCH_BY_NAME``).
     """
     rows: list[dict] = []
     if print_header:
@@ -311,7 +318,11 @@ def probe_occupancy(
         print("-" * 96)
     for label, kdef, waves_per_wg in entries:
         try:
-            artifact = compile_kernel(kdef)
+            # A kernel that needs an intrinsic the target provably can't lower
+            # would otherwise abort the process inside LLVM; fail just this entry.
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", ArchDomainWarning)
+                artifact = compile_kernel(kdef, arch=arch.name)
         except Exception as e:  # noqa: BLE001
             print(f"{label:<28}  BUILD-FAIL: {type(e).__name__}: {e}")
             continue

@@ -55,7 +55,8 @@ private:
     void setBatchInfo(
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tA,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tB,
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC);
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tC,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tFinal);
 
     void setEpilogue(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes* activAttr,
                      hipDataType biasDataType);

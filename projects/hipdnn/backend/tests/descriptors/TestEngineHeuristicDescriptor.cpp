@@ -77,6 +77,10 @@ public:
         EXPECT_CALL(*_mockHandle, getHeuristicPluginResourceManager())
             .WillRepeatedly(Return(_mockHeuristicPluginResourceManager));
         EXPECT_CALL(*_mockHandle, getStream()).WillRepeatedly(Return(_testStream));
+        // Result engines that are materialized through EngineDescriptor::finalize() re-check
+        // applicability of their own engine; every candidate these tests list is applicable.
+        ON_CALL(*_mockEnginePluginResourceManager, isEngineApplicable(_, _))
+            .WillByDefault(Return(true));
 
         // Set up mock heuristic plugin automatically when graph is set
         setupMockHeuristicPlugin();

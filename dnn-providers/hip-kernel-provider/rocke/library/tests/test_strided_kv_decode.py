@@ -16,8 +16,10 @@ from types import SimpleNamespace
 import pytest
 
 from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayout
-from kernels.common.attention_unified import _3d_signature
+from kernels.common.attention_unified import _tiled_3d_signatures
 from rocke.core.verify import verify
+
+from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
 
 @pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
@@ -105,7 +107,7 @@ def test_strided_segment_signature_and_identity(arch, dtype):
     assert strided.kernel_name() == paged.kernel_name() + "_stridedkv"
     kernel = module.build_unified_attention_3d_tiled(strided, arch=arch)
     assert not verify(kernel)
-    signature = _3d_signature(dtype, strided_kv=True)
+    signature, _ = _tiled_3d_signatures(arch, dtype, strided_kv=True)
     assert [p.name for p in kernel.params] == [p["name"] for p in signature]
     assert [p.type.name.replace(" ", "") for p in kernel.params] == [
         p["type"].replace(" ", "") for p in signature
@@ -201,7 +203,6 @@ def test_native_strided_builder_matches_python(arch, flavor, waves_per_eu, monke
     from dataclasses import asdict
 
     engine = pytest.importorskip("rocke_engine")
-    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     monkeypatch.setenv("ROCKE_LLVM_FLAVOR", flavor)
     module = import_module(f"kernels.{arch}.attention_tiled_3d")
@@ -219,20 +220,7 @@ def test_native_strided_builder_matches_python(arch, flavor, waves_per_eu, monke
         kv_layout="strided",
         waves_per_eu=waves_per_eu,
     )
-    kernel = module.build_unified_attention_3d_tiled(spec, arch=arch)
-    expected = _lower_kernel_to_llvm_python(kernel, arch=arch)
-    if arch == "gfx950":
-        reduce = module.UnifiedAttentionReduceTiledSpec(
-            head_size=64,
-            num_query_heads=4,
-            num_kv_heads=2,
-            dtype="fp16",
-            num_segments=4,
-            waves_per_eu=waves_per_eu,
-        )
-        expected += _lower_kernel_to_llvm_python(
-            module.build_unified_attention_reduce_tiled(reduce, arch=arch), arch=arch
-        )
+    expected = lower_like_tiled_3d_binding(spec, arch)
     actual = getattr(engine, f"{arch}_attention_tiled_3d_lower_llvm")(
         asdict(spec), arch
     )
@@ -283,11 +271,11 @@ def test_strided_mask_uses_integer_protocol(arch, mask):
 @pytest.mark.parametrize("block_size", [16, 32, 64])
 def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     from dispatch.attention import dispatch_attention
-    from dispatch.attention.common import _problem
+    from dispatch.attention.common import attention_problem
     from kernels.common import attention_unified as au
 
     req = replace(_strided_request(arch), kv_block_size=block_size)
-    problem = _problem(req)
+    problem = attention_problem(req)
     # Off-device selection must not use the host's architecture policy.
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx1250")
     selected = dispatch_attention(req).spec
@@ -310,12 +298,216 @@ def test_strided_selection_uses_runtime_policy(arch, block_size, monkeypatch):
     assert explicit.waves_per_eu == explicit_reduce.waves_per_eu == 3
 
 
-@pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
-def test_strided_spec_policy_rejects_other_arches(arch):
-    from dispatch.attention.common import _problem
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_strided_dispatch_follows_the_kernel_gate(arch):
+    """Head size and GQA ratio are the kernel's decision: dispatch admits a
+    shape exactly when the strided runner's own 3D gate does."""
+    from dispatch.attention.common import attention_problem
+    from dispatch.attention.strided_decode import make_candidate
     from kernels.common import attention_unified as au
 
-    problem = _problem(_strided_request("gfx942"))
+    candidate = make_candidate()
+    for ratio in (*range(1, 17), 32):
+        for head_size in (64, 96, 128, 192, 256):
+            req = replace(
+                _strided_request(arch),
+                nhead_q=2 * ratio,
+                hdim_q=head_size,
+                hdim_v=head_size,
+            )
+            ok, why = au._explicit_path_supported(
+                attention_problem(req), None, "3d", arch
+            )
+            assert candidate.admits(req) == (ok, "supported" if ok else why), (
+                ratio,
+                head_size,
+            )
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize(
+    "changes",
+    [
+        dict(nhead_q=10),
+        dict(nhead_q=12),
+        dict(nhead_q=24),
+        dict(hdim_q=192, hdim_v=192),
+    ],
+)
+def test_strided_dispatch_admits_what_the_kernel_gate_admits(
+    arch, changes, monkeypatch
+):
+    """GQA 5/6/12 and D192 reach the strided kernel through dispatch as soon
+    as the kernel gate admits them; dispatch keeps no list of its own."""
+    from dispatch.attention import dispatch_attention
+    from dispatch.attention import strided_decode
+
+    req = replace(_strided_request(arch), **changes)
+    monkeypatch.setattr(
+        strided_decode, "_explicit_path_supported", lambda *a: (True, "kernel ok")
+    )
+    result = dispatch_attention(req)
+    assert result.candidate.name == "attention_strided_decode"
+    segment = result.spec.kernel_spec
+    assert segment.kv_layout == "strided"
+    assert segment.head_size == req.hdim_q
+    assert segment.num_query_heads == req.nhead_q
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_strided_dispatch_rejects_what_the_kernel_gate_rejects(arch, monkeypatch):
+    from dispatch.attention import dispatch_attention
+    from dispatch.attention import strided_decode
+
+    req = _strided_request(arch)
+    gate_calls = []
+
+    def gate(problem, tuning_spec, kind, gate_arch):
+        gate_calls.append((tuning_spec, kind, gate_arch))
+        return False, "kernel declines this shape"
+
+    monkeypatch.setattr(strided_decode, "_explicit_path_supported", gate)
+    assert strided_decode.make_candidate().admits(req) == (
+        False,
+        "kernel declines this shape",
+    )
+    assert gate_calls == [(None, "3d", arch)]
+    with pytest.raises(ValueError):
+        dispatch_attention(req)
+
+
+def _dense_decode_request(arch, **changes):
+    return replace(_strided_request(arch), kv_layout="paged", layout="dense", **changes)
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+@pytest.mark.parametrize("tensor_layout", ["auto", "bshd", "bhsd"])
+@pytest.mark.parametrize("mask", [0, 2])
+def test_dense_decode_dispatches_to_strided(arch, tensor_layout, mask):
+    """A single-row contiguous request takes the strided decode kernel with
+    the spec a ``kv_layout='strided'`` request of the same shape gets."""
+    from dispatch.attention import (
+        attention_candidates,
+        attention_execution_candidates,
+        dispatch_attention,
+    )
+
+    req = _dense_decode_request(arch, tensor_layout=tensor_layout, mask_type=mask)
+    result = dispatch_attention(req)
+    assert result.candidate.name == "attention_strided_decode"
+    strided = dispatch_attention(replace(_strided_request(arch), mask_type=mask))
+    assert result.spec == strided.spec
+    assert result.spec.kernel_spec.kv_layout == "strided"
+    for candidates in (attention_candidates(), attention_execution_candidates()):
+        assert [c.name for c in candidates if c.admits(req)[0]] == [
+            "attention_strided_decode"
+        ]
+    replay = dispatch_attention(result.request)
+    assert replay.candidate is result.candidate
+    assert replay.spec == result.spec
+    assert replay.kernel_id == result.kernel_id
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx950"])
+def test_dense_decode_route_keeps_strided_limits(arch):
+    from dispatch.attention.strided_decode import make_candidate
+
+    candidate = make_candidate()
+    req = _dense_decode_request(arch)
+    assert candidate.admits(req)[0]
+    for changes in (
+        dict(seqlen_q=2),
+        dict(mask_type=1),
+        dict(use_sinks=True),
+        dict(use_fp8=True),
+        dict(layout="paged"),
+        dict(layout="ragged"),
+        dict(arch="gfx1250"),
+    ):
+        assert not candidate.admits(replace(req, **changes))[0], changes
+    # Without the contiguous layout a paged request stays on the paged kernels.
+    assert not candidate.admits(replace(req, layout="auto"))[0]
+
+
+def _dense_decode_tensors(order, *, batch=3, heads_q=8, heads_k=2, seqlen=65, dim=128):
+    torch = pytest.importorskip("torch")
+
+    def make(heads, rows):
+        shape = (
+            (batch, rows, heads, dim) if order == "bshd" else (batch, heads, rows, dim)
+        )
+        return torch.zeros(shape, dtype=torch.bfloat16)
+
+    return {
+        "q": make(heads_q, 1),
+        "k": make(heads_k, seqlen),
+        "v": make(heads_k, seqlen),
+        "out": make(heads_q, 1),
+    }
+
+
+@pytest.mark.parametrize("order", ["bshd", "bhsd"])
+def test_dense_decode_binding_passes_strided_views(order, monkeypatch):
+    torch = pytest.importorskip("torch")
+
+    from dispatch.attention import dispatch_attention
+    from kernels.common import attention_unified as au
+
+    req = _dense_decode_request("gfx950", tensor_layout=order)
+    result = dispatch_attention(req)
+    tensors = _dense_decode_tensors(order)
+    calls = []
+    monkeypatch.setattr(
+        au, "run_unified_attention_torch", lambda **kw: calls.append(kw)
+    )
+    binding = result.candidate.bind_torch(result.request, result.spec, tensors)
+    binding.launch()
+    (call,) = calls
+    assert call["kv_layout"] == "strided"
+    assert call["block_table"] is None
+    assert call["tuning_spec"] == result.spec
+    for name in ("q", "out"):
+        assert tuple(call[name].shape) == (3, 8, 128)
+        assert call[name].data_ptr() == tensors[name].data_ptr()
+    for name in ("k", "v"):
+        view = call[name]
+        assert tuple(view.shape) == (3, 2, 65, 128)
+        assert view.data_ptr() == tensors[name].data_ptr()
+        expected = tensors[name].transpose(1, 2) if order == "bshd" else tensors[name]
+        assert view.stride() == expected.stride()
+    assert call["cu_seqlens_q"].dtype == torch.int32
+    assert call["cu_seqlens_q"].tolist() == [0, 1, 2, 3]
+    assert call["seqused_k"].dtype == torch.int32
+    assert call["seqused_k"].tolist() == [65, 65, 65]
+
+
+@pytest.mark.parametrize(
+    "mutate, match",
+    [
+        (lambda t: t.pop("v"), "missing attention tensors: v"),
+        (lambda t: t.update(seqused_k=t["q"]), "unsupported dense decode tensors"),
+        (lambda t: t.update(k=t["k"][:, :64]), "k must have BSHD shape"),
+        (lambda t: t.update(out=t["out"][:2]), "out must have the shape of q"),
+        (lambda t: t.update(q=t["q"][:, :, :4]), "q shape must be"),
+    ],
+)
+def test_dense_decode_binding_rejects_bad_tensors(mutate, match):
+    from dispatch.attention import dispatch_attention
+
+    req = _dense_decode_request("gfx950", tensor_layout="bshd")
+    result = dispatch_attention(req)
+    tensors = _dense_decode_tensors("bshd")
+    mutate(tensors)
+    with pytest.raises(ValueError, match=match):
+        result.candidate.bind_torch(result.request, result.spec, tensors)
+
+
+@pytest.mark.parametrize("arch", ["gfx1250", "gfx1151", "gfx90a"])
+def test_strided_spec_policy_rejects_other_arches(arch):
+    from dispatch.attention.common import attention_problem
+    from kernels.common import attention_unified as au
+
+    problem = attention_problem(_strided_request("gfx942"))
     with pytest.raises(ValueError, match="targets gfx942/gfx950"):
         au._strided_3d_specs_from_problem(problem, arch=arch)
 
@@ -323,14 +515,14 @@ def test_strided_spec_policy_rejects_other_arches(arch):
 @pytest.fixture
 def strided_binding_case():
     from dispatch.attention import dispatch_attention
-    from dispatch.attention.common import _problem
+    from dispatch.attention.common import attention_problem
 
     req = _strided_request("gfx942")
     result = dispatch_attention(req)
     tensors = {
         name: object() for name in ("q", "k", "v", "out", "cu_seqlens_q", "seqused_k")
     }
-    tensors["problem"] = _problem(req)
+    tensors["problem"] = attention_problem(req)
     return req, result, tensors
 
 
@@ -440,6 +632,13 @@ def test_strided_runtime_rejects_incoherent_specs(
     spec = replace(
         result.spec, **{component: replace(getattr(result.spec, component), **changes)}
     )
+
+    class DeviceAccessMustComeLater:
+        @property
+        def device(self):
+            raise AssertionError("q.device inspected before strided spec validation")
+
+    tensors["q"] = DeviceAccessMustComeLater()
     # Validate before inspecting device tensors or compiling/launching a kernel.
     with pytest.raises(ValueError, match="disagrees"):
         au.run_unified_attention_torch(
@@ -449,6 +648,52 @@ def test_strided_runtime_rejects_incoherent_specs(
             softcap=0,
             tuning_spec=spec,
             kv_layout="strided",
+        )
+
+
+def test_strided_lse_refusal_precedes_q_device_access(
+    strided_binding_case, monkeypatch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    tensors["problem"] = replace(tensors["problem"], emit_lse=True)
+
+    class DeviceAccessMustComeLater:
+        @property
+        def device(self):
+            raise AssertionError("q.device inspected before strided LSE refusal")
+
+    tensors["q"] = DeviceAccessMustComeLater()
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
+    with pytest.raises(NotImplementedError, match="LSE output"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            lse=object(),
+            kv_layout="strided",
+        )
+
+
+def test_additive_bias_does_not_normalize_q_without_device(
+    strided_binding_case, monkeypatch
+):
+    from kernels.common import attention_unified as au
+
+    _, _, tensors = strided_binding_case
+    tensors["problem"] = replace(tensors["problem"], use_additive_bias=True)
+    monkeypatch.setattr(au, "_resolve_attention_arch", lambda: "gfx942")
+    with pytest.raises(AttributeError, match="device"):
+        au.run_unified_attention_torch(
+            **tensors,
+            block_table=None,
+            softmax_scale=0.125,
+            softcap=0,
+            additive_bias=object(),
+            additive_bias_sq_stride=0,
+            kv_layout="paged",
         )
 
 
@@ -550,11 +795,11 @@ def test_strided_runtime_rejects_missing_semantic_field(
     "arch,path", [("gfx942", "2d"), ("gfx950", "2d"), ("gfx1250", "3d")]
 )
 def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
-    from dispatch.attention.common import AttentionTuningSpec, _problem
+    from dispatch.attention.common import AttentionTuningSpec, attention_problem
     from kernels.common import attention_unified as au
 
     monkeypatch.setattr(au, "_resolve_attention_arch", lambda: arch)
-    problem = _problem(
+    problem = attention_problem(
         replace(
             _strided_request(arch), kv_layout="paged", hdim_q=64, hdim_v=64, nhead_q=16
         )

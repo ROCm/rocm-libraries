@@ -175,6 +175,10 @@ def _mask_from_attributes(
             raise SystemExit(
                 f"FAIL: {path}: invalid {name} {value!r}; expected null or integer >= -1"
             )
+    # left_bound follows cuDNN (L keeps the L keys ending at the diagonal); hipDNN rejects 0
+    # (SdpaSemanticsRegister SEM-005).
+    if left == 0:
+        raise SystemExit(f"FAIL: {path}: invalid left_bound 0; expected -1 or >= 1")
     causal = attrs.get("causal_mask")
     causal_bottom_right = attrs.get("causal_mask_bottom_right")
     if causal and causal_bottom_right:
@@ -202,7 +206,9 @@ def _mask_from_attributes(
             "mask_type": _causal_mask_type(bottom_right, seqlen_q, seqlen_k),
             "sliding_window": 0,
         }
-    return _mask_fields(SLIDING_WINDOW, left + 1)
+    # hipDNN's left_bound and the request's sliding_window both count the keys kept,
+    # diagonal included (cuDNN semantics), so the width passes through unchanged.
+    return _mask_fields(SLIDING_WINDOW, left)
 
 
 #: Every source spelling of a dtype -> the rocKE spec's spelling. An unmapped dtype
@@ -981,11 +987,12 @@ def _shape_name(shape: dict, index: int) -> str:
 def write_query_csv(shapes: list[dict], path: Path) -> dict:
     """The mined corpus as the `q.<parameter>` columns `corpus_gen --model-shapes` reads.
 
-    Narrows to what `sdpa_fwd` can express (no sliding window, asymmetric head dim,
-    or sinks) and counts each drop by reason. `q.alignment` is `bottom_right` for a
-    bottom-right causal shape and `top_left` otherwise; it and `q.generate_stats`
-    (always `false`: sources record inference forwards) are always written because
-    argument resolution requires every parameter it reads.
+    Narrows to what `sdpa_fwd` can express (no sliding window or asymmetric head dim)
+    and counts each drop by reason. `q.alignment` is `bottom_right` for a bottom-right
+    causal shape and `top_left` otherwise; it, `q.generate_stats` (always `false`: sources
+    record inference forwards) and `q.form` (`sink` for a shape with attention sinks,
+    `plain` otherwise) are always written because argument resolution requires every
+    parameter it reads.
     """
     columns = [
         "name",
@@ -1000,6 +1007,7 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
         "q.alignment",
         "q.generate_stats",
         "q.dtype",
+        "q.form",
     ]
     dropped: dict[str, int] = {}
     written = 0
@@ -1012,8 +1020,6 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
                 reason = "windowed mask, which sdpa_fwd declares no parameter for"
             elif shape["hdim_q"] != shape["hdim_v"]:
                 reason = "asymmetric head dims (MLA), one head_dim declared"
-            elif shape.get("use_sinks"):
-                reason = "attention sinks, which sdpa_fwd declares no parameter for"
             if reason is not None:
                 dropped[reason] = dropped.get(reason, 0) + 1
                 continue
@@ -1036,6 +1042,7 @@ def write_query_csv(shapes: list[dict], path: Path) -> dict:
                     ),
                     "false",
                     shape["dtype"],
+                    "sink" if shape.get("use_sinks") else "plain",
                 ]
             )
             written += 1

@@ -147,7 +147,13 @@ inline std::vector<BN2DTestCase> Network2DLarge()
         // fallback in GetHeuristicsConfigTuningNHWC (which selects vectorsize 8).
         // Verified end-to-end when run under tuning (MIOPEN_FIND_ENFORCE=SEARCH).
         {8, 24, 56, 56, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
-        {8, 24, 56, 56, miopen::batchnorm::Direction::Backward, 0, 1}
+        {8, 24, 56, 56, miopen::batchnorm::Direction::Backward, 0, 1},
+        // NHWC mixed precision, C/vectorsize (12/4 = 3) is odd and N is too small to hold the
+        // stash in the N dimension: the stash must not use the 'odd' consecutive layout.
+        {2, 12, 16, 16, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        {2, 12, 16, 16, miopen::batchnorm::Direction::Backward, 1, 0},
+        {2, 12, 64, 64, miopen::batchnorm::Direction::ForwardTraining, 1, 1},
+        {2, 12, 64, 64, miopen::batchnorm::Direction::Backward, 1, 0}
         };
     // clang-format on
 }

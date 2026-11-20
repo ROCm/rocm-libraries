@@ -161,15 +161,6 @@ static rocke_value_t* fh_mfma_32x32x16(rocke_gfx950_attn2d_build_ctx_t* ctx,
     return rocke_mfma_attn_mfma_32x32x16_for_dtype(ctx->b, ctx->dtype, a, bv, c);
 }
 
-static rocke_value_t* fh_read_k8_mfma_operand(rocke_gfx950_attn2d_build_ctx_t* ctx,
-                                              rocke_value_t* buf,
-                                              rocke_value_t* k_row,
-                                              rocke_value_t* k_off)
-{
-    rocke_value_t* idx[3] = {buf, k_row, k_off};
-    return rocke_b_smem_load_vN(ctx->b, ctx->K_lds, idx, 3, ctx->dtype, 8);
-}
-
 static rocke_value_t* fh_apply_softcap(rocke_gfx950_attn2d_build_ctx_t* ctx, rocke_value_t* s)
 {
     return rocke_apply_softcap_log2(ctx->b, s, ctx->softcap_p);
@@ -243,7 +234,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* qh_mod = rocke_b_mod(b, row, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* qh_r = rocke_b_add(b, qh_mul, qh_mod);
         rocke_value_t* row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
         rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
         rocke_value_t* row_ok;
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
@@ -261,6 +252,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         ctx->hoist_in_warp_row[reg] = row;
         ctx->hoist_q_pos[reg] = qp_r;
         ctx->hoist_q_head[reg] = qh_r;
+        ctx->hoist_qh_r[reg] = qh_r;
         ctx->hoist_row_mask[reg] = row_ok;
         ctx->hoist_state_row[reg] = causal_lim;
     }
@@ -271,7 +263,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
             rocke_value_t* qh_r = ctx->hoist_q_head[reg];
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
             rocke_value_t* slope = rocke_b_masked_global_load(
                 b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
             ctx->hoist_q_head[reg] = slope;
@@ -294,7 +286,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_qh_mod = rocke_b_mod(b, st_q_row, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* st_qh = rocke_b_add(b, st_qh_mul, st_qh_mod);
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
-        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
         rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
         ctx->st_qp_hoist = st_qp;
         ctx->st_qh_hoist = st_qh;
@@ -311,7 +303,7 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         ctx->st_causal_lim_hoist = rocke_b_add(b, ctx->context_len, st_qp);
         if(ctx->USE_ALIBI)
         {
-            rocke_value_t* st_qh_ok = rocke_b_cmp_lt(b, st_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* st_qh_ok = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
             ctx->st_alibi_slope_hoist = rocke_b_masked_global_load(b,
                                                                    ctx->alibi_slopes_ptr,
                                                                    st_qh,
@@ -357,13 +349,13 @@ void rocke_gfx950_attn2d_permute_p_c_to_a16(rocke_gfx950_attn2d_build_ctx_t* ctx
     for(int bit = 0; bit < 2; ++bit)
     {
         rocke_value_t* lane_bit = rocke_gfx950_attn2d_bit2(ctx, lane_col_mod4, bit);
-        int reg_bit = 1 << bit;
+        int reg_bit = 1 << bit; /* 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle */
         rocke_value_t* old[4];
         for(i = 0; i < 4; ++i)
             old[i] = vals[i];
         for(int reg = 0; reg < 4; ++reg)
         {
-            rocke_value_t* partner = rocke_b_warp_shuffle_xor(b, old[reg ^ reg_bit], reg_bit);
+            rocke_value_t* partner = rocke_b_warp_shuffle_xor_dpp(b, old[reg ^ reg_bit], reg_bit);
             rocke_value_t* same_bit
                 = rocke_b_cmp_eq(b, lane_bit, rocke_b_const_i32(b, (reg >> bit) & 1));
             vals[reg] = rocke_b_select(b, same_bit, old[reg], partner);
@@ -467,8 +459,9 @@ void rocke_gfx950_attn2d_reset_softmax_scratch(void)
  *  Front half of the QK + mask + softmax body.
  *
  *  Narrow 16x16x16 and transposed-32x32 QK/softmax paths; both supported by the
- *  gfx950 ctx. On return the softmax-derived state (alpha / new_l / m_new and,
- *  on the transposed path, the PT32 register-P groups) is handed to the peer
+ *  gfx950 ctx. On return the softmax-derived state (alpha / new_l / m_carry,
+ *  the raw running max, and, on the transposed path, the PT32 register-P
+ *  groups) is handed to the peer
  *  rocke_gfx950_attn2d_emit_pv_bucket, which runs acc *= alpha; acc += P @ V and
  *  emits the scf_yield carry.
  * ===================================================================== */
@@ -528,7 +521,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_qh_mod = rocke_b_mod(b, st_q_row_iter, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* st_qh_iter = rocke_b_add(b, st_qh_mul, st_qh_mod);
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
-        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
         rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
         if(ctx->VALID_ROWS < ctx->BLOCK_M)
         {
@@ -543,8 +536,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
         if(ctx->USE_ALIBI)
         {
-            rocke_value_t* st_qh_iter_ok
-                = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
+            rocke_value_t* st_qh_iter_ok = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
             st_alibi_slope_iter = rocke_b_masked_global_load(b,
                                                              ctx->alibi_slopes_ptr,
                                                              st_qh_iter,
@@ -561,16 +553,22 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     rocke_value_t* in_range_next = rocke_b_cmp_lt(b, next_tile_iv_raw, ctx->tile_end);
     rocke_value_t* safe_next_tile
         = rocke_b_select(b, in_range_next, next_tile_iv_raw, ctx->kv_tile_iv);
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+        ctx->page_next_tile = safe_next_tile;
 
-    /* softmax-derived state forwarded to the PV bucket. */
+    /* softmax-derived state forwarded to the PV bucket (alpha, new_l, and
+     * m_carry = the raw running max). m_new_out is the MFMA-32 branch's
+     * clamped exponent reference for P and alpha; it is not forwarded. */
     rocke_value_t* alpha_regs[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* new_l_vals[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     rocke_value_t* m_new_out[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+    rocke_value_t* m_carry_out[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
     for(int _i = 0; _i < ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE; ++_i)
     {
         alpha_regs[_i] = NULL;
         new_l_vals[_i] = NULL;
         m_new_out[_i] = NULL;
+        m_carry_out[_i] = NULL;
     }
 
     /* PT32 register groups for the transposed register-P PV. */
@@ -594,6 +592,19 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
     if(ctx->USE_SOFTMAX_INTERLEAVE
        && (ctx->SOFTMAX_INTERLEAVE_MODE == 0 || ctx->SOFTMAX_INTERLEAVE_MODE == 1))
         rocke_b_iglp_opt(b, ctx->SOFTMAX_INTERLEAVE_MODE);
+
+    /* Read the page ids of the tile after next now, right after the iter-start
+     * drain, so they arrive long before next iteration's copies need them. That
+     * tile is next iteration's safe_next_tile. */
+    if(rocke_gfx950_attn2d_page_prefetch(ctx))
+    {
+        rocke_value_t* c_two = rocke_b_const_i32(b, 2);
+        rocke_value_t* after_next_raw = rocke_b_add(b, ctx->kv_tile_iv, c_two);
+        rocke_value_t* in_range_after = rocke_b_cmp_lt(b, after_next_raw, ctx->tile_end);
+        rocke_value_t* after_next
+            = rocke_b_select(b, in_range_after, after_next_raw, next_tile_iv_raw);
+        rocke_gfx950_attn2d_tile_page_ids(ctx, after_next, ctx->page_after_next);
+    }
 
     /* Early-V schedule: V_lds is single-buffered and the iter-start full drain
      * guarantees the previous PV's V reads retired, so the current V copy can be
@@ -623,7 +634,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* k_off_base = rocke_b_const_i32(b, k * 16);
                 rocke_value_t* k_off_t = rocke_b_add(
                     b, k_off_base, rocke_b_mul(b, lane_half, rocke_b_const_i32(b, 8)));
-                rocke_value_t* A_k_t = fh_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row_t, k_off_t);
+                /* The shared K reader: when K_lds holds raw fp8 bytes it reads
+                 * them as fp8 and dequantizes with k_scale. */
+                rocke_value_t* A_k_t
+                    = rocke_gfx950_attn2d_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row_t, k_off_t);
                 rocke_value_t* B_q_t = ctx->q32_regs[k];
                 acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
             }
@@ -645,8 +659,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     rocke_value_t* k_off_base = rocke_b_const_i32(b, k * 16);
                     rocke_value_t* k_off_t = rocke_b_add(
                         b, k_off_base, rocke_b_mul(b, lane_half, rocke_b_const_i32(b, 8)));
-                    rocke_value_t* A_k_t
-                        = fh_read_k8_mfma_operand(ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
+                    rocke_value_t* A_k_t = rocke_gfx950_attn2d_read_k8_mfma_operand(
+                        ctx, ctx->nxt_buf_v, k_row_t, k_off_t);
                     rocke_value_t* B_q_t = ctx->q32_regs[k];
                     acc32 = fh_mfma_32x32x16(ctx, A_k_t, B_q_t, acc32);
                 }
@@ -760,7 +774,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                             qh_mod = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
                             qh_r = rocke_b_add(b, qh_mul, qh_mod);
                             row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
-                            row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
+                            row_ok_qh = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
                             rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
                             if(ctx->VALID_ROWS < ctx->BLOCK_M)
                             {
@@ -861,6 +875,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         for(int r = 0; r < SOFTMAX_STATE_SLOTS; ++r)
         {
             m_new[r] = st_m_new;
+            m_carry_out[r] = st_m_raw;
             l_local[r] = st_l_sum;
         }
 
@@ -899,7 +914,6 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
     else if(ctx->USE_MFMA_32X32)
@@ -921,12 +935,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 rocke_value_t* kc_base = rocke_b_const_i32(b, k * 16);
                 rocke_value_t* kc_off32 = rocke_b_add(
                     b, kc_base, rocke_b_mul(b, lane_half_qg, rocke_b_const_i32(b, 8)));
-                rocke_value_t* idx[3];
-                rocke_value_t* B32_v;
-                idx[0] = ctx->cur_buf;
-                idx[1] = k_row32;
-                idx[2] = kc_off32;
-                B32_v = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
+                /* The shared K reader: when K_lds holds raw fp8 bytes it reads
+                 * them as fp8 and dequantizes with k_scale. */
+                rocke_value_t* B32_v = rocke_gfx950_attn2d_read_k8_mfma_operand(
+                    ctx, ctx->cur_buf, k_row32, kc_off32);
                 acc32 = fh_mfma_32x32x16(ctx, ctx->q32_regs[k], B32_v, acc32);
             }
             S32_n[n] = acc32;
@@ -1041,6 +1053,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
                 ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
                 m_new_out[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
+                m_carry_out[reg] = full_max_raw;
             }
 
             /* P = exp2(S - m_new); publish to P_lds; per-row L (Python 3056-3065). */
@@ -1092,21 +1105,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     = rocke_b_add(b, kc_base, rocke_b_mul(b, lane_rg, rocke_b_const_i32(b, 8)));
                 rocke_value_t* kr_base = rocke_b_const_i32(b, n * 16);
                 rocke_value_t* k_row = rocke_b_add(b, kr_base, lane_col);
-                rocke_value_t* idx[3];
-                idx[0] = ctx->cur_buf;
-                idx[1] = k_row;
-                idx[2] = kc_off;
-                rocke_value_t* B_v;
-                if(ctx->FP8_MFMA_QK)
-                {
-                    rocke_value_t* B_fp8
-                        = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, rocke_fp8e4m3(), 8);
-                    B_v = rocke_dequant_fp8x8_to_dtype(b, B_fp8, ctx->k_scale_p, ctx->dtype);
-                }
-                else
-                {
-                    B_v = rocke_b_smem_load_vN(b, ctx->K_lds, idx, 3, ctx->dtype, 8);
-                }
+                /* The shared K reader, as on the 32x32 paths: fp8 K in K_lds is
+                 * read as fp8 and dequantized with k_scale. */
+                rocke_value_t* B_v
+                    = rocke_gfx950_attn2d_read_k8_mfma_operand(ctx, ctx->cur_buf, k_row, kc_off);
                 for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
                 {
                     rocke_value_t* A_k = ctx->q_regs[atom * QK_K_ITERS + k];
@@ -1229,6 +1231,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
             rocke_value_t* full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
             rocke_value_t* ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
             m_new[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
+            m_carry_out[reg] = full_max_raw;
         }
 
         /* P = exp2(S - m_new) + per-row L. */
@@ -1274,7 +1277,6 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         {
             new_l_vals[r]
                 = rocke_b_fadd(b, rocke_b_fmul(b, ctx->l_cur[r], alpha_regs[r]), l_local[r]);
-            m_new_out[r] = m_new[r];
         }
     }
 
@@ -1290,7 +1292,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         pv_in.alpha_regs = alpha_regs;
         pv_in.alpha_count = SOFTMAX_STATE_SLOTS;
         pv_in.new_l_vals = new_l_vals;
-        pv_in.m_new = m_new_out;
+        pv_in.m_carry = m_carry_out;
         if(ctx->REGISTER_PV)
         {
             pv_in.p_regs_f32 = p_regs_f32_buf;

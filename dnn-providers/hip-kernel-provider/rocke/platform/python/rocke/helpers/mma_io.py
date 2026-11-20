@@ -19,17 +19,59 @@ from ..core.ir import (
     VectorType,
     dtype_to_ir_type,
 )
-from ..core.storage import FragmentPacking, MatrixFragmentLayout
+from ..core.storage import (
+    FragmentPacking,
+    MatrixFragmentLayout,
+    is_register_packed,
+    register_packing,
+    storage_dtype,
+)
 
 
 def storage_ir_type(dtype: str) -> Type:
-    """Addressable storage unit, distinct from the logical dtype resolver."""
+    """The unit a pointer to a ``dtype`` tensor in memory addresses: the byte for a sub-byte
+    dtype, since memory is byte addressed, else its storage element (:func:`storage_element_type`):
+    ``i32`` for tf32, ``i8`` for e8m0, the dtype itself for every arithmetic type. It differs from
+    :func:`storage_element_type` only for a sub-byte dtype, which registers and LDS hold in i32
+    words but a pointer addresses by the byte."""
     info = dtype_info(dtype)
-    if info.name == "tf32":
-        return I32
-    if info.encoded_bits % 8 or info.name in ("e8m0", "e5m3"):
+    if info.encoded_bits % 8:
         return I8
-    return dtype_to_ir_type(info.name)
+    return dtype_to_ir_type(storage_dtype(info.name))
+
+
+def storage_element_type(dtype: Type) -> Type:
+    """The scalar IR type registers and LDS words of ``dtype`` are held in
+    (:func:`rocke.core.storage.storage_dtype`): ``i32`` for a register-packed sub-byte dtype and
+    for tf32, ``i8`` for e8m0 and e5m3, ``dtype`` itself otherwise. A pointer into global memory
+    addresses :func:`storage_ir_type` units instead, the byte for a sub-byte dtype."""
+    return dtype_to_ir_type(storage_dtype(dtype.name))
+
+
+def storage_vector_type(dtype: Type, count: int) -> VectorType:
+    """The vector type that holds ``count`` elements of ``dtype`` in registers:
+    ``vec<storage_element_type(dtype) x count>`` for a dtype held one to one, else the
+    ``core.storage.register_packing`` words, so ``fp4e2m1`` x 32 is ``vec<i32x4>``. A packed
+    ``count`` that leaves a word partly filled raises ``ValueError``."""
+    packing = register_packing(dtype.name, count)
+    if packing is not None:
+        return VectorType(I32, packing.carrier_count)
+    return VectorType(storage_element_type(dtype), count)
+
+
+def mma_operand_ir_type(dtype: str, count: int) -> VectorType:
+    """The vector type ``IRBuilder.mma`` takes for ``count`` A or B elements of ``dtype``.
+
+    A sub-byte dtype has no IR value type, so its elements reach the instruction as their packed
+    words (:func:`storage_vector_type`). Every other dtype is the logical vector
+    ``vec<dtype x count>``; the backend reinterprets it as the instruction's register type.
+    ``count`` counts logical elements in both cases, so ``fp4e2m1`` x 32 is ``vec<i32x4>`` and
+    ``fp8e4m3`` x 32 is ``vec<fp8e4m3x32>``.
+    """
+    logical = dtype_to_ir_type(dtype)
+    if is_register_packed(dtype):
+        return storage_vector_type(logical, count)
+    return VectorType(logical, count)
 
 
 def load_matrix_fragment(

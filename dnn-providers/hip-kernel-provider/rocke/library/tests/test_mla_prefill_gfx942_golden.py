@@ -190,11 +190,12 @@ def _run(flavor):
 
 
 def _build_doc():
-    from rocke.core.ir_golden import GOLDEN_FLAVORS
+    from rocke.core.ir_golden import GOLDEN_ALIASES, GOLDEN_PROFILE_FLAVORS
 
     return {
         "schema": _SCHEMA,
-        "flavors": {fl: _run(fl) for fl in GOLDEN_FLAVORS},
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {fl: _run(fl) for fl in GOLDEN_PROFILE_FLAVORS},
     }
 
 
@@ -215,12 +216,13 @@ def test_mla_prefill_gfx942_golden_covers_every_case():
     Without this, a case added to ``_cases()`` but never blessed would be
     silently skipped rather than failing, and a typo'd cid would pin nothing.
     """
-    from rocke.core.ir_golden import GOLDEN_FLAVORS
+    from rocke.core.ir_golden import GOLDEN_FLAVORS, golden_subdocument
 
     golden = _golden()
     want = set(_cases())
     for flavor in GOLDEN_FLAVORS:
-        sub = golden["flavors"][flavor]
+        sub = golden_subdocument(golden, flavor)
+        assert sub is not None, flavor
         hashed = set(sub["cases"])
         refused = set(sub.get("expected_failures", {}))
         assert not hashed & refused, f"{flavor}: {sorted(hashed & refused)}"
@@ -235,7 +237,7 @@ def test_mla_prefill_gfx942_golden_expected_failures_are_the_llvm20_agpr_refusal
     """The only refusals the golden may hold are the agpr_acc cases at llvm20;
     anything else recorded as an expected failure is a failed bless, not a
     golden."""
-    from rocke.core.ir_golden import GOLDEN_FLAVORS
+    from rocke.core.ir_golden import GOLDEN_FLAVORS, golden_subdocument
 
     agpr_cases = {
         "mla_prefill_gfx942/fwd_h128_agpr",
@@ -243,7 +245,9 @@ def test_mla_prefill_gfx942_golden_expected_failures_are_the_llvm20_agpr_refusal
     }
     golden = _golden()
     for flavor in GOLDEN_FLAVORS:
-        refused = golden["flavors"][flavor].get("expected_failures", {})
+        sub = golden_subdocument(golden, flavor)
+        assert sub is not None, flavor
+        refused = sub.get("expected_failures", {})
         if flavor == "llvm20":
             assert set(refused) == agpr_cases
             for cid in agpr_cases:

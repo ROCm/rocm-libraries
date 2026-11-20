@@ -1,0 +1,1642 @@
+MinimumRequiredVersion: 5.0.0
+ScheduleName: gfx950
+ArchitectureName: gfx950
+CUCount: 256
+DeviceNames: [Device 75a0]
+ProblemType:
+  Activation: false
+  ActivationComputeDataType: 0
+  ActivationNoGuard: false
+  ActivationType: none
+  AllowNoFreeDims: false
+  AssignedDerivedParameters: true
+  Batched: true
+  BetaOnlyUseBias: false
+  BiasDataTypeList: []
+  BiasSrc: D
+  ComplexConjugateA: false
+  ComplexConjugateB: false
+  ComputeDataType: 0
+  DataType: 4
+  DataTypeA: 4
+  DataTypeAmaxD: 0
+  DataTypeB: 4
+  DataTypeE: 4
+  DestDataType: 4
+  F32XdlMathOp: 0
+  Gradient: false
+  GroupedGemm: false
+  HighPrecisionAccumulate: true
+  Index0: 0
+  Index01A: 0
+  Index01B: 1
+  Index1: 1
+  IndexAssignmentsA: [3, 0, 2]
+  IndexAssignmentsB: [3, 1, 2]
+  IndexAssignmentsLD: [4, 5, 6, 7]
+  IndexAssignmentsMetadata: [3, 0, 2]
+  IndexUnroll: 3
+  IndexUnrollA: 0
+  IndexUnrollB: 0
+  IndexUnrollM: 0
+  IndicesBatch: [2]
+  IndicesFree: [0, 1]
+  IndicesSummation: [3]
+  MirrorDimsA: []
+  MirrorDimsB: []
+  MirrorDimsMetadata: []
+  NumIndicesBatch: 1
+  NumIndicesC: 3
+  NumIndicesFree: 2
+  NumIndicesLD: 4
+  NumIndicesSummation: 1
+  OperationType: GEMM
+  OutputAmaxD: false
+  SetConstStrideA: []
+  SetConstStrideB: []
+  SetConstStrideBias: []
+  SilentHighPrecisionAccumulate: false
+  Sparse: 0
+  StochasticRounding: false
+  StridedBatched: true
+  SupportUserArgs: true
+  SwizzleTensorA: false
+  SwizzleTensorB: false
+  TLUA: false
+  TLUB: false
+  Tensor0: 0
+  Tensor1: 1
+  TileA: 0
+  TileAwareSelection: false
+  TileB: 1
+  TotalIndices: 4
+  TransposeA: true
+  TransposeB: false
+  UseBeta: true
+  UseBias: 0
+  UseE: false
+  UseInitialStridesAB: false
+  UseInitialStridesCD: false
+  UseScaleAB: ''
+  UseScaleAlphaVec: 0
+  UseScaleCD: false
+DefaultSolution:
+  1LDSBuffer: 0
+  ActivationAlt: false
+  ActivationFuncCall: true
+  ActivationFused: true
+  AdaptiveGemm: 0
+  AdaptiveGemmGSUA: 0
+  AdaptiveGemmNTAB: 0
+  AssertAIGreaterThanEqual: -1
+  AssertAILessThanEqual: -1
+  AssertFree0ElementMultiple: 1
+  AssertFree1ElementMultiple: 1
+  AssertSummationElementMultiple: 1
+  BufferLoad: true
+  BufferStore: true
+  ClusterDim: [1, 1]
+  ClusterLocalRead: 1
+  CompactLoopStore: false
+  ConvertAfterDS: false
+  DebugPersistentKernelLoopForever: false
+  DebugStreamK: 0
+  DepthU: -1
+  DirectToLds: 0
+  DirectToLdsMetadata: 1
+  DirectToVgprA: false
+  DirectToVgprB: false
+  DirectToVgprMXSA: false
+  DirectToVgprMXSB: false
+  DirectToVgprSparseMetadata: false
+  DtlPlusLdsBuf: -1
+  ExpandPointerSwap: true
+  ExtraLatencyForLR: 0
+  ExtraMiLatencyLeft: -1
+  ForceDisableShadowInit: false
+  GlobalReadPerMfma: 1.0
+  GlobalReadVectorWidthA: -1
+  GlobalReadVectorWidthB: -1
+  GlobalSplitU: 1
+  GlobalSplitUAlgorithm: MultipleBuffer
+  GlobalSplitUCoalesced: false
+  GlobalSplitUWorkGroupMappingRoundRobin: false
+  GroupLoadStore: false
+  HalfPLR: 0
+  InitCIterWmma: -1
+  InnerUnroll: 1
+  InterleaveAlpha: 0
+  KernelLanguage: Assembly
+  LDSSegmentInterleave: 0
+  LDSTrInst: false
+  LdsBlockSizePerPadA: -1
+  LdsBlockSizePerPadB: -1
+  LdsBlockSizePerPadMXSA: -1
+  LdsBlockSizePerPadMXSB: -1
+  LdsBlockSizePerPadMetadata: -1
+  LdsPadA: -1
+  LdsPadB: -1
+  LdsPadMXSA: -1
+  LdsPadMXSB: -1
+  LdsPadMetadata: -1
+  LocalReadVectorWidth: -1
+  LocalReadVectorWidthA: -1
+  LocalReadVectorWidthB: -1
+  LocalWritePerMfma: -1
+  MIArchVgpr: false
+  MXLoadInst: Auto
+  MXScaleFormat: Auto
+  MagicDivAlg: 2
+  MatrixInstruction: []
+  MaxLDS: -1
+  MaxOccupancy: 64
+  MbskPrefetchMethod: -1
+  MinGRIncPerMfma: -1
+  NoReject: false
+  NonTemporal: -1
+  NonTemporalA: 0
+  NonTemporalB: 0
+  NonTemporalC: 0
+  NonTemporalD: 0
+  NonTemporalE: 0
+  NonTemporalGate: 0
+  NonTemporalMXSA: 0
+  NonTemporalMXSB: 0
+  NonTemporalMetadata: 0
+  NonTemporalWS: 0
+  NonVolatile: -1
+  NonVolatileA: 0
+  NonVolatileB: 0
+  NonVolatileC: 0
+  NonVolatileD: 0
+  NonVolatileE: 0
+  NonVolatileGate: 0
+  NonVolatileMXSA: 0
+  NonVolatileMXSB: 0
+  NonVolatileMetadata: 0
+  NonVolatileWS: 0
+  NumElementsPerBatchStore: 0
+  NumLoadsCoalescedA: 1
+  NumLoadsCoalescedB: 1
+  OptNoLoadLoop: 1
+  PrefetchAcrossPersistent: 0
+  PrefetchGL2: 0
+  PrefetchGlobalRead: 1
+  PrefetchLocalRead: 1
+  PreloadKernArgs: true
+  ReuseAcrossPersistent: 0
+  SFCWGM:
+  - [1, 1]
+  - [1, 1]
+  ScheduleGROverBarrier: -1
+  ScheduleGlobalRead: 1
+  ScheduleIterAlg: 3
+  ScheduleLocalWrite: 1
+  SourceSwap: false
+  SpaceFillingAlgo: []
+  StaggerU: 32
+  StaggerUMapping: 0
+  StaggerUStride: 256
+  StorePriorityOpt: false
+  StoreRemapVectorWidth: 0
+  StoreSyncOpt: 0
+  StoreVectorWidth: -1
+  StreamK: 0
+  StreamKAtomic: 0
+  StreamKFixupTreeReduction: 0
+  StreamKForceDPOnly: 0
+  StreamKWorkStealing: 0
+  StreamKXCCMapping: 0
+  SuppressNoLoadLoop: false
+  SwInstructionPrefetch: 1
+  SwapGlobalReadOrder: 0
+  TDMInst: 0
+  TDMIterateMode: 0
+  TDMLoadWaveSync: false
+  TDMPlusLdsBuf: 0
+  TDMSplit: false
+  TailloopInNll: false
+  TemporalHint: -1
+  TemporalHintA: 0
+  TemporalHintB: 0
+  TemporalHintC: 0
+  TemporalHintD: 0
+  TemporalHintE: 0
+  TemporalHintGate: 0
+  TemporalHintMXSA: 0
+  TemporalHintMXSB: 0
+  TemporalHintMetadata: 0
+  TemporalHintWS: 0
+  ThreadTile: [4, 4]
+  TransposeLDS: -1
+  TransposeLDSMetadata: -1
+  UnrollLoopSwapGlobalReadOrder: 0
+  Use64bShadowLimit: true
+  Use64bShadowLimitMX: false
+  UseCustomMainLoopSchedule: -1
+  UseDualFMAC: false
+  UseInstOffsetForGRO: 0
+  UsePLRPack: 0
+  UseSgprForGRO: -1
+  UseSubtileImpl: false
+  VectorStore: -1
+  VectorWidthA: -1
+  VectorWidthB: -1
+  WaveSeparateGlobalReadA: 0
+  WaveSeparateGlobalReadB: 0
+  WaveSeparateGlobalReadMetadata: 0
+  WaveSplitK: false
+  WavefrontSize: -1
+  WorkGroup: [16, 16, 1]
+  WorkGroupMapping: 8
+  WorkGroupMappingXCC: 1
+  WorkGroupMappingXCCGroup: -1
+  WorkGroupReduction: false
+Solutions:
+- SolutionIndex: 0
+  SolutionUID: 0uVIilpsydmx
+  KernelNameMin: wvSplitK_vllm_f16_tn_n1_y1u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n1_y1u2
+  AssertSizeEqual: {1: 1, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n1_y1u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n1_y1u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 1
+  SolutionUID: 0uVIilpstej1
+  KernelNameMin: wvSplitK_vllm_f16_tn_n1_y1u4
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n1_y1u4
+  AssertSizeEqual: {1: 1, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n1_y1u4
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n1_y1u4
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 2
+  SolutionUID: 0uVIilptKwrl
+  KernelNameMin: wvSplitK_vllm_f16_tn_n1_y3u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n1_y3u2
+  AssertSizeEqual: {1: 1, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n1_y3u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n1_y3u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 3
+  SolutionUID: 0uVIilptEXqE
+  KernelNameMin: wvSplitK_vllm_f16_tn_n2_y1u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n2_y1u2
+  AssertSizeEqual: {1: 2, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n2_y1u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n2_y1u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 4
+  SolutionUID: 0uVIilpstFEm
+  KernelNameMin: wvSplitK_vllm_f16_tn_n2_y1u4
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n2_y1u4
+  AssertSizeEqual: {1: 2, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n2_y1u4
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n2_y1u4
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 5
+  SolutionUID: 0uVIilpt1inX
+  KernelNameMin: wvSplitK_vllm_f16_tn_n2_y3u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n2_y3u2
+  AssertSizeEqual: {1: 2, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n2_y3u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n2_y3u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 6
+  SolutionUID: 0uVIilpsnB9f
+  KernelNameMin: wvSplitK_vllm_f16_tn_n3_y1u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n3_y1u2
+  AssertSizeEqual: {1: 3, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n3_y1u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n3_y1u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 7
+  SolutionUID: 0uVIilptHOtg
+  KernelNameMin: wvSplitK_vllm_f16_tn_n3_y1u4
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n3_y1u4
+  AssertSizeEqual: {1: 3, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n3_y1u4
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n3_y1u4
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 8
+  SolutionUID: 0uVIilpsVkgK
+  KernelNameMin: wvSplitK_vllm_f16_tn_n3_y3u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n3_y3u2
+  AssertSizeEqual: {1: 3, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n3_y3u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n3_y3u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 9
+  SolutionUID: 0uVIilpsXcJR
+  KernelNameMin: wvSplitK_vllm_f16_tn_n4_y1u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n4_y1u2
+  AssertSizeEqual: {1: 4, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n4_y1u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n4_y1u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 10
+  SolutionUID: 0uVIilptGfC5
+  KernelNameMin: wvSplitK_vllm_f16_tn_n4_y1u4
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n4_y1u4
+  AssertSizeEqual: {1: 4, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n4_y1u4
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n4_y1u4
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 11
+  SolutionUID: 0uVIilpsWsF5
+  KernelNameMin: wvSplitK_vllm_f16_tn_n4_y3u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n4_y3u2
+  AssertSizeEqual: {1: 4, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n4_y3u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n4_y3u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 12
+  SolutionUID: 0uVIilpsdAYd
+  KernelNameMin: wvSplitK_vllm_f16_tn_n5_y1u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n5_y1u2
+  AssertSizeEqual: {1: 5, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n5_y1u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n5_y1u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 13
+  SolutionUID: 0uVIilpsd2Ii
+  KernelNameMin: wvSplitK_vllm_f16_tn_n5_y1u4
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n5_y1u4
+  AssertSizeEqual: {1: 5, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n5_y1u4
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n5_y1u4
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+- SolutionIndex: 14
+  SolutionUID: 0uVIilpt70oK
+  KernelNameMin: wvSplitK_vllm_f16_tn_n5_y3u2
+  SolutionNameMin: wvSplitK_vllm_f16_tn_n5_y3u2
+  AssertSizeEqual: {1: 5, 2: 1}
+  AssertSizeGreaterThan: {0: 8}
+  AssertStrideAEqual: {0: 1}
+  AssertStrideBEqual: {0: 1}
+  AssertStrideCEqual: {0: 1}
+  AssertStrideDEqual: {0: 1}
+  AssertSummationElementMultiple: 8
+  AssignedDerivedParameters: false
+  AssignedProblemIndependentDerivedParameters: false
+  BaseName: wvSplitK_vllm_f16_tn_n5_y3u2
+  CUCount: null
+  CUOccupancy: -1
+  CodeObjectVersion: '4'
+  CustomKernel:
+    args:
+    - {type: int32, semantic: SizeSum}
+    - {type: int32, semantic: SizeFree0}
+    - {type: address, semantic: AddressA}
+    - {type: address, semantic: AddressB}
+    - {type: int32, semantic: ComputeUnits}
+    - {type: int32, semantic: SizeFree1}
+    - {type: int32, semantic: StrideA0}
+    - {type: int32, semantic: StrideB0}
+    - {type: address, semantic: AddressC}
+    - {type: address, semantic: AddressD}
+    - {type: float32, semantic: Alpha}
+    - {type: float32, semantic: Beta}
+    - {type: int32, semantic: StrideC0}
+    - {type: int32, semantic: StrideD0}
+    grid: [ComputeUnits, One, One]
+    macrotile: [64, 16, 8]
+    name: wvSplitK_vllm_f16_tn_n5_y3u2
+    threads: [64, 16, 1]
+  DepthU: 8
+  DirectToLdsA: false
+  DirectToLdsB: false
+  EnableF32XdlMathOp: false
+  EnableMatrixInstruction: true
+  GlobalReadVectorWidthA: 1
+  GlobalReadVectorWidthB: 1
+  ISA: [9, 5, 0]
+  InternalSupportParams: {PersistentLoopArgsVersion: 0, SupportCustomStaggerU: true,
+    SupportCustomWGM: true, SupportStreamKPerTileExtraIters: false, SupportUserGSU: true,
+    UseSFC: false, UseUniversalArgs: true}
+  Kernel: true
+  LocalSplitU: 1
+  MFMA_BF16_1K: false
+  MIBlock: [16, 16, 16, 1, 1, 1]
+  MIInputPerThread: 4
+  MIInputPerThreadA: 4
+  MIInputPerThreadB: 4
+  MIInputPerThreadMetadata: 4
+  MIWaveGroup: [4, 4]
+  MIWaveTile: [4, 1]
+  MacroTile0: 64
+  MacroTile1: 16
+  MathClocksUnrolledLoop: 0
+  MatrixInstB: 1
+  MatrixInstBM: 1
+  MatrixInstBN: 1
+  MatrixInstK: 16
+  MatrixInstM: 16
+  MatrixInstN: 16
+  MatrixInstruction: [16, 16, 16, 1]
+  NumElementsPerThread: 1
+  NumThreads: 1024
+  PackedC0IndicesX: []
+  StaggerU: 0
+  StoreVectorWidth: 1
+  ThreadTile: [1, 1]
+  ThreadTile0: 0
+  ThreadTile1: 0
+  Valid: true
+  WavefrontSize: 64
+  WorkGroup: [64, 16, 1]
+  _GlobalAccumulation: MultipleBuffer
+  _PersistentLoop: false
+  _WorkspaceSizePerElemBias: 0
+  _WorkspaceSizePerElemC: 0
+IndexOrder: [0, 1, 2, 3, 4, 5, 6, 7]
+ExactLogic:
+- - [9, 6144, 1, 1, 1, 1, 449, 1280]
+  - [0, 0.0]
+- - [6145, 49152, 1, 1, 1, 1, 449, 1280]
+  - [1, 0.0]
+- - [49153, 98304, 1, 1, 1, 1, 449, 1280]
+  - [2, 0.0]
+- - [98305, -1, 1, 1, 1, 1, 449, 1280]
+  - [1, 0.0]
+- - [9, 98304, 1, 1, 1, 1, 1281, 2560]
+  - [1, 0.0]
+- - [9, -1, 1, 1, 1, 1, 2561, 5120]
+  - [1, 0.0]
+- - [9, 98304, 1, 1, 1, 1, 5121, 10240]
+  - [1, 0.0]
+- - [98305, -1, 1, 1, 1, 1, 5121, 10240]
+  - [0, 0.0]
+- - [9, 6144, 1, 1, 1, 1, 10241, 20480]
+  - [1, 0.0]
+- - [9, 12288, 1, 1, 1, 1, 20481, -1]
+  - [1, 0.0]
+- - [12289, 24576, 1, 1, 1, 1, 20481, -1]
+  - [0, 0.0]
+- - [9, 1536, 2, 2, 1, 1, 449, 1280]
+  - [4, 0.0]
+- - [1537, 12288, 2, 2, 1, 1, 449, 1280]
+  - [3, 0.0]
+- - [12289, 24576, 2, 2, 1, 1, 449, 1280]
+  - [4, 0.0]
+- - [9, 24576, 2, 2, 1, 1, 1281, 2560]
+  - [4, 0.0]
+- - [9, 49152, 2, 2, 1, 1, 2561, 5120]
+  - [4, 0.0]
+- - [49153, 98304, 2, 2, 1, 1, 2561, 5120]
+  - [3, 0.0]
+- - [98305, -1, 2, 2, 1, 1, 2561, 5120]
+  - [4, 0.0]
+- - [9, 24576, 2, 2, 1, 1, 5121, 10240]
+  - [4, 0.0]
+- - [49153, 98304, 2, 2, 1, 1, 5121, 10240]
+  - [4, 0.0]
+- - [9, 6144, 2, 2, 1, 1, 10241, 20480]
+  - [4, 0.0]
+- - [49153, 98304, 2, 2, 1, 1, 10241, 20480]
+  - [3, 0.0]
+- - [1537, 3072, 2, 2, 1, 1, 20481, -1]
+  - [4, 0.0]
+- - [12289, 24576, 2, 2, 1, 1, 20481, -1]
+  - [5, 0.0]
+- - [9, 12288, 3, 3, 1, 1, 449, 1280]
+  - [6, 0.0]
+- - [9, 24576, 3, 3, 1, 1, 1281, 2560]
+  - [7, 0.0]
+- - [9, 49152, 3, 3, 1, 1, 2561, 5120]
+  - [7, 0.0]
+- - [9, 24576, 3, 3, 1, 1, 5121, 10240]
+  - [7, 0.0]
+- - [24577, 49152, 3, 3, 1, 1, 5121, 10240]
+  - [8, 0.0]
+- - [49153, 98304, 3, 3, 1, 1, 5121, 10240]
+  - [7, 0.0]
+- - [9, 6144, 3, 3, 1, 1, 10241, 20480]
+  - [7, 0.0]
+- - [49153, 98304, 3, 3, 1, 1, 10241, 20480]
+  - [8, 0.0]
+- - [9, 3072, 3, 3, 1, 1, 20481, -1]
+  - [7, 0.0]
+- - [9, 1536, 4, 4, 1, 1, 449, 1280]
+  - [9, 0.0]
+- - [1537, 3072, 4, 4, 1, 1, 449, 1280]
+  - [10, 0.0]
+- - [3073, 12288, 4, 4, 1, 1, 449, 1280]
+  - [9, 0.0]
+- - [9, 1536, 4, 4, 1, 1, 1281, 2560]
+  - [9, 0.0]
+- - [1537, 6144, 4, 4, 1, 1, 1281, 2560]
+  - [10, 0.0]
+- - [6145, 12288, 4, 4, 1, 1, 1281, 2560]
+  - [9, 0.0]
+- - [12289, 24576, 4, 4, 1, 1, 1281, 2560]
+  - [10, 0.0]
+- - [9, 1536, 4, 4, 1, 1, 2561, 5120]
+  - [10, 0.0]
+- - [1537, 6144, 4, 4, 1, 1, 2561, 5120]
+  - [9, 0.0]
+- - [6145, 12288, 4, 4, 1, 1, 2561, 5120]
+  - [10, 0.0]
+- - [12289, -1, 4, 4, 1, 1, 2561, 5120]
+  - [9, 0.0]
+- - [9, 3072, 4, 4, 1, 1, 5121, 10240]
+  - [10, 0.0]
+- - [3073, 12288, 4, 4, 1, 1, 5121, 10240]
+  - [9, 0.0]
+- - [9, 3072, 4, 4, 1, 1, 10241, 20480]
+  - [10, 0.0]
+- - [3073, 6144, 4, 4, 1, 1, 10241, 20480]
+  - [9, 0.0]
+- - [12289, 24576, 4, 4, 1, 1, 10241, 20480]
+  - [11, 0.0]
+- - [1537, 3072, 4, 4, 1, 1, 20481, -1]
+  - [10, 0.0]
+- - [12289, 24576, 4, 4, 1, 1, 20481, -1]
+  - [11, 0.0]
+- - [9, 6144, 5, 5, 1, 1, 449, 1280]
+  - [12, 0.0]
+- - [6145, 12288, 5, 5, 1, 1, 449, 1280]
+  - [14, 0.0]
+- - [9, 1536, 5, 5, 1, 1, 1281, 2560]
+  - [12, 0.0]
+- - [9, 6144, 5, 5, 1, 1, 2561, 5120]
+  - [12, 0.0]
+- - [6145, 12288, 5, 5, 1, 1, 2561, 5120]
+  - [13, 0.0]
+- - [12289, 49152, 5, 5, 1, 1, 2561, 5120]
+  - [12, 0.0]
+- - [98305, -1, 5, 5, 1, 1, 2561, 5120]
+  - [14, 0.0]
+- - [9, 1536, 5, 5, 1, 1, 5121, 10240]
+  - [13, 0.0]
+- - [1537, 3072, 5, 5, 1, 1, 5121, 10240]
+  - [12, 0.0]
+- - [3073, 6144, 5, 5, 1, 1, 5121, 10240]
+  - [14, 0.0]
+- - [49153, 98304, 5, 5, 1, 1, 5121, 10240]
+  - [14, 0.0]
+- - [9, 1536, 5, 5, 1, 1, 10241, 20480]
+  - [13, 0.0]
+- - [1537, 3072, 5, 5, 1, 1, 10241, 20480]
+  - [12, 0.0]
+- - [3073, 6144, 5, 5, 1, 1, 10241, 20480]
+  - [14, 0.0]
+- - [12289, 24576, 5, 5, 1, 1, 10241, 20480]
+  - [14, 0.0]
+- - [49153, 98304, 5, 5, 1, 1, 10241, 20480]
+  - [12, 0.0]
+- - [9, 3072, 5, 5, 1, 1, 20481, -1]
+  - [13, 0.0]
+RangeLogic: null
+TileSelectionIndices: null
+PerfMetric: DeviceEfficiency
+LibraryType: Range

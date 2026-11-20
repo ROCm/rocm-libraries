@@ -77,6 +77,36 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
     EXPECT_FALSE(params.hasSaveMeanVariance());
 }
 
+// A virtual saved pair that nothing consumes is "saved statistics not requested".
+TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
+{
+    auto savedBuilder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper savedGraph(
+        savedBuilder.GetBufferPointer(), savedBuilder.GetSize());
+    const auto* savedAttrs = savedGraph.getNode(0).attributes_as_BatchnormAttributes();
+    ASSERT_NE(savedAttrs, nullptr);
+    const BatchnormFwdTrainingParams savedParams(*savedAttrs, savedGraph.getTensorMap());
+    EXPECT_TRUE(savedParams.hasSaveMeanVariance());
+
+    auto virtualBuilder = hipdnn_test_sdk::utilities::mutateGraph(
+        hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(),
+        [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->name == "mean" || tensor->name == "inv_variance")
+                {
+                    tensor->virtual_ = true;
+                }
+            }
+        });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper virtualGraph(
+        virtualBuilder.GetBufferPointer(), virtualBuilder.GetSize());
+    const auto* virtualAttrs = virtualGraph.getNode(0).attributes_as_BatchnormAttributes();
+    ASSERT_NE(virtualAttrs, nullptr);
+    const BatchnormFwdTrainingParams virtualParams(*virtualAttrs, virtualGraph.getTensorMap());
+    EXPECT_FALSE(virtualParams.hasSaveMeanVariance());
+}
+
 TEST(TestBatchnormFwdTrainingParams, HasRunningStatsReturnsFalseWhenNotProvided)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();

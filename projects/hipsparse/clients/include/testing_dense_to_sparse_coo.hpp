@@ -29,7 +29,9 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_local_dnmat.hpp"
 #include "hipsparse_local_handle.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -77,19 +79,12 @@ void testing_dense_to_sparse_coo_bad_arg(const Arguments& argus)
     float*   dcoo_val     = (float*)dcoo_val_managed.get();
     void*    dbuf         = (void*)dbuf_managed.get();
 
-    // Matrix structures
-    hipsparseDnVecDescr_t matA;
-    hipsparseSpMatDescr_t matB;
-
     size_t bsize;
 
     // Create matrix structures
-    verify_hipsparse_status_success(
-        hipsparseCreateDnMat(&matA, m, n, ld, ddense_val, dataType, order), "success");
-    verify_hipsparse_status_success(
-        hipsparseCreateCoo(
-            &matB, m, n, nnz, dcoo_row_ind, dcoo_col_ind, dcoo_val, iType, idxBase, dataType),
-        "success");
+    hipsparseLocalCoo matB(
+        m, n, nnz, dcoo_row_ind, dcoo_col_ind, dcoo_val, iType, idxBase, dataType);
+    hipsparseLocalDnMat matA(m, n, ld, ddense_val, dataType, order);
 
     // denseToSparse buffer size
     verify_hipsparse_status_invalid_handle(
@@ -127,9 +122,6 @@ void testing_dense_to_sparse_coo_bad_arg(const Arguments& argus)
     verify_hipsparse_status_invalid_pointer(
         hipsparseDenseToSparse_convert(handle, matA, matB, alg, nullptr), "Error: dbuf is nullptr");
 
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(matA), "success");
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matB), "success");
 #endif
 }
 
@@ -192,20 +184,17 @@ void testing_dense_to_sparse_coo(Arguments argus)
         hipMemcpy(ddense, hdense_val.data(), sizeof(T) * nrow * ncol, hipMemcpyHostToDevice));
 
     // Create dense matrix
-    hipsparseDnMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matA, m, n, ld, ddense, typeT, order));
+    hipsparseLocalDnMat matA(m, n, ld, ddense, typeT, order);
 
     // Create matrices
-    hipsparseSpMatDescr_t matB;
-    CHECK_HIPSPARSE_ERROR(
-        hipsparseCreateCoo(&matB, m, n, 0, nullptr, nullptr, nullptr, typeI, idx_base, typeT));
+    hipsparseLocalCoo matB(m, n, 0, nullptr, nullptr, nullptr, typeI, idx_base, typeT);
 
     // Query DenseToSparse buffer
     size_t bufferSize;
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_bufferSize(handle, matA, matB, alg, &bufferSize));
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     CHECK_HIPSPARSE_ERROR(hipsparseDenseToSparse_analysis(handle, matA, matB, alg, buffer));
 
@@ -322,9 +311,6 @@ void testing_dense_to_sparse_coo(Arguments argus)
                             get_gpu_time_msec(gpu_time_used));
     }
 
-    CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matA));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matB));
 #endif
 }
 

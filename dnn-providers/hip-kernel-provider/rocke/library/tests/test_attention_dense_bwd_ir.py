@@ -41,6 +41,13 @@ import sys
 from pathlib import Path
 
 import pytest
+from rocke.core.ir_golden import (
+    GOLDEN_ALIASES,
+    GOLDEN_FLAVORS,
+    GOLDEN_PROFILE_FLAVORS,
+    golden_subdocument,
+)
+
 from ._attention_bwd_test_utils import kernel_signature
 
 _TESTS = Path(__file__).resolve().parent
@@ -49,7 +56,7 @@ if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
 _GOLDEN = _TESTS / "golden" / "attention_dense_bwd_ir_sha256.json"
-_FLAVORS = ("llvm20", "llvm22", "llvm23")
+_FLAVORS = GOLDEN_FLAVORS
 _ARCHS = ("gfx942", "gfx950")
 
 
@@ -383,8 +390,12 @@ def _current_flavor():
 
 
 def _build_doc():
-    doc = {"schema": "attention_dense_bwd.ir_golden_sha256/v1", "flavors": {}}
-    for flavor in _FLAVORS:
+    doc = {
+        "schema": "attention_dense_bwd.ir_golden_sha256/v1",
+        "aliases": GOLDEN_ALIASES,
+        "flavors": {},
+    }
+    for flavor in GOLDEN_PROFILE_FLAVORS:
         cases = {}
         for arch in _ARCHS:
             for key, over, dq in _golden_rows(arch):
@@ -402,7 +413,7 @@ def test_dense_bwd_ir_matches_golden(arch, flavor):
     if not _GOLDEN.exists():
         pytest.fail("dense backward golden fixture missing; generate with --write")
     golden = json.loads(_GOLDEN.read_text())
-    gflav = golden.get("flavors", {}).get(flavor)
+    gflav = golden_subdocument(golden, flavor)
     if not gflav:
         pytest.fail(f"no dense backward golden recorded for llvm flavor {flavor!r}")
     drift = []
@@ -419,9 +430,16 @@ def test_dense_bwd_ir_matches_golden(arch, flavor):
 
 def test_golden_covers_every_case_and_flavor():
     golden = json.loads(_GOLDEN.read_text())
+    aliases = golden.get("aliases", {})
+    direct = golden.get("flavors", {})
+    assert aliases == GOLDEN_ALIASES
+    assert set(direct) == set(GOLDEN_PROFILE_FLAVORS)
+    assert not set(aliases) & set(direct)
     want = {key for a in _ARCHS for key, _, _ in _golden_rows(a)}
     for flavor in _FLAVORS:
-        got = set(golden["flavors"][flavor]["cases"])
+        sub = golden_subdocument(golden, flavor)
+        assert sub is not None, flavor
+        got = set(sub["cases"])
         assert got == want, flavor
 
 

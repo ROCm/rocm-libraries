@@ -64,6 +64,26 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_probability().has_value()
                                    && attrs.dropout_probability().value() != 0.f,
                                "dropout not supported");
+    // Operands the kernel never reads: the scale comes from attn_scale_value (1.0 when
+    // unset), and the dropout, block-mask and fp8 quantization tensors have no kernel input.
+    // seed and offset are inert at dropout_probability 0, which is the only value served.
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_tensor_uid(), "scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_mask_tensor_uid(),
+                               "dropout_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.dropout_scale_tensor_uid(),
+                               "dropout_scale tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.rng_dump_tensor_uid(), "rng_dump tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.block_mask_tensor_uid(), "block_mask tensor not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.descale_q_tensor_uid() || attrs.descale_k_tensor_uid()
+                                   || attrs.descale_v_tensor_uid() || attrs.descale_s_tensor_uid(),
+                               "fp8 descale tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.amax_s_tensor_uid() || attrs.amax_o_tensor_uid(),
+                               "fp8 amax tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.scale_s_tensor_uid() || attrs.scale_o_tensor_uid(),
+                               "fp8 scale_s/scale_o tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_tensor_uid() || attrs.sum_exp_tensor_uid(),
+                               "max and sum_exp output tensors not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.max_seq_len_kv().has_value(), "max_seq_len_kv not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.alibi_mask(), "alibi_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.padding_mask(), "padding_mask not supported");
     HIP_KERNEL_RETURN_FALSE_IF(attrs.attn_mask_tensor_uid(), "attn_mask tensor not supported");
@@ -75,6 +95,9 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     HIP_KERNEL_RETURN_FALSE_IF(attrs.seq_len_q_tensor_uid().has_value()
                                    || attrs.seq_len_kv_tensor_uid().has_value(),
                                "variable-length (group) batch mode not supported");
+    HIP_KERNEL_RETURN_FALSE_IF(attrs.cu_seq_len_q_tensor_uid().has_value()
+                                   || attrs.cu_seq_len_kv_tensor_uid().has_value(),
+                               "cumulative sequence lengths (cu_seq_len_q/kv) not supported");
 
     // Tensor shapes
     const auto& tensorMap = opGraph.getTensorMap();
@@ -83,10 +106,43 @@ bool HipFlash2FwdPlanBuilder::isApplicable(const Handle& handle,
     auto* vTensor = tensorMap.at(attrs.v_tensor_uid());
     auto* oTensor = tensorMap.at(attrs.o_tensor_uid());
 
+    // Every buffer is read or written through a device pointer; a virtual tensor has none.
+    HIP_KERNEL_RETURN_FALSE_IF(qTensor->virtual_(), "Q tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(kTensor->virtual_(), "K tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(vTensor->virtual_(), "V tensor must not be virtual");
+    HIP_KERNEL_RETURN_FALSE_IF(oTensor->virtual_(), "O tensor must not be virtual");
+
     HIP_KERNEL_RETURN_FALSE_IF(qTensor->dims()->size() != 4, "Q must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(kTensor->dims()->size() != 4, "K must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(vTensor->dims()->size() != 4, "V must be rank-4");
     HIP_KERNEL_RETURN_FALSE_IF(oTensor->dims()->size() != 4, "O must be rank-4");
+
+    // Flash2FwdParams narrows every one of these dims to int (extractParams)
+    // and the kernel args struct keeps them int, so a dim that does not fit
+    // would be dispatched as a different shape. Batch has no other guard at
+    // all: it only ever reaches the kernel as gridDimY. Checked before the
+    // casts below, which are the first narrowing.
+    {
+        namespace plan_utils = asm_sdpa_engine::plan_utils;
+        bool dimsFit = true;
+        dimsFit &= plan_utils::dimFitsI32("batch", qTensor->dims()->Get(0));
+        dimsFit &= plan_utils::dimFitsI32("num_heads_q", qTensor->dims()->Get(1));
+        dimsFit &= plan_utils::dimFitsI32("num_heads_kv", kTensor->dims()->Get(1));
+        dimsFit &= plan_utils::dimFitsI32("seq_len_q", qTensor->dims()->Get(2));
+        dimsFit &= plan_utils::dimFitsI32("seq_len_kv", kTensor->dims()->Get(2));
+        dimsFit &= plan_utils::dimFitsI32("head_dim_qk", qTensor->dims()->Get(3));
+        dimsFit &= plan_utils::dimFitsI32("head_dim_v", vTensor->dims()->Get(3));
+        HIP_KERNEL_RETURN_FALSE_IF(!dimsFit,
+                                   "Tensor dimensions overflow the 32-bit fields that carry them");
+    }
+
+    // The int gate above only proves seq_len_kv survives the narrowing. The KV
+    // tile count the kernels form from it needs one more tile of headroom.
+    HIP_KERNEL_RETURN_FALSE_IF(
+        kTensor->dims()->Get(2) > K_FLASH2_MAX_SEQ_LEN_KV,
+        "seq_len_kv exceeds " + std::to_string(K_FLASH2_MAX_SEQ_LEN_KV)
+            + ", the largest value whose KV tile count does not overflow int (actual: "
+            + std::to_string(kTensor->dims()->Get(2)) + ")");
 
     // K2: reject mask types the kernel does not implement
     {

@@ -78,17 +78,17 @@ auto elementaryBinaryOpWithCpu(hiptensorDataType_t inputType,
     // size_t sizeB = sizeof(OutputType) * outputElements;
 
     std::vector<InputType> aArray(inElements);
-    std::iota(aArray.begin(), aArray.end(), 0);
+    std::iota(aArray.begin(), aArray.end(), static_cast<InputType>(0.0f));
     std::vector<InputType>  cArray(aArray);
     std::vector<OutputType> dArray(outputElements);
-    std::vector<OutputType> referenceArray;
+    std::vector<double>     referenceValues;
 
     using hiptensor::HiptensorOptions;
     auto& options = HiptensorOptions::instance();
 
     if(options->isColMajorStrides())
     {
-        referenceArray = {
+        referenceValues = {
             0.,     -19.8,  -39.6,  -59.4,  -79.2,  -99.,   -118.8, -138.6, -158.4, -178.2, -198.,
             -217.8, -237.6, -257.4, -277.2, -297.,  -316.8, -336.6, -356.4, -376.2, -9.9,   -29.7,
             -49.5,  -69.3,  -89.1,  -108.9, -128.7, -148.5, -168.3, -188.1, -207.9, -227.7, -247.5,
@@ -103,7 +103,7 @@ auto elementaryBinaryOpWithCpu(hiptensorDataType_t inputType,
     }
     else
     {
-        referenceArray = {
+        referenceValues = {
             0.,     -132.,  -264.,  -66.,   -198.,  -330.,  -3.3,   -135.3, -267.3, -69.3,  -201.3,
             -333.3, -6.6,   -138.6, -270.6, -72.6,  -204.6, -336.6, -9.9,   -141.9, -273.9, -75.9,
             -207.9, -339.9, -13.2,  -145.2, -277.2, -79.2,  -211.2, -343.2, -16.5,  -148.5, -280.5,
@@ -117,8 +117,10 @@ auto elementaryBinaryOpWithCpu(hiptensorDataType_t inputType,
             -323.4, -125.4, -257.4, -389.4, -62.7,  -194.7, -326.7, -128.7, -260.7, -392.7};
     }
 
-    const ComputeType alphaValue = 2.1f;
-    const ComputeType gammaValue = 1.2f;
+    std::vector<OutputType> referenceArray(referenceValues.begin(), referenceValues.end());
+
+    const ComputeType alphaValue = static_cast<ComputeType>(2.1f);
+    const ComputeType gammaValue = static_cast<ComputeType>(1.2f);
     hiptensorHandle_t handle;
     CHECK_HIPTENSOR_ERROR(hiptensorCreate(&handle));
     hiptensorTensorDescriptor_t descA = nullptr;
@@ -132,22 +134,22 @@ auto elementaryBinaryOpWithCpu(hiptensorDataType_t inputType,
     CHECK_HIPTENSOR_ERROR(hiptensorCreateTensorDescriptor(
         handle, &descD, noutputMode, outputExtent.data(), NULL /* stride */, outputType, 0));
 
-    hiptensorElementwiseBinaryOpReference(&alphaValue,
-                                          aArray.data(),
-                                          descA,
-                                          inMode.data(),
-                                          HIPTENSOR_OP_NEG,
-                                          &gammaValue,
-                                          cArray.data(),
-                                          descC,
-                                          inMode.data(),
-                                          HIPTENSOR_OP_NEG,
-                                          dArray.data(),
-                                          descD,
-                                          outputMode.data(),
-                                          HIPTENSOR_OP_ADD,
-                                          typeCompute,
-                                          0);
+    CHECK_HIPTENSOR_ERROR(hiptensorElementwiseBinaryOpReference(&alphaValue,
+                                                                aArray.data(),
+                                                                descA,
+                                                                inMode.data(),
+                                                                HIPTENSOR_OP_NEG,
+                                                                &gammaValue,
+                                                                cArray.data(),
+                                                                descC,
+                                                                inMode.data(),
+                                                                HIPTENSOR_OP_NEG,
+                                                                dArray.data(),
+                                                                descD,
+                                                                outputMode.data(),
+                                                                HIPTENSOR_OP_ADD,
+                                                                typeCompute,
+                                                                0));
 
     auto result = compareEqual(referenceArray.data(),
                                dArray.data(),
@@ -198,6 +200,51 @@ TEST(ElementaryBinaryOpCpuImplTest, CompareF16ResultWithReference)
     hiptensorDataType_t inputType   = HIPTENSOR_R_16F;
     hiptensorDataType_t outputType  = HIPTENSOR_R_16F;
     hiptensorDataType_t typeCompute = HIPTENSOR_R_16F;
+
+    auto [result, maxRelativeError] = elementaryBinaryOpWithCpu<InputType, OutputType, ComputeType>(
+        inputType, outputType, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(ElementaryBinaryOpCpuImplTest, CompareBF16ResultWithReference)
+{
+    typedef hip_bfloat16 InputType;
+    typedef hip_bfloat16 OutputType;
+    typedef hip_bfloat16 ComputeType;
+
+    hiptensorDataType_t inputType   = HIPTENSOR_R_16BF;
+    hiptensorDataType_t outputType  = HIPTENSOR_R_16BF;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_16BF;
+
+    auto [result, maxRelativeError] = elementaryBinaryOpWithCpu<InputType, OutputType, ComputeType>(
+        inputType, outputType, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(ElementaryBinaryOpCpuImplTest, CompareBF16WithF32ScalarResultWithReference)
+{
+    typedef hip_bfloat16 InputType;
+    typedef hip_bfloat16 OutputType;
+    typedef float        ComputeType;
+
+    hiptensorDataType_t inputType   = HIPTENSOR_R_16BF;
+    hiptensorDataType_t outputType  = HIPTENSOR_R_16BF;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_32F;
+
+    auto [result, maxRelativeError] = elementaryBinaryOpWithCpu<InputType, OutputType, ComputeType>(
+        inputType, outputType, typeCompute);
+    EXPECT_TRUE(result) << "max_relative_error: " << maxRelativeError;
+}
+
+TEST(ElementaryBinaryOpCpuImplTest, CompareF16WithF32ScalarResultWithReference)
+{
+    typedef _Float16 InputType;
+    typedef _Float16 OutputType;
+    typedef float    ComputeType;
+
+    hiptensorDataType_t inputType   = HIPTENSOR_R_16F;
+    hiptensorDataType_t outputType  = HIPTENSOR_R_16F;
+    hiptensorDataType_t typeCompute = HIPTENSOR_R_32F;
 
     auto [result, maxRelativeError] = elementaryBinaryOpWithCpu<InputType, OutputType, ComputeType>(
         inputType, outputType, typeCompute);

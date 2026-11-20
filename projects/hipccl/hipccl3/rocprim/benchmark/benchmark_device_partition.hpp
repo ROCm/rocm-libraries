@@ -133,6 +133,20 @@ constexpr auto config_name()
     }
 }
 
+// This functor exists for build-time optimization purposes.
+// In predicate-based benchmarks, using this in place of a lambda-defined
+// predicate function allows the compiler to generate fewer kernels.
+// This is because lambda functions can be given a type that depends on the
+// template arguments of the enclosing function. This type is then passed
+// to kernel-defining functions as a template parameter.
+// In contrast, this functor always has the same type.
+template<typename T>
+struct partition_less_than_op
+{
+    T threshold;
+    __host__ __device__ bool operator()(const T& value) const { return value < threshold; }
+};
+
 template<typename DataType,
          typename Config                   = rocprim::default_config,
          typename FlagType                 = int8_t,
@@ -274,15 +288,13 @@ struct device_partition_predicate_benchmark : public primbench::benchmark_interf
         {
             const auto dispatch_predicate = [&](float probability)
             {
-                auto predicate = [probability](const DataType& value) -> bool
-                { return value < static_cast<DataType>(127 * probability); };
                 HIP_CHECK(rocprim::partition<Config>(d_temp_storage,
                                                      temp_storage_size_bytes,
                                                      d_input.get(),
                                                      d_output.get(),
                                                      d_selected_count_output.get(),
                                                      items,
-                                                     predicate,
+                                                     partition_less_than_op<DataType>{static_cast<DataType>(127 * probability)},
                                                      stream));
             };
 
@@ -459,8 +471,6 @@ struct device_partition_two_way_predicate_benchmark : public primbench::benchmar
         {
             const auto dispatch_predicate = [&](float probability)
             {
-                auto predicate = [probability](const DataType& value) -> bool
-                { return value < static_cast<DataType>(127 * probability); };
                 HIP_CHECK(rocprim::partition_two_way<Config>(d_temp_storage,
                                                              temp_storage_size_bytes,
                                                              d_input.get(),
@@ -468,7 +478,7 @@ struct device_partition_two_way_predicate_benchmark : public primbench::benchmar
                                                              d_output_rejected.get(),
                                                              d_selected_count_output.get(),
                                                              items,
-                                                             predicate,
+                                                             partition_less_than_op<DataType>{static_cast<DataType>(127 * probability)},
                                                              stream));
             };
 
@@ -544,11 +554,9 @@ struct device_partition_three_way_benchmark : public primbench::benchmark_interf
             const auto dispatch_predicate = [&](std::pair<float, float> probability)
             {
                 const float probability_one = probability.first;
-                auto        predicate_one   = [probability_one](const DataType& value)
-                { return value < DataType(127 * probability_one); };
+                const partition_less_than_op<DataType> predicate_one{static_cast<DataType>(127 * probability_one)};
                 const float probability_two = probability.second;
-                auto        predicate_two   = [probability_two](const DataType& value)
-                { return value < DataType(127 * probability_two); };
+                const partition_less_than_op<DataType> predicate_two{static_cast<DataType>(127 * probability_two)};
 
                 HIP_CHECK(rocprim::partition_three_way<Config>(d_temp_storage,
                                                                temp_storage_size_bytes,

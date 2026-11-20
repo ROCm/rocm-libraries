@@ -487,6 +487,8 @@ namespace rocalution
 
         rocsparse_mat_info mat_info_;
         rocsparse_mat_info mat_info_itsv_;
+        // Iterative analysis of the U part, a rocsparse_mat_info holds a single csritsv analysis
+        rocsparse_mat_info mat_info_itsv_U_;
 
         // Matrix buffer (csrilu0, csric0, csrsv)
         size_t mat_buffer_size_;

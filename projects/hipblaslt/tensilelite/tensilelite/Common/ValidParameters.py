@@ -367,6 +367,19 @@ validParameters = { # we need to make sure this matches develop
     # workgroup cluster it forces GlobalSplitUWorkGroupMappingRoundRobin on so the
     # cluster's peers share a K chunk. May remove these limitations in the future.
     "PrefetchGL2": [0, 1, 2],
+    # Width of the PrefetchGL2 address increment sgpr (GL2PrefetchInc{A,B,...}).
+    # False: 32-bit (1 sgpr). True: 64-bit (2 sgprs), for when the per-iteration
+    # byte increment (unroll stride * DepthU * bpe, times the GSU chunk stride
+    # under GSU) can overflow 32 bits. Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2Inc64Bit": [False, True],
+    # Address form of the PrefetchGL2 global_prefetch_b8.
+    # False: a 64-bit vgpr pair address per load (vaddr, saddr=off).
+    # True: a 64-bit sgpr pair base per tensor (GL2PrefetchBase{A,B,...}) plus a
+    # 32-bit vgpr offset per load. Halves the address vgprs and advances the
+    # address with scalar instead of vector adds, but each lane's byte offset
+    # from the base (within one prefetch tile) must fit in 32 bits.
+    # Forced off when PrefetchGL2 == 0.
+    "PrefetchGL2SAddr": [False, True],
     # MatrixInstruction Only
     # If set ClusterLocalRead, each iteration dedicated vgprBuffer for localRead
     # So we can schedule these localReads to the front of the loop
@@ -419,10 +432,12 @@ validParameters = { # we need to make sure this matches develop
     # Not applied with 1LDSBuffer=1, LocalSplitU>1, subtile, or sparse.
     #
     # Values:
-    #   -1 = auto: enable only where it needs no extra LDS reserved.
-    #    0 = off (default): baseline layout.
-    #    1 = on: enable wherever valid, including cases that reserve more LDS to reach a segment
-    #            boundary (needs PrefetchGlobalRead=2).
+    #    0 = off (default).
+    #    1 = require interleave; allow additional LDS up to MaxLDS.
+    #        Reject the kernel candidate if the layout or buffering is unsupported.
+    #   -1 = auto: enable only when supported and LDS usage does not exceed mode 0;
+    #        otherwise disable interleave.
+    #
     # Recommended: set [0, 1] when tuning to compare baseline vs interleaved.
     "LDSSegmentInterleave": [-1, 0, 1],
     # LDSSegmentBRotate (gfx1250, needs LDSSegmentInterleave=1 aligned [2,2] layout): split B into
@@ -431,16 +446,21 @@ validParameters = { # we need to make sure this matches develop
     # segment at the same time. Pair 1's accumulator halves are swapped back before the epilogue.
     #   0 = off (default), 1 = on.
     "LDSSegmentBRotate": [0, 1],
+    # gfx1250 TDM, MIWaveGroup [2, 2]: each wave covers one M half.
+    # With smaller VectorWidthA, adjacent lanes read adjacent A rows.
+    # VectorWidthA and inherited VectorWidthMXSA retain their values.
+    # WTA == VWA (MIWaveTile[0] == VectorWidthA) keeps the original path.
+    # B keeps its VectorWidthB layout and iterate setting.
+    "WaveTileContiguousA": [False, True],
     # Persistent loop: use the current tile's no-load-loop window to
     # issue the first global-read group for the next persistent tile. The
     # generated code keeps that first-PGR data durable and restores borrowed
     # current-tile state before current tail/NLL code resumes.
     "PrefetchAcrossPersistent": [0, 1],
-    # Persistent loop: keep the whole K extent of an operand (and its MX
-    # scales) resident in VGPRs across persistent iterations, so every tile after
-    # the first reuses them instead of re-issuing the global->LDS and LDS->VGPR
-    # traffic. Only valid when every tile a workgroup visits shares that operand,
-    # which the emitted size predicates enforce.
+    # Persistent loop: keep an operand (and its MX scales) resident in VGPRs across persistent tiles,
+    # so tiles that share it skip reloading it. The size predicates cap K at the resident k-tiles;
+    # a K remainder ((AssertSummationElementMultiple % DepthU != 0)) is tail-folded into the main loop, 
+    # so there is no tail loop in RAP kernel.
     #   0 = off (default)
     #   1 = A resident
     #   2 = B resident -- planned, not implemented yet
@@ -585,6 +605,8 @@ validParameters = { # we need to make sure this matches develop
     # When True, uses a subtile scheduling strategy with DTL global reads and
     # an optimized storeD path. Automatically forced False on non-gfx950.
     "UseSubtileImpl": [False, True],
+    # FusedA2A=A2AGemm: K sub-rounds per peer shard, each with its own flag.
+    "A2ASubRounds": [1, 2, 4],
     # Load options:
     # (GRO = Global Read Offset)
     # BufferLoad=0:
@@ -701,6 +723,30 @@ validParameters = { # we need to make sure this matches develop
     "AssertStrideBEqual": -1,
     "AssertStrideCEqual": -1,
     "AssertStrideDEqual": -1,
+    # Required alpha. A kernel that has no alpha argument declares 1; the runtime
+    # predicate admits only a problem whose alpha restriction is that value. Unset
+    # admits any alpha.
+    "AssertAlphaValue": [1],
+    # Divisibility of an A/B stride, same {index: value} form: the predicate is
+    # stride(index) % value == 0, in elements. A kernel that issues wide loads
+    # along the leading dimension declares it. Fork YAML: AssertStrideAMultiple: [{1: 4}]
+    "AssertStrideAMultiple": -1,
+    "AssertStrideBMultiple": -1,
+    # First byte extent of any one tensor (A, B, C or D) that a kernel cannot
+    # address. Handwritten kernels that reach a whole tensor through a single buffer
+    # resource declare the first extent they cannot address here (2^31 = 2147483648 for
+    # the shipped skinny MXFP8 kernels); a problem with a tensor whose total allocated
+    # bytes or leading stride in bytes is at least this many does not match. -1 skips.
+    # Fork YAML: AssertTensorBytesLessThan: [2147483648]
+    "AssertTensorBytesLessThan": -1,
+    # True requires the problem's MX scales to be in the pre-swizzled (padded HostPreSwizzle)
+    # layout, for handwritten kernels that read that layout only: a caller that hands over
+    # compactly packed scales does not match. -1 skips. Fork YAML: AssertMXScalesPreSwizzled: [True]
+    "AssertMXScalesPreSwizzled": -1,
+    # {index: value} where the predicate holds when at least one listed size is below its
+    # value (an Or of SizeLessThan), for kernels that serve a problem if either of two
+    # extents is small. -1 skips. Fork YAML: AssertAnySizeLessThan: [{0: 5, 1: 5}]
+    "AssertAnySizeLessThan": -1,
     # Assertions that require arithmetic intensity to be specified value.
     # Arithmetic intensity measures the ratio of computation to memory bandwidth required for a problem.
     # These predicates can be used to adjust solution selection compute-bound or memory-bound problems.
@@ -1018,6 +1064,32 @@ validParameters = { # we need to make sure this matches develop
     # -1 means set vw to largest localReadWidth according to MIWaveTile, LDS padding and LDS capacity
     "VectorWidthA": [-1, 1, 2, 3, 4, 6, 8],
     "VectorWidthB": [-1, 1, 2, 3, 4, 6, 8],
+    # LDSTrStoreShuffle: the epilogue store shuffle (storeShuffleForLDSTrVW in
+    # KernelWriterAssembly). It re-orders the accumulators to bridge the ds_read_tr M order to
+    # the wide store's, and is what makes VectorWidthA > 1 legal under enableLDSTrA. Named for
+    # the read path it compensates for; it needs enableLDSTrA, VectorWidthA > 1 and SourceSwap
+    # together, so none of those alone identifies it.
+    # 0 = off. enableLDSTrA clamps VectorWidthA to 1, exactly as it did before the shuffle
+    #     existed -- including silently overriding an explicit VectorWidthA > 1 in the yaml.
+    #     With no VectorWidthA > 1 there is nothing to bridge, so no shuffle is emitted.
+    # 1 = on. VectorWidthA 2/4/8 is kept and the shuffle re-orders the accumulators. It walks
+    #     numNTiles*numGroups*accPerTile mutually independent passes, each VW*slotBatch
+    #     ds_bpermute followed by a cndmask tree, and drains LDS (s_wait_dscnt 0) before
+    #     consuming each pass -- so the full bpermute latency is exposed once per pass.
+    # 2 = on, software-pipelined. Issues the next pass's ds_bpermute before consuming the
+    #     current one and waits on a staggered dscnt, so each pass's LDS latency hides behind
+    #     the previous pass's cndmask tree. Same instruction multiset as 1; costs a second
+    #     gather buffer (VW*slotBatch extra vgprs).
+    # 0 is NOT a "wrong answers" setting: without the shuffle, VectorWidthA > 1 under
+    # enableLDSTrA reads the wrong M rows, so turning the shuffle off has to turn
+    # VectorWidthA > 1 off with it. That is also why 0 is the default -- it keeps every kernel
+    # that predates this feature bit-identical, including ones that never set VectorWidthA and
+    # would otherwise be auto-promoted into the shuffle path.
+    # 1 vs 2 is a pure scheduling choice and neither wins universally; it depends on the whole
+    # configuration and is not predictable from VectorWidthA, MacroTile or slotBatch alone, so
+    # benchmark both. Forced to 0 when the shuffle cannot run anyway (not enableLDSTrA, or
+    # StoreRemapVectorWidth > 0, which is the alternative bridge).
+    "LDSTrStoreShuffle": [0, 1, 2],
     # If 0, store 1 element per instruction.
     # If 1, store vector-width elements per instruction.
     # if -1, store vector-wide elements per instruction unless PBD would not generate a valid kernel
@@ -1206,6 +1278,10 @@ validParameters = { # we need to make sure this matches develop
     # Need certain conditions to use TailloopInNll optimization
     # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
     "TailloopInNll": [False, True],
+    # Fuse the D-tile buffer_store into the No-Load-Loop (NLL) so early-completed
+    # accumulator pairs are stored while the final-K-step MFMAs for later pairs run.
+    # Scoped to fp4-input (MXFP4) + UseSubtileImpl on gfx950; auto-disabled otherwise.
+    "PostLoopStoreInNll": [False, True],
     # Schedule global read instructions over barrier sync.
     # Only for DirectToLdsA+B + PGR>=2.
     # -1: auto (enable this for PGR>=3)
@@ -1236,7 +1312,7 @@ validParameters = { # we need to make sure this matches develop
     # wave issues the deferrable one. Handled by the StinkyTofu TDMLoadWaveSyncPass;
     # gfx1250 / ScheduleIterAlg=4 path only, off by default.
     "TDMLoadWaveSync": [False, True],
-    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2, WmmaQueueDepth: 8}. Tuning-only:
+    # StinkyTofu module-option overrides, e.g. {WmmaBatchSize: 2}. Tuning-only:
     # Solution moves it to the internal _StinkyTofuParameters, which tags the kernel name
     # (only when set) and is dropped from the solution before the logic yaml is written.
     "StinkyTofuParameters": -1,
@@ -1267,10 +1343,37 @@ validParameters = { # we need to make sure this matches develop
     #      when NumWaves>1). Hidden from the kernel name.
     #   1  {A,MXSA} + {MXSB,B}, each scale on a data tensor's set. NumWaves>1.
     #      Parity crosses the scales: waves 0,2 carry A+MXSB, 1,3 B+MXSA.
-    #   2  {A,MXSA,MXSB} + {B}, 2/1/1 wave split: A on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, B on every wave. NumWaves==4.
-    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2: B on waves 0-1, MXSA on
-    #      wave 2, MXSB on wave 3, A on every wave. NumWaves==4.
+    #   2  {A,MXSA,MXSB} + {B}. With both scales on 4 waves a 2/1/1 split:
+    #      A on waves 0-1, MXSA on wave 2, MXSB on wave 3, B on every wave;
+    #      on 2 waves A on wave 0, MXSA (on A's set) and MXSB (on a set of
+    #      its own) on wave 1, B on both.
+    #   3  {B,MXSA,MXSB} + {A}, the mirror of 2 with A and B exchanged.
+    #   Without MX scales 1-3 reduce to {A} + {B}: A and B each on every wave,
+    #   so every wave issues a slice of both. The three then issue the same
+    #   loads and differ only in the name, so a sweep need carry just one.
+    #   With MX scales on one tensor only, the scale takes every wave of the
+    #   0 scale set; on 1-3 it shares its data tensor's set, splitting that
+    #   set's waves with it, and the other data tensor rides every wave of
+    #   its own set.
+    #   Solution rejects, naming the limit and what to use instead:
+    #   - a value outside this list;
+    #   - 1-3 without the TDM on both tensors (TDMInst=3), on one wave, or
+    #     with UseSubtileImpl;
+    #   - 2 and 3 with both scales on other than 2 or 4 waves, or at a
+    #     divergent decoupled pair;
+    #   - one-sided MX with PrefetchAcrossPersistent on 1-3, where the one
+    #     live scale shares a data tensor's set and PAP refreshes the scale
+    #     descriptors only as a pair;
+    #   - ReuseAcrossPersistent on 1-3 with MX scales, whose null silences
+    #     one tensor by wave parity;
+    #   - one-sided MX off gfx1250 TDM kernels (MXLoadInst=TDM), with
+    #     UseSubtileImpl, with PrefetchAcrossPersistent or
+    #     ReuseAcrossPersistent on a persistent kernel, or at a divergent
+    #     decoupled pair on more than one wave;
+    #   - TDMSplit, which is disabled for every row.
+    #
+    # th/scope/nv are instruction-wide: at 1/2/3 the data tensor's (A or B) hints decide and the
+    # scale tensors' are ignored; at 0 a field is emitted only if the members of a set agree.
     #
     # This list and Components/TDMFuse.TDM_FUSE_GROUPING must name the same integers.
     "TDMFuse": [0, 1, 2, 3],
@@ -1282,13 +1385,17 @@ validParameters = { # we need to make sure this matches develop
     #                      requires MXLoadInst="BufferLoad" and gfx950 host pipeline.
     #   "InMemorySwizzle": scales swizzled in device memory by TDM;
     #                      requires MXLoadInst="TDM".
+    #   "HostPreSwizzle128x4": scales pre-shuffled on the host in 128-row by 4-K-block
+    #                      tiles (HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT);
+    #                      handwritten gfx950 custom kernels only.
     # Internal sentinel (do NOT use in yamls):
     #   "Auto":            triggers conditional defaulting in Solution.assignDerivedParameters.
     #                      The defaultBenchmarkCommonParameters entry is "Auto" so the
     #                      derivation fires; users should write one of the concrete values above.
     # Codegen + rejection logic combine MXScaleFormat with MXLoadInst and
     # archCaps["HasMXScaleSwizzle"].
-    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle"],
+    "MXScaleFormat": ["Auto", "NoSwizzle", "HostPreSwizzle", "InMemorySwizzle",
+                      "HostPreSwizzle128x4"],
     # How A/MXSA and B/MXSB are loaded from VRAM to LDS.
     # User-facing values:
     #   "TDM":         tensor_load_to_lds (requires asmCaps["HasTDM"]; today always implies
@@ -1301,12 +1408,13 @@ validParameters = { # we need to make sure this matches develop
     "MXLoadInst": ["Auto", "TDM", "BufferLoad", "GlobalLoad"],
     # Cluster dimension. Clusters have up to 16 work-groups in a cluster, but each work-group in a
     # cluster runs on a separate WGP.
+    # DataParallel and StreamK/StaticGrid derive spatial clustering on either axis.
+    # StreamK supports linear/tree fixup and requires PrefetchAcrossPersistent=0.
     "ClusterDim": validClusterDimensions,
     # Remap clusters onto the two AIDs (4 XCCs and one GL2 each) so that each GL2 reads
     # one operand once and only the other operand is duplicated across GL2s.
     # -2: Read each cluster's XCC from MSG_RTN_GET_SE_AID_ID (requires strict round-robin dispatch)
     # -1: Disabled
-    # 0-7: XCC that the hardware round-robin dispatches cluster 0 to
     "ClusterAIDMapping": list(range(-2, 0)),
     # Enable PLR 0.5 to save vgprs
     # 0: Disabled
@@ -1320,6 +1428,7 @@ validParameters = { # we need to make sure this matches develop
     # 1: Use iterate-mode for A
     # 2: Use iterate-mode for B
     # 3: Use iterate-mode for both A and B
+    # WaveTileContiguousA disables A iterate: 1 resolves to 0, 3 to 2; auto only checks B.
     "TDMIterateMode": [-1, 0, 1, 2, 3]
 }
 
@@ -1437,6 +1546,14 @@ ASSERT_DIM_MAP_PARAMETERS = (
     "AssertStrideBEqual",
     "AssertStrideCEqual",
     "AssertStrideDEqual",
+    "AssertStrideAMultiple",
+    "AssertStrideBMultiple",
+)
+
+# Subset of the above where the value is a divisor, so 0 would divide by zero.
+ASSERT_DIM_MULTIPLE_PARAMETERS = (
+    "AssertStrideAMultiple",
+    "AssertStrideBMultiple",
 )
 
 
@@ -1455,6 +1572,41 @@ def checkAssertSizeMapIsValid(name, value):
         if type(val) is not int:
             msgBase = "Invalid parameter value: {} = {}\nSize must be int, got {}"
             raise Exception(msgBase.format(name, value, type(val).__name__))
+
+
+def checkAssertMultipleMapIsValid(name, value):
+    """Divisors must be positive; -1 is the skip sentinel."""
+    for val in value.values():
+        if val == -1 or val > 0:
+            continue
+        msgBase = "Invalid parameter value: {} = {}\nMultiple must be > 0 (or -1 to skip), got {}"
+        raise Exception(msgBase.format(name, value, val))
+
+
+def checkAssertTensorBytesLessThanIsValid(name, value):
+    """The byte limit must be a positive int; -1 is the skip sentinel."""
+    if type(value) is int and (value == -1 or value > 0):
+        return
+    msgBase = "Invalid parameter value: {} = {}\nMust be a positive int or -1 to skip"
+    raise Exception(msgBase.format(name, value))
+
+
+def checkAssertMXScalesPreSwizzledIsValid(name, value):
+    """The flag must be True; -1 is the skip sentinel."""
+    if value is True or (type(value) is int and value == -1):
+        return
+    msgBase = "Invalid parameter value: {} = {}\nMust be True or -1 to skip"
+    raise Exception(msgBase.format(name, value))
+
+
+def checkAssertAnySizeLessThanIsValid(name, value):
+    """A size map whose limits are positive; -1 is the skip sentinel."""
+    checkAssertSizeMapIsValid(name, value)
+    for val in value.values():
+        if val == -1 or val > 0:
+            continue
+        msgBase = "Invalid parameter value: {} = {}\nLimit must be > 0 (or -1 to skip), got {}"
+        raise Exception(msgBase.format(name, value, val))
 
 
 def checkSpaceFillAlgoIsValid(name, value):
@@ -1574,6 +1726,14 @@ def checkParametersAreValid(
             raise Exception(msgBase.format(name, value, name, validParams[name][:32], msgExt))
         elif name in ASSERT_DIM_MAP_PARAMETERS:
             checkAssertSizeMapIsValid(name, value)
+            if name in ASSERT_DIM_MULTIPLE_PARAMETERS:
+                checkAssertMultipleMapIsValid(name, value)
+        elif name == "AssertTensorBytesLessThan":
+            checkAssertTensorBytesLessThanIsValid(name, value)
+        elif name == "AssertMXScalesPreSwizzled":
+            checkAssertMXScalesPreSwizzledIsValid(name, value)
+        elif name == "AssertAnySizeLessThan":
+            checkAssertAnySizeLessThanIsValid(name, value)
         elif name == "SpaceFillingAlgo":
             checkSpaceFillAlgoIsValid(name, value)
         elif name == "SFCWGM":

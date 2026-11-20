@@ -28,6 +28,7 @@
 #include <Tensile/Utils.hpp>
 
 #include <algorithm>
+#include <vector>
 
 namespace rocisa
 {
@@ -277,12 +278,27 @@ namespace TensileLite
     {
         registerAllTypeInfoOnce();
 
-        auto* data = getData();
-        auto  iter = data->find(t);
-        if(iter == data->end())
+        // The registry never changes once registered, so index it by enumerator
+        // rather than searching it. Serializing one data type asks for every
+        // enumerator in turn, and the std::map lookup dominated that walk. The
+        // map still owns the entries, so the returned address is unchanged.
+        static std::vector<DataTypeInfo const*> const index = [] {
+            std::vector<DataTypeInfo const*> rv(static_cast<size_t>(rocisa::DataType::Count),
+                                                nullptr);
+            for(auto const& entry : *DataTypeInfo::getData())
+            {
+                auto i = static_cast<size_t>(entry.first);
+                if(i < rv.size())
+                    rv[i] = &entry.second;
+            }
+            return rv;
+        }();
+
+        auto i = static_cast<size_t>(t);
+        if(i >= index.size() || index[i] == nullptr)
             throw std::runtime_error(concatenate("Invalid data type: ", static_cast<int>(t)));
 
-        return iter->second;
+        return *index[i];
     }
 
     DataTypeInfo const& DataTypeInfo::Get(std::string const& str)

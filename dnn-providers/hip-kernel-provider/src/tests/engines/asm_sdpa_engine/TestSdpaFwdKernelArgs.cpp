@@ -217,3 +217,34 @@ TEST(TestSdpaFwdKernelArgs, BuildArgsFp8UsesOneByteInputStridesAndWiresDescales)
     EXPECT_EQ(args.s_descale_q_Hs, 0u);
     EXPECT_EQ(args.s_descale_v_Hs, 0u);
 }
+
+TEST(TestSdpaFwdKernelArgs, BuildArgsGroupModeWiresSharedSeqstartsAndZeroBatchStrides)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.inBytesPerElement = 2;
+    params.group = asm_sdpa_engine::SdpaFwdGroupModeParams{10, 11};
+
+    int qBuf = 0;
+    int kBuf = 0;
+    int vBuf = 0;
+    int oBuf = 0;
+    int qoSeqstartBuf = 0;
+    int kvSeqstartBuf = 0;
+    const std::unordered_map<int64_t, void*> uidToPtrMap{
+        {1, &qBuf}, {2, &kBuf}, {3, &vBuf}, {4, &oBuf}, {10, &qoSeqstartBuf}, {11, &kvSeqstartBuf}};
+
+    const fmha_fwd_v3_args args = buildFwdKernelArgs(params, uidToPtrMap);
+
+    EXPECT_EQ(args.ptr_qseq_padding, &qoSeqstartBuf);
+    EXPECT_EQ(args.ptr_qseq, &qoSeqstartBuf);
+    EXPECT_EQ(args.ptr_kseq_padding, &kvSeqstartBuf);
+    EXPECT_EQ(args.ptr_kseq, &kvSeqstartBuf);
+    EXPECT_EQ(args.s_Bs, 0u);
+    EXPECT_EQ(args.s_k_Bs, 0u);
+    EXPECT_EQ(args.s_v_Bs, 0u);
+    EXPECT_EQ(args.s_o_Bs, 0u);
+    EXPECT_EQ(args.s_Seqs, params.qStrideSeq * 2u);
+    EXPECT_EQ(args.s_k_Seqs, params.kStrideSeq * 2u);
+    EXPECT_EQ(args.s_v_Seqs, params.vStrideSeq * 2u);
+    EXPECT_EQ(args.s_o_Seqs, params.oStrideSeq * 2u);
+}

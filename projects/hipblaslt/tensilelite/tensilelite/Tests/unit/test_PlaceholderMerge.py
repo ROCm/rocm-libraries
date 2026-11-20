@@ -29,17 +29,12 @@ Two invariants must hold together; either alone is insufficient:
 2. The ``_ID<chipid>`` placeholder-filename suffix is gated on
    ``supportsChipIdPredicate``, mirroring ``HardwarePredicate.FromHardware``.
 
-Sibling-DeviceNames consistency is the enforcement point in CI: it runs
-unconditionally inside ``TensileLogic --check-all`` via
-``tensilelite.TensileLogic.ValidCorpusConsistency.check_corpus_invariants``. The
-chip-ID-arch-lock check is *not* wired into ``--check-all`` (it guards a
-future source-policy change, not the artifact any one build selects -- see
-``check_corpus_invariants``'s docstring); its enforcement point is this
-file's own pytest assertion against the real corpus, run in CI's unit-test
-job. Either way, these pytest copies exercise the real ``Logic/asm_full``
-directory when it's present in *this* test environment, and are a
-convenience/local-dev signal otherwise -- hence ``skipif`` (an unmet
-precondition), not ``xfail`` (an expected failure).
+Sibling-DeviceNames consistency is a fact about the shipped corpus, so it is
+enforced by ``TensileLogic --check-all`` via
+``tensilelite.logic.valid_corpus_consistency.check_corpus_invariants`` in
+every kernel-generating build, and pinned hermetically in
+``test_valid_corpus_consistency.py``. Everything in this file checks code, and
+none of it reads the corpus.
 """
 import ast
 from pathlib import Path
@@ -47,33 +42,11 @@ from pathlib import Path
 import pytest
 
 from tensilelite import SolutionLibrary
-from tensilelite.Common.Architectures import supportsChipIdPredicate
-from tensilelite.TensileLogic.ValidCorpusConsistency import (
-    find_chip_id_arch_lock_violations,
-    find_sibling_device_names_violations,
-)
+from tensilelite.Common.Architectures import SUPPORTED_GFX, supportsChipIdPredicate
 
-
-_LOGIC_ROOT = (
-    Path(__file__).resolve().parents[4]
-    / "library" / "src" / "amd_detail" / "rocblaslt" / "src"
-    / "Tensile" / "Logic" / "asm_full"
-)
-
-_needs_logic_dir = pytest.mark.skipif(
-    not _LOGIC_ROOT.is_dir(),
-    reason="Logic files not found: https://github.com/ROCm/rocm-libraries/issues/7481",
-)
 
 _ID_SUFFIX_LITERAL = "_ID"
 _GATE_FUNC_NAME = "supportsChipIdPredicate"
-
-
-@_needs_logic_dir
-def test_logic_yaml_sibling_device_names_consistent():
-    """Same-basename YAMLs in one logic tree must declare identical DeviceNames."""
-    violations = find_sibling_device_names_violations(sorted(_LOGIC_ROOT.rglob("*.yaml")), _LOGIC_ROOT)
-    assert not violations, "\n".join(violations)
 
 
 def _annotate_parents(tree: ast.AST) -> None:
@@ -163,12 +136,11 @@ def test_hardware_gates_placeholder_chip_id_suffix(
     assert placeholderName.endswith("_" + devicePart), placeholderName
 
 
-@_needs_logic_dir
 def test_supports_chip_id_predicate_only_gfx950():
-    """Lock chip-id-aware archs (as seen in the corpus) to gfx950; new
-    entries require re-audit of YAMLs and the SolutionLibrary suffix gate."""
-    violations = find_chip_id_arch_lock_violations(sorted(_LOGIC_ROOT.rglob("*.yaml")))
-    assert not violations, "\n".join(violations)
+    """Lock chip-id-aware archs to gfx950 across every architecture TensileLite
+    supports, whether or not logic ships for it yet; new entries require
+    re-audit of YAMLs and the SolutionLibrary suffix gate."""
+    assert [gfx for gfx in SUPPORTED_GFX if supportsChipIdPredicate(gfx)] == ["gfx950"]
 
 
 def test_supports_chip_id_predicate_includes_gfx950():

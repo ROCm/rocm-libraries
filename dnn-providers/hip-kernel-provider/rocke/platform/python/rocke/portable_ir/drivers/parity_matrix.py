@@ -48,7 +48,10 @@ def _auto_flavor() -> Tuple[str, str]:
 
 def _kernels():
     """(label, build_thunk) for every buildable parity emitter (first working
-    config), plus (label, None) for ones that can't be built."""
+    config), plus (label, None) for ones that can't be built. An emitter whose
+    alternate configs use a region-bearing op the first config does not (e.g.
+    scf.if_else) also yields that config, labelled ``label[op]``, so the
+    replay paths see every control-flow construct the recorder models."""
     paths = sorted(
         os.path.join(d, f)
         for d in rc._PARITY_DIRS
@@ -62,15 +65,12 @@ def _kernels():
         except Exception as e:  # noqa: BLE001
             yield label, None, f"import: {type(e).__name__}"
             continue
-        thunk = None
-        for t in rc._kernel_thunks(mod):
-            try:
-                t()
-            except Exception:  # noqa: BLE001
-                continue
-            thunk = t
-            break
-        yield label, thunk, None if thunk else "no buildable config"
+        picked = rc.coverage_thunks(mod)
+        if not picked:
+            yield label, None, "no buildable config"
+            continue
+        for tag, thunk in picked:
+            yield (f"{label}[{tag}]" if tag else label), thunk, None
 
 
 def _cell(thunk, arch):

@@ -10,7 +10,7 @@ Capability-selected (``HasTDM`` + ``TDMInst == 3``), like ``TensorDataMoverLoad`
 """
 
 from ..Component import ClusterLoad
-from ..Common import clusterEnabled, persistent2DCluster, persistentSpatialCluster, \
+from ..Common import clusterEnabled, persistentSpatialCluster, \
     persistentMulticast
 from .TDMFuse import tdmMemberIsLive, tdmWavePartition
 from typing import Mapping
@@ -107,7 +107,7 @@ class ClusterLoadTDM(ClusterLoad):
         replaced by an ``s_endpgm`` stub and the output tensor is left unwritten).
         With ``Ck > 1`` A is a real multicast and must stay live.
         """
-        return self.persistentRefreshesMask(kernel) and not persistent2DCluster(kernel)
+        return self.persistentRefreshesMask(kernel) and kernel["ClusterDim"][1] == 1
 
     def undeclareSgprs(self, writer: "KernelWriter", kernel: Mapping) -> Module:
         """Free the ``MulticastMask*`` SGPRs."""

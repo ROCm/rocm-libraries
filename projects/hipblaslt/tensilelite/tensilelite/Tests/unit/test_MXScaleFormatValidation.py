@@ -49,7 +49,9 @@ import pytest
 
 from rocisa.enum import DataTypeEnum
 from tensilelite.Common.DataType import DataType
-from tensilelite.SolutionStructs.Solution import _validateMXLocalReadWidth
+from tensilelite.SolutionStructs.Solution import _validateMX2DFreeTile, _validateMX2DTdmMSplit, \
+    _validateMXBlock128Arch, \
+    _validateMXLocalReadWidth
 from tensilelite.SolutionStructs.Validators.MXScaleFormat import validateMXScaleFormatCombination
 
 
@@ -99,6 +101,32 @@ def _local_read_state(
         "UnrollMajorLDSA": unrollMajorLDSA,
         "UnrollMajorLDSB": unrollMajorLDSB,
     }
+
+
+class TestMXBlock128Arch:
+    # 2d-block64 is caught only by the 2D clause (MXBlock 64 is not 128).
+    @pytest.mark.parametrize("mxBlock,free", [(128, 1), (128, 128), (64, 128)],
+                             ids=["1d128", "2d", "2d-block64"])
+    def test_rejects_block128_off_gfx1250(self, mxBlock, free, capsys):
+        state = {"ProblemType": {"MXBlockA": mxBlock, "MXBlockB": 0,
+                                 "MXBlockFreeA": free, "MXBlockFreeB": 1}}
+
+        assert _validateMXBlock128Arch(state, _NON_GFX1250_CAPS, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: MXBlockA 128 and 2D MX scales require WMMA_V3 (gfx1250)"
+        )
+
+    @pytest.mark.parametrize(
+        "mxBlock,free,caps",
+        [(32, 1, _NON_GFX1250_CAPS), (128, 1, _GFX1250_CAPS), (128, 128, _GFX1250_CAPS)],
+        ids=["gfx950-32", "gfx1250-1d128", "gfx1250-2d"],
+    )
+    def test_accepts_block32_off_gfx1250_and_block128_on_gfx1250(self, mxBlock, free, caps):
+        state = {"ProblemType": {"MXBlockA": mxBlock, "MXBlockB": mxBlock,
+                                 "MXBlockFreeA": free, "MXBlockFreeB": free}}
+        assert _validateMXBlock128Arch(state, caps, False) is True
+        assert "Valid" not in state
 
 
 class TestMXLocalReadWidth:
@@ -499,3 +527,112 @@ class TestFieldShapeCompatibility:
         }}
         assert _call(st) is False
         assert st["Valid"] is False
+
+
+def _free_tile_state(
+    *,
+    mxBlock=128,
+    mt0=256,
+    mt1=128,
+    mxBlockFreeA=128,
+    mxBlockFreeB=128,
+    depthU=256,
+    numWaves=4,
+    tdmInst=3,
+):
+    return {
+        "ProblemType": {
+            "MXBlockA": mxBlock,
+            "MXBlockB": mxBlock,
+            "MXBlockFreeA": mxBlockFreeA,
+            "MXBlockFreeB": mxBlockFreeB,
+        },
+        "MacroTile0": mt0,
+        "MacroTile1": mt1,
+        "MatrixInstK": 128,
+        "DepthU": depthU,
+        "NumWaves": numWaves,
+        "TDMInst": tdmInst,
+        "enableTDMA": bool(tdmInst & 1),
+        "enableTDMB": bool(tdmInst & 2),
+        "TDMFuse": 0,
+        "UseSubtileImpl": False,
+    }
+
+
+class TestMX2DFreeTile:
+    def test_rejects_k_block_smaller_than_matrix_inst_k(self, capsys):
+        # [128, 32]: four scale bytes per row along K (mxUnit 4). The 2D TDM
+        # wg offset, LRA wave offset and one-VGPR local read assume mxUnit 1.
+        state = _free_tile_state(mxBlock=32, mt1=64)
+
+        assert _validateMX2DFreeTile(state, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: 2D MX scale for A requires MXBlockA == MatrixInstK (128), got mxUnit 4"
+        )
+
+    @pytest.mark.parametrize(
+        "free", [32, 64, 256, 96, 0, -128],
+        ids=["free32", "free64", "free256", "not-pow2", "zero", "negative"])
+    def test_rejects_free_extent_other_than_128(self, free, capsys):
+        # The 2D local read loads one scale row per wave: [32, 128] / [64, 128]
+        # read row 0's scale for rows of the next scale rows.
+        state = _free_tile_state(mxBlockFreeA=free)
+
+        assert _validateMX2DFreeTile(state, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            f"reject: 2D MX scale for A supports MXBlockFreeA 128 only, got {free}"
+        )
+
+    def test_free_extent_check_ignores_tensors_without_mx(self):
+        state = _free_tile_state(mxBlock=0, mxBlockFreeA=1, mxBlockFreeB=1)
+        assert _validateMX2DFreeTile(state, False) is True
+
+    def test_free_extent_check_accepts_1d_mx(self):
+        state = _free_tile_state(mxBlockFreeA=1, mxBlockFreeB=1)
+        assert _validateMX2DFreeTile(state, False) is True
+
+    def test_rejects_m_split_remainder_rows(self, capsys):
+        # DepthU=128: one K-group for two components -> M-split. MT=384 is
+        # three scale rows; each component takes one and row 2 is never loaded.
+        state = _free_tile_state(mt0=384, depthU=128)
+
+        assert _validateMX2DTdmMSplit(state, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: 2D MX TDM M-split for A requires MacroTile0 (384) aligned to "
+            "MXBlockFreeA (128) and scale rows (3) a multiple of TDM components (2); "
+            "otherwise rows are dropped"
+        )
+
+    def test_rejects_m_split_unaligned_macro_tile(self, capsys):
+        # MT=192 loads two worst-phase rows, which split evenly, but each
+        # component starts MT/2 = 96 elements in, off a scale-row boundary.
+        state = _free_tile_state(mt0=192, depthU=128)
+
+        assert _validateMX2DTdmMSplit(state, True) is False
+        assert state["Valid"] is False
+        assert capsys.readouterr().out.strip() == (
+            "reject: 2D MX TDM M-split for A requires MacroTile0 (192) aligned to "
+            "MXBlockFreeA (128) and scale rows (2) a multiple of TDM components (2); "
+            "otherwise rows are dropped"
+        )
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            dict(),                                         # aligned, K-split
+            dict(mt1=64),                                   # MT divides MXBlockFree
+            dict(mt1=224),                                  # unaligned: _validateMXFreePhase owns it
+            dict(mt0=384, depthU=256),                      # 3 rows but K-split
+            dict(mt0=128, depthU=128),                      # 1 row < 2 comps: comps share the tile
+        ],
+        ids=["aligned", "mt-divides-free", "unaligned-k-split", "k-split-3-rows", "rows-lt-comps"],
+    )
+    def test_accepts_supported_shapes(self, kwargs):
+        state = _free_tile_state(**kwargs)
+        assert _validateMX2DFreeTile(state, False) is True
+        assert _validateMX2DTdmMSplit(state, False) is True
+        assert "Valid" not in state

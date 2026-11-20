@@ -63,8 +63,12 @@ from kernels.conv.aot_jobs import (  # noqa: F401 (the grid and builder, re-expo
     CACHE_WGRAD_SPLIT_KS,
     CACHE_WGRAD_STREAMK_MODES,
     CACHE_WGRAD_STREAMK_REDUCTIONS,
+    TF32_TRIPLE,
     BuildJob,
     _direction_jobs,
+    conv_data_spec,
+    dtype_triple,
+    storage_dtype,
     _geometry_list,
     _spec_is_valid,
     count_jobs,
@@ -250,6 +254,7 @@ def enumerate_jobs(
             split_ks=split_ks,
             streamk_modes=streamk_modes,
             streamk_reductions=streamk_reductions,
+            llvm_flavor=flavor,
         )
         log(f"  {total} candidates to check with {jobs} process(es)")
 
@@ -540,7 +545,15 @@ _BREAKDOWN_AXES = (
     ("grouped", lambda i: "yes" if i.grouped else "no"),
     (
         "split-K",
-        lambda i: ("two-stage" if i.two_stage else "atomic") if i.split_k > 1 else "no",
+        lambda i: (
+            (
+                "cluster"
+                if i.split_k_cluster
+                else "two-stage" if i.needs_stage2 else "atomic"
+            )
+            if i.split_k > 1
+            else "no"
+        ),
     ),
     ("group_merge", lambda i: i.group_merge),
     (
@@ -844,6 +857,18 @@ def _launch_values_for(direction, problem, identity, ptrs, sizes, extras):
 
     tm, tn, tk = identity.tile_m, identity.tile_n, identity.tile_k
     if direction == "fwd":
+        if "ws_ptr" in extras:
+            # Split-K forward: the degree and the workspace, with the slice
+            # width rounded to the binary's tile_k.
+            return ConvArgs.from_problem(
+                problem, tile_m=tm, tile_n=tn, tile_k=tk
+            ).to_launch_values(
+                *ptrs,
+                *sizes,
+                split_k=extras["split_k"],
+                ws_ptr=extras["ws_ptr"],
+                ws_bytes=extras["ws_bytes"],
+            )
         return ConvArgs.from_problem(problem, tile_m=tm, tile_n=tn).to_launch_values(
             *ptrs, *sizes
         )

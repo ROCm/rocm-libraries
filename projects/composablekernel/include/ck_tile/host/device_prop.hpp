@@ -77,6 +77,11 @@ inline bool is_gfx11_supported()
            get_device_name() == "gfx1152" || get_device_name() == "gfx1153";
 }
 
+inline bool is_gfx117_supported()
+{
+    return get_device_name() == "gfx1170" || get_device_name() == "gfx1171";
+}
+
 inline bool is_gfx120_supported()
 {
     return get_device_name() == "gfx1200" || get_device_name() == "gfx1201";
@@ -93,7 +98,8 @@ inline bool is_gfx95_supported() { return get_device_name() == "gfx950"; }
 // looking unsupported to the host while its kernels are perfectly loadable.
 inline bool is_gfx125_supported()
 {
-    return get_device_name() == "gfx1250" || get_device_name() == "gfx1250-strict";
+    return get_device_name() == "gfx1250" || get_device_name() == "gfx1251" ||
+           get_device_name() == "gfx1250-strict";
 }
 
 inline bool is_gfx12_supported() { return is_gfx120_supported() || is_gfx125_supported(); }

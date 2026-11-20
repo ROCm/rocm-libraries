@@ -105,3 +105,31 @@ def test_16bit_tn_256x160_dtl_prefetch_matches_loop_waits(
     _, assembly, error = results[0]
     assert error == 0
     _assert_prefetch_ready(assembly, loads_a=8, loads_b=5)
+
+
+@pytest.mark.parametrize("dtype", ["B", "H"])
+def test_16bit_nt_128x224_dtl_prefetch_matches_loop_waits(dtype, tmp_path):
+    # 128x224 NT is the 224x128 NT schedule with A and B switched.
+    config = yaml.safe_load(
+        (Path(__file__).parent / "test_data" / "bf16_tn_dtl_prefetch.yaml").read_text()
+    )
+    problem, params = config["BenchmarkProblems"][0]
+    problem.update(DataType=dtype, DestDataType=dtype, TransposeA=False, TransposeB=True)
+    overrides = {
+        "MatrixInstruction": [[16, 16, 32, 1, 1, 4, 7, 2, 2]],
+        "TransposeLDS": [0],
+        "LDSTrInst": [True],
+    }
+    params["ForkParameters"] = [
+        {key: overrides.get(key, value)}
+        for fork in params["ForkParameters"]
+        for key, value in fork.items()
+    ]
+    params["BenchmarkFinalParameters"] = [{"ProblemSizes": [{"Exact": [128, 224, 1, 192]}]}]
+    path = tmp_path / "nt.yaml"
+    path.write_text(yaml.safe_dump(config))
+    results = emit_kernels_from_config(path, limit=1, arch="gfx950")
+    assert len(results) == 1
+    _, assembly, error = results[0]
+    assert error == 0
+    _assert_prefetch_ready(assembly, loads_a=4, loads_b=7)

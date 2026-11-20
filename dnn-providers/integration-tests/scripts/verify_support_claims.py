@@ -20,6 +20,10 @@ Checks
    harness's readSweepCaseIds() rules, or the harness registers none of it.
 4. Orphaned sidecars: X.support.json without a sibling X.json; support.json
    in a directory that is not a sweep root.
+5. expected_rejection: a bundle flagged expected_rejection (single-graph:
+   X.meta.json; sweep: cases[].metadata) is an invalid graph the engine must
+   reject and is never executed, so no claim may name it.  An unclaimed flagged
+   sweep case inside a claimed sweep is fine.
 
 Exit codes
 ----------
@@ -47,6 +51,8 @@ from bundle_discovery import (  # noqa: E402
     load_json,
     meta_for_graph,
     read_sweep_cases,
+    single_graph_expected_rejection,
+    sweep_case_expected_rejection,
     walk_bundle_tree,
 )
 from support_claim_schema import (  # noqa: E402
@@ -118,6 +124,57 @@ def check_enforcement_level_sweep(
                 f"case '{case_entry['id']}': invalid enforcement_level '{level}'",
                 errors,
             )
+
+
+def check_expected_rejection_single(support_path: Path, errors: List[str]) -> None:
+    """Reject a claim on a bundle whose meta.json flags expected_rejection.
+
+    An expected-rejection bundle is an invalid graph the engine must reject; it
+    is never executed, so there is nothing for a claim to describe.
+    """
+    graph_path = graph_for_sidecar(support_path)
+    if single_graph_expected_rejection(graph_path):
+        _error(
+            support_path,
+            f"{graph_path.name} is flagged expected_rejection in"
+            f" {meta_for_graph(graph_path).name}; expected_rejection bundles"
+            " carry no support claim",
+            errors,
+        )
+
+
+def check_expected_rejection_sweep(
+    sweep_path: Path, support_data: dict, cases: List[dict], errors: List[str]
+) -> None:
+    """Reject a claim group naming a case flagged expected_rejection.
+
+    A flagged case that no group names is fine: the sweep's other cases may be
+    claimed while the flagged one is simply left out.
+    """
+    flagged = {c["id"] for c in cases if sweep_case_expected_rejection(c)}
+    if not flagged:
+        return
+    claims = support_data.get("claims", {})
+    if not isinstance(claims, dict):
+        return
+    for engine_name, groups in claims.items():
+        if not isinstance(groups, list):
+            continue
+        for group in groups:
+            if not isinstance(group, dict):
+                continue
+            named = group.get("cases", [])
+            if not isinstance(named, list):
+                continue
+            for case_id in named:
+                if isinstance(case_id, str) and case_id in flagged:
+                    _error(
+                        sweep_path,
+                        f"engine '{engine_name}': case '{case_id}' is flagged"
+                        " expected_rejection; expected_rejection bundles carry"
+                        " no support claim",
+                        errors,
+                    )
 
 
 def check_sweep_case_ids(
@@ -197,6 +254,7 @@ def check_sweep_manifest(
         _error(sweep_path, error, errors)
         return
     check_enforcement_level_sweep(sweep_path, cases, errors)
+    check_expected_rejection_sweep(sweep_path, support_data, cases, errors)
     check_sweep_case_ids(support_path, support_data, cases, errors)
 
 
@@ -218,6 +276,7 @@ def verify_all(bundle_root: Path) -> List[str]:
         check_orphaned_single_graph(support_path, errors)
         if _has_non_empty_claims(data):
             check_enforcement_level_single(support_path, errors)
+            check_expected_rejection_single(support_path, errors)
 
     for support_path in (f for f in files if is_sweep_sidecar(f)):
         data, loaded = _load_sidecar(support_path, errors)

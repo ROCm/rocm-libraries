@@ -41,7 +41,7 @@ from pathlib import Path
 
 import pytest
 
-from tensilelite.TensileLogic.ValidChipId import _chipIdDirFromPath
+from tensilelite.logic.valid_chip_id import _chipIdDirFromPath
 
 pytestmark = pytest.mark.unit
 

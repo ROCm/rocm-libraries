@@ -20,11 +20,13 @@ including padding, with these bounds:
 - contiguous Q and output `[B, Hq, D]`, on the same device as KV and metadata.
 
 The selected segment and reducer must each fit the target's LDS capacity.
-Admission uses the resolved tile dimensions and LDS allocation dtypes. In
-particular, automatic gfx942 D256/block64 selection requires 74,752 bytes,
-exceeding its 65,536-byte capacity, and is rejected before compilation. An
-explicit smaller tile is checked using its actual footprint; selection does
-not silently resize it. gfx950 D256/block64 fits its target capacity.
+Admission uses the resolved tile dimensions and LDS allocation dtypes (the
+segment kernel keeps Q, two K tiles and one V tile in LDS; P stays in
+registers). In particular, automatic gfx942 D256/block64 selection uses a
+32-token tile and fits its 65,536-byte capacity, while an explicit block-sized
+64-token tile there exceeds it and is rejected before compilation. An explicit
+tile is checked using its actual footprint; selection does not silently resize
+it. gfx950 D256/block64 fits its target capacity.
 
 Capacity need not be a page or tile multiple. Device `seqused_k` is contiguous
 int32 `[B]`, with each value in `[0, problem.max_seqlen_k]`, and
@@ -64,6 +66,16 @@ run_unified_attention_torch(
 For registry consumers, set `AttentionRequest.kv_layout="strided"`; the
 [candidate](../library/dispatch/attention/strided_decode.py) provides spec building
 and `bind_torch`. Direct and dispatched launches share the same spec policy.
+Automatic strided selection applies the same decode policy as paged decode: the split
+rule ([gfx950](../library/builders/gfx950/attention/ALGORITHM.md#61-how-many-segments-the-decode-split-rule),
+[gfx942](../library/builders/gfx942/attention/ALGORITHM.md#83-the-decode-split-rule)),
+the per-architecture tile override (multi-page tiles on gfx950, sub-page tiles on
+gfx942), the all-decode grid and the K/V cache policy. It leaves the
+K/V LDS swizzle off because the strided swizzle measured slower on gfx950 (no gfx942
+measurement exists); an explicit kernel spec may enable it for fp16/bf16 K/V. On gfx950
+the default 64-token tile for few workgroups is slower than the previous kernel under
+LLVM 22 for strided K/V and slightly faster under LLVM 23; see the
+[3D decode case study](../library/builders/common/attention_3d_decode/CASE_STUDY.md#4-caveats-and-honest-losses).
 A non-`None` `problem.clamp_arch` must match the selected target (the active device
 at launch).
 The binding accepts only `softmax_scale` and `stream` keyword overrides; it

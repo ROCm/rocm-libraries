@@ -7,7 +7,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "asm_fmha_v3_fwd_configs.hpp"
@@ -109,6 +108,16 @@ std::string getConfigDescription(const fmha_v3_fwdConfig& config);
  */
 GraphTestCase configToTestCase(const fmha_v3_fwdConfig& config, bool withStats = false);
 
+/// The kpack TOC keys SdpaFwdPlanBuilder resolves @p config to on @p arch: gfx942 ships
+/// each forward object once per MI300 and MI308 variant, gfx950 once without a variant.
+std::vector<std::string> getFwdKernelTocKeys(const fmha_v3_fwdConfig& config,
+                                             const std::string& arch);
+
+/// Names of the INT32 [B+1, 1, 1, 1] token offset tables buildSdpaFwdGraph gives a
+/// group-mode graph: Q and O share the first, K and V the second.
+inline constexpr const char* K_QO_RAGGED_OFFSET_NAME = "qo_ragged_offset";
+inline constexpr const char* K_KV_RAGGED_OFFSET_NAME = "kv_ragged_offset";
+
 /// An SDPA forward graph together with its STATS output attribute.
 struct SdpaFwdGraph
 {
@@ -121,22 +130,5 @@ struct SdpaFwdGraph
 /// testCase.withStats is set and returning that output's attribute alongside the graph so
 /// callers can address it by identity.
 SdpaFwdGraph buildSdpaFwdGraph(const GraphTestCase& testCase);
-
-/// GraphTestCase descriptors for every config in @p configMap, stats-enabled when
-/// @p withStats is set. ConfigType requires matching configToTestCase and
-/// getConfigDescription overloads.
-template <typename ConfigType>
-std::vector<GraphTestCase>
-    getCompatibleGraphTestCases(const std::unordered_map<std::string, ConfigType>& configMap,
-                                bool withStats = false)
-{
-    std::vector<GraphTestCase> testCases;
-    testCases.reserve(configMap.size());
-    for(const auto& [key, config] : configMap)
-    {
-        testCases.push_back(configToTestCase(config, withStats));
-    }
-    return testCases;
-}
 
 } // namespace asm_sdpa_engine

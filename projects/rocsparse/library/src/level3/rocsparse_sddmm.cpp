@@ -46,8 +46,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_sddmm_alg value_)
     switch(value_)
     {
         CASE(rocsparse_sddmm_alg_default);
-        CASE(rocsparse_sddmm_alg_dense);
 #undef CASE
+    case deprecated_rocsparse_sddmm_alg_dense:
+        return "rocsparse_sddmm_alg_dense";
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
@@ -62,7 +63,7 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_sddmm_alg value_)
     {
         return false;
     }
-    case rocsparse_sddmm_alg_dense:
+    case deprecated_rocsparse_sddmm_alg_dense:
     {
         return false;
     }

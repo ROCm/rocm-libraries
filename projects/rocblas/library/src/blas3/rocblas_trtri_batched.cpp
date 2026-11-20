@@ -53,6 +53,8 @@ namespace
         if(!handle)
             return rocblas_status_invalid_handle;
 
+        rocblas_internal_api_scope api_scope(handle, rocblas_trtri_name<T>);
+
         // Compute the optimal size for temporary device memory
         size_t els   = rocblas_internal_trtri_temp_elements(n, 1);
         size_t size  = els * batch_count * sizeof(T);

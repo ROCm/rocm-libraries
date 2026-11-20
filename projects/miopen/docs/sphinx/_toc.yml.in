@@ -35,11 +35,13 @@ subtrees:
   - file: how-to/use-fusion-api.rst
     title: Use the fusion API
   - file: how-to/debug-log.rst
-    title: Log and debug
+    title: Log and debug MIOpen
   - file: how-to/find-and-immediate.rst
     title: Use the find APIs and immediate mode
   - file: how-to/use-nhwc-batchnorm-in-pytorch.rst
     title: Use NHWC Batch Normalization with PyTorch
+  - file: how-to/use-hipdnn-forwarding.rst
+    title: Use hipDNN forwarding in MIOpen
 
 - caption: Samples
   entries:

@@ -72,6 +72,8 @@ int run_bench_test(Arguments&         arg,
     // disable unit_check in client benchmark, it is only used in gtest unit test
     arg.unit_check = 0;
 
+    hipblaslt_bench_options::apply_to(arg);
+
     // enable timing check,otherwise no performance data collected
     arg.timing = 1;
 
@@ -214,6 +216,16 @@ int hipblaslt_bench_datafile(const std::string& filter, bool any_stride, hipDevi
     return ret;
 }
 
+int verification_exit(int ret)
+{
+    const int code = hipblaslt_bench_options::verification_exit_code(ret);
+    if(code != ret)
+        hipblaslt_cerr << "hipblaslt-bench: " << hipblaslt_bench_options::verification_failures()
+                       << " --verify check(s) failed; exiting with code " << code
+                       << " (--verify_strict)" << std::endl;
+    return code;
+}
+
 // Replace --batch with --batch_count for backward compatibility
 void fix_batch(int argc, char* argv[])
 {
@@ -304,6 +316,10 @@ try
     int         api_method      = 0;
     std::string api_method_str  = "";
     std::string algo_method_str = "";
+
+    int         partitions_opt = 1;
+    std::string split_dim_str  = "N";
+    std::string part_place_str[4] = {"shared", "shared", "shared", "shared"};
 
     bool verify = 0;
     bool ulp    = 0;
@@ -428,11 +444,11 @@ try
 
         ("compute_input_typeA",
          value<std::string>(&compute_input_typeA), "Precision of computation input A. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeA has no effect.")
 
         ("compute_input_typeB",
          value<std::string>(&compute_input_typeB), "Precision of computation input B. "
-         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.")
+         "Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, f6_r, bf6_r, f4_r. The default value indicates that the compute_input_typeB has no effect.")
 
         ("scale_type",
          value<std::string>(&scale_type), "Precision of scalar. "
@@ -442,7 +458,7 @@ try
          value<std::string>(&initialization)->default_value("hpl"),
          "Initialize matrix data."
          "Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01, integer_exact, "
-         "fp16_accumulator_probe")
+         "fp16_accumulator_probe, maf1_0, maf2_0, maf2_0_unit_scale")
 
         ("transA",
          value<char>(&arg.transA)->default_value('N'),
@@ -475,6 +491,21 @@ try
         ("verify,v",
          value<bool>(&verify)->default_value(false),
          "Validate GPU results with CPU?")
+
+        ("verify_strict",
+         value<bool>(&hipblaslt_bench_options::verify_strict())->default_value(false),
+         "Exit with code 2 if a --verify check of D fails (norm_error above its limit, or allclose "
+         "failed). Checks D only. Implies --verify. Computes a CPU reference per problem and "
+         "copies and compares D on the host for each solution.")
+
+        ("post_bench_verify_iters",
+         value<int32_t>(&hipblaslt_bench_options::post_bench_verify_iters())->default_value(0),
+         "After timing, relaunch each solution this many more times, untimed and without host "
+         "synchronization between relaunches, and check on the GPU that every relaunch gives the "
+         "same D, bit for bit, as the first launch, which --verify compares with the CPU. The "
+         "timed launches are not checked. A difference counts as a failed check for "
+         "--verify_strict, but the solution stays in the ranking. 0 turns it off. Implies "
+         "--verify, so it also runs the CPU reference.")
 
         ("ulp",
          value<bool>(&ulp)->default_value(false),
@@ -589,7 +620,8 @@ try
 
         ("scaleA",
          value<int>(&scaleAFormat)->default_value(0),
-         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8. "
+         "Apply scale for A buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B). "
          "w4a16 group scales (require --a_type i4_r), numbered as hipblasLtMatmulMatrixScale_t: "
          "bf16 scales: 1006 = VEC32, 1007 = VEC64, 1008 = VEC128, 1009 = VEC32_ZP, "
          "1010 = VEC64_ZP, 1011 = VEC128_ZP; fp16 scales: 1012..1017 in the same "
@@ -603,7 +635,8 @@ try
 
         ("scaleB",
          value<int>(&scaleBFormat)->default_value(0),
-         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8.")
+         "Apply scale for B buffer. 0 = None, 1 = scalar, 2 = vector, 3 = B32E8, 4 = B16E8, 5 = B32E4M3, 6 = B16E4M3, 7 = B32E5M3, 8 = B16E5M3, 1001 = block_preswizzled_32x8, "
+         "1018 = B32E8 in 128x4 tiles (f6_r/bf6_r TN with --swizzleA and optionally --swizzleB, on A and B).")
 
         ("scaleC",
          value<int>(&scaleCFormat)->default_value(0),
@@ -616,6 +649,10 @@ try
         ("scaleAlpha_vector",
          bool_switch(&arg.scaleAlpha_vector)->default_value(false),
          "Apply scaleAlpha vector")
+
+        ("device_scalar_alpha",
+         bool_switch(&arg.device_scalar_alpha)->default_value(false),
+         "Read alpha as one scalar from device memory")
 
         ("amaxScaleA",
          bool_switch(&arg.amaxScaleA)->default_value(false),
@@ -672,7 +709,43 @@ try
         ("api_method",
          value<std::string>(&api_method_str)->default_value("c"),
          "Use extension API. c: C style API. mix: declaration with C hipblasLtMatmul Layout/Desc but set, initialize, and run the problem with C++ extension API. cpp: Using C++ extension API only. "
-         "Options: c, mix, cpp.")
+         "grouped_gemm_c: with --grouped_gemm, grouped matrix layouts and hipblasLtMatmul instead of the C++ GroupedGemm class. "
+         "Options: c, mix, cpp, grouped_gemm_c.")
+
+        ("partitions",
+         value<int>(&partitions_opt)->default_value(1),
+         "Run each GEMM as slices on this many partitions, one stream each, with "
+         "hipblaslt_ext::experimental::PartitionedGemm. The devices are the DPX group of the current "
+         "device when it is in one (the current device is partition 0), otherwise the current device "
+         "once per partition (SPX: correct results, only for checking them, not for speed). The time "
+         "is the full span, first launch to last partition done. Data placement follows "
+         "--part_place_a/b/c/d: shared (one copy in the first partition's buffers, which the other "
+         "partitions read over peer access) or replicated (a copy per partition). Needs plain GEMM "
+         "and the heuristic solution selection; 1 = off.")
+
+        ("split_dim",
+         value<std::string>(&split_dim_str)->default_value("N"),
+         "With --partitions: the dimension to split, M, N or B (the batch). The first partitions take "
+         "size/partitions and the last takes the rest.")
+
+        ("part_place_a",
+         value<std::string>(&part_place_str[0])->default_value("shared"),
+         "With --partitions: shared (one copy of A in the first partition's buffer, read by every "
+         "partition over peer access) or replicated (a copy on each partition device).")
+
+        ("part_place_b",
+         value<std::string>(&part_place_str[1])->default_value("shared"),
+         "With --partitions: shared or replicated B, as --part_place_a.")
+
+        ("part_place_c",
+         value<std::string>(&part_place_str[2])->default_value("shared"),
+         "With --partitions: shared or replicated C, as --part_place_a.")
+
+        ("part_place_d",
+         value<std::string>(&part_place_str[3])->default_value("shared"),
+         "With --partitions: shared (every partition writes its slice into the device 0 D) or "
+         "replicated (a D on each partition device; the slices are gathered into the device 0 D "
+         "after a verified run, outside the timing).")
 
         ("print_kernel_info",
          value<bool>(&arg.print_kernel_info)->default_value(false),
@@ -737,10 +810,11 @@ try
 
         ("uniform_summation_order",
          value<std::string>(&hipblaslt_bench_options::uniform_summation_order_str())->default_value(""),
-         "Set the HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT extension attribute. "
+         "Set the handle-level uniform summation order request for every API method. "
          "Accepts off|0, on|1 (case-insensitive). When on, the matmul returns "
          "HIPBLAS_STATUS_INVALID_VALUE if no configuration honoring the guarantee exists. "
-         "When omitted the bench leaves the attribute unset so the library default (off) applies.")
+         "A YAML case's explicit 0 or 1 overrides the command-line value. "
+         "When neither specifies a value, the library default for the device applies.")
 
         ("help,h", "produces this help message")
 
@@ -821,6 +895,9 @@ try
         return 0;
     }
 
+    if(!hipblaslt_timing_allowed_with_adaptive_sm_count())
+        return EXIT_FAILURE;
+
     if(api_method_str.compare("c") == 0)
     {
         api_method = 0;
@@ -833,11 +910,40 @@ try
     {
         api_method = 2;
     }
+    else if(api_method_str.compare("grouped_gemm_c") == 0)
+    {
+        api_method = kApiMethodGroupedC;
+    }
     else
     {
         hipblaslt_cerr << "Invalid api method: " << api_method_str << std::endl;
         return 1;
     }
+
+    if(partitions_opt < 1 || partitions_opt > 255)
+    {
+        hipblaslt_cerr << "Invalid --partitions: " << partitions_opt << std::endl;
+        return 1;
+    }
+    if(split_dim_str.size() != 1
+       || std::string("MNBmnb").find(split_dim_str[0]) == std::string::npos)
+    {
+        hipblaslt_cerr << "Invalid --split_dim: " << split_dim_str << " (M, N or B)" << std::endl;
+        return 1;
+    }
+    for(int t = 0; t < 4; t++)
+    {
+        if(part_place_str[t] != "shared" && part_place_str[t] != "replicated")
+        {
+            hipblaslt_cerr << "Invalid --part_place_" << char('a' + t) << ": " << part_place_str[t]
+                           << " (shared or replicated)" << std::endl;
+            return 1;
+        }
+        arg.part_place[t] = part_place_str[t] == "replicated" ? 'R' : 'S';
+    }
+    arg.part_place[4] = 0;
+    arg.partitions = static_cast<uint8_t>(partitions_opt);
+    arg.split_dim     = char(std::toupper(static_cast<unsigned char>(split_dim_str[0])));
 
     if(algo_method_str.compare("heuristic") == 0)
     {
@@ -1039,7 +1145,7 @@ try
         perf_monitor->setDeviceId(device_id);
 
     if(datafile)
-        return hipblaslt_bench_datafile(filter, any_stride, props);
+        return verification_exit(hipblaslt_bench_datafile(filter, any_stride, props));
 
     // single bench run
 
@@ -1152,9 +1258,12 @@ try
                && arg.a_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.a_type != string_to_hip_datatype("f8_r")
                && arg.a_type != string_to_hip_datatype("bf16_r")
+               && arg.a_type != string_to_hip_datatype("f6_r")
+               && arg.a_type != string_to_hip_datatype("bf6_r")
                && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
-        hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
+        hipblaslt_cerr << "For swizzle-A, problem type must be FP16 or BF16 or FP8 or FP4 or FP6 TN"
+                       << std::endl;
         return 1;
     }
 
@@ -1164,9 +1273,12 @@ try
                && arg.b_type != string_to_hip_datatype("f8_fnuz_r")
                && arg.b_type != string_to_hip_datatype("f8_r")
                && arg.b_type != string_to_hip_datatype("bf16_r")
+               && arg.b_type != string_to_hip_datatype("f6_r")
+               && arg.b_type != string_to_hip_datatype("bf6_r")
                && arg.b_type != string_to_hip_datatype("f4_r"))))
     {
-        hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 TN" << std::endl;
+        hipblaslt_cerr << "For swizzle-B, problem type must be FP16 or BF16 or FP8 or FP4 or FP6 TN"
+                       << std::endl;
         return 1;
     }
 
@@ -1191,6 +1303,8 @@ try
             return hipblaslt_scaling_format::Block_16_UE5M3;
         if(s == 1001)
             return hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+        if(s == 1018)
+            return hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT;
         // w4a16 group scales; numbered as hipblasLtMatmulMatrixScale_t.
         if(s >= 1006 && s <= 1017)
             return static_cast<hipblaslt_scaling_format>(s);
@@ -1213,7 +1327,8 @@ try
                             || arg.scaleA == hipblaslt_scaling_format::Block_16_UE4M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleA == hipblaslt_scaling_format::Block_16_UE5M3
-                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                            || arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix A.");
     if(arg.batch_mode == 1 && (arg.scaleB == hipblaslt_scaling_format::Vector
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0
@@ -1222,7 +1337,8 @@ try
                             || arg.scaleB == hipblaslt_scaling_format::Block_16_UE4M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_32_UE5M3
                             || arg.scaleB == hipblaslt_scaling_format::Block_16_UE5M3
-                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)) 
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                            || arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_128_4_EXT))
         throw std::invalid_argument("Only Tensorwide scaling is supported when batch_mode is HIPBLASLT_BATCH_MODE_POINTER_ARRAY (General Batched Gemm) for matrix B.");
 
     // Block scaling only allows F8/F6/F4
@@ -1300,7 +1416,14 @@ try
         throw std::invalid_argument(
             "Valid value for --skip_slow_solution_ratio is in range (0.0 ~ 1.0).");
 
-    if(verify || ulp)
+    if(hipblaslt_bench_options::post_bench_verify_iters() < 0)
+        throw std::invalid_argument("--post_bench_verify_iters must be 0 or more");
+    if(hipblaslt_bench_options::post_bench_verify_iters() > 0 && arg.c_equal_d && arg.beta != 0)
+        throw std::invalid_argument("--post_bench_verify_iters does not support --c_equal_d with "
+                                    "a nonzero beta, since each launch then reads the D the "
+                                    "previous launch wrote");
+
+    if(verify || ulp || hipblaslt_bench_options::post_bench_verify_iters() > 0)
     {
         arg.norm_check     = 1;
         arg.allclose_check = 1;
@@ -1310,9 +1433,11 @@ try
         arg.ulp_check = 1;
     }
 
+    arg.api_method = api_method;
     switch(api_method)
     {
     case 0:
+    case kApiMethodGroupedC:
         arg.use_ext            = false;
         arg.use_ext_setproblem = false;
         break;
@@ -1330,7 +1455,7 @@ try
     }
 
     arg.norm_check_assert = false;
-    return run_bench_test(arg, filter, any_stride, props);
+    return verification_exit(run_bench_test(arg, filter, any_stride, props));
 }
 catch(const std::invalid_argument& exp)
 {

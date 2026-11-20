@@ -52,16 +52,21 @@
 #include "utility.hpp"
 
 #include <Tensile/Debug.hpp>
+#include <Tensile/LongPath.hpp>
 
 #include <algorithm>
 #include <atomic>
+#include <cstring>
 #include <hip/hip_runtime_api.h>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <shared_mutex>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #define TO_STR2(x) #x
 #define TO_STR(x) TO_STR2(x)
@@ -130,6 +135,30 @@ inline void assignAlphaBeta1(const rocblaslt_compute_type& compute_type,
     }
 }
 
+inline int64_t* rocblaslt_grouped_hint_field(rocblaslt_matmul_preference            pref,
+                                             rocblaslt_matmul_preference_attributes attribute)
+{
+    switch(attribute)
+    {
+    case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS:
+        return &pref->grouped.avg_rows;
+    case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS:
+        return &pref->grouped.avg_cols;
+    case ROCBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM:
+        return &pref->grouped.avg_k;
+    case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_ROWS_EXT:
+        return &pref->grouped.max_rows;
+    case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT:
+        return &pref->grouped.max_cols;
+    case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_ROWS_EXT:
+        return &pref->grouped.max_total_rows;
+    case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_COLS_EXT:
+        return &pref->grouped.max_total_cols;
+    default:
+        return nullptr;
+    }
+}
+
 inline void heuristicResult_copy(rocblaslt_matmul_heuristic_result* heuristicResultsDest,
                                  rocblaslt_matmul_heuristic_result* heuristicResultsSrc,
                                  size_t&                            maxWorkSpaceBytes,
@@ -186,19 +215,19 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
                                        int                               requestedAlgoCount,
                                        size_t                            maxWorkSpaceBytes)
 {
-    static TensileLite::StringSet emptySet({});
-    static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
-
-    // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
-    // But in that case, we don't need to get GridBased or Prediction which are already returned here
-    static std::mutex           mtx;
-    std::lock_guard<std::mutex> lock(mtx);
-    TensileLite::Debug::Instance().setExcludedLibFromGetAll(defExcludedSet);
-
+    // If the #-returned < #-requested, we'll call getAll. But in that case we
+    // don't need GridBased or Prediction, which are already returned above, so
+    // ask for a no-ranking search. This is a per-call argument so that a
+    // concurrent get-all on another handle still sees the full row set.
     std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
 
-    const bool read = getAllSolutions(prob, handle, allSolutionsResults, maxWorkSpaceBytes)
-                      == rocblaslt_status_success;
+    const bool read
+        = getAllSolutions(prob,
+                          handle,
+                          allSolutionsResults,
+                          maxWorkSpaceBytes,
+                          TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING)
+          == rocblaslt_status_success;
     if(read)
     {
         int oriReturnAlgoCount = *returnAlgoCount;
@@ -224,8 +253,6 @@ bool topUpWithSizeIndependentSolutions(rocblaslt_handle                  handle,
         }
     }
 
-    // reset
-    TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
     return read;
 }
 
@@ -934,6 +961,13 @@ RocblasltContractionProblem construct_rocblaslt_problem(rocblaslt_handle        
 
     // Encoding is a solution predicate; set it on every search path.
     problem.int4EncodingA = matmul_descr->int4_encoding_a_ext;
+    problem.deviceScalarAlpha = isDeviceScalarAlphaPointerMode(matmul_descr->pointermode);
+
+    if(adaptive_sm_count_applies(handle, matmul_descr))
+    {
+        problem.sm_count_target   = int32_t(handle->adaptive_sm->queryHint());
+        problem.adaptive_sm_count = true;
+    }
 
     if(scaleAlphaVec)
     {
@@ -1151,6 +1185,54 @@ rocblaslt_status rocblaslt_matrix_layout_create(rocblaslt_matrix_layout* matDesc
     }
 }
 
+rocblaslt_status rocblaslt_grouped_matrix_layout_create(rocblaslt_matrix_layout* matDescr,
+                                                        hipDataType              valueType,
+                                                        int                      groupCount,
+                                                        const void*              rowsArray,
+                                                        const void*              colsArray,
+                                                        const void*              ldArray)
+{
+    if(matDescr == nullptr)
+    {
+        log_error(__func__, "invalid matDescr pointer", matDescr);
+        return rocblaslt_status_invalid_pointer;
+    }
+    *matDescr = nullptr;
+    if(groupCount < 0)
+    {
+        log_error(__func__, "invalid groupCount", groupCount);
+        return rocblaslt_status_invalid_value;
+    }
+    try
+    {
+        *matDescr               = new _rocblaslt_matrix_layout();
+        (*matDescr)->type       = valueType;
+        (*matDescr)->batch_mode = HIPBLASLT_BATCH_MODE_GROUPED;
+        (*matDescr)->group_count = groupCount;
+        (*matDescr)->rows_array  = rowsArray;
+        (*matDescr)->cols_array  = colsArray;
+        (*matDescr)->ld_array    = ldArray;
+        log_api(__func__,
+                "matLayout[out]",
+                matDescr,
+                "type",
+                hipDataType_to_string(valueType),
+                "groupCount",
+                groupCount,
+                "rowsArray",
+                rowsArray,
+                "colsArray",
+                colsArray,
+                "ldArray",
+                ldArray);
+    }
+    catch(const rocblaslt_status& status)
+    {
+        return status;
+    }
+    return rocblaslt_status_success;
+}
+
 /********************************************************************************
  * \brief destroy matrix descriptor
  *******************************************************************************/
@@ -1271,7 +1353,25 @@ rocblaslt_status rocblaslt_matrix_layout_set_attribute(rocblaslt_matrix_layout  
                 break;
             case ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE:
                 if(sizeof(int32_t) <= sizeInBytes)
-                    memcpy(&matLayout->batch_mode, buf, sizeof(int32_t));
+                {
+                    int32_t mode = 0;
+                    memcpy(&mode, buf, sizeof(int32_t));
+                    if(mode != HIPBLASLT_BATCH_MODE_STRIDED
+                       && mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+                       && mode != HIPBLASLT_BATCH_MODE_GROUPED)
+                    {
+                        log_error(__func__, "invalid batch mode", mode);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    // Grouped layouts come only from rocblaslt_grouped_matrix_layout_create.
+                    if((mode == HIPBLASLT_BATCH_MODE_GROUPED)
+                       != (matLayout->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED))
+                    {
+                        log_error(__func__, "batch mode cannot switch to or from grouped", mode);
+                        return rocblaslt_status_invalid_value;
+                    }
+                    matLayout->batch_mode = static_cast<hipblasLtBatchMode_t>(mode);
+                }
                 else
                 {
                     log_error(__func__, "invalid buf size", sizeInBytes);
@@ -1287,6 +1387,54 @@ rocblaslt_status rocblaslt_matrix_layout_set_attribute(rocblaslt_matrix_layout  
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY:
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY:
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY:
+            {
+                if(matLayout->batch_mode != HIPBLASLT_BATCH_MODE_GROUPED)
+                {
+                    log_error(__func__, "attribute requires a grouped layout", attr);
+                    return rocblaslt_status_invalid_value;
+                }
+                if(sizeInBytes < sizeof(const void*))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                const void** dst = attr == ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY
+                                       ? &matLayout->rows_array
+                                   : attr == ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY
+                                       ? &matLayout->cols_array
+                                       : &matLayout->ld_array;
+                memcpy(dst, buf, sizeof(const void*));
+                break;
+            }
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH:
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH:
+            {
+                if(matLayout->batch_mode != HIPBLASLT_BATCH_MODE_GROUPED)
+                {
+                    log_error(__func__, "attribute requires a grouped layout", attr);
+                    return rocblaslt_status_invalid_value;
+                }
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                int32_t width = 0;
+                memcpy(&width, buf, sizeof(int32_t));
+                if(width != HIPBLASLT_INTEGER_WIDTH_32 && width != HIPBLASLT_INTEGER_WIDTH_64)
+                {
+                    log_error(__func__, "integer width must be HIPBLASLT_INTEGER_WIDTH_32 or HIPBLASLT_INTEGER_WIDTH_64", width);
+                    return rocblaslt_status_invalid_value;
+                }
+                if(attr == ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH)
+                    matLayout->rows_cols_int_width = width;
+                else
+                    matLayout->ld_int_width = width;
+                break;
+            }
             default:
                 log_error(__func__, "invalid attribute", attr);
                 return rocblaslt_status_invalid_value;
@@ -1363,6 +1511,56 @@ rocblaslt_status rocblaslt_matrix_layout_get_attribute(rocblaslt_matrix_layout  
                 }
                 memcpy(buf, &matLayout->batch_stride, sizeof(int64_t));
                 break;
+            case ROCBLASLT_MATRIX_LAYOUT_TYPE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint32_t);
+                if(sizeInBytes < sizeof(uint32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->type, sizeof(uint32_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_ORDER:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->order, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_ROWS:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint64_t);
+                if(sizeInBytes < sizeof(uint64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->m, sizeof(uint64_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_COLS:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(uint64_t);
+                if(sizeInBytes < sizeof(uint64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->n, sizeof(uint64_t));
+                break;
+            case ROCBLASLT_MATRIX_LAYOUT_LD:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int64_t);
+                if(sizeInBytes < sizeof(int64_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf, &matLayout->ld, sizeof(int64_t));
+                break;
             case ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE:
                 if(sizeWritten)
                     *sizeWritten = sizeof(int32_t);       
@@ -1382,6 +1580,40 @@ rocblaslt_status rocblaslt_matrix_layout_get_attribute(rocblaslt_matrix_layout  
                     return rocblaslt_status_invalid_value;
                 }
                 memcpy(buf, &matLayout->batch_offset, sizeof(int64_t));
+                break;
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY:
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY:
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY:
+            {
+                if(sizeWritten)
+                    *sizeWritten = sizeof(const void*);
+                if(sizeInBytes < sizeof(const void*))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                const void* src = attr == ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_ARRAY
+                                      ? matLayout->rows_array
+                                  : attr == ROCBLASLT_GROUPED_MATRIX_LAYOUT_COLS_ARRAY
+                                      ? matLayout->cols_array
+                                      : matLayout->ld_array;
+                memcpy(buf, &src, sizeof(const void*));
+                break;
+            }
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_ROWS_COLS_ARRAY_INTEGER_WIDTH:
+            case ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int32_t);
+                if(sizeInBytes < sizeof(int32_t))
+                {
+                    log_error(__func__, "invalid buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf,
+                       attr == ROCBLASLT_GROUPED_MATRIX_LAYOUT_LD_ARRAY_INTEGER_WIDTH
+                           ? &matLayout->ld_int_width
+                           : &matLayout->rows_cols_int_width,
+                       sizeof(int32_t));
                 break;
             default:
                 log_error(__func__, "invalid attribute", attr);
@@ -1668,6 +1900,10 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
                         break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
+                        matmulDesc->scaleAType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
+                        break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT:
                         matmulDesc->scaleAType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_BF16;
@@ -1782,6 +2018,10 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT:
                         matmulDesc->scaleBType
                             = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT;
+                        break;
+                    case HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT:
+                        matmulDesc->scaleBType
+                            = RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT;
                         break;
                     case HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F:
                         matmulDesc->scaleBType = RocblasltContractionProblem::ScalingFormat::Scalar;
@@ -1962,6 +2202,27 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 break;
+            case ROCBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE:
+            case ROCBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE:
+            {
+                if(sizeInBytes < sizeof(int64_t))
+                {
+                    log_error(__func__, "invalid batch stride buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                int64_t stride = 0;
+                memcpy(&stride, buf, sizeof(int64_t));
+                if(stride != 0 && stride != 1)
+                {
+                    log_error(__func__, "alpha/beta batch stride must be 0 or 1", stride);
+                    return rocblaslt_status_invalid_value;
+                }
+                if(matmulAttr == ROCBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE)
+                    matmulDesc->alpha_batch_stride = stride;
+                else
+                    matmulDesc->beta_batch_stride = stride;
+                break;
+            }
             case ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT:
                 if(sizeof(int32_t) <= sizeInBytes)
                 {
@@ -2007,7 +2268,7 @@ rocblaslt_status rocblaslt_matmul_desc_set_attribute(rocblaslt_matmul_desc      
                 {
                     int32_t requested = 0;
                     memcpy(&requested, buf, sizeof(int32_t));
-                    if(requested < 0 || requested > 1)
+                    if(requested < -1 || requested > 1)
                     {
                         log_error(__func__,
                                   "invalid uniform_summation_order value",
@@ -2193,6 +2454,11 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                     }
                     else if(matmulDesc->scaleAType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                    }
+                    else if(matmulDesc->scaleAType
                             == RocblasltContractionProblem::ScalingFormat::Block_32_BF16)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_16BF_EXT;
@@ -2327,6 +2593,11 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_32_8_EXT;
                     }
                     else if(matmulDesc->scaleBType
+                            == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_128_4_EXT)
+                    {
+                        mode = HIPBLASLT_MATMUL_MATRIX_SCALE_BLK32_UE8M0_128_4_EXT;
+                    }
+                    else if(matmulDesc->scaleBType
                             == RocblasltContractionProblem::ScalingFormat::Scalar)
                     {
                         mode = HIPBLASLT_MATMUL_MATRIX_SCALE_SCALAR_32F;
@@ -2423,6 +2694,21 @@ rocblaslt_status rocblaslt_matmul_desc_get_attribute(rocblaslt_matmul_desc      
                     return rocblaslt_status_invalid_value;
                 }
                 memcpy(buf, &matmulDesc->sm_count_target, sizeof(int32_t));
+                break;
+            case ROCBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE:
+            case ROCBLASLT_MATMUL_DESC_BETA_BATCH_STRIDE:
+                if(sizeWritten)
+                    *sizeWritten = sizeof(int64_t);
+                if(sizeInBytes < sizeof(int64_t))
+                {
+                    log_error(__func__, "invalid batch stride buf size", sizeInBytes);
+                    return rocblaslt_status_invalid_value;
+                }
+                memcpy(buf,
+                       matmulAttr == ROCBLASLT_MATMUL_DESC_ALPHA_BATCH_STRIDE
+                           ? &matmulDesc->alpha_batch_stride
+                           : &matmulDesc->beta_batch_stride,
+                       sizeof(int64_t));
                 break;
             case ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT:
                 if(sizeWritten)
@@ -2622,6 +2908,40 @@ rocblaslt_status
                     pref->sm_count_target);
             break;
         }
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_ROWS_EXT:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_ROWS_EXT:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_COLS_EXT:
+        {
+            if(dataSize < sizeof(int64_t))
+            {
+                log_error(__func__, "invalid grouped hint buf size", dataSize);
+                return rocblaslt_status_invalid_value;
+            }
+            int64_t value = 0;
+            memcpy(&value, data, sizeof(int64_t));
+            if(value < 0)
+            {
+                log_error(__func__, "negative grouped hint", value);
+                return rocblaslt_status_invalid_value;
+            }
+            *rocblaslt_grouped_hint_field(pref, attribute) = value;
+            log_api(__func__,
+                    "matmulPref",
+                    pref,
+                    "attr",
+                    attribute,
+                    "buf",
+                    data,
+                    "sizeInBytes",
+                    dataSize,
+                    "data",
+                    value);
+            break;
+        }
         default:
             log_error(__func__, "invalid attribute", attribute);
             return rocblaslt_status_invalid_value;
@@ -2706,6 +3026,22 @@ rocblaslt_status
                     "data[out]",
                     pref->sm_count_target);
             break;
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_ROWS:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_AVERAGE_COLS:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_AVERAGE_REDUCTION_DIM:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_ROWS_EXT:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_COLS_EXT:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_ROWS_EXT:
+        case ROCBLASLT_MATMUL_PREF_GROUPED_DESC_D_MAX_TOTAL_COLS_EXT:
+            if(sizeInBytes < sizeof(int64_t))
+            {
+                log_error(__func__, "invalid grouped hint buf size", sizeInBytes);
+                return rocblaslt_status_invalid_value;
+            }
+            if(sizeWritten)
+                *sizeWritten = sizeof(int64_t);
+            memcpy(data, rocblaslt_grouped_hint_field(pref, attribute), sizeof(int64_t));
+            break;
         default:
             return rocblaslt_status_invalid_value;
             break;
@@ -2744,6 +3080,10 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
         return rocblaslt_status_invalid_pointer;
     }
 
+    auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_descr);
+    if(alphaTypeStatus != rocblaslt_status_continue)
+        return alphaTypeStatus;
+
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
@@ -2758,6 +3098,13 @@ rocblaslt_status rocblaslt_matmul_is_algo_supported(rocblaslt_handle        hand
         void* betaf  = (void*)beta;
         auto  prob   = construct_rocblaslt_problem(
             handle, matmul_descr, matA, matB, matC, matD, alphaf, betaf, algo->max_workspace_bytes);
+#if HIPBLASLT_HAS_GEMM_A2A_FUSION
+        if(auto gate = validate_fused_a2a(handle, prob); gate != rocblaslt_status_success)
+            return gate;
+        if(auto gate = rocblaslt_validate_fused_epilogue_dispatch(handle, matmul_descr, matD);
+           gate != rocblaslt_status_success)
+            return gate;
+#endif
         status = isSolutionSupported(handle, prob, gemmData, algo, workspaceSizeInBytes);
 
         if(status != rocblaslt_status_success)
@@ -2801,6 +3148,24 @@ rocblaslt_status
         log_error(__func__, "invalid requested count", requestedAlgoCount);
         return rocblaslt_status_invalid_value;
     }
+    auto alphaTypeStatus = validateDeviceScalarAlphaType(matmul_desc);
+    if(alphaTypeStatus != rocblaslt_status_continue)
+        return alphaTypeStatus;
+
+    if(matA->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
+       || matB->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
+       || matC->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED
+       || matD->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED)
+        return rocblaslt_grouped_matmul_algo_get_heuristic(handle,
+                                                           matmul_desc,
+                                                           matA,
+                                                           matB,
+                                                           matC,
+                                                           matD,
+                                                           pref,
+                                                           requestedAlgoCount,
+                                                           heuristicResultsArray,
+                                                           returnAlgoCount);
     // No algorithm can take these sizes or strides; report none rather than search at all.
     if(!problemFitsKernelArgs(matD->m,
                               matD->n,
@@ -2896,6 +3261,7 @@ rocblaslt_status
 
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
+        bool layoutRuledOut = false;
         if(requestedAlgoCount > 0)
         {
             status = getBestSolutions(prob,
@@ -2905,7 +3271,23 @@ rocblaslt_status
                                       override_success ? &heuristicResultsArray[1]
                                                        : heuristicResultsArray,
                                       returnAlgoCount,
-                                      pref->max_workspace_bytes);
+                                      pref->max_workspace_bytes,
+                                      &layoutRuledOut);
+        }
+
+        // Tag the top Tensile result with the hint it was ranked for so a launch
+        // under a different adaptive hint can re-select, and give it enough
+        // workspace for a re-grid or a re-selection. A tuning-file result is not
+        // tagged; the other results and AlgoCheck report the plain size.
+        if(prob.adaptive_sm_count && !override_success && *returnAlgoCount > 0
+           && heuristicResultsArray[0].state == rocblaslt_status_success
+           && *(int*)heuristicResultsArray[0].algo.data >= 0)
+        {
+            using namespace rocblaslt::adaptive_sm;
+            auto& r0 = heuristicResultsArray[0];
+            tagAlgo(r0.algo.data, uint32_t(prob.sm_count_target));
+            r0.workspaceSize = std::min(pref->max_workspace_bytes,
+                                        std::max(r0.workspaceSize, c_adaptiveWorkspace));
         }
 
         if(override_success)
@@ -2925,8 +3307,10 @@ rocblaslt_status
             matmul_desc->bias = nullptr;
         log_api(__func__, "returnAlgoCount", *returnAlgoCount);
 
-        // Try to get size independent solutions from getAllSolutions()
-        if(requestedAlgoCount > *returnAlgoCount
+        // Try to get size independent solutions from getAllSolutions(). Its
+        // search loads every shard of the operation, so it is skipped when the
+        // MX scale layout rule emptied the ranked list.
+        if(requestedAlgoCount > *returnAlgoCount && !layoutRuledOut
            && topUpWithSizeIndependentSolutions(handle,
                                                 prob,
                                                 tensile_data,
@@ -3092,7 +3476,7 @@ rocblaslt_status
                                      std::shared_ptr<void>  gemmData,
                                      const size_t           maxWorkspaceBytes,
                                      const int32_t          streamKTileSchedulingMode,
-                                     const bool             uniformSummationOrder,
+                                     const int32_t          uniformSummationOrder,
                                      const int              requestedAlgoCount,
                                      std::vector<rocblaslt_matmul_heuristic_result>& results)
 {
@@ -3115,10 +3499,10 @@ rocblaslt_status
     // tensile_host.cpp (its body needs the TensileDataGemm /
     // TensileDataGroupedGemm types).
     applyStreamKTileSchedulingMode(gemmData, gemmType, streamKTileSchedulingMode);
-    applyUniformSummationOrder(gemmData,
-                               gemmType,
-                               uniformSummationOrder
-                                   || (handle && handle->uniform_summation_order));
+    int32_t uniformSummationOrderEnabled = handle ? handle->uniform_summation_order : 1;
+    if(uniformSummationOrder != -1)
+        uniformSummationOrderEnabled = uniformSummationOrder;
+    applyUniformSummationOrder(gemmData, gemmType, uniformSummationOrderEnabled);
     rocblaslt_status status = rocblaslt_status_success;
     try
     {
@@ -3134,6 +3518,7 @@ rocblaslt_status
             log_api(__func__, "OverrideAlgoCount", override_success ? 1 : 0);
         }
 
+        bool layoutRuledOut = false;
         if(requestedAlgoCount - override_result.size() > 0)
             status
                 = getBestSolutions(handle,
@@ -3141,7 +3526,8 @@ rocblaslt_status
                                    gemmData,
                                    workspaceLimit,
                                    override_success ? requestedAlgoCount - 1 : requestedAlgoCount,
-                                   results);
+                                   results,
+                                   &layoutRuledOut);
 
         if(override_success)
         {
@@ -3152,22 +3538,24 @@ rocblaslt_status
         log_api(__func__, "returnAlgoCount", results.size());
 
         int duplicated_counts = 0;
-        static TensileLite::StringSet emptySet({});
-        static TensileLite::StringSet defExcludedSet({"GridBasedMatching", "PredictionMatching"});
 
-        // Try to get size independent solutions from getAllSolutions()
-        if(requestedAlgoCount > results.size())
+        // Try to get size independent solutions from getAllSolutions(), unless
+        // the MX scale layout rule emptied the ranked list, as above.
+        if(requestedAlgoCount > results.size() && !layoutRuledOut)
         {
-            // set excluded lib here: if the #-returned < #-requested, we'll call getAll.
-            // But in that case, we don't need to get GridBased or Prediction which are already returned here
-            static std::mutex mtx;
-            std::lock_guard<std::mutex> lock(mtx);
-            TensileLite::Debug::Instance().setExcludedLibFromGetAll(defExcludedSet);
-
+            // If the #-returned < #-requested, we'll call getAll. But in that case we
+            // don't need GridBased or Prediction, which are already returned above, so
+            // ask for a no-ranking search. This is a per-call argument so that a
+            // concurrent get-all on another handle still sees the full row set.
             std::vector<rocblaslt_matmul_heuristic_result> allSolutionsResults;
             size_t                                         workspaceSizeInBytes = 0;
             if(rocblaslt_status_success
-               == getAllSolutions(gemmData, handle, gemmType, allSolutionsResults, workspaceLimit))
+               == getAllSolutions(gemmData,
+                                  handle,
+                                  gemmType,
+                                  allSolutionsResults,
+                                  workspaceLimit,
+                                  TensileLite::SolutionLibrarySearchType::GEMM_TYPE_ONLY_NO_RANKING))
             {
                 status = rocblaslt_status_success;
                 int oriReturnAlgoCount = results.size();
@@ -3200,9 +3588,6 @@ rocblaslt_status
 
                 log_api(__func__, "final returnAlgoCount", results.size());
             }
-
-            // reset
-            TensileLite::Debug::Instance().setExcludedLibFromGetAll(emptySet);
         }
 
         log_api(__func__, "duplicated counts from getAll", duplicated_counts);
@@ -3253,11 +3638,90 @@ struct ArchName
 // exported. Get architecture name
 std::string rocblaslt_internal_get_arch_name()
 {
-    int deviceId;
-    static_cast<void>(hipGetDevice(&deviceId));
-    hipDeviceProp_t deviceProperties;
-    static_cast<void>(hipGetDeviceProperties(&deviceProperties, deviceId));
-    return ArchName{}(deviceProperties);
+    int        deviceId = -1;
+    hipError_t err      = hipGetDevice(&deviceId);
+    if(err != hipSuccess)
+        throw std::runtime_error(std::string("hipGetDevice failed: ") + hipGetErrorString(err));
+    return rocblaslt_internal_get_arch_name(deviceId);
+}
+
+namespace
+{
+    // The HIP calls ArchNameCache makes; tests substitute fakes.
+    struct ArchNameApi
+    {
+        decltype(&hipGetDeviceCount)      getDeviceCount      = hipGetDeviceCount;
+        decltype(&hipGetDeviceProperties) getDeviceProperties = hipGetDeviceProperties;
+    };
+
+    // Per-device arch names. A device's properties do not change while the
+    // process runs. Only successful queries are kept: a failure throws, and
+    // the next lookup retries. Once filled, a lookup takes no lock.
+    class ArchNameCache
+    {
+    public:
+        explicit ArchNameCache(ArchNameApi api = {})
+            : m_api(api)
+        {
+        }
+
+        // Throws if deviceId is not a visible device or a HIP query fails.
+        const std::string& get(int deviceId)
+        {
+            if(!m_counted.load(std::memory_order_acquire))
+            {
+                std::lock_guard<std::mutex> lock(m_fill);
+                if(!m_counted.load(std::memory_order_relaxed))
+                {
+                    int        count = 0;
+                    hipError_t err   = m_api.getDeviceCount(&count);
+                    if(err != hipSuccess)
+                        throw std::runtime_error(std::string("hipGetDeviceCount failed: ")
+                                                 + hipGetErrorString(err));
+                    m_devices = std::vector<Device>(count);
+                    m_counted.store(true, std::memory_order_release);
+                }
+            }
+
+            if(deviceId < 0 || deviceId >= static_cast<int>(m_devices.size()))
+                throw std::runtime_error("Invalid HIP device ID " + std::to_string(deviceId));
+
+            Device& device = m_devices[deviceId];
+            if(!device.known.load(std::memory_order_acquire))
+            {
+                std::lock_guard<std::mutex> lock(m_fill);
+                if(!device.known.load(std::memory_order_relaxed))
+                {
+                    hipDeviceProp_t deviceProperties;
+                    hipError_t      err = m_api.getDeviceProperties(&deviceProperties, deviceId);
+                    if(err != hipSuccess)
+                        throw std::runtime_error(std::string("hipGetDeviceProperties failed: ")
+                                                 + hipGetErrorString(err));
+                    device.name = ArchName{}(deviceProperties);
+                    device.known.store(true, std::memory_order_release);
+                }
+            }
+            return device.name;
+        }
+
+    private:
+        struct Device
+        {
+            std::atomic<bool> known{false};
+            std::string       name;
+        };
+
+        ArchNameApi         m_api;
+        std::atomic<bool>   m_counted{false};
+        std::vector<Device> m_devices;
+        std::mutex          m_fill;
+    };
+}
+
+const std::string& rocblaslt_internal_get_arch_name(int deviceId)
+{
+    static ArchNameCache cache;
+    return cache.get(deviceId);
 }
 
 bool rocblaslt_internal_test_path(const std::string& path)
@@ -3330,12 +3794,12 @@ std::optional<std::filesystem::path> rocblaslt_find_library_relative_path(
         if(relpath)
         {
             auto full_path = p / (*relpath);
-            if(std::filesystem::exists(full_path))
+            if(std::filesystem::exists(TensileLite::longPathSafe(full_path.string())))
                 return full_path;
             return {};
         }
 
-        if(std::filesystem::exists(p))
+        if(std::filesystem::exists(TensileLite::longPathSafe(p.string())))
             return p;
         return {};
     };
@@ -3398,6 +3862,9 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
         return -1;
     }
 
+    if(validateDeviceScalarAlphaType(matmul_descr) != rocblaslt_status_continue)
+        return -1;
+
     hipDataType            a_type              = matA->type;
     hipDataType            b_type              = matB->type;
     hipDataType            c_type              = matC->type;
@@ -3430,6 +3897,38 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
 extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
 {
     TensileLite::Debug::Instance().reloadDebugBitsForTest();
+}
+
+// Test support: looks up deviceIds[0..count) in order through one fresh
+// ArchNameCache over the given HIP calls, leaving the process cache alone.
+// ok[i] is whether lookup i succeeded; on success, the nameSize bytes at
+// names + i * nameSize hold its name, truncated and NUL-terminated.
+extern "C" HIPBLASLT_EXPORT void
+    hipblaslt_arch_name_lookups_for_test(hipError_t (*getDeviceCount)(int*),
+                                         hipError_t (*getDeviceProperties)(hipDeviceProp_t*, int),
+                                         const int* deviceIds,
+                                         size_t     count,
+                                         char*      names,
+                                         size_t     nameSize,
+                                         bool*      ok)
+{
+    ArchNameCache cache({getDeviceCount, getDeviceProperties});
+    for(size_t i = 0; i < count; ++i)
+    {
+        try
+        {
+            const std::string& name = cache.get(deviceIds[i]);
+            char*              out  = names + i * nameSize;
+            size_t             len  = std::min(name.size(), nameSize - 1);
+            std::memcpy(out, name.data(), len);
+            out[len] = '\0';
+            ok[i]    = true;
+        }
+        catch(const std::exception&)
+        {
+            ok[i] = false;
+        }
+    }
 }
 
 // Test support, like hipblaslt_debug_reload: the tuning variables are read on
@@ -3613,4 +4112,48 @@ extern "C" HIPBLASLT_EXPORT size_t hipblaslt_tuning_stats_for_test(uint64_t* val
     for(size_t i = 0; values && i < count && i < known; i++)
         values[i] = all[i];
     return known;
+}
+
+// Test support: the adaptive sm_count_target state of `stream` into `state`,
+// a rocblaslt::adaptive_sm::StreamStateForTest of `size` bytes. Returns false
+// when adaptive mode is off, the stream has no slot or the size differs.
+extern "C" HIPBLASLT_EXPORT bool
+    hipblaslt_adaptive_sm_state_for_test(void* handle, hipStream_t stream, void* state, size_t size)
+{
+    auto*     h    = static_cast<rocblaslt_handle>(handle);
+    const int slot = h && h->adaptive_sm ? h->streamSlot(stream) : -1;
+    if(slot < 0 || size != sizeof(rocblaslt::adaptive_sm::StreamStateForTest))
+        return false;
+    *static_cast<rocblaslt::adaptive_sm::StreamStateForTest*>(state)
+        = h->adaptive_sm->stateForTest(slot);
+    return true;
+}
+
+// Test support: an adaptive launch on `stream` with no kernel. `*probe`: the
+// launch planned a probe; `*heldBetween`, `*heldAfter`: the slot's lock is
+// held while the launch lives and after it ends. Returns false when adaptive
+// mode is off or the stream has no slot.
+extern "C" HIPBLASLT_EXPORT bool hipblaslt_adaptive_sm_launch_lock_for_test(
+    void* handle, hipStream_t stream, bool tiny, bool* probe, bool* heldBetween, bool* heldAfter)
+{
+    auto*     h    = static_cast<rocblaslt_handle>(handle);
+    const int slot = h && h->adaptive_sm ? h->streamSlot(stream) : -1;
+    if(slot < 0)
+        return false;
+    {
+        const auto launch = h->adaptive_sm->begin(stream, slot, tiny);
+        *probe            = launch.epoch != 0;
+        *heldBetween      = launch.holdsLockForTest();
+    }
+    // This thread no longer holds the lock, so try_lock is well defined.
+    *heldAfter = h->adaptive_sm->lockedForTest(slot);
+    return true;
+}
+
+// Test support: adaptive re-selections memoised for a matmul desc.
+extern "C" HIPBLASLT_EXPORT size_t hipblaslt_adaptive_reselections_for_test(void* matmulDesc)
+{
+    return matmulDesc
+               ? adaptiveReselectionCount(static_cast<rocblaslt_matmul_desc>(matmulDesc)->m_data)
+               : 0;
 }

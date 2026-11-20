@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "133230ec-8d29-53b0-bb80-3a2c58159494",
+  "name": "flydsl rmsnorm dispatch",
+  "dispatch_symbol": "hipkernel.flydsl_rmsnorm.dispatch"
+}

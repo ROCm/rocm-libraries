@@ -1,4 +1,10 @@
-# Bundles extracted by reference_common/artifact.py unpack into the source
-# default, <operation>/<arch>/. Each operation's .gitignore lists its
-# DVC-tracked archives.
-/*/*/
+# Git tracks each variant's DVC pointer, <operation>/<arch>/<variant>.tar.gz.dvc.
+# dvc pull fetches the archive beside it, and reference_common/artifact.py unpack
+# extracts it into the source default, <operation>/<arch>/<variant>/. This file
+# already ignores every archive, so dvc add writes no .gitignore of its own.
+/*/*/*.tar.gz
+/*/*/*/
+# Leftovers of the earlier per-architecture layout: <operation>/<arch>.tar.gz
+# archives and bundles extracted into <operation>/<arch>/.
+/*/*.tar.gz
+/*/*/*.json

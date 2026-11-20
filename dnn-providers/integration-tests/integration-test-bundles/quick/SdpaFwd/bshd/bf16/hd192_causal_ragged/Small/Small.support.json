@@ -1,4 +1,13 @@
 {
-  "claims": {},
+  "claims": {
+    "ASM_SDPA_ENGINE": {
+      "gfx942": [
+        "linux"
+      ],
+      "gfx950": [
+        "linux"
+      ]
+    }
+  },
   "version": 1
 }

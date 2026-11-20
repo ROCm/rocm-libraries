@@ -1,0 +1,55 @@
+{
+  "version": "1.0",
+  "id": "8dc88fc8-9501-5c69-b49c-1a45e312639e",
+  "name": "flydsl sdpa_rdna_decode variant fields",
+  "fields": [
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "head_dim",
+      "type": "int"
+    },
+    {
+      "name": "causal",
+      "type": "int"
+    },
+    {
+      "name": "block_m",
+      "type": "int"
+    },
+    {
+      "name": "block_n",
+      "type": "int"
+    },
+    {
+      "name": "dv_split",
+      "type": "int"
+    },
+    {
+      "name": "has_bias",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_max",
+      "type": "int"
+    },
+    {
+      "name": "merge_symbol",
+      "type": "string"
+    },
+    {
+      "name": "bias_q",
+      "type": "int"
+    },
+    {
+      "name": "head_dim_v",
+      "type": "int"
+    },
+    {
+      "name": "has_sink",
+      "type": "int"
+    }
+  ]
+}

@@ -100,6 +100,11 @@ typedef struct rocke_gemm_trait_spec
     bool dtl_prefetch;
     bool active_tile_skip;
     int lds_k_pad; /* default 0 */
+    /* TDM (Tensor Data Mover): replace per-lane coalesced stores with a single
+     * tensor_load_to_lds descriptor per operand. gfx1250 only; mutually
+     * exclusive with direct_to_lds. Python TraitSpec.tdm / TraitSpec.tdm_depth. */
+    bool tdm; /* default false */
+    int tdm_depth; /* buffer count; 1 = unpipelined, >=2 = ring; default 1 */
     bool lds_swizzle;
     /* compv4/compv3 schedule-hint policy. Python: Optional[bool] = None.
      * emit_sched_hints_set==false mirrors Python None (arch-resolved: hints
@@ -121,6 +126,28 @@ typedef struct rocke_gemm_trait_spec
      * and the barrier is elided -> lower small-tile latency, more LDS. Only
      * affects the cshuffle epilogue; False keeps byte-identical output. */
     bool cshuffle_no_alias; /* default false */
+    /* Element width, in bytes, fed to the global A/B load-vector picker, which
+     * caps the vector at 16/elem_bytes (the 4-dword buffer_load limit). Unset
+     * (Python None) resolves it from data.dtype_a, so each operand type gets
+     * the full 16 bytes. An explicit value overrides that; 2 reproduces the
+     * older emission that capped 1-byte operands at an 8-byte load. No effect
+     * on f16/bf16, which resolve to 2 either way. */
+    bool ab_load_elem_bytes_set; /* false => Python None (dtype-resolved) */
+    int ab_load_elem_bytes;
+    /* Split the per-K-tile workgroup barrier of the TDM K-loop (depth-2
+     * ping-pong or depth >= 3 ring) into a signal, raised once the wave's last
+     * fragment reads of the tile have drained, and a wait at the top of the
+     * next iteration. WMMA `mem` pipeline with tdm and tdm_depth >= 2 only.
+     * Python TraitSpec.split_barrier. */
+    bool split_barrier; /* default false */
+    /* Waves 2p / 2p+1 issue the TDM fills of LDS half p instead of always
+     * waves 0 / 1. tdm with tdm_depth == 2 and >= 4 waves only.
+     * Python TraitSpec.tdm_alternate_issuers. */
+    bool tdm_alternate_issuers; /* default false */
+    /* Refill each LDS half as soon as every wave has read it: two K-tiles per
+     * iteration with static parity. Needs split_barrier and
+     * tdm_alternate_issuers. Python TraitSpec.tdm_early_refill. */
+    bool tdm_early_refill; /* default false */
 } rocke_gemm_trait_spec_t;
 
 /* ------------------------------------------------------------------ DataSpec */

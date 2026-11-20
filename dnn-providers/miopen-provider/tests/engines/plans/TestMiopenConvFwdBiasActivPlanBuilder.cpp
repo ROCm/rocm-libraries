@@ -20,7 +20,9 @@
 #include "tests/common/ConvolutionCommon.hpp"
 #include "tests/common/TestWorkarounds.hpp"
 
+#include <functional>
 #include <memory>
+#include <string>
 #include <unordered_map>
 
 using namespace miopen_plugin;
@@ -547,6 +549,29 @@ static std::vector<ConvolutionBiasActivationTestParam> testParams()
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
               false,
               "Leaky RELU is NOT supported"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+                  std::nullopt,
+                  std::nullopt,
+                  0.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "RELU with zero slope is supported"},
+        Param{FusedOp::CBA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD, -1.0, 1.0, 0.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "CLAMP with zero slope is supported"},
         Param{FusedOp::CA,
               validConvTestCase4d(),
               TensorLayout::NCHW,
@@ -580,6 +605,19 @@ static std::vector<ConvolutionBiasActivationTestParam> testParams()
               {TypeKey::Y_CONV, TypeKey::Y_BIAS},
               false,
               "Leaky RELU is NOT supported"},
+        Param{FusedOp::CA,
+              validConvTestCase4d(),
+              TensorLayout::NCHW,
+              test_activation_common::ActivTestCase{
+                  hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::RELU_FWD,
+                  std::nullopt,
+                  6.0,
+                  0.0},
+              hipdnn_frontend::DataType::FLOAT,
+              {},
+              {TypeKey::Y_CONV, TypeKey::Y_BIAS},
+              true,
+              "Clipped RELU with zero slope is supported"},
     };
 
     return params;
@@ -773,4 +811,90 @@ TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, BuildPlanThrowsForUnsupportedGraph
     EXPECT_THROW(_planBuilder.buildPlan(*_dummyHandle, graph, mockConfig, ctx),
                  hipdnn_plugin_sdk::HipdnnPluginException);
     EXPECT_FALSE(ctx.hasValidPlan());
+}
+
+// The handle-free checks of isApplicable, runnable without a device.
+namespace
+{
+
+bool isCbaGraphApplicable(const flatbuffers::FlatBufferBuilder& builder)
+{
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    return MiopenConvFwdBiasActivPlanBuilder::isGraphApplicable(graph);
+}
+
+flatbuffers::FlatBufferBuilder editCbaTensor(
+    const flatbuffers::FlatBufferBuilder& source,
+    const std::string& name,
+    const std::function<void(hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT&)>& edit)
+{
+    return mutateGraph(source, [&](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+        for(auto& tensor : graph.tensors)
+        {
+            if(tensor->name == name)
+            {
+                edit(*tensor);
+            }
+        }
+    });
+}
+
+flatbuffers::FlatBufferBuilder cbaGraphWithPassByValueTensor(const std::string& tensorName)
+{
+    return editCbaTensor(createValidConvFwdBiasActivGraph(),
+                         tensorName,
+                         [](hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& t) {
+                             t.is_runtime_pass_by_value = true;
+                         });
+}
+
+// x is NCHW; a channels-last final output does not match the fused descriptor.
+flatbuffers::FlatBufferBuilder cbaGraphWithFinalOutputLayoutMismatch()
+{
+    return editCbaTensor(createValidConvFwdBiasActivGraph(),
+                         "y",
+                         [](hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& t) {
+                             t.strides = {64, 1, 16, 4};
+                         });
+}
+
+} // namespace
+
+TEST(TestMiopenConvFwdBiasActivPlanBuilderGraphApplicability, AcceptsLegalGraphs)
+{
+    EXPECT_TRUE(isCbaGraphApplicable(createValidConvFwdBiasActivGraph()));
+    EXPECT_TRUE(isCbaGraphApplicable(createValidConvFwdActivGraph()));
+}
+
+TEST(TestMiopenConvFwdBiasActivPlanBuilderGraphApplicability, DeclinesPassByValueTensor)
+{
+    for(const char* name : {"x", "w", "bias", "y"})
+    {
+        const auto builder = cbaGraphWithPassByValueTensor(name);
+        EXPECT_FALSE(isCbaGraphApplicable(builder)) << name;
+    }
+}
+
+TEST(TestMiopenConvFwdBiasActivPlanBuilderGraphApplicability, DeclinesFinalOutputLayoutMismatch)
+{
+    const auto builder = cbaGraphWithFinalOutputLayoutMismatch();
+    EXPECT_FALSE(isCbaGraphApplicable(builder));
+}
+
+// isApplicable must apply the handle-free checks before consulting the device.
+TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableDeclinesPassByValueTensor)
+{
+    for(const char* name : {"x", "w", "bias", "y"})
+    {
+        const auto builder = cbaGraphWithPassByValueTensor(name);
+        const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+        EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph)) << name;
+    }
+}
+
+TEST_F(TestMiopenConvFwdBiasActivPlanBuilder, IsApplicableDeclinesFinalOutputLayoutMismatch)
+{
+    const auto builder = cbaGraphWithFinalOutputLayoutMismatch();
+    const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(*_dummyHandle, graph));
 }

@@ -1,0 +1,10 @@
+{
+  "claims": {
+    "hipkernel:Gfx942AttentionDense": {
+      "gfx942": [
+        "linux"
+      ]
+    }
+  },
+  "version": 1
+}

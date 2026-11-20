@@ -1,0 +1,7 @@
+outs:
+- md5: ab01b17955340e18ba1781ec567c921a.dir
+  size: 7012328
+  nfiles: 250
+  hash: md5
+  path: gfx950
+  remote: ingestor

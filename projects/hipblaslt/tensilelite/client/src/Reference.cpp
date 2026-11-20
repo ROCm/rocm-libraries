@@ -35,9 +35,9 @@
 #include <cstddef>
 #include <iostream>
 #include <omp.h>
+#include <optional>
 #include <type_traits>
 
-#define MAX_OMP_THREADS 64
 #if defined(_MSC_VER)
 #define TENSILELITE_CPU_REF_FORCE_INLINE __forceinline
 #else
@@ -548,6 +548,7 @@ namespace TensileLite
             }
             break;
                 break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::ComplexFloat:
             case rocisa::DataType::ComplexDouble:
@@ -661,6 +662,7 @@ namespace TensileLite
                 typedPtr[pos] = SaturateCast<BFloat8_fnuz>(src);
             }
             break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::XFloat32:
             case rocisa::DataType::ComplexFloat:
             case rocisa::DataType::ComplexDouble:
@@ -719,6 +721,7 @@ namespace TensileLite
                 throw std::runtime_error("Not supported yet.");
             }
             break;
+            case rocisa::DataType::Int4:
             case rocisa::DataType::Count:
             case rocisa::DataType::Float8BFloat8:
             case rocisa::DataType::BFloat8Float8:
@@ -927,7 +930,6 @@ namespace TensileLite
             // For 2D bias reduction, d batch = 1
             if((tensor.dimensions() == 3 && tensor.sizes()[2] == 1) || tensor.dimensions() == 2)
             {
-                omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel for
                 for(size_t bNum = 0; bNum < biasTensor.totalLogicalElements();
                     bNum += validationStride)
@@ -1368,6 +1370,8 @@ namespace TensileLite
             size_t       mxsbI,
             size_t       mxBlockA,
             size_t       mxBlockB,
+            size_t       mxBlockFreeA,
+            size_t       mxBlockFreeB,
             size_t       strideMxsaM,
             size_t       strideMxsaBlk,
             size_t       strideMxsbN,
@@ -1379,9 +1383,12 @@ namespace TensileLite
                 if(global_m >= sizeM)
                     continue;
 
+                // mxBlockFreeA consecutive rows share a scale; 1 (the 1xmxBlockA
+                // layout) makes this divide the identity.
                 AccumT sa = (mxBlockA > 0 && mxsaBatch)
                     ? static_cast<AccumT>(static_cast<float>(
-                          mxsaBatch[global_m * strideMxsaM + mxsaI * strideMxsaBlk]))
+                          mxsaBatch[(global_m / mxBlockFreeA) * strideMxsaM
+                                    + mxsaI * strideMxsaBlk]))
                     : AccumT(1);
 
                 for(size_t nn = 0; nn < BLOCK_N; ++nn)
@@ -1392,7 +1399,8 @@ namespace TensileLite
 
                     AccumT sb = (mxBlockB > 0 && mxsbBatch)
                         ? static_cast<AccumT>(static_cast<float>(
-                              mxsbBatch[global_n * strideMxsbN + mxsbI * strideMxsbBlk]))
+                              mxsbBatch[(global_n / mxBlockFreeB) * strideMxsbN
+                                        + mxsbI * strideMxsbBlk]))
                         : AccumT(1);
 
                     cReg[mm * BLOCK_N + nn]
@@ -1450,20 +1458,48 @@ namespace TensileLite
             size_t strideBatchC = problem.c().strides()[problem.batchIndices()[0].d];
             size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
 
+            size_t sizeBatch = problem.batchSize(0);
+            size_t sizeK     = problem.boundSize(0);
+            size_t sizeM     = problem.freeSizeA(0);
+            size_t sizeN     = problem.freeSizeB(0);
+
+            bool useScaleAlphaVec  = problem.useScaleAlphaVec();
+            bool deviceScalarAlpha = problem.getParams().deviceScalarAlpha();
+            int  factorDim         = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
+
+            const AccumT effectiveAlpha
+                = deviceScalarAlpha
+                      ? GetValue<AccumT>(problem.alphaType(), inputs.scaleAlphaVec, 0, false)
+                      : constVariantCast<AccumT>(inputs.alpha);
+            const bool doContraction = effectiveAlpha != AccumT(0);
+
+            ShadowBuffer<AccumT> shadowAlphaVec;
+            if(useScaleAlphaVec && !deviceScalarAlpha)
+            {
+                size_t vecLen = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
+                shadowAlphaVec
+                    = ShadowBuffer<AccumT>(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
+            }
+
             // 4. Shadow copies in AccumT.
             //
             // For A and B, also pass the compute-input type so the shadow is
             // pre-quantized to mirror the GPU MFMA / slow-path semantics when
             // storage is wider than the MAC input (e.g. Half storage with F8
             // compute-input). C/D never have a separate MAC-input type.
-            ShadowBuffer<AccumT> shadowA(inputs.a,
-                                         problem.a().dataType(),
-                                         problem.a().totalAllocatedElements(),
-                                         problem.computeInputTypeA());
-            ShadowBuffer<AccumT> shadowB(inputs.b,
-                                         problem.b().dataType(),
-                                         problem.b().totalAllocatedElements(),
-                                         problem.computeInputTypeB());
+            std::optional<ShadowBuffer<AccumT>> shadowA;
+            std::optional<ShadowBuffer<AccumT>> shadowB;
+            if(doContraction)
+            {
+                shadowA.emplace(inputs.a,
+                                problem.a().dataType(),
+                                problem.a().totalAllocatedElements(),
+                                problem.computeInputTypeA());
+                shadowB.emplace(inputs.b,
+                                problem.b().dataType(),
+                                problem.b().totalAllocatedElements(),
+                                problem.computeInputTypeB());
+            }
             ShadowBuffer<AccumT> shadowC(
                 inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
 
@@ -1484,21 +1520,6 @@ namespace TensileLite
                 shadowD.resize(problem.d().totalAllocatedElements());
                 ptrD = shadowD.data();
             }
-
-            bool useScaleAlphaVec = problem.useScaleAlphaVec();
-            int  factorDim        = problem.getParams().factorDim(); // 0 = Row(M), 1 = Col(N)
-
-            ShadowBuffer<AccumT> shadowAlphaVec;
-            if(problem.useScaleAlphaVec())
-            {
-                size_t vecLen  = (factorDim == 0) ? problem.freeSizeA(0) : problem.freeSizeB(0);
-                shadowAlphaVec = ShadowBuffer<AccumT>(inputs.scaleAlphaVec, problem.alphaType(), vecLen);
-            }
-
-            size_t sizeBatch = problem.batchSize(0);
-            size_t sizeK     = problem.boundSize(0);
-            size_t sizeM     = problem.freeSizeA(0);
-            size_t sizeN     = problem.freeSizeB(0);
 
             enum class ScaleABMode { None, Scalar, Vector };
             ScaleABMode          scaleABMode = ScaleABMode::None;
@@ -1524,6 +1545,10 @@ namespace TensileLite
             // MX block-scaling metadata (FP4 with MX)
             size_t         mxBlockA    = problem.mxBlockA();
             size_t         mxBlockB    = problem.mxBlockB();
+            // Free-dimension extent of one scaling tile. Never 0 (setMXScaleA/B
+            // clamp), but guard anyway since these are divisors.
+            size_t         mxBlockFreeA = std::max<size_t>(1, problem.mxBlockFreeA());
+            size_t         mxBlockFreeB = std::max<size_t>(1, problem.mxBlockFreeB());
             bool           hasMX       = (mxBlockA > 0) || (mxBlockB > 0);
             const E8* mxsaPtr
                 = (mxBlockA > 0) ? static_cast<const E8*>(inputs.mxsa) : nullptr;
@@ -1564,8 +1589,10 @@ namespace TensileLite
 #pragma omp parallel for collapse(3)
             for(size_t b = 0; b < sizeBatch; ++b)
             {
-                const AccumT* curBatchA = shadowA.data() + (b * strideBatchA);
-                const AccumT* curBatchB = shadowB.data() + (b * strideBatchB);
+                const AccumT* curBatchA
+                    = doContraction ? shadowA->data() + (b * strideBatchA) : nullptr;
+                const AccumT* curBatchB
+                    = doContraction ? shadowB->data() + (b * strideBatchB) : nullptr;
                 const AccumT* curBatchC = shadowC.data() + (b * strideBatchC);
                 AccumT*       curBatchD = ptrD + (b * strideBatchD);
 
@@ -1585,7 +1612,7 @@ namespace TensileLite
                         std::array<AccumT, BLOCK_K * BLOCK_N> bReg = {0};
                         std::array<AccumT, BLOCK_M * BLOCK_N> cReg = {0};
 
-                        if(hasMX)
+                        if(doContraction && hasMX)
                         {
                             // K divisibility follows from isFastPathEligible's MX checks.
                             assert(sizeK % BLOCK_K == 0
@@ -1631,13 +1658,15 @@ namespace TensileLite
                                                                          mxsbI,
                                                                          mxBlockA,
                                                                          mxBlockB,
+                                                                         mxBlockFreeA,
+                                                                         mxBlockFreeB,
                                                                          strideMxsaM,
                                                                          strideMxsaBlk,
                                                                          strideMxsbN,
                                                                          strideMxsbBlk);
                             }
                         }
-                        else
+                        else if(doContraction)
                         {
                             for(size_t k = 0; k < kTiles; ++k)
                             {
@@ -1679,8 +1708,7 @@ namespace TensileLite
                         }
 
                         // Perform all the post-reduction stuff.
-                        const AccumT originalAlpha = constVariantCast<AccumT>(inputs.alpha);
-                        const AccumT beta          = constVariantCast<AccumT>(inputs.beta);
+                        const AccumT beta = constVariantCast<AccumT>(inputs.beta);
                         for(size_t nn = 0; nn < BLOCK_N; ++nn)
                         {
                             for(size_t mm = 0; mm < BLOCK_M; ++mm)
@@ -1693,7 +1721,9 @@ namespace TensileLite
                                     size_t idxC      = global_m + (global_n * strideNC);
                                     auto   startingC = curBatchC[idxC];
                                     auto   current   = curBatchD[idxD];
-                                    AccumT alpha     = originalAlpha;
+                                    // DeviceScalarAlpha replaces inline alpha. Apply the
+                                    // independent A/B scales to the selected alpha value.
+                                    AccumT alpha = effectiveAlpha;
                                     if(scaleABMode == ScaleABMode::Vector)
                                     {
                                         alpha *= shadowScaleA[global_m];
@@ -1703,7 +1733,7 @@ namespace TensileLite
                                     {
                                         alpha *= scaleABScalar;
                                     }
-                                    if(useScaleAlphaVec)
+                                    if(useScaleAlphaVec && !deviceScalarAlpha)
                                     {
                                         if(factorDim == 1)
                                         {
@@ -1810,20 +1840,34 @@ namespace TensileLite
 
         }
 
-        template <typename Inputs, typename Accumulator, typename MathOpAccum>
-        void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
+        template <typename Inputs, typename EpilogueT, typename InputMathT>
+        void ReferenceSolution<Inputs, EpilogueT, InputMathT>::SolveCPU(
             ContractionProblemGemm const& problem,
             ContractionInputs const&      inputs,
             size_t                        elementsToValidate)
         {
-            Accumulator* ws                   = nullptr;
+            // Int8 MACs use a 32-bit integer reduction even with a float epilogue.
+            // Unsigned storage gives defined wraparound; interpret the completed
+            // sum as signed Int32 before converting to the epilogue type.
+            constexpr bool isInt8Mac = std::is_same_v<typename Inputs::AType, int8_t>
+                                       && std::is_same_v<typename Inputs::BType, int8_t>;
+            using ReductionT       = std::conditional_t<isInt8Mac, uint32_t, EpilogueT>;
+            using ReductionMathT   = std::conditional_t<isInt8Mac, uint32_t, InputMathT>;
+            using SignedReductionT = std::conditional_t<isInt8Mac, int32_t, ReductionT>;
+            if constexpr(isInt8Mac)
+            {
+                // The integer MAC would truncate a fractional MX scale to zero.
+                if(problem.mxBlockA() || problem.mxBlockB())
+                    throw std::runtime_error("Int8 CPU reference does not support MX scales");
+            }
+
+            EpilogueT*   ws                   = nullptr;
             size_t       validationStrideGemm = 1;
             if(problem.useGradient() && problem.useBias()
                && (problem.biasSrc() == ContractionProblemGemm::D))
             {
                 validationStrideGemm = 1;
-                ws                   = (Accumulator*)malloc(problem.d().totalAllocatedElements()
-                                          * sizeof(Accumulator));
+                ws = (EpilogueT*)malloc(problem.d().totalAllocatedElements() * sizeof(EpilogueT));
             }
             else
             {
@@ -1880,9 +1924,13 @@ namespace TensileLite
                 boundSize[i] = problem.boundSize(i);
 
             auto boundCount = CoordCount(boundSize.begin() + 1, boundSize.end());
+            const EpilogueT effectiveAlpha
+                = problem.getParams().deviceScalarAlpha()
+                      ? GetValue<EpilogueT>(
+                            problem.alphaType(), inputs.scaleAlphaVec, 0, aConjugate)
+                      : constVariantCast<EpilogueT>(inputs.alpha);
 
-            if(std::get<typename Inputs::AlphaType>(inputs.alpha)
-               != static_cast<typename Inputs::AlphaType>(0))
+            if(effectiveAlpha != static_cast<EpilogueT>(0))
             {
                 if(inputs.a == nullptr || inputs.b == nullptr)
                 {
@@ -1898,15 +1946,17 @@ namespace TensileLite
                 }
             }
 
-            Accumulator    amaxD(0);
-            Accumulator    negOne(-1);
-            constexpr bool notCmplxAmaxD = !std::is_same<Accumulator, std::complex<double>>()
-                                           && !std::is_same<Accumulator, std::complex<float>>();
+            EpilogueT      amaxD(0);
+            EpilogueT      negOne(-1);
+            constexpr bool notCmplxAmaxD = !std::is_same<EpilogueT, std::complex<double>>()
+                                           && !std::is_same<EpilogueT, std::complex<float>>();
 
             // gemm
-            omp_set_num_threads(MAX_OMP_THREADS);
 #pragma omp parallel
             {
+                // Per-thread AMAX-D, combined into amaxD once per thread after the loop.
+                EpilogueT threadAmaxD(0);
+
                 // Allocate coordinate buffers per-thread.
                 std::vector<int64_t> aCoord(a.dimensions());
                 std::vector<int64_t> bCoord(b.dimensions());
@@ -1945,25 +1995,30 @@ namespace TensileLite
 
                     cCoord[idx.c] = coord;
 
+                    // setMXScaleA/B divide the scale tensor's free dimension by the
+                    // tile extent, so divide the free coordinate to match (identity
+                    // at 1). The bound coordinate is divided further down; batch
+                    // coordinates are copied verbatim.
                     if(idx.isA)
                     {
                         aCoord[idx.i] = coord;
                         if(mxsaCoord.size())
-                            mxsaCoord[idx.i] = coord;
+                            mxsaCoord[idx.i]
+                                = coord / std::max<size_t>(1, problem.mxBlockFreeA());
                     }
                     else
                     {
                         bCoord[idx.i] = coord;
                         if(mxsbCoord.size())
-                            mxsbCoord[idx.i] = coord;
+                            mxsbCoord[idx.i]
+                                = coord / std::max<size_t>(1, problem.mxBlockFreeB());
                     }
                 }
 
-                Accumulator value(0);
+                ReductionT sum(0);
 
-                // Check short-circuit for alpha = 0
-                if(std::get<typename Inputs::AlphaType>(inputs.alpha)
-                   != static_cast<typename Inputs::AlphaType>(0))
+                // Check short-circuit for the selected inline or device alpha.
+                if(effectiveAlpha != static_cast<EpilogueT>(0))
                 {
                     for(size_t boundNum = 0; boundNum < boundCount; boundNum++)
                     {
@@ -2011,8 +2066,23 @@ namespace TensileLite
                             std::max<size_t>(problem.mxBlockA(), problem.mxBlockB()), 1);
                         for(size_t i = 0; i < boundSize[0]; i += innerMXLoop)
                         {
-                            Accumulator val(0);
-                            for(size_t j = 0; j < innerMXLoop; j++)
+                            // The last MX segment is short whenever K is not a multiple of
+                            // the block size (e.g. K=200 with mxBlock=128); clamp so the
+                            // summation never walks past K.
+                            //
+                            // NO-OP FOR BLOCK-ALIGNED K. The clamp can only bind when
+                            // boundSize[0] - i < innerMXLoop, i.e. when K is not a multiple
+                            // of the block size. Every kernel-dispatched problem has
+                            // K block-aligned (AssertSummationElementMultiple is raised to
+                            // max(MXBlockA, MXBlockB) during solution derivation), so for
+                            // all of them this is exactly the original `segment =
+                            // innerMXLoop` and results are bit-identical. Only direct
+                            // callers of the reference with arbitrary K are affected, where
+                            // the previous behaviour read past the end of A/B.
+                            // See ReferenceMXBlock128Demo.BlockAlignedKMakesTheSegmentClampANoOp.
+                            size_t      segment = std::min(innerMXLoop, boundSize[0] - i);
+                            ReductionT  val(0);
+                            for(size_t j = 0; j < segment; j++)
                             {
                                 size_t idx = i + j;
                                 size_t aI
@@ -2023,8 +2093,8 @@ namespace TensileLite
                                 size_t aIdx = aIndex + (aI * aStride);
                                 size_t bIdx = bIndex + (bI * bStride);
                                 val += multiply<Inputs,
-                                                Accumulator,
-                                                MathOpAccum,
+                                                ReductionT,
+                                                ReductionMathT,
                                                 typename Inputs::AType,
                                                 typename Inputs::BType,
                                                 typename Inputs::ComputeInputTypeA,
@@ -2060,25 +2130,29 @@ namespace TensileLite
                                     mxScale,
                                     mxScaleElementAsFloat(problem.mxTypeB(), mxsbBase, mxsbIdx));
                             }
-                            value += multiply<Accumulator>(val, mxScale);
+                            sum += multiply<ReductionT>(val, mxScale);
                         }
                     }
                 }
+
+                EpilogueT value = static_cast<EpilogueT>(static_cast<SignedReductionT>(sum));
 
                 auto cIndex = c.index(cCoord);
                 auto dIndex = d.index(dCoord);
 
                 // Ensure zero*nan returns zero
-                Accumulator alpha = constVariantCast<Accumulator>(inputs.alpha);
-                Accumulator beta  = constVariantCast<Accumulator>(inputs.beta);
-                auto        zero  = static_cast<Accumulator>(0);
+                // DeviceScalarAlpha replaces inline alpha. ScaleA/ScaleB remain
+                // independent multipliers and are applied below.
+                EpilogueT alpha = effectiveAlpha;
+                EpilogueT beta  = constVariantCast<EpilogueT>(inputs.beta);
+                auto      zero  = static_cast<EpilogueT>(0);
 
                 if(problem.useScaleAB() == "Scalar")
                 {
-                    Accumulator scaleA
-                        = GetValue<Accumulator>(problem.alphaType(), inputs.scaleA, 0, aConjugate);
-                    Accumulator scaleB
-                        = GetValue<Accumulator>(problem.alphaType(), inputs.scaleB, 0, aConjugate);
+                    EpilogueT scaleA
+                        = GetValue<EpilogueT>(problem.alphaType(), inputs.scaleA, 0, aConjugate);
+                    EpilogueT scaleB
+                        = GetValue<EpilogueT>(problem.alphaType(), inputs.scaleB, 0, aConjugate);
                     if constexpr(sizeof(typename Inputs::AType)
                                  <= sizeof(typename Inputs::ComputeInputTypeA))
                         alpha *= scaleA;
@@ -2091,10 +2165,10 @@ namespace TensileLite
                 {
                     auto posB = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
                     auto posA = int(dNum % problem.d().sizes()[0]);
-                    Accumulator scaleA = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleA, posA, aConjugate);
-                    Accumulator scaleB = GetValue<Accumulator>(
-                        problem.alphaType(), inputs.scaleB, posB, aConjugate);
+                    EpilogueT scaleA
+                        = GetValue<EpilogueT>(problem.alphaType(), inputs.scaleA, posA, aConjugate);
+                    EpilogueT scaleB
+                        = GetValue<EpilogueT>(problem.alphaType(), inputs.scaleB, posB, aConjugate);
                     if constexpr(sizeof(typename Inputs::AType)
                                  <= sizeof(typename Inputs::ComputeInputTypeA))
                         alpha *= scaleA;
@@ -2104,27 +2178,28 @@ namespace TensileLite
                         alpha *= scaleB;
                 }
 
-                auto resultD = multiply<Accumulator>(alpha, value);
+                auto resultD = multiply<EpilogueT>(alpha, value);
 
-                if(problem.useScaleAlphaVec())
+                if(problem.useScaleAlphaVec() && !problem.getParams().deviceScalarAlpha())
                 {
                     int pos = 0;
                     if(problem.getParams().factorDim())
-                        pos = int(int(dNum / problem.d().sizes()[0]) % problem.d().sizes()[1]);
+                        pos = int(int(dNum / problem.d().sizes()[0])
+                                  % problem.d().sizes()[1]);
                     else
                         pos = int(dNum % problem.d().sizes()[0]);
-                    Accumulator scaleAlphaVec = GetValue<Accumulator>(
+                    EpilogueT scaleAlphaVec = GetValue<EpilogueT>(
                         problem.alphaType(), inputs.scaleAlphaVec, pos, aConjugate);
                     resultD *= scaleAlphaVec;
                 }
 
                 if(beta != zero)
                 {
-                    Accumulator cValue = multiply<Accumulator>(beta, cPtr[cIndex]);
+                    EpilogueT cValue = multiply<EpilogueT>(beta, cPtr[cIndex]);
                     if(problem.useScaleCD())
                     {
-                        Accumulator scaleC = GetValue<Accumulator>(
-                            problem.betaType(), inputs.scaleC, 0, aConjugate);
+                        EpilogueT scaleC
+                            = GetValue<EpilogueT>(problem.betaType(), inputs.scaleC, 0, aConjugate);
                         cValue *= scaleC;
                     }
 
@@ -2142,7 +2217,7 @@ namespace TensileLite
                     else
                         pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
 
-                    Accumulator bias = GetValue<Accumulator>(
+                    EpilogueT bias = GetValue<EpilogueT>(
                         problem.bias().dataType(), inputs.bias, pos, aConjugate);
 
                     resultD += bias;
@@ -2152,26 +2227,26 @@ namespace TensileLite
                 {
                     auto eIndex
                         = problem.tensors()[ContractionProblemGemm::TENSOR::E].index(dCoord);
-                    SetValue<Accumulator>(
+                    SetValue<EpilogueT>(
                         problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType(),
                         resultD,
                         inputs.e,
                         eIndex);
                 }
                 // Activation adds here
-                std::vector<Accumulator> actArgs;
+                std::vector<EpilogueT> actArgs;
                 for(int i = 0; i < inputs.activationArgs.size(); i++)
-                    actArgs.push_back(constVariantCast<Accumulator>(inputs.activationArgs[i]));
+                    actArgs.push_back(constVariantCast<EpilogueT>(inputs.activationArgs[i]));
                 if(problem.useGradient() && problem.activationType() != ActivationType::None
                    && problem.getParams().activationEnum() != ActivationType::None)
                 {
-                    Accumulator dataE = static_cast<Accumulator>(0);
+                    EpilogueT dataE = static_cast<EpilogueT>(0);
                     if(problem.useE())
                     {
                         auto eIndex
                             = problem.tensors()[ContractionProblemGemm::TENSOR::E].index(
                                 dCoord);
-                        dataE = GetValue<Accumulator>(
+                        dataE = GetValue<EpilogueT>(
                             problem.tensors()[ContractionProblemGemm::TENSOR::E].dataType(),
                             inputs.e,
                             eIndex,
@@ -2191,25 +2266,20 @@ namespace TensileLite
                                          actArgs);
                 }
 
-                omp_set_num_threads(MAX_OMP_THREADS);
-#pragma omp critical
+                if constexpr(notCmplxAmaxD)
                 {
-                    if constexpr(notCmplxAmaxD)
+                    if(problem.outputAmaxD())
                     {
-                        if(problem.outputAmaxD())
-                        {
-                            Accumulator absResultD
-                                = (resultD > zero) ? resultD : resultD * negOne;
-                            if(absResultD > amaxD)
-                                amaxD = absResultD;
-                        }
+                        EpilogueT absResultD = (resultD > zero) ? resultD : resultD * negOne;
+                        if(absResultD > threadAmaxD)
+                            threadAmaxD = absResultD;
                     }
                 }
 
                 if(problem.useScaleCD())
                 {
-                    Accumulator scaleD = GetValue<Accumulator>(
-                        problem.betaType(), inputs.scaleD, 0, aConjugate);
+                    EpilogueT scaleD
+                        = GetValue<EpilogueT>(problem.betaType(), inputs.scaleD, 0, aConjugate);
                     resultD *= scaleD;
                 }
                 if(problem.useBias() && problem.useGradient()
@@ -2222,21 +2292,32 @@ namespace TensileLite
                 if(problem.useGateResidual() && inputs.gateResidual)
                 {
                     auto gateIndex = problem.gateResidual().index(dCoord);
-                    Accumulator gateVal
-                        = GetValue<Accumulator>(problem.gateResidual().dataType(),
-                                               inputs.gateResidual,
-                                               gateIndex,
-                                               aConjugate);
+                    EpilogueT gateVal   = GetValue<EpilogueT>(problem.gateResidual().dataType(),
+                                                            inputs.gateResidual,
+                                                            gateIndex,
+                                                            aConjugate);
                     resultD = gateVal * resultD + gateVal;
                 }
 
                 dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
             }
+
+            if constexpr(notCmplxAmaxD)
+            {
+                if(problem.outputAmaxD())
+                {
+#pragma omp critical
+                    {
+                        if(threadAmaxD > amaxD)
+                            amaxD = threadAmaxD;
+                    }
+                }
+            }
             } // end #pragma omp parallel
 
             if(problem.outputAmaxD())
             {
-                SetValue<Accumulator>(
+                SetValue<EpilogueT>(
                     problem.tensors()[ContractionProblemGemm::TENSOR::AMAXD].dataType(),
                     amaxD,
                     inputs.amaxD,
@@ -2248,7 +2329,7 @@ namespace TensileLite
                 auto& biasTensor = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
                 if(problem.biasSrc() == ContractionProblemGemm::D)
                 {
-                    auto msg = ReductionCPU<Accumulator, Accumulator>(
+                    auto msg = ReductionCPU<EpilogueT, EpilogueT>(
                         biasTensor, d, ws, inputs, elementsToValidate, 1);
                     if(!msg.empty())
                     {
@@ -2259,7 +2340,7 @@ namespace TensileLite
                 else if(problem.biasSrc() == ContractionProblemGemm::A)
                 {
                     auto reducIdx = problem.transA() ? 0 : 1;
-                    auto msg      = ReductionCPU<typename Inputs::AType, Accumulator>(
+                    auto msg      = ReductionCPU<typename Inputs::AType, EpilogueT>(
                         biasTensor, a, inputs.a, inputs, elementsToValidate, reducIdx);
                     if(!msg.empty())
                     {
@@ -2269,7 +2350,7 @@ namespace TensileLite
                 else if(problem.biasSrc() == ContractionProblemGemm::B)
                 {
                     auto reducIdx = problem.transB() ? 1 : 0;
-                    auto msg      = ReductionCPU<typename Inputs::BType, Accumulator>(
+                    auto msg      = ReductionCPU<typename Inputs::BType, EpilogueT>(
                         biasTensor, b, inputs.b, inputs, elementsToValidate, reducIdx);
                     if(!msg.empty())
                     {
@@ -2286,15 +2367,15 @@ namespace TensileLite
             }
         }
 
-        template <typename Inputs, typename Accumulator, typename MathOpAccum>
-        void ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
+        template <typename Inputs, typename EpilogueT, typename InputMathT>
+        void ReferenceSolution<Inputs, EpilogueT, InputMathT>::SolveCPU(
             ContractionProblemGroupedGemm const& problem,
             ContractionGroupedInputs const&      inputs,
             size_t                               elementsToValidate)
         {
             for(int idx = 0; idx < problem.gemms.size(); idx++)
             {
-                ReferenceSolution<Inputs, Accumulator, MathOpAccum>::SolveCPU(
+                ReferenceSolution<Inputs, EpilogueT, InputMathT>::SolveCPU(
                     problem.gemms[idx], inputs.grouped[idx], elementsToValidate);
             }
         }
@@ -3252,7 +3333,8 @@ namespace TensileLite
 
             if(tryFastPath && isDenseEnoughForFastPath && isFastPathEligible(problem))
             {
-                ScopedTimer timer("solve_cpu_fast");
+                ScopedTimer timer(g_inPerSolutionReference ? "solve_cpu_fast_per_solution"
+                                                           : "solve_cpu_fast");
                 bool isDouble = (problem.d().dataType() == rocisa::DataType::Double);
                 if(isDouble)
                     solveCPUFast<double>(problem, inputs);
@@ -3264,7 +3346,8 @@ namespace TensileLite
             }
 
             {
-                ScopedTimer timer("solve_cpu_slow");
+                ScopedTimer timer(g_inPerSolutionReference ? "solve_cpu_slow_per_solution"
+                                                           : "solve_cpu_slow");
                 auto contractionInputsTypeId = getInputContractionInputsTypeId(problem);
                 SolveCPUTemplates(contractionInputsTypeId, problem, inputs, elementsToValidate);
             }

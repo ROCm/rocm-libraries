@@ -1,0 +1,218 @@
+{
+  "aliases": {},
+  "flavors": {
+    "llvm20": {
+      "cases": {
+        "moe_sort/gfx1151/hist_t32_k2_e8": {
+          "arch": "gfx1151",
+          "bytes": 3011,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "4edb1b920370d66e6950354f0bbca3830db87e791d896f024cd7ea73307ea888",
+          "status": "ok"
+        },
+        "moe_sort/gfx1201/hist_t32_k2_e8": {
+          "arch": "gfx1201",
+          "bytes": 3011,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "4edb1b920370d66e6950354f0bbca3830db87e791d896f024cd7ea73307ea888",
+          "status": "ok"
+        },
+        "moe_sort/gfx942/hist_t32_k2_e8": {
+          "arch": "gfx942",
+          "bytes": 3015,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "064bde15679ca808fff12e8f0e87c8bc6fb0f504203063a8087d3737f5aa3189",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/hist_t32_k2_e8": {
+          "arch": "gfx950",
+          "bytes": 3015,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "064bde15679ca808fff12e8f0e87c8bc6fb0f504203063a8087d3737f5aa3189",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scan_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2955,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scan_scan_T64_K2_E16_b128",
+          "sha256": "5b6ab59c20b992b1530366716187326e46cf74332a4f5ea2479662e4497150b4",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scatter_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2883,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
+          "sha256": "45fda4bf93270823802bc61f52756750722b658a82b9c8cd67a49e69f8e758d5",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm22": {
+      "cases": {
+        "moe_sort/gfx1151/hist_t32_k2_e8": {
+          "arch": "gfx1151",
+          "bytes": 3018,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "d030d8dd5605adac789160dcb538808d3cde00fc0291ea5fb2fc03b8055c40f8",
+          "status": "ok"
+        },
+        "moe_sort/gfx1201/hist_t32_k2_e8": {
+          "arch": "gfx1201",
+          "bytes": 3018,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "d030d8dd5605adac789160dcb538808d3cde00fc0291ea5fb2fc03b8055c40f8",
+          "status": "ok"
+        },
+        "moe_sort/gfx942/hist_t32_k2_e8": {
+          "arch": "gfx942",
+          "bytes": 3022,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e35a15888b7f5ef5dd4315f848ac8ecdc53ac733c5aaeb54aca883b291d0a731",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/hist_t32_k2_e8": {
+          "arch": "gfx950",
+          "bytes": 3022,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e35a15888b7f5ef5dd4315f848ac8ecdc53ac733c5aaeb54aca883b291d0a731",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scan_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2962,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scan_scan_T64_K2_E16_b128",
+          "sha256": "81bac460d5ff684ef9ff3685f288077f923d563527a0ecff5fc3bd1912159ee1",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scatter_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2890,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
+          "sha256": "c66d3e71a8662b2bcb4e92951163fffb8f97e47fe25ab007bb5659e7c461f0f1",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm23": {
+      "cases": {
+        "moe_sort/gfx1151/hist_t32_k2_e8": {
+          "arch": "gfx1151",
+          "bytes": 3082,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e7faf027b938bef39f9cbd4024ddc53fcd5ced1203b060082668cd55d7b190de",
+          "status": "ok"
+        },
+        "moe_sort/gfx1201/hist_t32_k2_e8": {
+          "arch": "gfx1201",
+          "bytes": 3082,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e7faf027b938bef39f9cbd4024ddc53fcd5ced1203b060082668cd55d7b190de",
+          "status": "ok"
+        },
+        "moe_sort/gfx942/hist_t32_k2_e8": {
+          "arch": "gfx942",
+          "bytes": 3086,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e433bf6c5b48238cadaf789c36c1936a23110eab4f30c0580a5f484147180fd9",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/hist_t32_k2_e8": {
+          "arch": "gfx950",
+          "bytes": 3086,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e433bf6c5b48238cadaf789c36c1936a23110eab4f30c0580a5f484147180fd9",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scan_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 3026,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scan_scan_T64_K2_E16_b128",
+          "sha256": "ca098934f5d5bb42747a95934aa821a693360b6ed1b57ffea2db8723855cdce2",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scatter_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2954,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
+          "sha256": "afcd65e526827b62538fe963e47f0cf11908ad079e3a810fe2d7098767040824",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    },
+    "llvm24": {
+      "cases": {
+        "moe_sort/gfx1151/hist_t32_k2_e8": {
+          "arch": "gfx1151",
+          "bytes": 3082,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e7faf027b938bef39f9cbd4024ddc53fcd5ced1203b060082668cd55d7b190de",
+          "status": "ok"
+        },
+        "moe_sort/gfx1201/hist_t32_k2_e8": {
+          "arch": "gfx1201",
+          "bytes": 3082,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e7faf027b938bef39f9cbd4024ddc53fcd5ced1203b060082668cd55d7b190de",
+          "status": "ok"
+        },
+        "moe_sort/gfx942/hist_t32_k2_e8": {
+          "arch": "gfx942",
+          "bytes": 3086,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e433bf6c5b48238cadaf789c36c1936a23110eab4f30c0580a5f484147180fd9",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/hist_t32_k2_e8": {
+          "arch": "gfx950",
+          "bytes": 3086,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_histogram_hist_T32_K2_E8_b128",
+          "sha256": "e433bf6c5b48238cadaf789c36c1936a23110eab4f30c0580a5f484147180fd9",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scan_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 3026,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scan_scan_T64_K2_E16_b128",
+          "sha256": "ca098934f5d5bb42747a95934aa821a693360b6ed1b57ffea2db8723855cdce2",
+          "status": "ok"
+        },
+        "moe_sort/gfx950/scatter_t64_k2_e16": {
+          "arch": "gfx950",
+          "bytes": 2954,
+          "family": "moe",
+          "kernel_name": "irhash_moe_sort_scatter_scatter_T64_K2_E16_b128",
+          "sha256": "afcd65e526827b62538fe963e47f0cf11908ad079e3a810fe2d7098767040824",
+          "status": "ok"
+        }
+      },
+      "expected_failures": {}
+    }
+  },
+  "schema": "ck.dsl.ir_golden_sha256/v2"
+}

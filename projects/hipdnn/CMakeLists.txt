@@ -266,6 +266,7 @@ include(cmake/Tests.cmake)
 include(cmake/TestPluginNames.cmake)
 include(cmake/Spdlog.cmake)
 include(cmake/ResourceCompiler.cmake)
+include(cmake/LongPathManifest.cmake)
 
 # Add global compile options
 set(EXTRA_COMPILE_OPTIONS)
@@ -328,6 +329,8 @@ add_subdirectory(plugin_sdk)
 
 add_subdirectory(tests)
 add_subdirectory(tools)
+
+install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/doc/${PROJECT_NAME}" COMPONENT Runtime)
 
 # Python bindings are a standalone CMake project that consumes installed hipDNN
 # artifacts. Configure projects/hipdnn/python/frontend_bindings separately after
@@ -471,3 +474,4 @@ endif()
 if(NOT HIPDNN_SKIP_TESTS)
     install_hipdnn_ctest_files()
 endif()
+hipdnn_apply_long_path_manifest()

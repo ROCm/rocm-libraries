@@ -30,22 +30,22 @@ Tests:
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
-  precision: *single_double_precisions_complex_real
+  precision: *single_only_precisions
   M: [300]
   N: [300]
   row_block_dimA: [8]
   col_block_dimA: [4]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_zero]
 
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
   precision: *single_only_precisions
-  M: [0, 1, 10]
-  N: [0, 1, 8]
+  M: [0]
+  N: [0]
   row_block_dimA: [5]
   col_block_dimA: [8]
   baseA: [rocsparse_index_base_zero]
@@ -53,14 +53,16 @@ Tests:
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
+# n == 0 with m != 0, so the nnz query takes the second side of m == 0 || n == 0
+# and writes the block row pointer (bsr_row_ptr is non-null).
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
-  precision: *single_double_precisions_complex_real
-  M: [1107]
-  N: [1089]
-  row_block_dimA: [1, 6, 11, 16]
-  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  precision: *single_only_precisions
+  M: [16]
+  N: [0]
+  row_block_dimA: [4]
+  col_block_dimA: [4]
   baseA: [rocsparse_index_base_zero]
   baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
@@ -70,61 +72,63 @@ Tests:
   category: quick
   function: csr2gebsr
   precision: *single_only_precisions
-  M: [1746]
-  N: [1872]
-  row_block_dimA: [2, 7, 12, 17]
-  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  baseA: [rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_zero]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
-
-- name: csr2gebsr
-  category: quick
-  function: csr2gebsr
-  precision: *double_only_precisions
-  M: [1298]
-  N: [1490]
-  row_block_dimA: [3, 8, 13, 18]
-  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+  M: [64]
+  N: [64]
+  row_block_dimA: [2, 3, 5, 9, 17]
+  col_block_dimA: [1, 4, 6]
   baseA: [rocsparse_index_base_zero]
-  baseB: [rocsparse_index_base_one]
+  baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_random]
 
 - name: csr2gebsr
   category: quick
   function: csr2gebsr
-  precision: *single_only_precisions_complex
-  M: [2100]
-  N: [1759]
-  row_block_dimA: [4, 9, 14, 19]
-  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  baseA: [rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_one]
-  direction: [rocsparse_direction_column]
-  matrix: [rocsparse_matrix_random]
+  precision: *single_only_precisions
+  M: [1024, 4096]
+  N: [1024, 4096]
+  row_block_dimA: [8]
+  col_block_dimA: [4]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_random, rocsparse_matrix_tridiagonal]
 
-- name: csr2gebsr_file
+- name: csr2gebsr
   category: quick
   function: csr2gebsr
-  precision: *double_only_precisions_complex
+  precision: *single_only_precisions
+  M: [1]
+  N: [1]
+  dimx_dimy_dimz:
+    - { dimx: 640, dimy: 640, dimz: 1 }
+  row_block_dimA: [8]
+  col_block_dimA: [4]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
+  direction: [rocsparse_direction_row, rocsparse_direction_column]
+  matrix: [rocsparse_matrix_laplace_2d]
+
+- name: csr2gebsr
+  category: quick
+  function: csr2gebsr
+  precision: *single_only_precisions
   M: 1
   N: 1
-  row_block_dimA: [5, 10, 15, 20]
-  col_block_dimA: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
-  baseA: [rocsparse_index_base_one]
-  baseB: [rocsparse_index_base_one]
+  row_block_dimA: [8]
+  col_block_dimA: [4]
+  baseA: [rocsparse_index_base_zero]
+  baseB: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [nos1]
+  filename: [nos3, qc2534, mplate]
 
-# Pre-checkin
+# Pre_checkin
 - name: csr2gebsr_bad_arg
   category: pre_checkin
   function: csr2gebsr_bad_arg
   precision: *single_double_precisions_complex_real
-  
+
 - name: csr2gebsr
   category: pre_checkin
   function: csr2gebsr

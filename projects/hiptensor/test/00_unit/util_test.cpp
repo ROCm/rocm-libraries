@@ -148,6 +148,19 @@ TEST(convertToHipTensorDataTypeTypeToStringTest, UtilTest)
     EXPECT_EQ(hiptensor::convertToHipTensorDataType(HIPTENSOR_COMPUTE_DESC_C64F), HIPTENSOR_C_64F);
 }
 
+TEST(readValComputeDescTest, UtilTest)
+{
+    hip_bfloat16 bf16Val(2.5f);
+    _Float16     f16Val = 2.5;
+    float        f32Val = 2.5f;
+    double       f64Val = 2.5;
+    EXPECT_EQ(hiptensor::readVal<float>(&bf16Val, HIPTENSOR_COMPUTE_DESC_16BF), 2.5f);
+    EXPECT_EQ(hiptensor::readVal<double>(&bf16Val, HIPTENSOR_COMPUTE_DESC_16BF), 2.5);
+    EXPECT_EQ(hiptensor::readVal<double>(&f16Val, HIPTENSOR_COMPUTE_DESC_16F), 2.5);
+    EXPECT_EQ(hiptensor::readVal<double>(&f32Val, HIPTENSOR_COMPUTE_DESC_32F), 2.5);
+    EXPECT_EQ(hiptensor::readVal<double>(&f64Val, HIPTENSOR_COMPUTE_DESC_64F), 2.5);
+}
+
 TEST(algoTypeToStringTest, UtilTest)
 {
     EXPECT_STREQ(hiptensor::algoTypeToString(HIPTENSOR_ALGO_ACTOR_CRITIC).c_str(),

@@ -1,7 +1,7 @@
 # Proposal: give intrinsic resolution an arch axis
 
 **Status:** S1 implemented (`tools/gen_arch_domain.py`, committed columns,
-structure-tested by `tests/tools/test_arch_domain_artifact.py` and regenerated
+structure-tested by `tests/tools/test_arch_domain_support.py` and regenerated
 by the `rocke_arch_domain_reproducibility` CTest); S2 is implemented as a
 Python warning/corpus gate but not hard rejection; S3 is implemented; S4's
 in-engine C++ mirror remains proposed.
@@ -37,7 +37,7 @@ the C++ lowerer does not yet own the same in-engine lookup.
 The staged design is:
 
 - **S1** *(done)* — generate an `arch_domain` table by probing the installed
-  toolchain; commit it, gate regeneration as a no-op, exactly like golden. One
+  toolchain; commit it, gate retained support with a monotonic floor. One
   column per flavor, `(key, arch) → status + evidence`; a plain `key → set of
   arches` proved too lossy (§3.2, §4/S1).
 - **S2** *(warning/corpus gate done; hard rejection proposed)* — make `_need()`
@@ -248,17 +248,27 @@ Two further findings from the sweep, neither visible to a 15-probe sample:
 
 `tools/gen_arch_domain.py`, for each decl key × each wired arch, emits a minimal
 module, compiles **and links** it in a **subprocess**, and classifies the
-outcome. Commit the result; `tests/tools/test_arch_domain_artifact.py` checks
-its structure and the `rocke_arch_domain_reproducibility` CTest asserts
-regeneration is a no-op. The CTest is registered for both developer build trees
-and relocated provider test artifacts; the installed form checks the package
-data CI actually consumes without requiring a source checkout. This is exactly
-how golden is managed.
+outcome. Commit the result; `tests/tools/test_arch_domain_support.py` checks
+its structure and the `rocke_arch_domain_reproducibility` CTest checks a
+monotonic support floor with compatible flavor, scope, and probe methodology.
+Previously working cells and accepted processor names must remain working.
+Retained positives must preserve the effective signature, operand sources and
+fixed witnesses in `probe_contracts`; both `ok` and `arch_absent` require an
+accepted processor. Live clang/opt provenance is checked before probing, and the
+complete generated document is validated before persistence or comparison.
+Compiler identity is provenance, not an applicability gate. Gains and improved
+classification pass and are reported; remaining no-data and degraded negative
+measurements are not qualified. Invalid or missing comparison records fail.
+The CTest is registered for both developer build trees and relocated provider
+test artifacts; the installed form checks the package data CI actually consumes
+without requiring a source checkout. Unlike an IR golden, this gate compares
+capability transitions rather than requiring identical generated text.
 
 Shipped schema — per-cell provenance is the point, per
 [`multi_toolchain_strategy.md`](multi_toolchain_strategy.md) §3.2, since one host
 can only ever validate one flavor column. It differs from what this doc first
-proposed in three ways, each of which was a mistake worth recording:
+proposed in the ways described below. This partial illustration omits some
+method fields and is not itself an input to the generator's validator:
 
 ```json
 {
@@ -272,7 +282,10 @@ proposed in three ways, each of which was a mistake worth recording:
                   "evidence": "Cannot select: intrinsic %llvm.amdgcn.ds.read.tr16.b64"}
     }
   },
-  "canonical": {"ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16"}
+  "canonical": {"ds.read.tr16.b64": "llvm.amdgcn.ds.read.tr16.b64.v4i16"},
+  "probe_contracts": {
+    "ds.read.tr16.b64": {"operands": [{"source": "addrspacecast", "type": "ptr addrspace(3)"}], "return_type": "<4 x i16>", "version": 1}
+  }
 }
 ```
 
@@ -288,6 +301,14 @@ proposed in three ways, each of which was a mistake worth recording:
 - **Every non-`ok` cell carries its `evidence`** — the compiler's own first
   diagnostic. A status with no diagnostic behind it cannot be acted on by whoever
   hits it, and cannot be distinguished from a bug in the probe.
+
+`probe_contracts` is comparison-only metadata, not a runtime availability or
+numerical-correctness policy. It comes from the same operand plan that renders
+each probe, including default immediates and explicit integer literals, and
+extends the v1 envelope without changing the Python/C++ runtime tables. Storage,
+positive-key completeness and
+[historical contract recovery](../../../TESTING.md#historical-positive-probe-contract-recovery)
+follow the support-gate policy in `TESTING.md`.
 
 `canonical` records what LLVM resolved each surviving declare to. Mostly
 identical to the declared name; the interesting rows are the overloads that
@@ -339,17 +360,19 @@ silently targeted gfx950." `_Lowerer` now requires a non-empty architecture and
 passes it directly to `backend_for`; outer APIs that intentionally default an
 architecture do so explicitly.
 
-### S4 — Mirror into the C++ engine from the same source (proposed)
+### S4 — Mirror into the C++ engine from the same source — **DONE**
 
 Byte-identity is the #1 invariant, and it covers behaviour, not just bytes: if
 Python raises on an unavailable key and C++ emits a declare, the engines have
 diverged. So S1's artifact must feed **both**.
 
-Generate the C++ table into `cpp/core/lower_llvm/` from the same record set and
-commit the generated file, rather than hand-transcribing it — hand-transcription
-is what made the Tier 0 declare-parity test necessary
-(`tests/core/test_intrinsic_decl_table_parity.py`). One source, two emitted
-tables, CI checks regeneration is a no-op.
+*As built:* the C++ table is generated **at build time** rather than committed.
+CMake runs `tools/gen_arch_domain_cpp.py`, which reads the columns through
+`rocke.core.arch.domain` itself and emits the negative cells into the build
+tree; `rocke_ll_need` consults them. A committed copy would have needed a no-op
+gate to keep it honest; a build dependency cannot go stale, and regenerating a
+column reaches both engines with no other step. The cost is that configuring
+the C++ build now needs a Python interpreter.
 
 ### 4.1 Rollout status
 
@@ -358,18 +381,19 @@ tables, CI checks regeneration is a no-op.
    and dedicated reproduction CTest.
 3. **S2 (warn)** *(done)* — wire Python `_need()` and the emitted-IR corpus gate
    to the artifact; enforce the chokepoint and warning allowlist.
-4. **S4** *(pending)* — mirror the in-engine lookup into C++, then re-run byte
-   identity at every flavor.
-5. **S2 (error)** *(pending)* — promote once the warning stream is quiet.
+4. **S4** *(done)* — mirror to C++, re-run byte-identity at every flavor.
+5. **S2 (error)** — promote once the warning stream is quiet. The `error` mode
+   and the per-cell waivers exist in both engines; the default stays `warn`
+   until the judgement that the stream is quiet on real kernels is recorded.
 
 ### 4.2 What does and does not change
 
 | | effect |
 |---|---|
 | emitted IR bytes | **none** — S1–S4 add checks and a data file; no emission path changes |
-| golden | **no re-bless** |
+| golden | **no re-bless** of any shipped kernel. The parity corpus golden moved for its four gfx942 3D/reduce attention cases, because the harness was building the gfx950 kernels for them |
 | byte-identity | must be re-run after S4 (behaviour parity), expected GREEN |
-| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, both the same llvm23 backend fatal on attention 3d on gfx942 |
+| `KNOWN_BAD` | arch-unavailable keys become build errors, not allowlist entries; the allowlist itself holds 2 entries, attention 3d d128/b64 on gfx942, which overflow gfx942's LDS at every flavor |
 | B9 | fixed as a consequence: S1 flags it `name_absent` on every arch |
 
 ---
@@ -443,8 +467,8 @@ subprocess, and classify stderr by the §3 taxonomy.
 
 Acceptance for the change itself, from `platform/` with a configured build:
 
-- `python -m pytest tests/tools/test_arch_domain_artifact.py` green for the
-  source-only structure and generator unit coverage
+- `python -m pytest tests/tools/test_arch_domain_support.py tests/tools/test_arch_domain_artifact.py`
+  passes the packaged-column checks and the source-only generator/probe units
 - `ctest --test-dir <build> -R '^rocke_arch_domain_reproducibility$' -V` passes,
   or reports a named skip when this host cannot validate a committed flavor
 - `python tools/check_byte_identity.py` GREEN at each flavor (S4)

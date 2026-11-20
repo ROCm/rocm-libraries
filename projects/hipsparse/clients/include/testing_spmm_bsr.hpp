@@ -31,6 +31,8 @@
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
 #include "hipsparse_graph.hpp"
+#include "hipsparse_local_dnmat.hpp"
+#include "hipsparse_local_spmat.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -81,34 +83,24 @@ void testing_spmm_bsr_bad_arg(const Arguments& argus)
     T*    dC   = (T*)dC_managed.get();
     void* dbuf = (void*)dbuf_managed.get();
 
-    // SpMM structures
-    hipsparseSpMatDescr_t matA;
-    hipsparseDnMatDescr_t matB, matC;
-
     size_t bsize;
 
     // Create BSR sparse matrix descriptor (mb x kb blocks for op(A) = A).
-    verify_hipsparse_status_success(hipsparseCreateBsr(&matA,
-                                                       mb,
-                                                       kb,
-                                                       nnzb,
-                                                       blockDim,
-                                                       blockDim,
-                                                       dptr,
-                                                       dcol,
-                                                       dval,
-                                                       idxType,
-                                                       idxType,
-                                                       idxBase,
-                                                       dataType,
-                                                       blockOrder),
-                                    "success");
-    verify_hipsparse_status_success(
-        hipsparseCreateDnMat(&matB, kb * blockDim, n, kb * blockDim, dB, dataType, order),
-        "success");
-    verify_hipsparse_status_success(
-        hipsparseCreateDnMat(&matC, mb * blockDim, n, mb * blockDim, dC, dataType, order),
-        "success");
+    hipsparseLocalBsr   matA(mb,
+                           kb,
+                           nnzb,
+                           blockDim,
+                           blockDim,
+                           dptr,
+                           dcol,
+                           dval,
+                           idxType,
+                           idxType,
+                           idxBase,
+                           dataType,
+                           blockOrder);
+    hipsparseLocalDnMat matB(kb * blockDim, n, kb * blockDim, dB, dataType, order);
+    hipsparseLocalDnMat matC(mb * blockDim, n, mb * blockDim, dC, dataType, order);
 
     // SpMM buffer
     verify_hipsparse_status_invalid_handle(hipsparseSpMM_bufferSize(
@@ -185,11 +177,6 @@ void testing_spmm_bsr_bad_arg(const Arguments& argus)
         hipsparseSpMM(
             handle, transA, transB, &alpha, matA, matB, &beta, nullptr, dataType, alg, dbuf),
         "Error: matC is nullptr");
-
-    // Destruct
-    verify_hipsparse_status_success(hipsparseDestroySpMat(matA), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(matB), "success");
-    verify_hipsparse_status_success(hipsparseDestroyDnMat(matC), "success");
 #endif
 }
 
@@ -340,27 +327,24 @@ void testing_spmm_bsr(Arguments argus)
     CHECK_HIP_ERROR(hipMemcpy(d_beta, &h_beta, sizeof(T), hipMemcpyHostToDevice));
 
     // Create BSR matrix
-    hipsparseSpMatDescr_t matA;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateBsr(&matA,
-                                             A_mb,
-                                             A_nb,
-                                             nnzb_A,
-                                             blockDim,
-                                             blockDim,
-                                             dbsr_row_ptr,
-                                             dbsr_col_ind,
-                                             dbsr_val,
-                                             typeI,
-                                             typeJ,
-                                             idx_base,
-                                             typeT,
-                                             blockOrder));
+    hipsparseLocalBsr matA(A_mb,
+                           A_nb,
+                           nnzb_A,
+                           blockDim,
+                           blockDim,
+                           dbsr_row_ptr,
+                           dbsr_col_ind,
+                           dbsr_val,
+                           typeI,
+                           typeJ,
+                           idx_base,
+                           typeT,
+                           blockOrder);
 
     // Create dense matrices
-    hipsparseDnMatDescr_t matB, matC1, matC2;
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matB, B_m, B_n, ldb, dB, typeT, orderB));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matC1, C_m, C_n, ldc, dC_1, typeT, orderC));
-    CHECK_HIPSPARSE_ERROR(hipsparseCreateDnMat(&matC2, C_m, C_n, ldc, dC_2, typeT, orderC));
+    hipsparseLocalDnMat matB(B_m, B_n, ldb, dB, typeT, orderB);
+    hipsparseLocalDnMat matC1(C_m, C_n, ldc, dC_1, typeT, orderC);
+    hipsparseLocalDnMat matC2(C_m, C_n, ldc, dC_2, typeT, orderC);
 
     // Query SpMM buffer
     size_t bufferSize;
@@ -372,8 +356,8 @@ void testing_spmm_bsr(Arguments argus)
         bufferSize = 4;
     }
 
-    void* buffer;
-    CHECK_HIP_ERROR(hipMalloc(&buffer, bufferSize));
+    auto  buffer_managed = hipsparse_unique_ptr{device_malloc(bufferSize), device_free};
+    void* buffer         = buffer_managed.get();
 
     if(argus.call_preprocess)
     {
@@ -494,12 +478,6 @@ void testing_spmm_bsr(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    CHECK_HIP_ERROR(hipFree(buffer));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(matA));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matB));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matC1));
-    CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(matC2));
 #endif
 }
 

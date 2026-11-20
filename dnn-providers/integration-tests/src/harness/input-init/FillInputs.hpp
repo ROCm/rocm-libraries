@@ -14,7 +14,9 @@
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
+#include "harness/IReferenceExecutors.hpp"
 #include "harness/input-init/InputFillRecipes.hpp"
+#include "harness/input-init/TensorAliases.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -24,18 +26,33 @@ using InputTensorMap
 
 struct FillResult
 {
+    enum class Status
+    {
+        OK,
+        /// The harness cannot fill this graph's inputs.
+        UNSUPPORTED,
+        /// A recipe cannot fill its tensor as written, for example a VALUES list
+        /// with a value out of range for the tensor's data type.
+        INVALID,
+    };
+
     bool filled = false;
     std::string reason;
     /// How many tensors were generated on the device rather than the host.
     std::size_t deviceFilled = 0;
+    Status status = Status::UNSUPPORTED;
 
     static FillResult ok(std::size_t deviceFilled = 0)
     {
-        return {true, {}, deviceFilled};
+        return {true, {}, deviceFilled, Status::OK};
     }
     static FillResult unsupported(std::string why)
     {
-        return {false, std::move(why), 0};
+        return {false, std::move(why), 0, Status::UNSUPPORTED};
+    }
+    static FillResult invalid(std::string why)
+    {
+        return {false, std::move(why), 0, Status::INVALID};
     }
 };
 
@@ -109,11 +126,36 @@ private:
 /// generated on the device; with nullptr, which is what the unit tests rely on since
 /// they have no device, everything is filled on the host. All device fills have
 /// finished by the time this returns or throws. Throws DeviceInputError when a device
-/// fill fails.
+/// fill, or an SDPA backward forward on the device, fails.
+///
+/// A VALUES recipe is always filled on the host. A recipe that cannot fill its tensor
+/// as written makes the result invalid, with the uid and the reason.
+///
+/// After the fill, the O and stats inputs of each SDPA backward node are replaced by
+/// the forward of its Q, K and V (see deriveSdpaBackwardForwardOutputs()), whatever
+/// recipe they were filled with. `referenceExecutors` runs that forward: with a `device`
+/// filler on the GPU executor unless it gives the graph up, else on the CPU one. A graph
+/// without such a node never asks it for an executor. Likewise the index input of each
+/// max-pooling resample backward node is replaced by the argmax of a forward (see
+/// deriveResampleBackwardIndex()). A node whose forward cannot be derived makes the
+/// result unsupported, with the reason.
+///
+/// Each view in `aliases` keeps its place in the seed sequence, so no other tensor's
+/// contents change, but it is not filled and need not be in `inputs`. Each owner has
+/// its whole host allocation zeroed, then is filled once on the host. A recipe set()
+/// on a view makes the result invalid. Throws std::invalid_argument when an owner is
+/// missing from `ownedUids` or from `inputs`, or when fillDerivesInputs() is true for
+/// the graph.
 FillResult fillInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
                       InputTensorMap& inputs,
                       const std::vector<int64_t>& ownedUids,
                       InputFillRecipes& recipes,
-                      DeviceInputFiller* device);
+                      IReferenceExecutors& referenceExecutors,
+                      DeviceInputFiller* device,
+                      const std::vector<TensorAlias>& aliases = {});
+
+/// Whether fillInputs() replaces some inputs of `graph` after the fill with values
+/// derived from other inputs. Such a fill reads every input as its own tensor.
+bool fillDerivesInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph);
 
 } // namespace hipdnn_integration_tests

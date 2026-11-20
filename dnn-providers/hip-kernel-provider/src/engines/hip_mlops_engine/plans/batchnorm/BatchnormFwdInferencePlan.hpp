@@ -96,11 +96,8 @@ private:
     std::unique_ptr<IRunnableKernel> _runnableKernel;
 
     // Kernel launch parameters computed during compile()
-    unsigned int _channels = 0;
-    unsigned int _inCstride = 0;
-    unsigned int _batchCount = 0;
-    unsigned int _cStride = 0;
-    unsigned int _hwStride = 0;
+    unsigned int _channelStride = 0;
+    unsigned int _spatialStride = 0;
     unsigned int _batchStride = 0;
 };
 

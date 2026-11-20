@@ -93,7 +93,13 @@ cmake_dependent_option(BUILD_BENCHMARK "Build benchmarks" OFF "NOT ONLY_INSTALL"
 cmake_dependent_option(BUILD_EXAMPLE "Build examples" OFF "NOT ONLY_INSTALL" OFF)
 option(BUILD_NAIVE_BENCHMARK "Build naive benchmarks" OFF)
 cmake_dependent_option(BUILD_DOCS "Build documentation (requires sphinx)" OFF "NOT ONLY_INSTALL" OFF)
-option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
+option(ROCPRIM_ENABLE_COVERAGE "Build rocPRIM with code coverage enabled" OFF)
+if(DEFINED BUILD_CODE_COVERAGE)
+    message(DEPRECATION "BUILD_CODE_COVERAGE is deprecated and will be removed soon; use ROCPRIM_ENABLE_COVERAGE instead.")
+    set(ROCPRIM_ENABLE_COVERAGE ${BUILD_CODE_COVERAGE} CACHE BOOL "" FORCE)
+    unset(BUILD_CODE_COVERAGE CACHE)
+    unset(BUILD_CODE_COVERAGE)
+endif()
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
 cmake_dependent_option(ROCPRIM_ENABLE_TOPK "Enable the device level topk and segmented topk algorithms" OFF BUILD_TEST ON)
@@ -228,7 +234,7 @@ find_package(hip REQUIRED CONFIG PATHS ${HIP_DIR} ${ROCM_PATH} /opt/rocm)
 # already shipped at 4.x, so aligning it down to the umbrella version would
 # be a backwards version move and would break downstream
 # find_package(rocprim 4.x) consumers.
-set(VERSION_STRING "5.0.0")
+set(VERSION_STRING "5.1.0")
 rocm_setup_version(VERSION ${VERSION_STRING})
 math(EXPR rocprim_VERSION_NUMBER "${rocprim_VERSION_MAJOR} * 100000 + ${rocprim_VERSION_MINOR} * 100 + ${rocprim_VERSION_PATCH}")
 
@@ -327,7 +333,7 @@ set(BUILD_SHARED_LIBS ${PKG_BUILD_SHARED_LIBS})
 # ever needed. rocm-libraries' own projects/rocprim and hipccl2's copy are
 # untouched and still package standalone exactly as before.
 
-if(BUILD_CODE_COVERAGE)
+if(ROCPRIM_ENABLE_COVERAGE)
   target_compile_options(rocprim INTERFACE
     -w
     # Note: use SHELL here to prevent cmake from removing what it thinks is duplicate -Xarch_host options.
@@ -342,14 +348,15 @@ endif()
 #
 # ADDITIONAL TARGETS FOR CODE COVERAGE
 #
-if(BUILD_CODE_COVERAGE AND ROCPRIM_PROJECT_IS_TOP_LEVEL)
+if(ROCPRIM_ENABLE_COVERAGE AND ROCPRIM_PROJECT_IS_TOP_LEVEL)
   add_custom_target(
     coverage_analysis
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ${CMAKE_COMMAND} -E rm -rf ./coverage-report
     COMMAND ${CMAKE_COMMAND} -E make_directory ./coverage-report/profraw
-    COMMAND ctest --output-on-failure -E "rocprim.linking*" --gtest_filter=\"\${GTEST_FILTER}\"
+    COMMAND ${CMAKE_COMMAND} -E env "LLVM_PROFILE_FILE=${CMAKE_BINARY_DIR}/coverage-report/profraw/rocprim-coverage_%m.profraw" ctest --output-on-failure -E "rocprim.linking*" --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running tests to collect code coverage data"
   )
 
   find_program(
@@ -376,11 +383,12 @@ if(BUILD_CODE_COVERAGE AND ROCPRIM_PROJECT_IS_TOP_LEVEL)
     COMMAND ${LLVM_COV} show  ${LLVM_COV_OBJECT_ARGS}  --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata -format=html -output-dir=coverage-report
     COMMAND ${LLVM_COV} export  ${LLVM_COV_OBJECT_ARGS} --ignore-filename-regex="test_*" -instr-profile=./coverage-report/rocprim.profdata -format=lcov > ./coverage-report/coverage.info
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Generating code coverage report"
   )
 
   add_custom_target(
     coverage
-    DEPENDS coverage_analysis
-    DEPENDS coverage_summary
+    DEPENDS coverage_analysis coverage_summary
+    COMMENT "Running code coverage analysis and report generation"
   )
 endif()
