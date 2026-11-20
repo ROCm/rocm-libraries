@@ -39,17 +39,30 @@ from codegen.ops.fmha_fwd import (
 )
 
 
-SPLITKV_PIPELINES_TAG = ["qr", "qr_nwarp_sshuffle", "qr_tdm", "qr_tdm_pingpong"]
+SPLITKV_PIPELINES_TAG = [
+    "qr",
+    "qr_nwarp_sshuffle",
+    "qr_tdm",
+    "qr_tdm_pingpong",
+    "qr_tdm_wave",
+]
 
 # TDM pipelines merge the q heads of a kv head with a mask too, except with a sink, and are the
 # only ones that merge with a sink (each merged row reads the sink of its q head)
-TDM_PIPELINES_TAG = ["qr_tdm", "qr_tdm_pingpong"]
+TDM_PIPELINES_TAG = ["qr_tdm", "qr_tdm_pingpong", "qr_tdm_wave"]
+
+# Pipelines that run only on the tiles tagged with their name
+OWN_TILE_PIPELINES_TAG = ["qr_tdm_pingpong", "qr_tdm_wave"]
+
+# Experimental: the qr_tdm_wave instances are dispatched only with CK_TILE_FMHA_SPLITKV_WAVE set.
+WAVE_OPT_IN = 'std::getenv("CK_TILE_FMHA_SPLITKV_WAVE") != nullptr'
 
 FMHA_FWD_SPLITKV_PIPELINE_MAP = {
     "qr": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVS",
     "qr_nwarp_sshuffle": "ck_tile::BlockFmhaFwdSplitKVPipelineNWarpSShuffleQRKSVS",
     "qr_tdm": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdm",
     "qr_tdm_pingpong": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong",
+    "qr_tdm_wave": "ck_tile::BlockFmhaFwdSplitKVPipelineQRKSVSTdmWave",
 }
 
 FMHA_FWD_SPLITKV_KERNEL_BODY = """
@@ -1003,8 +1016,12 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
                 pipelines.append(Pipeline("qr", "row", "t", "t", "f", "f", logits, bias, "t", squant, "f", "f", mask))  # fmt: skip
         elif dtype in ["fp8bf16"]:
             # Per-tensor scaled fp8 runs on qr_tdm_pingpong only, so up to 16 rows at d128.
-            # The fused-combine entries come first; they need a.split_counter_ptr.
+            # The experimental qr_tdm_wave entries go first (see WAVE_OPT_IN), then the
+            # fused-combine entries, which need a.split_counter_ptr.
             if hdim == 128:
+                for mask in get_mask_map(mask_impl).keys():
+                    pipelines.append(Pipeline("qr_tdm_wave", "row", "t", "f", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor"))  # fmt: skip
+                    pipelines.append(Pipeline("qr_tdm_wave", "row", "t", "t", "f", "f", "f", "no", "t", "f", "f", "f", mask, "pertensor"))  # fmt: skip
                 for fuse, mask in itertools.product(
                     ["t", "f"], get_mask_map(mask_impl).keys()
                 ):
@@ -1041,7 +1058,8 @@ class KernelComponentFactoryGfx125(KernelComponentFactoryBase):
             # BlockFmhaPipelineQRKSVSTdm::kHwGemm1Scale).
             return {
                 #                      bm0, bn0, bk0, bn1, bk1,
-                "128": [FmhaFwdTileSize(16, 128, 128, 128, 128, 128,  1, 4, 1,  1, 4, 1,  16, 16, 128,  16, 16, 128,  -1, CppConstraint(f"{num_rows} <= 16"), "qr_tdm_pingpong")],
+                "128": [FmhaFwdTileSize(16, 128, 128, 128, 128, 128,  1, 4, 1,  1, 4, 1,  16, 16, 128,  16, 16, 128,  -1, CppConstraint(f"{num_rows} <= 16 && {WAVE_OPT_IN}"), "qr_tdm_wave"),
+                        FmhaFwdTileSize(16, 128, 128, 128, 128, 128,  1, 4, 1,  1, 4, 1,  16, 16, 128,  16, 16, 128,  -1, CppConstraint(f"{num_rows} <= 16"), "qr_tdm_pingpong")],
             }  # fmt: skip
         else:
             return None
@@ -1100,7 +1118,10 @@ def get_fwd_splitkv_blobs(
             ):
                 # A tile owned by a pipeline pairs with that pipeline only, and
                 # qr_tdm_pingpong runs on its own tile only
-                if tile.F_pipeline_tag is not None or pipeline.tag == "qr_tdm_pingpong":
+                if (
+                    tile.F_pipeline_tag is not None
+                    or pipeline.tag in OWN_TILE_PIPELINES_TAG
+                ):
                     if tile.F_pipeline_tag != pipeline.tag:
                         continue
                     if mode == "group" or receipt != 0:

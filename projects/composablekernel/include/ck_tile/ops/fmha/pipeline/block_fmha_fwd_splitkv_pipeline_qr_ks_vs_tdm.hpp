@@ -1225,4 +1225,446 @@ struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong
     }
 };
 
+// Split-KV decode (at most kM0 = 16 rows, fp8 Q/K/V with per-tensor descales) where each wave
+// owns whole K/V tiles: wave w takes tiles w, w + kNumWaves, ... of the split's range and runs
+// gemm_0, the online softmax and gemm_1 on them alone, with no barrier in the loop. The waves'
+// (m, l, O) merge once through LDS at the end. qr_tdm_pingpong instead spends its waves on N of
+// one tile, which makes every wave redo the whole tile's softmax each trip.
+template <typename Problem_, typename Policy_ = BlockFmhaPipelineQRKSVSTdmPingPongPolicy>
+struct BlockFmhaFwdSplitKVPipelineQRKSVSTdmWave
+    : BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong<Problem_, Policy_>
+{
+    using PingPong = BlockFmhaFwdSplitKVPipelineQRKSVSTdmPingPong<Problem_, Policy_>;
+    // qr_tdm_pingpong on the split problem: masks, TDM configs, fp8 P helpers
+    using Inner        = typename PingPong::Base;
+    using InnerProblem = typename Inner::Problem;
+    using Policy       = remove_cvref_t<Policy_>;
+
+    using Problem  = typename PingPong::Problem;
+    using FmhaMask = typename PingPong::FmhaMask;
+
+    using QDataType           = typename Inner::QDataType;
+    using KDataType           = typename Inner::KDataType;
+    using VDataType           = typename Inner::VDataType;
+    using SaccDataType        = typename Inner::SaccDataType;
+    using SMPLComputeDataType = typename Inner::SMPLComputeDataType;
+    using PDataType           = typename Inner::PDataType;
+    using OaccDataType        = typename Inner::OaccDataType;
+    using LSEDataType         = typename Inner::LSEDataType;
+    using BlockFmhaShape      = typename Inner::BlockFmhaShape;
+
+    static constexpr const char* name = "qr_tdm_wave";
+
+    static constexpr index_t kM0       = BlockFmhaShape::kM0;
+    static constexpr index_t kNw       = BlockFmhaShape::kN0; // keys per wave tile
+    static constexpr index_t kD        = BlockFmhaShape::kQKHeaddim;
+    static constexpr index_t kN1       = BlockFmhaShape::kN1;
+    static constexpr index_t kNumWaves = BlockFmhaShape::NumWarps;
+
+    static_assert(kM0 == 16 && kD == kN1 && BlockFmhaShape::kK0 == kD &&
+                      BlockFmhaShape::kK1 == kNw && BlockFmhaShape::kSubQKHeaddim == kD,
+                  "qr_tdm_wave: 16 rows, one gemm_0 step over the head dim and one gemm_1 "
+                  "step over a wave's keys");
+    static_assert(detail::is_qr_tdm_pingpong_fp8_qkv_v<Problem> && Inner::kQuantized &&
+                      Inner::kHwGemm1Scale,
+                  "qr_tdm_wave: per-tensor scaled fp8 Q/K/V");
+    static_assert(Problem::BiasEnum == BlockAttentionBiasEnum::NO_BIAS &&
+                      !Problem::kHasLogitsSoftCap && !Problem::kHasSink && !Problem::kIsPagedKV,
+                  "qr_tdm_wave: no bias, soft cap, sink or paged kv");
+
+    // One wave's view of gemm_0 (S = Q K^T) and gemm_1 (O += P V): NumWaveGroups != 1 makes
+    // the operand distributions lane-only, so each wave computes on its own tiles.
+    template <typename AType,
+              typename BType,
+              typename CType,
+              index_t M,
+              index_t N,
+              index_t K,
+              typename WarpTile,
+              typename WarpGemm>
+    CK_TILE_HOST_DEVICE static constexpr auto MakeWaveGemm()
+    {
+        using GemmProblem =
+            BlockGemmProblem<AType,
+                             BType,
+                             CType,
+                             get_warp_size(),
+                             TileGemmShape<sequence<M, N, K>, sequence<1, 1, 1>, WarpTile>,
+                             kNumWaves>;
+        using GemmPolicy = BlockGemmARegBRegCRegV2CustomPolicy<AType,
+                                                               BType,
+                                                               CType,
+                                                               sequence<1, 1, 1>,
+                                                               WarpGemm,
+                                                               GemmLoopOrder::MNK>;
+        return BlockGemmARegBRegCRegV2<GemmProblem, GemmPolicy>{};
+    }
+
+    using Gemm0WarpTile = typename BlockFmhaShape::Gemm0WarpTile;
+    using Gemm1WarpTile = typename BlockFmhaShape::Gemm1WarpTile;
+    using Gemm0 =
+        remove_cvref_t<decltype(MakeWaveGemm<QDataType,
+                                             KDataType,
+                                             SaccDataType,
+                                             kM0,
+                                             kNw,
+                                             kD,
+                                             Gemm0WarpTile,
+                                             WarpGemmDispatcher<QDataType,
+                                                                KDataType,
+                                                                SaccDataType,
+                                                                Gemm0WarpTile::at(number<0>{}),
+                                                                Gemm0WarpTile::at(number<1>{}),
+                                                                Gemm0WarpTile::at(number<2>{}),
+                                                                true>>())>;
+    using Gemm1 =
+        remove_cvref_t<decltype(MakeWaveGemm<PDataType,
+                                             VDataType,
+                                             OaccDataType,
+                                             kM0,
+                                             kN1,
+                                             kNw,
+                                             Gemm1WarpTile,
+                                             WarpGemmDispatcher<PDataType,
+                                                                VDataType,
+                                                                OaccDataType,
+                                                                Gemm1WarpTile::at(number<0>{}),
+                                                                Gemm1WarpTile::at(number<1>{}),
+                                                                Gemm1WarpTile::at(number<2>{}),
+                                                                true,
+                                                                false,
+                                                                false,
+                                                                WGAttrNumAccessEnum::Default>>())>;
+
+    // [wave 0: stage 0 K, V | stage 1 K, V][wave 1: ...]..., reused for the merge at the end
+    using InnerLayout                      = typename Policy::template LdsArenaLayout<InnerProblem>;
+    static constexpr index_t kStageVOffset = integer_least_multiple(InnerLayout::kKBytes, 256);
+    static constexpr index_t kStageBytes =
+        integer_least_multiple(kStageVOffset + InnerLayout::kVBytes, 256);
+    static constexpr index_t kStages      = 2;
+    static constexpr index_t kOMergeBytes = kM0 * kN1 * static_cast<index_t>(sizeof(OaccDataType));
+    static constexpr index_t kMergeBytes =
+        kNumWaves * (kOMergeBytes + 2 * kM0 * static_cast<index_t>(sizeof(SMPLComputeDataType)));
+
+    CK_TILE_HOST_DEVICE static constexpr index_t GetSmemSize()
+    {
+        return max(kNumWaves * kStages * kStageBytes, kMergeBytes);
+    }
+    static_assert(kNumWaves * kStages * kStageBytes <= 320 * 1024);
+
+    template <typename QDramBlockWindowTmp,
+              typename KDramBlockWindowLengths,
+              typename KPageBlockNavigator,
+              typename VDramBlockWindowLengths,
+              typename VPageBlockNavigator,
+              typename BiasDramBlockWindowTmp,
+              typename LSEaccDramBlockWindowTmp,
+              typename PositionEncoding,
+              typename AttentionVariantParams,
+              typename BlockIndices>
+    CK_TILE_HOST_DEVICE auto operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,
+                                        const KDramBlockWindowLengths& k_dram_block_window_lengths,
+                                        const KPageBlockNavigator& k_page_block_navigator,
+                                        const VDramBlockWindowLengths& v_dram_block_window_lengths,
+                                        const VPageBlockNavigator& v_page_block_navigator,
+                                        const BiasDramBlockWindowTmp&,
+                                        LSEaccDramBlockWindowTmp& lse_acc_dram_window_tmp,
+                                        index_t num_splits,
+                                        index_t i_split,
+                                        FmhaMask mask,
+                                        PositionEncoding,
+                                        float scale_s,
+                                        const typename Inner::AttentionVariant&,
+                                        const AttentionVariantParams&,
+                                        const BlockIndices&,
+                                        index_t, // kv_l2p_offset, 0 without paged kv
+                                        void* smem_arena,
+                                        float,
+                                        float v_descale = 1.0f) const
+    {
+        constexpr auto I0 = number<0>{};
+        constexpr auto I1 = number<1>{};
+
+        constexpr auto gemm_0 = Gemm0{};
+        constexpr auto gemm_1 = Gemm1{};
+        const auto f_max      = [](auto e0, auto e1) { return max(e0, e1); };
+        const auto f_sum      = [](auto e0, auto e1) { return e0 + e1; };
+
+        using SaccTile = decltype(gemm_0.MakeCBlockTile());
+        using OaccTile = decltype(gemm_1.MakeCBlockTile());
+        using SMPLTile = decltype(cast_tile<SMPLComputeDataType>(SaccTile{}));
+        using RowTile  = decltype(block_tile_reduce<SMPLComputeDataType>(
+            SMPLTile{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+
+        // this split's tile range; rows of merged heads take row 0's mask
+        const typename Inner::FmhaMask split_mask{mask, num_splits, i_split};
+        const auto q_origin     = q_dram_block_window_tmp.get_window_origin();
+        const auto tile_range   = Inner::GetKTileRange(split_mask, q_origin);
+        const index_t k_start   = tile_range.get(I1);
+        const index_t k_end     = tile_range.get(number<2>{});
+        const index_t num_tiles = max(integer_divide_ceil(k_end - k_start, kNw), 0);
+
+        const index_t i_wave = get_warp_id();
+        const index_t wave_tiles =
+            num_tiles > i_wave ? integer_divide_ceil(num_tiles - i_wave, kNumWaves) : 0;
+
+        auto o_acc   = OaccTile{};
+        auto m       = RowTile{};
+        auto l       = RowTile{};
+        auto l_quant = RowTile{};
+        clear_tile(o_acc);
+        set_tile(m, -numeric<SMPLComputeDataType>::infinity());
+        clear_tile(l);
+        clear_tile(l_quant);
+
+        // Q straight into this wave's gemm_0 A operand
+        auto q_dram_window = make_tile_window(
+            q_dram_block_window_tmp,
+            make_static_tile_distribution(decltype(gemm_0)::MakeABlockDistributionEncode()));
+        const auto q_tile = load_tile(q_dram_window);
+
+        // K/V: one TDM box per wave per tile, from this wave's own window origin
+        const auto k_view =
+            k_page_block_navigator.make_tile_window(k_dram_block_window_lengths, {0, 0})
+                .at(I1)
+                .get_bottom_tensor_view();
+        const auto v_view =
+            v_page_block_navigator.make_tile_window(v_dram_block_window_lengths, {0, 0})
+                .at(I1)
+                .get_bottom_tensor_view();
+        constexpr auto whole_tile_tdm_dstr = make_static_tile_distribution(
+            tile_distribution_encoding<sequence<>,
+                                       tuple<sequence<1, kNw>, sequence<kD>>,
+                                       tuple<sequence<1>>,
+                                       tuple<sequence<0>>,
+                                       sequence<1, 2>,
+                                       sequence<1, 0>>{},
+            bool_constant<true>{});
+        auto k_dram_window = make_tile_window(k_view,
+                                              make_tuple(number<kNw>{}, number<kD>{}),
+                                              {k_start + i_wave * kNw, 0},
+                                              whole_tile_tdm_dstr);
+        auto v_dram_window = make_tile_window(v_view,
+                                              make_tuple(number<kNw>{}, number<kN1>{}),
+                                              {k_start + i_wave * kNw, 0},
+                                              whole_tile_tdm_dstr);
+
+        const auto stage_base = [&](index_t stage) {
+            return static_cast<char*>(smem_arena) + (i_wave * kStages + stage) * kStageBytes;
+        };
+        auto k_lds_view = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<KDataType*>(stage_base(0)),
+            Policy::template MakeKLdsBlockDescriptor<InnerProblem>());
+        auto v_lds_view = make_tensor_view<address_space_enum::lds>(
+            reinterpret_cast<VDataType*>(stage_base(0) + kStageVOffset),
+            Policy::template MakeVLdsBlockDescriptor<InnerProblem>());
+        auto k_lds_write_window =
+            make_tile_window(k_lds_view,
+                             Policy::template MakeKLdsBlockDescriptor<InnerProblem>().get_lengths(),
+                             {0, 0});
+        auto v_lds_write_window =
+            make_tile_window(v_lds_view,
+                             Policy::template MakeVLdsBlockDescriptor<InnerProblem>().get_lengths(),
+                             {0, 0});
+        auto k_lds_read_window = make_tile_window(
+            k_lds_view,
+            make_tuple(number<kNw>{}, number<kD>{}),
+            {0, 0},
+            make_static_tile_distribution(decltype(gemm_0)::MakeBBlockDistributionEncode()));
+        auto v_lds_read_window =
+            make_tile_window(v_lds_view,
+                             make_tuple(number<kNw>{}, number<kN1>{}),
+                             {0, 0},
+                             make_static_tile_distribution(
+                                 typename InputTileDistributionTraits<
+                                     decltype(decltype(gemm_1)::MakeBBlockDistributionEncode()),
+                                     VDataType>::TransposedDstrEncode{}));
+
+        const TDMConfig tdm_config_k = Inner::template MakeTdmConfig<
+            typename Policy::template LdsPaddingConfigK<InnerProblem>>();
+        const TDMConfig tdm_config_v = Inner::template MakeTdmConfig<
+            typename Policy::template LdsPaddingConfigV<InnerProblem>>();
+
+        // stage <- this wave's next tile
+        const auto issue_tile = [&](index_t stage) {
+            k_lds_write_window.set_bottom_tensor_view_data_ptr(
+                reinterpret_cast<KDataType*>(stage_base(stage)));
+            load_tile_tdm(tdm_config_k, k_lds_write_window, k_dram_window);
+            move_tile_window(k_dram_window, {kNumWaves * kNw, 0});
+            v_lds_write_window.set_bottom_tensor_view_data_ptr(
+                reinterpret_cast<VDataType*>(stage_base(stage) + kStageVOffset));
+            load_tile_tdm(tdm_config_v, v_lds_write_window, v_dram_window);
+            move_tile_window(v_dram_window, {kNumWaves * kNw, 0});
+        };
+
+        const auto validated = [](SMPLComputeDataType raw_m) {
+            return raw_m == -numeric<SMPLComputeDataType>::infinity()
+                       ? type_convert<SMPLComputeDataType>(0.f)
+                       : raw_m;
+        };
+
+        // Only tiles this wave consumes are issued: a prefetch past its last tile would leave
+        // a transfer for the merge below to wait on.
+        if(wave_tiles > 0)
+            issue_tile(0);
+        if(wave_tiles > 1)
+            issue_tile(1);
+        for(index_t j = 0; j < wave_tiles; ++j)
+        {
+            const index_t stage = j & 1;
+            // this tile's K and V have landed; the next tile's, if any, stay in flight
+            if(j + 1 < wave_tiles)
+                s_wait_tensorcnt<2>();
+            else
+                s_wait_tensorcnt<0>();
+
+            k_lds_read_window.set_bottom_tensor_view_data_ptr(
+                reinterpret_cast<KDataType*>(stage_base(stage)));
+            v_lds_read_window.set_bottom_tensor_view_data_ptr(
+                reinterpret_cast<VDataType*>(stage_base(stage) + kStageVOffset));
+
+            const index_t i_tile  = i_wave + j * kNumWaves;
+            const index_t k_tile0 = k_start + i_tile * kNw;
+
+            auto s_acc = gemm_0(q_tile, load_tile(k_lds_read_window));
+            Inner::MaskScores(s_acc, split_mask, q_origin, k_tile0, i_tile == num_tiles - 1, k_end);
+            const auto s = cast_tile<SMPLComputeDataType>(s_acc);
+
+            auto m_local = block_tile_reduce<SMPLComputeDataType>(
+                s, sequence<1>{}, f_max, -numeric<SMPLComputeDataType>::infinity());
+            block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
+            const auto m_old = m;
+            tile_elementwise_inout([](auto& e0, auto e1) { e0 = max(e0, e1); }, m, m_local);
+
+            auto p_compute =
+                make_static_distributed_tensor<SMPLComputeDataType>(s.get_tile_distribution());
+            constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
+            sweep_tile_span(p_spans[I0], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                const auto row_max   = scale_s * validated(m[i_idx]);
+                sweep_tile_span(p_spans[I1], [&](auto idx1) {
+                    constexpr auto i_j_idx = make_tuple(idx0, idx1);
+                    p_compute(i_j_idx)     = exp2(scale_s * s[i_j_idx] - row_max);
+                });
+            });
+            auto rowsum_p = block_tile_reduce<SMPLComputeDataType>(
+                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+            block_tile_reduce_sync(rowsum_p, f_sum, bool_constant<false>{});
+
+            // gemm_0's C and gemm_1's A lanes align, so P is repacked within each lane;
+            // p_compute is left holding the dequantized q(P)
+            auto p_tile = make_static_distributed_tensor<PDataType>(
+                make_static_tile_distribution(decltype(gemm_1)::MakeABlockDistributionEncode()));
+            using WG          = typename Gemm1::WarpGemm;
+            const auto packed = cast_tile_mx_wmma<Inner::kPScaleGranularity,
+                                                  WG::WarpGemmAttribute::Impl::kAMLane,
+                                                  WG::WarpGemmAttribute::Impl::kABKLane,
+                                                  true>(p_tile, p_compute);
+            auto rowsum_q     = block_tile_reduce<SMPLComputeDataType>(
+                p_compute, sequence<1>{}, f_sum, SMPLComputeDataType{0});
+            block_tile_reduce_sync(rowsum_q, f_sum, bool_constant<false>{});
+
+            constexpr auto o_spans = OaccTile::get_distributed_spans();
+            sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                const auto tmp       = exp2(scale_s * m_old[i_idx] - scale_s * validated(m[i_idx]));
+                l(i_idx)             = tmp * l[i_idx] + rowsum_p[i_idx];
+                l_quant(i_idx)       = tmp * l_quant[i_idx] + rowsum_q[i_idx];
+                sweep_tile_span(o_spans[I1],
+                                [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= tmp; });
+            });
+
+            gemm_1(o_acc,
+                   p_tile,
+                   load_tile_transpose(v_lds_read_window),
+                   Inner::template make_gemm1_scale<Gemm1>(packed[I0]),
+                   Inner::template make_gemm1_scale<Gemm1>(Inner::e8m0_one()));
+
+            // the stage is free once this wave's reads of it are done
+            if(j + 2 < wave_tiles)
+            {
+                s_wait_dscnt<0>();
+                __builtin_amdgcn_sched_barrier(0);
+                issue_tile(stage);
+            }
+        }
+        s_wait_tensorcnt<0>();
+        Inner::CorrectQuantizedMass(l, l_quant, o_acc);
+
+        // merge the waves' (m, l, O): every wave leaves its partial in LDS, then each wave
+        // combines its own columns
+        block_sync_lds();
+        auto* merge_o = static_cast<char*>(smem_arena);
+        auto* merge_m = reinterpret_cast<SMPLComputeDataType*>(merge_o + kNumWaves * kOMergeBytes);
+        auto* merge_l = merge_m + kNumWaves * kM0;
+        constexpr auto o_merge_desc =
+            make_naive_tensor_descriptor(make_tuple(number<kM0>{}, number<kN1>{}),
+                                         make_tuple(number<kN1>{}, number<1>{}),
+                                         number<4>{},
+                                         number<1>{});
+        const auto o_merge_view = [&](index_t wave) {
+            return make_tensor_view<address_space_enum::lds>(
+                reinterpret_cast<OaccDataType*>(merge_o + wave * kOMergeBytes), o_merge_desc);
+        };
+        {
+            auto w = make_tile_window(o_merge_view(i_wave), o_merge_desc.get_lengths(), {0, 0});
+            store_tile(w, o_acc);
+            constexpr auto row_spans = RowTile::get_distributed_spans();
+            sweep_tile_span(row_spans[I0], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                const index_t row =
+                    get_x_indices_from_distributed_indices(m.get_tile_distribution(), i_idx).at(I0);
+                merge_m[i_wave * kM0 + row] = m[i_idx];
+                merge_l[i_wave * kM0 + row] = l[i_idx];
+            });
+        }
+        block_sync_lds();
+
+        // the result tile: qr_tdm_pingpong's gemm_1 C layout, waves on N
+        auto o_out     = Policy::template GetPVBlockGemm<InnerProblem>().MakeCBlockTile();
+        using OOutTile = decltype(o_out);
+        constexpr auto o_out_dstr = OOutTile::get_tile_distribution();
+        using OutRowTile          = decltype(block_tile_reduce<SMPLComputeDataType>(
+            OOutTile{}, sequence<1>{}, f_max, SMPLComputeDataType{0}));
+        auto lse_out =
+            make_static_distributed_tensor<LSEDataType>(OutRowTile::get_tile_distribution());
+        OOutTile o_part[kNumWaves];
+        static_for<0, kNumWaves, 1>{}([&](auto wave) {
+            o_part[wave] = load_tile(make_tile_window(
+                o_merge_view(wave), o_merge_desc.get_lengths(), {0, 0}, o_out_dstr));
+        });
+        constexpr auto out_spans = OOutTile::get_distributed_spans();
+        sweep_tile_span(out_spans[I0], [&](auto idx0) {
+            constexpr auto i_idx = make_tuple(idx0);
+            const index_t row =
+                get_x_indices_from_distributed_indices(lse_out.get_tile_distribution(), i_idx)
+                    .at(I0);
+            SMPLComputeDataType m_all = -numeric<SMPLComputeDataType>::infinity();
+            static_for<0, kNumWaves, 1>{}(
+                [&](auto wave) { m_all = max(m_all, merge_m[wave * kM0 + row]); });
+            SMPLComputeDataType weight[kNumWaves];
+            SMPLComputeDataType l_all = 0;
+            static_for<0, kNumWaves, 1>{}([&](auto wave) {
+                const auto m_w = merge_m[wave * kM0 + row];
+                weight[wave]   = m_w == -numeric<SMPLComputeDataType>::infinity()
+                                     ? SMPLComputeDataType{0}
+                                     : exp2(scale_s * (m_w - m_all));
+                l_all += merge_l[wave * kM0 + row] * weight[wave];
+            });
+            const auto inv = l_all == 0 ? SMPLComputeDataType{0} : v_descale / l_all;
+            sweep_tile_span(out_spans[I1], [&](auto idx1) {
+                constexpr auto i_j_idx  = make_tuple(idx0, idx1);
+                SMPLComputeDataType acc = 0;
+                static_for<0, kNumWaves, 1>{}(
+                    [&](auto wave) { acc += weight[wave] * o_part[wave][i_j_idx]; });
+                o_out(i_j_idx) = acc * inv;
+            });
+            lse_out(i_idx) = l_all == 0 ? -numeric<SMPLComputeDataType>::infinity()
+                                        : m_all * scale_s / C_LOG2E + log(l_all);
+        });
+        store_tile(lse_acc_dram_window_tmp, lse_out);
+        return o_out;
+    }
+};
+
 } // namespace ck_tile

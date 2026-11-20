@@ -165,6 +165,7 @@ PIPELINE_ENUM_MAP = {
     "qr_tdm_sched": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED",
     "qr_tdm_fp8_sched": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_SCHED_FP8",
     "qr_tdm_pingpong": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_PINGPONG",
+    "qr_tdm_wave": "ck_tile::BlockFmhaPipelineEnum::QRKSVS_TDM_WAVE",
 }
 
 BOOL_MAP = {
