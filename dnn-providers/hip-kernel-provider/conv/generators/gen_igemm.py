@@ -639,6 +639,22 @@ CATALOG125TF32 = {
 }
 
 FLEX_ATOMS = {"HALF": "mfma16x32_f16", "BFLOAT16": "mfma16x32_bf16"}
+# Tall 1-wide-vector tiles for reductions of a few channels (backward data into a wide layer
+# from 2 to 7 output channels, forward from a few input channels): a block's fixed setup and
+# its single k-step spread over 256 rows, 8 waves. 16x16 atoms of the CDNA catalogs.
+NARROW_ATOMS = {
+    "HALF": "mfma16_f16",
+    "BFLOAT16": "mfma16_bf16",
+    "FLOAT": "mfma16_f32",
+}
+# gfx950's double-rate 32 x 32 atoms for the col2im configs (patch 3).
+COL2IM_WIDE = {"HALF": "mfma32x16_f16", "BFLOAT16": "mfma32x16_bf16"}
+# Col2im tiles beside the direct-filter twins: a 64-deep k-step and 256 dy positions a block on
+# the CDNA 32 x 32 atoms (more of the filter's rows in flight a block).
+COL2IM_TILES = {
+    dt: [C(atom, 128, 128, 64, vec=8), C(atom, 256, 128, 32, vec=8)]
+    for dt, atom in (("HALF", "mfma32_f16"), ("BFLOAT16", "mfma32_bf16"))
+}
 # The flex tile's register-staged form (gfx942: 64 KiB LDS, dword LDS DMA): 256 x 128, 128-byte
 # reduction steps (64 16-bit or 32 fp32 channels).
 FLEX_REG_ATOMS = {
@@ -732,6 +748,75 @@ def kernels_for(catalog, direction, tag, priority=1000):
             cfgs += withSplitPolicy(
                 [C(atom, 256, 128, 128 // eb, 4, 2, vec=16 // eb, xcd=1, flex=1)]
             )
+        # Backward data's register-staged flex tile reading the graph's K T R S C filter in
+        # place (wdirect): no per-call transposed copy of the filter, which costs more than the
+        # GEMM on wide-channel layers over few positions. Appended after the other flex configs.
+        if catalog is CATALOG and dtype in FLEX_REG_ATOMS and tag == "bwd":
+            atom, eb = FLEX_REG_ATOMS[dtype]
+            cfgs += withSplitPolicy(
+                [
+                    C(
+                        atom,
+                        256,
+                        128,
+                        128 // eb,
+                        4,
+                        2,
+                        vec=16 // eb,
+                        xcd=1,
+                        wdirect=1,
+                        flex=1,
+                    )
+                ]
+            )
+        # patch 3: col2im backward data (withCol2imView), one GEMM over dy's positions whose
+        # T R S C columns a second launch sums into dx, for layers whose dx rows mostly multiply
+        # padding ("valid" small 3-D maps). Twins of the plain direct-filter configs (the filter
+        # read in place: its K-major rows are the GEMM's B), and on gfx950 its 32 x 32 x 16 atom.
+        # Appended after every other config.
+        # Tall 1-wide-vector tiles with their flat, channels-first-output, channels-first-input and
+        # split-policy twins, appended after every other legacy config.
+        if catalog is CATALOG and dtype in NARROW_ATOMS:
+            atom = NARROW_ATOMS[dtype]
+            cfgs += withSplitPolicy(
+                withCfx(
+                    withCf(
+                        withFlat(
+                            [
+                                C(atom, 256, 64, 16, 4, 2, vec=1),
+                                C(atom, 256, 128, 16, 4, 2, vec=1),
+                            ]
+                        )
+                    ),
+                    tag,
+                )
+            )
+        if catalog is CATALOG and tag == "bwd":
+            plain = [
+                c
+                for c in catalog[dtype]
+                if c["wdirect"]
+                and c["atom"] != "fma"
+                and c["math"] == "native"
+                and not (c["halo"] or c["pack"] or c["fuse"] or c["cf"] or c["swz"])
+            ]
+            cfgs += [dict(c, patch=3) for c in plain]
+            cfgs += [dict(c, wdirect=1, patch=3) for c in COL2IM_TILES.get(dtype, [])]
+            if dtype in COL2IM_WIDE:
+                cfgs += [
+                    C(COL2IM_WIDE[dtype], 128, 128, 64, vec=8, wdirect=1, patch=3),
+                    C(
+                        COL2IM_WIDE[dtype],
+                        256,
+                        128,
+                        64,
+                        4,
+                        2,
+                        vec=8,
+                        wdirect=1,
+                        patch=3,
+                    ),
+                ]
         for i, c in enumerate(cfgs):
             name = f"conv_igemm.{tag}.{dt}.{c['atom']}.{c['math']}.{c['bm']}x{c['bn']}x{c['bk']}" f".w{c['wm']}x{c['wn']}.t{c['threads']}.v{c['vec']}.s{c['stages']}" + (
                 ".xcd" if c["xcd"] else ""
@@ -759,6 +844,8 @@ def kernels_for(catalog, direction, tag, priority=1000):
                 ".patch" if c["patch"] == 1 else ""
             ) + (
                 ".patchtile" if c["patch"] == 2 else ""
+            ) + (
+                ".col2im" if c["patch"] == 3 else ""
             ) + (
                 ".cfx" if c["cfx"] else ""
             ) + (
