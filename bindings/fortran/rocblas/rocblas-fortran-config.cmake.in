@@ -152,6 +152,11 @@ if(NOT _rocblas_dir STREQUAL "${_rocblas_built_dir}")
   endforeach()
 endif()
 
+# The target and the .mod directory, for a project that does not want to spell
+# the target's namespace or that passes the paths to another build system.
+set(rocblas_FORTRAN_LIBRARIES roc::rocblas_fortran)
+set(rocblas_FORTRAN_INCLUDE_DIRS "${_rocblas_incdir}/${_rocblas_dir}")
+
 set(rocblas_FORTRAN_FOUND TRUE)
 
 check_required_components(rocblas-fortran)
