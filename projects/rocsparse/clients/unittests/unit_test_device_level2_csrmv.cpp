@@ -358,4 +358,50 @@ namespace
         nan_sweep(A, {rocsparse_spmv_alg_csr_adaptive});
     }
 
+    //
+    // CSC storage: op(A^T) through the CSC entry of csrmv. The conjugate transpose
+    // of a CSC matrix is the non transposed CSR product on conjugated values.
+    //
+    class L2DeviceCsrmvCsc : public rocsparse_ut::HandleTest
+    {
+    protected:
+        template <typename T>
+        void sweep(const host_csr<T>& A)
+        {
+            int n = 0;
+            for(const auto alg : csr_algs)
+                for(const auto trans : all_ops)
+                {
+                    // The transposed CSC product is the transposed CSR kernel, which only
+                    // the row split and nnz split algorithms implement.
+                    const bool trans_ok = (alg == rocsparse_spmv_alg_csr_rowsplit
+                                           || alg == rocsparse_spmv_alg_csr_nnzsplit);
+                    if(trans == rocsparse_operation_none && !trans_ok)
+                        continue;
+                    csr_case c;
+                    c.alg    = alg;
+                    c.trans  = trans;
+                    c.csc    = true;
+                    c.device = ((n++) % 2) == 1;
+                    run_csr<T>(handle, A, c);
+                    if(HasFailure())
+                        return;
+                }
+        }
+    };
+
+    TEST_F(L2DeviceCsrmvCsc, complex_operations)
+    {
+        sweep(make_csr_by_length<rocsparse_float_complex>(
+            700, 503, 0, [](int32_t i) { return 1 + (i % 9); }));
+        if(HasFailure())
+            return;
+        sweep(make_csr_by_length<rocsparse_double_complex>(
+            400, 611, 1, [](int32_t i) { return 2 + (i % 13); }));
+    }
+
+    TEST_F(L2DeviceCsrmvCsc, real_operations)
+    {
+        sweep(make_csr_by_length<float>(900, 701, 1, [](int32_t i) { return 1 + (i % 11); }));
+    }
 }
