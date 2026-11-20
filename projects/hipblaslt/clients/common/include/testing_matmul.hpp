@@ -2325,7 +2325,18 @@ public:
         {
             std::vector<hipblasLtHandle_t> handles{handle0};
             m_streams.push_back(stream0);
-            check(hipEventCreate(&m_start), "hipEventCreate");
+            // One counter per partition, in host memory every device can reach: run() orders
+            // the partitions with stream writes and waits on them. Created here, so that run()
+            // only enqueues.
+            for(int i = 0; i < int(arg.partitions); i++)
+            {
+                void* word = nullptr;
+                check(hipHostMalloc(
+                          &word, sizeof(uint64_t), hipHostMallocCoherent | hipHostMallocPortable),
+                      "hipHostMalloc");
+                m_counters.push_back(static_cast<uint64_t*>(word));
+                *m_counters.back() = 0;
+            }
             for(int i = 1; i < int(arg.partitions); i++)
             {
                 check(hipSetDevice(m_devices[i]), "hipSetDevice");
@@ -2382,12 +2393,9 @@ public:
                     static_cast<void>(hipFree(replica[i - 1]));
         }
         static_cast<void>(hipSetDevice(previous));
-        if(m_start != nullptr)
-            static_cast<void>(hipEventDestroy(m_start));
-        m_start = nullptr;
-        for(hipEvent_t event : m_done)
-            static_cast<void>(hipEventDestroy(event));
-        m_done.clear();
+        for(uint64_t* word : m_counters)
+            static_cast<void>(hipHostFree(word));
+        m_counters.clear();
         m_streams.resize(std::min<size_t>(m_streams.size(), 1));
         m_workspaces.clear();
         for(auto& replica : m_replica)
@@ -2566,36 +2574,30 @@ public:
         return m_gemm->initialize(algo, workspaces, true, m_streams);
     }
 
-    // One launch of every partition. Partitions wait for work already queued on stream0, and
-    // stream0 waits for every other partition at the end (PartitionedGemm::run does not join
-    // them), so stream0 sees the whole span.
+    // One launch of every partition, joined on the GPU (PartitionedGemm::run does not join
+    // them). stream0 writes the launch number into its counter after the work already queued on
+    // it, and the other partitions wait for that before their slice. After its slice every other
+    // partition writes the number into its own counter, and stream0 waits for all of them, so
+    // stream0 sees the whole span and the next launch starts when this one has finished
+    // everywhere.
     hipblasStatus_t run()
     {
-        check(hipEventRecord(m_start, m_streams[0]), "hipEventRecord");
+        const uint64_t launch = ++m_launch;
+        check(hipStreamWriteValue64(m_streams[0], m_counters[0], launch, 0),
+              "hipStreamWriteValue64");
         for(size_t i = 1; i < m_streams.size(); i++)
-            check(hipStreamWaitEvent(m_streams[i], m_start, 0), "hipStreamWaitEvent");
+            check(hipStreamWaitValue64(m_streams[i], m_counters[0], launch, hipStreamWaitValueGte),
+                  "hipStreamWaitValue64");
         auto status = m_gemm->run(m_streams);
         if(status != HIPBLAS_STATUS_SUCCESS)
             return status;
-        // An event belongs to the device that is current when it is created, and is recorded on
-        // a stream of that device.
-        int previous = 0;
-        check(hipGetDevice(&previous), "hipGetDevice");
         for(size_t i = 1; i < m_streams.size(); i++)
         {
-            check(hipSetDevice(m_devices[i]), "hipSetDevice");
-            if(m_done.size() < i)
-            {
-                hipEvent_t event = nullptr;
-                check(hipEventCreateWithFlags(&event, hipEventDisableTiming),
-                      "hipEventCreateWithFlags");
-                m_done.push_back(event);
-            }
-            check(hipEventRecord(m_done[i - 1], m_streams[i]), "hipEventRecord");
+            check(hipStreamWriteValue64(m_streams[i], m_counters[i], launch, 0),
+                  "hipStreamWriteValue64");
+            check(hipStreamWaitValue64(m_streams[0], m_counters[i], launch, hipStreamWaitValueGte),
+                  "hipStreamWaitValue64");
         }
-        check(hipSetDevice(previous), "hipSetDevice");
-        for(size_t i = 1; i < m_streams.size(); i++)
-            check(hipStreamWaitEvent(m_streams[0], m_done[i - 1], 0), "hipStreamWaitEvent");
         return status;
     }
 
@@ -2617,8 +2619,8 @@ private:
     std::vector<int>                                       m_devices; // device of each partition
     std::vector<hipStream_t>                               m_streams; // [0] is the caller's
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
-    hipEvent_t                                             m_start = nullptr;
-    std::vector<hipEvent_t>                                m_done; // partitions 1.. finished
+    std::vector<uint64_t*>                                 m_counters; // per partition, host memory
+    uint64_t                                               m_launch = 0;
     std::unique_ptr<hipblaslt_experimental::PartitionedGemm> m_gemm;
 };
 
