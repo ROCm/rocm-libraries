@@ -4,13 +4,14 @@
 function(ck_tile_fmha_fwd_get_source_compile_options fwd_blob_name out_var)
   set(compile_options)
   # Keep the compiler scheduling mode used by the validated qr_tdm_sched and qr_tdm_fp8_sched
-  # instances, and use it for every qr_tdm_pingpong instance.
-  # Clang before 24 omits a required wait after the MX async scale loads in this mode.
+  # instances, and use it for every qr_tdm_pingpong instance, at either input width (gfx1250
+  # fp8: prefill +0.8%, decode +5% geomean).
+  # Clang before 24 omits a required wait after the MX async scale loads in this mode (both
+  # pipelines stage MX scales so).
   if(fwd_blob_name MATCHES "^fmha_fwd_d128_(fp16|bf16)_.*_qr_tdm_sched(_.*)?_gfx125\\.cpp$" OR
-     fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_(fp16|bf16)_.*_qr_tdm_pingpong(_.*)?_gfx125\\.cpp$"
-     OR (fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_[a-z0-9]+_.*_qr_tdm_fp8_sched_.*_gfx125\\.cpp$"
-         AND NOT (fwd_blob_name MATCHES "_mx_" AND DEFINED CMAKE_HIP_COMPILER_VERSION
-                  AND CMAKE_HIP_COMPILER_VERSION VERSION_LESS 24)))
+     (fwd_blob_name MATCHES "^fmha_fwd_d[0-9]+_[a-z0-9]+_.*_qr_tdm_(pingpong|fp8_sched)(_.*)?_gfx125\\.cpp$"
+      AND NOT (fwd_blob_name MATCHES "_mx_" AND DEFINED CMAKE_HIP_COMPILER_VERSION
+               AND CMAKE_HIP_COMPILER_VERSION VERSION_LESS 24)))
     list(APPEND compile_options -mllvm -amdgpu-expert-scheduling-mode)
   endif()
   # Break large PHIs so blockscale and non-MX D64 keep the loop-carried K group in dwords.

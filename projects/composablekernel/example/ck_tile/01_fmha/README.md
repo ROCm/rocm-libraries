@@ -45,18 +45,48 @@ To speed up compile time, we instantiate the kernels into separate file. In this
 
 ### Ping-pong TDM forward pipeline
 
-`qr_tdm_pingpong` (gfx125, FP16/BF16 Q/K/V) is the default forward pipeline for
-head dims 32, 64, 96, 128, 160, 192/128, 256 and 512, at any query and key length.
-It stages a whole K tile per trip in two LDS buffers: trip i reads one buffer while
-the TDM fills the other with tile i + 1. On the 128-row tiles V has two buffers as well,
-issued a trip ahead. Two or more resident blocks per CU overlap one block's softmax
-with another's gemms on the same SIMD; `qr_tdm` and `qr_tdm_sched` instead prefetch
-and schedule within a block.
+`qr_tdm_pingpong` (gfx125) is the default forward pipeline for FP16/BF16 and FP8 Q/K/V
+(FP8 P; no scales, per-tensor, per-head or block descales, or MX scales) at head dims 32,
+64, 96, 128, 160, 192/128, 256 and 512, at any query and key length. It stages a whole K
+tile per trip in two LDS buffers: trip i reads one buffer while the TDM fills the other
+with tile i + 1. On the 128-row tiles V has two buffers as well, issued a trip ahead; the
+16-row (decode) tiles keep one K buffer and issue the next K once their short QK gemm has
+read the current one. Two or
+more resident blocks per CU overlap one block's softmax with another's gemms on the same
+SIMD, the waves in their gemms at a raised priority (`s_setprio`, on the tiles that read
+V before the softmax, except unmasked 128-key trips); `qr_tdm` and `qr_tdm_sched` instead
+prefetch and schedule within a block.
 
-It has 16-, 64- and 128-row query tiles (d256/d512 have no 128-row tile, and d32, whose V
-rows are narrower than 64 columns, no 16-row tile); the tile rules
-are `_gfx125_qr_tdm_pingpong_tiles` in `codegen/ops/fmha_fwd.py`. Q/K rows are staged at
-the head dim's own length (d32 is not padded to 64).
+It has 16-, 64- and 128-row query tiles (Q/K rows of 512 bytes or more, d256 at 16 bits and
+d512, have no 128-row tile), the same for every head dim and for FP16/BF16, FP8 and MX; the
+tile rules are `_gfx125_qr_tdm_pingpong_tiles` in `codegen/ops/fmha_fwd.py`. A WMMA's K
+slice is 32 bytes a lane at either width (32 elements at 16 bits, 64 at FP8). Q/K rows are
+staged at the head dim rounded up to whole K slices (d32 is not padded to 64 at 16 bits;
+FP8 d32, d96 and d160 stage 64, 128 and 192). d128 adds 128-key trips when the keys are at
+least max(1024, 2 x query rows) without a sliding window; those, and the 16-row tile's
+trips, take the widest WMMA K where it divides the row (32 elements at 16 bits, 128 at
+FP8).
+
+The 16-row (decode) tile splits each trip's keys over its warps (flash decoding within the
+block): `kw` warps on the keys times `4 / kw` on V's columns, each with its own online
+softmax over its keys, merged through LDS after the K loop, so a trip exchanges nothing
+between warps. `kw` is the most warps (4, then 2) whose shortest trip (one PV warp gemm of
+32 keys at 16 bits, 64 at FP8, 128 for MX, per key warp) keeps a warp's O and V operand
+within 192 VGPRs (two blocks a CU) and the trip's K and V within 128 KB of LDS. Long key
+ranges take trips of up to 512 keys (64 KB of K) within the same budgets. d512 (`kw` = 1)
+does not split: its four warps take 32 KB of K a trip on gemm_0's N and exchange S
+through LDS.
+
+MX (mxfp8, mxfp8bf16) takes the same tiles with the scaled WMMA (16x16x128, E8M0 scale
+operands, one per 32 elements); only the gemms' K and the Q/K row differ. QK runs on the
+widest WMMA K dividing the Q/K row (64-deep slices zero padded in registers), rows padded to
+whole 128-deep slices only where that takes fewer WMMAs (d96 to 128, d160 and d192 to 256).
+PV runs on 128-deep warp gemms, so trips take 128 keys or more, but for the prefill tiles of
+d160 and d192 (`GFX125_QR_TDM_PINGPONG_MX_64_KEY_TRIPS`): their 64-key trips, on 64-deep
+warp gemms zero padded in registers, keep two blocks a CU where 128-key trips keep one. d64
+and below run three waves a SIMD, without the read-ahead below. An FP8 P is 256
+times the softmax value (a rebase keeps it below 2^0.75, under e4m3's 448), converted
+eight values at a time.
 
 The LDS read schedule is chosen per head dim (`QrTdmPingPongLdsReadSchedule`,
 `GFX125_QR_TDM_PINGPONG_LDS_READ_SCHEDULE` in `codegen/ops/fmha_fwd.py`): prefetching
@@ -68,13 +98,23 @@ window mask, no bias, no dropout) always prefetch the next slice; their names do
 it.
 
 It supports masks, LSE, logits soft cap, elementwise bias and ALiBi, dropout (not on
-the 16-row tile), sink tokens, column-major V, batch and group mode. The one query it
-leaves to `qr_tdm_sched` is d128 with at least 128 query rows and fewer than two
+the 16-row tile), sink tokens, column-major V, batch and group mode, at FP16/BF16 and FP8
+alike; FP8 takes no scales, per-tensor, per-head or block descales (any q block, k/v
+blocks of whole 64-key PV slices; `_gfx125_qr_tdm_pingpong_block_scales`), or MX scales
+(scale rows read a word at a time where aligned, else bytewise). The one query it leaves to
+`qr_tdm_sched` (`qr_tdm_fp8_sched` at FP8) is d128 with at least 128 query rows and fewer than two
 128-row query blocks per CU (`batch * nhead_q * max_seqlen_q < 256 * num_cus`), where a
 single resident block cannot overlap softmax and gemms. `qr_tdm` sits on the tiles behind
 pingpong's on every head dim and takes what pingpong and `qr_tdm_sched` leave: group-mode
 skip, head dims that are not multiples of 8 (pingpong's dcheck/dvcheck), and on d128 the
 calls `qr_tdm_sched` refuses. The FP16/BF16 inventories hold no generic `qr`.
+
+GQA decode merges the query heads of a K/V head into one tile's rows in the kernel
+(`fmha_fwd_can_merge_head_groups`, batch mode, no mask or one query per head under a
+bottom-right causal mask, no bias; each merged row takes its head's q descale, MX scales
+and sink logit), so each K/V tile is read once per group. These packed instances (`_packgqa`, on the 16- and 64-row tiles) dispatch
+ahead of the unpacked ones; folding up to 16 query rows past the 16-row tile also needs
+`batch * nhead_q >= 2 * num_cus` (the `-pack_gqa` rule below).
 
 ### Basic TDM forward feature coverage
 
@@ -91,7 +131,9 @@ FP16/BF16 inventories contain only TDM pipelines, with head buckets up to 512.
 The existing D192/V128 bias/dropout exclusion still applies; the logits soft cap with a
 bias is generated for the TDM pipelines (`GFX125_TDM_PIPELINES_WITH_SOFT_CAP_BIAS`:
 scale_s, the soft cap, then the bias).
-FP8 and the split-KV/paged-KV APIs retain their separate inventories.
+FP8 and MX forward take `qr_tdm_pingpong` (see above); `qr_tdm_fp8_sched` keeps d128's
+small grids and the block-scale sizes pingpong leaves. The split-KV/paged-KV APIs retain their separate
+inventories.
 
 ### Scheduled TDM forward pipeline
 
@@ -294,10 +336,10 @@ By setting `-h`(nhead for q) and `-h_k`(nhead for k/v) with different number, yo
 
 `-pack_gqa=1` (the default) folds the `h / h_k` query heads that share a K/V head into the
 query length for non-causal batch-mode runs without bias or sink, so each K/V tile is
-loaded once per group. On gfx125 fp16/bf16 with `d_v >= 64` it is skipped (with a note)
-for 2..16 query rows that it would fold into more than 16 rows on a grid under two
-(batch, head) pairs per CU: the query would leave the 16-row decode tile for a tile with
-`h / h_k` times fewer blocks.
+loaded once per group. On gfx125 it is skipped (with a note) for up to
+16 query rows that it would fold into more than 16 rows on a grid under two (batch, head)
+pairs per CU: the query would leave the 16-row decode tile for a tile with `h / h_k`
+times fewer blocks.
 
 ### input/output permute, and `b*s*3*h*d`
 If you look at the kernel argument inside `fmha_fwd_kernel.hpp`, we support providing arbitrary stride for seqlen(stride_q/k/v), nhead, batch of q/k/v matrix, hence it is very flexible to support `b*h*s*d` or `b*s*h*d` input/output permute. The `-iperm=0/1`, `-operm=0/1` is a convenient way to achieve this through the executable. We didn't provide a command-line arg to test `b*s*3*h*d` layout which is by default used by torch/FA, but it's trivial to achieve this if one set the proper `stride_q/k/v` value as `3*h*d`.

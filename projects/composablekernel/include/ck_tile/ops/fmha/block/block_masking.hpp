@@ -322,6 +322,9 @@ struct GenericAttentionMask
 
     // the key sequence length, i.e. one past the last valid X index
     CK_TILE_HOST_DEVICE constexpr index_t GetXTotal() const { return x_total; }
+    // in-window elements satisfy -y < i_x - i_y < x (the left bound only where IsLocal)
+    CK_TILE_HOST_DEVICE constexpr index_t GetWindowY() const { return y; }
+    CK_TILE_HOST_DEVICE constexpr index_t GetWindowX() const { return x; }
 
     private:
     index_t y, x, sink;

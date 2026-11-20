@@ -248,13 +248,20 @@ struct FmhaFwdKernel
     static constexpr std::string_view kPipelineName = FmhaPipeline::name;
 
     // Pipelines that take the descale arguments; GetSoftmaxScale folds them as for qr_tdm.
-    static constexpr bool kTakesTdmDescales =
-        kPipelineName == "qr_tdm" || kPipelineName == "qr_tdm_fp8_sched";
+    static constexpr bool kTakesTdmDescales = kPipelineName == "qr_tdm" ||
+                                              kPipelineName == "qr_tdm_fp8_sched" ||
+                                              kPipelineName == "qr_tdm_pingpong";
 
-    static_assert(kTakesTdmDescales || QScaleEnum != BlockAttentionQuantScaleEnum::PERHEAD,
-                  "perhead scale is only supported on qr_tdm and qr_tdm_fp8_sched");
-    static_assert(!kMergeNumHeadGroupsSeqLenQ || kPipelineName == "qr_tdm_fp8_sched",
-                  "merged query heads are implemented for qr_tdm_fp8_sched only");
+    static_assert(
+        kTakesTdmDescales || QScaleEnum != BlockAttentionQuantScaleEnum::PERHEAD,
+        "perhead scale is only supported on qr_tdm, qr_tdm_fp8_sched and qr_tdm_pingpong");
+    // qr_tdm_fp8_sched reads per-head data (sink logits, per-head and MX descales) of merged
+    // rows itself (MergedHeads); qr_tdm_pingpong takes the merged rows' q descales, MX scales
+    // and sink logits by their heads (BlockFmhaQuantScales), the kernel's Q/O views carrying
+    // the rest.
+    static_assert(!kMergeNumHeadGroupsSeqLenQ || kPipelineName == "qr_tdm_fp8_sched" ||
+                      kPipelineName == "qr_tdm_pingpong",
+                  "merged query heads are implemented for qr_tdm_fp8_sched and qr_tdm_pingpong");
 
     using AttentionVariant = ck_tile::remove_cvref_t<typename FmhaPipeline::AttentionVariant>;
     using FmhaMask         = ck_tile::remove_cvref_t<typename FmhaPipeline::FmhaMask>;
@@ -1652,6 +1659,45 @@ struct FmhaFwdKernel
             }
         }
 
+        if constexpr(kMergeNumHeadGroupsSeqLenQ)
+        {
+            const auto reject = [&](const char* reason) {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                    CK_TILE_ERROR("FMHA fwd ", kPipelineName, ": ", reason);
+                return false;
+            };
+            // Merged heads must form one row stride: a single query, or seqlen_q-row heads.
+            const auto s  = kargs.seqlen_q;
+            bool foldable = s == 1 || (kargs.nhead_stride_q == s * kargs.stride_q &&
+                                       kargs.nhead_stride_o == s * kargs.stride_o);
+            if constexpr(kStoreLSE)
+                foldable = foldable && (s == 1 || kargs.nhead_stride_lse == s);
+            // (qr_tdm_pingpong addresses its merged rows' MX scales by head)
+            if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX &&
+                         kPipelineName != "qr_tdm_pingpong")
+                foldable = foldable &&
+                           (s == 1 || kargs.nhead_stride_q_descale == s * kargs.stride_q_descale);
+            if(!foldable)
+                return reject("merged query heads need foldable Q/O/LSE/scale strides.");
+            if(s * kargs.nhead_ratio_qk > FmhaPipeline::kM0)
+                return reject("merged query heads must fit one tile of query rows.");
+            if(kargs.cu_seqlen_q_ptr != nullptr || kargs.cu_seqlen_k_ptr != nullptr)
+                return reject("merged query heads do not support cu_seqlen_q/k_ptr.");
+            if constexpr(kPipelineName == "qr_tdm_pingpong")
+            {
+                // its merged rows' mask is each head's single query under a bottom-right
+                // causal mask (see the kernel's FmhaMask)
+                if constexpr(kHasMask)
+                {
+                    if(s != 1 ||
+                       kargs.mask_type != GenericAttentionMaskEnum::MASK_FROM_BOTTOM_RIGHT ||
+                       kargs.window_size_left >= 0 || kargs.window_size_right != 0)
+                        return reject("merged query heads take only a single-query "
+                                      "bottom-right causal mask.");
+                }
+            }
+        }
+
         if constexpr(kPipelineName == "qr_tdm_fp8_sched")
         {
             const bool log    = ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING));
@@ -1672,24 +1718,6 @@ struct FmhaFwdKernel
             {
                 if(kargs.block_scale_size_q <= 0 || kargs.block_scale_size_kv <= 0)
                     return reject("block_scale_size_q and block_scale_size_kv must be positive.");
-            }
-            if constexpr(kMergeNumHeadGroupsSeqLenQ)
-            {
-                // Merged heads must form one row stride: a single query, or seqlen_q-row heads.
-                const auto s  = kargs.seqlen_q;
-                bool foldable = s == 1 || (kargs.nhead_stride_q == s * kargs.stride_q &&
-                                           kargs.nhead_stride_o == s * kargs.stride_o);
-                if constexpr(kStoreLSE)
-                    foldable = foldable && (s == 1 || kargs.nhead_stride_lse == s);
-                if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
-                    foldable = foldable && (s == 1 || kargs.nhead_stride_q_descale ==
-                                                          s * kargs.stride_q_descale);
-                if(!foldable)
-                    return reject("merged query heads need foldable Q/O/LSE/scale strides.");
-                if(s * kargs.nhead_ratio_qk > FmhaPipeline::kM0)
-                    return reject("merged query heads must fit one tile of query rows.");
-                if(kargs.cu_seqlen_q_ptr != nullptr || kargs.cu_seqlen_k_ptr != nullptr)
-                    return reject("merged query heads do not support cu_seqlen_q/k_ptr.");
             }
             if constexpr(QScaleEnum == BlockAttentionQuantScaleEnum::MX)
             {
@@ -1727,7 +1755,9 @@ struct FmhaFwdKernel
                 }
             }
 
-            if(kargs.block_scale_size_q % FmhaPipeline::kM0 != 0)
+            // (qr_tdm_pingpong takes each row's q block descale: any q block)
+            if(kPipelineName != "qr_tdm_pingpong" &&
+               kargs.block_scale_size_q % FmhaPipeline::kM0 != 0)
             {
                 if(log)
                     CK_TILE_ERROR("FMHA fwd BLOCKSCALE: block_scale_size_q (",
@@ -3474,16 +3504,22 @@ struct FmhaFwdKernel
             }();
 
             FmhaMask mask = [&]() {
+                // qr_tdm_pingpong's merged rows are the heads' single queries (seqlen_q 1,
+                // bottom-right causal): num_rows_q rows, each seeing every key, i.e. a window
+                // reaching num_rows_q - 1 further right.
+                constexpr bool kRowsAreHeads =
+                    kMergeNumHeadGroupsSeqLenQ && kPipelineName == "qr_tdm_pingpong";
+                const index_t mask_rows = kRowsAreHeads ? num_rows_q : kargs.seqlen_q;
                 if constexpr(kHasMask)
                     return ck_tile::make_generic_attention_mask_from_lr_window<FmhaMask>(
                         kargs.window_size_left,
-                        kargs.window_size_right,
+                        kargs.window_size_right + (kRowsAreHeads ? num_rows_q - 1 : 0),
                         kargs.sink_size,
-                        kargs.seqlen_q,
+                        mask_rows,
                         kargs.seqlen_k,
                         kargs.mask_type == GenericAttentionMaskEnum::MASK_FROM_TOP_LEFT);
                 else
-                    return FmhaMask{kargs.seqlen_q, kargs.seqlen_k};
+                    return FmhaMask{mask_rows, kargs.seqlen_k};
             }();
 
             // WA i_batch capture structure binding before c++20
@@ -3531,7 +3567,9 @@ struct FmhaFwdKernel
             [[maybe_unused]] long_index_t descale_offset_q = 0;
             [[maybe_unused]] long_index_t descale_offset_k = 0;
             [[maybe_unused]] long_index_t descale_offset_v = 0;
-            if constexpr(kPerHeadQScale || kBlockQScale || kMxTdmSched)
+            // MX descales: qr_tdm_fp8_sched's and qr_tdm_pingpong's
+            constexpr bool kMxScales = QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+            if constexpr(kPerHeadQScale || kBlockQScale || kMxScales)
             {
                 descale_offset_q =
                     static_cast<long_index_t>(i_nhead_q) * kargs.nhead_stride_q_descale;
@@ -3548,7 +3586,7 @@ struct FmhaFwdKernel
                     descale_offset_v +=
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_v_descale;
                 }
-                else if constexpr(kMxTdmSched)
+                else if constexpr(kMxScales)
                 {
                     // Group MX: Q/K scale rows follow the physical token starts, V its own.
                     descale_offset_q += static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]) *
@@ -3565,9 +3603,10 @@ struct FmhaFwdKernel
                 }
             }
 
-            static_assert(kTakesTdmDescales || QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
-                          "only qr_tdm and qr_tdm_fp8_sched implement quantization descales in "
-                          "this branch");
+            static_assert(
+                kTakesTdmDescales || QScaleEnum == BlockAttentionQuantScaleEnum::NO_SCALE,
+                "only qr_tdm, qr_tdm_fp8_sched and qr_tdm_pingpong implement quantization "
+                "descales in this branch");
 
             constexpr bool kFoldedQScale =
                 QScaleEnum == BlockAttentionQuantScaleEnum::PERTENSOR || kPerHeadQScale;
@@ -3581,7 +3620,21 @@ struct FmhaFwdKernel
             // Same scale_s the pipeline receives, so the sink recovers its logit in the same
             // units it was seeded in. Dividing by the folded scale_s the pipeline re-applies is
             // what makes the descales cancel.
-            const float scale_s = GetSoftmaxScale(kargs, descale_offset_q, descale_offset_k, i_m0);
+            // qr_tdm_pingpong's merged rows take their own q descales on the scores
+            // (BlockFmhaQuantScales), so scale_s then folds none
+            // (and every row its block's at block scales)
+            constexpr bool kMergedRowQScale =
+                kPipelineName == "qr_tdm_pingpong" &&
+                (kBlockQScale || (kMergeNumHeadGroupsSeqLenQ && kPerHeadQScale));
+            const float scale_s = [&]() {
+                if constexpr(kMergedRowQScale && kPerHeadQScale)
+                    return kargs.scale_s *
+                           reinterpret_cast<const float*>(kargs.k_descale_ptr)[descale_offset_k];
+                else if constexpr(kMergedRowQScale)
+                    return kargs.scale_s;
+                else
+                    return GetSoftmaxScale(kargs, descale_offset_q, descale_offset_k, i_m0);
+            }();
             // Merged rows read their sinks per head in the pipeline; a finite value marks one.
             const float sink_value =
                 kargs.sink_ptr != nullptr
@@ -3590,7 +3643,21 @@ struct FmhaFwdKernel
                            : (*(static_cast<const float*>(kargs.sink_ptr) + i_nhead)) / scale_s)
                     : -numeric<float>::infinity();
 
-            auto tdm_dropout = MakeBlockDropout(kargs, i_batch, i_nhead);
+            // qr_tdm_pingpong's fp8 P takes dropout's keep mask unscaled, the 1/(1 - p_drop)
+            // on O (v_descale below): scaled, the kept p could pass e4m3's largest value
+            constexpr bool kDropoutScaleOnO =
+                kPipelineName == "qr_tdm_pingpong" && kHasDropout &&
+                std::is_same_v<typename FmhaPipeline::PDataType, fp8_t>;
+            auto tdm_dropout = [&]() {
+                if constexpr(kDropoutScaleOnO)
+                {
+                    auto unscaled      = kargs;
+                    unscaled.rp_undrop = 1.f;
+                    return MakeBlockDropout(unscaled, i_batch, i_nhead);
+                }
+                else
+                    return MakeBlockDropout(kargs, i_batch, i_nhead);
+            }();
             // a buffer store checks only its first element, so a vector would spill past
             // seqlen_k; the TDM pipelines take unpadded variants for any length (the TDM bounds
             // the K/V reads), so the randval stores are always bounded
@@ -3617,7 +3684,7 @@ struct FmhaFwdKernel
             static_assert(kTakesTdmSoftCapDropout || !(kHasLogitsSoftCap || kHasDropout),
                           "this pipeline takes no logits soft cap or dropout arguments");
             auto invoke_fmha_pipeline = [&](auto&&... args) -> decltype(auto) {
-                if constexpr(kMergeNumHeadGroupsSeqLenQ)
+                if constexpr(kMergeNumHeadGroupsSeqLenQ && kPipelineName == "qr_tdm_fp8_sched")
                 {
                     typename FmhaPipeline::MxDescales mx;
                     if constexpr(kMxTdmSched)
@@ -3668,6 +3735,60 @@ struct FmhaFwdKernel
                                           v_descale,
                                           mx,
                                           merged);
+                }
+                else if constexpr(kPipelineName == "qr_tdm_pingpong")
+                {
+                    // one entry at every width: the soft cap, dropout and the quantization
+                    // scales (BlockFmhaQuantScales::Args; q*k's per-tensor/per-head in scale_s)
+                    typename FmhaPipeline::QuantScaleArgs quant;
+                    quant.rows_per_head = kargs.seqlen_q;
+                    quant.rows          = num_rows_q;
+                    if constexpr(kMergeNumHeadGroupsSeqLenQ)
+                    {
+                        if(kargs.sink_ptr != nullptr)
+                            quant.sink = static_cast<const float*>(kargs.sink_ptr) + i_nhead_q;
+                    }
+                    quant.o = v_descale;
+                    if constexpr(kDropoutScaleOnO)
+                        quant.o *= kargs.rp_undrop;
+                    if constexpr(kMergedRowQScale || kMxScales)
+                    {
+                        quant.q = static_cast<const char*>(kargs.q_descale_ptr) +
+                                  descale_offset_q * (kMxScales ? 1 : sizeof(float));
+                        if constexpr(kMergeNumHeadGroupsSeqLenQ)
+                            quant.q_head_stride = kargs.nhead_stride_q_descale;
+                        // block q descales per block_scale_size_q queries, a merged row's
+                        // per-head one for all its head's
+                        if constexpr(kBlockQScale)
+                            quant.q_block = kargs.block_scale_size_q;
+                        else
+                            quant.q_block = kargs.seqlen_q;
+                    }
+                    if constexpr(kBlockQScale || kMxScales)
+                    {
+                        constexpr index_t kBytes = kMxScales ? 1 : sizeof(float);
+                        quant.k                  = static_cast<const char*>(kargs.k_descale_ptr) +
+                                  descale_offset_k * kBytes;
+                        quant.v = static_cast<const char*>(kargs.v_descale_ptr) +
+                                  descale_offset_v * kBytes;
+                        quant.keys = kargs.seqlen_k;
+                        if constexpr(kBlockQScale)
+                            quant.kv_block = kargs.block_scale_size_kv;
+                    }
+                    if constexpr(kMxScales)
+                    {
+                        quant.stride_q = kargs.stride_q_descale;
+                        quant.stride_k = kargs.stride_k_descale;
+                        quant.stride_v = kargs.stride_v_descale;
+                        quant.qk_bytes = integer_divide_ceil(kargs.hdim_q, 32);
+                        quant.cols_v   = kargs.hdim_v;
+                    }
+                    return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...,
+                                          tdm_soft_cap,
+                                          tdm_soft_cap_rcp,
+                                          tdm_randval_dram_window,
+                                          tdm_dropout,
+                                          quant);
                 }
                 else if constexpr(kTakesTdmDescales && kBlockQScale)
                 {
@@ -3830,10 +3951,11 @@ struct FmhaFwdKernel
                     auto o_dram = [&] {
                         const auto o_dram_naive = [&] {
                             {
+                                // merged query heads: their rows (num_rows_q, row_stride_o)
                                 return make_naive_tensor_view<address_space_enum::global>(
                                     o_ptr,
-                                    make_tuple(kargs.seqlen_q, kargs.hdim_v),
-                                    make_tuple(kargs.stride_o, 1),
+                                    make_tuple(num_rows_q, kargs.hdim_v),
+                                    make_tuple(row_stride_o, 1),
                                     alignment,
                                     number<1>{});
                             }
@@ -3857,9 +3979,9 @@ struct FmhaFwdKernel
                     {
                         fmha_tdm_sched_store_o_tile_async_from_lds<FmhaPipeline, kAsyncOStoreBytes>(
                             o_lds_staging,
-                            o_ptr + static_cast<long_index_t>(i_m0) * kargs.stride_o + i_n1,
-                            kargs.stride_o,
-                            kargs.seqlen_q - i_m0,
+                            o_ptr + static_cast<long_index_t>(i_m0) * row_stride_o + i_n1,
+                            row_stride_o,
+                            num_rows_q - i_m0,
                             o_acc_tile);
                     }
                     else if constexpr(detail::epilogue_uses_smem_v<EpiloguePipeline>)
