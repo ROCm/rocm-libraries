@@ -500,23 +500,6 @@ std::vector<float> generateData(T                           dgen,
         throw std::runtime_error(
             "integer_exact MX data with swizzled scales requires K along the stored rows");
 
-    // The K-major reference covers the generator's stride * cols buffer, whose scales the
-    // generator counts per whole run of sizes[0] elements; past the last whole run there are none.
-    // sizes[0] is the divisor below. A zero row count is SIGFPE, and the generator would have
-    // rejected a non-positive size with invalid_argument before writing. Check that first.
-    if(integerExact && isMatrixA == isTranspose)
-    {
-        if(sizes[0] == 0 || sizes[1] == 0)
-            throw std::invalid_argument(
-                "Invalid dimensions: dimension sizes must be greater than 0.");
-        if(strides[1] * sizes[1] % sizes[0] != 0)
-            throw std::runtime_error(
-                "integer_exact MX data requires the stride times the columns to be a multiple of "
-                "the rows, got stride "
-                + std::to_string(strides[1]) + ", " + std::to_string(sizes[1]) + " columns and "
-                + std::to_string(sizes[0]) + " rows");
-    }
-
     // Non-K-major integer_exact (non-transposed A, transposed B) realigns through
     // getAlignedFloat. A partial trailing K block makes that helper form a data index one
     // past the packed buffer (rows=64, cols=33, block 32 indexes 2112 of 2112 elements).
@@ -668,12 +651,11 @@ std::vector<float> generateData(T                           dgen,
             return restrideReference(
                 dgen.getReferenceFloat(), sizes[0], sizes[1], strides[1]);
 
-        // The generator's reference floats describe its own values, which integerExact replaced;
-        // recompute them from the bytes, over the generator's whole buffer of stride * cols
-        // elements as its own reference does, so a padded leading dimension keeps its layout.
-        // The generator's scale mapping blocks each run of sizes[0] elements of that buffer, so a
-        // partial block at the end of a run keeps its own scale.
-        size_t const       count = static_cast<size_t>(strides[1]) * static_cast<size_t>(sizes[1]);
+        // The generator's reference floats describe its own values, which integerExact replaced.
+        // Recompute the dense logical reference from the replacement bytes, then apply the caller's
+        // leading dimension below.
+        size_t const count
+            = static_cast<size_t>(sizes[0]) * static_cast<size_t>(sizes[1]);
         std::vector<float> ref(count);
         for(size_t idx = 0; idx < count; idx++)
         {
