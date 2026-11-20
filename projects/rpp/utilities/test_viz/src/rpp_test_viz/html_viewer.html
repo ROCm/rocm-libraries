@@ -4,82 +4,170 @@
 <meta charset="utf-8">
 <title>rpp-test-viz</title>
 <style>
-  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --fg:#c9d1d9; --dim:#8b949e; --accent:#58a6ff; --fail:#f85149; --pass:#3fb950; }
-  * { box-sizing: border-box; }
-  body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--fg); font:13px/1.4 ui-sans-serif,system-ui,sans-serif; }
-  #side { width:420px; min-width:260px; resize:horizontal; overflow:hidden; display:flex; flex-direction:column; border-right:1px solid var(--border); background:var(--panel); }
-  #side input { margin:8px; padding:6px 8px; background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:6px; }
+  :root { color-scheme:dark; --bg:#0d1117; --panel:#161b22; --border:#30363d; --fg:#c9d1d9; --dim:#8b949e; --accent:#58a6ff; --fail:#f85149; --pass:#3fb950; --pin:#ffd33d; }
+  * { box-sizing: border-box; scrollbar-width:thin; scrollbar-color:var(--border) transparent; }
+  ::-webkit-scrollbar { width:10px; height:10px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background:transparent; }
+  ::-webkit-scrollbar-thumb { background:var(--border); border:2px solid transparent; border-radius:6px; background-clip:padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background-color:#484f58; }
+  body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--fg); font:13px/1.4 ui-sans-serif,system-ui,sans-serif; overflow:hidden; }
+  body.resizing, body.resizing * { user-select:none; cursor:inherit !important; }
+  button { background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:4px; padding:1px 8px; font:inherit; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  select, input { font:inherit; }
+  kbd { display:inline-block; min-width:18px; padding:0 4px; border:1px solid var(--border); border-bottom-width:2px; border-radius:4px; background:var(--bg); font:11px ui-monospace,monospace; text-align:center; }
+
+  .gutter { flex:0 0 5px; cursor:col-resize; background:linear-gradient(var(--border),var(--border)) center/1px 100% no-repeat; }
+  .gutter:hover, .ggut:hover { background-color:#1f6feb66; }
+
+  #side { width:420px; display:flex; flex-direction:column; background:var(--panel); min-width:0; }
+  #side-top { display:flex; align-items:center; gap:8px; padding:8px; }
+  #filter { flex:1; min-width:0; padding:6px 8px; background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:6px; }
+  #filter:focus { outline:none; border-color:var(--accent); }
+  .chk { display:flex; align-items:center; gap:4px; white-space:nowrap; font-size:12px; color:var(--dim); cursor:pointer; }
   #counts { padding:0 10px 6px; color:var(--dim); font-size:12px; }
   #list { flex:1; overflow:auto; font:12px ui-monospace,monospace; }
   #list div { padding:3px 10px; white-space:nowrap; cursor:pointer; }
   #list div:hover { background:#1f2630; }
-  #list div.sel { background:#1f6feb44; }
+  #list div.sel { background:#1f6feb44; box-shadow:inset 2px 0 var(--accent); }
   #list .n { display:inline-block; width:92px; text-align:right; margin-right:8px; color:var(--fail); }
   #list .n.ok { color:var(--pass); }
   #list .fx { color:var(--dim); }
+  #list .empty { color:var(--dim); cursor:default; }
+
   #main { flex:1; display:flex; flex-direction:column; min-width:0; }
   #head { padding:8px 12px; border-bottom:1px solid var(--border); }
-  #title { font-weight:600; word-break:break-all; }
+  #title-row { display:flex; align-items:flex-start; gap:10px; }
+  #title { flex:1; font-weight:600; word-break:break-all; }
   #meta { color:var(--dim); font-size:12px; }
-  #controls { display:flex; flex-wrap:wrap; gap:14px; align-items:center; padding:6px 12px; border-bottom:1px solid var(--border); font-size:12px; }
+  #controls { display:flex; flex-wrap:wrap; gap:6px 14px; align-items:center; padding:6px 12px; border-bottom:1px solid var(--border); font-size:12px; }
   #controls label { display:flex; gap:6px; align-items:center; }
-  #controls select, #controls input[type=range] { accent-color:var(--accent); background:var(--bg); color:var(--fg); border:1px solid var(--border); }
+  #controls select, #controls input[type=range] { accent-color:var(--accent); background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:4px; }
+  #controls .sep { width:1px; align-self:stretch; background:var(--border); }
+  #levels { display:flex; gap:8px; align-items:center; }
+  #levels input[type=range] { width:90px; }
+  #levels input[type=number] { width:78px; padding:0 4px; background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:4px; }
+  #lv-auto.on { color:var(--accent); border-color:var(--accent); }
+  #pane-toggles { display:flex; gap:4px; align-items:center; }
+  #pane-toggles button:not(.on) { color:var(--dim); text-decoration:line-through; }
+  #pane-toggles button.on { border-color:#1f6feb99; }
+
   #body { flex:1; display:flex; min-height:0; }
-  #grid { flex:1; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:6px; padding:6px; min-width:0; }
-  .pane { position:relative; overflow:auto; background:#010409; border:1px solid var(--border); border-radius:6px; }
-  .pane .lbl { position:sticky; top:0; left:0; z-index:1; display:inline-block; padding:2px 8px; background:#161b22cc; font-size:11px; color:var(--dim); }
-  .pane canvas { display:block; image-rendering:pixelated; cursor:crosshair; }
-  .pane .mark { position:absolute; display:none; pointer-events:none; box-sizing:border-box; z-index:2;
-                border:1px solid #fff; box-shadow:0 0 0 1px #000, inset 0 0 0 1px #000; }
-  .pane.dragging, .pane.dragging canvas { cursor:grabbing; }
-  #info { width:320px; overflow:auto; border-left:1px solid var(--border); padding:10px 12px; font:12px ui-monospace,monospace; }
-  #info table { border-collapse:collapse; margin:6px 0 12px; }
+  #grid { flex:1; position:relative; display:grid; gap:6px; padding:6px; min-width:0; min-height:0; }
+  .ggut { position:absolute; z-index:5; border-radius:3px; }
+  .ggut.col { top:6px; bottom:6px; width:6px; cursor:col-resize; }
+  .ggut.row { left:6px; right:6px; height:6px; cursor:row-resize; }
+  .pane { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; background:#010409; border:1px solid var(--border); border-radius:6px; }
+  .pane.drop { outline:2px dashed var(--accent); outline-offset:-2px; }
+  .pane.moving { opacity:.4; }
+  .phead { display:flex; align-items:center; gap:8px; padding:3px 4px 3px 8px; background:var(--panel); border-bottom:1px solid var(--border); font-size:11px; color:var(--dim); white-space:nowrap; overflow:hidden; cursor:grab; user-select:none; }
+  .phead .grip { letter-spacing:-2px; }
+  .phead .ptitle { color:var(--fg); }
+  .phead .pextra { flex:1; display:flex; align-items:center; gap:6px; overflow:hidden; }
+  .pbtn { border:0; background:none; color:var(--dim); padding:0 5px; font-size:13px; line-height:1; }
+  .pbtn:hover { color:var(--fg); }
+  .cbar { display:inline-block; width:72px; height:8px; border-radius:2px; }
+  .sw { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:-2px; }
+  .view { flex:1; position:relative; overflow:auto; min-height:0; }
+  .view canvas { display:block; image-rendering:pixelated; cursor:crosshair; }
+  .view.dragging, .view.dragging canvas { cursor:grabbing; }
+  .mark { position:absolute; display:none; pointer-events:none; z-index:2; border:1px solid #fff; box-shadow:0 0 0 1px #000, inset 0 0 0 1px #000; }
+  .mark.pinned { border:2px solid var(--pin); }
+
+  #info { width:320px; overflow:auto; padding:10px 12px; font:12px ui-monospace,monospace; min-width:0; }
+  #info h4 { margin:0 0 6px; font:600 11px ui-sans-serif,system-ui,sans-serif; color:var(--dim); text-transform:uppercase; letter-spacing:.06em; }
+  #pixel { margin-bottom:16px; }
+  #info table { border-collapse:collapse; margin-top:6px; }
   #info td, #info th { padding:1px 8px 1px 0; text-align:right; }
   #info th { color:var(--dim); font-weight:normal; text-align:left; }
+  .pinnote { color:var(--pin); font-size:11px; }
   .FAIL { color:var(--fail); } .pass { color:var(--pass); } .skip { color:var(--dim); }
   pre { white-space:pre-wrap; word-break:break-all; color:var(--dim); margin:0; }
-  #legend span { display:inline-block; width:10px; height:10px; margin:0 4px 0 10px; vertical-align:middle; }
   .help { color:var(--dim); }
+
+  #keys { position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; background:#0009; }
+  #keys[hidden] { display:none; }
+  #keys > div { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px 18px; box-shadow:0 8px 24px #000a; }
+  #keys h3 { margin:0 0 8px; font-size:14px; }
+  #keys td { padding:3px 14px 3px 0; vertical-align:top; }
+  #keys td:first-child { text-align:right; white-space:nowrap; }
+  #toast { position:fixed; bottom:18px; left:50%; transform:translateX(-50%); z-index:30; max-width:80vw; padding:6px 12px; background:var(--panel); border:1px solid var(--border); border-radius:6px; box-shadow:0 4px 12px #0008; opacity:0; transition:opacity .2s; pointer-events:none; word-break:break-all; }
+  #toast.show { opacity:1; }
 </style>
 </head>
 <body>
 <div id="side">
-  <input id="filter" placeholder="filter cases (substring, or * glob)">
+  <div id="side-top">
+    <input id="filter" placeholder="filter cases (substring, or * glob)   /">
+    <label class="chk"><input type="checkbox" id="failonly"> failing only</label>
+  </div>
   <div id="counts"></div>
   <div id="list"></div>
 </div>
+<div class="gutter" data-resize="side" title="drag to resize"></div>
 <div id="main">
-  <div id="head"><div id="title"></div><div id="meta"></div></div>
+  <div id="head">
+    <div id="title-row"><div id="title"></div><button id="copy" title="copy --gtest_filter for this case (c)">copy filter</button></div>
+    <div id="meta"></div>
+  </div>
   <div id="controls">
     <span id="sliders"></span>
     <label>channel <select id="channel"></select></label>
     <label>outside ROI <select id="outside"><option value="dim">dim</option><option value="hide">hide</option><option value="show">show</option></select></label>
-    <label>contrast <select id="contrast"><option value="slice">slice</option><option value="global">global</option></select></label>
-    <span id="limits" class="help"></span>
+    <span id="levels">display
+      <label title="value shown as black">min <input id="lv-lo-r" type="range"><input id="lv-lo" type="number" step="any"></label>
+      <label title="value shown as white">max <input id="lv-hi-r" type="range"><input id="lv-hi" type="number" step="any"></label>
+      <button id="lv-auto" title="8-bit data: full type range; float data: compared elements of the current slice (a)">auto</button>
+    </span>
     <label>zoom <input id="zoom" type="range" min="1" max="128" value="8"> <span id="zoomv"></span></label>
-    <span id="legend">status:<span style="background:#30363d"></span>not compared<span style="background:#2ea043"></span>pass<span style="background:#f85149"></span>fail</span>
-    <span class="help">↑/↓: next/prev case · wheel: zoom · drag: pan (panes linked)</span>
+    <button id="fit" title="fit image to pane (f)">fit</button>
+    <span class="sep"></span>
+    <label>layout <select id="layout"><option value="grid">grid</option><option value="row">row</option><option value="column">column</option></select></label>
+    <span id="pane-toggles"></span>
+    <button id="reset" title="restore the default pane order, sizes and visibility">reset layout</button>
+    <span class="sep"></span>
+    <button id="keys-btn" title="keyboard shortcuts (?)">? shortcuts</button>
   </div>
   <div id="body">
-    <div id="grid">
-      <div class="pane"><span class="lbl">reference</span><canvas id="c-ref"></canvas><div class="mark"></div></div>
-      <div class="pane"><span class="lbl">actual</span><canvas id="c-act"></canvas><div class="mark"></div></div>
-      <div class="pane"><span class="lbl" id="diff-lbl">|actual − reference|</span><canvas id="c-diff"></canvas><div class="mark"></div></div>
-      <div class="pane"><span class="lbl">status</span><canvas id="c-status"></canvas><div class="mark"></div></div>
-    </div>
-    <div id="info"><div id="pixel" class="help">hover a pixel</div><pre id="failure"></pre></div>
+    <div id="grid"></div>
+    <div class="gutter" data-resize="info" title="drag to resize"></div>
+    <div id="info"><h4>pixel</h4><div id="pixel" class="help">hover a pixel · click to pin</div><h4>failure</h4><pre id="failure"></pre></div>
   </div>
 </div>
+<div id="keys" hidden><div>
+  <h3>Shortcuts</h3>
+  <table>
+    <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>previous / next case</td></tr>
+    <tr><td><kbd>←</kbd> <kbd>→</kbd></td><td>step the innermost leading axis (depth, else batch); with <kbd>Shift</kbd>, the outermost</td></tr>
+    <tr><td><kbd>n</kbd> <kbd>N</kbd></td><td>jump to next / previous failing element, across slices</td></tr>
+    <tr><td><kbd>f</kbd></td><td>fit zoom to pane</td></tr>
+    <tr><td><kbd>+</kbd> <kbd>−</kbd></td><td>zoom in / out (wheel zooms about the cursor)</td></tr>
+    <tr><td><kbd>a</kbd></td><td>reset display min/max to auto</td></tr>
+    <tr><td><kbd>c</kbd></td><td>copy <code>--gtest_filter</code> for this case</td></tr>
+    <tr><td><kbd>/</kbd></td><td>focus the case filter (<kbd>Enter</kbd> opens the first match)</td></tr>
+    <tr><td><kbd>Esc</kbd></td><td>close this · restore a maximized pane · unpin pixel</td></tr>
+    <tr><td>click</td><td>pin / unpin the pixel under the cursor</td></tr>
+    <tr><td>drag image</td><td>pan (all panes linked)</td></tr>
+    <tr><td>drag pane header</td><td>swap with another pane; double-click to maximize</td></tr>
+    <tr><td>drag gutters</td><td>resize panes, case list and info panel</td></tr>
+  </table>
+</div></div>
+<div id="toast"></div>
 <script id="data" type="application/json">/*__RPP_TEST_VIZ_DATA__*/[]</script>
 <script>
 "use strict";
 const ENTRIES = JSON.parse(document.getElementById("data").textContent);
 const $ = (id) => document.getElementById(id);
+const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
 const INFERNO = [[0,0,4],[31,12,72],[85,15,109],[136,34,106],[186,54,85],[227,89,51],[249,140,10],[249,201,50],[252,255,164]];
 const STATUS_RGB = [[48,54,61],[46,160,67],[248,81,73]];
 const BG_RGB = [1, 4, 9];  // matches the pane background
 const STATUS_NAME = ["not compared", "pass", "FAIL"];
 const STATUS_CLS = ["skip", "pass", "FAIL"];
+const PANES = { ref: "reference", act: "actual", diff: "|actual − reference|", status: "status" };
+const SHORT = { ref: "ref", act: "actual", diff: "diff", status: "status" };
+const KEYS = Object.keys(PANES);
+const GAP = 6, MIN_PANE = 80;
 
 // Arrays are gzip + base64; inflated only when their case is first opened.
 async function unpack(s) {
@@ -102,14 +190,14 @@ async function load(i) {
   const v = { e, C, rgb: C === 3, dims, labels, H: dims[dims.length - 2], W: dims[dims.length - 1],
               ref: await typed(e.ref), act: await typed(e.act),
               diff: new Float32Array(await unpack(e.diff)), status: new Uint8Array(await unpack(e.status)) };
-  // Shared contrast: full range for 8-bit integer types, else min/max over reference and actual.
-  const dt = e.dtypes[1];
-  if (dt === "uint8") v.lim = [0, 255];
-  else if (dt === "int8") v.lim = [-128, 127];
+  // 8-bit types display their full range; float types are stretched per slice in draw().
+  v.lim = { uint8: [0, 255], int8: [-128, 127] }[e.dtypes[1]] || null;
+  // Slider domain for manual levels: the type range, else everything in reference and actual.
+  if (v.lim) v.dom = v.lim;
   else {
     let lo = Infinity, hi = -Infinity;
     for (const a of [v.ref, v.act]) for (const x of a) if (Number.isFinite(x)) { if (x < lo) lo = x; if (x > hi) hi = x; }
-    v.lim = lo === Infinity ? [0, 1] : hi > lo ? [lo, hi] : [lo - 0.5, hi + 0.5];
+    v.dom = lo === Infinity ? [0, 1] : hi > lo ? [lo, hi] : [lo - 0.5, hi + 0.5];
   }
   v.peak = 0;
   for (const d of v.diff) if (Math.abs(d) > v.peak) v.peak = Math.abs(d);
@@ -117,59 +205,226 @@ async function load(i) {
   return v;
 }
 
-// ---- state + layout ---------------------------------------------------------
-let visible = [], current = -1, view = null, lead = [], hover = null, channelChoice = null;
+// ---- persisted layout preferences --------------------------------------------
+const STORE = "rpp-test-viz";
+const prefs = Object.assign({ order: KEYS.slice(), hidden: [], layout: "grid", fr: {}, side: 420, info: 320, failOnly: false, outside: "dim" },
+                            (() => { try { return JSON.parse(localStorage.getItem(STORE)) || {}; } catch { return {}; } })());
+if (prefs.order.length !== KEYS.length || !KEYS.every(k => prefs.order.includes(k))) prefs.order = KEYS.slice();
+prefs.hidden = prefs.hidden.filter(k => KEYS.includes(k));
+if (prefs.hidden.length === KEYS.length) prefs.hidden = [];
+function save() { try { localStorage.setItem(STORE, JSON.stringify(prefs)); } catch { /* storage unavailable */ } }
 
+// ---- state -------------------------------------------------------------------
+let visible = [], current = -1, view = null, lead = [], hover = null, pinned = false, channelChoice = null;
+let zoom = 8, maximized = null, levels = null;  // levels: manual [lo, hi], or null for auto
+
+// ---- pane grid -----------------------------------------------------------------
+const grid = $("grid");
+for (const k of KEYS) {
+  const extra = k === "diff" ? `<span class="cbar"></span><span id="diff-peak"></span>`
+              : k === "status" ? `<span class="sw" style="background:rgb(${STATUS_RGB[0]})"></span> not compared <span class="sw" style="background:rgb(${STATUS_RGB[1]})"></span> pass <span class="sw" style="background:rgb(${STATUS_RGB[2]})"></span> fail <span id="status-count"></span>`
+              : "";
+  grid.insertAdjacentHTML("beforeend",
+    `<div class="pane" data-pane="${k}">` +
+    `<div class="phead" draggable="true" title="drag onto another pane to swap · double-click to maximize">` +
+    `<span class="grip">⋮⋮</span><span class="ptitle">${PANES[k]}</span><span class="pextra">${extra}</span>` +
+    `<button class="pbtn" data-act="max" title="maximize / restore">⤢</button><button class="pbtn" data-act="hide" title="hide pane">×</button></div>` +
+    `<div class="view"><canvas id="c-${k}"></canvas><div class="mark"></div></div></div>`);
+}
+document.querySelector(".cbar").style.background = `linear-gradient(to right, ${INFERNO.map(c => `rgb(${c})`).join(",")})`;
+$("pane-toggles").innerHTML = "panes " + KEYS.map(k => `<button data-pane="${k}" title="show / hide">${SHORT[k]}</button>`).join("");
+const paneEl = (k) => grid.querySelector(`.pane[data-pane="${k}"]`);
+const views = [...grid.querySelectorAll(".view")];
+
+function shownPanes() { return maximized ? [maximized] : prefs.order.filter(k => !prefs.hidden.includes(k)); }
+function gridShape(n) {
+  if (prefs.layout === "row") return [n, 1];
+  if (prefs.layout === "column") return [1, n];
+  const nc = Math.ceil(Math.sqrt(n));
+  return [nc, Math.ceil(n / nc)];
+}
+// Track sizes, kept per layout and shape so maximizing or hiding a pane doesn't lose them.
+function fractions(nc, nr) {
+  const key = `${prefs.layout}:${nc}x${nr}`, f = prefs.fr[key];
+  if (!f || f.cols.length !== nc || f.rows.length !== nr) prefs.fr[key] = { cols: Array(nc).fill(1), rows: Array(nr).fill(1) };
+  return prefs.fr[key];
+}
+
+function layoutGrid() {
+  const shown = shownPanes(), [nc, nr] = gridShape(shown.length), f = fractions(nc, nr);
+  grid.style.gridTemplateColumns = f.cols.map(x => `minmax(0,${x}fr)`).join(" ");
+  grid.style.gridTemplateRows = f.rows.map(x => `minmax(0,${x}fr)`).join(" ");
+  for (const k of KEYS) {
+    const el = paneEl(k), i = shown.indexOf(k);
+    el.style.display = i < 0 ? "none" : "";
+    el.style.order = i;
+    el.querySelector('[data-act="max"]').textContent = maximized === k ? "⤡" : "⤢";
+  }
+  for (const b of $("pane-toggles").querySelectorAll("button")) b.classList.toggle("on", !prefs.hidden.includes(b.dataset.pane));
+  positionGutters();
+  placeMarks();
+}
+
+// Splitters sit in the grid gaps; each moves the boundary between two adjacent tracks.
+function positionGutters() {
+  grid.querySelectorAll(".ggut").forEach(g => g.remove());
+  const shown = shownPanes(), [nc, nr] = gridShape(shown.length), g0 = grid.getBoundingClientRect();
+  const add = (axis, i, at) => {
+    const g = document.createElement("div");
+    g.className = "ggut " + axis;
+    g.dataset.i = i;
+    g.style[axis === "col" ? "left" : "top"] = at + GAP / 2 - 3 + "px";
+    grid.append(g);
+  };
+  for (let i = 0; i < nc - 1; ++i) add("col", i, paneEl(shown[i]).getBoundingClientRect().right - g0.left);
+  for (let j = 0; j < nr - 1; ++j) add("row", j, paneEl(shown[j * nc]).getBoundingClientRect().bottom - g0.top);
+}
+new ResizeObserver(positionGutters).observe(grid);
+
+function startDrag(onMove, cursor) {
+  document.body.style.cursor = cursor;
+  document.body.classList.add("resizing");
+  const up = () => {
+    window.removeEventListener("mousemove", onMove);
+    window.removeEventListener("mouseup", up);
+    document.body.style.cursor = "";
+    document.body.classList.remove("resizing");
+    save();
+  };
+  window.addEventListener("mousemove", onMove);
+  window.addEventListener("mouseup", up);
+}
+
+grid.addEventListener("mousedown", (ev) => {
+  const g = ev.target.closest(".ggut");
+  if (!g || ev.button !== 0) return;
+  ev.preventDefault();
+  const shown = shownPanes(), [nc, nr] = gridShape(shown.length), f = fractions(nc, nr);
+  const i = +g.dataset.i, col = g.classList.contains("col"), arr = col ? f.cols : f.rows;
+  const a = paneEl(shown[col ? i : i * nc]).getBoundingClientRect(), b = paneEl(shown[col ? i + 1 : (i + 1) * nc]).getBoundingClientRect();
+  const wa = col ? a.width : a.height, wb = col ? b.width : b.height, sum = arr[i] + arr[i + 1], start = col ? ev.clientX : ev.clientY;
+  startDrag((e2) => {
+    const d = clamp((col ? e2.clientX : e2.clientY) - start, MIN_PANE - wa, wb - MIN_PANE);
+    arr[i] = sum * (wa + d) / (wa + wb);
+    arr[i + 1] = sum - arr[i];
+    layoutGrid();
+  }, col ? "col-resize" : "row-resize");
+});
+
+for (const g of document.querySelectorAll(".gutter")) g.addEventListener("mousedown", (ev) => {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  const which = g.dataset.resize, el = $(which), w0 = el.getBoundingClientRect().width, x0 = ev.clientX, sign = which === "side" ? 1 : -1;
+  startDrag((e2) => {
+    prefs[which] = Math.round(clamp(w0 + sign * (e2.clientX - x0), 160, window.innerWidth * 0.6));
+    el.style.width = prefs[which] + "px";
+  }, "col-resize");
+});
+
+function toggleMax(k) {
+  maximized = maximized === k ? null : k;
+  layoutGrid();
+}
+function setHidden(k, hide) {
+  if (hide && shownPanes().length === 1 && !prefs.hidden.includes(k) && !maximized) return toast("at least one pane must stay visible");
+  if (maximized === k) maximized = null;
+  prefs.hidden = hide ? [...new Set([...prefs.hidden, k])] : prefs.hidden.filter(x => x !== k);
+  if (prefs.hidden.length === KEYS.length) prefs.hidden = prefs.hidden.filter(x => x !== k);
+  layoutGrid();
+  save();
+}
+
+// Pane headers drag onto another pane to swap the two.
+let dragPane = null;
+for (const k of KEYS) {
+  const el = paneEl(k), head = el.querySelector(".phead");
+  head.addEventListener("dragstart", (ev) => { dragPane = k; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", k); el.classList.add("moving"); });
+  head.addEventListener("dragend", () => { dragPane = null; el.classList.remove("moving"); grid.querySelectorAll(".drop").forEach(p => p.classList.remove("drop")); });
+  el.addEventListener("dragover", (ev) => { if (!dragPane || dragPane === k) return; ev.preventDefault(); el.classList.add("drop"); });
+  el.addEventListener("dragleave", (ev) => { if (!el.contains(ev.relatedTarget)) el.classList.remove("drop"); });
+  el.addEventListener("drop", (ev) => {
+    ev.preventDefault();
+    el.classList.remove("drop");
+    if (!dragPane || dragPane === k) return;
+    const o = prefs.order, a = o.indexOf(dragPane), b = o.indexOf(k);
+    [o[a], o[b]] = [o[b], o[a]];
+    layoutGrid();
+    save();
+  });
+  head.addEventListener("dblclick", (ev) => { if (!ev.target.closest("button")) toggleMax(k); });
+  head.addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    if (b) b.dataset.act === "max" ? toggleMax(k) : setHidden(k, true);
+  });
+}
+
+// ---- case list -----------------------------------------------------------------
 function renderList() {
   const q = $("filter").value.trim();
   const re = q.includes("*") ? new RegExp("^" + q.split("*").map(s => s.replace(/[.+?^${}()|[\]\\/]/g, "\\$&")).join(".*") + "$") : null;
-  visible = ENTRIES.map((e, i) => i).filter(i => { const n = ENTRIES[i].case; return re ? re.test(n) : n.includes(q); });
+  visible = ENTRIES.map((e, i) => i).filter(i => {
+    const e = ENTRIES[i];
+    return (!prefs.failOnly || !e.passed) && (re ? re.test(e.case) : e.case.includes(q));
+  });
   const failing = visible.filter(i => !ENTRIES[i].passed).length;
-  $("counts").textContent = `${visible.length} of ${ENTRIES.length} comparisons · ${failing} failing`;
-  $("list").innerHTML = visible.map(i => {
+  $("counts").innerHTML = `${visible.length} of ${ENTRIES.length} comparisons · <span class="${failing ? "FAIL" : "pass"}">${failing} failing</span>`;
+  $("list").innerHTML = visible.length ? visible.map(i => {
     const e = ENTRIES[i], tag = e.count > 1 ? ` [${e.index}]` : "";
     const n = e.passed ? `<span class="n ok">PASS</span>` : `<span class="n">${e.failed}/${e.compared}</span>`;
     const [, fixture = "", param = e.case] = e.case.match(/^[^/]*\/([^.]*)\.[^/]*\/(.*)$/) || [];
     return `<div data-i="${i}" class="${i === current ? "sel" : ""}" title="${e.case}">${n}<span class="fx">${fixture}</span> ${param}${tag}</div>`;
-  }).join("");
+  }).join("") : `<div class="empty">${ENTRIES.length ? "no cases match" : "no comparisons in this capture"}</div>`;
 }
 
 async function select(i) {
   if (i === undefined || i < 0) return;
   const v = await load(i), e = v.e;
+  const sameSize = view && view.W === v.W && view.H === v.H;
+  if (i !== current) levels = null;
   current = i;
   view = v;
   document.querySelectorAll("#list div").forEach(d => d.classList.toggle("sel", +d.dataset.i === i));
   document.querySelector(`#list div[data-i="${i}"]`)?.scrollIntoView({ block: "nearest" });
   $("title").textContent = e.case + (e.count > 1 ? ` [${e.index}]` : "");
-  $("meta").textContent = `${e.kind} shape=(${e.shape}) axes=${e.axes.join(",")} reference=${e.dtypes[0]} actual=${e.dtypes[1]} · ` +
-    `${e.failed} of ${e.compared} compared failed · max |diff| ${fmt(v.peak)}`;
-  $("failure").textContent = e.failure;
+  $("meta").innerHTML = `${e.kind} shape=(${e.shape}) axes=${e.axes.join(",")} reference=${e.dtypes[0]} actual=${e.dtypes[1]} · ` +
+    `<span class="${e.failed ? "FAIL" : "pass"}">${e.failed} of ${e.compared} compared failed</span> · max |diff| ${fmt(v.peak)}`;
+  $("failure").textContent = e.failure || "—";
 
-  // One slider per leading axis (batch, depth, ...); kept when the next case has the same axes.
+  // Leading-axis positions are kept when the next case has the same axes.
   const leadDims = v.dims.slice(0, -2);
   if (lead.length !== leadDims.length) lead = leadDims.map(() => 0);
   lead = lead.map((x, k) => Math.min(x, leadDims[k] - 1));
-  $("sliders").innerHTML = leadDims.map((d, k) =>
-    `<label>${v.labels[k] || "·"} <input type="range" min="0" max="${d - 1}" value="${lead[k]}" data-k="${k}" ${d === 1 ? "disabled" : ""}> <span>${lead[k]}/${d - 1}</span></label>`).join("");
-  $("sliders").querySelectorAll("input").forEach(s => s.oninput = () => { lead[+s.dataset.k] = +s.value; s.nextElementSibling.textContent = `${s.value}/${s.max}`; draw(); });
+  renderSliders();
 
   // Only an explicit pick carries across cases, so passing through a 1-channel case doesn't
   // replace "all" on the next RGB one.
   const opts = (v.rgb ? ["all"] : []).concat(Array.from({ length: v.C }, (_, c) => String(c)));
   $("channel").innerHTML = opts.map(o => `<option value="${o}">${o === "all" ? "all (RGB)" : "c=" + o}</option>`).join("");
   $("channel").value = opts.includes(channelChoice) ? channelChoice : opts[0];
-  $("contrast").value = v.e.dtypes[1].endsWith("int8") ? "global" : "slice";
-  fitZoom(v);
+  // Same-sized cases keep zoom and scroll, so a pinned pixel can be compared across cases.
+  if (!sameSize) fitZoom();
   draw();
 }
 
-function fitZoom(v) {
-  const pane = document.querySelector(".pane");
-  const z = Math.max(1, Math.floor(Math.min((pane.clientWidth - 4) / v.W, (pane.clientHeight - 22) / v.H)));
-  $("zoom").value = Math.min(z, +$("zoom").max);
+function renderSliders() {
+  const v = view, leadDims = v.dims.slice(0, -2);
+  $("sliders").innerHTML = leadDims.map((d, k) =>
+    `<label>${v.labels[k] || "·"} <input type="range" min="0" max="${d - 1}" value="${lead[k]}" data-k="${k}" ${d === 1 ? "disabled" : ""}> <span>${lead[k]}/${d - 1}</span></label>`).join("");
+  $("sliders").querySelectorAll("input").forEach(s => s.oninput = () => { lead[+s.dataset.k] = +s.value; s.nextElementSibling.textContent = `${s.value}/${s.max}`; draw(); });
 }
 
+// Steps the innermost (or, with outer, the outermost) leading axis that has more than one entry.
+function stepLead(outer, dir) {
+  if (!view) return;
+  const leadDims = view.dims.slice(0, -2), ks = leadDims.map((d, k) => k).filter(k => leadDims[k] > 1);
+  if (!ks.length) return;
+  const k = outer ? ks[0] : ks[ks.length - 1];
+  lead[k] = clamp(lead[k] + dir, 0, leadDims[k] - 1);
+  renderSliders();
+  draw();
+}
+
+// ---- rendering ---------------------------------------------------------------------
 // Flat index of element (y, x, channel c) at the current leading-axis position.
 function offset(v, y, x, c) {
   let idx = 0;
@@ -192,7 +447,7 @@ function sliceLimits(v, chans, comparedOnly) {
 }
 
 function lut(t) {
-  t = Math.max(0, Math.min(1, t)) * (INFERNO.length - 1);
+  t = clamp(t, 0, 1) * (INFERNO.length - 1);
   const i = Math.min(Math.floor(t), INFERNO.length - 2), f = t - i, a = INFERNO[i], b = INFERNO[i + 1];
   return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
 }
@@ -201,15 +456,16 @@ function draw() {
   if (!view) return;
   const v = view, { W, H } = v, ch = $("channel").value, all = ch === "all";
   const chans = all ? [0, 1, 2] : [+ch];
-  $("diff-lbl").textContent = `|actual − reference|  (0 … ${fmt(v.peak)})`;
+  $("diff-peak").textContent = `0 … ${fmt(v.peak)}`;
   const outside = $("outside").value;
-  const [lo, hi] = $("contrast").value === "global" ? v.lim : sliceLimits(v, chans, outside !== "show"), scale = 255 / (hi - lo);
-  $("limits").textContent = `display ${fmt(lo)} … ${fmt(hi)}`;
-  const imgs = ["ref", "act", "diff", "status"].map(k => {
+  const [lo, hi] = levels || v.lim || sliceLimits(v, chans, outside !== "show"), scale = 255 / (hi - lo);
+  syncLevels(lo, hi);
+  const imgs = KEYS.map(k => {
     const cv = $("c-" + k); cv.width = W; cv.height = H;
     return [cv, new ImageData(W, H)];
   });
   applyZoom();
+  let nFail = 0, nCmp = 0;
   for (let y = 0; y < H; ++y) for (let x = 0; x < W; ++x) {
     const p = (y * W + x) * 4;
     let dmax = 0, smax = 0;
@@ -221,6 +477,8 @@ function draw() {
       const d = Math.abs(v.diff[o]); if (d > dmax) dmax = d;
       if (v.status[o] > smax) smax = v.status[o];
     }
+    if (smax) ++nCmp;
+    if (smax === 2) ++nFail;
     // Not compared: the test's own destination fill, which the kernel should not have touched.
     if (smax === 0 && outside !== "show")
       for (const im of [imgs[0][1], imgs[1][1]])
@@ -230,32 +488,86 @@ function draw() {
     for (const [, im] of imgs) im.data[p + 3] = 255;
   }
   for (const [cv, im] of imgs) cv.getContext("2d").putImageData(im, 0, 0);
+  $("status-count").innerHTML = `· slice: <span class="${nFail ? "FAIL" : "pass"}">${nFail}</span>/${nCmp} px failing`;
   if (hover) inspect(hover[0], hover[1]);
 }
 
 // Display size only; the pixels are not re-rendered.
 function applyZoom() {
-  if (!view) return;
-  const zoom = +$("zoom").value;
+  $("zoom").value = zoom;
   $("zoomv").textContent = zoom + "×";
-  for (const k of ["ref", "act", "diff", "status"]) {
+  if (!view) return;
+  for (const k of KEYS) {
     const cv = $("c-" + k);
     cv.style.width = view.W * zoom + "px"; cv.style.height = view.H * zoom + "px";
   }
   placeMarks();
 }
 
-// Outlines the hovered (y, x) in every pane. The box is at least 5 px so it stays visible at low
-// zoom, centred on the pixel.
+// Smallest level step: 1 for 8-bit types, else 1/1000 of the slider domain.
+function levelStep() { return view.lim ? 1 : (view.dom[1] - view.dom[0]) / 1000; }
+
+let shownLevels = [0, 1];
+function syncLevels(lo, hi) {
+  shownLevels = [lo, hi];
+  const step = levelStep(), dmin = Math.min(view.dom[0], lo), dmax = Math.max(view.dom[1], hi);
+  for (const [id, x] of [["lo", lo], ["hi", hi]]) {
+    const r = $(`lv-${id}-r`);
+    Object.assign(r, { min: dmin, max: dmax, step });
+    r.value = x;
+    if (document.activeElement !== $(`lv-${id}`)) $(`lv-${id}`).value = +x.toPrecision(6);
+    $(`lv-${id}`).step = view.lim ? 1 : "any";
+  }
+  $("lv-auto").classList.toggle("on", !levels);
+}
+
+// Sets one end of the manual levels, pushing the other end so min stays below max.
+function setLevel(which, x) {
+  if (!view || !Number.isFinite(x)) return;
+  const step = levelStep(), cur = shownLevels;
+  levels = which === "lo" ? [x, Math.max(cur[1], x + step)] : [Math.min(cur[0], x - step), x];
+  draw();
+}
+
+function firstView() { return paneEl(shownPanes()[0]).querySelector(".view"); }
+
+function fitZoom() {
+  if (!view) return;
+  const vw = firstView();
+  zoom = clamp(Math.floor(Math.min((vw.clientWidth - 2) / view.W, (vw.clientHeight - 2) / view.H)), 1, +$("zoom").max);
+  applyZoom();
+  scrollAll(0, 0);
+}
+
+// Zooms to `next`, keeping the image point at (mx, my) within view `vw` in place.
+function zoomAt(vw, mx, my, next) {
+  next = clamp(next, +$("zoom").min, +$("zoom").max);
+  if (!view || next === zoom) return;
+  const cv = vw.querySelector("canvas"), old = zoom;
+  const ix = (vw.scrollLeft + mx - cv.offsetLeft) / old, iy = (vw.scrollTop + my - cv.offsetTop) / old;
+  zoom = next;
+  applyZoom();
+  scrollAll(ix * zoom + cv.offsetLeft - mx, iy * zoom + cv.offsetTop - my);
+}
+const zoomStep = (z, dir) => dir > 0 ? Math.max(z + 1, Math.round(z * 1.25)) : Math.min(z - 1, Math.round(z / 1.25));
+function zoomCenter(next) { const vw = firstView(); zoomAt(vw, vw.clientWidth / 2, vw.clientHeight / 2, next); }
+
+function centerOn(y, x) {
+  const vw = firstView(), cv = vw.querySelector("canvas");
+  scrollAll(cv.offsetLeft + (x + 0.5) * zoom - vw.clientWidth / 2, cv.offsetTop + (y + 0.5) * zoom - vw.clientHeight / 2);
+}
+
+// Outlines the hovered or pinned (y, x) in every pane. The box is at least 5 px so it stays
+// visible at low zoom, centred on the pixel.
 function placeMarks() {
-  const z = +$("zoom").value;
   const on = view && hover && hover[0] < view.H && hover[1] < view.W;
-  for (const pane of document.querySelectorAll(".pane")) {
-    const mark = pane.querySelector(".mark"), cv = pane.querySelector("canvas");
+  for (const vw of views) {
+    const mark = vw.querySelector(".mark"), cv = vw.querySelector("canvas");
     if (!on) { mark.style.display = "none"; continue; }
-    const size = Math.max(z, 5), pad = (size - z) / 2;
-    mark.style.left = cv.offsetLeft + hover[1] * z - pad + "px";
-    mark.style.top = cv.offsetTop + hover[0] * z - pad + "px";
+    const size = Math.max(zoom, 5) + (pinned ? 2 : 0), pad = (size - zoom) / 2;
+    mark.classList.toggle("pinned", pinned);
+    mark.style.left = cv.offsetLeft + hover[1] * zoom - pad + "px";
+    mark.style.top = cv.offsetTop + hover[0] * zoom - pad + "px";
     mark.style.width = mark.style.height = size + "px";
     mark.style.display = "block";
   }
@@ -269,7 +581,7 @@ function fmt(x) {
 
 function inspect(y, x) {
   const v = view;
-  if (y < 0 || x < 0 || y >= v.H || x >= v.W) return;
+  if (!v || y < 0 || x < 0 || y >= v.H || x >= v.W) return;
   hover = [y, x];
   placeMarks();
   const where = [...lead, y, x].map((c, k) => v.labels[k] ? `${v.labels[k]}=${c}` : null).filter(Boolean).join(" ");
@@ -278,67 +590,176 @@ function inspect(y, x) {
     const o = offset(v, y, x, c), s = v.status[o];
     rows.push(`<tr><th>${v.C > 1 ? "c=" + c : ""}</th><td>${fmt(v.ref[o])}</td><td>${fmt(v.act[o])}</td><td>${fmt(v.diff[o])}</td><td class="${STATUS_CLS[s]}">${STATUS_NAME[s]}</td></tr>`);
   }
-  $("pixel").innerHTML = `<b>${where}</b><table><tr><th></th><th>ref</th><th>actual</th><th>diff</th><th></th></tr>${rows.join("")}</table>`;
+  const pin = pinned ? ` <span class="pinnote">● pinned (click or Esc to release)</span>` : "";
+  $("pixel").innerHTML = `<b>${where}</b>${pin}<table><tr><th></th><th>ref</th><th>actual</th><th>diff</th><th></th></tr>${rows.join("")}</table>`;
 }
 
-// ---- events -----------------------------------------------------------------
+function setPin(on) {
+  pinned = on;
+  if (hover) inspect(hover[0], hover[1]);
+  placeMarks();
+}
+
+// Next (dir = 1) or previous failing element after the pinned/hovered one, in raster order over
+// every leading-axis position; wraps around.
+function jumpFail(dir) {
+  const v = view;
+  if (!v) return;
+  const total = v.status.length / v.C, plane = v.H * v.W;
+  const here = hover && hover[0] < v.H && hover[1] < v.W ? offset(v, hover[0], hover[1], 0) / v.C : dir > 0 ? -1 : total;
+  for (let s = 1; s <= total; ++s) {
+    const p = (((here + dir * s) % total) + total) % total;
+    let bad = false;
+    for (let c = 0; c < v.C && !bad; ++c) bad = v.status[p * v.C + c] === 2;
+    if (!bad) continue;
+    const y = Math.floor((p % plane) / v.W), x = p % v.W;
+    let r = Math.floor(p / plane);
+    for (let k = lead.length - 1; k >= 0; --k) { lead[k] = r % v.dims[k]; r = Math.floor(r / v.dims[k]); }
+    renderSliders();
+    hover = [y, x];
+    pinned = true;
+    draw();
+    centerOn(y, x);
+    return;
+  }
+  toast("no failing elements in this comparison");
+}
+
+// ---- small helpers -----------------------------------------------------------------
+let toastTimer;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+async function copyText(s) {
+  try { await navigator.clipboard.writeText(s); }
+  catch {
+    const ta = document.createElement("textarea");
+    ta.value = s; document.body.append(ta); ta.select(); document.execCommand("copy"); ta.remove();
+  }
+  toast("copied: " + s);
+}
+
+// ---- events -----------------------------------------------------------------------
 $("filter").oninput = renderList;
+$("failonly").onchange = () => { prefs.failOnly = $("failonly").checked; save(); renderList(); };
 $("list").onclick = (ev) => { const d = ev.target.closest("div[data-i]"); if (d) select(+d.dataset.i); };
 $("channel").onchange = () => { channelChoice = $("channel").value; draw(); };
-$("outside").onchange = draw;
-$("contrast").onchange = draw;
-$("zoom").oninput = () => applyZoom();
-for (const cv of document.querySelectorAll(".pane canvas")) {
-  cv.onmousemove = (ev) => { const z = +$("zoom").value; inspect(Math.floor(ev.offsetY / z), Math.floor(ev.offsetX / z)); };
-  cv.onmouseleave = () => { hover = null; placeMarks(); };
+$("outside").onchange = () => { prefs.outside = $("outside").value; save(); draw(); };
+for (const id of ["lo", "hi"]) {
+  $(`lv-${id}-r`).oninput = (ev) => setLevel(id, +ev.target.value);
+  $(`lv-${id}`).onchange = (ev) => setLevel(id, parseFloat(ev.target.value));
 }
+$("lv-auto").onclick = () => { levels = null; draw(); };
+$("zoom").oninput = () => zoomCenter(+$("zoom").value);
+$("fit").onclick = fitZoom;
+$("layout").onchange = () => { prefs.layout = $("layout").value; maximized = null; layoutGrid(); save(); };
+$("pane-toggles").onclick = (ev) => { const b = ev.target.closest("button"); if (b) setHidden(b.dataset.pane, b.classList.contains("on")); };
+$("reset").onclick = () => {
+  Object.assign(prefs, { order: KEYS.slice(), hidden: [], layout: "grid", fr: {} });
+  maximized = null;
+  $("layout").value = "grid";
+  layoutGrid();
+  save();
+  fitZoom();
+};
+$("copy").onclick = () => view && copyText(`--gtest_filter='${view.e.case}'`);
+$("keys-btn").onclick = () => { $("keys").hidden = false; };
+$("keys").onclick = (ev) => { if (ev.target === $("keys")) $("keys").hidden = true; };
+
+for (const cv of document.querySelectorAll(".view canvas")) {
+  cv.addEventListener("mousemove", (ev) => { if (!pinned) inspect(Math.floor(ev.offsetY / zoom), Math.floor(ev.offsetX / zoom)); });
+  cv.addEventListener("mouseleave", () => { if (!pinned) { hover = null; placeMarks(); } });
+}
+
 let syncing = false;
-const panes = [...document.querySelectorAll(".pane")];
 function scrollAll(left, top) {
   syncing = true;
-  for (const o of panes) { o.scrollLeft = left; o.scrollTop = top; }
+  for (const o of views) { o.scrollLeft = left; o.scrollTop = top; }
   syncing = false;
 }
-for (const p of panes) p.onscroll = () => { if (!syncing) scrollAll(p.scrollLeft, p.scrollTop); };
+for (const vw of views) vw.addEventListener("scroll", () => { if (!syncing) scrollAll(vw.scrollLeft, vw.scrollTop); });
 
 // Wheel zooms about the cursor: the image point under it stays put.
-for (const p of panes) p.addEventListener("wheel", (ev) => {
+for (const vw of views) vw.addEventListener("wheel", (ev) => {
   if (!view) return;
   ev.preventDefault();
-  const slider = $("zoom"), old = +slider.value;
-  const next = ev.deltaY < 0 ? Math.max(old + 1, Math.round(old * 1.25)) : Math.min(old - 1, Math.round(old / 1.25));
-  const zoom = Math.max(+slider.min, Math.min(+slider.max, next));
-  if (zoom === old) return;
-  const cv = p.querySelector("canvas"), rect = p.getBoundingClientRect();
-  const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
-  const ix = (p.scrollLeft + mx - cv.offsetLeft) / old, iy = (p.scrollTop + my - cv.offsetTop) / old;
-  slider.value = zoom;
-  applyZoom();
-  scrollAll(ix * zoom + cv.offsetLeft - mx, iy * zoom + cv.offsetTop - my);
+  const rect = vw.getBoundingClientRect();
+  zoomAt(vw, ev.clientX - rect.left, ev.clientY - rect.top, zoomStep(zoom, ev.deltaY < 0 ? 1 : -1));
 }, { passive: false });
 
-// Left-drag pans all panes together.
+// Left-drag pans all panes together; a click without movement pins/unpins the pixel.
 let drag = null;
-for (const p of panes) p.addEventListener("mousedown", (ev) => {
+for (const vw of views) vw.addEventListener("mousedown", (ev) => {
   if (ev.button !== 0) return;
   ev.preventDefault();
-  drag = { p, x: ev.clientX, y: ev.clientY, left: p.scrollLeft, top: p.scrollTop };
-  p.classList.add("dragging");
+  drag = { vw, x: ev.clientX, y: ev.clientY, left: vw.scrollLeft, top: vw.scrollTop, moved: false };
+  vw.classList.add("dragging");
 });
 window.addEventListener("mousemove", (ev) => {
-  if (drag) scrollAll(drag.left - (ev.clientX - drag.x), drag.top - (ev.clientY - drag.y));
+  if (!drag) return;
+  const dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+  if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+  if (drag.moved) scrollAll(drag.left - dx, drag.top - dy);
 });
-window.addEventListener("mouseup", () => { if (drag) drag.p.classList.remove("dragging"); drag = null; });
-document.onkeydown = (ev) => {
-  if (ev.target.tagName === "SELECT" || (ev.target.tagName === "INPUT" && ev.target.type !== "range")) return;
-  const pos = visible.indexOf(current);
-  if (ev.key === "ArrowDown") select(visible[Math.min(pos + 1, visible.length - 1)]);
-  else if (ev.key === "ArrowUp") select(visible[Math.max(pos - 1, 0)]);
-  else return;
-  ev.preventDefault();
-};
+window.addEventListener("mouseup", (ev) => {
+  if (!drag) return;
+  drag.vw.classList.remove("dragging");
+  if (!drag.moved && ev.target.tagName === "CANVAS") {
+    const r = ev.target.getBoundingClientRect();
+    const y = Math.floor((ev.clientY - r.top) / zoom), x = Math.floor((ev.clientX - r.left) / zoom);
+    const same = pinned && hover && hover[0] === y && hover[1] === x;
+    if (!same) inspect(y, x);
+    setPin(!same);
+  }
+  drag = null;
+});
 
+document.addEventListener("keydown", (ev) => {
+  const t = ev.target, typing = (t.tagName === "INPUT" && (t.type === "text" || t.type === "number")) || t.tagName === "SELECT";
+  if (ev.key === "Escape") {
+    if (typing) t.blur();
+    else if (!$("keys").hidden) $("keys").hidden = true;
+    else if (maximized) toggleMax(maximized);
+    else if (pinned) setPin(false);
+    return;
+  }
+  if (t === $("filter") && ev.key === "Enter") { select(visible[0]); t.blur(); return; }
+  if (typing || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const pos = visible.indexOf(current);
+  switch (ev.key) {
+    case "ArrowDown": select(visible[Math.min(pos + 1, visible.length - 1)]); break;
+    case "ArrowUp": select(visible[Math.max(pos - 1, 0)]); break;
+    case "ArrowRight": stepLead(ev.shiftKey, 1); break;
+    case "ArrowLeft": stepLead(ev.shiftKey, -1); break;
+    case "n": jumpFail(1); break;
+    case "N": jumpFail(-1); break;
+    case "f": fitZoom(); break;
+    case "+": case "=": zoomCenter(zoomStep(zoom, 1)); break;
+    case "-": case "_": zoomCenter(zoomStep(zoom, -1)); break;
+    case "c": $("copy").click(); break;
+    case "a": $("lv-auto").click(); break;
+    case "/": $("filter").focus(); $("filter").select(); break;
+    case "?": $("keys").hidden = !$("keys").hidden; break;
+    default: return;
+  }
+  ev.preventDefault();
+});
+
+// ---- startup --------------------------------------------------------------------
+$("side").style.width = prefs.side + "px";
+$("info").style.width = prefs.info + "px";
+$("layout").value = prefs.layout;
+$("failonly").checked = prefs.failOnly;
+$("outside").value = prefs.outside;
+layoutGrid();
+applyZoom();
 renderList();
+if (!ENTRIES.length) $("title").textContent = "No comparisons in this capture.";
 select(visible[0]);
 </script>
 </body>
