@@ -4253,12 +4253,12 @@ protected:
         }
     }
 
-    std::filesystem::path root() const
+    static std::filesystem::path root()
     {
         return GetParam();
     }
 
-    const std::vector<DiscoveredBundle>& discovered() const
+    static const std::vector<DiscoveredBundle>& discovered()
     {
         return s_discovered.at(GetParam());
     }
