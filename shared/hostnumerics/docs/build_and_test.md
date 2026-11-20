@@ -6,7 +6,10 @@ The standalone build requires CMake 3.25.2 or newer, a C++20 compiler and
 OpenMP for C++; HostNumerics has no serial-only build. With Clang on Linux,
 install the LLVM OpenMP runtime, such as Ubuntu's `libomp-18-dev` for Clang 18.
 Installed-package consumers also need CMake to find OpenMP, because the static
-libraries link its runtime; they do not compile with OpenMP flags. The
+libraries link its runtime; they do not compile with OpenMP flags. That runtime
+must support the OpenMP calls compiled into the package: LLVM's `libomp` also
+implements GCC's `libgomp` interface, so a Clang consumer can use a package
+built with GCC, but a GCC consumer cannot link a package built with Clang. The
 commands below use Ninja. The Python module requires Python 3.10 or newer with
 development headers and nanobind; CI uses nanobind 3.0.1. The Python test suite
 also requires NumPy. C++ tests require
