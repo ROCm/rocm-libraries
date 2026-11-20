@@ -947,6 +947,7 @@ TEST(TestGraphBuilderRegistry, TheShippedSdpaMetadataBuildsGraphsTheEnginesAccep
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"form", std::string("plain")},
                              {"dtype", std::string("fp16")}};
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
@@ -1011,6 +1012,7 @@ TEST(TestGraphBuilderRegistry, ACausalSdpaGraphSaysCausalWithBoundsNotTheDepreca
                                  {"is_causal", true},
                                  {"alignment", anchor},
                                  {"generate_stats", false},
+                                 {"form", std::string("plain")},
                                  {"dtype", std::string("bf16")}};
         const auto built = buildGraphFor(*parsed.metadata, point);
         ASSERT_TRUE(built.ok()) << anchor << ": " << built.error;
@@ -1071,6 +1073,7 @@ TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
                              {"is_causal", false},
                              {"alignment", std::string("top_left")},
                              {"generate_stats", true},
+                             {"form", std::string("plain")},
                              {"dtype", std::string("bf16")}};
     const auto built = buildGraphFor(*parsed.metadata, point);
     ASSERT_TRUE(built.ok()) << built.error;
@@ -1096,15 +1099,6 @@ TEST(TestGraphBuilderRegistry, TheTrainingForwardWritesTheStatisticsItPromises)
 
 namespace
 {
-
-OperationMetadata shipped(const std::string& operation)
-{
-    std::ifstream file(hipdnn_corpus_gen::test::operationsDir() + "/" + operation + ".opmeta.json");
-    EXPECT_TRUE(file.good()) << operation;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << operation;
-    return parsed.metadata.value_or(OperationMetadata{});
-}
 
 /// The tensor with @p uid, or null.
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensorWith(const GraphBytes& bytes,
@@ -1153,7 +1147,8 @@ TEST(TestGraphBuilderRegistry, TheTrainingNormForwardsWriteTheStatisticsTheirBac
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto layer = buildGraphFor(shipped("layernorm_fwd_training"), layerNormPoint("4"));
+    const auto layer
+        = buildGraphFor(test::shippedOperation("layernorm_fwd_training"), layerNormPoint("4"));
     ASSERT_TRUE(layer.ok()) << layer.error;
     const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormAttributes();
     ASSERT_NE(layerNode, nullptr);
@@ -1162,7 +1157,8 @@ TEST(TestGraphBuilderRegistry, TheTrainingNormForwardsWriteTheStatisticsTheirBac
     expectStatistics(
         layer.bytes, layerNode->inv_variance_tensor_uid(), {2, 16, 1, 1}, "layernorm inv_variance");
 
-    const auto rms = buildGraphFor(shipped("rmsnorm_fwd_training"), layerNormPoint("3"));
+    const auto rms
+        = buildGraphFor(test::shippedOperation("rmsnorm_fwd_training"), layerNormPoint("3"));
     ASSERT_TRUE(rms.ok()) << rms.error;
     const auto* rmsNode = firstNode(rms.bytes)->attributes_as_RMSNormAttributes();
     ASSERT_NE(rmsNode, nullptr);
@@ -1174,7 +1170,7 @@ TEST(TestGraphBuilderRegistry, TheInferenceNormForwardsStayInferenceWithoutStati
 {
     namespace fb = hipdnn_flatbuffers_sdk::data_objects;
 
-    const auto layer = buildGraphFor(shipped("layernorm_fwd"), layerNormPoint("3"));
+    const auto layer = buildGraphFor(test::shippedOperation("layernorm_fwd"), layerNormPoint("3"));
     ASSERT_TRUE(layer.ok()) << layer.error;
     const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormAttributes();
     ASSERT_NE(layerNode, nullptr);
@@ -1182,7 +1178,7 @@ TEST(TestGraphBuilderRegistry, TheInferenceNormForwardsStayInferenceWithoutStati
     EXPECT_FALSE(layerNode->mean_tensor_uid().has_value());
     EXPECT_FALSE(layerNode->inv_variance_tensor_uid().has_value());
 
-    const auto rms = buildGraphFor(shipped("rmsnorm_fwd"), layerNormPoint("3"));
+    const auto rms = buildGraphFor(test::shippedOperation("rmsnorm_fwd"), layerNormPoint("3"));
     ASSERT_TRUE(rms.ok()) << rms.error;
     const auto* rmsNode = firstNode(rms.bytes)->attributes_as_RMSNormAttributes();
     ASSERT_NE(rmsNode, nullptr);
@@ -1192,7 +1188,7 @@ TEST(TestGraphBuilderRegistry, TheInferenceNormForwardsStayInferenceWithoutStati
 
 TEST(TestGraphBuilderRegistry, TheNormBackwardsReadTheStatisticsTheTrainingForwardWrote)
 {
-    const auto layer = buildGraphFor(shipped("layernorm_bwd"), layerNormPoint("3"));
+    const auto layer = buildGraphFor(test::shippedOperation("layernorm_bwd"), layerNormPoint("3"));
     ASSERT_TRUE(layer.ok()) << layer.error;
     const auto* layerNode = firstNode(layer.bytes)->attributes_as_LayernormBackwardAttributes();
     ASSERT_NE(layerNode, nullptr);
@@ -1208,7 +1204,7 @@ TEST(TestGraphBuilderRegistry, TheNormBackwardsReadTheStatisticsTheTrainingForwa
                                  {"D", int64_t{1}},
                                  {"layout", std::string("channels_first")},
                                  {"dtype", std::string("fp16")}};
-    const auto batch = buildGraphFor(shipped("batchnorm_bwd"), batchnorm);
+    const auto batch = buildGraphFor(test::shippedOperation("batchnorm_bwd"), batchnorm);
     ASSERT_TRUE(batch.ok()) << batch.error;
     const auto* batchNode = firstNode(batch.bytes)->attributes_as_BatchnormBackwardAttributes();
     ASSERT_NE(batchNode, nullptr);

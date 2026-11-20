@@ -234,6 +234,113 @@ TEST_P(rocrand_generate_host_test, int_parity_test)
     test_int_parity<unsigned int>(get_generator(), GetParam().rng_type, rocrand_generate);
 }
 
+// Host/device parity for requests whose pointer or size is not a multiple of the
+// distribution's output width. The parity tests above cannot reach this:
+// they make one aligned request of an even size per seed.
+template<typename Type, typename F>
+void test_parity_misaligned(rocrand_generator  host_generator,
+                            rocrand_rng_type   rng_type,
+                            F                  generate,
+                            unsigned long long seed = 1234567ULL)
+{
+    // Tracked separately: this generator repeats values on a misaligned request,
+    // on the host and on the device alike, so parity fails for a different
+    // reason than the one this test covers.
+    if(rng_type == ROCRAND_RNG_PSEUDO_THREEFRY4_64_20)
+    {
+        ROCRAND_CHECK(rocrand_destroy_generator(host_generator));
+        GTEST_SKIP() << "AIPRIMS-310: Threefry4_64_20 repeats values on misaligned requests";
+    }
+
+    rocrand_generator device_generator;
+    ROCRAND_CHECK(rocrand_create_generator(&device_generator, rng_type));
+
+    ROCRAND_CHECK(rocrand_set_seed(host_generator, seed));
+    ROCRAND_CHECK(rocrand_set_seed(device_generator, seed));
+
+    struct request
+    {
+        size_t offset;
+        size_t size;
+    };
+
+    // The offset is in elements: a non-zero one misaligns the pointer.
+    static constexpr request requests[] = {
+        {0, 1000},
+        {1,    3},
+        {0,    4},
+        {1,   15},
+        {1,    3},
+        {0,    1},
+        {0,    5},
+        {1,    1},
+        {1,    2},
+        {1,    7},
+        {0,    9},
+        {1,   12},
+        {1,   13},
+        {1,   16}
+    };
+
+    constexpr size_t  capacity = 2048;
+    std::vector<Type> host_results(capacity);
+    std::vector<Type> device_results(capacity);
+
+    Type* output;
+    HIP_CHECK(hipMallocHelper(&output, capacity * sizeof(Type)));
+
+    for(const request& r : requests)
+    {
+        SCOPED_TRACE(testing::Message() << "with offset = " << r.offset << ", size = " << r.size);
+
+        ROCRAND_CHECK(generate(host_generator, host_results.data() + r.offset, r.size));
+        ROCRAND_CHECK(generate(device_generator, output + r.offset, r.size));
+
+        HIP_CHECK(hipMemcpy(device_results.data() + r.offset,
+                            output + r.offset,
+                            r.size * sizeof(Type),
+                            hipMemcpyDeviceToHost));
+        HIP_CHECK(hipDeviceSynchronize());
+
+        // Compare only the values this request wrote.
+        const std::vector<Type> host_request(host_results.begin() + r.offset,
+                                             host_results.begin() + r.offset + r.size);
+        const std::vector<Type> device_request(device_results.begin() + r.offset,
+                                               device_results.begin() + r.offset + r.size);
+        ASSERT_VEC_EQ(host_request, device_request);
+    }
+
+    ROCRAND_CHECK(rocrand_destroy_generator(host_generator));
+    ROCRAND_CHECK(rocrand_destroy_generator(device_generator));
+    HIP_CHECK(hipFree(output));
+}
+
+TEST_P(rocrand_generate_host_test, char_parity_misaligned_test)
+{
+    test_parity_misaligned<unsigned char>(get_generator(),
+                                          GetParam().rng_type,
+                                          rocrand_generate_char);
+}
+
+TEST_P(rocrand_generate_host_test, short_parity_misaligned_test)
+{
+    test_parity_misaligned<unsigned short>(get_generator(),
+                                           GetParam().rng_type,
+                                           rocrand_generate_short);
+}
+
+TEST_P(rocrand_generate_host_test, uniform_half_parity_misaligned_test)
+{
+    test_parity_misaligned<half>(get_generator(),
+                                 GetParam().rng_type,
+                                 rocrand_generate_uniform_half);
+}
+
+TEST_P(rocrand_generate_host_test, int_parity_misaligned_test)
+{
+    test_parity_misaligned<unsigned int>(get_generator(), GetParam().rng_type, rocrand_generate);
+}
+
 template<typename Type, typename F>
 void test_uniform_parity(rocrand_generator                      host_generator,
                          rocrand_rng_type                       rng_type,

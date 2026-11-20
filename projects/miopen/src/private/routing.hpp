@@ -36,8 +36,9 @@ enum class ForwardingMode
 // Where a wrapped public entry point is served.
 enum class Route
 {
-    Miopen, // the MIOpen implementation (the _impl symbol in libMIOpen_private.so)
-    Hipdnn, // forwarded to hipDNN
+    Miopen,   // the MIOpen implementation (the _impl symbol in libMIOpen_private.so)
+    Hipdnn,   // forwarded to hipDNN
+    Rejected, // refused: a hipDNN plugin re-entered the wrapper from inside hipDNN
 };
 
 // Why a call landed on the route it did. Carried alongside the route rather than
@@ -49,6 +50,9 @@ enum class RouteReason
     DisabledByEnv,      // MIOPEN_DISABLE_HIPDNN_FOR named it, or named *
     HipdnnUnavailable,  // hipDNN missing or reporting an unsupported version
     InForwardingSet,    // forwarded
+    // A hipDNN plugin called a forwarded entry point from inside hipDNN. Decided per call,
+    // so ResolveRouteWithReason never returns it; hipdnn::RejectReentrantCall reports it.
+    ReentrantFromHipdnn,
 };
 
 struct RouteDecision
@@ -241,6 +245,11 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // __func__: a stub cloned from its neighbour then asserts in a debug build
 // instead of silently never forwarding.
 //
+// The route is cached per entry point, but whether hipDNN is running on this thread is not,
+// so the Hipdnn branch checks that on every call. A call made from inside hipDNN would loop,
+// so it fails with miopenStatusInternalError (see hipdnn::RejectReentrantCall), and so does
+// the call that started hipDNN. Entry points served by MIOpen cannot loop and are not checked.
+//
 // Caching the route in a function-local static is safe because neither input
 // changes after startup (the mode is read from the environment once, the
 // forwarding set is compile-time). That keeps hot entry points such as
@@ -256,25 +265,27 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 //
 // Requires hipdnn_graph.hpp, for ClearForwardedFailure and
 // RecordCurrentException.
-#define MIOPEN_WRAPPER_FORWARD(fn, expr)                                  \
-    do                                                                    \
-    {                                                                     \
-        try                                                               \
-        {                                                                 \
-            static const ::miopen::wrapper::Route miopen_wrapper_route_ = \
-                ::miopen::wrapper::DispatchFromStub(#fn, __func__);       \
-            if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn) \
-            {                                                             \
-                ::miopen::wrapper::hipdnn::ClearForwardedFailure();       \
-                ::miopen::wrapper::LogForwardedCall(#fn);                 \
-                return (expr);                                            \
-            }                                                             \
-        }                                                                 \
-        catch(...)                                                        \
-        {                                                                 \
-            return ::miopen::wrapper::hipdnn::RecordCurrentException();   \
-        }                                                                 \
-        ::miopen::wrapper::hipdnn::ClearForwardedFailure();               \
+#define MIOPEN_WRAPPER_FORWARD(fn, expr)                                        \
+    do                                                                          \
+    {                                                                           \
+        try                                                                     \
+        {                                                                       \
+            static const ::miopen::wrapper::Route miopen_wrapper_route_ =       \
+                ::miopen::wrapper::DispatchFromStub(#fn, __func__);             \
+            if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn)       \
+            {                                                                   \
+                if(::miopen::wrapper::hipdnn::InHipdnnCall())                   \
+                    return ::miopen::wrapper::hipdnn::RejectReentrantCall(#fn); \
+                ::miopen::wrapper::hipdnn::ClearForwardedFailure();             \
+                ::miopen::wrapper::LogForwardedCall(#fn);                       \
+                return (expr);                                                  \
+            }                                                                   \
+        }                                                                       \
+        catch(...)                                                              \
+        {                                                                       \
+            return ::miopen::wrapper::hipdnn::RecordCurrentException();         \
+        }                                                                       \
+        ::miopen::wrapper::hipdnn::ClearForwardedFailure();                     \
     } while(false)
 
 // The same seam for the stubs with nowhere to forward to yet:
