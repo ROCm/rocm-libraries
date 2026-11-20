@@ -2592,27 +2592,20 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableDeclinesDimensionsPastTheir32Bi
 // The head dims are narrowed to int for the kernel-registry lookup, so a head
 // dim whose low 32 bits are a supported value used to resolve a kernel built
 // for that supported value. The registry set {64, 128, 192} is what bounds the
-// head dims in practice, which is why there is no case at INT32_MAX here.
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesHeadDimsThatTruncateToASupportedValue)
+// head dims in practice, which is why there is no case at INT32_MAX here. One
+// batch and one head keep O inside createSdpaFwdGraphForDims's tile, so only the
+// head dim decides each case.
+TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableDeclinesHeadDimsThatTruncateToASupportedValue)
 {
-    SKIP_IF_NO_DEVICES();
-
-    const std::string deviceString
-        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
-    if(deviceString != "gfx942" && deviceString != "gfx950")
-    {
-        GTEST_SKIP();
-    }
-
     constexpr int64_t K_WRAPS_TO_128 = (int64_t{1} << 32) + 128;
 
     const std::vector<FwdDimRangeCase> cases = {
-        {"supported head dims (control)", {4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, 128}},
+        {"supported head dims (control)", {1, 1, 256, 128}, {1, 1, 256, 128}, {1, 1, 256, 128}},
         {"hdim_qk wraps to 128",
-         {4, 8, 256, K_WRAPS_TO_128},
-         {4, 8, 256, K_WRAPS_TO_128},
-         {4, 8, 256, 128}},
-        {"hdim_v wraps to 128", {4, 8, 256, 128}, {4, 8, 256, 128}, {4, 8, 256, K_WRAPS_TO_128}},
+         {1, 1, 256, K_WRAPS_TO_128},
+         {1, 1, 256, K_WRAPS_TO_128},
+         {1, 1, 256, 128}},
+        {"hdim_v wraps to 128", {1, 1, 256, 128}, {1, 1, 256, 128}, {1, 1, 256, K_WRAPS_TO_128}},
     };
 
     for(const auto& testCase : cases)
