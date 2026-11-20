@@ -28,17 +28,6 @@
 
 #include <tensilelitehost/export.h>
 
-#ifdef _WIN32
-
-#include <cstdint>
-
-namespace TensileLite
-{
-    typedef struct BFloat6{ uint8_t data;} BFloat6;
-} // end of namespace TensileLite
-
-#else // _WIN32
-
 #include <hip/hip_runtime.h>
 
 #define HIP_HOST_DEVICE __host__ __device__
@@ -302,5 +291,3 @@ namespace std
         return stream << to_string(a);
     }
 } // namespace std
-
-#endif // _WIN32

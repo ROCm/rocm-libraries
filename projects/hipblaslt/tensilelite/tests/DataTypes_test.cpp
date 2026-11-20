@@ -45,15 +45,9 @@ using InputTypes = ::testing::Types<std::tuple<float>,
                                     std::tuple<TensileLite::BFloat16>,
                                     std::tuple<TensileLite::Float8>,
                                     std::tuple<TensileLite::BFloat8>,
-#ifdef _WIN32
-                                    std::tuple<TensileLite::Float6>,
-                                    std::tuple<TensileLite::BFloat6>,
-                                    std::tuple<TensileLite::Float4>,
-#else
                                     std::tuple<TensileLite::Float6x32>,
                                     std::tuple<TensileLite::BFloat6x32>,
                                     std::tuple<TensileLite::Float4x2>,
-#endif
                                     std::tuple<TensileLite::E8>,
                                     std::tuple<std::complex<float>>,
                                     std::tuple<std::complex<double>>,
