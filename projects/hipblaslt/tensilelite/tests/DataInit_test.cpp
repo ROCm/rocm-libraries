@@ -54,10 +54,10 @@ using TensileLite::Client::initializeHostBufferWithHostNumerics;
 using TensileLite::Client::InitMode;
 using TensileLite::Client::isMXProblem;
 using TensileLite::Client::isMXTensor;
-using TensileLite::TestUtils::makeMinimalClientArgs;
-using TensileLite::TestUtils::setOption;
 using TensileLite::Client::PruneSparseMode;
 using TensileLite::Client::toHostNumericsScalarType;
+using TensileLite::TestUtils::makeMinimalClientArgs;
+using TensileLite::TestUtils::setOption;
 
 // Shorthand for the production helper namespace under test.
 namespace dt = TensileLite::Client::hostnumerics::detail;

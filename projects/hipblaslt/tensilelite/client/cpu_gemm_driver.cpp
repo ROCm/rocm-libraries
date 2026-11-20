@@ -1068,25 +1068,60 @@ int main(int argc, char* argv[])
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
         "alpha", po::value<double>()->default_value(1.0), "Alpha scalar")(
         "beta", po::value<double>()->default_value(0.0), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4, i8)")(
-        "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
-        "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
-        "typeCD", po::value<std::string>()->default_value(""), "C/D (output) type: f32, f64, f16, bf16, i8, i32. Defaults to i32 for i8 inputs, f64 for f64 inputs, else f32; i8 inputs take any of i8, i32, f16, bf16, other inputs only the default")(
-        "typeAlpha", po::value<std::string>()->default_value(""), "Alpha/beta type, also the reference's epilogue type: f32, f64, i32. Defaults to i32 when --typeCD is i8 or i32, f64 for f64 inputs, else f32; i32 needs integer --alpha/--beta")(
-        "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
-        "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
+        "type",
+        po::value<std::string>()->default_value("f32"),
+        "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4, i8)")(
+        "typeA",
+        po::value<std::string>()->default_value(""),
+        "Override A storage type (defaults to --type)")(
+        "typeB",
+        po::value<std::string>()->default_value(""),
+        "Override B storage type (defaults to --type)")(
+        "typeCD",
+        po::value<std::string>()->default_value(""),
+        "C/D (output) type: f32, f64, f16, bf16, i8, i32. Defaults to i32 for i8 inputs, f64 for "
+        "f64 inputs, else f32; i8 inputs take any of i8, i32, f16, bf16, other inputs only the "
+        "default")(
+        "typeAlpha",
+        po::value<std::string>()->default_value(""),
+        "Alpha/beta type, also the reference's epilogue type: f32, f64, i32. Defaults to i32 when "
+        "--typeCD is i8 or i32, f64 for f64 inputs, else f32; i32 needs integer --alpha/--beta")(
+        "computeInputA",
+        po::value<std::string>()->default_value(""),
+        "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to "
+        "mimic kernels that quantize A.")(
+        "computeInputB",
+        po::value<std::string>()->default_value(""),
+        "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to "
+        "mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
-        "injectValidationFailure", po::value<bool>()->default_value(false), "Perturb D before validation (negative-test hook)")(
-        "tryFastPath", po::value<bool>()->default_value(false), "Select the Blocked backend instead of automatic selection")(
+        "injectValidationFailure",
+        po::value<bool>()->default_value(false),
+        "Perturb D before validation (negative-test hook)")(
+        "tryFastPath",
+        po::value<bool>()->default_value(false),
+        "Select the Blocked backend instead of automatic selection")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
-        "factorDim", po::value<int>()->default_value(0), "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
-        "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)")(
-        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
-        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
+        "factorDim",
+        po::value<int>()->default_value(0),
+        "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
+        "useScaleAB",
+        po::value<std::string>()->default_value("none"),
+        "ScaleAB mode (none, Scalar, Vector)")(
+        "mxBlockA",
+        po::value<int>()->default_value(0),
+        "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and "
+        "--mxBlockB must be set together)")(
+        "mxBlockB",
+        po::value<int>()->default_value(0),
+        "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and "
+        "--mxBlockB must be set together)")(
         "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)")(
-        "outputAmaxD", po::value<bool>()->default_value(false), "Also output AMAX-D (max |D|) and validate it against the golden GEMM");
+        "outputAmaxD",
+        po::value<bool>()->default_value(false),
+        "Also output AMAX-D (max |D|) and validate it against the golden GEMM");
 
     po::variables_map vm;
     try
@@ -1281,9 +1316,8 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k
-              << " TypeA=" << typeAStr << " TypeB=" << typeBStr
-              << " TypeCD=" << typeCDStr << " TypeAlpha=" << typeAlphaStr
+    std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k << " TypeA=" << typeAStr
+              << " TypeB=" << typeBStr << " TypeCD=" << typeCDStr << " TypeAlpha=" << typeAlphaStr
               << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
               << " BlockedBackend=" << tryFastPath;
     if(isTF32)

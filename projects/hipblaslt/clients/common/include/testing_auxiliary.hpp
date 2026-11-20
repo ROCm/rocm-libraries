@@ -26,10 +26,6 @@
 
 #pragma once
 
-#include <hipblaslt/hipblaslt.h>
-#include <hipblaslt/hipblaslt-ext-op.h>
-#include <hipblaslt/hipblaslt-ext.hpp> // Add check for hipblaslt-ext
-#include "hipblaslt_test.hpp"
 #include "flops.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_math.hpp"

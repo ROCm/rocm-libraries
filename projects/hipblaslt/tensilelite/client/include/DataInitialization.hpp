@@ -872,14 +872,14 @@ namespace TensileLite
             ClientProblemFactory const* m_sliceFactory = nullptr;
             size_t                      m_sliceDevice  = 0;
 
-            ContractionSolution const*    m_currentSolution    = nullptr;
+            ContractionSolution const*    m_currentSolution          = nullptr;
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
             int                           m_mxPreswizzleMiK          = -1;
             bool                          m_cpuInputsReadyForProblem = false;
 
-            int                                                     m_mxDataGenerator = -1;
-            int                                                     m_mxScaleFormat   = 0;
-            hipblaslt::hostnumerics::MxScaleStorageLayout           m_mxScaleLayout
+            int                                           m_mxDataGenerator = -1;
+            int                                           m_mxScaleFormat   = 0;
+            hipblaslt::hostnumerics::MxScaleStorageLayout m_mxScaleLayout
                 = hipblaslt::hostnumerics::MxScaleStorageLayout::Natural;
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can

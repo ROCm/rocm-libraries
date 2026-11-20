@@ -1343,7 +1343,6 @@ private:
     std::unique_ptr<hipblaslt_experimental::PartitionedGemm> m_gemm;
 };
 
-
 void testing_matmul_with_bias(const Arguments&                                  arg,
                               std::span<const hipblaslt::client::MatmulProblem> matmulProblems,
                               const hipblaslt::client::MatmulDataTypes&         dataTypes)
@@ -1374,7 +1373,7 @@ void testing_matmul_with_bias(const Arguments&                                  
         CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProperties, 0));
     const auto mxScaleLayout = [&](hipblaslt_scaling_format format) {
         return isBlockScaling(format) ? hipblaslt::hostnumerics::mxScaleStorageLayoutForFormat(
-                                            format, mxProperties.gcnArchName)
+                   format, mxProperties.gcnArchName)
                                       : hipblaslt::hostnumerics::MxScaleStorageLayout::Natural;
     };
 
@@ -1861,8 +1860,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                           hipblaslt::hostnumerics::referenceAccumulatorType(Talpha))
                           .storageBits
                       / 8;
-                transientBytes = std::max(
-                    transientBytes, (m * k + k * n + 2 * m * n) * accumulatorBytes);
+                transientBytes
+                    = std::max(transientBytes, (m * k + k * n + 2 * m * n) * accumulatorBytes);
             }
         }
         const size_t sideScalars
@@ -2519,48 +2518,48 @@ void testing_matmul_with_bias(const Arguments&                                  
                 capacity = std::min(capacity, batchBytes);
             return std::span<uint8_t>(buffer.as<uint8_t>() + offset, capacity);
         };
-        auto generateMxBatch =
-            [&](hipDataType                                                  dataType,
-                hipDataType                                                  scaleType,
-                const roc::hostnumerics::Tensor&                             dataOutput,
-                std::span<uint8_t>                                           scaleOutput,
-                uint64_t                                                     rows,
-                uint64_t                                                     columns,
-                uint64_t                                                     leadingDimension,
-                size_t                                                       blockRows,
-                size_t                                                       blockColumns,
-                const roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan& scalePlan,
-                hipblaslt::hostnumerics::MxScaleStorageLayout                scaleLayout,
-                uint64_t                                                     seed,
-                hipblaslt::hostnumerics::MatrixRole                          role,
-                size_t                                                       batch) {
-                if(blockRows == 0 || blockColumns == 0
-                   || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
-                    throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
-                auto generated = hipblaslt::hostnumerics::generateMxData(
-                    dataType,
-                    scaleType,
-                    roc::hostnumerics::Shape{static_cast<size_t>(rows),
-                                             static_cast<size_t>(columns)},
-                    leadingDimension,
-                    blockColumns > 1 ? 1 : 0,
-                    blockRows * blockColumns,
-                    arg.initialization,
-                    seed,
-                    role,
-                    batch);
-                dataOutput.copyLogicalElementsFrom(generated.data);
+        auto generateMxBatch
+            = [&](hipDataType                                                  dataType,
+                  hipDataType                                                  scaleType,
+                  const roc::hostnumerics::Tensor&                             dataOutput,
+                  std::span<uint8_t>                                           scaleOutput,
+                  uint64_t                                                     rows,
+                  uint64_t                                                     columns,
+                  uint64_t                                                     leadingDimension,
+                  size_t                                                       blockRows,
+                  size_t                                                       blockColumns,
+                  const roc::hostnumerics::amd_gpu_layout::MxScaleStoragePlan& scalePlan,
+                  hipblaslt::hostnumerics::MxScaleStorageLayout                scaleLayout,
+                  uint64_t                                                     seed,
+                  hipblaslt::hostnumerics::MatrixRole                          role,
+                  size_t                                                       batch) {
+                  if(blockRows == 0 || blockColumns == 0
+                     || blockColumns > std::numeric_limits<size_t>::max() / blockRows)
+                      throw std::invalid_argument("Invalid hipBLASLt MX scale block dimensions.");
+                  auto generated = hipblaslt::hostnumerics::generateMxData(
+                      dataType,
+                      scaleType,
+                      roc::hostnumerics::Shape{static_cast<size_t>(rows),
+                                               static_cast<size_t>(columns)},
+                      leadingDimension,
+                      blockColumns > 1 ? 1 : 0,
+                      blockRows * blockColumns,
+                      arg.initialization,
+                      seed,
+                      role,
+                      batch);
+                  dataOutput.copyLogicalElementsFrom(generated.data);
 
-                const std::vector<std::byte> scaleStorage
-                    = hipblaslt::hostnumerics::mxScaleBytesForDevice(
-                        generated, blockColumns > 1 ? 1 : 0, scalePlan, scaleLayout);
-                if(scaleOutput.size() < scaleStorage.size())
-                    throw std::invalid_argument("hipBLASLt MX scale output is too small.");
-                if(!scaleStorage.empty())
-                    std::memcpy(scaleOutput.data(), scaleStorage.data(), scaleStorage.size());
+                  const std::vector<std::byte> scaleStorage
+                      = hipblaslt::hostnumerics::mxScaleBytesForDevice(
+                          generated, blockColumns > 1 ? 1 : 0, scalePlan, scaleLayout);
+                  if(scaleOutput.size() < scaleStorage.size())
+                      throw std::invalid_argument("hipBLASLt MX scale output is too small.");
+                  if(!scaleStorage.empty())
+                      std::memcpy(scaleOutput.data(), scaleStorage.data(), scaleStorage.size());
 
-                return generated.reference;
-            };
+                  return generated.reference;
+              };
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
         if(isW4A16Scaling(arg.scaleA))
@@ -2910,16 +2909,16 @@ void testing_matmul_with_bias(const Arguments&                                  
                                              const hipblaslt::client::MatmulMatrix& matrix,
                                              size_t                                 m_n,
                                              bool&                                  swizzled) {
-                swizzled = false;
+                swizzled             = false;
                 const size_t k       = static_cast<size_t>(problem.k);
                 const size_t batches = static_cast<size_t>(problem.batchCount);
-                const bool   dense   = static_cast<size_t>(matrix.rows()) == k
-                                   && static_cast<size_t>(matrix.leadingDimension()) == k
-                                   && (batches <= 1
-                                       || static_cast<size_t>(matrix.batchStride()) == m_n * k);
-                const size_t bytes   = matrix.apiType == HIP_R_4F_E2M1
-                                           ? batches * m_n * k / 2
-                                           : batches * m_n * k * realDataTypeSize(matrix.apiType);
+                const bool   dense
+                    = static_cast<size_t>(matrix.rows()) == k
+                      && static_cast<size_t>(matrix.leadingDimension()) == k
+                      && (batches <= 1 || static_cast<size_t>(matrix.batchStride()) == m_n * k);
+                const size_t bytes = matrix.apiType == HIP_R_4F_E2M1
+                                         ? batches * m_n * k / 2
+                                         : batches * m_n * k * realDataTypeSize(matrix.apiType);
                 if(!dense || isFp6Datatype(matrix.apiType) || device.use_HMM || bytes == 0
                    || bytes > host.getNumBytes() || bytes > device.getNumBytes() / block_count)
                     return;
@@ -4912,9 +4911,9 @@ void testing_matmul_with_bias(const Arguments&                                  
         // The skip_launch_solution self-test expects the solution it never launched to fail the
         // all-close check, and fails the case itself when any other solution does.
         .assertAllClose = arg.norm_check_assert && arg.skip_launch_solution < 0,
-        .computeType     = arg.compute_type,
-        .inputTypeA      = hipblaslt::hostnumerics::scalarType(arg.a_type),
-        .inputTypeB      = hipblaslt::hostnumerics::scalarType(arg.b_type),
+        .computeType    = arg.compute_type,
+        .inputTypeA     = hipblaslt::hostnumerics::scalarType(arg.a_type),
+        .inputTypeB     = hipblaslt::hostnumerics::scalarType(arg.b_type),
     };
 
     auto makeValidationCases = [&](const std::vector<
@@ -4985,8 +4984,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                     hBias[gemmIdx],
                     Tbias,
                     Layout::contiguousLastDimensionFastest(Shape{preparedProblem.biasElements}));
-                const size_t biasElements = static_cast<size_t>(bias_vector_length(
-                    arg.bias_source, normalizedProblem.m, normalizedProblem.n));
+                const size_t biasElements = static_cast<size_t>(
+                    bias_vector_length(arg.bias_source, normalizedProblem.m, normalizedProblem.n));
                 const auto norm
                     = output(hBias_gold[gemmIdx],
                              hBias[gemmIdx],
@@ -5022,9 +5021,8 @@ void testing_matmul_with_bias(const Arguments&                                  
                                                                            : Talpha;
             if(failure.kind == Kind::Norm)
                 hipblaslt_cerr << "norm check failed for " << name << " of gemm " << failure.gemm
-                               << ": batch " << failure.batch << " has norm_error "
-                               << failure.error << ", at or above the limit of " << failure.limit
-                               << std::endl;
+                               << ": batch " << failure.batch << " has norm_error " << failure.error
+                               << ", at or above the limit of " << failure.limit << std::endl;
             else if(failure.kind == Kind::NormUnavailable)
                 hipblaslt_cerr << "norm check of " << name << " of gemm " << failure.gemm
                                << " not done: no norm limit for " << hip_datatype_to_string(type)
@@ -5552,7 +5550,7 @@ void testing_matmul_with_bias(const Arguments&                                  
                         CHECK_HIP_ERROR(hipMemcpy(
                             storage.data(), dBias[i].buf(), storage.size(), hipMemcpyDeviceToHost));
                         const char source = arg.bias_source == hipblaslt_bias_source::a ? 'a' : 'b';
-                        ValidationResult grad = verify_bias_gradient(
+                        ValidationResult grad   = verify_bias_gradient(
                             source == 'a' ? freivaldsA[i].at(0) : freivaldsB[i].at(0),
                             source,
                             hipblaslt::hostnumerics::scalarType(Tc),

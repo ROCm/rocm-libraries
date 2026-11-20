@@ -407,61 +407,58 @@ namespace hipblaslt::hostnumerics
                 }
             }
 
-            const auto validateSideOutput
-                = [&](const std::optional<MatmulValidationCase::SideOutput>& output,
-                      MatmulOutputCheckFailure::Output                       name) {
-                      if(!output)
-                          return;
-                      if(options.compareAllClose)
-                      {
-                          auto selectedOptions        = options;
-                          selectedOptions.compareNorm = false;
-                          const auto report           = compareMatmulOutput(output->selected,
-                                                                  validationCase.allCloseTolerance,
-                                                                  selectedOptions,
-                                                                  false,
-                                                                  false,
-                                                                  false);
-                          record(report.comparison.passed());
-                      }
-                      if(options.compareNorm)
-                      {
-                          auto normOptions            = options;
-                          normOptions.compareAllClose = false;
-                          const auto   report         = compareMatmulOutput(output->norm,
-                                                                  validationCase.allCloseTolerance,
-                                                                  normOptions,
-                                                                  false,
-                                                                  false,
-                                                                  false);
-                          const double normError      = std::abs(report.relativeFrobeniusError);
-                          summary.relativeFrobeniusError += normError;
-                          const auto type  = output->norm.first.type();
-                          const auto limit = output->useComputeNormPolicy
-                                                 ? norm_tolerance(type,
-                                                                  options.computeType,
-                                                                  options.inputTypeA,
-                                                                  options.inputTypeB)
-                                                 : norm_tolerance(type);
-                          const double worstError = report.worstBatchFrobeniusError;
-                          // NaN fails.
-                          const bool passed = limit && worstError < *limit;
-                          if(options.assertNorm)
-                              record(passed);
-                          using Kind = MatmulOutputCheckFailure::Kind;
-                          if(!limit)
-                              summary.outputCheckFailures.push_back({.kind   = Kind::NormUnavailable,
-                                                                     .output = name,
-                                                                     .gemm   = caseIndex});
-                          else if(!passed)
-                              summary.outputCheckFailures.push_back({.kind   = Kind::Norm,
-                                                                     .output = name,
-                                                                     .gemm   = caseIndex,
-                                                                     .batch  = report.worstBatch,
-                                                                     .error  = worstError,
-                                                                     .limit  = *limit});
-                      }
-                  };
+            const auto validateSideOutput =
+                [&](const std::optional<MatmulValidationCase::SideOutput>& output,
+                    MatmulOutputCheckFailure::Output                       name) {
+                    if(!output)
+                        return;
+                    if(options.compareAllClose)
+                    {
+                        auto selectedOptions        = options;
+                        selectedOptions.compareNorm = false;
+                        const auto report           = compareMatmulOutput(output->selected,
+                                                                validationCase.allCloseTolerance,
+                                                                selectedOptions,
+                                                                false,
+                                                                false,
+                                                                false);
+                        record(report.comparison.passed());
+                    }
+                    if(options.compareNorm)
+                    {
+                        auto normOptions            = options;
+                        normOptions.compareAllClose = false;
+                        const auto   report         = compareMatmulOutput(output->norm,
+                                                                validationCase.allCloseTolerance,
+                                                                normOptions,
+                                                                false,
+                                                                false,
+                                                                false);
+                        const double normError      = std::abs(report.relativeFrobeniusError);
+                        summary.relativeFrobeniusError += normError;
+                        const auto type = output->norm.first.type();
+                        const auto limit
+                            = output->useComputeNormPolicy ? norm_tolerance(
+                                  type, options.computeType, options.inputTypeA, options.inputTypeB)
+                                                           : norm_tolerance(type);
+                        const double worstError = report.worstBatchFrobeniusError;
+                        // NaN fails.
+                        const bool passed = limit && worstError < *limit;
+                        if(options.assertNorm)
+                            record(passed);
+                        using Kind = MatmulOutputCheckFailure::Kind;
+                        if(!limit)
+                            summary.outputCheckFailures.push_back(
+                                {.kind = Kind::NormUnavailable, .output = name, .gemm = caseIndex});
+                        else if(!passed)
+                            summary.outputCheckFailures.push_back({.kind   = Kind::Norm,
+                                                                   .output = name,
+                                                                   .gemm   = caseIndex,
+                                                                   .batch  = report.worstBatch,
+                                                                   .error  = worstError,
+                                                                   .limit  = *limit});
+                    }
+                };
 
             using Output = MatmulOutputCheckFailure::Output;
             validateSideOutput(validationCase.maximum, Output::Maximum);

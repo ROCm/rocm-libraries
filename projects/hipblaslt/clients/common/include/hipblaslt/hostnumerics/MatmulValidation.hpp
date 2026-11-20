@@ -15,16 +15,16 @@ namespace hipblaslt::hostnumerics
 {
     struct MatmulValidationOptions
     {
-        bool                          compareAllClose = false;
-        bool                          compareNorm     = false;
-        bool                          searchAllClose  = false;
-        bool                          computeUlp      = false;
-        bool                          assertNorm      = false;
+        bool compareAllClose = false;
+        bool compareNorm     = false;
+        bool searchAllClose  = false;
+        bool computeUlp      = false;
+        bool assertNorm      = false;
         // Fail the summary when the all-close search finds no accepted tolerance for an output.
-        bool                          assertAllClose  = false;
-        hipblasComputeType_t          computeType     = HIPBLAS_COMPUTE_32F;
-        roc::hostnumerics::ScalarType inputTypeA      = roc::hostnumerics::ScalarType::Float32;
-        roc::hostnumerics::ScalarType inputTypeB      = roc::hostnumerics::ScalarType::Float32;
+        bool                          assertAllClose = false;
+        hipblasComputeType_t          computeType    = HIPBLAS_COMPUTE_32F;
+        roc::hostnumerics::ScalarType inputTypeA     = roc::hostnumerics::ScalarType::Float32;
+        roc::hostnumerics::ScalarType inputTypeB     = roc::hostnumerics::ScalarType::Float32;
     };
 
     struct MatmulValidationCase

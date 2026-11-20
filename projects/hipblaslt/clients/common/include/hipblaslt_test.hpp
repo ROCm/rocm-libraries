@@ -326,15 +326,15 @@ inline bool hipblaslt_skip_on_demand_case(const Arguments& arg)
     return !hipblaslt_gtest_filter_given();
 }
 
-#define SKIP_UNLESS_SELECTED_BY_FILTER()                                                     \
-    do                                                                                       \
-    {                                                                                        \
-        const auto& _sf_arg = GetParam();                                                    \
-        if(hipblaslt_skip_on_demand_case(_sf_arg))                                           \
-            GTEST_SKIP() << "the " << _sf_arg.category                                       \
-                         << " freivalds cases run only on request, for example "             \
-                            "--gtest_filter=*"                                               \
-                         << _sf_arg.category << "*";                                         \
+#define SKIP_UNLESS_SELECTED_BY_FILTER()                                         \
+    do                                                                           \
+    {                                                                            \
+        const auto& _sf_arg = GetParam();                                        \
+        if(hipblaslt_skip_on_demand_case(_sf_arg))                               \
+            GTEST_SKIP() << "the " << _sf_arg.category                           \
+                         << " freivalds cases run only on request, for example " \
+                            "--gtest_filter=*"                                   \
+                         << _sf_arg.category << "*";                             \
     } while(0)
 
 // The tests are instantiated by filtering through the RocBlasLt_Data stream

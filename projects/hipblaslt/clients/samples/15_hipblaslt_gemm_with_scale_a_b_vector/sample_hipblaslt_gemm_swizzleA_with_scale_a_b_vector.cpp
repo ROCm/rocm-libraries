@@ -93,10 +93,11 @@ void swizzleTensor(T* dst, const T* src, size_t m, size_t k, bool colMaj)
     if(colMaj)
         tmpTensor = tmpTensor.copyWithPermutedDimensions(roc::hostnumerics::Permutation{1, 0});
 
-    const Tensor permuted = tmpTensor
-                                .reshapeSharingStorage(Shape{
-                                    m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK})
-                                .copyWithPermutedDimensions(roc::hostnumerics::Permutation{0, 2, 3, 1, 4});
+    const Tensor permuted
+        = tmpTensor
+              .reshapeSharingStorage(
+                  Shape{m / MiM, MiM, k / (MiK * PackK), MiK / MiKv, MiKv * PackK})
+              .copyWithPermutedDimensions(roc::hostnumerics::Permutation{0, 2, 3, 1, 4});
     const std::span<const std::byte> swizzledBytes = permuted.rawEncodedBackingStorage();
     auto destinationBytes                          = std::as_writable_bytes(std::span(dst, m * k));
     std::copy(swizzledBytes.begin(), swizzledBytes.end(), destinationBytes.begin());

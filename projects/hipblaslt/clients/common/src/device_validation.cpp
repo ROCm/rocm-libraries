@@ -23,7 +23,6 @@
 #include <type_traits>
 #include <vector>
 
-
 namespace hn = roc::hostnumerics;
 
 namespace

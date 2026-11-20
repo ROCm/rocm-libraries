@@ -1944,7 +1944,7 @@ TEST(HostNumericsInitialization_pre_checkin, integer_exact_mx_swizzled_reference
                             = layout == MxScaleStorageLayout::Tile32x8
                                   ? amd_gpu_layout::MxScaleStoragePlan::tile32x8(scaleShape)
                                   : amd_gpu_layout::MxScaleStoragePlan::fastDimensionTiles(
-                                        scaleShape, 4);
+                                      scaleShape, 4);
                         const auto scale = amd_gpu_layout::copyMxScaleStorageToPhysicalLayout(
                             scalesForDevice.rawEncodedBackingStorage().data(),
                             scalesForDevice.rawEncodedBackingStorage().size(),

@@ -174,7 +174,7 @@ namespace TensileLite
                     size_t totalGemms = grouped->gemms.size();
                     for(size_t i = 0; i < totalGemms; i++)
                     {
-                        auto& g = grouped->gemms[i];
+                        auto&  g          = grouped->gemms[i];
                         size_t M          = g.freeSizeA(0);
                         size_t N          = g.freeSizeB(0);
                         size_t K          = g.boundSize(0);
@@ -681,7 +681,7 @@ namespace TensileLite
                                               double                               threshold,
                                               BoundsCheckMode                      boundsCheck)
         {
-            ScopedTimer checkTimer("validate_check_results_typed");
+            ScopedTimer                         checkTimer("validate_check_results_typed");
             const roc::hostnumerics::ScalarType scalarType
                 = toHostNumericsScalarType(tensor.dataType());
             const size_t storageBits = roc::hostnumerics::scalarTypeInfo(scalarType).storageBits;
@@ -925,9 +925,9 @@ namespace TensileLite
                 printTensors(problem, reference, result);
 
             auto const validateSetupStart = TimingClock::now();
-            auto   k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
-            bool   isTF32    = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
-            bool   isTF32x1  = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
+            auto       k = problem.transA() ? problem.a().sizes().at(0) : problem.a().sizes().at(1);
+            bool       isTF32    = (problem.f32XdlMathOp() == rocisa::DataType::XFloat32);
+            bool       isTF32x1  = (problem.computeInputTypeA() == rocisa::DataType::BFloat16
                              && problem.computeInputTypeB() == rocisa::DataType::BFloat16
                              && problem.computeType() == rocisa::DataType::Float
                              && problem.a().dataType() == rocisa::DataType::Float

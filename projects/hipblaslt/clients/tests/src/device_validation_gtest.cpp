@@ -47,7 +47,7 @@ namespace
         {
             (void)hipStreamDestroy(value);
         }
-        Stream(const Stream&)            = delete;
+        Stream(const Stream&) = delete;
         Stream& operator=(const Stream&) = delete;
     };
 
@@ -235,9 +235,9 @@ namespace
                 ASSERT_TRUE(std::holds_alternative<hn::FreivaldsPlan>(prepared));
                 const std::vector plans{std::get<hn::FreivaldsPlan>(std::move(prepared))};
                 auto              policy = [&](int            architecture,
-                                               hn::ScalarType input,
-                                               hn::ScalarType compute,
-                                               size_t         k = 4) {
+                                  hn::ScalarType input,
+                                  hn::ScalarType compute,
+                                  size_t         k = 4) {
                     return hipblaslt::client::freivaldsCheckOptions(
                         architecture, plans.front(), k, input, input, compute);
                 };

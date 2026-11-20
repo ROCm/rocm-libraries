@@ -167,17 +167,16 @@ namespace hipblaslt::hostnumerics::maf
         if(mode == Mode::Maf2UnitScale && fp6)
             throw std::runtime_error(
                 "maf2_0_unit_scale applies to block-scaled FP8 and FP4 only; use maf2_0.");
-        options.scale = MxScaleGenerationMode::One;
+        options.scale            = MxScaleGenerationMode::One;
         const bool numericalData = mode == Mode::Maf1 || mode == Mode::Maf2UnitScale;
-        auto generated = roc::hostnumerics::generateMx(
+        auto       generated     = roc::hostnumerics::generateMx(
             shape,
-            numericalData
-                ? MxDataGeneration::quantize(GenerationRecipe::realOnly(
-                      GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{}))
-                : MxDataGeneration::preserveGeneratedEncoding(
-                      GenerationRecipe::realOnly(GenerationRecipe::uniformFiniteEncodedValue(),
-                                                 seed(operand, batch),
-                                                 roc::hostnumerics::Permutation{1, 0})),
+            numericalData ? MxDataGeneration::quantize(GenerationRecipe::realOnly(
+                GenerationRecipe::zero(), 0, roc::hostnumerics::LastDimensionFastest{}))
+                                    : MxDataGeneration::preserveGeneratedEncoding(GenerationRecipe::realOnly(
+                              GenerationRecipe::uniformFiniteEncodedValue(),
+                              seed(operand, batch),
+                              roc::hostnumerics::Permutation{1, 0})),
             options);
         if(numericalData)
             fill(generated.data, mode, operand, batch);

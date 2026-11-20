@@ -157,9 +157,8 @@ namespace hipblaslt::client
         {
             auto [inputA, inputB] = derive_unset_compute_input_type(arguments);
             // A complex operand without an explicit compute input type keeps its own type.
-            const auto isComplex = [](hipDataType type) {
-                return type == HIP_C_32F || type == HIP_C_64F;
-            };
+            const auto isComplex
+                = [](hipDataType type) { return type == HIP_C_32F || type == HIP_C_64F; };
             if(arguments.compute_input_typeA == HIPBLASLT_DATATYPE_INVALID
                && isComplex(arguments.a_type))
                 inputA = arguments.a_type;

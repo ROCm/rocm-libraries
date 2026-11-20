@@ -389,8 +389,7 @@ namespace TensileLite::Client
                                           hostnumerics::detail::DescriptorFailure>
         getReferenceIndexRange(TensorDescriptor const& descriptor, ReferenceElements elements)
     {
-        const auto logicalCount
-            = roc::hostnumerics::Shape::getElementCount(descriptor.sizes());
+        const auto logicalCount = roc::hostnumerics::Shape::getElementCount(descriptor.sizes());
         if(!logicalCount)
         {
             return roc::hostnumerics::detail::Unexpected(hostnumerics::detail::DescriptorFailure(
