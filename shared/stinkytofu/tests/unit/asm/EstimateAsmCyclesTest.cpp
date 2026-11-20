@@ -33,6 +33,8 @@
 
 using namespace stinkytofu;
 
+namespace {
+
 // Helper class to build test IR and run pass
 class EstimateAsmCyclesTest : public ::testing::Test {
    protected:
@@ -130,6 +132,8 @@ class EstimateAsmCyclesTest : public ::testing::Test {
     std::unique_ptr<Function> func;
     BasicBlock* loopBB;
 };
+
+}  // namespace
 
 // Test with empty BasicBlock
 TEST_F(EstimateAsmCyclesTest, EmptyBasicBlock) {
