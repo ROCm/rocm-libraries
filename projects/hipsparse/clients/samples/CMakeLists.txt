@@ -10,7 +10,11 @@ if(NOT WIN32 AND HIPSPARSE_ENABLE_HIP)
     target_link_libraries(example_c_headers PRIVATE hipsparse::samples-common)
     set_target_properties(example_c_headers PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}/clients/staging"
+        C_STANDARD 99
+        C_STANDARD_REQUIRED ON
+        C_EXTENSIONS OFF
     )
+    target_compile_options(example_c_headers PRIVATE -pedantic-errors -Werror=strict-prototypes)
     
     if(HIPSPARSE_ENABLE_HIP)
         add_executable(example_axpyi)
