@@ -23,10 +23,13 @@
  * ************************************************************************ */
 
 // The mat_info based preconditioner entry points that the generic descriptor API does
-// not use: the numerical tolerance and singular pivot of csrilu0 / csric0, and the
-// numeric boost of csrilu0 / bsrilu0 for the four value types, in both pointer modes and
-// both index bases. The factors are compared with the host references on diagonally
-// dominant matrices, so every pivot is finite and bounded away from zero.
+// not use: the numerical tolerance and singular pivot of csrilu0 / csric0, the numeric
+// boost of csrilu0 / bsrilu0 for the four value types, in both pointer modes and both
+// index bases, and csric0 on Hermitian complex matrices whose Cholesky factor has
+// complex row inner products. The tolerance and singular pivot cases use diagonally
+// dominant matrices whose pivots sit away from the thresholds; the boost cases also put
+// a pivot exactly on the boost tolerance; the Hermitian cases are built as L * L^H from
+// a known factor.
 
 #include "unit_test_device_precond_common.hpp"
 
@@ -785,24 +788,108 @@ TEST_F(PrecondLegacy, csrilu0_numeric_boost_types_and_pointer_modes)
     });
 }
 
+// The boost replaces a pivot whose magnitude is at most the tolerance (|u_ii| <= tol, the
+// rule host_ilu0 applies), so a pivot exactly equal to the tolerance is replaced. The
+// pivots that are compared with the tolerance are exact in every precision (0.5 in (a),
+// 1 - (1/2) * 1 in (b); |0.5 + 0i| is exactly 0.5 for the complex types), so the
+// comparison sits on the boundary; the rest of the factor (not all of it representable,
+// e.g. l(2,1) = 4/11 in (a) once boosted) is checked with the usual relative tolerance:
+//   (a) | 0.5  1  0 |   the first pivot is a(0,0) = 0.5 = tol: boosted to 4, then
+//       | 1    3  1 |   l(1,0) = 1/4, u(1,1) = 3 - 1/4 = 2.75 (kept at 0.5: l(1,0) = 2,
+//       | 0    1  3 |   u(1,1) = 1, l(2,1) = 1, u(2,2) = 2);
+//   (b) | 2  1  0 |     u(1,1) = 1 - (1/2) * 1 = 0.5 = tol after the elimination of row 1:
+//       | 1  1  1 |     boosted to 4, then l(2,1) = 1/4, u(2,2) = 3 - 1/4 (kept at 0.5:
+//       | 0  1  3 |     l(2,1) = 2, u(2,2) = 1).
+// A negative pivot (-0.5 in (a)) keeps its sign (-4).
+TEST_F(PrecondLegacy, csrilu0_numeric_boost_pivot_equal_to_tolerance)
+{
+    struct case_t
+    {
+        std::vector<double> values; // dense 3x3 by rows, zeros are not stored
+        size_t              boosted; // position of the boosted diagonal in the CSR values
+    };
+    const std::vector<case_t> cases = {
+        {{0.5, 1, 0, 1, 3, 1, 0, 1, 3}, 0},
+        {{-0.5, 1, 0, 1, 3, 1, 0, 1, 3}, 0},
+        {{2, 1, 0, 1, 1, 1, 0, 1, 3}, 3},
+    };
+    for(const auto& c : cases)
+    {
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            SCOPED_TRACE(::testing::Message()
+                         << "a(0,0) " << c.values[0] << " a(1,1) " << c.values[4]);
+            csr_matrix<T> a;
+            a.n = 3;
+            a.ptr.push_back(0);
+            for(int32_t i = 0; i < 3; ++i)
+            {
+                for(int32_t j = 0; j < 3; ++j)
+                {
+                    if(c.values[static_cast<size_t>(i) * 3 + j] != 0.0)
+                    {
+                        a.ind.push_back(j);
+                        a.val.push_back(make_value<T>(c.values[static_cast<size_t>(i) * 3 + j]));
+                    }
+                }
+                a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
+            }
+            for(const bool device : {false, true})
+            {
+                SCOPED_TRACE(::testing::Message() << "device " << device);
+                const boost_request req{true, 0.5, 4.0, device, boost_api::standard};
+                csr_out<T>          out;
+                run_csr<Kind::ilu, T>(handle, a, rocsparse_index_base_zero, -1.0, req, false, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                const double sign = (c.values[0] < 0.0 && c.boosted == 0) ? -1.0 : 1.0;
+                EXPECT_EQ(to_cd(out.values[c.boosted]), std::complex<double>(4.0 * sign, 0.0));
+                expect_close(out.values, host_ilu0(a, req.tol, req.val), tolerance<T>());
+            }
+            // The mixed precision entry point passes the tolerance as a double.
+            if constexpr(is_single_precision<T>)
+            {
+                const boost_request req{true, 0.5, 4.0, false, boost_api::mixed};
+                csr_out<T>          out;
+                run_csr<Kind::ilu, T>(handle, a, rocsparse_index_base_zero, -1.0, req, false, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                expect_close(out.values, host_ilu0(a, req.tol, req.val), tolerance<T>());
+            }
+        });
+    }
+}
+
 // One dense 3x3 block (a single block row) whose first pivot is `pivot0`, the rest of
 // the block being well conditioned. Without the boost an exactly zero first pivot is
 // reported as a zero pivot at the block row (in the index base of the matrix); with a
-// boost tolerance of 1e-2 (boost value 2) the pivots that are at most 1e-2 in magnitude
+// boost tolerance of `tol` (boost value 2) the pivots that are at most `tol` in magnitude
 // (here only the first, of either sign) are replaced by 2 with their sign and the
-// factor matches the host reference, with no zero pivot reported.
+// factor matches the host reference, with no zero pivot reported. The pivots +-0.5 with
+// the tolerance 0.5 sit exactly on the boundary of the rule (|pivot| <= tol), and are
+// boosted: with the pivot kept, l(1,0) = 1 / 0.5 = 2 instead of 1 / 2 and the rest of
+// the block follows.
 TEST_F(PrecondLegacy, bsrilu0_numeric_boost_first_pivot)
 {
+    struct case_t
+    {
+        double pivot0;
+        bool   boost;
+        double tol;
+    };
+    const case_t cases[] = {{0.0, false, 1.0e-2},
+                            {0.0, true, 1.0e-2},
+                            {1.0e-3, true, 1.0e-2},
+                            {-1.0e-3, true, 1.0e-2},
+                            {0.5, true, 0.5},
+                            {-0.5, true, 0.5},
+                            {0.75, true, 0.5}};
     for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
     {
         for_all_types([&](auto tag) {
             using T = decltype(tag);
-            for(const auto& [pivot0, boost] : {std::pair{0.0, false},
-                                               std::pair{0.0, true},
-                                               std::pair{1.0e-3, true},
-                                               std::pair{-1.0e-3, true}})
+            for(const auto& [pivot0, boost, tol] : cases)
             {
-                SCOPED_TRACE(::testing::Message() << "pivot0 " << pivot0 << " boost " << boost);
+                SCOPED_TRACE(::testing::Message()
+                             << "pivot0 " << pivot0 << " boost " << boost << " tol " << tol);
                 bsr_matrix<T> bsr;
                 bsr.mb        = 1;
                 bsr.block_dim = 3;
@@ -811,7 +898,7 @@ TEST_F(PrecondLegacy, bsrilu0_numeric_boost_first_pivot)
                 bsr.ind       = {0};
                 for(const double x : {pivot0, 1.0, 0.5, 1.0, 4.0, 1.0, 0.5, 1.0, 5.0})
                     bsr.val.push_back(make_value<T>(x));
-                const boost_request req{boost, 1.0e-2, 2.0};
+                const boost_request req{boost, tol, 2.0};
                 bsr_out<T>          out;
                 run_bsrilu0<T>(handle, bsr, base, req, out);
                 ASSERT_EQ(out.compute_status, rocsparse_status_success);
@@ -823,11 +910,16 @@ TEST_F(PrecondLegacy, bsrilu0_numeric_boost_first_pivot)
                 }
                 EXPECT_EQ(out.zero_pivot_status, rocsparse_status_success);
                 EXPECT_EQ(out.zero_pivot, -1);
-                // The boosted pivot (block (0,0), entry (0,0)) is exactly +-2.
-                if(boost)
+                // The boosted pivot (block (0,0), entry (0,0)) is exactly +-2; a pivot above
+                // the tolerance is kept.
+                if(boost && std::abs(pivot0) <= tol)
                 {
                     const double sign = (pivot0 < 0.0) ? -1.0 : 1.0;
                     EXPECT_EQ(to_cd(out.values[0]), std::complex<double>(2.0 * sign, 0.0));
+                }
+                else
+                {
+                    EXPECT_EQ(to_cd(out.values[0]), std::complex<double>(pivot0, 0.0));
                 }
                 expect_bsr_factor(bsr, out, req);
             }
