@@ -34,6 +34,4 @@ provider = { path = "skbuild_plugins", module = "hipblaslt_version_provider" }
 testpaths = ["tests"]
 markers = [
     "gpu: needs a visible HIP device; fails instead of skipping when HIPBLASLT_PY_REQUIRE_GPU=1",
-    "gfx950: needs a gfx950 device (a capability probe, not a name match)",
-    "large_mem: allocates more than 4 GiB of device memory",
 ]
