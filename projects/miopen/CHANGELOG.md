@@ -6,6 +6,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Conv] Fixed an out-of-bounds shared-memory read in the CK depthwise forward and backward-data
+  solvers (`ConvDepthwiseFwd2D`, `ConvDepthwiseBwdData2D`); LDS grows by up to 640 B for some instances.
 * [MultiMarginLoss] Fixed incorrect results and HIP kernel launch failures on Windows caused by
   packing the `p` argument as a 32-bit `long` instead of the kernel's 64-bit integer.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
