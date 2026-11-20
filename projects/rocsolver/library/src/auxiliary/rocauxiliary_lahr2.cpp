@@ -30,6 +30,13 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
+/*
+ * ===========================================================================
+ *    lahr2_64 is not intended for inclusion in the public API. It exists to
+ *    expose the 64-bit version of the function for testing purposes.
+ * ===========================================================================
+ */
+
 template <typename T, typename I>
 rocblas_status rocsolver_lahr2_impl(rocblas_handle handle,
                                     const I n,
@@ -276,16 +283,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zlahr2(rocblas_handle handle,
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_slahr2_64(rocblas_handle handle,
-                                                 const int64_t n,
-                                                 const int64_t k,
-                                                 const int64_t nb,
-                                                 float* A,
-                                                 const int64_t lda,
-                                                 float* tau,
-                                                 float* T,
-                                                 const int64_t ldt,
-                                                 float* Y,
-                                                 const int64_t ldy)
+                                                    const int64_t n,
+                                                    const int64_t k,
+                                                    const int64_t nb,
+                                                    float* A,
+                                                    const int64_t lda,
+                                                    float* tau,
+                                                    float* T,
+                                                    const int64_t ldt,
+                                                    float* Y,
+                                                    const int64_t ldy)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_lahr2_impl<float>(handle, n, k, nb, A, lda, tau, T, ldt, Y, ldy);
@@ -295,16 +302,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_slahr2_64(rocblas_handle handle,
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dlahr2_64(rocblas_handle handle,
-                                                 const int64_t n,
-                                                 const int64_t k,
-                                                 const int64_t nb,
-                                                 double* A,
-                                                 const int64_t lda,
-                                                 double* tau,
-                                                 double* T,
-                                                 const int64_t ldt,
-                                                 double* Y,
-                                                 const int64_t ldy)
+                                                    const int64_t n,
+                                                    const int64_t k,
+                                                    const int64_t nb,
+                                                    double* A,
+                                                    const int64_t lda,
+                                                    double* tau,
+                                                    double* T,
+                                                    const int64_t ldt,
+                                                    double* Y,
+                                                    const int64_t ldy)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_lahr2_impl<double>(handle, n, k, nb, A, lda, tau, T, ldt, Y, ldy);
@@ -314,16 +321,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dlahr2_64(rocblas_handle handle,
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_clahr2_64(rocblas_handle handle,
-                                                 const int64_t n,
-                                                 const int64_t k,
-                                                 const int64_t nb,
-                                                 rocblas_float_complex* A,
-                                                 const int64_t lda,
-                                                 rocblas_float_complex* tau,
-                                                 rocblas_float_complex* T,
-                                                 const int64_t ldt,
-                                                 rocblas_float_complex* Y,
-                                                 const int64_t ldy)
+                                                    const int64_t n,
+                                                    const int64_t k,
+                                                    const int64_t nb,
+                                                    rocblas_float_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_float_complex* tau,
+                                                    rocblas_float_complex* T,
+                                                    const int64_t ldt,
+                                                    rocblas_float_complex* Y,
+                                                    const int64_t ldy)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_lahr2_impl<rocblas_float_complex>(handle, n, k, nb, A, lda, tau, T,
@@ -334,16 +341,16 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_clahr2_64(rocblas_handle handle,
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zlahr2_64(rocblas_handle handle,
-                                                 const int64_t n,
-                                                 const int64_t k,
-                                                 const int64_t nb,
-                                                 rocblas_double_complex* A,
-                                                 const int64_t lda,
-                                                 rocblas_double_complex* tau,
-                                                 rocblas_double_complex* T,
-                                                 const int64_t ldt,
-                                                 rocblas_double_complex* Y,
-                                                 const int64_t ldy)
+                                                    const int64_t n,
+                                                    const int64_t k,
+                                                    const int64_t nb,
+                                                    rocblas_double_complex* A,
+                                                    const int64_t lda,
+                                                    rocblas_double_complex* tau,
+                                                    rocblas_double_complex* T,
+                                                    const int64_t ldt,
+                                                    rocblas_double_complex* Y,
+                                                    const int64_t ldy)
 {
 #if defined(ROCSOLVER_ENABLE_HESSENBERG) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_lahr2_impl<rocblas_double_complex>(handle, n, k, nb, A, lda, tau, T,
