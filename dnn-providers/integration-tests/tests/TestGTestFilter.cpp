@@ -187,7 +187,7 @@ std::vector<std::string> enumeratedFilters()
 
 } // namespace
 
-TEST(TestGtestFilter, MaySelectSuiteHoldsForEverySuiteWithASelectedTest)
+TEST(TestGtestFilter, MaySelectSuiteHoldsForEverySuiteWithASelectedCase)
 {
     const auto suites = allStrings("a_", 0, 2);
     const auto testNames = allStrings("a_.", 0, 3);

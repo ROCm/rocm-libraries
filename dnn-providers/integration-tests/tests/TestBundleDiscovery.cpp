@@ -589,7 +589,7 @@ TEST_F(TestBundleDiscoveryFixture, SweepRootAtADataRootWithATrailingSeparatorIsF
 
 // The listing decides sweep roots from the walked entries. It must agree with
 // isSweepBundleRoot() on every directory, the data root included.
-TEST_F(TestBundleDiscoveryFixture, ListingSweepRootTestAgreesWithIsSweepBundleRoot)
+TEST_F(TestBundleDiscoveryFixture, ListingSweepRootCheckAgreesWithIsSweepBundleRoot)
 {
     createMixedTierTree(_tempDir);
     const auto templateOnly = _tempDir / "quick" / "Odd" / "TemplateOnly";
@@ -4232,45 +4232,46 @@ TEST(TestPruneAbsentTensors, RemovesTheTensorsAndNullsTheirPortsOnly)
 namespace
 {
 
-// One full discovery of the checked-in bundle tree, shared by every test of the suite.
-class StandardCheckedInBundleTree : public ::testing::Test
+// One full discovery of each bundle tree, shared by every test of the suite.
+class TestCheckedInBundleTree : public ::testing::TestWithParam<std::string>
 {
 protected:
-    static std::filesystem::path bundleRoot()
-    {
-        return std::filesystem::path(__FILE__).parent_path() / ".." / "integration-test-bundles";
-    }
-
-    static void SetUpTestSuite()
-    {
-        if(std::filesystem::is_directory(bundleRoot()))
-        {
-            s_discovered = discoverBundles(bundleRoot());
-        }
-    }
-
     static void TearDownTestSuite()
     {
-        s_discovered.reset();
+        s_discovered.clear();
     }
 
     void SetUp() override
     {
-        if(!s_discovered)
+        if(!std::filesystem::is_directory(root()))
         {
-            GTEST_SKIP() << "No checked-in bundle tree at " << bundleRoot().string();
+            GTEST_SKIP() << "No checked-in bundle tree at " << GetParam();
+        }
+        if(s_discovered.find(GetParam()) == s_discovered.end())
+        {
+            s_discovered.emplace(GetParam(), discoverBundles(root()));
         }
     }
 
-    static inline std::optional<std::vector<DiscoveredBundle>> s_discovered;
+    std::filesystem::path root() const
+    {
+        return GetParam();
+    }
+
+    const std::vector<DiscoveredBundle>& discovered() const
+    {
+        return s_discovered.at(GetParam());
+    }
+
+    static inline std::map<std::string, std::vector<DiscoveredBundle>> s_discovered;
 };
 
 } // namespace
 
-TEST_F(StandardCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryManifest)
+TEST_P(TestCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryManifest)
 {
     std::map<std::filesystem::path, size_t> discoveredCaseCounts;
-    for(const auto& bundle : *s_discovered)
+    for(const auto& bundle : discovered())
     {
         if(bundle.isTemplateSweepCase())
         {
@@ -4278,7 +4279,7 @@ TEST_F(StandardCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryM
         }
     }
 
-    const auto sweepDirs = findSweepDirectories(bundleRoot());
+    const auto sweepDirs = findSweepDirectories(root());
     ASSERT_FALSE(sweepDirs.empty());
     size_t scannedCases = 0;
     for(const auto& sweepDir : sweepDirs)
@@ -4298,15 +4299,21 @@ TEST_F(StandardCheckedInBundleTree, SweepCaseScanEqualsTheParsedIdCountForEveryM
     EXPECT_GT(scannedCases, 0u);
 }
 
-TEST_F(StandardCheckedInBundleTree, FilteredDiscoverySelectsAndCountsLikeFullDiscovery)
+TEST_P(TestCheckedInBundleTree, FilteredDiscoverySelectsAndCountsLikeFullDiscovery)
 {
     for(const auto& filter : {HIP_MLOPS_LANE_FILTER,
                               ASM_SDPA_LANE_FILTER,
                               FLYDSL_SDPA_LANE_FILTER,
                               std::string("quick_*")})
     {
-        expectFilteredSelectionMatchesFull(bundleRoot(), *s_discovered, filter);
+        expectFilteredSelectionMatchesFull(root(), discovered(), filter);
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestCheckedInBundleTree,
+                         ::testing::Values((std::filesystem::path(__FILE__).parent_path() / ".."
+                                            / "integration-test-bundles")
+                                               .string()));
 
 // NOLINTEND(readability-identifier-naming)
