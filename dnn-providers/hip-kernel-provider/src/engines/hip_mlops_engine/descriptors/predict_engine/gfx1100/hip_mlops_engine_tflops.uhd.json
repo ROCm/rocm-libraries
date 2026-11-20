@@ -2,7 +2,7 @@
   "version": "1.0",
   "id": "05461550-533b-401a-8798-fadbebd29591",
   "name": "HIP_MLOPS_ENGINE (gfx1100, 61 contribution(s))",
-  "adapter": "tree_data",
+  "adapter": "mlp_data",
   "features_signature": [
     "$graph.arithmetic_intensity",
     "$graph.flops",
@@ -18,8 +18,896 @@
     "$graph.flops_by_type.ResampleFwdAttributes",
     "$graph.logical_bytes",
     "$graph.node_count",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].bias.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].bias.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].bias.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dbias.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dbias.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].dbias.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].epsilon.virtual",
+        -1
+      ]
+    },
     "$graph.nodes[0].flops",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].generate_index",
+        false
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].index.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_rms.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].inv_variance.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].mean.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].momentum.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].momentum.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].momentum.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].momentum.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].momentum.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].momentum.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_mean.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].next_running_variance.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].post_padding[2]",
+        0
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].pre_padding[2]",
+        0
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_mean.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.data_type",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.dims[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.dims[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.dims[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.dims[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.numel",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.rank",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.strides[0]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.strides[1]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.strides[2]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.strides[3]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].prev_running_variance.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].scale.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[0].stride[2]",
+        1
+      ]
+    },
     "$graph.nodes[0].type",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].window[2]",
+        1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[1].in_1.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[1].in_1.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[1].in_1.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].dbias.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].dbias.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].dbias.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].inv_variance.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].inv_variance.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].inv_variance.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].mean.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].mean.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].mean.virtual",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].scale.dims[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].scale.strides[4]",
+        -1
+      ]
+    },
+    {
+      "value_or_default": [
+        "$graph.nodes[2].scale.virtual",
+        -1
+      ]
+    },
     "$graph.tensor_count",
     "$graph.tensors[0].data_type",
     "$graph.tensors[0].dims[0]",
@@ -1626,9 +2514,9 @@
       ]
     }
   ],
-  "features_hash": "sha256:fa7cc46d8973f576",
+  "features_hash": "sha256:45395cb6a8e37bb9",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/hip-mlops/c57439d67438e94a",
+    "selector_revision": "hip-kernel-provider/hip-mlops/f0af15194aa55e9e",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -1637,8 +2525,8 @@
     "calibrated": true,
     "transform": "log"
   },
-  "tree_data": {
+  "mlp_data": {
     "artifact": "hip_mlops_engine_tflops.bin",
-    "hash": "c1d2fadbe1f58daa878d2205bc972ce95244ea63e9e7e5671d2595ddebeec0be"
+    "hash": "7b32173760292b8b82eb54ce83ddee474f1a139da9f534d59fc9f44e63655847"
   }
 }
