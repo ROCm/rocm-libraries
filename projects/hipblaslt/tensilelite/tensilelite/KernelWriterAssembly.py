@@ -338,7 +338,7 @@ class KernelWriterAssembly(KernelWriter):
   def getSgprOccupancy(self, sgprs):
     return self.states.regCaps["PhysicalMaxSgpr"]//sgprs
 
-  def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False):
+  def getVgprOccupancy(self, numThreads, vgprs, doubleVgpr=False, totalVgprs=None):
     version = tuple(self.states.version[:2])
     # TODO: gfx10, gfx117x and gfx1250 keep the legacy model until their occupancy is validated.
     legacyModel = version[0] == 10 or version in ((11, 7), (12, 5))
@@ -353,7 +353,8 @@ class KernelWriterAssembly(KernelWriter):
     maxWorkgroups = self.states.archCaps["MaxWavesPerSimd"]//wavesPerSimdPerWorkgroup
 
     if legacyModel:
-      totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
+      if totalVgprs is None:
+        totalVgprs = self.states.regCaps["MaxVgpr"] if not doubleVgpr else self.states.regCaps["MaxVgpr"]*2
       vgprAllocateAligned = 4 if not doubleVgpr else 8
     else:
       # doubleVgpr is set for ArchAccUnifiedRegs or wave32; only wave64 halves the file.
@@ -372,7 +373,7 @@ class KernelWriterAssembly(KernelWriter):
     return occupancy
 
   ########################################
-  def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
+  def getOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False, totalVgprs=None):
     """Max. number of workgroups that can run on the same CU (CDNA) or WGP (RDNA) due to occupancy limiters """
 
     deviceLdsSize = self.states.archCaps["DeviceLDS"]
@@ -382,14 +383,26 @@ class KernelWriterAssembly(KernelWriter):
         ldsPool, ldsSize, self.states.archCaps["LdsGranularity"])
 
     if not doubleVgpr:
-      vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr)
-      accvgprLimitedOccupancy = self.getVgprOccupancy(numThreads, accvgprs,       doubleVgpr)
+      vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, vgprs,          doubleVgpr, totalVgprs)
+      accvgprLimitedOccupancy = self.getVgprOccupancy(numThreads, accvgprs,       doubleVgpr, totalVgprs)
     else:
-      vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, ceil(vgprs/8)*8+accvgprs, doubleVgpr)
+      vgprLimitedOccupancy    = self.getVgprOccupancy(numThreads, ceil(vgprs/8)*8+accvgprs, doubleVgpr, totalVgprs)
       accvgprLimitedOccupancy = vgprLimitedOccupancy
     sgprLimitedOccupancy = self.getSgprOccupancy(sgprs)
 
     return min(ldsLimitedOccupancy, vgprLimitedOccupancy, accvgprLimitedOccupancy, sgprLimitedOccupancy)
+
+  def getCUOccupancy(self, kernel, vgprs, sgprs, accvgprs):
+    # Resident workgroups per CU as written to the library. Origami ranks with it and the
+    # stream-K / persistent grids are sized from it, so it has to count what the hardware fits.
+    # The legacy model in getVgprOccupancy budgets MaxVgpr*2 under doubleVgpr, but gfx1250
+    # addresses its whole 1024-entry file per lane (MaxVgpr == PhysicalMaxVgpr), so that counts
+    # the file twice. Codegen keeps the legacy budget, the library gets the physical file like
+    # the non-legacy ISAs already do. The other legacy ISAs arent validated, so only gfx1250.
+    gfx1250 = tuple(self.states.version[:2]) == (12, 5)
+    totalVgprs = self.states.regCaps["PhysicalMaxVgpr"] if self.states.doubleVgpr and gfx1250 else None
+    return self.getOccupancy(kernel["NumThreads"], vgprs, sgprs, self.getLdsSize(kernel), accvgprs,
+                             self.states.doubleVgpr, totalVgprs)
 
   # TODO: also consider sgpr
   def getMaxRegsForOccupancy(self, numThreads, vgprs, sgprs, ldsSize, accvgprs=0, doubleVgpr=False):
@@ -2716,8 +2729,7 @@ class KernelWriterAssembly(KernelWriter):
                      self.states.regCaps["MaxSgpr"]))
 
     # TODO: Add target occupancy or kept the occupancy settings from globalWriteBatch
-    kernel["CUOccupancy"] = self.getOccupancy(kernel["NumThreads"], totalVgprs, totalSgprs, \
-      self.getLdsSize(kernel), totalAgprs, self.states.doubleVgpr)
+    kernel["CUOccupancy"] = self.getCUOccupancy(kernel, totalVgprs, totalSgprs, totalAgprs)
     if kernel["_ScheduleIterAlg"] == 2 and kernel["CUOccupancy"] < 2:
       verdict = 6
 
@@ -2876,9 +2888,7 @@ class KernelWriterAssembly(KernelWriter):
     mkb.setGprs(totalVgprs=max_vgpr, totalAgprs=pool_agprs,
                 totalSgprs=self.sgprPool.size())
 
-    kernel["CUOccupancy"] = self.getOccupancy(
-      kernel["NumThreads"], max_vgpr, self.sgprPool.size(),
-      self.getLdsSize(kernel), pool_agprs, self.states.doubleVgpr)
+    kernel["CUOccupancy"] = self.getCUOccupancy(kernel, max_vgpr, self.sgprPool.size(), pool_agprs)
 
   ##############################################################################
   # resolveDeferredRegisterOverflow
