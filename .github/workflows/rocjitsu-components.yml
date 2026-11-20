@@ -11,11 +11,6 @@ name: rocJITsu Component Tests
 # used by the hipRAND rocJITsu parity workflow.
 
 on:
-  push:
-    branches:
-      - users/dileepr1/rocjitsu-components-dispatch
-    paths:
-      - .github/rocjitsu-oneshot-hipsolver
   workflow_dispatch:
     inputs:
       components:
@@ -104,9 +99,7 @@ jobs:
         id: list
         env:
           CTEST_LABEL: ${{ inputs.ctest_label }}
-          # A push of the one-shot marker runs hipsolver. workflow_dispatch
-          # keeps an empty components input as "every quick component".
-          COMPONENTS: ${{ github.event_name == 'push' && 'hipsolver' || inputs.components }}
+          COMPONENTS: ${{ inputs.components }}
         run: |
           set -euo pipefail
           args=(
