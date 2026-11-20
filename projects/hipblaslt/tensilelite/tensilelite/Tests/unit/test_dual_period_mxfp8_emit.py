@@ -847,10 +847,45 @@ def _vmcnt_sequence(src):
 
 
 def test_8x10_balance_keeps_the_vmcnt_sequence(balanced_8x10, unbalanced_8x10_src):
+    """The last wait is the one retireScaleLoadsBeforeShadowReads caps at the
+    VMEM ops issued after the scale loads.  Balancing moves loads across that
+    point, so its count is positional; the test below checks it."""
     balanced = _vmcnt_sequence(balanced_8x10[0])
     assert balanced
-    assert balanced == _vmcnt_sequence(unbalanced_8x10_src)
+    assert balanced[:-1] == _vmcnt_sequence(unbalanced_8x10_src)[:-1]
     assert "balanced current-cell" not in "\n".join(_mainloop_lines(unbalanced_8x10_src))
+
+
+@pytest.mark.parametrize("which", ["8x4", "8x10", "8x10-unbalanced"])
+def test_scale_loads_retire_before_the_c0_entry_scale_refreshes(
+        which, dual_src, balanced_8x10, unbalanced_8x10_src):
+    """The preloop seeds one scale epoch, so the load C0 issues is the epoch
+    the C0-entry refreshes read, in the C1 tail or the next C0 prologue.
+    vmcnt is one in-order counter: the last VMEM wait ahead of the first
+    refresh has to count no more than the VMEM ops issued after the last
+    scale load, or the refresh can read LDS the load has not written yet."""
+    src = {"8x4": dual_src, "8x10": balanced_8x10[0],
+           "8x10-unbalanced": unbalanced_8x10_src}[which]
+    body = _mainloop_lines(src)
+    scale = [i for i, ln in enumerate(body)
+             if "buffer_load" in ln.split("//")[0] and "SrdMXS" in ln.split("//")[0]]
+    assert scale, "no main-loop scale load"
+    # One trip round the loop, starting after the last scale load.
+    trip = body[scale[-1] + 1:] + body[:scale[-1]]
+    issued, wait, refreshed = 0, None, False
+    for ln in trip:
+        code = ln.split("//")[0]
+        if "ds_read" in code and "refresh next C0 entry scale" in ln:
+            refreshed = True
+            break
+        if "buffer_load" in code or "buffer_store" in code:
+            issued += 1
+        count = re.search(r"vmcnt\((\d+)\)", code)
+        if count:
+            wait = (int(count.group(1)), issued)
+    assert refreshed, "no C0-entry scale refresh in the main loop"
+    assert wait is not None, "no VMEM wait between the scale loads and their refresh"
+    assert wait[0] <= wait[1], wait
 
 
 # The library's dual-period kernels are persistent StreamK kernels.

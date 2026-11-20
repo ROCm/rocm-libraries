@@ -5711,6 +5711,50 @@ def instructionSchedule(emittedModules, multiDU: bool = False,
     return scheduled
 
 
+def retireScaleLoadsBeforeShadowReads(c0Schedule, c1Module):
+    """Make the wait ahead of the C1 scale refreshes retire the scale loads.
+
+    Under a dual period the preloop seeds one scale epoch, so the load C0
+    issues is the epoch the C0-entry refreshes read: in the C1 tail, or in
+    the next C0 prologue ahead of the entry wait.  vmcnt is one in-order
+    counter, so the last VMEM wait before the first of those reads covers
+    the scale loads only if its count is at most the number of VMEM ops
+    issued after the last scale load.  Cap it there.
+
+    Returns the (old, new) count when a wait was tightened, else None.
+    """
+    def isScaleLoad(inst):
+        comment = getattr(inst, "comment", "") or ""
+        return _isBufferLoad(inst) and comment.startswith(("SA ", "SB "))
+
+    c0 = list(c0Schedule.flatitems())
+    scaleLoads = [i for i, inst in enumerate(c0) if isScaleLoad(inst)]
+    if not scaleLoads:
+        return None
+    issued = sum(
+        1 for inst in c0[scaleLoads[-1] + 1:]
+        if _isBufferLoad(inst) or _isBufferStore(inst))
+    wait = None
+    for inst in c1Module.flatitems():
+        if _isDsRead(inst) and "refresh next C0 entry scale" in (
+                getattr(inst, "comment", "") or ""):
+            break
+        if _isBufferLoad(inst) or _isBufferStore(inst):
+            issued += 1
+        elif _isWaitCnt(inst) and getattr(inst, "vlcnt", -1) >= 0:
+            wait = (inst, issued)
+    assert wait is not None, "no VMEM wait ahead of the C1 scale refreshes"
+    inst, limit = wait
+    if inst.vlcnt <= limit:
+        return None
+    old = inst.vlcnt
+    inst.vlcnt = limit
+    inst.comment = (
+        f"{getattr(inst, 'comment', '') or ''}; capped {old}->{limit}: "
+        "retire the scale loads before the C0-entry scale refreshes")
+    return old, limit
+
+
 def relaxWaitGrForOutstandingStores(module):
     """Stop the wait_gr waits from draining the fused epilogue's D stores.
 

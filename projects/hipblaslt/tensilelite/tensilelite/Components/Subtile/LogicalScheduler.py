@@ -5546,6 +5546,7 @@ class LogicalScheduler:
             restoreCanonicalScaleReads,
             dropDominatedLgkmWaits,
             relaxWaitGrForOutstandingStores,
+            retireScaleLoadsBeforeShadowReads,
             spillC0ScaleRefreshes,
             _isDsRead,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
@@ -5847,6 +5848,10 @@ class LogicalScheduler:
         # so this is the first point at which the D stores and the wait_gr counts
         # are visible together.
         module = relaxWaitGrForOutstandingStores(module)
+        if (self._scaleShadowPlan and label == "MAINLOOP_C1"
+                and self.config.dualPeriodScale
+                and self._mainloopC0Schedule is not None):
+            retireScaleLoadsBeforeShadowReads(self._mainloopC0Schedule, module)
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
