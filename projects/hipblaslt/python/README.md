@@ -40,8 +40,10 @@ To build hipBLASLt and the bindings together, use `invoke build --python` from `
 
 1. `HIPBLASLT_PY_LIBRARY`, a full path to `libhipblaslt.so.1` or `libhipblaslt.dll`;
 2. TheRock's rocm-sdk wheels, if they're installed;
-3. `$ROCM_PATH`, then `$ROCM_HOME`;
-4. the ROCm the bindings were built against.
+3. the hipBLASLt the bindings were built against;
+4. `$ROCM_PATH`, then `$ROCM_HOME`, if that one is gone.
+
+It warns (`HipblasLtLoadWarning`) when it doesn't end up on the hipBLASLt the bindings were built against and `HIPBLASLT_PY_LIBRARY` isn't set.
 
 If torch (or anything else) already loaded hipBLASLt, the bindings use that copy instead. The import raises `HipblasLtLoadError` when `HIPBLASLT_PY_LIBRARY` can't take effect because a different hipBLASLt is already loaded, or when hipBLASLt's companion libraries come from another build.
 

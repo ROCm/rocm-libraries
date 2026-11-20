@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Choose, preload and check the libhipblaslt that hipblaslt._core binds to.
 
-The lookup order is HIPBLASLT_PY_LIBRARY, then the rocm-sdk wheels, then ROCM_PATH, then ROCM_HOME, then the build-time
-path. The chosen library is preloaded by full path, so _core's NEEDED entry binds to it.
+The lookup order is HIPBLASLT_PY_LIBRARY, then the rocm-sdk wheels, then the build-time library, then
+ROCM_PATH, then ROCM_HOME. The chosen library is preloaded by full path, so _core's NEEDED entry binds to it.
 
 Everything above load() is a pure function of its arguments, so the tests can drive every case on
 any platform without a second ROCm.
@@ -38,6 +38,7 @@ __all__ = [
     "loaded_hipblaslt",
     "LoadInfo",
     "matches_lib_name",
+    "not_the_build_warning",
     "override_warning",
     "windows_dirs_to_register",
     "windows_dll_dirs",
@@ -103,14 +104,14 @@ def candidate_libraries(
     if override:
         out.append(Candidate(override, LIBRARY_ENV))
     out += [Candidate(p, "rocm-sdk") for p in rocm_sdk_libraries]
+    if build_lib_dir:
+        out.append(Candidate(os.path.join(build_lib_dir, name), "build"))
     for var in ("ROCM_PATH", "ROCM_HOME"):
         root = environ.get(var)
         if root:
             out.append(
                 Candidate(os.path.join(_root_lib_dir(root, platform), name), var)
             )
-    if build_lib_dir:
-        out.append(Candidate(os.path.join(build_lib_dir, name), "build"))
     return out
 
 
@@ -296,6 +297,28 @@ def check_companions(hipblaslt_path: str, loaded: Iterable[str], platform: str) 
             f"builds: {', '.join(sorted(set(mixed)))}. Mixing builds can corrupt memory silently. "
             "Make sure one ROCm install comes first on the search path."
         )
+
+
+def not_the_build_warning(
+    chosen: str, source: str, build_library: str, build_exists: bool, platform: str
+) -> str | None:
+    """A warning when import didn't get the library the bindings were built against, and nobody
+    asked for another one with the override."""
+    if source == LIBRARY_ENV or not build_library:
+        return None
+    if build_exists and _same_file(chosen, build_library, platform):
+        return None
+    why = {
+        "already loaded": "it was already loaded, probably by torch or another framework",
+        "rocm-sdk": "the rocm-sdk wheels come first, so the process shares one copy with torch",
+    }.get(source, f"it was found through {source}")
+    built = (
+        build_library if build_exists else f"{build_library}, which no longer exists"
+    )
+    return (
+        f"hipBLASLt is loaded from {chosen} because {why}, not from {built}, the library these "
+        f"bindings were built against. Set {LIBRARY_ENV} to choose a hipBLASLt explicitly."
+    )
 
 
 def override_warning(override: str) -> str:
@@ -536,6 +559,18 @@ def load(
     platform = sys.platform
     override = environ.get(LIBRARY_ENV)
     before = loaded_libraries()
+    build_library = (
+        os.path.join(build_lib_dir, library_file_name(platform, lib_name))
+        if build_lib_dir
+        else ""
+    )
+
+    def warn_if_not_the_build(path: str, source: str) -> None:
+        msg = not_the_build_warning(
+            path, source, build_library, os.path.isfile(build_library), platform
+        )
+        if msg:
+            warnings.warn(msg, HipblasLtLoadWarning, stacklevel=4)
 
     if override:
         check_override_can_take_effect(override, before, platform)
@@ -544,6 +579,7 @@ def load(
         if already:
             # Torch (or something else) got here first. _core binds to that copy by name, and
             # preloading another one would put two hipBLASLt builds in the process.
+            warn_if_not_the_build(already, "already loaded")
             return LoadInfo(already, "already loaded", preloaded=False)
 
     chosen = choose_library(
@@ -587,6 +623,7 @@ def load(
         warnings.warn(override_warning(override), HipblasLtLoadWarning, stacklevel=3)
     else:
         _log.info("hipBLASLt loaded from %s (%s)", chosen.path, chosen.source)
+        warn_if_not_the_build(chosen.path, chosen.source)
     return LoadInfo(chosen.path, chosen.source, preloaded=True)
 
 
