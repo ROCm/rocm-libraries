@@ -57,3 +57,33 @@ void rocsparse::error_message(
                   << std::endl;
     }
 }
+
+rocsparse_status rocsparse::hip_error_message(hipError_t  status,
+                                              const char* prefix,
+                                              bool        throwing,
+                                              const char* function,
+                                              const char* file,
+                                              int         line) noexcept
+{
+    const rocsparse_status rocsparse_status_for_hip
+        = rocsparse::get_rocsparse_status_for_hip_status(status);
+    try
+    {
+        std::stringstream s;
+        if(prefix != nullptr)
+        {
+            s << prefix << ", ";
+        }
+        if(throwing)
+        {
+            s << "throwing exception due to ";
+        }
+        s << "hip error detected: code '" << status << "', name '" << hipGetErrorName(status)
+          << "', description '" << hipGetErrorString(status) << "'";
+        rocsparse::error_message(rocsparse_status_for_hip, s.str().c_str(), function, file, line);
+    }
+    catch(...)
+    {
+    }
+    return rocsparse_status_for_hip;
+}
