@@ -1092,6 +1092,29 @@ def _bshd_strides(dims: list[int]) -> list[int]:
     return [s * h * d, d, h * d, 1]
 
 
+def _sbhd_strides(dims: list[int]) -> list[int]:
+    b, h, s, d = dims
+    return [h * d, d, b * h * d, 1]
+
+
+def _padded_token_strides(dims: list[int]) -> list[int]:
+    """bshd with 64 spare elements after every token's heads."""
+    b, h, s, d = dims
+    return [s * (h * d + 64), d, h * d + 64, 1]
+
+
+def _batch_slice_strides(dims: list[int]) -> list[int]:
+    """bhsd viewing every second batch of a larger buffer."""
+    b, h, s, d = dims
+    return [2 * h * s * d, s * d, d, 1]
+
+
+def _packed_qkv_strides(dims: list[int]) -> list[int]:
+    """bshd with k and v of the same head count stored after q in each token."""
+    b, h, s, d = dims
+    return [s * 3 * h * d, d, 3 * h * d, 1]
+
+
 def _sdpa(
     *,
     q_dims=(2, 8, 128, 128),
@@ -1206,6 +1229,79 @@ class TestSdpaExtract:
     def test_unknown_layout_raises(self) -> None:
         with pytest.raises(FeatureError, match="stride order"):
             self._extract(strides=lambda dims: [1, 2, 3, 4])
+
+    def test_sbhd_layout(self) -> None:
+        assert self._group("layout", strides=_sbhd_strides) == "layout:sbhd"
+
+    @pytest.mark.parametrize(
+        "q_dims, k_dims, strides, expected",
+        [
+            ((2, 8, 128, 128), (2, 8, 128, 128), _padded_token_strides, "bshd_padded"),
+            ((2, 8, 128, 128), (2, 8, 128, 128), _packed_qkv_strides, "bshd_padded"),
+            # Packed GQA: the token holds q's 16 heads and k's and v's 4 each.
+            ((2, 16, 128, 128), (2, 4, 128, 128), _packed_qkv_strides, "bshd_padded"),
+            ((2, 8, 128, 128), (2, 8, 128, 128), _batch_slice_strides, "bhsd_padded"),
+        ],
+    )
+    def test_padded_layouts(self, q_dims, k_dims, strides, expected: str) -> None:
+        layout = self._group("layout", q_dims=q_dims, k_dims=k_dims, strides=strides)
+        assert layout == f"layout:{expected}"
+
+    @pytest.mark.parametrize(
+        "q_dims, strides, expected",
+        [
+            # Dims of extent one tie in the stride order, whatever their strides.
+            ((2, 1, 512, 64), [32768, 64, 64, 1], "bhsd"),
+            ((2, 8, 1, 128), [1024, 128, 1024, 1], "bshd"),
+            ((1, 8, 128, 128), _bshd_strides((1, 8, 128, 128)), "bshd"),
+            ((1, 8, 128, 128), [8 * 128 * 128, 128 * 128, 128, 1], "bhsd"),
+        ],
+    )
+    def test_extent_one_dims_do_not_pad(self, q_dims, strides, expected: str) -> None:
+        if callable(strides):
+            strides = strides(list(q_dims))
+        layout = self._group(
+            "layout",
+            q_dims=q_dims,
+            k_dims=q_dims,
+            strides=lambda dims: strides,
+        )
+        assert layout == f"layout:{expected}"
+
+    @pytest.mark.parametrize(
+        "strides, match",
+        [
+            # Rows overlap: the token stride is below the heads it holds.
+            (
+                lambda dims: [dims[2] * dims[1] * dims[3], dims[3], dims[3], 1],
+                "overlap",
+            ),
+            # A padded sbhd has no name.
+            (
+                lambda dims: [
+                    dims[1] * dims[3] + 64,
+                    dims[3],
+                    2 * _sbhd_strides(dims)[2],
+                    1,
+                ],
+                "pad",
+            ),
+        ],
+    )
+    def test_layouts_the_catalog_does_not_name_raise(self, strides, match) -> None:
+        with pytest.raises(FeatureError, match=match):
+            self._extract(strides=strides)
+
+    def test_catalog_lists_the_new_layouts(self) -> None:
+        ids = {f.id for f in sdpa.FEATURES}
+        assert {
+            "layout:bhsd",
+            "layout:bshd",
+            "layout:sbhd",
+            "layout:bhsd_padded",
+            "layout:bshd_padded",
+            "layout:ragged",
+        } <= ids
 
     @pytest.mark.parametrize(
         "strides", [_bshd_strides, _bhsd_strides, lambda dims: [1, 2, 3, 4]]
@@ -1378,6 +1474,9 @@ class TestSdpaExtract:
             },
             {"dtype": "fp8_e5m2", "o_dtype": "bfloat16"},
             {"dtype": "fp8_e5m2_fnuz", "o_dtype": "bfloat16"},
+            {"strides": _sbhd_strides},
+            {"strides": _batch_slice_strides},
+            {"strides": _packed_qkv_strides},
             {
                 "dtype": "fp8_e4m3_fnuz",
                 "strides": _bshd_strides,
@@ -1491,6 +1590,25 @@ class TestSdpaBackwardExtract:
     def test_fp8_raises(self) -> None:
         with pytest.raises(FeatureError, match="dtype 'fp8_e4m3'"):
             self._extract(dtype="fp8_e4m3")
+
+    @pytest.mark.parametrize(
+        "strides, expected",
+        [
+            (_padded_token_strides, "layout:bshd"),
+            (_packed_qkv_strides, "layout:bshd"),
+            (_batch_slice_strides, "layout:bhsd"),
+        ],
+    )
+    def test_padded_layouts_keep_their_plain_name(self, strides, expected: str) -> None:
+        assert self._group("layout", strides=strides) == expected
+
+    def test_sbhd_is_not_a_backward_layout(self) -> None:
+        with pytest.raises(FeatureError, match="stride order"):
+            self._extract(strides=_sbhd_strides)
+
+    def test_catalog_has_no_forward_only_layout(self) -> None:
+        layouts = {f.id for f in sdpa_backward.FEATURES if f.id.startswith("layout:")}
+        assert layouts == {"layout:bhsd", "layout:bshd", "layout:ragged"}
 
     def test_kv_dtype_not_q_raises(self) -> None:
         node, tensors = _sdpa_backward()
@@ -7476,6 +7594,54 @@ class TestRealBundleTree:
         counted = sum(op.graphs for op in coverage.ops.values())
         assert units
         assert counted >= len(units)
+
+    def test_dense_sdpa_graphs_keep_their_plain_layout(
+        self, units: list[ClaimUnit]
+    ) -> None:
+        """Adding the sbhd and padded names moved no committed bundle.
+
+        A q whose strides are the dense strides of its order is bhsd or bshd
+        in both catalogs, as before; a backward q is never given a forward-only
+        name, padded or not.
+        """
+        checked = {"SdpaAttributes": 0, "SdpaBackwardAttributes": 0}
+        for unit in units:
+            tensors = {t["uid"]: t for t in unit.graph.get("tensors") or []}
+            for node in unit.graph.get("nodes") or []:
+                node_type = node.get("type")
+                if node_type not in checked:
+                    continue
+                q = tensors[node["inputs"]["q_tensor_uid"]]
+                if q.get("ragged_offset_tensor_uid") is not None:
+                    continue
+                dims, strides = q["dims"], q["strides"]
+                order = tuple(sorted(range(4), key=lambda dim: -strides[dim]))
+                module = sdpa if node_type == "SdpaAttributes" else sdpa_backward
+                layouts = {
+                    f for f in module.extract(node, tensors) if f.startswith("layout:")
+                }
+                if order == sdpa.SBHD_ORDER:
+                    # Only the forward catalog names it (and the backward one raises).
+                    assert node_type == "SdpaAttributes", unit.bundle
+                    assert layouts == {"layout:sbhd"}, unit.bundle
+                    checked[node_type] += 1
+                    continue
+                plain = sdpa.LAYOUTS.get(order)
+                assert plain, f"{unit.bundle}: q stride order {order}"
+                inner = [
+                    math.prod(dims[dim] for dim in order[i + 1 :]) for i in range(4)
+                ]
+                dense = all(
+                    strides[dim] == inner[i]
+                    for i, dim in enumerate(order)
+                    if dims[dim] != 1
+                )
+                if dense or node_type == "SdpaBackwardAttributes":
+                    assert layouts == {f"layout:{plain}"}, unit.bundle
+                else:
+                    assert layouts == {f"layout:{plain}_padded"}, unit.bundle
+                checked[node_type] += 1
+        assert all(checked.values()), checked
 
     def test_feature_matrix_knows_every_claimed_arch(
         self, units: list[ClaimUnit]

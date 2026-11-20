@@ -27,8 +27,29 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   `num_query_heads` / `num_kv_heads` as kernargs from the graph, so one variant per
   (dtype, head_size, causal, tile) serves every head configuration, the bias variants
   included. Each variant is built at the canonical 8 / 8 (a spec field, not metadata).
-- Fixed in every variant: batch 1, seqlen_q 512, seqlen_kv 512, no sliding window, not ragged,
-  not varlen, not paged, not persistent.
+- Fixed in every variant: no sliding window, not ragged, not varlen, not paged, not persistent.
+- Shape: each variant is built at batch 1, seqlen_q 512 and seqlen_kv 512, but batch and both
+  sequence lengths are runtime kernel arguments. A variant serves a graph whose seqlen_q is a
+  multiple of its block_m and seqlen_kv a multiple of its block_n.
+- Layouts: Q, K, V and O may be any `[B, S, H, D]` view whose strides the engine's host predicate
+  admits (`packs/AttentionDenseStrides.hpp`, the C++ twin of rocKE's
+  `dense_strides_admit`), so BSHD, BHSD, batch slices and packed QKV graphs are served. Every
+  variant takes the twelve `stride_{q,k,v,o}_{batch,head,token}` arguments last; a plain variant
+  reads them, and a bias variant (`use_additive_bias` 1: the fp32 `attn_mask`, matched from the
+  graph, with its pointer and three strides before the twelve) addresses packed BSHD and
+  ignores them, so a bias graph is served only with packed operands.
+  The head-dim stride must be 1, every stride of an axis longer than 1 a multiple of 8 elements
+  (a token stride at least the head size), no operand may overlap itself, each operand must
+  declare a base alignment that is a multiple of 16 bytes, and the slabs must stay inside the kernel's
+  32-bit offsets. Any other graph is declined with an INFO line naming the reason (`operand`,
+  `alignment`, `head_dim_stride`, `stride_alignment`, `overlap` or `size_limit`). A graph that
+  declares another alignment is declined first, with `alignment`, before its layout is
+  judged; the stride predicate's own `pointer_alignment` reason is the second line for the
+  same rule and is what refuses a plan when it is prepared.
+- Saved plans: new plans are saved under `hipkernel.gfx950_attention_dense.dispatch.v4`, which
+  records the twelve strides, and plans with a bias under `dispatch.v5`, which also records the
+  bias. Plans saved under `dispatch.v1`, `dispatch.v2` and `dispatch.v3` (the bias contract
+  before the strides) still restore and launch their own older 8-, 10- and 14-argument kernels.
 
 ## Files
 
@@ -51,10 +72,11 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   saved launch values, the additive bias included, are shared with the gfx942 engine in
   `packs/AttentionDenseNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit.
-- Saved plans store their launch values under `hipkernel.gfx950_attention_dense.dispatch.v2`
-  (the kernel reads the head counts at runtime), or `.v3` for a plan that serves a bias
-  kernel (v2 plus the bias uid and its batch, query-head and query-row strides). Plans
-  saved under `.v1` (head counts baked into the kernel) still load. All three stay
+- Saved plans store their launch values under `hipkernel.gfx950_attention_dense.dispatch.v4`
+  (the kernel reads the head counts and the strides at runtime), or `.v5` for a plan that
+  serves a bias kernel (v4 plus the bias uid and its batch, query-head and query-row strides).
+  Plans saved under `.v1` (head counts baked into the kernel), `.v2` (head counts at
+  runtime) and `.v3` (the bias contract before the strides) still load. All five stay
   registered so saved plans keep loading.
 - **Two rankers, and which one decides depends on the arch.** The UED binds
   `sort_kernel_catalog` as `default` (the native UHD) plus a `gfx950` list holding the

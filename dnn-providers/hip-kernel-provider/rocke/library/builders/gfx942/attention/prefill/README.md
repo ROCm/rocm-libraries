@@ -32,10 +32,23 @@ split matters when you build a spec by hand:
 The gfx950 golden is untouched either way: this is a separate kernel module emitting
 its own symbol against its own fixture, not an arch branch in the gfx950 file.
 
-Still rejected with a structured reason by `supports_attention_dense`: varlen and ragged.
+Still rejected with a structured reason by `supports_attention_dense`: varlen, ragged and
+paged K/V.
 A sliding window that leaves query rows no key (`seqlen_q - seqlen_kv >= W`, or a last
 query block whose window starts past `seqlen_kv`) is supported: those rows write O = 0,
 with or without sinks or the LSE output.
+Q, K, V and O are logical `[B, S, H, D]` views of any storage layout the host admits:
+every kernel takes twelve trailing `i32` arguments, a batch, head and token element stride
+per tensor (the head-dim stride is 1), so BSHD, BHSD, batch slices and packed QKV views
+launch without a copy. The default and persistent grids and the KV-segment grid read them;
+the opt-in `v_reg_prefetch=1` and `lds_num_buffers=2` pipelines and the paged body take the
+arguments and ignore them, and `run_attention_dense_torch` admits packed tensors only for
+those (`body_serves_strides`). The strides are not a spec field: the kernel name and the
+cache key do not change. The admission rules (stride multiples, alignment, overlap, size
+limits) are in `kernels/common/_attention_dense_strides.py`. The measured cost of the
+strides against `develop` on gfx942 and gfx950 and the strided-layout catalog sweep are in
+[the case study](../../../gfx950/attention/prefill/dense_attention_launch_time_strides_case_study.md)
+in the gfx950 prefill folder (it covers both architectures).
 Sliding-window and attention sinks are supported, alone or combined. Paged K/V runs on
 the default grid for the shared spec's paged cohort, with the same per-wave block-table
 lookup as gfx950; paged V always takes the async-DMA path, never conflict-free V. Sinks seed the

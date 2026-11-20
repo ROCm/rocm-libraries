@@ -15,6 +15,7 @@
             ],
             "strides": "packed",
             "stride_order": [0, 2, 1, 3],
+            "layout_role": "q",
             "data_type": "${dtype}",
             "virtual": false
         },
@@ -29,6 +30,7 @@
             ],
             "strides": "packed",
             "stride_order": [0, 2, 1, 3],
+            "layout_role": "k",
             "data_type": "${dtype}",
             "virtual": false
         },
@@ -43,6 +45,7 @@
             ],
             "strides": "packed",
             "stride_order": [0, 2, 1, 3],
+            "layout_role": "v",
             "data_type": "${dtype}",
             "virtual": false
         },
@@ -57,6 +60,7 @@
             ],
             "strides": "packed",
             "stride_order": [0, 2, 1, 3],
+            "layout_role": "o",
             "data_type": "${dtype}",
             "virtual": false
         }

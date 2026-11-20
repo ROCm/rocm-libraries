@@ -179,17 +179,21 @@ def emit_segment_store(
         b.global_store(segm_l, ml_idx, denom, align=4)
 
 
-def allocate_segment_workspace(spec, device):
-    """FP32 workspace tensors keyed by :data:`SEGMENT_PARAMS`."""
-    import torch
-
+def allocate_segment_workspace(spec, device, allocator=None):
+    """FP32 workspace buffers keyed by :data:`SEGMENT_PARAMS`: torch tensors on
+    ``device``, or, with ``allocator``, whatever ``allocator(shape)`` returns for each
+    shape (an FP32 buffer that has ``data_ptr()``, for a caller without torch)."""
     shape = (spec.batch * spec.seqlen_q, spec.num_query_heads, spec.kv_segments)
+    if allocator is None:
+        import torch
+
+        def allocator(shape):
+            return torch.empty(shape, dtype=torch.float32, device=device)
+
     return {
-        "segm_output_ptr": torch.empty(
-            shape + (spec.head_size,), dtype=torch.float32, device=device
-        ),
-        "segm_max_ptr": torch.empty(shape, dtype=torch.float32, device=device),
-        "segm_expsum_ptr": torch.empty(shape, dtype=torch.float32, device=device),
+        "segm_output_ptr": allocator(shape + (spec.head_size,)),
+        "segm_max_ptr": allocator(shape),
+        "segm_expsum_ptr": allocator(shape),
     }
 
 
@@ -260,13 +264,11 @@ def launch_segment_combine(spec, arch: str, out, workspace, stream: int) -> None
             signature=signature,
         )
         _COMBINE_LAUNCHER_CACHE[key] = launcher
-    import torch
-
     vals = dict(workspace)
     vals.update(scalars)
     vals["output_ptr"] = out
-    # Unused by the combine body; any int32 buffer satisfies the ABI.
-    vals["seq_lens_ptr"] = workspace["segm_max_ptr"].view(torch.int32)
+    # Unused by the combine body; any buffer satisfies the ABI (only its address is read).
+    vals["seq_lens_ptr"] = workspace["segm_max_ptr"]
     launcher(
         vals,
         config=LaunchConfig(

@@ -12,8 +12,10 @@ versus the Python engine across every kernel family (see
 `tools/check_byte_identity.py`). As of the latest authoritative verification:
 
 - Full fresh `-Werror` build of `librocke_core.a`: **passes**.
-- Byte-identity gate at both LLVM flavors (`llvm20`, `llvm22`): **GREEN for all
-  65 families**, `bad=0`, `canon=0`.
+- Byte-identity gate: the compiler lanes are the flavors of `LLVM_FLAVORS`
+  (`llvm20`, `llvm22`, `llvm23`, `llvm24`). The last recorded result, at `llvm20`
+  and `llvm22`: **GREEN for all 65 families**, `bad=0`, `canon=0`; not re-run at
+  `llvm23` / `llvm24` for this note.
 - Random-spec differential fuzz (gemm / elementwise / reduce): **all IDENTICAL,
   0 mismatch**.
 
@@ -322,23 +324,27 @@ and selector parity cases with LSE on.
 `library/dispatch/attention/`
 
 The gfx942 / gfx950 dense prefill family has **no C++ twin** of its kernel
-builder, spec, or dispatch selector; it is built and selected in Python only.
-`grep -r attention_dense platform/cpp/` returns nothing. §6 already mentions
-this family in passing as precedent for the MLA prefill gap; this entry records
-it in its own right so the family is named debt rather than a subordinate clause.
+builder or dispatch selector; it is built and selected in Python only, and only
+the architecture-neutral base spec has a C twin (`rocke_attention_dense_spec_t`,
+`platform/cpp/include/rocke/instance_attention_dense_spec.h`).
+`grep -r build_attention_dense platform/cpp/ library/cpp/` returns nothing. §6
+already mentions this family in passing as precedent for the MLA prefill gap;
+this entry records it in its own right so the family is named debt rather than a
+subordinate clause.
 
 | What's missing | Where |
 |---|---|
 | A C builder for `build_attention_dense` | `cpp/instances/gfx9{42,50}/`; only `attention_tiled_2d` and `attention_tiled_3d` are ported |
-| A C twin of `AttentionDenseSpec` / `Gfx9{42,50}AttentionDenseSpec`, including the `runtime_shape`, `fastdiv_divisors` and `runtime_kernarg_fields` properties | no `rocke_attention_dense_spec_t` exists |
+| A C twin of `Gfx9{42,50}AttentionDenseSpec`, including the `runtime_shape`, `fastdiv_divisors` and `runtime_kernarg_fields` properties | `rocke_attention_dense_spec_t` mirrors only the shared base `AttentionDenseSpec` (validation, decodes, kernel name, preflight); the arch subclasses and these three properties have no C twin |
 | A C selector / spec builder | `cpp/instances/common/attention_unified_selectors.cpp` covers the unified tiled path only; dense has no selector to mirror into |
-| The runtime-shape kernarg ABI (`attention_dense_signature`, `attention_dense_runtime_args`) | Python only; the hipDNN provider packs these kernargs from its own C++ pack, not from a rocke C++ spec |
+| The kernarg ABI (`attention_dense_signature`, `attention_dense_runtime_args`): the runtime-shape arguments and the twelve trailing `stride_{q,k,v,o}_{batch,head,token}` arguments | Python only; the hipDNN provider packs these kernargs from its own C++ pack, not from a rocke C++ spec. That pack restates the stride names and the host stride predicate (`AttentionDenseStrides.hpp`), and both are pinned to one vectors file (`platform/tests/golden/attention_dense_stride_vectors.json`). A C builder must emit the same twelve trailing arguments |
 
 **What is gated:** the C++ *lowerer* is family-agnostic, so its byte-identity
-against the Python lowerer is checked on every dense case at every
-`GOLDEN_FLAVORS` flavor with `ROCKE_CPP_STRICT=1` —  `attention_dense` is a
-member of `_FAMILIES` in
-`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`.
+against the Python lowerer is checked on every dense case with
+`ROCKE_CPP_STRICT=1`, at the LLVM flavor the process selects (`ROCKE_LLVM_FLAVOR`;
+run it once per flavor) — `attention_dense` is a member of `_FAMILIES` in
+`library/tests/test_attention_ir_cpp_parity.py::test_attention_ir_cpp_python_byte_identity`,
+which needs a built `rocke_engine` and skips without one.
 The Python IR itself is pinned by
 `platform/tests/golden/rocke_representative_ir_sha256/attention_dense.json`. So a change to the
 dense kernel body cannot silently diverge the two engines even without a builder

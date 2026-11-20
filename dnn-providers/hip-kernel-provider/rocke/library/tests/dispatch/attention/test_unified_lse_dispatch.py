@@ -379,3 +379,27 @@ def test_binding_rejects_a_problem_that_disagrees_on_lse(arch, monkeypatch):
     )
     with pytest.raises(ValueError, match="emit_lse"):
         result.bind_torch({"problem": problem})
+
+
+def test_only_the_dense_candidates_hash_the_strided_abi():
+    """The 12 trailing stride kernargs changed the dense kernels' argument list only:
+    the dense candidates hash DENSE_ATTENTION_ABI_VERSION (v3) into their tuning ids,
+    every other attention_unified candidate keeps develop's v2 (the pins above)."""
+    from dispatch.attention import ATTENTION_REGISTRY
+    from dispatch.attention.common import (
+        ATTENTION_ABI_VERSION,
+        DENSE_ATTENTION_ABI_VERSION,
+    )
+
+    assert ATTENTION_ABI_VERSION == "hipkg-attention-unified/v2"
+    assert DENSE_ATTENTION_ABI_VERSION == "hipkg-attention-unified/v3"
+    dense_arches = set()
+    for c in ATTENTION_REGISTRY.candidates():
+        if not c.abi_version.startswith("hipkg-attention-unified/"):
+            continue  # another ABI family (RDNA WMMA, strided-KV)
+        dense = "layout_dense" in c.capability.supports_features
+        want = DENSE_ATTENTION_ABI_VERSION if dense else ATTENTION_ABI_VERSION
+        assert c.abi_version == want, c.name
+        if dense:
+            dense_arches |= set(c.capability.arches)
+    assert dense_arches == {"gfx942", "gfx950"}

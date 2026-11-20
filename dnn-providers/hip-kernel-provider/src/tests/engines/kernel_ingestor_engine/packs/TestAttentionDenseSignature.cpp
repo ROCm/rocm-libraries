@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -32,33 +33,35 @@
  * a success status. This is the silent-wrong-answer class the layout and stride gates in
  * the matcher exist to stop, one layer lower down.
  *
- * Both catalogs ship the 10-argument grid form -- four pointers, scale, then batch,
- * seqlen_q, seqlen_kv, num_query_heads and num_kv_heads -- and the TEST_P cases pin it on
- * each. Every variant in either catalog declares `use_sinks: false`, so the sink tail of
- * attention_dense_signature is unreachable.
+ * Both catalogs ship the 22-argument grid form -- four pointers, scale, then batch,
+ * seqlen_q, seqlen_kv, num_query_heads and num_kv_heads, then the twelve i32 strides
+ * (stride_{q,k,v,o}_{batch,head,token}) last -- and the TEST_P cases pin it on each. Every
+ * variant in either catalog declares `use_sinks: false`, so the sink tail of
+ * attention_dense_signature is unreachable. The 10-argument form of kernels built before
+ * the strides is refused: only a plan saved under a legacy contract launches it.
  *
- * gfx942 only: a kernel on the persistent grid then takes a magic/shift pair per
- * fast-division divisor of its decode, in the decode's own order (14 or 16 arguments), and
- * an `emit_lse: true` kernel takes lse_ptr last. A graph that binds a stats output prepares
- * the LSE form and any other the form without it; the candidate's own grid selects the
- * pairs.
+ * gfx942 only: a kernel on the persistent grid takes a magic/shift pair per fast-division
+ * divisor of its decode after the shape, in the decode's own order, and an `emit_lse: true`
+ * kernel then takes lse_ptr; the strides stay last (26, 27, 28 or 29 arguments). A graph
+ * that binds a stats output prepares the LSE form and any other the form without it; the
+ * candidate's own grid selects the pairs.
  *
  * gfx950 only: every variant declares `persistent: false`, `varlen: false` and
- * `paged: false`. The five-argument form of a baked persistent body (the pointers and
- * scale, no shape) is covered only as a shape the pack must refuse.
+ * `paged: false`. The form of a baked persistent body (the pointers and scale, no shape,
+ * then the strides) is covered only as a shape the pack must refuse.
  *
  * requireSignatureMatch compares `kind` and `size`, and `name` only when both sides carry
  * one. The name comparison is the only one that tells the four pointers apart, or `scale`
- * (f32) from the i32 shape parameters -- all six by-value slots are `by_value` of 4
- * bytes -- so an exchange of two like slots, or a slot under another name, is refused by
- * name alone. `offset` is printed and never compared, which is why every expectation
+ * (f32) from the i32 shape and stride parameters -- all eighteen by-value slots are
+ * `by_value` of 4 bytes -- so an exchange of two like slots, or a slot under another name,
+ * is refused by name alone. `offset` is printed and never compared, which is why every expectation
  * below carries zero for it.
  *
- * Both arches also ship use_additive_bias kernels, which take the ten arguments then the
- * bias pointer and its three strides (fourteen), last after any lse_ptr; a bias graph
- * prepares that form and a plain graph the ten-argument one. The saved plan of a bias kernel
- * (gfx942 dispatch v2, gfx950 v3) restores against the same. Those cases run on the arches
- * that serve a bias (biasServingArches()).
+ * Both arches also ship use_additive_bias kernels, which take the ten arguments (after any
+ * lse_ptr), the bias pointer and its three strides, then the twelve strides (twenty-six); a
+ * bias graph prepares that form and a plain graph the twenty-two-argument one. The saved plan
+ * of a bias kernel (gfx942 dispatch v4, gfx950 v5) restores against the same. Those cases run
+ * on the arches that serve a bias (biasServingArches()).
  *
  * The last section pins AttentionDenseArch::isConsistent(), the rule each engine static_asserts
  * on its descriptor, as compile-time checks on broken descriptors.
@@ -81,7 +84,7 @@ using namespace attention_dense_graphs;
 
 constexpr std::size_t SCALE_INDEX = 4;
 
-constexpr std::size_t LAST_INDEX = 9;
+constexpr std::size_t NUM_KV_HEADS_INDEX = 9;
 
 constexpr std::size_t LSE_INDEX = 10;
 
@@ -100,10 +103,10 @@ const std::vector<std::pair<std::string, std::vector<std::string>>>& persistentD
 
 /// The form the gfx942 persistent body takes on @p decode (qb_major by default): the same
 /// ten arguments, then a magic/shift pair per fast-division divisor, so the pointers and
-/// shape all still line up and only the count differs; lse_ptr last for @p lse.
+/// shape all still line up and only the count differs; lse_ptr for @p lse; the strides last.
 std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major", bool lse = false)
 {
-    auto signature = pythonAbi();
+    auto signature = pythonShapeAbi();
     for(const auto& [name, divisors] : persistentDecodes())
     {
         if(name != decode)
@@ -122,16 +125,16 @@ std::vector<KernelArgument> persistentAbi(const std::string& decode = "qb_major"
     {
         signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
     }
-    return signature;
+    return withStrides(std::move(signature));
 }
 
 /// The form a gfx950 baked persistent body (ragged, or a gqa_pair order) takes: the four
-/// pointers and scale with no shape tail. None ships in that catalog.
+/// pointers and scale with no shape tail, then the strides. None ships in that catalog.
 std::vector<KernelArgument> bakedPersistentAbi()
 {
-    auto signature = pythonAbi();
+    auto signature = pythonShapeAbi();
     signature.resize(SCALE_INDEX + 1);
-    return signature;
+    return withStrides(std::move(signature));
 }
 
 std::vector<KernelArgument> withArgument(std::size_t index, const KernelArgument& argument)
@@ -249,20 +252,40 @@ TEST_P(TestAttentionDenseSignature, AcceptsTheAbiThePythonDeclares)
 
 TEST_P(TestAttentionDenseSignature, RefusesADroppedTrailingArgument)
 {
-    // num_kv_heads gone. Nine arguments against ten: the kernel would read the kernarg
+    // stride_o_token gone. 21 arguments against 22: the kernel would read the kernarg
     // segment one slot past what the host wrote.
     auto signature = pythonAbi();
     signature.pop_back();
-    expectRefused(arch(), signature, "a nine-argument list is not this ABI");
+    expectRefused(arch(), signature, "a 21-argument list is not this ABI");
 }
 
 TEST_P(TestAttentionDenseSignature, RefusesAnExtraTrailingArgument)
 {
-    // One i32 too many -- the shape a fourth shape parameter, or a stride argument, would
-    // add. Every argument the host does write still lands correctly, so nothing faults.
+    // One i32 too many -- the shape a fifth stride, or another trailing scalar, would add.
+    // Every argument the host does write still lands correctly, so nothing faults.
     auto signature = pythonAbi();
     signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""});
-    expectRefused(arch(), signature, "an eleven-argument list is not this ABI");
+    expectRefused(arch(), signature, "a 23-argument list is not this ABI");
+}
+
+TEST_P(TestAttentionDenseSignature, RefusesTheFormWithoutStrides)
+{
+    // A pack built before the strides: its kernels take the ten shape arguments only. This
+    // pack would write twelve more that the kernel never reads, and the kernel would address
+    // every operand as packed whatever the graph's strides are.
+    expectRefused(arch(), pythonShapeAbi(), "a kernel without the strides is not this ABI");
+}
+
+TEST_P(TestAttentionDenseSignature, RefusesTheStridesAheadOfTheShape)
+{
+    // The same 22 entries, the strides moved in front of batch. Count, kinds and sizes all
+    // agree slot by slot past the pointers and scale; only the names tell them apart.
+    auto shape = pythonShapeAbi();
+    const auto strides = pythonStrideAbi();
+    shape.insert(shape.begin() + static_cast<std::ptrdiff_t>(SCALE_INDEX + 1),
+                 strides.begin(),
+                 strides.end());
+    expectRefused(arch(), shape, "the strides come after the shape");
 }
 
 // =============================================================================
@@ -287,13 +310,13 @@ TEST_P(TestAttentionDenseSignature, RefusesAPointerInAScalarSlot)
 
 TEST_P(TestAttentionDenseSignature, RefusesBuffersAndScalarsTransposed)
 {
-    // The by-value tail ahead of the pointers. Same ten entries, the same four buffers
-    // and six scalars, and the comparison is positional, so only the order distinguishes
+    // The by-value tail ahead of the pointers. Same 22 entries, the same four buffers and
+    // eighteen scalars, and the comparison is positional, so only the order distinguishes
     // this from the shipped ABI.
     const KernelArgument buffer{BUFFER_KIND, POINTER_BYTES, 0, ""};
     const KernelArgument scalar{BY_VALUE_KIND, SCALAR_BYTES, 0, ""};
-    const std::vector<KernelArgument> transposed{
-        scalar, scalar, scalar, scalar, scalar, scalar, buffer, buffer, buffer, buffer};
+    std::vector<KernelArgument> transposed(pythonAbi().size() - SCALE_INDEX, scalar);
+    transposed.insert(transposed.end(), SCALE_INDEX, buffer);
     expectRefused(arch(), transposed, "the four pointers come first");
 }
 
@@ -314,9 +337,15 @@ TEST_P(TestAttentionDenseSignature, RefusesAWidenedScalarSlot)
 {
     // num_kv_heads as an i64. The shape parameters are i32 and the pack marshals int32_t,
     // so a 64-bit slot would take four bytes the host never wrote as its high half.
-    expectRefused(arch(),
-                  withArgument(LAST_INDEX, KernelArgument{BY_VALUE_KIND, POINTER_BYTES, 0, ""}),
-                  "the shape parameters are 32-bit");
+    expectRefused(
+        arch(),
+        withArgument(NUM_KV_HEADS_INDEX, KernelArgument{BY_VALUE_KIND, POINTER_BYTES, 0, ""}),
+        "the shape parameters are 32-bit");
+    // The same for a stride: the pack marshals each as int32_t too.
+    expectRefused(
+        arch(),
+        withArgument(pythonAbi().size() - 1, KernelArgument{BY_VALUE_KIND, POINTER_BYTES, 0, ""}),
+        "the strides are 32-bit");
 }
 
 // =============================================================================
@@ -442,7 +471,7 @@ TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseAbiForAGraphThatBindsStats)
         << "the pack refused the emit_lse argument list the rocKE builder declares: " << failure;
 }
 
-TEST(TestGfx942AttentionDenseSignature, RefusesTheTenArgumentFormForAGraphThatBindsStats)
+TEST(TestGfx942AttentionDenseSignature, RefusesTheFormWithoutLseForAGraphThatBindsStats)
 {
     // A non-LSE kernel would never write the stats output the graph asked for.
     expectRefused(
@@ -451,10 +480,18 @@ TEST(TestGfx942AttentionDenseSignature, RefusesTheTenArgumentFormForAGraphThatBi
 
 TEST(TestGfx942AttentionDenseSignature, RefusesTheLseFormForAGraphWithoutStats)
 {
-    // The launch would pass ten arguments, and the kernel would store the LSE through
-    // whatever the eleventh kernarg slot holds.
+    // The launch would pass no lse_ptr, and the kernel would store the LSE through whatever
+    // its lse_ptr slot then holds: the first two strides.
     expectRefused(
-        GFX942_ATTENTION_DENSE, pythonLseAbi(), "a graph without stats launches ten arguments");
+        GFX942_ATTENTION_DENSE, pythonLseAbi(), "a graph without stats launches no lse_ptr");
+}
+
+TEST(TestGfx942AttentionDenseSignature, RefusesTheLseFormWithLsePtrAfterTheStrides)
+{
+    // lse_ptr belongs before the strides, which stay the constant tail of every form.
+    auto late = pythonAbi();
+    late.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
+    expectRefused(GFX942_ATTENTION_DENSE, late, "lse_ptr precedes the strides", Stats::BOUND);
 }
 
 TEST(TestGfx942AttentionDenseSignature, RefusesAnLseSlotThatIsNotAPointer)
@@ -490,20 +527,21 @@ TEST(TestGfx942AttentionDenseSignature, RefusesTheLseFormWithAnyPointerRenamedOr
 TEST(TestGfx942AttentionDenseSignature, RefusesAnLseFormWithASlotDroppedOrAdded)
 {
     auto dropped = pythonLseAbi();
-    dropped.erase(dropped.begin() + static_cast<std::ptrdiff_t>(LAST_INDEX));
+    dropped.erase(dropped.begin() + static_cast<std::ptrdiff_t>(NUM_KV_HEADS_INDEX));
     expectRefused(
         GFX942_ATTENTION_DENSE, dropped, "num_kv_heads still precedes lse_ptr", Stats::BOUND);
 
     auto extra = pythonLseAbi();
     extra.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, ""});
-    expectRefused(GFX942_ATTENTION_DENSE, extra, "lse_ptr is the last argument", Stats::BOUND);
+    expectRefused(
+        GFX942_ATTENTION_DENSE, extra, "stride_o_token is the last argument", Stats::BOUND);
 }
 
 // =============================================================================
 // gfx950: no persistent form ships
 // =============================================================================
 
-TEST(TestGfx950AttentionDenseSignature, RefusesThePersistentFiveArgumentForm)
+TEST(TestGfx950AttentionDenseSignature, RefusesTheBakedPersistentForm)
 {
     expectRefused(GFX950_ATTENTION_DENSE,
                   bakedPersistentAbi(),
@@ -552,6 +590,7 @@ void expectBiasRefused(const AttentionDenseTestArch& arch,
 
 /// A tile the kernel is built with, so the saved block_m reads back.
 constexpr int64_t SAVED_BLOCK_M = 256;
+constexpr int64_t SAVED_BLOCK_N = 64;
 
 /// No device. A restore that passes the signature comparison and the launch values stops
 /// at the device load, which refuses a negative ordinal on the host.
@@ -580,6 +619,18 @@ hipdnn_plugin_sdk::ingestor::SavedLaunchInputs savedLaunchInputs(const Attention
     binding.o = O_UID;
     binding.scale = SCALE;
     binding.stats = statsUid;
+    // The strided contracts save the kernel's own block_n and the strides it addresses with:
+    // here the packed BSHD ones of Q, K, V and O alike, which a kernel that does not read them
+    // (every bias kernel) is saved with.
+    binding.blockN = SAVED_BLOCK_N;
+    binding.readsStrides = false;
+    {
+        const auto batch = static_cast<int32_t>(SEQ * HEADS * HEAD_SIZE);
+        const auto head = static_cast<int32_t>(HEAD_SIZE);
+        const auto token = static_cast<int32_t>(HEADS * HEAD_SIZE);
+        binding.strides
+            = {batch, head, token, batch, head, token, batch, head, token, batch, head, token};
+    }
 
     AttentionDenseProblem problem;
     problem.batch = BATCH;
@@ -661,7 +712,7 @@ protected:
 } // namespace
 
 /// The positive control for a bias variant: a bias graph on a bias candidate recording the
-/// fourteen arguments the builder declares gets past the comparison to the loader.
+/// twenty-six arguments the builder declares gets past the comparison to the loader.
 TEST_P(TestAttentionDenseBiasSignature, AcceptsTheBiasAbiThePythonDeclares)
 {
     const std::string failure = biasPrepareFailure(arch(), pythonBiasAbi(), /*bias=*/true);
@@ -671,10 +722,10 @@ TEST_P(TestAttentionDenseBiasSignature, AcceptsTheBiasAbiThePythonDeclares)
         << "the pack refused the argument list the rocKE builder declares: " << failure;
 }
 
-TEST_P(TestAttentionDenseBiasSignature, RefusesTheTenArgumentFormForABiasCandidate)
+TEST_P(TestAttentionDenseBiasSignature, RefusesThePlainFormForABiasCandidate)
 {
-    // A bias candidate whose object records no bias tail: the launch would write four
-    // arguments past the end of its kernarg segment.
+    // A bias candidate whose object records no bias tail: the launch passes four arguments
+    // the kernel does not declare.
     expectBiasRefused(arch(), pythonAbi(), "a bias variant takes the bias tail", /*bias=*/true);
 }
 
@@ -688,9 +739,17 @@ TEST_P(TestAttentionDenseBiasSignature, RefusesEachExchangeOfTwoBiasStrides)
 {
     // Same kind and size; accepted, the kernel would stride over heads by the batch pitch.
     const auto abi = pythonBiasAbi();
-    for(std::size_t first = abi.size() - 3; first < abi.size(); ++first)
+    const auto batchStride = static_cast<std::size_t>(
+        std::find_if(abi.begin(),
+                     abi.end(),
+                     [](const KernelArgument& argument) {
+                         return argument.name == "additive_bias_batch_stride";
+                     })
+        - abi.begin());
+    ASSERT_LT(batchStride + 2, abi.size());
+    for(std::size_t first = batchStride; first < batchStride + 3; ++first)
     {
-        for(std::size_t second = first + 1; second < abi.size(); ++second)
+        for(std::size_t second = first + 1; second < batchStride + 3; ++second)
         {
             auto exchanged = abi;
             std::swap(exchanged.at(first), exchanged.at(second));
@@ -704,10 +763,10 @@ TEST_P(TestAttentionDenseBiasSignature, RefusesEachExchangeOfTwoBiasStrides)
 // Restoring a saved plan
 // =============================================================================
 
-/// The positive control for the refusal below. The ten-argument form that the plain
+/// The positive control for the refusal below. The twenty-two-argument form that the plain
 /// contract restores passes the signature comparison and the launch values and reaches the
 /// device load.
-TEST_P(TestAttentionDenseBiasSignature, RestoresTheTenArgumentFormPastTheComparison)
+TEST_P(TestAttentionDenseBiasSignature, RestoresThePlainFormPastTheComparison)
 {
     const auto failure = restoreFailure(arch(), pythonAbi(), /*withBias=*/false);
     EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << failure.message;
@@ -716,9 +775,9 @@ TEST_P(TestAttentionDenseBiasSignature, RestoresTheTenArgumentFormPastTheCompari
 }
 
 /// The plain contract holds no bias, so a bias plan saves under the bias contract. A plain
-/// payload that names a bias kernel anyway (forged, or edited) records the fourteen-argument
+/// payload that names a bias kernel anyway (forged, or edited) records the twenty-six-argument
 /// list. The restore must refuse it as incompatible, and must not launch a bias kernel with
-/// ten arguments.
+/// twenty-two arguments.
 TEST_P(TestAttentionDenseBiasSignature, RefusesToRestoreAPlainPlanThatRecordsTheBiasForm)
 {
     const auto failure = restoreFailure(arch(), pythonBiasAbi(), /*withBias=*/false);
@@ -727,10 +786,10 @@ TEST_P(TestAttentionDenseBiasSignature, RefusesToRestoreAPlainPlanThatRecordsThe
     EXPECT_NE(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
 }
 
-/// The positive control for the refusal below. The fourteen-argument form that the bias
+/// The positive control for the refusal below. The twenty-six-argument form that the bias
 /// contract restores passes the signature comparison and the bias values and reaches the
 /// device load.
-TEST_P(TestAttentionDenseBiasSignature, RestoresTheFourteenArgumentFormPastTheComparison)
+TEST_P(TestAttentionDenseBiasSignature, RestoresTheBiasFormPastTheComparison)
 {
     const auto failure = restoreFailure(arch(), pythonBiasAbi(), /*withBias=*/true);
     EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR) << failure.message;
@@ -738,10 +797,10 @@ TEST_P(TestAttentionDenseBiasSignature, RestoresTheFourteenArgumentFormPastTheCo
     EXPECT_EQ(failure.message.find(MISMATCH_MARKER), std::string::npos) << failure.message;
 }
 
-/// A bias payload that names a plain kernel records the ten-argument list. The restore must
+/// A bias payload that names a plain kernel records the twenty-two-argument list. The restore must
 /// refuse it as incompatible, and must not pass four bias arguments the kernel does not
 /// declare.
-TEST_P(TestAttentionDenseBiasSignature, RefusesToRestoreABiasPlanThatRecordsTheTenArgumentForm)
+TEST_P(TestAttentionDenseBiasSignature, RefusesToRestoreABiasPlanThatRecordsThePlainForm)
 {
     const auto failure = restoreFailure(arch(), pythonAbi(), /*withBias=*/true);
     EXPECT_EQ(failure.status, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE) << failure.message;
@@ -758,9 +817,10 @@ INSTANTIATE_TEST_SUITE_P(,
 // gfx942: the bias beside the stats output
 // =============================================================================
 
-/// A bias kernel that writes LSE records lse_ptr and then the bias tail, and a graph that
-/// binds a stats output and a bias is prepared on it. The tail first, or no tail, is refused.
-TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseBiasFormOnlyWithTheTailLast)
+/// A bias kernel that writes LSE records lse_ptr, the bias tail and then the twelve strides,
+/// and a graph that binds a stats output and a bias is prepared on it. lse_ptr after the
+/// strides, or no tail, is refused.
+TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseBiasFormOnlyInItsDeclaredOrder)
 {
     const auto& arch = GFX942_ATTENTION_DENSE;
     const Graph graph(arch, withStats(withBias({BATCH, 1, SEQ, SEQ})));
@@ -777,9 +837,9 @@ TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseBiasFormOnlyWithTheTailLast
     ASSERT_FALSE(accepted.empty()) << "prepare() cannot succeed without the archive";
     EXPECT_EQ(accepted.find(MISMATCH_MARKER), std::string::npos) << accepted;
 
-    auto tailFirst = pythonBiasAbi();
-    tailFirst.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
-    EXPECT_NE(failureOf(tailFirst).find(MISMATCH_MARKER), std::string::npos);
+    auto lseLast = pythonBiasAbi();
+    lseLast.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
+    EXPECT_NE(failureOf(lseLast).find(MISMATCH_MARKER), std::string::npos);
     EXPECT_NE(failureOf(pythonLseAbi()).find(MISMATCH_MARKER), std::string::npos)
         << "a graph with a bias needs the bias tail";
     EXPECT_NE(failureOf(pythonBiasAbi()).find(MISMATCH_MARKER), std::string::npos)
@@ -787,7 +847,7 @@ TEST(TestGfx942AttentionDenseSignature, AcceptsTheLseBiasFormOnlyWithTheTailLast
 }
 
 /// The same for a saved plan: a bias plan with a stats output restores the LSE form with the
-/// tail last, and refuses the form without the tail.
+/// tail before the strides, and refuses the form without the tail.
 TEST(TestGfx942AttentionDenseSignature, RestoresTheLseBiasFormOfABiasPlanWithStats)
 {
     const auto& arch = GFX942_ATTENTION_DENSE;
@@ -836,9 +896,12 @@ constexpr AttentionDenseArch coherentArch()
     arch.tokens.biasStrideQuery = "arch.bias.stride_query";
     arch.candidateWritesLse = &unreachedHook;
     arch.candidateAddsBias = &unreachedHook;
-    arch.currentContract = {"arch.dispatch.v2", AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
-    arch.legacyContract = {"arch.dispatch.v1", AttentionDenseAbi::BAKED_HEAD_COUNTS};
-    arch.biasContract = {"arch.dispatch.v3", AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    arch.currentContract = {"arch.dispatch.v4", AttentionDenseAbi::RUNTIME_STRIDES};
+    arch.legacyContracts[0] = {"arch.dispatch.v1", AttentionDenseAbi::BAKED_HEAD_COUNTS};
+    arch.legacyContracts[1] = {"arch.dispatch.v2", AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
+    arch.legacyContracts[2]
+        = {"arch.dispatch.v3", AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    arch.biasContract = {"arch.dispatch.v5", AttentionDenseAbi::RUNTIME_STRIDES_WITH_BIAS};
     return arch;
 }
 
@@ -864,7 +927,7 @@ static_assert(consistentAfter([](AttentionDenseArch& arch) {
                   arch.biasContract = {};
               }),
               "a descriptor that serves neither stats nor a bias is consistent");
-static_assert(consistentAfter([](AttentionDenseArch& arch) { arch.legacyContract = {}; }),
+static_assert(consistentAfter([](AttentionDenseArch& arch) { arch.legacyContracts = {}; }),
               "a descriptor with no superseded contract is consistent");
 
 // A served stats output needs its token spelled.
@@ -896,17 +959,29 @@ static_assert(
     }),
     "a bias contract after a current contract that bakes the head counts must be refused");
 static_assert(!consistentAfter([](AttentionDenseArch& arch) {
-    arch.biasContract.abi = AttentionDenseAbi::RUNTIME_HEAD_COUNTS;
+    arch.currentContract.abi = AttentionDenseAbi::RUNTIME_HEAD_COUNTS;
+}),
+              "a bias contract after a current contract that takes no strides must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.abi = AttentionDenseAbi::RUNTIME_STRIDES;
 }),
               "a bias contract that launches the form without the bias must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.abi = AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS;
+}),
+              "a bias contract that launches the form without the strides must be refused");
 static_assert(!consistentAfter([](AttentionDenseArch& arch) {
     arch.biasContract.symbol = arch.currentContract.symbol;
 }),
               "a bias contract under the current contract's name must be refused");
 static_assert(!consistentAfter([](AttentionDenseArch& arch) {
-    arch.biasContract.symbol = arch.legacyContract.symbol;
+    arch.biasContract.symbol = arch.legacyContracts[0].symbol;
 }),
-              "a bias contract under the legacy contract's name must be refused");
+              "a bias contract under a legacy contract's name must be refused");
+static_assert(!consistentAfter([](AttentionDenseArch& arch) {
+    arch.biasContract.symbol = arch.legacyContracts[2].symbol;
+}),
+              "a bias contract under the legacy bias contract's name must be refused");
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 

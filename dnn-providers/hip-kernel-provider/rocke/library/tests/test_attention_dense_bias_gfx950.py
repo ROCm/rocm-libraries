@@ -18,6 +18,7 @@ import pytest
 
 from _dense_bias_common import assert_kernel_bias_constants
 from kernels.common._attention_additive_bias import additive_bias_strides
+from kernels.common._attention_dense_strides import DENSE_STRIDE_NAMES
 from kernels.common.attention_dense_spec import attention_dense_cache_key
 from kernels.gfx950.attention_dense import (
     LOG2E,
@@ -68,14 +69,17 @@ def _bias(spec_kw):
 @pytest.mark.parametrize("mode", list(_MODES))
 def test_kernel_params_match_the_launcher_signature(mode):
     """KernelLauncher packs kernargs by position, so the builder's params and
-    attention_dense_signature must name the same list, the four bias params last."""
+    attention_dense_signature must name the same list, the four bias params before the twelve strides.
+    """
     spec = _bias(_MODES[mode])
     params = [p.name for p in build_attention_dense(spec).params]
     assert params == [a["name"] for a in attention_dense_signature(spec)]
-    assert params[-4:] == _BIAS_PARAMS
+    # The four bias params come before the twelve launch-time strides, which stay last.
+    assert params[-16:-12] == _BIAS_PARAMS
+    assert tuple(params[-12:]) == DENSE_STRIDE_NAMES
     plain = replace(spec, use_additive_bias=False)
     plain_params = [p.name for p in build_attention_dense(plain).params]
-    assert plain_params == params[:-4]
+    assert plain_params == params[:-16] + params[-12:]
 
 
 @pytest.mark.parametrize("mode", list(_MODES))

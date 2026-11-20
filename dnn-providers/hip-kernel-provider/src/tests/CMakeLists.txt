@@ -623,13 +623,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
-    set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches
+        EveryShippedKernelTakesTheArgumentsTheEngineLaunches
+        EveryShippedKernelReadsItsStridesAsRockeSaysItDoes)
     set(_hkp_catalog_tiles_cases_gfx950_unified_2d
         EveryShippedKernelsGeometryIsOneTheEngineLaunches)
     set(_hkp_catalog_tiles_cases_gfx950_unified_3d
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryEntryLaunchesItsSegmentAndReduceKernels)
-    set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
+    set(_hkp_catalog_tiles_cases_gfx942_dense EveryShippedKernelsTileIsOneTheEngineLaunches
+        EveryShippedKernelTakesTheArgumentsTheEngineLaunches
+        EveryShippedKernelReadsItsStridesAsRockeSaysItDoes)
     set(_hkp_catalog_tiles_cases_gfx942_unified_2d
         EveryShippedKernelsGeometryIsOneTheEngineLaunches
         EveryCellShipsItsHeadSizesDefaultGeometry

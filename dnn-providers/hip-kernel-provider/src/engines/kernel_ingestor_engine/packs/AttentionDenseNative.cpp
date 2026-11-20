@@ -105,7 +105,6 @@ using sdpa_graph::BATCH_AXIS;
 using sdpa_graph::computesInFloat;
 using sdpa_graph::describeOperand;
 using sdpa_graph::findTensor;
-using sdpa_graph::hasBshdStrides;
 using sdpa_graph::hasSdpaForwardNode;
 using sdpa_graph::HEAD_AXIS;
 using sdpa_graph::HEAD_SIZE_AXIS;
@@ -174,8 +173,9 @@ sdpa_graph::DeclinedBy declined(const AttentionDenseArch& arch, std::string_view
     return sdpa_graph::DeclinedBy{arch.engineName, cause};
 }
 
-/// Why @p tensor is not one the kernel can address, with the strides the kernel bakes for
-/// its dims. Checks the rank itself rather than trusting that the caller validated it.
+/// Why @p tensor is not packed BSHD, with the packed strides of its dims: the decline of an
+/// arch that serves no strided layout. Checks the rank itself rather than trusting that the
+/// caller validated it.
 std::string notBshdReason(std::string_view role, const data_objects::TensorAttributes& tensor)
 {
     std::ostringstream out;
@@ -193,9 +193,9 @@ std::string notBshdReason(std::string_view role, const data_objects::TensorAttri
     const auto show = [](std::optional<int64_t> value) {
         return value.has_value() ? std::to_string(*value) : std::string("overflow");
     };
-    out << "; the kernel bakes strides [" << show(checkedProduct({sequence, heads, headSize}))
-        << ", " << headSize << ", " << show(checkedProduct({heads, headSize})) << ", 1]"
-        << " (unit-extent axes exempt) and takes no stride arguments";
+    out << "; this engine's dense kernels read packed operands only, whose strides are ["
+        << show(checkedProduct({sequence, heads, headSize})) << ", " << headSize << ", "
+        << show(checkedProduct({heads, headSize})) << ", 1] (unit-extent axes exempt)";
     return out.str();
 }
 
@@ -268,6 +268,68 @@ bool qoFitElementOffsets(const AttentionDenseProblem& problem)
     return qElements.has_value() && *qElements < OFFSET_LIMIT;
 }
 
+/// The tile a graph-level admission assumes. Both the padding to the tile and the slack of a
+/// K/V slab grow with block_n, so block_n 1 is the loosest reach any candidate can have: a
+/// graph declined at it is one no candidate could serve. Each candidate then asks again with
+/// its own tile (kernelMatches), and prepare() once more.
+constexpr int64_t GRAPH_LEVEL_BLOCK_N = 1;
+
+/// @p tensor as the stride predicate sees it. Total: a missing dims or strides vector is an
+/// empty one, which the predicate declines as a tensor of another rank.
+DenseOperand denseOperandOf(const data_objects::TensorAttributes& tensor)
+{
+    DenseOperand operand;
+    operand.dims
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(tensor.dims());
+    operand.strides
+        = hipdnn_flatbuffers_sdk::utilities::convertFlatBufferVectorToStdVector(tensor.strides());
+    operand.align = tensor.alignment();
+    operand.isVirtual
+        = tensor.virtual_() || hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(&tensor);
+    operand.isRagged = tensor.ragged_offset_tensor_uid().has_value();
+    return operand;
+}
+
+/// The stride predicate over a graph's four operands, for a candidate tile of block_n
+/// @p blockN: the operands' layouts, their declared alignment and the slab rule.
+DenseStrideVerdict admitDenseLayout(const AttentionDenseProblem& problem,
+                                    int64_t blockN,
+                                    const data_objects::TensorAttributes& q,
+                                    const data_objects::TensorAttributes& k,
+                                    const data_objects::TensorAttributes& v,
+                                    const data_objects::TensorAttributes& o)
+{
+    return denseStridesAdmit(
+        denseStrideProblem(problem, blockN),
+        {denseOperandOf(q), denseOperandOf(k), denseOperandOf(v), denseOperandOf(o)});
+}
+
+/// The strides the four operands declare, extent-1 axes canonicalized, without judging them
+/// (denseStridesAdmit does that); nullopt for a tensor without rank-4 strides. Cheap and
+/// allocation-free, for the per-candidate match.
+std::optional<AttentionDenseStrides> declaredLaunchStrides(const AttentionDenseProblem& problem,
+                                                           const data_objects::TensorAttributes& q,
+                                                           const data_objects::TensorAttributes& k,
+                                                           const data_objects::TensorAttributes& v,
+                                                           const data_objects::TensorAttributes& o)
+{
+    AttentionDenseStrides raw{};
+    const std::array<const data_objects::TensorAttributes*, 4> tensors{&q, &k, &v, &o};
+    for(std::size_t tensor = 0; tensor < tensors.size(); ++tensor)
+    {
+        const auto* strides = tensors.at(tensor)->strides();
+        if(strides == nullptr || strides->size() != SDPA_RANK)
+        {
+            return std::nullopt;
+        }
+        for(std::size_t axis = 0; axis < 3; ++axis)
+        {
+            raw.at(denseStrideIndex(tensor, axis)) = strides->Get(static_cast<uint32_t>(axis));
+        }
+    }
+    return canonicalDenseStrides(denseStrideProblem(problem, GRAPH_LEVEL_BLOCK_N), raw);
+}
+
 /// The stats tensor's trailing unit axis: [B, H, S_q, 1].
 constexpr uint32_t STATS_UNIT_AXIS = 3;
 
@@ -277,7 +339,7 @@ constexpr uint32_t STATS_UNIT_AXIS = 3;
  *
  * The kernel writes row (b, h, s) at element (b * Hq + h) * Sq + s of a FLOAT buffer and
  * takes no stride arguments, so any other layout is written as if it were this one. As in
- * hasBshdStrides, a unit-extent axis is exempt: its stride multiplies an index that is
+ * the stride predicate, a unit-extent axis is exempt: its stride multiplies an index that is
  * always 0. The data type is checked separately.
  */
 bool isServableStatsTensor(const data_objects::TensorAttributes& stats,
@@ -660,18 +722,8 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
         }
     }
 
-    // --- 4. Layout. Tier 1: the failure is wrong elements in bounds, no fault.
-    //
-    // O is held to the same rule at §5, so that an output whose extents disagree declines
-    // on the disagreement instead.
-    for(const auto& [role, tensor] : {std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}})
-    {
-        if(!hasBshdStrides(*tensor))
-        {
-            HIPDNN_PLUGIN_LOG_INFO(declined(arch, "layout") << notBshdReason(role, *tensor));
-            return std::nullopt;
-        }
-    }
+    // --- 4. Layout is judged at section 6, once the operands agree on their dims: the stride
+    // predicate holds each one to the problem's own extents.
 
     // --- 5. Cross-tensor consistency.
     const auto problem = problemFor(*q, *k);
@@ -724,11 +776,6 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                << describeOperand("Q", *q));
         return std::nullopt;
     }
-    if(!hasBshdStrides(*o))
-    {
-        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "layout") << notBshdReason("O", *o));
-        return std::nullopt;
-    }
 
     // GQA: the kernel derives its group size by integer division, so a non-divisible
     // pair silently drops heads.
@@ -762,6 +809,40 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                                << "Q or O has 2^31 elements or more; the kernel addresses them "
                                   "with 32-bit element offsets");
         return std::nullopt;
+    }
+
+    // --- 6b. Layout. The whole-tensor limits above are the spec's own preflight; the stride
+    // predicate then holds each operand to the launch-time stride rules (aligned, positive,
+    // non-overlapping, base alignment) and to the slab rule, which is what the kernel's
+    // 64-bit base and 32-bit offsets are bounded by. It runs at the loosest tile
+    // (GRAPH_LEVEL_BLOCK_N): each candidate asks again with its own. Declined causes are the
+    // predicate's own reason tokens.
+    const auto layout = admitDenseLayout(problem, GRAPH_LEVEL_BLOCK_N, *q, *k, *v, *o);
+    if(!layout.ok)
+    {
+        HIPDNN_PLUGIN_LOG_INFO(declined(arch, denseStrideReasonToken(layout.reason))
+                               << layout.detail);
+        return std::nullopt;
+    }
+    if(!arch.servesStridedLayouts())
+    {
+        // No candidate of this arch reads the strides: every one addresses packed BSHD.
+        const auto packed = packedLaunchStrides(denseStrideProblem(problem, GRAPH_LEVEL_BLOCK_N));
+        const std::array<std::pair<const char*, const data_objects::TensorAttributes*>, 4> operands{
+            std::pair{"Q", q}, std::pair{"K", k}, std::pair{"V", v}, std::pair{"O", o}};
+        for(std::size_t tensor = 0; tensor < operands.size(); ++tensor)
+        {
+            const auto first = denseStrideIndex(tensor, 0);
+            if(!packed.has_value()
+               || !std::equal(layout.strides.begin() + static_cast<std::ptrdiff_t>(first),
+                              layout.strides.begin() + static_cast<std::ptrdiff_t>(first) + 3,
+                              packed->begin() + static_cast<std::ptrdiff_t>(first)))
+            {
+                HIPDNN_PLUGIN_LOG_INFO(declined(arch, "layout") << notBshdReason(
+                                           operands.at(tensor).first, *operands.at(tensor).second));
+                return std::nullopt;
+            }
+        }
     }
 
     // --- 7. The mask. hipDNN has no `causal` boolean; see maskFor, which logs its own
@@ -1094,7 +1175,7 @@ void requireBiasBindingMatchesContract(const AttentionDenseBinding& binding,
                                        std::string_view archLabel,
                                        std::string_view kernelName)
 {
-    const bool contractAddsBias = contract.abi == AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS;
+    const bool contractAddsBias = addsBias(contract.abi);
     if(binding.bias.has_value() == contractAddsBias)
     {
         return;
@@ -1138,6 +1219,52 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel,
     return AttentionDenseTile{*blockM, *blockN};
 }
 
+namespace
+{
+
+/// Whether @p kernel, built for @p tile, addresses the graph's operands correctly: the K and
+/// V slabs fit its own block_n reach, and a layout other than packed BSHD meets a body that
+/// reads the strides. Total: an operand without rank-4 strides is not served.
+bool candidateServesLayout(const MatchContext& context,
+                           const data_objects::SdpaAttributes& attributes,
+                           const AttentionDenseProblem& problem,
+                           const AttentionDenseTile& tile,
+                           const KernelDefinition& kernel,
+                           const AttentionDenseArch& arch)
+{
+    const auto* q = findTensor(context, attributes.q_tensor_uid());
+    const auto* k = findTensor(context, attributes.k_tensor_uid());
+    const auto* v = findTensor(context, attributes.v_tensor_uid());
+    const auto* o = findTensor(context, attributes.o_tensor_uid());
+    if(q == nullptr || k == nullptr || v == nullptr || o == nullptr)
+    {
+        return false;
+    }
+    const auto strides = declaredLaunchStrides(problem, *q, *k, *v, *o);
+    if(!strides.has_value())
+    {
+        return false;
+    }
+    for(const std::size_t tensor : {std::size_t{1}, std::size_t{2}})
+    {
+        if(!denseKvSlabFits(problem.seqLenKv,
+                            strides->at(denseStrideIndex(tensor, 2)),
+                            problem.headSize,
+                            tile.blockN))
+        {
+            return false;
+        }
+    }
+    const auto packed = packedLaunchStrides(denseStrideProblem(problem, tile.blockN));
+    if(packed.has_value() && *strides == *packed)
+    {
+        return true;
+    }
+    return arch.candidateReadsStrides != nullptr && arch.candidateReadsStrides(kernel);
+}
+
+} // namespace
+
 /**
  * Only shape-generic candidates are served. A ragged build bakes its exact shape and pads
  * boundary tiles on-chip; neither catalog ships one, and one arriving from elsewhere is
@@ -1166,6 +1293,12 @@ std::optional<AttentionDenseTile> candidateTile(const KernelDefinition& kernel,
  * shape (AttentionDensePersistent.hpp gridIllegality): hq_minor_swz at a head count that
  * is not a multiple of the XCD count, or a persistent decode past its fast-division bound,
  * is declined so another grid serves the graph.
+ *
+ * The operands' layout was admitted by graphMatches at the loosest tile. Here the K/V slab
+ * rule is asked again with the candidate's own block_n (its reach past the data grows with
+ * the tile), and a graph whose operands are not packed BSHD is served only by a candidate
+ * whose body reads the strides (AttentionDenseArch::candidateReadsStrides); every other
+ * candidate addresses packed storage.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& bound,
@@ -1271,6 +1404,11 @@ bool kernelMatches(const MatchContext& context,
         return false;
     }
 
+    if(!candidateServesLayout(context, attributes, problem, *tile, kernel, arch))
+    {
+        return false;
+    }
+
     if(arch.servesGrids())
     {
         const auto grid = arch.candidateGrid(kernel);
@@ -1331,17 +1469,23 @@ AttentionDenseGrid savedGridSelector(const SavedLaunchInputs& inputs)
     return grid;
 }
 
+} // namespace
+
 /// The kernel signature a contract's launch passes, for a kernel on @p grid that writes LSE
 /// (@p writesLse) or not.
 ///
-/// RUNTIME_HEAD_COUNTS is the form every plain kernel in both catalogs takes; BAKED_HEAD_COUNTS
-/// is the 8-argument form of kernels built before the head counts became runtime arguments;
+/// RUNTIME_STRIDES is the form every plain kernel in both catalogs takes; RUNTIME_HEAD_COUNTS
+/// is the form of plain kernels built before the strides became runtime arguments, and
+/// BAKED_HEAD_COUNTS the 8-argument form of kernels built before the head counts did.
 /// RUNTIME_HEAD_COUNTS_WITH_BIAS is RUNTIME_HEAD_COUNTS plus the bias pointer and its three
-/// strides, appended after everything else, lse_ptr included (14 arguments on a plain
-/// grid kernel). A kernel on the persistent grid (gfx942 only) takes a `<d>_magic`, `<d>_shift` i32 pair per
+/// strides, appended after everything else, lse_ptr included (14 arguments on a plain grid
+/// kernel), and RUNTIME_STRIDES_WITH_BIAS is RUNTIME_STRIDES with those four before the twelve
+/// strides. A kernel on the persistent grid (gfx942 only) takes a `<d>_magic`, `<d>_shift` i32 pair per
 /// fast-division divisor of its decode after the shape (runtime_kernarg_fields), 14 or 16
 /// arguments; a non-persistent order takes none. An emit_lse kernel (gfx942 only) takes one
-/// more argument, lse_ptr, last. use_sinks=False everywhere, so there is no sink_ptr slot.
+/// more argument, lse_ptr, after them. Under RUNTIME_STRIDES the twelve DENSE_STRIDE_NAMES
+/// i32 strides follow last of all: 22, 23, 26, 27, 28 or 29 arguments. use_sinks=False
+/// everywhere, so there is no sink_ptr slot.
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one. Kind and size alone cannot tell the four pointers
@@ -1370,7 +1514,7 @@ std::vector<KernelArgument>
                                           KernelArgument{"by_value", I32, 36, "batch"},
                                           KernelArgument{"by_value", I32, 40, "seqlen_q"},
                                           KernelArgument{"by_value", I32, 44, "seqlen_kv"}};
-    if(abi != AttentionDenseAbi::BAKED_HEAD_COUNTS)
+    if(takesHeadCounts(abi))
     {
         signature.push_back(KernelArgument{"by_value", I32, 48, "num_query_heads"});
         signature.push_back(KernelArgument{"by_value", I32, 52, "num_kv_heads"});
@@ -1395,7 +1539,7 @@ std::vector<KernelArgument>
         signature.push_back(
             KernelArgument{"global_buffer", PTR, (end + PTR - 1) / PTR * PTR, "lse_ptr"});
     }
-    if(abi == AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS)
+    if(addsBias(abi))
     {
         // Spelled as kernels/common/_attention_additive_bias.py declares them: the pointer
         // at the next pointer-aligned offset (56 after num_kv_heads), then the strides.
@@ -1410,8 +1554,89 @@ std::vector<KernelArgument>
         signature.push_back(KernelArgument{
             "by_value", I32, pointerOffset + PTR + 2 * I32, "additive_bias_sq_stride"});
     }
+    if(takesStrides(abi))
+    {
+        // Packed after whatever precedes them: 48 bytes more kernarg on every form.
+        for(const auto name : DENSE_STRIDE_NAMES)
+        {
+            const uint32_t end = signature.back().offset + signature.back().size;
+            signature.push_back(KernelArgument{"by_value", I32, end, std::string(name)});
+        }
+    }
     return signature;
 }
+
+AttentionDenseKernelArguments::AttentionDenseKernelArguments(
+    const AttentionDenseLaunchInputs& launch,
+    AttentionDenseAbi abi,
+    const std::vector<AttentionDenseFastDivPair>& fastDiv,
+    const std::array<void*, 4>& operands,
+    void* lse,
+    void* bias)
+    : _operands(operands)
+    , _scale(launch.binding.scale)
+    , _shape{static_cast<int32_t>(launch.problem.batch),
+             static_cast<int32_t>(launch.problem.seqLenQ),
+             static_cast<int32_t>(launch.problem.seqLenKv),
+             static_cast<int32_t>(launch.problem.numQueryHeads),
+             static_cast<int32_t>(launch.problem.numKvHeads)}
+    , _fastDiv(fastDiv)
+    , _lse(lse)
+    , _bias(bias)
+{
+    // Exactly the arguments kernelSignature lists for this ABI: a BAKED_HEAD_COUNTS code
+    // object bakes the head counts, the other two read them after seqlen_kv, a persistent one
+    // then takes its fast-division pairs, one that writes LSE takes lse_ptr, one that adds a
+    // bias takes the bias pointer and its three strides, and a strides one takes the twelve
+    // strides last. Only gfx950 has a BAKED_HEAD_COUNTS
+    // contract, and it binds no stats output and launches no persistent grid. Every value
+    // fits its i32: the graph match and the saved-plan reader hold the shape and the strides
+    // to [1, INT32_MAX] and [0, INT32_MAX].
+    const bool writesLse = launch.binding.stats != ATTENTION_DENSE_NO_STATS;
+    _params.reserve(_operands.size() + 1 + _shape.size() + 2 * _fastDiv.size() + 1 + 1
+                    + _biasStrides.size() + _strides.size());
+    for(auto& pointer : _operands)
+    {
+        _params.push_back(static_cast<void*>(&pointer));
+    }
+    _params.push_back(&_scale);
+    for(size_t index = 0; index < (takesHeadCounts(abi) ? _shape.size() : 3); ++index)
+    {
+        _params.push_back(&_shape.at(index));
+    }
+    for(auto& pair : _fastDiv)
+    {
+        _params.push_back(&pair.magic);
+        _params.push_back(&pair.shift);
+    }
+    if(writesLse)
+    {
+        _params.push_back(static_cast<void*>(&_lse));
+    }
+    if(addsBias(abi))
+    {
+        // The binding has a bias wherever the contract adds one (requireBiasBindingMatchesContract
+        // refuses the others at prepare and restore), and attentionDenseBinding() bounded each
+        // stride to [0, INT32_MAX].
+        _biasStrides = launch.binding.bias.value().strides;
+        _params.push_back(static_cast<void*>(&_bias));
+        for(auto& stride : _biasStrides)
+        {
+            _params.push_back(&stride);
+        }
+    }
+    if(takesStrides(abi))
+    {
+        for(size_t index = 0; index < _strides.size(); ++index)
+        {
+            _strides.at(index) = static_cast<int32_t>(launch.binding.strides.at(index));
+            _params.push_back(&_strides.at(index));
+        }
+    }
+}
+
+namespace
+{
 
 /// The compiled kernel plus everything launch() needs, owning nothing that points back
 /// into the MatchContext or BoundTokens it came from.
@@ -1525,6 +1750,123 @@ std::unique_ptr<PreparedDispatch>
     return std::make_unique<PreparedAttentionDense>(std::move(code), launch, contract);
 }
 
+} // namespace
+
+AttentionDenseLaunchInputs resolveLaunch(const MatchContext& context,
+                                         const BoundTokens& bound,
+                                         const KernelDefinition& kernel,
+                                         const AttentionDenseArch& arch)
+{
+    auto binding = attentionDenseBinding(bound, arch);
+
+    // kernel_match declines a candidate without a supported tile, so this is the same
+    // defence in depth: the grid and workgroup below come from block_m, and there is no
+    // tile to substitute that would not launch this binary with another's geometry.
+    const auto tile = candidateTile(kernel, arch);
+    if(!tile.has_value())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string(arch.label) + " attention_dense: kernel '" + toString(kernel.kernelId)
+                + "' declares no supported block_m/block_n tile");
+    }
+
+    // kernel_match declines a candidate without a grid the arch launches; the same
+    // defence in depth, since the grid decides the workgroup count and the kernel arguments.
+    AttentionDenseGrid grid;
+    if(arch.servesGrids())
+    {
+        const auto candidateGrid = arch.candidateGrid(kernel);
+        if(!candidateGrid.has_value())
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string(arch.label) + " attention_dense: kernel '" + toString(kernel.kernelId)
+                    + "' declares no launch grid the engine "
+                      "launches");
+        }
+        grid = *candidateGrid;
+    }
+
+    // graph_match and kernel_match are the gates for the operands' layout: a graph whose
+    // operands the stride predicate declines never reaches prepare(). This re-checks all
+    // four, with this candidate's own tile, as defence in depth for a caller that reaches
+    // the handler without having matched, which is why it faults rather than declines --
+    // by this point the engine has been chosen and there is no one left to defer to.
+    const auto* q = findTensor(context, binding.q);
+    const auto* k = findTensor(context, binding.k);
+    const auto* v = findTensor(context, binding.v);
+    const auto* o = findTensor(context, binding.o);
+    for(const auto& [role, tensor] :
+        {std::pair{"query", q}, std::pair{"key", k}, std::pair{"value", v}, std::pair{"output", o}})
+    {
+        if(tensor == nullptr || !isWellFormedOperand(*tensor))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string(arch.label) + " attention_dense: the " + role
+                    + " tensor is missing or is not a rank-4 tensor with positive extents");
+        }
+    }
+    const auto problem = problemFor(*q, *k);
+    if(!kvFitByteOffsets(problem) || !qoFitElementOffsets(problem))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string(arch.label)
+                + " attention_dense: the operands are past the kernel's 32-bit offset limits");
+    }
+    const auto layout = admitDenseLayout(problem, tile->blockN, *q, *k, *v, *o);
+    if(!layout.ok)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string(arch.label) + " attention_dense: the operands are not a layout the "
+                + "kernel can address (" + std::string(denseStrideReasonToken(layout.reason))
+                + "): " + layout.detail);
+    }
+    // A body that does not read the strides addresses packed storage: the same rule as
+    // kernel_match, with the same word the output case always used.
+    const bool readsStrides
+        = arch.candidateReadsStrides != nullptr && arch.candidateReadsStrides(kernel);
+    const auto packed = packedLaunchStrides(denseStrideProblem(problem, tile->blockN));
+    if((!packed.has_value() || layout.strides != *packed) && !readsStrides)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            std::string(arch.label) + " attention_dense: the operands are not dense BSHD; kernel '"
+                + toString(kernel.kernelId)
+                + "' reads packed operands only and does not read the stride arguments");
+    }
+    binding.strides = layout.strides;
+    // Saved with the plan, so a restore knows the tile the slab was checked at and whether
+    // the strides are the ones this kernel reads.
+    binding.blockN = tile->blockN;
+    binding.readsStrides = readsStrides;
+
+    // The same defence in depth for the stats output: graph_match binds only one the
+    // kernel can write, and the kernel takes no stride arguments for it.
+    const bool writesLse = binding.stats != ATTENTION_DENSE_NO_STATS;
+    if(writesLse)
+    {
+        const auto* stats = findTensor(context, binding.stats);
+        if(stats == nullptr || stats->data_type() != data_objects::DataType::FLOAT
+           || !isServableStatsTensor(*stats, problem))
+        {
+            throw hipdnn_plugin_sdk::HipdnnPluginException(
+                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                std::string(arch.label)
+                    + " attention_dense: the stats tensor is not the packed [B, Hq, Sq, 1] "
+                      "FLOAT tensor the kernel writes the LSE to");
+        }
+    }
+
+    return AttentionDenseLaunchInputs{binding, problem, tile->blockM, grid};
+}
+
+namespace
+{
+
 class AttentionDenseDispatchHandler : public IKernelDispatchHandler<Handle>
 {
 public:
@@ -1551,72 +1893,8 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        const auto binding = attentionDenseBinding(bound, _arch);
-
-        // graph_match is the gate for this: a non-BSHD output declines there and never
-        // reaches prepare(). This re-check is defence in depth for a caller that reaches
-        // the handler without having matched, which is why it faults rather than declines
-        // -- by this point the engine has been chosen and there is no one left to defer to.
-        const auto* o = findTensor(context, binding.o);
-        if(o == nullptr || !isWellFormedOperand(*o) || !hasBshdStrides(*o))
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                std::string(_arch.label)
-                    + " attention_dense: the output tensor is not dense BSHD; the kernel "
-                      "bakes that layout and takes no stride arguments");
-        }
-
-        // kernel_match declines a candidate without a supported tile, so this is the same
-        // defence in depth: the grid and CTA below come from block_m, and there is no
-        // tile to substitute that would not launch this binary with another's geometry.
-        const auto tile = candidateTile(kernel, _arch);
-        if(!tile.has_value())
-        {
-            throw hipdnn_plugin_sdk::HipdnnPluginException(
-                HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                std::string(_arch.label) + " attention_dense: kernel '" + toString(kernel.kernelId)
-                    + "' declares no supported block_m/block_n tile");
-        }
-
-        // kernel_match declines a candidate without a grid the arch launches; the same
-        // defence in depth, since the grid decides the CTA count and the kernel arguments.
-        AttentionDenseGrid grid;
-        if(_arch.servesGrids())
-        {
-            const auto candidateGrid = _arch.candidateGrid(kernel);
-            if(!candidateGrid.has_value())
-            {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    std::string(_arch.label) + " attention_dense: kernel '"
-                        + toString(kernel.kernelId)
-                        + "' declares no launch grid the engine "
-                          "launches");
-            }
-            grid = *candidateGrid;
-        }
-
-        const auto* q = findTensor(context, binding.q);
-        const auto* k = findTensor(context, binding.k);
-        const auto problem = problemFor(*q, *k);
-
-        // The same defence in depth for the stats output: graph_match binds only one the
-        // kernel can write, and the kernel takes no stride arguments for it.
-        const bool writesLse = binding.stats != ATTENTION_DENSE_NO_STATS;
-        if(writesLse)
-        {
-            const auto* stats = findTensor(context, binding.stats);
-            if(stats == nullptr || stats->data_type() != data_objects::DataType::FLOAT
-               || !isServableStatsTensor(*stats, problem))
-            {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                    std::string(_arch.label)
-                        + " attention_dense: the stats tensor is not the packed [B, Hq, Sq, 1] "
-                          "FLOAT tensor the kernel writes the LSE to");
-            }
-        }
+        const auto launch = resolveLaunch(context, bound, kernel, _arch);
+        const bool writesLse = launch.binding.stats != ATTENTION_DENSE_NO_STATS;
 
         // kernel_match pairs a bias graph with a bias candidate only, so the binding and the
         // kernel agree here; the same defence in depth, since a bias adds kernel arguments. A
@@ -1624,8 +1902,8 @@ public:
         AttentionDenseContract contract = _contract;
         if(_arch.servesBias())
         {
-            const auto addsBias = _arch.candidateAddsBias(kernel);
-            if(!addsBias.has_value() || binding.bias.has_value() != *addsBias)
+            const auto kernelAddsBias = _arch.candidateAddsBias(kernel);
+            if(!kernelAddsBias.has_value() || launch.binding.bias.has_value() != *kernelAddsBias)
             {
                 throw hipdnn_plugin_sdk::HipdnnPluginException(
                     HIPDNN_PLUGIN_STATUS_BAD_PARAM,
@@ -1633,7 +1911,7 @@ public:
                         + toString(kernel.kernelId)
                         + "' and the graph disagree on the additive bias");
             }
-            if(binding.bias.has_value())
+            if(launch.binding.bias.has_value())
             {
                 if(!_servesBias)
                 {
@@ -1646,7 +1924,8 @@ public:
                 // attentionDenseBinding() bounded each stride; the reach over this problem's
                 // extents is bounded here, since a binding that did not come from the graph
                 // match may pair any strides with any shape, and the kernel wraps its i32 index.
-                const auto largest = largestAdditiveBiasIndex(problem, binding.bias->strides);
+                const auto largest
+                    = largestAdditiveBiasIndex(launch.problem, launch.binding.bias->strides);
                 if(!largest.has_value() || *largest > MAX_BIAS_INDEX)
                 {
                     throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1660,14 +1939,10 @@ public:
         }
 
         auto code = buildIngestorKernelCode(
-            _kpackLoader, context, kernel, kernelSignature(contract.abi, grid, writesLse));
+            _kpackLoader, context, kernel, kernelSignature(contract.abi, launch.grid, writesLse));
 
         return makePreparedAttentionDense(
-            std::move(code),
-            AttentionDenseLaunchInputs{binding, problem, tile->blockM, grid},
-            toString(kernel.kernelId),
-            _arch,
-            contract);
+            std::move(code), launch, toString(kernel.kernelId), _arch, contract);
     }
 
     std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
@@ -1711,9 +1986,13 @@ public:
     {
         const auto& preparedDense = dynamic_cast<const PreparedAttentionDense&>(prepared);
         const auto& launch = preparedDense.launchInputs();
-        return SavedLaunchInputs{
-            std::string(preparedDense.contract().symbol),
-            launchValues(launch.binding, launch.problem, launch.blockM, _arch, launch.grid)};
+        return SavedLaunchInputs{std::string(preparedDense.contract().symbol),
+                                 launchValues(launch.binding,
+                                              launch.problem,
+                                              launch.blockM,
+                                              _arch,
+                                              preparedDense.contract(),
+                                              launch.grid)};
     }
 
     bool supportsSaving() const override
@@ -1740,36 +2019,21 @@ public:
             = hipdnn_plugin_sdk::findDeviceBuffer(binding.o, deviceBuffers, numDeviceBuffers);
 
         const auto& launchInputs = preparedDense.launchInputs();
-        const auto& p = launchInputs.problem;
         auto& kernel = preparedDense.kernelForStream(handle.getStream());
 
-        // Exactly the arguments the code object was checked against (kernelSignature): a
-        // BAKED_HEAD_COUNTS code object bakes the head counts, a RUNTIME_HEAD_COUNTS one
-        // reads them after seqlen_kv, a persistent one then takes its fast-division pairs,
-        // one that writes LSE takes lse_ptr, and one that adds a bias takes the bias pointer
-        // and its three strides last. Only gfx950 has a BAKED_HEAD_COUNTS contract, and it
-        // binds no stats output and launches no persistent grid.
-        std::array<void*, 4> pointers{q.ptr, k.ptr, v.ptr, o.ptr};
-        float scale = binding.scale;
-        std::array<int32_t, 5> shape{static_cast<int32_t>(p.batch),
-                                     static_cast<int32_t>(p.seqLenQ),
-                                     static_cast<int32_t>(p.seqLenKv),
-                                     static_cast<int32_t>(p.numQueryHeads),
-                                     static_cast<int32_t>(p.numKvHeads)};
-        auto fastDiv = preparedDense.fastDiv();
         const bool writesLse = binding.stats != ATTENTION_DENSE_NO_STATS;
         void* lse = writesLse ? hipdnn_plugin_sdk::findDeviceBuffer(
                                     binding.stats, deviceBuffers, numDeviceBuffers)
                                     .ptr
                               : nullptr;
 
-        const bool headCounts
-            = preparedDense.contract().abi != AttentionDenseAbi::BAKED_HEAD_COUNTS;
-        const bool addsBias
-            = preparedDense.contract().abi == AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS;
+        // Exactly the arguments the code object was checked against (kernelSignature), for
+        // the contract it was prepared or restored under.
+        const auto abi = preparedDense.contract().abi;
+        // A bias contract's code object takes the bias pointer and its strides: the bound
+        // bias's buffer comes from the launch's own buffers, like the operands.
         void* biasPointer = nullptr;
-        std::array<int32_t, 3> biasStrides{0, 0, 0};
-        if(addsBias)
+        if(addsBias(abi))
         {
             if(!binding.bias.has_value())
             {
@@ -1781,48 +2045,24 @@ public:
             biasPointer = hipdnn_plugin_sdk::findDeviceBuffer(
                               binding.bias->uid, deviceBuffers, numDeviceBuffers)
                               .ptr;
-            biasStrides = binding.bias->strides;
         }
-        std::vector<void*> params;
-        params.reserve(pointers.size() + 1 + shape.size() + 2 * fastDiv.size() + 1 + 4);
-        for(auto& pointer : pointers)
-        {
-            params.push_back(static_cast<void*>(&pointer));
-        }
-        params.push_back(&scale);
-        for(size_t index = 0; index < (headCounts ? shape.size() : 3); ++index)
-        {
-            params.push_back(&shape.at(index));
-        }
-        for(auto& pair : fastDiv)
-        {
-            params.push_back(&pair.magic);
-            params.push_back(&pair.shift);
-        }
-        if(writesLse)
-        {
-            params.push_back(static_cast<void*>(&lse));
-        }
-        if(addsBias)
-        {
-            params.push_back(static_cast<void*>(&biasPointer));
-            for(auto& stride : biasStrides)
-            {
-                params.push_back(&stride);
-            }
-        }
+        AttentionDenseKernelArguments arguments(launchInputs,
+                                                abi,
+                                                preparedDense.fastDiv(),
+                                                {q.ptr, k.ptr, v.ptr, o.ptr},
+                                                lse,
+                                                biasPointer);
         // The count is the signature's by construction; checked so a skew can never launch.
-        const auto expected
-            = kernelSignature(preparedDense.contract().abi, launchInputs.grid, writesLse).size();
-        if(params.size() != expected)
+        const auto expected = kernelSignature(abi, launchInputs.grid, writesLse).size();
+        if(arguments.params().size() != expected)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
                 std::string(_arch.label) + " attention_dense: the launch packs "
-                    + std::to_string(params.size()) + " kernel arguments, the signature "
-                    + std::to_string(expected));
+                    + std::to_string(arguments.params().size())
+                    + " kernel arguments, the signature " + std::to_string(expected));
         }
-        kernel.launchWithParams(handle.getStream(), params.data());
+        kernel.launchWithParams(handle.getStream(), arguments.data());
     }
 
 private:
@@ -1946,6 +2186,76 @@ void requireServedSavedShape(const SavedLaunchInputs& inputs,
     }
 }
 
+// Refuses saved strides the graph match never binds, by re-running its gate on them. A plan
+// whose kernel does not read the strides (reads_strides 0) takes only the packed strides
+// (@p packed), each refused by its own name, and an arch that serves no strided layout takes
+// no kernel that reads them. Then the saved dims with the saved strides, at the default
+// 16-byte alignment and the kernel's own saved block_n, must pass the stride predicate. Last,
+// the saved values must be the predicate's canonical form, the values the launch passes.
+void requireServedSavedStrides(const SavedLaunchInputs& inputs,
+                               const AttentionDenseStrides& saved,
+                               const AttentionDenseStrides& packed,
+                               const AttentionDenseLaunchInputs& launch,
+                               const AttentionDenseArch& arch)
+{
+    const auto& binding = launch.binding;
+    if(binding.readsStrides && !arch.servesStridedLayouts())
+    {
+        refuseAttentionDenseLaunchValue(
+            inputs, READS_STRIDES_VALUE, "must be 0: no kernel of this engine reads the strides");
+    }
+    if(!binding.readsStrides)
+    {
+        for(size_t index = 0; index < saved.size(); ++index)
+        {
+            if(saved.at(index) != packed.at(index))
+            {
+                refuseAttentionDenseLaunchValue(
+                    inputs,
+                    DENSE_STRIDE_NAMES.at(index),
+                    "must be " + std::to_string(packed.at(index))
+                        + ", the packed BSHD stride of the saved dims; the plan holds "
+                        + std::to_string(saved.at(index))
+                        + ", and its kernel does not read the strides (reads_strides is 0)");
+            }
+        }
+    }
+
+    const auto denseProblem = denseStrideProblem(launch.problem, binding.blockN);
+    std::array<DenseOperand, 4> operands;
+    for(std::size_t tensor = 0; tensor < operands.size(); ++tensor)
+    {
+        const auto dims = denseOperandDims(denseProblem, tensor);
+        operands.at(tensor).dims.assign(dims.begin(), dims.end());
+        operands.at(tensor).strides = {saved.at(denseStrideIndex(tensor, 0)),
+                                       saved.at(denseStrideIndex(tensor, 1)),
+                                       saved.at(denseStrideIndex(tensor, 2)),
+                                       1};
+    }
+    const auto verdict = denseStridesAdmit(denseProblem, operands);
+    if(!verdict.ok)
+    {
+        serialization::refuseIngestorPlan(
+            serialization::IngestorPlanRefusal::INCOMPATIBLE,
+            "the stride launch values of dispatch '" + inputs.dispatchSymbol
+                + "' are not a layout the kernel can address ("
+                + std::string(denseStrideReasonToken(verdict.reason)) + "): " + verdict.detail);
+    }
+    for(size_t index = 0; index < saved.size(); ++index)
+    {
+        if(saved.at(index) != verdict.strides.at(index))
+        {
+            refuseAttentionDenseLaunchValue(
+                inputs,
+                DENSE_STRIDE_NAMES.at(index),
+                "must be " + std::to_string(verdict.strides.at(index))
+                    + ", the canonical value (an axis of extent 1 saves 0, or the head size for "
+                      "the token axis); the plan holds "
+                    + std::to_string(saved.at(index)));
+        }
+    }
+}
+
 // Reads the saved grid of an arch that serves grids, and refuses one the kernel match never
 // admits at the saved shape. The shape must already have been validated.
 AttentionDenseGrid readSavedGrid(const SavedLaunchInputs& inputs,
@@ -2012,10 +2322,41 @@ std::unique_ptr<IKernelDispatchHandler<Handle>>
     return std::make_unique<AttentionDenseDispatchHandler>(kpackLoader, arch, contract);
 }
 
+DenseStrideProblem denseStrideProblem(const AttentionDenseProblem& problem, int64_t blockN)
+{
+    DenseStrideProblem dense;
+    dense.batch = problem.batch;
+    dense.seqLenQ = problem.seqLenQ;
+    dense.seqLenKv = problem.seqLenKv;
+    dense.numQueryHeads = problem.numQueryHeads;
+    dense.numKvHeads = problem.numKvHeads;
+    dense.headSize = problem.headSize;
+    dense.blockN = blockN;
+    return dense;
+}
+
+std::optional<AttentionDenseStrides> packedLaunchStrides(const AttentionDenseProblem& problem)
+{
+    const auto packed = packedLaunchStrides(denseStrideProblem(problem, GRAPH_LEVEL_BLOCK_N));
+    if(!packed.has_value())
+    {
+        return std::nullopt;
+    }
+    for(const auto stride : *packed)
+    {
+        if(stride < 0 || stride >= DENSE_INT32_LIMIT)
+        {
+            return std::nullopt;
+        }
+    }
+    return packed;
+}
+
 MetadataValues launchValues(const AttentionDenseBinding& binding,
                             const AttentionDenseProblem& problem,
                             int64_t blockM,
                             const AttentionDenseArch& arch,
+                            const AttentionDenseContract& contract,
                             const AttentionDenseGrid& grid)
 {
     MetadataValues values{{std::string(Q_UID_VALUE), binding.q},
@@ -2033,8 +2374,20 @@ MetadataValues launchValues(const AttentionDenseBinding& binding,
                           {std::string(BLOCK_M_VALUE), blockM},
                           {std::string(SCALE_VALUE), static_cast<double>(binding.scale)},
                           {std::string(DATA_TYPE_VALUE),
-                           std::string(data_objects::EnumNameDataType(problem.dataType))},
-                          {std::string(STRIDE_LAYOUT_VALUE), std::string(BSHD_LAYOUT)}};
+                           std::string(data_objects::EnumNameDataType(problem.dataType))}};
+    if(takesStrides(contract.abi))
+    {
+        for(size_t index = 0; index < DENSE_STRIDE_NAMES.size(); ++index)
+        {
+            values.emplace(std::string(DENSE_STRIDE_NAMES.at(index)), binding.strides.at(index));
+        }
+        values.emplace(std::string(BLOCK_N_VALUE), binding.blockN);
+        values.emplace(std::string(READS_STRIDES_VALUE), int64_t{binding.readsStrides ? 1 : 0});
+    }
+    else
+    {
+        values.emplace(std::string(STRIDE_LAYOUT_VALUE), std::string(BSHD_LAYOUT));
+    }
     if(arch.servesStats())
     {
         values.emplace(std::string(STATS_UID_VALUE), binding.stats);
@@ -2062,24 +2415,16 @@ MetadataValues launchValues(const AttentionDenseBinding& binding,
 AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
                                             const AttentionDenseArch& arch)
 {
-    // The legacy and current contracts of an arch share this value set and the bias contract
-    // adds the bias values; anything else, including the unversioned name, is refused against
-    // the current contract.
-    const bool legacy = !arch.legacyContract.symbol.empty()
-                        && inputs.dispatchSymbol == arch.legacyContract.symbol;
-    const bool withBias = arch.servesBias() && inputs.dispatchSymbol == arch.biasContract.symbol;
-    std::string_view expectedContract = arch.currentContract.symbol;
-    if(legacy)
-    {
-        expectedContract = arch.legacyContract.symbol;
-    }
-    else if(withBias)
-    {
-        expectedContract = arch.biasContract.symbol;
-    }
-    requireLaunchContract(inputs, expectedContract);
-    // The sixteen values both arches share; an arch that serves stats also saves the
-    // stats uid.
+    // The current contract, the bias contract or a legacy one; anything else, including the
+    // unversioned name, is refused against the current contract.
+    const AttentionDenseContract* named = arch.contractNamed(inputs.dispatchSymbol);
+    const AttentionDenseContract& contract = named != nullptr ? *named : arch.currentContract;
+    requireLaunchContract(inputs, contract.symbol);
+    const bool savesStrides = takesStrides(contract.abi);
+    const bool withBias = addsBias(contract.abi);
+    // The fifteen values both arches share; then the twelve strides with block_n and
+    // reads_strides, or the stride layout of a contract without them; an arch that serves
+    // stats also saves the stats uid; a contract that adds a bias saves the bias values.
     std::vector<std::string_view> names{Q_UID_VALUE,
                                         K_UID_VALUE,
                                         V_UID_VALUE,
@@ -2094,8 +2439,17 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
                                         HEAD_SIZE_VALUE,
                                         BLOCK_M_VALUE,
                                         SCALE_VALUE,
-                                        DATA_TYPE_VALUE,
-                                        STRIDE_LAYOUT_VALUE};
+                                        DATA_TYPE_VALUE};
+    if(savesStrides)
+    {
+        names.insert(names.end(), DENSE_STRIDE_NAMES.begin(), DENSE_STRIDE_NAMES.end());
+        names.push_back(BLOCK_N_VALUE);
+        names.push_back(READS_STRIDES_VALUE);
+    }
+    else
+    {
+        names.push_back(STRIDE_LAYOUT_VALUE);
+    }
     if(arch.servesStats())
     {
         names.push_back(STATS_UID_VALUE);
@@ -2182,14 +2536,32 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
                 + dataTypeName + "'");
     }
 
-    // The kernel takes no stride arguments and reads every operand as dense BSHD.
-    const std::string strideLayout = requireLaunchString(inputs, STRIDE_LAYOUT_VALUE);
-    if(strideLayout != BSHD_LAYOUT)
+    // A contract without strides launches a kernel that reads every operand as dense BSHD.
+    // One with them passes each stride as an i32 kernel argument.
+    AttentionDenseStrides savedStrides{};
+    if(savesStrides)
     {
-        refuseAttentionDenseLaunchValue(inputs,
-                                        STRIDE_LAYOUT_VALUE,
-                                        "must be '" + std::string(BSHD_LAYOUT)
-                                            + "'; the plan holds '" + strideLayout + "'");
+        for(size_t index = 0; index < DENSE_STRIDE_NAMES.size(); ++index)
+        {
+            savedStrides.at(index)
+                = requireLaunchInt(inputs, DENSE_STRIDE_NAMES.at(index), 0, INT32_LIMIT);
+        }
+        // The kernel's own tile and whether its body reads the strides, both written by
+        // prepare(): block_n is checked against the arch's tile rule below, once the head size
+        // is.
+        binding.blockN = requireLaunchInt(inputs, BLOCK_N_VALUE, 1, INT32_LIMIT);
+        binding.readsStrides = requireLaunchInt(inputs, READS_STRIDES_VALUE, 0, 1) == 1;
+    }
+    else
+    {
+        const std::string strideLayout = requireLaunchString(inputs, STRIDE_LAYOUT_VALUE);
+        if(strideLayout != BSHD_LAYOUT)
+        {
+            refuseAttentionDenseLaunchValue(inputs,
+                                            STRIDE_LAYOUT_VALUE,
+                                            "must be '" + std::string(BSHD_LAYOUT)
+                                                + "'; the plan holds '" + strideLayout + "'");
+        }
     }
 
     try
@@ -2208,6 +2580,31 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
     }
 
     requireServedSavedShape(inputs, launch);
+    // Not re-checked here: seqlen_kv % block_n == 0. The reader re-checks memory safety (the slab
+    // rule below), not every matching rule; prepare() guarantees the divisibility.
+    if(savesStrides && !arch.isSupportedTile(problem.headSize, launch.blockM, binding.blockN))
+    {
+        refuseAttentionDenseLaunchValue(inputs,
+                                        BLOCK_N_VALUE,
+                                        "is not a tile the kernel is built with at head size "
+                                            + std::to_string(problem.headSize) + " and block_m "
+                                            + std::to_string(launch.blockM) + "; the plan holds "
+                                            + std::to_string(binding.blockN));
+    }
+    // The shape passed the size limits, so its packed strides are i32 values.
+    const auto packed = packedLaunchStrides(problem);
+    if(!packed.has_value())
+    {
+        serialization::refuseIngestorPlan(
+            serialization::IngestorPlanRefusal::INCOMPATIBLE,
+            "the launch values of dispatch '" + inputs.dispatchSymbol
+                + "' give a packed stride that is not a 32-bit kernel argument");
+    }
+    if(savesStrides)
+    {
+        requireServedSavedStrides(inputs, savedStrides, *packed, launch, arch);
+    }
+    binding.strides = savesStrides ? savedStrides : *packed;
     if(arch.servesGrids())
     {
         launch.grid = readSavedGrid(inputs, launch);

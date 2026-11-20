@@ -241,18 +241,36 @@ def zero_keyless_row(b, packed, row_has_key, dtype, width=4):
 
 def _check_lse_buffer(lse, q, expected, inputs):
     """Shared caller-owned LSE buffer contract: FP32, exact shape, contiguous,
-    on q's GPU, and not overlapping any input or output tensor."""
-    import torch
+    on q's GPU, and not overlapping any input or output tensor.
 
-    if not isinstance(lse, torch.Tensor):
+    A "tensor" is anything with the attributes read here (``shape``, ``dtype``,
+    ``is_contiguous()``, ``data_ptr()``, ``numel()``, ``element_size()``, and
+    ``stride()`` / ``is_cuda`` / ``device`` where noted): a torch tensor, or the
+    device-buffer view of a caller that does not use torch. ``is_cuda`` defaults to
+    True when absent."""
+    if not all(
+        hasattr(lse, a)
+        for a in (
+            "shape",
+            "dtype",
+            "is_contiguous",
+            "data_ptr",
+            "numel",
+            "element_size",
+        )
+    ):
         raise ValueError("lse must be a torch tensor")
-    if lse.dtype != torch.float32:
+    if not str(lse.dtype).endswith("float32"):
         raise ValueError("lse must have dtype float32")
     if tuple(lse.shape) != expected:
         raise ValueError(f"lse shape {tuple(lse.shape)} != {expected}")
     if not lse.is_contiguous():
         raise ValueError("lse must be contiguous")
-    if not q.is_cuda or not lse.is_cuda or lse.device != q.device:
+    if (
+        not getattr(q, "is_cuda", True)
+        or not getattr(lse, "is_cuda", True)
+        or lse.device != q.device
+    ):
         raise ValueError("lse and q must be GPU tensors on the same device")
 
     lse_start = lse.data_ptr()
@@ -260,7 +278,7 @@ def _check_lse_buffer(lse, q, expected, inputs):
     for name, tensor in inputs.items():
         if tensor is None:
             continue
-        if not tensor.is_cuda or tensor.device != q.device:
+        if not getattr(tensor, "is_cuda", True) or tensor.device != q.device:
             raise ValueError(f"{name} must be on q's GPU device")
         if not tensor.numel():
             continue

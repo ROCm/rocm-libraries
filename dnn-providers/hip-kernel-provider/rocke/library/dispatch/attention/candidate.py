@@ -22,6 +22,7 @@ from rocke.dispatch.tuning import make_tuned_candidate
 from .common import (
     ATTENTION_ABI_VERSION,
     ATTENTION_FEATURES,
+    DENSE_ATTENTION_ABI_VERSION,
     FAMILY,
     UNIFIED_BLOCK_SIZES,
     UNIFIED_DTYPES,
@@ -160,7 +161,7 @@ def make_dense_candidate(
     """One dense candidate. ``base_spec(req)`` is its default kernel spec (raise
     ``ValueError`` when the request cannot have one); ``supports`` is the
     kernel's own validator; ``features`` is the capability's feature set
-    (``layout_dense`` is added: every dense kernel reads contiguous tensors);
+    (``layout_dense`` is added: every dense kernel reads ``[B, S, H, D]`` tensors);
     ``algorithm`` the selector a pin names it by; ``recorded`` names the
     fields ``base_spec`` resolves per problem (see
     :meth:`rocke.dispatch.tuning.KnobSpace.recorded`); ``derived`` recomputes
@@ -179,7 +180,7 @@ def make_dense_candidate(
         family=FAMILY,
         algorithm=algorithm,
         spec_id=spec_id,
-        abi_version=ATTENTION_ABI_VERSION,
+        abi_version=DENSE_ATTENTION_ABI_VERSION,
         priority=3,
         capability=Capability(
             arches=(arch,),
@@ -187,7 +188,7 @@ def make_dense_candidate(
             supports_features=frozenset(features) | {"layout_dense"},
         ),
         space=DenseSpace(
-            abi=ATTENTION_ABI_VERSION,
+            abi=DENSE_ATTENTION_ABI_VERSION,
             arch=arch,
             path="dense",
             variant_id=variant_id,

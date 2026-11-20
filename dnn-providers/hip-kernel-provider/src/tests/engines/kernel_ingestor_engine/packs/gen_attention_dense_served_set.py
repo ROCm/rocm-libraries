@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+"""Print AttentionDenseServedSetTable.inc: which dense bodies rocKE says read their strides.
+
+A dense kernel that does not read its twelve stride arguments addresses packed
+[B, S, H, D] storage, so handing it a strided graph is a silent wrong answer. The engine
+decides from the KMD fields of a candidate (``candidateReadsStrides``, one function per
+arch); rocKE decides from the full spec (``kernels.<arch>.attention_dense
+.body_serves_strides``). This script asks rocKE, for the engine's census to compare.
+
+    gfx950=PATH gfx942=PATH      each PATH the arch's shipped ``*_attention_dense.kdp.json``
+
+Rows, one per line, ``{arch, kernel, variant, {overrides}, served}``:
+
+* every kernel the pack ships (variant ``""``, no overrides): rocKE's answer for the spec the
+  kernel is built from, which the KDP records beside its KMD metadata. The census loads the real
+  pack, so a kernel of a body class the rule gets wrong is judged where it ships;
+* for each distinct (dtype, head_size) of the catalog, that first kernel's spec with a body-class
+  flip applied (persistent in each work order, ragged, persistent and ragged, and on gfx942 the K
+  double buffer, the V prefetch and the KV-segment split), with rocKE's answer for the flipped
+  spec. The census applies the same overrides to the shipped kernel's KMD metadata and asks the
+  engine. This is how a class the catalog does not carry today (a gfx950 persistent kernel) is
+  still held to rocKE. Flips rocKE's spec rejects are left out.
+
+Not covered, on purpose: varlen and paged specs. The KMD cannot express them and their
+kernels take more arguments than the 22 the engine launches, so the argument census
+(EveryShippedKernelTakesTheArgumentsTheEngineLaunches) fails first.
+
+With no KDP the table is empty and the census reports that instead of passing vacuously.
+The build writes the table into the build tree through gen_gfx942_attention_unified_3d_table.py
+(kernel_ingestor_engine/CMakeLists.txt); it is never committed. To print it by hand, from the
+provider root:
+
+    cd rocke/library && PYTHONPATH=.:../platform/python ROCKE_BACKEND=python python3 \
+        ../../src/tests/engines/kernel_ingestor_engine/packs/gen_attention_dense_served_set.py \
+        gfx950=<gfx950 kdp> gfx942=<gfx942 kdp>
+"""
+
+import importlib
+import inspect
+import json
+import re
+import sys
+import typing
+
+# label -> ({spec field: value}, ((KMD field, value), ...) the engine sees). A string KMD value is
+# spelled as a C++ string, an integer (a flag too) as an integer.
+_PERSISTENT = ({"persistent": True}, (("persistent", 1),))
+_RAGGED = ({"ragged": True}, (("ragged", 1),))
+_GFX950_DECODES = (
+    "auto",
+    "qb_major",
+    "hkv_major",
+    "bt_hkv_minor",
+    "hq_minor_swz",
+    "gqa_pair",
+    "gqa_pair_2phase",
+)
+_FLIPS = {
+    "gfx950": {
+        "persistent": _PERSISTENT,
+        "ragged": _RAGGED,
+        "persistent_ragged": (
+            {"persistent": True, "ragged": True},
+            (("persistent", 1), ("ragged", 1)),
+        ),
+        **{
+            f"persistent_{decode}": (
+                {"persistent": True, "persist_decode": decode},
+                (("persistent", 1), ("persist_decode", decode)),
+            )
+            for decode in _GFX950_DECODES
+        },
+    },
+    "gfx942": {
+        "persistent": _PERSISTENT,
+        "ragged": _RAGGED,
+        "lds_num_buffers": ({"lds_num_buffers": 2}, (("lds_num_buffers", 2),)),
+        "v_reg_prefetch": ({"v_reg_prefetch": True}, (("v_reg_prefetch", 1),)),
+        "kv_segments": ({"kv_segments": 2}, (("kv_segments", 2),)),
+    },
+}
+
+
+def _spec_class(module):
+    builder = module.build_attention_dense
+    first = next(iter(inspect.signature(builder).parameters))
+    return typing.get_type_hints(builder)[first]
+
+
+def _build_spec(cls, fields):
+    """``cls(**fields)``; a persistent gqa_pair order states the workgroup count its baked shape needs
+    ("requires num_persistent == ... (N), got ..."), so that is taken once from the message.
+    """
+    try:
+        return cls(**fields)
+    except ValueError as error:
+        needed = re.search(r"requires num_persistent == .*? \((\d+)\), got", str(error))
+        if needed is None:
+            raise
+        return cls(**{**fields, "num_persistent": int(needed.group(1))})
+
+
+def _override(field, value):
+    text = "nullptr" if isinstance(value, int) else f'"{value}"'
+    number = value if isinstance(value, int) else 0
+    return f'{{"{field}", {number}, {text}}}'
+
+
+def _row(arch, kernel, variant, overrides, served):
+    listed = ", ".join(_override(f, v) for f, v in overrides)
+    return (
+        f'    {{"{arch}", "{kernel}", "{variant}", {{{listed}}}, '
+        f'{"true" if served else "false"}}},'
+    )
+
+
+def main() -> None:
+    print("// Generated by gen_attention_dense_served_set.py from rocKE. Do not edit.")
+    print("// {arch, kernel, variant, {{field, integer, text or nullptr}...}, served}")
+    for arg in sys.argv[1:]:
+        arch, _, path = arg.partition("=")
+        module = importlib.import_module(f"kernels.{arch}.attention_dense")
+        cls = _spec_class(module)
+        with open(path, encoding="utf-8") as stream:
+            descriptors = json.load(stream)["kernelDescriptors"]
+        seen = set()
+        bases = []
+        for descriptor in descriptors:
+            spec = descriptor["kernel_source"]["spec"]
+            name = descriptor["name"]
+            served = bool(module.body_serves_strides(cls(**spec)))
+            print(_row(arch, name, "", (), served))
+            key = (spec["dtype"], spec["head_size"])
+            if key not in seen:
+                seen.add(key)
+                bases.append((name, spec))
+        for name, spec in bases:
+            for label, (spec_flips, overrides) in _FLIPS[arch].items():
+                flipped = {**spec, **spec_flips}
+                try:
+                    served = bool(module.body_serves_strides(_build_spec(cls, flipped)))
+                except (TypeError, ValueError):
+                    continue
+                print(_row(arch, name, label, overrides, served))
+
+
+if __name__ == "__main__":
+    main()

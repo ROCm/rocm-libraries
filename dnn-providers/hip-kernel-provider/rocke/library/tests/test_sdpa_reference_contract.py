@@ -169,6 +169,10 @@ def test_gfx942_source_adapter_reports_a_renamed_current_api(monkeypatch):
 @pytest.mark.parametrize("causal", [False, True], ids=["full", "causal"])
 def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
     import kernels
+    from kernels.common._attention_dense_strides import (
+        DENSE_STRIDE_NAMES,
+        packed_launch_strides,
+    )
     from kernels.gfx950.attention_dense import (
         attention_dense_runtime_args,
         attention_dense_signature,
@@ -196,8 +200,9 @@ def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
         "(grid and persistent) is on the runtime-shape path; use a sequence length "
         "the aligned (non-ragged) kernels accept."
     )
-    # Replay supplies the shape and head scalars for the whole cohort, and the
-    # persistent members' work-decode fast-division pairs after them.
+    # Replay supplies the shape and head scalars for the whole cohort, the
+    # persistent members' work-decode fast-division pairs after them, and last the
+    # 12 Q/K/V/O strides every dense kernel takes (packed, in canonical form).
     signature = attention_dense_signature(spec)
     names = [arg["name"] for arg in signature]
     expected = ["q_ptr", "k_ptr", "v_ptr", "o_ptr", "scale"]
@@ -209,10 +214,15 @@ def test_gfx950_source_adapter_preserves_dispatch_and_replay_abi(case, causal):
         ]
     else:
         assert spec.fastdiv_divisors == ()
+    scalars += DENSE_STRIDE_NAMES
     assert names == expected + scalars
     # The export binds exactly these scalars (dense-v2 replay), from the same
     # single source the launcher uses, so a replayed kernel gets every kernarg.
-    assert list(attention_dense_runtime_args(spec)) == scalars
+    runtime_args = attention_dense_runtime_args(spec)
+    assert list(runtime_args) == scalars
+    assert {n: runtime_args[n] for n in DENSE_STRIDE_NAMES} == packed_launch_strides(
+        spec
+    )
 
 
 @pytest.mark.parametrize("causal", [False, True])
@@ -974,7 +984,10 @@ def test_dense_export_uses_selected_production_launcher(architecture, monkeypatc
             # Spelled out from the case, not via attention_dense_runtime_args, so a
             # wrong binding there cannot satisfy this check: every runtime-shape body
             # reads the shape and both head counts from kernargs, and the persistent
-            # one also its work decode's fast-division pairs.
+            # one also its work decode's fast-division pairs. Every dense body ends
+            # with the 12 Q/K/V/O strides, here those of packed [B, S, H, D] in
+            # canonical form: an axis of extent 1 has batch/head stride 0 and token
+            # stride D.
             from rocke.helpers.magic_division import calculate_magic_numbers
 
             scalars = (
@@ -998,6 +1011,21 @@ def test_dense_export_uses_selected_production_launcher(architecture, monkeypatc
                 magic, shift = calculate_magic_numbers(divisor[d])
                 scalars[f"{d}_magic"] = magic - (1 << 32) if magic >= 1 << 31 else magic
                 scalars[f"{d}_shift"] = shift
+            for tensor, heads in (
+                ("q", case.query_heads),
+                ("k", case.kv_heads),
+                ("v", case.kv_heads),
+                ("o", case.query_heads),
+            ):
+                scalars[f"stride_{tensor}_batch"] = (
+                    case.sequence_length * heads * case.head_dim
+                    if case.batch > 1
+                    else 0
+                )
+                scalars[f"stride_{tensor}_head"] = case.head_dim if heads > 1 else 0
+                scalars[f"stride_{tensor}_token"] = (
+                    heads * case.head_dim if case.sequence_length > 1 else case.head_dim
+                )
         assert metadata == {
             "abi": "dense-v2",
             "name": launcher.kernel_name,

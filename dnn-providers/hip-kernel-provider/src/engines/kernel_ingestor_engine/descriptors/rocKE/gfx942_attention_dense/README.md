@@ -71,6 +71,25 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 - Batch, sequence lengths and both head counts are runtime kernel arguments, so every
   variant serves any shape its tile divides. Each variant is built at batch 1,
   seqlen_q = seqlen_kv = 512 and 8 query/KV heads.
+- Layouts: Q, K, V and O may be any `[B, S, H, D]` view whose strides the engine's host predicate
+  admits (`packs/AttentionDenseStrides.hpp`, the C++ twin of rocKE's `dense_strides_admit`), so
+  BSHD, BHSD, batch slices and packed QKV graphs are served. Every variant takes the twelve
+  `stride_{q,k,v,o}_{batch,head,token}` arguments last (after `lse_ptr` where there is one).
+  The grid and persistent variants read them; the `v_reg_prefetch` and `lds_num_buffers` 2
+  pipelines ignore them, so a graph whose operands are not packed BSHD never matches those.
+  The head-dim stride must be 1, every stride of an axis longer than 1 a multiple of 8 elements
+  (a token stride at least the head size), no operand may overlap itself, each operand must
+  declare a base alignment that is a multiple of 16 bytes, and the slabs must stay inside the kernel's
+  32-bit offsets. Any other graph is declined with an INFO line naming the reason (`operand`,
+  `alignment`, `head_dim_stride`, `stride_alignment`, `overlap` or `size_limit`). A graph that
+  declares another alignment is declined first, with `alignment`, before its layout is
+  judged; the stride predicate's own `pointer_alignment` reason is the second line for the
+  same rule and is what refuses a plan when it is prepared.
+- Saved plans: new plans are saved under `hipkernel.gfx942_attention_dense.dispatch.v3`, which
+  records the twelve strides, and plans with a bias under `dispatch.v4`, which also records the
+  bias. Plans saved under `dispatch.v1` and `dispatch.v2` (the bias contract before the
+  strides) still restore and launch their own older kernel arguments. A bias kernel addresses
+  packed BSHD and ignores the strides, so a bias graph is served only with packed operands.
 - Each grid is held fixed by its registry candidate: `gfx942_dense_qbminor`,
   `gfx942_dense_btminor_aot`, `gfx942_dense_hqswz_aot` and `gfx942_dense_persist_aot`.
   Only `gfx942_dense_qbminor` declares the `attn_bias` feature, which is what keeps the
@@ -96,7 +115,9 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
     other than 64 and 128, FP32 and FP8 data types, dropout, block masks, an `attn_mask`
     other than the fp32 additive bias above, scale tensors, and the Max and Sum_exp outputs. The shipped tiles are block_m
     64, 128, 256 and 512 with block_n 32, 64 and 128, per cell as listed in the selection.
-  - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets).
+  - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets). With strided
+    operands the same limits also hold per batch-and-head slab, where a K/V slab counts the two
+    tiles a load may reach past the data.
   - Design limit: FLOAT accumulation, so a DOUBLE compute type is declined.
 
 ## Files
@@ -175,7 +196,9 @@ order. Release builds set `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`, which 
   `packs/AttentionDenseNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit, and retrain the
   L2 if the KDP's kernels changed (see Models).
-- Saved plans store their launch values under `hipkernel.gfx942_attention_dense.dispatch.v1`
-  (the kernel reads the head counts at runtime: this engine's first contract), or `.v2` for
-  a plan that serves a bias kernel (v1 plus the bias uid and its batch, query-head and
-  query-row strides). Both stay registered so saved plans keep loading.
+- Saved plans store their launch values under `hipkernel.gfx942_attention_dense.dispatch.v3`
+  (the kernel reads the head counts and the strides at runtime), or `.v4` for a plan that
+  serves a bias kernel (v3 plus the bias uid and its batch, query-head and query-row
+  strides). Plans saved under `.v1` (this engine's first contract: head counts at runtime)
+  and `.v2` (its bias contract before the strides) still load. All four stay registered so
+  saved plans keep loading.

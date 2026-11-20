@@ -31,7 +31,7 @@ using AttentionDenseLaunchValuesWriter
 inline hipdnn_plugin_sdk::ingestor::MetadataValues gfx942LaunchValues(
     const AttentionDenseBinding& binding, const AttentionDenseProblem& problem, int64_t blockM)
 {
-    return gfx942AttentionDenseLaunchValues(binding, problem, blockM);
+    return gfx942AttentionDenseStridedLaunchValues(binding, problem, blockM);
 }
 
 /// What a gfx942 or gfx950 dense attention test needs to know about its engine. The pack
@@ -63,8 +63,9 @@ struct AttentionDenseTestArch
     std::string_view kernelMatchSymbol;
     /// The head of every decline line the graph match logs.
     std::string_view engineName;
-    /// The versioned dispatch names a plan is saved under, restated rather than shared with
-    /// the pack: without a bias, and with one (empty for an arch that serves none).
+    /// The versioned dispatch names a plan is saved under today (the strided contract and the
+    /// strided bias contract), restated rather than shared with the pack: without a bias, and
+    /// with one (empty for an arch that serves none).
     std::string_view plainContractSymbol;
     std::string_view biasContractSymbol;
     /// The arch's writer of the launch values a save stores.
@@ -84,8 +85,8 @@ inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
     true,
     "hipkernel.gfx942_attention_dense.kernel_match",
     "hipkernel:Gfx942AttentionDense",
-    "hipkernel.gfx942_attention_dense.dispatch.v1",
-    "hipkernel.gfx942_attention_dense.dispatch.v2",
+    "hipkernel.gfx942_attention_dense.dispatch.v3",
+    "hipkernel.gfx942_attention_dense.dispatch.v4",
     &gfx942LaunchValues};
 
 inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
@@ -101,9 +102,9 @@ inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     false,
     "hipkernel.gfx950_attention_dense.kernel_match",
     "hipkernel:Gfx950AttentionDense",
-    "hipkernel.gfx950_attention_dense.dispatch.v2",
-    "hipkernel.gfx950_attention_dense.dispatch.v3",
-    &gfx950AttentionDenseLaunchValues};
+    "hipkernel.gfx950_attention_dense.dispatch.v4",
+    "hipkernel.gfx950_attention_dense.dispatch.v5",
+    &gfx950AttentionDenseStridedLaunchValues};
 
 /// The arches a case on the additive bias runs on: those that serve one.
 inline std::vector<const AttentionDenseTestArch*> biasServingArches()
@@ -126,12 +127,14 @@ inline std::string
 }
 
 /// The completed metadata prepare() reads before the signature comparison: head_size, the
-/// (block_m, block_n) tile and, on gfx942, the qb_minor grid as the KMD defaults complete
-/// it.
+/// (block_m, block_n) tile and, on gfx942, the qb_minor grid and the baseline body knobs
+/// (lds_num_buffers, v_reg_prefetch) as the KMD defaults complete them.
 inline hipdnn_plugin_sdk::ingestor::MetadataValues completedAttentionDenseMetadata(
     const AttentionDenseTestArch& arch, int64_t headSize, int64_t blockM, int64_t blockN)
 {
     hipdnn_plugin_sdk::ingestor::MetadataValues metadata{
+        // A record completes to the grid body: the KMD default of the field the stride rule reads.
+        {std::string("ragged"), int64_t{0}},
         {std::string("head_size"), headSize},
         {std::string("block_m"), blockM},
         {std::string("block_n"), blockN},
@@ -143,6 +146,9 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues completedAttentionDenseMetada
     }
     if(arch.completesGridOrder)
     {
+        // The baseline body: one K buffer, no V prefetch. It reads the strides.
+        metadata[std::string("lds_num_buffers")] = int64_t{1};
+        metadata[std::string("v_reg_prefetch")] = int64_t{0};
         metadata[std::string("persistent")] = int64_t{0};
         metadata[std::string("num_persistent")] = int64_t{304};
         metadata[std::string("persist_decode")] = std::string("auto");

@@ -228,9 +228,11 @@ endif()
 # that pins the shared dense spec's C++ mirror to the Python, the
 # oracle-free uniform-probability checker and subject contracts, the gfx942
 # dense golden IR hashes (pure text lowering, a few seconds), the dense
-# packed-offset host checks (test_attention_dense_varlen_keys.py), the gfx950
-# dense varlen K/V buffer bound on the emitted IR, and the backward-test memo
-# bound in tests/conftest.py.
+# packed-offset host checks (test_attention_dense_varlen_keys.py), the gfx950 dense
+# varlen K/V buffer bound on the emitted IR, the dense launch-time stride admission and its
+# torch-free runner, the dense A/B harness (its statistics and speed bar and the driver's
+# pure functions; the driver runs in a subprocess, which export a rocKE source tree, skip
+# here with that reason), and the backward-test memo bound in tests/conftest.py.
 # File-list style (same pattern as conv_pytest) so PYTHONPATH resolves rocke/
 # correctly from the installed tree.
 set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
@@ -247,6 +249,10 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_dense_paged_launch.py"
     "tests/library/tests/test_attention_dense_gfx950_varlen_kv_bound.py"
     "tests/library/tests/test_attention_dense_spec_vectors.py"
+    "tests/library/tests/test_attention_dense_strided_admission.py"
+    "tests/library/tests/test_attention_dense_strided_runner.py"
+    "tests/library/tests/test_attention_ab_stats.py"
+    "tests/library/tests/test_attention_dense_strided_ab_dryrun.py"
     "tests/library/tests/test_attention_dense_gfx942_golden.py"
     "tests/library/tests/test_attention_dense_varlen_keys.py"
     "tests/library/tests/test_attention_dense_varlen_keys.py"
@@ -571,6 +577,18 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_bias_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_additive_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx950_numeric.py\" \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_bias_gfx942_numeric.py\" -v -rs)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bias_gpu_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 1200)\n")
+
+# Strided dense attention numeric lane, gfx942 and gfx950 (torch-free, so it runs in
+# a GPU lane that has no torch). Its own entry, selected by name like the two above:
+# one test file with one launch matrix per body, and a GPU of the other arch (or none)
+# skips the device cases while the host cases still run.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_strided_gpu_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_dense_strided_numeric.py\" -v -rs)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_strided_gpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;gpu\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 1200)\n")

@@ -43,20 +43,31 @@ _VARIANTS = {
 # Non-varlen controls, as (spec fields, runtime_shape). The _VARIANTS specs are
 # runtime_shape (the row size comes from the num_kv_heads parameter); ragged bakes the
 # shape, so it covers the constant row size. Ragged at whole-tile lengths takes no
-# sliding window.
+# sliding window. The _VARIANTS controls are bodies that read their strides: their
+# bound is a slab extent (see test_strided_kv_bound_is_the_slab_extent); the ragged
+# ones keep packed addressing and the packed bound.
 _CONTROLS = {
     **{name: (kw, True) for name, kw in _VARIANTS.items()},
     "ragged": ({"ragged": True}, False),
     "ragged_lse": ({"ragged": True, "emit_lse": True}, False),
 }
+_PACKED_CONTROLS = ("ragged", "ragged_lse")
+_STRIDED_CONTROLS = tuple(name for name in _CONTROLS if name not in _PACKED_CONTROLS)
 
 # Kernel parameter values at which the control evaluates a non-varlen bound.
 # num_kv_heads matches no _SHAPES head count, so a runtime_shape bound that bakes the
 # spec's row size instead of reading the parameter evaluates to a different number.
-_PARAMS = {"%batch": 3, "%seqlen_kv": 5, "%num_kv_heads": 7}
+# The two token strides differ, so a V bound that borrows K's stride is caught.
+_PARAMS = {
+    "%batch": 3,
+    "%seqlen_kv": 5,
+    "%num_kv_heads": 7,
+    "%stride_k_token": 24,
+    "%stride_v_token": 40,
+}
 
 
-def _spec(shape, *, varlen, **kw):
+def _spec(shape, *, varlen, persistent=False, **kw):
     dtype, head_size, num_kv_heads = _SHAPES[shape]
     return AttentionDenseSpec(
         batch=2,
@@ -67,7 +78,7 @@ def _spec(shape, *, varlen, **kw):
         head_size=head_size,
         causal=True,
         dtype=dtype,
-        persistent=False,
+        persistent=persistent,
         varlen=varlen,
         **kw,
     )
@@ -86,12 +97,21 @@ def _walk(region):
             yield from _walk(inner)
 
 
+def _base_pointer(pointer):
+    """The kernel parameter ``pointer`` is, or the one it is moved from by a
+    ``tile.global_ptr_add`` (a strided body bounds the slab, not the whole tensor)."""
+    while pointer.op is not None and pointer.op.name == "tile.global_ptr_add":
+        pointer = pointer.op.operands[0]
+    return pointer
+
+
 def _kv_bounds(kernel):
     """The byte bound of the K and the V buffer resource, as (pointer name, Value)."""
     bounds = [
-        (op.operands[0].name, op.operands[1])
+        (_base_pointer(op.operands[0]).name, op.operands[1])
         for op in _walk(kernel.body)
-        if op.name == "tile.buffer_rsrc" and op.operands[0].name in ("%k_ptr", "%v_ptr")
+        if op.name == "tile.buffer_rsrc"
+        and _base_pointer(op.operands[0]).name in ("%k_ptr", "%v_ptr")
     ]
     names = sorted(name for name, _ in bounds)
     assert names == [
@@ -127,6 +147,15 @@ def _peel(index):
     return index, offset
 
 
+_ARITH = {
+    "arith.mul": lambda a, b: a * b,
+    "arith.add": lambda a, b: a + b,
+    "arith.sub": lambda a, b: a - b,
+    "arith.cmp": None,
+    "arith.select": None,
+}
+
+
 def _evaluate(value, name):
     """The integer ``value`` computes when the kernel parameters hold ``_PARAMS``;
     ``name`` names the bound in failures."""
@@ -137,12 +166,17 @@ def _evaluate(value, name):
         return _PARAMS[value.name]
     if value.op.name == "arith.constant":
         return value.op.attrs["value"]
-    assert value.op.name == "arith.mul", (
+    assert value.op.name in _ARITH, (
         f"{name} bound computes {value.op.name} ({value.name}); a non-varlen bound is "
-        "a product of kernel parameters and constants, with no global load"
+        "arithmetic on kernel parameters and constants, with no global load"
     )
-    lhs, rhs = (_evaluate(o, name) for o in value.op.operands)
-    return lhs * rhs
+    operands = [_evaluate(o, name) for o in value.op.operands]
+    if value.op.name == "arith.cmp":
+        assert value.op.attrs["pred"] == "gt", f"{name} bound compares with a non-gt"
+        return operands[0] > operands[1]
+    if value.op.name == "arith.select":
+        return operands[1] if operands[0] else operands[2]
+    return _ARITH[value.op.name](*operands)
 
 
 def _split_const(value, what):
@@ -209,10 +243,82 @@ def test_varlen_kv_bound_is_the_sequence_end(variant, shape):
 
 
 @pytest.mark.parametrize("shape", list(_SHAPES))
-@pytest.mark.parametrize("variant", list(_CONTROLS))
+@pytest.mark.parametrize("variant", _STRIDED_CONTROLS)
+def test_strided_kv_bound_is_the_slab_extent(variant, shape):
+    """A body that reads its strides bounds each (batch, KV head) slab of K and of V
+    by its last valid row: ``seqlen_kv > 0 ? 2 * ((seqlen_kv - 1) * stride + D) : 0``
+    bytes with the TENSOR'S OWN token stride, read from the kernel parameters, with
+    no global load. The slab base carries the batch and head offsets, so no batch
+    term appears."""
+    kw, _ = _CONTROLS[variant]
+    kernel = build_attention_dense(_spec(shape, varlen=False, **kw))
+    _, head_size, _ = _SHAPES[shape]
+    n = _PARAMS["%seqlen_kv"]
+    for name, bound in _kv_bounds(kernel):
+        stride = _PARAMS["%stride_k_token" if name == "%k_ptr" else "%stride_v_token"]
+        got = _evaluate(bound, name)
+        want = 2 * ((n - 1) * stride + head_size)
+        assert got == want, (
+            f"{name} bound is {got} bytes at {_PARAMS}; want 2 * ((seqlen_kv - 1) * "
+            f"{'stride_k_token' if name == '%k_ptr' else 'stride_v_token'} + {head_size}) "
+            f"= {want}"
+        )
+
+
+# The persistent bodies bound the same slab extent, once per workgroup (it does not
+# depend on the work item) over a buffer resource rebuilt per work item. The wide-DMA
+# body exists for head size 128 only.
+_PERSISTENT_CONTROLS = {
+    "persistent": {"persistent": True, "num_persistent": 256},
+    "persistent_lse": {"persistent": True, "num_persistent": 256, "emit_lse": True},
+    "persistent_window": {
+        "persistent": True,
+        "num_persistent": 256,
+        "sliding_window": 64,
+    },
+    "wide_dma": {
+        "persistent": True,
+        "num_persistent": 256,
+        "wide_lds_dma": True,
+        "lds_k_group_pad": 8,
+    },
+}
+
+
+@pytest.mark.parametrize(
+    ("variant", "shape"),
+    [
+        (variant, shape)
+        for variant in _PERSISTENT_CONTROLS
+        for shape in _SHAPES
+        if variant != "wide_dma" or _SHAPES[shape][1] == 128
+    ],
+)
+def test_persistent_strided_kv_bound_is_the_slab_extent(variant, shape):
+    """The persistent and wide-DMA bodies bound each (batch, KV head) slab of K and of
+    V like the grid body: ``seqlen_kv > 0 ? 2 * ((seqlen_kv - 1) * stride + D) : 0``
+    bytes with the tensor's own token stride, from kernel parameters alone."""
+    spec = _spec(shape, varlen=False, **_PERSISTENT_CONTROLS[variant])
+    assert spec.runtime_shape
+    _, head_size, _ = _SHAPES[shape]
+    n = _PARAMS["%seqlen_kv"]
+    for name, bound in _kv_bounds(build_attention_dense(spec)):
+        stride = _PARAMS["%stride_k_token" if name == "%k_ptr" else "%stride_v_token"]
+        got = _evaluate(bound, name)
+        want = 2 * ((n - 1) * stride + head_size)
+        assert got == want, (
+            f"{name} bound is {got} bytes at {_PARAMS}; want 2 * ((seqlen_kv - 1) * "
+            f"{'stride_k_token' if name == '%k_ptr' else 'stride_v_token'} + {head_size}) "
+            f"= {want}"
+        )
+
+
+@pytest.mark.parametrize("shape", list(_SHAPES))
+@pytest.mark.parametrize("variant", _PACKED_CONTROLS)
 def test_nonvarlen_kv_bound_stays_the_spec_extent(variant, shape):
-    """Control: a non-varlen bound stays batch * seqlen_kv rows of num_kv_heads *
-    head_size * 2 bytes, read from the kernel parameters, with no global load.
+    """Control: a packed-addressing non-varlen bound stays batch * seqlen_kv rows of
+    num_kv_heads * head_size * 2 bytes, read from the kernel parameters, with no
+    global load.
 
     A runtime_shape kernel (one binary serves every head count) must read the row size
     from the num_kv_heads parameter, so a bound that bakes the spec's head count

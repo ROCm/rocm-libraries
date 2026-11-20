@@ -439,8 +439,9 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
     (``spec.runtime_param_fields``). On the persistent grid the work decode's
     fast-division magic/shift pairs follow them (``spec.runtime_kernarg_fields``).
     ``signature`` is ``attention_dense_signature``, which appends those i32s after
-    ``scale``, and ``bind_torch`` launches through ``run_attention_dense_torch``,
-    which packs them via ``attention_dense_runtime_args``.
+    ``scale`` and the twelve Q/K/V/O stride i32s last, and ``bind_torch`` launches
+    through ``run_attention_dense_torch``, which packs the shape values via
+    ``attention_dense_runtime_args`` and reads the strides off the tensor views.
     """
 
     return make_dense_candidate(

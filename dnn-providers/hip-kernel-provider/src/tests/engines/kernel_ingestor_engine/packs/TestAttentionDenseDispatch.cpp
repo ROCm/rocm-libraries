@@ -6,10 +6,12 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -231,6 +233,21 @@ KernelDefinition makeKernel(const AttentionDenseTestArch& arch,
     return kpackKernel(arch, writesLse ? pythonLseAbi() : pythonAbi(), blockM, blockN);
 }
 
+/// @p kernel as a body that does not read the strides: gfx942's V-prefetch pipeline, gfx950's
+/// persistent gqa_pair body (fields its KMD declares only once such a kernel ships).
+void makePackedOnlyBody(const AttentionDenseTestArch& arch, KernelDefinition& kernel)
+{
+    if(arch.completesGridOrder)
+    {
+        kernel.metadata[std::string("v_reg_prefetch")] = int64_t{1};
+    }
+    else
+    {
+        kernel.metadata[std::string("persistent")] = int64_t{1};
+        kernel.metadata[std::string("persist_decode")] = std::string("gqa_pair");
+    }
+}
+
 std::string prepareFailure(const Graph& graph, const BoundTokens& bound)
 {
     return prepareFailure(graph, bound, makeKernel(graph.arch()));
@@ -239,8 +256,12 @@ std::string prepareFailure(const Graph& graph, const BoundTokens& bound)
 /// The fragment only the missing-token refusal carries.
 constexpr const char* MISSING_TOKEN_MARKER = "missing bound token";
 
-/// The fragment only the output-layout refusal carries.
+/// The fragment only the packed-only refusal carries: the operands are not dense BSHD and the
+/// kernel reads packed storage only.
 constexpr const char* OUTPUT_LAYOUT_MARKER = "not dense BSHD";
+
+/// The fragment only the refusal of a missing or ill-formed operand carries.
+constexpr const char* OPERAND_MARKER = "is missing or is not a rank-4 tensor";
 
 /// The fragment only the tile refusal carries.
 constexpr const char* TILE_MARKER = "no supported block_m/block_n tile";
@@ -456,36 +477,407 @@ TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenAnyOneBoundTokenIsMissing
     }
 }
 
-/// The O token naming no tensor at all. prepare() looks the output up to re-check its
-/// layout, and a null result has to be refused by name: the checks that follow index the
-/// tensor's dims, so a dropped null test is a dereference of nothing.
-TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesNoTensor)
+/// A token naming no tensor at all, for each operand in turn. prepare() looks all four up to
+/// re-check their layouts, and a null result has to be refused by name: the checks that
+/// follow index the tensor's dims, so a dropped null test is a dereference of nothing.
+TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenAnOperandTokenNamesNoTensor)
 {
     const Graph graph(arch(), servedGraph());
-    auto tampered = bindingsFor(graph);
-    tampered[tokenName(arch(), O_TOKEN)] = ABSENT_UID;
+    for(const auto& [token, role] : {std::pair{Q_TOKEN, "query"},
+                                     std::pair{K_TOKEN, "key"},
+                                     std::pair{V_TOKEN, "value"},
+                                     std::pair{O_TOKEN, "output"}})
+    {
+        SCOPED_TRACE(role);
+        auto tampered = bindingsFor(graph);
+        tampered[tokenName(arch(), token)] = ABSENT_UID;
 
-    const std::string failure = prepareFailure(graph, tampered);
-    ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
-    EXPECT_NE(failure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << failure;
+        const std::string failure = prepareFailure(graph, tampered);
+        ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+        EXPECT_NE(failure.find(std::string("the ") + role + " tensor " + OPERAND_MARKER),
+                  std::string::npos)
+            << failure;
+    }
 }
 
-/// The O token naming a real tensor that is head-major rather than token-major. The
-/// kernel bakes BSHD for the epilogue and takes no stride arguments, so a BHSD output is
-/// written in bounds at the wrong addresses -- every element lands somewhere inside the
-/// buffer, and the result is a transposed tensor reported as a success.
+/// The O token naming a real tensor that is head-major rather than token-major. Where the
+/// kernels address packed storage only, a head-major output is written in bounds at the wrong
+/// addresses -- every element lands somewhere inside the buffer, and the result is a
+/// transposed tensor reported as a success -- so prepare() refuses it. Where the kernels read
+/// the strides it is a layout they serve: the baseline body gets past the layout check, and
+/// only a body that ignores the strides (the V-prefetch pipeline) refuses it.
 ///
-/// graph_match is the gate for this and declines such a graph outright, so this case
-/// drives the defence-in-depth check in prepare() directly, which nothing else reaches.
+/// graph_match is the gate for this and declines such a graph outright where it is not
+/// served, so this case drives the defence-in-depth check in prepare() directly, which nothing
+/// else reaches.
 TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenTheOutputTokenNamesANonBshdTensor)
 {
     const Graph graph(arch(), withUnnamedTensors(arch(), servedGraph()));
     auto tampered = bindingsFor(graph);
     tampered[tokenName(arch(), O_TOKEN)] = BHSD_UID;
 
-    const std::string failure = prepareFailure(graph, tampered);
+    auto packedOnly = makeKernel(arch());
+    const std::string baseline = prepareFailure(graph, tampered);
+    ASSERT_FALSE(baseline.empty()) << "prepare() cannot succeed without the archive";
+    EXPECT_EQ(baseline.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << baseline;
+    makePackedOnlyBody(arch(), packedOnly);
+    const std::string failure = prepareFailure(graph, tampered, packedOnly);
     ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
     EXPECT_NE(failure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << failure;
+}
+
+/// prepare() holds all four operands to the stride predicate, not the output alone: the graph
+/// is bound from a served graph, then prepared over a graph whose one operand breaks a launch
+/// rule the match would have declined. Each refusal names the predicate's reason.
+TEST_P(TestAttentionDenseDispatch, RefusesToPrepareWhenAnyOperandBreaksALaunchRule)
+{
+    const Graph good(arch(), servedGraph());
+    const auto bound = bindingsFor(good);
+
+    struct Defect
+    {
+        const char* reason;
+        std::function<void(GraphSpec&, int64_t)> apply;
+    };
+    const std::vector<Defect> defects{
+        {"pointer_alignment",
+         [](GraphSpec& spec, int64_t uid) { spec.operand(uid).alignment = 8; }},
+        {"stride_alignment",
+         [](GraphSpec& spec, int64_t uid) {
+             auto strides = spec.stridesOf(uid);
+             strides[2] += 4;
+             spec.operand(uid).strides = strides;
+         }},
+        {"overlap",
+         [](GraphSpec& spec, int64_t uid) {
+             auto strides = spec.stridesOf(uid);
+             strides[1] = HEAD_SIZE / 2;
+             spec.operand(uid).strides = strides;
+         }},
+        {"head_dim_stride",
+         [](GraphSpec& spec, int64_t uid) {
+             auto strides = spec.stridesOf(uid);
+             strides[3] = 2;
+             spec.operand(uid).strides = strides;
+         }},
+        {"size_limit", [](GraphSpec& spec, int64_t uid) {
+             auto strides = spec.stridesOf(uid);
+             strides[0] = int64_t{1} << 31;
+             spec.operand(uid).strides = strides;
+         }}};
+    const std::array<std::pair<int64_t, const char*>, 4> operands{
+        {{Q_UID, "q"}, {K_UID, "k"}, {V_UID, "v"}, {O_UID, "o"}}};
+    for(const auto& [uid, role] : operands)
+    {
+        for(const auto& defect : defects)
+        {
+            SCOPED_TRACE("uid " + std::to_string(uid) + " " + defect.reason);
+            auto spec = servedGraph();
+            defect.apply(spec, uid);
+            const Graph bad(arch(), spec);
+            const std::string failure = prepareFailure(bad, bound);
+            ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+            // The refusal names the operand it found broken: "(<reason>): <role> ...".
+            EXPECT_NE(failure.find(std::string("(") + defect.reason + "): " + role + " "),
+                      std::string::npos)
+                << failure;
+        }
+    }
+}
+
+/// The K/V slab rule runs in prepare() with the candidate's own block_n, so a tile whose
+/// reach passes 2^31 bytes is refused even when a smaller tile of the same graph is served.
+TEST_P(TestAttentionDenseDispatch, RefusesToPrepareATileWhoseKeyValueReachPassesTheLimit)
+{
+    GraphSpec spec = servedGraph();
+    spec.batch = 1;
+    spec.numQueryHeads = 1;
+    spec.numKvHeads = 1;
+    // 2^23 - 128 rows of D128: a reach of exactly 2^31 bytes at a 64-row tile.
+    spec.seqLenKv = (int64_t{1} << 23) - 128;
+    const Graph graph(arch(), spec);
+    const auto bound = bindingsFor(graph);
+
+    EXPECT_EQ(prepareFailure(graph, bound, makeKernel(arch(), 256, 64)).find("size_limit"),
+              std::string::npos);
+    const std::string failure = prepareFailure(graph, bound, makeKernel(arch(), 256, 128));
+    EXPECT_NE(failure.find("(size_limit)"), std::string::npos) << failure;
+}
+
+/// The whole-tensor preflight runs in prepare() too: operands whose slabs and strides the
+/// predicate admits, but whose tensors hold 2^31 elements or more, are refused. 8192 batches
+/// of the default 512 x 4 x 128 are 2^31 elements of Q and O and 2^32 bytes of K and V.
+TEST_P(TestAttentionDenseDispatch, RefusesToPrepareOperandsPastTheWholeTensorPreflight)
+{
+    const Graph served(arch(), servedGraph());
+    const auto bound = bindingsFor(served);
+
+    auto spec = servedGraph();
+    spec.batch = int64_t{1} << 13;
+    const Graph large(arch(), spec);
+    const std::string failure = prepareFailure(large, bound);
+    ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+    EXPECT_NE(failure.find("past the kernel's 32-bit offset limits"), std::string::npos) << failure;
+}
+
+// =============================================================================
+// The launch state prepare() builds: the canonical strides in the binding
+// =============================================================================
+
+/// The strides the kernel is launched with, for a packed graph: rocKE's `packed_launch_strides`
+/// of the same spec. The graph is B2, 4 heads, 512 tokens of 128: batch 512 * 4 * 128, head
+/// 128, token 4 * 128, the same for Q, K, V and O.
+TEST_P(TestAttentionDenseDispatch, BindsThePackedStridesOfAPackedGraph)
+{
+    const Graph graph(arch(), servedGraph());
+    const auto launch
+        = attention_dense_graphs::resolveLaunchOf(graph, bindingsFor(graph), makeKernel(arch()));
+
+    const AttentionDenseStrides expected{
+        262144, 128, 512, 262144, 128, 512, 262144, 128, 512, 262144, 128, 512};
+    EXPECT_EQ(launch.binding.strides, expected);
+}
+
+/// An axis of extent 1 launches canonical: batch and head 0, token the head size, whatever
+/// the graph declared there. One batch, one KV head (4 query heads over it).
+TEST_P(TestAttentionDenseDispatch, BindsCanonicalStridesForAxesOfExtentOne)
+{
+    GraphSpec spec = servedGraph();
+    spec.batch = 1;
+    spec.numKvHeads = 1;
+    // Garbage in every exempt slot: stride 0 and a negative one on the batch axes, an odd head
+    // stride on K and V.
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        auto strides = spec.stridesOf(uid);
+        strides[0] = uid == K_UID ? int64_t{-5} : int64_t{0};
+        if(uid == K_UID || uid == V_UID)
+        {
+            strides[1] = 3;
+        }
+        spec.operand(uid).strides = strides;
+    }
+    const Graph graph(arch(), spec);
+    auto kernel = makeKernel(arch());
+    kernel.metadata[std::string("num_query_heads")] = spec.numQueryHeads;
+    kernel.metadata[std::string("num_kv_heads")] = spec.numKvHeads;
+    const auto launch = attention_dense_graphs::resolveLaunchOf(graph, bindingsFor(graph), kernel);
+
+    // Q and O: batch 0, head 128, token 4 * 128. K and V (one head): batch 0, head 0, token 128.
+    const AttentionDenseStrides expected{0, 128, 512, 0, 0, 128, 0, 0, 128, 0, 128, 512};
+    EXPECT_EQ(launch.binding.strides, expected);
+}
+
+/// Layouts other than packed BSHD, which the grid bodies of both arches read: the binding
+/// carries each operand's own strides.
+TEST_P(TestAttentionDenseDispatch, BindsTheStridesOfEveryAdmittedLayoutWhereKernelsReadThem)
+{
+    struct Case
+    {
+        const char* name;
+        GraphSpec spec;
+        AttentionDenseStrides expected;
+    };
+    std::vector<Case> cases;
+
+    // Head-major: batch H * S * D, head S * D, token D (B2, 4 heads, 512 tokens of 128).
+    auto bhsd = servedGraph();
+    bhsd.setEveryLayout(SdpaLayout::BHSD);
+    cases.push_back(
+        {"head-major",
+         bhsd,
+         {262144, 65536, 128, 262144, 65536, 128, 262144, 65536, 128, 262144, 65536, 128}});
+
+    // Q, K and V cut out of one [B, S, 3 * 4 heads, D] buffer; O packed on its own.
+    auto qkv = servedGraph();
+    for(const int64_t uid : {Q_UID, K_UID, V_UID})
+    {
+        qkv.operand(uid).strides = std::vector<int64_t>{
+            SEQ * 3 * HEADS * HEAD_SIZE, HEAD_SIZE, 3 * HEADS * HEAD_SIZE, 1};
+    }
+    cases.push_back({"packed QKV",
+                     qkv,
+                     {786432, 128, 1536, 786432, 128, 1536, 786432, 128, 1536, 262144, 128, 512}});
+
+    // Eight query heads over two KV heads, head-major: each operand has its own head count.
+    auto grouped = servedGraph();
+    grouped.numQueryHeads = 8;
+    grouped.numKvHeads = 2;
+    grouped.setEveryLayout(SdpaLayout::BHSD);
+    cases.push_back(
+        {"grouped head-major",
+         grouped,
+         {524288, 65536, 128, 131072, 65536, 128, 131072, 65536, 128, 524288, 65536, 128}});
+
+    // Rows padded by 8 elements: token 4 * 128 + 8, batch 512 rows of that.
+    auto padded = servedGraph();
+    padded.setEveryLayout(SdpaLayout::PADDED_BSHD);
+    cases.push_back({"padded rows",
+                     padded,
+                     {266240, 128, 520, 266240, 128, 520, 266240, 128, 520, 266240, 128, 520}});
+
+    // Every operand its own layout, so no two groups of three in the binding are equal and
+    // each can only come from its own operand: any operand mix-up in the launch strides fails
+    // here (the cases above all have K = V, so this is the one that catches a K/V swap). Q
+    // packed, K head-major, V rows padded by 8 (token 520), O rows padded by 16 (token 528).
+    auto distinct = servedGraph();
+    distinct.operand(K_UID).layout = SdpaLayout::BHSD;
+    distinct.operand(V_UID).layout = SdpaLayout::PADDED_BSHD;
+    // A pad of 16, not PADDED_BSHD's 8, so O's group differs from V's.
+    constexpr int64_t O_ROW = HEADS * HEAD_SIZE + 16;
+    distinct.operand(O_UID).strides = std::vector<int64_t>{SEQ * O_ROW, HEAD_SIZE, O_ROW, 1};
+    cases.push_back({"every operand its own layout",
+                     distinct,
+                     {262144, 128, 512, 262144, 65536, 128, 266240, 128, 520, 270336, 128, 528}});
+
+    for(const auto& testCase : cases)
+    {
+        SCOPED_TRACE(testCase.name);
+        const Graph graph(arch(), testCase.spec);
+        const auto launch = attention_dense_graphs::resolveLaunchOf(
+            graph, bindingsFor(graph), makeKernel(arch()));
+        EXPECT_EQ(launch.binding.strides, testCase.expected);
+    }
+}
+
+/// A body that does not read the strides cannot be handed a strided graph: prepare() refuses,
+/// by name, where the kernel match would not have matched.
+TEST_P(TestAttentionDenseDispatch, RefusesToPrepareAStridedGraphForABodyThatIgnoresTheStrides)
+{
+    auto spec = servedGraph();
+    spec.setEveryLayout(SdpaLayout::BHSD);
+    const Graph strided(arch(), spec);
+    const auto bound = bindingsFor(strided);
+
+    auto kernel = makeKernel(arch());
+    makePackedOnlyBody(arch(), kernel);
+    const std::string failure = prepareFailure(strided, bound, kernel);
+    ASSERT_FALSE(failure.empty()) << "prepare() did not fail at all";
+    EXPECT_NE(failure.find("reads packed operands only and does not read the stride arguments"),
+              std::string::npos)
+        << failure;
+    EXPECT_NE(failure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << failure;
+
+    // The same body over a packed graph gets past the layout check.
+    const Graph packed(arch(), servedGraph());
+    const std::string packedFailure = prepareFailure(packed, bindingsFor(packed), kernel);
+    ASSERT_FALSE(packedFailure.empty());
+    EXPECT_EQ(packedFailure.find(OUTPUT_LAYOUT_MARKER), std::string::npos) << packedFailure;
+}
+
+/// What prepare() saves with the plan: the candidate's own block_n and whether its body reads the
+/// strides, through the values the engine's strided contract stores. The grid bodies read them;
+/// gfx942's V-prefetch pipeline and gfx950's persistent gqa_pair body do not.
+TEST_P(TestAttentionDenseDispatch, SavesTheKernelsBlockNAndWhetherItReadsTheStrides)
+{
+    const Graph graph(arch(), servedGraph());
+    const auto bound = bindingsFor(graph);
+    const auto& engineArch = arch().label == GFX942_ATTENTION_DENSE.label
+                                 ? gfx942AttentionDenseArch()
+                                 : gfx950AttentionDenseArch();
+    const auto savedValues = [&](const KernelDefinition& kernel) {
+        const auto launch = attention_dense_graphs::resolveLaunchOf(graph, bound, kernel);
+        return attention_dense::launchValues(launch.binding,
+                                             launch.problem,
+                                             launch.blockM,
+                                             engineArch,
+                                             engineArch.currentContract,
+                                             launch.grid);
+    };
+
+    // The tile of the candidate, whatever it is: block_n is not the baseline's 64 here.
+    for(const int64_t blockN : {int64_t{32}, int64_t{64}})
+    {
+        SCOPED_TRACE(blockN);
+        const auto values = savedValues(makeKernel(arch(), 256, blockN));
+        EXPECT_EQ(std::get<int64_t>(values.at("block_n")), blockN);
+        EXPECT_EQ(std::get<int64_t>(values.at("block_m")), 256);
+        EXPECT_EQ(std::get<int64_t>(values.at("reads_strides")), 1);
+    }
+    // A body that ignores the strides saves 0: gfx942's V-prefetch pipeline, gfx950's persistent
+    // gqa_pair body.
+    auto packedOnly = makeKernel(arch());
+    makePackedOnlyBody(arch(), packedOnly);
+    EXPECT_EQ(std::get<int64_t>(savedValues(packedOnly).at("reads_strides")), 0);
+    if(arch().completesGridOrder)
+    {
+        auto kdb = makeKernel(arch());
+        kdb.metadata[std::string("lds_num_buffers")] = int64_t{2};
+        EXPECT_EQ(std::get<int64_t>(savedValues(kdb).at("reads_strides")), 0);
+    }
+}
+
+/// A gfx950 persistent body that decodes through the shape parameters reads the strides: prepare()
+/// admits a strided graph for it, with the strides in the binding and the flag saved as 1.
+TEST(TestAttentionDenseDispatchGfx950, AStridedGraphIsPlannedForAPersistentBodyThatReadsTheShape)
+{
+    auto spec = servedGraph();
+    spec.setEveryLayout(SdpaLayout::BHSD);
+    const Graph graph(GFX950_ATTENTION_DENSE, spec);
+    const auto bound = bindingsFor(graph);
+    for(const char* decode : {"qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz", "auto"})
+    {
+        SCOPED_TRACE(decode);
+        auto kernel = makeKernel(GFX950_ATTENTION_DENSE);
+        kernel.metadata[std::string("persistent")] = int64_t{1};
+        kernel.metadata[std::string("persist_decode")] = std::string(decode);
+        const auto launch = attention_dense_graphs::resolveLaunchOf(graph, bound, kernel);
+        EXPECT_TRUE(launch.binding.readsStrides);
+        const AttentionDenseStrides expected{
+            262144, 65536, 128, 262144, 65536, 128, 262144, 65536, 128, 262144, 65536, 128};
+        EXPECT_EQ(launch.binding.strides, expected);
+    }
+    // The gqa_pair orders keep packed addressing: the same graph is refused by name.
+    for(const char* decode : {"gqa_pair", "gqa_pair_2phase"})
+    {
+        SCOPED_TRACE(decode);
+        auto kernel = makeKernel(GFX950_ATTENTION_DENSE);
+        kernel.metadata[std::string("persistent")] = int64_t{1};
+        kernel.metadata[std::string("persist_decode")] = std::string(decode);
+        const std::string failure = prepareFailure(graph, bound, kernel);
+        EXPECT_NE(failure.find("reads packed operands only and does not read the stride arguments"),
+                  std::string::npos)
+            << failure;
+    }
+}
+
+/// What a launch passes after the shape arguments is the binding's strides, converted as the
+/// kernel takes them: the twelve i32 values, in kernarg order. Checked for a graph with
+/// extent-1 axes (canonical values) and a head-major one.
+TEST_P(TestAttentionDenseDispatch, LaunchesTheStridesTheBindingHolds)
+{
+    GraphSpec canonical = servedGraph();
+    canonical.batch = 1;
+    canonical.numKvHeads = 1;
+    GraphSpec headMajor = servedGraph();
+    headMajor.setEveryLayout(SdpaLayout::BHSD);
+
+    for(const auto& spec : {canonical, headMajor})
+    {
+        const Graph graph(arch(), spec);
+        auto kernel = makeKernel(arch());
+        kernel.metadata[std::string("num_query_heads")] = spec.numQueryHeads;
+        kernel.metadata[std::string("num_kv_heads")] = spec.numKvHeads;
+        const auto launch
+            = attention_dense_graphs::resolveLaunchOf(graph, bindingsFor(graph), kernel);
+
+        const std::array<void*, 4> operands{nullptr, nullptr, nullptr, nullptr};
+        const attention_dense::AttentionDenseKernelArguments arguments(
+            launch, attention_dense::AttentionDenseAbi::RUNTIME_STRIDES, {}, operands, nullptr);
+        // 4 pointers, scale, 5 shape values, then the strides last.
+        ASSERT_EQ(arguments.params().size(), 4U + 1U + 5U + 12U);
+        for(std::size_t index = 0; index < 12; ++index)
+        {
+            const auto* passed = static_cast<const int32_t*>(arguments.params().at(10 + index));
+            EXPECT_EQ(static_cast<int64_t>(*passed), launch.binding.strides.at(index)) << index;
+        }
+        // Not just consistent: for the head-major graph these are the head-major values (Q's
+        // head stride is S * D).
+        if(spec.operand(Q_UID).layout == SdpaLayout::BHSD)
+        {
+            EXPECT_EQ(*static_cast<const int32_t*>(arguments.params().at(10 + 1)), 65536);
+        }
+    }
 }
 
 /// Every tile a D128 catalog candidate can carry reaches the loader: the tile check is not
@@ -882,9 +1274,9 @@ ArchContracts contractsOf(const AttentionDenseTestArch& arch)
 {
     ArchContracts contracts;
     contracts.legacySymbol = std::string(arch.dispatchSymbol) + ".v1";
-    contracts.plain = {arch.plainContractSymbol, AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
+    contracts.plain = {arch.plainContractSymbol, AttentionDenseAbi::RUNTIME_STRIDES};
     contracts.legacy = {contracts.legacySymbol, AttentionDenseAbi::BAKED_HEAD_COUNTS};
-    contracts.bias = {arch.biasContractSymbol, AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
+    contracts.bias = {arch.biasContractSymbol, AttentionDenseAbi::RUNTIME_STRIDES_WITH_BIAS};
     return contracts;
 }
 
@@ -949,8 +1341,8 @@ INSTANTIATE_TEST_SUITE_P(,
 
 /// A gfx942 graph can carry a bias and write the LSE at once, and the two tensors are
 /// different uids the launch resolves apart: the bias flag and uid and the stats uid are
-/// each bound, and the launch passes lse_ptr before the bias tail, so a kernel recording the
-/// LSE form with the bias tail last is prepared and one with the tail first is refused.
+/// each bound, and the launch passes lse_ptr, then the bias tail, then the twelve strides, so a
+/// kernel recording the LSE form in that order is prepared and one with lse_ptr last is refused.
 TEST(TestGfx942AttentionDenseDispatch, BindsAndPreparesTheBiasAlongsideTheStatsOutput)
 {
     const auto& arch = GFX942_ATTENTION_DENSE;
@@ -967,10 +1359,10 @@ TEST(TestGfx942AttentionDenseDispatch, BindsAndPreparesTheBiasAlongsideTheStatsO
     EXPECT_EQ(accepted.find(SIGNATURE_MARKER), std::string::npos) << accepted;
     EXPECT_NE(accepted.find("does not exist"), std::string::npos) << accepted;
 
-    auto biasFirst = makeBiasKernel(arch, /*bias=*/true);
-    biasFirst.source.signature.push_back(KernelArgument{
+    auto lseLast = makeBiasKernel(arch, /*bias=*/true);
+    lseLast.source.signature.push_back(KernelArgument{
         attention_dense_graphs::BUFFER_KIND, attention_dense_graphs::POINTER_BYTES, 0, "lse_ptr"});
-    const std::string refused = prepareFailure(graph, bound, biasFirst);
+    const std::string refused = prepareFailure(graph, bound, lseLast);
     EXPECT_NE(refused.find(SIGNATURE_MARKER), std::string::npos) << refused;
 
     // The plain LSE form has no bias tail, which the graph's bias needs.
@@ -982,8 +1374,7 @@ TEST(TestGfx942AttentionDenseDispatch, BindsAndPreparesTheBiasAlongsideTheStatsO
 
 /// The v1 handler is registered only for plans saved before the head counts became runtime
 /// arguments, and has no bias form: a bias graph prepared on it is refused by name, before
-/// any code object is loaded, rather than launched with the wrong argument list. (gfx942
-/// has no legacy handler: its v1 handler is its current one and also serves v2.)
+/// any code object is loaded, rather than launched with the wrong argument list.
 TEST(TestGfx950AttentionDenseDispatch, RefusesToPrepareABiasPlanOnTheLegacyHandler)
 {
     const auto& arch = GFX950_ATTENTION_DENSE;

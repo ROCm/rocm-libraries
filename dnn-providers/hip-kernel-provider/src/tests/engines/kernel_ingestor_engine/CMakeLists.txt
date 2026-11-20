@@ -19,6 +19,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionDenseMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseGeometry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseSignature.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseStrides.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseDispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestAttentionDenseMatchers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionUnified3dGeometry.cpp
@@ -95,6 +96,65 @@ add_custom_target(hkp_gfx942_unified_3d_test_tables DEPENDS ${_gfx942_u3d_tables
                   COMMENT "gfx942 unified 3D test tables generated from rocKE")
 add_dependencies(hip_kernel_provider_tests hkp_gfx942_unified_3d_test_tables)
 target_include_directories(hip_kernel_provider_tests PRIVATE "${_gfx942_u3d_generated}")
+
+# Which dense bodies read their strides, as rocKE answers it for every kernel the pack ships and
+# for one flip of each body class, for the census to hold the engine's rule to (the census suites
+# TestGfx9[45]0AttentionDenseCatalogTiles). Same mechanism as the tables above: generated into the
+# build tree from the rocKE source tree, never committed. The input is each arch's shipped kernel
+# descriptor pack (`*_attention_dense.kdp.json`, which records the rocKE spec each kernel is built
+# from), found under the production source root the pack step compiles from; with none the table is
+# empty and the census says so.
+set(_dense_served_args)
+set(_dense_served_inputs)
+foreach(_arch gfx950 gfx942)
+    set(_kdp)
+    if(HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT)
+        file(GLOB_RECURSE _kdp
+             "${HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT}/*${_arch}_attention_dense.kdp.json")
+    endif()
+    if(_kdp)
+        list(GET _kdp 0 _kdp)
+        list(APPEND _dense_served_args "--generator-arg=${_arch}=${_kdp}")
+        list(APPEND _dense_served_inputs "${_kdp}")
+    endif()
+endforeach()
+set(_dense_served_inc "${_gfx942_u3d_generated}/AttentionDenseServedSetTable.inc")
+add_custom_command(
+    OUTPUT "${_dense_served_inc}"
+    COMMAND "${Python3_EXECUTABLE}" -I
+            "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_table.py"
+            "${_gfx942_u3d_packs}/gen_attention_dense_served_set.py"
+            --out "${_dense_served_inc}" --depfile "${_dense_served_inc}.d"
+            ${_dense_served_args}
+    DEPENDS "${_gfx942_u3d_packs}/gen_gfx942_attention_unified_3d_table.py"
+            "${_gfx942_u3d_packs}/gen_attention_dense_served_set.py"
+            ${_dense_served_inputs}
+    DEPFILE "${_dense_served_inc}.d"
+    COMMENT "Generating the dense attention served-set table from rocKE"
+    VERBATIM)
+add_custom_target(hkp_dense_served_set_table DEPENDS "${_dense_served_inc}"
+                  COMMENT "dense attention served-set table generated from rocKE")
+add_dependencies(hip_kernel_provider_census_tests hkp_dense_served_set_table)
+target_include_directories(hip_kernel_provider_census_tests PRIVATE "${_gfx942_u3d_generated}")
+
+# The dense stride predicate's C++ twin is held to the vectors file rocKE's Python predicate
+# is held to (TestAttentionDenseStrides). rocKE owns the file, so the test reads it from the
+# rocKE tree, embedded into the test binary at configure time as rocKE's own C++ twin tests do,
+# so an installed test needs no data path. configure_file rewrites the .inc only when the bytes
+# change, so a reconfigure does not force a recompile.
+set(_dense_stride_vectors
+    "${CMAKE_CURRENT_SOURCE_DIR}/../../../../rocke/platform/tests/golden/attention_dense_stride_vectors.json")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${_dense_stride_vectors}")
+file(READ "${_dense_stride_vectors}" _dense_stride_vectors_hex HEX)
+string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _dense_stride_vectors_bytes
+                     "${_dense_stride_vectors_hex}")
+string(REGEX REPLACE "(0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,0x..,)"
+                     "\\1\n" _dense_stride_vectors_bytes "${_dense_stride_vectors_bytes}")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_stride_vectors.inc.tmp"
+     "${_dense_stride_vectors_bytes}\n")
+configure_file("${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_stride_vectors.inc.tmp"
+               "${CMAKE_CURRENT_BINARY_DIR}/generated/attention_dense_stride_vectors.inc"
+               COPYONLY)
 
 # The schema hash test compares the pinned constant with the hash of the schema file. Line
 # ends are normalised to LF, so a CRLF checkout gives the same hash.

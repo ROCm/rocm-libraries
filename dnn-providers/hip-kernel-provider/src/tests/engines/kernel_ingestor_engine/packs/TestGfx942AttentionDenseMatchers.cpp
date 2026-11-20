@@ -667,14 +667,80 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAnUnsupportedOperandOrLayout)
     fp32.dataType = data_objects::DataType::FLOAT;
     EXPECT_FALSE(matchGraph(fp32).has_value());
 
-    auto bhsd = baseGraph();
-    bhsd.operand(Q_UID).layout = SdpaLayout::BHSD;
-    EXPECT_FALSE(matchGraph(bhsd).has_value());
+    // Q with the head dimension no longer the fastest axis: the kernel reads its elements one
+    // apart, which no stride argument expresses.
+    auto bsdh = baseGraph();
+    bsdh.operand(Q_UID).layout = SdpaLayout::BSDH;
+    EXPECT_EQ(loggedDecline(bsdh).cause, "head_dim_stride");
 
     auto gqa = baseGraph();
     gqa.numQueryHeads = 12;
     gqa.numKvHeads = 8;
     EXPECT_FALSE(matchGraph(gqa).has_value());
+}
+
+// =============================================================================
+// Strided layouts. The grid and persistent bodies read the twelve stride arguments, so the
+// graph match admits any layout the stride predicate admits (the shared suite pins the
+// predicate's declines on both arches); only the opt-in KDB and VPF pipelines keep packed
+// addressing. The stats tensor stays packed: the kernel writes it without strides.
+// =============================================================================
+
+namespace
+{
+
+/// The base graph with every operand head-major (BHSD): a layout, not packed BSHD, that the
+/// predicate admits.
+GraphSpec headMajorGraph()
+{
+    auto spec = baseGraph();
+    spec.setEveryLayout(SdpaLayout::BHSD);
+    return spec;
+}
+
+} // namespace
+
+TEST(TestGfx942AttentionDenseGraphMatch, ServesEveryLayoutTheStridePredicateAdmits)
+{
+    // Head-major, row-padded, a padded batch, packed QKV, one operand in each: the graph
+    // match binds them all. The base graph is grouped (32 query heads over 8).
+    ASSERT_TRUE(matchGraph(baseGraph()).has_value());
+    EXPECT_TRUE(matchGraph(headMajorGraph()).has_value());
+
+    auto padded = baseGraph();
+    padded.setEveryLayout(SdpaLayout::PADDED_BSHD);
+    EXPECT_TRUE(matchGraph(padded).has_value());
+
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        SCOPED_TRACE(uid);
+        auto one = baseGraph();
+        one.operand(uid).layout = SdpaLayout::BHSD;
+        EXPECT_TRUE(matchGraph(one).has_value());
+    }
+
+    // Q, K and V cut out of one [B, S, 32 + 8 + 8 heads, D] buffer: every token stride spans
+    // all 48 heads.
+    auto qkv = baseGraph();
+    for(const int64_t uid : {Q_UID, K_UID, V_UID})
+    {
+        qkv.operand(uid).strides
+            = std::vector<int64_t>{int64_t{1024} * 48 * 128, 128, int64_t{48} * 128, 1};
+    }
+    EXPECT_TRUE(matchGraph(qkv).has_value());
+}
+
+TEST(TestGfx942AttentionDenseGraphMatch, ServesPackedStatsBesideStridedOperands)
+{
+    ASSERT_TRUE(matchGraph(statsGraph()).has_value());
+    auto strided = statsGraph();
+    strided.setEveryLayout(SdpaLayout::BHSD);
+    EXPECT_TRUE(matchGraph(strided).has_value());
+
+    // The kernel writes the LSE at packed addresses whatever Q, K, V and O look like.
+    auto tokenMajor = strided;
+    tokenMajor.statsTensor->strides = {int64_t{1024} * 32, 1, 32, 1};
+    EXPECT_EQ(loggedDecline(tokenMajor).cause, "stats_layout");
 }
 
 // =============================================================================
@@ -816,6 +882,98 @@ TEST(TestGfx942AttentionDenseKernelMatch, RefusesACandidateWithoutAValidEmitLse)
         EXPECT_FALSE(matches(graph, mistyped));
         EXPECT_FALSE(matches(graph, two));
         EXPECT_FALSE(matches(graph, negative));
+    }
+}
+
+// A strided graph is served by every body that reads the strides: each block order of the
+// grid, each persistent decode, and the LSE form beside a packed stats tensor.
+TEST(TestGfx942AttentionDenseKernelMatch, ServesAStridedGraphFromEveryBodyThatReadsTheStrides)
+{
+    const auto strided = headMajorGraph();
+    for(const char* order : {"qb_minor", "bt_hkv_minor", "hq_minor_swz"})
+    {
+        EXPECT_TRUE(matches(baseGraph(), gridKernel(order))) << order << " (packed control)";
+        EXPECT_TRUE(matches(strided, gridKernel(order))) << order;
+    }
+    for(const char* decode : {"qb_major", "hkv_major", "bt_hkv_minor", "hq_minor_swz"})
+    {
+        EXPECT_TRUE(matches(baseGraph(), persistentKernel(decode))) << decode << " (control)";
+        EXPECT_TRUE(matches(strided, persistentKernel(decode))) << decode;
+    }
+
+    KernelSpec lse;
+    lse.emitLse = 1;
+    auto stridedStats = statsGraph();
+    stridedStats.setEveryLayout(SdpaLayout::BHSD);
+    ASSERT_TRUE(matches(statsGraph(), lse));
+    EXPECT_TRUE(matches(stridedStats, lse));
+}
+
+// The opt-in K double-buffer (KDB) and V-prefetch (VPF) pipelines keep packed addressing and
+// ignore the strides, so a graph whose operands are not packed BSHD is refused through the
+// knob fields that select them, and a packed graph still matches them.
+TEST(TestGfx942AttentionDenseKernelMatch, RefusesAStridedGraphFromAKdbOrVpfBody)
+{
+    KernelSpec kdb;
+    kdb.ldsNumBuffers = 2;
+    KernelSpec vpf;
+    vpf.vRegPrefetch = 1;
+    KernelSpec both;
+    both.ldsNumBuffers = 2;
+    both.vRegPrefetch = 1;
+    KernelSpec persistentVpf = persistentKernel("bt_hkv_minor");
+    persistentVpf.vRegPrefetch = 1;
+
+    for(const auto& [name, kernel] : {std::pair{"KDB", kdb},
+                                      std::pair{"VPF", vpf},
+                                      std::pair{"KDB and VPF", both},
+                                      std::pair{"persistent VPF", persistentVpf}})
+    {
+        SCOPED_TRACE(name);
+        EXPECT_TRUE(matches(baseGraph(), kernel)) << "a packed graph is served";
+        EXPECT_FALSE(matches(headMajorGraph(), kernel)) << "a strided graph is refused";
+
+        // One operand off packed is enough.
+        auto oneOperand = baseGraph();
+        oneOperand.operand(O_UID).layout = SdpaLayout::BHSD;
+        EXPECT_FALSE(matches(oneOperand, kernel));
+    }
+}
+
+// A packed graph with garbage in its exempt axes is still packed once canonicalized, so the
+// packed-only bodies serve it.
+TEST(TestGfx942AttentionDenseKernelMatch, ServesAPackedGraphWithGarbageInItsUnitExtentAxes)
+{
+    auto spec = baseGraph();
+    spec.batch = 1;
+    for(const int64_t uid : {Q_UID, K_UID, V_UID, O_UID})
+    {
+        auto strides = spec.stridesOf(uid);
+        strides[0] = 12345;
+        spec.operand(uid).strides = strides;
+    }
+    KernelSpec vpf;
+    vpf.vRegPrefetch = 1;
+    EXPECT_TRUE(matches(spec, vpf));
+    EXPECT_TRUE(matches(spec, KernelSpec{}));
+}
+
+// A record whose knob fields are missing or mistyped is not known to read the strides: it
+// serves packed graphs and not strided ones.
+TEST(TestGfx942AttentionDenseKernelMatch, DoesNotAssumeAMalformedRecordReadsTheStrides)
+{
+    for(const char* field : {"lds_num_buffers", "v_reg_prefetch"})
+    {
+        SCOPED_TRACE(field);
+        auto erased = makeKernel(KernelSpec{});
+        erased.metadata.erase(field);
+        EXPECT_TRUE(matches(baseGraph(), erased));
+        EXPECT_FALSE(matches(headMajorGraph(), erased));
+
+        auto mistyped = makeKernel(KernelSpec{});
+        mistyped.metadata[field] = std::string("1");
+        EXPECT_TRUE(matches(baseGraph(), mistyped));
+        EXPECT_FALSE(matches(headMajorGraph(), mistyped));
     }
 }
 
