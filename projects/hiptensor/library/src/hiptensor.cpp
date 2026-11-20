@@ -352,25 +352,16 @@ hiptensorStatus_t hiptensorCreateTensorDescriptor(const hiptensorHandle_t      h
              (unsigned int)alignmentRequirement);
     logger->logAPITrace("hiptensorCreateTensorDescriptor", msg);
 
-    if(handle == nullptr)
+    if(handle == nullptr || desc == nullptr)
     {
         auto errorCode = HIPTENSOR_STATUS_NOT_INITIALIZED;
-        if(handle == nullptr)
-        {
-            snprintf(msg,
-                     sizeof(msg),
-                     "Initialization Error : handle = nullptr (%s)",
-                     hiptensorGetErrorString(errorCode));
-        }
-        else
-        {
-            snprintf(msg,
-                     sizeof(msg),
-                     "Initialization Error : contraction descriptor = nullptr (%s)",
-                     hiptensorGetErrorString(errorCode));
-        }
+        snprintf(msg,
+                 sizeof(msg),
+                 "Initialization Error : %s = nullptr (%s)",
+                 handle == nullptr ? "handle" : "tensor descriptor",
+                 hiptensorGetErrorString(errorCode));
         logger->logError("hiptensorCreateTensorDescriptor", msg);
-        return HIPTENSOR_STATUS_NOT_INITIALIZED;
+        return errorCode;
     }
 
     if((lens == nullptr && strides != nullptr)
@@ -395,6 +386,45 @@ hiptensorStatus_t hiptensorCreateTensorDescriptor(const hiptensorHandle_t      h
         }
         logger->logError("hiptensorCreateTensorDescriptor", msg);
         return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+
+    // Every mode needs a positive extent. Strides are kept as unsigned element offsets, so a
+    // negative stride cannot be represented.
+    if(numModes > 0 && lens == nullptr)
+    {
+        snprintf(msg,
+                 sizeof(msg),
+                 "Tensor Initialization Error : numModes = %u but lens = nullptr (%s)",
+                 (unsigned int)numModes,
+                 hiptensorGetErrorString(HIPTENSOR_STATUS_INVALID_VALUE));
+        logger->logError("hiptensorCreateTensorDescriptor", msg);
+        return HIPTENSOR_STATUS_INVALID_VALUE;
+    }
+    for(uint32_t i = 0; i < numModes; i++)
+    {
+        if(lens[i] <= 0)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Tensor Initialization Error : lens[%u] = %lld, extents must be positive (%s)",
+                     (unsigned int)i,
+                     (long long)lens[i],
+                     hiptensorGetErrorString(HIPTENSOR_STATUS_INVALID_VALUE));
+            logger->logError("hiptensorCreateTensorDescriptor", msg);
+            return HIPTENSOR_STATUS_INVALID_VALUE;
+        }
+        if(strides != nullptr && strides[i] < 0)
+        {
+            snprintf(msg,
+                     sizeof(msg),
+                     "Tensor Initialization Error : strides[%u] = %lld, negative strides are not "
+                     "supported (%s)",
+                     (unsigned int)i,
+                     (long long)strides[i],
+                     hiptensorGetErrorString(HIPTENSOR_STATUS_NOT_SUPPORTED));
+            logger->logError("hiptensorCreateTensorDescriptor", msg);
+            return HIPTENSOR_STATUS_NOT_SUPPORTED;
+        }
     }
 
     if(dataType == HIPTENSOR_R_64F && !handle->getDevice().supportsF64())
