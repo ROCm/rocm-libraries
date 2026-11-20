@@ -36,7 +36,23 @@ except ImportError:
 testdir = os.path.dirname(__file__)
 moddir = os.path.dirname(testdir)
 rootdir = os.path.dirname(moddir)
+if testdir not in sys.path:
+    sys.path.insert(0, testdir)
 sys.path.append(rootdir)
+
+
+def pytest_report_header(config):
+    # pytest captures the workers' "Launching N threads" lines; show each worker's pool budget.
+    import importlib
+
+    # One --tx entry per pytest-xdist worker, after -n auto and --maxprocesses are applied.
+    workers = len(getattr(config.option, "tx", None) or []) or 1
+    try:
+        parallel = importlib.import_module("tensilelite.Common.Parallel")
+        return parallel.describePoolSizeBudget(workers)
+    except Exception as e:  # a header must never fail the session
+        return "TensileLite pool budget: unavailable (%s)" % e
+
 
 def pytest_addoption(parser):
     parser.addoption("--tensile-options")
@@ -285,6 +301,9 @@ def visibleDeviceCount():
     from tensilelite.ParallelExecution import detectAvailableGpus
     return detectAvailableGpus()
 
+_UNSET = object()
+
+
 def commSkipMark(config, devices):
     """Mark to apply to a `comm` test that needs `devices` devices, or None when it can run here."""
     if config.getoption("--build-only", default=False):
@@ -301,84 +320,28 @@ def commSkipMark(config, devices):
             reason=f"comm tests need {devices} visible HIP devices, found {count}")
     return None
 
-def _host_sees_gfx1250():
-    """True when ``rocm_agent_enumerator`` reports a gfx1250 GPU.
 
-    Same probe ``rocisa`` uses to auto-select the stinkytofu backend. A missing
-    enumerator or a failed probe does not count as seeing gfx1250. Cached: the
-    answer cannot change during a session.
+def dpxSkipMark(config):
+    """Mark to apply to a `dpx` test, or None when this machine has a GPU in DPX mode.
+
+    `dpx` tests need the two partitions of one GPU, which can reach each other's memory. Two
+    separate cards (SPX) are not enough, so the number of devices is not what is checked; see
+    gpu_detection.dpx_pairs.
     """
-    cached = getattr(_host_sees_gfx1250, "_cached", None)
-    if cached is not None:
-        return cached
-    import subprocess
-    rocmpath = os.environ.get(
-        "TENSILE_ROCM_PATH", os.environ.get("ROCM_PATH", "/opt/rocm")
-    )
-    enumerator = os.path.join(rocmpath, "bin", "rocm_agent_enumerator")
-    seen = False
-    if os.path.exists(enumerator):
-        try:
-            output = subprocess.check_output(
-                [enumerator, "-t", "GPU"], timeout=5, stderr=subprocess.DEVNULL,
-            )
-            seen = "gfx1250" in output.decode()
-        except (OSError, subprocess.SubprocessError):
-            seen = False
-    _host_sees_gfx1250._cached = seen
-    return seen
+    if config.getoption("--build-only", default=False):
+        return None
 
+    if hasattr(config, "workerinput"):
+        return pytest.mark.skip(
+            reason="dpx tests need two partitions of one GPU; assign_gpu_to_worker pins each "
+                   "xdist worker to one")
 
-def _gfx1250_native_guard(exc):
-    """The unset-env guard refusing to emit a gfx1250 kernel on native rocisa.
-
-    Matches both ``loaded=True`` and ``loaded=False``. An explicit
-    ``ROCISA_BACKEND`` mismatch uses a different message and stays a failure.
-    """
-    if not isinstance(exc, RuntimeError):
-        return False
-    text = str(exc)
-    return "gfx1250 kernel" in text and "expected the stinkytofu backend" in text
-
-
-def _skip_gfx1250_codegen_on_this_host(exc):
-    """Skip gfx1250 codegen when this process auto-selected native rocisa.
-
-    ``ROCISA_BACKEND`` left unset means the backend followed hardware detection.
-    Coverage and ``tox -e unit`` set it to ``stinkytofu``, so those lanes still
-    emit. A host that reports gfx1250 keeps the guard as a failure.
-    """
-    if os.environ.get("ROCISA_BACKEND", "").strip():
-        return False
-    if _host_sees_gfx1250():
-        return False
-    return _gfx1250_native_guard(exc)
-
-
-@pytest.hookimpl(hookwrapper=True)
-def pytest_runtest_makereport(item, call):
-    """Skip gfx1250 codegen on a non-gfx1250 host using native rocisa.
-
-    TheRock's gfx94X tensilelite job runs ``Tests/unit`` in one native process.
-    Characterization tests still ask for gfx1250 assembly. The guard in
-    ``create_library/run.py`` raises because that host did not select the
-    stinkytofu backend. Skipping here leaves the guard a hard error when
-    ``ROCISA_BACKEND`` is set and on hosts that report gfx1250.
-    """
-    outcome = yield
-    report = outcome.get_result()
-    if report.when == "teardown" or not report.failed:
-        return
-    excinfo = getattr(call, "excinfo", None)
-    if excinfo is None or not _skip_gfx1250_codegen_on_this_host(excinfo.value):
-        return
-    filename, lineno, _name = item.location
-    report.outcome = "skipped"
-    report.longrepr = (
-        filename,
-        lineno,
-        "Skipped: gfx1250 codegen uses the stinkytofu backend; this host is not gfx1250 and ROCISA_BACKEND is unset",
-    )
+    from gpu_detection import has_dpx
+    if not has_dpx():
+        return pytest.mark.skip(
+            reason="dpx tests need a GPU in DPX mode: two visible HIP devices that are the two "
+                   "partitions of one GPU (same PCI domain, bus and device, different function)")
+    return None
 
 
 def pytest_terminal_summary(terminalreporter):
@@ -414,6 +377,7 @@ def pytest_collection_modifyitems(config, items):
     need: the largest world they are marked with, or two.
     """
     commSkips = {}
+    dpxSkip = _UNSET
 
     for item in items:
 
@@ -430,6 +394,12 @@ def pytest_collection_modifyitems(config, items):
                 commSkips[devices] = commSkipMark(config, devices)
             if commSkips[devices] is not None:
                 item.add_marker(commSkips[devices])
+
+        if item.get_closest_marker("dpx"):
+            if dpxSkip is _UNSET:
+                dpxSkip = dpxSkipMark(config)
+            if dpxSkip is not None:
+                item.add_marker(dpxSkip)
 
 @pytest.fixture
 def useGlobalParameters(tensile_args):

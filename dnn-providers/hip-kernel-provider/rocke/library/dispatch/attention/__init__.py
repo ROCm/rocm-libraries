@@ -48,9 +48,13 @@ from . import (
 )
 from .candidate import (
     DENSE_ALGORITHM,
+    DENSE_ALGORITHMS,
     DENSE_GRID_ALGORITHM,
     DENSE_PERSIST_ALGORITHM,
 )
+from .generic import D256_DECODE_ALGORITHM, UNIFIED_2D_ALGORITHM, UNIFIED_3D_ALGORITHM
+from .gfx942_unified import GFX942_DENSE_PIPE_ALGORITHM
+from .gfx950_unified import D256_GFX950_ALGORITHM
 from .common import (
     ATTENTION_ABI_VERSION,
     ATTENTION_DIM_VOCABULARY,
@@ -63,11 +67,29 @@ from .common import (
     AttentionTuningSpec,
     FAMILY,
     _device_num_cus,
-    _problem,
     _request_errors,
     _resolve_num_cus,
     _selector_matches,
+    attention_band,
+    attention_problem,
     canonical_arch,
+    dense_scale_range,
+)
+
+# Every algorithm that routes through the unified launch path
+# (``run_unified_attention_torch``, no tuning spec): the two generic tiled
+# paths, the two per-arch fast cohorts, and D256 decode. A routed family's
+# gate (e.g. SDPA's ``bind_unified.py``) builds its own "which algorithms do
+# I serve" set from this one, so a new unified route candidate cannot go
+# unnoticed by only renaming a literal nobody re-checks.
+UNIFIED_ALGORITHMS = frozenset(
+    {
+        UNIFIED_2D_ALGORITHM,
+        UNIFIED_3D_ALGORITHM,
+        D256_DECODE_ALGORITHM,
+        D256_GFX950_ALGORITHM,
+        GFX942_DENSE_PIPE_ALGORITHM,
+    }
 )
 
 _FAMILY = FAMILY
@@ -539,9 +561,16 @@ def dispatch_for_arches(
 
 
 __all__ = [
+    "D256_DECODE_ALGORITHM",
+    "D256_GFX950_ALGORITHM",
     "DENSE_ALGORITHM",
+    "DENSE_ALGORITHMS",
     "DENSE_GRID_ALGORITHM",
     "DENSE_PERSIST_ALGORITHM",
+    "GFX942_DENSE_PIPE_ALGORITHM",
+    "UNIFIED_2D_ALGORITHM",
+    "UNIFIED_3D_ALGORITHM",
+    "UNIFIED_ALGORITHMS",
     "ATTENTION_ABI_VERSION",
     "ATTENTION_DIM_VOCABULARY",
     "ATTENTION_EXECUTION_REGISTRY",
@@ -554,11 +583,14 @@ __all__ = [
     "AttentionRequest",
     "AttentionSpec",
     "AttentionTuningSpec",
+    "attention_band",
     "attention_candidates",
     "attention_execution_candidates",
     "attention_dispatch_result",
+    "attention_problem",
     "attention_sweep_space",
     "attention_tuning_spec",
+    "dense_scale_range",
     "dispatch_attention",
     "dispatch_for_arches",
     "dispatch_attention_all",

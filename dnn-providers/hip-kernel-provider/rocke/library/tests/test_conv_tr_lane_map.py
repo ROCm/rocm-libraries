@@ -22,7 +22,7 @@ from kernels.common.conv_direct_grouped import (
     build_direct_conv_wgrad,
 )
 from kernels.common._attention_bwd_frag import IntLaneBuilder
-from rocke.helpers.layouts import ConvKOuterFragmentReader
+from kernels.common._conv_layouts import ConvKOuterFragmentReader
 
 
 @pytest.mark.parametrize("n", [8, 16])

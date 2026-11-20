@@ -10,6 +10,7 @@
 #include <string>
 
 #include "harness/Benchmark.hpp"
+#include "harness/Capture.hpp"
 #include "harness/TestConfig.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -139,6 +140,16 @@ struct HarnessPolicy
 
     /// Set by --benchmark: time each verified graph with these settings.
     std::optional<BenchmarkSettings> benchmark;
+    /// Set by --benchmark-reference: time the reference and report it per test.
+    bool benchmarkReference = false;
+
+    /// Set by --graph-capture: capture each verified graph and replay it with these
+    /// settings.
+    std::optional<CaptureSettings> graphCapture;
+
+    /// The engine's TOML overrides, applied to every output tensor the harness grades; null
+    /// when no settings file was given. Not owned: the settings outlive the harness.
+    const TestSettings* testSettings = nullptr;
 
     bool useDevice() const
     {

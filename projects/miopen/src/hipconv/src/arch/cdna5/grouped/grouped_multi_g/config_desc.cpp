@@ -14,6 +14,8 @@ hipconv::KVDescriptor config_fields(const Config& cfg)
     d.int_field("dilation", cfg.dilation, /*default=*/1);
     direction_field(d, cfg.direction);
     d.int_field("prefetch_depth", cfg.prefetch_depth, /*default=*/2);
+    d.int_field("h_split", cfg.h_split, /*default=*/1);
+    d.int_field("waves_per_simd", cfg.waves_per_simd, /*default=*/4);
     d.int_field("kh", cfg.kh, /*default=*/3);
     d.int_field("kw", cfg.kw, /*default=*/3);
     return d;

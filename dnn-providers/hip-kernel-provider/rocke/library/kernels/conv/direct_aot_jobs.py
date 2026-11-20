@@ -24,6 +24,7 @@ from kernels.conv.aot_jobs import BuildJob
 from kernels.conv.direct_variants import (
     DIRECT_DEPTHWISE_WIN_FWD as _DW_WIN_FWD,
     DIRECT_DGRAD_PATCH_WMMA as _DGRAD_PATCH,
+    DIRECT_DGRAD_PP_MFMA as _DGRAD_PP_MFMA,
     DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
@@ -31,6 +32,10 @@ from kernels.conv.direct_variants import (
     DIRECT_FWD_GSTREAM_WMMA as _FWD_GSTREAM,
     DIRECT_FWD_TAPOUTER_WMMA as _FWD_TAPOUTER,
     DIRECT_FWD_SMALLC_WMMA as _FWD_SMALLC,
+    DIRECT_FWD_SMALLC_MFMA as _FWD_SMALLC_MFMA,
+    DIRECT_FWD_SMALLK_MFMA as _FWD_SMALLK_MFMA,
+    DIRECT_FWD_FLEX_MFMA as _FWD_FLEX_MFMA,
+    DIRECT_FWD_PP_MFMA as _FWD_PP_MFMA,
     DIRECT_FWD_SMALLK_WMMA as _FWD_SMALLK,
     DIRECT_FWD_WMMA as _FWD_WMMA,
     DIRECT_GROUPED_HALO as _GROUPED_HALO,
@@ -617,6 +622,11 @@ DGRAD_WMMA_DILATED_KNOBS = (
     (2, 4, 4, 8, 32, 1, 32, 2, True),
     (2, 4, 4, 8, 64, 1, 32, 2, True),
 )
+# LDS-DMA ping-pong MFMA dgrad (direct_dgrad_pp_mfma, gfx950): "same"-padded
+# square filters (the output-channel blocks are the kernel module's BLOCK_K).
+# 7x7 fits LDS only below the 128-channel block its transposing weight reads
+# need.
+DGRAD_PP_MFMA_FILTERS = (3, 5)
 WGRAD_MFMA_K = (32,)
 # Wave32 WMMA direct forward (direct_fwd_wmma): (waves_k, waves_p, tiles_k,
 # tiles_p, tile_w, tile_n, ck, stages, prefetch, split_barrier,
@@ -1025,6 +1035,34 @@ WGRAD_TILED_UNFOLD = (1, 4)
 # Eight-wave blocks of two ping-ponged wave groups, on
 # the plain two-row prefetch of four-wave 32x32 tiles.
 WGRAD_TILED_PINGPONG = ((2, 2, 2, 2), (2, 0), (30,), (256,), (1,))
+# Eight-wave blocks ping-ponged in halves on one row stream (q_groups 1),
+# one block per CU: wave tile, (prefetch, row_unroll), rows_per_seg, unfold_n.
+# Only the points that win a dense 3x3 layer.
+WGRAD_TILED_PP_HALVES_BLOCKS = 256
+WGRAD_TILED_PP_HALVES = (
+    ((2, 2, 4, 2), (2, 4), 32, 1),
+    ((2, 2, 4, 2), (2, 4), 64, 1),
+    ((2, 2, 4, 2), (2, 0), 48, 1),
+    ((2, 2, 4, 2), (2, 0), 48, 4),
+    ((2, 2, 4, 2), (2, 0), 96, 1),
+    ((2, 2, 4, 2), (2, 0), 96, 4),
+    ((2, 2, 2, 4), (2, 4), 64, 1),
+)
+# Auto launch (rows_per_seg 0: whole strips, one-round grid) at
+# target_blocks 512 (two blocks per CU of a 256-CU part): wave tile,
+# (prefetch, row_unroll), unfold_n. Only the points that win a dense 3x3 row.
+WGRAD_TILED_AUTO_BLOCKS = 512
+WGRAD_TILED_AUTO = (
+    ((2, 1, 2, 2), (2, 0), 1),
+    ((2, 1, 2, 2), (2, 0), 4),
+    ((2, 1, 2, 2), (3, 0), 1),
+    ((2, 1, 2, 2), (3, 0), 4),
+    ((2, 1, 2, 2), (3, 4), 4),
+    ((2, 1, 2, 2), (5, 6), 1),
+    ((2, 1, 2, 2), (5, 6), 4),
+    ((2, 2, 2, 2), (3, 4), 1),
+    ((2, 2, 2, 2), (3, 4), 4),
+)
 # Depthwise LDS-ring wgrad (DwWgradLdsSpec): lanes along columns, prefetch,
 # output rows per segment, workgroups.
 WGRAD_DW_LANES_W = (8, 16, 32)
@@ -1102,6 +1140,29 @@ FWD_SMALLK_LAYERS = (
     (3, 3, 1, 1, 1, 3),
     (1, 7, 0, 3, 1, 1),
 )
+# Flattened-pixel implicit-GEMM forward (direct_fwd_flex_mfma, gfx950): the
+# dense layers it serves, (KH, KW, PAD, pad_w, stride, dil_h, dil_w), and its
+# (tile K, split_c) knobs.
+FWD_FLEX_LAYERS = (
+    (3, 3, 1, 1, 2, 1, 1),
+    (1, 1, 0, 0, 2, 1, 1),
+    (2, 2, 0, 0, 2, 1, 1),
+    (3, 3, 24, 24, 1, 24, 24),
+    (3, 3, 36, 36, 1, 36, 36),
+    (3, 3, 12, 12, 1, 12, 12),
+    (3, 3, 2, 2, 1, 2, 2),
+    (1, 3, 0, 1, 1, 1, 1),
+    (1, 3, 0, 3, 1, 1, 3),
+    (1, 3, 0, 5, 1, 1, 5),
+    (1, 7, 0, 3, 1, 1, 1),
+    (1, 7, 0, 9, 1, 1, 3),
+    (1, 7, 0, 15, 1, 1, 5),
+    (1, 11, 0, 5, 1, 1, 1),
+    (1, 11, 0, 15, 1, 1, 3),
+    (1, 11, 0, 25, 1, 1, 5),
+    (7, 1, 3, 0, 1, 1, 1),
+)
+FWD_FLEX_KNOBS = tuple((bk, sc) for bk in (256, 128) for sc in (1, 2, 4))
 # Tap-outer WMMA forward (direct_fwd_tapouter_wmma): the "same"-padded dilated
 # 3x3 rows of atrous / ASPP layers it serves, (PAD, dil); stride 1.
 FWD_TAPOUTER_DILATIONS = (
@@ -1154,6 +1215,66 @@ FWD_SMALLC_KNOBS = (
     (2, 4, 2, 4, 4, 64, 2, 1),
     (2, 8, 2, 2, 8, 32, 4, 1),
     (2, 8, 2, 4, 8, 64, 2, 1),
+)
+# fwd_smallc_mfma (gfx950): (waves_k, waves_p, tiles_k, tiles_p, out_h, out_w,
+# tiles_per_block, prefetch); the best few per stem of a tuning sweep.
+FWD_SMALLC_MFMA_KNOBS = (
+    (1, 4, 1, 4, 4, 64, 1, False),
+    (1, 4, 1, 4, 8, 32, 1, False),
+    (1, 4, 1, 4, 8, 32, 4, False),
+    (1, 4, 1, 4, 8, 32, 4, True),
+    (1, 4, 1, 4, 16, 16, 1, False),
+    (1, 4, 2, 2, 1, 128, 1, False),
+    (1, 4, 2, 2, 4, 32, 1, False),
+    (1, 4, 2, 2, 4, 32, 4, True),
+    (1, 4, 2, 2, 4, 32, 8, True),
+    (1, 4, 2, 2, 8, 16, 1, False),
+    (1, 4, 2, 4, 2, 128, 1, False),
+    (1, 4, 2, 4, 2, 128, 4, True),
+    (1, 4, 2, 4, 2, 128, 8, True),
+    (1, 4, 2, 4, 4, 64, 1, False),
+    (1, 4, 2, 4, 4, 64, 4, True),
+    (1, 4, 2, 4, 8, 32, 1, False),
+    (1, 4, 2, 4, 8, 32, 4, False),
+    (1, 4, 2, 4, 8, 32, 4, True),
+    (1, 4, 2, 4, 16, 16, 1, False),
+    (1, 4, 2, 4, 16, 16, 4, True),
+    (1, 4, 4, 1, 8, 8, 8, True),
+    (1, 4, 4, 2, 2, 64, 4, True),
+    (1, 4, 4, 2, 2, 64, 8, False),
+    (1, 4, 4, 4, 4, 64, 1, False),
+    (1, 4, 4, 4, 4, 64, 4, True),
+    (1, 4, 4, 4, 4, 64, 8, True),
+    (1, 4, 4, 4, 8, 32, 4, True),
+    (1, 4, 4, 4, 8, 32, 8, True),
+    (1, 4, 4, 4, 16, 16, 8, True),
+    (1, 8, 4, 2, 8, 32, 4, True),
+    (2, 2, 2, 2, 1, 64, 1, False),
+    (2, 2, 2, 2, 2, 32, 1, False),
+    (2, 2, 2, 2, 2, 32, 4, True),
+    (2, 2, 2, 2, 4, 16, 1, False),
+    (2, 2, 2, 2, 4, 16, 4, True),
+    (2, 2, 2, 2, 8, 8, 1, False),
+    (2, 4, 2, 2, 2, 64, 1, False),
+)
+# LDS-DMA ping-pong MFMA forward (direct_fwd_pp_mfma, gfx950): "same"-padded
+# square filters (the output-channel blocks are the kernel module's BLOCK_K).
+FWD_PP_MFMA_FILTERS = (3,)
+# fwd_smallk_mfma (gfx950): (waves, out_h, out_w); a first grid of 4 / 8 waves
+# over 8..32-pixel square-ish output tiles and full-width 1-row strips.
+FWD_SMALLK_MFMA_KNOBS = tuple(
+    (w, oh, ow)
+    for w in (4, 8)
+    for oh, ow in (
+        (8, 8),
+        (8, 16),
+        (16, 16),
+        (16, 32),
+        (32, 32),
+        (4, 64),
+        (1, 128),
+        (2, 128),
+    )
 )
 # fwd_smallk_wmma: (waves_c, waves_p, tiles_c, tiles_p, out_h, out_w, ck,
 # stages, prefetch); prefetch builds with the iterative-ilp scheduler.
@@ -1586,6 +1707,15 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad, dh, dw in DGRAD_WMMA_DILATIONS
         ),
     ),
+    # LDS-DMA ping-pong dgrad on wave64 MFMA (gfx950): dense, stride 1, odd
+    # square filters with "same" padding; C and K runtime.
+    _DGRAD_PP_MFMA: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=0, kpg=0)
+            for k in DGRAD_PP_MFMA_FILTERS
+        ),
+    ),
     # Stem dgrad on wave32 WMMA: patch embeddings (stride == filter, no
     # padding) of 3-channel images, and the overlapping 3- / 4-channel stems
     # of the reference workloads. dX channels baked, dY channels runtime.
@@ -1762,6 +1892,62 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         tuple(
             DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
             for k, pad, st, c in FWD_SMALLC_STEMS
+        ),
+    ),
+    # Its wave64 MFMA port (gfx950): the same stems, but only those whose
+    # flattened (r, s, c) reduction fits the resident weight fragments (at most
+    # 5 MFMA steps: 7x7x3); the 14x14 / 16x16 patchify stems stay on implicit
+    # GEMM.
+    _FWD_SMALLC_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=pad, stride=st, cpg=c, kpg=0)
+            for k, pad, st, c in FWD_SMALLC_STEMS
+            if k * k * c <= 5 * 32
+        ),
+    ),
+    # Its wave64 MFMA port (gfx950): the same layers.
+    _FWD_SMALLK_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=kk,
+            )
+            for kh, kw, pad, pw, st, kk in FWD_SMALLK_LAYERS
+        ),
+    ),
+    # LDS-DMA ping-pong forward on wave64 MFMA (gfx950): dense, stride 1, odd
+    # square filters with "same" padding; C and K runtime.
+    _FWD_PP_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=0, kpg=0)
+            for k in FWD_PP_MFMA_FILTERS
+        ),
+    ),
+    # Flattened-pixel implicit-GEMM forward on wave64 MFMA (gfx950): C, K
+    # runtime; split_c > 1 pulls in the split-C fold (_split_reduce_job).
+    _FWD_FLEX_MFMA: (
+        "fwd",
+        tuple(
+            DirectCaps(
+                KH=kh,
+                kw=0 if kw == kh else kw,
+                PAD=pad,
+                pad_w=-1 if pw == pad else pw,
+                stride=st,
+                cpg=0,
+                kpg=0,
+                dil_h=dh,
+                dil_w=dw,
+            )
+            for kh, kw, pad, pw, st, dh, dw in FWD_FLEX_LAYERS
         ),
     ),
     _FWD_SMALLK: (
@@ -2140,6 +2326,13 @@ def _knob_grid(
                     k_atoms=ka,
                     m_tiles=mt,
                 )
+    elif variant == _DGRAD_PP_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA and transposing LDS reads: gfx950 only
+        from kernels.common.conv_direct_dgrad_pp_mfma import BLOCK_K
+
+        for bk in BLOCK_K:
+            yield dict(block_k=bk)
     elif variant == _DGRAD_WMMA:
         from rocke.core.arch import ArchTarget
 
@@ -2213,6 +2406,31 @@ def _knob_grid(
                 unfold_n=un,
                 q_groups=2,
                 pingpong=True,
+            )
+        for (wk16, wc16, wk, wc), (pf, ru), rps, un in WGRAD_TILED_PP_HALVES:
+            yield dict(
+                wave_k16=wk16,
+                wave_c16=wc16,
+                waves_k=wk,
+                waves_c=wc,
+                prefetch=pf,
+                row_unroll=ru,
+                rows_per_seg=rps,
+                target_blocks=WGRAD_TILED_PP_HALVES_BLOCKS,
+                unfold_n=un,
+                pingpong=True,
+            )
+        for (wk16, wc16, wk, wc), (pf, ru), un in WGRAD_TILED_AUTO:
+            yield dict(
+                wave_k16=wk16,
+                wave_c16=wc16,
+                waves_k=wk,
+                waves_c=wc,
+                prefetch=pf,
+                row_unroll=ru,
+                rows_per_seg=0,
+                target_blocks=WGRAD_TILED_AUTO_BLOCKS,
+                unfold_n=un,
             )
     elif variant == "direct_wgrad_dw":
         for lw, pf, rps, tb in itertools.product(
@@ -2386,6 +2604,40 @@ def _knob_grid(
             DW_FWD_WMMA_PREFETCH,
         ):
             yield dict(block_waves=waves, block_h=bh, w_fold=fold, prefetch_rows=pf)
+    elif variant == _FWD_FLEX_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA and the 160 KiB LDS: gfx950 only
+        for bk, sc in FWD_FLEX_KNOBS:
+            yield dict(bk=bk, split_c=sc)
+    elif variant == _FWD_SMALLK_MFMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 64:
+            return
+        for waves, oh, ow in FWD_SMALLK_MFMA_KNOBS:
+            yield dict(waves=waves, out_h=oh, out_w=ow)
+    elif variant == _FWD_PP_MFMA:
+        if arch != "gfx950":
+            return  # 16-byte LDS DMA: gfx950 only
+        from kernels.common.conv_direct_fwd_pp_mfma import BLOCK_K
+
+        for bk in BLOCK_K:
+            yield dict(block_k=bk)
+    elif variant == _FWD_SMALLC_MFMA:
+        from rocke.core.arch import ArchTarget
+
+        if ArchTarget.from_gfx(arch).wave_size != 64:
+            return
+        for wk, wp, tk, tp, oh, ow, tb, pf in FWD_SMALLC_MFMA_KNOBS:
+            knobs = dict(
+                waves_k=wk, waves_p=wp, tiles_k=tk, tiles_p=tp, out_h=oh, out_w=ow
+            )
+            if tb > 1:
+                knobs["tiles_per_block"] = tb
+            if pf:
+                # The next tile's window loads in flight over this one's work.
+                knobs["prefetch"] = True
+            yield knobs
     elif variant in (_FWD_SMALLC, _FWD_SMALLK):
         from rocke.core.arch import ArchTarget
 
@@ -2880,7 +3132,7 @@ def probe_problem(
     """
     from kernels.common.conv_direct_grouped import DirectConvProblem
 
-    if variant in (_FWD_SMALLC, _FWD_SMALLK):
+    if variant in (_FWD_SMALLC, _FWD_SMALLK, _FWD_SMALLC_MFMA, _FWD_SMALLK_MFMA):
         # Ungrouped, the small channel count baked; 128 of the runtime one
         # (a multiple of every channel block and chunk) on a 64x64 image.
         return DirectConvProblem(
@@ -3236,7 +3488,10 @@ def _caps_jobs(
                     fold_knobs,
                 )
             )
-        if variant == "direct_nongrouped" and knobs.get("split_c", 1) > 1:
+        if (
+            variant in ("direct_nongrouped", _FWD_FLEX_MFMA)
+            and knobs.get("split_c", 1) > 1
+        ):
             cell.append(_split_reduce_job(arch, wave_size, knobs["split_c"], dtype))
         if variant in _MFMA_DGRAD:
             for helper, helper_knobs, _, _ in direct_dgrad_weight_transforms(

@@ -31,7 +31,7 @@ import contextlib
 
 import pytest
 
-from tensilelite.Tests.rocisa_test_state import preserve_rocisa_kernel_state
+from rocisa_test_state import preserve_rocisa_kernel_state
 
 pytestmark = pytest.mark.unit
 

@@ -383,7 +383,8 @@ endfunction()
 #
 #   EXCLUDE_FOLDERS names folders of the root the pack does not read at all: the
 #   families of HKP_DESCRIPTOR_FAMILIES whose option is OFF (top-level folders), and for
-#   the production root the bundles of HKP_PRODUCT_EXCLUDED_BUNDLES (`/`-separated paths).
+#   the production root the bundles of HKP_PRODUCT_EXCLUDED_BUNDLES and for the
+#   integration root those of HKP_INTEGRATION_EXCLUDED_BUNDLES (`/`-separated paths).
 #
 #   PACK_JOBS caps the worker processes one pack may spawn; 1 selects the packer's
 #   serial path. Omitted, the packer sizes its pool against the machine. Roots have
@@ -906,6 +907,14 @@ want = os.environ.get(\"ROCKE_COMGR_LIB\")
 got = getattr(lib, \"_name\", None)
 if want and (not got or os.path.realpath(got) != os.path.realpath(want)):
     sys.exit(f\"comgr loaded {got!r} instead of the requested {want!r}\")
+try:
+    from rocke.core import lower_llvm
+    flavor = lower_llvm._resolve_llvm_flavor()
+    version = comgr._require_compiler_info().llvm_version
+    llvm = \".\".join(map(str, version)) if version else \"unknown\"
+except Exception as error:
+    flavor, llvm = \"unknown\", f\"unknown ({error})\"
+print(f\"{got};{llvm};{flavor}\", end=\"\")
 ")
     # Each assignment must reach `-E env` as ONE argv element: the Windows
     # PYTHONPATH separator is also CMake's list separator, so an unquoted
@@ -918,7 +927,9 @@ if want and (not got or os.path.realpath(got) != os.path.realpath(want)):
         ERROR_VARIABLE _err)
     if(_rc EQUAL 0)
         set(${out_ok} TRUE PARENT_SCOPE)
-        set(${out_detail} "" PARENT_SCOPE)
+        # On success the detail is "<loaded comgr>;<LLVM version>;<rocKE flavor>".
+        string(STRIP "${_out}" _detail)
+        set(${out_detail} "${_detail}" PARENT_SCOPE)
     else()
         set(${out_ok} FALSE PARENT_SCOPE)
         string(STRIP "${_err}${_out}" _detail)
@@ -1380,10 +1391,10 @@ function(_hkp_shipped_engines_for_arch out_var shipped arch)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# hkp_product_ships_engine_for_arch(<out> <engine> <arch>)
-#   TRUE when this configuration actually ships <engine> for <arch>: the `product` pack
-#   target is wired, <arch> is among the architectures it was wired for, and what that
-#   pack ships for <arch> includes <engine>.
+# _hkp_root_ships_engine_for_arch(<out> <root> <engine> <arch>)
+#   TRUE when this configuration actually ships <engine> for <arch> from the pack target
+#   <root>: <root> is wired, <arch> is among the architectures it was wired for, and what
+#   that pack ships for <arch> includes <engine>.
 #
 #   Arch-aware, for registrations that install into the <arch> shard and are pruned with
 #   it (the census, the external and the gpu_ref checks). Host and test sources outside
@@ -1393,36 +1404,63 @@ endfunction()
 #   depends on the bundle turns on the same answer.
 #
 #   The third conjunct is the packer's own answer, taken after excluded folders and
-#   disabled kinds: `product` carries whatever HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT
-#   points at, and a build pointed at another bundle, or one that filters this engine's
-#   kernels out, must not register its tests. A probe that could not answer reads as
-#   HIPKERNELPROVIDER_ENABLE_ROCKE: the bundle is rocKE content, and the pack then
-#   reports what is wrong with the root.
+#   disabled kinds: <root> carries whatever its production source root points at (for
+#   `product`, HIPKERNELPROVIDER_PRODUCTION_SOURCE_ROOT), and a build pointed at another
+#   bundle, or one that filters this engine's kernels out, must not register its tests. A
+#   probe that could not answer reads as HIPKERNELPROVIDER_ENABLE_ROCKE: the bundle is
+#   rocKE content, and the pack then reports what is wrong with the root.
 # ---------------------------------------------------------------------------
-function(hkp_product_ships_engine_for_arch out_var engine arch)
+function(_hkp_root_ships_engine_for_arch out_var root engine arch)
     set(${out_var} FALSE PARENT_SCOPE)
 
     get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
-    if(NOT "product" IN_LIST _labels)
+    if(NOT "${root}" IN_LIST _labels)
         return()
     endif()
 
-    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    get_property(_arches GLOBAL PROPERTY HKP_PACK_ARCHES_${root})
     if(NOT "${arch}" IN_LIST _arches)
         return()
     endif()
 
-    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
+    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_${root})
     if(NOT _probe_ok)
         set(${out_var} "${HIPKERNELPROVIDER_ENABLE_ROCKE}" PARENT_SCOPE)
         return()
     endif()
 
-    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_product)
+    get_property(_shipped GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_${root})
     _hkp_shipped_engines_for_arch(_engines "${_shipped}" "${arch}")
     if("${engine}" IN_LIST _engines)
         set(${out_var} TRUE PARENT_SCOPE)
     endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_product_ships_engine_for_arch(<out> <engine> <arch>)
+#   _hkp_root_ships_engine_for_arch() for the `product` pack target.
+# ---------------------------------------------------------------------------
+function(hkp_product_ships_engine_for_arch out_var engine arch)
+    _hkp_root_ships_engine_for_arch(_ships product "${engine}" "${arch}")
+    set(${out_var} "${_ships}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_attention_dense_available(<out>)
+#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx950AttentionDense on gfx950.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_attention_dense_available out_var)
+    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx950AttentionDense" gfx950)
+    set(${out_var} "${_available}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx942_attention_unified_3d_available(<out>)
+#   hkp_product_ships_engine_for_arch() for hipkernel:Gfx942AttentionUnified3d on gfx942.
+# ---------------------------------------------------------------------------
+function(hkp_gfx942_attention_unified_3d_available out_var)
+    hkp_product_ships_engine_for_arch(_available "hipkernel:Gfx942AttentionUnified3d" gfx942)
+    set(${out_var} "${_available}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1463,6 +1501,39 @@ function(hkp_product_offers_engine out_var engine)
     if("${engine}" IN_LIST _offered)
         set(${out_var} TRUE PARENT_SCOPE)
     endif()
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_aot_available(<out>)
+#   The same predicate for the shape-generic AOT-instance engine,
+#   hipkernel:Gfx950ConvFwdAot, which ships its own bundle.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_aot_available out_var)
+    _hkp_root_ships_engine_for_arch(_ships product "hipkernel:Gfx950ConvFwdAot" gfx950)
+    set(${out_var} "${_ships}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_conv_fwd_aot_seed_available(<out>)
+#   TRUE when the `integration` test root ships hipkernel:Gfx950ConvFwdAotSeed for
+#   gfx950: the small seed catalog over hipkernel:Gfx950ConvFwdAot's native code that the
+#   integration binary pins instance by instance. Arch-aware, unlike
+#   hkp_product_offers_engine(): the test roots are always this build's own content, so
+#   a build that does not pack gfx950 has no seed to run against.
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_fwd_aot_seed_available out_var)
+    _hkp_root_ships_engine_for_arch(_ships integration "hipkernel:Gfx950ConvFwdAotSeed" gfx950)
+    set(${out_var} "${_ships}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_gfx950_conv_dgrad_aot_available(<out>)
+#   The same predicate for the shape-generic AOT-instance backward-data engine,
+#   hipkernel:Gfx950ConvDgradAot, which ships its own bundle (the `product` root).
+# ---------------------------------------------------------------------------
+function(hkp_gfx950_conv_dgrad_aot_available out_var)
+    hkp_product_ships_engine_for_arch(_ships "hipkernel:Gfx950ConvDgradAot" gfx950)
+    set(${out_var} "${_ships}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1510,6 +1581,28 @@ unrecognized value is only rejected when the pack step actually runs, not at con
             "one discoverable, or configure with -DHIPKERNELPROVIDER_ENABLE_ROCKE=OFF "
             "to pack without rocKE. Resolver said:\n"
             "${_comgr_detail}")
+    endif()
+    # The comgr that lowers the kernels decides their code quality, and nothing
+    # ties it to the ROCm the plugin is later loaded into: a build configured
+    # against an older ROCm silently ships kernels compiled by that ROCm's LLVM.
+    list(LENGTH _comgr_detail _comgr_fields)
+    if(_comgr_fields EQUAL 3)
+        list(GET _comgr_detail 0 _comgr_loaded)
+        list(GET _comgr_detail 1 _comgr_llvm)
+        list(GET _comgr_detail 2 _comgr_flavor)
+        message(STATUS
+            "hkp: rocKE kernels are compiled by ${_comgr_loaded} "
+            "(LLVM ${_comgr_llvm}, rocKE flavor ${_comgr_flavor})")
+        if(_comgr_flavor STREQUAL "llvm20")
+            message(WARNING
+                "hkp: rocKE kernels will be compiled by an LLVM 20 comgr "
+                "(${_comgr_loaded}), i.e. a ROCm 7.0/7.1 toolchain. Kernels "
+                "built this way can run far slower than the same kernels built "
+                "by the comgr of a current ROCm, so benchmarks and heuristics "
+                "measured on this build do not represent what a current ROCm "
+                "ships. Set HIPKERNELPROVIDER_ROCKE_COMGR_LIB to the comgr of "
+                "the ROCm the plugin will run on.")
+        endif()
     endif()
     hkp_rocke_wheel_stamp(_rocke_wheel_stamp)
     hkp_rocke_wheel_python_interp(_rocke_interp _rocke_ready _rocke_python_dir
@@ -1842,8 +1935,10 @@ function(hkp_add_packaging)
         # The only test root with enough distinct hip variants to build a worker
         # pool, so it is the one that exercises the parallel path in a real
         # build. Falls back to the serial path if that root ever drops below two.
+        # HKP_INTEGRATION_EXCLUDED_BUNDLES: its bundles whose DVC outputs were not
+        # pulled, as for the production root above.
         PACK_JOBS 2
-        ${_root_args})
+        ${_root_args} ${HKP_INTEGRATION_EXCLUDED_BUNDLES})
 
     _hkp_wire_root(
         NAME archive_fixture

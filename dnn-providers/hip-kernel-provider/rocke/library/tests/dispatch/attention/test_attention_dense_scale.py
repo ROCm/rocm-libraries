@@ -61,6 +61,15 @@ def test_bounds_match_the_hipdnn_packs():
     assert DENSE_MAX_SCALE == 2.0**4, msg
 
 
+@pytest.mark.parametrize("arch", sorted(_RUNNERS))
+def test_dense_scale_range_is_the_runners_range(arch):
+    """``dense_scale_range`` is the public lookup the SDPA gate declines with; it
+    must name the range the runners enforce, not drift to its own copy."""
+    from dispatch.attention import dense_scale_range
+
+    assert dense_scale_range(arch) == (DENSE_MIN_SCALE, DENSE_MAX_SCALE)
+
+
 _REFUSED = [
     (float("nan"), ValueError, "scale must be finite"),
     (float("inf"), ValueError, "scale must be finite"),

@@ -80,8 +80,9 @@ INSTANTIATE_TEST_SUITE_P(emulation_1D,
 // count of 2D or 3D cases, compute a probability for those cases,
 // scaled relative to the count of 1D cases.  We compute
 // k=count/count_1D and return a probability of:
-// - emulation_prob * 1/k when test_prob == 0
-// - exactly 1 when test_prob == 1
+// - emulation_prob / k when test_prob == 0
+// - emulation_prob when test_prob == 1
+// Assumes count > emulation_range_1D.size() (i.e. k > 1).
 static double scaled_emulation_prob(size_t count)
 {
     double k = static_cast<double>(count) / emulation_range_1D.size();

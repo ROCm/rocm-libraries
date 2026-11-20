@@ -960,8 +960,8 @@ _BACKEND_KIND = {build_direct_conv_16c: "16c", build_direct_conv: "generic"}
 
 
 @unittest.skipIf(
-    importlib.util.find_spec("rocke_engine") is None,
-    "rocke_engine extension not importable",
+    importlib.util.find_spec("rocke_library_engine") is None,
+    "rocke_library_engine extension not importable",
 )
 class TestDirectF32CrossEngine(unittest.TestCase):
     """The C++ direct builders build the fp32 / tf32 kernels too: every 16c
@@ -972,11 +972,8 @@ class TestDirectF32CrossEngine(unittest.TestCase):
     the ``conv_direct_grouped`` byte-identity family compares them."""
 
     def test_python_and_cpp_builders_agree(self):
-        from rocke.core.backend import (
-            BACKEND_CPP,
-            BACKEND_PYTHON,
-            lower_conv_direct_grouped,
-        )
+        from kernels.conv.engine_bridge import lower_conv_direct_grouped
+        from rocke.core.backend import BACKEND_CPP, BACKEND_PYTHON
 
         for name, (build, _valid, make, m) in _FWD.items():
             kind = _BACKEND_KIND.get(build)

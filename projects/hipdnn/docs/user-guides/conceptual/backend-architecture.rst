@@ -118,8 +118,8 @@ Frontend API control flow
                                                                      prediction-ranked policies only]
               [No engine details are loaded here; see get_knobs_for_engine()]
         e. initializeEngineConfig() [selects best engine config from heuristic results]
-     4. graph.check_support()         [validates descriptors exist]
-     5. graph.build_plans()          [finalizes the active plan; on failure tries the other ranked plans]
+     4. graph.check_support()         [validates descriptors exist; with an engine filter set, checks that a created plan passes the filters]
+     5. graph.build_plans()          [finalizes the active plan; if a filter removes it or it fails, tries the other ranked plans]
         a. Backend: hipdnnBackendSetAttribute(execPlan, ENGINE_CONFIG, engineConfig)
         b. Backend: hipdnnBackendFinalize(execPlan)
            -> ExecutionPlanDescriptor::finalize()
@@ -127,9 +127,10 @@ Frontend API control flow
               -> Plugin: hipdnnEnginePluginGetWorkspaceSize()
               -> Record the device of the graph handle's stream
         c. If finalize fails (any error), log a warning and repeat a-b for another
-           ranked plan (the list is scanned from the top) until one finalizes. If none
-           does, build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing
-           every attempted engine's failure.
+           ranked plan (the list is scanned from the top) until one finalizes. A plan
+           an engine filter removes is skipped before a-b. If none finalizes,
+           build_plans() returns GRAPH_EXECUTION_PLAN_CREATION_FAILED listing every
+           skipped or failed engine and its reason.
 
 
 ``graph.get_workspace_size()``
@@ -218,7 +219,7 @@ Handle destruction (implicit via RAII)
             -> Plugin: hipdnnEnginePluginGetEngineDetails(handle, engineId, graph, details*)
 
 Engine finalization checks applicability, not plugin metadata. The first engine-name,
-knob-info, or behavior-note read fetches and validates ``EngineDetails``; count-only
+knob-info, behavior-note, or numerical-note read fetches and validates ``EngineDetails``; count-only
 queries also trigger this load. Retrieval or validation errors are therefore returned
 by ``hipdnnBackendGetAttribute()``, even after successful finalization. Callers that
 need eager metadata validation can issue a metadata query immediately after finalizing.
@@ -313,7 +314,7 @@ Plugin lifecycle
 1. **Discovery**: ``Plugin.so`` loaded, metadata queried (name, version, type)
 2. **Instance creation**: ``PluginCreate`` and ``GetAllEngineIds`` during handle creation
 3. **Engine selection**: ``GetApplicableEngineIds`` during graph build, plus ``GetPrediction`` for prediction-ranked policies
-4. **Engine details**: ``GetEngineDetails`` on the first engine-name, knob-info, or behavior-note query for an engine
+4. **Engine details**: ``GetEngineDetails`` on the first engine-name, knob-info, behavior-note, or numerical-note query for an engine
 5. **Context creation**: ``CreateExecutionContext`` and ``GetWorkspaceSize`` during plan finalization
 6. **Execution**: ``ExecuteOpGraph``
 7. **Cleanup**: ``DestroyExecutionContext``, ``DestroyEngineDetails``, and ``PluginDestroy``
@@ -354,7 +355,8 @@ Engine descriptor (``HIPDNN_BACKEND_ENGINE_DESCRIPTOR``)
 - Binds the engine ID to an operation graph; finalization validates applicability.
 - Retrieved from engine config descriptor.
 - Exposes the engine name through the read-only ``HIPDNN_ATTR_ENGINE_NAME_EXT`` attribute (``HIPDNN_TYPE_CHAR``).
-- Loads name, knob-info, and behavior-note metadata on the first corresponding attribute query.
+- Loads name, knob-info, behavior-note, and numerical-note metadata on the first corresponding attribute query.
+- Serves ``HIPDNN_ATTR_ENGINE_NUMERICAL_NOTE`` read-only; an engine whose plugin omits the numerical-note list is reported ``HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC``.
 
 Execution plan descriptor (``HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR``)
 ------------------------------------------------------------------------
