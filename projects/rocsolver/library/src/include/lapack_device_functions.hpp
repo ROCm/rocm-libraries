@@ -3605,6 +3605,10 @@ ROCSOLVER_KERNEL void __launch_bounds__(LACN2_BLOCKSIZE) lacn2_jump4(const I n,
     S val_new = rocblas_abs(x[local_max_idx]);
     S val_old = rocblas_abs(x[jlast]);
 
+    // x is overwritten below: all threads must have read these values first, so that they all
+    // take the same branch
+    __syncthreads();
+
     if(val_new == val_old || iters >= iters_max)
     {
         for(rocblas_int i = tid; i < n; i += LACN2_BLOCKSIZE)
