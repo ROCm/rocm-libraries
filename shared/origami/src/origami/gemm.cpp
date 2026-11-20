@@ -1212,10 +1212,12 @@ static double compute_w4a16_decode_latency(const problem_t& problem,
                        * token_tiles * batch;
   // The weights (half a byte each) are read once per token tile, at the DRAM bandwidth.
   const double t_dram = token_tiles * m * k * batch * 0.5 / d.decode_dram_bytes_per_us;
-  // The waves run in rounds of the resident ones (the kernel's occupancy on every SIMD), each
-  // one K iteration after another (the last one whole when DepthU does not divide K).
+  // The waves run in rounds of the resident ones (one per workgroup), each one K iteration
+  // after another (the last one whole when DepthU does not divide K).  The kernel's occupancy
+  // counts the workgroups on hardware_t::OCCUPANCY_SIMDS SIMDs, a CU has simds_per_cu of them.
   const double resident = static_cast<double>(resolve_num_cus(problem.num_cus, hardware.N_CU))
-                          * static_cast<double>(hardware.simds_per_cu()) * static_cast<double>(std::max(config.occupancy, 1));
+                          * static_cast<double>(hardware.simds_per_cu()) / static_cast<double>(hardware_t::OCCUPANCY_SIMDS)
+                          * static_cast<double>(std::max(config.occupancy, 1));
   const double wave_cycles = w4a16_params_t::DECODE_WAVE_CYCLES + std::ceil(k / depth_u) * w4a16_params_t::DECODE_ITER_CYCLES;
   const double t_waves     = std::ceil(waves / resident) * wave_cycles / CYCLES_PER_US;
   return std::max(t_dram, t_waves) * CYCLES_PER_US + heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;

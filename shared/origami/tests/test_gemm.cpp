@@ -255,7 +255,7 @@ TEST_CASE("GEMM: W4A16 decode kernels are ranked, not rejected", "[gemm][w4a16][
   const auto hardware = make_w4a16_gfx1151_hardware();
   const auto problem  = make_w4a16_decode_problem(4096, 2, 4096, origami::data_type_t::Half);
   const double latency
-      = origami::gemm::compute_total_latency(problem, hardware, make_w4a16_decode_config(2, 2, 512, 16));
+      = origami::gemm::compute_total_latency(problem, hardware, make_w4a16_decode_config(2, 2, 512, 32));
   REQUIRE(latency < std::numeric_limits<double>::max());
   // Streaming 8.4 MB of weights at about 230 GB/s, plus the fixed time: 30-60 us
   // (2200 cycles per us).
@@ -263,7 +263,7 @@ TEST_CASE("GEMM: W4A16 decode kernels are ranked, not rejected", "[gemm][w4a16][
   REQUIRE(latency < 60.0 * 2200.0);
   // Only gfx1151 has the model: elsewhere a dot2 W4A16 config keeps its old fate.
   const double other = origami::gemm::compute_total_latency(problem, make_hardware(950),
-                                                            make_w4a16_decode_config(2, 2, 512, 16));
+                                                            make_w4a16_decode_config(2, 2, 512, 32));
   REQUIRE(other != latency);
 }
 
@@ -275,7 +275,7 @@ TEST_CASE("GEMM: W4A16 decode kernels are ranked on gfx1150", "[gemm][w4a16][dec
   for (auto mi_dtype : {origami::data_type_t::Half, origami::data_type_t::BFloat16}) {
     const auto problem = make_w4a16_decode_problem(4096, 2, 4096, mi_dtype);
     const double latency
-        = origami::gemm::compute_total_latency(problem, hardware, make_w4a16_decode_config(2, 2, 512, 12));
+        = origami::gemm::compute_total_latency(problem, hardware, make_w4a16_decode_config(2, 2, 512, 32));
     // 8.4 MB of weights at gfx1150's DRAM bandwidth (about 80 GB/s): 100-160 us.
     REQUIRE(latency > 100.0 * 2200.0);
     REQUIRE(latency < 160.0 * 2200.0);
@@ -296,6 +296,11 @@ TEST_CASE("GEMM: W4A16 decode model terms", "[gemm][w4a16][decode]") {
   REQUIRE(latency(4096, 1, 2560, 2, 1, 1024, 1) / 2560.0 > latency(4096, 1, 3072, 2, 1, 1024, 1) / 3072.0);
   // More resident waves finish the rounds sooner when the grid is latency bound.
   REQUIRE(latency(1024, 1, 16384, 2, 1, 512, 2) > latency(1024, 1, 16384, 2, 1, 512, 8));
+  // The occupancy counts workgroups per WGP (two CUs): 20 WGPs x 32 workgroups hold the 512
+  // waves of 1024 rows in one round, and 16 per WGP need two.
+  const double launch = origami::heuristic_defaults_t::KERNEL_LAUNCH_OVERHEAD;
+  REQUIRE(latency(1024, 1, 512, 2, 1, 512, 16) - launch == Catch::Approx(2.0 * (latency(1024, 1, 512, 2, 1, 512, 32) - launch)));
+  REQUIRE(latency(1024, 1, 512, 2, 1, 512, 32) == latency(1024, 1, 512, 2, 1, 512, 26));
   // The decode model has no term of the activation type: the same kernel shape costs the same.
   REQUIRE(latency(4096, 1, 16384, 2, 1, 2048, 1, origami::data_type_t::BFloat16)
           == latency(4096, 1, 16384, 2, 1, 2048, 1, origami::data_type_t::Half));
