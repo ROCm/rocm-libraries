@@ -279,6 +279,9 @@ test_categories:
       - "rocke_library_gdn_pytest"
       # Its host tests are too slow for the single-shard quick tier.
       - "rocke_library_conv_fwd_aot_packaging_pytest"
+      # Attention backward: a few minutes of CPU and GPU items, sharded.
+      - "rocke_library_attention_bwd_pytest"
+      - "rocke_library_attention_bwd_gpu_pytest"
     labels:
       - "standard"
       - "comprehensive"
