@@ -66,7 +66,7 @@ def main() -> None:
     gx, gy = (shape[1] + 255) // 256, (shape[0] + 255) // 256
     tiles = -(-shape[2] // 256)
     tiles += tiles % 2
-    n_stamp = gx * gy * 4 * tiles * 8 if o.stamps else 0
+    n_stamp = gx * gy * 4 * tiles * 4 if o.stamps else 0
     if n_stamp:
         rt.free(prob.c)
         prob.c = rt.alloc(shape[0] * shape[1] * 2 + n_stamp * 8)
@@ -87,7 +87,10 @@ def main() -> None:
 
 
 def _report(rt, prob, shape, gx, gy, tiles, n_stamp, cluster):
-    """Who waits for whom at each tile's end (last launch)."""
+    """Who waits for whom at each tile's end (last launch). Cycle counters
+    differ between SIMDs, so only intervals within one wave are used: all
+    waves leave a barrier together, so the one that waited least there
+    arrived last."""
     import ctypes
 
     import numpy as np
@@ -95,45 +98,51 @@ def _report(rt, prob, shape, gx, gy, tiles, n_stamp, cluster):
     off = shape[0] * shape[1] * 2
     buf = (ctypes.c_uint8 * (n_stamp * 8))()
     rt.memcpy_d2h(buf, prob.c + off, n_stamp * 8)
-    st = np.frombuffer(bytes(buf), dtype=np.int64).reshape(gy, gx, 4, tiles, 8).astype(np.float64)
+    st = np.frombuffer(bytes(buf), dtype=np.int64).reshape(gy, gx, 4, tiles, 4).astype(np.float64)
     st = st[:, :, :, 4:tiles - 4]  # drop the first and last tiles
-    cyc, rt_ = st[..., 0::2], st[..., 1::2]  # events: arrive, fill done, past WG barrier, past cluster
-    fill = cyc[..., 1] - cyc[..., 0]
-    wgw = cyc[..., 2] - cyc[..., 1]
-    clw = cyc[..., 3] - cyc[..., 2]
+    fill = st[..., 1] - st[..., 0]   # own fill landing after reaching the drain
+    wgw = st[..., 2] - st[..., 1]    # workgroup barrier
+    clw = st[..., 3] - st[..., 2]    # head reads + cluster wait
+    per_tile = np.diff(st[..., 2], axis=3)  # barrier to barrier, two tiles apart in parity
     print(f"\nstamps: {gy}x{gx} WGs x 4 waves x {st.shape[3]} tiles (cycles; mean / p90)")
-    for name, v in (("own fill wait", fill), ("WG barrier wait", wgw), ("cluster wait + head reads", clw)):
+    for name, v in (("own fill wait", fill), ("WG barrier wait", wgw),
+                    ("head reads + cluster wait", clw), ("tile (barrier to barrier)", per_tile)):
         print(f"  {name:26s} {v.mean():8.1f} {np.percentile(v, 90):8.1f}")
-    print("  by wave (0..3; odd waves load A, even B):")
+    print("  by wave (odd waves load A, even B; component = wave // 2):")
     for w in range(4):
         print(f"    wave {w}: fill {fill[:, :, w].mean():7.1f}  WG wait {wgw[:, :, w].mean():7.1f}  "
-              f"arrive-to-fill-done {(cyc[:, :, w, :, 1] - cyc[:, :, :, :, 0].min(axis=2)).mean():7.1f}")
-    last = np.argmax(cyc[..., 1], axis=2)  # which wave's fill lands last, per WG and tile
-    print("  wave whose fill lands last (share of WG-tiles):",
+              f"cluster {clw[:, :, w].mean():7.1f}")
+    last = np.argmin(wgw, axis=2)  # least WG wait = arrived last
+    print("  wave arriving last at the WG barrier (share):",
           " ".join(f"w{w}={np.mean(last == w):.2f}" for w in range(4)))
-    print("  by tile parity: WG wait", " ".join(f"p{p}={wgw[:, :, :, p::2].mean():.1f}" for p in (0, 1)),
+    print("  by tile parity: fill", " ".join(f"p{p}={fill[:, :, :, p::2].mean():.1f}" for p in (0, 1)),
+          " WG wait", " ".join(f"p{p}={wgw[:, :, :, p::2].mean():.1f}" for p in (0, 1)),
           " cluster", " ".join(f"p{p}={clw[:, :, :, p::2].mean():.1f}" for p in (0, 1)))
     if cluster:
         cx, cy = cluster[0], cluster[1]
-        ready = rt_[..., 2].max(axis=2)  # WG past its barrier (realtime), latest wave
-        pos = np.zeros((cy, cx))
+        cl = clw.mean(axis=2)  # gy x gx x tiles, mean over the WG's waves
+        pos_wait = np.zeros((cy, cx))
+        last_pos = np.zeros((cy, cx))
+        n = 0
         for y in range(0, gy - gy % cy, cy):
             for x in range(0, gx - gx % cx, cx):
-                blk = ready[y:y + cy, x:x + cx]  # cy x cx x tiles
-                lastpos = np.argmax(blk.reshape(cy * cx, -1), axis=0)
-                for i in lastpos:
-                    pos[i // cx, i % cx] += 1
-        pos /= pos.sum()
-        print("  cluster member past its WG barrier last (share; rows = cluster y, cols = x):")
+                blk = cl[y:y + cy, x:x + cx]
+                pos_wait += blk.mean(axis=2)
+                for i in np.argmin(blk.reshape(cy * cx, -1), axis=0):
+                    last_pos[i // cx, i % cx] += 1
+                n += 1
+        pos_wait /= n
+        last_pos /= last_pos.sum()
+        print("  cluster wait by member position (cycles; rows = cluster y, cols = x):")
         for y in range(cy):
-            print("    " + " ".join(f"{v:.2f}" for v in pos[y]))
-        spread = []
-        for y in range(0, gy - gy % cy, cy):
-            for x in range(0, gx - gx % cx, cx):
-                blk = ready[y:y + cy, x:x + cx].reshape(cy * cx, -1)
-                spread.append(blk.max(axis=0) - blk.min(axis=0))
-        sp = np.concatenate(spread) * 10.0  # realtime ticks are 10 ns
-        print(f"  cluster arrival spread (ns): mean {sp.mean():.0f}  p90 {np.percentile(sp, 90):.0f}")
+            print("    " + " ".join(f"{v:7.1f}" for v in pos_wait[y]))
+        print("  member arriving last at the cluster barrier (share):")
+        for y in range(cy):
+            print("    " + " ".join(f"{v:7.2f}" for v in last_pos[y]))
+        wgpos = wgw.mean(axis=(2, 3))
+        print("  WG barrier wait by WG (rows = M tiles, cols = N tiles):")
+        for y in range(gy):
+            print("    " + " ".join(f"{v:5.0f}" for v in wgpos[y]))
 
 
 if __name__ == "__main__":

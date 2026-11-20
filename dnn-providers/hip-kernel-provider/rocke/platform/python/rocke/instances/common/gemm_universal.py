@@ -3583,20 +3583,19 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                        and _os_ra.environ.get("ROCKE_EXP_TDM_SPLIT") == "2")
         # EXPERIMENT (diagnostic): ROCKE_EXP_MX_RA_STAMP=1 (RA=2) stamps each
         # wave's tile end: reaching the drain, its fill landed, past the
-        # workgroup barrier, past the cluster wait; each as (shader cycles,
-        # realtime) i64, 8 per tile, every lane writing the same address past
-        # C: slot = M*N/4 + ((wg * waves + wave) * tiles + tile) * 8, with
+        # workgroup barrier, past the cluster wait; each the shader cycles as
+        # i64, 4 per tile, every lane writing the same address past C:
+        # slot = M*N/4 + ((wg * waves + wave) * tiles + tile) * 4, with
         # wg = block_y * N-tiles + block_x and tiles the loop's tile count.
         stamp_on = _mx_ra_one and _os_ra.environ.get("ROCKE_EXP_MX_RA_STAMP") == "1"
         if stamp_on:
             from ...core.ir import I64 as _I64s
 
+            # Shader cycles only: the realtime message (with its kmcnt wait)
+            # nearly doubled the run. Cycle counters differ between SIMDs, so
+            # only intervals within one wave are meaningful.
             def _st_now():
-                cyc = b.inline_asm("s_get_shader_cycles_u64 $0", "=s", [], result_type=_I64s)
-                rt = b.inline_asm(
-                    "s_sendmsg_rtn_b64 $0, sendmsg(MSG_RTN_GET_REALTIME)\n\ts_wait_kmcnt 0x0",
-                    "=s", [], result_type=_I64s)
-                return [cyc, rt]
+                return [b.inline_asm("s_get_shader_cycles_u64 $0", "=s", [], result_type=_I64s)]
 
             _st_waves = spec.block_size // spec.wave_size
             _st_gx = b.div(b.add(N, b.const_i32(block_n - 1)), b.const_i32(block_n))
@@ -3607,7 +3606,7 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
 
             def _st_store(k_cur, vals):
                 tile = b.div(b.sub(k_cur, k_lo), c_block_k)
-                base = b.add(_st_c0, b.mul(b.add(_st_row, tile), b.const_i32(8)))
+                base = b.add(_st_c0, b.mul(b.add(_st_row, tile), b.const_i32(4)))
                 for j, v in enumerate(vals):
                     b.global_store(C, b.add(base, b.const_i32(j)), v, align=8)
         if cs >= 0 and k_atoms < 2:
