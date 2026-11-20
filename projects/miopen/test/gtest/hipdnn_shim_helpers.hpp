@@ -103,6 +103,16 @@ using OwnedProblem = Owned<miopenProblem_t, miopenDestroyProblem>;
 using OwnedActivationDescriptor =
     Owned<miopenActivationDescriptor_t, miopenDestroyActivationDescriptor>;
 
+// A handle of its own on `stream`, so it reuses no invoker or plan that another
+// handle cached. Sharing the stream keeps it ordered with the shared handle's work.
+struct OwnedHandleOnStream : Owned<miopenHandle_t, miopenDestroy>
+{
+    explicit OwnedHandleOnStream(miopenAcceleratorQueue_t stream)
+    {
+        EXPECT_EQ(miopenCreateWithStream(&handle, stream), miopenStatusSuccess);
+    }
+};
+
 // Declare it after the vector it refers to, so it is destroyed first. Nulls are skipped
 // because the vector can hold slots the find call did not fill.
 struct OwnedSolutions
@@ -251,12 +261,70 @@ void CheckMatchesCpuBackwardWeights(const tensor<T>& x,
     CheckWithinTolerance(ref_dw, dw, "backward-weights result");
 }
 
+// A fact the parity comparison requires to be the same in the forwarded and the native
+// run: compare_forwarding_runs.py compares only the properties named parity_*. Key one
+// per case, because gtest keeps only the last value recorded under a key.
+inline void RecordParity(const std::string& name, const std::string& value)
+{
+    ::testing::Test::RecordProperty("parity_" + name, value);
+}
+
+// known_forwarding_divergences.txt matches a flag by its true/false text.
+inline void RecordParityFlag(const std::string& name, bool value)
+{
+    RecordParity(name, value ? "true" : "false");
+}
+
 // A served case and a declined case both pass, so this property is what lets the parity
-// comparison tell them apart. Keyed by case name because gtest keeps only the last value
-// recorded under a key.
+// comparison tell them apart.
 inline void RecordServed(const std::string& case_name, bool served)
 {
-    ::testing::Test::RecordProperty("parity_served_" + case_name, served ? "true" : "false");
+    RecordParityFlag("served_" + case_name, served);
+}
+
+// FNV-1a over the raw bytes of a test's GPU outputs. A tolerance check passes for two
+// kernels that round differently, so it cannot tell whether forwarding ran the same
+// kernel MIOpen would have; the hash can, because the parity comparison needs it to be
+// identical in both modes. Not a security hash: it only has to change when a bit does.
+class OutputHash
+{
+public:
+    template <typename T>
+    void Add(const std::vector<T>& values)
+    {
+        static_assert(std::is_trivially_copyable_v<T>, "hashing raw bytes");
+        const auto* bytes = reinterpret_cast<const unsigned char*>(values.data());
+        for(std::size_t i = 0; i < values.size() * sizeof(T); ++i)
+        {
+            state_ ^= bytes[i];
+            state_ *= kFnvPrime;
+        }
+    }
+
+    std::string Hex() const
+    {
+        static constexpr char digits[] = "0123456789abcdef";
+        std::string text(16, '0');
+        for(int i = 15, shift = 0; i >= 0; --i, shift += 4)
+            text[i] = digits[(state_ >> shift) & 0xfU];
+        return text;
+    }
+
+private:
+    // The published 64-bit FNV-1a parameters. std::hash is not used because it only has
+    // to be stable within one process, and the two hashes come from separate runs.
+    static constexpr std::uint64_t kFnvOffsetBasis = 0xcbf29ce484222325ULL;
+    static constexpr std::uint64_t kFnvPrime       = 0x100000001b3ULL;
+
+    std::uint64_t state_ = kFnvOffsetBasis;
+};
+
+// Recorded only by tests both modes serve: a test that one mode declines has no output
+// to hash, and a property present in one run alone reads as a divergence.
+inline void RecordOutputHash(const OutputHash& hash, const std::string& case_name = "")
+{
+    RecordParity(case_name.empty() ? std::string("output_hash") : "output_hash_" + case_name,
+                 hash.Hex());
 }
 
 // For a case neither mode serves. Records the enum name, because miopenGetErrorString's text
@@ -278,14 +346,14 @@ inline void RecordStatus(const std::string& case_name, miopenStatus_t status)
     case miopenStatusGpuOperationsSkipped: name = "GpuOperationsSkipped"; break;
     case miopenStatusVersionMismatch: name = "VersionMismatch"; break;
     }
-    ::testing::Test::RecordProperty("parity_status_" + case_name, name);
+    RecordParity("status_" + case_name, name);
 }
 
 // For a case where one mode is known to return a wrong answer, so the test records the check
 // instead of failing on it.
 inline void RecordCorrect(const std::string& case_name, bool correct)
 {
-    ::testing::Test::RecordProperty("parity_correct_" + case_name, correct ? "true" : "false");
+    RecordParityFlag("correct_" + case_name, correct);
 }
 
 // Fixed for the life of the process; the parity run executes each binary once per mode.
@@ -505,6 +573,48 @@ inline void ExpectForwardedDecline(const CallResult& result, const char* reason 
     // MIOPEN_LOG_LEVEL can turn the reason off.
     if(reason != nullptr && miopen::wrapper::ErrorLoggingEnabled())
         EXPECT_NE(result.logged.find(reason), std::string::npos) << result.logged;
+}
+
+// A decline on the forwarded path, with its status and its logged reason.
+inline void ExpectDeclinedBecause(const CallResult& result, const char* reason)
+{
+    EXPECT_EQ(result.status, miopenStatusUnsupportedOp) << reason;
+    ExpectForwardedDecline(result, reason);
+}
+
+// For a case MIOpen serves and the forwarded path may decline. Natively, some conv problems fail
+// with UnknownError, so unknown_error_declines counts that as a decline in that mode only.
+// Returns whether the case was served.
+inline bool RecordGapOutcome(const std::string& case_name,
+                             const CallResult& result,
+                             const char* reason          = nullptr,
+                             bool unknown_error_declines = false)
+{
+    const bool served   = result.status == miopenStatusSuccess;
+    const bool declined = result.status == miopenStatusUnsupportedOp ||
+                          result.status == miopenStatusNotImplemented ||
+                          (unknown_error_declines && !ForwardingEnabled() &&
+                           result.status == miopenStatusUnknownError);
+    EXPECT_TRUE(served || declined)
+        << case_name << ": unexpected status " << result.status << ": " << result.message << '\n'
+        << result.logged;
+    if(declined)
+        ExpectForwardedDecline(result, reason);
+    RecordServed(case_name, served);
+    return served;
+}
+
+// For a case where both modes must return the same status.
+inline void ExpectStatusParity(const std::string& case_name,
+                               const CallResult& result,
+                               miopenStatus_t expected,
+                               const char* reason = nullptr)
+{
+    EXPECT_EQ(result.status, expected) << case_name << ": " << result.message << '\n'
+                                       << result.logged;
+    RecordStatus(case_name, result.status);
+    if(result.status != miopenStatusSuccess)
+        ExpectForwardedDecline(result, reason);
 }
 
 // The parity comparison matches known divergences against this device. Recorded only when a

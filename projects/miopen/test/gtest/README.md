@@ -29,11 +29,11 @@ skips this runner.
 ## hipDNN shim surface
 
 A test belongs to the hipDNN backend-swap surface if its full gtest name contains the
-token `HipdnnShim`. Parameterized tests get it from the instantiation prefix, e.g.
-`INSTANTIATE_TEST_SUITE_P(HipdnnShim, GPU_ConvFwdApi_FP32, ...)`. Non-parameterized tests
-carry it directly in the suite name instead, e.g. `TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`,
-since `check_names.py`'s prefix check only applies to the `Smoke`/`Standard`/`Full`/`Perf`/
-`Unit` token used by parameterized instantiations.
+token `HipdnnShim`. Every shim test carries it in its suite name, e.g.
+`INSTANTIATE_TEST_SUITE_P(Smoke, GPU_HipdnnShimBNFwdTrain_FP32, ...)` or
+`TEST_F(GPU_HipdnnShimConvFwdApi_FP32, ...)`. It cannot go in an instantiation's prefix,
+because `check_names.py` requires that prefix to be one of `Smoke`/`Standard`/`Full`/`Perf`/
+`Unit`.
 
 The token is deliberately specific: it is a filter, so a generic word like `Forwarding`
 would sooner or later pull in an unrelated test and silently double its runtime.
@@ -46,10 +46,11 @@ reachable through public entry points makes the comparison meaningless.
 Two consequences of that being the only entry path, both easy to "fix" in the wrong
 direction:
 
-- **Shim-surface tests stay out of `test_categories.yaml` on purpose.** The categorized
-  smoke/standard/full entries turn those patterns into a `--gtest_filter`, so a matching
-  pattern would register a third run of tests the parity entries already run twice. Absence
-  from that file is the design, not a gap.
+- **Shim-surface tests stay out of the `test_categories.yaml` tiers on purpose.** The
+  categorized smoke/standard/full entries turn those patterns into a `--gtest_filter`, so a
+  matching pattern would register a third run of tests the parity entries already run twice.
+  The quick tier's `Smoke/*` would match the `Smoke` instantiations of shim tests, so it
+  excludes `*HipdnnShim*`; add the same exclude to any tier that gains a pattern that broad.
 - **Excluding a shim-surface test means narrowing the parity filter,** not calling
   `add_gtest_negative_filter`. That function feeds the shard filter, which the parity entries
   do not use, so disabling a shim test through it looks like it worked and changes nothing.
@@ -62,7 +63,7 @@ To qualify, a shim-surface test must:
 3. Use a tolerance appropriate for cross-implementation comparison, not
    bit-reproducibility.
 
-See `hipdnn_shim_conv.cpp` for worked examples.
+See `hipdnn_shim_conv.cpp` and `hipdnn_shim_batchnorm.cpp` for worked examples.
 
 ### Tolerances
 
@@ -138,7 +139,7 @@ should check each one:
    above for what qualifies.
 3. A tolerance note for the new operation family in "Tolerances" above, if its data or
    accumulation differs from the families listed there.
-4. An update to `DefaultSetIsTheConvolutionFamily` in `wrapper_routing.cpp`. It makes the
+4. An update to `DefaultSetIsConvolutionAndBatchnorm` in `wrapper_routing.cpp`. It makes the
    addition deliberate; it does not check that item 2 exists.
 5. A `known_forwarding_divergences.txt` line for any case where forwarding serves a call that
    MIOpen declines, or the reverse.
@@ -181,9 +182,11 @@ Why it is set up this way:
   checked. It needs the bare parity entry, so it runs only on a `MIOPEN_TEST_DISCRETE=OFF`
   configure (a build tree also needs a GPU or a `MIOPEN_TEST_GFX*` option).
   `test_check_wrapper_registration` covers the check itself.
-- **In a discrete build, only the `test_hipdnn_shim_conv*` binaries get entries.** Any other binary would
-  replay a filter that matches nothing, and the comparison rejects two empty runs.
-- **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests.
+- **In a discrete build, only the `test_hipdnn_shim_*` binaries get entries.** Any other
+  binary would replay a filter that matches nothing, and the comparison rejects two empty runs.
+- **No build-tree entry without a GPU.** The shim tests are all `GPU_` tests. A CPU test for
+  the harness's own helpers goes in a file outside `hipdnn_shim_*.cpp` with no `HipdnnShim` in
+  its name, as `hipdnn_output_hash.cpp` does.
 
 The packaged test list (`bin/MIOpen/CTestTestfile.cmake`) is generated from
 `test_categories.yaml` and does not see `add_test()` calls, so the harness entries,
@@ -258,6 +261,12 @@ they agreed when one of them did no work.
 
 Record a property from within the test's own execution, keyed so that two cases in one test
 cannot overwrite each other — gtest replaces a property recorded twice under the same key.
+
+`parity_output_hash` (`hipdnn_shim_test::RecordOutputHash`) records a hash of the bytes a test
+read back, so it requires the two replays to agree bit for bit, not just within the test's
+tolerance. A test that records it must get the same inputs in both replays whatever ran before
+it: the batchnorm hash wrappers in `hipdnn_shim_batchnorm.cpp` call `prng::reset_seed()` in
+`SetUp` for that reason.
 
 ### Known divergences
 
@@ -345,10 +354,15 @@ read once per process, so each case runs a fresh process:
   but no version, so hipDNN loads it and then refuses it. Every case points
   `HIPDNN_BACKEND_LIBRARY_PATH` at it, so no case can reach a real backend. It prints a marker
   line to stderr when it is loaded, which shows whether a case loaded it at all.
+- A second backend, `reentrant_hipdnn_backend`, is one hipDNN accepts. Like a plugin built on
+  MIOpen, it creates an MIOpen handle with each hipDNN handle and destroys it in `hipdnnDestroy`.
+  One case uses it to check that `miopenDestroy` returns when destroying its hipDNN handle calls
+  `miopenDestroy` again.
 - `script/test_forwarding_failure_modes.py` is the `unittest` module that runs the probe under
   each environment and checks its output.
 
-Run it from the build directory with `ctest -R '^forwarding_failure_modes$'`. It needs no GPU.
+Run it from the build directory with `ctest -R '^forwarding_failure_modes$'`. It needs no GPU,
+except for the cases that use `reentrant_hipdnn_backend`, which are skipped without one.
 
 A missing backend cannot be tested directly. When `HIPDNN_BACKEND_LIBRARY_PATH` names a directory
 without the backend, hipDNN moves on to its next search location and may find the real backend

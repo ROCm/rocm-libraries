@@ -24,6 +24,9 @@ bool ComputeTypeFor(miopenDataType_t type, hipdnn_frontend::DataType& out);
 
 bool ToPointwiseActivation(miopenActivationMode_t mode, hipdnn_frontend::PointwiseMode& out);
 
+// The enumerator's name without its prefix, for decline messages.
+const char* ActivationModeName(miopenActivationMode_t mode);
+
 miopenStatus_t TranslateHipdnnError(const hipdnn_frontend::Error& error);
 
 } // namespace hipdnn
