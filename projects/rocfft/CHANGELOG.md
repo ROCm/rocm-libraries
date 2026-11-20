@@ -5,6 +5,13 @@ Documentation for rocFFT is available at
 
 ## (Unreleased) rocFFT 1.0.42
 
+### Resolved issues
+
+* Fixed `rocfft_execute` to use stream-ordered allocation if possible when it allocates required work memory that was
+  not specified on the execution info.  This allows for `rocfft_execute` to work during HIP graph capture in this
+  situation, though performance will still be better if the required work memory is allocated and set on the
+  execution info.
+
 ## rocFFT 1.0.41 for ROCm 10.2
 
 ### Added
