@@ -30,15 +30,17 @@ from .features import (
 #: These are markers, not API meanings.
 SENTINEL = -1
 
-#: Read for an unset ReLU upper clip, whose API meaning is no upper bound: cuDNN's default is
-#: the float maximum (its double maximum clamped to float, cudnn-frontend `pointwise.h`). A
-#: literal stays below 1e15, so the expression writes it as an exact product:
-#: (2**24 - 1) * 2**40 * 2**40 * 2**24 = 3.4028234663852886e38.
-FLOAT_MAX = {"*": [16777215, 1099511627776, 1099511627776, 16777216]}
+#: Read for an unset ReLU upper clip, whose API meaning is no upper bound: the numeric maximum
+#: of a float, which the expression language cannot write (a literal stays below 1e15). The
+#: largest literal that fits stands in for it, so a model still orders "no bound" above every
+#: real bound; SENTINEL would order it below them, as the tightest clip. A marker, not an API
+#: meaning.
+UNBOUNDED_CLIP = 1e14
 
 #: What the API means when an optional attribute or a vector element is unset, keyed by the
 #: optional feature's pattern: the number, or an expression of the reading node's own operands
-#: (`{node}` is its index). Where unset has no number, SENTINEL stands in.
+#: (`{node}` is its index). Where no number or expression says it, a marker stands in:
+#: SENTINEL or UNBOUNDED_CLIP.
 ATTRIBUTE_DEFAULTS: dict[str, object] = {
     # SDPA forward and backward (SdpaAttributes.hpp, SdpaBackwardAttributes.hpp: the scale is
     # 1.0 when neither a value nor a tensor is set; the fbs files state no default). A scale
@@ -51,7 +53,7 @@ ATTRIBUTE_DEFAULTS: dict[str, object] = {
     "graph.nodes[*].max_seq_len_kv": SENTINEL,  # not declared
     # Pointwise (hipdnn_frontend/attributes/PointwiseAttributes.hpp; cuDNN's defaults)
     "graph.nodes[*].relu_lower_clip": 0.0,
-    "graph.nodes[*].relu_upper_clip": FLOAT_MAX,  # no upper bound
+    "graph.nodes[*].relu_upper_clip": UNBOUNDED_CLIP,  # no upper bound
     "graph.nodes[*].relu_lower_clip_slope": 0.0,
     "graph.nodes[*].swish_beta": 1.0,
     "graph.nodes[*].elu_alpha": 1.0,
@@ -208,21 +210,32 @@ def safe_signature(
     """`signature` reading every optional feature through `value_or_default`, and what was
     wrapped. On a graph that binds a feature the value is unchanged, so a model's predictions
     on every graph it could already score are too; a graph without it now gets its default.
+
+    Repeated until the lint is clean: it infers a node's type from the operands read bare at
+    it, so guarding one round of reads widens the types a node may be and can expose operands
+    optional only in the wider set. Each round wraps only new references, so this ends.
     """
-    unguarded = lint(signature, metric, executable)
-    if not unguarded:
-        return list(signature), []
-    targets = {
-        found["reference"]: default_for(found["reference"], found)
-        for found in unguarded
-    }
-    wrapped = [_wrap(parse_signature_entry(entry), targets) for entry in signature]
-    remaining = lint(wrapped, metric, executable)
-    if remaining:
+    targets: dict = {}
+    wrapped = [parse_signature_entry(entry) for entry in signature]
+    while True:
+        unguarded = lint(wrapped, metric, executable)
+        new = {
+            item["reference"]: default_for(item["reference"], item)
+            for item in unguarded
+            if item["reference"] not in targets
+        }
+        if not new:
+            break
+        targets.update(new)
+        wrapped = [_wrap(entry, new) for entry in wrapped]
+    if unguarded:
+        # Wrapped already, yet still read bare: a read _wrap cannot reach.
         raise ValueError(
             "wrapping left optional features unguarded: "
-            + ", ".join(found["reference"] for found in remaining)
+            + ", ".join(found["reference"] for found in unguarded)
         )
+    if not targets:
+        return list(signature), []
     return wrapped, [
         {"reference": reference, "default": default}
         for reference, default in targets.items()

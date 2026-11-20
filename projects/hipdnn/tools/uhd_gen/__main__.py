@@ -10,6 +10,7 @@ Subcommands for collection, training, evaluation and descriptor installation:
     evaluate            corpus + trained UHD -> §11.2 regret report
     promote             install that pair into a descriptor tree and point a UED at it
     generate            graph corpus -> public collection -> train/evaluate/promote
+    restamp             re-stamp an L1 model's selector revision, when provably still valid
 
 Collect, train and install:
 
@@ -219,6 +220,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_size_arguments(size)
 
+    from .restamp import add_restamp_arguments, run_restamp
+
+    restamp = subparsers.add_parser(
+        "restamp",
+        help="re-stamp an L1 model's selector_revision, only with proof it still applies",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_restamp_arguments(restamp)
+
     from .rewrite import add_rewrite_arguments, run_rewrite
 
     rewrite = subparsers.add_parser(
@@ -269,6 +279,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_generate(args)
     if args.command == "size":
         return run_size(args)
+    if args.command == "restamp":
+        return run_restamp(args)
     if args.command == "promote":
         return run_promote(args)
     if args.command == "evaluate":

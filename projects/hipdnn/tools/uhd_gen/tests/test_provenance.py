@@ -204,6 +204,21 @@ def test_provenance_that_names_neither_form_completely_is_refused(snapshot, refu
         validate_provenance(snapshot)
 
 
+def test_extension_members_are_accepted_and_never_compared():
+    """The loader ignores `x-` and `_` members; `x-restamps` records a re-stamp."""
+    recorded = validate_provenance(
+        {
+            "selector_revision": "rev-2",
+            "x-restamps": [{"from": "rev-1", "to": "rev-2"}],
+            "_note": "free-form",
+        }
+    )
+    assert recorded == {"selector_revision": "rev-2"}
+    compare_provenance(recorded, {"selector_revision": "rev-2"})
+    with pytest.raises(ProvenanceError, match="unknown members: \\['restamps'\\]"):
+        validate_provenance({"selector_revision": "rev-2", "restamps": []})
+
+
 def test_a_stale_selector_revision_is_refused_rather_than_scored():
     """L1 is compared across engines, so a stale build changes which one wins."""
     trained = {"selector_revision": "aiter-fwd-1"}

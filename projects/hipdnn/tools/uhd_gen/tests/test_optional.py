@@ -85,6 +85,26 @@ def test_a_gdn_scale_defaults_to_rsqrt_of_its_own_nodes_key_width(evaluator):
     assert values == [[pytest.approx(1 / math.sqrt(64))]]
 
 
+def test_a_safe_signature_wraps_operands_a_first_round_of_wrapping_exposes(evaluator):
+    """The lint types a node by the operands read bare at it. A HIP MLOps corpus reads a
+    rank-5 norm node's mean and inv_variance (optional in some types) beside its dbias and
+    scale (optional in others): wrapping the first pair widens the node's types to ones
+    where the second pair is optional, so one round of wrapping is not enough."""
+    operands = ("mean", "inv_variance", "dbias", "scale")
+    signature = [
+        f"$graph.nodes[2].{operand}.{field}"
+        for operand in operands
+        for field in ("dims[4]", "strides[4]", "virtual")
+    ]
+    first = {found["reference"] for found in lint(signature, "tflops", evaluator)}
+    assert first and first != set(signature), "the case no longer needs a second round"
+
+    rewritten, wrapped = safe_signature(signature, "tflops", evaluator)
+
+    assert lint(rewritten, "tflops", evaluator) == []
+    assert {item["reference"] for item in wrapped} == set(signature)
+
+
 # The rank the absent-attribute rows bind for their node's input, from which an unset
 # BlockScaleQuantize axis (the last one) is read.
 X_RANK = 4
@@ -92,7 +112,8 @@ X_RANK = 4
 # What the API means by an unset optional attribute (or a vector element past the end),
 # written from the schemas and the frontend rather than read back from ATTRIBUTE_DEFAULTS.
 # A boolean reads as 0.0 (false) or 1.0 (true). Where unset has no number, a marker stands in:
-# -1 for an unset uid or sequence length.
+# -1 for an unset uid or sequence length, and for the upper clip the largest literal the
+# expression language admits (below 1e15), since numeric max cannot be written in it.
 UNSET_MEANINGS = {
     "graph.nodes[*].attn_scale_value": 1.0,  # SdpaAttributes.hpp: 1.0 with no value or tensor
     "graph.nodes[*].dropout_probability": 0.0,  # no dropout
@@ -101,8 +122,7 @@ UNSET_MEANINGS = {
     "graph.nodes[*].right_bound": -1.0,  # unbounded
     "graph.nodes[*].max_seq_len_kv": -1.0,  # not declared
     "graph.nodes[*].relu_lower_clip": 0.0,  # cuDNN pointwise defaults
-    # cuDNN's unset upper clip is the float maximum (numpy.finfo(numpy.float32).max)
-    "graph.nodes[*].relu_upper_clip": 3.4028234663852886e38,
+    "graph.nodes[*].relu_upper_clip": 1e14,  # no upper bound (numeric max): a marker
     "graph.nodes[*].relu_lower_clip_slope": 0.0,
     "graph.nodes[*].swish_beta": 1.0,
     "graph.nodes[*].elu_alpha": 1.0,
@@ -251,7 +271,9 @@ def test_automatic_selection_keeps_an_optional_column_and_drops_any_other_gap(
 
 
 def test_generate_proposes_an_optional_column_some_rows_leave_unbound(evaluator):
+    from uhd_gen.features import signature_references
     from uhd_gen.generate import _feature_signature
+    from uhd_gen.physics import derived_features
 
     frame = pd.DataFrame(
         {
@@ -263,10 +285,17 @@ def test_generate_proposes_an_optional_column_some_rows_leave_unbound(evaluator)
     args = argparse.Namespace(
         dim_tile=[], feature_signature=None, features=None, feature_evaluator=evaluator
     )
+    # A published q.dims[0] adds the derived attention features; they read fields every real
+    # SDPA graph publishes, so the frame carries those too, bound on every row.
+    for ref in signature_references(list(derived_features(frame).values())):
+        if ref[1:] not in frame.columns:
+            frame[ref[1:]] = 1
     signature, _, _ = _feature_signature(
         args, frame, set(frame.columns), None, [], False
     )
-    assert signature == [SCALE, "$graph.nodes[0].q.dims[0]"]
+    assert SCALE in signature
+    assert "$graph.nodes[0].q.dims[0]" in signature
+    assert Q_DIM not in signature
 
 
 #: The artifact root class of each adapter whose artifact embeds a features_hash.

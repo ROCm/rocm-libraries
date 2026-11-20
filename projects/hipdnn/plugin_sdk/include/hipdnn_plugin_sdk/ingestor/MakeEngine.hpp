@@ -6,16 +6,25 @@
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
 #include <algorithm>
+#include <cctype>
+#include <exception>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include <nlohmann/json.hpp>
+
+#include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/ingestor/Descriptors.hpp>
 #include <hipdnn_plugin_sdk/ingestor/GenericEngine.hpp>
 #include <hipdnn_plugin_sdk/ingestor/IDeviceResolver.hpp>
@@ -199,12 +208,20 @@ inline void describePacks(nlohmann::json& out, const std::vector<KernelDescripto
 
 } // namespace detail
 
-/// @brief Stable selector identity, including ranker provenance but never evaluating L2.
+/// The prefix of every generic selector revision; the rest is the sha256 of the selector's
+/// compact JSON.
+constexpr const char* GENERIC_SELECTOR_REVISION_PREFIX = "generic-untuned-v1/";
+
+/// @brief The selector a revision identifies: ranker provenance, matchers, dispatches and
+///        every pack kernel's identity, but never an L2 evaluation.
 ///
 /// A slotted engine's selector adds a `slots` array in launch order: each slot's name, KMD,
 /// knobs, rankers and packs, so renaming, reordering or retuning a slot is a different selector
 /// (RFC 0021 §9). An unslotted engine's selector is unchanged.
-inline std::string engineSelectorRevision(const DescriptorSet& set)
+///
+/// Two builds whose revisions differ differ somewhere in this document, so writing it on both
+/// sides (writeEngineSelector()) shows what moved.
+inline nlohmann::json engineSelectorDescription(const DescriptorSet& set)
 {
     auto selector = enginePredictionProvenance(set);
     selector["selector"] = "generic-untuned-v1";
@@ -241,8 +258,77 @@ inline std::string engineSelectorRevision(const DescriptorSet& set)
             selector["slots"].push_back(std::move(described));
         }
     }
-    return "generic-untuned-v1/" + uhd::sha256(selector.dump());
+    return selector;
 }
+
+/// @brief Stable selector identity: the digest of engineSelectorDescription().
+inline std::string engineSelectorRevision(const DescriptorSet& set)
+{
+    return GENERIC_SELECTOR_REVISION_PREFIX + uhd::sha256(engineSelectorDescription(set).dump());
+}
+
+/// @brief Writes `{"engine", "selector_revision", "selector"}` for @p set into @p dir as
+///        `<engine name>.selector.json`, every character of the name outside
+///        `[A-Za-z0-9._-]` replaced by `_`.
+/// @return The file written.
+/// @throws std::runtime_error The directory cannot be created or the file written.
+inline std::filesystem::path writeEngineSelector(const DescriptorSet& set,
+                                                 const std::filesystem::path& dir)
+{
+    auto fileName = set.engine.name;
+    std::replace_if(
+        fileName.begin(),
+        fileName.end(),
+        [](unsigned char character) {
+            return std::isalnum(character) == 0 && character != '.' && character != '_'
+                   && character != '-';
+        },
+        '_');
+    const auto description = engineSelectorDescription(set);
+    const nlohmann::json document{
+        {"engine", set.engine.name},
+        {"selector_revision", GENERIC_SELECTOR_REVISION_PREFIX + uhd::sha256(description.dump())},
+        {"selector", description}};
+
+    std::error_code error;
+    std::filesystem::create_directories(dir, error);
+    const auto path = dir / (fileName + ".selector.json");
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    file << document.dump(2) << '\n';
+    if(error || !file)
+    {
+        throw std::runtime_error("cannot write the selector of engine '" + set.engine.name + "' to "
+                                 + path.string());
+    }
+    return path;
+}
+
+namespace detail
+{
+
+/// The revision makeEngine() gives an engine; when SELECTOR_DUMP_DIR_ENV names a directory,
+/// the selector is written there too. A failed write is logged, never fatal: it is a
+/// diagnostic, and the engine is served either way.
+inline std::string servedSelectorRevision(const DescriptorSet& set)
+{
+    const auto dir = hipdnn_data_sdk::utilities::getEnv(SELECTOR_DUMP_DIR_ENV);
+    if(!dir.empty())
+    {
+        try
+        {
+            const auto path = writeEngineSelector(set, dir);
+            HIPDNN_PLUGIN_LOG_INFO("ingestor: wrote the selector of engine '"
+                                   << set.engine.name << "' to " << path.string());
+        }
+        catch(const std::exception& error)
+        {
+            HIPDNN_PLUGIN_LOG_WARN("ingestor: " << SELECTOR_DUMP_DIR_ENV << ": " << error.what());
+        }
+    }
+    return engineSelectorRevision(set);
+}
+
+} // namespace detail
 
 namespace detail
 {
@@ -469,7 +555,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
     auto predictions = std::move(set.enginePredictionsByMetric);
     auto unavailablePredictionArches = std::move(set.unavailableEnginePredictionArches);
     auto provenance = enginePredictionProvenance(set);
-    auto selectorRevision = engineSelectorRevision(set);
+    auto selectorRevision = detail::servedSelectorRevision(set);
     auto engine = set.engine;
     auto graphMatchSymbol = engine.graphMatchNativeSymbol;
     return std::make_unique<GenericEngine<THandle, TSettings, TContext>>(
@@ -509,7 +595,7 @@ std::unique_ptr<IEngine<THandle, TSettings, TContext>>
         deviceResolver,
         set.enginePredictionsByMetric,
         set.unavailableEnginePredictionArches,
-        engineSelectorRevision(set),
+        detail::servedSelectorRevision(set),
         enginePredictionProvenance(set));
 }
 
