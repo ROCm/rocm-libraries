@@ -2814,6 +2814,62 @@ class MxGemmIrTest(unittest.TestCase):
         self.assertEqual(default.count(prefetch), 4 * 2)
         self.assertEqual(_llvm(_spec(tile_k=256)).count(prefetch), 2 * (2 + 1))
 
+    def test_gl2_prefetches_wait_for_their_address_registers(self):
+        """Each group of GL2 prefetches, and each tile's loads of the next
+        scale words with scales in registers, ends with s_wait_alu
+        depctr_vm_vsrc(0) (raw 0xFF83) before any later memory operation,
+        WMMA, wait or branch: the tile walk with read-ahead, the direct path
+        with one 16x16 WMMA per wave and a single partial tile, the panel,
+        half and ring walks. Without GL2 prefetch there is no wait."""
+        wait = f'"s_wait_alu {0xFF83}"'
+        prefetch = "call void @llvm.amdgcn.global.prefetch"
+        scale_load = re.compile(r"= load (?:<\d x i32>|i32), ptr addrspace\(1\)")
+        # Only the next prefetches' or loads' address arithmetic may come
+        # between them and their wait.
+        later = re.compile(
+            r"call void|@llvm\.amdgcn\.wmma|= load |^\s*(store|br|ret|switch) |^[\w.]+:"
+        )
+        one_atom = _spec6(
+            256,
+            2048,
+            160,
+            tile_m=16,
+            tile_n=64,
+            tile_k=128,
+            wave_group=(1, 4),
+            cluster_dim=(1, 1, 1),
+            **_DIRECT,
+        )
+        kernels = {
+            "tile": _spec(),
+            "one atom per wave": one_atom,
+            "panels": _spec6(*_MAF_MED[0], **_PANELS),
+            "halves": _spec6(*_MAF_MED[0], **_HALVES),
+            "ring": _spec6(512, 512, 4096, **_RING | {"cluster_dim": (1, 1, 1)}),
+            "register scales": _spec6(**_DIRECT, scales="registers"),
+        }
+        for label, spec in kernels.items():
+            with self.subTest(label):
+                self.assertIsNone(validate(spec))
+                groups = 0
+                pending = False
+                for line in _llvm(spec).splitlines():
+                    if prefetch in line or scale_load.search(line):
+                        pending = True
+                    elif wait in line:
+                        self.assertTrue(pending, "a wait without a prefetch")
+                        groups += 1
+                        pending = False
+                    elif pending:
+                        self.assertIsNone(later.search(line), line)
+                self.assertFalse(pending)
+                self.assertGreater(groups, 0)
+        off = _spec(gl2_prefetch_distance=0)
+        self.assertIsNone(validate(off))
+        no_prefetch = _llvm(off)
+        self.assertNotIn(prefetch, no_prefetch)
+        self.assertNotIn(wait, no_prefetch)
+
     def test_two_n_repeats(self):
         """wave_repeat_n 2 (1x4 waves, tile_n 128): one 8 B B-scale read per
         K-step, counted in the LDS waits, and 2-wide stores."""
@@ -3359,6 +3415,41 @@ class MxGemmSparseCheckTest(unittest.TestCase):
 
 @unittest.skipIf(shutil.which("llvm-objdump") is None, "needs llvm-objdump")
 class MxGemmHostBuildTest(unittest.TestCase):
+    def test_gl2_prefetch_wait_precedes_wmma_in_isa(self):
+        """Each global_prefetch_b8 meets s_wait_alu depctr_vm_vsrc(0) before
+        the next v_wmma or branch."""
+        import tempfile
+        from pathlib import Path
+
+        from rocke.analysis.isa import analyze_hsaco
+        from rocke.helpers.compile import compile_kernel
+
+        spec = _spec6(
+            256,
+            2048,
+            160,
+            tile_m=16,
+            tile_n=64,
+            tile_k=128,
+            wave_group=(1, 4),
+            cluster_dim=(1, 1, 1),
+            **_DIRECT,
+        )
+        artifact = compile_kernel(build_mx_gemm(spec), arch="gfx1250", backend="python")
+        with tempfile.NamedTemporaryFile(suffix=".hsaco") as handle:
+            handle.write(artifact.hsaco)
+            handle.flush()
+            text = analyze_hsaco(Path(handle.name), keep_text=True).objdump_text
+        pending = False
+        for line in text.splitlines():
+            if "global_prefetch_b8" in line:
+                pending = True
+            elif re.search(r"s_wait_alu\b.*depctr_vm_vsrc\(0\)", line):
+                pending = False
+            elif re.search(r"\bv_wmma|\bs_c?branch|\bs_endpgm", line):
+                self.assertFalse(pending, line)
+        self.assertFalse(pending)
+
     def test_resources(self):
         """Host compiles: VGPR file and LDS limits, no spills."""
         import tempfile

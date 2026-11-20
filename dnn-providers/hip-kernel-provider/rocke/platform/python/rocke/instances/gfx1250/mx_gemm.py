@@ -176,6 +176,9 @@ _I32_SPAN = 1 << 31
 _GL2_LINE_BYTES = 256
 # th:TH_LOAD_NT (bits 0..2) | scope:SCOPE_SE (bits 3..4), as in the winner.
 _GL2_PREFETCH_CPOL = 1 | (1 << 3)
+# s_wait_alu depctr_vm_vsrc(0): every memory instruction issued so far has
+# read its VGPR operands.
+_WAIT_VM_VSRC = 0xFF83
 _FP8_MAX = 448.0
 # sched_barrier mask: VALU (0x2), SALU (0x4) and TRANS (0x400) may cross;
 # WMMAs and memory operations may not.
@@ -2062,7 +2065,11 @@ class Gl2Prefetcher:
     def _distribute(self, categories) -> None:
         """One line prefetch per thread of the cluster for each of the
         ``(count, address)`` categories' lines, in rounds of the cluster's
-        threads."""
+        threads, then a wait until the prefetches have read their address
+        registers. In expert scheduling that order is the kernel's to keep,
+        and LLVM does not wait before a WMMA whose accumulator takes those
+        registers: a prefetch reading them late would take WMMA results as
+        its address."""
         k = self.k
         b, ops, spec = k.b, k.ops, k.spec
         cluster_x, cluster_y, _ = spec.cluster_dim
@@ -2105,6 +2112,8 @@ class Gl2Prefetcher:
                 # are prefetched more than once.
                 index = ops.add(ops.mod(thread, remaining), round_start)
             prefetch_round(round_start, index)
+        if total:
+            b.s_wait_alu(_WAIT_VM_VSRC)
 
     def prefetch_ring(self, k0, loads) -> None:
         """``walk`` "ring": the cluster's lines of the ``loads`` of the
@@ -2285,6 +2294,9 @@ class ScaleRegisters:
         for step in range(k.spec.k_steps):
             out += self._words(bases[2 * step], offsets["a"])
             out += self._words(bases[2 * step + 1], offsets["b"])
+        # As after a GL2 prefetch group: the loads read their offset VGPRs
+        # before a WMMA accumulator can take those registers.
+        k.b.s_wait_alu(_WAIT_VM_VSRC)
         return out
 
 
