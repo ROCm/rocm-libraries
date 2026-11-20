@@ -980,8 +980,9 @@ namespace rocalution
             // (x,q)
             ValueType xq = x->DotNonConj(*q);
 
-            // The CG step breaks down if (x,Ax) is zero, as for a zero rhs, whose cycle gives
-            // the zero correction. Keep the correction of the cycle then
+            // The CG step breaks down if (x,Ax) is zero. Keep the correction of the cycle then:
+            // zero for a zero rhs, and nonzero for a coarse operator whose symmetric part is
+            // not definite, or for complex values, since the dot products do not conjugate
             if(xq == static_cast<ValueType>(0))
             {
                 return;

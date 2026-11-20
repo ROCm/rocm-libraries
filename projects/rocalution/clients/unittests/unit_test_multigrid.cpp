@@ -500,7 +500,8 @@ namespace
             const T xq  = dot(x, q);
             if(xq == static_cast<T>(0))
             {
-                // CG breaks down, as for a zero residual, which has the zero correction
+                // CG breaks down. Keep the correction of the cycle: zero for a zero residual,
+                // and nonzero for an operator whose symmetric part is not definite
                 return;
             }
             if(rho == static_cast<T>(0))
@@ -910,6 +911,44 @@ TYPED_TEST(multigrid, k_cycle_step_is_zero_for_a_cycle_orthogonal_to_the_residua
         ASSERT_TRUE(std::isfinite(v));
     }
     expect_near(x, Vec<T>{0.75, 0.75}, tol<T>());
+    expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
+}
+
+// A0 = 2I, R0 = P0 = I, A1 = diag(1, -1), R1 = [1 0] and P1 = [1 7]^T. With omega 0.5,
+// b = (2, 2) and x0 = 0, level 1 gets r = (1, 1) and its cycle gives x = (1, 1), exactly in
+// floating point. A1 is indefinite, so (x, Ax) is zero while (r, x) = 2. The K-cycle keeps
+// the correction of the cycle, and the solver gives (1.25, 1.25)
+TYPED_TEST(multigrid, k_cycle_keeps_the_cycle_when_its_x_ax_is_zero)
+{
+    using T = typename TypeParam::value_type;
+    Csr<T> R1(1, 2);
+    R1.add(0, static_cast<T>(1));
+    R1.end_row();
+    Csr<T> P1(2, 1);
+    P1.add(0, static_cast<T>(1));
+    P1.end_row();
+    P1.add(0, static_cast<T>(7));
+    P1.end_row();
+
+    Hierarchy<T> h;
+    h.A = {diagonal_matrix<T>({2, 2}), diagonal_matrix<T>({1, -1})};
+    h.R = {diagonal_matrix<T>({1, 1}), R1};
+    h.P = {diagonal_matrix<T>({1, 1}), P1};
+    h.A.push_back(galerkin(h.R[1], h.A[1], h.P[1], 1.0));
+
+    CycleOptions o = options(rocalution::Kcycle, 1, 1, false);
+    o.omega        = 0.5;
+    UserSetup<T> s(TypeParam::backend, h, o);
+    s.mg.Build();
+
+    const Vec<T> b  = {2, 2};
+    const Vec<T> x0 = {0, 0};
+    const Vec<T> x  = solve(s.mg, *s.user.A, b, x0, 1);
+    for(T v : x)
+    {
+        ASSERT_TRUE(std::isfinite(v));
+    }
+    expect_near(x, Vec<T>{1.25, 1.25}, tol<T>());
     expect_near(x, cycled(DenseCycle<T>(s.h, o), b, x0, 1), tol<T>());
 }
 
