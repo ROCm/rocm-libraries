@@ -137,7 +137,7 @@ Evaluated once per graph. Every one of these is a hard refusal.
 | x, y rank ≥ 2; scale rank ≥ 1; `dims` and `strides` both present and equal length | Rank ≥ 2 so there is a row to reduce over. The matcher runs on an *unvalidated* graph, so it must be total against null or mismatched dims. |
 | `sameShape(x, y)` | |
 | x, y, scale all **packed row-major**, ignoring the stride of any axis of extent 1 | The innermost stride is a compile-time literal 1 in the kernel and has no descriptor slot, and the launch passes the width as the row stride. The check is stronger than the descriptor strictly needs — it could carry a padded row stride — but it is what makes collapsing rank > 2 to (M, N) sound, since one row stride has to describe all the leading axes at once. An axis of extent 1 is never stepped along, so its stride is not checked: hipdnn_torch describes an `F.rms_norm` weight with stride 0 on its unit axes, and the data SDK's packed test exempts them the same way. |
-| rows > 0 and columns > 0, and every element of x and y within 2³¹ − 1 bytes | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. |
+| rows > 0 and columns > 0, and every element of x, y and gamma within 2³¹ − 1 bytes, and in training inv_rms's 4 bytes per row too | Each operand is one buffer view with 32-bit byte offsets; the bound counts bytes, so f32 reaches it at half the elements. Gamma is bounded on its own columns times its own element size, inv_rms on its row count times 4: at width 1 and 16-bit x, inv_rms reaches the bound before x does. |
 | gamma **encodes the normalised shape** as the frontend reads it: the normalised axes are the longest trailing run where gamma's extent equals x's (never axis 0), and gamma is 1 on every axis before it | Any other shape would be a broadcast the kernel does not perform. The rule of `validateScaleNormalizedShape` in the frontend, but for rank: a gamma of lower rank than x, which the frontend rejects, is aligned at the innermost axis with its missing leading axes read as 1, so the matcher stays total. |
 | epsilon is one scalar: present, with dims, and extent 1 on every axis | The kernel takes one f32; a tensor of more elements would be read as its first. |
 | epsilon is runtime-user-supplied, **or** a finite, non-negative f32 | See below. |
@@ -227,7 +227,9 @@ virtual, pass-by-value or ragged); x, dy, dx one dtype; gamma and dgamma one dty
 or f32 beside 16-bit x; dx shaped as x and dgamma as gamma; inv_rms one f32 per row (the
 forward's rule); every row operand and gamma/dgamma packed and 16-byte aligned; gamma
 encoding the normalised shape; every element of x, dy and dx within 2³¹ − 1 bytes (the
-forward's bound); not override-shape. **The kernel matcher** pairs dtype and gamma
+forward's row-operand bound), and inv_rms's 4 bytes per row within it too (the backward
+matcher does not bound gamma or dgamma bytes);
+not override-shape. **The kernel matcher** pairs dtype and gamma
 form, and serves a baked width exactly or a generic one up to its `n_max`.
 
 ---
@@ -1281,13 +1283,27 @@ wins by default. The rule this provider follows:
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
 
-No trained UHD model is installed for the FlyDSL SDPA engines (`sdpa_*`), whose catalog
-this provider changed. Each SDPA engine orders its kernels by descriptor `priority` (the
-native ranker), its engine estimate is the `default` slot the loader disables, and
-autotune measures the order. SDPA models trained on this catalog are a follow-up:
-`gen_descriptors.py` binds each one per arch once it is installed under `heuristics/`
-([README](README.md)). The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their
-trained models; their catalog is unchanged.
+Trained UHD models are installed for the FlyDSL SDPA engines on these architectures
+(under each op's `heuristics/`, bound per arch by `gen_descriptors.py`, see the
+[README](README.md)):
+
+| Engine | Engine estimate (`predict_engine`) | Kernel ranker (`sort_kernel_catalog`) |
+|---|---|---|
+| `sdpa_aiw` | gfx1201 | gfx1201 |
+| `sdpa_cdna` | gfx90a, gfx942, gfx950 | gfx942 |
+| `sdpa_cdna_decode` | gfx90a, gfx942, gfx950 | -- |
+| `sdpa_cdna_dualwave` | gfx950 | -- |
+| `sdpa_rdna` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+| `sdpa_rdna_decode` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+
+Elsewhere an SDPA engine orders its kernels by descriptor `priority` (the native ranker),
+its engine estimate is the `default` slot the loader disables, and autotune measures the
+order. Each installed model records the selector revision it was trained against, which
+digests the engine's kernel catalog and ranker: a change to an SDPA catalog, its kernel
+fields or a ranker makes those models refused at run time, so such a change retrains or
+re-stamps them in the same pull request. `TestFlydslModelBinding` (the census) fails the
+build on a stale stamp. The RMSNorm engines (`rmsnorm`, `rmsnorm_bwd`) keep their trained
+models; their catalog is unchanged.
 
 ### 6.1 Runtime features audited against compiled-out builds
 
@@ -1402,7 +1418,8 @@ a class's "default" and "companions", ranking applies within one engine: the gen
 kernel's tiles against each other, by descriptor `priority` plus a bonus where a tier's
 measured rule prefers it (the engine's interim native ranker). That static order is
 provisional: autotune times every object the engine admits for a graph and caches the
-measured order, and a trained UHD ranker replaces the static one. Which engine runs a
+measured order, and a trained UHD ranker replaces the static one where one is installed
+(`sdpa_cdna` on gfx942, §6). Which engine runs a
 graph several serve is the engine-level heuristic's (UHD), or autotune's; `priority`
 never compares objects of different engines. The kernels are FlyDSL's own MFMA flash-attention forwards,
 vendored whole under
@@ -1906,8 +1923,8 @@ What came out of it:
 
 The rules were fitted on bf16 and the f16 objects share them. Bias classes are
 rare in the corpus and ship their default tier only. The process is repeated as
-features land; the rules are coarse by design, and a trained heuristic replaces
-them when the ingestor gains one.
+features land; the rules are coarse by design, and a trained ranker replaces them
+where one is installed (gfx942, §6).
 
 ### 7.7 gfx90a (MI210, MI250)
 

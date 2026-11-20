@@ -171,29 +171,19 @@ TEST(TestPointwiseValidation, ImplementedTernaryModesAreSubset)
 TEST(TestPointwiseValidation, KnownImplementedUnaryOperations)
 {
     // Define which unary operations are currently implemented
-    const std::set<PointwiseMode> expectedImplementedUnary = {PointwiseMode::RELU_FWD,
-                                                              PointwiseMode::SIGMOID_FWD,
-                                                              PointwiseMode::TANH_FWD,
-                                                              PointwiseMode::ABS,
-                                                              PointwiseMode::NEG,
-                                                              PointwiseMode::GELU_FWD,
-                                                              PointwiseMode::GELU_APPROX_TANH_FWD,
-                                                              PointwiseMode::SWISH_FWD,
-                                                              PointwiseMode::IDENTITY,
-                                                              PointwiseMode::EXP,
-                                                              PointwiseMode::LOG,
-                                                              PointwiseMode::SQRT,
-                                                              PointwiseMode::RSQRT,
-                                                              PointwiseMode::RECIPROCAL,
-                                                              PointwiseMode::SIN,
-                                                              PointwiseMode::TAN,
-                                                              PointwiseMode::ERF,
-                                                              PointwiseMode::CEIL,
-                                                              PointwiseMode::FLOOR,
-                                                              PointwiseMode::ELU_FWD,
-                                                              PointwiseMode::SOFTPLUS_FWD,
-                                                              PointwiseMode::LOGICAL_NOT,
-                                                              PointwiseMode::GEN_INDEX};
+    const std::set<PointwiseMode> expectedImplementedUnary
+        = {PointwiseMode::IDENTITY,    PointwiseMode::RELU_FWD,
+           PointwiseMode::SIGMOID_FWD, PointwiseMode::TANH_FWD,
+           PointwiseMode::ABS,         PointwiseMode::NEG,
+           PointwiseMode::GELU_FWD,    PointwiseMode::GELU_APPROX_TANH_FWD,
+           PointwiseMode::SWISH_FWD,   PointwiseMode::IDENTITY,
+           PointwiseMode::EXP,         PointwiseMode::LOG,
+           PointwiseMode::SQRT,        PointwiseMode::RSQRT,
+           PointwiseMode::RECIPROCAL,  PointwiseMode::SIN,
+           PointwiseMode::TAN,         PointwiseMode::ERF,
+           PointwiseMode::CEIL,        PointwiseMode::FLOOR,
+           PointwiseMode::ELU_FWD,     PointwiseMode::SOFTPLUS_FWD,
+           PointwiseMode::LOGICAL_NOT, PointwiseMode::GEN_INDEX};
 
     // Check all unary modes
     for(size_t i = 0; i < POINTWISE_MODE_COUNT; ++i)

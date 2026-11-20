@@ -51,6 +51,9 @@ from ..Common import (
     HR,
     IsaVersion,
     ParallelMap2,
+    poolSizeBudget,
+    releaseFreedMemory,
+    shutdownWorkerPool,
     print1,
     print2,
     printWarning,
@@ -912,7 +915,13 @@ def writeSolutionsAndKernelsTCL(
             assembled_kernel = assemble(written_kernel)
             # The source is on disk (and assembled) by now; don't ship it back
             # to the parent, which only needs the post-codegen kernel info.
-            return processed_kernel._replace(src=None, header=None)
+            slim = processed_kernel._replace(src=None, header=None)
+            # Release free allocator pages after dropping the source and write results.
+            # With CpuThreads 1 this runs in the parent beside the source
+            # compile thread; glibc's malloc_trim takes the arena locks.
+            del processed_kernel, written_kernel, assembled_kernel
+            releaseFreedMemory()
+            return slim
         return composed_function
 
     # The basename has to stay "Kernels": the emitted code object is named from
@@ -939,6 +948,9 @@ def writeSolutionsAndKernelsTCL(
             compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
             uniqueAsmKernels,
         )
+        # The link and bundle steps below need no workers; the pool would
+        # otherwise sit idle holding the heap it grew during codegen.
+        shutdownWorkerPool()
 
         buildAssemblyCodeObjectFiles(
             asmToolchain.linker,
@@ -1302,10 +1314,8 @@ def _includeGemmA2AFusionProblemType(problemType, enabled: bool) -> bool:
 # Tensile Create Library
 ################################################################################
 def _cpuCount() -> int:
-    if os.name == "nt":
-        # Matches CPUThreadCount: the Windows scheduler caps waitable handles.
-        return min(os.cpu_count() or 1, 61)
-    return len(os.sched_getaffinity(0))
+    """The pool budget CPUThreadCount gives one process: the groups build in place of it."""
+    return poolSizeBudget()
 
 
 def _jobsPerGroup(requested: int, groups: List[List[str]]) -> List[int]:
@@ -1324,7 +1334,7 @@ def _jobsPerGroup(requested: int, groups: List[List[str]]) -> List[int]:
     unambiguous abbreviation of ``--jobs``) to avoid silently dropping them.
     """
     # 0 disables threading and has to survive the split intact; -1 is the
-    # documented "use every CPU" default.
+    # documented "use the whole budget" default.
     if requested == 0:
         return [0] * len(groups)
     total = _cpuCount() if requested < 0 else min(_cpuCount(), requested)
@@ -1569,6 +1579,9 @@ def main(argv=None):
     )
     stop_glds = timer()
     print(f"Time to load yaml files (s): {(stop_glds-start_glds):3.2f}")
+    # Codegen gets fresh workers rather than ones still holding the heap they
+    # grew parsing YAML.
+    shutdownWorkerPool()
 
 
     kernels = generateKernelObjectsFromSolutions(solutions)

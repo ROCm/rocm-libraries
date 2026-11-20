@@ -49,9 +49,9 @@ The following table lists all operations currently supported in the CPU Referenc
 | SDPA Backward | FP16, BFP16, FP32 | Op-defined | CPU Reference | See [SDPA Restrictions](#sdpa-restrictions) |
 | BlockScale Quantize | FP32, FP16, BFP16 in; FP8, FP6, FP4 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
 | BlockScale Dequantize | FP8, FP6, FP4 in; FP32, FP16, BFP16 out | Op-defined | CPU Reference | See [Block-Scale Quantization](#block-scale-quantization) |
-| Pointwise Unary | FP16, BFP16, FP32 | All | CPU Reference | `LOGICAL_NOT` is BOOLEAN only; `GEN_INDEX` outputs INT32 |
-| Pointwise Binary | FP16, BFP16, FP32 | All | CPU Reference | `CMP_*` outputs BOOLEAN and also accepts INT32 inputs; `LOGICAL_AND`/`LOGICAL_OR` are BOOLEAN only |
-| Pointwise Ternary | FP16, BFP16, FP32 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask; also accepts INT32 data inputs |
+| Pointwise Unary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `LOGICAL_NOT` is BOOLEAN only; `GEN_INDEX` outputs INT32; INT32 supports a subset of modes, see below |
+| Pointwise Binary | FP16, BFP16, FP32, FP64, INT32, FP8 | All | CPU Reference | `CMP_*` outputs BOOLEAN and also accepts INT32 inputs; `LOGICAL_AND`/`LOGICAL_OR` are BOOLEAN only |
+| Pointwise Ternary | FP16, BFP16, FP32, FP64, INT32, BOOLEAN, FP8 | All | CPU Reference | BINARY_SELECT with BOOLEAN mask |
 
 ## Implementation Details
 
@@ -115,6 +115,11 @@ The following table lists all operations currently supported in the CPU Referenc
 | Binary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | ADD, SUB, MUL, DIV, ADD_SQUARE, MAX, MIN, CMP_EQ, CMP_NEQ, CMP_GT, CMP_GE, CMP_LT, CMP_LE, LOGICAL_AND (BOOLEAN only), LOGICAL_OR (BOOLEAN only), RELU_BWD, SIGMOID_BWD, TANH_BWD, GELU_BWD, GELU_APPROX_TANH_BWD, SWISH_BWD, ELU_BWD, SOFTPLUS_BWD |
 | Ternary Operations | `PointwisePlanBuilder` | `PointwiseSignatureKey` | BINARY_SELECT (BOOLEAN mask) |
 
+The pointwise reference honors the node `compute_data_type`: a plan is only built for a registered
+(input, compute, output) tuple, and operations that perform arithmetic evaluate their intermediate
+math in that compute type before rounding to the output type. A node whose compute type has no
+registered tuple is declined.
+
 `CMP_*` and `LOGICAL_*` outputs must have their tensor data type explicitly set to `BOOLEAN`, and
 `GEN_INDEX` outputs must be set to `INT32`; generic pointwise output inference otherwise uses the
 graph's intermediate data type.
@@ -125,6 +130,32 @@ range for its pointwise axis attribute.
 
 Scalar attributes (`relu_*`, `swish_beta`, `elu_alpha`, `softplus_beta`) that a mode does not use are
 ignored, as in cuDNN.
+
+A pointwise node is declined, rather than failing at execution, when an input does not broadcast to
+the output shape.
+
+Input operands may be scalars: a baked compile-time constant, a runtime scalar with a default, or a
+pure runtime scalar read from the variant pack. A scalar is treated as a one-element tensor that
+broadcasts to the output shape.
+
+Each (input, compute, output) tuple is registered explicitly, and a node with any other tuple is
+declined. FP16 and BFP16 nodes compute in FP32. Their arithmetic and backward binary modes also
+register same-type compute (FP16 in FP16, BFP16 in BFP16); the comparison modes and `BINARY_SELECT`
+compute in FP32 only. Beyond FP16, BFP16 and FP32, the reference registers FP64, INT32, BOOLEAN and the FP8
+formats `FP8_E4M3` and `FP8_E5M2`:
+
+- FP64 computes in FP64 and supports every mode except the BOOLEAN-only logical modes, including all
+  `CMP_*` modes and `GEN_INDEX`.
+- INT32 computes in FP32, so integer values above 2^24 lose exactness in arithmetic; comparisons of
+  integer inputs are exact. It supports `RELU_FWD`, `ADD`, `SUB`, `MUL`, `MAX`, `MIN`, the `CMP_*`
+  modes and `BINARY_SELECT`; every other mode is declined. `ABS` and `NEG` are declined because
+  their result overflows `int32` for `INT32_MIN`.
+- BOOLEAN supports `BINARY_SELECT` and the logical modes.
+- FP8 inputs compute in FP32 and produce an output in the input's FP8 format or FP32. They support
+  the unary and binary modes, `CMP_GT` and `BINARY_SELECT`; the other `CMP_*` modes are declined.
+- `CMP_GT` also accepts inputs of different floating-point types: FP32 with FP16, FP32 with BFP16,
+  FP16 with BFP16, and FP32 with FP64, each in both orders. Other pairs, such as FP16 with FP64 or
+  BFP16 with FP64, and the other `CMP_*` modes with mixed inputs, are declined.
 
 ## Operation Restrictions
 

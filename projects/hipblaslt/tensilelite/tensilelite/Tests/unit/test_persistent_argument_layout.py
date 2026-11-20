@@ -318,8 +318,11 @@ def _data_parallel_signature_agreement(tmp_path, use_beta, initial_strides):
         packed_arguments = packed_metadata["amdhsa.kernels"][0][".args"]
         inferred = [_metadataArgToCustomArg(argument) for argument in packed_arguments]
         assert inferred == writer.kernelArgDefs
-        magic = [argument for argument in packed_arguments if argument[".name"].endswith("SizeJ")]
-        assert [argument[".name"] for argument in magic] == ["MagicNumberSizeJ", "MagicShiftSizeJ"]
+        alg = packed["MagicDivAlg"]
+        magic = [argument for argument in packed_arguments
+                 if argument[".name"].endswith("Alg%dJ" % alg)]
+        assert [argument[".name"] for argument in magic] == ["MagicNumberSizeAlg%dJ" % alg,
+                                                             "MagicShiftSizeAlg%dJ" % alg]
         assert magic[1][".offset"] == magic[0][".offset"] + 4
         assert packed_arguments[-4][".offset"] == arguments[-4][".offset"] + 8
     return arguments, generated

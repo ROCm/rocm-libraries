@@ -4,6 +4,8 @@
 #include "hipdnn_graph.hpp"
 #include "hipdnn_types.hpp"
 
+#include "erase_outside_lock.hpp"
+#include "insert_outside_lock.hpp"
 #include "lru_cache.hpp"
 #include "miopen_impl.h"
 #include "routing.hpp"
@@ -138,63 +140,68 @@ private:
     int previous_ = -1;
 };
 
+// Creating a handle runs the plugin's code, and so does destroying one that is not kept. For a
+// plugin built against the public libMIOpen.so that code calls miopenDestroy, which takes
+// HandleMapMutex, so neither happens while the lock is held.
+std::pair<std::unique_ptr<HandleState>, miopenStatus_t> CreateHandleState(hipStream_t stream)
+{
+    auto [created, error] = fe::createHipdnnHandle(stream);
+    if(!error.is_good() || created == nullptr)
+        return {nullptr,
+                RecordFailure(miopenStatusInternalError, "could not create a hipDNN handle")};
+    auto state = std::make_unique<HandleState>();
+    if(hipEventCreateWithFlags(&state->lastWork, hipEventDisableTiming) != hipSuccess)
+        return {nullptr,
+                RecordFailure(miopenStatusInternalError,
+                              "could not create the HIP event that orders hipDNN work")};
+    state->hipdnnHandle = std::move(created);
+    state->stream       = stream;
+    return {std::move(state), miopenStatusSuccess};
+}
+
 // Created on first forwarded call rather than in miopenCreate, so a process that
 // never forwards never pays for hipdnnCreate.
 std::pair<HandleState*, miopenStatus_t> AcquireHandleState(miopenHandle_t handle,
                                                            hipStream_t stream)
 {
-    // Declared before the lock so that a hipDNN handle this call fails to keep is
-    // destroyed after the lock is released; see ReleaseHandle.
-    fe::HipdnnHandlePtr unused;
-    const std::lock_guard<std::mutex> lock(HandleMapMutex());
-    auto& slot = HandleMap()[handle];
-    if(slot == nullptr)
+    // Two threads using one MIOpen handle at once can both miss and both create a state;
+    // the one that loses is dropped and the loop finds the winner's.
+    for(;;)
     {
-        // Created without the stream: given one, the frontend destroys the handle
-        // itself when setting it fails, which would happen under this lock.
-        auto [created, error] = fe::createHipdnnHandle();
-        unused                = std::move(created);
-        if(!error.is_good() || unused == nullptr)
         {
-            HandleMap().erase(handle);
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError, "could not create a hipDNN handle")};
+            const std::lock_guard<std::mutex> lock(HandleMapMutex());
+            const auto found = HandleMap().find(handle);
+            if(found != HandleMap().end())
+            {
+                HandleState& state = *found->second;
+                if(state.stream != stream)
+                {
+                    // Work still queued on the old stream may be using the shared workspace.
+                    if(hipStreamWaitEvent(stream, state.lastWork, 0) != hipSuccess)
+                        return {nullptr,
+                                RecordFailure(
+                                    miopenStatusInternalError,
+                                    "could not make the MIOpen handle's new stream wait for the "
+                                    "hipDNN work queued on its old stream")};
+                    if(!fe::setHipdnnHandleStream(state.hipdnnHandle, stream).is_good())
+                        return {nullptr,
+                                RecordFailure(miopenStatusInternalError,
+                                              "could not move the hipDNN handle to the MIOpen "
+                                              "handle's new stream")};
+                    state.stream = stream;
+                }
+                return {&state, miopenStatusSuccess};
+            }
         }
-        if(stream != nullptr && !fe::setHipdnnHandleStream(unused, stream).is_good())
-        {
-            HandleMap().erase(handle);
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError,
-                                  "could not set the MIOpen handle's stream on the hipDNN handle")};
-        }
-        auto state = std::make_unique<HandleState>();
-        if(hipEventCreateWithFlags(&state->lastWork, hipEventDisableTiming) != hipSuccess)
-        {
-            HandleMap().erase(handle);
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError,
-                                  "could not create the HIP event that orders hipDNN work")};
-        }
-        state->hipdnnHandle = std::move(unused);
-        state->stream       = stream;
-        slot                = std::move(state);
+
+        auto [created, status] = CreateHandleState(stream);
+        if(created == nullptr)
+            return {nullptr, status};
+        HandleState* const raw = created.get();
+        if(InsertDestroyingLoserOutsideLock(
+               HandleMap(), HandleMapMutex(), handle, std::move(created)))
+            return {raw, miopenStatusSuccess};
     }
-    else if(slot->stream != stream)
-    {
-        // Work still queued on the old stream may be using the shared workspace.
-        if(hipStreamWaitEvent(stream, slot->lastWork, 0) != hipSuccess)
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError,
-                                  "could not make the MIOpen handle's new stream wait for the "
-                                  "hipDNN work queued on its old stream")};
-        if(!fe::setHipdnnHandleStream(slot->hipdnnHandle, stream).is_good())
-            return {nullptr,
-                    RecordFailure(miopenStatusInternalError,
-                                  "could not move the hipDNN handle to the MIOpen handle's new "
-                                  "stream")};
-        slot->stream = stream;
-    }
-    return {slot.get(), miopenStatusSuccess};
 }
 
 using GraphPtr = std::shared_ptr<fe::graph::Graph>;
@@ -233,6 +240,19 @@ LastForwardedError& LastError()
     return last;
 }
 
+struct ReentryState
+{
+    int depth = 0;
+    // The entry point most recently rejected in the outermost scope; null means none.
+    const char* rejected = nullptr;
+};
+
+ReentryState& Reentry()
+{
+    static thread_local ReentryState state;
+    return state;
+}
+
 // Pointers into the set stay valid as it grows, because its elements are never
 // moved.
 struct InternedStrings
@@ -246,10 +266,11 @@ miopenStatus_t RecordHipdnnFailure(const fe::Error& error)
     return RecordFailure(TranslateHipdnnError(error), error.get_message());
 }
 
-miopenStatus_t RecordSuccess()
+std::optional<miopenStatus_t> FailureOfHipdnnResult(const fe::Error& error)
 {
-    ClearForwardedFailure();
-    return miopenStatusSuccess;
+    if(error.is_good())
+        return std::nullopt;
+    return RecordHipdnnFailure(error);
 }
 
 // Builds `graph` like Graph::build, but on the first engine in heuristic order
@@ -281,30 +302,21 @@ fe::Error BuildBenchmarked(fe::graph::Graph& graph, hipdnnHandle_t hipdnnHandle)
     return error;
 }
 
-// Held across build() on purpose. A build can take seconds, but it happens once
-// per distinct problem and serializing it is far simpler than letting two
-// threads race to build the same graph.
+// Both ways of building run inside AcquireGraphWith's hipDNN call, so the benchmarked build,
+// with its engine and plan calls, is marked and checked for re-entry like Graph::build.
 std::pair<GraphPtr, miopenStatus_t>
 AcquireGraph(const PlanKey& key, const PopulateGraphFn& populate, hipdnnHandle_t hipdnnHandle)
 {
-    const std::lock_guard<std::mutex> lock(PlanMutex());
-
-    if(const GraphPtr* cached = PlanCache().Find(key))
-        return {*cached, miopenStatusSuccess};
-
-    GraphPtr graph = std::make_shared<fe::graph::Graph>();
-    if(!populate(*graph))
-        return {nullptr,
-                RecordFailure(miopenStatusUnsupportedOp,
-                              "could not build a hipDNN graph for this problem")};
-
-    const fe::Error error =
-        key.benchmark ? BuildBenchmarked(*graph, hipdnnHandle) : graph->build(hipdnnHandle);
-    if(!error.is_good())
-        return {nullptr, RecordHipdnnFailure(error)};
-
-    PlanCache().Insert(key, graph);
-    return {graph, miopenStatusSuccess};
+    return AcquireGraphWith<fe::graph::Graph>(
+        PlanCache(),
+        PlanMutex(),
+        key,
+        populate,
+        [&](fe::graph::Graph& graph) {
+            return key.benchmark ? BuildBenchmarked(graph, hipdnnHandle)
+                                 : graph.build(hipdnnHandle);
+        },
+        FailureOfHipdnnResult);
 }
 
 // One graph of a sequence, with the variant pack it runs on and the function
@@ -324,52 +336,51 @@ miopenStatus_t RunGraphs(HandleState& state,
                          size_t callerWorkspaceSize,
                          size_t scratchBytes)
 {
-    const std::lock_guard<std::mutex> lock(state.mutex);
-
-    size_t needed = 0;
-    for(const GraphRun& run : runs)
-    {
-        int64_t runNeeded = 0;
-        if(const fe::Error error = run.graph->get_workspace_size(runNeeded); !error.is_good())
-            return RecordHipdnnFailure(error);
-        needed = std::max(needed, static_cast<size_t>(runNeeded));
-    }
-
-    void* workspace = callerWorkspace;
-    void* scratch   = nullptr;
-    if(scratchBytes > 0)
-    {
-        // The scratch follows the graph's workspace in the handle's buffer.
-        const size_t offset = AlignScratch(needed);
-        if(!state.EnsureWorkspace(offset + scratchBytes))
-            return RecordFailure(miopenStatusAllocFailed, "hipDNN scratch allocation failed");
-        workspace = state.workspace;
-        scratch   = static_cast<char*>(state.workspace) + offset;
-    }
-    else if(needed > 0 && (callerWorkspace == nullptr || callerWorkspaceSize < needed))
-    {
-        if(!state.EnsureWorkspace(needed))
-            return RecordFailure(miopenStatusAllocFailed, "hipDNN workspace allocation failed");
-        workspace = state.workspace;
-    }
-
-    for(const GraphRun& run : runs)
-    {
-        if(scratch != nullptr && run.bindScratch != nullptr && *run.bindScratch)
-            (*run.bindScratch)(*run.variantPack, scratch);
-        const fe::Error error =
-            run.graph->execute(*state.hipdnnHandle, *run.variantPack, workspace);
-        // Recorded even when execute failed, because it may have queued work first.
-        const bool recorded = hipEventRecord(state.lastWork, state.stream) == hipSuccess;
-        if(!error.is_good())
-            return RecordHipdnnFailure(error);
-        if(!recorded)
-            return RecordFailure(miopenStatusInternalError,
-                                 "could not record the end of the hipDNN work on the MIOpen "
-                                 "handle's stream");
-    }
-
-    return RecordSuccess();
+    // With scratch, the scratch follows the graph's workspace in the handle's own buffer, so
+    // the caller's workspace is not offered and the query reports the whole buffer: the
+    // largest workspace, aligned, then the scratch.
+    size_t scratchOffset = 0;
+    return RunGraphWith(
+        state.mutex,
+        scratchBytes > 0 ? nullptr : callerWorkspace,
+        scratchBytes > 0 ? size_t{0} : callerWorkspaceSize,
+        [&](int64_t& needed) -> fe::Error {
+            needed = 0;
+            for(const GraphRun& run : runs)
+            {
+                int64_t runNeeded = 0;
+                if(fe::Error error = run.graph->get_workspace_size(runNeeded); !error.is_good())
+                    return error;
+                needed = std::max(needed, runNeeded);
+            }
+            if(scratchBytes > 0)
+            {
+                scratchOffset = AlignScratch(static_cast<size_t>(needed));
+                needed        = static_cast<int64_t>(scratchOffset + scratchBytes);
+            }
+            return {};
+        },
+        [&](size_t bytes) -> void* {
+            return state.EnsureWorkspace(bytes) ? state.workspace : nullptr;
+        },
+        [&](void* workspace) -> fe::Error {
+            void* const scratch =
+                scratchBytes > 0 ? static_cast<char*>(workspace) + scratchOffset : nullptr;
+            for(const GraphRun& run : runs)
+            {
+                if(scratch != nullptr && run.bindScratch != nullptr && *run.bindScratch)
+                    (*run.bindScratch)(*run.variantPack, scratch);
+                // A failed run stops the sequence; RunGraphWith records the end of whatever
+                // work was queued before the failure is reported.
+                if(fe::Error error =
+                       run.graph->execute(*state.hipdnnHandle, *run.variantPack, workspace);
+                   !error.is_good())
+                    return error;
+            }
+            return {};
+        },
+        [&] { return hipEventRecord(state.lastWork, state.stream) == hipSuccess; },
+        FailureOfHipdnnResult);
 }
 
 // One graph to look up or build, then run.
@@ -423,19 +434,25 @@ miopenStatus_t RunCachedRequests(miopenHandle_t handle,
 
 } // namespace
 
-miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason)
+miopenStatus_t
+RecordFailureTo(miopenStatus_t status, std::string_view reason, bool log, std::ostream& os)
 {
     LastError() = LastForwardedError{true, status};
-    if(ErrorLoggingEnabled())
+    if(log)
     {
         std::string line = "[MIOpen] [hipDNN-forwarded] ";
         line += miopenGetErrorString_impl(status);
         line += ": ";
         line += reason;
         line += '\n';
-        std::cerr << line;
+        os << line;
     }
     return status;
+}
+
+miopenStatus_t RecordFailure(miopenStatus_t status, std::string_view reason)
+{
+    return RecordFailureTo(status, reason, ErrorLoggingEnabled(), std::cerr);
 }
 
 miopenStatus_t ForwardingNotImplemented(const char* entryPoint)
@@ -480,6 +497,79 @@ bool LastForwardedFailure(miopenStatus_t* status) noexcept
         return false;
     *status = last.status;
     return true;
+}
+
+ScopedHipdnnCall::ScopedHipdnnCall() noexcept
+{
+    ReentryState& state = Reentry();
+    if(state.depth == 0)
+        state.rejected = nullptr;
+    ++state.depth;
+}
+
+ScopedHipdnnCall::~ScopedHipdnnCall() { --Reentry().depth; }
+
+bool ScopedHipdnnCall::ReentryDetected() const noexcept { return Reentry().rejected != nullptr; }
+
+bool InHipdnnCall() noexcept { return Reentry().depth > 0; }
+
+miopenStatus_t RejectReentrantCallTo(const char* entryPoint, bool trace, std::ostream& os) noexcept
+{
+    Reentry().rejected = entryPoint != nullptr ? entryPoint : "<null>";
+    try
+    {
+        if(trace)
+            ReportRouteDecision(entryPoint,
+                                ForwardingMode::Enabled,
+                                {Route::Rejected, RouteReason::ReentrantFromHipdnn},
+                                os);
+    }
+    catch(...)
+    {
+        // A lost trace line must not turn the rejection into an exception.
+    }
+    return miopenStatusInternalError;
+}
+
+miopenStatus_t RejectReentrantCall(const char* entryPoint) noexcept
+{
+    return RejectReentrantCallTo(entryPoint, RouteTraceEnabled(), std::cerr);
+}
+
+miopenStatus_t RecordReentryFailureTo(bool log, std::ostream& os) noexcept
+{
+#ifdef _WIN32
+    constexpr const char* publicLibrary  = "MIOpen.dll";
+    constexpr const char* privateLibrary = "MIOpen_private.dll";
+#else
+    constexpr const char* publicLibrary  = "libMIOpen.so";
+    constexpr const char* privateLibrary = "libMIOpen_private.so";
+#endif
+    try
+    {
+        const char* entryPoint = Reentry().rejected;
+        return RecordFailureTo(
+            miopenStatusInternalError,
+            std::string("a hipDNN plugin called the public MIOpen entry point ") +
+                (entryPoint != nullptr ? entryPoint : "<unknown>") +
+                " while hipDNN was running a forwarded call. The plugin was built against " +
+                publicLibrary + ", not " + privateLibrary +
+                ", so it would call back into hipDNN forever. Rebuild or reinstall the plugin "
+                "from the same build as MIOpen.",
+            log,
+            os);
+    }
+    catch(...)
+    {
+        // Building the reason ran out of memory, so record the status alone.
+        LastError() = LastForwardedError{true, miopenStatusInternalError};
+        return miopenStatusInternalError;
+    }
+}
+
+miopenStatus_t RecordReentryFailure() noexcept
+{
+    return RecordReentryFailureTo(ErrorLoggingEnabled(), std::cerr);
 }
 
 miopenStatus_t RunCachedGraph(miopenHandle_t handle,
@@ -545,16 +635,7 @@ void ReleaseHandle(miopenHandle_t handle) noexcept
             }
         }
 
-        std::unique_ptr<HandleState> state;
-        {
-            const std::lock_guard<std::mutex> lock(HandleMapMutex());
-            const auto found = HandleMap().find(handle);
-            if(found != HandleMap().end())
-            {
-                state = std::move(found->second);
-                HandleMap().erase(found);
-            }
-        }
+        EraseDestroyingOutsideLock(HandleMap(), HandleMapMutex(), handle);
     }
     catch(...)
     {

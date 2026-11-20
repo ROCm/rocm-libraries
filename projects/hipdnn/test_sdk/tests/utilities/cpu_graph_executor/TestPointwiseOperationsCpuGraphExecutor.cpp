@@ -178,27 +178,28 @@ private:
                 input1.fillTensorWithValue(params.in1TensorValue);
                 if(hasModeParameters(params))
                 {
-                    CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
-                        mode,
-                        output,
-                        input0,
-                        input1,
-                        params.reluLowerClip.value_or(0.0f),
-                        params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
-                        params.reluLowerClipSlope.value_or(0.0f),
-                        params.swishBeta.value_or(1.0f),
-                        params.eluAlpha.value_or(1.0f),
-                        params.softplusBeta.value_or(1.0f));
+                    CpuReferencePointwiseImpl<OutputType, double, Input0Type, Input1Type>::
+                        pointwiseCompute(
+                            mode,
+                            output,
+                            input0,
+                            input1,
+                            params.reluLowerClip.value_or(0.0f),
+                            params.reluUpperClip.value_or(std::numeric_limits<float>::max()),
+                            params.reluLowerClipSlope.value_or(0.0f),
+                            params.swishBeta.value_or(1.0f),
+                            params.eluAlpha.value_or(1.0f),
+                            params.softplusBeta.value_or(1.0f));
                 }
                 else
                 {
-                    CpuReferencePointwiseImpl<OutputType, Input0Type, Input1Type>::pointwiseCompute(
-                        mode, output, input0, input1);
+                    CpuReferencePointwiseImpl<OutputType, double, Input0Type, Input1Type>::
+                        pointwiseCompute(mode, output, input0, input1);
                 }
             }
             else if(hasModeParameters(params))
             {
-                CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+                CpuReferencePointwiseImpl<OutputType, double, Input0Type>::pointwiseCompute(
                     mode,
                     output,
                     input0,
@@ -211,7 +212,7 @@ private:
             }
             else
             {
-                CpuReferencePointwiseImpl<OutputType, Input0Type>::pointwiseCompute(
+                CpuReferencePointwiseImpl<OutputType, double, Input0Type>::pointwiseCompute(
                     mode, output, input0);
             }
 

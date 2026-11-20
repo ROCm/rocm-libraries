@@ -16,7 +16,6 @@
 // Compiled only into the public wrapper library; never installed.
 #pragma once
 
-#include <atomic>
 #include <cstddef>
 #include <iosfwd>
 #include <string>
@@ -37,8 +36,9 @@ enum class ForwardingMode
 // Where a wrapped public entry point is served.
 enum class Route
 {
-    Miopen, // the MIOpen implementation (the _impl symbol in libMIOpen_private.so)
-    Hipdnn, // forwarded to hipDNN
+    Miopen,   // the MIOpen implementation (the _impl symbol in libMIOpen_private.so)
+    Hipdnn,   // forwarded to hipDNN
+    Rejected, // refused: a hipDNN plugin re-entered the wrapper from inside hipDNN
 };
 
 // Why a call landed on the route it did. Carried alongside the route rather than
@@ -50,6 +50,9 @@ enum class RouteReason
     DisabledByEnv,      // MIOPEN_DISABLE_HIPDNN_FOR named it, or named *
     HipdnnUnavailable,  // hipDNN missing or reporting an unsupported version
     InForwardingSet,    // forwarded
+    // A hipDNN plugin called a forwarded entry point from inside hipDNN. Decided per call,
+    // so ResolveRouteWithReason never returns it; hipdnn::RejectReentrantCall reports it.
+    ReentrantFromHipdnn,
 };
 
 struct RouteDecision
@@ -192,43 +195,6 @@ void ReportForwardedCall(const char* entryPoint, std::ostream& diagnostics);
 // call log entry, so without this it would be missing from the log.
 void LogForwardedCall(const char* entryPoint) noexcept;
 
-// Marks the calling thread as running a forwarded call for the scope's lifetime.
-//
-// A forwarded call must not come back into this wrapper. It does when the hipDNN
-// MIOpen plugin was linked against libMIOpen.so instead of libMIOpen_private (an
-// older plugin installed next to this library): the plugin's call lands in the
-// stub again, which forwards again, and every level creates another hipDNN
-// handle until the device runs out of memory. ForwardingAllowed() sends such a
-// call to MIOpen instead.
-class ForwardingScope
-{
-public:
-    ForwardingScope() noexcept;
-    ~ForwardingScope();
-    ForwardingScope(const ForwardingScope&)            = delete;
-    ForwardingScope& operator=(const ForwardingScope&) = delete;
-
-    // True while a ForwardingScope is alive on the calling thread.
-    static bool Active() noexcept;
-
-private:
-    bool previous_;
-};
-
-// Writes one "[MIOpen] Warning: ..." line naming entryPoint as a call that
-// reached the wrapper while the same thread was already forwarding.
-void ReportNestedForwarding(const char* entryPoint, std::ostream& diagnostics);
-
-// False while ForwardingScope::Active(); the first refusal for `warned` reports
-// itself to diagnostics.
-bool ForwardingAllowed(const char* entryPoint,
-                       std::atomic<bool>& warned,
-                       std::ostream& diagnostics);
-
-// The same against one process-wide flag and std::cerr, so the warning is
-// written once per process.
-bool ForwardingAllowed(const char* entryPoint) noexcept;
-
 // Route::Hipdnn only when mode is Enabled AND entryPoint is in the set AND the
 // deny list does not name it. hipdnnAvailable false still routes away from
 // MIOpen: an enabled-but-unavailable hipDNN has to fail loudly, and a route back
@@ -282,6 +248,11 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // __func__: a stub cloned from its neighbour then asserts in a debug build
 // instead of silently never forwarding.
 //
+// The route is cached per entry point, but whether hipDNN is running on this thread is not,
+// so the Hipdnn branch checks that on every call. A call made from inside hipDNN would loop,
+// so it fails with miopenStatusInternalError (see hipdnn::RejectReentrantCall), and so does
+// the call that started hipDNN. Entry points served by MIOpen cannot loop and are not checked.
+//
 // Caching the route in a function-local static is safe because neither input
 // changes after startup (the mode is read from the environment once, the
 // forwarding set is compile-time). That keeps hot entry points such as
@@ -295,10 +266,6 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
 // Each route clears the last recorded hipDNN failure before the call, so a
 // callee that records none cannot leave the previous call's failure in place.
 //
-// A call that arrives while its thread is already forwarding is served by
-// MIOpen (see ForwardingScope). The check comes after the cached route, so the
-// MIOpen route pays nothing for it.
-//
 // Requires hipdnn_graph.hpp, for ClearForwardedFailure and
 // RecordCurrentException.
 #define MIOPEN_WRAPPER_FORWARD(fn, expr)                                        \
@@ -308,12 +275,12 @@ Route DispatchFromStub(const char* entryPoint, const char* enclosingFunction);
         {                                                                       \
             static const ::miopen::wrapper::Route miopen_wrapper_route_ =       \
                 ::miopen::wrapper::DispatchFromStub(#fn, __func__);             \
-            if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn &&     \
-               ::miopen::wrapper::ForwardingAllowed(#fn))                       \
+            if(miopen_wrapper_route_ == ::miopen::wrapper::Route::Hipdnn)       \
             {                                                                   \
+                if(::miopen::wrapper::hipdnn::InHipdnnCall())                   \
+                    return ::miopen::wrapper::hipdnn::RejectReentrantCall(#fn); \
                 ::miopen::wrapper::hipdnn::ClearForwardedFailure();             \
                 ::miopen::wrapper::LogForwardedCall(#fn);                       \
-                const ::miopen::wrapper::ForwardingScope miopen_wrapper_scope_; \
                 return (expr);                                                  \
             }                                                                   \
         }                                                                       \

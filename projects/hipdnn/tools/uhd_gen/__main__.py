@@ -86,6 +86,7 @@ from .lgbm_to_flatbuffer import (
     convert,
     resolve_training_date,
 )
+from .optional import feature_name, safe_signature
 from .promote import add_promote_arguments, run_promote
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 from . import score_transform
@@ -218,6 +219,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     add_size_arguments(size)
 
+    from .rewrite import add_rewrite_arguments, run_rewrite
+
+    rewrite = subparsers.add_parser(
+        "rewrite-signature",
+        help="read an installed UHD's optional features through value_or_default, "
+        "without retraining (RFC 0019 §6.7, §6.8 item 9)",
+    )
+    add_rewrite_arguments(rewrite)
+
     # Split off before the main parser sees flags it does not declare.
     if argv is None:
         argv = sys.argv[1:]
@@ -267,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_knobs(args)
     if args.command == "merge":
         return run_merge(args)
+    if args.command == "rewrite-signature":
+        return run_rewrite(args)
     code = _run_train(args)
     if code == 0:
         print(install_hint(args.output_dir, args.role, args.arch, args.uhd_id))
@@ -1333,14 +1345,33 @@ def _run_train(args: argparse.Namespace) -> int:
         if not isinstance(signature, list) or not signature:
             raise ValueError("features_signature must be a nonempty JSON array")
         signature = [parse_signature_entry(entry) for entry in signature]
+        # RFC 0019 §6.7 (absent is not zero) and §6.8 item 9: a feature a valid graph may leave
+        # unbound is read through value_or_default, so a row without it trains on the value the
+        # runtime reads.
+        # Wrapping turns a bare read into an expression, so the column check below must look at
+        # the signature as requested: a column no row publishes is a typo, not an absent value.
+        requested_columns = (
+            None
+            if any(isinstance(entry, dict) for entry in signature)
+            else {reference[1:] for reference in signature_references(signature)}
+        )
+        signature, wrapped = safe_signature(
+            signature, args.metric, args.feature_evaluator
+        )
+        if wrapped:
+            logger.info(
+                "Reading %d optional feature(s) through value_or_default: %s",
+                len(wrapped),
+                ", ".join(f"{item['reference']}={item['default']}" for item in wrapped),
+            )
         requested_signature = list(signature)
         references = signature_references(signature)
         if immediate:
             validate_signature(signature)
-        if not any(isinstance(entry, dict) for entry in signature):
+        if requested_columns is not None:
             # A raw reference is a column gather; expression inputs may be legally absent
             # (value_or_default/present), so the shared evaluator decides for those.
-            missing = {reference[1:] for reference in references} - set(df.columns)
+            missing = requested_columns - set(df.columns)
             if missing:
                 raise ValueError(f"Missing feature columns: {sorted(missing)}")
         if args.target not in df.columns:
@@ -1375,10 +1406,7 @@ def _run_train(args: argparse.Namespace) -> int:
             trained_against,
             evaluator_feature_semantics_revision(args.feature_evaluator),
         )
-        names = [
-            entry[1:] if isinstance(entry, str) else f"expression_{index}"
-            for index, entry in enumerate(signature)
-        ]
+        names = [feature_name(entry, index) for index, entry in enumerate(signature)]
         signature, names, matrix, categorical_encoding, pruned_hash, dropped = (
             _drop_constant_features(
                 df,

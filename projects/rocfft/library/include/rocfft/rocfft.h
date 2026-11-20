@@ -296,7 +296,8 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *
  *  Offset, stride, and distance for either input or output provided
  *  here is ignored if a field is set for the corresponding input or
- *  output.
+ *  output. Planar array types are not supported if a field is set for
+ *  either input or output.
  *  @note Non-zero offsets are not supported yet.
  * 
  *  @param[in, out] description description handle

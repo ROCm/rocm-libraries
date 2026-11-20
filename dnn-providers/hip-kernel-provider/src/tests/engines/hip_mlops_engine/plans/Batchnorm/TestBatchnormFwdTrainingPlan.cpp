@@ -141,6 +141,36 @@ TEST(TestBatchnormFwdTrainingParams, HandlesMeanVarianceMissing)
     EXPECT_FALSE(params.hasSaveMeanVariance());
 }
 
+TEST(TestBatchnormFwdTrainingParams, LeavesSavedStatisticsUnsetWhenBothVirtual)
+{
+    auto base = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph(
+        {1, 3, 14, 14}, {1, 3, 14, 14}, true);
+    auto builder = hipdnn_test_sdk::utilities::mutateGraph(
+        base, [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            auto* attrs = graph.nodes.at(0)->attributes.AsBatchnormAttributes();
+            for(auto& tensor : graph.tensors)
+            {
+                if(tensor->uid == attrs->mean_tensor_uid.value()
+                   || tensor->uid == attrs->inv_variance_tensor_uid.value())
+                {
+                    tensor->virtual_ = true;
+                }
+            }
+        });
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    auto* attrs = node.attributes_as_BatchnormAttributes();
+    ASSERT_NE(attrs, nullptr);
+
+    const BatchnormFwdTrainingParams params(*attrs, graph.getTensorMap());
+
+    EXPECT_FALSE(params.hasSaveMeanVariance());
+    EXPECT_EQ(params.mean(), nullptr);
+    EXPECT_EQ(params.invVariance(), nullptr);
+}
+
 TEST(TestBatchnormFwdTrainingParams, HasRunningStatsReturnsFalseWhenNotProvided)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingGraph();

@@ -278,9 +278,10 @@ class TestGfx1250Policy(unittest.TestCase):
         self.assertEqual(d.split_k, 56)
 
     def test_slice_depth_term_binds(self):
-        # 50400-deep reduction: slices may not go below 2048 elements -> 24.
-        d = self._pick(128, 9 * 128, 42 * 30 * 40, dtype_d="fp32")
-        self.assertEqual(d.split_k, 24)
+        # 5040-deep reduction: slices may not go below 256 elements -> 19
+        # (the fill term alone would give 56).
+        d = self._pick(128, 9 * 128, 42 * 120, dtype_d="fp32")
+        self.assertEqual(d.split_k, 19, d.reason)
 
     def test_dtype_caps(self):
         # A 4-tile grid on a long reduction asks for far more than any cap:
@@ -292,16 +293,16 @@ class TestGfx1250Policy(unittest.TestCase):
 
     def test_fp16_policy(self):
         # fp16 has its own gfx1250 policy: fill to 1024 CTAs (2048 grouped),
-        # K slices down to 512, up to its accuracy cap of 97.
+        # K slices down to 64 (512 grouped), up to its accuracy cap of 97.
         # Fill: base grid 2 x 18 = 36 tiles -> floor(1024 / 36) = 28 (fp32
         # fills to 2048 -> 56).
         d = self._pick(128, 9 * 128, 42 * 120 * 160, dtype_d="fp16")
         self.assertEqual(d.split_k, 28, d.reason)
-        # Slice depth: a 12288-deep reduction allows 12288 / 512 = 24 slices
-        # (fp32's 2048-element floor allows only 6).
-        d = self._pick(64, 9 * 64, 12288, dtype_d="fp16")
+        # Slice depth: a 1536-deep reduction allows 1536 / 64 = 24 slices
+        # (fp32's 256-element floor allows only 6).
+        d = self._pick(64, 9 * 64, 1536, dtype_d="fp16")
         self.assertEqual(d.split_k, 24, d.reason)
-        self.assertEqual(self._pick(64, 9 * 64, 12288, dtype_d="fp32").split_k, 6)
+        self.assertEqual(self._pick(64, 9 * 64, 1536, dtype_d="fp32").split_k, 6)
         # Grouped: 4 groups of a 1 x 3 tile grid -> floor(2048 / 12) = 170,
         # capped at 97.
         d = self._pick(16, 9 * 16, 42 * 240 * 320, tile=64, groups=4, dtype_d="fp16")
@@ -382,7 +383,22 @@ class TestGfx1250Policy(unittest.TestCase):
             self.assertEqual((d.base_grid, d.split_k), (tiles, expected))
 
     def test_tiny_reduction_does_not_split(self):
-        self.assertEqual(self._pick(128, 9 * 128, 1024).split_k, 1)
+        # Under one 256-element slice.
+        self.assertEqual(self._pick(128, 9 * 128, 255).split_k, 1)
+
+    def test_grouped_keeps_the_deeper_slice_floor(self):
+        # Shallower slices regressed grouped shapes (ResNeXt g32), so a grouped
+        # launch keeps the 2048 (fp16: 512) floor while an ungrouped one slices
+        # down to 256 (fp16: 64). The fill term does not bind in any case here.
+        for groups, dtype_d, wg_K, expected in (
+            (1, "fp32", 6272, 24),  # 6272 / 256
+            (2, "fp32", 6272, 3),  # 6272 / 2048
+            (1, "fp16", 3136, 49),  # 3136 / 64
+            (2, "fp16", 3136, 6),  # 3136 / 512
+        ):
+            with self.subTest(groups=groups, dtype_d=dtype_d):
+                d = self._pick(32, 288, wg_K, tile=32, groups=groups, dtype_d=dtype_d)
+                self.assertEqual(d.split_k, expected, d.reason)
 
     def test_grouped_fill_target(self):
         # 4096-CTA grouped target over 2 tiles x 32 groups = 64 CTAs -> 64,

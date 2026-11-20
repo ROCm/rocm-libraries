@@ -495,6 +495,30 @@ TEST(TestGfx950AttentionUnified3DMatchers, PairsTheLseOnKernelWithTheStatsGraph)
     EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
 }
 
+TEST(TestGfx950AttentionUnified3DMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(matchGraph(spec).has_value()) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(matchGraph(spec).has_value()) << data_objects::EnumNameDataType(computeType);
+    }
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

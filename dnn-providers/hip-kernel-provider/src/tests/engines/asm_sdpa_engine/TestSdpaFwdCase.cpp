@@ -86,7 +86,8 @@ namespace
                                    hip_kernel_provider_common::BatchMode::GROUP,
                                    0,
                                    256,
-                                   32};
+                                   32,
+                                   512};
     const GraphTestCase tc(config, "GroupMode", "gfx942");
     const auto built = asm_sdpa_engine::buildSdpaFwdGraph(tc);
     const auto result = built.graph->validate();

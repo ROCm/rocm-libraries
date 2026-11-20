@@ -488,6 +488,16 @@ namespace TensileLite
         virtual std::string description() const;
 
         /**
+         * Create a single, non-transposed 1-by-k times k-by-1 GEMM with packed
+         * operands and scalar C/D. A/B and their compute-input types use
+         * inputType; C/D use outputType. Alpha/beta types are set separately.
+         */
+        static ContractionProblemGemm GEMM_InnerProduct(rocisa::DataType inputType,
+                                                        rocisa::DataType outputType,
+                                                        size_t           k,
+                                                        double           beta);
+
+        /**
         * Create a ContractionProblemGemm representing a batched GEMM, specifying
         * strides between matrices.
         */

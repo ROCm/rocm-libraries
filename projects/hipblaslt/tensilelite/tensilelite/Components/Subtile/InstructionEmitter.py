@@ -640,11 +640,17 @@ class InstructionEmitter:
             return sorted(set(m.values()))
 
         aIds, bIds = _unique_ids('A'), _unique_ids('B')
-        # All A/B tiles share the same vgprs-per-lane count and K layout,
-        # so the i-th vgpr of every tile gets the same mask.
+        # BF16 A/B tiles share the same vgprs-per-lane count and K layout,
+        # so the i-th vgpr of every tile gets the same mask. Other types use
+        # one shared mask, and with mixed MX operands (e.g. MXFP4 x MXFP8) a
+        # B tile can hold more vgprs than an A tile, so size for the largest.
         refTiles = self.vgprTilesA if aIds else self.vgprTilesB
         refIds = aIds or bIds
         vgprPerInUnroll = len(list(refTiles[refIds[0]])) if refIds else 0
+        if not isBF16:
+            vgprPerInUnroll = max([vgprPerInUnroll]
+                                  + [len(list(self.vgprTilesA[t])) for t in aIds]
+                                  + [len(list(self.vgprTilesB[t])) for t in bIds])
 
         with writer.allocTmpSgpr(laneSGPRCount, alignment=laneSGPRCount, tag="InstructionEmitter_mask_k_tmpSgpr") as tmpSgprInfo:
             maskSgpr = tmpSgprInfo.idx
@@ -714,15 +720,16 @@ class InstructionEmitter:
             # valid residual lanes (~0.5% wrong outputs at K%MIK!=0).
             #
             # Skip the data K-mask for the MX paths that the gfx950 corruption
-            # actually hits: all multi-DU MX kernels, and all 8-bit-float MX
-            # (MXFP8) kernels regardless of unroll depth. GPU-validated on
+            # actually hits: all multi-DU MX kernels, and all MX kernels with an
+            # 8-bit-float (MXFP8) operand regardless of unroll depth. GPU-validated on
             # gfx950 (full-element, K%MIK!=0 tails): single-DU MXFP8 fails with
             # the mask and passes without it, while MXFP4 (4-bit) passes either
             # way -- so single-DU MXFP4 keeps the mask and stays develop-
             # identical, but single-DU MXFP8 must skip it like multi-DU does.
             _emit_mask_multi_du = (self.config.numUnroll.get('A', 1) > 1
                                    or self.config.numUnroll.get('B', 1) > 1)
-            _data_is_8bit_float = kernel["ProblemType"]["DataTypeA"].is8bitFloat()
+            _data_is_8bit_float = (kernel["ProblemType"]["DataTypeA"].is8bitFloat()
+                                   or kernel["ProblemType"]["DataTypeB"].is8bitFloat())
             _skip_data_kmask = self.hasScale and (_emit_mask_multi_du
                                                   or _data_is_8bit_float)
             if not _skip_data_kmask:

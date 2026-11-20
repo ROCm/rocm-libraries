@@ -69,15 +69,15 @@ field on the tiled kernel specs is a declared `KnobAxis` in `axes.py`
 (`_GFX950_2D_AXES`, `_GFX942_2D_AXES`, `_3D_AXES`); `test_tuning_space.py`
 fails if a kernel field is on no axis. Axes are ordered prerequisites-first,
 and the space is walked depth-first with the kernel's own spec validator
-pruning illegal prefixes, plus `UnifiedSpace.validate` on gfx950 2D (the LDS
-budget and the padded-K / aliased-Q rule, which the tiled 2D validator does
-not model). There is no size cap: the full space is millions of
-specs per shape on the transposed paths, so `sweep_space` is a lazy stream and
-`sample_space(req, n, seed)` draws `n` random legal specs per candidate. Held
-out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They reject
-any request that does not pin both `algorithm="unified_tuning"` and their own
-`spec_id` before constructing a spec, so normal dispatch does not pay the
-enumeration cost and the historical winner is unchanged. Sweeps probe them
+pruning illegal prefixes (on gfx950 2D it refuses a padded K slot that holds
+Q), plus `UnifiedSpace.validate` on gfx950 2D (the LDS budget, which the tiled
+2D validator does not model). There is no size cap: the full space is millions
+of specs per shape on the transposed paths, so `sweep_space` is a lazy stream
+and `sample_space(req, n, seed)` draws `n` random legal specs per candidate.
+Held out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They
+reject any request that does not pin both `algorithm="unified_tuning"` and
+their own `spec_id` before constructing a spec, so normal dispatch does not pay
+the enumeration cost and the historical winner is unchanged. Sweeps probe them
 through `opt_in_probe` and execute the returned `AttentionTuningSpec`, which
 also owns its build, cache key, and launch grid.
 
@@ -149,8 +149,8 @@ configuration). Knobs that compile to the default are dropped (default
 values, restated policies, knobs the body does not read, a gfx950 KQ pad the
 kernel lays out as none); illegal ones are refused with the reason
 (`KNOWN_WRONG_KNOBS`, fields on no axis, codepath-fixed knobs,
-kernel-validator rejections, and on gfx950 2D the LDS budget and padded K with
-aliased Q). So one kernel has one id, and a knob pin cannot reach a
+kernel-validator rejections such as a padded K slot holding Q, and on gfx950
+2D the LDS budget). So one kernel has one id, and a knob pin cannot reach a
 configuration a sweep would not.
 
 gfx950 dense is two algorithms, one per kernel body: `attention_dense_grid`
@@ -237,6 +237,26 @@ stored in this tree. A downstream tuning store must drop its old
 `gfx942_dense` ids and re-sweep. `TUNING_ID_VERSION` is not bumped: the
 defaults fingerprint already separates the old and new ids, and
 `lds_num_buffers` was untunable on gfx942 before, so no stored id names it.
+
+**Tuning-id migration for gfx950 2D fp8 K and the zero-width KQ pad.** Two
+gfx950 2D changes touch stored ids; no such id is stored in this tree.
+
+- fp8 K in LDS (`kv_storage_dtype="fp8e4m3"`, `use_fp8_mfma_qk`) on the 32x32
+  QK paths: ids hash the knobs, not the emitted kernel, so these ids keep
+  their value. The kernels behind them changed: the non-transposed path (both
+  engines) and the transposed path (C++ engine only) read the fp8 K bytes as
+  bf16 without `k_scale` and computed wrong scores, and now read fp8 and scale
+  it. A stored measurement of such a kernel is of the broken one: revalidate
+  and re-measure it.
+- A pin that sets `use_kq_lds_pad` with `kq_lds_pad_halves=0` has both knobs
+  dropped as inert: a zero-width pad builds the unpadded kernel, so it takes
+  that kernel's id. An id recorded with the two knobs kept is no longer
+  produced; replaying it raises `PinRefused` (its knobs canonicalize to the
+  unpadded id) instead of building anything. Replace it with the unpadded id.
+
+`TUNING_ID_VERSION` is not bumped: a bump re-keys every family's ids, while
+here the only kernels that changed under an unchanged id are ones that
+computed wrong output, and the dropped zero-width ids are refused already.
 
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each

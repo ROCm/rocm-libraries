@@ -213,7 +213,7 @@ def _fp8D16UsesHighWord(isCvtHighBits, inTailLoop, tailPacksPairs):
 
 from math import ceil, floor, log, prod
 from contextlib import contextmanager
-from copy import deepcopy
+from copy import copy as shallowCopy, deepcopy
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import List, Mapping, NamedTuple, Optional, Tuple, Union
@@ -6162,7 +6162,7 @@ class KernelWriterAssembly(KernelWriter):
   # K_pad = 1 for A/B, 256 for MX scale (matches host rearrangePaddedMXScaleLayout).
   # Precondition: upstream Srd+2 is computeLoadSrd's tile-boundary limit
   # (useFixedSrd2 + non-isConstUnitStride); PGR/mainloop GR_INC only touch Srd+0/+1.
-  # tPs must share kPad and bpe_K_byteStride (delta emitted once, reused).
+  # tPs must share kPad (delta_K emitted once); bpe_K_byteStride may differ.
   ##############################################################################
   def computeTailLoopSrdLimit(self, kernel, tPs):
     module = Module("computeTailLoopSrdLimit")
@@ -6184,8 +6184,8 @@ class KernelWriterAssembly(KernelWriter):
     MX_PAD_K = 256
     depthU = int(kernel["DepthU"])
 
-    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad and bpeForLimit must
-    # agree across tPs, otherwise bail. kRowStride is None when K is the
+    # Gather per-tc (kPad, bpeForLimit, kRowStride). kPad must agree across
+    # tPs, otherwise bail. kRowStride is None when K is the
     # contiguous dimension and the unroll stride when it is not (TLU=1), where
     # the window set up in computeLoadSrd spans DepthU K rows.
     tcKpadBpeList = []
@@ -6224,11 +6224,13 @@ class KernelWriterAssembly(KernelWriter):
           kRowStride = self.strideRef(tc, kernel["ProblemType"]["IndexUnroll"])
       tcKpadBpeList.append((tc, kPad, bpeForLimit, kRowStride))
 
-    # Joint emission requires uniform kPad/bpe across all tPs (true for A/B
-    # symmetric configs and for MXSA/MXSB scale pairs in the gauntlet).
+    # Joint emission requires uniform kPad across all tPs (true for A/B and for
+    # MXSA/MXSB scale pairs). bpe may differ between A and B with mixed MX
+    # operands (e.g. MXFP4 x MXFP8); delta_K is shared and delta_bytes is
+    # computed per bpe.
     kPad = tcKpadBpeList[0][1]
     bpeForLimit = tcKpadBpeList[0][2]
-    if any(kp != kPad or bp != bpeForLimit for _, kp, bp, _ in tcKpadBpeList):
+    if any(kp != kPad for _, kp, _, _ in tcKpadBpeList):
       return module
     tcs = [t for t, _, _, _ in tcKpadBpeList]
     isMx = tcs[0] in ("MXSA", "MXSB")
@@ -6257,15 +6259,15 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SSubU32(dst=sgpr(stmp), src0=depthU, src1=sgpr(loopCounterName),
                            comment="delta_K = DepthU - K_rem"))
 
-      for tc, _, _, kRowStride in tcKpadBpeList:
+      for tc, _, bpe, kRowStride in tcKpadBpeList:
         # delta_bytes = delta_K [* K-row stride] * bpe (handles bpe=0.5 via SShr 1)
         if kRowStride is None:
-          module.add(scalarMultiplyBpe(sbytes, stmp, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, stmp, bpe,
                                        comment="delta_bytes"))
         else:
           module.add(SMulI32(dst=sgpr(sbytes), src0=sgpr(stmp), src1=kRowStride,
                              comment="delta_K rows * %s K-row stride" % tc))
-          module.add(scalarMultiplyBpe(sbytes, sbytes, bpeForLimit,
+          module.add(scalarMultiplyBpe(sbytes, sbytes, bpe,
                                        comment="delta_bytes"))
         module.add(SSubU32(dst=sgpr("Srd%s+2" % tc), src0=sgpr("Srd%s+2" % tc),
                            src1=sgpr(sbytes),
@@ -10631,8 +10633,21 @@ class KernelWriterAssembly(KernelWriter):
             # PGR=2 and EPS and no SuppressNoLoadLoop case, need to jump to EvenExit
             jumpLabel = Label(self.rapLabel("LoopEnd%s_evenexit%s%s"%(loopChar, strNta, strNtb)), "" )
 
-        module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
-                  comment="do not enter Loop%s"%loopChar ))
+        if self._needsLoopSkipPGRSync(kernel):
+          # The token planner walks the loop body linearly, so the first NGLL is
+          # planned as if entered from the loop exit. Skipping the loop enters it
+          # straight from the prologue, with the second prefetched tile still in
+          # flight: drain it and sync before the NGLL reads it.
+          continueLabel = Label(self.labels.getUniqueNamePrefix("AfterLoopSkipPGRSync"), "")
+          module.add(SCBranchSCC0(labelName=continueLabel.getLabelName(), \
+                    comment="enter Loop%s, skip loop-skip PGR synchronization"%loopChar))
+          module.add(self._wait(kernel, tPA, tPB, 0, -1, -1, "wait for prefetched PGR TDM loads"))
+          module.add(self._syncThreads(kernel, "loop-skip PGR bypass sync", skipForceWaitcnt0=True))
+          module.add(SBranch(labelName=jumpLabel.getLabelName(), comment="do not enter Loop%s"%loopChar))
+          module.add(continueLabel)
+        else:
+          module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
+                    comment="do not enter Loop%s"%loopChar ))
 
       # A one-trip loop has no preceding closeLoop.  Prefetch the next
       # persistent tile before entering its sole/final trip.
@@ -20254,6 +20269,81 @@ class KernelWriterAssembly(KernelWriter):
     vgprActCopy: int = -1
     calleeLabelsByGwvw: Optional[Mapping[int, Tuple[str, ...]]] = None
 
+  def pureGemmEpilogueTerms(self, kernel, gsuLimit, gsuBackup):
+    """Runtime tests that select the pure-gemm store pass, or None if the kernel has none.
+
+    The pass is a copy of the final (GSU1) store pass with bias, scaleAlphaVec and
+    activation compiled out and no beta variant. It is generated only with CompactLoopStore
+    (keeps the copy small). Beta alone is not worth a copy: the beta==0 tree is already it.
+    """
+    pt = kernel["ProblemType"]
+    if not kernel["CompactLoopStore"] or not (gsuLimit > 1 or gsuBackup == 1):
+      return None
+    if kernel.get("UseSubtileImpl") or self.states.subtileFusedFullTileStore:
+      return None
+    if self.states.useGateResidual or self.states.FactorDim == 3 or kernel["StoreRemapVectorWidth"]:
+      return None
+    if kernel["AdaptiveGemmGSUA"] or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
+      return None
+    if pt["Gradient"] or pt["UseE"] or pt["UseScaleAB"] or pt["UseScaleCD"] or pt["OutputAmaxD"] or pt["Sparse"]:
+      return None
+    # A fixed activation is always applied; only 'all' has a runtime "none".
+    activationType = pt["ActivationType"].value
+    if activationType not in ("none", "all", "hipblaslt_all"):
+      return None
+    # Device-scalar alpha reads alpha through the ScaleAlphaVec pointer.
+    if pt["UseScaleAlphaVec"] and scaleAlphaSupportsDeviceScalar(pt["UseScaleAlphaVec"]):
+      return None
+    terms = []
+    if self.states.useBias == DataDirection.READ:
+      terms.append("AddressBias")
+    if pt["UseScaleAlphaVec"]:
+      terms.append("AddressScaleAlphaVec")
+    if activationType != "none" and kernel["ActivationFused"]:
+      terms.append("ActivationType")
+    if not terms:
+      return None
+    if pt["UseBeta"]:
+      terms.insert(0, "Beta")
+    return terms
+
+  def pureGemmEpilogueFlag(self, kernel, terms, flagSgpr):
+    """Set sgpr *flagSgpr* to 1 when every term says "feature off", else 0.
+
+    Must be emitted while the pointers are still defined (the prelude undefines
+    AddressScaleAlphaVec), so persistent kernels hold the flag until the trees.
+    """
+    module = Module("PureGemmEpilogueFlag")
+    module.addComment1("Pure-gemm store pass: %s all off -> flag" % ", ".join(terms))
+    module.add(SMovB32(dst=sgpr(flagSgpr), src=1, comment="pure-gemm flag"))
+    for term in terms:
+      if term == "Beta":
+        if self.states.bpeCinternal <= self.states.bpr:
+          module.add(self.getSCMPKInstruction("EQU32", "Beta", 0, comment="Beta == 0 ?"))
+        else:
+          with self.allocTmpSgpr(1, tag="pureGemmBetaTmp") as tmpSgprInfo:
+            module.add(SMovB32(dst=sgpr(tmpSgprInfo.idx), src=sgpr("Beta+0"), comment="tmp = Beta[0]"))
+            for i in range(1, self.states.bpeCinternal // self.states.bpr):
+              module.add(SOrB32(dst=sgpr(tmpSgprInfo.idx), src0=sgpr("Beta+%u" % i), src1=sgpr(tmpSgprInfo.idx), comment="tmp |= Beta[%u]" % i))
+            module.add(self.getSCMPKInstruction("EQU32", tmpSgprInfo.idx, 0, comment="Beta == 0 ?"))
+      elif term == "ActivationType":
+        module.add(self.getSCMPKInstruction("EQU32", "ActivationType", 0, comment="activationType == none ?"))
+      else:
+        module.add(SCmpEQU64(src0=sgpr(term, 2), src1=0, comment="%s == 0 (null) ?" % term))
+      module.add(SCSelectB32(dst=sgpr(flagSgpr), src0=sgpr(flagSgpr), src1=0, comment="%s set -> not pure" % term))
+    return module
+
+  def pureGemmEpilogueBranch(self, flagSgpr, pureLabel):
+    """Branch to *pureLabel* when the flag is set, else fall through."""
+    module = Module("PureGemmEpilogueBranch")
+    notPure = Label(self.labels.getNameInc("GW_NotPure"), "")
+    module.add(SCmpEQU32(src0=sgpr(flagSgpr), src1=1, comment="pure-gemm flag == 1 ?"))
+    module.add(SCBranchSCC0(labelName=notPure.getLabelName(), comment="not pure -> full epilogue"))
+    with self.allocTmpSgpr(3, tag="pureGemmBranchTmp") as tmpSgprInfo:
+      module.add(SLongBranchPositive(pureLabel, tmpSgprInfo, comment="pure-gemm store pass"))
+    module.add(notPure)
+    return module
+
   def globalWriteElements(self, kernel, tPA, tPB, vectorWidths_2, vectorWidths_1, elements_2, elements_1,
                           noGSUBranch=False,
                           applyAlpha=True, # defaults to generating *=alpha codes
@@ -20353,8 +20443,18 @@ class KernelWriterAssembly(KernelWriter):
         else:
           module.add(SCBranchSCC1(labelName=gsuLabel.getLabelName(), comment="branch if GSU == 1"))
 
-    gsuLimitRange = range(0, gsuLimit) # generate GSU1 and GSUM label
-    for gsuLimitIdx in gsuLimitRange:
+    # Passes: GSU0 (if any), the full final pass, then (CLS only) a pure-gemm copy of the
+    # final pass that the full pass branches to when beta/bias/scaleAlphaVec/activation are off.
+    pureTerms = self.pureGemmEpilogueTerms(kernel, gsuLimit, gsuBackup)
+    pureLabel = Label(self.labels.getNameInc("GW_Pure"), "") if pureTerms else None
+    pureEndLabel = Label(self.labels.getNameInc("GW_PureEnd"), "") if pureTerms else None
+    # Persistent kernels route through storeBranches (fixup/partials) first, so the pure
+    # pass can only be entered after it; otherwise enter before the bias/scale prelude.
+    pureAtTrees = bool(pureTerms) and isPersistent(kernel)
+    gsuPasses = [(idx, False) for idx in range(gsuLimit)] # generate GSU1 and GSUM label
+    if pureTerms:
+      gsuPasses.append((gsuLimit - 1, True))
+    for gsuLimitIdx, isPurePass in gsuPasses:
       # Redirect GSU0 output to deferred module, keeping original label as stub
       if deferGSU0 and gsuLimitIdx == 0:
         # Keep original GW_B0 label inline as a stub with jump to deferred
@@ -20396,7 +20496,8 @@ class KernelWriterAssembly(KernelWriter):
           vectorWidths = vectorWidths_2
           elements     = elements_2
         else:
-          module.add(gsuLabel)
+          if not isPurePass:
+            module.add(gsuLabel)
           self.states.bpeCexternal = self.states.bpeCexternalGSU1
           self.states.useBias = useBiasBackup
           kernel["LdsOffsetBias"] = kernel["LdsOffsetBiasNonGSU"]
@@ -20422,6 +20523,22 @@ class KernelWriterAssembly(KernelWriter):
           kernel["LdsOffsetBias"] = kernel["LdsOffsetBiasNonGSU"]
           vectorWidths = vectorWidths_1
           elements     = elements_1
+      pureRestore = None
+      pureFlagHeld = False
+      if isPurePass:
+        module.add(pureLabel)
+        module.addComment1("Pure-gemm store pass: beta, bias, scaleAlphaVec and activation compiled out")
+        # Work on a copy so a failed generation cannot leave the shared ProblemType altered.
+        pureRestore = (kernel["ProblemType"], self.states.useBias, kernel["ActivationFuncCall"])
+        pureProblemType = shallowCopy(kernel["ProblemType"])
+        pureProblemType.state = dict(kernel["ProblemType"].state)
+        pureProblemType["UseBias"] = 0
+        pureProblemType["UseScaleAlphaVec"] = 0
+        pureProblemType["ActivationType"] = ActivationType("none")
+        kernel["ProblemType"] = pureProblemType
+        self.states.useBias = DataDirection.NONE
+        kernel["ActivationFuncCall"] = False
+        betas = [False]
       '''
       Post process for loop
       '''
@@ -20441,6 +20558,15 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
           module.add(self.setSgprToInUseState("AddressScaleAlphaVec"))
           module.add(self.setSgprToInUseState("SrdScaleAlphaVec"))
+
+      if pureTerms and not isPurePass and gsuLimitIdx == gsuLimit - 1:
+        if pureAtTrees:
+          pureFlagSgpr = self.sgprPool.checkOut(1, tag="globalWriteElements_pureFlag", preventOverflow=False)
+          module.add(self.pureGemmEpilogueFlag(kernel, pureTerms, pureFlagSgpr))
+        else:
+          with self.allocTmpSgpr(1, tag="globalWriteElements_pureFlagTmp") as pureFlagTmp:
+            module.add(self.pureGemmEpilogueFlag(kernel, pureTerms, pureFlagTmp.idx))
+            module.add(self.pureGemmEpilogueBranch(pureFlagTmp.idx, pureLabel))
 
       isSingleKernel = ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') or isPersistent(kernel)
       # Issue read scale A/B value for later use
@@ -20815,7 +20941,7 @@ class KernelWriterAssembly(KernelWriter):
       gateModes = (True, False) if self.states.useGateResidual else (False,)
       writeLabels = {}
       for emitGateResidual in gateModes:
-        gateSuffix = "_G%u" % int(emitGateResidual) if self.states.useGateResidual else ""
+        gateSuffix = ("_G%u" % int(emitGateResidual) if self.states.useGateResidual else "") + ("_P" if isPurePass else "")
         writeLabels[emitGateResidual] = {}
         for beta in betas:
           writeLabels[emitGateResidual][beta] = {}
@@ -21023,7 +21149,7 @@ class KernelWriterAssembly(KernelWriter):
       skPartialsLabel = Label(label=self.labels.getNameInc("SK_Partials"), comment="")
       # GSU0 temporarily selects the ordinary policy; resolve this store branch's
       # strategy rather than reusing the kernel's allocation capabilities.
-      processingComponent = Component.TileProcessingStrategy.find(self) if isPersistent(kernel) else None
+      processingComponent = Component.TileProcessingStrategy.find(self) if isPersistent(kernel) and not isPurePass else None
       # PostLoopStoreInNll: the FUSED NLL store runs only for a StreamK full-tile
       # OWNER (front guard: StreamKLocalStart==0 && StreamKLocalEnd==ItersPerTile),
       # which computed the entire tile and writes D directly -- no workspace
@@ -21123,7 +21249,7 @@ class KernelWriterAssembly(KernelWriter):
           }
         for emitGateResidual in gateModes:
           gateLabels = writeLabels[emitGateResidual]
-          gateSuffix = "_G%u" % int(emitGateResidual) if self.states.useGateResidual else ""
+          gateSuffix = ("_G%u" % int(emitGateResidual) if self.states.useGateResidual else "") + ("_P" if isPurePass else "")
           for beta in betas:
             gateLabels[beta][globalWriteMode] = {}
             gateLabels[beta][globalWriteMode]["Label"] = Label(self.labels.getNameInc("GW_B%u%s_%s" % (beta, gateSuffix, globalWriteMode)), "")
@@ -21137,6 +21263,15 @@ class KernelWriterAssembly(KernelWriter):
                 labels["NonEdgeEnd"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u%s_%s_NonEdgeEnd" % (beta, factorDim, vectorWidth, gateSuffix, globalWriteMode)), "")
                 labels["Then"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u%s_%s_Then" % (beta, factorDim, vectorWidth, gateSuffix, globalWriteMode)), "")
                 labels["Else"] = Label(self.labels.getNameInc("GW_B%u_FD%u_VW%u%s_%s_Else" % (beta, factorDim, vectorWidth, gateSuffix, globalWriteMode)), "")
+
+      if pureAtTrees and not isPurePass and gsuLimitIdx == gsuLimit - 1:
+        module.add(self.pureGemmEpilogueBranch(pureFlagSgpr, pureLabel))
+        if arrivalFixup:
+          # The last arriving part runs writePartials, then falls back through SK_Store into
+          # this branch, so writePartials (generated below) must not reuse the flag sgpr.
+          pureFlagHeld = True
+        else:
+          self.sgprPool.checkIn(pureFlagSgpr)
 
       # Generate beta modules for each global write mode
       activationLabelListBackup = activationLabelList
@@ -21255,6 +21390,10 @@ class KernelWriterAssembly(KernelWriter):
           self._assertStillCheckedOut(liveAcrossPartials, "writePartials (StreamK arrival fixup)")
         module.add(processingComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
 
+      if pureFlagHeld:
+        self.sgprPool.checkIn(pureFlagSgpr)
+        pureFlagHeld = False
+
       if activationLabelList and arrivalFixup:
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
@@ -21294,6 +21433,13 @@ class KernelWriterAssembly(KernelWriter):
         else:
           with self.allocTmpSgpr(3, tag="globalWriteElements_tmpSgprInfo2") as tmpSgprInfo:
             module.add(SLongBranchPositive(Label("KernelEnd", ""), tmpSgprInfo))
+      if isPurePass:
+        kernel["ProblemType"], self.states.useBias, kernel["ActivationFuncCall"] = pureRestore
+        module.add(pureEndLabel)
+      elif pureTerms and gsuLimitIdx == gsuLimit - 1:
+        # The pure pass follows the full final pass.
+        with self.allocTmpSgpr(3, tag="globalWriteElements_tmpSgprInfoPure") as tmpSgprInfo:
+          module.add(SLongBranchPositive(pureEndLabel, tmpSgprInfo, comment="full store pass done, skip pure pass"))
 
     kernel["GlobalSplitU"] = gsuBackup
     kernel["_GlobalAccumulation"] = gsuAccumBackup

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <map>
 #include <optional>
 #include <ostream>
 #include <set>
@@ -36,6 +37,7 @@
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/tolerance/ConvFwdDynamicTolerance.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -934,6 +936,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
     try
     {
         _inputs = _deps.policy.benchmarkReference ? _bundle->loadInputs() : _bundle->loadTensors();
+        _inputsFromRecipes = false;
     }
     catch(const std::exception& e)
     {
@@ -1104,6 +1107,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     }
 
     _inputs = std::move(inputs);
+    _inputsFromRecipes = true;
     return checkRaggedLayouts(lengthUids);
 }
 
@@ -1533,11 +1537,96 @@ VerificationOutcome
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
-    const auto toleranceFor
-        = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-              const auto value = tolerance::defaultTolerance(wrapper, dataType);
-              return gradingForTensor(currentTestName(), label, value.atol, value.rtol);
-          };
+    //
+    // A half, bfloat16 or float output of a convolution-forward graph is graded with the dynamic
+    // tolerance computed from the graph and its input statistics instead of the fixed per-op
+    // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
+    // inputs read from golden blobs are scanned on the host, once; a scalar baked into the graph
+    // is read from the graph (convFwdErrorScale() asks this lookup only for the rest). The scale
+    // is that of one output, computed the first time the output is graded, and only when it
+    // needs it. The tolerance lookup gets the label of an output, not its uid (a uid is not
+    // stable between a C++ graph test and the bundle captured from it): the label names the
+    // output here, and an output that shares its label with another has the per-op default.
+    std::map<int64_t, std::optional<tolerance::InputMoments>> momentsCache;
+    const auto momentsFor = [&](int64_t uid) -> std::optional<tolerance::InputMoments> {
+        const auto cached = momentsCache.find(uid);
+        if(cached != momentsCache.end())
+        {
+            return cached->second;
+        }
+        std::optional<tolerance::InputMoments> moments;
+        if(_inputsFromRecipes)
+        {
+            moments = tolerance::recipeMoments(_inputFillRecipes.fill(uid));
+        }
+        else if(const auto it = _inputs.find(uid); it != _inputs.end())
+        {
+            moments
+                = tolerance::hostMoments(*it->second, wrapper.getTensorMap().at(uid)->data_type());
+        }
+        momentsCache.emplace(uid, moments);
+        return moments;
+    };
+    std::map<int64_t, std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>>
+        convScales;
+    const auto outputUidOf = [&](const std::string& label) -> std::optional<int64_t> {
+        std::optional<int64_t> found;
+        for(const auto uid : _bundle->outputTensorUids)
+        {
+            if(bundle::tensorLabel(uid, *wrapper.getTensorMap().at(uid)) != label)
+            {
+                continue;
+            }
+            if(found.has_value())
+            {
+                return std::nullopt;
+            }
+            found = uid;
+        }
+        return found;
+    };
+    const auto toleranceFor = [&](const std::string& label,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+        std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> dynamic;
+        const auto outputUid = tolerance::hasDynamicToleranceFor(dataType)
+                                   ? outputUidOf(label)
+                                   : std::optional<int64_t>();
+        if(outputUid.has_value())
+        {
+            auto convScale = convScales.find(*outputUid);
+            if(convScale == convScales.end())
+            {
+                convScale
+                    = convScales
+                          .emplace(*outputUid,
+                                   tolerance::convFwdErrorScale(wrapper, momentsFor, *outputUid))
+                          .first;
+            }
+            if(convScale->second.has_value())
+            {
+                hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+                if(dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+                   && _deps.policy.testSettings != nullptr)
+                {
+                    coefficients.summationOrder
+                        = _deps.policy.testSettings->convFwdSummationOrder("float");
+                }
+                dynamic
+                    = tolerance::convFwdOutputTolerance(*convScale->second, dataType, coefficients);
+            }
+        }
+        if(dynamic.has_value())
+        {
+            return gradingForTensor(currentTestName(),
+                                    label,
+                                    _deps.policy.testSettings,
+                                    static_cast<float>(dynamic->atol),
+                                    static_cast<float>(dynamic->rtol));
+        }
+        const auto value = tolerance::defaultTolerance(wrapper, dataType);
+        return gradingForTensor(
+            currentTestName(), label, _deps.policy.testSettings, value.atol, value.rtol);
+    };
 
     // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
     const auto dump = bundle::findSdpaRngDump(wrapper);

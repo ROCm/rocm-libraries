@@ -16,6 +16,7 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestSdpaModuleCache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestSdpaFwdCase.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaConfigHelpers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/AsmSdpaFwdLaunchLimitRows.cpp
 )
 
 # Add include path for codegen-generated headers (e.g., asm_fmha_v3_fwd_configs.hpp)

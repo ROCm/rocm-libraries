@@ -47,6 +47,9 @@
 // reach handle->properties.
 #include "rocsparse_handle.hpp"
 
+#include <ostream>
+#include <sstream>
+
 namespace rocsparse_ut
 {
     // Temporarily shrink the grid.x limit that the launches clamp against, and
@@ -72,5 +75,35 @@ namespace rocsparse_ut
         ScopedMaxGridSizeX(const ScopedMaxGridSizeX&) = delete;
 
         ScopedMaxGridSizeX& operator=(const ScopedMaxGridSizeX&) = delete;
+    };
+
+    // Turn on the debug log and send it to `sink` for the lifetime of the object, for the
+    // same reason as ScopedMaxGridSizeX: the handle must not keep pointing at the sink
+    // after a failed assertion ends the test.
+    struct ScopedDebugLog
+    {
+        rocsparse_handle     handle;
+        rocsparse_layer_mode saved_mode;
+        std::ostream*        saved_os;
+        std::ostringstream   sink;
+
+        explicit ScopedDebugLog(rocsparse_handle h)
+            : handle(h)
+            , saved_mode(h->layer_mode)
+            , saved_os(h->log_debug_os)
+        {
+            handle->layer_mode = rocsparse_layer_mode(saved_mode | rocsparse_layer_mode_log_debug);
+            handle->log_debug_os = &sink;
+        }
+
+        ~ScopedDebugLog()
+        {
+            handle->layer_mode   = saved_mode;
+            handle->log_debug_os = saved_os;
+        }
+
+        ScopedDebugLog(const ScopedDebugLog&) = delete;
+
+        ScopedDebugLog& operator=(const ScopedDebugLog&) = delete;
     };
 }

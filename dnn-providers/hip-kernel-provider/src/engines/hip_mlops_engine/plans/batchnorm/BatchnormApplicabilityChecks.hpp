@@ -11,6 +11,19 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_inference_attributes_variance_ext_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 
+namespace hip_kernel_provider::batchnorm
+{
+
+// True when a training graph carries a saved mean and inv_variance that are both virtual and
+// requests no running-statistics update: the pair is then treated as not requested.
+bool hasUnrequestedSavedPair(
+    const hipdnn_flatbuffers_sdk::data_objects::BatchnormAttributes& bnAttr,
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap);
+
+} // namespace hip_kernel_provider::batchnorm
+
 namespace hip_kernel_provider
 {
 

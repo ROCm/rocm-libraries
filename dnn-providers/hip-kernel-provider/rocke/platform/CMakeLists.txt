@@ -486,9 +486,9 @@ if(ROCKE_INSTALL_TESTS)
     # LDS analyzer and dsl_probes tests (load tools from the adjacent dsl_doc
     # source tree), the arch-table parity test (reads cpp/core/arch/data.cpp),
     # the MMA catalog cross-check unit tests (load tools/ from the source tree),
-    # and the arch-domain artifact unit tests. The latter remain
-    # source-only units, while the full regeneration sweep is installed below as
-    # its own CTest with an independent timeout and resource policy.
+    # and the arch-domain artifact/probe unit tests. The host-only support-policy
+    # units are installed with the rest of tests/tools; the full regeneration
+    # sweep has its own CTest timeout and resource policy.
     # Include run_all.py: installed runner unit tests import it as a dependency.
     # Linux detector fixtures link a stdin wrapper against the production archive.
     # Keep it with the pytest assets so TheRock's test artifact captures it even
@@ -531,9 +531,9 @@ if(ROCKE_INSTALL_TESTS)
               "rocKE: top-level run_checks.py not found; skipping its test-only install")
     endif()
 
-    # Test-only implementation for the installed arch-domain reproduction gate.
-    # Keep it outside the production package: CTest owns the external compiler
-    # sweep, while package resources provide the committed columns being checked.
+    # Test-only implementation shared by the installed support-policy units and
+    # arch-domain reproduction gate. Keep it outside the production package:
+    # CTest owns the compiler sweep; pytest checks the policy without one.
     # tests/conftest.py also points rocke.tests.ir_validity at this copy, so the
     # installed pytest runs compile lowered IR with the same tool.
     install(FILES
@@ -873,6 +873,43 @@ if(ROCKE_INSTALL_TESTS)
       endforeach()
     endforeach()
 
+  endif()
+
+  # TheRock starts every installed entry on every hipkernelprovider CI shard. A
+  # pytest entry runs only its shard's share when its command starts with
+  # ${_ROCKE_INSTALLED_PYTEST}; otherwise it runs whole on every shard. Stop the
+  # configure for such an entry. An entry runs pytest when its command runs
+  # "-m pytest" or its program is pytest (or py.test). The explicit gates,
+  # _ROCKE_EXPLICIT_PYTEST_GATES in library/tests/ctest_lists.cmake, stop on a
+  # partial run, so they must not load the shard plugin.
+  string(REGEX MATCHALL "add_test\\([^\n]*" _rocke_adds "${_ROCKE_INSTALLED_CTEST_ENTRIES}")
+  set(_rocke_bad_pytest_entries "")
+  foreach(_rocke_add IN LISTS _rocke_adds)
+    if(NOT _rocke_add MATCHES
+       "^add_test\\([A-Za-z0-9_]+ (\"?([^ \"]*[/\\\\])?(pytest|py\\.test)(\\.exe)?\"?[ )]|[^\n]* -m pytest[ )])")
+      continue()
+    endif()
+    string(REGEX REPLACE "^add_test\\(([A-Za-z0-9_]+) .*" "\\1" _rocke_name "${_rocke_add}")
+    if(_rocke_name IN_LIST _ROCKE_EXPLICIT_PYTEST_GATES)
+      if(_rocke_add MATCHES "rocke\\.tests\\.ctest_shard")
+        list(APPEND _rocke_bad_pytest_entries
+             "${_rocke_name} (an explicit gate must not load the shard plugin)")
+      endif()
+    else()
+      string(FIND "${_rocke_add}" "add_test(${_rocke_name} ${_ROCKE_INSTALLED_PYTEST}"
+             _rocke_prefix_pos)
+      if(NOT _rocke_prefix_pos EQUAL 0)
+        list(APPEND _rocke_bad_pytest_entries "${_rocke_name}")
+      endif()
+    endif()
+  endforeach()
+  if(_rocke_bad_pytest_entries)
+    list(JOIN _rocke_bad_pytest_entries "\n  " _rocke_bad_pytest_entries)
+    message(FATAL_ERROR
+            "Each installed rocKE pytest entry must start its command with "
+            "\${_ROCKE_INSTALLED_PYTEST}, so that each hipkernelprovider CI shard "
+            "runs only its share of the entry's tests (see rocke/TESTING.md):\n"
+            "  ${_rocke_bad_pytest_entries}")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)

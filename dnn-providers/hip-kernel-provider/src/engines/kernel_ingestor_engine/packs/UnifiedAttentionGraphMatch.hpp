@@ -609,6 +609,15 @@ inline std::optional<MatchedAttributes>
                                << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
         return std::nullopt;
     }
+    // The kernels accumulate and keep the softmax statistics in FLOAT.
+    if(!sdpa_graph::computesInFloat(context))
+    {
+        HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{engine, "compute_data_type"})
+                               << "compute data type "
+                               << context.graph.getNodeWrapper(0).computeDataType()
+                               << " is not supported; the kernels accumulate in FLOAT");
+        return std::nullopt;
+    }
     // `implementation` is an execution-strategy hint. AUTO leaves the choice to the provider.
     if(attributes.implementation() != data_objects::AttentionImplementation::AUTO)
     {

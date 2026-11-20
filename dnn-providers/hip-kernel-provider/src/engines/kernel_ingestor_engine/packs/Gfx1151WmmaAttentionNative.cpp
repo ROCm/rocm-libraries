@@ -1010,6 +1010,12 @@ bool bindCommon(std::string_view engine,
         logDecline(engine, unserved->first, unserved->second);
         return false;
     }
+    // The kernels accumulate and keep the softmax statistics in FLOAT.
+    if(!sdpa_graph::computesInFloat(context))
+    {
+        logDecline(engine, "compute_type", "the kernels accumulate in FLOAT");
+        return false;
+    }
     if(!mask.has_value() || !scale.has_value()
        || (mmaCoreMode != data_objects::DataType::UNSET
            && mmaCoreMode != data_objects::DataType::FLOAT

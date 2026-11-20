@@ -197,9 +197,7 @@ rocsparse_status rocsparse::gcsc2csr(rocsparse_handle     handle,
     case rocsparse_datatype_f16_r:
     case rocsparse_datatype_bf16_r:
     {
-        // LCOV_EXCL_START
-        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-        // LCOV_EXCL_STOP
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
     }
     case rocsparse_datatype_u32_r:
     {
@@ -268,6 +266,16 @@ rocsparse_status rocsparse::spmat_csc2csr(rocsparse_handle            handle,
                                           void*                       buffer_)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                              source_->col_type != target_->row_type);
+    RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                              source_->row_type != target_->col_type);
+    if(target_->val_data != nullptr && source_->const_val_data != nullptr)
+    {
+        RETURN_ROCSPARSE_ERROR_IF(rocsparse_status_not_implemented,
+                                  source_->data_type != target_->data_type);
+    }
 
     RETURN_IF_ROCSPARSE_ERROR(
         rocsparse::gcsc2csr(handle,

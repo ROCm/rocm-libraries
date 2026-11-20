@@ -100,6 +100,17 @@ namespace hipblaslt_bench_options
         return v;
     }
 
+    int64_t& extra_check_failures()
+    {
+        static int64_t v = 0;
+        return v;
+    }
+
+    int64_t reported_failures()
+    {
+        return verification_failures() + extra_check_failures();
+    }
+
     int verification_exit_code(int ret)
     {
         if(ret != 0 || !verify_strict() || verification_failures() == 0)

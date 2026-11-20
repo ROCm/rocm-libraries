@@ -12,6 +12,7 @@
 #include "MiopenConvDescriptor.hpp"
 #include "MiopenConvPlanBuilder.hpp"
 #include "MiopenUtils.hpp"
+#include "engines/plans/MiopenConvApplicabilityChecks.hpp"
 #include "engines/plans/MiopenConvBwdPlan.hpp"
 #include "engines/plans/MiopenConvFwdPlan.hpp"
 #include "engines/plans/MiopenConvWrwPlan.hpp"
@@ -344,9 +345,8 @@ void buildPlanWrw(const HipdnnMiopenHandle& handle,
 
 } // namespace
 
-bool MiopenConvPlanBuilder::isApplicable(
-    const HipdnnMiopenHandle& handle,
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+bool MiopenConvPlanBuilder::isGraphApplicable(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
     // Execute-time override shapes can diverge from the compile-time dims this
     // builder matched exactly; the plan bakes those dims into the MIOpen
@@ -366,11 +366,29 @@ bool MiopenConvPlanBuilder::isApplicable(
         return false;
     }
 
+    if(conv_applicability::hasPassByValueTensor(opGraph.getTensorMap()))
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Convolution plan builder does not support pass-by-value tensors");
+        return false;
+    }
+
     if(opGraph.getNode(0).compute_data_type()
        != hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
     {
         HIPDNN_PLUGIN_LOG_ERROR("Convolution plan builder only supports nodes with an fp32 "
                                 "compute_data_type");
+        return false;
+    }
+
+    return true;
+}
+
+bool MiopenConvPlanBuilder::isApplicable(
+    const HipdnnMiopenHandle& handle,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
+{
+    if(!isGraphApplicable(opGraph))
+    {
         return false;
     }
 

@@ -36,7 +36,7 @@
  *     serves every other;
  *   - a causal sliding window of graph left_bound L (L keys, diagonal included) is the
  *     kernel's sliding_window L, and every other band is declined;
- *   - the sliding-window zero-trip guard and tile divisibility are per candidate;
+ *   - tile divisibility is per candidate, and a keyless window is served without stats;
  *   - the stats (LSE) output is bound, and served only by a candidate built with
  *     emit_lse, while the gfx950 twin still declines every stats output;
  *   - the cold ranking orders every knob combination, policy arms first.
@@ -394,25 +394,26 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesARaggedOperand)
     }
 }
 
-TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey)
+// A window that leaves the last query rows no key is served without a stats output: the
+// kernel zeroes those rows. A graph that binds stats is declined (see
+// KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats; windowLeavesRowsWithoutKeys says why).
+TEST(TestGfx942AttentionDenseGraphMatch, ServesAWindowThatLeavesQueryRowsNoKeyWithoutStats)
 {
     // Row q sees keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows see none.
-    // The pack declines them (windowLeavesRowsWithoutKeys says why). One key short of that
-    // is served. 4096/512 also fails the per-block guard at 256/64 (the last block's window
-    // starts at key tile 58 of 8): on every tile-divisible shape, which kernel match checks
-    // first, a block-level failure is a row-level one, so the block guard is reached only
-    // through TestGfx942AttentionDenseGeometry.
-    for(const auto& [seqLenQ, seqLenKv, served] : {std::tuple{512, 256, false},
-                                                   std::tuple{4096, 512, false},
-                                                   std::tuple{512, 384, false},
-                                                   std::tuple{512, 385, true},
-                                                   std::tuple{512, 512, true}})
+    // 4096/512 also puts the last block's window past the final key tile at 256/64 (key
+    // tile 58 of 8): the kernel match must serve that too, see
+    // ServesAWindowWhoseLastBlockSeesNoKeyTileWithoutStats.
+    for(const auto& [seqLenQ, seqLenKv] : {std::pair{512, 256},
+                                           std::pair{4096, 512},
+                                           std::pair{512, 384},
+                                           std::pair{512, 385},
+                                           std::pair{512, 512}})
     {
         SCOPED_TRACE(std::to_string(seqLenQ) + "/" + std::to_string(seqLenKv));
         auto spec = windowGraph(128);
         spec.seqLenQ = seqLenQ;
         spec.seqLenKv = seqLenKv;
-        EXPECT_EQ(matchGraph(spec).has_value(), served);
+        EXPECT_TRUE(matchGraph(spec).has_value());
 
         // Without a window every row keeps key 0.
         auto causal = baseGraph();
@@ -607,7 +608,10 @@ TEST(TestGfx942AttentionDenseGraphMatch, KeepsDecliningAWindowThatLeavesRowsNoKe
     spec.leftBound = 128;
     spec.seqLenQ = 512;
     spec.seqLenKv = 384;
-    EXPECT_EQ(loggedDecline(spec).cause, "mask");
+    const auto decline = loggedDecline(spec);
+    EXPECT_EQ(decline.cause, "mask");
+    EXPECT_NE(decline.detail.find("not yet supported with a stats output"), std::string::npos)
+        << decline.detail;
 
     spec.seqLenKv = 385;
     EXPECT_TRUE(matchGraph(spec).has_value());
@@ -710,6 +714,28 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowOnlyFromTheCandidateBuilt
     EXPECT_FALSE(matches(baseGraph(), w128));
     // left_bound 129 asks for 129 keys, which no block_n-aligned build carries.
     EXPECT_FALSE(matches(windowGraph(129), w128));
+}
+
+// A candidate serves a window whose last query block sees no key tile: at 256/64 tiles,
+// seqlen_q 4096 over seqlen_kv 512 with a 128-key window puts that block's window past the
+// final key tile. The kernel zeroes those rows, so a graph without stats is served by the
+// candidate built for the window, for the narrowest and a wide window. (A graph that binds
+// stats is declined by the graph match, see KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats.)
+TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowWhoseLastBlockSeesNoKeyTileWithoutStats)
+{
+    KernelSpec w128;
+    w128.slidingWindow = 128;
+    auto spec = windowGraph(128);
+    spec.seqLenQ = 4096;
+    spec.seqLenKv = 512;
+    EXPECT_TRUE(matches(spec, w128));
+
+    KernelSpec w512;
+    w512.slidingWindow = 512;
+    auto wide = windowGraph(512);
+    wide.seqLenQ = 4096;
+    wide.seqLenKv = 1024;
+    EXPECT_TRUE(matches(wide, w512));
 }
 
 TEST(TestGfx942AttentionDenseKernelMatch, DivisibilityIsAgainstTheCandidatesOwnTile)

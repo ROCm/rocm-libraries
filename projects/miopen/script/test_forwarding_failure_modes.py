@@ -364,9 +364,7 @@ class ForwardingFailureModesTest(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                line.endswith(
-                    "could not set the MIOpen handle's stream on the hipDNN handle"
-                )
+                line.endswith("could not create a hipDNN handle")
                 for line in run.lines_starting(FORWARDED_FAILURE)
             ),
             run.stderr,

@@ -1082,7 +1082,6 @@ namespace rocalution
             new_col[k] = idx;
             new_val[k] = vec[ai];
             ++k;
-            ++aj;
         }
 
         for(; aj < row_offset[ai + 1]; ++aj)

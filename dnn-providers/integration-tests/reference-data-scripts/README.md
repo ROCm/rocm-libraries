@@ -391,3 +391,38 @@ python dnn-providers/integration-tests/reference-data-scripts/generate_sdpa_bwd_
 checked-in sweeps or the TOML block differ from the generator output. It also
 checks determinism, the legality of every written case, the all-pairs
 coverage, the TOML rows and the traceability of `metadata.plan_items`.
+
+## `generate_conv_fwd_bundles.py`
+
+Writes the convolution-forward sweeps from the convolution forward test plan
+(`docs/test-plans/convolution-fwd.md`). Nobody edits those bundles by hand.
+
+| File | Holds |
+|---|---|
+| `conv_fwd_plan.py` | axes, legality, shape catalog (S, L, M, H, A, X), level ceilings, activations, value domains, purpose rule, trimmed products (`TRIMS`) |
+| `generate_conv_fwd_bundles.py` | level rules, graph templates, sweep writer, report |
+| `conv_fwd_corpus.json` | the R set: the corpus pick, its selection rule and its provenance |
+
+From the `rocm-libraries/` repo root:
+
+```bash
+python dnn-providers/integration-tests/reference-data-scripts/generate_conv_fwd_bundles.py \
+  --bundle-dir dnn-providers/integration-tests/integration-test-bundles \
+  --report
+```
+
+- It writes `{quick,standard,comprehensive,full}/ConvolutionFwd/Default` and
+  `{quick,standard,comprehensive,full}/ConvolutionFwdPointwise/{Default,Variant2..Variant6}`,
+  each with `graph.template.json`, `sweep.json` and `support.json`. A topology
+  that has no case at a level gets no directory there.
+- Before it writes, it removes the `ConvolutionFwd` and `ConvolutionFwdPointwise`
+  directories of all four levels and writes them again. Nothing else under the
+  bundle directory changes.
+- It never creates a claim. A `support.json` keeps the claims of the case ids the
+  generator writes and drops every other claim; a sweep with no claims gets an
+  empty sidecar. Claims are harvested with `--write-support-claims`, and that
+  harvest is outside the repository (ALMIOPEN-3231).
+- `--report` prints the counts by level and topology, by purpose and size class,
+  the distinct geometries, the largest case of each level, and the cases the
+  generator dropped or trimmed.
+- `--dry-run` writes nothing and prints the same report.

@@ -45,6 +45,7 @@
 #include <Tensile/DataTypes.hpp>
 #include <Tensile/MXScaleFormat.hpp>
 #include <Tensile/Predicates.hpp>
+#include <Tensile/ReadMostlyMap.hpp>
 #include <Tensile/Task.hpp>
 #include <Tensile/Utils.hpp>
 
@@ -141,9 +142,10 @@ namespace TensileLite
         X_MACRO(SKItersPerWG) \
         X_MACRO(SKGrid) \
         X_MACRO(SKTilesAndSplit) \
-        /* Packed batch dimension divisors */ \
-        X_MACRO(MagicNumberSize) \
-        X_MACRO(MagicShiftSize) \
+        X_MACRO(MagicNumberSizeAlg1) \
+        X_MACRO(MagicShiftSizeAlg1) \
+        X_MACRO(MagicNumberSizeAlg2) \
+        X_MACRO(MagicShiftSizeAlg2) \
         /* Epilogue control args */ \
         X_MACRO(BiasType) \
         X_MACRO(StrideBias) \
@@ -467,7 +469,7 @@ namespace TensileLite
         dim3                   macroTile;
         int                    magicDivAlg            = 1;
         int                    MathClocksUnrolledLoop = 0;
-        std::array<int, 4>     matrixInstruction;
+        std::array<int, 4>     matrixInstruction{};
         int                    Multicast                  = 0;
         int                    nonTemporalA               = 0;
         int                    nonTemporalB               = 0;
@@ -494,7 +496,7 @@ namespace TensileLite
         int                    temporalHintA              = 0;
         int                    temporalHintB              = 0;
         int                    temporalHintD              = 0;
-        dim3                   threadTile;
+        dim3                   threadTile{0, 0, 0};
         TileProcessingStrategy tileProcessingStrategy        = TileProcessingStrategy::None;
         int                    UnrollLoopSwapGlobalReadOrder = 0;
         int                    UnrollMajorLDSA               = -1;
@@ -503,7 +505,7 @@ namespace TensileLite
         int                    VectorWidthA                  = 1;
         int                    VectorWidthB                  = 1;
         int                    WavefrontSize                 = 0;
-        std::array<int, 2>     waveGroup;
+        std::array<int, 2>     waveGroup{};
         size_t                 waveNum                  = 0;
         int                    WaveSeparateGlobalReadA  = 0;
         int                    WaveSeparateGlobalReadB  = 0;
@@ -1001,8 +1003,9 @@ namespace TensileLite
         using Problem             = ContractionProblemGemm;
         using Inputs              = ContractionInputs;
         using GroupedInputs       = ContractionGroupedInputs;
-        using WGMParamsCache      = CacheMap<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
-        using StaggerUParamsCache = CacheMap<std::tuple<size_t, size_t, size_t>, Problem>;
+        using WGMParamsCache
+            = InsertOnceCache<std::tuple<int32_t, size_t, size_t, size_t>, Problem>;
+        using StaggerUParamsCache = InsertOnceCache<std::tuple<size_t, size_t, size_t>, Problem>;
 
         /**
          * Indicate a solution's matching type
@@ -1013,6 +1016,7 @@ namespace TensileLite
             Range, // RangeMatching
             FreeSize, // FreeSizeMatching
             GridBased, // GridBasedMatching
+            MeshBased, // MeshBasedMatching
             Prediction, // PredictionMatching
             Experimental, // ExperimentalStreamK or ExperimentalMLP
             Others, // Default
@@ -1627,7 +1631,6 @@ namespace TensileLite
 
         uint32_t magicNumberAlg1(uint32_t x, uint32_t* magicShift) const;
         uint32_t magicNumberAlg2(uint32_t x, uint32_t* magicShift) const;
-        uint32_t magicNumber(int magicDivAlg, uint32_t x, uint32_t* magicShift) const;
         uint32_t smallMagicNumber(uint32_t x) const;
 
         std::tuple<int32_t, size_t, size_t, size_t> calculateAutoWGM(Problem const&  problem,

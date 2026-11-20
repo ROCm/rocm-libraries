@@ -209,6 +209,8 @@ _imp(
         "chiplet_transform_chunked_runtime",
         "super_tile_swizzle",
         "super_tile_swizzle_dynamic",
+        "xcd_remap",
+        "xcd_remap_plane",
         "Autotuner",
         "AutotuneConfig",
         "AutotuneKey",
@@ -760,6 +762,7 @@ from rocke.helpers import (
     NUM_XCDS_MI350X,
     chiplet_transform_chunked,
     chiplet_transform_chunked_runtime,
+    xcd_remap,
 )
 
 
@@ -770,6 +773,7 @@ def t_chiplet() -> None:
     chiplet_transform_chunked(b, wgid, num_wgs=512, num_xcds=8, chunk_size=64)
     n = b.param("n_wgs", I32)
     chiplet_transform_chunked_runtime(b, wgid, num_wgs=n, num_xcds=8)
+    xcd_remap(b, wgid, num_wgs=n, num_xcds=8, mode="contiguous")
     lower_kernel_to_llvm(b.kernel, arch="gfx950")
 
 

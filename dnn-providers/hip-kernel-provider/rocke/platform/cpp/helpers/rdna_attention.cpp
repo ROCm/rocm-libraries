@@ -1517,18 +1517,21 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
             flat.insert(flat.end(), row.begin(), row.end());
         Val local_max = tree(flat, rocke_b_fmax, rocke_b_fmax3);
         Val tile_max = rocke_b_fmax(b, local_max, permx16_f32(local_max));
-        Val skip = NULL, m_new;
+        Val skip = NULL, within = NULL, m_new;
         if(cfg->lazy_rescale)
         {
+            /* Each row keeps its max on its own scores only (rows stay
+             * independent of the wave's other rows); the wave skips the O/l
+             * rescale when every row keeps it. */
             Val d = rocke_b_fsub(b, tile_max, m_old);
             Val dm = rocke_b_fmul(b, d, c);
             Val th = rocke_b_const_f32(b, k_lazy_rescale_threshold);
-            Val within = rocke_b_fcmp(b, "ole", dm, th);
+            within = rocke_b_fcmp(b, "ole", dm, th);
             Val sel = rocke_b_select(b, within, c0, c1);
             Val any_out = rocke_b_wave_any(b, sel);
             skip = rocke_b_cmp_eq(b, any_out, c0);
             Val mx = rocke_b_fmax(b, m_old, tile_max);
-            m_new = rocke_b_select(b, skip, m_old, mx);
+            m_new = rocke_b_select(b, within, m_old, mx);
         }
         else
             m_new = rocke_b_fmax(b, m_old, tile_max);
@@ -1558,6 +1561,13 @@ rocke_status_t rocke_rdna_attention_fwd_body(rocke_ir_builder_t* b,
         {
             Val f = rocke_b_fma(b, m_old, c, neg_mc);
             alpha = rocke_b_exp2_fast(b, f);
+        }
+        if(within != NULL)
+        {
+            /* Exactly 1 for a row that kept its max (fma(m, c, -(m * c)) is the
+             * product's rounding error, not 0), so the wave's rescale leaves it. */
+            Val one = rocke_b_const_f32(b, 1.0);
+            alpha = rocke_b_select(b, within, one, alpha);
         }
         Vals flat_p;
         for(const Vals& row : ps)

@@ -822,13 +822,14 @@ hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle,
  *
  *  \details
  *  Enables or disables uniform summation order for subsequent GEMMs on
- *  this handle. ``0`` off, ``1`` on (default). See
+ *  this handle. ``0`` off, ``1`` on. The default is ``1``, except on gfx11,
+ *  gfx120x, and gfx942, where it is ``0``. See
  *  ``HIPBLASLT_MATMUL_DESC_UNIFORM_SUMMATION_ORDER_EXT``.
  *
  *  @param[in]
  *  handle                     hipBLASLt library context.
  *  @param[in]
- *  uniformSummationOrder      ``0`` (off) or ``1`` (on, default).
+ *  uniformSummationOrder      ``0`` (off) or ``1`` (on).
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         value stored.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.
@@ -843,12 +844,12 @@ hipblasStatus_t hipblasLtSetUniformSummationOrder(hipblasLtHandle_t handle,
  *
  *  \details
  *  Returns the value previously programmed via
- *  ``hipblasLtSetUniformSummationOrder``. ``1`` if never set.
+ *  ``hipblasLtSetUniformSummationOrder``, or the device default if never set.
  *
  *  @param[in]
  *  handle                     hipBLASLt library context.
  *  @param[out]
- *  uniformSummationOrder      receives the previously stored value (``1`` if never set).
+ *  uniformSummationOrder      receives the previously stored value (the device default if never set).
  *
  *  \retval HIPBLAS_STATUS_SUCCESS         value returned.
  *  \retval HIPBLAS_STATUS_NOT_INITIALIZED \p handle is null / uninitialized.

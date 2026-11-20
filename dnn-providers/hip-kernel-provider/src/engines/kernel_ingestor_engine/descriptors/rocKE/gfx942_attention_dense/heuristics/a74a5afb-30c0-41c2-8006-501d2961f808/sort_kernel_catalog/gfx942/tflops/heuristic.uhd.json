@@ -1,0 +1,105 @@
+{
+  "version": "1.0",
+  "id": "18bb432e-d871-4290-9ae8-f5111aaf2ffe",
+  "name": "hipkernel:Gfx942AttentionDense kernel ranker (L2, gfx942, tflops)",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$kernel.block_m",
+    "$kernel.block_n",
+    "$kernel.causal_diag_split",
+    "$kernel.lds_k_group_pad",
+    "$kernel.lds_row_pad",
+    "$kernel.nonpersist_decode",
+    "$kernel.persist_decode",
+    "$kernel.persistent",
+    "$kernel.pv_priority",
+    "$kernel.use_cfvst",
+    "$kernel.use_exp2_fast",
+    "$kernel.v_reg_prefetch",
+    "$gfx942_attention_dense.causal",
+    {
+      "value_or_default": [
+        "$graph.nodes[0].generate_stats",
+        false
+      ]
+    },
+    "$graph.nodes[0].k.data_type",
+    "$graph.nodes[0].k.dims[0]",
+    "$graph.nodes[0].k.dims[1]",
+    "$graph.nodes[0].k.dims[2]",
+    "$graph.nodes[0].k.dims[3]",
+    "$graph.nodes[0].k.numel",
+    "$graph.nodes[0].k.strides[0]",
+    "$graph.nodes[0].k.strides[1]",
+    "$graph.nodes[0].k.strides[2]",
+    "$graph.nodes[0].o.data_type",
+    "$graph.nodes[0].o.dims[0]",
+    "$graph.nodes[0].o.dims[1]",
+    "$graph.nodes[0].o.dims[2]",
+    "$graph.nodes[0].o.dims[3]",
+    "$graph.nodes[0].o.numel",
+    "$graph.nodes[0].o.strides[0]",
+    "$graph.nodes[0].o.strides[1]",
+    "$graph.nodes[0].o.strides[2]",
+    "$graph.nodes[0].q.data_type",
+    "$graph.nodes[0].q.dims[0]",
+    "$graph.nodes[0].q.dims[1]",
+    "$graph.nodes[0].q.dims[2]",
+    "$graph.nodes[0].q.dims[3]",
+    "$graph.nodes[0].q.numel",
+    "$graph.nodes[0].q.strides[0]",
+    "$graph.nodes[0].q.strides[1]",
+    "$graph.nodes[0].q.strides[2]",
+    "$graph.nodes[0].v.data_type",
+    "$graph.nodes[0].v.dims[0]",
+    "$graph.nodes[0].v.dims[1]",
+    "$graph.nodes[0].v.dims[2]",
+    "$graph.nodes[0].v.dims[3]",
+    "$graph.nodes[0].v.numel",
+    "$graph.nodes[0].v.strides[0]",
+    "$graph.nodes[0].v.strides[1]",
+    "$graph.nodes[0].v.strides[2]"
+  ],
+  "features_hash": "sha256:b939daf2b8502016",
+  "trained_against": {
+    "ued": {
+      "id": "a74a5afb-30c0-41c2-8006-501d2961f808",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "daac46c8-97fb-4012-b00c-500f0bf3b955",
+      "revision": "1.0"
+    },
+    "umd": [
+      {
+        "id": "c1a8caf0-42aa-4852-a967-23328e1f6eb7",
+        "revision": "1.0"
+      }
+    ],
+    "feature_semantics_revision": 1
+  },
+  "objective": "max",
+  "score": {
+    "metric": "tflops",
+    "calibrated": true,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "model.bin",
+    "hash": "c61528925c7a9e15c7e1a318992d95357524a08708e31d7bf0237b9b8f318b45"
+  },
+  "categorical_encoding": {
+    "$kernel.nonpersist_decode": {
+      "bt_hkv_minor": 0,
+      "hq_minor_swz": 1,
+      "qb_minor": 2
+    },
+    "$kernel.persist_decode": {
+      "auto": 0,
+      "bt_hkv_minor": 1,
+      "hkv_major": 2,
+      "hq_minor_swz": 3,
+      "qb_major": 4
+    }
+  }
+}

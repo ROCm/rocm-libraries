@@ -31,12 +31,7 @@ namespace
 
 OperationMetadata shippedSdpa()
 {
-    const std::string path = hipdnn_corpus_gen::test::operationsDir() + "/sdpa_fwd.opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
-    return parsed.ok() ? *parsed.metadata : OperationMetadata{};
+    return test::shippedOperation("sdpa_fwd");
 }
 
 /// One descriptor, spelled as a real pack spells it (`num_query_heads`, `seqlen_kv`,
@@ -238,6 +233,7 @@ TEST(TestKernelCatalogSource, AGeometryTooLargeToBenchmarkIsCountedApartFromOneT
                              // Built directly; a pack gets this from `kernel_catalog.constants`.
                              {"alignment", std::string("top_left")},
                              {"generate_stats", false},
+                             {"form", std::string("plain")},
                              {"dtype", std::string("bf16")}};
     const auto built = buildAdmissible(metadata, point);
     ASSERT_TRUE(built.has_value());

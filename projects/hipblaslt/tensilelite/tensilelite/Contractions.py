@@ -1125,6 +1125,28 @@ class Solution:
             *,
             raiseProblemTypeOnTypeMismatch: bool = True,
         ):
+        rv = cls.RecordFromOriginalState(d, srcName, deviceInfo)
+        rv.originalSolution = OriginalSolution(
+                                  d,
+                                  splitGSU,
+                                  printSolutionRejectionReason,
+                                  printIndexAssignmentInfo,
+                                  assembler,
+                                  isaInfoMap,
+                                  srcName,
+                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
+                              )
+        rv.srcName = srcName
+
+        return rv
+
+    @classmethod
+    def RecordFromOriginalState(cls, d, srcName="", deviceInfo=None):
+        """The library record FromOriginalState writes, without the OriginalSolution.
+
+        Fills in d['ISA'] and d['CUCount'] as FromOriginalState does, so the
+        OriginalSolution built from d afterwards sees the same state.
+        """
         rv = cls()
 
         if 'SolutionNameMin' in d:
@@ -1182,18 +1204,6 @@ class Solution:
         rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
             d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
         )
-        rv.originalSolution = OriginalSolution(
-                                  d,
-                                  splitGSU,
-                                  printSolutionRejectionReason,
-                                  printIndexAssignmentInfo,
-                                  assembler,
-                                  isaInfoMap,
-                                  srcName,
-                                  raiseProblemTypeOnTypeMismatch=raiseProblemTypeOnTypeMismatch,
-                              )
-        rv.srcName = srcName
-
         return rv
 
     @classmethod

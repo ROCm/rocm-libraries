@@ -8,7 +8,8 @@
 # is created and reused by every re-run. So what matters is not when the
 # branch last merged `develop` but when its newest TheRock Multi-Arch CI run
 # was created. A re-run does not refresh it; only a new run (a push, a
-# reopen, a label change) does. See pr_ci_freshness.py for the details.
+# reopen, marking a draft ready for review, a label change) does. See
+# pr_ci_freshness.py for the details.
 #
 # Why a commit status and not a check run: staleness is a function of
 # wall-clock time, so a PR that is fine today has to be able to turn red three

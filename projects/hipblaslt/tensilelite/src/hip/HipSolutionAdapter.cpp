@@ -32,10 +32,15 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <memory>
+#include <string>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/EmbeddedData.hpp>
+#include <Tensile/LongPath.hpp>
 #include <Tensile/hip/HipSolutionAdapter.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -45,6 +50,102 @@ namespace TensileLite
 {
     namespace hip
     {
+        namespace
+        {
+            using ModuleImage = std::shared_ptr<const std::vector<char>>;
+
+            // A module that has been loaded but not yet recorded by the adapter,
+            // and the image HIP may still be reading. If recording fails, the
+            // destructor unloads the module before the image is released.
+            struct PendingModule
+            {
+                SolutionAdapter::ModuleApi const& api;
+                hipModule_t                       module = nullptr;
+                ModuleImage                       image;
+
+                explicit PendingModule(SolutionAdapter::ModuleApi const& moduleApi)
+                    : api(moduleApi)
+                {
+                }
+
+                PendingModule(PendingModule const&)            = delete;
+                PendingModule& operator=(PendingModule const&) = delete;
+
+                ~PendingModule()
+                {
+                    if(module != nullptr)
+                        static_cast<void>(api.unload(module));
+                }
+            };
+
+            // hipModuleLoad opens the file by its narrow path, so it fails for a
+            // path Windows will only open in verbatim form (see LongPath.hpp).
+            // When resolvePath gives a different path, or the path is already in
+            // that form, the file is read and loaded from memory instead, and
+            // `pending.image` keeps the buffer. Nothing allocates once a load
+            // has succeeded, so `pending` owns the module from that point.
+            hipError_t loadModuleFile(PendingModule& pending, std::string const& path)
+            {
+                SolutionAdapter::ModuleApi const& api    = pending.api;
+                hipModule_t                       module = nullptr;
+
+                auto const openPath = api.resolvePath(path);
+                if(openPath.native() == std::filesystem::path(path).native()
+                   && !isVerbatimPath(openPath))
+                {
+                    hipError_t error = api.load(&module, path.c_str());
+                    if(error == hipSuccess)
+                        pending.module = module;
+                    return error;
+                }
+
+                std::ifstream file(openPath, std::ios::binary | std::ios::ate);
+                if(!file)
+                    return hipErrorFileNotFound;
+                auto const size = file.tellg();
+                if(size <= 0)
+                    return hipErrorInvalidImage;
+                std::vector<char> bytes(static_cast<size_t>(size));
+                file.seekg(0);
+                file.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+                if(!file)
+                    return hipErrorFileNotFound;
+                auto image = std::make_shared<const std::vector<char>>(std::move(bytes));
+
+                hipError_t error = api.loadData(&module, image->data());
+                if(error == hipSuccess)
+                {
+                    pending.image  = std::move(image);
+                    pending.module = module;
+                }
+                return error;
+            }
+
+            // Records `pending`: its image in `images`, then its module through
+            // `add`, which puts it where the adapter will unload it. The adapter
+            // takes ownership only once both have succeeded. If either throws,
+            // `pending` still owns the module and unloads it, and `images`
+            // holds only a copy of the image reference, so the image outlives
+            // the unload.
+            template <typename Images, typename Add>
+            hipModule_t recordModule(PendingModule& pending, Images& images, Add add)
+            {
+                if(pending.image)
+                    images.insert_or_assign(pending.module, pending.image);
+                try
+                {
+                    add(pending.module);
+                }
+                catch(...)
+                {
+                    if(pending.image)
+                        images.erase(pending.module);
+                    throw;
+                }
+                return std::exchange(pending.module, nullptr);
+            }
+        } // namespace
+
         SolutionAdapter::SolutionAdapter()
             : m_debug(Debug::Instance().printKernelArguments())
             , m_debugSkipLaunch(Debug::Instance().skipKernelLaunch())
@@ -144,7 +245,43 @@ namespace TensileLite
             // Reset the error code from the failed hipModuleLoad.
             (void)m_moduleApi.getLastError();
             std::cout << "Clearing modules and retrying hipModuleLoad" << std::endl;
-            for(auto module : m_modules)
+
+            // Taken under the lock every module and cache writer holds, so a
+            // concurrent load is neither lost nor unloaded here. Once the
+            // caches are reset, a new lookup cannot reach these modules, so
+            // they are unloaded after the lock is released. A launch that
+            // read a kernel handle before the reset may still use it after
+            // the unload.
+            std::vector<hipModule_t>              modules;
+            std::vector<std::vector<hipModule_t>> extraModuleCopies;
+            // In-memory images of those modules, released after the unloads.
+            std::vector<ModuleImage> images;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                modules.swap(m_modules);
+                extraModuleCopies.swap(m_extraModuleCopies);
+                auto detachImage = [&](hipModule_t module) {
+                    if(auto node = m_moduleImages.extract(module))
+                        images.push_back(std::move(node.mapped()));
+                };
+                for(auto module : modules)
+                    detachImage(module);
+                for(auto const& copyModules : extraModuleCopies)
+                    for(auto module : copyModules)
+                        detachImage(module);
+                m_loadedModuleNames.clear();
+                m_loadedCOFiles.forEachValue([](std::atomic<bool>& loaded) {
+                    loaded.store(false, std::memory_order_release);
+                });
+                m_helperKernelPath.clear();
+                m_kernels.forEachValue([](std::atomic<hipFunction_t>& kernel) {
+                    kernel.store(nullptr, std::memory_order_release);
+                });
+                m_extraKernels.clear();
+                m_currentRotationCopy.store(0);
+            }
+
+            for(auto module : modules)
             {
                 HIP_CHECK_PRINT(m_moduleApi.unload(module), [&](hipError_t error_t) {
                     std::cerr << "hipModuleUnload failed: " << std::endl
@@ -153,14 +290,14 @@ namespace TensileLite
             }
 
             // Extra rotation copies are not recreated by recovery.
-            if(!m_extraModuleCopies.empty())
+            if(!extraModuleCopies.empty())
             {
                 std::cerr << "[icache-rotate] WARNING: out-of-memory retry is dropping "
-                          << m_extraModuleCopies.size()
+                          << extraModuleCopies.size()
                           << " rotation copy set(s); I-cache rotation is now disabled "
                           << "until loadCodeObjectFileExtraCopies() is called again." << std::endl;
             }
-            for(auto const& copyModules : m_extraModuleCopies)
+            for(auto const& copyModules : extraModuleCopies)
             {
                 for(auto module : copyModules)
                 {
@@ -169,18 +306,6 @@ namespace TensileLite
                                   << " error: " << hipGetErrorString(error_t) << std::endl;
                     });
                 }
-            }
-
-            {
-                std::lock_guard<std::mutex> guard(m_access);
-                m_modules.clear();
-                m_loadedModuleNames.clear();
-                m_loadedCOFiles.clear();
-                m_helperKernelPath.clear();
-                m_kernels.clear();
-                m_extraModuleCopies.clear();
-                m_extraKernels.clear();
-                m_currentRotationCopy.store(0);
             }
 
             hipError_t lazyLoadingError = initializeLazyLoading(lazyArch, lazyDir);
@@ -201,9 +326,9 @@ namespace TensileLite
         hipError_t SolutionAdapter::loadCodeObjectFileOnce(std::string const& path)
         {
             Debug::Instance().markerStart("loadCodeObjectFile", path);
-            hipModule_t module;
+            PendingModule pending(m_moduleApi);
 
-            hipError_t error = m_moduleApi.load(&module, path.c_str());
+            hipError_t error = loadModuleFile(pending, path);
             if(error != hipSuccess)
             {
                 Debug::Instance().markerStop();
@@ -215,7 +340,9 @@ namespace TensileLite
 
             {
                 std::lock_guard<std::mutex> guard(m_access);
-                m_modules.push_back(module);
+                recordModule(pending, m_moduleImages, [this](hipModule_t module) {
+                    m_modules.push_back(module);
+                });
                 m_loadedModuleNames.push_back(concatenate("File ", path));
 
                 //Isolate filename
@@ -224,7 +351,8 @@ namespace TensileLite
                 std::string fileName(path.begin() + start, path.end());
                 if(fileName.rfind("Kernels.so-000-", 0) == 0)
                     m_helperKernelPath = path;
-                m_loadedCOFiles.insert(removeXnack(fileName));
+                m_loadedCOFiles.insert(removeXnack(fileName), true)
+                    .store(true, std::memory_order_release);
             }
             Debug::Instance().markerStop();
             return hipSuccess;
@@ -332,7 +460,7 @@ namespace TensileLite
             // replaced between this check and the load.
             bool codeObjectFitsInFile(std::string const& path)
             {
-                std::ifstream file(path, std::ios::binary);
+                std::ifstream file(longPathSafe(path), std::ios::binary);
                 if(!file)
                     return true;
                 file.seekg(0, std::ios::end);
@@ -449,7 +577,7 @@ namespace TensileLite
                 std::lock_guard<std::mutex> guard(m_access);
                 if(m_localModules.count(path) != 0)
                     return hipSuccess;
-                auto& slot = m_localLoadMutexes[path];
+                auto& slot = m_loadMutexes[path];
                 if(!slot)
                     slot = std::make_shared<std::mutex>();
                 pathMutex = slot;
@@ -468,11 +596,11 @@ namespace TensileLite
                 return hipErrorInvalidImage;
             }
 
-            hipModule_t module;
-            hipError_t  error;
+            PendingModule pending(m_moduleApi);
+            hipError_t    error;
             try
             {
-                error = m_moduleApi.load(&module, path.c_str());
+                error = loadModuleFile(pending, path);
             }
             catch(std::exception const& e)
             {
@@ -486,17 +614,13 @@ namespace TensileLite
                 return error;
             }
 
-            // Keep ownership until insertion succeeds, so an allocation failure
-            // cannot leave a loaded module outside the adapter's maps.
-            std::unique_ptr<std::remove_pointer_t<hipModule_t>, decltype(m_moduleApi.unload)>
-                ownedModule(module, m_moduleApi.unload);
-
             if(m_debug)
                 std::cout << "loaded local code object " << path << std::endl;
 
             std::lock_guard<std::mutex> guard(m_access);
-            m_localModules.emplace(path, module);
-            ownedModule.release();
+            recordModule(pending, m_moduleImages, [this, &path](hipModule_t module) {
+                m_localModules.emplace(path, module);
+            });
             m_loadedModuleNames.push_back(concatenate("Local file ", path));
             return hipSuccess;
         }
@@ -521,7 +645,7 @@ namespace TensileLite
                 return err == hipErrorNotFound ? hipErrorFileNotFound : err;
 
             std::lock_guard<std::mutex> guard(m_access);
-            err = hipModuleGetFunction(&rv, m_localModules.at(path), name.c_str());
+            err = m_moduleApi.getFunction(&rv, m_localModules.at(path), name.c_str());
             if(err == hipSuccess)
                 m_localKernels.emplace(std::move(key), rv);
             else
@@ -550,15 +674,35 @@ namespace TensileLite
                 return false;
             }
 #endif
-            //If required code object file hasn't yet been loaded, load it now
-            m_access.lock();
-            bool loaded = m_loadedCOFiles.find(removeXnack(codeObjectFile))
-                          != m_loadedCOFiles.end();
-            std::string codeObjectDir = m_codeObjectDirectory;
-            m_access.unlock();
+            // If required code object file hasn't yet been loaded, load it now.
+            // Loads of one file are serialized so it is loaded once; the key is
+            // the m_loadedCOFiles name, shared by its xnack variants.
+            std::string const key      = removeXnack(codeObjectFile);
+            auto              isLoaded = [this, &key] {
+                auto const* entry = m_loadedCOFiles.find(key);
+                return entry && entry->load(std::memory_order_acquire);
+            };
+            if(isLoaded())
+                return true;
+
+            std::shared_ptr<std::mutex> fileMutex;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                auto&                       slot = m_loadMutexes[key];
+                if(!slot)
+                    slot = std::make_shared<std::mutex>();
+                fileMutex = slot;
+            }
+
+            std::lock_guard<std::mutex> loadGuard(*fileMutex);
+            bool                        loaded = isLoaded();
 
             if(!loaded)
             {
+                m_access.lock();
+                std::string codeObjectDir = m_codeObjectDirectory;
+                m_access.unlock();
+
                 //Try other xnack versions
                 size_t     loc = codeObjectFile.rfind('.');
                 hipError_t err;
@@ -598,9 +742,24 @@ namespace TensileLite
             return hipSuccess;
         }
 
+        hipFunction_t SolutionAdapter::cachedKernel(std::string const& name) const
+        {
+            auto const* entry = m_kernels.find(name);
+            return entry ? entry->load(std::memory_order_acquire) : nullptr;
+        }
+
         hipError_t SolutionAdapter::getKernel(hipFunction_t& rv, std::string const& name)
         {
             int copyIdx = m_currentRotationCopy.load();
+
+            if(copyIdx == 0)
+            {
+                if(hipFunction_t cached = cachedKernel(name))
+                {
+                    rv = cached;
+                    return hipSuccess;
+                }
+            }
 
             std::unique_lock<std::mutex> guard(m_access);
             hipError_t                   err = hipErrorNotFound;
@@ -613,23 +772,34 @@ namespace TensileLite
             if(copyIdx <= 0 || copyIdx > (int)m_extraModuleCopies.size())
                 copyIdx = 0;
 
-            auto&       cache   = copyIdx ? m_extraKernels[copyIdx - 1] : m_kernels;
             auto const& modules = copyIdx ? m_extraModuleCopies[copyIdx - 1] : m_modules;
 
-            auto it = cache.find(name);
-            if(it != cache.end())
+            if(copyIdx)
             {
-                rv = it->second;
+                auto& cache = m_extraKernels[copyIdx - 1];
+                auto  it    = cache.find(name);
+                if(it != cache.end())
+                {
+                    rv = it->second;
+                    return hipSuccess;
+                }
+            }
+            else if(hipFunction_t cached = cachedKernel(name))
+            {
+                rv = cached;
                 return hipSuccess;
             }
 
             for(auto module : modules)
             {
-                err = hipModuleGetFunction(&rv, module, name.c_str());
+                err = m_moduleApi.getFunction(&rv, module, name.c_str());
 
                 if(err == hipSuccess)
                 {
-                    cache[name] = rv;
+                    if(copyIdx)
+                        m_extraKernels[copyIdx - 1][name] = rv;
+                    else
+                        m_kernels.insert(name, rv).store(rv, std::memory_order_release);
                     return err;
                 }
                 else if(err != hipErrorNotFound)
@@ -646,20 +816,19 @@ namespace TensileLite
             // original m_modules so multi-kernel launches still resolve.
             if(copyIdx > 0)
             {
-                auto origIt = m_kernels.find(name);
-                if(origIt != m_kernels.end())
+                if(hipFunction_t cached = cachedKernel(name))
                 {
-                    rv = origIt->second;
+                    rv = cached;
                     return hipSuccess;
                 }
 
                 for(auto module : m_modules)
                 {
-                    err = hipModuleGetFunction(&rv, module, name.c_str());
+                    err = m_moduleApi.getFunction(&rv, module, name.c_str());
 
                     if(err == hipSuccess)
                     {
-                        m_kernels[name] = rv;
+                        m_kernels.insert(name, rv).store(rv, std::memory_order_release);
                         return err;
                     }
                     else if(err != hipErrorNotFound)
@@ -698,8 +867,8 @@ namespace TensileLite
             // I-cache cold misses on rotation.
             for(int i = 0; i < extraCopies; ++i)
             {
-                hipModule_t module;
-                hipError_t  error = m_moduleApi.load(&module, path.c_str());
+                PendingModule pending(m_moduleApi);
+                hipError_t    error = loadModuleFile(pending, path);
                 if(error != hipSuccess)
                 {
                     std::cerr << "loadCodeObjectFileExtraCopies hipModuleLoad failed: " << path
@@ -711,14 +880,18 @@ namespace TensileLite
                 // hipModule_t handles indicate independent module objects;
                 // identical handles would silently break rotation.
                 if(m_debug)
-                    std::cout << std::endl << "[icache-rotate] loaded rotation copy " << (i + 1) << "/"
-                            << extraCopies << " of " << path << " hipModule_t="
-                            << static_cast<void*>(module) << std::endl << std::endl;
+                    std::cout << std::endl
+                              << "[icache-rotate] loaded rotation copy " << (i + 1) << "/"
+                              << extraCopies << " of " << path
+                              << " hipModule_t=" << static_cast<void*>(pending.module) << std::endl
+                              << std::endl;
 
                 // Record the module in the i-th rotation slot, plus a debug
                 // name (printed by operator<<).
                 std::lock_guard<std::mutex> guard(m_access);
-                m_extraModuleCopies[i].push_back(module);
+                recordModule(pending, m_moduleImages, [this, i](hipModule_t module) {
+                    m_extraModuleCopies[i].push_back(module);
+                });
                 m_loadedModuleNames.push_back(
                     concatenate("File ", path, " (rotation copy ", i + 1, ")"));
             }
@@ -809,8 +982,8 @@ namespace TensileLite
                 lazyDir                      = m_codeObjectDirectory;
                 std::string helperKernelName = std::string("Kernels.so-000-") + lazyArch;
                 // If required code object file hasn't yet been loaded, load it now.
-                loaded = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco")
-                         != m_loadedCOFiles.end();
+                auto const* entry = m_loadedCOFiles.find(removeXnack(helperKernelName) + ".hsaco");
+                loaded            = entry && entry->load(std::memory_order_acquire);
             }
 
             if(!loaded)

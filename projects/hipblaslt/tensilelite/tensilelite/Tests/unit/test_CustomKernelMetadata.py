@@ -807,11 +807,20 @@ def test_metadata_arg_regex_semantics():
     assert _metadataArgToCustomArg(_meta_arg("StrideE0"))["semantic"] == "StrideE0"
 
 
-def test_metadata_arg_magic_size_index():
-    a = _metadataArgToCustomArg(_meta_arg("MagicNumberSizeI"))
-    assert a["semantic"] == "MagicNumberSize" and a["index"] == 0
-    b = _metadataArgToCustomArg(_meta_arg("MagicShiftSizeJ"))
-    assert b["semantic"] == "MagicShiftSize" and b["index"] == 1
+@pytest.mark.parametrize("alg", [1, 2])
+def test_metadata_arg_magic_size_name_carries_algorithm(alg):
+    number = _metadataArgToCustomArg(_meta_arg("MagicNumberSizeAlg%dI" % alg))
+    shift = _metadataArgToCustomArg(_meta_arg("MagicShiftSizeAlg%dJ" % alg))
+    assert number["semantic"] == "MagicNumberSizeAlg%d" % alg and number["index"] == 0
+    assert shift["semantic"] == "MagicShiftSizeAlg%d" % alg and shift["index"] == 1
+
+
+@pytest.mark.parametrize("name", ["MagicNumberSizeI", "MagicShiftSizeJ",
+                                  "MagicNumberSizeAlg0I", "MagicNumberSizeAlg3I"])
+def test_metadata_arg_magic_size_without_a_supported_algorithm_raises(name):
+    # A name that does not say which algorithm packed the value is not guessed.
+    with pytest.raises(RuntimeError, match="Unknown amdgpu_metadata arg name"):
+        _metadataArgToCustomArg(_meta_arg(name))
 
 
 def test_metadata_arg_missing_field_raises():

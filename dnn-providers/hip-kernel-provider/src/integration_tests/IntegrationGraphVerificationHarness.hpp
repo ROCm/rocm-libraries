@@ -9,6 +9,7 @@
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
 #include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
@@ -134,12 +135,29 @@ protected:
         ASSERT_NO_FATAL_FAILURE(verifyBuiltGraph(context, seed));
     }
 
-    /// Uses the same verification path after a caller builds its engine-pinned plans.
+    /// Uses the same verification path after a caller builds its engine-pinned plans, for
+    /// example with buildPlansForEngine().
     void verifyBuiltGraph(GraphVerificationContext& context, unsigned int seed)
     {
         VerificationRun run;
         ASSERT_NO_FATAL_FAILURE(prepareVerification(context, seed, run));
         ASSERT_NO_FATAL_FAILURE(executeAndValidate(run, context._graph, _handle));
+    }
+
+    /// Builds @p graph's plan on the engine @p engineId with @p knobs, instead of the plan
+    /// the heuristics rank first with its default knobs. verifyBuiltGraph() then runs it.
+    void buildPlansForEngine(hipdnn_frontend::graph::Graph& graph,
+                             int64_t engineId,
+                             const std::vector<hipdnn_frontend::KnobSetting>& knobs)
+    {
+        auto result = graph.build_operation_graph(_handle);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.create_execution_plan_ext(engineId, knobs);
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.check_support();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+        result = graph.build_plans();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
     }
 
     // Split in two so a test can work out the right answers once, then check several runs
@@ -464,6 +482,13 @@ private:
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
         gpuBundle.addTensor(*tensorAttr,
                             hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr));
+
+        // A ragged tensor's offset table is an input the variant pack must carry, but the
+        // node lists only its primary tensors.
+        if(tensorAttr->has_ragged_offset())
+        {
+            tryAddTensorToBundles(tensorAttr->get_ragged_offset(), cpuBundle, gpuBundle);
+        }
     }
 };
 

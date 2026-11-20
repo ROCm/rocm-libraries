@@ -26,6 +26,10 @@ public:
     MiopenBatchnormFwdTrainingPlanBuilder& operator=(const MiopenBatchnormFwdTrainingPlanBuilder&)
         = delete;
 
+    // Every check of isApplicable; none of them needs a handle.
+    static bool
+        isGraphApplicable(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph);
+
     bool isApplicable(
         const HipdnnMiopenHandle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;

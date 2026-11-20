@@ -978,6 +978,9 @@ def rdna_attention_fwd_body(
         local_max = tree(list(flat), b.fmax, b.fmax3)
         tile_max = b.fmax(local_max, permx16_f32(local_max))
         if cfg.lazy_rescale:
+            # Each row keeps its max on its own scores only (rows stay
+            # independent of the wave's other rows); the wave skips the O/l
+            # rescale when every row keeps it.
             within = b.fcmp(
                 "ole",
                 b.fmul(b.fsub(tile_max, m_old), c),
@@ -985,9 +988,9 @@ def rdna_attention_fwd_body(
             )
             any_out = b.wave_any(b.select(within, c0, c1))
             skip = b.cmp_eq(any_out, c0)
-            m_new = b.select(skip, m_old, b.fmax(m_old, tile_max))
+            m_new = b.select(within, m_old, b.fmax(m_old, tile_max))
         else:
-            skip = None
+            within = skip = None
             m_new = b.fmax(m_old, tile_max)
         neg_mc = b.fneg(b.fmul(m_new, c))
         # A row whose running max is still -inf (every visible key so far is
@@ -997,6 +1000,10 @@ def rdna_attention_fwd_body(
             neg_mc = b.select(b.fcmp("oeq", m_new, neg_inf), zero_f, neg_mc)
         ps = [[b.exp2_fast(b.fma(v, c, neg_mc)) for v in row] for row in vals]
         alpha = b.exp2_fast(b.fma(m_old, c, neg_mc))
+        if within is not None:
+            # Exactly 1 for a row that kept its max (fma(m, c, -(m * c)) is the
+            # product's rounding error, not 0), so the wave's rescale leaves it.
+            alpha = b.select(within, b.const_f32(1.0), alpha)
         lsum = tree([p for row in ps for p in row], b.fadd)
         l_scaled = b.fmul(l_old, alpha)
         if skip is not None:

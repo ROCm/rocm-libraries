@@ -64,12 +64,20 @@ pack-coverage engine adds its entry there on its branch.
 - `--regime-quota` / `--regime-quotas` ask at least n problems in a named regime (a sizing's
   quotas use these); `--regime-floor n` asks n in every regime the operation declares and
   reports a regime the engine does not serve as short, without failing.
+- `--form-floor n` asks n in every optional **form** the operation declares (`form_label`):
+  for `sdpa_fwd` plain, `scale_unset`, `scale_tensor`, `dropout`, `padded`, `ragged`, `bias`,
+  `sink`; for `sdpa_bwd` all but `ragged` and `sink`. Each form varies one optional attribute
+  or tensor from the plain graph, so a model trains and is validated on graphs that leave it
+  unbound (RFC 0019 §6.7, absent is not zero, and §6.8 rule 9). Forms are a manifest column of
+  their own, not part of the regime label, and are reported as `form:<label>` in
+  `reports.regime_quota`; the live engine decides which it serves.
 - `--include-extremes` takes the served point at each end of every numeric parameter first;
   `--ceiling` is the largest extent searched. Every manifest records `served_extent` (how far
   the search reached; a maximum near the ceiling is marked `at_search_ceiling`).
 - `--exclude-corpus` keeps another set's graphs out; corpus_gen walks through the excluded
   configurations and returns new ones.
-- `--model-shapes` adds recorded real-model shapes as `q.<parameter>` columns.
+- `--model-shapes` adds recorded real-model shapes as `q.<parameter>` columns; a file with no
+  `q.form` column (one mined before forms existed) reads as the `plain` form.
 - Exit status: 0 success; 1 bad arguments or an unregistered engine; 2 empty set (the engine
   serves none of the proposed problems); 3 fewer than `--count` without the engine being shown
   to serve no more.

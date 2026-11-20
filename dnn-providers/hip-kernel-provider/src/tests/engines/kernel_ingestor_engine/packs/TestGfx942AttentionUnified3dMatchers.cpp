@@ -596,6 +596,30 @@ TEST(TestGfx942AttentionUnified3dMatchers, WorkspaceIsTheGeometryHeadersLayoutFo
     }
 }
 
+TEST(TestGfx942AttentionUnified3dMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = base();
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = base();
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
+}
+
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing::gfx942_unified_3d
 

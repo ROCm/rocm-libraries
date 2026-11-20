@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "id": "e0f4eda1-e55b-5e1e-8923-27302152522b",
+  "id": "07db0797-e7ec-5adc-942a-0208b7d1d265",
   "name": "hipkernel:flydsl_rmsnorm_bwd",
   "graph_match": {
     "native": "hipkernel.flydsl_rmsnorm_bwd.graph_match"

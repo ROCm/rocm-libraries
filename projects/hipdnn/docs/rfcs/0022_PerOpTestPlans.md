@@ -533,7 +533,7 @@ batch and RMS). Other ops follow as bandwidth allows.
 
 | Phase | Content | Exit |
 |---|---|---|
-| 1 | This RFC. The methodology guide and index under `docs/test-plans/`. Documents updated ([§16.1](#161-documents-and-tickets-to-update)). | RFC merged |
+| 1 | This RFC. The plan index under `docs/test-plans/`. Documents updated ([§16.1](#161-documents-and-tickets-to-update)). | RFC merged |
 | 2 | I1 and I2. | Generator writes bundles with `purpose` |
 | 3 | The attention plan, then the convolution plan, each in its own PR. Each plan regenerates its bundles, harvests claims, and fixes FFM pins and TOML globs. I3–I7 land as these plans need them. | Attention and convolution have plans. This is the minimum before exhaustive-tool work starts. |
 | 4 | Normalization plans: layer, batch, RMS. | Each has a plan |
@@ -599,7 +599,7 @@ because nobody writes bundles by hand ([§4](#4-design-overview)).
 | A missed oracle gap gives wrong verdicts | Review step of [§11](#11-oracles-and-reference-prerequisites). Golden G-B cases. Three-way confirmation. |
 | Pairwise misses a three-way fault | Corpus shapes. The exhaustive tool ([§14](#14-exhaustive-mode-and-the-separate-tool)). Pinned regressions. |
 | Case-id changes break name-keyed config | Step 10 of [§13.1](#131-process) updates FFM pins and TOML globs in the same PR. |
-| The methodology guide and this RFC diverge | The guide (`docs/test-plans/methodology.md`) is the working form of [§5](#5-principles)–[§13](#13-authoring-process-and-plan-template). Principle changes need an RFC amendment. |
+| Plans drift from this RFC | There is no separate methodology guide: this RFC is the method, and each plan links its sections and describes only how its own sweep was built. Principle changes need an RFC amendment. |
 | The exhaustive tool needs declarations that plans do not provide | Each plan has an exhaustive-mode section ([§13.2](#132-template)). The companion RFC can ask for more fields. |
 
 ## 19. Open Questions and Future Work

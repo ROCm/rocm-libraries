@@ -24,6 +24,7 @@
 
 #include "stinkytofu/analysis/BBIndexAnalysis.hpp"
 #include "stinkytofu/analysis/LoopAnalysis.hpp"
+#include "stinkytofu/analysis/asm/GirFrameAnalysis.hpp"
 #include "stinkytofu/analysis/asm/Layer2BarrierOverlapAnalysis.hpp"
 #include "stinkytofu/analysis/asm/ssa/SSALiveIntervalsAnalysis.hpp"
 #include "stinkytofu/analysis/controlflow/DominanceAnalysis.hpp"
@@ -37,6 +38,8 @@ inline void registerAllAnalyses(AnalysisManager& AM) {
     AM.registerPass<BBIndexAnalysis>();
     AM.registerPass<DominanceAnalysis>();
     AM.registerPass<LoopAnalysis>();
+    AM.registerPass<GirFrameAnalysis>();
+    AM.registerPass<GirFrameHazardAnalysis>();
     AM.registerPass<SSALiveIntervalsAnalysis>();
     AM.registerPass<Layer2BarrierOverlapAnalysis>();
     AM.registerPass<EstimateAsmCyclesAnalysis>();

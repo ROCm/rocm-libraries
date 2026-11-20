@@ -168,18 +168,6 @@ namespace
     }
 
     // Two devices of one architecture, so a payload for one serves both.
-    bool haveTwoMatchingDevices()
-    {
-        int count = 0;
-        if(hipGetDeviceCount(&count) != hipSuccess || count < 2)
-            return false;
-        hipDeviceProp_t a, b;
-        if(hipGetDeviceProperties(&a, 0) != hipSuccess
-           || hipGetDeviceProperties(&b, 1) != hipSuccess)
-            return false;
-        return std::strcmp(a.gcnArchName, b.gcnArchName) == 0;
-    }
-
     void expectNothingRegistered(hipblasLtHandle_t handle)
     {
         size_t registered = 123, selectable = 123;
@@ -591,7 +579,8 @@ TEST(LocalKernelRegister, RejectsIncompleteIndexedPayloads)
 
 // A kernel runs from the code object it was registered with, even when a
 // shipped kernel and an earlier registered kernel have the same name. The
-// replacement here is an empty kernel, so it leaves D untouched.
+// replacement here is an empty kernel, so D does not get the product, even
+// where a shipped helper kernel reduces the (zeroed) workspace into D.
 TEST(LocalKernelRegister, DISABLED_OwnCodeObjectWorker)
 {
     const std::vector<std::string> candidates = candidatePayloads();
