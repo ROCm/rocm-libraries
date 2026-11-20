@@ -88,7 +88,7 @@ TEST_P(TestGpuFlydslSdpaBwdSplitParity, MatchesTheReferenceOrIsDeclined)
     expectDeclined(SPLIT_ENGINE, parity.spec);
 }
 
-INSTANTIATE_TEST_SUITE_P(, TestGpuFlydslSdpaBwdSplitParity, parityIndices(), parityName);
+INSTANTIATE_TEST_SUITE_P(Standard, TestGpuFlydslSdpaBwdSplitParity, parityIndices(), parityName);
 
 } // namespace
 } // namespace hip_kernel_provider::kernel_ingestor_engine

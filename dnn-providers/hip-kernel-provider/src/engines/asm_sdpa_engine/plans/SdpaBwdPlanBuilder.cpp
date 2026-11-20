@@ -926,6 +926,7 @@ static constexpr const char* K_ACC_TYPE_KNOB_NAME = "hipkernel.sdpa.bwd.accumula
 static Rejection checkBwdUnsupportedFeatures(
     const hipdnn_flatbuffers_sdk::data_objects::SdpaBackwardAttributes& attrs)
 {
+    HIP_KERNEL_REJECT_IF(attrs.padding_mask(), "padding_mask must be false");
     // The ASM kernels take sequence positions only as cumulative offsets
     // (getBatchMode), never as per-sequence lengths.
     HIP_KERNEL_REJECT_IF(

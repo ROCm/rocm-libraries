@@ -317,3 +317,67 @@ TEST(TestSdpaFwdKernelArgs, BuildArgsThrowsPluginErrorNamingTheMissingUid)
         }
     }
 }
+
+// With cu_seq_len the sequence pointers take the logical cumulative lengths and the padding
+// pointers keep the physical starts from the ragged offset tensors.
+TEST(TestSdpaFwdKernelArgs, BuildArgsGroupModeWiresCumulativeLengthsAndPhysicalStarts)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.group = asm_sdpa_engine::SdpaFwdGroupModeParams{
+        10, 11, asm_sdpa_engine::SdpaFwdGroupModeParams::CumulativeLengthUids{12, 13}};
+
+    int qBuf = 0;
+    int kBuf = 0;
+    int vBuf = 0;
+    int oBuf = 0;
+    int qoSeqstartBuf = 0;
+    int kvSeqstartBuf = 0;
+    int cuSeqLenQBuf = 0;
+    int cuSeqLenKvBuf = 0;
+    const auto buffers = makeBuffers({{1, &qBuf},
+                                      {2, &kBuf},
+                                      {3, &vBuf},
+                                      {4, &oBuf},
+                                      {10, &qoSeqstartBuf},
+                                      {11, &kvSeqstartBuf},
+                                      {12, &cuSeqLenQBuf},
+                                      {13, &cuSeqLenKvBuf}});
+
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
+
+    EXPECT_EQ(args.ptr_qseq, &cuSeqLenQBuf);
+    EXPECT_EQ(args.ptr_kseq, &cuSeqLenKvBuf);
+    EXPECT_EQ(args.ptr_qseq_padding, &qoSeqstartBuf);
+    EXPECT_EQ(args.ptr_kseq_padding, &kvSeqstartBuf);
+}
+
+// Group-mode LSE is AITER's head-major [H, total_q] FP32 layout; the kernel takes its head
+// stride in bytes.
+TEST(TestSdpaFwdKernelArgs, BuildArgsGroupModeLseWiresPointerAndHeadByteStride)
+{
+    SdpaFwdParams params = makeBaseParams();
+    params.group = asm_sdpa_engine::SdpaFwdGroupModeParams{10, 11};
+    params.lseUid = 20;
+    params.lseStrideHead = params.batchSize * params.seqLenQ;
+
+    int qBuf = 0;
+    int kBuf = 0;
+    int vBuf = 0;
+    int oBuf = 0;
+    int qoSeqstartBuf = 0;
+    int kvSeqstartBuf = 0;
+    float lseBuf = 0.f;
+    const auto buffers = makeBuffers({{1, &qBuf},
+                                      {2, &kBuf},
+                                      {3, &vBuf},
+                                      {4, &oBuf},
+                                      {10, &qoSeqstartBuf},
+                                      {11, &kvSeqstartBuf},
+                                      {20, &lseBuf}});
+
+    const fmha_fwd_v3_args args = buildArgs(params, buffers);
+
+    EXPECT_EQ(args.ptr_lse, &lseBuf);
+    EXPECT_EQ(args.s_lse, 1u);
+    EXPECT_EQ(args.s_lse_Hs, 2u * 256u * 4u);
+}

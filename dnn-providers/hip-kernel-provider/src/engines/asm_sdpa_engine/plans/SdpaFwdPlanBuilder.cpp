@@ -13,6 +13,8 @@
 #include <exception>
 #include <optional>
 #include <string>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include <hip/hip_runtime.h>
@@ -57,17 +59,16 @@ static RoundingMode
     return getRoundingMode(attrs);
 }
 
-static std::string getKernelNameKey(const std::string& archId,
-                                    const std::string& dataType,
-                                    int hdim_q, // NOLINT(readability-identifier-naming)
-                                    int hdim_v, // NOLINT(readability-identifier-naming)
-                                    plan_utils::MaskType maskType,
-                                    RoundingMode bf16_cvt, // NOLINT(readability-identifier-naming)
-                                    BatchMode mode,
-                                    const CFG* cfgs)
+std::string fwdKernelNameKey(const std::string& archId,
+                             const std::string& dataType,
+                             int hdimQ,
+                             int hdimV,
+                             plan_utils::MaskType maskType,
+                             RoundingMode bf16Cvt,
+                             BatchMode mode)
 {
     std::string kernelNameKey{};
-    for(const auto& el : *cfgs)
+    for(const auto& el : cfg_fmha_fwd)
     {
         const auto& cfg = el.second;
         if(cfg.arch != archId)
@@ -75,7 +76,7 @@ static std::string getKernelNameKey(const std::string& archId,
             continue;
         }
 
-        if(cfg.dtype == dataType && cfg.hdim_q == hdim_q && cfg.hdim_v == hdim_v
+        if(cfg.dtype == dataType && cfg.hdim_q == hdimQ && cfg.hdim_v == hdimV
            && cfg.mask == static_cast<int>(maskType) && static_cast<int>(cfg.mode) == mode)
         {
             if(archId == "gfx950")
@@ -83,7 +84,7 @@ static std::string getKernelNameKey(const std::string& archId,
                 kernelNameKey = el.first;
                 break;
             }
-            if(archId == "gfx942" && cfg.bf16_cvt == bf16_cvt)
+            if(archId == "gfx942" && cfg.bf16_cvt == bf16Cvt)
             {
                 kernelNameKey = el.first;
                 break;
@@ -92,6 +93,20 @@ static std::string getKernelNameKey(const std::string& archId,
     }
 
     return kernelNameKey;
+}
+
+// The registry mask ordinal of the forward kernel for a graph whose band classifies as
+// maskType. AITER's get_cfg_mask_type() (mha_fwd.cu) runs a top-left causal mask on the
+// bottom-right causal (mask 2) kernels when the Q and K/V lengths are equal, where the two
+// masks agree; the registry has no top-left causal rows. See hasEqualPerBatchLengths.
+static plan_utils::MaskType fwdKernelMaskType(plan_utils::MaskType maskType,
+                                              bool perBatchLengthsEqual)
+{
+    if(maskType == plan_utils::MaskType::TOP_LEFT_CAUSAL && perBatchLengthsEqual)
+    {
+        return plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL;
+    }
+    return maskType;
 }
 
 static std::string getDataTypeIdentifier(hipdnn_flatbuffers_sdk::data_objects::DataType qType,
@@ -139,7 +154,8 @@ static bool isScalarTensor(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     return elementCount == 1;
 }
 
-// AITER group mode reads INT32 [B+1] token seqstarts.
+// AITER group mode reads INT32 [B+1] token tables: the seqstarts (physical starts) and the
+// cumulative logical lengths.
 static bool isTokenSeqstartTensor(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
@@ -206,6 +222,84 @@ static Rejection checkAiterRaggedAddressing(
             || !isTokenSeqstartTensor(tensorMap, kvOffsetUid, batch),
         "Ragged offset tensors must be non-virtual INT32 [B+1, 1, 1, 1] device tensors");
     return std::nullopt;
+}
+
+// The sequence-length inputs the kernels can take. AITER's group mode reads each batch's
+// logical length from a cumulative table (ptr_qseq/ptr_kseq) and its physical start from the
+// ragged offset table (ptr_*seq_padding), so a ragged graph may carry cu_seq_len_q/kv, which
+// the frontend pairs with padding_mask. Per-batch seq_len_q/kv would need a device prefix sum
+// into that cumulative form, and batch mode has no length input ("batch mode does not
+// support padded", AITER init_fmha_fwd_v3_args). Q must already be known to be rank 4.
+static Rejection
+    checkSequenceLengths(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                         const plan_utils::TensorMap& tensorMap,
+                         const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
+                         BatchMode batchMode)
+{
+    HIP_KERNEL_REJECT_IF(attrs.seq_len_q_tensor_uid().has_value()
+                             || attrs.seq_len_kv_tensor_uid().has_value(),
+                         "seq_len_q/kv not supported; ragged graphs can give the lengths "
+                         "as cu_seq_len_q/kv");
+
+    const auto cuSeqLenQUid = attrs.cu_seq_len_q_tensor_uid();
+    const auto cuSeqLenKvUid = attrs.cu_seq_len_kv_tensor_uid();
+    if(!cuSeqLenQUid.has_value() && !cuSeqLenKvUid.has_value())
+    {
+        HIP_KERNEL_REJECT_IF(
+            attrs.padding_mask(),
+            "padding_mask requires cu_seq_len_q/kv and ragged Q, K, V and O tensors");
+        return std::nullopt;
+    }
+
+    HIP_KERNEL_REJECT_IF(batchMode != BatchMode::GROUP,
+                         "cu_seq_len_q/kv require ragged Q, K, V and O tensors");
+    HIP_KERNEL_REJECT_IF(!cuSeqLenQUid.has_value() || !cuSeqLenKvUid.has_value(),
+                         "cu_seq_len_q and cu_seq_len_kv must be set together");
+    HIP_KERNEL_REJECT_IF(!attrs.padding_mask(), "cu_seq_len_q/kv require padding_mask");
+
+    const int64_t batch = qTensor.dims()->Get(0);
+    HIP_KERNEL_REJECT_IF(!isTokenSeqstartTensor(tensorMap, cuSeqLenQUid.value(), batch)
+                             || !isTokenSeqstartTensor(tensorMap, cuSeqLenKvUid.value(), batch),
+                         "cu_seq_len_q/kv must be non-virtual INT32 [B+1, 1, 1, 1] device tensors");
+    return std::nullopt;
+}
+
+// The group-mode token tables of a graph isApplicable accepted in group mode.
+static SdpaFwdGroupModeParams
+    makeGroupModeParams(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
+                        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
+                        const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kTensor)
+{
+    SdpaFwdGroupModeParams group{qTensor.ragged_offset_tensor_uid().value(),
+                                 kTensor.ragged_offset_tensor_uid().value()};
+    if(attrs.cu_seq_len_q_tensor_uid().has_value())
+    {
+        group.cuSeqLenUids = SdpaFwdGroupModeParams::CumulativeLengthUids{
+            attrs.cu_seq_len_q_tensor_uid().value(), attrs.cu_seq_len_kv_tensor_uid().value()};
+    }
+    return group;
+}
+
+// True when every batch's logical Q length equals its K/V length, where the top-left and
+// bottom-right causal masks agree. Batch mode compares S_q with S_kv. Group mode reads each
+// side's lengths from one table, the cumulative lengths when the graph has them and the
+// ragged offsets otherwise, so the lengths agree per batch when both sides name the same
+// table. AITER compares seqlen_q with seqlen_k in group mode too, but its varlen path sets
+// those to the packed totals, and equal totals do not make the per-batch lengths equal.
+static bool
+    hasEqualPerBatchLengths(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& qTensor,
+                            const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& kTensor,
+                            const std::optional<SdpaFwdGroupModeParams>& group)
+{
+    if(!group.has_value())
+    {
+        return qTensor.dims()->Get(SDPA_SEQ_AXIS) == kTensor.dims()->Get(SDPA_SEQ_AXIS);
+    }
+    const int64_t qLengthTable
+        = group->cuSeqLenUids ? group->cuSeqLenUids->q : group->qoRaggedOffsetUid;
+    const int64_t kvLengthTable
+        = group->cuSeqLenUids ? group->cuSeqLenUids->kv : group->kvRaggedOffsetUid;
+    return qLengthTable == kvLengthTable;
 }
 
 // The gfx950 bf16 head-dim-256 kernels index K/V by the query head, so they compute only
@@ -362,9 +456,27 @@ bool fwdKvRowExtentsFitU32(const hipdnn_flatbuffers_sdk::data_objects::TensorAtt
     return ok;
 }
 
+// Batch-mode kernels form each LSE row's byte offset (b * H + h) * s_lse_Hs in 32-bit
+// arithmetic. The check bounds the byte offset of the last element,
+// 4 * ((B * H - 1) * headStride + Sq - 1), to 32 bits, which covers the last row's base with
+// Sq - 1 elements to spare. Evaluated by division so no product of graph values can overflow.
+static bool batchLseOffsetsFitU32(int64_t batch, int64_t heads, int64_t headStride, int64_t seqLenQ)
+{
+    constexpr int64_t K_MAX_LSE_ELEMENTS = static_cast<int64_t>(UINT32_MAX) / K_FP32_BYTES;
+    if(batch < 1 || heads < 1 || seqLenQ < 1 || seqLenQ > K_MAX_LSE_ELEMENTS
+       || heads > K_MAX_LSE_ELEMENTS / batch)
+    {
+        return false;
+    }
+    const int64_t headSteps = (batch * heads) - 1;
+    return headSteps == 0
+           || (headStride >= 0 && headStride <= (K_MAX_LSE_ELEMENTS - (seqLenQ - 1)) / headSteps);
+}
+
 // Checks every byte offset the kernel forms in 32 bits: the per-field strides,
-// the Ts product and, for hd192x128, the K/V per-head row extent. `inputBytes`
-// is the resolved Q/K/V element size and `tsQo` the matched row's Q-tile size.
+// the Ts product and, for hd192x128, the K/V per-head row extent. The stats (LSE)
+// strides and extent are bounded in checkStatsTensor. `inputBytes` is the resolved
+// Q/K/V element size and `tsQo` the matched row's Q-tile size.
 static Rejection checkFwdByteRanges(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
                                     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& k,
                                     const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& v,
@@ -424,8 +536,9 @@ std::optional<std::string>
            + " threads per block but is launched with " + std::to_string(blockDimX);
 }
 
-// Group-mode (ragged) layout: only Q/K/V/O may be ragged, all of them or none, and a
-// ragged layout must match AITER's seqstart addressing.
+// Group-mode (ragged) layout: only Q/K/V/O and the stats tensor may be ragged, Q/K/V/O all
+// of them or none, and a ragged layout must match AITER's seqstart addressing.
+// checkStatsTensor decides whether a ragged stats layout is one the kernel writes.
 static Rejection
     checkRaggedLayout(const plan_utils::TensorMap& tensorMap,
                       const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
@@ -434,16 +547,19 @@ static Rejection
                       const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& vTensor,
                       const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& oTensor)
 {
+    std::unordered_set<int64_t> raggedCapableUids{
+        attrs.q_tensor_uid(), attrs.k_tensor_uid(), attrs.v_tensor_uid(), attrs.o_tensor_uid()};
+    if(hasStatsOutput(attrs) && attrs.stats_tensor_uid().has_value())
+    {
+        raggedCapableUids.insert(attrs.stats_tensor_uid().value());
+    }
     const auto unsupportedRaggedTensorIds
         = hipdnn_flatbuffers_sdk::utilities::listUnsupportedRaggedTensorIds(tensorMap,
-                                                                            {attrs.q_tensor_uid(),
-                                                                             attrs.k_tensor_uid(),
-                                                                             attrs.v_tensor_uid(),
-                                                                             attrs.o_tensor_uid()});
+                                                                            raggedCapableUids);
     HIP_KERNEL_REJECT_IF(
         !unsupportedRaggedTensorIds.empty(),
-        "Only the Q, K, V and O tensors can be ragged. The following tensor uids are ragged "
-        "and not supported: "
+        "Only the Q, K, V, O and stats tensors can be ragged. The following tensor uids are "
+        "ragged and not supported: "
             + hipdnn_data_sdk::utilities::vecToString(unsupportedRaggedTensorIds));
 
     const int numberRagged = static_cast<int>(qTensor.ragged_offset_tensor_uid().has_value())
@@ -483,11 +599,6 @@ static Rejection
     HIP_KERNEL_REJECT_IF(attrs.page_table_v_tensor_uid(), "page_table_v tensor not supported");
     // Attention sinks join the softmax denominator; the vendored kernels have no sink input.
     HIP_KERNEL_REJECT_IF(attrs.sink_token_tensor_uid(), "sink_token tensor not supported");
-    HIP_KERNEL_REJECT_IF(attrs.seq_len_kv_tensor_uid().has_value()
-                             || attrs.seq_len_q_tensor_uid().has_value()
-                             || attrs.cu_seq_len_q_tensor_uid().has_value()
-                             || attrs.cu_seq_len_kv_tensor_uid().has_value(),
-                         "SEQ_LENS_Q/KV and CU_SEQ_LEN_Q/KV not supported");
 
     // Softmax/output (de)quantization is not implemented by the v3 forward kernel
     // (its argument struct exposes only q/k/v descales).
@@ -516,17 +627,48 @@ static Rejection
     return std::nullopt;
 }
 
-// Validates the stats (LSE) output tensor generate_stats requests. Q must already be
-// validated rank 4.
+// Batch mode writes FP32 [B, H, Sq] element (b, h, s) at (b * H + h) * s_lse_Hs + s: the
+// kernel takes only a head stride (s_lse_Hs), with no batch or sequence stride, and steps
+// batches by H * s_lse_Hs. The strides must therefore be [H * s_h, s_h, 1] with s_h >= Sq so
+// rows of different heads do not overlap, and the last element's byte offset must fit in 32
+// bits; any other layout is declined. stats must already be known to be [B, H, Sq] or
+// [B, H, Sq, 1].
+static Rejection
+    checkBatchStatsLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& stats)
+{
+    // The kernel steps batches by H * head stride even when H == 1, so the head stride is
+    // checked whenever B > 1 or H > 1. The batch and sequence strides are unused, and not
+    // checked, when their axis has size 1.
+    const int64_t batch = stats.dims()->Get(0);
+    const int64_t heads = stats.dims()->Get(1);
+    const int64_t seqLenQ = stats.dims()->Get(2);
+    const auto* strides = stats.strides();
+    HIP_KERNEL_REJECT_IF(strides == nullptr || strides->size() != stats.dims()->size(),
+                         "batch-mode stats tensor must have one stride per dim");
+    // Checked first: it bounds the head stride, so the product below cannot overflow.
+    HIP_KERNEL_REJECT_IF(!batchLseOffsetsFitU32(batch, heads, strides->Get(1), seqLenQ),
+                         "batch-mode stats tensor LSE byte offset 4 * ((B * H - 1) * "
+                         "head stride + Sq - 1) must fit in 32 bits");
+    HIP_KERNEL_REJECT_IF(
+        (batch != 1 && strides->Get(0) != heads * strides->Get(1))
+            || ((batch != 1 || heads != 1) && strides->Get(1) < seqLenQ)
+            || (seqLenQ != 1 && strides->Get(SDPA_SEQ_AXIS) != 1),
+        "batch-mode stats tensor strides must be [H * s_h, s_h, 1] with head stride s_h >= Sq "
+        "(the kernel derives the batch offset from the head stride)");
+    return std::nullopt;
+}
+
+// Validates the stats (LSE) output tensor generate_stats requests. Batch mode's layout is
+// checked by checkBatchStatsLayout. Group mode writes AITER's varlen layout [H, total_q]: one
+// FP32 per Q token at h * s_lse_Hs + seqstart_q[b] + s, with no per-token stride, so the stats
+// tensor must be ragged on the Q/O offset table in token units with a sequence stride of 1.
+// Q must already be validated rank 4.
 static Rejection checkStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::SdpaAttributes& attrs,
                                   const plan_utils::TensorMap& tensorMap,
-                                  BatchMode batchMode,
-                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q,
+                                  const std::optional<SdpaFwdGroupModeParams>& group)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
-    // Varlen LSE is [H, total_q] indexed by seqstart, not the dense [B, H, Sq] stats layout.
-    HIP_KERNEL_REJECT_IF(batchMode == BatchMode::GROUP,
-                         "stats (LSE) output is not supported for ragged tensors");
     // Gate purely on generate_stats; the UID is required when the flag is set.
     HIP_KERNEL_REJECT_IF(!attrs.stats_tensor_uid().has_value(),
                          "generate_stats is set but stats_tensor_uid is missing");
@@ -545,16 +687,35 @@ static Rejection checkStatsTensor(const hipdnn_flatbuffers_sdk::data_objects::Sd
                          "stats tensor rank-4 last dim must be 1 (Actual: "
                              + std::to_string(stats.dims()->Get(3)) + ")");
 
+    const auto statsOffsetUid = stats.ragged_offset_tensor_uid();
+    HIP_KERNEL_REJECT_IF(!group.has_value() && statsOffsetUid.has_value(),
+                         "stats tensor must not be ragged when Q, K, V and O are dense");
+    HIP_KERNEL_REJECT_IF(
+        group.has_value()
+            && (!statsOffsetUid.has_value() || statsOffsetUid.value() != group->qoRaggedOffsetUid
+                || stats.strides() == nullptr || stats.strides()->size() != statsRank
+                || stats.strides()->Get(SDPA_SEQ_AXIS) != 1
+                || stats.ragged_offset_multiplier() != 1),
+        "group-mode stats tensor must be ragged on the Q/O offset tensor with a sequence "
+        "stride and ragged_offset_multiplier of 1 (AITER's [H, total_q] LSE layout)");
+
     HIP_KERNEL_REJECT_IF(stats.dims()->Get(0) != q.dims()->Get(0)
                              || stats.dims()->Get(1) != q.dims()->Get(1)
                              || stats.dims()->Get(2) != q.dims()->Get(2),
                          "stats tensor shape [B,H,Sq] must match Q tensor");
+    if(!group.has_value())
+    {
+        HIP_KERNEL_RETURN_IF_REJECTED(checkBatchStatsLayout(stats));
+    }
 
-    // Only the FP32 batch and head strides reach the kernel.
+    // Only the FP32 head stride reaches the kernel, which steps batches by H * head stride.
+    // The batch step is checked only once the head stride is known to fit.
     const auto* statsStrides = stats.strides();
-    bool ok = plan_utils::byteStrideFitsU32("batch_stride_lse", statsStrides->Get(0), K_FP32_BYTES);
-    ok &= plan_utils::byteStrideFitsU32("nhead_stride_lse", statsStrides->Get(1), K_FP32_BYTES);
-    HIP_KERNEL_REJECT_IF(!ok, "stats byte strides overflow uint32_t kernarg fields");
+    HIP_KERNEL_REJECT_IF(
+        !plan_utils::byteStrideFitsU32("nhead_stride_lse", statsStrides->Get(1), K_FP32_BYTES)
+            || !plan_utils::byteStrideFitsU32(
+                "batch_stride_lse", stats.dims()->Get(1) * statsStrides->Get(1), K_FP32_BYTES),
+        "stats byte strides overflow uint32_t kernarg fields");
     return std::nullopt;
 }
 
@@ -730,10 +891,13 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
         "K's head size must match Q's, Hq must be a multiple of Hkv, and O must be "
         "[B, Hq, Sq, Dv]");
 
-    const bool hasStats = hasStatsOutput(attrs);
-    if(hasStats)
+    HIP_KERNEL_RETURN_IF_REJECTED(checkSequenceLengths(attrs, tensorMap, *qTensor, batchMode));
+    const auto group = (batchMode == BatchMode::GROUP)
+                           ? std::optional{makeGroupModeParams(attrs, *qTensor, *kTensor)}
+                           : std::nullopt;
+    if(hasStatsOutput(attrs))
     {
-        HIP_KERNEL_RETURN_IF_REJECTED(checkStatsTensor(attrs, tensorMap, batchMode, *qTensor));
+        HIP_KERNEL_RETURN_IF_REJECTED(checkStatsTensor(attrs, tensorMap, *qTensor, group));
     }
 
     const auto dataTypeId = getDataTypeIdentifier(
@@ -750,22 +914,15 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     HIP_KERNEL_RETURN_IF_REJECTED(plan_utils::tryClassifyMask(
         attrs, qTensor->dims()->Get(2), kTensor->dims()->Get(2), maskType));
+    maskType = fwdKernelMaskType(maskType, hasEqualPerBatchLengths(*qTensor, *kTensor, group));
 
-    // The current causal kernel binaries do not compute LSE stats correctly
-    // when s_lse=1 is set at runtime. Decline causal+stats until the upstream
-    // ASM kernels support this combination.
-    HIP_KERNEL_REJECT_IF(
-        hasStats && maskType != plan_utils::MaskType::NO_MASK,
-        "stats (LSE) output is not supported with causal masks on the current ASM kernels");
-
-    auto key = getKernelNameKey(deviceString,
+    auto key = fwdKernelNameKey(deviceString,
                                 dataTypeId,
                                 static_cast<int>(qTensor->dims()->Get(3)),
                                 static_cast<int>(vTensor->dims()->Get(3)),
                                 maskType,
                                 getBf16ConvertMode(attrs, dataTypeId),
-                                batchMode,
-                                &cfg_fmha_fwd);
+                                batchMode);
 
     HIP_KERNEL_REJECT_IF(
         key.empty(),
@@ -974,12 +1131,6 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.lseStrideHead = lseStrideHead;
     params.attnScale = attnScale;
     params.archString = deviceString;
-    // Classify on the graph dims, exactly as isApplicable does. Passing the
-    // narrowed unsigned locals instead would let the two sites resolve
-    // different mask types for the same graph.
-    const auto band = plan_utils::makeCoveringBoundsUnbound(
-        plan_utils::resolveDiagonalBand(sdpaAttrs), qDims->Get(2), kDims->Get(2));
-    params.maskType = plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment);
 
     const auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
@@ -996,27 +1147,35 @@ void SdpaFwdPlanBuilder::buildPlan(
                                                         sdpaAttrs.descale_v_tensor_uid().value()};
     }
 
-    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, and that O and V
-    // share the Q and K offset tensors respectively
+    // isApplicable ensures all of q, k, v and o tensors are ragged if any are, that O and V
+    // share the Q and K offset tensors respectively, and that cu_seq_len_q/kv come together
+    // and only in group mode.
     const auto batchMode
         = qTensor->ragged_offset_tensor_uid().has_value() ? BatchMode::GROUP : BatchMode::BATCH;
 
     if(batchMode == BatchMode::GROUP)
     {
-        params.group = SdpaFwdGroupModeParams{qTensor->ragged_offset_tensor_uid().value(),
-                                              kTensor->ragged_offset_tensor_uid().value()};
+        params.group = makeGroupModeParams(sdpaAttrs, *qTensor, *kTensor);
     }
+
+    // Classify on the graph dims, exactly as isApplicable does. Passing the
+    // narrowed unsigned locals instead would let the two sites resolve
+    // different mask types for the same graph.
+    const auto band = plan_utils::makeCoveringBoundsUnbound(
+        plan_utils::resolveDiagonalBand(sdpaAttrs), qDims->Get(2), kDims->Get(2));
+    params.maskType = fwdKernelMaskType(
+        plan_utils::getMaskType(band.leftBound, band.rightBound, band.alignment),
+        hasEqualPerBatchLengths(*qTensor, *kTensor, params.group));
 
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
-    auto kernelKey = getKernelNameKey(deviceString,
+    auto kernelKey = fwdKernelNameKey(deviceString,
                                       dataTypeId,
                                       static_cast<int>(headDimQk),
                                       static_cast<int>(headDimV),
                                       params.maskType,
                                       getBf16ConvertMode(sdpaAttrs, dataTypeId),
-                                      batchMode,
-                                      &cfg_fmha_fwd);
+                                      batchMode);
 
     if(kernelKey.empty())
     {

@@ -890,6 +890,8 @@ def writeClientConfigIni(forBenchmark, problemSizes, biasTypeArgs, factorDimArgs
             if splitDim not in ("M", "N"):
                 printExit("SplitDim must be M or N, got %r" % (splitDim,))
             param("split-dim",            splitDim)
+            if globalParameters["SplitFreeRun"]:
+                param("split-free-run",   True)
             # Only the operand the split does not cut (B for M, A for N) and D can be shared; the
             # client applies the same rule (client/include/SplitPlacement.hpp).
             uncut = "B" if splitDim == "M" else "A"

@@ -456,7 +456,6 @@ Rejection checkCommonUnsupportedFeatures(const SdpaAttrsT& attrs, const TensorMa
                          "dropout_probability must be unset or zero (Actual value: "
                              + std::to_string(attrs.dropout_probability().value()) + ")");
     HIP_KERNEL_REJECT_IF(attrs.alibi_mask(), "alibi_mask must be false");
-    HIP_KERNEL_REJECT_IF(attrs.padding_mask(), "padding_mask must be false");
     HIP_KERNEL_REJECT_IF(attrs.attn_mask_tensor_uid(), // Change to bias
                          "attn_mask tensor not supported");
 

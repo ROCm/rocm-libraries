@@ -74,8 +74,7 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
     args.s_lse = params.lseUid ? 1 : 0;
 
     // KV dimensions. Group mode passes hipDNN's S_kv (the maximum per-batch KV length),
-    // not a packed total. Precondition, not checked: S_kv >= every per-batch KV length,
-    // i.e. max_b(kvOffset[b+1] - kvOffset[b]).
+    // not a packed total. Precondition, not checked: S_kv >= every per-batch KV length.
     args.s_kv_seq_len = params.seqLenKv;
     args.s_qk_head_dim = params.headDimQk;
     args.s_v_head_dim = params.headDimV;
@@ -137,10 +136,15 @@ inline fmha_fwd_v3_args buildFwdKernelArgs(const SdpaFwdParams& params,
         args.s_v_Bs = 0;
         args.s_o_Bs = 0;
 
+        // Mirrors AITER's init_fmha_fwd_v3_args group branch: the padding pointers take the
+        // physical starts, and the sequence pointers take the logical cumulative lengths when
+        // the graph has them, else the physical starts again.
         args.ptr_qseq_padding = bufferPtr(group->qoRaggedOffsetUid);
-        args.ptr_qseq = args.ptr_qseq_padding;
         args.ptr_kseq_padding = bufferPtr(group->kvRaggedOffsetUid);
-        args.ptr_kseq = args.ptr_kseq_padding;
+        args.ptr_qseq
+            = group->cuSeqLenUids ? bufferPtr(group->cuSeqLenUids->q) : args.ptr_qseq_padding;
+        args.ptr_kseq
+            = group->cuSeqLenUids ? bufferPtr(group->cuSeqLenUids->kv) : args.ptr_kseq_padding;
     }
 
     return args;
