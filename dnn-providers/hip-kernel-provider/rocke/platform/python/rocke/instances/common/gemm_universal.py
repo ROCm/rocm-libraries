@@ -3152,6 +3152,51 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
         # cluster's A and B rows of the tile D ahead, split over every thread of
         # the cluster (a line or two each, ROCKE_EXP_GL2_LINE bytes, default
         # 256), branch-free: a thread picks its operand by select.
+        # ROCKE_EXP_GL2_CLUSTER=2: the same cluster-split prefetch, cheap form.
+        # The operand is wave-uniform (odd waves of the cluster take A lines,
+        # even waves B), so every prefetch is a scalar base plus a 32-bit
+        # per-lane offset (global_prefetch v, s[...]) whose row part is loop
+        # invariant; ROCKE_EXP_GL2_SCALES=1 adds the scale lines the same way.
+        if _os_gl2.environ.get("ROCKE_EXP_GL2_CLUSTER") == "2":
+            _cl = _os_gl2.environ.get("ROCKE_EXP_CLUSTER")
+            cx, cy = (int(v) for v in _cl.split(",")) if _cl else (1, 1)
+            cwx = _cwx if _cl else b.const_i32(0)
+            cwy = _cwy if _cl else b.const_i32(0)
+            line = int(_os_gl2.environ.get("ROCKE_EXP_GL2_LINE", "256"))
+            lpr = max(1, row_bytes // line)
+            epl = line // _tdm_elem_bytes
+            wpg = nthr // spec.wave_size
+            gw = b.add(b.mul(b.add(cwx, b.mul(cwy, b.const_i32(cx))), b.const_i32(wpg)), _tdm_wave_id)
+            is_b = b.cmp_eq(b.mod(gw, b.const_i32(2)), b.const_i32(0))  # wave-uniform
+            lanes = cx * cy * wpg // 2 * spec.wave_size  # lanes per operand
+            li0 = b.add(b.mul(b.div(gw, b.const_i32(2)), b.const_i32(spec.wave_size)), lane)
+            m0 = b.sub(block_m_off, b.mul(cwy, b.const_i32(block_m)))
+            n0 = b.sub(block_n_off, b.mul(cwx, b.const_i32(block_n)))
+            r0 = b.select(is_b, n0, m0)
+            n_lines = max(cy * block_m, cx * block_n) * lpr
+            base = b.select(is_b, b.global_ptr_add(Bp, tdm_batch_b), b.global_ptr_add(A, tdm_batch_a))
+            kb = k_ahead if _tdm_elem_bytes == 1 else b.mul(k_ahead, b.const_i32(_tdm_elem_bytes))
+            for rnd in range(0, n_lines, lanes):
+                li = b.mod(b.add(li0, b.const_i32(rnd)) if rnd else li0,
+                           b.select(is_b, b.const_i32(cx * block_n * lpr), b.const_i32(cy * block_m * lpr)))
+                row = b.add(r0, b.div(li, b.const_i32(lpr)))
+                col = b.mul(b.mod(li, b.const_i32(lpr)), b.const_i32(line))
+                rowoff = b.mul(row, b.mul(K, b.const_i32(_tdm_elem_bytes)))
+                off = b.add(b.add(rowoff, col), kb)
+                b.global_prefetch(b.global_ptr_add(base, b.zext(off, _I64)), cachepolicy=_GL2_CPOL)
+            if _mx and _os_gl2.environ.get("ROCKE_EXP_GL2_SCALES") == "1":
+                ks = block_k // 128
+                a_sl = max(1, cy * block_m * 4 // line)
+                b_sl = max(1, cx * block_n * 4 // line)
+                sl = b.select(is_b, b.const_i32(b_sl), b.const_i32(a_sl))
+                si = b.mod(li0, b.mul(sl, b.const_i32(ks)))
+                kstep = b.add(b.div(k_ahead, b.const_i32(128)), b.div(si, sl))
+                rows = b.select(is_b, N, M)
+                soff = b.add(b.mul(kstep, b.mul(rows, b.const_i32(4))),
+                             b.add(b.mul(r0, b.const_i32(4)), b.mul(b.mod(si, sl), b.const_i32(line))))
+                sbase = b.select(is_b, BS, AS)
+                b.global_prefetch(b.global_ptr_add(sbase, b.zext(soff, _I64)), cachepolicy=_GL2_CPOL)
+            return
         if _os_gl2.environ.get("ROCKE_EXP_GL2_CLUSTER") == "1":
             _cl = _os_gl2.environ.get("ROCKE_EXP_CLUSTER")
             cx, cy = (int(v) for v in _cl.split(",")) if _cl else (1, 1)
