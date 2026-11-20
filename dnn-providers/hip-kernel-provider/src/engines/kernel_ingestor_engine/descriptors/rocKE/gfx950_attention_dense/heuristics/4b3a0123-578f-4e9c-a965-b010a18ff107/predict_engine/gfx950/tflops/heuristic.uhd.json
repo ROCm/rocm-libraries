@@ -1,7 +1,7 @@
 {
   "version": "1.0",
-  "id": "121536c3-6aa0-4f50-819b-92a5303153a8",
-  "name": "hipkernel:Gfx950AttentionDense (gfx950, 58 contribution(s))",
+  "id": "d91b2ab8-19b3-424a-9eee-3cce9b4a1a6f",
+  "name": "hipkernel:Gfx950AttentionDense (gfx950, 42 contribution(s))",
   "adapter": "tree_data",
   "features_signature": [
     "$device.memory_clock_rate",
@@ -322,7 +322,7 @@
         "revision": "1.0"
       }
     ],
-    "selector_revision": "generic-untuned-v1/67c9d4c3b0d48c67970692e6134c2f156f80746a59df1d9c68396290c096677f",
+    "selector_revision": "generic-untuned-v1/8ca0aca44c011143d223575b4ad192f738131530248663965da26ab7c4d4763a",
     "feature_semantics_revision": 1
   },
   "objective": "max",
@@ -333,6 +333,6 @@
   },
   "tree_data": {
     "artifact": "model.bin",
-    "hash": "48e33b9a85ac395f70665cc8e88bddb2c537c187a505ebc2700d00ce0545cb7c"
+    "hash": "d83550d8c65b3f61f15d4e163f697b2ef54b84d2c69884de97d1b85d50c7414c"
   }
 }
