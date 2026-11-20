@@ -25,8 +25,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from kernels.common._attention_additive_bias import ADDITIVE_BIAS_INDEX_LIMIT
 from kernels.common._sdpa_seqlen import validate_lengths
-from kernels.common.attention_unified import _I32_LIMIT
 from rocke.core.arch import known_arches
 from rocke.dispatch.core import TorchBinding
 from rocke.runtime.torch_interop import device_tensor, empty_workspace, torch_dtype
@@ -208,7 +208,7 @@ def _bias_reject(req: SdpaRequest) -> tuple[bool, str] | None:
             f"converted (supported: {', '.join(_BIAS_DTYPES)})"
         )
     b, h, sq, _ = bias.dims
-    if b * h * sq * req.s_kv >= _I32_LIMIT:
+    if b * h * sq * req.s_kv >= ADDITIVE_BIAS_INDEX_LIMIT:
         return False, (
             f"bias: dims {bias.dims} expand to {b * h * sq * req.s_kv} f32 "
             f"elements, past the kernels' i32 bias addressing (2**31)"

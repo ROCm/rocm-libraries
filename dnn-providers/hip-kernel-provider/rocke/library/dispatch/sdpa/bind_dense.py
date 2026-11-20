@@ -98,7 +98,8 @@ SDPA_DENSE_FEATURES = frozenset(
 # bind_shared.py, so the unified and dense wording cannot drift apart; a
 # dense-only feature like d_v_differs/padded/ragged keeps its own text in
 # ``overrides`` since unified does not decline it at all -- it carries it
-# instead). Checked in this order, so the reported reason is deterministic.
+# instead -- and bias/bias_broadcast keep theirs because the shared reason is
+# untrue for dense). Checked in this order, so the reported reason is deterministic.
 _DECLINED = declined_table(
     "dense",
     (
@@ -121,6 +122,19 @@ _DECLINED = declined_table(
         "max_sum_exp",
     ),
     overrides={
+        # Some dense candidates declare ``attn_bias``, so the shared "no candidate
+        # declares additive-bias support" would be untrue here: it is this binding that
+        # has no bias operand to pass on (``_DensePlan``), and nothing in the gate maps
+        # an SdpaRequest's bias onto ``AttentionRequest.use_attn_bias``.
+        "bias": (
+            "bias: NOT_YET_IMPLEMENTED: the dense SDPA binding passes no additive bias "
+            "to the dense kernels, although some dense candidates declare attn_bias"
+        ),
+        "bias_broadcast": (
+            "bias_broadcast: NOT_YET_IMPLEMENTED: the dense SDPA binding passes no "
+            "additive bias to the dense kernels, although some dense candidates "
+            "declare attn_bias"
+        ),
         "d_v_differs": "d_v_differs: the dense kernels take one head size for Q/K and V",
         "padded": "padded: the dense candidates take one sequence length per batch",
         "ragged": "ragged: the dense candidates take one sequence length per batch",

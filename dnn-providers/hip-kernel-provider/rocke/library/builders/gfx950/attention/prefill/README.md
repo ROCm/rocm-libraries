@@ -234,9 +234,18 @@ aligned packed inputs, sinks, and supported wide-load variants. Existing mode
 restrictions still apply. Enabled packed inputs require same-device int32
 cumulative offsets of length `B+1`, monotone from zero to each packed extent.
 Each nonempty Q length must be a `block_m` multiple and at most spec `seqlen_q`;
-each KV length must be a positive `block_n` multiple and at most spec `seqlen_kv`.
-Zero-Q sequences write no rows. These offset-content checks may synchronize;
-LSE buffer checks use metadata only.
+each KV length must be a `block_n` multiple and at most spec `seqlen_kv`, and
+positive unless the sequence has no queries. Zero-Q sequences write no rows and
+never read their keys. These offset-content checks may synchronize; LSE buffer
+checks use metadata only.
+
+The same offset checks run on every packed launch, with LSE or without
+(`validate_dense_varlen_offsets`; without LSE, `validate_varlen=False` skips them,
+except for a launch with an additive bias). Two valid inputs are not implemented:
+a sequence with queries and no keys (`NotImplementedError` without LSE), and,
+without LSE or an additive bias, with a sliding window, a sequence whose last query
+rows see no key (`q_len - kv_len >= window`; `NotImplementedError`), because only
+the LSE and bias epilogues zero such a row.
 
 Through the dispatcher, set `emit_lse=True` on a pinned dense `AttentionRequest` and
 pass the buffer as `tensors["lse"]`; `dispatch_attention(req).bind_torch(tensors)`
@@ -246,6 +255,55 @@ kernel without the output. The prefill CLI, hipDNN, and the standalone split-KV
 decode kernels do not write LSE; unified attention writes it on its split-KV and
 tiled 2D paths on gfx942/gfx950 (see `dispatch/attention/README.md`). The gfx942
 dense kernel has the same opt-in.
+
+### Optional additive bias through the direct runner
+
+An additive bias (hipDNN's `attn_mask`, PyTorch's float `attn_mask`) is added to the
+scaled scores before the mask: `softmax(QK * scale + bias)`. It is a compile-time
+opt-in on the gfx950 dense spec, `use_additive_bias=True`, served by the grid body
+only (the persistent body and paged K/V refuse it). The kernel name gains `addb`.
+
+```python
+spec = Gfx950AttentionDenseSpec(
+    batch=2, seqlen_q=512, seqlen_kv=512,
+    num_query_heads=32, num_kv_heads=8, head_size=128,
+    causal=True, dtype="bf16", use_additive_bias=True,
+)
+# One bias row per (batch, query head, query): [B, Hq, Sq, Skv]. Any leading axis may
+# be 1 to broadcast, e.g. a [1, 1, 1, 512] key-padding row shared by every query.
+bias = torch.zeros((2, 32, 512, 512), dtype=torch.float32, device=q.device)
+run_attention_dense_torch(
+    spec=spec, q=q, k=k, v=v, out=out, additive_bias=bias, scale=128**-0.5,
+)
+```
+
+- **Layout.** fp32 `[B|1, Hq|1, Sq|1, Skv]`, on q's device, indexed by the query head
+  (not the KV head). The key axis must be full length at unit stride; the other strides
+  are free (a padded row pitch works), and an extent-1 axis broadcasts through stride 0.
+  Under varlen, `Sq`/`Skv` are the spec maxima and each sequence reads its rows by
+  in-sequence position, so the offsets are always checked (a device sync; see the
+  packed-offset rules above).
+- **Size.** The kernel indexes the bias in i32: a launch whose largest element index
+  reaches 2**31 (8 GiB of fp32) raises `NotImplementedError`; broadcast an axis or split
+  the launch. Strides that reach past the tensor's storage raise `ValueError`.
+- **Masking values.** `-inf` masks a key. A row with no unmasked key writes zero output
+  and `LSE=-inf` (`LSE=sink` with a finite sink), as the hipDNN reference does for a row
+  of `-inf` scores. A finite bias is an ordinary score, except that one below -2**97
+  (about -1.6e29) is raised to that, which keeps it above the kernel's own mask
+  sentinel. A row whose visible keys are all below it (e.g. `finfo(float32).min`
+  padding) therefore gets the uniform softmax over them, as the reference and PyTorch
+  give it (O = mean(V) over the keys the mask leaves), with an `LSE` of about -2**97
+  where theirs is about the bias itself; biases that differ below -2**97 are not told
+  apart. A NaN bias on a visible key makes its row NaN (O and `LSE`), as in the
+  reference; a NaN on a key the mask removes is ignored. A bias above about 2.3e38
+  overflows to a NaN row.
+- **Composes with** every mask (none, top-left and bottom-right causal, sliding window,
+  lookahead), fixed ragged, packed varlen, sinks and LSE, fp16/bf16, D64/D128.
+
+Through the dispatcher, set `use_attn_bias=True` (fp32 only: `attn_bias_dtype="f32"`) on
+an `AttentionRequest` pinned to `gfx950_dense_grid` and pass the bias as
+`tensors["attn_bias"]`. hipDNN ships the bias kernels at the 128/64 tile only (see the
+`gfx950_attention_dense` descriptor README).
 
 Through the dispatcher (opt-in: pin the candidate by `algorithm` and `spec_id`,
 and optionally a swept point by `tuning_id`):
@@ -321,8 +379,9 @@ and the sinks / softcap options compose; ALiBi and QQ-bias are only defined for
 causal masks. At `seqlen_q == 1` top-left attends only key 0, which is the
 definition of top-left, not a bug. A row whose band holds no key outputs zeros (the
 same in the unified and dense kernels, and what PyTorch SDPA returns for a fully
-masked row), except in packed varlen dense launches without LSE: the launcher rejects
-a keyless-window or empty-KV sequence on the host there instead of zeroing it.
+masked row), except in packed varlen dense launches without LSE or an additive bias:
+the launcher rejects a keyless-window sequence on the host there instead of zeroing
+it (a sequence with queries and no keys is rejected in every packed launch).
 
 The standalone dense kernel (`algorithm="attention_dense_grid"` / `"attention_dense_persist"`) implements the same band
 on the top-left diagonal -- full attention (including ragged cross-attention

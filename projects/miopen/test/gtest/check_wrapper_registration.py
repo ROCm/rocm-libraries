@@ -6,11 +6,11 @@
     check_wrapper_registration.py --labels "<ex_gpu_a;ex_gpu_b>" \\
         [--ctest-dir <build dir>] [--packaged <install_CTestTestfile.cmake>]
 
-wrapper_abi_check, wrapper_bare_link_check and forwarding_failure_modes are registered
-once bare and once per ex_gpu_<arch> label, each with the tier labels plus the arch
-label, because TheRock's GPU jobs select tests with `-L ^<tier>$ -L ^ex_gpu_<arch>$`.
-If the per-arch entries are dropped, no other test fails, so this check is the only
-thing that notices.
+wrapper_abi_check, wrapper_bare_link_check, forwarding_failure_modes and wrapper_reentry_macro
+are registered once bare and once per ex_gpu_<arch> label, each with the tier labels plus the
+arch label, because TheRock's GPU jobs select tests with `-L ^<tier>$ -L ^ex_gpu_<arch>$`.
+If the per-arch entries are dropped, no other test fails, so this check is the only thing
+that notices.
 
 --labels is what forwarding_parity_gpu_labels.py prints for test_categories.yaml: the
 architectures that have an enabled suite, the list CMake registers from. A label whose
@@ -35,7 +35,12 @@ import re
 import subprocess
 import sys
 
-CHECKS = ("wrapper_abi_check", "wrapper_bare_link_check", "forwarding_failure_modes")
+CHECKS = (
+    "wrapper_abi_check",
+    "wrapper_bare_link_check",
+    "forwarding_failure_modes",
+    "wrapper_reentry_macro",
+)
 PARITY = "miopen_gtest_forwarding_parity"
 
 # The harness's own label, on the bare parity entry only.

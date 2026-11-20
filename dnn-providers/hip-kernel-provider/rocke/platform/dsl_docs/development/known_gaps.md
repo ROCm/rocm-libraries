@@ -18,7 +18,10 @@ versus the Python engine across every kernel family (see
   0 mismatch**.
 
 None of the gaps below are on the *valid-config emission path*, which is why the
-gate is fully green. They fall into three kinds:
+gate is fully green, with one exception: §5 (additive bias) covers a
+Python-engine-only feature on the dense kernels that *is* reachable from a valid
+config — see that section for why the gate stays green anyway. They fall into
+three kinds:
 
 1. **Faithful rejection mirrors** — a `ROCKE_ERR_NOTIMPL` (or a reject-message)
    that translates a Python `raise NotImplementedError` / `ValueError` /
@@ -204,7 +207,45 @@ or are link-resolved-but-forward-declared; the byte-identity path is unaffected.
 
 ---
 
-## 5. gfx942 MLA prefill — Python-only kernel builder
+## 5. Library attention — additive bias on the dense kernels (Python engine only)
+
+**Subsystem:** `library/kernels/common/_attention_additive_bias.py`, the `attention_dense` family
+
+The gfx950 unified tiled 2D and 3D split-KV kernels build additive bias in both
+engines (`instance_attention_additive_bias_internal.h` mirrors
+`_attention_additive_bias.py`), pinned by bias-on cases in
+`rocke_ir_parity_harness.py` and the representative-IR goldens.
+
+The gfx950 `attention_dense` grid body also takes `use_additive_bias` through
+the same helper. It is not a new gap: the dense family has no C++ builder mirror
+by design. Its five bias-on harness cases (`bias_sq512`,
+`bias_catalog_tile_sq512`, `bias_ragged_bottom_right_sq500`,
+`bias_lse_window_past_keys_sq512`, `bias_varlen_window_sq512`) are pinned in
+the representative-IR golden; `bias_catalog_tile_sq512` is the tile and block
+order the hipDNN catalog ships.
+`library/tests/test_attention_ir_cpp_parity.py` lowers the same cases through the
+C++ engine for byte-identity; it needs the `rocke_engine` binding, which the CI
+lanes do not build, so run it locally with `ROCKE_CPP_STRICT=1`.
+
+The gfx942 `attention_dense` kernel (default and persistent grids) takes
+`use_additive_bias` through the same helper, and is likewise not a gap: no C++
+builder mirror by design. Its bias-on harness cases are pinned in the same golden
+(`attention_dense/gfx942/bias_*`) and lowered through the C++ engine by the same
+parity test.
+
+Bias validation is not shared everywhere yet. The host checks of a bias launch
+(`check_additive_bias_tensor`, `check_additive_bias_reach`) serve the unified
+and dense runners, but the gfx1151 dispatch binding (`dispatch/attention/bindings.py`)
+and the two hipDNN code paths that accept `attn_mask` (the shared dense matcher
+`AttentionDenseNative.cpp`, which only the gfx950 dense pack enables, and
+`Gfx1151WmmaAttentionNative.cpp`) keep their own copies of the layout rules, and
+the two C++ copies already differ on a broadcast axis's stride and on bounding
+bytes versus element indices. Merging them is a follow-up. A gfx942 dense pack
+needs no third copy: it turns the bias feature on in its arch descriptor.
+
+---
+
+## 6. gfx942 MLA prefill — Python-only kernel builder
 
 **Subsystem:** `library/kernels/mla/`, `library/dispatch/mla/`
 
@@ -225,7 +266,7 @@ mirrors; until then, keep emission changes gated by the two tests above.
 
 ---
 
-## 6. Unified attention LSE output (`emit_lse`) — not requestable from C
+## 7. Unified attention LSE output (`emit_lse`) — not requestable from C
 
 **Subsystem:** `instances/common/attention_unified_selectors.cpp` (and its
 header), `rocke_unified_attn_problem_t`

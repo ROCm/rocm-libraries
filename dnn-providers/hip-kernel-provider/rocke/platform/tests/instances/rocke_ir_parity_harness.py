@@ -2009,6 +2009,48 @@ def cases():
                 "use_sinks": True,
             },
         ),
+        # --- additive bias (grid body only): the aligned runtime-shape body with
+        # plain 16-byte loads (four keys each, element-aligned), the ragged body
+        # whose scalar loads are masked at the tails, and the
+        # windowed bodies that clamp the start tile because the bias load is plain
+        # (LSE on: baked tile count; varlen: per-sequence tile count). Numerics
+        # cannot observe that clamp (the window mask overwrites the read), so these
+        # hashes are its only CI pin. bias_catalog_tile is the configuration the
+        # hipDNN catalog ships (block_m 128 / block_n 64 at the qb_minor block
+        # order); the others run the spec's default 256/64 tile.
+        ("bias_sq512", {"use_additive_bias": True}),
+        (
+            "bias_catalog_tile_sq512",
+            {
+                "use_additive_bias": True,
+                "block_m": 128,
+                "block_n": 64,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_ragged_bottom_right_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 1234,
+                "ragged": True,
+                "causal_bottom_right": True,
+                "use_additive_bias": True,
+            },
+        ),
+        (
+            "bias_lse_window_past_keys_sq512",
+            {
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "seqlen_kv": 128,
+                "sliding_window": 64,
+            },
+        ),
+        (
+            "bias_varlen_window_sq512",
+            {"use_additive_bias": True, "varlen": True, "sliding_window": 64},
+        ),
     ):
         add(
             "attention_dense",
@@ -2041,6 +2083,130 @@ def cases():
                 "causal_diag_split": True,
                 "kv_segments": 4,
                 "block_m": 128,
+            },
+        ),
+        # --- additive bias: one bias add per tile ahead of the mask, on the default
+        # and the persistent grid (the policy picks the 4-wide loads for every bias
+        # body, so a row names use_bias_x4 only to force the scalar loads or to pin
+        # the policy's pick); the epilogue's live-row test with and without LSE (sinks
+        # with LSE keep m = sink for a row whose keys are all -inf); a sliding window on
+        # the persistent grid and under wave skip; the diagonal split, whose unmasked
+        # tiles still take the bias; D64 fp16 without a mask; bf16 D64 with the policy's
+        # loads and with scalar ones forced; the 4-wide loads and the scalar ones at
+        # D128 on both grids; and the geometry the dispatch factory builds for a bias
+        # (128-row blocks, a 32-key tile at D128 and 64-key at D64, the decode order
+        # following the mask). The rows above pin that none of this emits IR when the
+        # bias is off.
+        ("bias_causal_sq512", {"use_additive_bias": True}),
+        ("bias_persist_causal_sq512", {**_persist942, "use_additive_bias": True}),
+        (
+            "bias_lse_window_sq512",
+            {"use_additive_bias": True, "emit_lse": True, "sliding_window": 128},
+        ),
+        (
+            "bias_persist_window_lse_sq512",
+            {
+                **_persist942,
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "sliding_window": 128,
+            },
+        ),
+        (
+            "bias_window_wave_skip_sq512",
+            {
+                "use_additive_bias": True,
+                "sliding_window": 128,
+                "block_m": 128,
+                "block_n": 32,
+                "window_wave_skip": True,
+            },
+        ),
+        (
+            "bias_bottom_right_dsplit_sq512",
+            {
+                "use_additive_bias": True,
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+            },
+        ),
+        (
+            "bias_d64_fp16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "dtype": "fp16",
+                "causal": False,
+            },
+        ),
+        ("bias_d64_bf16_sq512", {"use_additive_bias": True, "head_size": 64}),
+        (
+            "bias_d64_bf16_scalar_sq512",
+            {"use_additive_bias": True, "head_size": 64, "use_bias_x4": False},
+        ),
+        (
+            "bias_sinks_lse_sq512",
+            {"use_additive_bias": True, "use_sinks": True, "emit_lse": True},
+        ),
+        ("bias_x4_sq512", {"use_additive_bias": True, "use_bias_x4": True}),
+        ("bias_scalar_sq512", {"use_additive_bias": True, "use_bias_x4": False}),
+        (
+            "bias_persist_scalar_sq512",
+            {**_persist942, "use_additive_bias": True, "use_bias_x4": False},
+        ),
+        (
+            "bias_d128_fp16_no_mask_sq512",
+            {"use_additive_bias": True, "dtype": "fp16", "causal": False},
+        ),
+        (
+            "bias_geom_d128_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "bt_hkv_minor",
+            },
+        ),
+        (
+            "bias_geom_lse_d128_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "bt_hkv_minor",
+            },
+        ),
+        (
+            "bias_geom_d128_fp16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "dtype": "fp16",
+                "causal": False,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_geom_d64_bf16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "causal": False,
+                "block_m": 128,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_geom_lse_d64_bf16_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "emit_lse": True,
+                "block_m": 128,
+                "nonpersist_decode": "bt_hkv_minor",
             },
         ),
         # Paged K/V, the same cohort as the gfx950 case of this name.

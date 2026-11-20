@@ -16,7 +16,6 @@
 #include <nlohmann/json.hpp>
 
 #include "OperationsDir.hpp"
-#include <fstream>
 #include <set>
 #include <string>
 
@@ -73,17 +72,6 @@ int64_t at(const ProblemPoint& point, const std::string& name)
     return std::get<int64_t>(point.at(name));
 }
 
-/// A shipped declaration, read as the generator reads it.
-OperationMetadata shipped(const std::string& operation)
-{
-    const auto path = hipdnn_corpus_gen::test::operationsDir() + "/" + operation + ".opmeta.json";
-    std::ifstream file(path);
-    EXPECT_TRUE(file.is_open()) << path;
-    const auto load = parseOperationMetadata(nlohmann::json::parse(file));
-    EXPECT_TRUE(load.ok()) << (load.errors.empty() ? "" : load.errors.front());
-    return load.metadata.value_or(OperationMetadata{});
-}
-
 } // namespace
 
 TEST(TestWorkloadSampling, ADrawKeepsAnArchetypesValuesTogether)
@@ -122,7 +110,7 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
     // follow references, not key order.
     for(const std::string operation : {"sdpa_fwd", "sdpa_bwd"})
     {
-        const auto metadata = shipped(operation);
+        const auto metadata = test::shippedOperation(operation);
         ASSERT_FALSE(metadata.archetypes.empty()) << operation;
         ProblemPoint categorical{{"alignment", std::string{"top_left"}},
                                  {"dtype", std::string{"bf16"}}};
@@ -130,6 +118,7 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
         {
             categorical["generate_stats"] = false;
         }
+        categorical["form"] = std::string{"plain"};
 
         std::mt19937_64 rng(4);
         for(const auto& archetype : metadata.archetypes)
@@ -151,7 +140,7 @@ TEST(TestWorkloadSampling, EveryShippedSdpaArchetypeDrawsWhateverOrderItsKeysPar
 TEST(TestWorkloadSampling, AShippedMirrorFollowsThePerturbedValueWhateverOrderItsKeysParseIn)
 {
     // Same key-order hazard for neighbourhood mirrors.
-    const auto metadata = shipped("sdpa_fwd");
+    const auto metadata = test::shippedOperation("sdpa_fwd");
     std::mt19937_64 rng(5);
     const ProblemPoint anchor{{"batch", int64_t{4}},
                               {"heads", int64_t{32}},
@@ -162,7 +151,8 @@ TEST(TestWorkloadSampling, AShippedMirrorFollowsThePerturbedValueWhateverOrderIt
                               {"is_causal", true},
                               {"alignment", std::string{"top_left"}},
                               {"dtype", std::string{"bf16"}},
-                              {"generate_stats", false}};
+                              {"generate_stats", false},
+                              {"form", std::string{"plain"}}};
 
     const std::set<int64_t> ratios{1, 2, 4, 16};
     for(int i = 0; i < 100; ++i)

@@ -295,10 +295,26 @@ def validate_tuning_attention_tensors(
 # arguments the runner does not list and launches a different kernel.
 _DENSE_OPTIONAL_INPUTS = {
     "gfx942": frozenset(
-        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
+        {
+            "cu_seqlens_q",
+            "cu_seqlens_kv",
+            "block_tables",
+            "kv_lens",
+            "sinks",
+            "lse",
+            "additive_bias",
+        }
     ),
     "gfx950": frozenset(
-        {"cu_seqlens_q", "cu_seqlens_kv", "block_tables", "kv_lens", "sinks", "lse"}
+        {
+            "cu_seqlens_q",
+            "cu_seqlens_kv",
+            "block_tables",
+            "kv_lens",
+            "sinks",
+            "lse",
+            "additive_bias",
+        }
     ),
 }
 
@@ -355,7 +371,9 @@ def bind_dense_attention_torch(
 
     Grid and block come from the spec, the same values the candidate reports.
     An ``emit_lse`` spec also needs ``tensors["lse"]``: a caller-owned FP32
-    buffer the kernel fills in place (the runner validates it). For a paged spec,
+    buffer the kernel fills in place (the runner validates it). An additive-bias
+    spec needs ``tensors["attn_bias"]``, the fp32 ``[B|1, Hq|1, Sq|1, Skv]`` bias
+    (the runner derives its strides). For a paged spec,
     ``unsafe_skip_paged_value_validation=True`` skips the runner's synchronized
     block-table/kv_lens value checks (graph capture, hot paths), as for the
     unified binding; the structural checks stay. Only for callers that guarantee
@@ -414,14 +432,18 @@ def bind_dense_attention_torch(
             "kv_lens": _kw.get("kv_lens", tensors.get("kv_lens")),
             "sinks": _kw.get("sinks", tensors.get("sinks")),
             "lse": _kw.get("lse", tensors.get("lse")),
+            "additive_bias": _kw.get("additive_bias", tensors.get("attn_bias")),
         }
         accepted = _DENSE_OPTIONAL_INPUTS[str(request.arch)]
         for name, value in optional.items():
             if value is None:
                 continue
             if name not in accepted:
+                shown = (
+                    "tensors['attn_bias']" if name == "additive_bias" else repr(name)
+                )
                 raise NotImplementedError(
-                    f"{request.arch} dense runner does not accept {name!r}"
+                    f"{request.arch} dense runner does not accept {shown}"
                 )
             call[name] = value
         if spec.paged:

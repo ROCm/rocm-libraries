@@ -85,18 +85,22 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        # fp8 KV is grid-only -- the spec rejects persistent/paged (so the
-        # persistent variants do not advertise it).
-        features=_FEATURES | {"causal_bottom_right", "layout_paged", "fp8"},
+        # Additive bias is grid-body only, and fp32 only (see _base_spec). fp8 KV is
+        # grid-only too -- the spec rejects persistent/paged (so the persistent
+        # variants advertise neither). The spec also rejects bias with paged K/V or
+        # fp8 KV, so the candidates declare both features and a request for either
+        # pair is reported as a refused pin.
+        features=_FEATURES
+        | {"causal_bottom_right", "attn_bias", "layout_paged", "fp8"},
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
-    # launches.
+    # launches, so it serves hipDNN's fp32 attn_mask too.
     Gfx950DenseVariant(
         "qbminor",
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right", "layout_paged"},
+        features=_FEATURES | {"causal_bottom_right", "attn_bias", "layout_paged"},
         nonpersist_decode="qb_minor",
     ),
     Gfx950DenseVariant(
@@ -209,6 +213,12 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         raise ValueError(
             f"gfx950 dense spec factory requires arch='gfx950', got {req.arch!r}"
         )
+    use_bias = req.use_attn_bias  # a bool: AttentionRequest refuses anything else
+    if use_bias and req.attn_bias_dtype.strip().lower() != "f32":
+        raise ValueError(
+            "gfx950 dense: the additive bias must be fp32, got "
+            f"attn_bias_dtype={req.attn_bias_dtype!r}"
+        )
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     window = int(req.sliding_window)
     shared_bm = int(DENSE_TILE_GEOMETRIES[_DENSE_TILE]["block_m"])
@@ -237,6 +247,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         and not variant.persistent
         and not req.use_sinks
         and not req.emit_lse
+        and not use_bias
     ):
         # A short query chunk over a long KV prefix launches few CTAs: halve the
         # query tile, then split each work item's KV range so the grid covers the
@@ -303,6 +314,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,
         kv_segments=kv_segments,
+        use_additive_bias=use_bias,
         **dense_paged_fields(req),
         kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
     )

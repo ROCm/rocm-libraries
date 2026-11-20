@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -161,6 +162,41 @@ IngestorPlanPayload gfx950AttentionDensePayload(std::string_view dispatchSymbol,
     return payload;
 }
 
+// A gfx950 dense-attention bias plan under v3, the contract of a bias kernel: the v2 values
+// plus a [B, 1, Sq, Skv] bias. Its recorded signature is v2's ten arguments, then the bias
+// pointer and its three strides when `withBiasTail`.
+IngestorPlanPayload gfx950AttentionDenseBiasPayload(bool withBiasTail)
+{
+    AttentionDenseBinding binding{1, 2, 3, 4, 1, 0, 0.125F};
+    binding.bias = AttentionDenseBias{5, {512 * 512, 0, 512}};
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::BFLOAT16;
+
+    IngestorPlanPayload payload = validConvFwdPayload();
+    payload.dispatchSymbol = std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3);
+    payload.launchValues = gfx950AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.symbol = "attention_dense";
+    payload.recordedSignature = gfx950AttentionDenseSignature(/*withHeads=*/true);
+    if(withBiasTail)
+    {
+        payload.recordedSignature.push_back(
+            KernelArgument{"global_buffer", 8, 56, "additive_bias_ptr"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, 64, "additive_bias_batch_stride"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, 68, "additive_bias_head_stride"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, 72, "additive_bias_sq_stride"});
+    }
+    return payload;
+}
+
 // A gfx942 dense-attention payload under its one contract, saved with stats uid `stats`
 // (ATTENTION_DENSE_NO_STATS for none), that passes every check before the module load when
 // `withHeads` is true and `writesLse` says whether `stats` is bound: gfx942 launches the
@@ -188,6 +224,51 @@ IngestorPlanPayload gfx942AttentionDensePayload(bool withHeads,
     if(writesLse)
     {
         payload.recordedSignature.push_back(KernelArgument{"global_buffer", 8, 56, "lse_ptr"});
+    }
+    return payload;
+}
+
+// A gfx942 dense-attention bias plan under v2, the contract of a bias kernel: v1's values plus
+// a [B, 1, Sq, Skv] bias, saved with stats uid `stats` (ATTENTION_DENSE_NO_STATS for none).
+// Its recorded signature is v1's ten arguments, lse_ptr when `writesLse`, then the bias
+// pointer and its three strides when `withBiasTail`: last, after lse_ptr.
+IngestorPlanPayload gfx942AttentionDenseBiasPayload(bool withBiasTail,
+                                                    int64_t stats = ATTENTION_DENSE_NO_STATS,
+                                                    bool writesLse = false)
+{
+    AttentionDenseBinding binding{1, 2, 3, 4, 1, 128, 0.125F};
+    binding.stats = stats;
+    binding.bias = AttentionDenseBias{5, {512 * 512, 0, 512}};
+    AttentionDenseProblem problem;
+    problem.batch = 2;
+    problem.seqLenQ = 512;
+    problem.seqLenKv = 512;
+    problem.numQueryHeads = 8;
+    problem.numKvHeads = 4;
+    problem.headSize = 128;
+    problem.dataType = data_objects::DataType::HALF;
+
+    IngestorPlanPayload payload = validConvFwdPayload();
+    payload.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2);
+    payload.launchValues = gfx942AttentionDenseLaunchValues(binding, problem, int64_t{256});
+    payload.symbol = "attention_dense";
+    payload.recordedSignature = gfx950AttentionDenseSignature(/*withHeads=*/true);
+    uint32_t offset = 56;
+    if(writesLse)
+    {
+        payload.recordedSignature.push_back(KernelArgument{"global_buffer", 8, offset, "lse_ptr"});
+        offset += 8;
+    }
+    if(withBiasTail)
+    {
+        payload.recordedSignature.push_back(
+            KernelArgument{"global_buffer", 8, offset, "additive_bias_ptr"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, offset + 8, "additive_bias_batch_stride"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, offset + 12, "additive_bias_head_stride"});
+        payload.recordedSignature.push_back(
+            KernelArgument{"by_value", 4, offset + 16, "additive_bias_sq_stride"});
     }
     return payload;
 }
@@ -376,13 +457,17 @@ TEST_F(TestIngestorPlanRestoreChecks, RefusesASignatureThePackDoesNotLaunch)
 }
 
 // Each gfx950 dense-attention contract restores only the code object it launches: v1 the
-// 8-argument kernels that bake the head counts, v2 the 10-argument kernels that read them.
+// 8-argument kernels that bake the head counts, v2 the 10-argument kernels that read them,
+// and v3 the 14-argument bias kernels.
 TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsRefuseTheOtherSignature)
 {
     expectRefusal(gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1, true),
                   HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                   "the saved kernel's arguments do not match what this provider launches");
     expectRefusal(gfx950AttentionDensePayload(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2, false),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  "the saved kernel's arguments do not match what this provider launches");
+    expectRefusal(gfx950AttentionDenseBiasPayload(/*withBiasTail=*/false),
                   HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
                   "the saved kernel's arguments do not match what this provider launches");
 }
@@ -400,6 +485,10 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx950AttentionDenseContractsAcceptTheirOw
         payload.launchValues["block_m"] = int64_t{64};
         expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
     }
+
+    auto bias = gfx950AttentionDenseBiasPayload(/*withBiasTail=*/true);
+    bias.launchValues["block_m"] = int64_t{64};
+    expectRefusal(bias, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
 }
 
 // gfx942's one contract restores only the 10-argument code object it launches.
@@ -425,6 +514,52 @@ TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseContractAcceptsItsOwnS
     keylessRows.launchValues["sliding_window"] = int64_t{256};
     expectRefusal(
         keylessRows, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'sliding_window'");
+}
+
+// gfx942's bias contract, v2, restores only the code object that takes the bias tail last,
+// after lse_ptr; its plain contract, v1, refuses the tail.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseBiasContractRefusesTheOtherSignatures)
+{
+    constexpr const char* MISMATCH
+        = "the saved kernel's arguments do not match what this provider launches";
+    expectRefusal(gfx942AttentionDenseBiasPayload(/*withBiasTail=*/false),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  MISMATCH);
+    expectRefusal(gfx942AttentionDenseBiasPayload(
+                      /*withBiasTail=*/false, int64_t{7}, /*writesLse=*/true),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  MISMATCH);
+    // A bias plan whose code object records lse_ptr after the tail, the order a kernel
+    // never takes, or whose stats uid disagrees with the lse_ptr it records.
+    auto tailBeforeLse = gfx942AttentionDenseBiasPayload(/*withBiasTail=*/true);
+    tailBeforeLse.recordedSignature.push_back(KernelArgument{"global_buffer", 8, 80, "lse_ptr"});
+    tailBeforeLse.launchValues["stats.uid"] = int64_t{7};
+    expectRefusal(tailBeforeLse, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, MISMATCH);
+    expectRefusal(gfx942AttentionDenseBiasPayload(
+                      /*withBiasTail=*/true, ATTENTION_DENSE_NO_STATS, /*writesLse=*/true),
+                  HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
+                  MISMATCH);
+
+    // v1 holds no bias: a plan relabelled v1 that records the tail is refused too, its
+    // code object taking four arguments v1 never passes.
+    auto biasUnderV1 = gfx942AttentionDenseBiasPayload(/*withBiasTail=*/true);
+    biasUnderV1.dispatchSymbol = std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    expectRefusal(biasUnderV1, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, MISMATCH);
+}
+
+// The matching signature passes: the plan reaches the launch-value check, which a block_m
+// gfx942 does not build then refuses. No case loads the code object, so no device is
+// needed.
+TEST_F(TestIngestorPlanRestoreChecks, Gfx942AttentionDenseBiasContractAcceptsItsOwnSignature)
+{
+    for(const bool writesLse : {false, true})
+    {
+        SCOPED_TRACE(writesLse);
+        auto payload = gfx942AttentionDenseBiasPayload(
+            /*withBiasTail=*/true, writesLse ? int64_t{7} : ATTENTION_DENSE_NO_STATS, writesLse);
+        payload.launchValues["block_m"] = int64_t{48};
+        expectRefusal(payload, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, "launch value 'block_m'");
+    }
 }
 
 // The saved stats uid selects the argument list before anything is checked: a plan with a
