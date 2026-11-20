@@ -279,9 +279,27 @@ hiptensorStatus_t hiptensorDestroy(hiptensorHandle_t handle)
     return HIPTENSOR_STATUS_SUCCESS;
 }
 
+// Logs that the argument `name` of `apiFuncName` is null and returns `errorCode`.
+static hiptensorStatus_t
+    nullArgumentError(char const* apiFuncName, char const* name, hiptensorStatus_t errorCode)
+{
+    char msg[256];
+    snprintf(msg,
+             sizeof(msg),
+             "Initialization Error : %s = nullptr (%s)",
+             name,
+             hiptensorGetErrorString(errorCode));
+    hiptensor::Logger::instance()->logError(apiFuncName, msg);
+    return errorCode;
+}
+
 hiptensorStatus_t hiptensorHandleResizePlanCache(hiptensorHandle_t handle,
                                                  const uint32_t    numEntries)
 {
+    if(handle == nullptr)
+        return nullArgumentError(
+            "hiptensorHandleResizePlanCache", "handle", HIPTENSOR_STATUS_NOT_INITIALIZED);
+
     if(handle->getPlanCache() == nullptr)
         return HIPTENSOR_STATUS_SUCCESS;
 
@@ -296,6 +314,12 @@ hiptensorStatus_t hiptensorHandleResizePlanCache(hiptensorHandle_t handle,
 hiptensorStatus_t hiptensorHandleWritePlanCacheToFile(const hiptensorHandle_t handle,
                                                       const char              fileName[])
 {
+    constexpr auto apiFuncName = "hiptensorHandleWritePlanCacheToFile";
+    if(handle == nullptr)
+        return nullArgumentError(apiFuncName, "handle", HIPTENSOR_STATUS_NOT_INITIALIZED);
+    if(fileName == nullptr)
+        return nullArgumentError(apiFuncName, "fileName", HIPTENSOR_STATUS_INVALID_VALUE);
+
     if(handle->getPlanCache() == nullptr)
         return HIPTENSOR_STATUS_SUCCESS;
 
@@ -306,8 +330,20 @@ hiptensorStatus_t hiptensorHandleReadPlanCacheFromFile(hiptensorHandle_t handle,
                                                        const char        fileName[],
                                                        uint32_t*         numCachelinesRead)
 {
+    constexpr auto apiFuncName = "hiptensorHandleReadPlanCacheFromFile";
+    if(handle == nullptr)
+        return nullArgumentError(apiFuncName, "handle", HIPTENSOR_STATUS_NOT_INITIALIZED);
+    if(fileName == nullptr)
+        return nullArgumentError(apiFuncName, "fileName", HIPTENSOR_STATUS_INVALID_VALUE);
+    if(numCachelinesRead == nullptr)
+        return nullArgumentError(apiFuncName, "numCachelinesRead", HIPTENSOR_STATUS_INVALID_VALUE);
+
+    // With the plan cache disabled there is nothing to read into.
     if(handle->getPlanCache() == nullptr)
+    {
+        *numCachelinesRead = 0;
         return HIPTENSOR_STATUS_SUCCESS;
+    }
 
     hiptensorStatus_t retVal = handle->getPlanCache()->readFile(fileName);
     if(retVal == HIPTENSOR_STATUS_SUCCESS)
