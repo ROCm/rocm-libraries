@@ -344,4 +344,73 @@ namespace
             }
         }
     }
+
+    TEST_F(L2DeviceCsrmvRows, spmv_preprocess_with_unregistered_host_row_ptr)
+    {
+        const bool compute = pageable_memory_access();
+        for(const auto alg : {rocsparse_spmv_alg_default, rocsparse_spmv_alg_csr_adaptive})
+        {
+            for(const int base : {0, 1})
+            {
+                SCOPED_TRACE(::testing::Message() << "alg=" << alg << " base=" << base);
+                const host_csr<float>    A     = make_short_rows(base);
+                const float              alpha = 1.5f, beta = -0.5f;
+                const std::vector<float> x  = make_vector<float>(A.n, 2);
+                const std::vector<float> y0 = make_vector<float>(A.m, 9);
+                const std::vector<float> want
+                    = csr_gemv(A, rocsparse_operation_none, alpha, x, beta, y0);
+
+                std::vector<int32_t> ptr(A.ptr);
+                device_csr<float>    dA(A);
+                device_vector<float> dx(x), dy(y0);
+                ASSERT_TRUE(dA.ok() && dx.ptr && dy.ptr);
+
+                spmat_guard mat;
+                ASSERT_EQ(rocsparse_create_csr_descr(&mat.d,
+                                                     A.m,
+                                                     A.n,
+                                                     A.nnz(),
+                                                     ptr.data(),
+                                                     dA.ind,
+                                                     dA.val,
+                                                     rocsparse_indextype_i32,
+                                                     rocsparse_indextype_i32,
+                                                     to_base(base),
+                                                     rocsparse_datatype_f32_r),
+                          rocsparse_status_success);
+                dnvec_guard vx, vy;
+                ASSERT_EQ(rocsparse_create_dnvec_descr(&vx.d, A.n, dx, rocsparse_datatype_f32_r),
+                          rocsparse_status_success);
+                ASSERT_EQ(rocsparse_create_dnvec_descr(&vy.d, A.m, dy, rocsparse_datatype_f32_r),
+                          rocsparse_status_success);
+
+                auto spmv = [&](rocsparse_spmv_stage stage, size_t* bytes, void* buffer) {
+                    return rocsparse_spmv(handle,
+                                          rocsparse_operation_none,
+                                          &alpha,
+                                          mat.d,
+                                          vx.d,
+                                          &beta,
+                                          vy.d,
+                                          rocsparse_datatype_f32_r,
+                                          alg,
+                                          stage,
+                                          bytes,
+                                          buffer);
+                };
+                size_t bytes = 0;
+                ASSERT_EQ(spmv(rocsparse_spmv_stage_buffer_size, &bytes, nullptr),
+                          rocsparse_status_success);
+                device_vector<char> dbuf(std::max<size_t>(bytes, 1));
+                ASSERT_TRUE(dbuf.ptr);
+                ASSERT_EQ(spmv(rocsparse_spmv_stage_preprocess, &bytes, dbuf.ptr),
+                          rocsparse_status_success);
+                if(!compute)
+                    continue;
+                ASSERT_EQ(spmv(rocsparse_spmv_stage_compute, &bytes, dbuf.ptr),
+                          rocsparse_status_success);
+                EXPECT_TRUE(expect_near(want, to_host(dy), "spmv y"));
+            }
+        }
+    }
 }
