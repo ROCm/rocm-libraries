@@ -3627,10 +3627,18 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
             with b.scf_if(b.cmp_lt(k_next, k_end)):
                 emit_load_phase(A_smem, B_smem, k_next, lds_parity=p)
 
+        # ROCKE_EXP_GL2_AT=refill: issue the L2 prefetch in the last K-atom,
+        # right after this tile's refill, instead of at the tile's start.
+        # =bar: right after the tile's workgroup barrier, before the next
+        # tile's reads are issued (fewer live registers than after the refill).
+        gl2_at_refill = _os_ra.environ.get("ROCKE_EXP_GL2_AT") == "refill"
+        gl2_at_bar = _os_ra.environ.get("ROCKE_EXP_GL2_AT") == "bar"
+
         def _tile(p, k_cur, acc, head):
             acc = list(acc)
             a, sa, sb, b0, b1 = head
-            _gl2_prefetch(k_cur)
+            if not (gl2_at_refill or gl2_at_bar):
+                _gl2_prefetch(k_cur)
             for s in range(k_atoms):
                 last = s + 1 == k_atoms
                 sp, sk = (1 - p, 0) if last else (p, s + 1)
@@ -3652,6 +3660,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                         b.s_barrier_bare()
                     if stamp_on:
                         st += _st_now()
+                    if gl2_at_bar:
+                        _gl2_prefetch(k_cur)
                     if cb:
                         # This workgroup is done with the buffer: tell the
                         # cluster (wave 0 only), and refill only once every
@@ -3669,6 +3679,8 @@ def build_universal_gemm(spec: UniversalGemmSpec, arch: str = "gfx950") -> Kerne
                             st += _st_now()
                             _st_store(k_cur, st)
                         _refill(p, k_cur)
+                        if gl2_at_refill:
+                            _gl2_prefetch(k_cur)
                         fence()
                         wmmas(acc, a, b0, sa, sb, 0, wait_at)
                         fence()
