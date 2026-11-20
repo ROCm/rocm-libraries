@@ -45,38 +45,39 @@ private:
     TempStorage& temp_storage;
 
 public:
-    explicit HIPCUB_DEVICE __forceinline__ WarpExchangeSmem(TempStorage& temp_storage)
+    explicit _CCCL_DEVICE __forceinline__
+    WarpExchangeSmem(TempStorage& temp_storage)
         : temp_storage(temp_storage)
     {}
 
     template<typename OutputT>
-    HIPCUB_DEVICE __forceinline__ void
-        BlockedToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
-                         OutputT (&output_items)[ITEMS_PER_THREAD])
+    _CCCL_DEVICE __forceinline__
+    void BlockedToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
+                          OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         warp_exchange{}.blocked_to_striped(input_items, output_items, temp_storage);
     }
 
     template<typename OutputT>
-    HIPCUB_DEVICE __forceinline__ void
-        StripedToBlocked(const InputT (&input_items)[ITEMS_PER_THREAD],
-                         OutputT (&output_items)[ITEMS_PER_THREAD])
+    _CCCL_DEVICE __forceinline__
+    void StripedToBlocked(const InputT (&input_items)[ITEMS_PER_THREAD],
+                          OutputT (&output_items)[ITEMS_PER_THREAD])
     {
         warp_exchange{}.striped_to_blocked(input_items, output_items, temp_storage);
     }
 
     template<typename OffsetT>
-    HIPCUB_DEVICE __forceinline__ void ScatterToStriped(InputT (&items)[ITEMS_PER_THREAD],
-                                                        OffsetT (&ranks)[ITEMS_PER_THREAD])
+    _CCCL_DEVICE __forceinline__
+    void ScatterToStriped(InputT (&items)[ITEMS_PER_THREAD], OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
         ScatterToStriped(items, items, ranks);
     }
 
     template<typename OutputT, typename OffsetT>
-    HIPCUB_DEVICE __forceinline__ void
-        ScatterToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
-                         OutputT (&output_items)[ITEMS_PER_THREAD],
-                         OffsetT (&ranks)[ITEMS_PER_THREAD])
+    _CCCL_DEVICE __forceinline__
+    void ScatterToStriped(const InputT (&input_items)[ITEMS_PER_THREAD],
+                          OutputT (&output_items)[ITEMS_PER_THREAD],
+                          OffsetT (&ranks)[ITEMS_PER_THREAD])
     {
         warp_exchange{}.scatter_to_striped(input_items, output_items, ranks, temp_storage);
     }

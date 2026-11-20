@@ -43,7 +43,7 @@ namespace detail
 {
 // Base case: When N == 0
 template<size_t N, typename Generator, typename... Ts>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 typename std::enable_if<N == 0, hipError_t>::type generate_partition(void*   d_temp_storage,
                                                                      size_t& temp_storage_bytes,
                                                                      Generator /*gen*/,
@@ -57,7 +57,7 @@ typename std::enable_if<N == 0, hipError_t>::type generate_partition(void*   d_t
 
 // Recursive case: When N > 0
 template<size_t N, typename Generator, typename... Ts>
-HIPCUB_HOST_DEVICE
+_CCCL_HOST_DEVICE
 typename std::enable_if<(N > 0), hipError_t>::type
     generate_partition(void* d_temp_storage, size_t& temp_storage_bytes, Generator gen, Ts... args)
 {

@@ -38,13 +38,15 @@ struct custom_notaligned
     float        f;
     unsigned int u;
 
-    HIPCUB_HOST_DEVICE custom_notaligned() : i(0), d(0), f(0), u(0){};
-    HIPCUB_HOST_DEVICE ~custom_notaligned(){};
+    _CCCL_HOST_DEVICE
+    custom_notaligned()
+        : i(0), d(0), f(0), u(0) {};
+    _CCCL_HOST_DEVICE
+    ~custom_notaligned() {};
 };
 
-HIPCUB_HOST_DEVICE
-inline bool
-    operator==(const custom_notaligned& lhs, const custom_notaligned& rhs)
+_CCCL_HOST_DEVICE
+inline bool operator==(const custom_notaligned& lhs, const custom_notaligned& rhs)
 {
     return lhs.i == rhs.i && lhs.d == rhs.d && lhs.f == rhs.f && lhs.u == rhs.u;
 }
@@ -56,11 +58,13 @@ struct custom_16aligned
     unsigned int u;
     float        f;
 
-    HIPCUB_HOST_DEVICE custom_16aligned(){};
-    HIPCUB_HOST_DEVICE ~custom_16aligned(){};
+    _CCCL_HOST_DEVICE
+    custom_16aligned() {};
+    _CCCL_HOST_DEVICE
+    ~custom_16aligned() {};
 } __attribute__((aligned(16)));
 
-inline HIPCUB_HOST_DEVICE
+inline _CCCL_HOST_DEVICE
 bool operator==(const custom_16aligned& lhs, const custom_16aligned& rhs)
 {
     return lhs.i == rhs.i && lhs.f == rhs.f && lhs.u == rhs.u;
@@ -749,16 +753,17 @@ std::ostream& operator<<(std::ostream& lhs, TestStatus rhs)
     return lhs << "Unknown(" << static_cast<int>(rhs) << ")";
 }
 
-HIPCUB_DEVICE
+_CCCL_DEVICE
 bool is_lane_in_mask(const uint64_t mask, const unsigned int lane)
 {
     return (uint64_t(1) << lane) & mask;
 }
 
 template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
-test_warp_mask_pow_two() {
+    test_warp_mask_pow_two()
+{
 #ifdef __HIP_PLATFORM_NVIDIA__
     const unsigned int logical_warp_id = (hipThreadIdx_x % warpSize) / LogicalWarpSize;
 #else
@@ -793,7 +798,7 @@ test_warp_mask_pow_two() {
 }
 
 template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 std::enable_if_t<!(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
     test_warp_mask_pow_two()
 {
@@ -801,9 +806,10 @@ std::enable_if_t<!(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
 }
 
 template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 std::enable_if_t<(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
-test_warp_mask_non_pow_two() {
+    test_warp_mask_non_pow_two()
+{
 #ifdef __HIP_PLATFORM_NVIDIA__
     const unsigned int logical_warp_id = (hipThreadIdx_x % warpSize) / LogicalWarpSize;
 #else
@@ -829,7 +835,7 @@ test_warp_mask_non_pow_two() {
 }
 
 template<unsigned int LogicalWarpSize>
-HIPCUB_DEVICE
+_CCCL_DEVICE
 std::enable_if_t<!(HIPCUB_DEVICE_WARP_THREADS >= LogicalWarpSize), TestStatus>
     test_warp_mask_non_pow_two()
 {

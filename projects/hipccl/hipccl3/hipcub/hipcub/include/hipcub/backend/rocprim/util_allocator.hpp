@@ -32,11 +32,12 @@
 
 #include "../../config.hpp"
 
+#include _HIPCUB_STD_INCLUDE(__host_stdlib/math.h)
+
 #include <set>
 #include <map>
 #include <mutex>
 
-#include <math.h>
 #include <stdio.h>
 
 BEGIN_HIPCUB_NAMESPACE

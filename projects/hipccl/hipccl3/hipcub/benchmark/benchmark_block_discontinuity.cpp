@@ -31,7 +31,7 @@ constexpr unsigned int Trials = 100;
 struct equal
 {
     template<class A, class B>
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
     inline constexpr auto operator()(const A& a, const B& b) const
     {
         return a == b;

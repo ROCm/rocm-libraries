@@ -47,7 +47,7 @@ public:
 template<class T>
 struct custom_flag_op1
 {
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     bool operator()(const T& a, const T& b) const
     {
         return (a == b);
@@ -57,7 +57,7 @@ struct custom_flag_op1
 template<class T>
 struct custom_flag_op2
 {
-    HIPCUB_HOST_DEVICE
+    _CCCL_HOST_DEVICE
     bool operator()(const T& a, const T& b) const
     {
         return (a - b > 5);

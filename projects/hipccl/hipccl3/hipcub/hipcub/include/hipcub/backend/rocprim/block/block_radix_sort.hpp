@@ -105,18 +105,24 @@ class BlockRadixSort
 public:
     using TempStorage = typename base_type::storage_type;
 
-    HIPCUB_DEVICE BlockRadixSort() : temp_storage_(private_storage()) {}
+    _CCCL_DEVICE
+    BlockRadixSort()
+        : temp_storage_(private_storage())
+    {}
 
-    HIPCUB_DEVICE BlockRadixSort(TempStorage& temp_storage) : temp_storage_(temp_storage) {}
+    _CCCL_DEVICE
+    BlockRadixSort(TempStorage& temp_storage)
+        : temp_storage_(temp_storage)
+    {}
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void Sort(KeyT (&keys)[ItemsPerThread], int begin_bit = 0, int end_bit = sizeof(KeyT) * 8)
     {
         base_type::sort(keys, temp_storage_, begin_bit, end_bit);
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         Sort(KeyT (&keys)[ItemsPerThread], Decomposer decomposer, int begin_bit, int end_bit)
     {
@@ -124,7 +130,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         Sort(KeyT (&keys)[ItemsPerThread], Decomposer decomposer)
     {
@@ -132,7 +138,7 @@ public:
         base_type::sort(keys, temp_storage_, 0, end_bit, decomposer);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void Sort(KeyT (&keys)[ItemsPerThread],
               ValueT (&values)[ItemsPerThread],
               int begin_bit = 0,
@@ -142,7 +148,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         Sort(KeyT (&keys)[ItemsPerThread],
              ValueT (&values)[ItemsPerThread],
@@ -154,7 +160,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         Sort(KeyT (&keys)[ItemsPerThread], ValueT (&values)[ItemsPerThread], Decomposer decomposer)
     {
@@ -162,7 +168,7 @@ public:
         base_type::sort(keys, values, temp_storage_, 0, end_bit, decomposer);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void SortDescending(KeyT (&keys)[ItemsPerThread],
                         int begin_bit = 0,
                         int end_bit   = sizeof(KeyT) * 8)
@@ -171,7 +177,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value> SortDescending(
         KeyT (&keys)[ItemsPerThread], Decomposer decomposer, int begin_bit, int end_bit)
     {
@@ -179,7 +185,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         SortDescending(KeyT (&keys)[ItemsPerThread], Decomposer decomposer)
     {
@@ -187,7 +193,7 @@ public:
         base_type::sort_desc(keys, temp_storage_, 0, end_bit, decomposer);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void SortDescending(KeyT (&keys)[ItemsPerThread],
                         ValueT (&values)[ItemsPerThread],
                         int begin_bit = 0,
@@ -197,7 +203,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         SortDescending(KeyT (&keys)[ItemsPerThread],
                        ValueT (&values)[ItemsPerThread],
@@ -209,7 +215,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value> SortDescending(
         KeyT (&keys)[ItemsPerThread], ValueT (&values)[ItemsPerThread], Decomposer decomposer)
     {
@@ -217,7 +223,7 @@ public:
         base_type::sort_desc(keys, values, temp_storage_, 0, end_bit, decomposer);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void SortBlockedToStriped(KeyT (&keys)[ItemsPerThread],
                               int begin_bit = 0,
                               int end_bit   = sizeof(KeyT) * 8)
@@ -226,7 +232,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value> SortBlockedToStriped(
         KeyT (&keys)[ItemsPerThread], Decomposer decomposer, int begin_bit, int end_bit)
     {
@@ -234,7 +240,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         SortBlockedToStriped(KeyT (&keys)[ItemsPerThread], Decomposer decomposer)
     {
@@ -242,7 +248,7 @@ public:
         base_type::sort_to_striped(keys, temp_storage_, 0, end_bit, decomposer);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void SortBlockedToStriped(KeyT (&keys)[ItemsPerThread],
                               ValueT (&values)[ItemsPerThread],
                               int begin_bit = 0,
@@ -252,7 +258,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         SortBlockedToStriped(KeyT (&keys)[ItemsPerThread],
                              ValueT (&values)[ItemsPerThread],
@@ -264,7 +270,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value> SortBlockedToStriped(
         KeyT (&keys)[ItemsPerThread], ValueT (&values)[ItemsPerThread], Decomposer decomposer)
     {
@@ -272,7 +278,7 @@ public:
         base_type::sort_to_striped(keys, values, temp_storage_, 0, end_bit, decomposer);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void SortDescendingBlockedToStriped(KeyT (&keys)[ItemsPerThread],
                                         int begin_bit = 0,
                                         int end_bit   = sizeof(KeyT) * 8)
@@ -281,7 +287,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value> SortDescendingBlockedToStriped(
         KeyT (&keys)[ItemsPerThread], Decomposer decomposer, int begin_bit, int end_bit)
     {
@@ -289,7 +295,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         SortDescendingBlockedToStriped(KeyT (&keys)[ItemsPerThread], Decomposer decomposer)
     {
@@ -297,7 +303,7 @@ public:
         base_type::sort_desc_to_striped(keys, temp_storage_, 0, end_bit, decomposer);
     }
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     void SortDescendingBlockedToStriped(KeyT (&keys)[ItemsPerThread],
                                         ValueT (&values)[ItemsPerThread],
                                         int begin_bit = 0,
@@ -307,7 +313,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value>
         SortDescendingBlockedToStriped(KeyT (&keys)[ItemsPerThread],
                                        ValueT (&values)[ItemsPerThread],
@@ -324,7 +330,7 @@ public:
     }
 
     template<class Decomposer>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     std::enable_if_t<!std::is_convertible<Decomposer, int>::value> SortDescendingBlockedToStriped(
         KeyT (&keys)[ItemsPerThread], ValueT (&values)[ItemsPerThread], Decomposer decomposer)
     {
@@ -333,7 +339,8 @@ public:
     }
 
 private:
-    HIPCUB_DEVICE TempStorage& private_storage()
+    _CCCL_DEVICE
+    TempStorage& private_storage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;

@@ -140,8 +140,8 @@ private:
 public:
   WarpMergeSort() = delete;
 
-  HIPCUB_DEVICE __forceinline__ WarpMergeSort(
-      typename BlockMergeSortStrategyT::TempStorage& temp_storage)
+  _CCCL_DEVICE __forceinline__
+  WarpMergeSort(typename BlockMergeSortStrategyT::TempStorage& temp_storage)
       : BlockMergeSortStrategyT(temp_storage,
                                 IS_ARCH_WARP ? ::rocprim::lane_id()
                                              : (::rocprim::lane_id() % LOGICAL_WARP_THREADS))
@@ -150,16 +150,18 @@ public:
   {
   }
 
-  HIPCUB_DEVICE __forceinline__ uint64_t get_member_mask() const
+  _CCCL_DEVICE __forceinline__
+  uint64_t get_member_mask() const
   {
     return member_mask;
   }
 
 private:
-  HIPCUB_DEVICE __forceinline__ void SyncImplementation() const
-  {
-      ::rocprim::wave_barrier();
-  }
+    _CCCL_DEVICE __forceinline__
+    void SyncImplementation() const
+    {
+        ::rocprim::wave_barrier();
+    }
 
   friend BlockMergeSortStrategyT;
 };

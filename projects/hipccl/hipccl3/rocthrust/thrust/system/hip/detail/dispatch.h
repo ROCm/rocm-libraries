@@ -34,7 +34,7 @@
 #include _THRUST_STD_INCLUDE(__type_traits/is_unsigned.h)
 #include _THRUST_STD_INCLUDE(cstdint)
 #include _THRUST_STD_INCLUDE(limits)
-#include _THRUST_STD_INCLUDE(__host_stdlib/stdexcept)
+#include <thrust/detail/libcxx_wrapper/std/detail/libcxx/include/stdexcept.h>
 
 #include <string>
 
