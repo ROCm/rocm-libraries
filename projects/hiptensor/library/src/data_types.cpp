@@ -132,28 +132,28 @@ namespace hiptensor
         {
         case HIPTENSOR_COMPUTE_DESC_16F:
         {
-            return ScalarData(id, static_cast<double>(*(_Float16*)value));
+            return ScalarData(id, static_cast<double>(loadUnaligned<_Float16>(value)));
         }
         case HIPTENSOR_COMPUTE_DESC_16BF:
         {
-            return ScalarData(id, static_cast<double>(*(hip_bfloat16*)value));
+            return ScalarData(id, static_cast<double>(loadUnaligned<hip_bfloat16>(value)));
         }
         case HIPTENSOR_COMPUTE_DESC_32F:
         {
-            return ScalarData(id, static_cast<double>(*(float*)value));
+            return ScalarData(id, static_cast<double>(loadUnaligned<float>(value)));
         }
         case HIPTENSOR_COMPUTE_DESC_64F:
         {
-            return ScalarData(id, *(double*)value);
+            return ScalarData(id, loadUnaligned<double>(value));
         }
         case HIPTENSOR_COMPUTE_DESC_C32F:
         {
-            auto complex = *(hipFloatComplex*)value;
+            auto complex = loadUnaligned<hipFloatComplex>(value);
             return ScalarData(id, complex.x, complex.y);
         }
         case HIPTENSOR_COMPUTE_DESC_C64F:
         {
-            auto complex = *(hipDoubleComplex*)value;
+            auto complex = loadUnaligned<hipDoubleComplex>(value);
             return ScalarData(id, complex.x, complex.y);
         }
         default:
@@ -173,32 +173,34 @@ namespace hiptensor
         {
         case HIPTENSOR_COMPUTE_DESC_16F:
         {
-            *(_Float16*)addr = static_cast<_Float16>(value.mReal);
+            storeUnaligned<_Float16>(const_cast<void*>(addr), static_cast<_Float16>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_16BF:
         {
-            *(hip_bfloat16*)addr = static_cast<hip_bfloat16>(value.mReal);
+            storeUnaligned<hip_bfloat16>(const_cast<void*>(addr),
+                                         static_cast<hip_bfloat16>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_32F:
         {
-            *(float*)addr = static_cast<float>(value.mReal);
+            storeUnaligned<float>(const_cast<void*>(addr), static_cast<float>(value.mReal));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_64F:
         {
-            *(double*)addr = value.mReal;
+            storeUnaligned<double>(const_cast<void*>(addr), value.mReal);
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_C32F:
         {
-            *(hipFloatComplex*)addr = hipComplexDoubleToFloat(value.mComplex);
+            storeUnaligned<hipFloatComplex>(const_cast<void*>(addr),
+                                            hipComplexDoubleToFloat(value.mComplex));
             return;
         }
         case HIPTENSOR_COMPUTE_DESC_C64F:
         {
-            *(hipDoubleComplex*)addr = value.mComplex;
+            storeUnaligned<hipDoubleComplex>(const_cast<void*>(addr), value.mComplex);
             return;
         }
         default:
