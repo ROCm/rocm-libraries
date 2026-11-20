@@ -1019,7 +1019,9 @@ struct FmhaFwdSplitKVKernel
             LSEDataType lse_in[kMaxClusterSplits];
             vec_t part[kMaxClusterSplits];
             static_for<0, kMaxClusterSplits, 1>{}([&](auto i) {
-                const long_index_t s = min(static_cast<index_t>(i), num_splits - 1);
+                if(num_splits <= i)
+                    return;
+                const long_index_t s = i;
                 lse_in[i]            = amd_buffer_load_impl<LSEDataType, 1, kAccCoherence>(
                     lse_acc_res,
                     static_cast<index_t>((s * kargs.split_stride_lse_acc + lse_src) *
