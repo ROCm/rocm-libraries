@@ -379,6 +379,7 @@ void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
         // fp6 elements are packed four to three bytes, LSB first.
         std::vector<uint8_t>  fp6Elements(isMXFp6<DT> ? dataBytes.size() * 8 / 6 : 0);
         std::vector<uint8_t>& elements = isMXFp6<DT> ? fp6Elements : dataBytes;
+#pragma omp parallel for
         for(size_t i = 0; i < elements.size(); i++)
         {
             const uint64_t h = mix(i * 131 + salt);
@@ -397,6 +398,7 @@ void makeIntegerExactMX(std::vector<uint8_t>& dataBytes,
         if constexpr(isMXFp6<DT>)
             packData<DT>(fp6Elements, dataBytes.data());
         const uint64_t scaleChoices = sparseK ? 2 : 3;
+#pragma omp parallel for
         for(size_t i = 0; i < scaleBytes.size(); i++)
             scaleBytes[i] = uint8_t(127 + mix(i * 137 + salt + 2) % scaleChoices);
     }
@@ -600,6 +602,7 @@ std::vector<float> generateData(T                           dgen,
         // partial block at the end of a run keeps its own scale.
         size_t const       count = static_cast<size_t>(strides[1]) * static_cast<size_t>(sizes[1]);
         std::vector<float> ref(count);
+#pragma omp parallel for
         for(size_t idx = 0; idx < count; idx++)
         {
             auto const dataIndex  = static_cast<DGen::index_t>(idx);
