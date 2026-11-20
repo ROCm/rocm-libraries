@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/pipeline/block_fmha_pipeline_qx_ks_vs_custom_policy.hpp"
 #include "ck_tile/ops/gemm/pipeline/tile_gemm_shape.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher.hpp"
@@ -169,24 +170,42 @@ CK_TILE_HOST_DEVICE constexpr auto make_qr_tdm_row_major_lds_descriptor()
         constexpr index_t PadElements         = PadBytes / ElementBytes;
         constexpr index_t NumIntervals        = LogicalBytes / IntervalBytes;
 
-        constexpr auto interval_desc = make_naive_tensor_descriptor(
-            make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}),
-            make_tuple(number<ElementsPerInterval + PadElements>{}, number<1>{}),
-            number<AccessElements>{},
-            number<1>{});
+        // fp16/bf16 keep develop's general descriptor below.
+        constexpr bool kIsFp8 = is_any_of<DataType, fp8_t, bf8_t>::value;
+        if constexpr(kIsFp8 && ElementsPerInterval == Cols)
+        {
+            // One row per interval, so the round trip below is just a padded row stride:
+            // (r * Cols + c) / Cols == r and % Cols == c for c < Cols. Stating it affinely
+            // matters -- the division and modulo made the compiler reach rows by negative
+            // multiples of Pad, which the unsigned ds_load offset cannot hold, so every
+            // transpose load carried its own address VGPR.
+            return make_naive_tensor_descriptor(
+                make_tuple(number<Rows>{}, number<Cols>{}),
+                make_tuple(number<Cols + PadElements>{}, number<1>{}),
+                number<AccessElements>{},
+                number<1>{});
+        }
+        else
+        {
+            constexpr auto interval_desc = make_naive_tensor_descriptor(
+                make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}),
+                make_tuple(number<ElementsPerInterval + PadElements>{}, number<1>{}),
+                number<AccessElements>{},
+                number<1>{});
 
-        constexpr auto flat_desc = transform_tensor_descriptor(
-            interval_desc,
-            make_tuple(make_merge_transform_v3_division_mod(
-                make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}))),
-            make_tuple(sequence<0, 1>{}),
-            make_tuple(sequence<0>{}));
+            constexpr auto flat_desc = transform_tensor_descriptor(
+                interval_desc,
+                make_tuple(make_merge_transform_v3_division_mod(
+                    make_tuple(number<NumIntervals>{}, number<ElementsPerInterval>{}))),
+                make_tuple(sequence<0, 1>{}),
+                make_tuple(sequence<0>{}));
 
-        return transform_tensor_descriptor(
-            flat_desc,
-            make_tuple(make_unmerge_transform(make_tuple(number<Rows>{}, number<Cols>{}))),
-            make_tuple(sequence<0>{}),
-            make_tuple(sequence<0, 1>{}));
+            return transform_tensor_descriptor(
+                flat_desc,
+                make_tuple(make_unmerge_transform(make_tuple(number<Rows>{}, number<Cols>{}))),
+                make_tuple(sequence<0>{}),
+                make_tuple(sequence<0, 1>{}));
+        }
     }
 }
 
@@ -201,8 +220,36 @@ inline constexpr bool is_qr_tdm_padding_supported_arch_v =
     false;
 #endif
 
+// fp8 at its own geometry (gemm0 in one K step on 16x16x64 or 16x16x128 WMMA), kept
+// separate so the bf16/fp16 predicate below is provably unchanged. Those geometry gates are
+// tuning, not correctness: padding only transforms LDS addresses, and writer and reader
+// derive it from one LdsPaddingConfig.
+// Unpadded, a 128 B fp8 row is half the 256 B wrap of the 64 banks, so the 16 rows of
+// a transpose tile start on only two banks -- an 8-way conflict.
 template <typename Problem>
-inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
+inline constexpr bool is_qr_tdm_fp8_padding_enabled_problem_v =
+    is_qr_tdm_padding_supported_arch_v && std::is_same_v<typename Problem::QDataType, fp8_t> &&
+    std::is_same_v<typename Problem::KDataType, fp8_t> &&
+    std::is_same_v<typename Problem::VDataType, fp8_t> && Problem::BlockFmhaShape::NumWarps == 4 &&
+    (Problem::BlockFmhaShape::kM0 == 64 || Problem::BlockFmhaShape::kM0 == 128) &&
+    Problem::BlockFmhaShape::kN0 == 128 &&
+    Problem::BlockFmhaShape::kK0 == Problem::BlockFmhaShape::kQKHeaddim &&
+    Problem::BlockFmhaShape::kK1 == 128 &&
+    Problem::BlockFmhaShape::kSubQKHeaddim == Problem::BlockFmhaShape::kQKHeaddim &&
+    (Problem::BlockFmhaShape::kQKHeaddim * sizeof(typename Problem::KDataType)) %
+            kQrTdmLdsAccessBytes ==
+        0 &&
+    (Problem::BlockFmhaShape::kN1 * sizeof(typename Problem::VDataType)) % kQrTdmLdsAccessBytes ==
+        0 &&
+    Problem::BlockFmhaShape::IsVLayoutRowMajor &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm0BlockWarps, sequence<4, 1, 1>> &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1BlockWarps, sequence<4, 1, 1>> &&
+    (std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 64>> ||
+     std::is_same_v<typename Problem::BlockFmhaShape::Gemm0WarpTile, sequence<16, 16, 128>>) &&
+    std::is_same_v<typename Problem::BlockFmhaShape::Gemm1WarpTile, sequence<16, 16, 128>>;
+
+template <typename Problem>
+inline constexpr bool is_qr_tdm_bf16_fp16_padding_enabled_problem_v =
     is_qr_tdm_padding_supported_arch_v &&
     ((std::is_same_v<typename Problem::QDataType, bf16_t> &&
       std::is_same_v<typename Problem::KDataType, bf16_t> &&
@@ -239,6 +286,13 @@ inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
     numeric_traits<typename Problem::QDataType>::PackedSize == 1 &&
     numeric_traits<typename Problem::KDataType>::PackedSize == 1 &&
     numeric_traits<typename Problem::VDataType>::PackedSize == 1;
+
+// Each dtype is admitted only at the geometry its instances are generated at, so adding
+// one cannot widen another.
+template <typename Problem>
+inline constexpr bool is_qr_tdm_padding_enabled_problem_v =
+    is_qr_tdm_bf16_fp16_padding_enabled_problem_v<Problem> ||
+    is_qr_tdm_fp8_padding_enabled_problem_v<Problem>;
 
 template <typename Problem, bool Enabled = is_qr_tdm_padding_enabled_problem_v<Problem>>
 struct QrTdmPaddingSelection
@@ -633,7 +687,10 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return BlockGemmARegBRegCRegV2<GemmProblem, BlockGemmPolicy>{};
     }
 
-    template <typename Problem>
+    // kNPerBlock below kN0 and kKPerBlock below kK0 describe one fp8 K fragment.
+    template <typename Problem,
+              index_t kNPerBlock = Problem::BlockFmhaShape::kN0,
+              index_t kKPerBlock = Problem::BlockFmhaShape::kK0>
     CK_TILE_HOST_DEVICE static constexpr auto MakeKRegTileDistribution()
     {
         using BlockGemm       = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
@@ -642,9 +699,6 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 
         constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<0>{});
         constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm0BlockWarps::at(number<1>{});
-
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN0;
-        constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK0;
 
         constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
         constexpr index_t KIterPerWarp = kKPerBlock / WarpGemm::kK;
@@ -734,7 +788,267 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         return p_block_dstr;
     }
 
-    template <typename Problem>
+    // gemm0 (Q * K^T) for one 16-row K fragment: s_acc(m, n) += q(m, KStep0 + k) * k_frag(k) over
+    // every M iteration and the fragment's K steps, the QK block gemm's MNK step at nIter = NIter.
+    template <typename Problem,
+              index_t KStep0 = 0,
+              typename SAcc,
+              typename QTile,
+              typename KFrag,
+              index_t NIter>
+    CK_TILE_DEVICE static void
+    RunQKFragment(SAcc& s_acc, const QTile& q_tile, const KFrag& k_frag, number<NIter>)
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+        static_assert(BlockGemm::NWarp == 1, "K fragments assume one N warp");
+        constexpr index_t kFragKIter = KFrag::get_lengths().at(number<1>{}) / WarpGemm::kK;
+
+        using AWarpDstr       = typename WarpGemm::AWarpDstr;
+        using BWarpDstr       = typename WarpGemm::BWarpDstr;
+        using CWarpDstr       = typename WarpGemm::CWarpDstr;
+        constexpr auto a_len  = to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_len  = to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_len  = to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_zero = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_zero = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_zero = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto i_m) {
+            constexpr index_t m = decltype(i_m)::value;
+            typename WarpGemm::CWarpTensor c;
+            c.get_thread_buffer() =
+                s_acc.get_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                               merge_sequences(sequence<1, 1>{}, c_len));
+            static_for<0, kFragKIter, 1>{}([&](auto i_k) {
+                constexpr index_t k = decltype(i_k)::value;
+                typename WarpGemm::AWarpTensor a;
+                a.get_thread_buffer() = q_tile.get_y_sliced_thread_data(
+                    merge_sequences(sequence<m, KStep0 + k>{}, a_zero),
+                    merge_sequences(sequence<1, 1>{}, a_len));
+                typename WarpGemm::BWarpTensor b;
+                b.get_thread_buffer() =
+                    k_frag.get_y_sliced_thread_data(merge_sequences(sequence<0, k>{}, b_zero),
+                                                    merge_sequences(sequence<1, 1>{}, b_len));
+                WarpGemm{}(c, a, b);
+            });
+            s_acc.set_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                           merge_sequences(sequence<1, 1>{}, c_len),
+                                           c.get_thread_buffer());
+        });
+    }
+
+    // MX gemm0 on a K64 warp tile for one N iteration: s_acc(m, NIter) += q(m) * k(KN) with E8M0
+    // scales. K64 has no scaled WMMA, but a 16x128 8-bit operand is two 16x64 ones in consecutive
+    // VGPRs (CDNA5 ISA 7.12), so K steps 2p and 2p + 1 form K128 step p; an odd last step is
+    // zero-padded. KN is the N index into k (0 for a K fragment); scales are (m, p) and (n, p).
+    template <typename Problem,
+              typename SAcc,
+              typename QTile,
+              typename KTile,
+              index_t NIter,
+              index_t KN,
+              typename QScale,
+              typename KScale>
+    CK_TILE_DEVICE static void RunQKMxNIter(SAcc& s_acc,
+                                            const QTile& q_tile,
+                                            const KTile& k_tile,
+                                            number<NIter>,
+                                            number<KN>,
+                                            const QScale& q_scale,
+                                            const KScale& k_scale)
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+        using ScaledGemm =
+            WarpGemmDispatcher<typename Problem::QDataType,
+                               typename Problem::KDataType,
+                               typename Problem::SaccDataType,
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
+                               128,
+                               true>;
+        using Half = int32_t __attribute__((ext_vector_type(8)));
+        static_assert(WarpGemm::kK == 64 && BlockGemm::NWarp == 1 &&
+                          WarpGemm::AWarpTensor::get_thread_buffer_size() == sizeof(Half) &&
+                          WarpGemm::BWarpTensor::get_thread_buffer_size() == sizeof(Half),
+                      "MX K64 gemm0: 8-bit K64 operands of 8 dwords, one N warp");
+        constexpr index_t kKIter = BlockGemm::KIterPerWarp;
+
+        using AWarpDstr       = typename WarpGemm::AWarpDstr;
+        using BWarpDstr       = typename WarpGemm::BWarpDstr;
+        using CWarpDstr       = typename WarpGemm::CWarpDstr;
+        constexpr auto a_len  = to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_len  = to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_len  = to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_zero = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_zero = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_zero = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        // K step k of an operand as 8 dwords; past the last step, zeros.
+        auto a_half = [&](auto i_m, auto i_k) {
+            if constexpr(decltype(i_k)::value < kKIter)
+                return bit_cast<Half>(q_tile.get_y_sliced_thread_data(
+                    merge_sequences(sequence<decltype(i_m)::value, decltype(i_k)::value>{}, a_zero),
+                    merge_sequences(sequence<1, 1>{}, a_len)));
+            else
+                return Half{};
+        };
+        auto b_half = [&](auto i_k) {
+            if constexpr(decltype(i_k)::value < kKIter)
+                return bit_cast<Half>(k_tile.get_y_sliced_thread_data(
+                    merge_sequences(sequence<KN, decltype(i_k)::value>{}, b_zero),
+                    merge_sequences(sequence<1, 1>{}, b_len)));
+            else
+                return Half{};
+        };
+
+        static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto i_m) {
+            constexpr index_t m = decltype(i_m)::value;
+            typename ScaledGemm::CWarpTensor c;
+            c.get_thread_buffer() =
+                s_acc.get_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                               merge_sequences(sequence<1, 1>{}, c_len));
+            static_for<0, integer_divide_ceil(kKIter, 2), 1>{}([&](auto i_p) {
+                constexpr index_t k = 2 * decltype(i_p)::value;
+                typename ScaledGemm::AWarpTensor a;
+                typename ScaledGemm::BWarpTensor b;
+                a.get_thread_buffer().template set_as<Half>(number<0>{}, a_half(i_m, number<k>{}));
+                a.get_thread_buffer().template set_as<Half>(number<1>{},
+                                                            a_half(i_m, number<k + 1>{}));
+                b.get_thread_buffer().template set_as<Half>(number<0>{}, b_half(number<k>{}));
+                b.get_thread_buffer().template set_as<Half>(number<1>{}, b_half(number<k + 1>{}));
+                ScaledGemm{}(c, a, b, q_scale(i_m, i_p), k_scale(number<NIter>{}, i_p));
+            });
+            s_acc.set_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                           merge_sequences(sequence<1, 1>{}, c_len),
+                                           c.get_thread_buffer());
+        });
+    }
+
+    // MX gemm0 on a K128 warp tile for one K fragment at N iteration NIter: K step KStep0 + k of
+    // Q meets step k of the fragment. Scales are (m, KStep0 + k) and (NIter, k).
+    template <typename Problem,
+              index_t KStep0,
+              typename SAcc,
+              typename QTile,
+              typename KFrag,
+              index_t NIter,
+              typename QScale,
+              typename KScale>
+    CK_TILE_DEVICE static void RunQKMxFragment(SAcc& s_acc,
+                                               const QTile& q_tile,
+                                               const KFrag& k_frag,
+                                               number<NIter>,
+                                               const QScale& q_scale,
+                                               const KScale& k_scale)
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetQKBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+        using ScaledGemm =
+            WarpGemmDispatcher<typename Problem::QDataType,
+                               typename Problem::KDataType,
+                               typename Problem::SaccDataType,
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<0>{}),
+                               Problem::BlockFmhaShape::Gemm0WarpTile::at(number<1>{}),
+                               128,
+                               true>;
+        static_assert(WarpGemm::kK == 128 && BlockGemm::NWarp == 1,
+                      "MX K fragments: K128 warp tile, one N warp");
+        constexpr index_t kFragKIter = KFrag::get_lengths().at(number<1>{}) / WarpGemm::kK;
+
+        using AWarpDstr       = typename WarpGemm::AWarpDstr;
+        using BWarpDstr       = typename WarpGemm::BWarpDstr;
+        using CWarpDstr       = typename WarpGemm::CWarpDstr;
+        constexpr auto a_len  = to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_len  = to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_len  = to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_zero = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_zero = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_zero = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto i_m) {
+            constexpr index_t m = decltype(i_m)::value;
+            typename ScaledGemm::CWarpTensor c;
+            c.get_thread_buffer() =
+                s_acc.get_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                               merge_sequences(sequence<1, 1>{}, c_len));
+            static_for<0, kFragKIter, 1>{}([&](auto i_k) {
+                constexpr index_t k = decltype(i_k)::value;
+                typename ScaledGemm::AWarpTensor a;
+                a.get_thread_buffer() = q_tile.get_y_sliced_thread_data(
+                    merge_sequences(sequence<m, KStep0 + k>{}, a_zero),
+                    merge_sequences(sequence<1, 1>{}, a_len));
+                typename ScaledGemm::BWarpTensor b;
+                b.get_thread_buffer() =
+                    k_frag.get_y_sliced_thread_data(merge_sequences(sequence<0, k>{}, b_zero),
+                                                    merge_sequences(sequence<1, 1>{}, b_len));
+                ScaledGemm{}(
+                    c, a, b, q_scale(i_m, number<KStep0 + k>{}), k_scale(number<NIter>{}, i_k));
+            });
+            s_acc.set_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                           merge_sequences(sequence<1, 1>{}, c_len),
+                                           c.get_thread_buffer());
+        });
+    }
+
+    // gemm1 (P * V) for one 16-column V fragment: o_acc(m, n) += p(m) * v_frag for every M
+    // iteration, the PV block gemm's KMN step at a single nIter = NIter. scales is (P scale, V
+    // scale), each a scale functor or the block gemm's no_scale.
+    template <typename Problem,
+              typename OAcc,
+              typename PTile,
+              typename VFrag,
+              index_t NIter,
+              typename Scales>
+    CK_TILE_DEVICE static void RunPVFragment(
+        OAcc& o_acc, const PTile& p_tile, const VFrag& v_frag, number<NIter>, const Scales& scales)
+    {
+        using BlockGemm = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
+        using WarpGemm  = typename BlockGemm::WarpGemm;
+        static_assert(BlockGemm::KIterPerWarp == 1 && BlockGemm::NWarp == 1,
+                      "V fragments assume one K step and one N warp");
+        const auto& a_scale = scales.at(number<0>{});
+        const auto& b_scale = scales.at(number<1>{});
+        constexpr bool kScaled =
+            !std::is_same_v<remove_cvref_t<decltype(a_scale)>, typename BlockGemm::no_scale>;
+
+        using AWarpDstr       = typename WarpGemm::AWarpDstr;
+        using BWarpDstr       = typename WarpGemm::BWarpDstr;
+        using CWarpDstr       = typename WarpGemm::CWarpDstr;
+        constexpr auto a_len  = to_sequence(AWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto b_len  = to_sequence(BWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto c_len  = to_sequence(CWarpDstr{}.get_ys_to_d_descriptor().get_lengths());
+        constexpr auto a_zero = uniform_sequence_gen_t<AWarpDstr::NDimY, 0>{};
+        constexpr auto b_zero = uniform_sequence_gen_t<BWarpDstr::NDimY, 0>{};
+        constexpr auto c_zero = uniform_sequence_gen_t<CWarpDstr::NDimY, 0>{};
+
+        typename WarpGemm::BWarpTensor b;
+        b.get_thread_buffer() = v_frag.get_y_sliced_thread_data(
+            merge_sequences(sequence<0, 0>{}, b_zero), merge_sequences(sequence<1, 1>{}, b_len));
+        static_for<0, BlockGemm::MIterPerWarp, 1>{}([&](auto i_m) {
+            constexpr index_t m = decltype(i_m)::value;
+            typename WarpGemm::AWarpTensor a;
+            a.get_thread_buffer() =
+                p_tile.get_y_sliced_thread_data(merge_sequences(sequence<0, m>{}, a_zero),
+                                                merge_sequences(sequence<1, 1>{}, a_len));
+            typename WarpGemm::CWarpTensor c;
+            c.get_thread_buffer() =
+                o_acc.get_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                               merge_sequences(sequence<1, 1>{}, c_len));
+            if constexpr(kScaled)
+                WarpGemm{}(
+                    c, a, b, a_scale(i_m, number<0>{}), b_scale(number<NIter>{}, number<0>{}));
+            else
+                WarpGemm{}(c, a, b);
+            o_acc.set_y_sliced_thread_data(merge_sequences(sequence<m, NIter>{}, c_zero),
+                                           merge_sequences(sequence<1, 1>{}, c_len),
+                                           c.get_thread_buffer());
+        });
+    }
+
+    // kNPerBlock below kN1 describes one column slice of V (the fp8 V fragments).
+    template <typename Problem, index_t kNPerBlock = Problem::BlockFmhaShape::kN1>
     CK_TILE_HOST_DEVICE static constexpr auto MakeVRegTileDistribution()
     {
         using BlockGemm       = remove_cvref_t<decltype(GetPVBlockGemm<Problem>())>;
@@ -744,7 +1058,6 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
         constexpr index_t MWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<0>{});
         constexpr index_t NWarp = Problem::BlockFmhaShape::Gemm1BlockWarps::at(number<1>{});
 
-        constexpr index_t kNPerBlock = Problem::BlockFmhaShape::kN1;
         constexpr index_t kKPerBlock = Problem::BlockFmhaShape::kK1;
 
         constexpr index_t NIterPerWarp = kNPerBlock / (NWarp * WarpGemm::kN);
@@ -890,6 +1203,13 @@ struct BlockFmhaPipelineQRKSVSTdmDefaultPolicy
 
 namespace detail {
 
+// MX only when the problem has a QScaleEnum: pipelines without quant scales reuse this layout.
+template <typename Problem, typename = void>
+inline constexpr bool is_mx_problem_v = false;
+template <typename Problem>
+inline constexpr bool is_mx_problem_v<Problem, std::void_t<decltype(Problem::QScaleEnum)>> =
+    Problem::QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+
 // One 256-byte-aligned arena backs every qr_tdm LDS region. Q intentionally aliases K0 at offset
 // zero and, on the single-V/double-K LDS buffer path, overlaps the later S/V regions: the pipeline
 // loads Q into registers and completes the tensor-count barrier before K/V overwrite that storage.
@@ -961,8 +1281,30 @@ struct QrTdmLdsArenaLayout
     static constexpr index_t kV1Offset =
         kUseDoubleKVLdsBuffer ? integer_least_multiple(kV0Offset + kVBytes, kRegionAlignment)
                               : kV0Offset;
+    // MX: the TDM-loaded E8M0 scales of a KV tile, one byte per 32 K elements, ping-ponged like
+    // K / V: K as [kN0][4 per K128 step] (a K64 head dim pads its row to one step), V as
+    // [kN1][kK1 / 32]. Q's scales borrow K0's scale region.
+    static constexpr bool kMx                    = is_mx_problem_v<Problem>;
+    static constexpr index_t kMxScaleGranularity = 32;
+    static constexpr index_t kMxKScaleBytes =
+        kMx ? Shape::kN0 * integer_divide_ceil(Shape::kK0, 4 * kMxScaleGranularity) * 4 : 0;
+    static constexpr index_t kMxVScaleBytes =
+        kMx ? Shape::kN1 * Shape::kK1 / kMxScaleGranularity : 0;
+    static constexpr index_t kMxKScale0Offset =
+        integer_least_multiple(kV1Offset + kVBytes, kRegionAlignment);
+    static constexpr index_t kMxKScale1Offset =
+        integer_least_multiple(kMxKScale0Offset + kMxKScaleBytes, kRegionAlignment);
+    static constexpr index_t kMxVScale0Offset =
+        integer_least_multiple(kMxKScale1Offset + kMxKScaleBytes, kRegionAlignment);
+    static constexpr index_t kMxVScale1Offset =
+        integer_least_multiple(kMxVScale0Offset + kMxVScaleBytes, kRegionAlignment);
+    static_assert(!kMx || (kUseDoubleKVLdsBuffer && Shape::kM0 <= Shape::kN0));
     static constexpr index_t kArenaBytes = [] {
-        if constexpr(kUseDoubleKVLdsBuffer)
+        if constexpr(kMx)
+        {
+            return integer_least_multiple(kMxVScale1Offset + kMxVScaleBytes, kArenaAlignment);
+        }
+        else if constexpr(kUseDoubleKVLdsBuffer)
         {
             return integer_least_multiple(kV1Offset + kVBytes, kArenaAlignment);
         }
@@ -992,9 +1334,14 @@ struct QrTdmLdsArenaLayout
     // invariant is (granule-rounded arena) x (workgroups per CU) <= 320 KiB.
     // D512 cannot reach two workgroups per CU no matter how small the arena
     // gets -- its register pressure caps it at one -- so budget it for one
-    // workgroup and let it spend the whole 320 KiB; every smaller head dim
-    // keeps the two-workgroup budget and the values it had before.
-    static constexpr index_t kLdsOccupancyTarget = Shape::kQKHeaddim >= 512 ? 1 : 2;
+    // workgroup and let it spend the whole 320 KiB. fp8 d256 is in the same place:
+    // it adds 64 VGPRs of o_acc to d128's ~480, so its padded double K/V arena
+    // (136 KiB) is budgeted for one too. Every other head dim keeps two.
+    static constexpr index_t kLdsOccupancyTarget =
+        Shape::kQKHeaddim >= 512 ||
+                (sizeof(typename Problem::KDataType) == 1 && Shape::kQKHeaddim >= 256)
+            ? 1
+            : 2;
     static_assert(kArenaBytes <= (kLdsOccupancyTarget == 2 ? 128 * 1024 : 320 * 1024));
     static_assert(integer_least_multiple(kArenaBytes, 64 * 1024) * kLdsOccupancyTarget <=
                   320 * 1024);

@@ -424,7 +424,7 @@ endforeach()
         for hip_version in (None, "24.0.0", "23.0.0"):
             commands = configure(hip_version)
             # Clang before 24 builds MX fp8_sched instances without the expert mode.
-            no_expert = (d256_source, fp8_tdm_source) + (
+            no_expert = (d256_source,) + (
                 (mx_sched_source,) if hip_version == "23.0.0" else ()
             )
             for source in sources:
@@ -499,6 +499,54 @@ endforeach()
                         self.assertGreater(seen[(tag, want)], 0)
             self.assertEqual(seen[("qr_tdm", True)], 0)
             self.assertGreater(seen[("qr_tdm", False)], 0)
+
+    @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
+    def test_cmake_fp8_qr_tdm_rule_scope(self):
+        # fp8-family qr_tdm sources build in expert scheduling mode without gfx1250 packed fp32;
+        # qr_tdm_fp8_sched and bf16 sources keep their own options. Names come from codegen.
+        helper = (_FMHA_EXAMPLE_DIR / "cmake") / "fmha_fwd_source_flags.cmake"
+        _, fp8 = get_fwd_blobs(
+            ["gfx1250"], "*fp8*", 0, [32, 64, 96, 128, 160, 192, 256, 512], "simplified"
+        )
+        _, bf16 = get_fwd_blobs(
+            ["gfx1250"], "*_bf16_*_qr_tdm_*", 0, [128], "simplified"
+        )
+        kernels = fp8 + bf16
+        fp8_family = ("fp8", "fp8bf16", "mxfp8", "mxfp8bf16")
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "flags.cmake"
+            script.write_text(
+                f'include("{helper}")\n'
+                + "\n".join(
+                    f'ck_tile_fmha_fwd_get_source_compile_options("{k.filename}" flags)\n'
+                    f'message("{i}:${{flags}}")'
+                    for i, k in enumerate(kernels)
+                )
+            )
+            process = subprocess.run(
+                ["cmake", "-P", str(script)],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=300,
+            )
+        lines = process.stderr.strip().splitlines()
+        self.assertEqual(len(lines), len(kernels))
+        seen = Counter()
+        for i, (k, line) in enumerate(zip(kernels, lines)):
+            self.assertTrue(line.startswith(f"{i}:"))
+            flags = line.split(":", 1)[1].split(";")
+            fp8_tdm = k.F_pipeline.tag == "qr_tdm" and k.F_dtype in fp8_family
+            seen[(k.F_dtype, k.F_pipeline.tag)] += 1
+            with self.subTest(source=k.filename):
+                self.assertEqual("-packed-fp32-single-sgpr-ops" in flags, fp8_tdm)
+                if fp8_tdm:
+                    self.assertIn("-amdgpu-expert-scheduling-mode", flags)
+        # Positive names for every fp8 data type, negative names on both sides.
+        for dtype in fp8_family:
+            self.assertGreater(seen[(dtype, "qr_tdm")], 0)
+            self.assertGreater(seen[(dtype, "qr_tdm_fp8_sched")], 0)
+        self.assertGreater(seen[("bf16", "qr_tdm")], 0)
 
     @unittest.skipUnless(shutil.which("cmake"), "cmake is required")
     def test_cmake_source_flags_follow_gfx125_family_targets(self):
@@ -1521,12 +1569,21 @@ class TestGfx125V128Codegen(unittest.TestCase):
         # BLOCKSCALE qr_tdm and qr_tdm_fp8_sched share one kv-scale row via the lcm.
         self.assertIn("ck_tile::lcm(", pool.render_block_scale_size_kv())
 
-    def test_mxfp8_emits_only_fp8_sched(self):
-        pool, kernels = get_fwd_blobs(
+    def test_mxfp8_emits_fp8_sched_ahead_of_qr_tdm(self):
+        pool, all_kernels = get_fwd_blobs(
             ["gfx1250"], "*d128_mxfp8*", 0, [128], "simplified"
         )
+        kernels = [k for k in all_kernels if k.F_pipeline.tag == "qr_tdm_fp8_sched"]
         self.assertTrue(kernels)
         self.assertEqual({k.F_mode for k in kernels}, {"batch", "group"})
+        # qr_tdm serves the MX calls qr_tdm_fp8_sched rejects.
+        self.assertEqual(
+            {k.F_pipeline.tag for k in all_kernels}, {"qr_tdm_fp8_sched", "qr_tdm"}
+        )
+        for k in all_kernels:
+            with self.subTest(kernel=k.name):
+                self.assertEqual(k.F_pipeline.F_vlayout, "row")
+                self.assertEqual(k.F_pipeline.F_qscale, "mx")
         for k in kernels:
             with self.subTest(kernel=k.name):
                 self.assertEqual(k.F_pipeline.tag, "qr_tdm_fp8_sched")
@@ -1536,6 +1593,15 @@ class TestGfx125V128Codegen(unittest.TestCase):
         api = pool.render("test")
         self.assertIn("reinterpret_cast<uintptr_t>(a.q_descale_ptr) % 4 == 0", api)
         self.assertIn("a.batch_stride_k_descale % 4 == 0", api)
+        # Within one data type, every sched trait is tried before qr_tdm.
+        one_dtype, _ = get_fwd_blobs(
+            ["gfx1250"], "*d128_mxfp8_*", 0, [128], "simplified"
+        )
+        api_one = one_dtype.render("test")
+        self.assertLess(
+            api_one.rindex("QRKSVS_TDM_SCHED_FP8"),
+            api_one.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
+        )
         # No seqlen_q condition gates qr_tdm_fp8_sched.
         for k in kernels:
             self.assertNotIn("max_seqlen_q", str(k.F_pipeline.F_constraint))
@@ -1778,17 +1844,11 @@ class TestGfx125V128Codegen(unittest.TestCase):
                     traits[hdim] = Counter(key(k) for k in sched)
                     if hdim == 64:
                         api = pool.render("test")
-                        # MXFP8 has no other D64 pipeline.
-                        if dtype in ("mxfp8", "mxfp8bf16"):
-                            self.assertEqual(
-                                len(sched),
-                                sum(k.F_pipeline.F_packgqa == "f" for k in kernels),
-                            )
-                        else:
-                            self.assertLess(
-                                api.rindex("QRKSVS_TDM_SCHED_FP8"),
-                                api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
-                            )
+                        # qr_tdm serves what qr_tdm_fp8_sched rejects, behind it.
+                        self.assertLess(
+                            api.rindex("QRKSVS_TDM_SCHED_FP8"),
+                            api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
+                        )
                         for k in sched:
                             # M128 N128 tile, K64 QK WMMA, K128 PV WMMA.
                             t = k.F_tile
@@ -1851,9 +1911,15 @@ class TestGfx125V128Codegen(unittest.TestCase):
                         == (1 if k.F_pipeline.F_bias == "bias" else 2)
                     )
                     if hdim == 256:
+                        # Besides sched, only qr_tdm, dispatched behind it.
                         self.assertEqual(
-                            len(sched),
-                            sum(k.F_pipeline.F_packgqa == "f" for k in kernels),
+                            {k.F_pipeline.tag for k in kernels},
+                            {"qr_tdm_fp8_sched", "qr_tdm"},
+                        )
+                        api = pool.render("test")
+                        self.assertLess(
+                            api.rindex("QRKSVS_TDM_SCHED_FP8"),
+                            api.index("BlockFmhaPipelineEnum::QRKSVS_TDM,"),
                         )
                         for k in sched:
                             t = k.F_tile
@@ -1905,13 +1971,17 @@ class TestGfx125V128Codegen(unittest.TestCase):
                 _, d128 = get_fwd_blobs(
                     ["gfx1250"], f"*d128_{dtype}_*", 0, [128], "simplified"
                 )
-                pool, d192 = get_fwd_blobs(
+                pool, d192_all = get_fwd_blobs(
                     ["gfx1250"], f"*d192_{dtype}_*", 0, [192], "simplified"
                 )
-                # D192/V128 runs only the scheduled FP8 pipelines, with D128's variants.
-                self.assertTrue(d192)
+                # D192/V128 runs the scheduled FP8 pipelines with D128's variants, and
+                # qr_tdm for what they reject.
                 fp8_sched = "qr_tdm_fp8_sched"
-                self.assertTrue(all(k.F_pipeline.tag == fp8_sched for k in d192))
+                d192 = [k for k in d192_all if k.F_pipeline.tag == fp8_sched]
+                self.assertTrue(d192)
+                self.assertEqual(
+                    {k.F_pipeline.tag for k in d192_all}, {fp8_sched, "qr_tdm"}
+                )
                 self.assertEqual(
                     Counter(key(k) for k in d192),
                     Counter(key(k) for k in d128 if k.F_pipeline.tag == fp8_sched),
@@ -2434,6 +2504,59 @@ int main() {
                     [dispatch.expected_id(**features)],
                 )
 
+    def test_fp8_qr_tdm_serves_head_dims_and_sched_rejects(self):
+        # qr_tdm takes the head dims qr_tdm_fp8_sched lacks and the calls it rejects; the
+        # sched head dims still reach sched first.
+        pool, kernels = get_fwd_blobs(
+            ["gfx1250"],
+            "fmha_fwd_d*_fp8_[bg]*_nlogits_nbias_nmask_nlse_ndropout_nskip_*_nsink*",
+            0,
+            [32, 64, 96, 128, 160, 192, 256, 512],
+            "simplified",
+        )
+        dispatch = _CompiledDispatcher(
+            self, pool, kernels, filter_fn=lambda trait: True
+        )
+        pertensor, blockscale = 1, 2
+        for hdim_q, hdim_v, bucket, qscale, block_scale_size, pipeline, padded in (
+            (32, 32, 32, pertensor, 0, "qr_tdm", True),
+            (96, 96, 96, pertensor, 0, "qr_tdm", True),
+            (160, 160, 160, pertensor, 0, "qr_tdm", True),
+            (512, 512, 512, pertensor, 0, "qr_tdm", False),
+            (128, 128, 128, pertensor, 0, "qr_tdm_fp8_sched", False),
+            (192, 128, 192, pertensor, 0, "qr_tdm_fp8_sched", False),
+            (256, 256, 256, pertensor, 0, "qr_tdm_fp8_sched", False),
+            # Q scale blocks that split sched's M128 tile fall back to qr_tdm.
+            (128, 128, 128, blockscale, 64, "qr_tdm", False),
+            (192, 128, 192, blockscale, 64, "qr_tdm", False),
+            (256, 256, 256, blockscale, 64, "qr_tdm", False),
+        ):
+            with self.subTest(hdim_q=hdim_q, hdim_v=hdim_v, qscale=qscale):
+                features = dict(
+                    dtype="fp8",
+                    hdim=bucket,
+                    mode="batch",
+                    pipeline=pipeline,
+                    qscale="pertensor" if qscale == pertensor else "blockscale",
+                    dpad="t" if padded else "f",
+                    dvpad="t" if padded else "f",
+                    spad="f" if pipeline == "qr_tdm" else "t",
+                )
+                if pipeline == "qr_tdm_fp8_sched":
+                    features["packgqa"] = "f"
+                self.assertEqual(
+                    dispatch.run(
+                        dtype="fp8",
+                        hdim_q=hdim_q,
+                        hdim_v=hdim_v,
+                        qscale=qscale,
+                        block_scale_size_q=block_scale_size,
+                        block_scale_size_kv=block_scale_size,
+                        nhead_k=8,
+                    ),
+                    [dispatch.expected_id(**features)],
+                )
+
     def test_batch_sched_only_dispatch(self):
         pool, kernels = get_fwd_blobs(
             ["gfx1250"], "*d128_bf16*_qr_tdm_sched_*", 600, [128], "simplified"
@@ -2799,7 +2922,6 @@ int main() {
             run(seqlen_q=100, seqlen_k=512, **big), [kernel("qr_tdm_pingpong", 64)]
         )
         self.assertEqual(run(seqlen_q=100, seqlen_k=512), [kernel("qr_tdm", 64)])
-
 
 
 class SplitKVQrTdmTiles(unittest.TestCase):

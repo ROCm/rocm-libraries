@@ -5,6 +5,7 @@
 
 #include "ck_tile/core.hpp"
 #include "ck_tile/ops/common.hpp"
+#include "ck_tile/ops/epilogue/tdm_epilogue.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_bias_enum.hpp"
 #include "ck_tile/ops/fmha/block/block_attention_quant_scale_enum.hpp"
 #include "ck_tile/ops/fmha/block/variants.hpp"
@@ -52,6 +53,20 @@ struct uses_qr_tdm_lds_arena<Pipeline, std::void_t<decltype(Pipeline::kUsesLdsAr
 
 template <typename Pipeline>
 inline constexpr bool uses_qr_tdm_lds_arena_v = uses_qr_tdm_lds_arena<Pipeline>::value;
+
+template <typename Pipeline, typename = void>
+struct uses_tdm_o_store : std::false_type
+{
+};
+
+template <typename Pipeline>
+struct uses_tdm_o_store<Pipeline, std::void_t<decltype(Pipeline::kTdmOStore)>>
+    : std::bool_constant<Pipeline::kTdmOStore>
+{
+};
+
+template <typename Pipeline>
+inline constexpr bool uses_tdm_o_store_v = uses_tdm_o_store<Pipeline>::value;
 
 // Whether the K/V views take the NT_HT cache hint on gfx1250 (see
 // FmhaFwdKernel::kKVCoherence): TDM pipelines that stage K/V in their LDS arena,
@@ -3481,10 +3496,11 @@ struct FmhaFwdKernel
             // MX descales: E8M0 per 32 elements, consumed as WMMA scale operands.
             constexpr bool kMxTdmSched = kPipelineName == "qr_tdm_fp8_sched" &&
                                          QScaleEnum == BlockAttentionQuantScaleEnum::MX;
+            constexpr bool kMxQScale = QScaleEnum == BlockAttentionQuantScaleEnum::MX;
             [[maybe_unused]] long_index_t descale_offset_q = 0;
             [[maybe_unused]] long_index_t descale_offset_k = 0;
             [[maybe_unused]] long_index_t descale_offset_v = 0;
-            if constexpr(kPerHeadQScale || kBlockQScale || kMxTdmSched)
+            if constexpr(kPerHeadQScale || kBlockQScale || kMxQScale)
             {
                 descale_offset_q =
                     static_cast<long_index_t>(i_nhead_q) * kargs.nhead_stride_q_descale;
@@ -3501,7 +3517,7 @@ struct FmhaFwdKernel
                     descale_offset_v +=
                         static_cast<long_index_t>(i_batch) * kargs.batch_stride_v_descale;
                 }
-                else if constexpr(kMxTdmSched)
+                else if constexpr(kMxQScale)
                 {
                     // Group MX: Q/K scale rows follow the physical token starts, V its own.
                     descale_offset_q += static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]) *
@@ -3630,6 +3646,21 @@ struct FmhaFwdKernel
                 else if constexpr(kTakesTdmDescales && kFoldedQScale)
                     return FmhaPipeline{}(
                         static_cast<decltype(args)&&>(args)..., nullptr, nullptr, 1, v_descale);
+                else if constexpr(kPipelineName == "qr_tdm" && kMxQScale)
+                {
+                    typename FmhaPipeline::MxDescale mx;
+                    mx.q = reinterpret_cast<const e8m0_t*>(kargs.q_descale_ptr) + descale_offset_q;
+                    mx.k = reinterpret_cast<const e8m0_t*>(kargs.k_descale_ptr) + descale_offset_k;
+                    mx.v = reinterpret_cast<const e8m0_t*>(kargs.v_descale_ptr) + descale_offset_v;
+                    mx.stride_q  = kargs.stride_q_descale;
+                    mx.stride_k  = kargs.stride_k_descale;
+                    mx.stride_v  = kargs.stride_v_descale;
+                    mx.qk_scales = integer_divide_ceil(kargs.hdim_q, FmhaPipeline::kMxGranularity);
+                    mx.q_rows    = kargs.seqlen_q;
+                    mx.v_rows    = kargs.hdim_v;
+                    return FmhaPipeline{}(
+                        static_cast<decltype(args)&&>(args)..., nullptr, nullptr, 1, 1.0f, mx);
+                }
                 else if constexpr(kPipelineName == "qr_tdm" && (kHasLogitsSoftCap || kHasDropout))
                 {
                     auto transform = [&](auto x) {
@@ -3696,6 +3727,39 @@ struct FmhaFwdKernel
                 }
                 else
                     return FmhaPipeline{}(static_cast<decltype(args)&&>(args)...);
+            };
+
+            // Oacc DRAM and Oacc DRAM window
+            auto make_o_dram_window = [&] {
+                const auto o_dram_naive = make_naive_tensor_view<address_space_enum::global>(
+                    o_ptr,
+                    make_tuple(kargs.seqlen_q, kargs.hdim_v),
+                    make_tuple(kargs.stride_o, 1),
+                    number<FmhaPipeline::kAlignmentOacc>{},
+                    number<1>{});
+                const auto o_dram = pad_tensor_view(
+                    o_dram_naive,
+                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
+                    sequence<kPadSeqLenQ, kPadHeadDimV>{});
+                return make_tile_window(
+                    o_dram,
+                    make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN1>{}),
+                    {i_m0, i_n1});
+            };
+
+            // fp8 qr_tdm stages O in its LDS arena, free once the pipeline returns, and writes
+            // it out with one TDM store per wave.
+            constexpr bool kTdmOStore = detail::uses_qr_tdm_lds_arena_v<FmhaPipeline> &&
+                                        detail::uses_tdm_o_store_v<FmhaPipeline>;
+            static_assert(
+                !kTdmOStore ||
+                    tdm_store_2d_smem_bytes<ODataType, FmhaPipeline::kM0, FmhaPipeline::kN1>() <=
+                        GetSmemSize(),
+                "the padded O tile must fit the pipeline's LDS arena");
+            auto store_o_through_arena = [&](const auto& o_acc, void* smem_arena) {
+                auto o_dram_window = make_o_dram_window();
+                tdm_store_2d<ODataType, kBlockSize, FmhaPipeline::kM0, FmhaPipeline::kN1>(
+                    o_dram_window, o_acc, smem_arena);
             };
 
             // Declared here so the epilogue can reuse the pipeline's LDS. The
@@ -3795,7 +3859,11 @@ struct FmhaFwdKernel
                 }
             }();
 
-            if constexpr(detail::stores_output_via_tdm_v<FmhaPipeline>)
+            if constexpr(kTdmOStore)
+            {
+                store_o_through_arena(o_acc_tile, smem_ptr);
+            }
+            else if constexpr(detail::stores_output_via_tdm_v<FmhaPipeline>)
             {
                 // o_ptr already holds the group's physical query start; rows stop at seqlen_q.
                 alignas(16) __shared__ char smem_o[FmhaPipeline::kOLdsBytes];

@@ -197,6 +197,24 @@ load_tile_tdm(const TDMConfig_& tdm_config,
     return tile_window.tdm_load_to_lds(tdm_config, lds_tile, gather_index_view, number<i_access>{});
 }
 
+// load_tile_tdm for loops: take the strides once with make_tdm_uniform_strides() before the
+// loop, then each load_tile_tdm_uniform() packs its descriptor in SGPRs. Same bounds handling
+// as load_tile_tdm; no gather.
+template <typename TileWindow_>
+CK_TILE_DEVICE auto make_tdm_uniform_strides(const TileWindow_& tile_window)
+{
+    return tile_window.get_tdm_uniform_strides();
+}
+
+template <typename TDMConfig_, typename LdsTileWindow_, typename TileWindow_, typename Strides_>
+CK_TILE_DEVICE void load_tile_tdm_uniform(const TDMConfig_& tdm_config,
+                                          LdsTileWindow_&& lds_tile,
+                                          const TileWindow_& tile_window,
+                                          const Strides_& uniform_strides)
+{
+    tile_window.tdm_load_to_lds_uniform(tdm_config, lds_tile, uniform_strides);
+}
+
 // Explicit unchecked-bounds path for a caller-proven full tile. Every distributed
 // box (including every warp's origin) must lie within the actual global tensor.
 // Global strides, address calculation, LDS padding and synchronization are unchanged.
