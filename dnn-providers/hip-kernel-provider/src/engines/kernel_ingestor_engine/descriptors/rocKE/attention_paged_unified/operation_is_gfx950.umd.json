@@ -1,0 +1,7 @@
+{
+  "version": "1.0",
+  "id": "f5baea64-2961-4555-9a77-6576fc1ec21b",
+  "name": "graph operation is gfx950",
+  "scope": "graph",
+  "match_symbol": "hipkernel.attention_paged_unified.gfx950_match"
+}

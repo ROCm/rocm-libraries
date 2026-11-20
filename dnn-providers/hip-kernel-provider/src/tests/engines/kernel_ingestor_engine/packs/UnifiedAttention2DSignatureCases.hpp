@@ -18,7 +18,7 @@
 /**
  * @file UnifiedAttention2DSignatureCases.hpp
  * @brief The kernarg-ABI cases the unified-attention 2D packs share: pins the ABI each pack
- *        marshals (unified2DKernelSignature in UnifiedAttention2DCommon.hpp) against the ABI
+ *        marshals (tiled2DKernelSignature in AttentionTiled2DSignature.hpp) against the ABI
  *        the rocKE builder declares.
  *
  * A wrong argument count, order, kind or width is not a launch error. The driver copies

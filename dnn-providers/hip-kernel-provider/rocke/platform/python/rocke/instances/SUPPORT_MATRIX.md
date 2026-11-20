@@ -160,6 +160,7 @@ be smaller than 2 GiB.
 | `unified_attention_reduce` | ✅ | ✅ | ✅ | scalar |
 | `attention_dense` | ✅ | ✅ | ❌ | dense (non-paged) flash prefill, separate per-arch bodies; bf16/fp16 D64/D128. gfx950 grid body also takes fp8 e4m3 (OCP) K/V with per-tensor scales (aligned contiguous KV, no sinks). Lives in `library/kernels/{gfx942,gfx950}/attention_dense.py` |
 | tiled 3D `kv_layout="strided"` | ✅ | ✅ | ❌ | non-paged Sq=1, fp16/bf16 D64/128/256, aligned unit-D KV views; existing tiled segment/reduce pipeline |
+| tiled 2D `runtime_layout=True` | ✅ | ✅ | ❌ | fp16/bf16 D64/128/256, paged block 16/32/64, 1-16 query heads per KV head, default 16x16 pipeline only (no softcap, ALiBi, QQ bias, fp8 KV or LSE). One object serves a dense or ragged Q and paged K/V: strides, separate K/V block tables, `seq_len_q`, the window and Q-dtype or fp32 sinks are kernargs. Specs over the `ArchTarget` LDS budget are refused (on gfx942 by the support gate and both builders). GPU-numeric-verified on both arches (`test_gfx942_attention_runtime_layout.py`, `test_attention_tiled_2d_runtime_layout_gfx950.py`) |
 | `mla_prefill_fwd` | ✅ | ❌ | ❌ | bf16 only; paged compressed KV, `W_UK` absorbed into the query and `W_UV` applied in the epilogue (the latent KV is never expanded). Takes an already projected, RoPE-rotated query. Lives in `library/kernels/mla/`, dispatched by the separate `dispatch.mla` registry (not `dispatch.attention`). gfx950 is a later phase. |
 
 ---

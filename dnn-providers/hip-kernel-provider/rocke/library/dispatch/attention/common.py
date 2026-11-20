@@ -1048,6 +1048,7 @@ class AttentionTuningSpec:
                     and not getattr(spec, f.name)
                 )
                 and not (f.name == "lse_layout" and spec.lse_layout == "token_major")
+                and not (f.name == "runtime_layout" and not spec.runtime_layout)
             )
 
         return (

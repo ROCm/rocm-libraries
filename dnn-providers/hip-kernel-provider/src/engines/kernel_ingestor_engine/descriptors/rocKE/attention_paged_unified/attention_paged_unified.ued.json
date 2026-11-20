@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "c9af5aa1-86fc-4186-aa3c-307b929710af",
+  "name": "hipkernel:AttentionPagedUnified",
+  "sdk_version": "1.4.0",
+  "graph_match": {
+    "native": "hipkernel.attention_paged_unified.graph_match"
+  },
+  "metadata": "29593010-20c8-41e6-9197-d4d617e1d25b"
+}

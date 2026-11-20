@@ -46,6 +46,8 @@ using hipdnn_plugin_sdk::ingestor::MetadataValue;
 using hipdnn_plugin_sdk::ingestor::MetadataValues;
 using hipdnn_plugin_sdk::ingestor::SavedLaunchInputs;
 using hipdnn_plugin_sdk::ingestor::toString;
+using serialization::expectCommonReadRefusals;
+using serialization::expectReadRefusal;
 
 TEST(TestPackLaunchValues, PointwiseValuesMatchTheV1Contract)
 {
@@ -199,47 +201,6 @@ SavedLaunchInputs savedGfx950AttentionDense()
     const auto launch = gfx950AttentionDenseInputs();
     return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
             gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
-}
-
-// Expects `read` to refuse `inputs` as a valid plan that cannot be restored, with `phrase`
-// in the message.
-template <typename TReader>
-void expectReadRefusal(TReader read, const SavedLaunchInputs& inputs, const std::string& phrase)
-{
-    serialization::expectIngestorPlanRefusal(
-        [&]() { static_cast<void>(read(inputs)); }, HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE, phrase);
-}
-
-// The refusals every reader shares: a missing value, an extra value, an integer stored as a
-// string or as an integer list, and the unversioned dispatch name, which is registered but
-// names no contract.
-template <typename TReader>
-void expectCommonReadRefusals(TReader read,
-                              const SavedLaunchInputs& valid,
-                              const std::string& unversionedAlias,
-                              const std::string& integerName)
-{
-    SavedLaunchInputs missing = valid;
-    missing.values.erase(integerName);
-    expectReadRefusal(read, missing, "needs launch value '" + integerName + "'");
-
-    SavedLaunchInputs extra = valid;
-    extra.values["unexpected"] = int64_t{1};
-    expectReadRefusal(read, extra, "launch value 'unexpected' is not part of the contract");
-
-    SavedLaunchInputs wrongType = valid;
-    wrongType.values[integerName] = std::string("1");
-    expectReadRefusal(read, wrongType, "launch value '" + integerName + "'");
-    expectReadRefusal(read, wrongType, "must be int in [");
-    expectReadRefusal(read, wrongType, "and the plan holds string");
-
-    SavedLaunchInputs wrongList = valid;
-    wrongList.values[integerName] = std::vector<int64_t>{1};
-    expectReadRefusal(read, wrongList, "and the plan holds int_list");
-
-    SavedLaunchInputs unversioned = valid;
-    unversioned.dispatchSymbol = unversionedAlias;
-    expectReadRefusal(read, unversioned, "names no launch-value contract");
 }
 
 // The scales a dense reader restores: the [2^-64, 2^4] its graph match serves, bounds

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "b4085b75-ea3b-4d38-878d-9998a03e15c7",
+  "name": "AttentionPagedUnified dispatch",
+  "dispatch_symbol": "hipkernel.attention_paged_unified.dispatch"
+}
