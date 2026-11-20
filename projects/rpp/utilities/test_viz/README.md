@@ -1,6 +1,6 @@
 # rpp-test-viz
 
-Prototype visual debugger for the GoogleTest suite in `utilities/test/`. It shows the reference, the actual output, `|actual - reference|`, and a pass/fail mask for each comparison in a failing case. The four panes share one camera, and a pixel inspector shows every pane's values under the cursor.
+Prototype visual debugger for the GoogleTest suite in `utilities/test/`. It shows the reference, the actual output, `|actual - reference|`, and a pass/fail mask for each comparison in a failing case. The four panes zoom and pan together, and a pixel inspector shows every pane's values under the cursor.
 
 ## Usage
 
@@ -13,24 +13,17 @@ RPP_TEST_CAPTURE_DIR=/tmp/cap ./rpp_tests_capture --gtest_filter='*ColorCastTest
 
 Only failing cases are written. Set `RPP_TEST_CAPTURE_ALL=1` to write passing cases too. `RPP_TEST_NO_SKIP_LIST=1` runs the known kernel defects, which is a quick way to get failures to look at.
 
-Then view the bundles in one of two ways.
-
-**HTML (no display needed).** This writes one self-contained file with gzipped data, no server, and no network access. It's about 1 MB for 128 small cases. Open it with VS Code Live Preview, a browser over a port forward, or a downloaded copy:
+Then write the viewer. It's one self-contained HTML file with gzipped data, no server, and no network access, about 1 MB for 128 small cases. Open it with VS Code Live Preview (`ms-vscode.live-server`), a browser over a port forward, or a downloaded copy:
 
 ```bash
-uv run --project utilities/test_viz rpp-test-viz /tmp/cap --html            # -> /tmp/cap/viewer.html
-uv run --project utilities/test_viz rpp-test-viz /tmp/cap --html out.html --filter '*HIP_I8*'
+uv run --project utilities/test_viz rpp-test-viz /tmp/cap                   # -> /tmp/cap/viewer.html
+uv run --project utilities/test_viz rpp-test-viz /tmp/cap -o out.html --filter '*HIP_I8*'
+uv run --project utilities/test_viz rpp-test-viz /tmp/cap --list            # print the cases, write nothing
 ```
 
-**napari (needs a display).** This opens a desktop window instead. napari is an optional extra, so headless machines never install Qt:
+Every selected case is embedded, so narrow a broad capture with `--filter`.
 
-```bash
-uv run --project utilities/test_viz --extra napari rpp-test-viz /tmp/cap
-```
-
-`--list` prints the cases and exits.
-
-Both viewers show the reference, actual, `|actual - reference|` and status panes with linked zoom and pan. There's a slider for each leading axis (batch, depth, ...), a channel selector (all (RGB) or a single channel), and a per-channel pixel inspector. The HTML viewer also has slice or global contrast, the GTest failure text, a case filter, and `j`/`k` to step through cases.
+The viewer shows the reference, actual, `|actual - reference|` and status panes with linked wheel zoom and drag-to-pan. There's a slider for each leading axis (batch, depth, ...), a channel selector (all (RGB) or a single channel), slice or global contrast, and a per-channel pixel inspector. It also shows the GTest failure text, and has a case filter and `j`/`k` to step through cases.
 
 ## How it hooks in
 
