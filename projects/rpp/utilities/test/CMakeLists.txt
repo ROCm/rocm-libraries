@@ -70,17 +70,31 @@ if(NOT RPP_TEST_SOURCES)
     message(FATAL_ERROR "No test sources found under ${CMAKE_CURRENT_SOURCE_DIR}/src/tests")
 endif()
 
-add_executable(rpp_tests ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp ${RPP_TEST_SOURCES})
-target_include_directories(rpp_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-if(RPP_TEST_STAGED_INCLUDE_DIR)
-    target_include_directories(rpp_tests BEFORE PRIVATE ${RPP_TEST_STAGED_INCLUDE_DIR})
+# rpp_test_add_executable(<target> [extra sources...])
+# The suite's sources plus main.cpp, with the suite's include dirs, warnings and links.
+function(rpp_test_add_executable target)
+    add_executable(${target} ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp ${RPP_TEST_SOURCES} ${ARGN})
+    target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(RPP_TEST_STAGED_INCLUDE_DIR)
+        target_include_directories(${target} BEFORE PRIVATE ${RPP_TEST_STAGED_INCLUDE_DIR})
+    endif()
+
+    # Warnings are errors for the suite's own sources.
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror)
+
+    # src/main.cpp provides main() (it installs the suite's own reporter), so gtest_main is not used.
+    target_link_libraries(${target} PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest)
+endfunction()
+
+rpp_test_add_executable(rpp_tests)
+
+# Debug-only twin of rpp_tests that dumps reference/actual/diff for the utilities/test_viz viewer.
+# Not registered with CTest and not installed.
+option(RPP_TEST_CAPTURE "Also build rpp_tests_capture (comparison dumps for utilities/test_viz)" OFF)
+if(RPP_TEST_CAPTURE)
+    rpp_test_add_executable(rpp_tests_capture ${CMAKE_CURRENT_SOURCE_DIR}/src/capture/bundle.cpp)
+    target_compile_definitions(rpp_tests_capture PRIVATE RPPTEST_CAPTURE=1)
 endif()
-
-# Warnings are errors for the suite's own sources.
-target_compile_options(rpp_tests PRIVATE -Wall -Wextra -Werror)
-
-# src/main.cpp provides main() (it installs the suite's own reporter), so gtest_main is not used.
-target_link_libraries(rpp_tests PRIVATE ${RPP_TEST_LINK_LIB} GTest::gtest)
 
 # One CTest test per GTest suite (per operator) by default; see cmake/grouped_tests.cmake.
 # Per-case registration isolates each case in its own process, at the cost of one start per case.

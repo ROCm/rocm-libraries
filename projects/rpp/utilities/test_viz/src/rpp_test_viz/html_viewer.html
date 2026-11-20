@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rpp-test-viz</title>
+<style>
+  :root { --bg:#0d1117; --panel:#161b22; --border:#30363d; --fg:#c9d1d9; --dim:#8b949e; --accent:#58a6ff; --fail:#f85149; --pass:#3fb950; }
+  * { box-sizing: border-box; }
+  body { margin:0; height:100vh; display:flex; background:var(--bg); color:var(--fg); font:13px/1.4 ui-sans-serif,system-ui,sans-serif; }
+  #side { width:420px; min-width:260px; resize:horizontal; overflow:hidden; display:flex; flex-direction:column; border-right:1px solid var(--border); background:var(--panel); }
+  #side input { margin:8px; padding:6px 8px; background:var(--bg); color:var(--fg); border:1px solid var(--border); border-radius:6px; }
+  #counts { padding:0 10px 6px; color:var(--dim); font-size:12px; }
+  #list { flex:1; overflow:auto; font:12px ui-monospace,monospace; }
+  #list div { padding:3px 10px; white-space:nowrap; cursor:pointer; }
+  #list div:hover { background:#1f2630; }
+  #list div.sel { background:#1f6feb44; }
+  #list .n { display:inline-block; width:92px; text-align:right; margin-right:8px; color:var(--fail); }
+  #list .n.ok { color:var(--pass); }
+  #list .fx { color:var(--dim); }
+  #main { flex:1; display:flex; flex-direction:column; min-width:0; }
+  #head { padding:8px 12px; border-bottom:1px solid var(--border); }
+  #title { font-weight:600; word-break:break-all; }
+  #meta { color:var(--dim); font-size:12px; }
+  #controls { display:flex; flex-wrap:wrap; gap:14px; align-items:center; padding:6px 12px; border-bottom:1px solid var(--border); font-size:12px; }
+  #controls label { display:flex; gap:6px; align-items:center; }
+  #controls select, #controls input[type=range] { accent-color:var(--accent); background:var(--bg); color:var(--fg); border:1px solid var(--border); }
+  #body { flex:1; display:flex; min-height:0; }
+  #grid { flex:1; display:grid; grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; gap:6px; padding:6px; min-width:0; }
+  .pane { position:relative; overflow:auto; background:#010409; border:1px solid var(--border); border-radius:6px; }
+  .pane .lbl { position:sticky; top:0; left:0; z-index:1; display:inline-block; padding:2px 8px; background:#161b22cc; font-size:11px; color:var(--dim); }
+  .pane canvas { display:block; image-rendering:pixelated; cursor:crosshair; }
+  .pane.dragging, .pane.dragging canvas { cursor:grabbing; }
+  #info { width:320px; overflow:auto; border-left:1px solid var(--border); padding:10px 12px; font:12px ui-monospace,monospace; }
+  #info table { border-collapse:collapse; margin:6px 0 12px; }
+  #info td, #info th { padding:1px 8px 1px 0; text-align:right; }
+  #info th { color:var(--dim); font-weight:normal; text-align:left; }
+  .FAIL { color:var(--fail); } .pass { color:var(--pass); } .skip { color:var(--dim); }
+  pre { white-space:pre-wrap; word-break:break-all; color:var(--dim); margin:0; }
+  #legend span { display:inline-block; width:10px; height:10px; margin:0 4px 0 10px; vertical-align:middle; }
+  .help { color:var(--dim); }
+</style>
+</head>
+<body>
+<div id="side">
+  <input id="filter" placeholder="filter cases (substring, or * glob)">
+  <div id="counts"></div>
+  <div id="list"></div>
+</div>
+<div id="main">
+  <div id="head"><div id="title"></div><div id="meta"></div></div>
+  <div id="controls">
+    <span id="sliders"></span>
+    <label>channel <select id="channel"></select></label>
+    <label>contrast <select id="contrast"><option value="slice">slice</option><option value="global">global</option></select></label>
+    <span id="limits" class="help"></span>
+    <label>zoom <input id="zoom" type="range" min="1" max="128" value="8"> <span id="zoomv"></span></label>
+    <span id="legend">status:<span style="background:#30363d"></span>not compared<span style="background:#2ea043"></span>pass<span style="background:#f85149"></span>fail</span>
+    <span class="help">j/k: next/prev case · wheel: zoom · drag: pan (panes linked)</span>
+  </div>
+  <div id="body">
+    <div id="grid">
+      <div class="pane"><span class="lbl">reference</span><canvas id="c-ref"></canvas></div>
+      <div class="pane"><span class="lbl">actual</span><canvas id="c-act"></canvas></div>
+      <div class="pane"><span class="lbl" id="diff-lbl">|actual − reference|</span><canvas id="c-diff"></canvas></div>
+      <div class="pane"><span class="lbl">status</span><canvas id="c-status"></canvas></div>
+    </div>
+    <div id="info"><div id="pixel" class="help">hover a pixel</div><pre id="failure"></pre></div>
+  </div>
+</div>
+<script id="data" type="application/json">/*__RPP_TEST_VIZ_DATA__*/[]</script>
+<script>
+"use strict";
+const ENTRIES = JSON.parse(document.getElementById("data").textContent);
+const $ = (id) => document.getElementById(id);
+const INFERNO = [[0,0,4],[31,12,72],[85,15,109],[136,34,106],[186,54,85],[227,89,51],[249,140,10],[249,201,50],[252,255,164]];
+const STATUS_RGB = [[48,54,61],[46,160,67],[248,81,73]];
+const STATUS_NAME = ["not compared", "pass", "FAIL"];
+const STATUS_CLS = ["skip", "pass", "FAIL"];
+
+// Arrays are gzip + base64; inflated only when their case is first opened.
+async function unpack(s) {
+  const bin = atob(s), u = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; ++i) u[i] = bin.charCodeAt(i);
+  return new Response(new Blob([u]).stream().pipeThrough(new DecompressionStream("gzip"))).arrayBuffer();
+}
+async function typed([t, s]) { const b = await unpack(s); return t === "f8" ? new Float64Array(b) : new Float32Array(b); }
+
+// Decoded comparison + how its canonical (channels-last) arrays map onto 2-D panes.
+const cache = new Map();
+async function load(i) {
+  if (cache.has(i)) return cache.get(i);
+  const e = ENTRIES[i];
+  const hasC = e.axes[e.axes.length - 1] === "c";
+  const C = hasC ? e.shape[e.shape.length - 1] : 1;
+  let dims = hasC ? e.shape.slice(0, -1) : e.shape.slice();
+  let labels = hasC ? e.axes.slice(0, -1) : e.axes.slice();
+  if (dims.length === 1) { dims = [1, ...dims]; labels = ["", ...labels]; }
+  const v = { e, C, rgb: C === 3, dims, labels, H: dims[dims.length - 2], W: dims[dims.length - 1],
+              ref: await typed(e.ref), act: await typed(e.act),
+              diff: new Float32Array(await unpack(e.diff)), status: new Uint8Array(await unpack(e.status)) };
+  // Shared contrast: full range for 8-bit integer types, else min/max over reference and actual.
+  const dt = e.dtypes[1];
+  if (dt === "uint8") v.lim = [0, 255];
+  else if (dt === "int8") v.lim = [-128, 127];
+  else {
+    let lo = Infinity, hi = -Infinity;
+    for (const a of [v.ref, v.act]) for (const x of a) if (Number.isFinite(x)) { if (x < lo) lo = x; if (x > hi) hi = x; }
+    v.lim = lo === Infinity ? [0, 1] : hi > lo ? [lo, hi] : [lo - 0.5, hi + 0.5];
+  }
+  v.peak = 0;
+  for (const d of v.diff) if (Math.abs(d) > v.peak) v.peak = Math.abs(d);
+  cache.set(i, v);
+  return v;
+}
+
+// ---- state + layout ---------------------------------------------------------
+let visible = [], current = -1, view = null, lead = [], hover = null;
+
+function renderList() {
+  const q = $("filter").value.trim();
+  const re = q.includes("*") ? new RegExp("^" + q.split("*").map(s => s.replace(/[.+?^${}()|[\]\\/]/g, "\\$&")).join(".*") + "$") : null;
+  visible = ENTRIES.map((e, i) => i).filter(i => { const n = ENTRIES[i].case; return re ? re.test(n) : n.includes(q); });
+  const failing = visible.filter(i => !ENTRIES[i].passed).length;
+  $("counts").textContent = `${visible.length} of ${ENTRIES.length} comparisons · ${failing} failing`;
+  $("list").innerHTML = visible.map(i => {
+    const e = ENTRIES[i], tag = e.count > 1 ? ` [${e.index}]` : "";
+    const n = e.passed ? `<span class="n ok">PASS</span>` : `<span class="n">${e.failed}/${e.compared}</span>`;
+    const [, fixture = "", param = e.case] = e.case.match(/^[^/]*\/([^.]*)\.[^/]*\/(.*)$/) || [];
+    return `<div data-i="${i}" class="${i === current ? "sel" : ""}" title="${e.case}">${n}<span class="fx">${fixture}</span> ${param}${tag}</div>`;
+  }).join("");
+}
+
+async function select(i) {
+  if (i === undefined || i < 0) return;
+  const v = await load(i), e = v.e;
+  current = i;
+  view = v;
+  document.querySelectorAll("#list div").forEach(d => d.classList.toggle("sel", +d.dataset.i === i));
+  document.querySelector(`#list div[data-i="${i}"]`)?.scrollIntoView({ block: "nearest" });
+  $("title").textContent = e.case + (e.count > 1 ? ` [${e.index}]` : "");
+  $("meta").textContent = `${e.kind} shape=(${e.shape}) axes=${e.axes.join(",")} reference=${e.dtypes[0]} actual=${e.dtypes[1]} · ` +
+    `${e.failed} of ${e.compared} compared failed · max |diff| ${fmt(v.peak)}`;
+  $("failure").textContent = e.failure;
+
+  // One slider per leading axis (batch, depth, ...); kept when the next case has the same axes.
+  const leadDims = v.dims.slice(0, -2);
+  if (lead.length !== leadDims.length) lead = leadDims.map(() => 0);
+  lead = lead.map((x, k) => Math.min(x, leadDims[k] - 1));
+  $("sliders").innerHTML = leadDims.map((d, k) =>
+    `<label>${v.labels[k] || "·"} <input type="range" min="0" max="${d - 1}" value="${lead[k]}" data-k="${k}" ${d === 1 ? "disabled" : ""}> <span>${lead[k]}/${d - 1}</span></label>`).join("");
+  $("sliders").querySelectorAll("input").forEach(s => s.oninput = () => { lead[+s.dataset.k] = +s.value; s.nextElementSibling.textContent = `${s.value}/${s.max}`; draw(); });
+
+  const prev = $("channel").value;
+  const opts = (v.rgb ? ["all"] : []).concat(Array.from({ length: v.C }, (_, c) => String(c)));
+  $("channel").innerHTML = opts.map(o => `<option value="${o}">${o === "all" ? "all (RGB)" : "c=" + o}</option>`).join("");
+  $("channel").value = opts.includes(prev) ? prev : opts[0];
+  $("contrast").value = v.e.dtypes[1].endsWith("int8") ? "global" : "slice";
+  fitZoom(v);
+  draw();
+}
+
+function fitZoom(v) {
+  const pane = document.querySelector(".pane");
+  const z = Math.max(1, Math.floor(Math.min((pane.clientWidth - 4) / v.W, (pane.clientHeight - 22) / v.H)));
+  $("zoom").value = Math.min(z, +$("zoom").max);
+}
+
+// Flat index of element (y, x, channel c) at the current leading-axis position.
+function offset(v, y, x, c) {
+  let idx = 0;
+  const full = [...lead, y, x];
+  for (let k = 0; k < v.dims.length; ++k) idx = idx * v.dims[k] + full[k];
+  return idx * v.C + c;
+}
+
+// Min/max over the visible slice of reference and actual, for the shown channels.
+function sliceLimits(v, chans) {
+  let lo = Infinity, hi = -Infinity;
+  for (let y = 0; y < v.H; ++y) for (let x = 0; x < v.W; ++x) for (const c of chans) {
+    const o = offset(v, y, x, c);
+    for (const a of [v.ref[o], v.act[o]]) if (Number.isFinite(a)) { if (a < lo) lo = a; if (a > hi) hi = a; }
+  }
+  return lo === Infinity ? [0, 1] : hi > lo ? [lo, hi] : [lo - 0.5, hi + 0.5];
+}
+
+function lut(t) {
+  t = Math.max(0, Math.min(1, t)) * (INFERNO.length - 1);
+  const i = Math.min(Math.floor(t), INFERNO.length - 2), f = t - i, a = INFERNO[i], b = INFERNO[i + 1];
+  return [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
+}
+
+function draw() {
+  if (!view) return;
+  const v = view, { W, H } = v, ch = $("channel").value, all = ch === "all";
+  const chans = all ? [0, 1, 2] : [+ch];
+  $("diff-lbl").textContent = `|actual − reference|  (0 … ${fmt(v.peak)})`;
+  const [lo, hi] = $("contrast").value === "global" ? v.lim : sliceLimits(v, chans), scale = 255 / (hi - lo);
+  $("limits").textContent = `display ${fmt(lo)} … ${fmt(hi)}`;
+  const imgs = ["ref", "act", "diff", "status"].map(k => {
+    const cv = $("c-" + k); cv.width = W; cv.height = H;
+    return [cv, new ImageData(W, H)];
+  });
+  applyZoom();
+  for (let y = 0; y < H; ++y) for (let x = 0; x < W; ++x) {
+    const p = (y * W + x) * 4;
+    let dmax = 0, smax = 0;
+    for (let j = 0; j < chans.length; ++j) {
+      const o = offset(v, y, x, chans[j]);
+      const r = (v.ref[o] - lo) * scale, a = (v.act[o] - lo) * scale;
+      if (all) { imgs[0][1].data[p + j] = r; imgs[1][1].data[p + j] = a; }
+      else for (let q = 0; q < 3; ++q) { imgs[0][1].data[p + q] = r; imgs[1][1].data[p + q] = a; }
+      const d = Math.abs(v.diff[o]); if (d > dmax) dmax = d;
+      if (v.status[o] > smax) smax = v.status[o];
+    }
+    const dc = lut(v.peak ? dmax / v.peak : 0), sc = STATUS_RGB[smax];
+    for (let q = 0; q < 3; ++q) { imgs[2][1].data[p + q] = dc[q]; imgs[3][1].data[p + q] = sc[q]; }
+    for (const [, im] of imgs) im.data[p + 3] = 255;
+  }
+  for (const [cv, im] of imgs) cv.getContext("2d").putImageData(im, 0, 0);
+  if (hover) inspect(hover[0], hover[1]);
+}
+
+// Display size only; the pixels are not re-rendered.
+function applyZoom() {
+  if (!view) return;
+  const zoom = +$("zoom").value;
+  $("zoomv").textContent = zoom + "×";
+  for (const k of ["ref", "act", "diff", "status"]) {
+    const cv = $("c-" + k);
+    cv.style.width = view.W * zoom + "px"; cv.style.height = view.H * zoom + "px";
+  }
+}
+
+function fmt(x) {
+  if (Number.isNaN(x)) return "—";
+  if (Number.isInteger(x)) return String(x);
+  return Math.abs(x) >= 1e5 || Math.abs(x) < 1e-3 ? x.toExponential(4) : x.toPrecision(6).replace(/\.?0+$/, "");
+}
+
+function inspect(y, x) {
+  const v = view;
+  if (y < 0 || x < 0 || y >= v.H || x >= v.W) return;
+  hover = [y, x];
+  const where = [...lead, y, x].map((c, k) => v.labels[k] ? `${v.labels[k]}=${c}` : null).filter(Boolean).join(" ");
+  const rows = [];
+  for (let c = 0; c < v.C; ++c) {
+    const o = offset(v, y, x, c), s = v.status[o];
+    rows.push(`<tr><th>${v.C > 1 ? "c=" + c : ""}</th><td>${fmt(v.ref[o])}</td><td>${fmt(v.act[o])}</td><td>${fmt(v.diff[o])}</td><td class="${STATUS_CLS[s]}">${STATUS_NAME[s]}</td></tr>`);
+  }
+  $("pixel").innerHTML = `<b>${where}</b><table><tr><th></th><th>ref</th><th>actual</th><th>diff</th><th></th></tr>${rows.join("")}</table>`;
+}
+
+// ---- events -----------------------------------------------------------------
+$("filter").oninput = renderList;
+$("list").onclick = (ev) => { const d = ev.target.closest("div[data-i]"); if (d) select(+d.dataset.i); };
+$("channel").onchange = draw;
+$("contrast").onchange = draw;
+$("zoom").oninput = () => applyZoom();
+for (const cv of document.querySelectorAll(".pane canvas"))
+  cv.onmousemove = (ev) => { const z = +$("zoom").value; inspect(Math.floor(ev.offsetY / z), Math.floor(ev.offsetX / z)); };
+let syncing = false;
+const panes = [...document.querySelectorAll(".pane")];
+function scrollAll(left, top) {
+  syncing = true;
+  for (const o of panes) { o.scrollLeft = left; o.scrollTop = top; }
+  syncing = false;
+}
+for (const p of panes) p.onscroll = () => { if (!syncing) scrollAll(p.scrollLeft, p.scrollTop); };
+
+// Wheel zooms about the cursor: the image point under it stays put.
+for (const p of panes) p.addEventListener("wheel", (ev) => {
+  if (!view) return;
+  ev.preventDefault();
+  const slider = $("zoom"), old = +slider.value;
+  const next = ev.deltaY < 0 ? Math.max(old + 1, Math.round(old * 1.25)) : Math.min(old - 1, Math.round(old / 1.25));
+  const zoom = Math.max(+slider.min, Math.min(+slider.max, next));
+  if (zoom === old) return;
+  const cv = p.querySelector("canvas"), rect = p.getBoundingClientRect();
+  const mx = ev.clientX - rect.left, my = ev.clientY - rect.top;
+  const ix = (p.scrollLeft + mx - cv.offsetLeft) / old, iy = (p.scrollTop + my - cv.offsetTop) / old;
+  slider.value = zoom;
+  applyZoom();
+  scrollAll(ix * zoom + cv.offsetLeft - mx, iy * zoom + cv.offsetTop - my);
+}, { passive: false });
+
+// Left-drag pans all panes together.
+let drag = null;
+for (const p of panes) p.addEventListener("mousedown", (ev) => {
+  if (ev.button !== 0) return;
+  ev.preventDefault();
+  drag = { p, x: ev.clientX, y: ev.clientY, left: p.scrollLeft, top: p.scrollTop };
+  p.classList.add("dragging");
+});
+window.addEventListener("mousemove", (ev) => {
+  if (drag) scrollAll(drag.left - (ev.clientX - drag.x), drag.top - (ev.clientY - drag.y));
+});
+window.addEventListener("mouseup", () => { if (drag) drag.p.classList.remove("dragging"); drag = null; });
+document.onkeydown = (ev) => {
+  if (ev.target.tagName === "INPUT" && ev.target.type !== "range") return;
+  const pos = visible.indexOf(current);
+  if (ev.key === "j") select(visible[Math.min(pos + 1, visible.length - 1)]);
+  if (ev.key === "k") select(visible[Math.max(pos - 1, 0)]);
+};
+
+renderList();
+select(visible[0]);
+</script>
+</body>
+</html>

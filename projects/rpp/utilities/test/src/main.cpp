@@ -30,11 +30,13 @@ SOFTWARE.
 #include <cstdio>
 #include <cstdlib>
 
+#include "framework/capture.hpp"
 #include "framework/reporter.hpp"
 
 int main(int argc, char** argv) {
     ::testing::InitGoogleTest(&argc, argv);
     if (std::getenv("RPP_TEST_PLAIN_OUTPUT") == nullptr) rpptest::install_concise_reporter();
+    rpptest::capture::install();  // no-op outside rpp_tests_capture
 
     const int result = RUN_ALL_TESTS();
 

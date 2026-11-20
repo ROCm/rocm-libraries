@@ -34,6 +34,7 @@ SOFTWARE.
 #include <string>
 #include <vector>
 
+#include "framework/capture.hpp"
 #include "framework/intensity.hpp"
 #include "framework/nd_config_param.hpp"
 #include "framework/tensor_setup.hpp"
@@ -116,6 +117,7 @@ template <typename T>
                         mismatches.check(to_double(actual[dstIdx]), to_double(reference[dstIdx]),
                                          named_coord({{"n", n}, {"c", c}, {"row", j}, {"col", i}}));
                     });
+    capture::record_roi(actual, reference, d, roi, roiType, bound);
     return mismatches.result();
 }
 
@@ -130,6 +132,7 @@ template <typename T>
         const std::size_t i = nd_offset(d, coord);
         mismatches.check(to_double(actual[i]), to_double(reference[i]), bracket_coord(coord));
     });
+    capture::record_nd(actual, reference, d, bound);
     return mismatches.result();
 }
 
@@ -147,6 +150,7 @@ template <typename T>
             mismatches.check(to_double(actual[idx]), to_double(reference[idx]),
                              named_coord({{"n", n}, {"c", c}, {"z", z}, {"y", y}, {"x", x}}));
         });
+    capture::record_voxel_roi(actual, reference, desc, roi, type, bound);
     return mismatches.result();
 }
 
@@ -159,6 +163,7 @@ template <typename TOut>
     Mismatches mismatches(bound);
     for (std::size_t i = 0; i < golden.size(); ++i)
         mismatches.check(to_double(actual[i]), golden[i], "[" + std::to_string(i) + "]");
+    capture::record_reduction(actual, golden, bound);
     return mismatches.result();
 }
 
