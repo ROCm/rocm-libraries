@@ -67,6 +67,13 @@ public:
         {"gfx950", "8b61d0c9-24af-4d17-9e52-3a7c06b8f145"}, // tflops
     }};
 
+    /// @brief Whether the L1 models can answer for @p graph: a single forward SDPA node.
+    ///
+    /// The models are trained on forward graphs only, yet every feature they read is bound
+    /// for a backward graph too (`graph.flops_by_type.<Type>` is 0 for an absent type), so
+    /// without this check a forward model would estimate backward SDPA.
+    static bool modelsCover(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph);
+
     hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
         getPrediction(Handle& handle,
                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
