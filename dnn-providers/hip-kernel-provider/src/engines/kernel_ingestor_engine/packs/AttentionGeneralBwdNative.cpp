@@ -3,6 +3,7 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstddef>
@@ -49,11 +50,15 @@
  * accumulate atomically, the dK and dV converts. Every main kernel declares the four main
  * launches; the dK/dV converts of a direct-dK/dV plan are never built or launched.
  *
- * The graph match computes the whole plan once (AttentionGeneralBwdGeometry.hpp) and
+ * The graph match computes the engine's own plan once (AttentionGeneralBwdGeometry.hpp) and
  * publishes it as tokens: the shared workspace layout (`ws.*`) and the KMD fields of the
- * prep and main kernels the plan names. The kernel match selects exactly those kernels.
- * Each handler recomputes the plan from the graph at prepare, refuses one that disagrees
- * with the tokens or with its kernel, and binds every runtime value as a kernarg.
+ * prep and main kernels that plan names. The prep slot admits exactly that prep kernel. The
+ * main slot admits every main kernel of the class the graph pins whose own plan can stand in
+ * for the engine's pick (same prep launch and workspace layout, legal for the graph and the
+ * device); its native score puts the engine's own pick first and a ranker may reorder the
+ * rest. Each handler recomputes the plan from the graph at prepare, builds the main plan from
+ * the kernel it was given, refuses one that disagrees with the tokens or with its kernel, and
+ * binds every runtime value as a kernarg.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -71,6 +76,7 @@ static_assert(generated::ENGINE_NAME == ATTENTION_GENERAL_BWD_ENGINE_NAME,
 // The contract with the installed descriptor files, which restate these same strings.
 constexpr std::string_view GRAPH_MATCHER_SYMBOL = "hipkernel.attention_general_bwd.graph_match";
 constexpr std::string_view KERNEL_MATCHER_SYMBOL = "hipkernel.attention_general_bwd.kernel_match";
+constexpr std::string_view MAIN_SCORE_SYMBOL = "hipkernel.attention_general_bwd.main_score";
 constexpr std::string_view PREP_DISPATCH_SYMBOL = "hipkernel.attention_general_bwd.prep_dispatch";
 constexpr std::string_view MAIN_DISPATCH_SYMBOL = "hipkernel.attention_general_bwd.main_dispatch";
 constexpr std::string_view PREP_GFX942_SYMBOL = "hipkernel.attention_general_bwd.prep_gfx942_match";
@@ -382,9 +388,46 @@ bool isMainKernel(const KernelDefinition& kernel)
     return kernel.metadata.count(std::string(MAIN_ONLY_FIELD)) != 0;
 }
 
-/// Kernel-scoped applicability: the kernel whose every slot field equals the token the graph
-/// match bound for it. The plan names one prep and one main kernel, so exactly one of each
-/// matches across the architecture's packs.
+/// The main fields the graph pins: what the main kernel computes, and so what the other slot
+/// and the shared workspace were built for. The remaining fields choose among kernels that
+/// compute the same result (tile, load-balance order, head packing, scale placement, work-list
+/// use); the candidate filter admits those by plan.
+constexpr bool isPinnedMainField(std::string_view name)
+{
+    return name == "dtype" || name == "head_size" || name == "seq_mode" || name == "stage_vec"
+           || name == "dkv_mode" || name == "mask_class" || name == "dq_mode";
+}
+
+/// Every main field encodes, and the pinned ones equal the tokens the graph match bound.
+bool mainClassMatches(const BoundTokens& bound,
+                      const KernelDefinition& kernel,
+                      std::string_view arch)
+{
+    for(const auto& field : MAIN_FIELDS)
+    {
+        const auto actual = encodeField(kernel, field, arch);
+        if(!actual.has_value())
+        {
+            logUnencodableOnce(kernel, field.name);
+            return false;
+        }
+        if(!isPinnedMainField(field.name))
+        {
+            continue;
+        }
+        const auto expected
+            = tryGetBoundInt(bound, tokenName(generated::MAIN_TOKEN_PREFIX, field.name));
+        if(!expected.has_value() || *actual != *expected)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+/// Kernel-scoped applicability. The prep kernel is the one whose every field equals the token
+/// the graph match bound. A main kernel is any of the class the graph pins; the candidate
+/// filter then keeps those whose plan can stand in for the engine's own pick.
 bool attentionGeneralBwdKernelMatches(const MatchContext& context,
                                       const BoundTokens& bound,
                                       const KernelDefinition& kernel)
@@ -392,9 +435,36 @@ bool attentionGeneralBwdKernelMatches(const MatchContext& context,
     const std::string_view arch = general_bwd::processorOf(context);
     if(isMainKernel(kernel))
     {
-        return fieldsMatch(MAIN_FIELDS, generated::MAIN_TOKEN_PREFIX, bound, kernel, arch);
+        return mainClassMatches(bound, kernel, arch);
     }
     return fieldsMatch(PREP_FIELDS, generated::PREP_TOKEN_PREFIX, bound, kernel, arch);
+}
+
+constexpr SlotField TUNING_KEY_FIELD{"tuning_key", FieldKind::TUNING_KEY};
+constexpr SlotField HEAD_PACK_FIELD{"head_pack", FieldKind::BOOL};
+
+/// The catalog row @p kernel names by its tuning key and head pack, or nullopt when either
+/// is not a value this engine encodes.
+std::optional<general_bwd::Selection> selectionOf(const KernelDefinition& kernel,
+                                                  std::string_view arch)
+{
+    const auto key = encodeField(kernel, TUNING_KEY_FIELD, arch);
+    const auto pack = encodeField(kernel, HEAD_PACK_FIELD, arch);
+    if(!key.has_value() || !pack.has_value())
+    {
+        return std::nullopt;
+    }
+    general_bwd::Selection selection;
+    selection.headPack = *pack != 0;
+    if(*key != 0)
+    {
+        selection.tuned = general_bwd::tunedEntryById(arch, *key);
+        if(selection.tuned == nullptr)
+        {
+            return std::nullopt;
+        }
+    }
+    return selection;
 }
 
 // ---------------------------------------------------------------------------
@@ -556,43 +626,143 @@ struct GraphPlan
     general_bwd::Plan plan;
 };
 
-[[noreturn]] void failNoLongerMatches(const general_bwd::Decline& decline)
+std::string noLongerMatchesMessage(const general_bwd::Decline& decline)
 {
-    failBadParam("the graph no longer matches ["
-                 + std::string(general_bwd::reasonName(decline.code)) + ": " + decline.detail
-                 + "]");
+    return "the graph no longer matches [" + std::string(general_bwd::reasonName(decline.code))
+           + ": " + decline.detail + "]";
+}
+
+/// The graph match's verdict recomputed: the engine's own plan with its lowering, or why the
+/// graph no longer yields one.
+std::variant<GraphPlan, std::string> tryGraphPlanOf(const MatchContext& context)
+{
+    if(general_bwd::sdpaBackwardNode(context) == nullptr)
+    {
+        return std::string("the graph is not a single SdpaBackward node");
+    }
+    const std::string_view arch = general_bwd::processorOf(context);
+    if(auto decline = general_bwd::archCheck(arch))
+    {
+        return noLongerMatchesMessage(*decline);
+    }
+    auto lowered = general_bwd::lowerGraph(context, general_bwd::computeUnitsOf(context));
+    if(const auto* decline = std::get_if<general_bwd::Decline>(&lowered))
+    {
+        return noLongerMatchesMessage(*decline);
+    }
+    auto& lowering = std::get<general_bwd::Lowered>(lowered);
+    auto result = general_bwd::evaluateRequest(lowering.request, arch, &resolvePlanOf);
+    if(const auto* decline = std::get_if<general_bwd::Decline>(&result))
+    {
+        return noLongerMatchesMessage(*decline);
+    }
+    auto& plan = std::get<general_bwd::Plan>(result);
+    if(const auto why = general_bwd::proveWorkspace(plan.workspace); !why.empty())
+    {
+        return "the workspace of the graph's plan does not prove: " + why;
+    }
+    return GraphPlan{std::move(lowering), std::move(plan)};
 }
 
 /// The graph match's verdict recomputed at prepare. A graph that no longer yields a plan is a
 /// caller that reached the handler without matching: it faults rather than declines.
 GraphPlan graphPlanOf(const MatchContext& context)
 {
-    if(general_bwd::sdpaBackwardNode(context) == nullptr)
+    auto result = tryGraphPlanOf(context);
+    if(auto* why = std::get_if<std::string>(&result))
     {
-        failBadParam("the graph is not a single SdpaBackward node");
+        failBadParam(*why);
     }
-    const std::string_view arch = general_bwd::processorOf(context);
-    if(auto decline = general_bwd::archCheck(arch))
+    return std::move(std::get<GraphPlan>(result));
+}
+
+/// The plan of the main kernel @p kernel on the graph of @p graphPlan: its catalog row
+/// standing in for the engine's own pick, or why it cannot. The row is the one the kernel's
+/// tuning key and head pack name; the 14 fields MAIN_FIELDS encodes must be that row's (the
+/// int knob restatements the descriptors also carry are not read here).
+std::variant<general_bwd::Plan, std::string> mainCandidatePlanOf(const GraphPlan& graphPlan,
+                                                                 std::string_view arch,
+                                                                 const KernelDefinition& kernel)
+{
+    const auto traits = general_bwd::shippedArchTraits(arch);
+    const auto in = general_bwd::planInputOf(graphPlan.lowered.request);
+    if(!traits.has_value() || !in.has_value())
     {
-        failNoLongerMatches(*decline);
+        return std::string("the graph has no plan input on this architecture");
     }
-    auto lowered = general_bwd::lowerGraph(context, general_bwd::computeUnitsOf(context));
-    if(const auto* decline = std::get_if<general_bwd::Decline>(&lowered))
+    const auto selection = selectionOf(kernel, arch);
+    if(!selection.has_value())
     {
-        failNoLongerMatches(*decline);
+        return std::string("its tuning key or head pack is not one this engine encodes");
     }
-    auto& lowering = std::get<general_bwd::Lowered>(lowered);
-    auto result = general_bwd::evaluateRequest(lowering.request, arch, &resolvePlanOf);
+    auto result = general_bwd::resolveCandidate(*in, *traits, graphPlan.plan, *selection);
     if(const auto* decline = std::get_if<general_bwd::Decline>(&result))
     {
-        failNoLongerMatches(*decline);
+        return decline->detail;
     }
     auto& plan = std::get<general_bwd::Plan>(result);
-    if(const auto why = general_bwd::proveWorkspace(plan.workspace); !why.empty())
+    if(!fieldsMatch(
+           MAIN_FIELDS, generated::MAIN_TOKEN_PREFIX, general_bwd::tokensFor(plan), kernel, arch))
     {
-        failBadParam("the workspace of the graph's plan does not prove: " + why);
+        return std::string(
+            "its fields are not those of the catalog row its tuning key and head pack name");
     }
-    return GraphPlan{std::move(lowering), std::move(plan)};
+    return std::move(plan);
+}
+
+/**
+ * @brief The main slot's candidate set: every main kernel of the graph's class whose plan can
+ *        stand in for the engine's own pick (see resolveCandidate), the pick included.
+ *
+ * Runs once per graph over the kernels the class match admitted, so the graph is lowered and
+ * planned once. Prep kernels are never narrowed. A graph that no longer yields a plan keeps no
+ * main kernel.
+ */
+std::vector<bool>
+    attentionGeneralBwdCandidateFilter(const MatchContext& context,
+                                       const BoundTokens& /*bound*/,
+                                       const std::vector<const KernelDefinition*>& kernels)
+{
+    std::vector<bool> keep(kernels.size(), true);
+    const bool anyMain = std::any_of(
+        kernels.begin(), kernels.end(), [](const auto* kernel) { return isMainKernel(*kernel); });
+    if(!anyMain)
+    {
+        return keep;
+    }
+    const auto graphPlan = tryGraphPlanOf(context);
+    const auto* plan = std::get_if<GraphPlan>(&graphPlan);
+    const std::string_view arch = general_bwd::processorOf(context);
+    for(std::size_t i = 0; i < kernels.size(); ++i)
+    {
+        if(isMainKernel(*kernels[i]))
+        {
+            keep[i] = plan != nullptr
+                      && std::holds_alternative<general_bwd::Plan>(
+                          mainCandidatePlanOf(*plan, arch, *kernels[i]));
+        }
+    }
+    return keep;
+}
+
+/// The main slot's native order: the engine's own pick first, every other candidate after it
+/// (priority, then id, orders those). A trained ranker replaces it.
+double attentionGeneralBwdMainScore(const MatchContext& context,
+                                    const BoundTokens& bound,
+                                    const KernelDefinition& kernel)
+{
+    const std::string_view arch = general_bwd::processorOf(context);
+    for(const auto& field : {TUNING_KEY_FIELD, HEAD_PACK_FIELD})
+    {
+        const auto pick
+            = tryGetBoundInt(bound, tokenName(generated::MAIN_TOKEN_PREFIX, field.name));
+        const auto actual = encodeField(kernel, field, arch);
+        if(!pick.has_value() || !actual.has_value() || *pick != *actual)
+        {
+            return 0.0;
+        }
+    }
+    return 1.0;
 }
 
 bool isEngineToken(std::string_view token)
@@ -875,25 +1045,35 @@ public:
                                               const BoundTokens& bound,
                                               const KernelDefinition& kernel) const override
     {
-        const auto graphPlan = graphPlanOf(context);
-        const auto& plan = graphPlan.plan;
-
-        const auto expected = general_bwd::tokensFor(plan);
+        auto graphPlan = graphPlanOf(context);
+        const auto expected = general_bwd::tokensFor(graphPlan.plan);
         requireTokens(bound, expected);
 
-        // The kernel the runtime selected must be the one the plan names: its kernargs are
-        // the plan's.
+        // The prep kernel selected must be the one the engine's own plan names. The main
+        // kernel selected must be one whose plan can stand in for it: the kernel's plan is
+        // the one launched, and the prep launch and workspace it leaves are the engine's own.
         const std::string_view arch = general_bwd::processorOf(context);
-        const bool selected
-            = ROLE == Role::MAIN
-                  ? fieldsMatch(MAIN_FIELDS, generated::MAIN_TOKEN_PREFIX, expected, kernel, arch)
-                  : fieldsMatch(PREP_FIELDS, generated::PREP_TOKEN_PREFIX, expected, kernel, arch);
-        if(!selected || isMainKernel(kernel) != (ROLE == Role::MAIN))
+        if(isMainKernel(kernel) != (ROLE == Role::MAIN))
         {
-            failBadParam(describeDescriptor("kernel", kernel.name, kernel.kernelId) + " is not the "
-                         + (ROLE == Role::MAIN ? "main" : "prep")
-                         + " kernel the plan of the graph names");
+            failBadParam(describeDescriptor("kernel", kernel.name, kernel.kernelId) + " is not a "
+                         + (ROLE == Role::MAIN ? "main" : "prep") + " kernel");
         }
+        if constexpr(ROLE == Role::MAIN)
+        {
+            auto candidate = mainCandidatePlanOf(graphPlan, arch, kernel);
+            if(const auto* why = std::get_if<std::string>(&candidate))
+            {
+                failBadParam(describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                             + " is not a main kernel the plan of the graph admits: " + *why);
+            }
+            graphPlan.plan = std::move(std::get<general_bwd::Plan>(candidate));
+        }
+        else if(!fieldsMatch(PREP_FIELDS, generated::PREP_TOKEN_PREFIX, expected, kernel, arch))
+        {
+            failBadParam(describeDescriptor("kernel", kernel.name, kernel.kernelId)
+                         + " is not the prep kernel the plan of the graph names");
+        }
+        const auto& plan = graphPlan.plan;
 
         std::vector<PreparedLaunch> launches;
         launches.reserve(plan.launches.size());
@@ -1006,6 +1186,8 @@ void registerAttentionGeneralBwdSymbols(SymbolScope<Handle>& scope)
 {
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &attentionGeneralBwdGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &attentionGeneralBwdKernelMatches);
+    scope.add(std::string(KERNEL_MATCHER_SYMBOL), &attentionGeneralBwdCandidateFilter);
+    scope.add(std::string(MAIN_SCORE_SYMBOL), &attentionGeneralBwdMainScore);
     scope.add(std::string(PREP_GFX942_SYMBOL), &packArchMatches<ArchId::GFX942>);
     scope.add(std::string(PREP_GFX950_SYMBOL), &packArchMatches<ArchId::GFX950>);
     scope.add(std::string(MAIN_GFX942_SYMBOL), &packArchMatches<ArchId::GFX942>);

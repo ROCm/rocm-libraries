@@ -230,6 +230,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/attention_general_bwd/corpus_${_corpus_arch}.jsonl"
             "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_general_bwd_corpus_subdir}/corpus_${_corpus_arch}.jsonl"
             COPYONLY)
+        # The reference plans of the alternate main kernels, joined to the corpus on entry id.
+        configure_file(
+            "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/attention_general_bwd/alternates_${_corpus_arch}.jsonl"
+            "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/${_hkp_general_bwd_corpus_subdir}/alternates_${_corpus_arch}.jsonl"
+            COPYONLY)
     endforeach()
     target_compile_definitions(hip_kernel_provider_tests PRIVATE
         HIPKERNELPROVIDER_GENERAL_BWD_CORPUS_RELDIR="${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/${_hkp_general_bwd_corpus_subdir}")
@@ -634,6 +639,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -810,6 +816,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryLaunchIsTheSymbolThePlanNames
                 EveryLaunchRecordsTheAbiTheHandlerMarshals
                 AsmSdpaRanksAheadOfThisEngine
+        )
+        # Its trained main-slot rankers, as the ModelBinding companions above check the other
+        # engines': the bound model survives the loader's pre-flight.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_general_bwd_arches}
+            SUITES TestAttentionGeneralBwdModelBinding
+            EXPECTED_CASES
+                TheNativeScoreIsBoundAsTheMainSlotsDefault
+                TheBoundMainSlotRankerLoads
         )
     else()
         message(STATUS

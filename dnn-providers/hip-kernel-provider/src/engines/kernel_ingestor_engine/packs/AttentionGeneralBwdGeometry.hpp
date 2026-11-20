@@ -1235,17 +1235,49 @@ inline std::variant<std::vector<LaunchPlan>, std::string> launchesOf(const PlanV
 
 } // namespace detail
 
+/// The catalog row a plan is built for: a tuned-table entry (nullptr: the class default) and,
+/// where the entry does not pin it, the head-pack choice (nullopt: rocKE's short-query rule).
+struct Selection
+{
+    const generated::TunedKey* tuned = nullptr;
+    std::optional<bool> headPack;
+};
+
+/// The tuned entry of @p arch named by @p id (the catalog's `tuning_key` code), or nullptr.
+inline const generated::TunedKey* tunedEntryById(std::string_view arch, int64_t id)
+{
+    for(const auto& entry : generated::TUNED_KEYS)
+    {
+        if(entry.arch == arch && entry.id == id)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+/// Whether @p entry tunes the performance class of @p key: the arch, head size, dtype, mask
+/// kind and stage vec. Its head mode, length relation, length mode and buckets may differ: the
+/// entry then runs outside the shapes it was tuned on, which resolvePlan() still guards.
+inline bool tunedEntryServesClass(const generated::TunedKey& entry,
+                                  const TuningKey& key,
+                                  const ArchTraits& traits)
+{
+    return entry.arch == traits.arch && entry.headSize == key.headSize && entry.dtype == key.dtype
+           && entry.maskKind == key.maskKind && entry.stageVec == key.stageVec;
+}
+
 /**
  * @brief The plan of a request that passed the request checks (rocKE's `_resolve_plan`, general
- *        route, under the engine policy), or INSTANCE_UNAVAILABLE where rocKE's plan raises.
+ *        route) for the catalog row @p selection names, or INSTANCE_UNAVAILABLE where rocKE's
+ *        plan raises or the row is not buildable for the request.
  *
- * Selection follows rocKE's precedence: the most specific tuned-table entry of the request's
- * tuning key, else the class default; the class plus the tuned values then name one catalog
- * row. Runtime values (load-balance order and mirror pairing with its CU guard, work list,
- * head packing, scale multipliers, head split) are bound from the request and the device CU
- * count.
+ * The tuned entry and the head-pack choice, with the class, name one catalog row. Runtime
+ * values (load-balance order and mirror pairing with its CU guard, work list, head packing,
+ * scale multipliers, head split) are bound from the request and the device CU count.
  */
-inline std::variant<Plan, Decline> resolvePlan(const PlanInput& in, const ArchTraits& traits)
+inline std::variant<Plan, Decline>
+    resolvePlan(const PlanInput& in, const ArchTraits& traits, const Selection& selection)
 {
     using detail::unavailable;
     using generated::DqMode;
@@ -1257,7 +1289,7 @@ inline std::variant<Plan, Decline> resolvePlan(const PlanInput& in, const ArchTr
     {
         return unavailable("no default geometry for the class");
     }
-    const auto* tuned = tunedEntryFor(*key, traits);
+    const auto* tuned = selection.tuned;
 
     const int64_t placementIndex = tuned != nullptr ? tuned->scalePlacement : 0;
     const std::string_view placement
@@ -1300,12 +1332,22 @@ inline std::variant<Plan, Decline> resolvePlan(const PlanInput& in, const ArchTr
     }
 
     // Short query spans pack the group's query heads into the M rows of one q tile, unless
-    // the tuned entry pins head_pack.
+    // the tuned entry pins head_pack or the selection states it (packing needs a head group).
     const auto packedRows = detail::mul(in.sQ, p.group);
     bool headPack = false;
     if(tuned != nullptr && tuned->headPackPin >= 0)
     {
         headPack = tuned->headPackPin == 1;
+    }
+    else if(selection.headPack.has_value())
+    {
+        headPack = *selection.headPack;
+        if(headPack && p.group <= 1)
+        {
+            return unavailable(
+                "engine policy: head packing is offered only for a query-head group above 1 (the "
+                "planner builds this row)");
+        }
     }
     else
     {
@@ -1464,6 +1506,145 @@ inline std::variant<Plan, Decline> resolvePlan(const PlanInput& in, const ArchTr
     plan.runtime.nKvTiles = p.nKvTiles;
     plan.launches = std::move(std::get<std::vector<LaunchPlan>>(launches));
     plan.workspace = std::move(p.workspace);
+    return plan;
+}
+
+/**
+ * @brief The engine's own pick for a request (rocKE's precedence): the most specific tuned-table
+ *        entry of the request's tuning key, else the class default.
+ */
+inline std::variant<Plan, Decline> resolvePlan(const PlanInput& in, const ArchTraits& traits)
+{
+    const auto key = tuningKeyOf(in, traits);
+    if(!key)
+    {
+        return detail::unavailable("no default geometry for the class");
+    }
+    return resolvePlan(in, traits, Selection{tunedEntryFor(*key, traits), std::nullopt});
+}
+
+namespace detail
+{
+
+inline const LaunchPlan* prepLaunchOf(const Plan& plan)
+{
+    for(const auto& launch : plan.launches)
+    {
+        if(launch.launch == Launch::PREP)
+        {
+            return &launch;
+        }
+    }
+    return nullptr;
+}
+
+inline bool sameLaunch(const LaunchPlan& a, const LaunchPlan& b)
+{
+    if(a.kernel != b.kernel || a.grid != b.grid || a.block != b.block
+       || a.kernargs.size() != b.kernargs.size())
+    {
+        return false;
+    }
+    for(std::size_t i = 0; i < a.kernargs.size(); ++i)
+    {
+        const auto& x = a.kernargs[i];
+        const auto& y = b.kernargs[i];
+        if(x.name != y.name || x.kind != y.kind || x.bits != y.bits || x.role != y.role)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+inline bool sameWorkspace(const WorkspaceLayout& a, const WorkspaceLayout& b)
+{
+    if(a.bytes != b.bytes || a.scratchOffset != b.scratchOffset
+       || a.regions.size() != b.regions.size())
+    {
+        return false;
+    }
+    for(const auto& [name, region] : a.regions)
+    {
+        const auto other = b.regions.find(name);
+        if(other == b.regions.end() || other->second.offset != region.offset
+           || other->second.bytes != region.bytes)
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+} // namespace detail
+
+/**
+ * @brief The plan of @p selection as an alternative to @p policy, the engine's own pick for the
+ *        same request, or why it cannot run in its place.
+ *
+ * Slots are selected independently (RFC 0021), so everything the other slots and the shared
+ * workspace were built on must be what the policy pick would have produced: the class the main
+ * kernel computes (dtype, head size, sequence mode, stage vec, dK/dV and dQ modes, mask class),
+ * the whole prep launch (its kernel, grid, block and every kernarg, which carry the work-list
+ * tile) and the workspace layout. What may differ is the catalog row's tile, load-balance
+ * order, head packing, scale placement and work-list use that the prep launch does not read,
+ * with the runtime values bound from them.
+ *
+ * Three further rules are engine policy, not limits of the planner (each declines a row the
+ * planner builds): a tuned entry serves only the performance class it was tuned for, head
+ * packing is offered only for a query-head group above 1 (unless the entry pins it), and a THD
+ * graph is served by the pick alone.
+ */
+inline std::variant<Plan, Decline> resolveCandidate(const PlanInput& in,
+                                                    const ArchTraits& traits,
+                                                    const Plan& policy,
+                                                    const Selection& selection)
+{
+    using detail::unavailable;
+    const auto key = tuningKeyOf(in, traits);
+    if(!key)
+    {
+        return unavailable("no default geometry for the class");
+    }
+    if(selection.tuned != nullptr && !tunedEntryServesClass(*selection.tuned, *key, traits))
+    {
+        return unavailable(
+            "engine policy: the tuned entry was tuned for another performance class (the planner "
+            "builds this row)");
+    }
+    auto result = resolvePlan(in, traits, selection);
+    if(auto* decline = std::get_if<Decline>(&result))
+    {
+        return std::move(*decline);
+    }
+    auto& plan = std::get<Plan>(result);
+    // Temporary limit: hipdnn_bench cannot time THD candidates yet (it fills the ragged offset
+    // tables with its input pattern), so no trained ranker has seen one and a THD graph keeps
+    // the engine's own pick. Lift this once THD candidates can be timed and trained on.
+    if(in.thd && plan.row != policy.row)
+    {
+        return unavailable(
+            "engine policy: a THD graph is served by the engine's own pick only (the planner "
+            "builds this row)");
+    }
+    const auto& row = *plan.row;
+    const auto& pick = *policy.row;
+    if(row.dtype != pick.dtype || row.headSize != pick.headSize || row.seq != pick.seq
+       || row.stageVec != pick.stageVec || row.dkv != pick.dkv || row.mask != pick.mask
+       || row.dq != pick.dq)
+    {
+        return unavailable("the candidate computes another class than the policy pick");
+    }
+    const auto* prep = detail::prepLaunchOf(plan);
+    const auto* pickPrep = detail::prepLaunchOf(policy);
+    if(prep == nullptr || pickPrep == nullptr || !detail::sameLaunch(*prep, *pickPrep))
+    {
+        return unavailable("the candidate's prep launch differs from the policy pick's");
+    }
+    if(!detail::sameWorkspace(plan.workspace, policy.workspace))
+    {
+        return unavailable("the candidate's workspace layout differs from the policy pick's");
+    }
     return plan;
 }
 

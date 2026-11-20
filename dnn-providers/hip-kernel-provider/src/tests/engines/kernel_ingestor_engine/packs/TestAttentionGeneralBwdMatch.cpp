@@ -532,7 +532,7 @@ TEST(TestAttentionGeneralBwdMatch, EachPackCriterionAcceptsOnlyItsOwnArchitectur
     }
 }
 
-TEST(TestAttentionGeneralBwdMatch, KernelMatchSelectsTheRowsThePlanNames)
+TEST(TestAttentionGeneralBwdMatch, KernelMatchPinsTheClassAndTheExactPrepKernel)
 {
     registerNativeIngestorSymbols();
     const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
@@ -551,11 +551,13 @@ TEST(TestAttentionGeneralBwdMatch, KernelMatchSelectsTheRowsThePlanNames)
         EXPECT_TRUE(kernelMatcher(context, bound, main)) << arch;
         EXPECT_TRUE(kernelMatcher(context, bound, prep)) << arch;
 
-        // One field off, one kernel off.
+        // The free fields (head packing, tuning key) do not pin a main kernel: the candidate
+        // filter decides those by plan.
         auto otherHeadPack = main;
         otherHeadPack.metadata["head_pack"] = !plan.row->headPack;
-        EXPECT_FALSE(kernelMatcher(context, bound, otherHeadPack)) << arch;
+        EXPECT_TRUE(kernelMatcher(context, bound, otherHeadPack)) << arch;
 
+        // A pinned field off, one kernel off.
         auto otherDqMode = main;
         otherDqMode.metadata["dq_mode"]
             = std::string(plan.row->dq == generated::DqMode::SPLIT ? "atomic" : "split");
@@ -565,14 +567,15 @@ TEST(TestAttentionGeneralBwdMatch, KernelMatchSelectsTheRowsThePlanNames)
         otherPrepRows.metadata["rows_per_cta"] = plan.row->prepRowsPerCta + 1;
         EXPECT_FALSE(kernelMatcher(context, bound, otherPrepRows)) << arch;
 
-        // A tuning key of this arch the plan did not pick, then one no arch knows.
+        // A tuning key of this arch the plan did not pick is free; one no arch knows is not
+        // a kernel this engine encodes.
         for(const auto& entry : generated::TUNED_KEYS)
         {
             if(entry.arch == arch && entry.id != plan.row->tuningKeyId)
             {
                 auto otherKey = main;
                 otherKey.metadata["tuning_key"] = std::string(entry.key);
-                EXPECT_FALSE(kernelMatcher(context, bound, otherKey)) << arch;
+                EXPECT_TRUE(kernelMatcher(context, bound, otherKey)) << arch;
                 break;
             }
         }
@@ -591,7 +594,7 @@ TEST(TestAttentionGeneralBwdMatch, KernelMatchSelectsTheRowsThePlanNames)
     }
 }
 
-TEST(TestAttentionGeneralBwdMatch, KernelMatchSelectsOneKernelPerSlotForEveryCatalogRow)
+TEST(TestAttentionGeneralBwdMatch, KernelMatchAdmitsTheRowsOfTheClassAndOnePrepForEveryCatalogRow)
 {
     registerNativeIngestorSymbols();
     const auto kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
@@ -611,22 +614,206 @@ TEST(TestAttentionGeneralBwdMatch, KernelMatchSelectsOneKernelPerSlotForEveryCat
             general_bwd::Plan plan;
             plan.row = &row;
             const auto bound = general_bwd::tokensFor(plan);
+            std::size_t classRows = 0;
+            for(const auto& other : generated::CATALOG)
+            {
+                classRows += other.arch == row.arch && other.dtype == row.dtype
+                                     && other.headSize == row.headSize && other.seq == row.seq
+                                     && other.stageVec == row.stageVec && other.dkv == row.dkv
+                                     && other.mask == row.mask && other.dq == row.dq
+                                 ? 1
+                                 : 0;
+            }
             std::size_t mains = 0;
+            bool ownRowAdmitted = false;
             std::size_t preps = 0;
             for(const auto& kernel : kernels.main)
             {
-                mains += kernelMatcher(context, bound, kernel) ? 1 : 0;
+                const bool admitted = kernelMatcher(context, bound, kernel);
+                mains += admitted ? 1 : 0;
+                ownRowAdmitted = ownRowAdmitted || (admitted && kernel.name == row.mainKernel);
             }
             for(const auto& kernel : kernels.prep)
             {
                 preps += kernelMatcher(context, bound, kernel) ? 1 : 0;
             }
-            EXPECT_EQ(mains, 1u) << row.mainKernel << " / key " << row.tuningKeyId;
+            EXPECT_EQ(mains, classRows) << row.mainKernel << " / key " << row.tuningKeyId;
+            EXPECT_TRUE(ownRowAdmitted) << row.mainKernel << " / key " << row.tuningKeyId;
             EXPECT_EQ(preps, 1u) << row.prepKernel;
             ++checked;
         }
         EXPECT_GT(checked, 0u) << arch;
     }
+}
+
+namespace
+{
+
+/// The main kernels of @p arch the registered matcher and candidate filter keep for @p graph,
+/// with the plan the engine picks. Fails the test, and returns empty, for a graph the engine
+/// declines.
+struct Candidates
+{
+    std::vector<const generated::CatalogRow*> rows;
+    const generated::CatalogRow* pick = nullptr;
+    std::vector<double> scores;
+};
+
+Candidates candidatesOf(const json& graph, std::string_view arch)
+{
+    registerNativeIngestorSymbols();
+    using namespace hipdnn_plugin_sdk::ingestor;
+    const auto graphMatcher = GraphMatchRegistry::resolve(std::string(GRAPH_MATCHER_SYMBOL));
+    const auto kernelMatcher = KernelMatcherRegistry::resolve(std::string(KERNEL_MATCHER_SYMBOL));
+    const auto filter = CandidateFilterRegistry::resolve(std::string(KERNEL_MATCHER_SYMBOL));
+    const auto score = ScoreRegistry::resolve("hipkernel.attention_general_bwd.main_score");
+
+    Candidates out;
+    const GraphFixture fixture(graph, arch, fullComputeUnits(arch));
+    const auto context = fixture.context();
+    const auto bound = graphMatcher(context);
+    const auto verdict = general_bwd::evaluate(context);
+    EXPECT_TRUE(bound.has_value()) << arch;
+    EXPECT_TRUE(std::holds_alternative<general_bwd::Plan>(verdict)) << arch;
+    if(!bound.has_value() || !std::holds_alternative<general_bwd::Plan>(verdict))
+    {
+        return out;
+    }
+    out.pick = std::get<general_bwd::Plan>(verdict).row;
+
+    const auto kernels = archKernels(arch);
+    std::vector<const KernelDefinition*> admitted;
+    for(const auto& kernel : kernels.main)
+    {
+        if(kernelMatcher(context, *bound, kernel))
+        {
+            admitted.push_back(&kernel);
+        }
+    }
+    const auto keep = filter(context, *bound, admitted);
+    EXPECT_EQ(keep.size(), admitted.size());
+    for(std::size_t i = 0; i < admitted.size() && i < keep.size(); ++i)
+    {
+        if(!keep[i])
+        {
+            continue;
+        }
+        for(const auto& row : generated::CATALOG)
+        {
+            if(row.arch == arch && row.mainKernel == admitted[i]->name)
+            {
+                out.rows.push_back(&row);
+            }
+        }
+        out.scores.push_back(score(context, *bound, *admitted[i]));
+    }
+    return out;
+}
+
+} // namespace
+
+TEST(TestAttentionGeneralBwdMatch, CandidateFilterKeepsThePickAndTheLegalRowsThatCanStandInForIt)
+{
+    const auto spec
+        = [](int64_t b, int64_t hQ, int64_t hK, int64_t sQ, int64_t sKv, int64_t d, bool causal) {
+              GraphSpec s;
+              s.b = b;
+              s.hQ = hQ;
+              s.hK = hK;
+              s.hV = hK;
+              s.sQ = sQ;
+              s.sKv = sKv;
+              s.dQk = d;
+              s.dV = d;
+              s.causal = causal;
+              return s;
+          };
+    const std::vector<GraphSpec> specs = {
+        GraphSpec{},
+        // GQA, causal, long: tuned entries of the class apply.
+        spec(8, 32, 8, 1024, 1024, 128, true),
+        // GQA, one query row: the group's heads pack.
+        spec(2, 8, 2, 1, 256, 128, false),
+        spec(4, 16, 16, 2048, 2048, 64, true),
+    };
+    std::size_t withAlternates = 0;
+    for(const auto arch : {GFX942, GFX950})
+    {
+        for(const auto& graphSpec : specs)
+        {
+            const auto candidates = candidatesOf(graphWith(graphSpec), arch);
+            ASSERT_NE(candidates.pick, nullptr) << arch;
+            ASSERT_EQ(candidates.rows.size(), candidates.scores.size()) << arch;
+
+            std::size_t picks = 0;
+            for(std::size_t i = 0; i < candidates.rows.size(); ++i)
+            {
+                const auto& row = *candidates.rows[i];
+                const bool isPick = &row == candidates.pick;
+                picks += isPick ? 1 : 0;
+                EXPECT_EQ(candidates.scores[i], isPick ? 1.0 : 0.0)
+                    << "the engine's own pick is scored first: " << row.mainKernel;
+                EXPECT_TRUE(
+                    row.dtype == candidates.pick->dtype && row.headSize == candidates.pick->headSize
+                    && row.seq == candidates.pick->seq && row.stageVec == candidates.pick->stageVec
+                    && row.dkv == candidates.pick->dkv && row.mask == candidates.pick->mask
+                    && row.dq == candidates.pick->dq)
+                    << row.mainKernel << " computes another class than the pick";
+                if(graphSpec.hQ == graphSpec.hK)
+                {
+                    EXPECT_TRUE(isPick || !row.headPack)
+                        << "packing heads needs a head group: " << row.mainKernel;
+                }
+            }
+            EXPECT_EQ(picks, 1u) << arch << ": the pick is kept exactly once";
+            withAlternates += candidates.rows.size() > 1 ? 1 : 0;
+        }
+    }
+    EXPECT_GT(withAlternates, 0u) << "no graph had a candidate besides the pick";
+}
+
+TEST(TestAttentionGeneralBwdMatch, CandidateFilterKeepsOnlyThePickOnATHDGraph)
+{
+    // A THD graph keeps the engine's own pick: hipdnn_bench cannot time THD candidates yet, so
+    // no trained ranker has seen one. The dense twin of each graph has alternates, so the single
+    // candidate is the rule at work, not a graph without alternates.
+    const auto spec
+        = [](int64_t b, int64_t hQ, int64_t hK, int64_t sQ, int64_t sKv, int64_t d, bool causal) {
+              GraphSpec s;
+              s.b = b;
+              s.hQ = hQ;
+              s.hK = hK;
+              s.hV = hK;
+              s.sQ = sQ;
+              s.sKv = sKv;
+              s.dQk = d;
+              s.dV = d;
+              s.causal = causal;
+              return s;
+          };
+    const std::vector<GraphSpec> specs = {
+        spec(8, 32, 8, 1024, 1024, 128, true),
+        spec(2, 8, 2, 1, 256, 128, false),
+        spec(4, 16, 16, 2048, 2048, 64, true),
+    };
+    std::size_t denseWithAlternates = 0;
+    for(const auto arch : {GFX942, GFX950})
+    {
+        for(auto graphSpec : specs)
+        {
+            graphSpec.thd = false;
+            denseWithAlternates += candidatesOf(graphWith(graphSpec), arch).rows.size() > 1 ? 1 : 0;
+
+            graphSpec.thd = true;
+            const auto candidates = candidatesOf(graphWith(graphSpec), arch);
+            ASSERT_NE(candidates.pick, nullptr) << arch;
+            ASSERT_EQ(candidates.rows.size(), 1u)
+                << arch << ": a THD graph admits only the engine's own pick";
+            EXPECT_EQ(candidates.rows.front(), candidates.pick) << arch;
+        }
+    }
+    EXPECT_GT(denseWithAlternates, 0u)
+        << "no dense twin had an alternate, so the THD rule was not exercised";
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

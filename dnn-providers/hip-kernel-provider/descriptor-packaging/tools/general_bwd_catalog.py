@@ -66,6 +66,9 @@ DEFAULT_BUNDLE = (
 )
 TOOL = "dnn-providers/hip-kernel-provider/descriptor-packaging/tools/general_bwd_catalog.py"
 AOT_BUDGET_PER_PACK = 1000
+# The main slot's trained rankers (`uhd_gen promote` bindings) and the catalog fingerprints
+# they were trained on; an empty file binds nothing.
+TRAINED_RANKERS = Path(__file__).with_name("general_bwd_trained_rankers.yaml")
 
 MAIN_SOURCE = "kernels/common/attention_bwd.py"
 AUX_SOURCE = "kernels/common/attention_bwd_aux.py"
@@ -116,6 +119,33 @@ MAIN_FIELDS = (
     ("main_worklist", "bool", None),
     ("main_static_scale", "string", None),
 )
+
+# Main-slot knobs (RFC 0021 section 4): the int KMD fields a slot ranker reads as
+# `$kernel.*` and the bench keys a candidate by. A slot knob must be int-typed, so the
+# bool and string choices of MAIN_FIELDS are restated as ints here; the matcher ignores
+# these fields. Together with main_block_n, (tuning_key_id, head_pack_on) tells apart
+# every main kernel of one class, which the bench requires of a graph's candidates.
+KNOB_FIELDS = (
+    "tuning_key_id",
+    "head_pack_on",
+    "lb_mirror_on",
+    "lb_interleave_on",
+    "worklist_on",
+    "static_scale_id",
+)
+MAIN_KNOBS = ("main_block_n",) + KNOB_FIELDS
+
+
+def knob_values(row: C.CatalogRow, metadata: dict) -> dict:
+    return {
+        "tuning_key_id": row.tuning_key_id,
+        "head_pack_on": int(metadata["head_pack"]),
+        "lb_mirror_on": int(metadata["lb_mirror"]),
+        "lb_interleave_on": int(metadata["lb_interleave"]),
+        "worklist_on": int(metadata["main_worklist"]),
+        "static_scale_id": H.STATIC_SCALES.index(metadata["main_static_scale"]),
+    }
+
 
 HEADER = f"""\
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
@@ -306,28 +336,66 @@ def main_kernel(row: C.CatalogRow) -> dict:
                 "convert_dv": dict(convert_launch),
             },
         },
-        "metadata": {n: metadata[n] for n, _k, _b in MAIN_FIELDS},
+        "metadata": {
+            **{n: metadata[n] for n, _k, _b in MAIN_FIELDS},
+            **knob_values(row, metadata),
+        },
     }
 
 
-def _slot(name: str, fields) -> dict:
+def trained_rankers(path: Path = TRAINED_RANKERS) -> dict:
+    """The main slot's `heuristics` / `trained_catalog_sha256` entries from @p path.
+
+    An empty file adds nothing to the config. A binding must carry the fingerprint of the
+    catalog its models were trained on, for exactly the arches it binds (the config loader
+    enforces the key match; requiring the fingerprint at all is stricter, so a bound ranker
+    is never left without the retrain gate), and a fingerprint needs a binding."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    unknown = set(raw) - {"sort_kernel_catalog", "trained_catalog_sha256"}
+    if unknown:
+        raise CatalogError(f"{path.name}: unknown keys {sorted(unknown)}")
+    bound = raw.get("sort_kernel_catalog") or {}
+    fingerprints = raw.get("trained_catalog_sha256") or {}
+    if set(bound) != set(fingerprints):
+        raise CatalogError(
+            f"{path.name}: sort_kernel_catalog binds {sorted(bound)} but "
+            f"trained_catalog_sha256 records {sorted(fingerprints)}; bind each arch with "
+            f"the fingerprint of the catalog its model was trained on, or neither"
+        )
+    out = {}
+    if bound:
+        out["heuristics"] = {"sort_kernel_catalog": dict(bound)}
+        out["trained_catalog_sha256"] = dict(fingerprints)
+    return out
+
+
+def _slot(
+    name: str, fields, ranker: bool = False, knob_fields=(), trained=None
+) -> dict:
     kmd = []
     for field, kind, _bound in fields:
         entry = {"name": field, "type": kind}
         if field == "tuning_key":
             entry["default_value"] = ""
         kmd.append(entry)
+    kmd.extend({"name": field, "type": "int"} for field in knob_fields)
     bound = [(f, b) for f, _k, b in fields if b is not None]
-    return {
+    slot = {
         "name": name,
         "kmd_fields": kmd,
         "specialization": {
             "metadata_fields": [f for f, _b in bound],
-            "matcher_only_fields": [f for f, _k, b in fields if b is None],
+            "matcher_only_fields": [f for f, _k, b in fields if b is None]
+            + list(knob_fields),
             "bindings": {f: {"field": b} for f, b in bound},
             "vocabulary": {"dtype": dict(KMD_DTYPES)},
         },
     }
+    if ranker:
+        slot["ranker"] = True
+        slot["knobs"] = list(MAIN_KNOBS)
+    slot.update(trained or {})
+    return slot
 
 
 def _unique(pack: str, kernels: list) -> None:
@@ -383,7 +451,16 @@ def build_config() -> dict:
             "sdk_version": "1.4.0",
             "shared_workspace": "ws.bytes",
         },
-        "slots": [_slot("prep", PREP_FIELDS), _slot("main", MAIN_FIELDS)],
+        "slots": [
+            _slot("prep", PREP_FIELDS),
+            _slot(
+                "main",
+                MAIN_FIELDS,
+                ranker=True,
+                knob_fields=KNOB_FIELDS,
+                trained=trained_rankers(),
+            ),
+        ],
         "packs": [packs[name] for name in order],
     }
 

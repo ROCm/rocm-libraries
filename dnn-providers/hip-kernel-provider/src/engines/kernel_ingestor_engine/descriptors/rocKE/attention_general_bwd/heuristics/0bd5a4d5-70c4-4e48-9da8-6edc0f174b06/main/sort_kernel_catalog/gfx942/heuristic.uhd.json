@@ -1,0 +1,56 @@
+{
+  "version": "1.1",
+  "id": "10c3f054-934d-4c8d-98ca-f8c9111c8009",
+  "name": "Generated UHD",
+  "adapter": "tree_data",
+  "features_signature": [
+    "$graph.nodes[0].q.dims[0]",
+    "$graph.nodes[0].q.dims[1]",
+    "$graph.nodes[0].q.dims[2]",
+    "$graph.nodes[0].q.dims[3]",
+    "$graph.nodes[0].k.dims[1]",
+    "$graph.nodes[0].k.dims[2]",
+    "$graph.nodes[0].q.data_type",
+    "$kernel.main_block_n",
+    "$kernel.tuning_key_id",
+    "$kernel.head_pack_on",
+    "$kernel.lb_mirror_on",
+    "$attention_general_bwd.main.mask_class",
+    "$attention_general_bwd.main.main_block_n",
+    "$attention_general_bwd.main.tuning_key",
+    "$graph.nodes[0].q.numel",
+    "$graph.nodes[0].k.numel"
+  ],
+  "features_hash": "sha256:d4a271dcf1c2393b",
+  "trained_against": {
+    "ued": {
+      "id": "0bd5a4d5-70c4-4e48-9da8-6edc0f174b06",
+      "revision": "1.0"
+    },
+    "kmd": {
+      "id": "b0b95d84-8486-40a6-81d4-c03d0283e809",
+      "revision": "1.0"
+    },
+    "slot": "main",
+    "umd": [
+      {
+        "id": "698459c2-1236-4ce8-b4f8-c9b6d5bb51d8",
+        "revision": "1.0"
+      },
+      {
+        "id": "80ad9fa8-e5bb-4588-a85c-125eb0850815",
+        "revision": "1.0"
+      }
+    ],
+    "feature_semantics_revision": 1
+  },
+  "objective": "min",
+  "score": {
+    "calibrated": false,
+    "transform": "log"
+  },
+  "tree_data": {
+    "artifact": "model.bin",
+    "hash": "415086e789fa78d5fc0d5e506b72e3b862363619c56fa446d8d9f88b54d43217"
+  }
+}

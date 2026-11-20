@@ -525,8 +525,10 @@ def _build_slotted_ued(config: IngestorConfig, ids: dict) -> dict:
     for slot in config.slots:
         entry = {"name": slot.name, "metadata": ids[_slot_key("kmd", config, slot)]}
         if slot.ranker:
+            # Arch entries follow `default`, where `uhd_gen promote` inserts them.
             entry["sort_kernel_catalog"] = {
-                "default": ids[_slot_key("uhd", config, slot)]
+                "default": ids[_slot_key("uhd", config, slot)],
+                **slot.heuristics.get("sort_kernel_catalog", {}),
             }
         if slot.knobs:
             entry["knobs"] = list(slot.knobs)

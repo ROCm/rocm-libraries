@@ -17,7 +17,8 @@
  *        key, stage_vec 1 and 8, h_k != h_v, batched and THD), named feature graphs (THD GQA and
  *        MQA with per-side multipliers, both ragged stats forms, windows, scales, BSHD), the
  *        dense-stats THD decline, HIP-graph capture and replay with changed lengths and data,
- *        and a misaligned pointer. The quick tier runs a covering subset of the rows; the full
+ *        a misaligned pointer, and every main kernel the engine admits for a graph, forced through
+ *        the main slot's knobs and run twice. The quick tier runs a covering subset of the rows; the full
  *        tier the rest.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine::integration::general_bwd_gpu
@@ -37,6 +38,11 @@ using IntegrationGpuGfx942AttentionGeneralBwdPlans = AttentionGeneralBwdGpu<Gfx9
 TEST_P(IntegrationGpuGfx942AttentionGeneralBwd, MatchesTheReference)
 {
     runCase(GetParam());
+}
+
+TEST_P(IntegrationGpuGfx942AttentionGeneralBwd, EveryAdmittedMainKernelMatchesTheReference)
+{
+    runEveryMainCandidate(GetParam());
 }
 
 TEST_F(IntegrationGpuGfx942AttentionGeneralBwdPlans,

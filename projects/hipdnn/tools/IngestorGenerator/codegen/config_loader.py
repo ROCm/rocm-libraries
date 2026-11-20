@@ -549,6 +549,7 @@ def _load_slots(raw: dict, engine_raw: dict) -> list:
                 f"{where}.kmd_fields declares {repeated} more than once. A slot's KMD "
                 f"holds each field once; a repeat leaves its type ambiguous."
             )
+        heuristics = _load_slot_heuristics(slot_raw, where, ranker)
         slots.append(
             SlotSpec(
                 name=name,
@@ -556,10 +557,40 @@ def _load_slots(raw: dict, engine_raw: dict) -> list:
                 knobs=_require_sequence(slot_raw.get("knobs"), f"{where}.knobs"),
                 ranker=ranker,
                 specialization=dict(specialization),
+                heuristics=heuristics,
+                trained_catalog_sha256=_load_trained_catalog_sha256(
+                    slot_raw, heuristics, where
+                ),
             )
         )
     _check_slot_names(slots)
     return slots
+
+
+def _load_slot_heuristics(slot_raw: dict, where: str, ranker: bool) -> dict:
+    """Read ``slots[].heuristics``: the per-arch trained rankers `uhd_gen promote`
+    binds into the slot's ``sort_kernel_catalog`` beside the native ``default``.
+    Absent is ``{}``. A slot ranks only its catalog (no ``predict_engine``, which is
+    engine-level, and no ``predict_applicable_kernels``, which slots do not carry)."""
+    raw = slot_raw.get("heuristics")
+    if raw is None:
+        return {}
+    scope = f"{where}.heuristics"
+    native_missing = (
+        None
+        if ranker
+        else f"{scope}.sort_kernel_catalog is set but {where}.ranker is not true; the "
+        f"arch entries follow the slot's native 'default' UHD, which only a ranker slot "
+        f"emits."
+    )
+    return _read_heuristic_bindings(
+        raw,
+        scope,
+        ("sort_kernel_catalog",),
+        "a slot binds only 'sort_kernel_catalog' (predict_engine is engine-level, and "
+        "slots carry no predict_applicable_kernels)",
+        native_missing,
+    )
 
 
 def _check_slot_names(slots: list) -> None:
@@ -806,24 +837,41 @@ def _load_heuristics(engine_raw: dict, slotted: bool) -> dict:
     if slotted:
         raise ConfigError(
             f"{scope} is set on a slotted engine; a slotted engine binds its rankers "
-            f"per slot (slots[].ranker), so per-arch engine bindings are not supported."
+            f"per slot (slots[].ranker, slots[].heuristics), so per-arch engine "
+            f"bindings are not supported."
         )
+    native_missing = (
+        f"{scope}.sort_kernel_catalog is set but engine.heuristic is 'none'; "
+        f"the arch entries follow the native 'default' UHD, which 'none' omits."
+        if engine_raw.get("heuristic") == "none"
+        else None
+    )
+    return _read_heuristic_bindings(
+        raw,
+        scope,
+        HEURISTIC_ROLES,
+        f"expected one of {list(HEURISTIC_ROLES)} (the roles `uhd_gen promote --role` "
+        f"accepts)",
+        native_missing,
+    )
+
+
+def _read_heuristic_bindings(
+    raw, scope: str, roles, roles_hint: str, native_missing: str | None
+) -> dict:
+    """role -> arch -> UHD ids under ``scope``, as `uhd_gen promote` writes them.
+    @p native_missing refuses a ``sort_kernel_catalog`` binding when the owner emits
+    no native ``default`` for the arch entries to follow."""
     _require_mapping(raw, scope)
     heuristics = {}
     for role, arches in raw.items():
-        if role not in HEURISTIC_ROLES:
-            raise ConfigError(
-                f"{scope} names role {role!r}; expected one of {list(HEURISTIC_ROLES)} "
-                f"(the roles `uhd_gen promote --role` accepts)."
-            )
+        if role not in roles:
+            raise ConfigError(f"{scope} names role {role!r}; {roles_hint}.")
         _require_mapping(arches, f"{scope}.{role}")
         if not arches:
             raise ConfigError(f"{scope}.{role} is empty; bind at least one arch.")
-        if role == "sort_kernel_catalog" and engine_raw.get("heuristic") == "none":
-            raise ConfigError(
-                f"{scope}.sort_kernel_catalog is set but engine.heuristic is 'none'; "
-                f"the arch entries follow the native 'default' UHD, which 'none' omits."
-            )
+        if role == "sort_kernel_catalog" and native_missing is not None:
+            raise ConfigError(native_missing)
         bound = {}
         for arch, ids in arches.items():
             key = f"{scope}.{role}.{arch}"
@@ -1429,22 +1477,25 @@ def _require_config_shapes(raw: dict) -> None:
 _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
-def _load_trained_catalog_sha256(engine_raw: dict, heuristics: dict) -> dict:
-    """Read ``engine.trained_catalog_sha256``: arch -> the `tools/catalog_fingerprint.py`
-    hash of the catalog the ``engine.heuristics.sort_kernel_catalog`` models bound under
+def _load_trained_catalog_sha256(
+    raw_owner: dict, heuristics: dict, owner: str = "engine"
+) -> dict:
+    """Read ``<owner>.trained_catalog_sha256``: arch -> the `tools/catalog_fingerprint.py`
+    hash of the catalog the ``<owner>.heuristics.sort_kernel_catalog`` models bound under
     that arch were trained on (tools/catalog_fingerprint.py prints it). When set, its keys must be
     exactly those arch keys, so every bound ranker's catalog is gated. Absent is ``{}``,
-    which gates nothing."""
-    raw = engine_raw.get("trained_catalog_sha256")
+    which gates nothing. @p raw_owner is the raw mapping of the owner (the engine, or one
+    slot); @p owner names it in messages: ``engine`` or ``slots[<name>]``."""
+    raw = raw_owner.get("trained_catalog_sha256")
     if raw is None:
         return {}
-    scope = "engine.trained_catalog_sha256"
+    scope = f"{owner}.trained_catalog_sha256"
     trained = set(heuristics.get("sort_kernel_catalog", {}))
     _require_mapping(raw, scope)
     if set(raw) != trained:
         raise ConfigError(
             f"{scope} keys {sorted(raw)} must equal the arch keys bound under "
-            f"engine.heuristics.sort_kernel_catalog ({sorted(trained)})."
+            f"{owner}.heuristics.sort_kernel_catalog ({sorted(trained)})."
         )
     for arch, digest in raw.items():
         if not isinstance(digest, str) or not _SHA256.fullmatch(digest):
@@ -1489,7 +1540,17 @@ _KNOWN_ENGINE = frozenset(
     }
 )
 #: RFC 0021 §4's per-slot selection members, plus the slot's own ``specialization``.
-_KNOWN_SLOT = frozenset({"name", "kmd_fields", "knobs", "ranker", "specialization"})
+_KNOWN_SLOT = frozenset(
+    {
+        "name",
+        "kmd_fields",
+        "knobs",
+        "ranker",
+        "specialization",
+        "heuristics",
+        "trained_catalog_sha256",
+    }
+)
 _KNOWN_KMD_FIELD = frozenset({"name", "type", "default_value", "builder_default"})
 _KNOWN_PACK = frozenset(
     {

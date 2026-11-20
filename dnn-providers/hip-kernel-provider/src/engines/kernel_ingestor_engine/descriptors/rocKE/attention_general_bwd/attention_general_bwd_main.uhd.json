@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "id": "64afdd1c-1a2e-45a8-a8d6-692381eadcee",
+  "name": "AttentionGeneralBwd main selector",
+  "adapter": "native",
+  "objective": "max",
+  "native": {
+    "symbol": "hipkernel.attention_general_bwd.main_score"
+  }
+}

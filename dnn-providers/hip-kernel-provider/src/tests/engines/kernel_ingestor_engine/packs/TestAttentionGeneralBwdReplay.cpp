@@ -3,16 +3,20 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -34,7 +38,9 @@
  * layout and every launch with its kernel symbol, grid, block and each kernarg in ABI order.
  * The C++ lowering, checks and plan must reproduce it exactly, through both the evaluator
  * and the registered graph matcher. For an accepted graph the kernel matcher must then pick
- * exactly one prep and one main kernel of the arch's catalog, the ones the plan names.
+ * exactly one prep kernel of the arch's catalog, the one the plan names, and the main
+ * candidates (the class match, then the candidate filter) must hold the plan's main kernel
+ * once, beside the alternates that can stand in for it.
  *
  * The committed subset runs here. `HKP_GENERAL_BWD_CORPUS` points the suite at a full
  * corpus (a file, or a directory of `corpus_<arch>.jsonl`) instead.
@@ -56,6 +62,10 @@ struct ReplayTally
     std::size_t accepts = 0;
     std::size_t launches = 0;
     std::size_t failures = 0;
+    std::size_t candidates = 0;
+    std::size_t withAlternates = 0;
+    std::size_t alternatesVerified = 0;
+    std::size_t declinedVerified = 0;
     std::map<std::string, std::size_t> codes;
     std::map<std::string, std::size_t> mainKernelsHit;
 };
@@ -63,15 +73,22 @@ struct ReplayTally
 class Replay
 {
 public:
-    explicit Replay(std::string_view arch)
+    /// @p alternates are the Python reference plans of the alternate main kernels by entry id,
+    /// or null when the corpus ships without them (the parity check is then skipped).
+    Replay(std::string_view arch, const std::map<std::string, json>* alternates)
         : _arch(arch)
         , _kernels(archKernels(arch))
+        , _alternates(alternates)
     {
         registerNativeIngestorSymbols();
         _graphMatcher = hipdnn_plugin_sdk::ingestor::GraphMatchRegistry::resolve(
             std::string(GRAPH_MATCHER_SYMBOL));
         _kernelMatcher = hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
             std::string(KERNEL_MATCHER_SYMBOL));
+        _candidateFilter = hipdnn_plugin_sdk::ingestor::CandidateFilterRegistry::resolve(
+            std::string(KERNEL_MATCHER_SYMBOL));
+        _mainScore = hipdnn_plugin_sdk::ingestor::ScoreRegistry::resolve(
+            "hipkernel.attention_general_bwd.main_score");
     }
 
     void run(const json& entry)
@@ -287,12 +304,21 @@ private:
                         const BoundTokens& bound,
                         const general_bwd::Plan& plan)
     {
-        std::vector<const KernelDefinition*> mains;
+        std::vector<const KernelDefinition*> admitted;
         for(const auto& kernel : _kernels.main)
         {
             if(_kernelMatcher(context, bound, kernel))
             {
-                mains.push_back(&kernel);
+                admitted.push_back(&kernel);
+            }
+        }
+        const auto keep = _candidateFilter(context, bound, admitted);
+        std::vector<const KernelDefinition*> mains;
+        for(std::size_t i = 0; i < admitted.size() && i < keep.size(); ++i)
+        {
+            if(keep[i])
+            {
+                mains.push_back(admitted[i]);
             }
         }
         std::vector<const KernelDefinition*> preps;
@@ -303,17 +329,35 @@ private:
                 preps.push_back(&kernel);
             }
         }
-        if(mains.size() != 1 || preps.size() != 1)
+        if(keep.size() != admitted.size() || preps.size() != 1)
         {
-            fail("kernel_match selected " + std::to_string(preps.size()) + " prep and "
-                 + std::to_string(mains.size()) + " main kernels, expected one of each");
+            fail("kernel_match selected " + std::to_string(preps.size())
+                 + " prep kernels, expected "
+                   "one, and the candidate filter answered "
+                 + std::to_string(keep.size()) + " flags for " + std::to_string(admitted.size())
+                 + " main kernels");
             return;
         }
-        if(mains.front()->name != plan.row->mainKernel)
+        // Tuned keys can share one binary, so the pick is the candidate the native score ranks
+        // first (its tuning key and head pack are the plan's), not the one with the plan's name.
+        std::vector<const KernelDefinition*> picks;
+        for(const auto* kernel : mains)
         {
-            fail("kernel_match selected main kernel " + mains.front()->name + ", the plan names "
-                 + std::string(plan.row->mainKernel));
+            if(_mainScore(context, bound, *kernel) > 0.0)
+            {
+                picks.push_back(kernel);
+            }
         }
+        if(picks.size() != 1 || picks.front()->name != plan.row->mainKernel)
+        {
+            fail("the main candidates hold " + std::to_string(picks.size())
+                 + " picks of the native score, expected one named "
+                 + std::string(plan.row->mainKernel));
+            return;
+        }
+        _tally.candidates += mains.size();
+        _tally.withAlternates += mains.size() > 1 ? 1 : 0;
+        checkAlternates(context, plan, mains);
         if(preps.front()->name != plan.row->prepKernel)
         {
             fail("kernel_match selected prep kernel " + preps.front()->name + ", the plan names "
@@ -323,10 +367,243 @@ private:
                                 + std::to_string(plan.row->tuningKeyId)];
     }
 
+    using CandidateKey = std::pair<int64_t, int64_t>;
+
+    static std::optional<CandidateKey> candidateKeyOf(const KernelDefinition& kernel)
+    {
+        const auto key = kernel.metadata.find("tuning_key_id");
+        const auto pack = kernel.metadata.find("head_pack_on");
+        if(key == kernel.metadata.end() || pack == kernel.metadata.end())
+        {
+            return std::nullopt;
+        }
+        const auto* keyValue = std::get_if<int64_t>(&key->second);
+        const auto* packValue = std::get_if<int64_t>(&pack->second);
+        if(keyValue == nullptr || packValue == nullptr)
+        {
+            return std::nullopt;
+        }
+        return CandidateKey{*keyValue, *packValue};
+    }
+
+    static std::string describe(const std::set<CandidateKey>& keys)
+    {
+        std::ostringstream text;
+        for(const auto& [tuningKey, headPack] : keys)
+        {
+            text << " (tuning_key " << tuningKey << ", head_pack " << headPack << ')';
+        }
+        return keys.empty() ? std::string(" none") : text.str();
+    }
+
+    /// The Python reference of the alternate main kernels: the engine must admit the pick and
+    /// exactly the alternates rocKE's planner builds for the graph, and each one's plan must
+    /// reproduce rocKE's main launches (kernel, grid, block and every kernarg value).
+    void checkAlternates(const MatchContext& context,
+                         const general_bwd::Plan& pick,
+                         const std::vector<const KernelDefinition*>& mains)
+    {
+        if(_alternates == nullptr)
+        {
+            return;
+        }
+        std::set<CandidateKey> admitted;
+        for(const auto* kernel : mains)
+        {
+            const auto key = candidateKeyOf(*kernel);
+            if(!key.has_value())
+            {
+                fail("main kernel " + kernel->name
+                     + " carries no tuning_key_id / head_pack_on knob values");
+                return;
+            }
+            if(!admitted.insert(*key).second)
+            {
+                fail("two admitted main kernels share one (tuning_key_id, head_pack_on)");
+                return;
+            }
+        }
+
+        const auto found = _alternates->find(_id);
+        const json none = json::array();
+        const json& alternates
+            = found == _alternates->end() ? none : found->second.at("alternates");
+        std::set<CandidateKey> expected{{pick.row->tuningKeyId, pick.row->headPack ? 1 : 0}};
+        for(const auto& alternate : alternates)
+        {
+            expected.insert({alternate.at("tuning_key").get<int64_t>(),
+                             alternate.at("head_pack").get<int64_t>()});
+        }
+        const json noneDeclined = json::array();
+        const json& declined
+            = found == _alternates->end() ? noneDeclined : found->second.at("declined");
+        for(const auto& row : declined)
+        {
+            const CandidateKey key{row.at("tuning_key").get<int64_t>(),
+                                   row.at("head_pack").get<int64_t>()};
+            if(admitted.count(key) != 0)
+            {
+                fail("the engine admits (tuning_key " + std::to_string(key.first) + ", head_pack "
+                     + std::to_string(key.second) + "), which its rules decline ("
+                     + row.at("reason").get<std::string>() + ")");
+            }
+            else
+            {
+                ++_tally.declinedVerified;
+            }
+        }
+        if(admitted != expected)
+        {
+            std::set<CandidateKey> extra;
+            std::set<CandidateKey> missing;
+            std::set_difference(admitted.begin(),
+                                admitted.end(),
+                                expected.begin(),
+                                expected.end(),
+                                std::inserter(extra, extra.begin()));
+            std::set_difference(expected.begin(),
+                                expected.end(),
+                                admitted.begin(),
+                                admitted.end(),
+                                std::inserter(missing, missing.begin()));
+            fail("the engine admits main kernels rocKE does not build:" + describe(extra)
+                 + "; rocKE builds main kernels the engine does not admit:" + describe(missing));
+        }
+
+        if(alternates.empty())
+        {
+            return;
+        }
+        auto lowered = general_bwd::lowerGraph(context, general_bwd::computeUnitsOf(context));
+        const auto* lowering = std::get_if<general_bwd::Lowered>(&lowered);
+        const auto traits = general_bwd::shippedArchTraits(_arch);
+        const auto in = lowering != nullptr ? general_bwd::planInputOf(lowering->request)
+                                            : std::optional<general_bwd::PlanInput>();
+        if(!traits.has_value() || !in.has_value())
+        {
+            fail("the graph has no plan input to build the alternates from");
+            return;
+        }
+        for(const auto& alternate : alternates)
+        {
+            const auto tuningKey = alternate.at("tuning_key").get<int64_t>();
+            general_bwd::Selection selection;
+            selection.headPack = alternate.at("head_pack").get<int64_t>() != 0;
+            if(tuningKey != 0)
+            {
+                selection.tuned = general_bwd::tunedEntryById(_arch, tuningKey);
+                if(selection.tuned == nullptr)
+                {
+                    fail("alternate tuning_key " + std::to_string(tuningKey)
+                         + " is not a tuned entry of " + _arch);
+                    continue;
+                }
+            }
+            auto result = general_bwd::resolveCandidate(*in, *traits, pick, selection);
+            if(const auto* decline = std::get_if<general_bwd::Decline>(&result))
+            {
+                fail("alternate (tuning_key " + std::to_string(tuningKey)
+                     + ") is not plannable: " + decline->detail);
+                continue;
+            }
+            const auto failuresBefore = _tally.failures;
+            checkAlternatePlan(std::get<general_bwd::Plan>(result), pick, alternate);
+            if(_tally.failures == failuresBefore)
+            {
+                ++_tally.alternatesVerified;
+            }
+        }
+    }
+
+    void checkAlternatePlan(const general_bwd::Plan& plan,
+                            const general_bwd::Plan& pick,
+                            const json& alternate)
+    {
+        const std::string tag
+            = "alternate (tuning_key " + std::to_string(alternate.at("tuning_key").get<int64_t>())
+              + ", head_pack " + std::to_string(alternate.at("head_pack").get<int64_t>()) + ")";
+        const auto mainsOf = [](const general_bwd::Plan& of) {
+            std::vector<const general_bwd::LaunchPlan*> out;
+            for(const auto& launch : of.launches)
+            {
+                if(launch.launch != general_bwd::Launch::PREP)
+                {
+                    out.push_back(&launch);
+                }
+            }
+            return out;
+        };
+        const auto launches = mainsOf(plan);
+        const auto pickLaunches = mainsOf(pick);
+        const auto& want = alternate.at("launches");
+        if(launches.size() != want.size() || launches.size() != pickLaunches.size())
+        {
+            fail(tag + " has " + std::to_string(launches.size()) + " main launches, rocKE "
+                 + std::to_string(want.size()) + ", the pick "
+                 + std::to_string(pickLaunches.size()));
+            return;
+        }
+        for(std::size_t i = 0; i < want.size(); ++i)
+        {
+            const auto& launch = *launches[i];
+            const auto& expected = want[i];
+            const std::string where = tag + " launch " + std::to_string(i) + " ('"
+                                      + std::string(general_bwd::launchName(launch.launch)) + "')";
+            if(general_bwd::launchName(launch.launch) != expected.at("launch").get<std::string>())
+            {
+                fail(where + " is not " + expected.at("launch").dump());
+            }
+            if(launch.kernel != expected.at("kernel").get<std::string>())
+            {
+                fail(where + " kernel " + std::string(launch.kernel) + ", rocKE "
+                     + expected.at("kernel").dump());
+            }
+            const auto& grid = expected.at("grid");
+            for(std::size_t axis = 0; axis < 3; ++axis)
+            {
+                if(launch.grid[axis] != grid.at(axis).get<uint32_t>())
+                {
+                    fail(where + " grid differs from " + grid.dump());
+                    break;
+                }
+            }
+            if(launch.block != expected.at("block").get<uint32_t>())
+            {
+                fail(where + " block " + std::to_string(launch.block) + ", rocKE "
+                     + expected.at("block").dump());
+            }
+            const auto& values = expected.at("values");
+            const auto& pickArgs = pickLaunches[i]->kernargs;
+            if(launch.kernargs.size() != values.size() || launch.kernargs.size() != pickArgs.size())
+            {
+                fail(where + " has " + std::to_string(launch.kernargs.size()) + " kernargs, rocKE "
+                     + std::to_string(values.size()));
+                continue;
+            }
+            for(std::size_t a = 0; a < values.size(); ++a)
+            {
+                const auto& arg = launch.kernargs[a];
+                const auto value = kernargText(arg);
+                if(arg.name != pickArgs[a].name || arg.kind != pickArgs[a].kind
+                   || value != corpusKernargText(values.at(a)))
+                {
+                    std::ostringstream why;
+                    why << where << " kernarg " << a << " is [" << arg.name << ", " << arg.kind
+                        << ", " << value << "], rocKE " << values.at(a).dump() << " (the pick has ["
+                        << pickArgs[a].name << ", " << pickArgs[a].kind << "])";
+                    fail(why.str());
+                }
+            }
+        }
+    }
+
     std::string _arch;
     ArchKernels _kernels;
+    const std::map<std::string, json>* _alternates;
     hipdnn_plugin_sdk::ingestor::GraphMatchFn _graphMatcher;
     hipdnn_plugin_sdk::ingestor::KernelMatcherFn _kernelMatcher;
+    hipdnn_plugin_sdk::ingestor::CandidateFilterFn _candidateFilter;
+    hipdnn_plugin_sdk::ingestor::ScoreFn _mainScore;
     ReplayTally _tally;
     std::string _id;
 };
@@ -349,7 +626,22 @@ TEST_P(TestAttentionGeneralBwdReplay, EveryCorpusEntryReplaysItsVerdictAndPlan)
     ASSERT_FALSE(entries.empty()) << "the corpus '" << path.string() << "' holds no " << arch
                                   << " entries";
 
-    Replay replay(arch);
+    std::map<std::string, json> alternates;
+    const auto alternatesFile = alternatesPath(arch);
+    // The committed corpus always has its alternates beside it (CMake stages both), so an absent
+    // file there is a build slip that would silently turn the candidate parity off. Only a corpus
+    // taken from the override may lack one.
+    if(hipdnn_data_sdk::utilities::getEnv("HKP_GENERAL_BWD_CORPUS").empty())
+    {
+        ASSERT_TRUE(alternatesFile.has_value())
+            << "no alternates_" << arch << ".jsonl beside the committed corpus '" << path.string()
+            << "': the candidate parity against rocKE would be skipped";
+    }
+    if(alternatesFile.has_value())
+    {
+        alternates = loadAlternates(*alternatesFile);
+    }
+    Replay replay(arch, alternatesFile.has_value() ? &alternates : nullptr);
     for(const auto& entry : entries)
     {
         replay.run(entry);
@@ -359,7 +651,18 @@ TEST_P(TestAttentionGeneralBwdReplay, EveryCorpusEntryReplaysItsVerdictAndPlan)
     std::ostringstream summary;
     summary << arch << ": " << tally.entries << " entries, " << tally.accepts << " accepted, "
             << tally.launches << " launches, " << tally.mainKernelsHit.size()
-            << " distinct main kernels, " << tally.failures << " failures; codes:";
+            << " distinct main kernels, " << tally.candidates << " main candidates ("
+            << tally.withAlternates << " graphs with alternates), ";
+    if(alternatesFile.has_value())
+    {
+        summary << tally.alternatesVerified << " alternates verified against rocKE, "
+                << tally.declinedVerified << " rocKE-built rows the engine declines, ";
+    }
+    else
+    {
+        summary << "no alternates file beside the corpus (alternate parity skipped), ";
+    }
+    summary << tally.failures << " failures; codes:";
     for(const auto& [code, count] : tally.codes)
     {
         summary << ' ' << code << '=' << count;
@@ -369,6 +672,11 @@ TEST_P(TestAttentionGeneralBwdReplay, EveryCorpusEntryReplaysItsVerdictAndPlan)
     EXPECT_EQ(tally.failures, 0u) << summary.str();
     EXPECT_GT(tally.accepts, 0u) << "a corpus that accepts nothing proves no plan";
     EXPECT_GT(tally.codes.size(), 1u) << "a corpus with one verdict proves no check order";
+    if(alternatesFile.has_value())
+    {
+        EXPECT_GT(tally.alternatesVerified, 0u)
+            << "the alternates file verified no candidate, so the candidate parity proves nothing";
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(,

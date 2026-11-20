@@ -14,7 +14,25 @@
     },
     {
       "name": "main",
-      "metadata": "b0b95d84-8486-40a6-81d4-c03d0283e809"
+      "metadata": "b0b95d84-8486-40a6-81d4-c03d0283e809",
+      "sort_kernel_catalog": {
+        "default": "64afdd1c-1a2e-45a8-a8d6-692381eadcee",
+        "gfx942": [
+          "10c3f054-934d-4c8d-98ca-f8c9111c8009"
+        ],
+        "gfx950": [
+          "8b6c4f63-6c5a-4206-941a-da5c14a10aff"
+        ]
+      },
+      "knobs": [
+        "main_block_n",
+        "tuning_key_id",
+        "head_pack_on",
+        "lb_mirror_on",
+        "lb_interleave_on",
+        "worklist_on",
+        "static_scale_id"
+      ]
     }
   ]
 }

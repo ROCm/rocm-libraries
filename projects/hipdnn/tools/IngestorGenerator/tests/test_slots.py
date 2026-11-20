@@ -1035,3 +1035,106 @@ def test_placeholder_checking_is_refused_for_a_slotted_engine(tmp_path):
     assert result.returncode == 2
     assert "not supported for slotted engines" in result.stderr
     assert "No unfilled placeholders" not in result.stdout
+
+
+# --- trained slot rankers (`uhd_gen promote` bindings) ---------------------------------
+
+_SLOT_UHD = "11111111-2222-4333-8444-555555555555"
+_SLOT_SHA = "cd" * 32
+
+
+def _bind_dkdv(raw, ids=None, sha=None, role="sort_kernel_catalog", arch="gfx950"):
+    """Binds a trained ranker under the ``dkdv`` slot (index 1, a ranker slot)."""
+    slot = raw["slots"][1]
+    slot["heuristics"] = {role: {arch: ids or [_SLOT_UHD]}}
+    if sha is not None:
+        slot["trained_catalog_sha256"] = sha
+
+
+def test_a_slot_binding_follows_the_native_default_in_the_ued(generator, tmp_path):
+    """The arch entries ride after the slot's native `default`, where `uhd_gen promote`
+    inserts them, and the fingerprint stays in the config, as for an unslotted engine.
+    """
+    config = _load(tmp_path, lambda raw: _bind_dkdv(raw, sha={"gfx950": _SLOT_SHA}))
+    out = tmp_path / "out"
+    generator.render(config, out)
+    ued = json.loads(
+        (out / config.descriptor_dir / "split_bwd.ued.json").read_text(encoding="utf-8")
+    )
+    by_name = {slot["name"]: slot for slot in ued["slots"]}
+    catalog = by_name["dkdv"]["sort_kernel_catalog"]
+    assert list(catalog) == ["default", "gfx950"]
+    assert catalog["gfx950"] == [_SLOT_UHD]
+    assert list(by_name["dq"]["sort_kernel_catalog"]) == ["default"]
+    assert "trained_catalog_sha256" not in json.dumps(ued)
+    dkdv = next(slot for slot in config.slots if slot.name == "dkdv")
+    assert dkdv.trained_catalog_sha256 == {"gfx950": _SLOT_SHA}
+
+
+def test_a_slot_binding_keeps_every_id_on_regeneration(generator, tmp_path):
+    """Binding a trained ranker over an installed bundle mints nothing: every id stays,
+    and only the bound slot's catalog gains the arch entry."""
+    plain = load_config(SLOTTED)
+    render_resolved(generator, plain, tmp_path)
+    ddir = tmp_path / plain.descriptor_dir
+    before = _doc_ids(ddir)
+    bound = _load(tmp_path, _bind_dkdv)
+    resolution, _ = render_resolved(generator, bound, tmp_path)
+    assert resolution.report.minted == 0
+    assert _doc_ids(ddir) == before
+
+
+@pytest.mark.parametrize(
+    "mutate, message",
+    [
+        (
+            lambda raw: raw["slots"][0].update(
+                heuristics={"sort_kernel_catalog": {"gfx950": [_SLOT_UHD]}}
+            ),
+            r"slots\[prep\]\.ranker is not true",
+        ),
+        (
+            lambda raw: _bind_dkdv(raw, arch="default"),
+            r"generator owns sort_kernel_catalog\.default",
+        ),
+        (lambda raw: _bind_dkdv(raw, arch="gfx9"), "not one concrete gfx"),
+        (lambda raw: _bind_dkdv(raw, ids=["not-a-uuid"]), "not a UUID"),
+        (
+            lambda raw: _bind_dkdv(raw, role="predict_engine"),
+            "a slot binds only 'sort_kernel_catalog'",
+        ),
+        (
+            lambda raw: _bind_dkdv(raw, sha={"gfx942": _SLOT_SHA}),
+            r"slots\[dkdv\]\.trained_catalog_sha256 keys \['gfx942'\] must equal",
+        ),
+        (
+            lambda raw: raw["slots"][1].update(
+                trained_catalog_sha256={"gfx950": _SLOT_SHA}
+            ),
+            r"slots\[dkdv\]\.trained_catalog_sha256 keys",
+        ),
+        (
+            lambda raw: _bind_dkdv(raw, sha={"gfx950": "AB" * 32}),
+            "64 lowercase hex",
+        ),
+        (
+            lambda raw: raw["engine"].update(
+                heuristics={"sort_kernel_catalog": {"gfx950": [_SLOT_UHD]}}
+            ),
+            r"engine\.heuristics is set on a slotted engine",
+        ),
+    ],
+    ids=[
+        "no_ranker",
+        "default_arch",
+        "bad_arch",
+        "bad_uuid",
+        "role",
+        "unbound_arch_fingerprint",
+        "fingerprint_without_binding",
+        "uppercase_fingerprint",
+        "engine_level",
+    ],
+)
+def test_bad_slot_bindings_are_refused(tmp_path, mutate, message):
+    _expect(tmp_path, mutate, message)
