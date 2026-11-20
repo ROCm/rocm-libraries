@@ -70,25 +70,25 @@ check_numerics(const T* C_d, size_t sz, CheckNumericsResult* abnormal, bool comp
     __shared__ Numerics stats[256];
     U sum    = 0;
     U absSum = 0;
-    T minV   = std::numeric_limits<T>::max();
-    T maxV   = std::numeric_limits<T>::min();
+    U minV   = std::numeric_limits<U>::infinity();
+    U maxV   = -std::numeric_limits<U>::infinity();
 
     size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
     size_t stride = blockDim.x * gridDim.x;
 
     for(size_t i = offset; i < sz; i += stride)
     {
-        T val = C_d[i];
-        sum += static_cast<U>(val);
-        const auto abs_val = fabs(static_cast<U>(val));
+        const U val = static_cast<U>(C_d[i]);
+        sum += val;
+        const auto abs_val = fabs(val);
         absSum += abs_val;
-        minV = min(minV, val);
-        maxV = max(maxV, val);
+        minV = fmin(minV, val);
+        maxV = fmax(maxV, val);
         if(abs_val <= static_cast<U>(0.0f))
             abnormal->hasZero = 1;
-        if(isnan(static_cast<U>(val)))
+        if(isnan(val))
             abnormal->hasNan = 1;
-        if(isinf(static_cast<U>(val)))
+        if(isinf(val))
             abnormal->hasInf = 1;
     }
     if(computeStats)
