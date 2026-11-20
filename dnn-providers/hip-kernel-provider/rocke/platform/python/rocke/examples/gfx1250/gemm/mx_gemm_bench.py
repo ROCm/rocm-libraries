@@ -29,6 +29,15 @@ long after the timing, so that clocks and power can be sampled from outside
 the process; ``hold_start_unix`` and ``hold_end_unix`` (host clock, seconds
 since the epoch) bound that window and ``hold_launches`` counts its launches.
 
+``--rotate-mb`` times as hipBLASLt's ``--rotating``: the timed launches
+cycle over copies of A, B, the scales and D (``beta = 0`` reads no C),
+enough copies to fill that many MiB, at least one and at most the largest
+of ``--warmup``, ``--batch`` and ``--iters``; every phase starts again at
+the first copy, and the hold cycles too. ``rotate_copies`` counts the
+copies. After the timing, D of the middle and of the last copy must equal,
+byte for byte, D of the first (every copy holds the same inputs);
+otherwise the check is ``FAIL:rotate``.
+
 ``--host-only`` compiles and reports resources without touching a device;
 ``--check-only`` skips the timing. Absolute timings must not be committed
 to the repo; use ``--out`` with a path outside the tree.
@@ -148,6 +157,7 @@ FIELDS = [
     "hold_end_unix",
     "hold_launches",
     "code",
+    "rotate_copies",
 ]
 # Target device time per synchronized group of launches in the hold window.
 _HOLD_GROUP_SECONDS = 0.02
@@ -496,8 +506,18 @@ def _check(spec, got, expected, *, verify: str, samples: int) -> bool:
     return bool(np.array_equal(got[rows, cols], expected[rows, cols]))
 
 
+def rotating_copies(bytes_per_copy: int, rotate_mb: float, cap: int) -> int:
+    """The copy count of ``--rotate-mb``, as hipBLASLt's rotating plan:
+    enough copies of ``bytes_per_copy`` to fill ``rotate_mb`` MiB, at least
+    one and at most ``cap`` (the launches of the longest timing phase, so
+    every copy is launched)."""
+    budget = int(rotate_mb * (1 << 20))
+    return max(1, min(cap, -(-budget // max(bytes_per_copy, 1))))
+
+
 class _Launcher:
-    """A compiled kernel with device buffers for A, B, scales, C and D."""
+    """A compiled kernel with device buffers for A, B, scales, C and D, and
+    the extra copies of A, B, the scales and D that ``--rotate-mb`` cycles."""
 
     # The workgroup shape of every launch, checked or timed.
     _BLOCK = (128, 1, 1)
@@ -509,19 +529,44 @@ class _Launcher:
         self.grid, self.cluster = grid, cluster
         self.out_bytes = out_bytes
         self.pointers = []
+        # Bytes of A, B, A_scale, B_scale, C and D.
+        self.sizes = []
+        # Copy c >= 1: its A, B, A_scale, B_scale and D at copy_pointers[c - 1].
+        self.copy_pointers: list[list[int]] = []
         for array in (*arrays, None):
             nbytes = out_bytes if array is None else array.nbytes
             pointer = runtime.alloc(nbytes)
             self.pointers.append(pointer)
+            self.sizes.append(nbytes)
             if array is not None:
                 runtime.memcpy_h2d(pointer, _u8_buffer(array), nbytes)
 
     def upload(self, index: int, array: np.ndarray) -> None:
         self.runtime.memcpy_h2d(self.pointers[index], _u8_buffer(array), array.nbytes)
 
-    def arguments(self, m, n, k, alpha, beta) -> bytes:
+    def add_copies(self, count: int, arrays) -> None:
+        """Allocate ``count`` more copies: A, B, A_scale and B_scale hold
+        ``arrays``, D starts as 0xFF bytes. Each pointer is kept as soon as
+        it is allocated, so ``close`` frees them all even when this raises."""
+        buffers = [_u8_buffer(array) for array in arrays]
+        for _ in range(count):
+            pointers = []
+            self.copy_pointers.append(pointers)
+            for buffer in buffers:
+                pointers.append(self.runtime.alloc(len(buffer)))
+                self.runtime.memcpy_h2d(pointers[-1], buffer, len(buffer))
+            pointers.append(self.runtime.alloc(self.out_bytes))
+            self.runtime.memset(pointers[-1], 0xFF, self.out_bytes)
+
+    def arguments(self, m, n, k, alpha, beta, copy: int = 0) -> bytes:
+        """The kernel arguments; ``copy`` >= 1 takes that copy's A, B, scales
+        and D, and C of the first."""
+        pointers = self.pointers
+        if copy:
+            a, b, a_scale, b_scale, d = self.copy_pointers[copy - 1]
+            pointers = [a, b, a_scale, b_scale, self.pointers[4], d]
         return struct.pack(
-            "<QQQQQQiiiff", *self.pointers, m, n, k, float(alpha), float(beta)
+            "<QQQQQQiiiff", *pointers, m, n, k, float(alpha), float(beta)
         )
 
     def launch(self, arguments: bytes) -> None:
@@ -582,16 +627,17 @@ class _Launcher:
 
         return enqueue
 
-    def output(self) -> bytes:
+    def output(self, copy: int = 0) -> bytes:
         self.runtime.sync()
         host = (ctypes.c_uint8 * self.out_bytes)()
-        self.runtime.memcpy_d2h(host, self.pointers[-1], self.out_bytes)
+        source = self.copy_pointers[copy - 1][-1] if copy else self.pointers[-1]
+        self.runtime.memcpy_d2h(host, source, self.out_bytes)
         return bytes(host)
 
     def close(self) -> None:
         # hipFree synchronizes the device, so the module is unloaded only
         # after every launch that uses it has finished.
-        for pointer in self.pointers:
+        for pointer in itertools.chain(self.pointers, *self.copy_pointers):
             self.runtime.free(pointer)
         self.module.unload()
 
@@ -608,30 +654,38 @@ class _Times(NamedTuple):
     median: float | None = None
 
 
-def _time(launcher: _Launcher, arguments: bytes, *, warmup, iters, batch) -> _Times:
-    """Time the launch of ``arguments``; see the module docstring. When a
+def _time(
+    launcher: _Launcher, arguments: bytes | list[bytes], *, warmup, iters, batch
+) -> _Times:
+    """Time the launch of ``arguments``, or of a list of them in turn, every
+    phase from the first (``--rotate-mb``); see the module docstring. When a
     launch or a timing call raises an ``Exception``, the launches already
     queued are waited for before it propagates, so the caller may unload the
     module and free the buffers."""
     runtime = launcher.runtime
+    cycle = [arguments] if isinstance(arguments, bytes) else list(arguments)
+    count = len(cycle)
     batched_us = event_batch_us = enqueue_us = None
     times = []
     try:
-        for _ in range(max(warmup, 1)):
-            launcher.launch(arguments)
+        for i in range(max(warmup, 1)):
+            launcher.launch(cycle[i % count])
         runtime.sync()
         if batch > 0:
+            order = [cycle[i % count] for i in range(batch)]
             begin = time.perf_counter()
-            for _ in range(batch):
-                launcher.launch(arguments)
+            for each in order:
+                launcher.launch(each)
             runtime.sync()
             batched_us = (time.perf_counter() - begin) * 1.0e6 / batch
-            enqueue = launcher.prepare_launch(arguments)
+            # One prepared enqueue per copy the batch uses, before the events.
+            enqueues = [launcher.prepare_launch(each) for each in cycle[:batch]]
+            calls = [enqueues[i % len(enqueues)] for i in range(batch)]
             start, end = runtime.event(), runtime.event()
             try:
                 start.record()
                 begin = time.perf_counter()
-                for _ in range(batch):
+                for enqueue in calls:
                     enqueue()
                 enqueue_us = (time.perf_counter() - begin) * 1.0e6 / batch
                 end.record()
@@ -640,10 +694,11 @@ def _time(launcher: _Launcher, arguments: bytes, *, warmup, iters, batch) -> _Ti
             finally:
                 start.destroy()
                 end.destroy()
-        for _ in range(iters):
+        for i in range(iters):
+            each = cycle[i % count]
             start, end = runtime.event(), runtime.event()
             start.record()
-            launcher.launch(arguments)
+            launcher.launch(each)
             end.record()
             runtime.sync()
             times.append(start.elapsed_to(end) * 1.0e3)
@@ -673,21 +728,28 @@ class _Hold(NamedTuple):
     launches: int = 0
 
 
-def _hold(launcher: _Launcher, arguments: bytes, seconds: float, launch_us) -> _Hold:
-    """Enqueue the prepared launch of ``arguments`` back to back for
-    ``seconds``, in groups of about ``_HOLD_GROUP_SECONDS`` of device time
-    (``launch_us`` per launch), synchronizing after each group so the window
-    ends on time. Nothing is timed."""
+def _hold(
+    launcher: _Launcher, arguments: bytes | list[bytes], seconds: float, launch_us
+) -> _Hold:
+    """Enqueue the prepared launch of ``arguments``, or of a list of them in
+    turn, back to back for ``seconds``, in groups of about
+    ``_HOLD_GROUP_SECONDS`` of device time (``launch_us`` per launch), each
+    group whole rounds of the list, synchronizing after each group so the
+    window ends on time. Nothing is timed."""
     if seconds <= 0:
         return _Hold()
     runtime = launcher.runtime
+    cycle = [arguments] if isinstance(arguments, bytes) else list(arguments)
+    count = len(cycle)
     group = max(1, int(_HOLD_GROUP_SECONDS * 1.0e6 / launch_us)) if launch_us else 1
-    enqueue = launcher.prepare_launch(arguments)
+    group = -(-group // count) * count
+    enqueues = [launcher.prepare_launch(each) for each in cycle]
+    calls = enqueues * (group // count)
     launches = 0
     start = time.time()
     try:
         while time.time() - start < seconds:
-            for _ in range(group):
+            for enqueue in calls:
                 enqueue()
             launches += group
             runtime.sync()
@@ -695,6 +757,15 @@ def _hold(launcher: _Launcher, arguments: bytes, seconds: float, launch_us) -> _
         runtime.sync()
         raise
     return _Hold(start, time.time(), launches)
+
+
+def _same_outputs(launcher: _Launcher, copies: int) -> bool:
+    """D of the middle and of the last of ``copies`` copies equals, byte for
+    byte, D of the first (``--rotate-mb``: every copy holds the same
+    inputs)."""
+    first = launcher.output()
+    others = sorted({copies // 2, copies - 1} - {0})
+    return all(launcher.output(copy) == first for copy in others)
 
 
 def _wmma_count(llvm_text: str | None) -> str:
@@ -754,7 +825,9 @@ def _loop_scratch(hsaco: bytes) -> str:
 
 def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
     """Check at every ``--check-betas`` value, then time, then hold the timed
-    launch for ``--hold-seconds``. Returns (check, times, hold)."""
+    launch for ``--hold-seconds``. Returns (check, times, hold, copies):
+    ``copies`` is the ``rotate_copies`` count, ``None`` without
+    ``--rotate-mb`` or when nothing was timed."""
     m, n, k = spec.M, spec.N, spec.K
     alpha = np.float32(1.0 / max(k, 256))
     inputs = check_inputs(spec)
@@ -799,20 +872,38 @@ def _run(spec, artifact, grid, cluster, *, args, runtime, timing_inputs: bool):
                 for index, array in enumerate(device_inputs(inputs, spec)):
                     launcher.upload(index, array)
         if failed:
-            return "FAIL:" + ",".join(failed), _Times(), _Hold()
+            return "FAIL:" + ",".join(failed), _Times(), _Hold(), None
         if args.check_only:
-            return "PASS", _Times(), _Hold()
-        timed = launcher.arguments(m, n, k, alpha, 0.0)
+            return "PASS", _Times(), _Hold(), None
+        timed_alpha, operands = alpha, None
         if timing_inputs:
-            timing = device_inputs((*timed_inputs(spec), inputs[4]), spec)
-            for index, array in enumerate(timing[:4]):
+            operands = device_inputs((*timed_inputs(spec), inputs[4]), spec)[:4]
+            for index, array in enumerate(operands):
                 launcher.upload(index, array)
-            timed = launcher.arguments(m, n, k, 1.0, 0.0)
+            timed_alpha = 1.0
+        timed = launcher.arguments(m, n, k, timed_alpha, 0.0)
+        copies = None
+        if args.rotate_mb > 0:
+            bytes_per_copy = sum(launcher.sizes[:4]) + out_bytes
+            cap = max(args.warmup, args.batch, args.iters, 1)
+            copies = rotating_copies(bytes_per_copy, args.rotate_mb, cap)
+        rotating = copies is not None and copies > 1
+        if rotating:
+            if operands is None:
+                operands = device_inputs(inputs, spec)[:4]
+            launcher.add_copies(copies - 1, operands)
+            timed = [
+                launcher.arguments(m, n, k, timed_alpha, 0.0, copy=copy)
+                for copy in range(copies)
+            ]
         times = _time(
             launcher, timed, warmup=args.warmup, iters=args.iters, batch=args.batch
         )
+        if rotating and not _same_outputs(launcher, copies):
+            return "FAIL:rotate", _Times(), _Hold(), copies
         launch_us = times.event_batch if times.event_batch is not None else times.median
-        return "PASS", times, _hold(launcher, timed, args.hold_seconds, launch_us)
+        hold = _hold(launcher, timed, args.hold_seconds, launch_us)
+        return "PASS", times, hold, copies
     finally:
         launcher.close()
 
@@ -837,8 +928,9 @@ def run_case(spec: MxGemmSpec, *, betas=(0.0, 0.5)) -> str:
         samples=0,
         check_only=True,
         hold_seconds=0.0,
+        rotate_mb=0.0,
     )
-    check, _, _ = _run(
+    check, _, _, _ = _run(
         spec,
         artifact,
         mx_gemm_grid(spec),
@@ -1010,6 +1102,13 @@ def main(argv: list[str] | None = None) -> int:
         help="after timing, keep the timed launch running back to back this long "
         "(for sampling clocks and power from outside; 0: no hold)",
     )
+    parser.add_argument(
+        "--rotate-mb",
+        type=float,
+        default=0.0,
+        help="as hipBLASLt's --rotating: the timed launches cycle over copies of "
+        "A, B, the scales and D filling this many MiB (0: no rotation)",
+    )
     parser.add_argument("--check-only", action="store_true", help="check, do not time")
     parser.add_argument(
         "--host-only", action="store_true", help="compile only; no device"
@@ -1034,6 +1133,8 @@ def main(argv: list[str] | None = None) -> int:
     args.check_data = [x.strip() for x in args.check_data.split(",") if x.strip()]
     if not args.check_data or set(args.check_data) - set(CHECK_DATA):
         parser.error(f"--check-data must be a comma list of {CHECK_DATA}")
+    if not 0.0 <= args.rotate_mb < float("inf"):
+        parser.error("--rotate-mb must be a finite number of MiB, 0 or more")
 
     runtime = None
     arch = "gfx1250"
@@ -1071,7 +1172,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.host_only:
             return _row(config, check="HOST", **values), None
-        check, times, hold = _run(
+        check, times, hold, copies = _run(
             run_spec,
             artifact,
             grid,
@@ -1094,6 +1195,7 @@ def main(argv: list[str] | None = None) -> int:
             hold_start_unix="" if hold.start is None else f"{hold.start:.3f}",
             hold_end_unix="" if hold.end is None else f"{hold.end:.3f}",
             hold_launches=str(hold.launches) if hold.start is not None else "",
+            rotate_copies="" if copies is None else str(copies),
             **values,
         )
         return row, best

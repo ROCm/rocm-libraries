@@ -4,9 +4,11 @@
 
 from __future__ import annotations
 
+import ctypes
 import itertools
 import re
 import shutil
+import struct
 import types
 import unittest
 from dataclasses import replace
@@ -26,6 +28,9 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     SPARSE_ALPHA,
     SPARSE_STEPS,
     _hold,
+    _Launcher,
+    _run,
+    _same_outputs,
     _time,
     check_inputs,
     decode_table,
@@ -34,6 +39,7 @@ from rocke.examples.gfx1250.gemm.mx_gemm_bench import (
     main,
     pack_fp6_rows,
     reference,
+    rotating_copies,
     run_case,
     sparse_inputs,
     sparse_steps,
@@ -3068,13 +3074,18 @@ class _FakeEvent:
 class _FakeGpu:
     """``_time``'s launcher and its runtime in one: a GPU clock in ms that
     ``launch`` advances by 2 and a prepared enqueue by 3, so each time shows
-    which path it measured. ``fail_on``: the enqueue call that raises."""
+    which path it measured. ``launched`` and ``enqueued`` record the
+    arguments of each launch and prepared enqueue in order. ``fail_on``: the
+    enqueue call that raises."""
 
     def __init__(self, fail_on=None):
         self.runtime = self
         self.clock = 0
         self.events = []
         self.prepared_with = []
+        self.launched = []
+        self.enqueued = []
+        self.synced = []
         self.enqueues = 0
         self.fail_on = fail_on
 
@@ -3083,25 +3094,127 @@ class _FakeGpu:
         return self.events[-1]
 
     def sync(self):
-        pass
+        self.synced.append(len(self.enqueued))
 
     def launch(self, arguments):
+        self.launched.append(arguments)
         self.clock += 2
 
     def prepare_launch(self, arguments):
         self.prepared_with.append(arguments)
+        # Building an enqueue inside the event bracket shows in event_batch.
+        self.clock += 1000
 
         def enqueue():
             self.enqueues += 1
             if self.enqueues == self.fail_on:
                 raise RuntimeError("enqueue failed")
+            self.enqueued.append(arguments)
             self.clock += 3
 
         return enqueue
 
 
+class _FakeModule:
+    def __init__(self, runtime):
+        self.runtime = runtime
+
+    def get_function(self, name):
+        return name
+
+    def unload(self):
+        self.runtime.unloaded = True
+
+
+class _FakeRuntime:
+    """``_Launcher``'s runtime: numbered allocations with their sizes, the
+    uploads and fills in order, and the freed pointers. ``fail_alloc``: the
+    allocation call that raises; ``fail_upload``: the upload call that raises."""
+
+    def __init__(self, fail_alloc=None, fail_upload=None):
+        self.sizes = {}
+        self.uploads = []
+        self.fills = []
+        self.freed = []
+        self.downloads = []
+        self.unloaded = False
+        self.fail_alloc = fail_alloc
+        self.fail_upload = fail_upload
+
+    def load_module(self, hsaco):
+        return _FakeModule(self)
+
+    def alloc(self, nbytes):
+        if len(self.sizes) + 1 == self.fail_alloc:
+            raise MemoryError("hipMalloc failed")
+        pointer = 0x1000 * (len(self.sizes) + 1)
+        self.sizes[pointer] = nbytes
+        return pointer
+
+    def memcpy_h2d(self, dst, src, nbytes):
+        if len(self.uploads) + 1 == self.fail_upload:
+            raise RuntimeError("hipMemcpyHtoD failed")
+        self.uploads.append((dst, bytes(src)[:nbytes]))
+
+    def memset(self, ptr, value, nbytes):
+        self.fills.append((ptr, value, nbytes))
+
+    def free(self, ptr):
+        self.freed.append(ptr)
+
+    def sync(self):
+        pass
+
+    def memcpy_d2h(self, dst, src, nbytes):
+        self.downloads.append((src, nbytes))
+
+
+class _FakeDevice(_FakeRuntime):
+    """``_run``'s runtime: ``_FakeRuntime`` with ``_FakeEvent``'s clock,
+    which each launch advances by 2 ms. A D reads back as zeros once a
+    launch has written it and as its fill before; ``writes`` False: no
+    launch writes."""
+
+    def __init__(self, writes=True):
+        super().__init__()
+        self.clock = 0
+        self.writes = writes
+        self.written = set()
+        self.launched = []
+
+    def event(self):
+        return _FakeEvent(self)
+
+    def launch(self, function, grid, block, arguments, cluster=None):
+        self.launched.append(arguments)
+        self.clock += 2
+        if self.writes:
+            self.written.add(struct.unpack_from("<6Q", arguments)[5])
+
+    def prepare_launch(self, function, grid, block, arguments):
+        return lambda: self.launch(function, grid, block, arguments)
+
+    def memcpy_d2h(self, dst, src, nbytes):
+        super().memcpy_d2h(dst, src, nbytes)
+        fill = {ptr: value for ptr, value, _ in self.fills}.get(src, 0)
+        ctypes.memset(dst, 0 if src in self.written else fill, nbytes)
+
+
+class _FakeOutputs:
+    """``_same_outputs``'s launcher: D of each copy, and the copies read."""
+
+    def __init__(self, outputs):
+        self.outputs = outputs
+        self.read = []
+
+    def output(self, copy=0):
+        self.read.append(copy)
+        return self.outputs[copy]
+
+
 class MxGemmBenchTimingTest(unittest.TestCase):
-    """The bench's timing and ``--out`` without a device."""
+    """The bench's timing, ``--rotate-mb`` copies and ``--out`` without a
+    device."""
 
     def test_event_batch_times_prepared_enqueues(self):
         """event_batch_us brackets ``--batch`` prepared enqueues, built once,
@@ -3147,6 +3260,256 @@ class MxGemmBenchTimingTest(unittest.TestCase):
         gpu = _FakeGpu(fail_on=3)
         with self.assertRaisesRegex(RuntimeError, "enqueue failed"):
             _hold(gpu, b"args", 1.0, None)
+
+    def test_rotating_copies_fill_the_budget_within_the_cap(self):
+        """As hipBLASLt's rotating plan: the budget over the bytes of one copy,
+        rounded up, at least one and at most the cap."""
+        mib = 1 << 20
+        self.assertEqual(rotating_copies(2048 * mib, 512, 2000), 1)
+        self.assertEqual(rotating_copies(128 * mib, 512, 2000), 4)
+        self.assertEqual(rotating_copies(128 * mib + 1, 512, 2000), 4)
+        self.assertEqual(rotating_copies(128 * mib - 1, 512, 2000), 5)
+        self.assertEqual(rotating_copies(mib, 512, 200), 200)
+        self.assertEqual(rotating_copies(mib, 0.5, 2000), 1)
+        # A budget below one byte still times one copy.
+        self.assertEqual(rotating_copies(mib, 1e-9, 2000), 1)
+
+    def test_time_cycles_the_copies_from_the_first_in_each_phase(self):
+        """Warm-up, both batches and the single launches take the copies in
+        turn, each from the first; the event batch prepares each copy once."""
+        copies = [b"a0", b"a1", b"a2"]
+
+        def rounds(count):
+            return [copies[i % len(copies)] for i in range(count)]
+
+        gpu = _FakeGpu()
+        times = _time(gpu, copies, warmup=5, iters=4, batch=7)
+        self.assertEqual(gpu.prepared_with, copies)
+        self.assertEqual(gpu.launched, rounds(5) + rounds(7) + rounds(4))
+        self.assertEqual(gpu.enqueued, rounds(7))
+        self.assertEqual((times.event_batch, times.median), (3000.0, 2000.0))
+
+    def test_one_arguments_blob_launches_as_a_list_of_one(self):
+        runs = []
+        for arguments in (b"args", [b"args"]):
+            gpu = _FakeGpu()
+            times = _time(gpu, arguments, warmup=3, iters=2, batch=5)
+            runs.append(
+                (gpu.launched, gpu.enqueued, gpu.prepared_with, times.event_batch)
+            )
+        self.assertEqual(runs[0], runs[1])
+        self.assertEqual(runs[0][2], [b"args"])
+
+    def test_hold_cycles_whole_rounds_of_the_copies(self):
+        """Every hold group is whole rounds of the copies, each copy prepared
+        once: 20 launches of 1 ms round up to 21 for three copies, and a
+        group of one (no launch time) up to 3."""
+        copies = [b"a0", b"a1", b"a2"]
+        for launch_us, group in ((1000.0, 21), (None, 3)):
+            with self.subTest(launch_us=launch_us):
+                gpu = _FakeGpu()
+                hold = _hold(gpu, copies, 0.01, launch_us)
+                self.assertEqual(gpu.prepared_with, copies)
+                self.assertGreater(hold.launches, 0)
+                # One sync after each group: the enqueues so far, by group.
+                self.assertEqual(
+                    gpu.synced, list(range(group, hold.launches + 1, group))
+                )
+                self.assertEqual(
+                    gpu.enqueued, [copies[i % 3] for i in range(hold.launches)]
+                )
+
+    def _launcher(self, runtime):
+        """A ``_Launcher`` of A, B, A_scale, B_scale and C of 8, 16, 4, 2 and
+        32 bytes (each array filled with its index) and a D of 64 bytes."""
+        arrays = [
+            np.full(n, i, dtype=np.uint8) for i, n in enumerate((8, 16, 4, 2, 32))
+        ]
+        artifact = types.SimpleNamespace(hsaco=b"", kernel_name="k")
+        return _Launcher(runtime, artifact, (1, 1, 1), None, arrays, 64), arrays
+
+    def test_launcher_copies_take_their_own_buffers_and_close_frees_all(self):
+        """Each copy has its own A, B, scales and D (D filled with 0xFF), A to
+        B_scale uploaded with the arrays; its arguments share only C; close
+        frees every pointer once."""
+        runtime = _FakeRuntime()
+        launcher, arrays = self._launcher(runtime)
+        launcher.add_copies(2, arrays[:4])
+        self.assertEqual(len(runtime.sizes), 16)
+        first = struct.unpack("<QQQQQQiiiff", launcher.arguments(3, 5, 7, 1.0, 0.0))
+        seen = set(first[:6])
+        for copy in (1, 2):
+            fields = struct.unpack(
+                "<QQQQQQiiiff", launcher.arguments(3, 5, 7, 1.0, 0.0, copy=copy)
+            )
+            pointers = fields[:6]
+            self.assertEqual(fields[6:], first[6:])
+            self.assertEqual(pointers[4], first[4])
+            own = set(pointers) - {first[4]}
+            self.assertEqual(len(own), 5)
+            self.assertFalse(own & seen)
+            seen |= own
+            self.assertEqual(
+                [runtime.sizes[p] for p in pointers], [8, 16, 4, 2, 32, 64]
+            )
+            uploads = dict(runtime.uploads)
+            for pointer, array in zip(pointers[:4], arrays[:4]):
+                self.assertEqual(uploads[pointer], array.tobytes())
+            self.assertIn((pointers[5], 0xFF, 64), runtime.fills)
+        launcher.close()
+        self.assertEqual(sorted(runtime.freed), sorted(runtime.sizes))
+        self.assertTrue(runtime.unloaded)
+
+    def test_launcher_close_frees_a_copy_cut_short(self):
+        """A call that fails inside ``add_copies`` leaves every pointer
+        allocated so far for ``close``, also the one whose upload failed:
+        the 6 buffers of the first copy and 2 of the second (the 9th
+        allocation fails, or the upload of the 8th)."""
+        for failing in ({"fail_alloc": 9}, {"fail_upload": 7}):
+            with self.subTest(**failing):
+                runtime = _FakeRuntime(**failing)
+                launcher, arrays = self._launcher(runtime)
+                with self.assertRaisesRegex(
+                    (MemoryError, RuntimeError), "hipMalloc|hipMemcpyHtoD"
+                ):
+                    launcher.add_copies(2, arrays[:4])
+                launcher.close()
+                self.assertEqual(len(runtime.freed), 8)
+                self.assertEqual(sorted(runtime.freed), sorted(runtime.sizes))
+                self.assertTrue(runtime.unloaded)
+
+    def test_launcher_output_reads_the_d_its_copy_launches_with(self):
+        """``output(copy)`` reads back the D of ``arguments(copy=copy)``, so
+        ``_same_outputs`` compares what each copy's launches wrote."""
+        runtime = _FakeRuntime()
+        launcher, arrays = self._launcher(runtime)
+        launcher.add_copies(2, arrays[:4])
+        for copy in (0, 1, 2):
+            fields = struct.unpack(
+                "<QQQQQQiiiff", launcher.arguments(3, 5, 7, 1.0, 0.0, copy=copy)
+            )
+            self.assertEqual(len(launcher.output(copy)), 64)
+            self.assertEqual(runtime.downloads[-1], (fields[5], 64))
+
+    def _run_rotating(
+        self, rotate_mb, *, writes=True, timing_inputs=False, hold_seconds=0.0
+    ):
+        """``_run`` of a 64x48x256 FP6 problem on ``_FakeDevice`` with no
+        check (empty ``--check-data``), 2 warm-up, 3 batch and 1 single
+        launches: 9 timed launches. Returns (check, times, hold, copies) and
+        the runtime."""
+        runtime = _FakeDevice(writes=writes)
+        args = types.SimpleNamespace(
+            verify="full",
+            samples=0,
+            check_data=[],
+            check_betas=[],
+            check_only=False,
+            warmup=2,
+            batch=3,
+            iters=1,
+            hold_seconds=hold_seconds,
+            rotate_mb=rotate_mb,
+        )
+        artifact = types.SimpleNamespace(hsaco=b"", kernel_name="k")
+        result = _run(
+            _spec6(64, 48, 256),
+            artifact,
+            (1, 1, 1),
+            None,
+            args=args,
+            runtime=runtime,
+            timing_inputs=timing_inputs,
+        )
+        return result, runtime
+
+    def test_run_rotates_one_copy_per_launch_of_the_longest_phase(self):
+        """A budget far above the problem gives as many copies as the
+        longest phase has launches (the batch of 3); every copy's D is
+        launched, in the timing and in the hold, its A, B and scales hold the
+        bytes the first copy times with, and every buffer is freed."""
+        for timing_inputs in (False, True):
+            with self.subTest(timing_inputs=timing_inputs):
+                (check, times, hold, copies), runtime = self._run_rotating(
+                    1.0e6, timing_inputs=timing_inputs, hold_seconds=0.005
+                )
+                self.assertEqual((check, copies), ("PASS", 3))
+                self.assertEqual(times.event_batch, 2000.0)
+                self.assertEqual(len(runtime.sizes), 6 + 2 * 5)
+                launched = [struct.unpack_from("<6Q", a) for a in runtime.launched]
+                self.assertEqual(len({fields[5] for fields in launched[:9]}), 3)
+                self.assertEqual(len(launched), 9 + hold.launches)
+                self.assertEqual(len({fields[5] for fields in launched[9:]}), 3)
+                uploads = dict(runtime.uploads)
+                for fields in launched[:9]:
+                    for operand in range(4):
+                        self.assertEqual(
+                            uploads[fields[operand]], uploads[launched[0][operand]]
+                        )
+                self.assertEqual(sorted(runtime.freed), sorted(runtime.sizes))
+
+    def test_run_fails_rotate_when_a_copy_differs(self):
+        """D of a copy that differs from D of the first is ``FAIL:rotate``:
+        no times, no hold launched, and every buffer still freed."""
+        result, runtime = self._run_rotating(1.0e6, writes=False, hold_seconds=0.005)
+        self.assertEqual(
+            result, ("FAIL:rotate", (None, None, None, None), (None, None, 0), 3)
+        )
+        self.assertEqual(len(runtime.launched), 9)
+        self.assertEqual(sorted(runtime.freed), sorted(runtime.sizes))
+
+    def test_run_rotating_set_is_a_b_scales_and_d_without_c(self):
+        """At beta 0 the rotating set is A, B, the scales and D, not C, as
+        hipBLASLt's: a budget of one set times one copy, a byte more two."""
+        _, runtime = self._run_rotating(0.0)
+        sizes = list(runtime.sizes.values())  # A, B, A_scale, B_scale, C, D
+        set_bytes = sum(sizes) - sizes[4]
+        for extra, copies in ((0, 1), (1, 2)):
+            with self.subTest(extra=extra):
+                (check, _, _, got), _ = self._run_rotating(
+                    (set_bytes + extra) / (1 << 20)
+                )
+                self.assertEqual((check, got), ("PASS", copies))
+
+    def test_run_with_one_copy_or_none_adds_no_buffers(self):
+        """A budget below one byte times one copy and ``--rotate-mb`` 0 none:
+        no extra buffers, one launch argument set, no read-back."""
+        for rotate_mb, copies in ((1e-9, 1), (0.0, None)):
+            with self.subTest(rotate_mb=rotate_mb):
+                (check, _, _, got), runtime = self._run_rotating(rotate_mb)
+                self.assertEqual((check, got), ("PASS", copies))
+                self.assertEqual(len(runtime.sizes), 6)
+                self.assertEqual(len(set(runtime.launched)), 1)
+                self.assertEqual(runtime.downloads, [])
+
+    def test_same_outputs_compares_the_middle_and_last_copy(self):
+        same = _FakeOutputs([b"d"] * 5)
+        self.assertTrue(_same_outputs(same, 5))
+        self.assertEqual(same.read, [0, 2, 4])
+        for bad in (2, 4):
+            outputs = [b"d"] * 5
+            outputs[bad] = b"x"
+            self.assertFalse(_same_outputs(_FakeOutputs(outputs), 5))
+        two = _FakeOutputs([b"d", b"d"])
+        self.assertTrue(_same_outputs(two, 2))
+        self.assertEqual(two.read, [0, 1])
+
+    def test_rotate_mb_must_be_finite_and_not_negative(self):
+        """``--rotate-mb`` below 0, NaN or infinite is a usage error, before
+        anything is compiled."""
+        import contextlib
+        import io
+
+        for value in ("-1", "-0.5", "nan", "inf"):
+            with self.subTest(value=value):
+                err = io.StringIO()
+                with (
+                    contextlib.redirect_stderr(err),
+                    self.assertRaises(SystemExit) as caught,
+                ):
+                    main(["--host-only", "--rotate-mb", value])
+                self.assertEqual(caught.exception.code, 2)
+                self.assertIn("--rotate-mb must be a finite number", err.getvalue())
 
     def test_out_holds_every_row_without_base(self):
         """``--out`` is written row by row; without ``--base`` nothing
