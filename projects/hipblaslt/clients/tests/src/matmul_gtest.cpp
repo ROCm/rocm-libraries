@@ -1383,4 +1383,41 @@ namespace
     INSTANTIATE_TEST_CATEGORIES(rocroller_off_test);
 #endif
 
+    // Runs on both builds. The env makes a rocRoller-on build launch the
+    // checked-in kernel; a rocRoller-off build already does. Chip ids named
+    // by the case fail instead of skipping when no solution exists.
+    struct rocroller_checked_in_testing : hipblaslt_test_valid
+    {
+        void operator()(const Arguments& arg)
+        {
+            test_env::ScopedEnv force("HIPBLASLT_TEST_CHECKED_IN_ROCROLLER", "1");
+            testing_matmul(arg);
+        }
+    };
+
+    struct rocroller_checked_in_test
+        : RocBlasLt_Test<rocroller_checked_in_test, rocroller_checked_in_testing>
+    {
+        static bool type_filter(const Arguments& arg)
+        {
+            return type_filter_functor{}(arg);
+        }
+
+        static bool function_filter(const Arguments& arg)
+        {
+            return !strcmp(arg.function, "rocroller_checked_in_matmul");
+        }
+
+        static std::string name_suffix(const Arguments& arg)
+        {
+            return matmul_test::name_suffix(arg);
+        }
+    };
+
+    TEST_P(rocroller_checked_in_test, matmul)
+    {
+        RUN_TEST_ON_THREADS_STREAMS(rocroller_checked_in_testing{}(GetParam()));
+    }
+    INSTANTIATE_TEST_CATEGORIES(rocroller_checked_in_test);
+
 } // namespace

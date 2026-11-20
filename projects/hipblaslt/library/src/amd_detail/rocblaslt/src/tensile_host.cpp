@@ -332,6 +332,15 @@ namespace
         return *(reinterpret_cast<const T*>(ptr));
     }
 
+    // Every Hardware this file selects or checks solutions against comes from here.
+    std::shared_ptr<TensileLite::Hardware> getTensileDevice(int deviceId)
+    {
+        auto hardware = TensileLite::hip::GetDevice(deviceId);
+        if(auto gpu = std::dynamic_pointer_cast<TensileLite::AMDGPU>(hardware))
+            allowRocRollerCaptures(*gpu);
+        return hardware;
+    }
+
     // Classify alpha/beta via its storage type (alphaBetaType), not the matrix type.
     static TensileLite::ScalarValue get_scalar_value_from_void_ptr(const void*      ptr,
                                                                    rocisa::DataType type)
@@ -3547,7 +3556,7 @@ namespace
                         std::string deviceString
                             = deviceFullString.substr(0, deviceFullString.find(":"));
                         m_devicePropMap[deviceString] = std::make_shared<hipDeviceProp_t>(prop);
-                        m_hardwareMap[deviceString] = TensileLite::hip::GetDevice(devId);
+                        m_hardwareMap[deviceString]   = getTensileDevice(devId);
                     }
                 }
 
@@ -3559,7 +3568,7 @@ namespace
                 hipDeviceProp_t prop;
                 HIP_CHECK_EXC(hipGetDeviceProperties(&prop, deviceId));
                 m_deviceProp = std::make_shared<hipDeviceProp_t>(prop);
-                m_hardware = TensileLite::hip::GetDevice(deviceId);
+                m_hardware   = getTensileDevice(deviceId);
 
                 // Load library
                 auto lib = TensileLite::LoadLibraryFile<TensileLite::ContractionProblemGemm>(
@@ -8054,6 +8063,17 @@ rocblaslt_status getBestSolutions(RocblasltContractionProblem const& prob,
     *returnAlgoCount = 0;
     if(layoutRuledOut)
         *layoutRuledOut = false;
+    // The client chip-id test sets this so a default (rocRoller-on) build
+    // launches the checked-in kernel instead of the JIT. Unset, the branch
+    // below is unchanged.
+    if(rocRollerCapturesForcedForTest() && useRocRoller(handle, prob))
+        return getRocRollerSelectedSolutions(handle,
+                                             prob,
+                                             requestedAlgoCount,
+                                             heuristicResultsArray,
+                                             maxWorkSpaceBytes,
+                                             returnAlgoCount,
+                                             layoutRuledOut);
 #ifdef HIPBLASLT_USE_ROCROLLER
     if(useRocRoller(handle, prob))
         return getRocRollerBestSolutions(handle,
@@ -8438,7 +8458,8 @@ rocblaslt_status
 
 #endif
         auto solution = library->getSolutionByIndex(*hardware, index);
-        if(!solution)
+        auto gpu      = std::dynamic_pointer_cast<TensileLite::AMDGPU>(hardware);
+        if(!solution || (gpu && refusedOnlyForRocRollerCaptures(*solution, *gpu)))
         {
             isOutOfBound = true;
             continue;
