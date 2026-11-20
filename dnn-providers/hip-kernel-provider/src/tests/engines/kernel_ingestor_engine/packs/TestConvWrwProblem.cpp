@@ -1745,6 +1745,49 @@ TEST(TestConvWrwKernelMatch, TheRingRunsHeightStridesAsPhases)
     EXPECT_EQ(launch->args.trackLen, launch->args.ho + 1);
 }
 
+TEST(TestConvWrwKernelMatch, RingStagesServeOutputRowsWithinAStep)
+{
+    // Stages of wq ring steps of fewer positions: wq 2 or 4, for output rows no wider than bq
+    // (the base shape's 12 columns), either layout.
+    auto f = ConfigFields{};
+    f.bq = 16;
+    f.wq = 2;
+    EXPECT_TRUE(admits(f, "gfx942", baseShape()));
+    auto cl = f;
+    cl.layout = 1;
+    EXPECT_TRUE(admits(cl, "gfx942", channelsLastShape()));
+    // A row wider than a step takes the one-step ring.
+    auto wide = baseShape();
+    wide.input = {10, 20};
+    EXPECT_FALSE(admits(f, "gfx942", wide));
+    auto f4 = f;
+    f4.bq = 8;
+    f4.wq = 4;
+    EXPECT_FALSE(admits(f4, "gfx942", baseShape()));
+    auto narrow = baseShape();
+    narrow.input = {10, 8};
+    EXPECT_TRUE(admits(f4, "gfx942", narrow));
+    // Not three steps, not a stage of one, and not on the output-rows loop.
+    for(const int64_t wq : {1, 3, 8})
+    {
+        auto g = f;
+        g.wq = wq;
+        EXPECT_FALSE(admits(g, "gfx942", baseShape())) << wq;
+    }
+    auto rows = f;
+    rows.loop = 0;
+    rows.fr = 1;
+    EXPECT_FALSE(admits(rows, "gfx942", baseShape()));
+    // LDS: a slot per step. Channels-first fp16: LDA 16 + 8, the 18-position window in 3
+    // vectors (24) pitched to 5 16-byte units (40). Channels-last (k3ClPitch, 8-byte reads):
+    // LDA 10 dwords (20), LDB 20; at 8 positions, 4 steps of LDA 12 and LDB 12.
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(f), 2), 2 * 2 * (64 * 24 + 64 * 40) * 2);
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(cl), 2), 2 * 2 * (64 * 20 + 64 * 20) * 2);
+    auto cl4 = f4;
+    cl4.layout = 1;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(configOf(cl4), 2), 2 * 4 * (64 * 12 + 64 * 12) * 2);
+}
+
 TEST(TestConvWrwKernelMatch, UnalignedDyUnitsOnlyWhereOutputChannelsAreNotVectors)
 {
     // Align 2 serves 3 output channels and declines 40 (whole vectors: the aligned configs).
@@ -3663,11 +3706,33 @@ TEST(TestConvWrwLds, MirrorsTheKernelsArithmetic)
     auto aligned = ring;
     aligned.align = 1;
     EXPECT_EQ(conv_wrw::ldsBytesOf(aligned, 2), 2 * (64 * 40 + 8 + 64 * 72) * 2);
-    // Channels-last: the window's 34 positions (words of 2), ceil(36 / 8) + 1 = 6 units (LDB
-    // 48; channels-last tiles keep even counts).
+    // Channels-last ring on a CDNA atom (8-byte fragment reads, k3ClPitch): rows of an odd
+    // number of dword pairs; dy 32 positions = 16 dwords -> 18 (LDA 36), the window's 34 + 2
+    // positions = 18 dwords (LDB 36).
     auto channelsLast = ring;
     channelsLast.layout = 1;
-    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLast, 2), 2 * (64 * 40 + 64 * 48) * 2);
+    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLast, 2), 2 * (64 * 36 + 64 * 36) * 2);
+    // fp32 (4-byte reads): odd dword counts, LDA 33 and LDB 37.
+    auto channelsLastF32 = channelsLast;
+    channelsLastF32.atom = "mfma32_f32";
+    channelsLastF32.atomId = 7;
+    channelsLastF32.vec = 4;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLastF32, 4), 2 * (64 * 33 + 64 * 37) * 4);
+    // gfx950's 16-byte reads: odd counts of 4 dwords, LDA 40 and LDB 40.
+    auto channelsLast950 = channelsLast;
+    channelsLast950.atom = "mfma32x16_f16";
+    channelsLast950.atomId = 10;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLast950, 2), 2 * (64 * 40 + 64 * 40) * 2);
+    // RDNA keeps ceil(36 / 8) + 1 = 6 units (LDB 48; channels-last tiles keep even counts).
+    auto channelsLastRdna = channelsLast;
+    channelsLastRdna.atom = "wmma11_f16";
+    channelsLastRdna.atomId = 12;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLastRdna, 2), 2 * (64 * 40 + 64 * 48) * 2);
+    // Rows keep the legacy pitch on every arch.
+    auto channelsLastRows = channelsLast;
+    channelsLastRows.loop = 0;
+    channelsLastRows.fr = 1;
+    EXPECT_EQ(conv_wrw::ldsBytesOf(channelsLastRows, 2), 2 * (64 * 40 + 64 * 48) * 2);
     // Rows, 3 filter rows at width stride 2: window 65 = 9 vectors, 36 per phase, LDB 48 (6
     // units: strided tiles keep even counts); x tile 3 rows x 2 phases x 64 channels.
     auto rows = ring;

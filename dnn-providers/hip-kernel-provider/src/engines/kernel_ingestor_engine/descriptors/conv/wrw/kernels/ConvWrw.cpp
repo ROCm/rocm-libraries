@@ -26,10 +26,12 @@
 //   CONV_K3_WK, _WC  waves over output and input channels (loops 0 to 2)
 //   CONV_K3_TK, _TC  output and input channels per thread (loops 3, 4 and 9)
 //   CONV_K3_VEC      elements per 16-byte global load (1 for runtime scalar loops 9, 11 and 12)
-//   CONV_K3_XCD      1: XCD-contiguous block order (gfx942, gfx950)
+//   CONV_K3_XCD      1: XCD-contiguous block order (gfx942, gfx950); the matrix-core ring
+//                    (loop 1) always walks it
 //   CONV_K3_ALIGN    1: row-aligned units, unaligned LDS store (loop 1, channels-first)
 //   CONV_K3_NS       LDS stages (loop 2); ring slots (loop 5)
-//   CONV_K3_WQ       loop 5: items side by side (waves_q; wk x wc x wq = 8 waves)
+//   CONV_K3_WQ       loop 5: items side by side (waves_q; wk x wc x wq = 8 waves); loop 1:
+//                    steps a stage (0 one)
 //   CONV_K3_FLAT     loop 8: 1 steps over BQ consecutive flattened output positions (default 0)
 //   CONV_K3_DWS      1: the epilogue can write dw itself at one split (K3Args::dwStore); 0:
 //                    fp32 partials only (default)
@@ -247,8 +249,8 @@ extern "C" __global__ void __launch_bounds__(CONV_K3_THREADS) ConvWrw(K3Args a)
               CONV_K3_WK,
               CONV_K3_WC,
               CONV_K3_VEC,
-              CONV_K3_XCD,
-              CONV_K3_ALIGN>(a);
+              CONV_K3_ALIGN,
+              CONV_K3_WQ>(a);
 #elif CONV_K3_LOOP == 7
     k3WrwRows<CONV_K3_T,
               CONV_K3_ATOM,

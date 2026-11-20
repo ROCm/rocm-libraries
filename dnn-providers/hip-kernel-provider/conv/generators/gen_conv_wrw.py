@@ -194,6 +194,14 @@ def d_loads(c):  # k3dLoads
     )
 
 
+def cl_pitch(n, e, fb):  # ConvWrwGeom.h k3ClPitch
+    g = 4 if fb >= 16 else 2 if fb >= 8 else 1
+    d = du(du(n * e, 4), g) * g
+    if (d // g) % 2 == 0:
+        d += g
+    return d * 4 // e
+
+
 def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
     loop, layout, bk, bc, bq, fr, s, sw, dw = (
         c[k] for k in ("loop", "layout", "bk", "bc", "bq", "fr", "s", "sw", "dw")
@@ -273,9 +281,14 @@ def lds_bytes(c, e):  # ConvWrwGeom.h k3LdsBytes
         if tr
         else (units | 1 if sw == 1 and layout == CF else units) * skew
     )
+    if loop == 1 and layout == CL and c["atom"].startswith("mfma"):
+        # The CDNA ring's channels-last rows: k3ClPitch of the fragment read's bytes.
+        fb = SHAPE[c["atom"]][2] * e
+        lda, ldb = cl_pitch(bq, e, fb), cl_pitch(ph + 2, e, fb)
     a = (bq if tr else bk) * lda + (vec if align else 0)
     b = rows * sw * (ph if tr else bc) * ldb
-    return 2 * (a + b) * e
+    slots = c["wq"] if loop == 1 and c["wq"] > 1 else 1  # the ring's steps a stage
+    return 2 * slots * (a + b) * e
 
 
 def passes(c, e):  # ConvWrwProblem.cpp loadPassesOf
@@ -548,7 +561,15 @@ def valid(c, dtype, fma16=False):
         )
         ok = ok and c["fr"] * c["s"] * fc * fk * 4 <= 160
     elif c["wq"]:
-        ok = False
+        # The matrix-core ring's steps a stage (K3 WQ): 2 or 4, channels-first or -last.
+        ok = (
+            ok
+            and c["loop"] == 1
+            and c["wq"] in (2, 4)
+            and c["layout"] in (CF, CL)
+            and c["atom"] != "fma"
+            and c["align"] == 0
+        )
     if c["loop"] == 2:
         ok = (
             ok
@@ -706,6 +727,28 @@ RING_CF_TILES = {
 # 1.60 / 1.70; gfx90a 65^2 d36 9.44 / 9.50 (bpu only sets the split count: no new program). Both
 # layouts.
 BPU4_RING_ROWS = {"3x3d2", "3x3d4", "3x3d12", "3x3d24", "3x3d36"}
+# Ring stages of wq steps of fewer positions (K3 WQ), for output rows no wider than bq (the
+# host admits them only there): the 3-D small-map layers' 16- and 8-wide rows fill the atoms
+# instead of padding a 32-position step with zeros. (atom prefix, filter tags) -> [(layout, tile
+# (bk, bc, wk, wc, bq), wq)].
+STAGE_RING = {
+    (("mfma32_f16", "mfma32_bf16"), ("3x3",)): [
+        (CF, (64, 64, 2, 2, 16), 2),
+        (CL, (64, 64, 2, 2, 16), 2),
+        (CF, (64, 64, 2, 2, 8), 4),
+        (CL, (64, 64, 2, 2, 8), 4),
+    ],
+    (("mfma32_f32",), ("3x3",)): [
+        (CF, (64, 64, 2, 2, 16), 2),
+        (CL, (64, 64, 2, 2, 16), 2),
+        (CF, (64, 64, 2, 2, 8), 4),
+        (CL, (64, 64, 2, 2, 8), 4),
+    ],
+    (("mfma32x16_f16", "mfma32x16_bf16"), ("3x3",)): [
+        (CF, (64, 64, 2, 2, 16), 2),
+        (CL, (64, 64, 2, 2, 16), 2),
+    ],
+}
 FMA32 = [(32, 64, 4, 4, 32), (64, 64, 4, 4, 32)]
 # FMA tiles per filter row where FMA32's 32-position steps overflow the LDS (a stride-8 window
 # of 32 outputs spans 264 inputs): 8 positions per step.
@@ -1737,6 +1780,30 @@ def build():
                                     cands.append(
                                         C(atom, 1, CF, t, s, sw, dw, fr, vec, xcd, 0, 0)
                                     )
+                if loop == 1:
+                    for (stage_atoms, tags), extra in STAGE_RING.items():
+                        if atom in stage_atoms and tag in tags:
+                            for lay, t, wq in extra:
+                                if lay in layouts and (lays is None or lay in lays):
+                                    cands.append(
+                                        dict(
+                                            C(
+                                                atom,
+                                                1,
+                                                lay,
+                                                t,
+                                                s,
+                                                sw,
+                                                dw,
+                                                fr,
+                                                vec,
+                                                xcd,
+                                                0,
+                                                0,
+                                            ),
+                                            wq=wq,
+                                        )
+                                    )
                 if tag == "1x1" and TR in layouts:
                     for t in BIG1x1:
                         cands.append(C(atom, 1, TR, t, s, sw, dw, fr, vec, xcd, 0, 0))
@@ -2026,7 +2093,7 @@ def emit():
                 if c["atom"] == "fma"
                 else f"w{c['wk']}x{c['wc']}"
             )
-            if c["loop"] == 5:
+            if c["loop"] == 5 or (c["loop"] == 1 and c["wq"]):
                 thr += f"q{c['wq']}"
             name = (
                 f"conv_wrw.{dt}{'x3' if c['math'] else ''}.{c['atom']}.l{c['loop']}.{lay}.{c['bk']}x{c['bc']}x{c['bq']}"
