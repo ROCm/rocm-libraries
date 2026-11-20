@@ -165,6 +165,11 @@ if(NOT _rocsolver_dir STREQUAL "${_rocsolver_built_dir}")
   endforeach()
 endif()
 
+# The target and the .mod directory, for a project that does not want to spell
+# the target's namespace or that passes the paths to another build system.
+set(rocsolver_FORTRAN_LIBRARIES roc::rocsolver_fortran)
+set(rocsolver_FORTRAN_INCLUDE_DIRS "${_rocsolver_incdir}/${_rocsolver_dir}")
+
 set(rocsolver_FORTRAN_FOUND TRUE)
 
 check_required_components(rocsolver-fortran)
