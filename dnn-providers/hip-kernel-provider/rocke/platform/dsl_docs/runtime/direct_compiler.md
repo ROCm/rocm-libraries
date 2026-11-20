@@ -1,7 +1,8 @@
 # The direct code-object compiler
 
 The direct compiler turns serialized rocKE IR (`ck.dsl.ir/v1`) into a loadable
-HSACO for gfx1151 and gfx950. It is the Rust library `rocke_codeobj_ffi`, built
+HSACO for gfx1151, gfx950 and the gfx12 processors gfx1201 and gfx12-generic.
+It is the Rust library `rocke_codeobj_ffi`, built
 from [`rust/rocke-codeobj`](../../rust/rocke-codeobj/). No LLVM component takes
 part in a compile: no COMGR, Clang, LLD, assembler, subprocess, code-object
 cache or precompiled image. The crate depends only on the Rust standard
@@ -39,6 +40,8 @@ as unsupported takes the COMGR path when it comes through `compile_kernel`.
 |---|---|---|
 | gfx1151 | 32 | The ops of every kernel family rocKE builds for gfx1151, WMMA included. |
 | gfx950 | 64 | The ops of the kernel families rocKE builds for gfx950: MFMA (plain, scaled f8f6f4 and the BF16x3 emulation) with AGPR accumulators, LDS DMA, the transposing LDS reads, fp8 and bf8 conversions, packed f32 math, the cross-lane ops, and the scalar, vector, memory and control-flow ops of the other families. |
+| gfx1201 | 32 | What gfx1151 compiles, with gfx12's f16 and bf16 WMMA atoms, less the ops listed below. |
+| gfx12-generic | 32 | gfx1201's code, in a code object for LLVM's generic gfx12 processor. |
 
 The library reports its targets (`rocke_codeobj_supported_targets_v1`, or
 `direct_supported_targets()` in Python). Any other target is refused: the
@@ -49,6 +52,52 @@ A request names a processor. Python drops the features of an ISA name or a
 target ID, so `amdgcn-amd-amdhsa--gfx950:sramecc+:xnack-` compiles for
 `gfx950`. The gfx950 code object is built for xnack and sramecc `any`, so it
 loads in either mode.
+
+gfx12-generic is LLVM's generic gfx12 processor: it has gfx1201's instruction
+set and requires code object version 6, which every direct code object is. The
+compiler runs the same passes for both names and writes the same instructions
+and kernel descriptor; the two objects differ only in the processor that the
+ELF flags and the `amdhsa.target` note state. What this page says about
+gfx1201 holds for gfx12-generic. gfx1200, the other processor the generic name
+covers, is no target: a request for it fails with a `request` diagnostic
+(`DirectUnsupported` in Python), because no direct code object is verified on
+that device.
+
+gfx1201 (the gfx12 ISA) goes through the gfx1151 pipeline, and `target/gfx12`
+supplies what gfx12 changed:
+
+- the split-K WMMA atoms `wmma_gfx12_f32_16x16x16_f16` and `_bf16` (A and B in
+  four registers); gfx11's atoms are refused;
+- workgroup ids from `ttmp9` and `ttmp7` instead of user SGPRs;
+- `s_wait_loadcnt`, `s_wait_dscnt`, `s_wait_kmcnt`, `s_wait_storecnt` for
+  `s_waitcnt`, and `s_barrier_signal` with `s_barrier_wait` for `s_barrier`.
+  The wait sits below the register-only instructions that follow the barrier
+  in its block, so they run while the other waves arrive. The signal does
+  not move, those instructions read and write registers of their own wave
+  only, and the first instruction that accesses memory, waits for a counter,
+  branches or fences ends the run: every memory access keeps its side of
+  the barrier;
+- `s_wait_alu` before a read of an SGPR whose last write is uncommitted
+  (LLVM's `AMDGPUWaitSGPRHazards`);
+- the three-word buffer, global and scratch encodings, the `s_load` layout, and
+  the opcodes of `v_min`/`v_max` (f32, three-operand and f64), `v_add_f64`,
+  `v_mul_f64` and `v_lshlrev_b64`;
+- a kernel descriptor without DX10 clamp and IEEE mode, with the eight-bit
+  prefetch size;
+- the address reductions of the Optimize stage
+  (`TargetInfo::address_reduction`). gfx1151 and gfx950 leave them off: turning
+  them on changes the code objects of most kernels that access global memory
+  per lane, and each changed object needs the on-silicon numeric check of
+  [Comparing code objects](#comparing-code-objects) first.
+
+Not lowered on gfx1201: memory fences (gfx12 has no `buffer_gl0_inv` /
+`buffer_gl1_inv`), the integer WMMA atoms, and the always-false and always-true
+compares, which gfx12 dropped. A kernel written for a 64-lane wave is refused
+where its IR says so: a `tile.ds_bpermute` whose source lane is
+`tile.lane_id()` combined (`^`, `+` or `|`) with a constant that puts it at or
+past the wave size reads a lane a 32-lane wave does not have
+(`target/gfx12/lanes.rs`). gfx1201's SGPR spill and LDS swizzle models are
+gfx1151's.
 
 ## Using it
 
@@ -88,7 +137,8 @@ artifact.direct_fallback      # why the direct compiler refused, after a fallbac
   the resource summary below. The default `isa` is gfx1151. It raises
   `DirectUnsupported` or `CodeObjectError`, and never falls back.
 - `direct_supported_targets()` returns the library's targets
-  (`["gfx1151", "gfx950"]`), and `supported_isas("direct")` returns them as ISA
+  (`["gfx1151", "gfx950", "gfx1201", "gfx12-generic"]`), and
+  `supported_isas("direct")` returns them as ISA
   names. Neither queries a GPU.
 - `loaded_compiler_info("direct")` and `compiler_identity("direct")` describe
   the loaded library. The identity includes the library's path, size and
@@ -129,7 +179,7 @@ The ABI is declared in
 | Entry point | What it does |
 |---|---|
 | `rocke_codeobj_ffi_abi_version` | The ABI version. Compare it with `ROCKE_CODEOBJ_FFI_ABI_VERSION` before the first compile. |
-| `rocke_codeobj_supported_targets_v1` | The supported targets, comma-separated (`"gfx1151,gfx950"`). A static string: do not free it. |
+| `rocke_codeobj_supported_targets_v1` | The supported targets, comma-separated (`"gfx1151,gfx950,gfx1201,gfx12-generic"`). A static string: do not free it. |
 | `rocke_codeobj_compile_rocke_ir_v2` | Compiles serialized IR for the request's target. |
 | `rocke_codeobj_compile_rocke_ir_v1` | The same, for gfx1151. |
 | `rocke_codeobj_session_create_v2`, `rocke_codeobj_session_create_v1` | Creates a session for a target (v1: gfx1151), with its worker threads. |
@@ -182,10 +232,10 @@ are `<kind>: <message>`:
 | Kind | Meaning | In Python |
 |---|---|---|
 | `request` | An unknown or unsupported target, or a malformed request. | `CodeObjectError`. Python refuses an unsupported target itself, as `DirectUnsupported`. |
-| `ROCKE_DIRECT_PARSE` | Text that is not `ck.dsl.ir/v1`, or an op name the parser does not know. | `CodeObjectError` |
+| `ROCKE_DIRECT_PARSE` | Text that is not `ck.dsl.ir/v1`, or an op name outside rocKE's op dialects. | `CodeObjectError` |
 | `ROCKE_DIRECT_MALFORMED` | IR that is not well formed: operand counts, types or attributes that an op does not take. | `CodeObjectError` |
 | `ROCKE_DIRECT_INVALID` | IR that rocKE's LLVM lowering or COMGR refuses as well. | `CodeObjectError` |
-| `ROCKE_DIRECT_UNSUPPORTED` | Valid IR that this compiler does not lower for the target. | `DirectUnsupported`: `compile_kernel` uses COMGR. |
+| `ROCKE_DIRECT_UNSUPPORTED` | Valid IR that this compiler does not lower for the target, or an op of a rocKE dialect that it does not know. | `DirectUnsupported`: `compile_kernel` uses COMGR. |
 | `ROCKE_DIRECT_REGISTERS` | No allocation fits, even with spilling. | `CodeObjectError` |
 | `ROCKE_DIRECT_ENCODE` | An instruction the encoder cannot encode, such as a branch past its offset range. | `CodeObjectError` |
 | `ROCKE_DIRECT_ELF` | The code-object writer failed. | `CodeObjectError` |
@@ -201,17 +251,17 @@ Paths are under [`rust/rocke-codeobj/src`](../../rust/rocke-codeobj/src/).
 | Parse | Reads the text into the compiler's IR. Large inputs are cut into chunks parsed on several threads, a SIMD byte scanner (AVX-512 or AVX2 when the CPU has them) finds the line structure, and repeated constants are shared. A session parses a streamed input while it is being written. On gfx950, constants used before their definition move ahead of their uses, a vector select by a splatted mask becomes a scalar select, and nontemporal accesses get the `nt` bit. | `rir/parse.rs`, `rir/parse_par.rs`, `rir/scan.rs`, `rir/hashcons.rs`, `rir/stream.rs`, `target/gfx9/early_constants.rs`, `target/gfx9/mask_splat.rs`, `target/gfx9/cpol.rs` |
 | Validate | Checks every op's operands, results, types and attributes, and the limits: region nesting, vector width, LDS per workgroup, workgroup size, uniformity. | `rir/validate.rs` |
 | LDS layout | Places the kernel's LDS allocations; allocations whose lifetimes do not overlap share space. | `rir/analysis.rs` |
-| Optimize | Simplification and constant folding, common-subexpression elimination (repeated LDS loads included), loop-invariant code motion, known-bits facts (a bounds test with the same answer in every workgroup, for example), unrolling the loops the IR marks `unroll = true`, and the `noalias` and `readonly` facts of kernel arguments. | `rir/opt.rs`, `rir/unroll.rs`, `rir/alias.rs` |
+| Optimize | Simplification and constant folding, common-subexpression elimination (repeated LDS loads included), loop-invariant code motion, known-bits facts (a bounds test with the same answer in every workgroup, for example), unrolling the loops the IR marks `unroll = true`, and the `noalias` and `readonly` facts of kernel arguments. gfx1201 also reduces address arithmetic: 64-bit sums, products and constant shifts read only through `trunc` become 32-bit ops; a per-lane 64-bit address reuses one already in scope when the two differ by a constant the instruction's offset field holds, or becomes it plus one 64-bit add when they differ by a power-of-two multiple of a uniform value (the rows of a tile); and a masked right shift of a sum drops the part of the sum's constant above the bits it keeps, so the LDS swizzle term of rows 16 apart is one value and the rows share one base register. | `rir/opt.rs`, `rir/unroll.rs`, `rir/alias.rs` |
 | Automatic unrolling | Unrolls small loops with a constant trip count that the IR leaves rolled, under a size bound. gfx950 also unrolls a loop whose only wait on a carried value is an empty register pin (`tile.inline_asm` without a template). | `rir/unroll.rs`, `target/gfx9/unrolled.rs` |
 | Target IR passes | gfx950: adjacent `if` blocks of one condition fuse and their stores widen, and a repeated load takes the first load's result: within one straight-line run, and for memory of a `noalias readonly` argument also past barriers and from an enclosing region. gfx1151: long FMA accumulator chains issue round-robin. | `target/gfx9/widen.rs`, `target/gfx9/ro_loads.rs`, `rir/fma_chains.rs` |
 | LDS swizzle | Remaps LDS addresses to avoid bank conflicts; wave32 only. | `rir/lds_swizzle.rs` |
 | Uniformity | Classifies every value as wave-uniform (SGPRs) or per lane (VGPRs). | `rir/analysis.rs` |
-| Instruction selection | Maps ops to machine instructions. On gfx950 it adds MFMA selection, LDS DMA with its M0 writes, the transposing LDS reads, the fp8 and bf8 conversions, uniform-address atomics issued once per wave, the cross-lane ops and the cache-policy bits. On gfx1151, a 64-bit division takes a 32-bit path when both operands fit. | `rir/isel.rs`, `target/gfx9/isel_hooks.rs`, `target/gfx9/mfma.rs`, `target/gfx9/lds_dma.rs`, `target/gfx9/lds_tr.rs`, `target/gfx9/fp8.rs`, `target/gfx9/atomics.rs`, `target/gfx9/lanes.rs`, `rir/div_bypass.rs` |
+| Instruction selection | Maps ops to machine instructions. `tile.global_ptr_add` and `tile.global_ptr_offset` are one wrapping 64-bit add on every target; the second takes an i64 byte offset only, which may be negative. On gfx950 it adds MFMA selection, LDS DMA with its M0 writes, the transposing LDS reads, the fp8 and bf8 conversions, uniform-address atomics issued once per wave, the cross-lane ops and the cache-policy bits. On gfx1151, a 64-bit division takes a 32-bit path when both operands fit. | `rir/isel.rs`, `target/gfx9/isel_hooks.rs`, `target/gfx9/mfma.rs`, `target/gfx9/lds_dma.rs`, `target/gfx9/lds_tr.rs`, `target/gfx9/fp8.rs`, `target/gfx9/atomics.rs`, `target/gfx9/lanes.rs`, `rir/div_bypass.rs` |
 | Machine-code rewrites | Dead copies, the proven peephole rules (on gfx950, the rule families confirmed there) and VALU fusion. gfx1151: a row's guard is evaluated once per loop block. gfx950: an MFMA that starts from zero reads C as the constant 0, an LDS DMA address is read into an SGPR once, gfx950's own instructions (packed f32, `v_lshl_add_u64`), and gfx9's operand rules, with literals and VGPR copies of SGPRs reused in loops; in kernels without MFMAs, a uniform compare repeated in a loop block reuses the first evaluation's lane mask. | `rir/post.rs`, `rir/peephole.rs`, `rir/uniform_masks.rs`, `target/gfx9/zero_acc.rs`, `target/gfx9/m0_hoist.rs`, `target/gfx9/rules.rs`, `target/gfx9/select.rs`, `target/gfx9/wide_add.rs`, `target/gfx9/pack.rs`, `target/gfx9/masks.rs`, `target/gfx9/legalize.rs` |
 | Scheduling and allocation | Schedules each candidate window, allocates it, and takes the widest window that keeps the occupancy of load sinking alone. A wider window still is tried when a cost model predicts a faster schedule at the same occupancy or one wave less. The `noalias` facts relax memory order only when the relaxed schedule wins after allocation. When program order does not fit the registers, each WMMA moves up to its operands. gfx1151: an f16 conversion that several FMAs read folds into each of them when that costs no spills or waves. gfx950: MFMA accumulators move to AGPRs when no schedule fits the VGPRs; before spilling, a candidate schedule that fits with its accumulators in AGPRs (moved inside their loops where needed) joins the cost race; a kernel whose LDS or workgroup size already sets its occupancy also tries wider windows with its accumulators in AGPRs; a wider schedule at one wave fewer with AGPR accumulators is kept when the cost model prefers it; in a kernel without MFMAs whose schedule leaves most of its latency exposed, wider windows are weighed with the SGPRs they need past the hardware in VGPR lanes at the same occupancy, also when the kernel spills anyway; a window that fails is retried with its SGPR results sunk toward their readers; every kernel's registers leave room for one workgroup on a CU; the allocator keeps a load's destination and the registers its memory clause reads apart where a register below the most placed so far is free, so that the clause needs no break; and `agpr_alloc = [0, 0]` turns AGPRs off. | `rir/mod.rs`, `rir/regalloc.rs`, `rir/mma_order.rs`, `rir/fma_mix.rs`, `target/gfx9/sched.rs`, `target/gfx9/agpr.rs`, `target/gfx9/agpr_spill.rs`, `target/gfx9/bank_wide.rs`, `target/gfx9/trade.rs`, `target/gfx9/latency.rs`, `target/gfx9/relief.rs`, `target/gfx9/clauses.rs` |
 | Spilling | When nothing fits: VGPRs go to free AGPRs (gfx950), then to LDS slots that cost no occupancy, then to scratch; SGPRs go to VGPR lanes. On gfx950 the accumulators can also take the top of the AGPRs with the spill slots under them, and the cost model picks between that and the plain spill. Reloads move up their block, never across a write of EXEC. | `rir/spill.rs`, `rir/reload.rs`, `target/gfx9/spill.rs`, `target/gfx9/agpr_spill.rs` |
-| After allocation | Pseudo expansion and `s_waitcnt`. gfx1151: VOPD dual issue, the WMMA hazards, clauses, `s_delay_alu`, the VGPR release and FMAC shrinking. gfx950: a wide MFMA whose C is copied from registers that hold zero on every path into its block reads C as the constant 0, the 64-bit shift fix, and the wait states its hazard rules need as `s_nop`s, counted over every path into a block. | `rir/post.rs`, `rir/vopd.rs`, `target/gfx9/zero_wide.rs`, `target/gfx9/waitcnt.rs`, `target/gfx9/hazards.rs` |
-| Encoding | Encodes each instruction from the generated tables. The encoder refuses operands the hardware does not read, such as an inline constant as a lane mask. | `rir/asm.rs`, `rir/isa.rs`, `target/gfx9/asm.rs` |
+| After allocation | Pseudo expansion and `s_waitcnt`. gfx1151: VOPD dual issue, the WMMA hazards, clauses, `s_delay_alu`, the VGPR release and FMAC shrinking. gfx1201: the same, with each wait and barrier in its gfx12 form and the barrier's wait below the register-only instructions after it, clauses over loads as well as stores, and `s_wait_alu` before a read of an SGPR whose write is uncommitted. gfx950: a wide MFMA whose C is copied from registers that hold zero on every path into its block reads C as the constant 0, the 64-bit shift fix, and the wait states its hazard rules need as `s_nop`s, counted over every path into a block. | `rir/post.rs`, `rir/vopd.rs`, `target/gfx12/mod.rs`, `target/gfx12/sgpr.rs`, `target/gfx9/zero_wide.rs`, `target/gfx9/waitcnt.rs`, `target/gfx9/hazards.rs` |
+| Encoding | Encodes each instruction from the generated tables; gfx1201 rewrites what gfx12 encodes differently. The encoder refuses operands the hardware does not read, such as an inline constant as a lane mask. | `rir/asm.rs`, `rir/isa.rs`, `target/gfx12/asm.rs`, `target/gfx9/asm.rs` |
 | Code object | Writes the ELF: the kernel descriptor (with the AGPR offset on gfx950), the MessagePack metadata note the HIP runtime reads, symbols, hash tables and headers. | `hsaco_writer.rs`, `elf.rs` |
 
 The instruction descriptions are `rust/rocke-codeobj/isa/gfx11.isa` (with
@@ -272,7 +322,7 @@ on the same inputs in these ways:
 
 ## Limits
 
-- Only gfx1151 and gfx950.
+- Only gfx1151, gfx950, gfx1201 and gfx12-generic.
 - `tile.inline_asm`: only the empty `"=v,0"` barrier, and on gfx950 an LDS read
   (`ds_read_b32`, `ds_read_b64` or `ds_read_b128` with constraints `=v,v`),
   which one rocKE GEMM emits. Any other template is
@@ -280,10 +330,13 @@ on the same inputs in these ways:
 - `tile.iglp_opt` is accepted and has no effect: scheduling groups are not
   implemented.
 - `agpr_alloc`: only `[0, 0]`.
-- An op name the parser does not know is `ROCKE_DIRECT_PARSE`, so
-  `compile_kernel` raises instead of falling back. A new IR op needs at least
-  its name and `OpKind` in `rir/ast.rs`, and a `ROCKE_DIRECT_UNSUPPORTED`
-  refusal in instruction selection until it is lowered.
+- An op name the parser does not know is `ROCKE_DIRECT_UNSUPPORTED` when it
+  is in one of rocKE's op dialects (`arith.`, `math.`, `vector.`, `memref.`,
+  `tile.`, `gpu.`, `scf.`, `cf.`), so `compile_kernel` falls back; any other
+  name is `ROCKE_DIRECT_PARSE`. To check or lower a new IR op, the compiler
+  needs its name and `OpKind` in `rir/ast.rs`, and a
+  `ROCKE_DIRECT_UNSUPPORTED` refusal in instruction selection until it is
+  lowered.
 - No branch relaxation: a branch past the instruction's offset range fails with
   `ROCKE_DIRECT_ENCODE`.
 - The LDS swizzle runs on wave32 only; its bank model is gfx1151's.
@@ -332,7 +385,7 @@ Switches for both targets:
 | `verifyspill` | Checks every spill round against a full recomputation. Slow. |
 | `burs` | Plans 32-bit integer address arithmetic with the prototype tree-pattern selector (`rir/burs.rs`). Off by default. |
 
-gfx1151 only:
+gfx1151 and the gfx12 targets:
 
 | Switch | Effect |
 |---|---|
@@ -346,6 +399,15 @@ gfx1151 only:
 | `nodelay` | No `s_delay_alu`. |
 | `noshrink` | No FMAC shrinking. |
 | `waitall` | Waits for each global, LDS or scalar load right after issuing it. |
+
+The gfx12 targets only:
+
+| Switch | Effect |
+|---|---|
+| `noaddrreuse` | Builds every per-lane 64-bit address from its pointer and index. |
+| `nonarrow` | Keeps 64-bit arithmetic that only `trunc` reads. |
+| `noshiftmask` | Keeps the whole constant of a sum under a masked right shift. |
+| `nobarriersink` | Keeps `s_barrier_wait` right after `s_barrier_signal`. |
 
 gfx950 only:
 
@@ -386,13 +448,21 @@ cargo test --locked --manifest-path rust/rocke-codeobj/Cargo.toml
 python tools/isa_tables.py check
 python tools/isa_tables.py check --isa gfx950
 python -m pytest tests/runtime/test_code_object.py tests/runtime/test_code_object_elf.py \
-  tests/runtime/test_direct_gemm.py tests/runtime/test_direct_targets.py \
-  tests/runtime/test_direct_session.py
+  tests/runtime/test_direct_gemm.py tests/runtime/test_direct_gfx12.py \
+  tests/runtime/test_direct_targets.py tests/runtime/test_direct_session.py
 ctest -R "rocke_native_(gemm|direct)_code_object"
 ```
 
-The GPU case in `test_direct_gemm.py` runs only on a gfx1151 device, and the
-fallback test in `test_direct_targets.py` needs COMGR.
+The gfx12 encoder reads gfx1151's tables, so it has no table check of its own.
+A change to an encoder also runs `tools/isa_xcheck.py` for its processor
+(`--isa gfx1201`, `--isa gfx12-generic`, `--isa gfx950`, or none for gfx1151),
+which needs `llvm-mc`.
+
+The GPU case in `test_direct_gemm.py` runs only on a gfx1151 device. The cases
+of `test_direct_gfx12.py` run only on a gfx12 device: the gfx1201 objects on a
+gfx1201, the gfx12-generic objects on a gfx1200 or a gfx1201. Each compares
+the direct code object's output with an exact reference and with COMGR's
+output. The fallback test in `test_direct_targets.py` needs COMGR.
 
 ### Comparing code objects
 
@@ -405,7 +475,8 @@ are the tools for that:
 | `target_compile <gfx> <out-dir> [--max-vgprs N] <in.ir>...` | Compiles serialized IR for a target to `.hsaco` files with `.s` listings, one result line per input. `--max-vgprs` forces spilling. |
 | `bench_corpus <dir>`, `bench950 <dir>` | Compile-time runs over a corpus (`index.json` and `<slug>.ir` files) for gfx1151 and gfx950. Both first check every object against the corpus's `<slug>.hsaco`, and exit non-zero on a difference. |
 | `hazard_corpus <report.tsv> <disassembly>...` | Deletes the `s_nop`s of disassembled COMGR gfx950 code objects, puts its own back, and fails at any site where it waits less than COMGR. |
-| `isa_xcheck [--target gfx950]` | Writes operand variants of every table-encoded instruction; `tools/isa_xcheck.py` assembles them with `llvm-mc` and compares the encodings. |
+| `isa_xcheck [--target gfx950\|gfx1201]` | Writes operand variants of every table-encoded instruction; `tools/isa_xcheck.py [--isa gfx950\|gfx1201\|gfx12-generic]` assembles them with `llvm-mc` and compares the encodings. gfx1201 takes gfx11's variants through its own encoder, plus gfx12's waits and barrier; gfx12-generic checks the same encoder against `llvm-mc` for the generic processor. |
+| `addr_check <gfx> [--samples N] <in.ir>...` | Optimizes serialized IR without and with the address reductions and compares the global, buffer and LDS accesses one lane makes (address and value) over sampled sizes, lanes and workgroups; exits non-zero on a difference. It evaluates the optimized IR, so it checks the reductions, not instruction selection. |
 | `mir_dump`, `rir_compile`, `unroll_stats`, `lds_conflicts`, `mb_hsaco` | The machine IR after selection; the optimized IR, or one compile with its listing; unrolling statistics; a static LDS bank-conflict report; a microbenchmark packager. |
 
 `llvm-mc` and the disassembler appear only in these offline checks, never in a
@@ -435,3 +506,5 @@ compile.
   rules), its code-object target in `hsaco_writer.rs`, an instruction
   description and encoder, wait counts, hazard rules and resource rules. Then
   `Target::supported` and the `SUPPORTED_NAMES` string the C ABI returns.
+  `TargetInfo::address_reduction` starts off, and goes on with the silicon
+  check its comment names.
