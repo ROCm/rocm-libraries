@@ -592,6 +592,35 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowedAlibiGraphOnlyFromItsWi
     EXPECT_FALSE(matches(alibiGraph(), w512));
 }
 
+/// An ALiBi window that leaves the last query rows no key follows the plain rule: without
+/// stats its ALiBi candidate serves it (the kernel zeroes those rows, ALiBi or not), with
+/// stats the graph match declines it. Shapes as in
+/// ServesAWindowWhoseLastBlockSeesNoKeyTileWithoutStats and
+/// KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats.
+TEST(TestGfx942AttentionDenseKernelMatch, ServesAKeylessAlibiWindowOnlyWithoutStats)
+{
+    auto graph = windowGraph(128);
+    graph.alibiMask = true;
+    graph.seqLenQ = 4096;
+    graph.seqLenKv = 512;
+    KernelSpec w128;
+    w128.slidingWindow = 128;
+    w128.useAlibi = 1;
+    auto plain = w128;
+    plain.useAlibi = 0;
+    EXPECT_TRUE(matches(graph, w128));
+    EXPECT_FALSE(matches(graph, plain));
+
+    auto stats = statsGraph();
+    stats.alibiMask = true;
+    stats.leftBound = 128;
+    stats.seqLenQ = 512;
+    stats.seqLenKv = 384;
+    EXPECT_EQ(loggedDecline(stats).cause, "mask");
+    stats.seqLenKv = 385;
+    EXPECT_TRUE(matchGraph(stats).has_value());
+}
+
 /// A use_alibi that is neither 0 nor 1, or not an integer, is a malformed record: it serves
 /// no graph, rather than reading as a plain kernel.
 TEST(TestGfx942AttentionDenseKernelMatch, RefusesAMalformedUseAlibi)

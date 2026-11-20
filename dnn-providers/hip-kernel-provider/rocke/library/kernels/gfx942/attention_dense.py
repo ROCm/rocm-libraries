@@ -1430,8 +1430,7 @@ def supports_attention_dense(
 
 def _alibi_design(spec: Gfx942AttentionDenseSpec) -> str:
     """How the ALiBi term enters the scores (``ALIBI_DESIGNS``): the spec's
-    ``alibi_design``, else the measured best of the family: the post-MFMA scale
-    FMA at head size 64, the accumulator seed elsewhere."""
+    ``alibi_design``, else the family's measured default."""
     if spec.alibi_design is not None:
         return spec.alibi_design
     return "fma_tile" if spec.head_size == 64 else "seed_tile"

@@ -240,6 +240,26 @@ def test_sliding_window():
     _check(_run_case(sq=1024, skv=1024, window=128), "fp16")
 
 
+@pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persistent"])
+@pytest.mark.parametrize("lse", [False, True], ids=["no_lse", "lse"])
+@pytest.mark.parametrize("window", [128, 64])
+def test_sliding_window_keyless_rows(window, lse, persistent):
+    # Sq > Skv + W - 1: rows from Skv + W - 1 on see no key and must be exactly 0
+    # (LSE -inf), with the ALiBi term on the rows before them. W 64 puts the first
+    # keyless row mid-block.
+    sq, skv = 1024, 256
+    out, lse_v, ref_o, ref_lse = _run_case(
+        sq=sq, skv=skv, window=window, heads=(8, 2), lse=lse, persistent=persistent
+    )
+    first = skv + window - 1
+    assert not np.any(out[:, first:]), f"rows >= {first} see no key but are not 0"
+    tol = _tolerance("fp16")
+    assert np.abs(out[:, :first] - ref_o[:, :first]).max() < tol
+    if lse:
+        assert np.isneginf(lse_v[:, :, first:]).all()
+        assert np.abs(lse_v[:, :, :first] - ref_lse[:, :, :first]).max() < tol
+
+
 def test_band_right_bound():
     if _ARCH == "gfx942":
         pytest.skip("gfx942 dense has no right_bound")
@@ -274,6 +294,31 @@ def test_designs(design, head_size, causal, persistent):
         alibi_design=design,
     )
     _check(case, "bf16")
+
+
+@pytest.mark.parametrize("design", ["seed_tile", "fma_tile", "seed_split", "fma_split"])
+@pytest.mark.parametrize("head_size", [64, 128])
+@pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persistent"])
+def test_designs_window_keyless(design, head_size, persistent):
+    # A window unfolds the scale on the gfx950 persistent body, so the split designs
+    # take other paths there; Sq > Skv + W - 1 adds rows without keys.
+    sq, skv, window = 1024, 256, 128
+    out, lse_v, ref_o, ref_lse = _run_case(
+        dtype="bf16",
+        head_size=head_size,
+        heads=(8, 2),
+        sq=sq,
+        skv=skv,
+        window=window,
+        persistent=persistent,
+        alibi_design=design,
+    )
+    first = skv + window - 1
+    assert not np.any(out[:, first:])
+    assert np.isneginf(lse_v[:, :, first:]).all()
+    tol = _tolerance("bf16")
+    assert np.abs(out[:, :first] - ref_o[:, :first]).max() < tol
+    assert np.abs(lse_v[:, :, :first] - ref_lse[:, :, :first]).max() < tol
 
 
 @pytest.mark.parametrize(

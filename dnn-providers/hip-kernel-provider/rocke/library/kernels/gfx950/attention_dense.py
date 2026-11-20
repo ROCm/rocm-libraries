@@ -847,8 +847,8 @@ def _dense_lse_output(
 
 def _alibi_design(spec: AttentionDenseSpec) -> str:
     """How the ALiBi term enters the scores (``ALIBI_DESIGNS``): the spec's
-    ``alibi_design``, else the measured best of the family (grid and persistent
-    alike): ``seed_split`` at head size 64, the accumulator seed elsewhere."""
+    ``alibi_design``, else the family's measured default (grid and persistent
+    alike)."""
     if spec.alibi_design is not None:
         return spec.alibi_design
     return "seed_split" if spec.head_size == 64 else "seed_tile"
@@ -2645,7 +2645,7 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
             async_load_k(K_lds_addr, buf_val, tk0)
             async_load_v(V_lds_addr, buf_val, tk0)
 
-        def do_qk(kbuf, tile_idx=None):
+        def do_qk(kbuf, tile_idx):
             s_reg = []
             if ALIBI and not AD_SPLIT:
                 bias = alibi_tile_bias(
