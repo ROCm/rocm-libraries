@@ -2594,6 +2594,14 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     constexpr int CFR = WTM < 64 ? WTM : 64;
     constexpr int OLDC = CFR + 16 / static_cast<int>(sizeof(T));
     constexpr int OUT = CF ? WM * WN * DIM * OLDC : WM * WN * DIM * OLD;
+    // The epilogues store 16-byte output vectors wherever a strip row (a run of CFR rows
+    // channels-first) holds whole ones, whatever the reduction's channel vector VEC: narrow
+    // reductions (VEC 1) write wide outputs as vectors, not one element and one decoded output
+    // position at a time. Patch backward data keeps VEC: its columns are contiguous in dx only
+    // within runs of S C, which VEC divides.
+    constexpr int OV = 16 / static_cast<int>(sizeof(T));
+    constexpr int OVEC = WTN % OV == 0 && !(K1_PATCH && DIR == K1_BACKWARD_DATA) ? OV : VEC;
+    constexpr int OVECC = CFR % OV == 0 ? OV : VEC;
     // Halo: A is [PLANES][AROWS][LD], the staged rows and one zero row, then one B tile.
     constexpr int HRPP = THREADS / (BK / VEC);
     // Channels-first halo rows: up to a vector of pixels more, for its aligned base.
@@ -3137,16 +3145,16 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
     }
 
     T* out = static_cast<T*>(DIR == K1_FORWARD ? a.y : a.x);
-    typedef typename K1Raw<VEC * sizeof(T)>::type Raw;
     if constexpr(CF != 0)
     {
         // Channels-first epilogue: per DIM-column slab and CFR-row chunk, accumulators to the
-        // wave's column-major LDS strip, then runs of VEC rows (consecutive positions of one
+        // wave's column-major LDS strip, then runs of OVECC rows (consecutive positions of one
         // channel) to global; single elements where a run is not contiguous in the output (an
         // image boundary, a stride phase) or past the last row.
+        typedef typename K1Raw<OVECC * sizeof(T)>::type Raw;
         k1LdsBarrier();
         T* strip = lds + wave * DIM * OLDC;
-        constexpr int RUNS = CFR / VEC;
+        constexpr int RUNS = CFR / OVECC;
         K1CfWalk walk;
         walk.template init<DIR>(a, gather);
 #pragma unroll
@@ -3175,31 +3183,31 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                 {
                     const int col = v / RUNS;
                     const int run = v - col * RUNS;
-                    const long long m = m0 + wm * WTM + rc * CFR + run * VEC;
+                    const long long m = m0 + wm * WTM + rc * CFR + run * OVECC;
                     const int nn = n0 + wn * WTN + j * DIM + col;
                     if(m >= gather.rows || nn >= ncols)
                     {
                         continue;
                     }
-                    const T* src = strip + col * OLDC + run * VEC;
+                    const T* src = strip + col * OLDC + run * OVECC;
                     const long long o = k1OutIndexCf<DIR>(a, gather, g, phase, m, nn);
                     walk.start(m, o);
-                    long long at[VEC];
+                    long long at[OVECC];
 #pragma unroll
-                    for(int e = 0; e < VEC; ++e)
+                    for(int e = 0; e < OVECC; ++e)
                     {
                         at[e] = walk.o;
                         walk.next();
                     }
-                    // Positions only increase with m, so a span of VEC - 1 means contiguous.
-                    if(m + VEC <= gather.rows && o % VEC == 0 && at[VEC - 1] == o + VEC - 1)
+                    // Positions only increase with m, so a span of OVECC - 1 means contiguous.
+                    if(m + OVECC <= gather.rows && o % OVECC == 0 && at[OVECC - 1] == o + OVECC - 1)
                     {
                         *reinterpret_cast<Raw*>(out + o) = *reinterpret_cast<const Raw*>(src);
                     }
                     else
                     {
 #pragma unroll
-                        for(int e = 0; e < VEC; ++e)
+                        for(int e = 0; e < OVECC; ++e)
                             if(m + e < gather.rows)
                                 out[at[e]] = src[e];
                     }
@@ -3214,11 +3222,12 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         return;
     }
 
-    // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then rows of VEC columns
+    // Epilogue: per DIM-row slab, accumulators to the wave's LDS strip, then rows of OVEC columns
     // to global (single columns past the last full vector).
+    typedef typename K1Raw<OVEC * sizeof(T)>::type Raw;
     k1LdsBarrier();
     T* strip = lds + wave * DIM * OLD;
-    constexpr int ROW_VECS = WTN / VEC;
+    constexpr int ROW_VECS = WTN / OVEC;
 #pragma unroll
     for(int i = 0; i < FM; ++i)
     {
@@ -3238,7 +3247,7 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
         for(int v = lane; v < DIM * ROW_VECS; v += WAVE)
         {
             const int r = v / ROW_VECS;
-            const int col = (v - r * ROW_VECS) * VEC;
+            const int col = (v - r * ROW_VECS) * OVEC;
             const long long m = m0 + wm * WTM + i * DIM + r;
             const int nn = n0 + wn * WTN + col;
             if(m >= gather.rows || nn >= ncols)
@@ -3246,14 +3255,14 @@ __device__ void k1ConvMma(const K1Args& a CONV_EPI_FN_PARAM)
                 continue;
             }
             const long long o = k1OutIndex<DIR>(a, gather, g, phase, m, nn);
-            if(nn + VEC <= ncols && o % VEC == 0)
+            if(nn + OVEC <= ncols && o % OVEC == 0)
             {
                 *reinterpret_cast<Raw*>(out + o)
                     = *reinterpret_cast<const Raw*>(strip + r * OLD + col);
             }
             else
             {
-                for(int e = 0; e < VEC && nn + e < ncols; ++e)
+                for(int e = 0; e < OVEC && nn + e < ncols; ++e)
                     out[o + e] = strip[r * OLD + col + e];
             }
         }
