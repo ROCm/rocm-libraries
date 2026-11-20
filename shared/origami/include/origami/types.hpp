@@ -779,6 +779,10 @@ struct problem_t {
   /// MX block size.
   std::size_t a_mx_block_size = 0;
   std::size_t b_mx_block_size = 0;
+
+  /// True when there are no output tiles (M, N or batch is 0), so there is
+  /// nothing to model. K = 0 is not empty: D = beta * C still needs a kernel.
+  bool is_empty() const { return size.m == 0 || size.n == 0 || batch == 0; }
 };
 
 /**
