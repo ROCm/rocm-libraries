@@ -381,11 +381,15 @@ void hipblaslt_print_version()
 {
     int                    version;
     char                   git_version[128];
+    char                   build_version[HIPBLASLT_BUILD_VERSION_MAX_LENGTH];
     hipblaslt_local_handle handle;
     hipblasLtGetVersion(handle, &version);
     hipblasLtGetGitRevision(handle, &git_version[0]);
+    if(hipblasLtGetBuildVersion(build_version, sizeof(build_version)) != HIPBLAS_STATUS_SUCCESS)
+        build_version[0] = '\0';
     hipblaslt_cout << "hipBLASLt version: " << version << std::endl;
     hipblaslt_cout << "hipBLASLt git version: " << git_version << std::endl;
+    hipblaslt_cout << "hipBLASLt build version: " << build_version << std::endl;
 }
 
 /* ==================================================================== */
