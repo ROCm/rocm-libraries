@@ -1,8 +1,12 @@
 #pragma once
 
 #include "hipconv/conv_params.hpp"
+#include "launch_params.h"
 
 #include <hip/hip_runtime.h>
+
+#include <algorithm>
+#include <cstdint>
 
 namespace hipconv::cdna4
 {
@@ -95,8 +99,27 @@ __device__ __forceinline__ DepthTaps<KD> live_depth_taps(int od, const DepthPara
     return taps;
 }
 
-// HIP's limit on grid z, where the grouped kernels put batch and depth.
+// HIP's advertised limit on grid z (hipDeviceProp_t::maxGridSize), where the grouped kernels put
+// batch and depth.
+//
+// A grid z above it launches on gfx950 under ROCm 10.3 and failed to launch on gfx1250; see
+// docs/gpu-reference.md.
 constexpr unsigned max_grid_z = 65535;
+
+// A grid extent computed in 64 bits, saturated so that a count past 32 bits fails grid_fits.
+inline unsigned grid_extent(int64_t blocks)
+{
+    return static_cast<unsigned>(std::min<int64_t>(blocks, UINT32_MAX));
+}
+
+// Whether HIP accepts a grouped launch: grid z within max_grid_z, and fewer than 2^32 work items
+// in x and in y.
+inline bool grid_fits(const LaunchParams& launch)
+{
+    return launch.grid.z <= max_grid_z &&
+           uint64_t(launch.grid.x) * launch.block_size.x <= UINT32_MAX &&
+           uint64_t(launch.grid.y) * launch.block_size.y <= UINT32_MAX;
+}
 
 // The delta plane and depth tap a wgrad block owns.
 //
