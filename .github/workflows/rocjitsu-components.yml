@@ -11,11 +11,6 @@ name: rocJITsu Component Tests
 # lists components and stays on a GitHub-hosted runner.
 
 on:
-  push:
-    branches:
-      - users/dileepr1/rocjitsu-components-dispatch
-    paths:
-      - .github/rocjitsu-oneshot-hipsolver
   workflow_dispatch:
     inputs:
       components:
@@ -76,7 +71,7 @@ jobs:
         id: list
         env:
           CTEST_LABEL: ${{ inputs.ctest_label || '^quick$' }}
-          COMPONENTS: ${{ github.event_name == 'push' && 'hipsolver' || inputs.components }}
+          COMPONENTS: ${{ inputs.components }}
         run: |
           set -euo pipefail
           args=(
