@@ -559,6 +559,94 @@ def test_preloop_seeds_one_scale_epoch(base_src):
         % wait)
 
 
+def _code(ln):
+    return ln.split("//")[0].strip()
+
+
+def _tail_entry(src):
+    """Tail lines from TAILLOOP start through its first run of MFMAs.
+
+    Returns the lines (comments kept) and the indices of the parity branch
+    around the scale-dword shift and of its target label."""
+    lines = src[src.index("/* TAILLOOP start */"):].splitlines()
+    raw = [ln for ln in lines if _code(ln) and not _code(ln).startswith("/*")]
+    last = next(i for i, ln in enumerate(raw) if _code(ln).startswith("v_mfma"))
+    while last + 1 < len(raw) and _code(raw[last + 1]).startswith("v_mfma"):
+        last += 1
+    raw = raw[:last + 1]
+    code = [_code(ln) for ln in raw]
+    branch = next(i for i, c in enumerate(code)
+                  if c.startswith("s_cbranch_scc0 label_SubtileTailScalePhase0"))
+    label = code.index(code[branch].split()[1] + ":")
+    return raw, branch, label
+
+
+def _tail_paths(src):
+    """Code each parity takes from TAILLOOP start to the end of the first MFMA run."""
+    raw, branch, label = _tail_entry(src)
+    code = [_code(ln) for ln in raw]
+    return {"odd": code[:label] + code[label + 1:],
+            "even": code[:branch + 1] + code[label + 1:]}
+
+
+def _mfma_scale_regs(code):
+    ops = [o.strip() for o in code.split(None, 1)[1].split(",")]
+    return [ops[4].split()[0], ops[5].split()[0]]
+
+
+def _wait_states(codes):
+    n = 0
+    for c in codes:
+        nop = re.match(r"s_nop\s+(\d+)$", c)
+        n += int(nop.group(1)) + 1 if nop else 1
+    return n
+
+
+def test_odd_phase_tail_shifts_every_scale_dword_to_phase_one(base_src):
+    """The tail MFMAs encode phase 0 of each scale dword. After an odd
+    completed-DepthU count the tail's DU is phase 1 of its epoch, so every scale
+    vgpr the tail consumes moves down one phase on that path, and only there."""
+    raw, branch, label = _tail_entry(base_src)
+    code = [_code(ln) for ln in raw]
+    parity = code[branch - 1]
+    assert parity.startswith("s_bitcmp1_b32") and "SizesSum+0" in parity, parity
+    assert re.search(r",\s*7$", parity), parity
+
+    masked = {_code(ln).split()[1].rstrip(",") for ln in raw if "mask scale vgpr" in ln}
+    assert masked
+    shifted = []
+    for c in code[branch + 1:label]:
+        op, args = c.split(None, 1)
+        assert op == "v_lshrrev_b32", c
+        dst, amount, src = [a.strip() for a in args.split(",")]
+        assert int(amount, 0) == 16 and dst == src, c
+        shifted.append(dst)
+    assert sorted(shifted) == sorted(masked)
+
+    mfmas = [c for c in code[label:] if c.startswith("v_mfma")]
+    assert {r for c in mfmas for r in _mfma_scale_regs(c)} <= masked
+    assert all("op_sel_hi:[0,0]" in c for c in mfmas), mfmas
+
+
+def test_tail_scale_writes_clear_the_mfma_read_hazard(base_src):
+    """A VALU write needs two wait states before an MFMA reads the vgpr, scale
+    operands included. The tail masks (and on odd counts shifts) every scale
+    vgpr right before its first MFMAs, on both parity paths."""
+    checked = 0
+    for parity, path in _tail_paths(base_src).items():
+        for i, c in enumerate(path):
+            if not c.startswith("v_mfma"):
+                continue
+            for reg in _mfma_scale_regs(c):
+                writes = [j for j in range(i) if _is_valu(path[j].split()[0])
+                          and path[j].split()[1].rstrip(",") == reg]
+                if writes:
+                    checked += 1
+                    gap = _wait_states(path[writes[-1] + 1:i])
+                    assert gap >= 2, (parity, reg, path[writes[-1]:i + 1])
+    assert checked
+
+
 def test_no_scale_local_read_in_preloop(base_src):
     """The pre-loop prefetches data operands but not scales.
 

@@ -22,7 +22,7 @@ from .SubtileScaleEmit import (
 from rocisa.code import Module
 from rocisa.instruction import (
     SWaitCnt, SBarrier, DSLoadB32, SBitcmp1B32, SCmpEQU32, SCmpLeU32,
-    SCBranchSCC0, SCBranchSCC1, SMovB32, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
+    SCBranchSCC0, SCBranchSCC1, SMovB32, SNop, VAddU32, VAndB32, VCmpGEI32, VCmpGTI32, VCmpLeI32,
     VCmpLtI32, VCndMaskB32, VLShiftLeftB32, VLShiftRightB32, VMovB32, VSubI32,
     LocalReadInstruction,
 )
@@ -928,6 +928,16 @@ class InstructionEmitter:
                             src=vgpr(v),
                             comment="odd count: advance scale dword to phase 1"))
                     module.add(aligned)
+
+                # The first MFMA of this step reads these vgprs as its scale
+                # operands, and a VALU write needs two wait states before any
+                # MFMA source read. The mask/shift order does not track MFMA
+                # order, so pad here rather than rely on the instructions
+                # between the last write and its reader.
+                if scaleVgprs and _data_is_8bit_float:
+                    module.add(SNop(
+                        waitState=1,
+                        comment="VALU scale write -> MFMA scale read: 2 wait states"))
 
         for m in set(maskVgprs):
             writer.vgprPool.checkIn(m)

@@ -1377,7 +1377,8 @@ def _emitDualPeriodTailScalePhase(writer, kernel, unrollIdx, scaleTiA, scaleTiB)
 
   The completed-DepthU parity is bit log2(DepthU) of global K.  The tail is
   the final global K interval under both data-parallel and StreamK execution,
-  so global K is the authoritative phase source.
+  and StreamK starts every workgroup on a whole epoch (skKGranularity), so
+  global K parity equals the parity of this workgroup's DU count.
   """
   assert kernel["DepthU"] > 0 and \
       kernel["DepthU"] & (kernel["DepthU"] - 1) == 0, \
