@@ -134,15 +134,6 @@ def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutio
         f.write("\n".join(lines) + "\n")
 
 
-def _resultsFileConsumed(hasLibraryLogic: bool, backendName: str) -> bool:
-    """Whether anything reads the benchmark client's results CSVs.
-
-    The LibraryLogic step reads them from 2_BenchmarkData, and the Ductile backend
-    scores each GA generation from them. Otherwise the client is told to write none.
-    """
-    return hasLibraryLogic or backendName == "ductile"
-
-
 def _updateResultsFileConfig(configPath, resultsFileName):
     """Update reporting in a cached INI without changing its tile sizes or other settings."""
     with open(configPath, "r", newline="") as f:
@@ -1284,8 +1275,8 @@ def main(
         archNames: The gfx names this build was asked for, when the caller knows
             them. Needed to tune a stepping, whose ISA cannot name its target.
         hasLibraryLogic: Whether the config has a LibraryLogic section, which reads
-            the results CSVs. Without one (and without the Ductile backend or
-            ForceResultsFile) the client writes no results CSV, so a rerun with
+            the results CSVs. When neither LibraryLogic nor the backend reads the CSV
+            and ForceResultsFile is off, the client omits it, so a rerun with
             ForceRedoBenchmarkProblems=False benchmarks again: the results CSV is the
             "already benchmarked" marker.
     """
@@ -1295,15 +1286,15 @@ def main(
 
     # Parse and validate backend config using shared contract
     backend = parse_backend_config(backend if backend else None)
-    backend_name = str(backend.get("Name", "tensile")).lower()
-    writeResultsFile = globalParameters["ForceResultsFile"] or _resultsFileConsumed(
-        hasLibraryLogic, backend_name
-    )
+    backend_name = backend["Name"]
+    backendImpl = BackendFactory.create(backend_name)
+    usesBenchmarkResults = backendImpl.uses_benchmark_results()
+    writeResultsFile = globalParameters["ForceResultsFile"] or hasLibraryLogic or usesBenchmarkResults
 
     # Load solution pool index if provided and supported by the backend
     solutionPoolIndex = None
     if solutionPoolFiles:
-        if BackendFactory.create(backend_name).supports_solution_pool():
+        if backendImpl.supports_solution_pool():
             solutionPoolIndex = _loadSolutionPool(solutionPoolFiles)
         else:
             printWarning(f"Backend '{backend_name}' does not support solution pools; ignoring provided pool files.")
@@ -1357,7 +1348,7 @@ def main(
     # A backend that does not use the benchmark results (TensileBackend) leaves the steps
     # independent of each other: they are all prepared first, their kernels generated in one
     # pool, then each is finished in order (_StepBatch).
-    batchSteps = not BackendFactory.create(backend_name).uses_benchmark_results()
+    batchSteps = not usesBenchmarkResults
 
     with _stepBatchFor(batchSteps) as stepBatch:
         for outerIdx, benchmarkProblemTypeConfig in enumerate(config):
