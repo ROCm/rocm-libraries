@@ -85,6 +85,26 @@ def test_a_gdn_scale_defaults_to_rsqrt_of_its_own_nodes_key_width(evaluator):
     assert values == [[pytest.approx(1 / math.sqrt(64))]]
 
 
+def test_a_safe_signature_wraps_operands_a_first_round_of_wrapping_exposes(evaluator):
+    """The lint types a node by the operands read bare at it. A HIP MLOps corpus reads a
+    rank-5 norm node's mean and inv_variance (optional in some types) beside its dbias and
+    scale (optional in others): wrapping the first pair widens the node's types to ones
+    where the second pair is optional, so one round of wrapping is not enough."""
+    operands = ("mean", "inv_variance", "dbias", "scale")
+    signature = [
+        f"$graph.nodes[2].{operand}.{field}"
+        for operand in operands
+        for field in ("dims[4]", "strides[4]", "virtual")
+    ]
+    first = {found["reference"] for found in lint(signature, "tflops", evaluator)}
+    assert first and first != set(signature), "the case no longer needs a second round"
+
+    rewritten, wrapped = safe_signature(signature, "tflops", evaluator)
+
+    assert lint(rewritten, "tflops", evaluator) == []
+    assert {item["reference"] for item in wrapped} == set(signature)
+
+
 # The rank the absent-attribute rows bind for their node's input, from which an unset
 # BlockScaleQuantize axis (the last one) is read.
 X_RANK = 4
