@@ -79,6 +79,20 @@ hipblas-bench supports data-driven benchmarks using a YAML-format specification 
 For example, ``hipblas_smoke.yaml`` is a YAML file used to run a smoke test.
 However, other examples can be found in the `rocBLAS <https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocblas>`_ GitHub repository.
 
+GPU clocks vary with power and thermal limits, which affects the measured performance.
+When hipblas-bench is built with AMD SMI, set ``HIPBLAS_BENCH_FREQ=1`` to sample the clocks
+every 50 ms while the timed iterations run and report them with each result, in MHz:
+
+*  ``lowest-avg-freq`` and ``lowest-median-freq``: the average and median engine clock of the slowest XCD.
+*  ``avg-MCLK`` and ``median-MCLK``: the average and median memory clock.
+
+Set ``HIPBLAS_BENCH_FREQ_ALL=1`` instead to report the engine clock of each XCD
+in the ``avg-freq_<i>`` and ``median-freq_<i>`` columns.
+
+.. code-block:: bash
+
+   HIPBLAS_BENCH_FREQ=1 ./hipblas-bench -f gemm -r f32_r -m 4096 -n 4096 -k 4096
+
 hipblas-test
 ============
 

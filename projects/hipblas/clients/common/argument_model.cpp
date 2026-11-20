@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2022 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  * ************************************************************************ */
 
 #include "argument_model.hpp"
+#include "frequency_monitor.hpp"
 
 // this should have been a member variable but due to the complex variadic template this singleton allows global control
 
@@ -46,4 +47,38 @@ void ArgumentModel_set_log_datatype(bool d)
 bool ArgumentModel_get_log_datatype()
 {
     return log_datatype;
+}
+
+void ArgumentModel_log_frequencies(std::stringstream& name_line, std::stringstream& val_line)
+{
+    FrequencyMonitor& frequency_monitor = getFrequencyMonitor();
+    if(!frequency_monitor.enabled())
+        return;
+
+    if(!frequency_monitor.detailedReport())
+    {
+        name_line << "lowest-avg-freq,lowest-median-freq,";
+        val_line << frequency_monitor.getLowestAverageSYSCLK() << ", "
+                 << frequency_monitor.getLowestMedianSYSCLK() << ", ";
+    }
+    else
+    {
+        auto all_avg = frequency_monitor.getAllAverageSYSCLK();
+        for(size_t i = 0; i < all_avg.size(); i++)
+        {
+            name_line << "avg-freq_" << i << ",";
+            val_line << all_avg[i] << ", ";
+        }
+
+        auto all_median = frequency_monitor.getAllMedianSYSCLK();
+        for(size_t i = 0; i < all_median.size(); i++)
+        {
+            name_line << "median-freq_" << i << ",";
+            val_line << all_median[i] << ", ";
+        }
+    }
+
+    name_line << "avg-MCLK,median-MCLK,";
+    val_line << frequency_monitor.getAverageMEMCLK() << ", " << frequency_monitor.getMedianMEMCLK()
+             << ", ";
 }

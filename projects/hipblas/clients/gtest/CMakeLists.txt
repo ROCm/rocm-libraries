@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2016-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -105,6 +105,7 @@ set( hipblas_test_common
   ../common/near.cpp
   ../common/arg_check.cpp
   ../common/argument_model.cpp
+  ../common/frequency_monitor.cpp
   ../common/hipblas_arguments.cpp
   ../common/hipblas_parse_data.cpp
   ../common/hipblas_datatype2string.cpp
