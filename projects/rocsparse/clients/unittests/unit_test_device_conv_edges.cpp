@@ -220,6 +220,121 @@ namespace
         }
     }
 
+    // Value with the given real and imaginary parts (the imaginary part is ignored for real
+    // types).
+    template <typename T>
+    T cval(double re, double im)
+    {
+        if constexpr(is_complex_v<T>)
+        {
+            using R = decltype(std::abs(T{}));
+            return T(static_cast<R>(re), static_cast<R>(im));
+        }
+        else
+        {
+            return static_cast<T>(re);
+        }
+    }
+
+    // An entry whose magnitude equals the tolerance is dropped and one just above it is
+    // kept: every kernel of the family (nnz_compress, the count and the fill of
+    // csr2csr_compress) keeps |value| > tol, the formula the hipSPARSE header spells out
+    // (rocSPARSE's own prose only says "below the threshold"). The count and the fill must
+    // agree on the boundary, or the filled row shifts and runs past the counted length. For
+    // complex types the magnitude is hypot(re, im) against the real part of tol, so a purely
+    // imaginary entry of magnitude tol is on the boundary too. All values are exact in every
+    // type.
+    template <typename T>
+    void compress_tolerance_boundary(rocsparse_handle handle)
+    {
+        using R       = decltype(std::abs(T{}));
+        const R tol   = 1;
+        const R above = std::nextafter(tol, R(2));
+        const T tol_v = cval<T>(tol, 0);
+        const I m = 2, n = 6;
+        for(int base : {0, 1})
+        {
+            SCOPED_TRACE("base " + std::to_string(base));
+            HostCsr<T> a;
+            a.m    = m;
+            a.n    = n;
+            a.base = base;
+            // Row 0: 2, -1 (|v| == tol), 3. Row 1: 1 (== tol), 1 + ulp, -1 (-i for complex,
+            // |v| == tol), 0.5.
+            const T on_boundary = is_complex_v<T> ? cval<T>(0, -tol) : cval<T>(-tol, 0);
+            a.ptr               = {base, base + 3, base + 7};
+            a.ind               = {base, base + 2, base + 4, base, base + 1, base + 3, base + 5};
+            a.val               = {cval<T>(2, 0),
+                                   cval<T>(-tol, 0),
+                                   cval<T>(3, 0),
+                                   cval<T>(tol, 0),
+                                   cval<T>(above, 0),
+                                   on_boundary,
+                                   cval<T>(0.5, 0)};
+            const auto want     = keep_entries(a, base, [&](T v) { return std::abs(v) > tol; });
+            ASSERT_EQ(want.nnz(), 3);
+            std::vector<I> per_row(m);
+            for(I r = 0; r < m; ++r)
+                per_row[r] = want.ptr[r + 1] - want.ptr[r];
+
+            DevCsr<T>  d(a);
+            DevBuf<I>  d_per_row(m);
+            const auto nnz_fn      = pick<T>(rocsparse_snnz_compress,
+                                        rocsparse_dnnz_compress,
+                                        rocsparse_cnnz_compress,
+                                        rocsparse_znnz_compress);
+            const auto compress_fn = pick<T>(rocsparse_scsr2csr_compress,
+                                             rocsparse_dcsr2csr_compress,
+                                             rocsparse_ccsr2csr_compress,
+                                             rocsparse_zcsr2csr_compress);
+            ASSERT_EQ(nnz_via(handle,
+                              false,
+                              [&](I* total) {
+                                  return nnz_fn(
+                                      handle, m, d.descr, d.val, d.ptr, d_per_row, total, tol_v);
+                              }),
+                      want.nnz());
+            EXPECT_EQ(d_per_row.read(m), per_row);
+
+            // Guard elements past the counted length keep their sentinel.
+            const I   guard      = 4;
+            const I   sentinel_i = -7;
+            const T   sentinel_v = cval<T>(-77, -55);
+            DevBuf<I> ptr_c(m + 1), ind_c(std::vector<I>(want.nnz() + guard, sentinel_i));
+            DevBuf<T> val_c(std::vector<T>(want.nnz() + guard, sentinel_v));
+            ASSERT_EQ(compress_fn(handle,
+                                  m,
+                                  n,
+                                  d.descr,
+                                  d.val,
+                                  d.ptr,
+                                  d.ind,
+                                  a.nnz(),
+                                  d_per_row,
+                                  val_c,
+                                  ptr_c,
+                                  ind_c,
+                                  tol_v),
+                      st_ok);
+            ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+            expect_csr(ptr_c, ind_c, val_c, want);
+            std::vector<I> want_ind = want.ind;
+            std::vector<T> want_val = want.val;
+            want_ind.insert(want_ind.end(), guard, sentinel_i);
+            want_val.insert(want_val.end(), guard, sentinel_v);
+            EXPECT_EQ(ind_c.read(), want_ind);
+            EXPECT_EQ(val_c.read(), want_val);
+        }
+    }
+
+    TEST_F(ConvEdges, Csr2CsrCompressToleranceBoundary)
+    {
+        compress_tolerance_boundary<float>(handle);
+        compress_tolerance_boundary<double>(handle);
+        compress_tolerance_boundary<rocsparse_float_complex>(handle);
+        compress_tolerance_boundary<rocsparse_double_complex>(handle);
+    }
+
     TEST_F(ConvEdges, Csr2CsrCompressEmpty)
     {
         MatDescr  descr;
