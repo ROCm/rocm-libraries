@@ -24,6 +24,7 @@
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/params_gen.h"
 #include "../../shared/rocfft_against_fftw.h"
+#include "../../shared/rocfft_hip.h"
 #include "../../shared/rocfft_params.h"
 #include "rocfft/rocfft.h"
 #include <gtest/gtest.h>
@@ -270,12 +271,28 @@ static void compare_data(const std::vector<rocfft_complex<float>>& original_host
     EXPECT_LT(diff.l_inf / input_norm.l_inf, log2(original_host_data.size()) * MAX_TRANSFORM_ERROR);
 }
 
-void hipGraphTest_execute(size_t N)
+void hipGraphTest_execute(size_t N, bool expect_work_memory)
 {
     if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
        > unittest_prob)
     {
         GTEST_SKIP();
+    }
+
+    // This test doesn't allocate work memory itself, and expects
+    // rocFFT to auto-allocate at execute time.  That goes into a
+    // memory pool, so ensure that those are supported before trying
+    // to test.
+    if(expect_work_memory)
+    {
+        int pool_supported = 0;
+        if(hipDeviceGetAttribute(&pool_supported,
+                                 hipDeviceAttributeMemoryPoolsSupported,
+                                 rocfft_scoped_device::current_device())
+           != hipSuccess)
+            GTEST_SKIP() << "unable to query memory pool support";
+        if(!pool_supported)
+            GTEST_SKIP() << "memory pool unsupported for execute-time auto-allocation";
     }
 
     hipGraph_t     graph      = nullptr;
@@ -397,7 +414,7 @@ void hipGraphTest_execute(size_t N)
 // Test a plan that should not require work memory
 TEST(rocfft_UnitTest, hipGraph_execution_256)
 {
-    hipGraphTest_execute(256);
+    hipGraphTest_execute(256, false);
 }
 
 // Test a plan that should require work memory - the test does not
@@ -405,5 +422,5 @@ TEST(rocfft_UnitTest, hipGraph_execution_256)
 // internally.
 TEST(rocfft_UnitTest, hipGraph_execution_1048576)
 {
-    hipGraphTest_execute(1048576);
+    hipGraphTest_execute(1048576, true);
 }

@@ -215,6 +215,7 @@ inline namespace rocfft_internal
             std::swap(buf, other.buf);
             std::swap(owned, other.owned);
             std::swap(stream, other.stream);
+            std::swap(async, other.async);
             std::swap(bsize, other.bsize);
             std::swap(device, other.device);
             std::swap(is_managed_memory, other.is_managed_memory);
@@ -224,6 +225,7 @@ inline namespace rocfft_internal
             std::swap(buf, other.buf);
             std::swap(owned, other.owned);
             std::swap(stream, other.stream);
+            std::swap(async, other.async);
             std::swap(bsize, other.bsize);
             std::swap(device, other.device);
             std::swap(is_managed_memory, other.is_managed_memory);
@@ -260,12 +262,15 @@ inline namespace rocfft_internal
             });
         }
 
-        hipError_t alloc_on_stream(const size_t size, hipStream_t stream)
+        hipError_t alloc_async(const size_t size, hipStream_t stream)
         {
             return alloc_base(size, [this, stream]() {
                 auto ret = hipMallocAsync(&buf, bsize, stream);
                 if(ret == hipSuccess)
+                {
                     this->stream = stream;
+                    this->async  = true;
+                }
                 return ret;
             });
         }
@@ -283,10 +288,11 @@ inline namespace rocfft_internal
                 {
                     // free on the device we allocated on
                     rocfft_scoped_device dev(device);
-                    if(stream)
+                    if(async)
                     {
                         (void)hipFreeAsync(buf, stream);
                         stream = nullptr;
+                        async  = false;
                     }
                     else
                     {
@@ -376,6 +382,7 @@ inline namespace rocfft_internal
         bool        owned             = true;
         bool        is_managed_memory = false;
         hipStream_t stream            = nullptr;
+        bool        async             = false;
         size_t      bsize             = 0;
         int         device            = 0;
     };
