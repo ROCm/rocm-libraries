@@ -338,6 +338,9 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
       fil_layout_encodings(),
       out_layout_encodings()
 {
+    // Caller passes NormalizeArch(device); keep the dimension-independent arch for arch-exact
+    // feature gates (ExtractTunaNetNDFeatures) instead of substring-matching the model prefix.
+    arch = device;
     if(dim == 2)
     {
         model_prefix = device;

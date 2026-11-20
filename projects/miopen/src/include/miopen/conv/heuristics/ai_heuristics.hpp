@@ -253,8 +253,9 @@ class MetadataND
 {
 private:
     std::string model_prefix;
-    bool is_valid;   // Error handling flag
-    int spatial_dim; // 2 or 3 - dimension this model supports
+    std::string arch; // normalized device arch (e.g. "gfx1250"), dimension-independent
+    bool is_valid;    // Error handling flag
+    int spatial_dim;  // 2 or 3 - dimension this model supports
 
     // Loaded data (const members like 2D pattern)
     std::vector<std::string> features;
@@ -321,6 +322,10 @@ public:
      * @return Model prefix string used during construction/loading
      */
     const std::string& GetModelPrefix() const { return model_prefix; }
+
+    /// Normalized device arch (e.g. "gfx942", "gfx950", "gfx1250"), independent of dimension;
+    /// use this for arch-exact feature gates instead of substring-matching the model prefix.
+    const std::string& GetArch() const { return arch; }
 
     /**
      * @brief Get the spatial dimension this model supports

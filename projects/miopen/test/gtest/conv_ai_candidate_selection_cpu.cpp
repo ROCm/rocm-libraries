@@ -56,34 +56,64 @@ const std::vector<ArchSolver>& AllArchSolvers()
     return v;
 }
 
-// A real ProblemDescription per spatial rank, so GetFeaturesND builds the engineered input exactly
-// as production does (RunAIHeuristics feeds its output straight to EncodeInputFeatures). stride 1 /
-// pad 1 / dilation 1 / 3x3(x3) keeps the output spatial size equal to the input.
-miopen::conv::ProblemDescription MakeProblem(bool is3d)
+// The problem's direction must match the solver's: Wrw/Bwd models were trained on
+// BackwardWeights/BackwardData shapes, and GetFeaturesND encodes the direction, so a Forward
+// problem would not exercise the Bwd/Wrw metadata the target workload uses.
+miopen::conv::Direction DirectionOf(const std::string& solver)
 {
-    if(is3d)
-    {
-        miopen::TensorDescriptor in(miopenFloat, std::vector<int>{1, 64, 8, 56, 56});
-        miopen::TensorDescriptor wei(miopenFloat, std::vector<int>{64, 64, 3, 3, 3});
-        miopen::TensorDescriptor out(miopenFloat, std::vector<int>{1, 64, 8, 56, 56});
-        miopen::ConvolutionDescriptor conv(
-            3, miopenConvolution, miopenPaddingDefault, {1, 1, 1}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0});
-        return miopen::conv::ProblemDescription(
-            in, wei, out, conv, miopen::conv::Direction::Forward);
-    }
-    miopen::TensorDescriptor in(miopenFloat, std::vector<int>{1, 64, 56, 56});
-    miopen::TensorDescriptor wei(miopenFloat, std::vector<int>{64, 64, 3, 3});
-    miopen::TensorDescriptor out(miopenFloat, std::vector<int>{1, 64, 56, 56});
-    miopen::ConvolutionDescriptor conv(
-        2, miopenConvolution, miopenPaddingDefault, {1, 1}, {1, 1}, {1, 1}, {0, 0});
-    return miopen::conv::ProblemDescription(in, wei, out, conv, miopen::conv::Direction::Forward);
+    if(solver.find("Wrw") != std::string::npos)
+        return miopen::conv::Direction::BackwardWeights;
+    if(solver.find("Bwd") != std::string::npos)
+        return miopen::conv::Direction::BackwardData;
+    return miopen::conv::Direction::Forward;
 }
 
-// The engineered feature map as production builds it (not a hand-coded map), so the dilation_d
-// source change and any future GetFeaturesND change are exercised here.
-std::map<std::string, float> FeaturesFor(const ArchSolver& as)
+// Float precisions every shipped input-encoder metadata one-hots (BF16/FP16/FP32). The target
+// workload is BF16; a precision the encoder does not cover would throw in EncodeInputFeatures, so
+// covering all three here catches a dtype regression in the metadata. INT8 (Fwd only) uses a
+// separate path and is out of scope.
+const std::vector<miopenDataType_t>& TestDataTypes()
 {
-    return miopen::solver::conv::GetFeaturesND(MakeProblem(as.is3d), /*max_cu=*/304, as.arch);
+    static const std::vector<miopenDataType_t> v{miopenFloat, miopenHalf, miopenBFloat16};
+    return v;
+}
+
+// A real ProblemDescription per spatial rank, dtype, direction and dilation, so GetFeaturesND
+// builds the engineered input exactly as production does (RunAIHeuristics feeds its output straight
+// to EncodeInputFeatures). stride 1 and pad == dilation on a 3-tap filter keep the output spatial
+// size equal to the input, so a dilation > 1 case stays valid and exercises the dilation feature.
+miopen::conv::ProblemDescription
+MakeProblem(bool is3d, miopenDataType_t dtype, miopen::conv::Direction dir, int dilation)
+{
+    const int p = dilation;
+    if(is3d)
+    {
+        miopen::TensorDescriptor in(dtype, std::vector<int>{1, 64, 8, 56, 56});
+        miopen::TensorDescriptor wei(dtype, std::vector<int>{64, 64, 3, 3, 3});
+        miopen::TensorDescriptor out(dtype, std::vector<int>{1, 64, 8, 56, 56});
+        miopen::ConvolutionDescriptor conv(3,
+                                           miopenConvolution,
+                                           miopenPaddingDefault,
+                                           {p, p, p},
+                                           {1, 1, 1},
+                                           {dilation, dilation, dilation},
+                                           {0, 0, 0});
+        return miopen::conv::ProblemDescription(in, wei, out, conv, dir);
+    }
+    miopen::TensorDescriptor in(dtype, std::vector<int>{1, 64, 56, 56});
+    miopen::TensorDescriptor wei(dtype, std::vector<int>{64, 64, 3, 3});
+    miopen::TensorDescriptor out(dtype, std::vector<int>{1, 64, 56, 56});
+    miopen::ConvolutionDescriptor conv(
+        2, miopenConvolution, miopenPaddingDefault, {p, p}, {1, 1}, {dilation, dilation}, {0, 0});
+    return miopen::conv::ProblemDescription(in, wei, out, conv, dir);
+}
+
+// The engineered feature map as production builds it (not a hand-coded map) for one dtype/dilation,
+// so the dilation_d source change and any future GetFeaturesND change are exercised here.
+std::map<std::string, float> FeaturesFor(const ArchSolver& as, miopenDataType_t dtype, int dilation)
+{
+    return miopen::solver::conv::GetFeaturesND(
+        MakeProblem(as.is3d, dtype, DirectionOf(as.solver), dilation), /*max_cu=*/304, as.arch);
 }
 
 // Mirror parse_kernel_id (ai_candidate_selection.cpp); that lambda is file-local, so keep this copy
@@ -146,11 +176,19 @@ TEST_P(CPU_CandidateSelectionCpu_NONE, EncodeInputFeaturesMatchesEncoderWidth)
         GTEST_SKIP() << "No candidate-selection assets for " << as.arch << "/" << as.solver;
 
     const auto& model = GetCandidateSelectionModel(as.arch, as.solver);
-    std::vector<float> encoded;
-    ASSERT_NO_THROW({ encoded = model.EncodeInputFeatures(FeaturesFor(as)); })
-        << "EncodeInputFeatures threw for " << as.arch << "/" << as.solver
-        << ": engineered input width disagrees with the input encoder.";
-    EXPECT_FALSE(encoded.empty());
+    for(const auto dtype : TestDataTypes())
+    {
+        for(const int dilation : {1, 2})
+        {
+            std::vector<float> encoded;
+            ASSERT_NO_THROW({
+                encoded = model.EncodeInputFeatures(FeaturesFor(as, dtype, dilation));
+            }) << "EncodeInputFeatures threw for "
+               << as.arch << "/" << as.solver << " dtype " << dtype << " dilation " << dilation
+               << ": engineered input width disagrees with the input encoder.";
+            EXPECT_FALSE(encoded.empty());
+        }
+    }
 }
 
 // End to end on the precompute path: with trivial applicability the selector must return a real
@@ -163,12 +201,22 @@ TEST_P(CPU_CandidateSelectionCpu_NONE, PrecomputeSelectorReturnsPick)
         GTEST_SKIP() << "No candidate-selection assets for " << as.arch << "/" << as.solver;
 
     const auto accept_all = [](const std::string&, int, bool) { return true; };
-    const auto pick       = SelectBestVocabCandidate(
-        as.arch, as.solver, FeaturesFor(as), /*use_tf32=*/false, accept_all);
-    ASSERT_TRUE(pick.has_value()) << "SelectBestVocabCandidate fell back for " << as.arch << "/"
-                                  << as.solver
-                                  << ": table rejected, input-shape mismatch, or empty vocabulary.";
-    EXPECT_FALSE(pick->first.empty());
+    for(const auto dtype : TestDataTypes())
+    {
+        for(const int dilation : {1, 2})
+        {
+            const auto pick = SelectBestVocabCandidate(as.arch,
+                                                       as.solver,
+                                                       FeaturesFor(as, dtype, dilation),
+                                                       /*use_tf32=*/false,
+                                                       accept_all);
+            ASSERT_TRUE(pick.has_value())
+                << "SelectBestVocabCandidate fell back for " << as.arch << "/" << as.solver
+                << " dtype " << dtype << " dilation " << dilation
+                << ": table rejected, input-shape mismatch, or empty vocabulary.";
+            EXPECT_FALSE(pick->first.empty());
+        }
+    }
 }
 
 // Structural lint over the shipped vocabulary: accept_all above never parses split_k, so it misses

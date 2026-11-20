@@ -846,7 +846,7 @@ static bool HasLegacyTunaNetSupport(const std::string& device)
 
 /**
  * @brief Check if device has ND TunaNet model support (2D and 3D)
- * @param device GPU device name (e.g., "gfx942", "gfx950")
+ * @param device GPU device name (e.g., "gfx942", "gfx950", "gfx1250")
  * @return true if ND TunaNet models exist for this device
  */
 static bool HasNDTunaNetSupport(const std::string& device)
@@ -1140,7 +1140,7 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
             MIOPEN_LOG_I2("TunaNet bypassed via MIOPEN_DEBUG_LGBM_ONLY for " << device
                                                                              << "; trying LGBM");
         }
-        // ND model (for gfx942/gfx950, supports both 2D and 3D).
+        // ND model (for gfx942/gfx950/gfx1250, supports both 2D and 3D).
         else if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
             int dim                        = is3d ? 3 : 2;
@@ -1333,8 +1333,9 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
         else if(feature_name == "arch")
         {
             // Combined gfx950+gfx1250 models add a binary arch input (gfx950=0, gfx1250=1). Each
-            // per-arch model file serves a single device, so emit that device's arch bit.
-            const bool is_gfx1250 = metadata.GetModelPrefix().find("gfx1250") != std::string::npos;
+            // per-arch model file serves a single device, so emit that device's arch bit. Use the
+            // normalized arch (covers gfx1250-strict) rather than substring-matching the prefix.
+            const bool is_gfx1250 = metadata.GetArch() == "gfx1250";
             features.push_back(is_gfx1250 ? 1.0f : 0.0f);
         }
         else
@@ -1384,7 +1385,7 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
 class TunaNetNDModel : public ModelND
 {
 private:
-    const std::string device_name; // Device name (e.g., "gfx942", "gfx950")
+    const std::string device_name; // Device name (e.g., "gfx942", "gfx950", "gfx1250")
 
 public:
     MetadataND metadata;

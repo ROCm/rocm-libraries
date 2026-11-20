@@ -54,7 +54,7 @@
  * - RunAIHeuristics: Main template function that orchestrates AI model execution
  *
  * Architecture support:
- * - gfx942/gfx950: Candidate Selection models (newer architecture)
+ * - gfx942/gfx950/gfx1250: Candidate Selection models (newer architecture)
  * - gfx90a: KTN models (legacy compatibility)
  *
  * @see RunAIHeuristics for usage examples
@@ -94,7 +94,7 @@ static constexpr int CkSplitkAutoDeduce = -1;
  */
 struct SolverHeuristicConfig
 {
-    // Solver name for Candidate Selection models (gfx942/gfx950)
+    // Solver name for Candidate Selection models (gfx942/gfx950/gfx1250)
     const char* solver_name = "Unknown";
 
     // Solver name for KTN models (gfx90a) - often abbreviated
@@ -281,7 +281,7 @@ bool RunKTNGeneric(ConfigType& config,
 /**
  * @brief Run AI-based heuristics to select optimal kernel configuration
  *
- * This centralized function handles both Candidate Selection (gfx942/gfx950)
+ * This centralized function handles both Candidate Selection (gfx942/gfx950/gfx1250)
  * and KTN (gfx90a) heuristics, reducing code duplication across solvers.
  *
  * @tparam FillKernelsFunc Callable that returns valid kernel IDs for a given problem
