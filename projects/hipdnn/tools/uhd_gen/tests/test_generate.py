@@ -1240,6 +1240,126 @@ def test_the_search_never_sees_the_evaluation_benchmarks(
     assert groups.tolist() == frame["benchmark"].astype(str).tolist()
 
 
+def _spied_feature_search(monkeypatch, tmp_path, evaluator, *extra):
+    """`generate --feature-search` over a tree whose KDP kernels carry tile values, with a
+    bench that also publishes two tensor uids (one optional) and an optional attribute, and
+    a stub MLP that scores every set alike. Returns what `search_features` was called with
+    (its frame and keywords), the columns the bench published and the metric asked for.
+    """
+    import numpy as np
+    import uhd_gen.feature_search as feature_search
+    import uhd_gen.generate
+    from uhd_gen.tests.kdp_stub import kdp
+
+    main = _cli()
+    tree = _ued_tree(tmp_path / "descriptors")
+    (tree / "engine.kdp.json").write_text(
+        json.dumps(kdp("33333333-3333-4333-8333-333333333330", UED, [64, 128, 64])),
+        encoding="utf-8",
+    )
+    requested = _immediate_bench(monkeypatch, snapshot_provenance(tree))
+    bench = uhd_gen.generate._run_json
+    published = {
+        "graph.nodes[0].dy.dims[0]",
+        "device.cu_count",
+        "graph.flops",
+        "graph.nodes[0].in_1.uid",
+        "graph.nodes[0].swish_beta",
+        "engine7.bias.uid",
+    }
+
+    def publishing(*arguments, **keywords):
+        response = bench(*arguments, **keywords)
+        size = response["features"]["graph.nodes[0].dy.dims[0]"]
+        response["features"].update(
+            {
+                # The matcher binds -1 to an absent optional tensor.
+                "graph.nodes[0].in_1.uid": -1 if size % 2 else 5,
+                "graph.nodes[0].swish_beta": 1.0 + size / 10,
+                "engine7.bias.uid": 3,
+            }
+        )
+        return response
+
+    monkeypatch.setattr("uhd_gen.generate._run_json", publishing)
+    monkeypatch.setattr(
+        feature_search._MlpScorer,
+        "cells",
+        lambda self, columns, folds: np.full(len(self.scorer.seeds) * len(folds), 0.5),
+    )
+    seen = []
+    real = feature_search.search_features
+
+    def spy(frame, **options):
+        seen.append((frame, options))
+        return real(frame, **options)
+
+    monkeypatch.setattr("uhd_gen.feature_search.search_features", spy)
+    command = _search_args(
+        _graphs(tmp_path / "graphs"), tree, tmp_path / "out", evaluator, *extra
+    )
+    assert main([*command, "--feature-search"]) == 0
+    [(frame, options)] = seen
+    assert published <= set(frame.columns)
+    return frame, options, published, requested[0], tree
+
+
+def test_feature_search_forwards_the_callers_options_to_the_search(
+    monkeypatch, tmp_path, evaluator
+):
+    from uhd_gen.feature_search import catalog_values_from_tree
+    from uhd_gen.generate import search_inputs
+
+    frame, options, published, metric, tree = _spied_feature_search(
+        monkeypatch,
+        tmp_path,
+        evaluator,
+        "--adapter",
+        "mlp_data",
+        "--adapter-pass-budget",
+        "7",
+        "--seed",
+        "5",
+        "--mlp-hidden",
+        "8",
+        "--mlp-epochs",
+        "3",
+        "--mlp-max-rows",
+        "50",
+    )
+    assert options["seeds"] == [5, 6, 7]
+    assert options["adapter"] == "mlp_data"
+    assert options["adapter_pass_budget"] == 7
+    assert options["mlp_options"] == {"hidden": (8,), "epochs": 3, "max_rows": 50}
+    assert options["catalog_values"] == {"tile": [64, 128]}
+    assert options["catalog_values"] == catalog_values_from_tree(tree, None)
+    assert options["catalog_source"] == str(tree)
+    # What the search may read is what the proposal rules leave: the identifiers only as
+    # presence flags, the optional ones with the default an unbound row takes.
+    columns, identifiers, guards, omitted = search_inputs(
+        frame, published, None, [], metric, evaluator
+    )
+    assert identifiers == ["engine7.bias.uid", "graph.nodes[0].in_1.uid"]
+    assert guards == {"graph.nodes[0].in_1.uid": -1, "graph.nodes[0].swish_beta": 1.0}
+    assert options["columns"] == columns
+    assert options["presence_columns"] == identifiers
+    assert options["guards"] == guards
+    assert options["omitted"] == omitted
+
+
+def test_feature_search_without_options_searches_as_the_tree_over_three_seeds(
+    monkeypatch, tmp_path, evaluator
+):
+    from uhd_gen.feature_search import ADAPTER_PASS_BUDGET
+
+    _, options, _, _, _ = _spied_feature_search(monkeypatch, tmp_path, evaluator)
+    assert options["seeds"] == [0, 1, 2]
+    assert options["adapter"] == "tree"
+    assert options["adapter_pass_budget"] == ADAPTER_PASS_BUDGET
+    assert options["mlp_options"] == {}
+    assert options["catalog_values"] == {"tile": [64, 128]}
+
+
 def test_feature_search_trains_on_its_recipe_and_records_the_report(
     monkeypatch, tmp_path, evaluator
 ):

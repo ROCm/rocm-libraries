@@ -3,6 +3,7 @@
 """Tests for `uhd_gen feature-search`: the candidates, the search, and its recipe."""
 import json
 import types
+import warnings
 
 import numpy as np
 import pytest
@@ -18,6 +19,7 @@ from uhd_gen.feature_search import (
     search_features,
     verify_recipe,
 )
+from uhd_gen.tests.kdp_stub import kdp
 
 SEEDS = ["0", "1"]
 
@@ -313,6 +315,7 @@ def test_the_search_keeps_a_stride_order_flag_when_time_depends_on_layout():
 
 def _signal_search(**options):
     """One column time depends on and five it does not; no dim columns, so no templates."""
+    options.setdefault("seeds", [0])
     rng = np.random.default_rng(5)
     count = 400
     frame = pd.DataFrame({"s.x": rng.random(count)})
@@ -326,7 +329,6 @@ def _signal_search(**options):
         target="tflops",
         objective="max",
         groups=frame["benchmark"],
-        seeds=[0],
         feature_evaluator=_evaluator_path(),
         **options,
     )
@@ -438,6 +440,7 @@ def _adapter_frame(count=300):
 
 
 def _adapter_search(**options):
+    options.setdefault("seeds", [0, 1])
     frame = _adapter_frame()
     return frame, search_features(
         frame,
@@ -445,19 +448,16 @@ def _adapter_search(**options):
         target="tflops",
         objective="max",
         groups=frame["benchmark"],
-        seeds=[0, 1],
         feature_evaluator=_evaluator_path(),
         **options,
     )
 
 
-def test_the_adapter_pass_adds_what_the_mlp_scores_better_and_records_each_delta(
-    monkeypatch,
-):
-    frame = _adapter_frame()
+def _mlp_that_wants_the_remainder(monkeypatch, frame):
+    """A constant stub: the MLP scores 0.1 better with `dim % 8` among its columns."""
     remainder = (frame["g.q.dims[3]"] % 8).to_numpy(float)
 
-    def mlp_that_wants_the_remainder(self, columns, folds):
+    def cells(self, columns, folds):
         useful = any(
             np.array_equal(self.scorer.matrix[:, column], remainder)
             for column in columns
@@ -467,9 +467,13 @@ def test_the_adapter_pass_adds_what_the_mlp_scores_better_and_records_each_delta
             0.5 - (0.1 if useful else 0.0) + 0.0001 * len(columns),
         )
 
-    monkeypatch.setattr(
-        feature_search._MlpScorer, "cells", mlp_that_wants_the_remainder
-    )
+    monkeypatch.setattr(feature_search._MlpScorer, "cells", cells)
+
+
+def test_the_adapter_pass_adds_what_the_mlp_scores_better_and_records_each_delta(
+    monkeypatch,
+):
+    _mlp_that_wants_the_remainder(monkeypatch, _adapter_frame())
     _, tree = _adapter_search()
     _, mlp = _adapter_search(adapter="mlp_data", adapter_pass_budget=40)
     assert tree["adapter_pass"] is None and tree["recipe"] == ["$s.x"]
@@ -538,6 +542,267 @@ def test_the_mlp_keeps_the_pruned_set_when_it_scores_better(monkeypatch):
     assert choice["pruned_mlp_score"] < choice["pre_prune_mlp_score"]
     assert report["recipe"] == ["$s.x"]
     assert report["final"]["features"][0]["removal_cost"] is None
+
+
+def test_a_one_seed_adapter_pass_keeps_a_feature_the_removal_fold_says_is_needed(
+    monkeypatch,
+):
+    """One seed leaves the removal fold a single cell, which has no spread to estimate: its
+    standard error is 0 (the margin is the floor), not NaN, which kept nothing."""
+    _mlp_that_wants_the_remainder(monkeypatch, _adapter_frame())
+    _, report = _adapter_search(adapter="mlp_data", adapter_pass_budget=40, seeds=[0])
+    remainder = {"%": ["$g.q.dims[3]", 8]}
+    assert report["recipe"] == ["$s.x", remainder]
+    [check] = report["adapter_pass"]["removal_check"]
+    assert check["kept"] and np.isfinite(check["mlp_removal_cost"])
+    [added] = [f for f in report["final"]["features"] if f["mlp_removal_cost"]]
+    assert np.isfinite(added["mlp_removal_cost"]) and added["mlp_removal_cost"] > 0.09
+
+
+def test_paired_with_one_cell_has_zero_standard_error():
+    with warnings.catch_warnings():
+        # A standard error of one cell is not computed: no "degrees of freedom" warning.
+        warnings.simplefilter("error")
+        mean, error = feature_search._paired(np.array([0.5]), np.array([0.25]))
+    assert (mean, error) == (0.25, 0.0)
+    mean, error = feature_search._paired(np.array([0.5, 0.5]), np.array([0.25, 0.45]))
+    assert mean == pytest.approx(0.15)
+    assert error == pytest.approx(np.std([0.25, 0.05], ddof=1) / np.sqrt(2))
+
+
+def _noisy_cells(monkeypatch, wanted, gain):
+    """Stub `_MlpScorer.cells` with a known paired difference per (seed, fold) cell.
+
+    One value per cell, in the real method's order (each seed's folds in turn):
+    `0.5 + 1e-4 * len(columns)`, less `gain(seed_index, fold)` when a column equals
+    `wanted`. A set that adds a column pays 1e-4 for it; every other difference between
+    two sets is `gain` on the cells it names, so a gain can differ by seed and fold.
+    Returns the (columns, folds) of each call."""
+    calls = []
+
+    def cells(self, columns, folds):
+        calls.append((tuple(columns), tuple(folds)))
+        useful = any(np.array_equal(self.scorer.matrix[:, c], wanted) for c in columns)
+        return np.array(
+            [
+                0.5 + 1e-4 * len(columns) - (gain(seed, fold) if useful else 0.0)
+                for seed in range(len(self.scorer.seeds))
+                for fold in folds
+            ]
+        )
+
+    monkeypatch.setattr(feature_search._MlpScorer, "cells", cells)
+    return calls
+
+
+def _gain_by_fold(discovery=0.0, confirm=0.0, removal=0.0):
+    """`gain` for `_noisy_cells`: a level per stage (the folds 0-1, 2-3 and 4), or
+    (level, wobble) for a gain that swings by +-wobble from one cell to the next."""
+    stages = {0: discovery, 1: discovery, 2: confirm, 3: confirm, 4: removal}
+
+    def gain(seed, fold):
+        level, wobble = (
+            stages[fold] if isinstance(stages[fold], tuple) else (stages[fold], 0)
+        )
+        return level + wobble * (-1) ** (seed + fold)
+
+    return gain
+
+
+def _standard_error(values):
+    return np.std(values, ddof=1) / np.sqrt(len(values))
+
+
+_REMAINDER = json.dumps({"%": ["$g.q.dims[3]", 8]}, separators=(",", ":"))
+
+
+def _remainder_pass(monkeypatch, gain):
+    """The adapter pass over `_adapter_frame` with three seeds, the stub MLP gaining `gain`
+    from `dim % 8`: the report and the remainder's entry."""
+    frame = _adapter_frame()
+    calls = _noisy_cells(monkeypatch, (frame["g.q.dims[3]"] % 8).to_numpy(float), gain)
+    _, report = _adapter_search(
+        adapter="mlp_data", adapter_pass_budget=40, seeds=[0, 1, 2]
+    )
+    [entry] = [
+        e for e in report["adapter_pass"]["candidates"] if e["feature"] == _REMAINDER
+    ]
+    return report, entry, calls
+
+
+def test_a_gain_inside_two_standard_errors_is_not_picked(monkeypatch):
+    # Cells swing between 0.03 and -0.01: the mean 0.01 clears the floor, not 2 errors.
+    noisy = _gain_by_fold(discovery=(0.01, 0.02))
+    report, entry, _ = _remainder_pass(monkeypatch, noisy)
+    cells = [
+        noisy(seed, fold)
+        for seed in range(3)
+        for fold in feature_search.ADAPTER_DISCOVERY
+    ]
+    assert entry["mlp_delta"] == pytest.approx(np.mean(cells) - 1e-4)
+    assert entry["mlp_delta_se"] == pytest.approx(_standard_error(cells))
+    assert feature_search.MIN_TOLERANCE < entry["mlp_delta"] < 2 * entry["mlp_delta_se"]
+    assert not entry["picked"] and not entry["added"]
+    assert entry["confirm_delta"] is None
+    assert report["recipe"] == ["$s.x"]
+
+
+def test_a_gain_past_two_standard_errors_is_picked_confirmed_and_kept(monkeypatch):
+    steady = (0.05, 0.001)
+    report, entry, _ = _remainder_pass(
+        monkeypatch, _gain_by_fold(discovery=steady, confirm=steady, removal=steady)
+    )
+    assert entry["mlp_delta"] > 2 * entry["mlp_delta_se"] > 0
+    assert entry["picked"] and entry["added"]
+    assert report["adapter_pass"]["removal_check"][0]["kept"]
+    assert json.dumps(report["recipe"][-1], separators=(",", ":")) == _REMAINDER
+
+
+def test_a_pick_the_confirm_folds_do_not_support_is_not_added(monkeypatch):
+    steady = (0.05, 0.001)
+    report, entry, calls = _remainder_pass(
+        monkeypatch, _gain_by_fold(discovery=steady, removal=steady)
+    )
+    assert entry["picked"] and not entry["added"]
+    assert entry["confirm_delta"] < feature_search.MIN_TOLERANCE
+    assert report["adapter_pass"]["removal_check"] == []
+    assert report["recipe"] == ["$s.x"]
+    # The confirmation reads the folds discovery did not.
+    assert feature_search.ADAPTER_CONFIRM in {folds for _, folds in calls}
+
+
+def test_a_pick_the_confirm_folds_support_inside_one_standard_error_is_not_added(
+    monkeypatch,
+):
+    steady = (0.05, 0.001)
+    # Cells swing between 0.04 and -0.02: the mean 0.01 clears the floor, not one error.
+    report, entry, _ = _remainder_pass(
+        monkeypatch,
+        _gain_by_fold(discovery=steady, confirm=(0.01, 0.03), removal=steady),
+    )
+    assert entry["picked"] and not entry["added"]
+    assert entry["confirm_delta"] > feature_search.MIN_TOLERANCE
+    assert report["recipe"] == ["$s.x"]
+
+
+def test_a_gain_only_on_the_confirm_folds_is_never_picked(monkeypatch):
+    steady = (0.05, 0.001)
+    report, entry, _ = _remainder_pass(
+        monkeypatch, _gain_by_fold(confirm=steady, removal=steady)
+    )
+    assert not entry["picked"] and not entry["added"]
+    assert entry["confirm_delta"] is None
+    assert report["recipe"] == ["$s.x"]
+
+
+@pytest.mark.parametrize(
+    "removal",
+    [
+        # No gain on the removal fold.
+        (0.0, 0.001),
+        # A gain of 0.015 that three cells swinging between 0.035 and -0.025 do not show.
+        (0.005, 0.03),
+    ],
+)
+def test_an_added_feature_the_removal_fold_does_not_need_is_dropped_again(
+    monkeypatch, removal
+):
+    steady = (0.05, 0.001)
+    report, entry, _ = _remainder_pass(
+        monkeypatch, _gain_by_fold(discovery=steady, confirm=steady, removal=removal)
+    )
+    assert entry["picked"] and entry["added"]
+    [check] = report["adapter_pass"]["removal_check"]
+    assert check["feature"] == _REMAINDER and not check["kept"]
+    assert report["recipe"] == ["$s.x"]
+    assert report["adapter_pass"]["added"] == []
+
+
+def _pre_prune_choice(monkeypatch, gain):
+    """The set choice when the stub MLP gains `gain` from `n0`, which the prune removed."""
+    n0 = _signal_columns()["s.n0"].to_numpy()
+    _noisy_cells(monkeypatch, n0, gain)
+    report = _signal_search(adapter="mlp_data", seeds=[0, 1, 2])
+    assert sum(step["removed"] for step in report["prune"]) == 5
+    return report, report["adapter_pass"]["set_choice"]
+
+
+def test_the_pre_prune_set_needs_a_gain_past_two_standard_errors_to_replace_the_pruned(
+    monkeypatch,
+):
+    swinging = (0.005, 0.02)
+    report, choice = _pre_prune_choice(
+        monkeypatch, _gain_by_fold(confirm=swinging, removal=swinging)
+    )
+    # Ahead on average, by more than the floor and by less than 2 standard errors.
+    assert 0.002 < choice["pre_prune_gain"] < 2 * choice["pre_prune_gain_se"]
+    assert choice["chosen"] == "pruned"
+    assert report["recipe"] == ["$s.x"]
+
+
+def test_a_clear_gain_on_the_held_folds_chooses_the_pre_prune_set(monkeypatch):
+    steady = (0.05, 0.001)
+    # Folds 2-4 held: the stub's gain there, not on the discovery folds, decides.
+    report, choice = _pre_prune_choice(
+        monkeypatch, _gain_by_fold(confirm=steady, removal=steady)
+    )
+    assert choice["pre_prune_gain"] > 2 * choice["pre_prune_gain_se"] > 0
+    assert choice["chosen"] == "pre_prune"
+    assert "$s.n0" in report["recipe"]
+
+
+def test_a_gain_only_on_the_discovery_folds_does_not_choose_the_pre_prune_set(
+    monkeypatch,
+):
+    report, choice = _pre_prune_choice(
+        monkeypatch, _gain_by_fold(discovery=(0.05, 0.001))
+    )
+    assert choice["chosen"] == "pruned"
+    assert report["recipe"] == ["$s.x"]
+
+
+def _scripted_rounds(monkeypatch, errors, spread):
+    """Stub `_Scorer.score`: the held-out error of a set is `errors[its size]`, whatever it
+    holds, with `spread` over seeds and no importance to rank by."""
+
+    def score(self, columns, clusters=None):
+        importance = None if clusters is None else np.zeros(len(clusters))
+        return errors[len(columns)], spread, importance
+
+    monkeypatch.setattr(feature_search._Scorer, "score", score)
+
+
+def test_the_rounds_and_the_prune_tolerate_the_spread_over_seeds_when_it_is_wide(
+    monkeypatch,
+):
+    # Best at four features; three are 0.009 worse, inside the spread 0.01, not the floor.
+    _scripted_rounds(
+        monkeypatch,
+        {6: 0.507, 5: 0.504, 4: 0.500, 3: 0.509, 2: 0.512, 1: 0.515},
+        spread=0.01,
+    )
+    report = _signal_search(floor=1)
+    assert [r["features"] for r in report["rounds"]] == [6, 5, 4, 3, 2, 1]
+    assert report["selected"]["best_round"] == 2
+    assert report["selected"]["features"] == 3
+    # Removing one more costs 0.003: past the floor, within the spread.
+    assert [step["removed"] for step in report["prune"]] == [True, True]
+    assert all(0.002 < step["cost"] < 0.01 for step in report["prune"])
+
+
+def test_the_rounds_tolerate_the_floor_when_the_spread_over_seeds_is_narrower(
+    monkeypatch,
+):
+    # Three features are 0.0015 worse than four: no spread to cover it, the floor does.
+    _scripted_rounds(
+        monkeypatch,
+        {6: 0.510, 5: 0.505, 4: 0.500, 3: 0.5015, 2: 0.520, 1: 0.530},
+        spread=0.0,
+    )
+    report = _signal_search(floor=1)
+    assert [r["features"] for r in report["rounds"]] == [6, 5, 4, 3, 2, 1]
+    assert report["selected"]["best_round"] == 2
+    assert report["selected"]["features"] == 3
 
 
 def _scorer_over(columns, groups=None, count=400):
@@ -690,21 +955,6 @@ def test_the_catalog_values_come_from_the_kdp_kernels_of_one_engine(tmp_path):
         "11111111-1111-4111-8111-111111111111",
         "22222222-2222-4222-8222-222222222222",
     )
-
-    def kdp(identity, engine, tiles):
-        return {
-            "version": "1.0",
-            "id": identity,
-            "name": "kernels",
-            "engine": engine,
-            "kernelDescriptors": [
-                {
-                    "id": f"{identity[:-1]}{i}",
-                    "metadata": {"tile": tile, "dtype": "bf16"},
-                }
-                for i, tile in enumerate(tiles)
-            ],
-        }
 
     (tmp_path / "a.ued.json").write_text(
         json.dumps({"version": "1.0", "id": ued, "name": "provider:a"}), "utf-8"
