@@ -29,6 +29,8 @@
   .pane { position:relative; overflow:auto; background:#010409; border:1px solid var(--border); border-radius:6px; }
   .pane .lbl { position:sticky; top:0; left:0; z-index:1; display:inline-block; padding:2px 8px; background:#161b22cc; font-size:11px; color:var(--dim); }
   .pane canvas { display:block; image-rendering:pixelated; cursor:crosshair; }
+  .pane .mark { position:absolute; display:none; pointer-events:none; box-sizing:border-box; z-index:2;
+                border:1px solid #fff; box-shadow:0 0 0 1px #000, inset 0 0 0 1px #000; }
   .pane.dragging, .pane.dragging canvas { cursor:grabbing; }
   #info { width:320px; overflow:auto; border-left:1px solid var(--border); padding:10px 12px; font:12px ui-monospace,monospace; }
   #info table { border-collapse:collapse; margin:6px 0 12px; }
@@ -51,6 +53,7 @@
   <div id="controls">
     <span id="sliders"></span>
     <label>channel <select id="channel"></select></label>
+    <label>outside ROI <select id="outside"><option value="dim">dim</option><option value="hide">hide</option><option value="show">show</option></select></label>
     <label>contrast <select id="contrast"><option value="slice">slice</option><option value="global">global</option></select></label>
     <span id="limits" class="help"></span>
     <label>zoom <input id="zoom" type="range" min="1" max="128" value="8"> <span id="zoomv"></span></label>
@@ -59,10 +62,10 @@
   </div>
   <div id="body">
     <div id="grid">
-      <div class="pane"><span class="lbl">reference</span><canvas id="c-ref"></canvas></div>
-      <div class="pane"><span class="lbl">actual</span><canvas id="c-act"></canvas></div>
-      <div class="pane"><span class="lbl" id="diff-lbl">|actual − reference|</span><canvas id="c-diff"></canvas></div>
-      <div class="pane"><span class="lbl">status</span><canvas id="c-status"></canvas></div>
+      <div class="pane"><span class="lbl">reference</span><canvas id="c-ref"></canvas><div class="mark"></div></div>
+      <div class="pane"><span class="lbl">actual</span><canvas id="c-act"></canvas><div class="mark"></div></div>
+      <div class="pane"><span class="lbl" id="diff-lbl">|actual − reference|</span><canvas id="c-diff"></canvas><div class="mark"></div></div>
+      <div class="pane"><span class="lbl">status</span><canvas id="c-status"></canvas><div class="mark"></div></div>
     </div>
     <div id="info"><div id="pixel" class="help">hover a pixel</div><pre id="failure"></pre></div>
   </div>
@@ -74,6 +77,7 @@ const ENTRIES = JSON.parse(document.getElementById("data").textContent);
 const $ = (id) => document.getElementById(id);
 const INFERNO = [[0,0,4],[31,12,72],[85,15,109],[136,34,106],[186,54,85],[227,89,51],[249,140,10],[249,201,50],[252,255,164]];
 const STATUS_RGB = [[48,54,61],[46,160,67],[248,81,73]];
+const BG_RGB = [1, 4, 9];  // matches the pane background
 const STATUS_NAME = ["not compared", "pass", "FAIL"];
 const STATUS_CLS = ["skip", "pass", "FAIL"];
 
@@ -114,7 +118,7 @@ async function load(i) {
 }
 
 // ---- state + layout ---------------------------------------------------------
-let visible = [], current = -1, view = null, lead = [], hover = null;
+let visible = [], current = -1, view = null, lead = [], hover = null, channelChoice = null;
 
 function renderList() {
   const q = $("filter").value.trim();
@@ -150,10 +154,11 @@ async function select(i) {
     `<label>${v.labels[k] || "·"} <input type="range" min="0" max="${d - 1}" value="${lead[k]}" data-k="${k}" ${d === 1 ? "disabled" : ""}> <span>${lead[k]}/${d - 1}</span></label>`).join("");
   $("sliders").querySelectorAll("input").forEach(s => s.oninput = () => { lead[+s.dataset.k] = +s.value; s.nextElementSibling.textContent = `${s.value}/${s.max}`; draw(); });
 
-  const prev = $("channel").value;
+  // Only an explicit pick carries across cases, so passing through a 1-channel case doesn't
+  // replace "all" on the next RGB one.
   const opts = (v.rgb ? ["all"] : []).concat(Array.from({ length: v.C }, (_, c) => String(c)));
   $("channel").innerHTML = opts.map(o => `<option value="${o}">${o === "all" ? "all (RGB)" : "c=" + o}</option>`).join("");
-  $("channel").value = opts.includes(prev) ? prev : opts[0];
+  $("channel").value = opts.includes(channelChoice) ? channelChoice : opts[0];
   $("contrast").value = v.e.dtypes[1].endsWith("int8") ? "global" : "slice";
   fitZoom(v);
   draw();
@@ -173,14 +178,17 @@ function offset(v, y, x, c) {
   return idx * v.C + c;
 }
 
-// Min/max over the visible slice of reference and actual, for the shown channels.
-function sliceLimits(v, chans) {
+// Min/max over the visible slice of reference and actual, for the shown channels; with
+// comparedOnly, over compared elements only (falling back to all if none are).
+function sliceLimits(v, chans, comparedOnly) {
   let lo = Infinity, hi = -Infinity;
   for (let y = 0; y < v.H; ++y) for (let x = 0; x < v.W; ++x) for (const c of chans) {
     const o = offset(v, y, x, c);
+    if (comparedOnly && v.status[o] === 0) continue;
     for (const a of [v.ref[o], v.act[o]]) if (Number.isFinite(a)) { if (a < lo) lo = a; if (a > hi) hi = a; }
   }
-  return lo === Infinity ? [0, 1] : hi > lo ? [lo, hi] : [lo - 0.5, hi + 0.5];
+  if (lo === Infinity) return comparedOnly ? sliceLimits(v, chans, false) : [0, 1];
+  return hi > lo ? [lo, hi] : [lo - 0.5, hi + 0.5];
 }
 
 function lut(t) {
@@ -194,7 +202,8 @@ function draw() {
   const v = view, { W, H } = v, ch = $("channel").value, all = ch === "all";
   const chans = all ? [0, 1, 2] : [+ch];
   $("diff-lbl").textContent = `|actual − reference|  (0 … ${fmt(v.peak)})`;
-  const [lo, hi] = $("contrast").value === "global" ? v.lim : sliceLimits(v, chans), scale = 255 / (hi - lo);
+  const outside = $("outside").value;
+  const [lo, hi] = $("contrast").value === "global" ? v.lim : sliceLimits(v, chans, outside !== "show"), scale = 255 / (hi - lo);
   $("limits").textContent = `display ${fmt(lo)} … ${fmt(hi)}`;
   const imgs = ["ref", "act", "diff", "status"].map(k => {
     const cv = $("c-" + k); cv.width = W; cv.height = H;
@@ -212,6 +221,10 @@ function draw() {
       const d = Math.abs(v.diff[o]); if (d > dmax) dmax = d;
       if (v.status[o] > smax) smax = v.status[o];
     }
+    // Not compared: the test's own destination fill, which the kernel should not have touched.
+    if (smax === 0 && outside !== "show")
+      for (const im of [imgs[0][1], imgs[1][1]])
+        for (let q = 0; q < 3; ++q) im.data[p + q] = outside === "dim" ? im.data[p + q] * 0.25 : BG_RGB[q];
     const dc = lut(v.peak ? dmax / v.peak : 0), sc = STATUS_RGB[smax];
     for (let q = 0; q < 3; ++q) { imgs[2][1].data[p + q] = dc[q]; imgs[3][1].data[p + q] = sc[q]; }
     for (const [, im] of imgs) im.data[p + 3] = 255;
@@ -229,6 +242,23 @@ function applyZoom() {
     const cv = $("c-" + k);
     cv.style.width = view.W * zoom + "px"; cv.style.height = view.H * zoom + "px";
   }
+  placeMarks();
+}
+
+// Outlines the hovered (y, x) in every pane. The box is at least 5 px so it stays visible at low
+// zoom, centred on the pixel.
+function placeMarks() {
+  const z = +$("zoom").value;
+  const on = view && hover && hover[0] < view.H && hover[1] < view.W;
+  for (const pane of document.querySelectorAll(".pane")) {
+    const mark = pane.querySelector(".mark"), cv = pane.querySelector("canvas");
+    if (!on) { mark.style.display = "none"; continue; }
+    const size = Math.max(z, 5), pad = (size - z) / 2;
+    mark.style.left = cv.offsetLeft + hover[1] * z - pad + "px";
+    mark.style.top = cv.offsetTop + hover[0] * z - pad + "px";
+    mark.style.width = mark.style.height = size + "px";
+    mark.style.display = "block";
+  }
 }
 
 function fmt(x) {
@@ -241,6 +271,7 @@ function inspect(y, x) {
   const v = view;
   if (y < 0 || x < 0 || y >= v.H || x >= v.W) return;
   hover = [y, x];
+  placeMarks();
   const where = [...lead, y, x].map((c, k) => v.labels[k] ? `${v.labels[k]}=${c}` : null).filter(Boolean).join(" ");
   const rows = [];
   for (let c = 0; c < v.C; ++c) {
@@ -253,11 +284,14 @@ function inspect(y, x) {
 // ---- events -----------------------------------------------------------------
 $("filter").oninput = renderList;
 $("list").onclick = (ev) => { const d = ev.target.closest("div[data-i]"); if (d) select(+d.dataset.i); };
-$("channel").onchange = draw;
+$("channel").onchange = () => { channelChoice = $("channel").value; draw(); };
+$("outside").onchange = draw;
 $("contrast").onchange = draw;
 $("zoom").oninput = () => applyZoom();
-for (const cv of document.querySelectorAll(".pane canvas"))
+for (const cv of document.querySelectorAll(".pane canvas")) {
   cv.onmousemove = (ev) => { const z = +$("zoom").value; inspect(Math.floor(ev.offsetY / z), Math.floor(ev.offsetX / z)); };
+  cv.onmouseleave = () => { hover = null; placeMarks(); };
+}
 let syncing = false;
 const panes = [...document.querySelectorAll(".pane")];
 function scrollAll(left, top) {
