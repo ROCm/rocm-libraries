@@ -58,6 +58,7 @@
 
 #include "ProgramOptions.hpp"
 #include "Utility.hpp"
+#include "TensileLiteClientVersion.hpp"
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
 #include "Profiler.hpp"
@@ -80,6 +81,7 @@
 #include <memory>
 #include <numeric>
 #include <sstream>
+#include <string_view>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -878,6 +880,25 @@ namespace TensileLite
 
 int main(int argc, const char* argv[])
 {
+    // One-line identity queries. They touch no GPU, so callers can run them
+    // anywhere, under a short timeout, before using the client.
+    if(argc == 2)
+    {
+        std::string_view const query(argv[1]);
+        char const*            answer = nullptr;
+        if(query == "--version")
+            answer = TENSILELITE_CLIENT_VERSION;
+        else if(query == "--source-revision")
+            answer = TENSILELITE_CLIENT_SOURCE_REVISION;
+        else if(query == "--build-rocm")
+            answer = TENSILELITE_CLIENT_BUILD_ROCM;
+        if(answer)
+        {
+            std::cout << answer << '\n';
+            return 0;
+        }
+    }
+
     using namespace TensileLite;
     using namespace TensileLite::Client;
 

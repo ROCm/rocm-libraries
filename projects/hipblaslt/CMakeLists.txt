@@ -292,6 +292,23 @@ set(hipblaslt_python_dev Development.Module)
 hipblaslt_find_python("${hipblaslt_python_dev}")
 hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 
+if(TENSILELITE_ENABLE_CLIENT)
+    set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+    set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
+        "rocm-libraries commit to record when building from a tree without git")
+    hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    include(cmake/TensileLiteMetadata.cmake)
+    hipblaslt_configure_tensilelite_metadata("${_tensilelite_source_root}"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated")
+    if(TENSILELITE_CLIENT_SOURCE_REVISION STREQUAL "none")
+        message(WARNING "No source revision found; client pairing disabled. Build from a git "
+            "checkout or pass -DTENSILELITE_SOURCE_REVISION=<sha>.")
+    endif()
+    message(STATUS "TensileLite client: version ${TENSILELITE_DISTRIBUTION_VERSION}, "
+        "source revision ${TENSILELITE_CLIENT_SOURCE_REVISION}, "
+        "build ROCm ${TENSILELITE_CLIENT_BUILD_ROCM}")
+endif()
+
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBS_SUPERBUILD)
         if(HIPBLASLT_ENABLE_THEROCK)

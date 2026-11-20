@@ -49,7 +49,7 @@ def _git(cwd, *args):
 
 def _copy_project(dest):
     dest.mkdir(parents=True)
-    for name in ("setup.py", "release_metadata.py", "pyproject.toml", "MANIFEST.in",
+    for name in ("setup.py", "release_metadata.py", "VERSION", "pyproject.toml", "MANIFEST.in",
                  "requirements.txt", ".gitignore"):
         shutil.copyfile(_PROJECT_ROOT / name, dest / name)
     (dest / "tensilelite").mkdir()
