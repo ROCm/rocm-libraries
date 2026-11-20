@@ -927,14 +927,16 @@ that the engine is correct for it. Examples:
   result depends on the input data and on the memory contents.
 
 ALMIOPEN-3123, ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 have no entry.
-Since rocm-libraries #15768, `ASM_SDPA_ENGINE` declines the 1,526 cases that
+Since rocm-libraries #15768, `ASM_SDPA_ENGINE` declines the 1,486 cases that
 the ALMIOPEN-3124, ALMIOPEN-3126 and ALMIOPEN-3211 entries skipped (628
-`standard`, 257 `comprehensive` and 601 `full`). With those entries removed,
+`standard`, 257 `comprehensive` and 601 `full`). 40 of these cases match both
+an ALMIOPEN-3124 entry and the ALMIOPEN-3126 entry. With those entries removed,
 the engine declined every one of these cases on gfx942 and on gfx950, in
-3 runs with each fill.
+3 runs with each fill. On gfx942, 40 of the cases also match the
+`FP8_E4M3_FNUZ` entry (ALMIOPEN-2273), which still skips them, so 1,446 cases
+move from skipped to declined there.
 
-With the ALMIOPEN-3123 fix (#15768), With its fix (rocm-libraries #15768),
-`ASM_SDPA_ENGINE` declines a graph that has a block mask, or a dropout mask
+With the ALMIOPEN-3123 fix (rocm-libraries #15768), `ASM_SDPA_ENGINE` declines a graph that has a block mask, or a dropout mask
 and a dropout scale. The engine declines, on gfx942 and gfx950 with both
 fills, the 445 trigger cases that failed before the fix (207 `standard`, 111
 `comprehensive` and 127 `full`). On the `quick`, `standard` and
