@@ -2725,13 +2725,17 @@ the best score without selecting for launch).
 
 Items 1 and 2 are built. `IEngine::getPrediction()` answers A and B for one named metric
 (`heuristics/uhd/EnginePredictor.hpp`), and the backend implements the quick and thorough policies as
-`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. The quick policy is part of the built-in
-default policy order (`Config`, `ModeA`, `StaticOrdering`; RFC 0007 §5.3.2), so default engine
-selection ranks by L1 estimates wherever an engine ships one; the thorough policy is opt-in. A caller
-names the metric through
+`SelectionHeuristic::ModeA` and `SelectionHeuristic::ModeB`. The quick policy is selected by heuristic
+mode A (`HIPDNN_HEUR_MODE_A`, alias `HIPDNN_HEUR_MODE_INSTANT`; list `Config`, `ModeA`, `StaticOrdering`;
+RFC 0007 §5.3.2), which is the frontend's default mode, so default engine selection ranks by L1
+estimates wherever an engine ships one; the thorough policy is selected by mode B, and mode `FALLBACK`
+is model-free. A caller names the metric through
 `HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT`, `Graph::set_ranking_metric()`, or
-`HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet:
-no in-tree engine ships a calibrated model.
+`HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet.
+In tree, only the FlyDSL `rmsnorm` and `rmsnorm_bwd` engines in hip-kernel-provider bind trained `tflops`
+L1 models, for gfx1100, gfx1151, gfx1201, gfx90a, gfx942 and gfx950; every other in-tree engine binding is
+a disabled `default` placeholder. Calibration across engines stays the models' obligation: an engine's
+estimate may only outrank another's if both are in the metric's real units.
 
 ### 11.4 Selecting a UHD by Metric
 

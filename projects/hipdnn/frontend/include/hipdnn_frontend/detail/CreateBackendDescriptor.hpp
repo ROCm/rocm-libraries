@@ -3,57 +3,14 @@
 
 #pragma once
 
-#include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
-#include <algorithm>
 #include <cstdint>
 #include <string_view>
-#include <vector>
 
 namespace hipdnn_frontend::detail
 {
-
-// A/B name prediction policies, not backend modes (RFC 0007 §5.3.2): they travel as the policy
-// order [Config, A/B in request order, StaticOrdering]. Empty when neither is requested, so the
-// caller leaves the attribute unset and HIPDNN_HEUR_POLICY_ORDER and the backend default apply
-// (RFC 0007 §5.3.3).
-inline std::vector<int64_t> heuristicPolicyOrder(const std::vector<HeuristicMode>& modes)
-{
-    std::vector<int64_t> policyOrder;
-    for(const auto& mode : modes)
-    {
-        const char* policyName = nullptr;
-        if(mode == HeuristicMode::A)
-        {
-            policyName = hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME;
-        }
-        else if(mode == HeuristicMode::B)
-        {
-            policyName = hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME;
-        }
-        if(policyName == nullptr)
-        {
-            continue;
-        }
-        const int64_t policyId = hipdnn_data_sdk::utilities::policyNameToId(policyName);
-        if(std::find(policyOrder.begin(), policyOrder.end(), policyId) == policyOrder.end())
-        {
-            policyOrder.push_back(policyId);
-        }
-    }
-
-    if(!policyOrder.empty())
-    {
-        policyOrder.insert(
-            policyOrder.begin(),
-            hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::Config"));
-        policyOrder.push_back(
-            hipdnn_data_sdk::utilities::policyNameToId("SelectionHeuristic::StaticOrdering"));
-    }
-    return policyOrder;
-}
 
 inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engineDesc,
                                             hipdnnBackendDescriptor_t graphDesc,
@@ -80,13 +37,15 @@ inline Error createEngineDescriptorForGraph(ScopedHipdnnBackendDescriptor& engin
     return {ErrorCode::OK, ""};
 }
 
+/// Creates and finalizes a heuristic descriptor for one heuristic mode, which the backend turns
+/// into its policy list (RFC 0007 §5.3), as CUDNN_ATTR_ENGINEHEUR_MODE does in cuDNN.
 /// @p rankingMetric names the registered metric the prediction policies rank by and the
 /// result configurations carry into plan build (RFC 0019 §11.4). Empty leaves the attribute
 /// unset, so HIPDNN_HEUR_RANKING_METRIC and the backend default keep deciding.
 inline Error
     createEngineHeuristicDescriptorForGraph(ScopedHipdnnBackendDescriptor& engineHeuristicDesc,
                                             hipdnnBackendDescriptor_t graphDesc,
-                                            const std::vector<HeuristicMode>& modes,
+                                            HeuristicMode mode,
                                             bool findFirst = false,
                                             std::string_view rankingMetric = {})
 {
@@ -100,36 +59,14 @@ inline Error
                                              static_cast<const void*>(&graphDesc)),
         "Failed to set operation graph on the engine heuristic descriptor.");
 
-    // Only the first mode in the vector is forwarded to the backend today.
-    // HIPDNN_HEUR_MODE_FALLBACK is the only backend mode, so this collapses to
-    // one element; if the backend ever gains a second mode, this loop should set
-    // all of them rather than just backendModes.data()[0].
-    std::vector<hipdnnBackendHeurMode_t> backendModes;
-    backendModes.reserve(modes.size());
-    for(const auto& mode : modes)
-    {
-        backendModes.push_back(toBackendType(mode));
-    }
-
+    const hipdnnBackendHeurMode_t backendMode = toBackendType(mode);
     HIPDNN_RETURN_ON_BACKEND_FAILURE(
         hipdnnBackend()->backendSetAttribute(engineHeuristicDesc.get(),
                                              HIPDNN_ATTR_ENGINEHEUR_MODE,
                                              HIPDNN_TYPE_HEUR_MODE,
                                              1,
-                                             backendModes.data()),
+                                             &backendMode),
         "Failed to set mode on the engine heuristic descriptor.");
-
-    const std::vector<int64_t> policyOrder = heuristicPolicyOrder(modes);
-    if(!policyOrder.empty())
-    {
-        HIPDNN_RETURN_ON_BACKEND_FAILURE(
-            hipdnnBackend()->backendSetAttribute(engineHeuristicDesc.get(),
-                                                 HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT,
-                                                 HIPDNN_TYPE_INT64,
-                                                 static_cast<int64_t>(policyOrder.size()),
-                                                 policyOrder.data()),
-            "Failed to set policy order on the engine heuristic descriptor.");
-    }
 
     if(findFirst)
     {

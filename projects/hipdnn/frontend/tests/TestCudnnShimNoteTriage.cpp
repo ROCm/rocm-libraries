@@ -60,7 +60,7 @@ protected:
     std::array<char, 16> _engineDescs{};
     size_t _nextEngineDesc = 0;
     size_t _nextEngineIdLookup = 0;
-    // When set, heuristics given a policy order (modes A/B) rank the engines in reverse.
+    // When set, heuristics in backend mode A or B rank the engines in reverse.
     bool _policyOrderReversesRanking = false;
     std::unordered_set<hipdnnBackendDescriptor_t> _policyOrderedHeuristics;
     std::unordered_map<hipdnnBackendDescriptor_t, int64_t> _engineIdsByConfig;
@@ -95,7 +95,9 @@ protected:
                     _lastStampedEngineId = *static_cast<const int64_t*>(arrayOfElements);
                     _engineIdsByDesc[descriptor] = _lastStampedEngineId;
                 }
-                if(attribute == HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT)
+                if(attribute == HIPDNN_ATTR_ENGINEHEUR_MODE && arrayOfElements != nullptr
+                   && *static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements)
+                          != HIPDNN_HEUR_MODE_FALLBACK)
                 {
                     _policyOrderedHeuristics.insert(descriptor);
                 }

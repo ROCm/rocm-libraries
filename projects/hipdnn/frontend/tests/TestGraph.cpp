@@ -15468,70 +15468,10 @@ TEST_F(TestGraph, DeserializeLegacyBareGraphBlobReconstructsGraphNoPlan)
     EXPECT_FALSE(graph2.hasExecutionPlan());
 }
 
-// Config first, requested prediction policies in order without duplicates, StaticOrdering
-// last; HIPDNN_ATTR_ENGINEHEUR_MODE still carries exactly one FALLBACK mode.
-TEST_F(TestGraph, HeuristicModeAAndBTravelAsPolicyOrderNotAsBackendMode)
-{
-    auto* heurDesc = reinterpret_cast<hipdnnBackendDescriptor_t>(0x9911);
-    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR, _))
-        .WillOnce(
-            [&heurDesc](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* descriptor) {
-                *descriptor = heurDesc;
-                return HIPDNN_STATUS_SUCCESS;
-            });
-
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(heurDesc,
-                                    HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH,
-                                    HIPDNN_TYPE_BACKEND_DESCRIPTOR,
-                                    1,
-                                    _));
-
-    EXPECT_CALL(
-        *_mockBackend,
-        backendSetAttribute(heurDesc, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
-        .WillOnce([](hipdnnBackendDescriptor_t,
-                     hipdnnBackendAttributeName_t,
-                     hipdnnBackendAttributeType_t,
-                     int64_t,
-                     const void* arrayOfElements) {
-            EXPECT_EQ(*static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements),
-                      HIPDNN_HEUR_MODE_FALLBACK);
-            return HIPDNN_STATUS_SUCCESS;
-        });
-
-    std::vector<int64_t> policyOrder;
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(
-                    heurDesc, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, _, _))
-        .WillOnce([&policyOrder](hipdnnBackendDescriptor_t,
-                                 hipdnnBackendAttributeName_t,
-                                 hipdnnBackendAttributeType_t,
-                                 int64_t count,
-                                 const void* arrayOfElements) {
-            const auto* ids = static_cast<const int64_t*>(arrayOfElements);
-            policyOrder.assign(ids, ids + count);
-            return HIPDNN_STATUS_SUCCESS;
-        });
-
-    detail::ScopedHipdnnBackendDescriptor heuristicDesc;
-    const auto error = detail::createEngineHeuristicDescriptorForGraph(
-        heuristicDesc,
-        reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
-        {HeuristicMode::B, HeuristicMode::A, HeuristicMode::B, HeuristicMode::FALLBACK});
-    ASSERT_TRUE(error.is_good()) << error.get_message();
-
-    using hipdnn_data_sdk::utilities::policyNameToId;
-    EXPECT_EQ(policyOrder,
-              (std::vector<int64_t>{policyNameToId("SelectionHeuristic::Config"),
-                                    policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME),
-                                    policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
-                                    policyNameToId("SelectionHeuristic::StaticOrdering")}));
-}
-
-// Leaving both attributes unset keeps HIPDNN_HEUR_POLICY_ORDER, HIPDNN_HEUR_RANKING_METRIC
-// and the backend defaults in charge (RFC 0007 §5.3.3).
-TEST_F(TestGraph, FallbackOnlyHeuristicModeLeavesPolicyOrderUnset)
+// Each frontend mode travels as the backend heuristic mode, as CUDNN_ATTR_ENGINEHEUR_MODE does;
+// the frontend never sends a policy order of its own, leaving HIPDNN_HEUR_POLICY_ORDER, the
+// ranking metric and the mode's built-in policy list in charge (RFC 0007 §5.3).
+TEST_F(TestGraph, HeuristicModeTravelsAsTheBackendMode)
 {
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, _, _, _))
@@ -15540,15 +15480,148 @@ TEST_F(TestGraph, FallbackOnlyHeuristicModeLeavesPolicyOrderUnset)
                 backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT, _, _, _))
         .Times(0);
     EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _));
-    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, _, 1, _));
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _))
+        .Times(AnyNumber());
+    hipdnnBackendHeurMode_t sent = HIPDNN_HEUR_MODE_FALLBACK;
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
+        .WillRepeatedly([&sent](hipdnnBackendDescriptor_t,
+                                hipdnnBackendAttributeName_t,
+                                hipdnnBackendAttributeType_t,
+                                int64_t,
+                                const void* arrayOfElements) {
+            sent = *static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements);
+            return HIPDNN_STATUS_SUCCESS;
+        });
 
-    detail::ScopedHipdnnBackendDescriptor heuristicDesc;
-    const auto error = detail::createEngineHeuristicDescriptorForGraph(
-        heuristicDesc,
-        reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
-        {HeuristicMode::FALLBACK});
-    EXPECT_TRUE(error.is_good()) << error.get_message();
+    const std::vector<std::pair<HeuristicMode, hipdnnBackendHeurMode_t>> cases{
+        {HeuristicMode::A, HIPDNN_HEUR_MODE_A},
+        {HeuristicMode::B, HIPDNN_HEUR_MODE_B},
+        {HeuristicMode::FALLBACK, HIPDNN_HEUR_MODE_FALLBACK},
+        {HeuristicMode::OPENSOURCE, HIPDNN_HEUR_MODE_FALLBACK}};
+    for(const auto& [mode, expected] : cases)
+    {
+        sent = static_cast<hipdnnBackendHeurMode_t>(-1);
+        detail::ScopedHipdnnBackendDescriptor heuristicDesc;
+        const auto error = detail::createEngineHeuristicDescriptorForGraph(
+            heuristicDesc, reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242), mode);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(sent, expected) << to_string(mode);
+    }
+}
+
+// As cudnn-frontend's get_heuristics_list: one query per mode in the order given, results
+// concatenated. An engine returned by an earlier mode is not repeated, and a repeated mode is
+// not queried again.
+TEST_F(TestGraph, MultipleModesQueryOncePerModeAndConcatenate)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    Graph graph;
+    createBasicBatchnormGraph(graph);
+    ASSERT_TRUE(graph.validate().is_good());
+    ASSERT_TRUE(graph.build_operation_graph(_handle).is_good());
+
+    const std::map<hipdnnBackendHeurMode_t, std::vector<int64_t>> rankedByMode{
+        {HIPDNN_HEUR_MODE_B, {200, 100}},
+        {HIPDNN_HEUR_MODE_A, {100, 300}},
+        {HIPDNN_HEUR_MODE_FALLBACK, {300, 100, 200, 400}}};
+    std::vector<hipdnnBackendHeurMode_t> queriedModes;
+    std::map<hipdnnBackendDescriptor_t, hipdnnBackendHeurMode_t> modeOf;
+    std::map<hipdnnBackendDescriptor_t, int64_t> engineOfConfig;
+    uintptr_t nextHeuristic = 0x91000;
+    uintptr_t nextConfig = 0xA1000;
+    // Engine descriptors encode their engine ID.
+    constexpr uintptr_t ENGINE_BASE = 0xE00000;
+
+    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _))
+        .WillRepeatedly(
+            [&](hipdnnBackendDescriptorType_t type, hipdnnBackendDescriptor_t* descriptor) {
+                *descriptor = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                    type == HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR ? nextHeuristic++ : nextConfig++);
+                return HIPDNN_STATUS_SUCCESS;
+            });
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
+        .WillRepeatedly([&](hipdnnBackendDescriptor_t heuristic,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t,
+                            const void* arrayOfElements) {
+            const auto mode = *static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements);
+            modeOf[heuristic] = mode;
+            queriedModes.push_back(mode);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINEHEUR_RESULTS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, _, _, _))
+        .WillRepeatedly([&](hipdnnBackendDescriptor_t heuristic,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t requested,
+                            int64_t* elementCount,
+                            void* arrayOfElements) {
+            const auto& ids = rankedByMode.at(modeOf.at(heuristic));
+            *elementCount = static_cast<int64_t>(ids.size());
+            if(arrayOfElements != nullptr)
+            {
+                auto* configs = static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements);
+                for(int64_t i = 0; i < requested; ++i)
+                {
+                    engineOfConfig[configs[i]] = ids[static_cast<size_t>(i)];
+                }
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(
+                    _, HIPDNN_ATTR_ENGINECFG_ENGINE, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 1, _, _))
+        .WillRepeatedly([&](hipdnnBackendDescriptor_t config,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t,
+                            int64_t*,
+                            void* arrayOfElements) {
+            *static_cast<hipdnnBackendDescriptor_t*>(arrayOfElements)
+                = reinterpret_cast<hipdnnBackendDescriptor_t>(
+                    ENGINE_BASE + static_cast<uintptr_t>(engineOfConfig.at(config)));
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    EXPECT_CALL(*_mockBackend,
+                backendGetAttribute(_, HIPDNN_ATTR_ENGINE_GLOBAL_INDEX, HIPDNN_TYPE_INT64, 1, _, _))
+        .WillRepeatedly([&](hipdnnBackendDescriptor_t engine,
+                            hipdnnBackendAttributeName_t,
+                            hipdnnBackendAttributeType_t,
+                            int64_t,
+                            int64_t*,
+                            void* arrayOfElements) {
+            *static_cast<int64_t*>(arrayOfElements)
+                = static_cast<int64_t>(reinterpret_cast<uintptr_t>(engine) - ENGINE_BASE);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    std::vector<int64_t> rankedEngineIds;
+    const auto error = graph.get_ranked_engine_ids(
+        rankedEngineIds,
+        {HeuristicMode::B, HeuristicMode::A, HeuristicMode::B, HeuristicMode::FALLBACK});
+    ASSERT_TRUE(error.is_good()) << error.get_message();
+    EXPECT_EQ(rankedEngineIds, (std::vector<int64_t>{200, 100, 300, 400}));
+    EXPECT_EQ(queriedModes,
+              (std::vector<hipdnnBackendHeurMode_t>{
+                  HIPDNN_HEUR_MODE_B, HIPDNN_HEUR_MODE_A, HIPDNN_HEUR_MODE_FALLBACK}));
+}
+
+// cudnn-frontend fails a query that names no mode; so does hipDNN, without a backend call.
+TEST_F(TestGraph, EmptyModeListIsRejected)
+{
+    EXPECT_CALL(*_mockBackend, backendCreateDescriptor(_, _)).Times(0);
+    std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> configs;
+    std::vector<int64_t> engineIds;
+    const auto error = detail::getEngineConfigsForModes(
+        configs, engineIds, reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242), {}, {});
+    EXPECT_EQ(error.code, ErrorCode::INVALID_VALUE);
 }
 
 // Captures a HIPDNN_TYPE_CHAR attribute value as the backend reads it: count bytes, no NUL.
@@ -15599,7 +15672,7 @@ TEST_F(TestGraph, RankingMetricTravelsOnTheHeuristicDescriptor)
     const auto error = detail::createEngineHeuristicDescriptorForGraph(
         heuristicDesc,
         reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
-        {HeuristicMode::A},
+        HeuristicMode::A,
         /*findFirst=*/false,
         "time");
     ASSERT_TRUE(error.is_good()) << error.get_message();

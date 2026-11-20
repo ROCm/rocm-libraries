@@ -279,7 +279,7 @@ struct EngineSweepSpec {
 
 ```cpp
 Error get_engine_configs(std::vector<EngineConfigInfo>& configs,
-                         const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK});
+                         const std::vector<HeuristicMode>& modes = {HeuristicMode::A});
 ```
 
 Queries the backend for engine implementations applicable to the current operation graph on the current hardware, ranked by the specified heuristic mode(s). Only engines that pass the backend's applicability check are returned.
@@ -318,7 +318,7 @@ Error add_engine_sweep(const std::vector<EngineSweepSpec>& specs);
 // Discover all engines and add plan specs with default knobs. Equivalent to:
 //   get_engine_configs(configs, modes);
 //   add_engine_configs(configs);
-Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK});
+Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::A});
 ```
 
 **Workspace query**:
