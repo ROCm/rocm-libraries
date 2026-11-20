@@ -1674,9 +1674,17 @@ def test_aot_dgrad_builds_tilde_and_stride1_binaries(monkeypatch):
     family = "wmma" if target.wave_size == 32 else "mma"
     jobs = list(aj._dgrad_jobs(_ARCH, "fp16", target.wave_size, family, target, 64))
     patch = [j for j in jobs if j.identity.patch]
-    tilde = [j for j in jobs if j.identity.stride_h == 0 and not j.identity.patch]
+    # The split-K (atomic dX) variants are tilde binaries too, built next to
+    # some of the split_k = 1 ones (see test_aot_dgrad_split_k_variants).
+    split = [j for j in jobs if j.identity.split_k > 1]
+    tilde = [
+        j
+        for j in jobs
+        if j.identity.stride_h == 0 and not j.identity.patch and j.identity.split_k == 1
+    ]
     unit = [j for j in jobs if j.identity.stride_h == 1]
-    assert tilde and len(tilde) + len(unit) + len(patch) == len(jobs)
+    assert all(j.identity.stride_h == 0 for j in split)
+    assert tilde and len(tilde) + len(unit) + len(patch) + len(split) == len(jobs)
     # One stride-1 binary per tilde one outside the wavelet pipeline, and it
     # is the tap-outer one.
     assert all(j.identity.tap_outer_k for j in unit)

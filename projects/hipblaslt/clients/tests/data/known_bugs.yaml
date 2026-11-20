@@ -49,3 +49,18 @@ Known bugs:
   # with a NaN sentinel before each verified launch. REMOVE this entry in the PR that
   # fixes ROCM-33823. Review by 2026-11-16.
   - { name: matmul_batch_complex_general_batch_edge, function: matmul, alpha: 0, alphai: 0, beta: 1, betai: 0, known_bug_platforms: gfx950 }
+  # AIHPBLAS-5511: gfx950 generic (non-skinny) MXFP8 subtile kernels over-read C past
+  # column N when beta != 0 and N is not a multiple of 16, which faults depending on
+  # allocation order. These nine shapes are not shard keys and run the generic Cijk_
+  # kernels, not the skinny gemm_BM* ones.
+  # REMOVE these entries once the C-load over-read fix (GlobalWriteBatch.py exec-masked
+  # C load) lands. Fix: #15501. Review by 2026-12-15.
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta, function: matmul, M: 29584, N: 4, K: 8192, alpha: 1.5, beta: 0.5, known_bug_platforms: gfx950 }
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta, function: matmul, M: 4, N: 16385, K: 2304, alpha: 1.5, beta: 0.5, known_bug_platforms: gfx950 }
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta, function: matmul, M: 10240, N: 3, K: 9216, alpha: 1.5, beta: 0.5, known_bug_platforms: gfx950 }
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta, function: matmul, M: 16384, N: 2, K: 5120, alpha: 1.5, beta: 0.5, known_bug_platforms: gfx950 }
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta_negative, function: matmul, M: 51203, N: 4, K: 4096, alpha: -1, beta: 2, known_bug_platforms: gfx950 }
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta_negative, function: matmul, M: 3001, N: 3, K: 12288, alpha: -1, beta: 2, known_bug_platforms: gfx950 }
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta_negative, function: matmul, M: 3, N: 20001, K: 5376, alpha: -1, beta: 2, known_bug_platforms: gfx950 }
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta_negative, function: matmul, M: 2, N: 10001, K: 16384, alpha: -1, beta: 2, known_bug_platforms: gfx950 }
+  - { name: matmul_skinny_mxfp8_tn_alpha_beta_negative, function: matmul, M: 3, N: 2049, K: 2048, alpha: -1, beta: 2, known_bug_platforms: gfx950 }

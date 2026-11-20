@@ -66,6 +66,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <cstdlib>
 #if defined(__linux__)
 // Used by getMinKernelSizeToGwEnd() to parse .co ELF symbol tables. <elf.h>
 // is glibc-only, so the whole ELF code path is Linux-gated.
@@ -79,6 +80,10 @@
 #include <memory>
 #include <numeric>
 #include <sstream>
+
+#ifdef _OPENMP
+#include <omp.h>
+#endif
 
 namespace TensileLite
 {
@@ -233,8 +238,9 @@ namespace TensileLite
                 ("swizzle-tensor-a",         po::value<bool>()->default_value(false), "Swizzle input tensor A.")
                 ("swizzle-tensor-b",         po::value<bool>()->default_value(false), "Swizzle input tensor B.")
                 ("fused-a2a",                po::value<FusedA2A>()->default_value(FusedA2A::Disabled), "Fused A2A mode: Disabled, GemmA2A (all-to-all PUSH from the GEMM epilogue) or A2AGemm (B's K shards gathered from the peers into a2aBuf one shard at a time).")
-                ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
+                ("split-devices",          po::value<int>()->default_value(1), "Split each problem across N consecutive devices (device-idx .. device-idx+N-1), one stream each, and run the slices concurrently. Devices 0..N-2 get size/N, the last device gets the rest; that share is rounded up so each device's D slice starts on a multiple of 256 bytes when the last device then has at most 1% less work, else it is not rounded and a hint says how to pad. --split-dim M: A is split, B replicated. --split-dim N: B is split, A replicated. Each device writes its slice into its own full-size D at the slice's final offset (nothing goes to a peer); the slices are read back and validated after the timed run. Reported time is the slowest device; reported GFlops are for the full problem. Needs the all-solutions run (no --best-solution). For partitioned GPUs (e.g. NPS2: N=2). 1 = off.")
                 ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
+                ("split-align",            po::value<std::string>()->default_value("auto"), "With --split-devices, how the share of the split dimension is rounded so each device's slice of the split operand, C and D starts on a multiple of 256 bytes, the same rule as hipBLASLt PartitionedGemm: auto = round up when the balance changes by at most 1%; off = always size/N (to measure the misaligned case); force = always round up, as long as the last device keeps work.")
                 ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. Only the operand the split does not cut (B for --split-dim M, A for --split-dim N) and D can be shared; a shared operand is the copy of the last device, and the other devices validate against its data. A shared D is the one of device-idx, and every device writes its slice into it.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
@@ -843,6 +849,29 @@ namespace TensileLite
                     "[fused-a2a] --world-filter cannot be combined with --prob-sol-map.");
         }
 
+        // Make idle OpenMP workers sleep as soon as a parallel region ends, unless the user set
+        // KMP_BLOCKTIME. With libomp's default (200 ms) the workers left over from the CPU
+        // reference and data initialization spin on the cores the main thread needs for the
+        // per-solution loop. kmp_set_blocktime is a libomp extension: other OpenMP runtimes and
+        // Windows builds keep their default.
+        void disableOpenMPIdleSpin()
+        {
+#if defined(_OPENMP) && defined(KMP_VERSION_MAJOR) && !defined(_WIN32)
+            auto const* blocktime = std::getenv("KMP_BLOCKTIME");
+            if(blocktime == nullptr)
+                kmp_set_blocktime(0);
+
+            std::clog << "OpenMP: KMP_VERSION_MAJOR=" << KMP_VERSION_MAJOR
+                      << ", blocktime=" << kmp_get_blocktime()
+                      << ", max_threads=" << omp_get_max_threads()
+                      << ", KMP_BLOCKTIME=" << (blocktime ? blocktime : "<unset>") << '\n';
+#elif defined(_OPENMP)
+            std::clog << "OpenMP: _OPENMP=" << _OPENMP << ", blocktime control unavailable\n";
+#else
+            std::clog << "OpenMP: disabled\n";
+#endif
+        }
+
     } // namespace Client
 } // namespace TensileLite
 
@@ -850,6 +879,10 @@ int main(int argc, const char* argv[])
 {
     using namespace TensileLite;
     using namespace TensileLite::Client;
+
+    // Initialize the OpenMP runtime and log its settings before mainStart so this work
+    // belongs to process startup rather than main_parse_args.
+    disableOpenMPIdleSpin();
 
     auto const mainStart     = TimingClock::now();
     auto const mainStartWall = std::chrono::system_clock::now();
@@ -902,6 +935,12 @@ int main(int argc, const char* argv[])
         // --split-dim first: the placement rules depend on it.
         if(split && splitDim != "M" && splitDim != "N")
             throw std::runtime_error("--split-dim must be M or N");
+        if(split)
+        {
+            auto const& a = args["split-align"].as<std::string>();
+            if(a != "auto" && a != "off" && a != "force")
+                throw std::runtime_error("--split-align must be auto, off or force");
+        }
         // The format is checked even without a split; the sharing rules only apply to one.
         auto const err = split ? splitPlacementError(placement, splitDim == "N")
                                : splitPlacementFormatError(placement);
