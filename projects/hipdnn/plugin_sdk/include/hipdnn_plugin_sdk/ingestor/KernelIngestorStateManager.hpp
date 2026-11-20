@@ -972,57 +972,64 @@ public:
     /// The unslotted constructor for callers that hold the native graph_match symbol as a
     /// string. An empty @p graphMatchSymbol means the engine declares no graph_match.
     ///
-    /// The symbol's type is deduced, so a braced `{}` cannot select this constructor and
-    /// reaches the GraphMatch one as std::monostate, which also means no graph_match.
+    /// The symbol is taken by value, so a string literal deduces `const char*` rather than an
+    /// array type, and a braced `{}` cannot deduce it: `{}` reaches the GraphMatch constructor
+    /// as std::monostate, which also means no graph_match.
     template <typename TSymbol,
-              std::enable_if_t<std::is_convertible_v<const TSymbol&, std::string>, int> = 0>
+              // A slotted call with a literal describedBy instantiates this constraint for
+              // the literal; clang-tidy reports the literal's array type here, though no array
+              // is declared.
+              // NOLINTNEXTLINE(modernize-avoid-c-arrays) - see above
+              std::enable_if_t<std::is_convertible_v<TSymbol, std::string>, int> = 0>
     [[deprecated("use NativeGraphMatch{symbol}")]] KernelIngestorStateManager(
         MetadataSchema schema,
         std::vector<MatchDescriptor> matchers,
         std::vector<DispatchDescriptor> dispatches,
         std::vector<KernelDescriptorPack> packs,
         std::shared_ptr<IKernelHeuristic> heuristic,
-        const TSymbol& graphMatchSymbol,
+        TSymbol graphMatchSymbol,
         const std::string& describedBy = {},
         size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
         EngineIdentity engine = {},
         size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
-        : KernelIngestorStateManager(std::move(schema),
-                                     std::move(matchers),
-                                     std::move(dispatches),
-                                     std::move(packs),
-                                     std::move(heuristic),
-                                     detail::graphMatchFromNativeSymbol(graphMatchSymbol),
-                                     describedBy,
-                                     catalogCacheCapacity,
-                                     std::move(engine),
-                                     winnerCacheCapacity)
+        : KernelIngestorStateManager(
+              std::move(schema),
+              std::move(matchers),
+              std::move(dispatches),
+              std::move(packs),
+              std::move(heuristic),
+              detail::graphMatchFromNativeSymbol(std::move(graphMatchSymbol)),
+              describedBy,
+              catalogCacheCapacity,
+              std::move(engine),
+              winnerCacheCapacity)
     {
     }
 
     /// The slotted constructor for callers that hold the native graph_match symbol as a
     /// string, as the unslotted one above.
     template <typename TSymbol,
-              std::enable_if_t<std::is_convertible_v<const TSymbol&, std::string>, int> = 0>
+              std::enable_if_t<std::is_convertible_v<TSymbol, std::string>, int> = 0>
     [[deprecated("use NativeGraphMatch{symbol}")]] KernelIngestorStateManager(
         std::vector<KernelSlotInput> slots,
         std::vector<MatchDescriptor> matchers,
         std::vector<DispatchDescriptor> dispatches,
-        const TSymbol& graphMatchSymbol,
+        TSymbol graphMatchSymbol,
         std::string sharedWorkspaceToken = {},
         const std::string& describedBy = {},
         size_t catalogCacheCapacity = DEFAULT_CATALOG_CACHE_CAPACITY,
         EngineIdentity engine = {},
         size_t winnerCacheCapacity = DEFAULT_WINNER_CACHE_CAPACITY)
-        : KernelIngestorStateManager(std::move(slots),
-                                     std::move(matchers),
-                                     std::move(dispatches),
-                                     detail::graphMatchFromNativeSymbol(graphMatchSymbol),
-                                     std::move(sharedWorkspaceToken),
-                                     describedBy,
-                                     catalogCacheCapacity,
-                                     std::move(engine),
-                                     winnerCacheCapacity)
+        : KernelIngestorStateManager(
+              std::move(slots),
+              std::move(matchers),
+              std::move(dispatches),
+              detail::graphMatchFromNativeSymbol(std::move(graphMatchSymbol)),
+              std::move(sharedWorkspaceToken),
+              describedBy,
+              catalogCacheCapacity,
+              std::move(engine),
+              winnerCacheCapacity)
     {
     }
 

@@ -515,23 +515,25 @@ std::unique_ptr<KernelIngestorStateManager<THandle>> makeStateManager(Descriptor
 /// The `makeStateManager` overload for callers that hold the native graph_match symbol as a
 /// string. An empty @p graphMatchSymbol means the engine declares no graph_match.
 ///
-/// The symbol's type is deduced, so a braced `{}` cannot select this overload and reaches the
-/// GraphMatch one as std::monostate, which also means no graph_match.
+/// The symbol is taken by value, so a string literal deduces `const char*` rather than an array
+/// type, and a braced `{}` cannot deduce it: `{}` reaches the GraphMatch overload as
+/// std::monostate, which also means no graph_match.
 template <typename THandle,
           typename TSymbol,
-          std::enable_if_t<std::is_convertible_v<const TSymbol&, std::string>, int> = 0>
+          std::enable_if_t<std::is_convertible_v<TSymbol, std::string>, int> = 0>
 [[deprecated("use NativeGraphMatch{symbol}")]] std::unique_ptr<KernelIngestorStateManager<THandle>>
     makeStateManager(DescriptorSet set,
-                     const TSymbol& graphMatchSymbol,
+                     TSymbol graphMatchSymbol,
                      std::string describedBy = {},
                      EngineIdentity engine = {},
                      std::vector<std::string> knobs = {})
 {
-    return makeStateManager<THandle>(std::move(set),
-                                     detail::graphMatchFromNativeSymbol(graphMatchSymbol),
-                                     std::move(describedBy),
-                                     std::move(engine),
-                                     std::move(knobs));
+    return makeStateManager<THandle>(
+        std::move(set),
+        detail::graphMatchFromNativeSymbol(std::move(graphMatchSymbol)),
+        std::move(describedBy),
+        std::move(engine),
+        std::move(knobs));
 }
 
 /// @param deviceResolver Held by reference by the engine; providers use a
