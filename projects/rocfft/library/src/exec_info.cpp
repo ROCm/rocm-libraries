@@ -118,8 +118,8 @@ void rocfft_execution_info_internal::ensure_work_buffer_size(
         int pool_supported = 0;
 
         // NOTE: multi-GPU plans don't always respect the
-        // user-provided yet, so avoid stream-ordered allocs in that
-        // case.
+        // user-provided streams yet, so avoid stream-ordered allocs
+        // in that case.
 
         // If query fails, assume pool is not supported
         if(!have_multigpu_plan
