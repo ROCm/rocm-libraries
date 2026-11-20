@@ -242,12 +242,14 @@ inline std::array<std::optional<int64_t>, 3>
 /// Whether the model takes the pointwise node to change an error in an operand by at most its
 /// slope, about 1: ADD, SUBTRACT, BINARY_SELECT (which passes one operand on), IDENTITY, the
 /// activations the conv test-plan bundles use (RELU_FWD, SIGMOID_FWD, TANH_FWD, SOFTPLUS_FWD,
-/// ELU_FWD, SWISH_FWD, GELU_FWD, GELU_APPROX_TANH_FWD), their backward modes behind a dgrad
-/// (which multiply the gradient by the activation's derivative at the forward input: at most 1
-/// for relu, sigmoid, tanh and softplus, about 1.1 for swish and both gelus) and MUL, whose scale
-/// the walk reads. Every other mode (DIV, RECIPROCAL, SQRT, ...) has no slope this model knows,
-/// and so has a parameter that steepens one of the above: a leaky relu with a slope above 1 and
-/// an elu with an alpha above 1, forward or backward.
+/// ELU_FWD, SWISH_FWD, GELU_FWD, GELU_APPROX_TANH_FWD), RELU_BWD, SIGMOID_BWD and TANH_BWD behind a
+/// dgrad (which multiply the gradient by the activation's derivative at the forward input: at most
+/// 1) and MUL, whose scale the walk reads. The other backward activations (SOFTPLUS_BWD, ELU_BWD,
+/// SWISH_BWD, GELU_BWD, GELU_APPROX_TANH_BWD) are not modeled: no hipDNN reference implements them
+/// yet and no output of them was calibrated, so a graph with one keeps the per-op default,
+/// whatever the convolution's direction. Every other mode (DIV, RECIPROCAL, SQRT, ...) has no
+/// slope this model knows, and so has a parameter that steepens one of the above: a leaky relu
+/// with a slope above 1 and a forward elu with an alpha above 1.
 inline bool
     hasModeledSlope(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& pointwise)
 {
@@ -267,26 +269,22 @@ inline bool
     case PointwiseMode::GELU_APPROX_TANH_FWD:
     case PointwiseMode::SIGMOID_BWD:
     case PointwiseMode::TANH_BWD:
-    case PointwiseMode::SOFTPLUS_BWD:
-    case PointwiseMode::SWISH_BWD:
-    case PointwiseMode::GELU_BWD:
-    case PointwiseMode::GELU_APPROX_TANH_BWD:
         return true;
     case PointwiseMode::RELU_FWD:
     case PointwiseMode::RELU_BWD:
         return !pointwise.relu_lower_clip_slope().has_value()
                || std::abs(*pointwise.relu_lower_clip_slope()) <= 1.0f;
     case PointwiseMode::ELU_FWD:
-    case PointwiseMode::ELU_BWD:
         return !pointwise.elu_alpha().has_value() || std::abs(*pointwise.elu_alpha()) <= 1.0f;
     default:
         return false;
     }
 }
 
-/// Whether the mode is the backward form of an activation: it multiplies a gradient (in_0) by the
-/// activation's derivative at the forward input (in_1). The model prices it only behind a
-/// ConvolutionBwd, whose result is that gradient.
+/// Whether the mode is the backward form of an activation the model prices: it multiplies a
+/// gradient (in_0) by the activation's derivative at the forward input (in_1). The model prices
+/// it only behind a ConvolutionBwd, whose result is that gradient. Only the modes with a hipDNN
+/// reference are priced; see hasModeledSlope().
 inline bool isBackwardActivation(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode mode)
 {
     using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
@@ -295,11 +293,6 @@ inline bool isBackwardActivation(hipdnn_flatbuffers_sdk::data_objects::Pointwise
     case PointwiseMode::RELU_BWD:
     case PointwiseMode::SIGMOID_BWD:
     case PointwiseMode::TANH_BWD:
-    case PointwiseMode::SOFTPLUS_BWD:
-    case PointwiseMode::ELU_BWD:
-    case PointwiseMode::SWISH_BWD:
-    case PointwiseMode::GELU_BWD:
-    case PointwiseMode::GELU_APPROX_TANH_BWD:
         return true;
     default:
         return false;
@@ -462,8 +455,8 @@ using ConvErrorScale = std::variant<hipdnn_test_sdk::utilities::conv::ConvFpropE
 /// another output does not enter it. The modes that leave an error alone are the ones
 /// detail::hasModeledSlope() lists, each assumed to change an error by at most its slope, about
 /// 1: the activations of the conv test-plan bundles (relu with its clips, identity, sigmoid,
-/// tanh, softplus, elu, swish, both gelus, at the bundles' parameters, and their backward modes
-/// behind a dgrad) have a slope of at most about 1.13. Any other mode, and a node that is neither
+/// tanh, softplus, elu, swish, both gelus, at the bundles' parameters, and relu, sigmoid and tanh
+/// backward behind a dgrad) have a slope of at most about 1.13. Any other mode, and a node that is neither
 /// the convolution nor pointwise, leave the graph outside the model.
 ///
 /// The roundings below float. The graph is walked from the convolution to its outputs, and every

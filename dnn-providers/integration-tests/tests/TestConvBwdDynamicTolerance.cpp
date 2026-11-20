@@ -300,14 +300,17 @@ void expectFixedOnBothOperandsToFallBack(Direction direction)
     EXPECT_FALSE(modeledWithRecipes(spec, fixed, fixed));
 }
 
-const std::vector<PointwiseMode> BACKWARD_ACTIVATIONS = {PointwiseMode::RELU_BWD,
-                                                         PointwiseMode::SIGMOID_BWD,
-                                                         PointwiseMode::TANH_BWD,
-                                                         PointwiseMode::SOFTPLUS_BWD,
-                                                         PointwiseMode::ELU_BWD,
-                                                         PointwiseMode::SWISH_BWD,
-                                                         PointwiseMode::GELU_BWD,
-                                                         PointwiseMode::GELU_APPROX_TANH_BWD};
+// The backward activations with a hipDNN reference are priced behind a dgrad; the other five have
+// none yet and no output of them was calibrated, so they keep the per-op default.
+const std::vector<PointwiseMode> PRICED_BACKWARD_ACTIVATIONS
+    = {PointwiseMode::RELU_BWD, PointwiseMode::SIGMOID_BWD, PointwiseMode::TANH_BWD};
+
+const std::vector<PointwiseMode> UNPRICED_BACKWARD_ACTIVATIONS
+    = {PointwiseMode::SOFTPLUS_BWD,
+       PointwiseMode::ELU_BWD,
+       PointwiseMode::SWISH_BWD,
+       PointwiseMode::GELU_BWD,
+       PointwiseMode::GELU_APPROX_TANH_BWD};
 
 } // namespace
 
@@ -403,23 +406,40 @@ TEST(TestConvBwdDynamicTolerance, DgradResultStoredInHalfAndReadByAnActivationIs
     EXPECT_DOUBLE_EQ(scale->roundingPoints[0].slope, 1.0);
 }
 
-// Catches a backward mode dropped from the priced set: each has a derivative of at most ~1.13.
-TEST(TestConvBwdDynamicTolerance, DgradFollowedByEachBackwardActivationIsModeled)
+// Catches a priced backward mode dropped from the priced set: each has a derivative of at most 1.
+TEST(TestConvBwdDynamicTolerance, DgradFollowedByEachPricedBackwardActivationIsModeled)
 {
-    for(const auto mode : BACKWARD_ACTIVATIONS)
+    for(const auto mode : PRICED_BACKWARD_ACTIVATIONS)
     {
         GraphSpec spec;
         spec.fusedBackwardActivation = true;
         spec.backwardMode = mode;
         const auto scale = dgradScale(spec);
         ASSERT_TRUE(scale.has_value()) << EnumNamePointwiseMode(mode);
-        EXPECT_GT(scale->outputScale, 0.0) << EnumNamePointwiseMode(mode);
-        EXPECT_LE(scale->outputScale, 1.2) << EnumNamePointwiseMode(mode);
+        EXPECT_DOUBLE_EQ(scale->outputScale, 1.0) << EnumNamePointwiseMode(mode);
         EXPECT_TRUE(scale->roundingPoints.empty()) << EnumNamePointwiseMode(mode);
     }
 }
 
-// Catches a leaky relu slope or an elu alpha above 1 being priced as a slope of 1 behind a dgrad.
+// Catches a backward activation without a hipDNN reference being priced again, behind a dgrad or
+// a wrw: its output keeps the per-op default.
+TEST(TestConvBwdDynamicTolerance, BackwardActivationWithoutAReferenceIsNotModeled)
+{
+    for(const auto direction : {Direction::DGRAD, Direction::WRW})
+    {
+        for(const auto mode : UNPRICED_BACKWARD_ACTIVATIONS)
+        {
+            GraphSpec spec;
+            spec.direction = direction;
+            spec.fusedBackwardActivation = true;
+            spec.backwardMode = mode;
+            EXPECT_FALSE(errorScale(spec).has_value()) << EnumNamePointwiseMode(mode);
+        }
+    }
+}
+
+// Catches a leaky relu slope above 1 being priced as a slope of 1 behind a dgrad, and an elu
+// backward being priced at any alpha: it has no reference, so its alpha never makes it modeled.
 TEST(TestConvBwdDynamicTolerance, BackwardActivationThatSteepensTheGradientIsNotModeled)
 {
     for(const auto& [slope, modeled] : {std::pair{0.01f, true},
@@ -433,16 +453,13 @@ TEST(TestConvBwdDynamicTolerance, BackwardActivationThatSteepensTheGradientIsNot
         spec.reluSlope = slope;
         EXPECT_EQ(errorScale(spec).has_value(), modeled) << "slope " << slope;
     }
-    for(const auto& [alpha, modeled] : {std::pair{0.5f, true},
-                                        std::pair{1.0f, true},
-                                        std::pair{2.0f, false},
-                                        std::pair{-2.0f, false}})
+    for(const float alpha : {0.5f, 1.0f, 2.0f, -2.0f})
     {
         GraphSpec spec;
         spec.fusedBackwardActivation = true;
         spec.backwardMode = PointwiseMode::ELU_BWD;
         spec.eluAlpha = alpha;
-        EXPECT_EQ(errorScale(spec).has_value(), modeled) << "alpha " << alpha;
+        EXPECT_FALSE(errorScale(spec).has_value()) << "alpha " << alpha;
     }
 }
 
@@ -582,7 +599,7 @@ TEST(TestConvBwdDynamicTolerance, WrwWithFixedFillOfTheInputAndDyIsNotModeled)
 // Catches a backward activation priced behind a wrw; its control, the same graph behind a dgrad.
 TEST(TestConvBwdDynamicTolerance, BackwardActivationBehindWrwIsNotModeled)
 {
-    for(const auto mode : BACKWARD_ACTIVATIONS)
+    for(const auto mode : PRICED_BACKWARD_ACTIVATIONS)
     {
         GraphSpec spec;
         spec.fusedBackwardActivation = true;
