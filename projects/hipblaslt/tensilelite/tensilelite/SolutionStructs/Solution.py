@@ -3976,11 +3976,11 @@ class Solution(collections.abc.Mapping):
       if numWaves > 1 and (numWaves & (numWaves - 1)) != 0:
         reject(state, printRejectionReason, f"Wave-separated TDM requires NumWaves={numWaves} to be a power of two")
         return
-      if state["1LDSBuffer"] == -1:
-        state["1LDSBuffer"] = 0
-      if state["1LDSBuffer"] and state["PrefetchGlobalRead"] == 2:
-        reject(state, printRejectionReason, "TDM requires at least 2 LDS buffers for PGR2")
-        return
+
+    # TDM needs at least 2 LDS buffers, so auto (-1) resolves to 0 here.
+    # An explicit or forced 1LDSBuffer=1 is rejected once its value is final.
+    if (state["enableTDMA"] or state["enableTDMB"]) and state["1LDSBuffer"] == -1:
+      state["1LDSBuffer"] = 0
 
     # TDMLoadWaveSync needs the StinkyTofu backend (ScheduleIterAlg=4); reject
     # otherwise. It only matters with TDM in flight and >1 wave; else turn it off.
@@ -4420,6 +4420,12 @@ class Solution(collections.abc.Mapping):
     # if (state["enableLDSTrA"] or state["enableLDSTrB"]) and (not state["1LDSBuffer"] and state["ExpandPointerSwap"]):
     if (state["enableLDSTrA"] or state["enableLDSTrB"]) and (not state["1LDSBuffer"] and state["ExpandPointerSwap"]):
       reject(state, printRejectionReason, "Current LDSTrInst implementation does not support 1LDSBuffer=0")
+      return
+
+    # TDM requires 1LDSBuffer=0. With a single LDS buffer, the next tile's tensor
+    # loads would write the only buffer while other waves are still reading it.
+    if (state["enableTDMA"] or state["enableTDMB"]) and state["1LDSBuffer"]:
+      reject(state, printRejectionReason, "1LDSBuffer must be 0 for TDM")
       return
 
   @staticmethod
@@ -7722,7 +7728,7 @@ class Solution(collections.abc.Mapping):
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
       wlrMultiple = state["LocalReadVectorWidthA"]//state["MIInputPerThreadA"]
       # NOTE: wlrmultiple can be 0 for new MFMA
-      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not((state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataTypeA"].is8bitFloat()) and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         if wlrMultiple == 0:
           reject(state, printRejectionReason, "LocalReadVectorWidthA %u is less than MIInputA" % (state["LocalReadVectorWidthA"]))
           return
@@ -7741,7 +7747,7 @@ class Solution(collections.abc.Mapping):
       # Multiple = WLR-size / input-size = how many iters could be covered by one WLR ?
       wlrMultiple = state["LocalReadVectorWidthB"]//state["MIInputPerThreadB"]
       # NOTE: wlrmultiple can be 0 for new MFMA
-      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not(state["ProblemType"]["DataType"].is8bitFloat() and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
+      if not state["ProblemType"]["Sparse"] and not state["UseF32XEmulation"] and not((state["ProblemType"]["DataType"].is8bitFloat() or state["ProblemType"]["DataTypeB"].is8bitFloat()) and (state["MatrixInstK"] in [64, 128,])) and (not isaInfoMap[isa].asmCaps["HasWMMA_V3"]):
         if wlrMultiple == 0:
           reject(state, printRejectionReason, "LocalReadVectorWidthB %u is less than MIInputB" % (state["LocalReadVectorWidthB"]))
           return
