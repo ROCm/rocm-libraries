@@ -428,10 +428,14 @@ struct BlockFmhaQuantScales
             const index_t warp_k = kKeyWarps > 1 ? index_t(get_warp_id()) % kKeyWarps : 0;
             const float* const v = reinterpret_cast<const float*>(Trip(trip) + kTripKDwords) +
                                    (IK1::value * kKeyWarps + warp_k) * kVBlockChunks;
+            // descales are staged as stored: a block's are bitwise equal
+            const auto same = [](float a, float b) {
+                return bit_cast<uint32_t>(a) == bit_cast<uint32_t>(b);
+            };
             const auto block_gemm = [&](float v_block, const auto& p) {
                 if(v_block == 0.f)
                     return;
-                if(v_block != v_block_)
+                if(!same(v_block, v_block_))
                 {
                     const float ratio = v_block_ / v_block;
                     tile_elementwise_inout([ratio](auto& x) { x *= ratio; }, o_acc);
@@ -440,7 +444,7 @@ struct BlockFmhaQuantScales
                 gemm(o_acc, p, v_slice);
             };
             bool uniform = true;
-            static_for<1, kVBlockChunks, 1>{}([&](auto c) { uniform &= v[c] == v[0]; });
+            static_for<1, kVBlockChunks, 1>{}([&](auto c) { uniform &= same(v[c], v[0]); });
             if(uniform)
                 block_gemm(v[0], p_slice);
             else
