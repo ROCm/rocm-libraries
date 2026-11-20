@@ -443,6 +443,8 @@ TEST(TestAttentionGeneralBwdGeometry, PrepareRefusesWorkspaceTokensThatDisagreeW
     }
 }
 
+// Defence in depth: the kernels below are hand-edited, which no shipped catalog contains; the
+// candidate filter keeps them out before prepare() runs, and prepare() refuses them again.
 TEST(TestAttentionGeneralBwdGeometry, MainPrepareAdmitsOnlyAKernelThatCanStandInForThePick)
 {
     const std::string admits = "is not a main kernel the plan of the graph admits";
@@ -466,6 +468,21 @@ TEST(TestAttentionGeneralBwdGeometry, MainPrepareAdmitsOnlyAKernelThatCanStandIn
         kernel.metadata["head_pack"] = true;
     });
     EXPECT_NE(packed.find(admits), std::string::npos) << packed;
+
+    // A kernel whose fields are not those of the catalog row its tuning key and head pack name
+    // (here a tile no row has, and a mirrored load balance the row does not use) is refused by
+    // the field comparison, not by the plan.
+    const std::string notTheRow = "its fields are not those of the catalog row";
+    const auto wrongTile = prepareFailure(symbol, denseMhaTokens(), [](KernelDefinition& kernel) {
+        kernel.metadata["main_block_n"] = int64_t{7};
+    });
+    EXPECT_NE(wrongTile.find(admits), std::string::npos) << wrongTile;
+    EXPECT_NE(wrongTile.find(notTheRow), std::string::npos) << wrongTile;
+    const auto wrongMirror = prepareFailure(symbol, denseMhaTokens(), [](KernelDefinition& kernel) {
+        kernel.metadata["lb_mirror"] = !std::get<bool>(kernel.metadata.at("lb_mirror"));
+    });
+    EXPECT_NE(wrongMirror.find(admits), std::string::npos) << wrongMirror;
+    EXPECT_NE(wrongMirror.find(notTheRow), std::string::npos) << wrongMirror;
 
     // The pick itself is admitted: whatever prepare then does, it does not refuse the kernel.
     EXPECT_EQ(prepareFailure(symbol, denseMhaTokens()).find(admits), std::string::npos);
@@ -518,6 +535,59 @@ TEST(TestAttentionGeneralBwdGeometry, ACandidateStandsInForThePickOnlyAtTheSameP
     foreign.tuned = other;
     EXPECT_TRUE(std::holds_alternative<general_bwd::Decline>(
         general_bwd::resolveCandidate(mhaIn, traits, mhaPolicy, foreign)));
+}
+
+TEST(TestAttentionGeneralBwdGeometry, AThdGraphAdmitsOnlyThePickAsACandidate)
+{
+    // Every other row of the pick's class that a selection can name is declined on a THD graph,
+    // while the pick stays a candidate of itself.
+    std::size_t declined = 0;
+    std::size_t picks = 0;
+    for(const auto& representative : generated::REPRESENTATIVES)
+    {
+        if(!representative.reproduces || representative.seqMode != generated::SeqMode::THD)
+        {
+            continue;
+        }
+        const auto& pickRow = generated::CATALOG.at(representative.row);
+        const auto& traits = general_bwd::archTraitsOf(pickRow.arch);
+        const auto in = representativeInput(representative);
+        const auto policy = planOf(general_bwd::resolvePlan(in, traits));
+        ASSERT_EQ(policy.row, &pickRow);
+
+        for(const auto& row : generated::CATALOG)
+        {
+            if(row.arch != pickRow.arch || row.dtype != pickRow.dtype
+               || row.headSize != pickRow.headSize || row.seq != pickRow.seq
+               || row.stageVec != pickRow.stageVec || row.dkv != pickRow.dkv
+               || row.mask != pickRow.mask || row.dq != pickRow.dq)
+            {
+                continue;
+            }
+            general_bwd::Selection selection;
+            selection.tuned = row.tuningKeyId == 0
+                                  ? nullptr
+                                  : general_bwd::tunedEntryById(row.arch, row.tuningKeyId);
+            selection.headPack = row.headPack;
+            const auto result = general_bwd::resolveCandidate(in, traits, policy, selection);
+            if(&row == &pickRow)
+            {
+                EXPECT_EQ(planOf(result).row, &pickRow) << row.mainKernel;
+                ++picks;
+            }
+            else if(const auto* plan = std::get_if<Plan>(&result))
+            {
+                // A selection that resolves to the pick's own row (a pinned entry) is the pick.
+                EXPECT_EQ(plan->row, &pickRow) << row.mainKernel << " is admitted on THD";
+            }
+            else
+            {
+                ++declined;
+            }
+        }
+    }
+    EXPECT_GT(picks, 0u);
+    EXPECT_GT(declined, 0u) << "no THD class had another row, so the rule is untested";
 }
 
 TEST(TestAttentionGeneralBwdGeometry, EveryTunedEntryIsFoundByItsId)

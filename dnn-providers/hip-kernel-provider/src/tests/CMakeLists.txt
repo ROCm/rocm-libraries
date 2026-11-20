@@ -638,6 +638,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestAttentionGeneralBwdModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
             "HKP_REQUIRE_DVC_DESCRIPTORS=$<BOOL:${HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS}>")
     set(_hkp_catalog_tiles_cases_gfx950_dense EveryShippedKernelsTileIsOneTheEngineLaunches)
@@ -811,6 +812,17 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
                 EveryLaunchIsTheSymbolThePlanNames
                 EveryLaunchRecordsTheAbiTheHandlerMarshals
                 AsmSdpaRanksAheadOfThisEngine
+        )
+        # Its trained main-slot rankers, as the ModelBinding companions above check the other
+        # engines': the bound model survives the loader's pre-flight.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES ${_hkp_general_bwd_arches}
+            SUITES TestAttentionGeneralBwdModelBinding
+            EXPECTED_CASES
+                TheNativeScoreIsBoundAsTheMainSlotsDefault
+                TheBoundMainSlotRankerLoads
         )
     else()
         message(STATUS

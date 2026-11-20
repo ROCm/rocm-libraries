@@ -7,6 +7,7 @@
 #include <array>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -15,6 +16,7 @@
 #include <memory>
 #include <optional>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -819,7 +821,15 @@ protected:
 
     /// Whether the installed UED binds a trained ranker to the main slot for this arch: the
     /// runtime then orders the main candidates by that model, not with the engine's own pick
-    /// first. Read from the descriptor tree the runtime loads; false when it is not found.
+    /// first. Read from the descriptor tree the runtime loads.
+    ///
+    /// Blind spots. It reads the UED only, so it cannot tell that the model loaded: a missing
+    /// `model.bin`, a hash mismatch or a provenance refusal leave the UED binding in place while
+    /// the runtime ranks in declared order. A graph with a real choice is therefore also held to
+    /// `decided_by=model` (expectMainSlotSelection), and the census suite
+    /// TestAttentionGeneralBwdModelBinding fails the build on a refused model. It returns false
+    /// when HIPDNN_DESCRIPTOR_RUNTIME_DIR is unset or holds no UED, and the strict check that
+    /// the main slot selected the engine's own pick then applies: a loud failure, not a pass.
     static bool mainSlotHasTrainedRanker()
     {
         const auto root = hipdnn_data_sdk::utilities::getEnv("HIPDNN_DESCRIPTOR_RUNTIME_DIR");
@@ -845,6 +855,63 @@ protected:
         return false;
     }
 
+    /// What the runtime logged for the main slot's selection: `slot 'main' selected kernel <id>
+    /// at rank 0 from <N> candidate(s)`. @p found is false when no such line was captured.
+    struct MainSelection
+    {
+        bool found = false;
+        std::string kernelId;
+        size_t candidates = 0;
+    };
+
+    static MainSelection
+        mainSelectionIn(const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder)
+    {
+        const std::string logs = recorder.getRecordedLogsAsString();
+        const std::string marker
+            = std::string("engine '") + ENGINE + "' slot 'main' selected kernel ";
+        const auto at = logs.find(marker);
+        MainSelection out;
+        if(at == std::string::npos)
+        {
+            return out;
+        }
+        const auto idStart = at + marker.size();
+        const auto idEnd = logs.find(' ', idStart);
+        const auto from = logs.find(" from ", idEnd);
+        if(idEnd == std::string::npos || from == std::string::npos)
+        {
+            return out;
+        }
+        out.kernelId = logs.substr(idStart, idEnd - idStart);
+        out.candidates = static_cast<size_t>(std::strtoull(logs.c_str() + from + 6, nullptr, 10));
+        out.found = !out.kernelId.empty() && out.candidates > 0;
+        return out;
+    }
+
+    /// With a trained ranker bound and a real choice (more than one candidate), the runtime must
+    /// have decided the main slot by the model: a model that was refused or failed to score
+    /// leaves the declared order, which no other check here notices.
+    void expectMainSlotSelection(
+        const GpuCase& c, const hipdnn_test_sdk::utilities::IsolatedLogRecorder& recorder) const
+    {
+        const auto selection = mainSelectionIn(recorder);
+        EXPECT_TRUE(selection.found) << c.name << ": the engine logged no main-slot selection:\n"
+                                     << recorder.getRecordedLogsAsString();
+        if(selection.found && selection.candidates > 1)
+        {
+            const bool decided = recorder.hasLogContaining("slot 'main' decided_by=model");
+            EXPECT_TRUE(decided) << c.name << ": a trained main-slot ranker is bound and "
+                                 << selection.candidates
+                                 << " candidates matched, but the model did not decide:\n"
+                                 << recorder.getRecordedLogsAsString();
+            if(decided)
+            {
+                std::cout << "GBWD_MODEL " << c.name << " " << selection.candidates << '\n';
+            }
+        }
+    }
+
     /// Checks that each slot selected the kernel the engine's Python reference predicts. With a
     /// trained main-slot ranker installed the main slot may select any admitted kernel
     /// (EveryAdmittedMainKernelMatchesTheReference runs each), so only that it selected one.
@@ -864,11 +931,7 @@ protected:
         {
             if(trained && std::string_view(slot) == "main")
             {
-                const auto line
-                    = std::string("engine '") + ENGINE + "' slot 'main' selected kernel ";
-                EXPECT_TRUE(recorder.hasLogContaining(line))
-                    << "expected '" << line << "...'. Captured logs:\n"
-                    << recorder.getRecordedLogsAsString();
+                expectMainSlotSelection(c, recorder);
                 continue;
             }
             const auto line = std::string("engine '") + ENGINE + "' slot '" + slot
@@ -956,10 +1019,39 @@ protected:
         return {};
     }
 
+    /// The (tuning key id, head pack) pair of the engine's own pick for @p c, read off its main
+    /// kernel's name `...hp<0|1>_<default|k<id>>`. {-1, -1} when the name does not parse.
+    static std::pair<int64_t, int64_t> nativePickPair(const GpuCase& c)
+    {
+        const std::string name(c.mainKernel);
+        const auto hp = name.rfind("_hp");
+        if(hp == std::string::npos || hp + 5 >= name.size()
+           || (name[hp + 3] != '0' && name[hp + 3] != '1') || name[hp + 4] != '_')
+        {
+            return {-1, -1};
+        }
+        const std::string tail = name.substr(hp + 5);
+        if(tail == "default")
+        {
+            return {0, name[hp + 3] - '0'};
+        }
+        if(tail.size() < 2 || tail[0] != 'k')
+        {
+            return {-1, -1};
+        }
+        return {std::strtoll(tail.c_str() + 1, nullptr, 10), name[hp + 3] - '0'};
+    }
+
     /// Every main kernel the engine admits for @p c, forced through the main slot's knobs, runs
     /// twice on fresh data and matches the reference. A candidate stands in for the engine's
     /// pick (same prep launch and shared workspace), so each queries the pick's workspace size.
     /// A (tuning key, head pack) pair no admitted kernel has is refused before any plan exists.
+    ///
+    /// Each pinned plan is held to the kernel it names: the runtime logs the main slot's
+    /// selection, which must be one candidate (the pin narrowed the slot to it), the engine's own
+    /// pick for its own pair and another kernel for every other pair, and different from every
+    /// other pair's. Without that an engine that ignored the pin and always built the pick would
+    /// pass. The pairs that planned must also be exactly the candidates the unpinned plan reports.
     void runEveryMainCandidate(const GpuCase& c)
     {
         if(c.code != "OK")
@@ -969,22 +1061,33 @@ protected:
         const auto engineId = hipdnn_data_sdk::utilities::engineNameToId(ENGINE);
         std::vector<int64_t> keys;
         std::vector<int64_t> packs;
-        std::pair<int64_t, int64_t> pick;
+        std::pair<int64_t, int64_t> knobDefault;
         int64_t pickWorkspace = 0;
+        size_t admitted = 0;
         {
+            const ScopedPluginLogCapture capture(this);
             Built probe;
             build(c, probe);
             ASSERT_FALSE(::testing::Test::HasFatalFailure());
+            const auto selection = mainSelectionIn(capture.recorder());
+            ASSERT_TRUE(selection.found)
+                << c.name << ": the engine logged no main-slot selection:\n"
+                << capture.recorder().getRecordedLogsAsString();
+            admitted = selection.candidates;
             pickWorkspace = probe.workspaceBytes;
             std::vector<hipdnn_frontend::Knob> knobs;
             ASSERT_TRUE(ok(probe.graph->get_knobs_for_engine(engineId, knobs)));
-            std::tie(keys, pick.first) = advertised(knobs, "main.tuning_key_id");
-            std::tie(packs, pick.second) = advertised(knobs, "main.head_pack_on");
+            std::tie(keys, knobDefault.first) = advertised(knobs, "main.tuning_key_id");
+            std::tie(packs, knobDefault.second) = advertised(knobs, "main.head_pack_on");
         }
         ASSERT_FALSE(keys.empty() || packs.empty());
+        const auto native = nativePickPair(c);
+        ASSERT_NE(native.first, -1) << "cannot read the engine's pick off " << c.mainKernel;
 
         size_t ran = 0;
-        bool pickRan = false;
+        bool knobDefaultRan = false;
+        bool nativeRan = false;
+        std::set<std::string> selectedIds;
         for(const auto key : keys)
         {
             for(const auto pack : packs)
@@ -993,6 +1096,7 @@ protected:
                                          + " main.tuning_key_id=" + std::to_string(key)
                                          + " main.head_pack_on=" + std::to_string(pack);
                 SCOPED_TRACE(what);
+                const ScopedPluginLogCapture capture(this);
                 Built built;
                 const auto error = plan(c,
                                         built,
@@ -1004,6 +1108,29 @@ protected:
                               std::string::npos)
                         << "a pinned candidate failed to plan: " << error.err_msg;
                     continue;
+                }
+                const auto selection = mainSelectionIn(capture.recorder());
+                ASSERT_TRUE(selection.found) << "the engine logged no main-slot selection:\n"
+                                             << capture.recorder().getRecordedLogsAsString();
+                EXPECT_EQ(selection.candidates, 1u)
+                    << "the pin did not narrow the main slot to one kernel";
+                EXPECT_TRUE(selectedIds.insert(selection.kernelId).second)
+                    << "another pair already selected kernel " << selection.kernelId
+                    << ": the pin is not honoured";
+                const bool isNative = std::pair<int64_t, int64_t>{key, pack} == native;
+                if(fullDevice())
+                {
+                    if(isNative)
+                    {
+                        EXPECT_EQ(selection.kernelId, std::string(c.mainKernelId))
+                            << "the engine's own pair did not select the engine's own pick";
+                    }
+                    else
+                    {
+                        EXPECT_NE(selection.kernelId, std::string(c.mainKernelId))
+                            << "a pinned alternate selected the engine's own pick: the engine "
+                               "ignored the pin";
+                    }
                 }
                 allocate(c, built);
                 ASSERT_FALSE(::testing::Test::HasFatalFailure());
@@ -1019,13 +1146,21 @@ protected:
                     ASSERT_FALSE(::testing::Test::HasFatalFailure());
                 }
                 ++ran;
-                pickRan = pickRan || (key == pick.first && pack == pick.second);
+                nativeRan = nativeRan || isNative;
+                knobDefaultRan
+                    = knobDefaultRan || (key == knobDefault.first && pack == knobDefault.second);
             }
         }
         std::cout << "GBWD_CANDIDATES " << c.name << " " << ran << '\n';
-        EXPECT_GE(ran, 1u);
-        EXPECT_TRUE(pickRan) << "the engine's own pick (tuning key " << pick.first << ", head pack "
-                             << pick.second << ") was not among the candidates";
+        EXPECT_EQ(ran, admitted)
+            << "the pairs that planned are not the candidates the unpinned plan "
+               "reports";
+        EXPECT_TRUE(nativeRan) << "the engine's own pick (tuning key " << native.first
+                               << ", head pack " << native.second
+                               << ") was not among the candidates";
+        EXPECT_TRUE(knobDefaultRan)
+            << "the knob default (tuning key " << knobDefault.first << ", head pack "
+            << knobDefault.second << ") was not among the candidates";
     }
 
     /// One plan captured once into a HIP graph and replayed three times, each with new data and,

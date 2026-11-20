@@ -1344,7 +1344,9 @@ inline std::variant<Plan, Decline>
         headPack = *selection.headPack;
         if(headPack && p.group <= 1)
         {
-            return unavailable("head_pack needs a head group above 1");
+            return unavailable(
+                "engine policy: head packing is offered only for a query-head group above 1 (the "
+                "planner builds this row)");
         }
     }
     else
@@ -1587,6 +1589,11 @@ inline bool sameWorkspace(const WorkspaceLayout& a, const WorkspaceLayout& b)
  * tile) and the workspace layout. What may differ is the catalog row's tile, load-balance
  * order, head packing, scale placement and work-list use that the prep launch does not read,
  * with the runtime values bound from them.
+ *
+ * Three further rules are engine policy, not limits of the planner (each declines a row the
+ * planner builds): a tuned entry serves only the performance class it was tuned for, head
+ * packing is offered only for a query-head group above 1 (unless the entry pins it), and a THD
+ * graph is served by the pick alone.
  */
 inline std::variant<Plan, Decline> resolveCandidate(const PlanInput& in,
                                                     const ArchTraits& traits,
@@ -1601,7 +1608,9 @@ inline std::variant<Plan, Decline> resolveCandidate(const PlanInput& in,
     }
     if(selection.tuned != nullptr && !tunedEntryServesClass(*selection.tuned, *key, traits))
     {
-        return unavailable("the tuned entry belongs to another performance class");
+        return unavailable(
+            "engine policy: the tuned entry was tuned for another performance class (the planner "
+            "builds this row)");
     }
     auto result = resolvePlan(in, traits, selection);
     if(auto* decline = std::get_if<Decline>(&result))
@@ -1609,6 +1618,15 @@ inline std::variant<Plan, Decline> resolveCandidate(const PlanInput& in,
         return std::move(*decline);
     }
     auto& plan = std::get<Plan>(result);
+    // Temporary limit: hipdnn_bench cannot time THD candidates yet (it fills the ragged offset
+    // tables with its input pattern), so no trained ranker has seen one and a THD graph keeps
+    // the engine's own pick. Lift this once THD candidates can be timed and trained on.
+    if(in.thd && plan.row != policy.row)
+    {
+        return unavailable(
+            "engine policy: a THD graph is served by the engine's own pick only (the planner "
+            "builds this row)");
+    }
     const auto& row = *plan.row;
     const auto& pick = *policy.row;
     if(row.dtype != pick.dtype || row.headSize != pick.headSize || row.seq != pick.seq

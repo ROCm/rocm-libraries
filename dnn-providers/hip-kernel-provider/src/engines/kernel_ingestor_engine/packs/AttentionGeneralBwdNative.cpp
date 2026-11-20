@@ -677,8 +677,9 @@ GraphPlan graphPlanOf(const MatchContext& context)
 }
 
 /// The plan of the main kernel @p kernel on the graph of @p graphPlan: its catalog row
-/// standing in for the engine's own pick, or why it cannot. Every field of the kernel must be
-/// the row the plan resolves to, which is what the tuning key and head pack name.
+/// standing in for the engine's own pick, or why it cannot. The row is the one the kernel's
+/// tuning key and head pack name; the 14 fields MAIN_FIELDS encodes must be that row's (the
+/// int knob restatements the descriptors also carry are not read here).
 std::variant<general_bwd::Plan, std::string> mainCandidatePlanOf(const GraphPlan& graphPlan,
                                                                  std::string_view arch,
                                                                  const KernelDefinition& kernel)
@@ -705,12 +706,6 @@ std::variant<general_bwd::Plan, std::string> mainCandidatePlanOf(const GraphPlan
     {
         return std::string(
             "its fields are not those of the catalog row its tuning key and head pack name");
-    }
-    // hipdnn_bench cannot time THD candidates (it fills the ragged offset tables with its input
-    // pattern), so no trained ranker has seen one: a THD graph keeps the engine's own pick.
-    if(in->thd && plan.row != graphPlan.plan.row)
-    {
-        return std::string("a THD graph admits only the engine's own pick");
     }
     return std::move(plan);
 }

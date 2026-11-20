@@ -763,6 +763,50 @@ TEST(TestAttentionGeneralBwdMatch, CandidateFilterKeepsThePickAndTheLegalRowsTha
     EXPECT_GT(withAlternates, 0u) << "no graph had a candidate besides the pick";
 }
 
+TEST(TestAttentionGeneralBwdMatch, CandidateFilterKeepsOnlyThePickOnATHDGraph)
+{
+    // A THD graph keeps the engine's own pick: hipdnn_bench cannot time THD candidates yet, so
+    // no trained ranker has seen one. The dense twin of each graph has alternates, so the single
+    // candidate is the rule at work, not a graph without alternates.
+    const auto spec
+        = [](int64_t b, int64_t hQ, int64_t hK, int64_t sQ, int64_t sKv, int64_t d, bool causal) {
+              GraphSpec s;
+              s.b = b;
+              s.hQ = hQ;
+              s.hK = hK;
+              s.hV = hK;
+              s.sQ = sQ;
+              s.sKv = sKv;
+              s.dQk = d;
+              s.dV = d;
+              s.causal = causal;
+              return s;
+          };
+    const std::vector<GraphSpec> specs = {
+        spec(8, 32, 8, 1024, 1024, 128, true),
+        spec(2, 8, 2, 1, 256, 128, false),
+        spec(4, 16, 16, 2048, 2048, 64, true),
+    };
+    std::size_t denseWithAlternates = 0;
+    for(const auto arch : {GFX942, GFX950})
+    {
+        for(auto graphSpec : specs)
+        {
+            graphSpec.thd = false;
+            denseWithAlternates += candidatesOf(graphWith(graphSpec), arch).rows.size() > 1 ? 1 : 0;
+
+            graphSpec.thd = true;
+            const auto candidates = candidatesOf(graphWith(graphSpec), arch);
+            ASSERT_NE(candidates.pick, nullptr) << arch;
+            ASSERT_EQ(candidates.rows.size(), 1u)
+                << arch << ": a THD graph admits only the engine's own pick";
+            EXPECT_EQ(candidates.rows.front(), candidates.pick) << arch;
+        }
+    }
+    EXPECT_GT(denseWithAlternates, 0u)
+        << "no dense twin had an alternate, so the THD rule was not exercised";
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

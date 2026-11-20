@@ -628,6 +628,15 @@ TEST_P(TestAttentionGeneralBwdReplay, EveryCorpusEntryReplaysItsVerdictAndPlan)
 
     std::map<std::string, json> alternates;
     const auto alternatesFile = alternatesPath(arch);
+    // The committed corpus always has its alternates beside it (CMake stages both), so an absent
+    // file there is a build slip that would silently turn the candidate parity off. Only a corpus
+    // taken from the override may lack one.
+    if(hipdnn_data_sdk::utilities::getEnv("HKP_GENERAL_BWD_CORPUS").empty())
+    {
+        ASSERT_TRUE(alternatesFile.has_value())
+            << "no alternates_" << arch << ".jsonl beside the committed corpus '" << path.string()
+            << "': the candidate parity against rocKE would be skipped";
+    }
     if(alternatesFile.has_value())
     {
         alternates = loadAlternates(*alternatesFile);
@@ -663,6 +672,11 @@ TEST_P(TestAttentionGeneralBwdReplay, EveryCorpusEntryReplaysItsVerdictAndPlan)
     EXPECT_EQ(tally.failures, 0u) << summary.str();
     EXPECT_GT(tally.accepts, 0u) << "a corpus that accepts nothing proves no plan";
     EXPECT_GT(tally.codes.size(), 1u) << "a corpus with one verdict proves no check order";
+    if(alternatesFile.has_value())
+    {
+        EXPECT_GT(tally.alternatesVerified, 0u)
+            << "the alternates file verified no candidate, so the candidate parity proves nothing";
+    }
 }
 
 INSTANTIATE_TEST_SUITE_P(,
