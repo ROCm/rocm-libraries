@@ -17,8 +17,8 @@ the rand bound on the rand set.
 
 ``--gpu auto`` (two partitions per physical GPU): samples ``amd-smi process``,
 takes the first pair of ``--pairs`` whose partitions both stayed idle and runs
-on its first partition; a timed batch during which another process used the
-pair is tagged and left out of the ranking. ``--allow-single`` falls back to
+on its first partition; a timed batch with another process on the pair (checked
+before and after the batch) is tagged and left out of the ranking. ``--allow-single`` falls back to
 one idle partition (quick checks only).
 
     python -m rocke.examples.gfx1250.gemm_perf_fp8.mx_env_sweep \
@@ -442,6 +442,16 @@ def main():
                     e1.record()
                     e1.synchronize()
                     tf = fl / (e0.elapsed_to(e1) / rep * 1e9)
+                    if pair and not o.no_pair_check and not tainted:
+                        # A neighbour that started during the batch: check again after it.
+                        why = []
+                        try:
+                            tainted = bool(_busy(gmap, os.getpid(), why) & set(pair))
+                        except RuntimeError:
+                            tainted, why = True, ["amd-smi failed"]
+                        if tainted:
+                            _log("  pair busy after the batch: " + "; ".join(
+                                w for w in why if any(f"HIP {i} " in w for i in pair) or w == "amd-smi failed"))
                     res.setdefault((t, shape), []).append(None if tainted else tf)
                     w.writerow([t, *shape, r + 1, f"{tf:.1f}", int(tainted)])
                     fcsv.flush()
