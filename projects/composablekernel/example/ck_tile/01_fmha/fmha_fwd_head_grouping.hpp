@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ck_tile/host.hpp"
+#include "bias.hpp"
 
 #include <algorithm>
 #include <cctype>
@@ -13,6 +14,7 @@
 #include <limits>
 #include <optional>
 #include <string>
+#include <vector>
 
 #ifdef __linux__
 #include <dirent.h>
@@ -264,6 +266,7 @@ inline size_t get_llc_cache_bytes(const std::string& arch)
 inline std::optional<ck_tile::index_t> get_head_group_size(ck_tile::index_t nhead_q,
                                                            ck_tile::index_t nhead_k,
                                                            ck_tile::index_t batch,
+                                                           ck_tile::index_t seqlen_q,
                                                            ck_tile::index_t seqlen_k,
                                                            ck_tile::index_t hdim_q,
                                                            ck_tile::index_t hdim_v,
@@ -283,7 +286,7 @@ inline std::optional<ck_tile::index_t> get_head_group_size(ck_tile::index_t nhea
 
     if(nhead_k <= 0 || nhead_q <= 0 || (nhead_q % nhead_k) != 0)
         return std::nullopt;
-    if(seqlen_k <= 0 || hdim_q <= 0 || hdim_v <= 0 || batch <= 0)
+    if(seqlen_q <= 0 || seqlen_k <= 0 || hdim_q <= 0 || hdim_v <= 0 || batch <= 0)
         return std::nullopt;
 
     const size_t kv_bytes_per_head =
@@ -332,6 +335,49 @@ inline std::optional<ck_tile::index_t> get_head_group_size(ck_tile::index_t nhea
     if(group >= nhead_q)
         return std::nullopt;
 
+    const bool is_gfx110 = arch.rfind("gfx110", 0) == 0;
+    const bool is_gfx115 = arch.rfind("gfx115", 0) == 0;
+    const bool is_gfx120 = arch.rfind("gfx120", 0) == 0;
+    if((is_gfx110 || is_gfx115 || is_gfx120) && elem_bytes_k == 2 && elem_bytes_v == 2)
+    {
+        constexpr size_t kMiB = 1024ull * 1024ull;
+        const size_t qo_bytes_per_row =
+            static_cast<size_t>(hdim_q) * elem_bytes_k + static_cast<size_t>(hdim_v) * elem_bytes_v;
+        // Count shared K/V heads once; gfx110 and gfx115 also budget query/output traffic.
+        size_t cache_bytes = static_cast<size_t>(nhead_k) * kv_bytes_per_head;
+        if(is_gfx110 || is_gfx115)
+            cache_bytes += static_cast<size_t>(nhead_q) * seqlen_q * qo_bytes_per_row;
+
+        // Small GQA groups run as one launch: 4096 query rows across batches, capped at 1.5 MiB
+        // of Q/O on gfx115 and extended to 16 MiB of Q/O on gfx120. These are tuning limits,
+        // not hardware cache capacities.
+        constexpr ck_tile::index_t kMaxSmallGqaQueryRowsPerGroup = 4096;
+        ck_tile::index_t max_rows                                = kMaxSmallGqaQueryRowsPerGroup;
+        if(is_gfx115)
+            max_rows =
+                std::min(max_rows, static_cast<ck_tile::index_t>(3 * kMiB / 2 / qo_bytes_per_row));
+        else if(is_gfx120)
+            max_rows =
+                std::max(max_rows, static_cast<ck_tile::index_t>(16 * kMiB / qo_bytes_per_row));
+        if(cache_bytes <= target_llc_bytes ||
+           (gqa_ratio > 1 && seqlen_q <= max_rows / batch / group))
+            return std::nullopt;
+
+        if((is_gfx110 || is_gfx115) && gqa_ratio > 1)
+        {
+            // Fit shared K/V and Q/O across batches, keeping equal-sized head groups.
+            auto kv_heads_per_group =
+                static_cast<ck_tile::index_t>(target_llc_bytes / batch / (cache_bytes / nhead_k));
+            if(is_gfx115)
+                kv_heads_per_group =
+                    std::min(kv_heads_per_group,
+                             kMaxSmallGqaQueryRowsPerGroup / batch / seqlen_q / gqa_ratio);
+            while(kv_heads_per_group > 1 && nhead_k % kv_heads_per_group != 0)
+                --kv_heads_per_group;
+            group = std::max(group, kv_heads_per_group * gqa_ratio);
+        }
+    }
+
     return group;
 }
 
@@ -376,7 +422,12 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
     const ck_tile::index_t group_sz  = std::min(group_size_q, nhead);
     const ck_tile::index_t n_groups  = ck_tile::integer_divide_ceil(nhead, group_sz);
 
-    float total_time = 0.0f;
+    // Prepare group arguments outside the timing loop.
+    std::vector<FmhaFwdArgs> grouped_args;
+    if(sc.time_kernel_)
+        grouped_args.reserve(n_groups);
+    std::vector<std::string> kernel_names(sc.time_kernel_ && sc.log_level_ > 0 ? n_groups : 0);
+    float result = 0.0f;
     for(ck_tile::index_t head_start = 0; head_start < nhead; head_start += group_sz)
     {
         const ck_tile::index_t q_heads = std::min(group_sz, nhead - head_start);
@@ -396,8 +447,11 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
             ptr_offset<VDataType>(base_args.v_ptr, k_head_start * base_args.nhead_stride_v);
         args.o_ptr = ptr_offset<ODataType>(base_args.o_ptr, head_start * base_args.nhead_stride_o);
 
-        args.bias_ptr =
-            ptr_offset<BiasDataType>(base_args.bias_ptr, head_start * base_args.nhead_stride_bias);
+        // ALiBi has one FP32 slope per head, independent of the elementwise bias type.
+        args.bias_ptr = fmha_traits.bias_type == bias_enum::alibi
+                            ? ptr_offset<float>(base_args.bias_ptr, head_start)
+                            : ptr_offset<BiasDataType>(base_args.bias_ptr,
+                                                       head_start * base_args.nhead_stride_bias);
         args.lse_ptr =
             ptr_offset<LSEDataType>(base_args.lse_ptr, head_start * base_args.nhead_stride_lse);
         args.rand_val_ptr = ptr_offset<RandValOutputDataType>(
@@ -429,12 +483,44 @@ float run_fwd_head_grouped(const ck_tile::stream_config& sc,
                       << k_head_start << ", " << (k_head_start + k_heads) << ")" << std::endl;
         }
 
-        const float t = run_kernel_fn(fmha_traits, args, sc);
-        if(t < 0.0f)
-            return t;
-        total_time += t;
+        if(!sc.time_kernel_)
+        {
+            const float t = run_kernel_fn(fmha_traits, args, sc);
+            if(t < 0.0f)
+                return t;
+            result += t;
+            continue;
+        }
+
+        if(sc.log_level_ > 0)
+            args.selected_kernel_name = &kernel_names[grouped_args.size()];
+        grouped_args.push_back(args);
     }
-    return total_time;
+
+    if(!sc.time_kernel_)
+        return result;
+
+    auto dispatch_sc         = sc;
+    dispatch_sc.time_kernel_ = false;
+    dispatch_sc.log_level_   = 0;
+    const float elapsed      = ck_tile::launch_kernel(sc, [&](const ck_tile::stream_config&) {
+        for(auto& args : grouped_args)
+        {
+            if(result < 0.0f)
+                return;
+            result = run_kernel_fn(fmha_traits, args, dispatch_sc);
+        }
+    });
+    for(const auto& name : kernel_names)
+    {
+        if(!name.empty())
+        {
+            if(base_args.selected_kernel_name != nullptr)
+                *base_args.selected_kernel_name = name;
+            std::cout << ", " << name << std::flush;
+        }
+    }
+    return result < 0.0f ? result : elapsed;
 }
 
 } // namespace fmha_fwd_head_grouping

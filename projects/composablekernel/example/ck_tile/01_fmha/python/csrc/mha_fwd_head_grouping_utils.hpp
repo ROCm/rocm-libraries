@@ -41,6 +41,7 @@ inline float maybe_dispatch_head_grouped_fwd(const ck_tile::stream_config& strea
     const auto group_size_opt = head_grouping::get_head_group_size(num_heads,
                                                                    num_heads_k,
                                                                    batch_size,
+                                                                   args.max_seqlen_q,
                                                                    seqlen_k,
                                                                    head_size_q,
                                                                    head_size_v,
