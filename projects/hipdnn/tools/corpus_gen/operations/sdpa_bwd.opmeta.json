@@ -1393,6 +1393,44 @@
           false
         ]
       }
+    },
+    {
+      "name": "cross_attention",
+      "note": "more queries than keys, from different tensors: diffusion and encoder-decoder attention over a short text or memory sequence. Bidirectional, since a causal mask is declared only for seqlen_q <= seqlen_k",
+      "values": {
+        "batch": [
+          1,
+          2,
+          4
+        ],
+        "heads": [
+          8,
+          16,
+          32
+        ],
+        "heads_kv": [
+          "$q.heads"
+        ],
+        "seqlen_q": [
+          1024,
+          2048,
+          4096
+        ],
+        "seqlen_k": [
+          77,
+          256,
+          512
+        ],
+        "head_dim": [
+          40,
+          64,
+          80,
+          160
+        ],
+        "is_causal": [
+          false
+        ]
+      }
     }
   ],
   "neighbourhood": {
