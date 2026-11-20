@@ -19,7 +19,8 @@ Key differences vs gfx950 (MFMA) profiles:
   * No DirectToLds (absent on gfx12).
   * No MIArchVgpr (auto-forced True under WMMA).
   * PrefetchGlobalRead capped at [1,2] (PGR>=3 needs DirectToLds).
-  * Misc gfx1250 specific optimizations - ClusterDim, LDSSegmentInterleave 
+  * Misc gfx1250 specific optimizations - ClusterDim, LDSSegmentInterleave,
+    LDSSegmentBRotate (B-side LDS segment conflict elimination).
 """
 
 from typing import Optional
@@ -106,11 +107,13 @@ class GFX1250Params(BaseOptimizationParams):
 
     @param
     def compact_loop_store(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("CompactLoopStore", [True])
-    
-    @param
-    def tdm_plus_lds_buff(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("TDMPlusLdsBuf", [-1, 0 , 1])
+        # MI455X reco: "Don't use it" — illegal mem access in corner cases.
+        # Tensile force-overrides to False anyway (Solution.py L3254).
+        return self._make_param("CompactLoopStore", [False])
+
+    # TDMPlusLdsBuf: DO NOT ENABLE (MI455X Sep-7 warning — illegal mem access,
+    # cross-wave RAW race). Tensile unconditionally forces it to 0
+    # (Solution.py L6246). Omitted so codegen uses the default (0 = off).
 
     # =================================================================
     # gfx1250-exclusive: TDM / cluster / schedule
@@ -121,10 +124,9 @@ class GFX1250Params(BaseOptimizationParams):
         return self._make_param("TDMInst", [3])
 
     @param
-    def tdm_iterate_mode(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        # if self._is_tn():
-        return self._make_param("TDMIterateMode", [0]) # 0, 1, 2, 3
-        # return None
+    def tdm_iterate_mode(self, ctx: SizeContext) -> ForkParameter:
+        """0 (default) and -1 (auto, Tensile picks based on shape alignment)."""
+        return self._make_param("TDMIterateMode", [0, -1])
 
     @param
     def init_c_iter_wmma(self, ctx: SizeContext) -> ForkParameter:
@@ -132,9 +134,18 @@ class GFX1250Params(BaseOptimizationParams):
 
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> Optional[ForkParameter]:
-        # if self._gt.data_type == "F4":
-        #     return None
-        return self._make_param("LDSSegmentInterleave", [0, 1])
+        # MI455X latest reco: pin to 1 (paired with BRotate=1).
+        # Separates A/B operand halves into different 64K LDS segments to
+        # eliminate read-port conflicts. Codegen rejects incompatible MIs.
+        # ---
+        # AIHPBLAS-5252: since LDSSegmentBRotate is forced to 0, 
+        # LDSSegmentInterleave should be set to 0 as well to generate valid kernels.
+        return self._make_param("LDSSegmentInterleave", [0])
+
+    @param
+    def lds_segment_b_rotate(self, ctx: SizeContext) -> Optional[ForkParameter]:
+        # AIHPBLAS-5252: force LDSSegmentBRotate to 0.
+        return self._make_param("LDSSegmentBRotate", [0])
 
     @param
     def schedule_iter_alg(self, ctx: SizeContext) -> ForkParameter:
@@ -170,6 +181,17 @@ class GFX1250Params(BaseOptimizationParams):
     @param
     def prefetch_global_read(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("PrefetchGlobalRead", [2])
+
+    @param
+    def prefetch_global_read_a(self, ctx: SizeContext) -> ForkParameter:
+        # MI455X baseline: auto LDS-feasible PGR pair. With PGR=2, Tensile
+        # tries (2,2) first; if LDS is tight it falls back to (2,1)/(1,2)
+        # instead of rejecting. No downside — identical when LDS fits both.
+        return self._make_param("PrefetchGlobalReadA", [-1])
+
+    @param
+    def prefetch_global_read_b(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("PrefetchGlobalReadB", [-1])
 
     @param
     def prefetch_local_read(self, ctx: SizeContext) -> ForkParameter:
@@ -521,13 +543,31 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def tdm_iterate_mode(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("TDMIterateMode", [0, 1, 2, 3])
+        """0 (default) and -1 (auto, Tensile picks based on shape alignment)."""
+        return self._make_param("TDMIterateMode", [0, -1])
 
     @param
     def tdm_split(self, ctx: SizeContext) -> ForkParameter:
         # Also rejected unconditionally by this tensilelite ("TDMSplit is
         # currently disabled"), so [False] is the only value that can build.
         return self._make_param("TDMSplit", [False])
+
+    @param
+    def tdm_fuse(self, ctx: SizeContext) -> ForkParameter:
+        """Pinned [1] -- {A, MXSA} + {MXSB, B}, so A and B never share a TDM load.
+
+        A ``tensor_load_to_lds`` carries one set of th/scope/nv bits for every
+        tensor it moves. Under TDMFuse=0 (develop's default, {A, B} + {MXSA, MXSB})
+        A and B share that instruction, so a TemporalHint is applied only when
+        TemporalHintA and TemporalHintB agree: of the four (A, B) pairs swept
+        below, (0, 1) and (1, 0) both build the (0, 0) kernel and only (1, 1)
+        differs. TDMFuse=1 gives A and B a descriptor set each, so every pair
+        builds its own kernel.
+
+        TDMFuse 1-3 need more than one wave; ``_GFX1250TDMFuseOneWave`` in
+        post_processor.py keeps one-wave MIs at TDMFuse=0.
+        """
+        return self._make_param("TDMFuse", [1])
 
     @param
     def compact_loop_store(self, ctx: SizeContext) -> ForkParameter:
@@ -624,11 +664,16 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
     # not a clearance. StreamK: true puts persistent kernels in the space.
 
     @param
-    def global_split_u(self, ctx: SizeContext) -> ForkParameter:
+    def global_split_u(self, ctx: SizeContext) -> Optional[ForkParameter]:
         """-1 lets Tensile choose. With StreamK: false, MIDesign also attaches
         a per-MI GlobalSplitU that would override this one for those MIs
         (Tensile lets a group entry win over a flat parameter);
-        _GFX1250DropMIGroupGSU in post_processor.py strips it."""
+        _GFX1250DropMIGroupGSU in post_processor.py strips it.
+
+        ``GSU_PER_MI: true`` keeps the per-MI values instead, so no flat value is
+        emitted and MIs without one run Tensile's default GlobalSplitU 1."""
+        if self.config.get("GSU_PER_MI"):
+            return None
         return self._make_param("GlobalSplitU", [-1])
 
     @param
@@ -661,24 +706,25 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @group
     def execution_policy(self, ctx: SizeContext) -> Optional[GroupDimension]:
-        """Persistent strategies with their options, when the input config sets ``StreamK: true``.
+        """Persistent strategy with its options, when ``StreamK: true`` (the default).
 
-        StreamK and DataParallel each pair with PrefetchAcrossPersistent [0, 1]
-        and the XCC remap. Both options exist only for a persistent kernel: Tensile
-        raises UnsupportedExecutionPolicy for an explicit PrefetchAcrossPersistent
-        with TileProcessingStrategy None, which aborts the run, and zeroes the XCC
-        remap there. So an Equality library keeps the non-persistent kernel as an
-        entry of its own. An OOB library drops it, since its origami sentinel
-        ``WorkGroupMappingXCC: -1`` needs a persistent kernel, and keeps only XCC
-        remap 0 ("Cannot use auto WGMXCC with SKXCC").
+        OOB libraries use only StreamK (origami needs a persistent kernel for
+        ``WorkGroupMappingXCC: -1``, and a single strategy keeps the search
+        space tight).  Equality libraries search both StreamK and DataParallel,
+        plus a non-persistent ``None`` entry.
+
+        Each persistent strategy pairs with PrefetchAcrossPersistent [0, 1].
+        OOB keeps only XCC remap 0 ("Cannot use auto WGMXCC with SKXCC");
+        Equality searches all divisors of the ARCH's XCC count.
         """
         if not self._sk3():
             return None
         origami = self._origami_picks_wgm()
+        strategies = ("StreamK",) if origami else ("StreamK", "DataParallel")
         entries = [] if origami else [
             {"TileProcessingStrategy": self._make_param("TileProcessingStrategy", ["None"])}
         ]
-        for strategy in ("StreamK", "DataParallel"):
+        for strategy in strategies:
             for prefetch in (0, 1):
                 for remap in [0] if origami else self._xcc_remap_values():
                     entries.append({
@@ -738,6 +784,12 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def source_swap(self, ctx: SizeContext) -> ForkParameter:
+        """Both values; _GFX1250SourceSwapCoupling pins non-square MIs to False.
+
+        SourceSwap=True on a non-square MI (32x16) swaps the effective M and N, so
+        the kernel builds a different macro tile than the ClusterDim coupling ranks
+        shapes for. Square MIs build the same tile either way and keep both values.
+        """
         return self._make_param("SourceSwap", [False, True])
 
     @param
@@ -911,11 +963,19 @@ class GFX1250GAParams(GFX1250GAOrigamiPolicy, BaseOptimizationParams):
 
     @param
     def lds_segment_interleave(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("LDSSegmentInterleave", [0, 1])
+        # MI455X latest reco: pin to 1 (paired with BRotate=1).
+        # ---
+        # AIHPBLAS-5252: since LDSSegmentBRotate is forced to 0, 
+        # LDSSegmentInterleave should be set to 0 as well to generate valid kernels.
+        return self._make_param("LDSSegmentInterleave", [0])
 
     @param
-    def tdm_plus_lds_buff(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("TDMPlusLdsBuf", [-1])
+    def lds_segment_b_rotate(self, ctx: SizeContext) -> ForkParameter:
+        # AIHPBLAS-5252: force LDSSegmentBRotate to 0.
+        return self._make_param("LDSSegmentBRotate", [0])
+
+    # TDMPlusLdsBuf: DO NOT ENABLE (MI455X Sep-7 warning — cross-wave RAW race).
+    # Tensile unconditionally forces to 0 (Solution.py L6246). Omitted.
 
     @param
     def init_c_iter_wmma(self, ctx: SizeContext) -> ForkParameter:

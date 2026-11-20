@@ -616,6 +616,43 @@ TensileLite's Python code generator. That is very likely the architecturally cor
 means TensileLite's own Python unit/characterization suite has no coverage at all for a rocRoller-only
 change; see the corrected rows in Known Risks and Gaps below.
 
+### CPU reference GEMM tests
+
+The C++ reference has two numerical suites: gtests in `tensilelite-tests` and
+the `CPUGemm.*` cases registered for `cpu-gemm-driver`. The driver validates D
+and AMAX-D against its own scalar GEMM. Its cases cover fast and slow paths,
+data types, transposes, scaling, bias, activation and batching.
+
+Both executables and their CTest registrations install under
+`bin/hipblaslt-tensilelite/`. TheRock's TensileLite job runs that installed suite
+in the standard tier and reports through the required `Multi-Arch CI Summary`.
+The driver tiers are defined in
+[`tests/cpu_gemm_test_categories.yaml`](tests/cpu_gemm_test_categories.yaml).
+The pinned TheRock selector omits the C++ stage for quick-tier runs.
+
+Run the driver cases from either the build tree or an installed test package:
+
+```bash
+ctest --test-dir <build>/tensilelite/tests -L '^standard$' -R '^CPUGemm\.' \
+    --parallel 1 --output-on-failure --no-tests=error
+ctest --test-dir <install>/bin/hipblaslt-tensilelite -L '^standard$' -R '^CPUGemm\.' \
+    --parallel 1 --output-on-failure --no-tests=error
+```
+
+Each ordinary driver case has one registration, with an OpenMP thread limit of
+8. Each AMAX-D case has three configurations: the original name uses limit 8,
+and `_Threads1` and `_Threads3` select limits 1 and 3. CTest sets both
+`OMP_THREAD_LIMIT` and `OMP_NUM_THREADS`, disables dynamic teams, and accounts
+for the requested processors when scheduling tests. Limits constrain the
+reference's explicit request for 64 threads; they are numerical test settings,
+not measurements of the team used by every reference call.
+
+Math CI's `coverage-cpp` environment continues running the build-tree cases
+with coverage instrumentation. That overlap already exists for the gtests:
+Math CI collects coverage while TheRock validates the installed artifact and
+supplies the required gate. Multiple category labels on a driver registration
+do not cause repeated execution within one CTest invocation.
+
 ### Where these tests actually run
 
 The TensileLite Python tree under `tensilelite/Tests/unit` (characterization *and* unit, about six

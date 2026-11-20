@@ -63,6 +63,7 @@ target_sources(tensilelite-host
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Properties.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/RocRollerWgmKernargs.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/PropertyMatching.hpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ReadMostlyMap.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScalarValueTypes.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/ScaleAlphaVec.hpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/Serialization.hpp"
@@ -127,6 +128,7 @@ else()
             FILE_SET tensilelite_public_headers TYPE HEADERS
                 FILES
                     "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/MessagePack.hpp"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/Tensile/msgpack/SolutionState.hpp"
         PRIVATE
             FILE_SET tensilelite_private_headers TYPE HEADERS
                 FILES

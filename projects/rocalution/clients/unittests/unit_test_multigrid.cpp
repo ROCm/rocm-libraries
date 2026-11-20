@@ -766,10 +766,7 @@ TYPED_TEST(multigrid, coarse_levels_start_from_zero_without_pre_smoothing)
     const Vec<T>        x0 = initial_guess<T>(15);
     const DenseCycle<T> ref(s.h, o);
 
-    // The coarse vectors are zero after Build, so the first cycle is right
     expect_near(solve(s.mg, *s.user.A, b, x0, 1), cycled(ref, b, x0, 1), tol<T>());
-
-    KNOWN_BUG("without pre-smoothing a coarse level starts from its previous correction");
     expect_near(solve(s.mg, *s.user.A, b, x0, 2), cycled(ref, b, x0, 2), tol<T>());
 }
 
@@ -1695,6 +1692,122 @@ TYPED_TEST(multigrid_amg, pairwise_aggregation_reaches_the_coarsening_factor)
     }
 }
 
+namespace
+{
+    // A path of n nodes. The couplings among the first n / 2 are negative, the others
+    // positive, which are never strong.
+    template <typename T>
+    Csr<T> half_positive_path(int n = 8)
+    {
+        Csr<T> A(n);
+        for(int i = 0; i < n; ++i)
+        {
+            for(int j = std::max(i - 1, 0); j <= std::min(i + 1, n - 1); ++j)
+            {
+                A.add(j, static_cast<T>(i == j ? 2 : (std::max(i, j) < n / 2 ? -1 : 1)));
+            }
+            A.end_row();
+        }
+        return A;
+    }
+
+    // Four uncoupled pairs of nodes, so a single pairwise level leaves a diagonal operator
+    template <typename T>
+    Csr<T> uncoupled_pairs()
+    {
+        Csr<T> A(8);
+        for(int i = 0; i < 8; ++i)
+        {
+            if(i % 2 == 1)
+            {
+                A.add(i - 1, static_cast<T>(-1));
+            }
+            A.add(i, static_cast<T>(2));
+            if(i % 2 == 0)
+            {
+                A.add(i + 1, static_cast<T>(-1));
+            }
+            A.end_row();
+        }
+        return A;
+    }
+}
+
+TYPED_TEST(multigrid_amg, pairwise_coarsening_stops_when_no_pair_forms)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = half_positive_path<T>();
+    auto         A   = make_local_matrix(TypeParam::backend, ref);
+    PWAMG<T>     amg;
+    amg.SetOperator(*A);
+    amg.SetCoarsestLevel(2);
+    amg.Verbose(0);
+
+    testing::internal::CaptureStdout();
+    amg.Build();
+    const std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("Pairwise aggregation paired fewer than half of the nodes"),
+              std::string::npos);
+    EXPECT_NE(out.find("Requested coarse operator size cannot be reached"), std::string::npos);
+
+    // The first level pairs the first four nodes into one, short of the coarsening factor, and
+    // leaves a path with only positive couplings, which a second level would not coarsen
+    const Hierarchy<T> h = hierarchy_of(amg, ref);
+    expect_galerkin_hierarchy(h, 2, 1.0);
+    EXPECT_EQ(h.levels(), 2);
+    EXPECT_EQ(h.A.back().n, 5);
+}
+
+TYPED_TEST(multigrid_amg, pairwise_coarsening_ends_a_level_that_pairs_fewer_than_half_of_the_nodes)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = half_positive_path<T>(64);
+    auto         A   = make_local_matrix(TypeParam::backend, ref);
+    PWAMG<T>     amg;
+    amg.SetOperator(*A);
+    amg.SetCoarsestLevel(2);
+    amg.Verbose(0);
+
+    testing::internal::CaptureStdout();
+    amg.Build();
+    const std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("Pairwise aggregation paired fewer than half of the nodes"),
+              std::string::npos);
+
+    // Each level halves the aggregates of the negative half twice, or once when only two are
+    // left, and stops at the pass that pairs fewer than half of the nodes. Pairing on until no
+    // pair forms would reach 33 nodes on the first level, with 64 map entries per node.
+    const Hierarchy<T> h = hierarchy_of(amg, ref);
+    expect_galerkin_hierarchy(h, 2, 1.0);
+    ASSERT_EQ(h.levels(), 4);
+    EXPECT_EQ(h.A[1].n, 40);
+    EXPECT_EQ(h.A[2].n, 34);
+    EXPECT_EQ(h.A[3].n, 33);
+}
+
+TYPED_TEST(multigrid_amg, pairwise_hierarchy_ends_at_a_level_without_an_aggregate)
+{
+    using T          = typename TypeParam::value_type;
+    const Csr<T> ref = uncoupled_pairs<T>();
+    auto         A   = make_local_matrix(TypeParam::backend, ref);
+    PWAMG<T>     amg;
+    amg.SetOperator(*A);
+    amg.SetCoarsestLevel(2);
+    amg.Verbose(0);
+
+    testing::internal::CaptureStdout();
+    amg.Build();
+    const std::string out = testing::internal::GetCapturedStdout();
+    EXPECT_NE(out.find("Requested coarse operator size cannot be reached"), std::string::npos);
+
+    // The first level aggregates each pair. On the diagonal operator it leaves, every row is
+    // strongly diagonally dominant, so the second level forms no aggregate.
+    const Hierarchy<T> h = hierarchy_of(amg, ref);
+    expect_galerkin_hierarchy(h, 2, 1.0);
+    EXPECT_EQ(h.levels(), 2);
+    EXPECT_EQ(h.A.back().n, 4);
+}
+
 TYPED_TEST(multigrid_amg, max_levels_limits_the_hierarchy)
 {
     using T = typename TypeParam::value_type;
@@ -2335,6 +2448,40 @@ TYPED_TEST(multigrid_errors, amg_of_a_problem_within_the_coarsest_size_is_a_fata
             SAAMG<T> amg;
             amg.SetOperator(*A);
             amg.SetCoarsestLevel(16);
+            amg.Build();
+        },
+        "base_amg\\.cpp");
+}
+
+// Without a strong coupling the finest level forms no pair, so the hierarchy cannot start
+TYPED_TEST(multigrid_errors, pairwise_amg_of_a_finest_level_without_a_pair_is_a_fatal_error)
+{
+    using T = typename TypeParam::value_type;
+    EXPECT_FATAL_ERROR(
+        {
+            const Csr<T> ref = transformed(band<T>(8, 1, false),
+                                           [](int i, int j, T) { return T(i == j ? 2 : 1); });
+            auto         A   = make_local_matrix(Backend::Host, ref);
+            PWAMG<T>     amg;
+            amg.SetOperator(*A);
+            amg.SetCoarsestLevel(2);
+            amg.Build();
+        },
+        "base_amg\\.cpp");
+}
+
+// Every row of a diagonal matrix is strongly diagonally dominant, so the finest level forms no
+// aggregate
+TYPED_TEST(multigrid_errors, pairwise_amg_of_a_diagonal_matrix_is_a_fatal_error)
+{
+    using T = typename TypeParam::value_type;
+    EXPECT_FATAL_ERROR(
+        {
+            const Csr<T> ref = transformed(band<T>(8, 0, false), [](int, int, T) { return T(2); });
+            auto         A   = make_local_matrix(Backend::Host, ref);
+            PWAMG<T>     amg;
+            amg.SetOperator(*A);
+            amg.SetCoarsestLevel(2);
             amg.Build();
         },
         "base_amg\\.cpp");

@@ -115,17 +115,32 @@ def test_each_tensor_has_its_own_placement(tmp_path, _restore_gp):
         _write_ini(
             tmp_path,
             SplitDevices=2,
-            SplitDim="M",
+            SplitDim="N",
             SplitPlacementA="Shared",
             SplitPlacementD="Shared",
         )
     )
     assert options["split-placement"] == "SRRS"
-    options = _options(_write_ini(tmp_path, SplitDevices=2, SplitPlacementB="Shared", SplitPlacementC="Shared"))
-    assert options["split-placement"] == "RSSR"
+    options = _options(_write_ini(tmp_path, SplitDevices=2, SplitDim="M", SplitPlacementB="Shared"))
+    assert options["split-placement"] == "RSRR"
 
 
 @pytest.mark.parametrize("tensor", ["A", "B", "C", "D"])
 def test_an_unknown_placement_is_refused(tmp_path, _restore_gp, tensor):
     with pytest.raises(SystemExit):
         _write_ini(tmp_path, SplitDevices=2, **{"SplitPlacement" + tensor: "Everywhere"})
+
+
+@pytest.mark.parametrize(
+    "splitDim, tensor",
+    [("M", "A"), ("M", "C"), ("N", "B"), ("N", "C")],
+)
+def test_only_the_unsplit_operand_and_d_can_be_shared(tmp_path, _restore_gp, splitDim, tensor):
+    # The client refuses the same placements (client/include/SplitPlacement.hpp).
+    with pytest.raises(SystemExit):
+        _write_ini(tmp_path, SplitDevices=2, SplitDim=splitDim, **{"SplitPlacement" + tensor: "Shared"})
+
+
+def test_an_unknown_split_dim_is_refused(tmp_path, _restore_gp):
+    with pytest.raises(SystemExit):
+        _write_ini(tmp_path, SplitDevices=2, SplitDim="K")

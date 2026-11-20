@@ -61,6 +61,10 @@ struct PoolEntry
     /// The stratification label (see RegimeLabel.hpp), carried so ordering and reporting agree.
     std::string regime;
 
+    /// The quota key (`<axis>:<label>`, see formQuotaKey) each form axis puts it under. A form
+    /// floor counts it beside its regime: forms cross regimes, so one entry serves both.
+    std::vector<std::string> forms;
+
     /// What a cut is spread over: the categorical combination plus regime; empty means regime
     /// alone. Without the combination, a cut can drop whole dtypes.
     std::string stratum;
@@ -247,6 +251,13 @@ inline std::vector<PoolEntry> spread(const std::vector<PoolEntry>& pool)
     return result;
 }
 
+/// Whether @p entry counts toward the quota @p key: its regime, or one of its forms.
+inline bool carries(const PoolEntry& entry, const std::string& key)
+{
+    return entry.regime == key
+           || std::find(entry.forms.begin(), entry.forms.end(), key) != entry.forms.end();
+}
+
 } // namespace detail
 
 /// What a regime quota asked for and what the pools could give it.
@@ -256,14 +267,16 @@ struct RegimeQuotaOutcome
     int64_t taken = 0;
 };
 
-/// @brief The corpus: regime quotas first, then the rest of @p count cut by @p shares.
+/// @brief The corpus: quotas first, then the rest of @p count cut by @p shares.
 ///
-/// Every pool is spread (see @ref detail::spread) and cut from its front, in source
+/// A quota is keyed by a regime label or by a form key (see PoolEntry::forms); an entry counts
+/// toward every quota whose key it carries, so one graph can fill a regime's quota and a
+/// form's. Every pool is spread (see @ref detail::spread) and cut from its front, in source
 /// precedence. @p count below the quotas' sum does not trim them. @p allocation receives
-/// each source's total ask; @p quotaOutcome each regime's asked and taken (an unfilled
+/// each source's total ask; @p quotaOutcome each quota's asked and taken (an unfilled
 /// quota is a finding about what the engine serves). @p reserved names points (by
 /// `detail::describe`) taken first, the served edges; they count against @p count and
-/// towards their regime's quota.
+/// towards the quotas they carry.
 inline std::vector<PoolEntry> select(const SourcePools& pools,
                                      int64_t count,
                                      const std::map<std::string, double>& shares,
@@ -283,8 +296,7 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
 
     std::map<std::string, std::vector<bool>> chosen;
     std::map<std::string, int64_t> fromQuotas;
-    std::map<std::string, int64_t> reservedIn;
-    int64_t reservedTotal = 0;
+    int64_t quotaTotal = 0;
     for(const auto& source : corpusSources())
     {
         const auto& pool = ordered[source];
@@ -296,39 +308,41 @@ inline std::vector<PoolEntry> select(const SourcePools& pools,
             {
                 marks[i] = true;
                 ++fromQuotas[source];
-                ++reservedIn[pool[i].regime];
-                ++reservedTotal;
+                ++quotaTotal;
             }
         }
     }
     quotaOutcome.clear();
-    for(const auto& [regime, asked] : quotas)
+    for(const auto& [key, asked] : quotas)
     {
-        auto& outcome = quotaOutcome[regime];
+        auto& outcome = quotaOutcome[key];
         outcome.asked = asked;
-        outcome.taken = std::min(asked, reservedIn[regime]);
+        // Already marked -- a served edge, or another quota's pick -- and carrying this key.
+        int64_t carried = 0;
+        for(const auto& source : corpusSources())
+        {
+            const auto& pool = ordered[source];
+            for(size_t i = 0; i < pool.size(); ++i)
+            {
+                carried += chosen[source][i] && detail::carries(pool[i], key) ? 1 : 0;
+            }
+        }
+        outcome.taken = std::min(asked, carried);
         for(const auto& source : corpusSources())
         {
             const auto& pool = ordered[source];
             auto& marks = chosen[source];
-            marks.resize(pool.size(), false);
             for(size_t i = 0; i < pool.size() && outcome.taken < asked; ++i)
             {
-                if(!marks[i] && pool[i].regime == regime)
+                if(!marks[i] && detail::carries(pool[i], key))
                 {
                     marks[i] = true;
                     ++outcome.taken;
                     ++fromQuotas[source];
+                    ++quotaTotal;
                 }
             }
         }
-    }
-
-    // Everything already marked: the reserved points, and what the quotas took beyond them.
-    int64_t quotaTotal = reservedTotal;
-    for(const auto& entry : quotaOutcome)
-    {
-        quotaTotal += entry.second.taken - std::min(entry.second.taken, reservedIn[entry.first]);
     }
 
     // What the quotas left, still in spread order, cut by shares for the remainder of `count`.

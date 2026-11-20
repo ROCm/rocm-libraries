@@ -19,7 +19,8 @@
 # configs. We rewrite the config's device-block CU fields to the arch's real CU count before each
 # run (topology untouched). db_sync.cpp's own CU-match skip (GetSysDbSelectionCu) picks the one
 # StaticFDBSync param matching each CU (gfx942 304 -> gfx942130, 228 -> gfx942e4 / MI300A,
-# gfx950 256 -> gfx950100) and skips the rest, so no per-run gtest filter is needed.
+# gfx950 256 -> gfx950100, gfx90a 104 -> gfx90a68) and skips the rest, so no per-run gtest filter
+# is needed.
 #
 # Navi (gfx11xx/gfx12xx) differs in two ways. First, the DB basename comes from
 # Handle::GetDbBasename's gfx11xx/gfx12xx branch, which uses GetMaxHardwareComputeUnits() ==
@@ -31,8 +32,8 @@
 #
 # A wrong "cus" value or a missing "retarget" can make gtest pass with nothing checked: every
 # StaticFDBSync param skips when the device reports another arch, and a param with a nonzero
-# num_cu (gfx942, gfx950, gfx1201) skips when the device's CU count selects another system DB.
-# Only a num_cu == 0 param that runs against a missing DB file fails on its own (SetupPaths).
+# num_cu (gfx90a, gfx942, gfx950, gfx1201) skips when the device's CU count selects another system
+# DB. Only a num_cu == 0 param that runs against a missing DB file fails on its own (SetupPaths).
 # So each run writes gtest's JSON report, and the runner fails unless exactly one StaticFDBSync
 # param for the target arch ran and was not skipped.
 #
@@ -66,6 +67,13 @@ FAMILY_MAP = {
     ],
     "gfx950-dcgpu": [
         {"arch": "gfx950", "rj_config": "gfx950_mi355x_kmd.json", "cus": [256]},
+    ],
+    # TheRock's family string for gfx90a has no -dcgpu suffix. Only the 104-CU MI210 system DB
+    # (gfx90a68) is validated here: the 110-CU MI250X GCD one (gfx90a6e) still has wrong workspace
+    # sizes in its find-db (known issue in #14519) and fails StaticFDBSync. Add 110 once it is
+    # corrected.
+    "gfx90a": [
+        {"arch": "gfx90a", "rj_config": "gfx90a_mi210_kmd.json", "cus": [104]},
     ],
     "gfx110X-all": [
         # gfx110060, Radeon Pro W7900 / RX 7900 XTX
