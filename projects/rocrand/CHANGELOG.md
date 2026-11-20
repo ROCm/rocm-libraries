@@ -5,6 +5,10 @@ Documentation for rocRAND is available at
 
 ## rocRAND 5.3.0 for ROCm 10.3.0
 
+### Added
+
+* Added `rocrand_philox4x32_10(uint4 counter, uint2 key)`, a stateless device and host function that computes one Philox4x32-10 block. It is the equivalent of cuRAND's `curand_Philox4x32_10`.
+
 ### Optimized
 
 * Updated auto tuned configs for `gfx950` on all available engines.
