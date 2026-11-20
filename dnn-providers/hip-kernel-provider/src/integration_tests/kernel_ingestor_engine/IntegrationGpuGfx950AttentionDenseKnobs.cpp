@@ -583,16 +583,18 @@ std::vector<KnobCase> knobCases()
          withAlibi(makeShape(FP16, 128, 24, 8, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 256)),
          FORCED,
          Tile{256, 128}},
-        // Cold: the ALiBi classes rank as the plain ones do (preferredTile: block_m 128 below
-        // the causal thresholds; block_n 128 at D64, 64 at D128 causal).
+        // Cold: the ALiBi satellite ranks with the home catalog's trained model, which picks
+        // other tiles than preferredTile (which wants 128/128 at D64, 128/64 at D128).
+        // What is checked is that the cold path lands on an ALiBi kernel and that its result
+        // is correct. See Cold_MmaBfloat16.
         {"Alibi_D64_Fp16Hq32Kv4_Sq256Skv384",
          withAlibi(makeShape(FP16, 64, 32, 4, Mask::CAUSAL_MASK_FLAG, MMA_UNSET, 1, 256, 384)),
          COLD,
-         Tile{128, 128}},
+         Tile{128, 64}},
         {"Alibi_D128_Fp16Hq9_Sq128",
          withAlibi(makeShape(FP16, 128, 9, 9, Mask::BOUNDS_TOP_LEFT, MMA_UNSET, 1, 128, 128)),
          COLD,
-         Tile{128, 64}},
+         Tile{128, 128}},
     };
 }
 

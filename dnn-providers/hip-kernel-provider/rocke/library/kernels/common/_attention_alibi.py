@@ -22,8 +22,10 @@ scores the row max sees keep their fp32 precision however far apart ``i`` and
 precision drops slowly there. The difference ``slope * (a_i - i)`` is constant per
 row, so softmax and O are unchanged; only the log-sum-exp moves, and
 :func:`alibi_lse_shift` gives the correction to add to the log2-domain row max
-before the LSE store. A sink logit is not shifted, so kernels refuse sinks with
-ALiBi.
+before the LSE store. A sink logit gets no ALiBi term and no shift, so sinks
+need the anchor to be the query's own diagonal (top-left causal, right bound 0):
+the dense kernels admit sinks with ALiBi there only, the unified kernels refuse
+the pair.
 
 hipDNN defines the term on the top-left diagonal only. Off it (bottom-right
 alignment with ``Sq != Skv``) the kernels anchor at the shifted diagonal, which
@@ -44,6 +46,8 @@ from rocke.core.ir import F32, I32, IRBuilder, Value
 
 __all__ = [
     "alibi_lse_shift",
+    "alibi_split_lane_terms",
+    "alibi_split_tile_offsets",
     "alibi_slope",
     "alibi_slope_log2",
     "alibi_tile_bias",
@@ -157,6 +161,36 @@ def alibi_tile_bias(
             c = nsub * 32 + (i // 4) * 8 + i % 4
             row.append(b.fma(slope, b.const_f32(float(c)), base) if c else base)
         out.append(row)
+    return out
+
+
+def alibi_split_lane_terms(b: IRBuilder, slope: Value, lane_key: Value) -> list:
+    """Split designs: the loop-invariant part ``slope * (lane_key + c_i)`` of the
+    ALiBi term for one 32-key sub-block (``c_i`` as in :func:`alibi_tile_bias`),
+    in the units of ``slope``. Computed once per work item; the per-tile rest is
+    :func:`alibi_split_tile_offsets`."""
+    base = b.fmul(slope, b.sitofp_f32(lane_key))
+    out = []
+    for i in range(16):
+        c = (i // 4) * 8 + i % 4
+        out.append(b.fma(slope, b.const_f32(float(c)), base) if c else base)
+    return out
+
+
+def alibi_split_tile_offsets(
+    b: IRBuilder, slope: Value, tile_key0: Value, anchor: Value, n_sub: int
+) -> list:
+    """Split designs: the per-row offset ``slope * min(tile_key0 + 32 n - anchor,
+    0)`` of sub-block ``n``, folded into the row max and the exp2 offset (softmax
+    invariant). Exact for every sub-block that holds a visible key (none lies past
+    the anchor); the clamp keeps it <= 0 for sub-blocks without one, so exp2 stays
+    finite for a row masked in the whole tile (its max at the sentinel)."""
+    d0 = b.sub(tile_key0, anchor)
+    zero = b.const_i32(0)
+    out = []
+    for n in range(n_sub):
+        d = b.add(d0, b.const_i32(32 * n)) if n else d0
+        out.append(b.fmul(slope, b.sitofp_f32(b.smin(d, zero))))
     return out
 
 

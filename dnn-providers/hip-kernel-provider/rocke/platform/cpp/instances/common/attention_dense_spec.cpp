@@ -662,13 +662,19 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
     }
     if(s->use_alibi)
     {
-        /* A sink logit would need the per-row anchor shift of the ALiBi term. */
-        if(s->use_sinks)
-            ROCKE_SPEC_FAIL(reason, cap, "use_alibi is not yet supported with use_sinks");
         if(s->paged)
             ROCKE_SPEC_FAIL(reason, cap, "use_alibi is not yet supported with paged");
         if(s->varlen)
             ROCKE_SPEC_FAIL(reason, cap, "use_alibi is not yet supported with varlen");
+        /* Python _alibi_anchor_is_query (gfx950 adds right_bound == 0: !lookahead).
+         * The sink logit has no positional term, so it needs the exact
+         * slope * (j - i): the kernels anchor each row at its diagonal on top-left
+         * causal masks with right bound 0 only. */
+        if(s->use_sinks && !(s->causal && !s->causal_bottom_right && !lookahead))
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "use_alibi with use_sinks needs a top-left causal mask with "
+                            "right bound 0");
         /* hipDNN defines ALiBi on the top-left diagonal only; off it, the LSE
          * depends on which query index the term uses (O does not). */
         if(s->causal_bottom_right && s->emit_lse)

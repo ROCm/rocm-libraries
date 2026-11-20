@@ -49,7 +49,16 @@ def _lowered(arch, spec):
 @pytest.mark.parametrize(
     "over,match",
     [
-        ({"use_alibi": True, "use_sinks": True}, "use_sinks"),
+        ({"use_alibi": True, "use_sinks": True, "causal": False}, "use_sinks"),
+        (
+            {
+                "use_alibi": True,
+                "use_sinks": True,
+                "causal_bottom_right": True,
+                "seqlen_q": 256,
+            },
+            "use_sinks",
+        ),
         (
             {
                 "use_alibi": True,
@@ -66,9 +75,69 @@ def test_spec_refusals(arch, over, match):
         _spec(arch, **over)
 
 
-def test_gfx950_refuses_persistent():
-    with pytest.raises(ValueError, match="persistent"):
-        _spec("gfx950", use_alibi=True, persistent=True)
+def test_gfx950_sinks_refused_with_a_lookahead():
+    """A right bound moves the anchor off the query row."""
+    with pytest.raises(ValueError, match="use_sinks"):
+        _spec("gfx950", use_alibi=True, use_sinks=True, right_bound=64)
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+@pytest.mark.parametrize(
+    "over",
+    [{}, dict(sliding_window=128), dict(persistent=True)],
+    ids=["causal", "window", "persistent"],
+)
+def test_sinks_with_alibi_on_top_left_causal(arch, over):
+    """Sinks + ALiBi build where every row anchors at its own query (hipDNN's
+    band): the sink pointer and the slopes pointer are both parameters."""
+    params, _ = _params(arch, _spec(arch, use_alibi=True, use_sinks=True, **over))
+    assert "sink_ptr" in params and "alibi_slopes_ptr" in params
+
+
+@pytest.mark.parametrize(
+    "arch,head_size,design",
+    [
+        ("gfx950", 64, "seed_split"),
+        ("gfx950", 128, "seed_tile"),
+        ("gfx942", 64, "fma_tile"),
+        ("gfx942", 128, "seed_tile"),
+    ],
+)
+@pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persistent"])
+def test_default_design_per_family(arch, head_size, design, persistent):
+    """Without ``alibi_design`` each body emits the design measured best for its
+    family: the same IR as naming it."""
+    base = dict(use_alibi=True, head_size=head_size, persistent=persistent)
+    assert _lowered(arch, _spec(arch, **base)) == _lowered(
+        arch, _spec(arch, alibi_design=design, **base)
+    )
+
+
+@pytest.mark.parametrize(
+    "over",
+    [{}, dict(wide_lds_dma=False, sliding_window=128)],
+    ids=["wide_dma", "window"],
+)
+def test_gfx950_persistent_seeds_the_qk_accumulator(over):
+    """The gfx950 persistent grid serves ALiBi (folded-scale and window phases):
+    the slopes pointer is the one new parameter, where the launch signature has it,
+    and every QK MFMA chain that starts from zero without ALiBi starts from a bias
+    built from it."""
+    off_spec = _spec("gfx950", persistent=True, **over)
+    on_spec = _spec("gfx950", persistent=True, use_alibi=True, **over)
+    off_params, _ = _params("gfx950", off_spec)
+    on_params, _ = _params("gfx950", on_spec)
+    assert [p for p in on_params if p not in off_params] == ["alibi_slopes_ptr"]
+    assert [a["name"] for a in dense950.attention_dense_signature(on_spec)] == on_params
+    off, on = _lowered("gfx950", off_spec), _lowered("gfx950", on_spec)
+    off_seeds, on_seeds = _mfma_seeds(off), _mfma_seeds(on)
+    assert len(on_seeds) == len(off_seeds)
+    qk_heads = [i for i, seed in enumerate(off_seeds) if _is_zero(off, seed)]
+    assert qk_heads
+    slope_readers = _readers_of(on, _SLOPES)
+    for i in qk_heads:
+        assert not _is_zero(on, on_seeds[i])
+        assert on_seeds[i] in slope_readers
 
 
 @pytest.mark.parametrize("arch", _ARCHES)

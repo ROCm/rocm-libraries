@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
+from typing import Optional
 
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
@@ -99,6 +100,19 @@ def partial_tile_reason(spec: "AttentionDenseSpec") -> str:
     )
 
 
+# How the ALiBi term enters the scores, and the kernel-name tokens. ``seed``: the
+# QK MFMA accumulator starts at the term in raw units (free in the MFMA); ``fma``:
+# the term joins the post-MFMA scale op. ``tile``: the whole term per KV tile;
+# ``split``: a loop-invariant per-key part plus a per-row offset per tile folded
+# into the row max and the exp2 offset.
+ALIBI_DESIGNS = {
+    "seed_tile": "st",
+    "fma_tile": "ft",
+    "seed_split": "ss",
+    "fma_split": "fs",
+}
+
+
 @dataclass(frozen=True)
 class AttentionDenseSpec:
     """Shared compile-time problem and geometry for dense attention."""
@@ -147,6 +161,10 @@ class AttentionDenseSpec:
     # ``alibi_slopes_ptr`` kernel argument (fp32, one per query head) or, when it
     # is null, are hipDNN's, derived from the query head count.
     use_alibi: bool = field(default=False, kw_only=True)
+    # How the ALiBi term enters the scores (ALIBI_DESIGNS). None = the arch's
+    # measured default for the body; a value overrides it (tuning and tests). Not
+    # mirrored in C++ specs or hipDNN descriptors, which take the default.
+    alibi_design: Optional[str] = field(default=None, kw_only=True)
 
     @classmethod
     def supported_persist_decodes(cls) -> frozenset[str]:
@@ -336,11 +354,27 @@ class AttentionDenseSpec:
                 raise ValueError(
                     "causal_bottom_right is not yet supported with paged KV"
                 )
+        if self.alibi_design is not None:
+            if not self.use_alibi:
+                raise ValueError("alibi_design requires use_alibi")
+            if self.alibi_design not in ALIBI_DESIGNS:
+                raise ValueError(
+                    f"alibi_design must be one of {sorted(ALIBI_DESIGNS)}, "
+                    f"got {self.alibi_design!r}"
+                )
         if self.use_alibi:
-            # A sink logit would need the per-row anchor shift of the ALiBi term.
-            for name in ("use_sinks", "paged", "varlen"):
+            for name in ("paged", "varlen"):
                 if getattr(self, name):
                     raise ValueError(f"use_alibi is not yet supported with {name}")
+            # The sink logit has no positional term, so it needs the exact
+            # ``slope * (j - i)``: the kernels anchor each row at its diagonal on
+            # top-left causal masks with right bound 0 (hipDNN's ALiBi band), and
+            # at the last key elsewhere, a per-row shift that would move the sink.
+            if self.use_sinks and not self._alibi_anchor_is_query():
+                raise ValueError(
+                    "use_alibi with use_sinks needs a top-left causal mask with "
+                    "right bound 0"
+                )
             # hipDNN defines ALiBi on the top-left diagonal only; off it, the LSE
             # depends on which query index the term uses (O does not).
             if self.causal_bottom_right and getattr(self, "emit_lse", False):
@@ -351,6 +385,12 @@ class AttentionDenseSpec:
             raise ValueError("use_sinks is not yet supported with paged KV")
         if self.use_sinks and self.varlen:
             raise ValueError("use_sinks is not yet supported with varlen")
+
+    def _alibi_anchor_is_query(self) -> bool:
+        """Whether the ALiBi anchor of every row is its own query index, so the
+        term is exactly ``slope * (j - i)``. Arches with a right band bound
+        narrow this to ``right_bound == 0``."""
+        return self.causal and not self.causal_bottom_right
 
     @property
     def num_waves(self) -> int:
@@ -576,6 +616,8 @@ class AttentionDenseSpec:
             parts.append("sinks")
         if self.use_alibi:
             parts.append("alibi")
+        if self.alibi_design is not None:
+            parts.append("ad" + ALIBI_DESIGNS[self.alibi_design])
         if self.varlen:
             parts.append("varlen")
         if self.paged:
@@ -675,7 +717,11 @@ def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
         return getattr(spec, name)
 
     rest = tuple(
-        (f.name, _value(f.name)) for f in _dataclass_fields(spec) if f.name not in skip
+        (f.name, _value(f.name))
+        for f in _dataclass_fields(spec)
+        if f.name not in skip
+        # Absent at its default, so ALiBi-off and default-design keys keep their form.
+        and not (f.name == "alibi_design" and spec.alibi_design is None)
     )
     return (arch, type(spec), rest)
 
@@ -790,6 +836,7 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
 
 
 __all__ = [
+    "ALIBI_DESIGNS",
     "AttentionDenseSpec",
     "DEFAULT_DENSE_TILE_GEOMETRY",
     "DENSE_MAX_SCALE",

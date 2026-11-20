@@ -78,6 +78,7 @@ def _run_case(
     lse=True,
     seed=0,
     fp8_kv=False,
+    sinks=False,
     **spec_over,
 ):
     """Run one case; return (out, lse, ref_out, ref_lse) as float64 numpy, with
@@ -92,6 +93,8 @@ def _run_case(
         spec_over["right_bound"] = right_bound
     if lse:
         spec_over["emit_lse"] = True
+    if sinks:
+        spec_over["use_sinks"] = True
     spec = spec_cls(
         batch=batch,
         seqlen_q=sq,
@@ -119,6 +122,7 @@ def _run_case(
         k_run, k_scale, k = _quantize_fp8(k)
         v_run, v_scale, v = _quantize_fp8(v)
         fp8_kwargs = {"k_scale": k_scale, "v_scale": v_scale}
+    sink_t = torch.randn(hq, device="cuda", dtype=tdt, generator=gen) if sinks else None
     out = torch.empty_like(q)
     lse_t = (
         torch.full((batch, hq, sq, 1), float("nan"), device="cuda", dtype=torch.float32)
@@ -142,6 +146,7 @@ def _run_case(
         arch=_ARCH,
         lse=lse_t,
         alibi_slopes=slopes_t,
+        sinks=sink_t,
         **fp8_kwargs,
     )
     torch.cuda.synchronize()
@@ -159,8 +164,19 @@ def _run_case(
         right_bound=right_bound if causal else None,
         top_left=not bottom_right,
     )
+    if sinks:
+        ref_o, ref_lse = _with_sinks(ref_o, ref_lse, host(sink_t))
     lse_np = host(lse_t)[..., 0] if lse else None
     return host(out), lse_np, ref_o.transpose(0, 2, 1, 3), ref_lse
+
+
+def _with_sinks(ref_o, ref_lse, sinks):
+    """Add a per-head sink logit (score units, no positional term: SEM-022) to
+    the softmax denominator of ``(O [B, H, Sq, D], LSE [B, H, Sq])``."""
+    s = sinks[None, :, None]
+    lse = np.logaddexp(ref_lse, s)
+    keep = np.where(np.isneginf(ref_lse), 0.0, np.exp(ref_lse - lse))
+    return np.nan_to_num(ref_o) * keep[..., None], lse
 
 
 def _check(case, dtype, *, lse=True):
@@ -240,9 +256,43 @@ def test_long_noncausal_precision():
 
 
 def test_persistent():
-    if _ARCH == "gfx950":
-        pytest.skip("gfx950 refuses ALiBi on the persistent grid")
     _check(_run_case(persistent=True, heads=(8, 2)), "bf16")
+
+
+@pytest.mark.parametrize("design", ["seed_tile", "fma_tile", "seed_split", "fma_split"])
+@pytest.mark.parametrize("head_size", [64, 128])
+@pytest.mark.parametrize("causal", [True, False], ids=["causal", "full"])
+@pytest.mark.parametrize("persistent", [False, True], ids=["grid", "persistent"])
+def test_designs(design, head_size, causal, persistent):
+    # Every design on every body, not only each family's default.
+    case = _run_case(
+        dtype="bf16",
+        head_size=head_size,
+        heads=(8, 2),
+        causal=causal,
+        persistent=persistent,
+        alibi_design=design,
+    )
+    _check(case, "bf16")
+
+
+@pytest.mark.parametrize(
+    "over",
+    [
+        {},
+        dict(window=128),
+        dict(persistent=True),
+        dict(sq=1024, skv=512),
+        dict(head_size=64),
+    ],
+    ids=["causal", "window", "persistent", "sq_gt_skv", "d64"],
+)
+def test_sinks(over):
+    # Top-left causal anchors each row at its query, so the sink competes with
+    # the exact slope * (k - q) scores (other masks are refused).
+    kw = dict(dtype="bf16", heads=(8, 2), sinks=True)
+    kw.update(over)
+    _check(_run_case(**kw), "bf16")
 
 
 @pytest.mark.parametrize("dtype", ["fp16", "bf16"])

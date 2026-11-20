@@ -92,6 +92,12 @@ VECTORS = next(
 )
 CPP_MIRROR = "platform/cpp/instances/common/attention_dense_spec.cpp"
 
+# Builder-only fields the C++ port does not mirror (hipDNN descriptors take their
+# defaults): kept out of the vectors (fields, defaults, case specs) and their
+# rejects out of the reject sites. Each must default to a value that leaves every
+# mirrored answer unchanged.
+_NON_MIRRORED_FIELDS = ("alibi_design",)
+
 _BASE = dict(
     batch=1,
     seqlen_q=512,
@@ -264,7 +270,10 @@ _CASES: tuple[dict, ...] = (
     ),
     # ALiBi: each excluded mode on its own (the emit_lse reject reads a subclass
     # field, so its cases are hook cases).
-    dict(use_alibi=True, use_sinks=True),
+    dict(use_alibi=True, use_sinks=True),  # top-left causal: accepted
+    dict(use_alibi=True, use_sinks=True, sliding_window=128),  # accepted
+    dict(use_alibi=True, use_sinks=True, causal=False),
+    dict(use_alibi=True, use_sinks=True, causal_bottom_right=True),
     dict(
         use_alibi=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
     ),
@@ -531,6 +540,9 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         ),
         dict(use_alibi=True, causal_bottom_right=True, emit_lse=True),
         dict(use_alibi=True, emit_lse=True),
+        # Sinks + ALiBi need right bound 0 (a lookahead moves the anchor).
+        dict(use_alibi=True, use_sinks=True, right_bound=64),
+        dict(use_alibi=True, use_sinks=True, sliding_window=128),
     ),
     _G942: (
         {},  # runtime shape: head and shape parts off
@@ -564,7 +576,9 @@ _HOOKS = (
 
 
 def _field_names() -> list[str]:
-    return [f.name for f in fields(AttentionDenseSpec)]
+    return [
+        f.name for f in fields(AttentionDenseSpec) if f.name not in _NON_MIRRORED_FIELDS
+    ]
 
 
 def _defaults() -> dict:
@@ -573,7 +587,7 @@ def _defaults() -> dict:
     return {
         f.name: f.default
         for f in fields(AttentionDenseSpec)
-        if f.default is not MISSING
+        if f.default is not MISSING and f.name not in _NON_MIRRORED_FIELDS
     }
 
 
@@ -897,8 +911,19 @@ def _reject_sites() -> tuple[set, set]:
             if not isinstance(node, ast.FunctionDef):
                 continue
             if mod is spec_mod and node.name == "__post_init__":
+                # Rejects of a non-mirrored field sit under an ``if`` on that field.
+                skip = {
+                    n.lineno
+                    for branch in ast.walk(node)
+                    if isinstance(branch, ast.If)
+                    and any(f in ast.unparse(branch.test) for f in _NON_MIRRORED_FIELDS)
+                    for n in ast.walk(branch)
+                    if isinstance(n, ast.Raise)
+                }
                 sites |= {
-                    (path, n.lineno) for n in ast.walk(node) if isinstance(n, ast.Raise)
+                    (path, n.lineno)
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Raise) and n.lineno not in skip
                 }
             elif mod is paged_mod and node.name == "paged_tile_check":
                 sites |= {

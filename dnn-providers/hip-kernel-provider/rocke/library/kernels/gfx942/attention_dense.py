@@ -240,6 +240,8 @@ from kernels.common.attention_dense_kv_split import (
 from kernels.common._attention_alibi import (
     alibi_lse_shift,
     alibi_slope_log2,
+    alibi_split_lane_terms,
+    alibi_split_tile_offsets,
     alibi_tile_bias,
     check_alibi_slopes,
 )
@@ -1426,6 +1428,15 @@ def supports_attention_dense(
     return True, ""
 
 
+def _alibi_design(spec: Gfx942AttentionDenseSpec) -> str:
+    """How the ALiBi term enters the scores (``ALIBI_DESIGNS``): the spec's
+    ``alibi_design``, else the measured best of the family: the post-MFMA scale
+    FMA at head size 64, the accumulator seed elsewhere."""
+    if spec.alibi_design is not None:
+        return spec.alibi_design
+    return "fma_tile" if spec.head_size == 64 else "seed_tile"
+
+
 def build_attention_dense(
     spec: Gfx942AttentionDenseSpec,
     *,
@@ -1590,6 +1601,9 @@ def _build_attention_dense_single_buffer(
             "sink_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
         )
     ALIBI = spec.use_alibi
+    # ALiBi design (see alibi_split_tile_offsets).
+    AD = _alibi_design(spec) if ALIBI else None
+    AD_SPLIT = AD in ("seed_split", "fma_split")
     alibi_slopes = None
     if spec.use_alibi:
         alibi_slopes = b.param(
@@ -1912,6 +1926,12 @@ def _build_attention_dense_single_buffer(
             else:
                 alibi_anchor = alibi_query
             alibi_lane_key = b.mul(lane_h, b.const_i32(4))
+            if AD == "seed_split":
+                alibi_split_seed = b.vec_pack(
+                    alibi_split_lane_terms(b, alibi_slope_raw, alibi_lane_key), F32
+                )
+            elif AD == "fma_split":
+                alibi_split_d = alibi_split_lane_terms(b, alibi_slope, alibi_lane_key)
         # NOT hoisted into a local shared with o_base below: the IR builder is
         # side-effecting, so `b.const_i32(Sq)` EMITS a node at the point it is
         # written. Hoisting moves that node earlier and lets the second use CSE
@@ -2117,18 +2137,33 @@ def _build_attention_dense_single_buffer(
         def do_qk(tile_idx, kbuf=None):
             """S^T = K@Q^T via the 32x32x8 atom (K-doubled)."""
             s_reg = []
-            if ALIBI:
+            if ALIBI and not AD_SPLIT:
                 bias = alibi_tile_bias(
                     b,
-                    alibi_slope_raw,
+                    alibi_slope_raw if AD == "seed_tile" else alibi_slope,
                     b.mul(tile_idx, b.const_i32(BN)),
                     alibi_lane_key,
                     alibi_anchor,
                     N_SUB,
                 )
+            if AD_SPLIT:
+                # Log2 units. seed_split folds it into the scale FMA (no max/exp2
+                # change); fma_split moves the sub-block max and exp2 offset by it.
+                offs = alibi_split_tile_offsets(
+                    b,
+                    alibi_slope,
+                    b.mul(tile_idx, b.const_i32(BN)),
+                    alibi_anchor,
+                    N_SUB,
+                )
             for nsub in range(N_SUB):
                 # ALiBi seeds the accumulator, so the MFMA adds the bias for free.
-                acc = b.vec_pack(bias[nsub], F32) if ALIBI else b.zero_vec_f32(16)
+                if ALIBI and AD == "seed_tile":
+                    acc = b.vec_pack(bias[nsub], F32)
+                elif ALIBI and AD == "seed_split":
+                    acc = alibi_split_seed
+                else:
+                    acc = b.zero_vec_f32(16)
                 krow = b.add(b.const_i32(nsub * 32), lane_m)
                 if KPAD_D64:
                     # 2-row-group padded K_lds[1, BN//2, 2*D+pad]: decompose the
@@ -2160,10 +2195,28 @@ def _build_attention_dense_single_buffer(
                     acc = mfma_32x32x8_for_dtype(b, dtype, k_pack, q_packs[ks], acc)
                 # Into the log2 domain in fp32, so masking, the row max and
                 # exp2(s - m) all see the same rounded score (s - m <= 0).
-                s_reg.append(
-                    [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
-                )
-            return s_reg
+                if ALIBI and AD == "fma_tile":
+                    term = bias[nsub]
+                elif ALIBI and AD == "fma_split":
+                    term = alibi_split_d
+                elif ALIBI and AD == "seed_split":
+                    term = [offs[nsub]] * 16
+                else:
+                    term = None
+                if term is None:
+                    s_reg.append(
+                        [b.fmul(b.vec_extract(acc, i), qk_scale) for i in range(16)]
+                    )
+                else:
+                    s_reg.append(
+                        [
+                            b.fma(b.vec_extract(acc, i), qk_scale, term[i])
+                            for i in range(16)
+                        ]
+                    )
+            if ALIBI and AD == "fma_split":
+                return s_reg, offs
+            return s_reg, None
 
         def do_mask(s_reg, tile_idx, lower=False, upper=True):
             # upper: causal bound (ktok <= query_tok). lower: sliding-window bound
@@ -2266,7 +2319,7 @@ def _build_attention_dense_single_buffer(
             (f"o{dt}", o0[dt]) for dt in range(D_TILES)
         ]
 
-        def softmax_pv(s, j, m_i, l_i, o_acc, masked):
+        def softmax_pv(s, offs, j, m_i, l_i, o_acc, masked):
             """One KV tile's mask -> online softmax -> PV update, shared by the
             single-buffer ``tile_compute`` and the KDB/VPF pipeline so both
             honour the same exp2, fused-rescale and PV scheduling knobs. Returns
@@ -2289,8 +2342,15 @@ def _build_attention_dense_single_buffer(
             # tile max over keys (both lane-halves) for this query.
             local_max = neg_inf
             for nsub in range(N_SUB):
+                if offs is None:
+                    for i in range(16):
+                        local_max = b.fmax(local_max, s[nsub][i])
+                    continue
+                # Split arms: the sub-block's offset completes the term of its max.
+                sub_max = neg_inf
                 for i in range(16):
-                    local_max = b.fmax(local_max, s[nsub][i])
+                    sub_max = b.fmax(sub_max, s[nsub][i])
+                local_max = b.fmax(local_max, b.fadd(sub_max, offs[nsub]))
             tile_max = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
             m_new = b.fmax(m_i, tile_max)
             # P2: exp2_fast (llvm.amdgcn.exp2.f32 -> one v_exp_f32) drops the ~5-VALU
@@ -2318,6 +2378,7 @@ def _build_attention_dense_single_buffer(
             # once, and i steps 0,1,2,3 / 4,5,6,7 / ... within each nsub -- the
             # identical accumulation order as a nested (nsub,i) loop, so l_local and
             # the packed casts are numerically bit-identical: pure live-range relief.
+            m_subs = [b.fsub(m_new, t) for t in offs] if offs else [m_new] * N_SUB
             l_local = b.const_f32(0.0)
             p_packs = []
             for kk in range(KK_STEPS):
@@ -2325,7 +2386,7 @@ def _build_attention_dense_single_buffer(
                 base_i = (kk % 4) * 4
                 elems = []
                 for j2 in range(4):
-                    pv = exp2(b.fsub(s[nsub][base_i + j2], m_new))
+                    pv = exp2(b.fsub(s[nsub][base_i + j2], m_subs[nsub]))
                     l_local = b.fadd(l_local, pv)
                     elems.append(pv if PACK_P_BF16 else b.cast_f32_to(pv, dtype))
                 if PACK_P_BF16:
@@ -2356,8 +2417,8 @@ def _build_attention_dense_single_buffer(
             m_i = carry[0]
             l_i = carry[1]
             o_acc = list(carry[2 : 2 + D_TILES])
-            s = do_qk(j)
-            m_new, l_new, o_acc = softmax_pv(s, j, m_i, l_i, o_acc, masked)
+            s, offs = do_qk(j)
+            m_new, l_new, o_acc = softmax_pv(s, offs, j, m_i, l_i, o_acc, masked)
             return (m_new, l_new, *o_acc)
 
         # Wave-uniform skip of (wave, tile) pairs a sliding window fully masks.
@@ -2514,7 +2575,7 @@ def _build_attention_dense_single_buffer(
                 # or the preceding iteration. With one K slot, do not overwrite
                 # it until *all* waves have completed current-tile LDS reads.
                 kbuf = b.mod(j, b.const_i32(K_BUFS))
-                s = do_qk(j, kbuf)
+                s, offs = do_qk(j, kbuf)
                 next_j = b.add(j, b.const_i32(1))
                 next_kbuf = b.mod(next_j, b.const_i32(K_BUFS))
                 if USE_KDB:
@@ -2525,7 +2586,7 @@ def _build_attention_dense_single_buffer(
                     v_next = _cfvst_load_v_pipeline(next_j)
                 # The pipeline cohort has no sliding window, so masked=True
                 # applies only the causal upper bound.
-                m_new, l_new, o_acc = softmax_pv(s, j, m_i, l_i, o_acc, masked)
+                m_new, l_new, o_acc = softmax_pv(s, offs, j, m_i, l_i, o_acc, masked)
 
                 # WAR: finish all waves' K/V LDS reads before a single K slot
                 # or the (always single-buffered) V slot can be overwritten.
@@ -2597,8 +2658,8 @@ def _build_attention_dense_single_buffer(
             l_i = loop_res[1]
             o_acc = list(loop_res[2 : 2 + D_TILES])
             last_kbuf = b.mod(last_j, b.const_i32(K_BUFS))
-            s = do_qk(last_j, last_kbuf)
-            m_i, l_i, o_acc = softmax_pv(s, last_j, m_i, l_i, o_acc, True)
+            s, offs = do_qk(last_j, last_kbuf)
+            m_i, l_i, o_acc = softmax_pv(s, offs, last_j, m_i, l_i, o_acc, True)
             b.sync_lds_only()
 
         elif causal and not SW and DIAG_SPLIT:

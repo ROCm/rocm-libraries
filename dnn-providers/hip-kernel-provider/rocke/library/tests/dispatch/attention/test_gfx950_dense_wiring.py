@@ -1214,9 +1214,9 @@ class TestGfx950DenseCandidates(unittest.TestCase):
 
 
 class TestDenseAlibi(unittest.TestCase):
-    """ALiBi runs on the grid bodies only; built-in and external slopes both route."""
+    """ALiBi runs on every body; built-in and external slopes both route."""
 
-    def test_only_grid_bodies_admit_alibi(self):
+    def test_every_body_admits_alibi(self):
         for external in (False, True):
             with self.subTest(external=external):
                 names = _admitting(
@@ -1224,7 +1224,9 @@ class TestDenseAlibi(unittest.TestCase):
                         **_LLAMA_8K, use_alibi=True, use_alibi_external_slopes=external
                     )
                 )
-                self.assertEqual(names, {_GRID_NAME, _QBMINOR_NAME})
+                self.assertEqual(
+                    names, {_GRID_NAME, _QBMINOR_NAME, _PERSIST_NAME, _WIDE_NAME}
+                )
 
     def test_flags_pass_through_to_spec(self):
         req = _gfx950_dense_req(use_alibi=True)
@@ -1237,11 +1239,13 @@ class TestDenseAlibi(unittest.TestCase):
                 self.assertEqual(_spec(external, spec_id), spec)
         self.assertFalse(_spec(_gfx950_dense_req()).use_alibi)
 
-    def test_auto_order_skips_persistent(self):
+    def test_auto_order_as_without_alibi(self):
+        # The persistent bodies win with ALiBi as without it.
         from dispatch.attention.gfx950_dense import dense_auto_order
 
-        req = _gfx950_dense_req(**_LLAMA_8K, use_alibi=True)
-        self.assertEqual(dense_auto_order(req), (_GRID_NAME,))
+        on = dense_auto_order(_gfx950_dense_req(**_LLAMA_8K, use_alibi=True))
+        self.assertEqual(on, dense_auto_order(_gfx950_dense_req(**_LLAMA_8K)))
+        self.assertIn(_PERSIST_NAME, on)
 
     def test_external_slopes_without_alibi_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "use_alibi_external_slopes requires"):

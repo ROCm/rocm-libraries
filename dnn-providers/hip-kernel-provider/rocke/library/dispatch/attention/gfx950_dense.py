@@ -54,15 +54,19 @@ _WINDOW_TILE = "bm128"
 _WINDOW_NUM_PERSISTENT = 2 * _DEFAULT_NUM_PERSISTENT
 _WINDOW_TILE_MAX_CTAS_PER_CU = 8
 _FEATURES = frozenset(
-    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
+    {
+        "causal",
+        "sliding_window",
+        "full_attention",
+        "band",
+        "sinks",
+        "lse",
+        "alibi",
+        "alibi_external_slopes",
+    }
 )
-# Served by the grid body only (the persistent body refuses ALiBi).
-_GRID_FEATURES = _FEATURES | {
-    "causal_bottom_right",
-    "layout_paged",
-    "alibi",
-    "alibi_external_slopes",
-}
+# Served by the grid body only.
+_GRID_FEATURES = _FEATURES | {"causal_bottom_right", "layout_paged"}
 
 
 @dataclass(frozen=True)
@@ -338,7 +342,7 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     bm, bn = int(geometry["block_m"]), int(geometry["block_n"])
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     work_items = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
-    grid_only = moving_bottom_right or bool(req.use_alibi)
+    grid_only = moving_bottom_right
     persistent = not grid_only and work_items >= _DEFAULT_NUM_PERSISTENT
     wide_ok = (
         not grid_only

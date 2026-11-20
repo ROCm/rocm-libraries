@@ -28,6 +28,8 @@ from dispatch.attention.common import ATTENTION_FEATURES
 # The generated tuning candidates are not in this map; their feature set is
 # checked in the tuning-candidate test below.
 _GFX950_DENSE_FEATURES = {
+    "alibi",
+    "alibi_external_slopes",
     "band",
     "causal",
     "full_attention",
@@ -38,8 +40,6 @@ _GFX950_DENSE_FEATURES = {
 }
 _GFX950_DENSE_GRID_BODY_FEATURES = _GFX950_DENSE_FEATURES | {
     "causal_bottom_right",
-    "alibi",
-    "alibi_external_slopes",
     "layout_paged",
 }
 # fp8 KV is validated only on the default-order grid variant.
