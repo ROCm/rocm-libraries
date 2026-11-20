@@ -48,7 +48,11 @@ rocfft_execution_info_internal::rocfft_execution_info_internal(
 
     // now ensure that each of the work buffers is big enough,
     // allocating if necessary
-    bool have_multigpu_plan = !plan.desc.inFields.empty() || !plan.desc.outFields.empty();
+    bool have_multigpu_plan
+        = std::any_of(plan.multiPlan.begin(), plan.multiPlan.end(), [](const auto& item) {
+              auto exec = dynamic_cast<const ExecPlan*>(item.get());
+              return exec && exec->mgpuPlan;
+          });
     ensure_work_buffer_size(plan.tempBufferUserAllocs, have_multigpu_plan);
 
     // now that all of the work buffers is big enough, assign
