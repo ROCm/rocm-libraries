@@ -181,11 +181,15 @@ struct w4a16_params_t {
   static constexpr double DECODE_WAVE_CYCLES = 5000.0;
   static constexpr double DECODE_ITER_CYCLES = 1500.0;
   // Peak DRAM read bandwidth of the device, bytes/us (per architecture, measured).
-  // TODO: read it from hardware_t.  Its DRAM ratio cannot be used yet: the tile model
-  // underestimates the memory latency and gfx1150's value compensates for that.
   double decode_dram_bytes_per_us;
 };
 
+// TODO: these two values should come from hardware_t (mem3_perf_ratio is the DRAM bandwidth),
+// not from here.  The values hardware_t holds today are wrong: about 623 GB/s on gfx1151 and
+// 31 GB/s on gfx1150, against the 247 and 84.1 GB/s measured.  The tile model is calibrated
+// with them (it underestimates the memory latency and gfx1150's value compensates for that),
+// so the Origami model has to be fixed before they can change.  Until then the decode model
+// keeps the measured bandwidths here.
 // gfx1151 (Strix Halo): 230 GiB/s.
 inline constexpr w4a16_params_t W4A16_GFX1151_PARAMS{247.0e3};
 // gfx1150 (Strix Point): 78.3 GiB/s.
