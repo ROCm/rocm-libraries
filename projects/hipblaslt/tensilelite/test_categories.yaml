@@ -192,14 +192,14 @@ test_categories:
     labels:
       - "emu-fast"
 
-  # rocjitsu suites, simulator x (fast, full) like FFM and AM.
-  # rocjitsu-fast: pre-submit (TheRock tensilelite-rocjitsu job), all configs
+  # rocjitsu suites: rocjitsu-quick (pre-submit) and rocjitsu-full (nightly).
+  # rocjitsu-quick: pre-submit (TheRock tensilelite-rocjitsu job), all configs
   # for the target except `rocjitsu_slow` ones (> 2 h each under rocjitsu, the
   # per-test cap). Both run through tensilelite/Tests/emulation/run_rocjitsu.py,
   # which sets the worker count, per-test timeout and the rocjitsu_pytest
   # plugin's report directory; the plugin selects the job's shard from
   # SHARD_INDEX/TOTAL_SHARDS.
-  rocjitsu-fast:
+  rocjitsu-quick:
     description: "Common GEMM tests under rocjitsu for pre-submit CI (no rocjitsu_slow)"
     test_paths:
       - "tensilelite/Tests/common"
@@ -219,7 +219,7 @@ test_categories:
       - "--global-parameters=LibraryFormat='msgpack'"
       - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,{AMDGPU_TARGETS}"
     labels:
-      - "rocjitsu-fast"
+      - "rocjitsu-quick"
 
   # rocjitsu-full: nightly, all configs for the target. The rocjitsu_slow ones
   # take up to 3.5 h each, more than TheRock's 210-min job cap; raise the
