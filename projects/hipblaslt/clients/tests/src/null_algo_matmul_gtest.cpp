@@ -18,6 +18,7 @@
 #include <initializer_list>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "../../../library/src/amd_detail/rocblaslt/src/include/solution_lookup_miss_for_test.hpp"
 
@@ -93,7 +94,7 @@ namespace
     }
 
     // A column-major D = op(A) * op(B) problem with no workspace. The buffers are sized for the
-    // largest problem the tests use and hold zeros: the tests check statuses only.
+    // largest problem the tests use and hold zeros unless a test fills them.
     class NullAlgoMatmul : public ::testing::Test
     {
     protected:
@@ -280,6 +281,44 @@ namespace
         const LookupMiss miss(rocblaslt_testing_solution_lookup_miss_ranked);
         if(expectNullAlgoAgreesWithHeuristic({kFp32}, {{2, 4, 3}, {37, 19, 11}, {100, 60, 70}}) == 0)
             GTEST_SKIP() << "the loaded library has no size-independent algorithm for these problems";
+    }
+
+    // A status check alone would pass if the fallback launched a kernel that computed the wrong
+    // product, so this one compares the result with a CPU reference.
+    TEST_F(NullAlgoMatmul, smoke_RankedMissResultMatchesReference)
+    {
+        constexpr int64_t m = 37, n = 19, k = 11;
+        const LookupMiss  miss(rocblaslt_testing_solution_lookup_miss_ranked);
+        const Problem     p = makeProblem(kFp32, HIPBLAS_OP_N, HIPBLAS_OP_N, m, n, k);
+        if(heuristicCount(p) == 0)
+            GTEST_SKIP() << "the loaded library has no size-independent algorithm for "
+                         << describe(kFp32, HIPBLAS_OP_N, HIPBLAS_OP_N, m, n, k);
+
+        // Small integers, so every product and sum is exact in FP32 and the result must match.
+        std::vector<float> hA(m * k), hB(k * n), hD(m * n), expected(m * n, 0.0f);
+        for(size_t i = 0; i < hA.size(); ++i)
+            hA[i] = float(int(i % 5) - 2);
+        for(size_t i = 0; i < hB.size(); ++i)
+            hB[i] = float(int(i % 7) - 3);
+        for(int64_t j = 0; j < n; ++j)
+            for(int64_t l = 0; l < k; ++l)
+                for(int64_t i = 0; i < m; ++i)
+                    expected[i + j * m] += hA[i + l * m] * hB[l + j * k];
+
+        ASSERT_EQ(hipMemcpy(a, hA.data(), hA.size() * sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(hipMemcpy(b, hB.data(), hB.size() * sizeof(float), hipMemcpyHostToDevice),
+                  hipSuccess);
+        ASSERT_EQ(nullAlgoMatmul(p), HIPBLAS_STATUS_SUCCESS);
+        ASSERT_EQ(hipMemcpy(hD.data(), d, hD.size() * sizeof(float), hipMemcpyDeviceToHost),
+                  hipSuccess);
+
+        size_t wrong = 0, first = 0;
+        for(size_t i = 0; i < expected.size(); ++i)
+            if(hD[i] != expected[i] && wrong++ == 0)
+                first = i;
+        EXPECT_EQ(wrong, 0u) << "first wrong element " << first << ": got " << hD[first]
+                             << ", expected " << expected[first];
     }
 
     // With the libraries as shipped, at sizes outside the tuned tables.
