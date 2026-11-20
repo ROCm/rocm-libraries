@@ -129,7 +129,7 @@ rocThrust performance testing is getting reworked to use `Primbench` instead of 
 * A flaky test is not an accepted final state. rocThrust does not currently maintain a tagged flaky list — establishing one is a gap.
 
 ## Coverage
-* **Tooling:** `CODE_COVERAGE=ON` (clang only) compiles with `-O0 -fprofile-instr-generate -fcoverage-mapping`. Codecov configuration lives at the `rocm-libraries` monorepo level (`codecov.yml`), not per-component. No `gcovr`/`lcov` report target is wired into rocThrust today.
+* **Tooling:** `ROCTHRUST_ENABLE_COVERAGE=ON` (clang only) compiles with `-O0 -fprofile-instr-generate -fcoverage-mapping`. Codecov configuration lives at the `rocm-libraries` monorepo level (`codecov.yml`), not per-component. No `gcovr`/`lcov` report target is wired into rocThrust today.
 * **Target:** long-term > 95% (phased, aspirational);
 * **Scope / limitations:** instrumentation is host-side and clang-only; device-code coverage is not measured. Windows coverage is not tracked separately.
 

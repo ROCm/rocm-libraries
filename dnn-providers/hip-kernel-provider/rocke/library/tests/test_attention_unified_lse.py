@@ -6,7 +6,7 @@
 import importlib
 import sys
 from contextlib import nullcontext
-from dataclasses import replace
+from dataclasses import fields as dataclass_fields, replace
 from types import SimpleNamespace
 
 import pytest
@@ -45,6 +45,14 @@ def _reduce_ir(arch, spec):
 def test_reduce_spec_rejects_non_boolean_emit_lse(arch, bad):
     with pytest.raises(ValueError, match="emit_lse must be a bool"):
         _reduce_spec(arch, emit_lse=bad)
+
+
+@pytest.mark.parametrize("arch", _ARCHES)
+def test_reduce_spec_emit_lse_is_a_keyword_only_flag_that_defaults_off(arch):
+    """Both reduce specs take the field from ``emit_lse_field``: off by default, and
+    keyword-only so it cannot shift a positional argument."""
+    emit_lse = {f.name: f for f in dataclass_fields(_reduce_spec(arch))}["emit_lse"]
+    assert emit_lse.default is False and emit_lse.kw_only
 
 
 @pytest.mark.parametrize("arch", _ARCHES)
@@ -348,6 +356,35 @@ def test_validator_contract_without_gpu():
             cu_seqlens_q=None,
             seqused_k=None,
             block_table=None,
+        )
+
+
+_NO_TENSORS = dict(
+    q=None,
+    k=None,
+    v=None,
+    out=None,
+    cu_seqlens_q=None,
+    seqused_k=None,
+    block_table=None,
+)
+
+
+def test_validator_rejects_an_unknown_lse_layout():
+    with pytest.raises(ValueError, match="lse_layout must be one of"):
+        au.validate_unified_lse(
+            _problem(emit_lse=True), None, lse_layout="bhsd", **_NO_TENSORS
+        )
+
+
+def test_head_major_validator_refuses_a_non_contiguous_buffer_without_gpu():
+    """Head-major reads the buffer flat, so a strided view would be misread."""
+    torch = pytest.importorskip("torch")
+    problem = _problem(emit_lse=True)
+    lse = torch.empty(problem.num_query_heads, problem.total_q, dtype=torch.float32)
+    with pytest.raises(ValueError, match="contiguous"):
+        au.validate_unified_lse(
+            problem, lse.t(), lse_layout="head_major", **_NO_TENSORS
         )
 
 
