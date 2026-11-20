@@ -1,18 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file thrust/reduce.h
  *  \brief Functions for reducing a range to a single value
@@ -82,6 +70,10 @@ THRUST_NAMESPACE_BEGIN
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator>
 THRUST_HOST_DEVICE detail::it_value_t<InputIterator>
@@ -124,6 +116,10 @@ reduce(const thrust::detail::execution_policy_base<DerivedPolicy>& exec, InputIt
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator>
 detail::it_value_t<InputIterator> reduce(InputIterator first, InputIterator last);
@@ -171,6 +167,10 @@ detail::it_value_t<InputIterator> reduce(InputIterator first, InputIterator last
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename T>
 THRUST_HOST_DEVICE T reduce(
@@ -213,6 +213,10 @@ THRUST_HOST_DEVICE T reduce(
  *  \endcode
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename T>
 T reduce(InputIterator first, InputIterator last, T init);
@@ -267,6 +271,10 @@ T reduce(InputIterator first, InputIterator last, T init);
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see transform_reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename T, typename BinaryFunction>
 THRUST_HOST_DEVICE T reduce(
@@ -319,6 +327,10 @@ THRUST_HOST_DEVICE T reduce(
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see transform_reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename T, typename BinaryFunction>
 T reduce(InputIterator first, InputIterator last, T init, BinaryFunction binary_op);
@@ -375,6 +387,11 @@ T reduce(InputIterator first, InputIterator last, T init, BinaryFunction binary_
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *        First appears in CUDA Toolkit 13.2.
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
 THRUST_HOST_DEVICE void reduce_into(
@@ -431,6 +448,11 @@ THRUST_HOST_DEVICE void reduce_into(
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *        First appears in CUDA Toolkit 13.2.
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator>
 void reduce_into(InputIterator first, InputIterator last, OutputIterator output);
@@ -489,6 +511,11 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output)
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *        First appears in CUDA Toolkit 13.2.
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T>
 THRUST_HOST_DEVICE void reduce_into(
@@ -547,6 +574,11 @@ THRUST_HOST_DEVICE void reduce_into(
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/accumulate
  *  \see reduce
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *        First appears in CUDA Toolkit 13.2.
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator, typename T>
 void reduce_into(InputIterator first, InputIterator last, OutputIterator output, T init);
@@ -596,7 +628,7 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  execution policy for parallelization:
  *
  *  \code
- *  #include <cuda/functional>
+ *  #include _THRUST_LIBCXX_INCLUDE(functional)
  *  #include <thrust/reduce.h>
  *  #include <thrust/device_vector.h>
  *  #include <thrust/execution_policy.h>
@@ -605,7 +637,7 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  thrust::device_vector<int> output(1);
  *  thrust::reduce_into(thrust::device,
  *                      data.begin(), data.end(), output.begin(), -1,
- *                      cuda::maximum{});
+ *                      _THRUST_LIBCXX::maximum{});
  *  // output[0] == 3
  *  \endcode
  *
@@ -613,6 +645,11 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  \see reduce
  *  \see transform_reduce
  *  \see transform_reduce_into
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *        First appears in CUDA Toolkit 13.2.
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
 THRUST_HOST_DEVICE void reduce_into(
@@ -657,7 +694,7 @@ THRUST_HOST_DEVICE void reduce_into(
  *  compute the maximum value of a sequence of integers.
  *
  *  \code
- *  #include <cuda/functional>
+ *  #include _THRUST_LIBCXX_INCLUDE(functional)
  *  #include <thrust/reduce.h>
  *  #include <thrust/device_vector.h>
  *  #include <thrust/execution_policy.h>
@@ -665,7 +702,7 @@ THRUST_HOST_DEVICE void reduce_into(
  *  thrust::device_vector<int> data{1, 0, 2, 2, 1, 3};
  *  thrust::device_vector<int> output(1);
  *  thrust::reduce_into(data.begin(), data.end(), output.begin(), -1,
- *                      cuda::maximum{});
+ *                      _THRUST_LIBCXX::maximum{});
  *  // output[0] == 3
  *  \endcode
  *
@@ -673,6 +710,11 @@ THRUST_HOST_DEVICE void reduce_into(
  *  \see reduce
  *  \see transform_reduce
  *  \see transform_reduce_into
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 3.2.0
+ *        First appears in CUDA Toolkit 13.2.
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator, typename T, typename BinaryFunction>
 void reduce_into(InputIterator first, InputIterator last, OutputIterator output, T init, BinaryFunction binary_op);
@@ -733,6 +775,10 @@ void reduce_into(InputIterator first, InputIterator last, OutputIterator output,
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -797,6 +843,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator1, typename OutputIterator2>
 _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
@@ -865,6 +915,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -934,6 +988,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,
@@ -1013,6 +1071,10 @@ _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by_key(
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -1090,6 +1152,10 @@ THRUST_HOST_DEVICE _THRUST_STD::pair<OutputIterator1, OutputIterator2> reduce_by
  *  \see unique_copy
  *  \see unique_by_key
  *  \see unique_by_key_copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1,
           typename InputIterator2,

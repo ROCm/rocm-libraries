@@ -1,19 +1,6 @@
-/*
- *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2013, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file thrust/copy.h
  *  \brief Copies elements from one range to another
@@ -87,6 +74,10 @@ THRUST_NAMESPACE_BEGIN
  *
  *  // vec1 is now a copy of vec0
  *  \endcode
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator
@@ -139,6 +130,10 @@ copy(const thrust::detail::execution_policy_base<DerivedPolicy>& exec,
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/copy_n
  *  \see thrust::copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename Size, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator copy_n(
@@ -185,6 +180,10 @@ THRUST_HOST_DEVICE OutputIterator copy_n(
  *
  *  // vec1 is now a copy of vec0
  *  \endcode
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator>
 OutputIterator copy(InputIterator first, InputIterator last, OutputIterator result);
@@ -228,6 +227,10 @@ OutputIterator copy(InputIterator first, InputIterator last, OutputIterator resu
  *
  *  \see https://en.cppreference.com/w/cpp/algorithm/copy_n
  *  \see thrust::copy
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename Size, typename OutputIterator>
 OutputIterator copy_n(InputIterator first, Size n, OutputIterator result);
@@ -295,6 +298,10 @@ OutputIterator copy_n(InputIterator first, Size n, OutputIterator result);
  *  \endcode
  *
  *  \see \c remove_copy_if
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy, typename InputIterator, typename OutputIterator, typename Predicate>
 THRUST_HOST_DEVICE OutputIterator copy_if(
@@ -355,6 +362,10 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
  *  \endcode
  *
  *  \see \c remove_copy_if
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator, typename OutputIterator, typename Predicate>
 OutputIterator copy_if(InputIterator first, InputIterator last, OutputIterator result, Predicate pred);
@@ -422,6 +433,10 @@ OutputIterator copy_if(InputIterator first, InputIterator last, OutputIterator r
  *  \endcode
  *
  *  \see \c remove_copy_if
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename DerivedPolicy,
           typename InputIterator1,
@@ -493,6 +508,10 @@ THRUST_HOST_DEVICE OutputIterator copy_if(
  *  \endcode
  *
  *  \see \c remove_copy_if
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 template <typename InputIterator1, typename InputIterator2, typename OutputIterator, typename Predicate>
 OutputIterator

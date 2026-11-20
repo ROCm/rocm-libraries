@@ -1,4 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA CORPORATION. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: BSD-3-Clause
 #pragma once
 
@@ -34,13 +35,7 @@ generate_n(execution_policy<Derived>& policy, OutputIt result, Size count, Gener
      cudaError_t status;
      THRUST_INDEX_TYPE_DISPATCH(
        status,
-       (CUB_NS_QUALIFIER::detail::transform::dispatch_t<
-         CUB_NS_QUALIFIER::detail::transform::requires_stable_address::no,
-         decltype(count_fixed),
-         ::cuda::std::tuple<>,
-         OutputIt,
-         Predicate,
-         Generator>::dispatch),
+       (CUB_NS_QUALIFIER::detail::transform::dispatch<CUB_NS_QUALIFIER::detail::transform::requires_stable_address::no>),
        count,
        (::cuda::std::tuple<>{}, result, count_fixed, Predicate{}, generator, cuda_cub::stream(policy)));
      throw_on_error(status, "generate_n: failed inside CUB");
@@ -56,4 +51,4 @@ void _CCCL_HOST_DEVICE generate(execution_policy<Derived>& policy, OutputIt firs
 }
 } // namespace cuda_cub
 THRUST_NAMESPACE_END
-#endif
+#endif // _CCCL_CUDA_COMPILATION()

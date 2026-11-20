@@ -29,10 +29,6 @@
 #include "test_param_fixtures.hpp"
 #include "test_utils.hpp"
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <iterator>
-#endif
-
 using IntType = ::testing::Types<Params<int>>;
 
 using IntFloatType = ::testing::Types<Params<int>, Params<float>>;
@@ -53,18 +49,16 @@ struct SumThreeTuple
 {
   template <typename Tuple>
   THRUST_HOST_DEVICE auto operator()(Tuple x) const
-    THRUST_DECLTYPE_RETURNS(thrust::get<0>(x) + thrust::get<1>(x) + thrust::get<2>(x))
+    THRUST_DECLTYPE_RETURNS(_THRUST_STD::get<0>(x) + _THRUST_STD::get<1>(x) + _THRUST_STD::get<2>(x))
 }; // end SumThreeTuple
 
 TYPED_TEST(ZipFunctionIntTests, TestZipFunctionCtor)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
-  ASSERT_EQ(thrust::zip_function<SumThree>()(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-  ASSERT_EQ(thrust::zip_function<SumThree>(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#ifdef __cpp_deduction_guides
-  ASSERT_EQ(thrust::zip_function(SumThree{})(thrust::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
-#endif // __cpp_deduction_guides
+  ASSERT_EQ(thrust::zip_function<SumThree>()(_THRUST_STD::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
+  ASSERT_EQ(thrust::zip_function<SumThree>(SumThree{})(_THRUST_STD::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
+  ASSERT_EQ(thrust::zip_function(SumThree{})(_THRUST_STD::make_tuple(1, 2, 3)), SumThree{}(1, 2, 3));
 }
 
 TYPED_TEST(ZipFunctionThirtyTwoBitTests, TestZipFunctionTransform)
@@ -113,9 +107,9 @@ TYPED_TEST(ZipFunctionThirtyTwoBitTests, TestZipFunctionTransform)
 
 struct RemovePred
 {
-  THRUST_HOST_DEVICE bool operator()(const thrust::tuple<uint32_t, uint32_t>& ele1, const float&)
+  THRUST_HOST_DEVICE bool operator()(const _THRUST_STD::tuple<uint32_t, uint32_t>& ele1, const float&)
   {
-    return thrust::get<0>(ele1) == thrust::get<1>(ele1);
+    return _THRUST_STD::get<0>(ele1) == _THRUST_STD::get<1>(ele1);
   }
 };
 TYPED_TEST(ZipFunctionIntFloatTests, TestZipFunctionMixed)
@@ -141,13 +135,14 @@ TYPED_TEST(ZipFunctionIntFloatTests, TestZipFunctionMixed)
 
 struct NestedFunctionCall
 {
-  THRUST_HOST_DEVICE bool
-  operator()(const thrust::tuple<uint32_t, thrust::tuple<thrust::tuple<int, int>, thrust::tuple<int, int>>>& idAndPt)
+  THRUST_HOST_DEVICE bool operator()(
+    const _THRUST_STD::tuple<uint32_t, _THRUST_STD::tuple<_THRUST_STD::tuple<int, int>, _THRUST_STD::tuple<int, int>>>&
+      idAndPt)
   {
-    thrust::tuple<thrust::tuple<int, int>, thrust::tuple<int, int>> ele1 = thrust::get<1>(idAndPt);
-    thrust::tuple<int, int> p1                                           = thrust::get<0>(ele1);
-    thrust::tuple<int, int> p2                                           = thrust::get<1>(ele1);
-    return thrust::get<0>(p1) == thrust::get<0>(p2) || thrust::get<1>(p1) == thrust::get<1>(p2);
+    _THRUST_STD::tuple<_THRUST_STD::tuple<int, int>, _THRUST_STD::tuple<int, int>> ele1 = _THRUST_STD::get<1>(idAndPt);
+    _THRUST_STD::tuple<int, int> p1                                                     = _THRUST_STD::get<0>(ele1);
+    _THRUST_STD::tuple<int, int> p2                                                     = _THRUST_STD::get<1>(ele1);
+    return _THRUST_STD::get<0>(p1) == _THRUST_STD::get<0>(p2) || _THRUST_STD::get<1>(p1) == _THRUST_STD::get<1>(p2);
   }
 };
 
@@ -176,10 +171,10 @@ TYPED_TEST(ZipFunctionIntFloatTests, TestNestedZipFunction)
 
 struct SortPred
 {
-  THRUST_DEVICE THRUST_FORCEINLINE bool
-  operator()(const thrust::tuple<thrust::tuple<int, int>, int>& a, const thrust::tuple<thrust::tuple<int, int>, int>& b)
+  THRUST_DEVICE THRUST_FORCEINLINE bool operator()(const _THRUST_STD::tuple<_THRUST_STD::tuple<int, int>, int>& a,
+                                                   const _THRUST_STD::tuple<_THRUST_STD::tuple<int, int>, int>& b)
   {
-    return thrust::get<1>(a) < thrust::get<1>(b);
+    return _THRUST_STD::get<1>(a) < _THRUST_STD::get<1>(b);
   }
 };
 

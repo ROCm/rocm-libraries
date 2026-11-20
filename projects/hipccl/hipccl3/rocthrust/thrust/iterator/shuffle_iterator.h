@@ -1,18 +1,5 @@
-/*
- *  Copyright 2025 NVIDIA Corporation
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2025, NVIDIA Corporation. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 //! \file thrust/iterator/shuffle_iterator.h
 //! \brief An output iterator which generates a sequence of values representing a random permutation
@@ -50,11 +37,11 @@ namespace detail
 template <class IndexType, class BijectionFunc>
 struct make_shuffle_iterator_base
 {
-  static_assert(::cuda::std::is_integral_v<IndexType>, "IndexType must be an integral type");
+  static_assert(_THRUST_STD::is_integral_v<IndexType>, "IndexType must be an integral type");
 
   using system     = any_system_tag;
   using traversal  = random_access_traversal_tag;
-  using difference = ::cuda::std::_If<sizeof(IndexType) < sizeof(int), int, ::cuda::std::ptrdiff_t>;
+  using difference = _THRUST_STD::_If<sizeof(IndexType) < sizeof(int), int, _THRUST_STD::ptrdiff_t>;
 
   using type =
     iterator_adaptor<shuffle_iterator<IndexType, BijectionFunc>,
@@ -147,10 +134,10 @@ public:
   //! \param g The \c URBG used to generate the random permutation. This is only invoked during construction of the \p
   //! shuffle_iterator.
   template <class URBG,
-            class Enable = ::cuda::std::enable_if_t<::cuda::std::is_constructible_v<BijectionFunc, IndexType, URBG&&>>>
+            class Enable = _THRUST_STD::enable_if_t<_THRUST_STD::is_constructible_v<BijectionFunc, IndexType, URBG&&>>>
   THRUST_HOST_DEVICE shuffle_iterator(IndexType n, URBG&& g)
       : super_t(IndexType{0})
-      , bijection(n, ::cuda::std::forward<URBG>(g))
+      , bijection(n, _THRUST_STD::forward<URBG>(g))
   {}
 
   //! \brief Constructs a \p shuffle_iterator with a given bijection.
@@ -181,7 +168,7 @@ private:
 template <class IndexType, class URBG>
 THRUST_HOST_DEVICE shuffle_iterator<IndexType> make_shuffle_iterator(IndexType n, URBG&& g)
 {
-  return shuffle_iterator<IndexType>(n, ::cuda::std::forward<URBG>(g));
+  return shuffle_iterator<IndexType>(n, _THRUST_STD::forward<URBG>(g));
 } // end make_shuffle_iterator
 
 //! \} // end fancyiterators

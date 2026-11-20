@@ -1,19 +1,6 @@
-/*
- *  Copyright 2008-2018 NVIDIA Corporation
- *  Modifications Copyright (c) 2026, Advanced Micro Devices, Inc.  All rights reserved.
- *
- *  Licensed under the Apache License, Version 2.0 (the "License");
- *  you may not use this file except in compliance with the License.
- *  You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- *  Unless required by applicable law or agreed to in writing, software
- *  distributed under the License is distributed on an "AS IS" BASIS,
- *  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- *  See the License for the specific language governing permissions and
- *  limitations under the License.
- */
+// SPDX-FileCopyrightText: Copyright (c) 2008-2018, NVIDIA Corporation. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 
 /*! \file tuple.h
  *  \brief A type encapsulating a heterogeneous collection of elements.
@@ -60,6 +47,12 @@ THRUST_NAMESPACE_BEGIN
  *
  *  \see pair
  *  \see tuple
+ *
+ *  \deprecated Use _THRUST_STD::tuple_element instead
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <size_t N, class T>
@@ -75,6 +68,12 @@ using _THRUST_STD::tuple_element;
  *
  *  \see pair
  *  \see tuple
+ *
+ *  \deprecated Use _THRUST_STD::tuple_size instead
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class T>
@@ -119,6 +118,12 @@ using _THRUST_STD::tuple_size;
  *  \see tuple_element
  *  \see tuple_size
  *  \see tie
+ *
+ *  \deprecated Use _THRUST_STD::tuple instead
+ *
+ *  \verbatim embed:rst:leading-asterisk
+ *     .. versionadded:: 2.2.0
+ *  \endverbatim
  */
 #ifdef THRUST_DOXYGEN_INVOKED // Provide a fake alias for doxygen
 template <class... Ts>
