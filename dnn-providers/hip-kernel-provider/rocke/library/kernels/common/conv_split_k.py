@@ -43,7 +43,10 @@ long-standing dispatcher rule instead: the CK formula
 atomic whenever it can be built, else the workspace, else no split. The kernel
 builders and the benchmark, which used to feed the CK formula unmerged
 per-group dims, get it on the launched geometry (merged dims, launched group
-count).
+count). The CK-formula auto degree of a 16-bit dtype is also held to
+:data:`ATOMIC_16BIT_MAX_SPLIT_K` on the packed atomic: dgrad, which has no
+workspace, comes down to it; a wgrad request free to pick its reduction moves to
+the workspace above it (else it comes down to it, as for ``override``).
 
 ``override`` forces the degree of an auto request: ``1`` forces no split, an
 integer ``n >= 2`` forces that degree, held to what the kernel can build --
@@ -110,7 +113,9 @@ __all__ = [
 # slice rounds its partial into the 16-bit output, so the error grows with the
 # degree: on the gfx950 wgrad corpus the verify gate fails broadly from 256 on,
 # while the f32 workspace reduction passes at every degree. An override is held
-# to it too; only an explicit degree is the caller's own.
+# to it too, and so is the CK-formula fallback of both dgrad and wgrad (wgrad
+# moves to the workspace first where one fits); only an explicit degree is the
+# caller's own.
 ATOMIC_16BIT_MAX_SPLIT_K = 128
 
 # ws_bytes is an i32 kernarg, so a two-stage workspace above this overflows it.
@@ -738,7 +743,7 @@ def _resolve_wgrad(
                 legacy.split_k,
                 f"CK formula ({legacy.reason}); no split: {atomic_why}",
             )
-        return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=False)
+        return _rule(legacy.split_k, f"CK formula ({legacy.reason})", atomic_cap=True)
 
     reductions = []
     if reduction in ("auto", "atomic") and atomic_ok:
@@ -882,11 +887,14 @@ def _resolve_dgrad(
     if split_k != -1:
         return ConvSplitK(split_k, False, split_k, f"explicit split_k={split_k}")
     wave_size = ArchTarget.from_gfx(arch).wave_size
+    # tf32 is fp32 storage: the builder checks the output dtype, not the
+    # logical one.
+    store_dtype = "fp32" if dtype == "tf32" else dtype
     if override is not None:
         # Held to what the kernel can build: an unbuildable split becomes 1
         # rather than a spec the builder then rejects, and the 16-bit atomic
         # stays within its accuracy limit (dgrad has no workspace to move to).
-        ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
+        ok, why = dgrad_split_k_available(p, store_dtype, wave_size=wave_size)
         cap = ATOMIC_16BIT_MAX_SPLIT_K if _is_16bit(dtype) else MAX_GRID_DIM_Z
         degree = min(override, cap) if ok else 1
         if not ok and override != 1:
@@ -898,10 +906,9 @@ def _resolve_dgrad(
         return ConvSplitK(degree, False, override, f"override split_k={override}{note}")
     m, n, k = _dg_M(p), _dg_N(p), _dg_K(p)
     cost = split_k_cost_model(arch, num_cus, num_xcds)
-    if cost is not None:
-        ok, why = dgrad_split_k_available(p, dtype, wave_size=wave_size)
-        if not ok:
-            return ConvSplitK(1, False, 1, f"no split: {why}")
+    ok, why = dgrad_split_k_available(p, store_dtype, wave_size=wave_size)
+    if not ok:
+        return ConvSplitK(1, False, 1, f"no split: {why}")
     if cost is None:
         legacy = select_split_k_wgrad(
             wg_M=m,
@@ -912,9 +919,16 @@ def _resolve_dgrad(
             tile_k=tile_k,
             arch=arch,
         )
-        return ConvSplitK(
-            legacy.split_k, False, legacy.split_k, f"CK formula ({legacy.reason})"
-        )
+        degree = legacy.split_k
+        reason = f"CK formula ({legacy.reason})"
+        if _is_16bit(dtype) and degree > ATOMIC_16BIT_MAX_SPLIT_K:
+            # dgrad has no workspace to move to: the packed 16-bit atomic stays
+            # within its accuracy limit, as the dgrad override and the fitted
+            # planner hold it. (The wgrad CK-formula fallback moves to its
+            # workspace instead, or is held to the same limit.)
+            degree = ATOMIC_16BIT_MAX_SPLIT_K
+            reason += f", held to the 16-bit atomic limit {ATOMIC_16BIT_MAX_SPLIT_K}"
+        return ConvSplitK(degree, False, legacy.split_k, reason)
     waves = max(1, block_size // wave_size)
     # The group rides grid y, the slice grid z: groups multiply the CTAs but do
     # not share the z budget.
