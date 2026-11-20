@@ -69,7 +69,7 @@ FP8); FP8 d512's, whose warps share the keys, takes 64 like the other tiles.
 A query takes the 16-row tile up to 16 rows, the 128-row tile from 128 rows on, and the
 64-row tile otherwise, and under a sliding window of fewer than 512 keys (left + right + 1),
 where the 64-row tile keeps more blocks resident against the few keys a block visits; d96,
-d160, d192/128 and MX take the 128-row tile at any window (gfx1250, against the faster tile
+d160, d192/128 and MX above d64 take the 128-row tile at any window (gfx1250, against the faster tile
 a shape: bf16 -0.4%, fp8 -0.7%, MX -0.7% geomean).
 
 The 16-row (decode) tile splits each trip's keys over its warps (flash decoding within the

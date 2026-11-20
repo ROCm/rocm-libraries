@@ -2419,9 +2419,10 @@ GFX125_QR_TDM_PINGPONG_M128_MIN_WINDOW = 512
 # Head-dim pairs whose 128-row tile takes every window from 128 query rows on: with slice
 # prefetch, wide rows make the 64-row tile's doubled K/V LDS reads the larger cost (gfx1250,
 # 32 x 16 heads, 128 x 256 keys, 128-row over 64-row: d96 dense +11% causal +4%, d160
-# +33% / +29%, d192/128 +43% / +32%). MX takes it at every head dim: its 64-row tiles, on
-# 128-key trips, lose to it everywhere but the shortest windows (MX, the measure above:
-# window rule -2.8%, 128-row tiles regardless -0.7%).
+# +33% / +29%, d192/128 +43% / +32%). MX takes it at every head dim above d64: its 64-row
+# tiles, on 128-key trips, lose to it under narrow windows too (128-row over 64-row, window
+# 256: d96 +18..28%, d128 +25..46%, d192 +0..10%, d256 +6..37%; d64 -5%). MX, the measure
+# above: -0.5% (window rule -2.8%, 128-row tiles regardless at d64 too -0.7%).
 GFX125_QR_TDM_PINGPONG_M128_ANY_WINDOW = ((96, 96), (160, 160), (192, 128))
 
 
@@ -2500,7 +2501,7 @@ def _gfx125_qr_tdm_pingpong_tiles(hdim_pair, fp8=False, mx=False):
     # A sliding window bounds the keys a block visits by the window, not by seqlen_k.
     m128 = (
         "a.max_seqlen_q >= 128"
-        if mx or hdim_pair in GFX125_QR_TDM_PINGPONG_M128_ANY_WINDOW
+        if (mx and hdim > 64) or hdim_pair in GFX125_QR_TDM_PINGPONG_M128_ANY_WINDOW
         else "a.max_seqlen_q >= 128 && (a.window_size_left < 0 || a.window_size_right < 0"
         " || a.window_size_left + a.window_size_right + 1 >= "
         f"{GFX125_QR_TDM_PINGPONG_M128_MIN_WINDOW})"
