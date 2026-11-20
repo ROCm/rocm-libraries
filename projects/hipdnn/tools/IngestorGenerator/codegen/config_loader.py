@@ -1478,14 +1478,15 @@ _SHA256 = re.compile(r"[0-9a-f]{64}")
 
 
 def _load_trained_catalog_sha256(
-    engine_raw: dict, heuristics: dict, owner: str = "engine"
+    raw_owner: dict, heuristics: dict, owner: str = "engine"
 ) -> dict:
     """Read ``<owner>.trained_catalog_sha256``: arch -> the `tools/catalog_fingerprint.py`
     hash of the catalog the ``<owner>.heuristics.sort_kernel_catalog`` models bound under
     that arch were trained on (tools/catalog_fingerprint.py prints it). When set, its keys must be
     exactly those arch keys, so every bound ranker's catalog is gated. Absent is ``{}``,
-    which gates nothing. @p owner is ``engine`` or ``slots[<name>]``."""
-    raw = engine_raw.get("trained_catalog_sha256")
+    which gates nothing. @p raw_owner is the raw mapping of the owner (the engine, or one
+    slot); @p owner names it in messages: ``engine`` or ``slots[<name>]``."""
+    raw = raw_owner.get("trained_catalog_sha256")
     if raw is None:
         return {}
     scope = f"{owner}.trained_catalog_sha256"

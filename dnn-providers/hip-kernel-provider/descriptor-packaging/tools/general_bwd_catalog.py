@@ -66,7 +66,8 @@ DEFAULT_BUNDLE = (
 )
 TOOL = "dnn-providers/hip-kernel-provider/descriptor-packaging/tools/general_bwd_catalog.py"
 AOT_BUDGET_PER_PACK = 1000
-# The main slot's trained rankers (`uhd_gen promote` bindings), empty until one ships.
+# The main slot's trained rankers (`uhd_gen promote` bindings) and the catalog fingerprints
+# they were trained on; an empty file binds nothing.
 TRAINED_RANKERS = Path(__file__).with_name("general_bwd_trained_rankers.yaml")
 
 MAIN_SOURCE = "kernels/common/attention_bwd.py"
@@ -343,17 +344,28 @@ def main_kernel(row: C.CatalogRow) -> dict:
 
 
 def trained_rankers(path: Path = TRAINED_RANKERS) -> dict:
-    """The main slot's `heuristics` / `trained_catalog_sha256` entries from @p path,
-    only those that bind something (an empty file adds nothing to the config)."""
+    """The main slot's `heuristics` / `trained_catalog_sha256` entries from @p path.
+
+    An empty file adds nothing to the config. A binding must carry the fingerprint of the
+    catalog its models were trained on, for exactly the arches it binds (the config loader
+    enforces the key match; requiring the fingerprint at all is stricter, so a bound ranker
+    is never left without the retrain gate), and a fingerprint needs a binding."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     unknown = set(raw) - {"sort_kernel_catalog", "trained_catalog_sha256"}
     if unknown:
         raise CatalogError(f"{path.name}: unknown keys {sorted(unknown)}")
+    bound = raw.get("sort_kernel_catalog") or {}
+    fingerprints = raw.get("trained_catalog_sha256") or {}
+    if set(bound) != set(fingerprints):
+        raise CatalogError(
+            f"{path.name}: sort_kernel_catalog binds {sorted(bound)} but "
+            f"trained_catalog_sha256 records {sorted(fingerprints)}; bind each arch with "
+            f"the fingerprint of the catalog its model was trained on, or neither"
+        )
     out = {}
-    if raw.get("sort_kernel_catalog"):
-        out["heuristics"] = {"sort_kernel_catalog": dict(raw["sort_kernel_catalog"])}
-    if raw.get("trained_catalog_sha256"):
-        out["trained_catalog_sha256"] = dict(raw["trained_catalog_sha256"])
+    if bound:
+        out["heuristics"] = {"sort_kernel_catalog": dict(bound)}
+        out["trained_catalog_sha256"] = dict(fingerprints)
     return out
 
 

@@ -499,3 +499,158 @@ def test_corpus_plans_select_one_kernel_per_slot(hydrated, arch):
             )
         served += 1
     assert served > 0
+
+
+# The main slot's int knobs restate the KMD's bool and string choices (a slot knob must be
+# an int). The engine plans from the string fields while a ranker and a knob pin read the
+# ints, so the shipped kernels must keep the two in step.
+_CLASS_FIELDS = (
+    "dtype",
+    "head_size",
+    "seq_mode",
+    "stage_vec",
+    "dkv_mode",
+    "mask_class",
+    "dq_mode",
+)
+_KNOB_TUPLE = (
+    "main_block_n",
+    "tuning_key_id",
+    "head_pack_on",
+    "lb_mirror_on",
+    "lb_interleave_on",
+    "worklist_on",
+    "static_scale_id",
+)
+
+
+def _knob_mismatches(metadata, tuning_ids, static_scales):
+    """What differs between one main kernel's int knobs and the fields they restate."""
+    want = {
+        "head_pack_on": int(metadata["head_pack"]),
+        "lb_mirror_on": int(metadata["lb_mirror"]),
+        "lb_interleave_on": int(metadata["lb_interleave"]),
+        "worklist_on": int(metadata["main_worklist"]),
+        "tuning_key_id": tuning_ids[metadata["tuning_key"]],
+        "static_scale_id": static_scales.index(metadata["main_static_scale"]),
+    }
+    return [
+        f"{knob}={metadata.get(knob)!r}, its source field says {value!r}"
+        for knob, value in want.items()
+        if metadata.get(knob) != value
+    ]
+
+
+def _shipped_main_kernels(arch):
+    _require_artifacts()
+    out = []
+    for path in sorted((BUNDLE / "artifacts").glob(f"*main*_{arch}.kdp.json")):
+        out += [(path.name, k) for k in _json(path)["kernelDescriptors"]]
+    assert out, f"no main KDP for {arch}"
+    return out
+
+
+@pytest.fixture(scope="module")
+def knob_sources(rocke_sources):
+    sys.path.insert(0, str(TOOLS))
+    try:
+        import general_bwd_constants as constants
+    finally:
+        sys.path.remove(str(TOOLS))
+    return constants
+
+
+def _tuning_ids(constants, arch):
+    ids = {"": 0}
+    ids.update({text: key_id for key_id, _key, text in constants.H.tuned_keys(arch)})
+    return ids
+
+
+@pytest.mark.parametrize("arch", ARCHES)
+def test_shipped_knob_ints_match_the_fields_they_restate(knob_sources, arch):
+    """Every shipped main kernel's int knobs equal the KMD field each restates, and no two
+    kernels of one class share a knob tuple (the bench keys a candidate by it)."""
+    ids = _tuning_ids(knob_sources, arch)
+    scales = list(knob_sources.STATIC_SCALES)
+    seen = {}
+    for pack, kernel in _shipped_main_kernels(arch):
+        meta = kernel["metadata"]
+        assert not _knob_mismatches(meta, ids, scales), (
+            pack,
+            kernel["name"],
+            _knob_mismatches(meta, ids, scales),
+        )
+        tuple_ = tuple(meta[k] for k in _KNOB_TUPLE)
+        cls = (pack, *(meta[f] for f in _CLASS_FIELDS))
+        assert (cls, tuple_) not in seen, (kernel["name"], seen[(cls, tuple_)])
+        seen[(cls, tuple_)] = kernel["name"]
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "head_pack_on",
+        "lb_mirror_on",
+        "lb_interleave_on",
+        "worklist_on",
+        "tuning_key_id",
+        "static_scale_id",
+    ],
+)
+def test_knob_check_fires_on_a_disagreeing_int(knob_sources, field):
+    """The consistency check can fail: break one int of a shipped kernel in memory."""
+    arch = "gfx950"
+    ids = _tuning_ids(knob_sources, arch)
+    scales = list(knob_sources.STATIC_SCALES)
+    # Moving the int away from the field it restates is what the check must catch.
+    _pack, kernel = _shipped_main_kernels(arch)[0]
+    meta = dict(kernel["metadata"])
+    assert not _knob_mismatches(meta, ids, scales)
+    meta[field] = meta[field] + 1
+    problems = _knob_mismatches(meta, ids, scales)
+    assert len(problems) == 1 and problems[0].startswith(field), problems
+
+
+@pytest.mark.parametrize(
+    "text, fails",
+    [
+        ("sort_kernel_catalog: {}\ntrained_catalog_sha256: {}\n", False),
+        (
+            "sort_kernel_catalog:\n  gfx942: [10c3f054-934d-4c8d-98ca-f8c9111c8009]\n"
+            "trained_catalog_sha256:\n  gfx942: " + "a" * 64 + "\n",
+            False,
+        ),
+        (
+            "sort_kernel_catalog:\n  gfx942: [10c3f054-934d-4c8d-98ca-f8c9111c8009]\n"
+            "trained_catalog_sha256: {}\n",
+            True,
+        ),
+        (
+            "sort_kernel_catalog: {}\ntrained_catalog_sha256:\n  gfx942: "
+            + "a" * 64
+            + "\n",
+            True,
+        ),
+        (
+            "sort_kernel_catalog:\n  gfx942: [10c3f054-934d-4c8d-98ca-f8c9111c8009]\n"
+            "trained_catalog_sha256:\n  gfx950: " + "a" * 64 + "\n",
+            True,
+        ),
+    ],
+    ids=["empty", "bound-and-gated", "no-fingerprint", "no-binding", "arch-mismatch"],
+)
+def test_trained_rankers_file_binds_an_arch_only_with_its_fingerprint(
+    generator_deps, tmp_path, text, fails
+):
+    sys.path.insert(0, str(TOOLS))
+    try:
+        import general_bwd_catalog as catalog
+    finally:
+        sys.path.remove(str(TOOLS))
+    path = tmp_path / "trained.yaml"
+    path.write_text(text, encoding="utf-8")
+    if fails:
+        with pytest.raises(catalog.CatalogError):
+            catalog.trained_rankers(path)
+    else:
+        assert bool(catalog.trained_rankers(path)) == ("gfx942" in text)

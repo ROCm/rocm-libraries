@@ -47,6 +47,7 @@ import argparse
 import dataclasses
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -69,6 +70,9 @@ from kernels.common.attention_bwd_plan import (  # noqa: E402
 )
 
 GENERATOR = "general_bwd_alternates.py"
+# The planner declines with `<CODE>: <detail>` (`INSTANCE_UNAVAILABLE` for a row it cannot
+# build under the forced policy); any other ValueError is a defect, not a decline.
+_DECLINE = re.compile(r"[A-Z][A-Z0-9_]*: ")
 # The class the graph pins; the engine admits only main kernels that agree on all of it.
 PINNED = (
     "dtype",
@@ -150,7 +154,9 @@ def alternates_of(req, arch: str, pick) -> tuple[list[dict], list[dict]]:
             continue
         try:
             plan = attn_bwd_plan(req, arch, policy=_forced_policy(row))
-        except ValueError:
+        except ValueError as exc:
+            if not _DECLINE.match(str(exc)):
+                raise
             continue
         fields = H.main_fields(plan)
         if any(fields[name] != pick_fields[name] for name in PINNED):

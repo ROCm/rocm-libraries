@@ -415,8 +415,9 @@ Roles are the three promote accepts. Keys are one concrete arch (`gfx942`, not `
 is the generator's native UHD (so that role also needs `heuristic: native`). Values are
 what promote writes: a non-empty list of distinct UUIDs for every role -- one model per
 ranking metric for `sort_kernel_catalog` and `predict_engine`, and the candidate generators
-(`predict_applicable_kernels`) for future JIT spaces. A slotted engine refuses the key: its
-rankers are per slot. Without `engine.heuristics` every output is unchanged.
+(`predict_applicable_kernels`) for future JIT spaces. A slotted engine refuses the key: it
+binds its rankers per slot, with `slots[].heuristics` (see "Slotted engines"). Without
+`engine.heuristics` every output is unchanged.
 
 ## Output
 
@@ -948,7 +949,8 @@ engine:
                                   # then: nothing registers it.
   heuristics:                     # optional; per-arch model UHDs `uhd_gen promote` bound,
     sort_kernel_catalog:          # role -> arch -> [UHD id]. See "Shipping a trained
-      gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`.
+      gfx942: [<uhd-uuid>]        # model". Not allowed beside `slots`
+                                  # (a slotted engine uses `slots[].heuristics`).
   trained_catalog_sha256:         # optional; per arch bound under sort_kernel_catalog (all
     gfx942: <64 hex>              # of them), the catalog its models were trained on. See
                                   # "Trained rankers and catalog changes".
@@ -1019,6 +1021,14 @@ python3 tools/catalog_fingerprint.py <bundle>/artifacts/<pack>.kdp.json
 
 The same test checks that the shipped UED binds exactly the configured ids and, with the
 heuristics pulled from DVC, that each is installed.
+
+A slotted engine records the same two facts per slot, as `slots[].heuristics` and
+`slots[].trained_catalog_sha256` (see "Slotted engines"). A slot ranker is trained on every
+pack serving its slot on that arch, so its fingerprint hashes all of those KDPs together:
+name each of them, `python3 tools/catalog_fingerprint.py <kdp> [<kdp>...]` (one KDP gives the
+same value as above). `TestShippedSlotRankers` in `tests/test_trained_rankers.py` is the slot
+form of the gate: it recomputes the fingerprint from the shipped KDPs of every slot that binds
+a ranker and compares it with the config.
 
 ### The engine manifest and `reduction:`
 
@@ -1233,8 +1243,9 @@ kind. See the
 ## Slotted engines: `slots`
 
 A config with a `slots` list describes a slotted engine (RFC 0021): `engine.shared_workspace`
-names the shared-workspace token, each slot declares `name`, `kmd_fields`, `knobs`, `ranker`
-and `specialization`, and every pack names its `slot`. The loader refuses `kmd_fields`,
+names the shared-workspace token, each slot declares `name`, `kmd_fields`, `knobs`, `ranker`,
+`specialization` and, for a slot with `ranker: true`, optionally `heuristics` and
+`trained_catalog_sha256`, and every pack names its `slot`. The loader refuses `kmd_fields`,
 `specialization`, `engine.knobs` and a non-`none` `engine.heuristic` beside `slots`, so a
 slotted config declares them per slot. `tests/fixtures/slotted_three_slot.yaml` is the
 reference. A slotted config generates descriptors only: no native stub, census, matcher test or fragments,
@@ -1242,6 +1253,26 @@ and no provider splice (`generate.py` prints `Descriptors only: no provider spli
 engines`), and `--check-placeholders` is refused for it (exit 2). The slotted engine's runtime
 behavior, benchmarking and tooling are in the
 [RUNBOOK](../ai/skills/hipdnn-ingestor-engine/RUNBOOK.md#slotted-engines-rfc-0021).
+
+A slot with `ranker: true` binds the native default in its `sort_kernel_catalog`. To record the
+trained rankers `uhd_gen promote --slot` installed for it, add the per-arch UHD ids and the
+fingerprint of the catalog they were trained on, so a regeneration keeps the binding and the
+catalog gate covers it:
+
+```yaml
+slots:
+- name: main
+  ranker: true
+  heuristics:
+    sort_kernel_catalog:          # role -> arch -> [UHD id]; the only role a slot takes
+      gfx942: [<uhd-uuid>]        # concrete arch keys only: `default` is the native UHD
+  trained_catalog_sha256:         # per bound arch, the fingerprint of every KDP of the slot
+    gfx942: <64 hex>              # on that arch (`tools/catalog_fingerprint.py <kdp>...`)
+```
+
+Both keys need `ranker: true`; the fingerprint keys must equal the arches bound under
+`heuristics`. The UED's slot entry is written `{"default": <native id>, "<arch>": [ids]}`, the
+form `promote` produces, and the fingerprint stays in the config only.
 
 Each slot emits its own KMD, its own UDD (`<slug>_<slot>.udd.json`, dispatch symbol
 `<namespace>.<slot>_dispatch`) and, when it ranks, its own UHD; a slot's KDPs name the slot's

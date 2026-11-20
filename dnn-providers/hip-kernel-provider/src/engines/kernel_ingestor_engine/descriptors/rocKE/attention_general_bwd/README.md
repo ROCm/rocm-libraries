@@ -10,7 +10,8 @@ engine (RFC 0021) with a shared workspace (`ws.bytes`):
   sequence mode, stage vec, dK/dV mode, mask class, dQ mode) whose own plan can stand in for the
   engine's pick: same prep launch and workspace layout, legal for the graph and the device
   (`packs/AttentionGeneralBwdNative.cpp`, `resolveCandidate` in
-  `packs/AttentionGeneralBwdGeometry.hpp`). A THD (ragged) graph admits only the engine's pick.
+  `packs/AttentionGeneralBwdGeometry.hpp`). A THD (ragged) graph admits only the engine's pick:
+  a temporary limit, see "Main-slot ranking".
 
 ## Coverage
 
@@ -31,45 +32,66 @@ instead, bound as `"gfx942": [...]`, `"gfx950": [...]` beside `default`. The mod
 `heuristic.uhd.json` in git, `model.bin` in DVC (`model.bin.dvc`, remote `ingestor`). The prep
 slot has one candidate per graph and no ranker.
 
-- Metric-less tree rankers (`tree_data`) over the main slot's knobs (`main_block_n`,
-  `tuning_key_id`, `head_pack_on`, `lb_mirror_on`, `lb_interleave_on`, `worklist_on`,
-  `static_scale_id`: int restatements of the KMD's choice fields) and graph features (shapes,
-  data type, mask class, the pick's tile and tuned key). Label: `robustMeanMs` of
-  `hipdnn_bench --sweep`, warm cache.
-- Trained on dense graphs only: per arch, 2000 or 4000 `hipdnn_corpus_gen` `sdpa_bwd` graphs
-  (BSHD) and 672 graphs around the rocKE backward census (BSHD and BHSD, causal and window
-  masks), each main candidate timed on the device (`hipdnn_corpus_gen`, `hipdnn_bench`,
-  `uhd_gen`; the `hipdnn-uhd` skill). THD graphs are not timed (hipdnn_bench fills ragged
-  offset tables with its input pattern) and keep the engine's pick.
-- Validated on held-out graphs (never trained on) offline and at runtime on each arch
-  (native tree against model tree, paired timings): the model picks a faster kernel than the
-  engine's own pick on most multi-candidate graphs. On gfx942 no held-out graph ran slower than
-  with the native pick; on gfx950 about 2% of held-out graphs did. The PR that shipped them
-  gives the measured ratios.
+- Metric-less tree rankers (`tree_data`). Each model reads a subset of the main slot's knobs
+  (`main_block_n`, `tuning_key_id`, `head_pack_on`, `lb_mirror_on`, `lb_interleave_on`,
+  `worklist_on`, `static_scale_id`: int restatements of the KMD's choice fields) and of the
+  graph features (shapes, data type, mask class, and for gfx942 the engine pick's tile and
+  tuned key); the exact list is the model's `features_signature` in its `heuristic.uhd.json`
+  and differs per arch. The label is `robustMeanMs` of `hipdnn_bench --sweep`, warm cache.
+- Trained on dense graphs only (BSHD and BHSD, causal and window masks), each main candidate
+  timed on the device with `hipdnn_corpus_gen` (`sdpa_bwd`), `hipdnn_bench` and `uhd_gen` (the
+  `hipdnn-uhd` skill), plus dense graphs around the rocKE backward census. The graph sets and
+  the judging scripts are not in the repository. THD graphs are not timed (`hipdnn_bench` does
+  not fill the ragged offset tables of a graph, so a THD run reads an invalid table) and keep
+  the engine's pick. This is a temporary limit: lift the THD rule in `mainCandidatePlanOf` once
+  the bench times THD and a model is trained on it.
+- Validated on held-out graphs (never trained on) offline and at runtime on each arch, native
+  tree against model tree on the same graphs. On gfx950 a few held-out graphs are not ranked at
+  least as well as by the native pick; the measured results are in the PR description, not here.
 - Correctness: `IntegrationGpu<arch>AttentionGeneralBwd.EveryAdmittedMainKernelMatchesTheReference`
   runs every main kernel the engine admits for each catalog-row graph against hipDNN's GPU
-  reference, so a ranked-first kernel is always one checked on the device;
+  reference, so on those graphs a ranked-first kernel is one checked on the device;
   `TestAttentionGeneralBwdReplay` checks every admitted candidate's launches against rocKE's
-  planner. `hipdnn_bench`'s own cross-check cannot decide fp16 rows (its fill overflows dQ), so
-  those training rows carry no verdict.
+  planner. `hipdnn_bench`'s own cross-check cannot decide fp16 rows (its input fill overflows
+  dQ), so those training rows carry no verdict.
+- If the loader refuses a model (a failed provenance or feature check, a missing `model.bin`),
+  the slot ranks in declared order, not with the engine's pick first: the SDK logs an error
+  naming the model and arch (`descriptor loader: ... disabled: ...`). A shipped-ranker gate
+  that fails with the KDPs and models pulled is how that surfaces in the tests.
 
 ## Retraining
 
 The config records the models (`descriptor-packaging/tools/general_bwd_trained_rankers.yaml`:
-the main slot's `heuristics` and `trained_catalog_sha256`), and
-`tests/test_trained_rankers.py` in the IngestorGenerator fails when a shipped main-slot catalog
-no longer matches the fingerprint the model was trained on: any main kernel added, removed or
-changed needs a retrain.
+the main slot's `heuristics` and `trained_catalog_sha256`), and `TestShippedSlotRankers` in
+`projects/hipdnn/tools/IngestorGenerator/tests/test_trained_rankers.py` fails (with the KDPs
+pulled) when a shipped main-slot catalog no longer matches the fingerprint the model was trained
+on: any main kernel added, removed or changed needs a retrain.
 
-1. Sweep the graphs on each arch: `hipdnn_bench --graph <g> --engine-name hipkernel:AttentionGeneralBwd --sweep`.
-2. Store the CSVs (`python -m uhd_gen.dataset add --csv ...`; merge several sweep CSVs into one
-   file first) and train per arch: `python -m uhd_gen generate --dataset <store> --slot main
-   --no-promote --target robustMeanMs --objective min --features ...`.
-3. Judge it against the native pick on its held-out graphs, then
-   `python -m uhd_gen promote --role sort_kernel_catalog --arch <arch> --descriptor-tree <this directory> ...`.
-4. Record the new ids and `tools/catalog_fingerprint.py artifacts/<every main-slot KDP of the
-   arch>` in `general_bwd_trained_rankers.yaml`, regenerate with
-   `general_bwd_catalog.py --generate --verify`, `dvc add` the new `model.bin`, and push it.
+1. Make the graph sets on each arch: `hipdnn_corpus_gen --operation sdpa_bwd --engine-name
+   hipkernel:AttentionGeneralBwd ...` and dense graphs around the rocKE backward census (BSHD
+   and BHSD, several sequence lengths and batches; build the graphs with rocKE's
+   `dispatch/attention_bwd/hipdnn.py` and keep those the engine accepts). Those scripts are not
+   in the repository.
+2. Time every admitted candidate: `hipdnn_bench --graph <g> --engine-name
+   hipkernel:AttentionGeneralBwd --plugin-dir <dir> --sweep` writes one CSV per graph.
+3. Merge the CSVs into one file before adding them: `python -m uhd_gen.dataset add --csv` reads
+   each file's `numerically_valid` column on its own, and files that mix `True` and `Unknown`
+   verdicts then fail to store as one table. Then `python -m uhd_gen.dataset add --into <store>
+   --csv <merged.csv> --engine hipkernel:AttentionGeneralBwd --engine-id <id> --arch <arch>
+   --selector-revision <rev> --collected-at <timestamp>`.
+4. Train per arch: `python -m uhd_gen generate --dataset <store> --slot main --no-promote
+   --target robustMeanMs --objective min --features <shape and knob features>
+   --descriptor-tree <this directory's parent tree> --engine hipkernel:AttentionGeneralBwd
+   --arch <arch> --feature-evaluator <build>/bin/hipdnn_uhd_features --output-dir <out>`.
+5. Judge the model against the native pick on its held-out graphs (a manual step: the slot
+   has no validate script), then install it: `python -m uhd_gen promote --model-dir
+   <out>/model --descriptor-tree <this directory> --engine hipkernel:AttentionGeneralBwd
+   --role sort_kernel_catalog --arch <arch> --corpus <out>/corpus.json --feature-evaluator
+   <build>/bin/hipdnn_uhd_features`.
+6. Record the new ids and `projects/hipdnn/tools/IngestorGenerator/tools/catalog_fingerprint.py
+   <every main-slot KDP of the arch under artifacts/>` in `general_bwd_trained_rankers.yaml`,
+   regenerate with `general_bwd_catalog.py --generate --verify`, `dvc add` the new `model.bin`,
+   and push it.
 
 ## Files
 
