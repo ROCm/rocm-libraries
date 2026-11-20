@@ -601,18 +601,15 @@ if(HIPBLASLT_ENABLE_HOST
    AND TENSILELITE_BUILD_SHARED_LIBS
    AND NOT WIN32
    AND (HIPBLASLT_BUILD_TESTING OR TENSILELITE_BUILD_TESTING OR BUILD_TESTING))
-    get_filename_component(_hipblaslt_cxx_dir "${CMAKE_CXX_COMPILER}" REALPATH)
-    get_filename_component(_hipblaslt_cxx_dir "${_hipblaslt_cxx_dir}" DIRECTORY)
-    find_program(HIPBLASLT_LLVM_IFS llvm-ifs
-        REQUIRED
-        HINTS "${_hipblaslt_cxx_dir}"
-        PATHS "${ROCM_PATH}/lib/llvm/bin" "$ENV{ROCM_PATH}/lib/llvm/bin" /opt/rocm/lib/llvm/bin
-    )
+    # Use the configured toolchain's nm; llvm-ifs is not built by TheRock.
+    if(NOT CMAKE_NM)
+        message(FATAL_ERROR "hipBLASLt symbol contract requires the toolchain's CMAKE_NM")
+    endif()
     enable_testing()
     add_test(
         NAME hipblaslt.symbol-contract.tensilelite-host
         COMMAND "${CMAKE_COMMAND}"
-            "-DLLVM_IFS=${HIPBLASLT_LLVM_IFS}"
+            "-DNM=${CMAKE_NM}"
             "-DCONSUMER=$<TARGET_FILE:hipblaslt>"
             "-DPROVIDER=$<TARGET_FILE:tensilelite-host>"
             "-DREQUIRED_IMPORTS=${CMAKE_CURRENT_SOURCE_DIR}/library/symbol-contract/tensilelite-host-imports.txt"
