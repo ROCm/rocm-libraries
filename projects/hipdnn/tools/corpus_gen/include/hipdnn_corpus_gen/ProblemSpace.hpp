@@ -57,10 +57,10 @@ struct ExplorationRequest
     /// weighted parameters split a budget rather than multiply it: the first pass is this many
     /// points for each distinct combination of the unweighted parameters, divided among the
     /// combinations by weight, so it is the mean per unweighted combination, not per combination.
-    /// A combination gets at least one point, so the first pass is never smaller than the number
-    /// of explored combinations that can hold a problem (it is that many when the budget is
-    /// smaller); a combination the declared constraints make empty gets none. See
-    /// detail::firstPassTargets.
+    /// A combination may get none: the growth toward @ref corpusTarget, the regime floors and the
+    /// quotas reach it. Every declared value that some combination can hold is drawn at least
+    /// once, so the first pass is more than this budget only when there are more such values
+    /// than points. See detail::firstPassTargets.
     int64_t pointsPerCombination = 50;
 
     /// Oracle calls per categorical combination.
@@ -730,6 +730,142 @@ inline std::vector<ShapeDimension> numericWindow(const OperationMetadata& metada
     return window;
 }
 
+/// Makes sure the first pass draws every declared value of every enumerable parameter, weighted
+/// or not, that some live combination holds. A value @p targets leaves with no point (a light
+/// value spread over combinations whose shares each round to nothing) gets one in its live
+/// combination of largest size, ties to the lowest key, and that point is taken from the
+/// combination with the largest surplus over its exact share (@p budget split by @p sizes), so
+/// the total stays the budget. A combination is only a donor if giving the point up leaves every
+/// value it holds with a point. When none can give one the total grows by the points owed, which
+/// happens only when there are more uncovered values than points.
+inline void coverEveryValue(const OperationMetadata& metadata,
+                            const std::vector<ProblemPoint>& combinations,
+                            const std::vector<double>& sizes,
+                            const std::vector<uint64_t>& keys,
+                            double budget,
+                            std::vector<int64_t>& targets)
+{
+    std::vector<std::vector<ParameterValue>> axes;
+    std::vector<std::string> names;
+    for(const auto& parameter : metadata.parameters)
+    {
+        auto values = parameter.enumerable();
+        if(!values.empty())
+        {
+            names.push_back(parameter.name);
+            axes.push_back(std::move(values));
+        }
+    }
+
+    // Which value of each axis a combination holds (-1: it names none).
+    std::vector<std::vector<int>> holds(combinations.size(), std::vector<int>(axes.size(), -1));
+    std::vector<std::vector<int64_t>> points(axes.size());
+    for(size_t axis = 0; axis < axes.size(); ++axis)
+    {
+        points[axis].assign(axes[axis].size(), 0);
+    }
+    double total = 0.0;
+    for(const auto size : sizes)
+    {
+        total += size;
+    }
+    for(size_t index = 0; index < combinations.size(); ++index)
+    {
+        for(size_t axis = 0; axis < axes.size(); ++axis)
+        {
+            const auto found = combinations[index].find(names[axis]);
+            if(found == combinations[index].end())
+            {
+                continue;
+            }
+            const auto& values = axes[axis];
+            const auto at = std::find(values.begin(), values.end(), found->second);
+            if(at != values.end())
+            {
+                holds[index][axis] = static_cast<int>(at - values.begin());
+                points[axis][static_cast<size_t>(holds[index][axis])] += targets[index];
+            }
+        }
+    }
+    if(!(total > 0.0))
+    {
+        return;
+    }
+
+    const auto shift = [&](size_t index, int64_t by) {
+        targets[index] += by;
+        for(size_t axis = 0; axis < axes.size(); ++axis)
+        {
+            if(holds[index][axis] >= 0)
+            {
+                points[axis][static_cast<size_t>(holds[index][axis])] += by;
+            }
+        }
+    };
+    const auto keepsEveryValue = [&](size_t index) {
+        if(targets[index] > 1)
+        {
+            return true;
+        }
+        for(size_t axis = 0; axis < axes.size(); ++axis)
+        {
+            if(holds[index][axis] >= 0 && points[axis][static_cast<size_t>(holds[index][axis])] < 2)
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    constexpr auto NONE = std::numeric_limits<size_t>::max();
+    for(size_t axis = 0; axis < axes.size(); ++axis)
+    {
+        for(size_t value = 0; value < axes[axis].size(); ++value)
+        {
+            if(points[axis][value] > 0)
+            {
+                continue;
+            }
+            auto taker = NONE;
+            for(size_t index = 0; index < combinations.size(); ++index)
+            {
+                if(sizes[index] > 0.0 && holds[index][axis] == static_cast<int>(value)
+                   && (taker == NONE || sizes[index] > sizes[taker]
+                       || (sizes[index] == sizes[taker] && keys[index] < keys[taker])))
+                {
+                    taker = index;
+                }
+            }
+            if(taker == NONE)
+            {
+                continue;
+            }
+            shift(taker, 1);
+            auto donor = NONE;
+            double donorSurplus = 0.0;
+            for(size_t index = 0; index < combinations.size(); ++index)
+            {
+                if(index == taker || targets[index] <= 0 || !keepsEveryValue(index))
+                {
+                    continue;
+                }
+                const auto surplus
+                    = static_cast<double>(targets[index]) - budget * sizes[index] / total;
+                if(donor == NONE || surplus > donorSurplus
+                   || (surplus == donorSurplus && keys[index] < keys[donor]))
+                {
+                    donor = index;
+                    donorSurplus = surplus;
+                }
+            }
+            if(donor != NONE)
+            {
+                shift(donor, -1);
+            }
+        }
+    }
+}
+
 /// The first pass's problem count for each of @p combinations, @p sizes being their
 /// combinationSizes.
 ///
@@ -738,9 +874,11 @@ inline std::vector<ShapeDimension> numericWindow(const OperationMetadata& metada
 /// combination (one that can hold a problem) of the parameters that have no weights, so
 /// declaring a weight on layout, scale, window or form reshapes the corpus without growing it
 /// by the number of their values. It is divided by size, the units placed as apportion places
-/// them, and every live combination gets at least one point so no declared value disappears:
-/// the first pass is the budget, but never smaller than the number of live combinations,
-/// whatever the budget. A combination the declared constraints make empty gets none.
+/// them, so each weighted value holds its declared share of the first pass. No combination is
+/// owed a point: one whose share rounds to nothing is left for the growth, the regime floors and
+/// the quotas to reach. What is owed is every declared value that some live combination holds
+/// (coverEveryValue): the first pass is the budget, or more only when there are more uncovered
+/// values than points. A combination the declared constraints make empty gets none.
 inline std::vector<int64_t> firstPassTargets(const OperationMetadata& metadata,
                                              const ExplorationRequest& request,
                                              const std::vector<ProblemPoint>& combinations,
@@ -784,45 +922,8 @@ inline std::vector<int64_t> firstPassTargets(const OperationMetadata& metadata,
     const auto budget = request.pointsPerCombination
                         * std::max<int64_t>(1, static_cast<int64_t>(distinct.size()));
 
-    // A combination whose share of what is left is under one point is given one and set aside;
-    // the rest split what remains, until none is under. So the floor costs the combinations that
-    // would otherwise round to nothing, not the budget: the total stays the budget, or one point
-    // for each live combination when that is more.
-    std::fill(targets.begin(), targets.end(), int64_t{0});
-    std::vector<double> open = sizes;
-    int64_t remaining = budget;
-    for(;;)
-    {
-        double openSum = 0.0;
-        for(const auto size : open)
-        {
-            openSum += size;
-        }
-        std::vector<size_t> floored;
-        for(size_t index = 0; index < open.size(); ++index)
-        {
-            if(open[index] > 0.0
-               && (remaining <= 0 || static_cast<double>(remaining) * open[index] < openSum))
-            {
-                floored.push_back(index);
-            }
-        }
-        if(floored.empty())
-        {
-            break;
-        }
-        for(const auto index : floored)
-        {
-            targets[index] = 1;
-            open[index] = 0.0;
-        }
-        remaining -= static_cast<int64_t>(floored.size());
-    }
-    const auto shares = apportion(remaining, open, keys);
-    for(size_t index = 0; index < targets.size(); ++index)
-    {
-        targets[index] += shares[index];
-    }
+    targets = apportion(budget, sizes, keys);
+    coverEveryValue(metadata, combinations, sizes, keys, static_cast<double>(budget), targets);
     return targets;
 }
 
@@ -874,9 +975,15 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     const bool weighted = detail::anyWeighted(metadata.parameters);
     const auto sizes = detail::combinationSizes(metadata, combinations);
     // The first pass's per-combination problem count: pointsPerCombination for each, or, when
-    // weighted, pointsPerCombination for each distinct unweighted combination split by size, with
-    // at least one each so no combination (and so no declared value) is dropped.
+    // weighted, pointsPerCombination for each distinct unweighted combination split by size,
+    // with every declared value drawn at least once. A live combination left with none is
+    // untried: the growth treats it as open, not as one that found nothing.
     const auto firstPass = detail::firstPassTargets(metadata, request, combinations, sizes);
+    std::vector<bool> untried(combinations.size(), false);
+    for(size_t i = 0; i < untried.size(); ++i)
+    {
+        untried[i] = sizes[i] > 0.0 && firstPass[i] == 0;
+    }
     // The combinations that can hold a problem; all of them when nothing is weighted.
     const auto live = std::max<std::ptrdiff_t>(
         1, std::count_if(sizes.begin(), sizes.end(), [](double size) { return size > 0.0; }));
@@ -1143,7 +1250,8 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         for(size_t index = 0; index < corpus.combinations.size(); ++index)
         {
             if(!spent[index]
-               && (!corpus.combinations[index].problems.empty() || heldFound[index] > 0))
+               && (untried[index] || !corpus.combinations[index].problems.empty()
+                   || heldFound[index] > 0))
             {
                 growable.push_back(index);
             }
@@ -1229,7 +1337,27 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             // Run at the current budget first (a larger target re-tessellates what the walk
             // observed). Then grow: by a quarter for sparse regions, so saturation is cheap to
             // establish, or doubling once the region proves productive.
-            auto found = buildFeasibleShapeSet(oracle, search);
+            auto found = [&]() {
+                if(!untried[index] || request.probeBudget >= search.oracleBudget)
+                {
+                    return buildFeasibleShapeSet(oracle, search);
+                }
+                // Never searched: probe first, as the first pass does, so a combination the
+                // engine declines costs the probe, not the whole budget.
+                auto probe = search;
+                probe.oracleBudget = request.probeBudget;
+                auto probed = buildFeasibleShapeSet(oracle, probe);
+                return probed.stats.distinct == 0 ? probed : buildFeasibleShapeSet(oracle, search);
+            }();
+            if(untried[index] && found.stats.distinct == 0)
+            {
+                // Declined, like a combination the first pass found nothing in: not grown.
+                result.stats = found.stats;
+                result.saturated = true;
+                spent[index] = true;
+                continue;
+            }
+            untried[index] = false;
             auto selection = select(found);
             // At least one new point per hundred queries counts as productive.
             bool productive = found.stats.oracleCalls > 0

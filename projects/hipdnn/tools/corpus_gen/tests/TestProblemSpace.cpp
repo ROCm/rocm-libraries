@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <fstream>
 #include <map>
+#include <numeric>
 #include <set>
 #include <string>
 #include <vector>
@@ -1122,15 +1123,12 @@ TEST(TestProblemSpace, ApportionSplitsByLargestRemainderAndSumsExactly)
 
 TEST(TestProblemSpace, AWeightedValueKeepsItsShareAtASmallPointsPerCombination)
 {
-    // The first pass is 6 for each of the two dtypes, 12 points, so a layout-b or -c
-    // combination's ideal is 1.5 and a layout-a one's 3. A per-combination rounding (and a
-    // per-combination ceiling when growing) puts every such light value above its weight; the
-    // split of the whole first pass by largest remainder lands exactly on 2:1:1. Below 6 points
-    // the floor of one for each of the six combinations (see
-    // TheFirstPassNeverDropsACombinationItsBudgetCannotCover) lifts the light values above their
-    // weight.
+    // 0.75 of two points rounds to two, and 1.5 of two to three: a per-combination rounding
+    // (and a per-combination ceiling when growing) puts every small value above its weight.
+    // The split of the whole first pass (2 points for each of the two dtypes) by largest
+    // remainder lands exactly on 2:1:1, and no combination is owed a point to spoil it.
     ExplorationRequest request;
-    request.pointsPerCombination = 6;
+    request.pointsPerCombination = 2;
     request.seed = 14;
     const auto corpus
         = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
@@ -1213,32 +1211,6 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     EXPECT_NEAR(all, static_cast<double>(combinations.size() - empty), 1e-6);
 }
 
-TEST(TestProblemSpace, TheFirstPassNeverDropsACombinationItsBudgetCannotCover)
-{
-    // pointsPerCombination x the two dtypes is 2 points for six live combinations: each keeps
-    // one, so no layout (and no dtype) disappears, and the first pass is the number of live
-    // combinations rather than the budget.
-    ExplorationRequest request;
-    request.pointsPerCombination = 1;
-    request.seed = 15;
-    const auto metadata = weightedToy(R"(, "weights": {"a": 2})");
-    size_t total = 0;
-    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
-    const auto sizes = detail::combinationSizes(metadata, combinations);
-
-    EXPECT_EQ(detail::firstPassTargets(metadata, request, combinations, sizes),
-              std::vector<int64_t>(6, 1));
-    EXPECT_EQ(exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING).problems().size(), 6U);
-
-    // Nothing weighted: pointsPerCombination for each combination.
-    const auto plain = weightedToy("");
-    const auto plainCombinations = detail::categoricalCombinations(plain.parameters, 0, total);
-    const auto plainSizes = detail::combinationSizes(plain, plainCombinations);
-    request.pointsPerCombination = 9;
-    EXPECT_EQ(detail::firstPassTargets(plain, request, plainCombinations, plainSizes),
-              std::vector<int64_t>(6, 9));
-}
-
 namespace
 {
 
@@ -1275,6 +1247,93 @@ ProblemOracle oneWideLayout(int64_t wideLimit)
 }
 
 } // namespace
+
+TEST(TestProblemSpace, TheFirstPassDrawsEveryDeclaredValueAndKeepsItsBudgetWhereItCan)
+{
+    ExplorationRequest request;
+    request.seed = 15;
+    size_t total = 0;
+    const auto covered = [](const OperationMetadata& metadata,
+                            const std::vector<ProblemPoint>& combinations,
+                            const std::vector<int64_t>& targets,
+                            const std::string& parameter) {
+        std::set<std::string> values;
+        for(size_t i = 0; i < combinations.size(); ++i)
+        {
+            if(targets[i] > 0)
+            {
+                values.insert(std::get<std::string>(combinations[i].at(parameter)));
+            }
+        }
+        EXPECT_NE(metadata.find(parameter), nullptr);
+        return values;
+    };
+    const auto sum = [](const std::vector<int64_t>& targets) {
+        return std::accumulate(targets.begin(), targets.end(), int64_t{0});
+    };
+
+    // Layout a is a thousand times as common as b and c: their combinations' shares round to
+    // nothing, yet each is drawn, with the points taken from layout a, not added to the budget
+    // (10 points for each of the two dtypes).
+    request.pointsPerCombination = 10;
+    const auto skewed = weightedToy(R"(, "weights": {"a": 1000, "b": 1, "c": 1})");
+    const auto skewedCombinations = detail::categoricalCombinations(skewed.parameters, 0, total);
+    const auto skewedTargets = detail::firstPassTargets(
+        skewed, request, skewedCombinations, detail::combinationSizes(skewed, skewedCombinations));
+    EXPECT_EQ(sum(skewedTargets), 20);
+    EXPECT_EQ(covered(skewed, skewedCombinations, skewedTargets, "layout"),
+              (std::set<std::string>{"a", "b", "c"}));
+    EXPECT_EQ(covered(skewed, skewedCombinations, skewedTargets, "dtype"),
+              (std::set<std::string>{"fp32", "fp16"}));
+
+    // Three values and one point: none may give theirs up, so the first pass is the three owed.
+    request.pointsPerCombination = 1;
+    const auto three = threeEqualLayouts();
+    const auto threeCombinations = detail::categoricalCombinations(three.parameters, 0, total);
+    const auto threeTargets = detail::firstPassTargets(
+        three, request, threeCombinations, detail::combinationSizes(three, threeCombinations));
+    EXPECT_EQ(threeTargets, std::vector<int64_t>(3, 1));
+
+    // Nothing weighted: pointsPerCombination for each combination, as ever.
+    const auto plain = weightedToy("");
+    const auto plainCombinations = detail::categoricalCombinations(plain.parameters, 0, total);
+    request.pointsPerCombination = 9;
+    EXPECT_EQ(
+        detail::firstPassTargets(
+            plain, request, plainCombinations, detail::combinationSizes(plain, plainCombinations)),
+        std::vector<int64_t>(6, 9));
+}
+
+TEST(TestProblemSpace, ACombinationLeftWithoutAFirstPassPointStillGrowsToTheTarget)
+{
+    // Six combinations share 4 first-pass points (2 for each dtype), layout a taking nearly
+    // all of them; b and c are drawn once each, so two combinations are left with none. They are
+    // untried, not declined: growing toward a target well past the first pass reaches them, in
+    // proportion to their weight.
+    const auto metadata = weightedToy(R"(, "weights": {"a": 100, "b": 1, "c": 1})");
+    for(uint64_t seed = 0; seed < 5; ++seed)
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 2;
+        request.seed = seed;
+        size_t total = 0;
+        const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+        const auto targets = detail::firstPassTargets(
+            metadata, request, combinations, detail::combinationSizes(metadata, combinations));
+        ASSERT_NE(std::count(targets.begin(), targets.end(), 0), 0) << "seed " << seed;
+
+        request.corpusTarget = 2000;
+        const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+
+        EXPECT_GE(corpus.problems().size(), 2000U) << "seed " << seed;
+        EXPECT_TRUE(corpus.shortfall.empty()) << "seed " << seed;
+        for(const auto& combination : corpus.combinations)
+        {
+            EXPECT_FALSE(combination.problems.empty())
+                << "seed " << seed << ": " << detail::describe(combination.categorical);
+        }
+    }
+}
 
 TEST(TestProblemSpace, WeightedGrowthKeepsGoingWhenTheRoundsShareFallsOnExhaustedCombinations)
 {
@@ -1361,7 +1420,6 @@ TEST_P(TestShippedFirstPass, TheShippedSdpaDeclarationsKeepTheDefaultFirstPassNe
             continue;
         }
         ++live;
-        EXPECT_GE(targets[i], 1) << detail::describe(combinations[i]);
         ProblemPoint projected;
         for(const auto& parameter : metadata.parameters)
         {
@@ -1381,44 +1439,38 @@ TEST_P(TestShippedFirstPass, TheShippedSdpaDeclarationsKeepTheDefaultFirstPassNe
     {
         sum += target;
     }
-    EXPECT_EQ(sum, std::max(request.pointsPerCombination * distinct, live));
+    EXPECT_EQ(sum, request.pointsPerCombination * distinct);
     EXPECT_LT(sum, int64_t{5} * 24 * request.pointsPerCombination);
 
-    // The floor of one point each puts most of a first pass this small into every combination
-    // alike, so the declared shares are only approached (plain holds 0.37 of the forward's
-    // first pass against its declared 0.5), but the order the weights declare holds. Where the
-    // budget exceeds the floor the shares are realised
-    // (AWeightedValueRealisesItsShareOfTheFirstPassAndOfTheGrownCorpus).
+    // Every declared value that some live combination holds is drawn, weighted or not, and each
+    // weighted value holds its declared share of the first pass.
     for(const auto& parameter : metadata.parameters)
     {
-        if(parameter.weights.empty())
-        {
-            continue;
-        }
-        std::map<std::string, double> share;
-        for(const auto& value : parameter.values)
+        const auto values = parameter.enumerable();
+        for(size_t v = 0; v < values.size(); ++v)
         {
             int64_t held = 0;
+            bool someLiveCombinationHoldsIt = false;
             for(size_t i = 0; i < combinations.size(); ++i)
             {
-                held += std::get<std::string>(combinations[i].at(parameter.name)) == value
-                            ? targets[i]
-                            : 0;
-            }
-            share[value] = static_cast<double>(held) / static_cast<double>(sum);
-        }
-        for(const auto& heavier : parameter.values)
-        {
-            for(const auto& lighter : parameter.values)
-            {
-                const auto weightGap
-                    = parameter.relativeWeight(heavier) - parameter.relativeWeight(lighter);
-                if(weightGap > 1e-9)
+                if(combinations[i].at(parameter.name) == values[v])
                 {
-                    EXPECT_GT(share[heavier], share[lighter])
-                        << GetParam() << " " << parameter.name << ": " << heavier << " over "
-                        << lighter;
+                    held += targets[i];
+                    someLiveCombinationHoldsIt = someLiveCombinationHoldsIt || sizes[i] > 0.0;
                 }
+            }
+            if(someLiveCombinationHoldsIt)
+            {
+                EXPECT_GE(held, 1) << GetParam() << " " << parameter.name << " value " << v;
+            }
+            if(!parameter.weights.empty())
+            {
+                const auto& value = parameter.values[v];
+                EXPECT_NEAR(static_cast<double>(held) / static_cast<double>(sum),
+                            parameter.relativeWeight(value)
+                                / static_cast<double>(parameter.values.size()),
+                            0.03)
+                    << GetParam() << " " << parameter.name << "=" << value;
             }
         }
     }

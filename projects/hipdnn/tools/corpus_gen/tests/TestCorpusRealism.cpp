@@ -413,7 +413,9 @@ TEST(TestCorpusRealism, TheShippedSdpaCorpusCoversHeadDimsLayoutsAndSequenceRela
     request.seed = 9;
     const auto problems
         = exploreProblemSpace(*parsed.metadata, request, ACCEPT_EVERYTHING).problems();
-    ASSERT_GT(problems.size(), 1000U);
+    // 30 points for each of the 24 unweighted combinations: enough rows that the shares below are
+    // not noise.
+    ASSERT_GT(problems.size(), 500U);
 
     size_t wide = 0;
     size_t square = 0;
