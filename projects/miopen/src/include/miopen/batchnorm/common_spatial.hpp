@@ -555,9 +555,7 @@ inline void GetHeuristicsConfigTuningNHWC(const miopen::batchnorm::ProblemDescri
 // The first instance added is based on heuristics and is the default one if spatial
 // multiple is the default method.
 // Additional instances are added:
-//  - for NCHW all supported vector sizes smaller than the default one
-//    (the default is the largest applicable)
-//  - for NHWC the combinations of vectorsize, xlocalsize, ylocalsize, zlocalsize and
+//  - the combinations of vectorsize, xlocalsize, ylocalsize, zlocalsize and
 //    nelements that are valid for the implementation and pass a few heuristic filters
 inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescription& problem,
                                          unsigned int stash_values,
@@ -573,68 +571,54 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
     size_t zlocalsize_default = 1;
     size_t nelements_default  = n;
 
-    // Tuning instances: add the full parameter space
-    if(problem.IsLayoutNHWC())
+    const bool is_layout_nhwc = problem.IsLayoutNHWC();
+
+    // First add the default instance, which should work well for a large range of problems
+    // with the largest applicable vector size
+    for(size_t vs = vectorsize_default; vs > 0; vs >>= 1)
     {
-        // First add the default instance, which should work well for a large range of problems
+        GetSpatialMultipleConfig(problem, vs, xlocalsize_default, ylocalsize_default);
+        if(IsSpatialMultipleApplicable(problem,
+                                       vs,
+                                       stash_values,
+                                       ylocalsize_default,
+                                       zlocalsize_default,
+                                       nelements_default))
         {
-            GetSpatialMultipleConfig(
-                problem, vectorsize_default, xlocalsize_default, ylocalsize_default);
-            if(IsSpatialMultipleApplicable(problem,
-                                           vectorsize_default,
-                                           stash_values,
-                                           ylocalsize_default,
-                                           zlocalsize_default,
-                                           nelements_default))
-            {
-                valid_kernels.push_back(GetKernelIdFromVariant(2,
-                                                               vectorsize_default,
-                                                               xlocalsize_default,
-                                                               ylocalsize_default,
-                                                               zlocalsize_default,
-                                                               nelements_default));
-            }
-            else
-            {
-                if(vectorsize_default > 1)
-                {
-                    vectorsize_default = 1;
-                    GetSpatialMultipleConfig(
-                        problem, vectorsize_default, xlocalsize_default, ylocalsize_default);
-
-                    if(IsSpatialMultipleApplicable(problem,
-                                                   1,
-                                                   stash_values,
-                                                   ylocalsize_default,
-                                                   zlocalsize_default,
-                                                   nelements_default))
-                    {
-                        valid_kernels.push_back(GetKernelIdFromVariant(2,
-                                                                       vectorsize_default,
-                                                                       xlocalsize_default,
-                                                                       ylocalsize_default,
-                                                                       zlocalsize_default,
-                                                                       nelements_default));
-                    }
-                }
-            }
+            vectorsize_default = vs;
+            valid_kernels.push_back(GetKernelIdFromVariant(2,
+                                                           vectorsize_default,
+                                                           xlocalsize_default,
+                                                           ylocalsize_default,
+                                                           zlocalsize_default,
+                                                           nelements_default));
+            break;
         }
+    }
 
-        // All powers of 2 dividing c and 1
-        std::vector<size_t> vectorsizes;
-        for(size_t vs = kMaxSupportedVectorSize; vs > 1; vs >>= 1)
+    // Tuning instances: add the full parameter space
+    // The vector size applies to C for NHWC and to HW for NCHW.
+    // All powers of 2 dividing it and 1.
+    const size_t vector_dim = is_layout_nhwc ? c : in_cstride;
+    std::vector<size_t> vectorsizes;
+    for(size_t vs = kMaxSupportedVectorSize; vs > 1; vs >>= 1)
+    {
+        if(vector_dim % vs == 0)
         {
-            if(c % vs == 0)
-            {
-                vectorsizes.push_back(vs);
-            }
+            vectorsizes.push_back(vs);
         }
-        vectorsizes.push_back(1);
+    }
+    vectorsizes.push_back(1);
 
-        for(const size_t& vectorsize : vectorsizes)
+    for(const size_t& vectorsize : vectorsizes)
+    {
+        const size_t cv = c / vectorsize;
+
+        // NHWC: xlocalsize covers c / vectorsize.
+        // NCHW: one channel per workgroup.
+        std::vector<size_t> xlocalsize_vector;
+        if(is_layout_nhwc)
         {
-            const size_t cv = c / vectorsize;
-            std::vector<size_t> xlocalsize_vector;
             for(size_t xl = 8; xl <= 64; xl <<= 1)
             {
                 if(cv % xl == 0)
@@ -642,93 +626,71 @@ inline void DefaultConfigSpatialMultiple(const miopen::batchnorm::ProblemDescrip
                     xlocalsize_vector.push_back(xl);
                 }
             }
+        }
+        else
+        {
+            xlocalsize_vector.push_back(1);
+        }
 
-            // The workgroup size is limited by the shared memory, which is fixed, so with
-            // vectorization the maximum is 1024 / vectorsize
-            const size_t max_localsize = 1024 / vectorsize;
+        // For NHWC, the workgroup size is limited by the shared memory, which is fixed, so with
+        // vectorization the maximum is 1024 / vectorsize
+        const size_t max_localsize = is_layout_nhwc ? 1024 / vectorsize : 1024;
 
-            for(const size_t& xlocalsize : xlocalsize_vector)
+        // NHWC: ylocalsize up to 64.
+        // NCHW: up to the default one, which is not larger than the HW dimension.
+        size_t ylocalsize_max = 64;
+        if(!is_layout_nhwc)
+        {
+            size_t xlclsize_temp = 0;
+            GetSpatialMultipleConfig(problem, vectorsize, xlclsize_temp, ylocalsize_max);
+        }
+
+        for(const size_t& xlocalsize : xlocalsize_vector)
+        {
+            // zlocalsize is a power of 2 dividing n until it reaches the batch size
+            for(size_t zlocalsize = 1; zlocalsize <= static_cast<size_t>(n) && n % zlocalsize == 0;
+                zlocalsize <<= 1)
             {
-                // zlocalsize is a power of 2 dividing n until it reaches the batch size
-                std::vector<size_t> zlocalsize_vector;
-                for(size_t z = 1; z <= static_cast<size_t>(n) && n % z == 0; z <<= 1)
-                {
-                    zlocalsize_vector.push_back(z);
-                }
+                // Full batch is processed by a single block of z threads
+                const size_t nelements = n / zlocalsize;
 
-                for(const size_t& zlocalsize : zlocalsize_vector)
+                for(size_t ylocalsize = is_layout_nhwc ? 8 : 64; ylocalsize <= ylocalsize_max;
+                    ylocalsize <<= 1)
                 {
-                    for(size_t ylocalsize = 8; ylocalsize <= 64; ylocalsize <<= 1)
+                    if(xlocalsize * ylocalsize * zlocalsize > max_localsize)
                     {
-                        if(xlocalsize * ylocalsize * zlocalsize > max_localsize)
-                        {
-                            continue;
-                        }
+                        break;
+                    }
 
-                        // All the batch is processed by a single block of z threads
-                        const size_t nelements = n / zlocalsize;
-
-                        // Restriction based on the number of CUs
+                    // NHWC: restriction based on the number of CUs
+                    if(is_layout_nhwc)
+                    {
                         const size_t xgridsize = xlocalsize * ((cv + xlocalsize - 1) / xlocalsize);
                         const size_t ygridsize =
                             ylocalsize * ((in_cstride + ylocalsize - 1) / ylocalsize);
-                        const size_t zgridsize =
-                            zlocalsize * ((n / nelements + zlocalsize - 1) / zlocalsize);
-                        const size_t nWG = (xgridsize / xlocalsize) * (ygridsize / ylocalsize) *
-                                           (zgridsize / zlocalsize);
+                        const size_t nWG = (xgridsize / xlocalsize) * (ygridsize / ylocalsize);
                         if(in_cstride > 64 && nWG < problem.GetMinWorkgroups())
                         {
                             continue;
                         }
+                    }
 
-                        // Avoid inserting the default spatial multiple instance twice
-                        if(vectorsize == vectorsize_default && xlocalsize == xlocalsize_default &&
-                           ylocalsize == ylocalsize_default && zlocalsize == zlocalsize_default &&
-                           nelements == nelements_default)
-                        {
-                            continue;
-                        }
+                    // Avoid inserting the default spatial multiple instance twice
+                    if(vectorsize == vectorsize_default && xlocalsize == xlocalsize_default &&
+                       ylocalsize == ylocalsize_default && zlocalsize == zlocalsize_default &&
+                       nelements == nelements_default)
+                    {
+                        continue;
+                    }
 
-                        // Check if the instance is applicable and add it
-                        if(IsSpatialMultipleApplicable(problem,
-                                                       vectorsize,
-                                                       stash_values,
-                                                       ylocalsize,
-                                                       zlocalsize,
-                                                       nelements))
-                        {
-                            valid_kernels.push_back(GetKernelIdFromVariant(
-                                2, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements));
-                        }
+                    if(IsSpatialMultipleApplicable(
+                           problem, vectorsize, stash_values, ylocalsize, zlocalsize, nelements))
+                    {
+                        valid_kernels.push_back(GetKernelIdFromVariant(
+                            2, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements));
                     }
                 }
             }
-        }
-    }
-    else
-    {
-        // For NCHW we add all the supported vector sizes smaller than the default (if they are
-        // applicable)
-        while(vectorsize_default > 0)
-        {
-            GetSpatialMultipleConfig(
-                problem, vectorsize_default, xlocalsize_default, ylocalsize_default);
-
-            if(IsSpatialMultipleApplicable(problem,
-                                           vectorsize_default,
-                                           stash_values,
-                                           ylocalsize_default,
-                                           zlocalsize_default,
-                                           nelements_default))
-            {
-                valid_kernels.push_back(GetKernelIdFromVariant(2,
-                                                               vectorsize_default,
-                                                               xlocalsize_default,
-                                                               ylocalsize_default,
-                                                               zlocalsize_default,
-                                                               nelements_default));
-            }
-            vectorsize_default >>= 1;
         }
     }
 }
