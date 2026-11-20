@@ -12,7 +12,7 @@ parallelism from the group axis, so it only serves small per-group channel
 counts. This kernel computes the same thing directly on wave32 WMMA, for dense
 and grouped layers alike, with no weight pre-pass:
 
-    dX[n, h, w, c] = sum_{r, s, k} dY[n, h + PAD - r, w + PAD - s, k] * W[k, r, s, c]
+    dX[n, h, w, c] = sum_{r, s, k} dY[n, h + PAD - r, w + PAD_W - s, k] * W[k, r, s, c]
 
 Per workgroup, with M = dX channels and N = dX pixels::
 
@@ -30,9 +30,10 @@ Per workgroup, with M = dX channels and N = dX pixels::
             B = dY fragment   (halo shifted by (KH-1-r, KW-1-s): no im2col)
             acc[c-tile, px-tile] = wmma_16x16x32(A, B, acc)
 
-The halo origin is ``(h_tile - (KH-1-PAD), w_tile - (KW-1-PAD))``. A transfer
-cannot start at a negative coordinate, so a block on the top or left image
-edge starts its read at row / column 0 and lands it shifted down / right in
+The halo origin is ``(h_tile - (KH-1-PAD), w_tile - (KW-1-PAD_W))``: rows
+and columns have their own padding (a 1x3 / 3x1 "same" filter pads one axis
+only). A transfer cannot start at a negative coordinate, so a block on the
+top or left image edge starts its read at row / column 0 and lands it shifted down / right in
 the slot; the rows and columns above / left of it are zeroed once, before the
 loop, and never written again. Shifting right wraps the last columns of each
 row into the next row's leading (zero) columns: the transfer's column extent is
@@ -103,7 +104,7 @@ from kernels.common.conv_direct_grouped import (
     DirectConvProblem,
     _io_type,
     emit_direct_params,
-    one_padding_reason,
+    pad_w_reason,
 )
 from kernels.common.conv_fwd_wmma_gate import CH_PAD, I32_MAX, WMMA_K, wmma_fwd_op
 
@@ -175,7 +176,7 @@ class DirectDgradWmmaSpec:
     @property
     def plan_w(self):
         p = self.problem
-        return _axis_plan(p.KW, p.PAD, p.dil_w, p.stride)
+        return _axis_plan(p.KW, p.PAD_W, p.dil_w, p.stride)
 
     @property
     def phases(self) -> int:
@@ -270,7 +271,7 @@ class DirectDgradWmmaSpec:
         return kernel_name_join(
             self.name,
             f"f{p.KH}x{p.KW}",
-            f"p{p.PAD}",
+            f"p{p.PAD}" + (f"x{p.PAD_W}" if p.PAD_W != p.PAD else ""),
             f"wc{self.waves_c}",
             f"wp{self.waves_p}",
             f"tc{self.tiles_c}",
@@ -345,11 +346,14 @@ def dgrad_wmma_reason(spec: DirectDgradWmmaSpec, arch: str = "gfx1250") -> str |
         return f"dilation {p.dil_h}x{p.dil_w} < 1"
     if p.KH < 1 or p.KW < 1:
         return f"filter {p.KH}x{p.KW} is not positive"
-    if p.PAD < 0 or spec.plan_h[2] < 0 or spec.plan_w[2] < 0:
-        return f"PAD {p.PAD} outside 0..(K-1)*dilation"
-    why = one_padding_reason(p)
+    # Before the plans: a column padding below -1 is no padding at all.
+    why = pad_w_reason(p)
     if why is not None:
         return why
+    if p.PAD < 0 or spec.plan_h[2] < 0 or spec.plan_w[2] < 0:
+        return f"PAD {p.PAD}x{p.PAD_W} outside 0..(K-1)*dilation"
+    if p.PAD_W != p.PAD and p.stride > 1:
+        return "a column padding of its own serves stride 1 only"
     G = spec.pack_groups
     if G < 1:
         return f"pack_groups {G} < 1"

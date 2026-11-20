@@ -157,8 +157,9 @@ DIRECT_FWD_FLEX_MFMA = "direct_fwd_flex_mfma"
 DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
 # The variants that offset columns by a column padding of their own
 # (problem.PAD_W != problem.PAD) and the only ones with a non-square filter:
-# the rotated-filter depthwise dgrad and the direct (1 x R, rectangular,
-# poly_view) and small-K WMMA forwards. Every other variant takes one padding
+# the rotated-filter depthwise dgrad, the stride-1 WMMA dgrad (1x3 / 3x1
+# "same") and the direct (1 x R, rectangular, poly_view) and small-K WMMA
+# forwards. Every other variant takes one padding
 # for both axes. The cache selection (direct_spec_for_problem) and the AOT
 # identity lookup (direct_aot_jobs.direct_job_for_identity) both read it.
 PER_AXIS_PAD_VARIANTS = (
@@ -167,6 +168,7 @@ PER_AXIS_PAD_VARIANTS = (
     DIRECT_FWD_SMALLK_WMMA,
     DIRECT_FWD_SMALLK_MFMA,
     DIRECT_FWD_WMMA,
+    DIRECT_DGRAD_WMMA,
 )
 # variant -> (transpose helper, reorganize helper)
 DIRECT_MFMA_HELPERS = {

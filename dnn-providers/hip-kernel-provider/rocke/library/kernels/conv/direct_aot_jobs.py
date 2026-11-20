@@ -546,6 +546,31 @@ DGRAD_WMMA_SB_KNOBS = (
     (2, 4, 6, 4, 16, 1, 32, 2, True, False),
     (2, 4, 6, 4, 16, 1, 32, 2, True, True),
 )
+# 3x1 / 1x3 "same" dgrad of direct_dgrad_wmma (the Inception-v3 8x8 blocks,
+# c384 -> 384, n16-n128): whole 8x8 images per block (block_p = 64 * tile_n)
+# and 32-128 channel C blocks, as FWD_WMMA_RECT3_KNOBS for the forward.
+# The DGRAD_WMMA_KNOBS layout; the last rows with split_barrier.
+DGRAD_WMMA_RECT_LAYERS = ((3, 1, 1, 0), (1, 3, 0, 1))
+DGRAD_WMMA_RECT_KNOBS = (
+    (2, 1, 2, 4, 8, 1, 32, 3, True),
+    (2, 1, 4, 4, 8, 1, 32, 3, True),
+    (4, 1, 2, 4, 8, 1, 32, 2, True),
+    (2, 1, 2, 4, 8, 1, 64, 2, True),
+    (2, 2, 2, 4, 8, 2, 32, 3, True),
+    (2, 2, 4, 4, 8, 2, 32, 3, True),
+    (4, 2, 2, 4, 8, 2, 32, 2, True),
+    (2, 2, 4, 4, 8, 2, 64, 2, True),
+    (2, 4, 2, 4, 8, 4, 32, 2, True),
+    (2, 4, 4, 4, 8, 4, 32, 2, True),
+    (1, 8, 1, 2, 8, 4, 32, 2, True),
+    (1, 8, 2, 2, 8, 4, 32, 2, True),
+)
+DGRAD_WMMA_RECT_SB_KNOBS = (
+    (2, 1, 2, 4, 8, 1, 32, 3, True),
+    (2, 2, 4, 4, 8, 2, 32, 3, True),
+    (4, 2, 2, 4, 8, 2, 32, 2, True),
+)
+
 # Grouped layers with fewer than 8 channels per group (or 16): direct_dgrad_wmma
 # packs 32 // cpg groups into one block-diagonal super-group, one dY chunk.
 DGRAD_WMMA_PACKED_CHANNELS = (4, 8, 16)
@@ -1705,6 +1730,11 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
         + tuple(
             DirectCaps(KH=3, PAD=pad, stride=1, cpg=0, kpg=0, dil_h=dh, dil_w=dw)
             for pad, dh, dw in DGRAD_WMMA_DILATIONS
+        )
+        # 3x1 / 1x3 "same": per-axis padding.
+        + tuple(
+            DirectCaps(KH=kh, kw=kw, PAD=ph, pad_w=pw, stride=1, cpg=0, kpg=0)
+            for kh, kw, ph, pw in DGRAD_WMMA_RECT_LAYERS
         ),
     ),
     # LDS-DMA ping-pong dgrad on wave64 MFMA (gfx950): dense, stride 1, odd
@@ -2354,6 +2384,10 @@ def _knob_grid(
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_STRIDED_KNOBS)
         elif caps is not None and (caps.dil_h, caps.dil_w) != (1, 1):
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_DILATED_KNOBS)
+        elif caps is not None and caps.KW != caps.KH:
+            yield from _dgrad_wmma_knobs(DGRAD_WMMA_RECT_KNOBS)
+            for knobs in _dgrad_wmma_knobs(DGRAD_WMMA_RECT_SB_KNOBS):
+                yield dict(knobs, split_barrier=True)
         else:
             yield from _dgrad_wmma_knobs(DGRAD_WMMA_KNOBS)
             for wc, wp, tc, tp, tw, tn, ck, st, pf, we in DGRAD_WMMA_SB_KNOBS:
