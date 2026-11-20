@@ -154,7 +154,8 @@ struct WorkNode_Header {
      */
     __device__ WorkNode_Header **lock();
 
-    /// Put the worknode at location and unlock, without updating link_to_self (e.g. back where it was locked from).
+    /// Move the worknode *back* to location and unlock (i.e. skip updating link_to_self).
+    /// Precondition: either this->link_to_self == nullptr or this->link_to_self == location
     __device__ void restoreAndUnlock(WorkNode_Header **location);
 
     /// Move the worknode to *new_location and unlock.

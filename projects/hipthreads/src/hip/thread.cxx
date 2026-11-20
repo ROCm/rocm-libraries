@@ -171,7 +171,7 @@ __device__ WorkNode_Header **WorkNode_Header::lock() {
 // moveAndUnlock instead when the WorkNode is moving somewhere new.
 __device__ void WorkNode_Header::restoreAndUnlock(WorkNode_Header **location) {
     // assert(location != nullptr);
-    // Make everything written while holding the lock visible before anyone else can lock the WorkNode again.
+    // Make everything that was written while holding the lock visible before anyone else can lock the WorkNode again.
     __threadfence();
     // I think this might be a strict aliasing violation, but it's kind of unavoidable
     [[maybe_unused]] WorkNode_Header *oldValue = reinterpret_cast<WorkNode_Header*>(
@@ -557,17 +557,21 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     }
 
     oldWorkNode->link_to_self = nullptr;
+
+    // If there is a waiting worknode, lock it before the memcpy. That way oldWorkNode->next is already nullptr when
+    // it's copied, so the waiting worknode is never reachable from both oldWorkNode->next and newWorkNode->next.
+    WorkNode_Header *next = nullptr;
+    if (oldWorkNode->hasWaiting) {
+        // Lock next in case it's also in the middle of being detached.
+        next = WorkNode_Header::lockAndFetch(&oldWorkNode->next);
+    }
+
     // TODO: Technically this is not standards compliant. Even though WorkNode<T> is TriviallyCopyable, it is not a
     // StandardLayoutType, so WorkNode_Header and WorkNode<T> pointers are not interchangeable.
     hip::memcpy(newWorkNode, oldWorkNode, oldWorkNode->worknodeSize);
 
     // If there is a waiting worknode, update its link_to_self value so it points at newWorkNode->next.
     if (oldWorkNode->hasWaiting) {
-        // Lock next in case it's also in the middle of being detached.
-        WorkNode_Header *next = WorkNode_Header::lockAndFetch(&oldWorkNode->next);
-        // newWorkNode->next still holds whatever the memcpy copied from oldWorkNode->next. Nobody can reach newWorkNode
-        // yet, so clear it: like every other location a WorkNode is unlocked into, it should be empty beforehand.
-        newWorkNode->next = nullptr;
         next->moveAndUnlock(&newWorkNode->next);
     }
 
