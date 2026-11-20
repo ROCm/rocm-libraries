@@ -61,6 +61,17 @@ REGRESSIONS = [
     _case("lsi_AB_f8", "AB", "f8", VectorWidthA=2, VectorWidthB=2, LDSSegmentInterleave=1),
     _case("lsi_A_bf16_du512", "A", "bf16", DepthU=512, VectorWidthA=2, LDSSegmentInterleave=1),
     # F4 is packed bytes: innerK / pad derive from a 0.5-byte element.
+    # One wave: TDM is not wave-separated, so the single-descriptor start address / descriptor init run.
+    _case("one_wave_B", "B", "f8", wg=(1, 1)),
+    _case("one_wave_A", "A", "f8", wg=(1, 1)),
+    _case("one_wave_AB", "AB", "f8", wg=(1, 1)),
+    _case("one_wave_B_gsu4", "B", "f8", wg=(1, 1), GlobalSplitU=4),
+    _case("one_wave_A_gsu4", "A", "f8", wg=(1, 1), GlobalSplitU=4),
+    # ... with the VW>1 pad deposited by iterate-mode: its init takes the unclamped row count.
+    _case("one_wave_B_bf16_vwb2_iterate", "B", "bf16", wg=(1, 1), VectorWidthA=2, VectorWidthB=2, DepthU=512,
+          TDMIterateMode=1),  # A is the plain side: its own pad block needs iterate-mode too
+    _case("one_wave_A_bf16_vwa2_iterate", "A", "bf16", wg=(1, 1), VectorWidthA=2, VectorWidthB=2, DepthU=512,
+          TDMIterateMode=2),
     _case("f4_B", "B", "f4"),
     _case("f4_A_vwa2_pad", "A", "f4", VectorWidthA=2),
     # nO tile <= 1024 B: the VW>1 pad comes from the descriptor's pad_interval (no iterate-mode)

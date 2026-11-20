@@ -24832,7 +24832,7 @@ class KernelWriterAssembly(KernelWriter):
     return mod
 
   def _emitSwizzleTdmIterateInit(self, mod, kernel, tc, dtype, descSgprName,
-                                 swzTile0, swzRows, bpe, globalIncSgpr, remainRowsSgpr=None):
+                                 swzTile0, swzRows, bpe, globalIncSgpr, remainRowsSgpr):
     """TDM iterate-mode init for the swizzled-B VW>1 LDS pad.
 
     Unlike the generic _emitTdmIterateInit (which walks contiguous N-rows in pad-block
@@ -24853,16 +24853,13 @@ class KernelWriterAssembly(KernelWriter):
     lds_inc = geom.iterLdsIncBytes() >> dss
     mod.add(comp.setIterationEnabled(descSgprName(1), True))
     with self.allocTmpSgpr(1, tag="swzTdmIterCount") as itTmp:
-      if remainRowsSgpr is None:
-        mod.add(SMovB32(sgpr(itTmp.idx), swzRows - 1, "TDM iterate: #nO(%d) - 1 (field = n-1)" % swzRows))
-      else:
-        # tile1 == 1, so dim1 only guards the first nO of the walk; later iterations step past
-        # the buffer end unless the count is clamped to the nO rows this wave still has.
-        mod.add(SMinU32(dst=sgpr(itTmp.idx), src0=sgpr(remainRowsSgpr), src1=swzRows,
-                        comment="TDM iterate: nO rows this wave loads = min(rows left, %d)" % swzRows))
-        mod.add(SMaxU32(dst=sgpr(itTmp.idx), src0=sgpr(itTmp.idx), src1=1,
-                        comment="an empty wave still walks once; dim1 keeps it off memory"))
-        mod.add(SSubU32(dst=sgpr(itTmp.idx), src0=sgpr(itTmp.idx), src1=1, comment="field = n-1"))
+      # tile1 == 1, so dim1 only guards the first nO of the walk; later iterations step past
+      # the buffer end unless the count is clamped to the nO rows this wave still has.
+      mod.add(SMinU32(dst=sgpr(itTmp.idx), src0=sgpr(remainRowsSgpr), src1=swzRows,
+                      comment="TDM iterate: nO rows this wave loads = min(rows left, %d)" % swzRows))
+      mod.add(SMaxU32(dst=sgpr(itTmp.idx), src0=sgpr(itTmp.idx), src1=1,
+                      comment="an empty wave still walks once; dim1 keeps it off memory"))
+      mod.add(SSubU32(dst=sgpr(itTmp.idx), src0=sgpr(itTmp.idx), src1=1, comment="field = n-1"))
       mod.add(comp.setIterationIncrements(descSgprName(2), lds_inc, globalIncSgpr))
       mod.add(comp.setIterations(descSgprName(2), itTmp.idx))
 
