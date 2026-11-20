@@ -1,6 +1,7 @@
 TestParameters:
-  # Verify reused CPU results in the shared gfx950 common lane.
+  # Verify both reuse layers in the shared GPU common lanes.
   verify_reference_reuse: true
+  verify_upload_skip: true
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250, skip-gfx1250-strict] # not supported by arch
 
 
@@ -10,7 +11,7 @@ GlobalParameters:
   EnqueuesPerSync: 10
   NumWarmups: 10
   KernelTime: true
-  NumElementsToValidate: 0
+  NumElementsToValidate: 128
   DataInitTypeBeta: 1
   DataInitTypeAlpha: 1
   DataInitTypeA: 12
