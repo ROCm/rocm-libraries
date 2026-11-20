@@ -28,14 +28,26 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <iostream>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
+#include <mutex>
+#include <optional>
 #include <set>
+#include <string>
 #include <vector>
 
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/UtilsOrigami.hpp>
+
+#if ORIGAMI_ENABLE_NN
+#  include <origami/nn/nn.hpp>
+#endif
 
 #include <tensilelitehost/export.h>
 
@@ -55,6 +67,70 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
+
+#if ORIGAMI_ENABLE_NN
+        /**
+         * Tilewright weights for this logic file. Deserialization only records where they
+         * would be; the manifest is parsed (YAML, int4 expansion) on the first findTopSolutions
+         * call that resolves to nn or nn_fallback. The default mode is analytical, so most
+         * libraries never load anything.
+         */
+        struct LazyNnModels
+        {
+            std::string logicStem;
+            std::string weightsDir;
+
+            LazyNnModels() = default;
+            // A copy keeps the location and loads again on demand.
+            LazyNnModels(LazyNnModels const& other)
+                : logicStem(other.logicStem)
+                , weightsDir(other.weightsDir)
+            {
+            }
+            LazyNnModels& operator=(LazyNnModels const& other)
+            {
+                if(this != &other)
+                {
+                    std::lock_guard<std::mutex> lock(mutex);
+                    logicStem  = other.logicStem;
+                    weightsDir = other.weightsDir;
+                    models.reset();
+                }
+                return *this;
+            }
+
+            // Loads on the first call. A missing manifest is a cached miss in origami, so
+            // other libraries asking for the same stem do not read the index again.
+            origami::nn::library_models_t const& get() const
+            {
+                std::lock_guard<std::mutex> lock(mutex);
+                if(!models)
+                {
+                    models = origami::nn::load_models_for_logic(logicStem, weightsDir);
+                    if(const char* diag = std::getenv("ORIGAMI_NN_DIAG"))
+                    {
+                        if(diag[0] != '\0' && std::strcmp(diag, "0") != 0)
+                        {
+                            std::fprintf(stderr,
+                                         "[ORIGAMI_NN_DIAG] PredictionLibrary stem=%s dir=%s "
+                                         "tilewright_handle=%d\n",
+                                         logicStem.c_str(),
+                                         weightsDir.c_str(),
+                                         models->tilewright);
+                            std::fflush(stderr);
+                        }
+                    }
+                }
+                return *models;
+            }
+
+        private:
+            mutable std::mutex                                    mutex;
+            mutable std::optional<origami::nn::library_models_t> models;
+        };
+
+        LazyNnModels nn_models;
+#endif
 
         static std::string Type()
         {
@@ -144,6 +220,8 @@ namespace TensileLite
                                                             int numSolutions) const override
         {
             SolutionVector<MySolution> rv;
+            if(numSolutions == 0)
+                return rv;
             size_t                     m     = 1;
             size_t                     n     = 1;
             size_t                     k     = 1;
@@ -225,8 +303,20 @@ namespace TensileLite
                     .b_mx_block_size = 0, // MX Data types come from rocroller
                 };
 
+                origami::rank_options_t rank_options;
+#if ORIGAMI_ENABLE_NN
+                // Only an nn or nn_fallback call can use the weights, so only that call loads them.
+                if(origami::nn::nn_inference_requested(rank_options.inference))
+                {
+                    rank_options.library_models = &nn_models.get();
+                    const std::size_t nnDepth   = numSolutions < 0
+                                                      ? std::numeric_limits<std::size_t>::max()
+                                                      : static_cast<std::size_t>(numSolutions);
+                    rank_options.nn.min_scored  = nnDepth;
+                }
+#endif
                 auto prediction_result = origami::rank_configs(
-                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
 
                 for(const auto& r : prediction_result)
                 {
@@ -234,12 +324,41 @@ namespace TensileLite
                     {
                         continue;
                     }
+#if ORIGAMI_ENABLE_NN
+                    // An analytical result has a latency and an NN result has a score. An entry
+                    // with neither was not scored by the model, so it only counts as a fallback.
+                    if(std::isnan(r.latency) && std::isnan(r.score))
+                        continue;
+#endif
                     considerSolution(solution_list[r.config.index].second);
-                    if(rv.size() == numSolutions)
+                    if(rv.size() == static_cast<std::size_t>(numSolutions))
                     {
                         break;
                     }
                 }
+
+#if ORIGAMI_ENABLE_NN
+                // No scored entry produced a supported solution, so take the unscored entries in
+                // the order rank_configs returned them, which is input order. This is deliberate.
+                // It matches the analytical path, where rank_configs ranks the configs it rejected
+                // when it rejected every candidate, so the caller gets a usable kernel rather
+                // than an empty list.
+                if(rv.empty())
+                {
+                    for(const auto& r : prediction_result)
+                    {
+                        if(r.config.index >= solution_list.size())
+                        {
+                            continue;
+                        }
+                        considerSolution(solution_list[r.config.index].second);
+                        if(rv.size() == static_cast<std::size_t>(numSolutions))
+                        {
+                            break;
+                        }
+                    }
+                }
+#endif
             }
             return rv;
         }
