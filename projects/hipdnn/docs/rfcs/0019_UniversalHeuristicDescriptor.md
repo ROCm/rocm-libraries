@@ -2122,12 +2122,9 @@ what the model records:
 ```
 
 `selector_revision` is an opaque string, compared for **exact equality** against the revision the
-running provider reports. A model whose recorded string differs is *stale*: it is still used, and the
-provider logs one warning naming both revisions. The model is sound but describes a slightly different
-build, and an estimate for nearly the same code ranks engines better than none; every edit to a
-selector input moves the revision, most without moving a prediction. Keeping shipped models current is
-the provider's build-time job: its shipped-model check fails the build on a stale model, which is then
-re-stamped with proof or retrained. One that records no selector revision cannot be matched to any
+running provider reports. A model whose recorded string differs is not used, and the engine's estimate
+for that metric and architecture is *unavailable*, with a reason naming both revisions — the model is
+sound, it describes a different build. One that records no selector revision cannot be matched to any
 build and is refused as *invalid*: that is a broken contract rather than a stale one
 ([Section 11.1](#111-the-engine-estimate-and-the-kernel-catalog-ranker)).
 
@@ -2154,8 +2151,8 @@ with no descriptor's content revision moving — a retrained ranker restamps no 
 object changes no KMD. So the generic engine computes a selector revision of its own over exactly those
 inputs (`generic-untuned-v1/<sha256>`), and a `predict_engine` model bound to a descriptor engine must
 record a `selector_revision` equal to it, beside the descriptor entries. The check is the opaque
-engine's, unchanged: a different recorded revision is used with a warning naming both; no recorded
-revision makes it *invalid*. The generation tool always records the engine's current revision
+engine's, unchanged: a different recorded revision makes the estimate *unavailable*, naming both; no
+recorded revision makes it *invalid*. The generation tool always records the engine's current revision
 when it trains an estimate. A `sort_kernel_catalog` model is not subject to the check: it is one of the
 selector's inputs, so a revision over itself would expire every ranker at every retrain.
 

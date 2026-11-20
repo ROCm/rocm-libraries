@@ -133,10 +133,8 @@ public:
         }
         // RFC 0019 §3.1: the UED role map is this engine's L1 binding, keyed by each UHD's metric.
         // §4.1 selector_revision is re-checked here because this engine's selector also covers
-        // its rankers, packs, kernels and native symbols. A model measured against another
-        // selector is still bound, with a warning: an estimate for slightly changed code ranks
-        // engines better than none, and the provider's build-time gate keeps shipped models
-        // current.
+        // its rankers, packs, kernels and native symbols; an L1 model measured against another
+        // selector changes which engine is chosen.
         for(const auto& [metric, byArch] : predictions)
         {
             for(const auto& [arch, descriptor] : byArch)
@@ -151,20 +149,19 @@ public:
                                 "model records no trained_against.selector_revision, so it "
                                 "cannot be matched to a provider build");
                 }
+                else if(descriptor.trainedAgainstSelectorRevision != _selectorRevision)
+                {
+                    refuseModel(metric,
+                                arch,
+                                descriptor,
+                                hipdnn_flatbuffers_sdk::data_objects::PredictionStatus::UNAVAILABLE,
+                                "model was trained against "
+                                    + descriptor.trainedAgainstSelectorRevision
+                                    + ", engine reports " + _selectorRevision);
+                }
                 else
                 {
                     _binding.bind(metric, arch, UhdKernelHeuristic::configFrom(descriptor));
-                    if(descriptor.trainedAgainstSelectorRevision != _selectorRevision)
-                    {
-                        _binding.markStale(
-                            metric,
-                            arch,
-                            "model=" + toString(descriptor.id) + " was trained against "
-                                + descriptor.trainedAgainstSelectorRevision + ", engine reports "
-                                + _selectorRevision + " (set " + SELECTOR_DUMP_DIR_ENV
-                                + " to write this build's selector and compare "
-                                  "it with the training build's)");
-                    }
                 }
             }
         }

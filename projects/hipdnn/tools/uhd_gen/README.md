@@ -1035,10 +1035,8 @@ KMD or UMD to be trained against, and one that names them is refused. It must in
 its prediction binding, which names the selection logic the measurements were taken under.
 The binding's `provider_build` (the loaded plugin's name, version and API version) is a
 diagnostic, never a compatibility key: measurements from two builds reporting one selector
-revision are repeats of each other. A model recording a different revision is still used,
-with one warning naming both revisions; the provider's shipped-model test fails the build on
-it, so it is re-stamped or retrained before it ships. A model recording no revision is
-refused, and the engine reports INVALID.
+revision are repeats of each other. A model recording a different revision, or none, is
+refused -- the engine stays applicable and reports UNAVAILABLE naming both revisions.
 Start a fresh consumer process after installing a model: a compiled model is cached
 for the lifetime of the engine that owns it.
 
@@ -1068,9 +1066,8 @@ graphs), and no graph may be served at the new revision that was not at the old.
 served before and declined after is allowed and counted. A pass sets
 `trained_against.selector_revision` and appends `{from, to, proof, changes, parity}` to the
 ignored `trained_against["x-restamps"]`; without `--write` it only judges, and `--report`
-writes the verdict as `uhd_gen.restamp_report/1`. The runtime rule is unchanged: a loaded
-model that does not match the engine's revision is used with a warning, and the build-time
-check still fails on it.
+writes the verdict as `uhd_gen.restamp_report/1`. The runtime rule is unchanged: the loaded
+model must still match the engine's revision exactly.
 
 Install the intended catalog-ranking model before collecting L1 measurements.
 Changing that model changes the descriptor engine's immediate selector and can

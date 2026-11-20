@@ -27,8 +27,9 @@
  *        each one bound for the census architecture loads, and each one this architecture's
  *        engine would serve records the selector revision this build computes for it.
  *
- * GenericEngine uses an L1 trained against another selector revision with one warning, so
- * selection ranks the engine on an estimate for other code. The revision digests every ranker, pack kernel and native symbol, so
+ * GenericEngine refuses an L1 trained against another selector revision (PredictionStatus::
+ * UNAVAILABLE) with one log line, and selection then ranks the engine in static order as if
+ * no model shipped. The revision digests every ranker, pack kernel and native symbol, so
  * any of those moving -- a retrained L2, a recompiled code object, a merge from another
  * branch -- does this silently. This suite fails the build instead, and writes this build's
  * selector so the change can be found and the model re-stamped (`uhd_gen restamp`) or
@@ -148,9 +149,7 @@ TEST(TestShippedEnginePredictors, EveryServedEnginePredictorMatchesThisBuildsSel
                     << " (in " << model.baseDir.string() << ") records selector revision "
                     << model.trainedAgainstSelectorRevision << ", but this build computes "
                     << revision
-                    << ". GenericEngine uses it anyway, ranking the engine on an estimate for "
-                       "other "
-                       "code.\n"
+                    << ". GenericEngine refuses it and ranks the engine without an estimate.\n"
                     << "This build's selector: " << written << "\n"
                     << "Write the training build's with " << ingestor::SELECTOR_DUMP_DIR_ENV
                     << "=<dir> and compare. If only kernel source paths moved, or the engine's "

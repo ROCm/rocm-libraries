@@ -3635,18 +3635,13 @@ struct DeclaredModelRefusal
 };
 
 /// One opaque engine's resolved L1 binding: the models its provider declared, keyed by the
-/// metric each declares and then by architecture exactly as the declaration spelled it, the
-/// (metric, architecture) pairs whose declared model this build refused, and the bound
-/// models that record another selector revision.
+/// metric each declares and then by architecture exactly as the declaration spelled it, and
+/// the (metric, architecture) pairs whose declared model this build refused.
 struct DeclaredEnginePredictions
 {
     std::map<std::string, std::map<std::string, HeuristicDescriptor>> byMetric;
     /// Separate from absent pairs, which mean nothing was declared or deployed.
     std::map<std::string, std::map<std::string, DeclaredModelRefusal>> refused;
-    /// Bound pairs whose model was trained against another selector revision, with a reason
-    /// naming the model and both revisions. Each is also in byMetric: a stale estimate is
-    /// used, not refused. Pass each to uhd::EngineModelBinding::markStale, which warns once.
-    std::map<std::string, std::map<std::string, std::string>> stale;
 };
 
 /**
@@ -3654,10 +3649,9 @@ struct DeclaredEnginePredictions
  *
  * RFC 0019 Open Question 7: an engine with no UED binds its L1 model by naming the UHD's
  * UUID in provider code; @p declared is that declaration. Each declared id gets the same
- * pre-flight, provenance and feature-semantics checks as a UED role reference. A model
- * recording another selector revision than @p selectorRevision is still bound and listed in
- * `stale`: an estimate for slightly changed code ranks engines better than none, and the
- * provider's build-time gate is what keeps shipped models current.
+ * pre-flight, provenance and feature-semantics checks as a UED role reference, and the
+ * model must record @p selectorRevision: a stale L1 estimate would change which engine
+ * is selected, so it is refused rather than warned about.
  *
  * Never throws, and no refusal costs the engine. A declared id no descriptor defines
  * leaves the arch unbound, since a declaration may ship ahead of its model (§5).
@@ -3755,12 +3749,17 @@ inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
                     reason = "model records no trained_against.selector_revision, so it cannot "
                              "be matched to a provider build";
                 }
+                else if(bound.trainedAgainstSelectorRevision != selectorRevision)
+                {
+                    status = PredictionStatus::UNAVAILABLE;
+                    reason = "model was trained against " + bound.trainedAgainstSelectorRevision
+                             + ", engine reports " + selectorRevision;
+                }
                 else if(auto mismatch = uhd::featureSemanticsMismatch(bound.featuresSignature,
                                                                       bound.trainedAgainstJson);
                         !mismatch.empty())
                 {
-                    // Wrong build, not a broken model; unlike a stale selector, refused:
-                    // its features would be read with different meanings.
+                    // Wrong build, not a broken model: refused like a stale selector.
                     status = PredictionStatus::UNAVAILABLE;
                     reason = std::move(mismatch);
                 }
@@ -3769,14 +3768,6 @@ inline DeclaredEnginePredictions resolveDeclaredEnginePredictions(
             {
                 refuse(metric, arch, id, status, std::move(reason));
                 continue;
-            }
-            if(bound.trainedAgainstSelectorRevision != selectorRevision)
-            {
-                resolved.stale[metric].insert_or_assign(
-                    arch,
-                    "model=" + toString(id) + " was trained against "
-                        + bound.trainedAgainstSelectorRevision + ", engine reports "
-                        + selectorRevision);
             }
             resolved.byMetric[metric].emplace(arch, std::move(bound));
         }

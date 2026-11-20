@@ -3059,14 +3059,13 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionNamingADescriptorSetIsRefused
         PredictionStatus::AVAILABLE);
 }
 
-/// RFC 0019 §4.1: a mismatched `trained_against.selector_revision` is bound and used, and
-/// the first evaluation warns naming both revisions: an estimate for slightly changed code
-/// ranks engines better than none. Two engines over one catalog each own their model.
-TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsUsedWithAWarning)
+/// RFC 0019 §4.1: a mismatched `trained_against.selector_revision` is refused, since L1
+/// scores decide between engines. Two engines over one catalog each own their model.
+TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsRefused)
 {
     const ScopedL1Scorer scorer;
     auto recorder
-        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
     const hipdnn_test_sdk::utilities::ScopedDirectory dir(uniqueDirectory("declared_l1_stale"));
     const std::string revisionA = "test-provider/1.2.3/engine-a-untuned-v1/library-4.5";
     const std::string revisionB = "test-provider/1.2.3/engine-b-untuned-v1/library-4.5";
@@ -3085,33 +3084,25 @@ TEST(TestDescriptorLoader, DeclaredEnginePredictionTrainedAgainstAnotherBuildIsU
     ASSERT_EQ(engineA.byMetric.count("tflops"), 1u);
     EXPECT_EQ(engineA.byMetric.at("tflops").count("default"), 1u);
     EXPECT_TRUE(engineA.refused.empty());
-    EXPECT_TRUE(engineA.stale.empty());
+    EXPECT_TRUE(engineB.byMetric.empty());
+    ASSERT_EQ(engineB.refused.count("tflops"), 1u);
+    ASSERT_EQ(engineB.refused.at("tflops").count("default"), 1u);
 
-    EXPECT_TRUE(engineB.refused.empty());
-    ASSERT_EQ(engineB.byMetric.count("tflops"), 1u);
-    ASSERT_EQ(engineB.byMetric.at("tflops").count("default"), 1u);
-    ASSERT_EQ(engineB.stale.count("tflops"), 1u);
-    ASSERT_EQ(engineB.stale.at("tflops").count("default"), 1u);
-    const auto& staleness = engineB.stale.at("tflops").at("default");
-    EXPECT_NE(staleness.find(revisionA), std::string::npos) << staleness;
-    EXPECT_NE(staleness.find(revisionB), std::string::npos) << staleness;
+    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
+    const auto& refusal = engineB.refused.at("tflops").at("default");
+    // Silence, not a claim: the model is not bad, it is not this build's.
+    EXPECT_EQ(refusal.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_NE(refusal.reason.find(revisionA), std::string::npos) << refusal.reason;
+    EXPECT_NE(refusal.reason.find(revisionB), std::string::npos) << refusal.reason;
 
     hipdnn_plugin_sdk::uhd::EngineModelBinding binding;
-    binding.bind("tflops",
-                 "default",
-                 UhdKernelHeuristic::configFrom(engineB.byMetric.at("tflops").at("default")));
-    binding.markStale("tflops", "default", staleness);
-    EXPECT_FALSE(recorder.hasLogContaining(HIPDNN_SEV_WARN, staleness))
-        << "warned before any request used the model";
+    binding.markUnusable("tflops", "default", refusal.status, refusal.reason);
     hipdnn_plugin_sdk::uhd::FeatureExtractionContext features;
     features.bind("graph.flops", std::log1p(42.0));
     const auto prediction = binding.predict(
         8, "test:opaqueB", revisionB, "tflops", "gfx942", features, /*evaluate=*/true);
-    using hipdnn_flatbuffers_sdk::data_objects::PredictionStatus;
-    ASSERT_EQ(prediction.status, PredictionStatus::AVAILABLE) << prediction.reason;
-    EXPECT_NEAR(prediction.value, 42.0, 1e-12);
-    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, staleness))
-        << recorder.getRecordedLogsAsString();
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.reason, refusal.reason);
 }
 
 /// A model recording no revision matches no build: INVALID and logged, not UNAVAILABLE.

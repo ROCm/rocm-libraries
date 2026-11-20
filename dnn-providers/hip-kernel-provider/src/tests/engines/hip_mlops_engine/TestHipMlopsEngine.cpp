@@ -532,8 +532,8 @@ TEST(TestHipMlopsEngineDeclaration, SelectorRevisionIsTheEnginePrefixAndSixteenH
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-/// A shipped model that records another revision is used at load with only a warning, so
-/// the engine is ranked on an estimate for other code; this is where that fails the build.
+/// A shipped model that records another revision is refused at load and the engine reports
+/// no estimate, silently; this is where that fails the build.
 TEST(TestHipMlopsEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComputes)
 {
     EXPECT_TRUE(shipped_model_gate::shippedL1ModelsBindThisBuild(

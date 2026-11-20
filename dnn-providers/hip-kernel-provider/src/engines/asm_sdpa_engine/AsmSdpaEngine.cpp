@@ -37,8 +37,8 @@ namespace
 
 /// `<provider>/asm-sdpa-fwd/<digest>`: a configure-time digest of everything that decides
 /// which forward kernel runs and how (see AsmSdpaSelectorRevision.cmake). A deployed L1
-/// model records this string as `trained_against.selector_revision` (RFC 0019 §4.1); one
-/// recording another is used with a warning, and the shipped-model test fails the build.
+/// model must record this exact string as `trained_against.selector_revision` (RFC 0019
+/// §4.1) or the loader refuses it.
 #ifndef HKP_ASM_SDPA_FWD_REVISION
 // Without a digest, report a revision no shipped model can match.
 #define HKP_ASM_SDPA_FWD_REVISION "undetermined"
@@ -87,13 +87,6 @@ void bindDeclaredL1Models(hipdnn_plugin_sdk::uhd::EngineModelBinding& binding)
         for(const auto& [arch, refusal] : byArch)
         {
             binding.markUnusable(metric, arch, refusal.status, refusal.reason);
-        }
-    }
-    for(const auto& [metric, byArch] : resolved.stale)
-    {
-        for(const auto& [arch, reason] : byArch)
-        {
-            binding.markStale(metric, arch, reason);
         }
     }
 }

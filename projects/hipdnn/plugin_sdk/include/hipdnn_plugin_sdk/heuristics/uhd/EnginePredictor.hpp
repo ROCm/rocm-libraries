@@ -18,7 +18,6 @@
 #include <hipdnn_data_sdk/utilities/RankingMetrics.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_prediction_generated.h>
 #include <hipdnn_plugin_sdk/ArchMatch.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/AdapterFactory.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/ScoreTransform.hpp>
 #include <hipdnn_plugin_sdk/heuristics/uhd/UhdParser.hpp>
@@ -317,15 +316,6 @@ public:
         _refused[metric].insert_or_assign(arch, Refusal{status, std::move(reason)});
     }
 
-    /// @brief Record that the model bound at (@p metric, @p arch) was trained against another
-    /// selector revision. It is still used (RFC 0019 §4.1); the first evaluation through it
-    /// in this process logs @p reason as a warning.
-    /// @param reason Names the model and both revisions.
-    void markStale(const std::string& metric, const std::string& arch, std::string reason)
-    {
-        _stale[metric].insert_or_assign(arch, std::move(reason));
-    }
-
     /// @brief This engine's L1 prediction in @p metric for @p arch, described or evaluated.
     /// @param metric The requested metric; arch fallback never crosses to another metric.
     /// @param arch The device `gcnArchName`, feature suffix included.
@@ -390,10 +380,6 @@ public:
                 result.features_json.clear();
             }
         }
-        else if(evaluate && selected != nullptr)
-        {
-            warnIfStale(engineName, metric, selectedArch);
-        }
         return result;
     }
 
@@ -403,38 +389,6 @@ private:
         hipdnn_flatbuffers_sdk::data_objects::PredictionStatus status;
         std::string reason;
     };
-
-    /// Logs once per process, at the first evaluation through it, that the model bound at
-    /// (@p metric, @p arch) is stale: not at bind time, where every other architecture's model
-    /// would be reported too.
-    void warnIfStale(const std::string& engineName,
-                     const std::string& metric,
-                     const std::string& arch) const
-    {
-        const auto models = _stale.find(metric);
-        if(models == _stale.end())
-        {
-            return;
-        }
-        const auto stale = models->second.find(arch);
-        if(stale == models->second.end())
-        {
-            return;
-        }
-        static std::mutex s_mutex;
-        static std::set<std::string> s_logged;
-        {
-            const std::lock_guard<std::mutex> lock(s_mutex);
-            if(!s_logged.insert(engineName + '\n' + metric + '\n' + arch).second)
-            {
-                return;
-            }
-        }
-        HIPDNN_PLUGIN_LOG_WARN("uhd: engine '" << engineName << "' metric='" << metric << "' arch='"
-                                               << arch << "' engine-prediction " << stale->second
-                                               << "; using its estimate anyway. Retrain or "
-                                                  "restamp the model.");
-    }
 
     /// Caches every compile except one still awaiting its artifact, so a model being deployed
     /// recovers (RFC 0019 §5) while a broken one is read, hashed and reported once. Compiles
@@ -464,8 +418,6 @@ private:
 
     std::map<std::string, std::map<std::string, UhdConfig>> _byMetric;
     std::map<std::string, std::map<std::string, Refusal>> _refused;
-    /// Bound models trained against another selector revision: used, warned about once.
-    std::map<std::string, std::map<std::string, std::string>> _stale;
     mutable std::mutex _modelMutex;
     mutable std::map<std::pair<std::string, std::string>,
                      std::shared_ptr<const prediction_detail::Model>>

@@ -382,9 +382,8 @@ struct HeuristicDescriptor
     /// the engine, metadata schema and matcher identities before a model is used.
     std::optional<HeuristicProvenance> trainedAgainst;
     /// RFC 0019 §4.1 `trained_against.selector_revision`: the provider build this model was
-    /// measured on. Empty unless authored. A mismatch is used with a warning, not refused: an
-    /// estimate for slightly changed code ranks engines better than none, and the provider's
-    /// build-time gate is what keeps shipped models current.
+    /// measured on, for engines with no UED. Empty unless authored. A mismatch is refused, not
+    /// warned about, because a stale L1 estimate changes which engine is selected.
     std::string trainedAgainstSelectorRevision;
     /// The role-map entry that resolved this model: backfilled by
     /// DescriptorLoader::resolveRole from the owning UED, never authored in the UHD

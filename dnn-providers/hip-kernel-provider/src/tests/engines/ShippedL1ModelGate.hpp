@@ -42,10 +42,10 @@ inline std::string lowercase(std::string text)
 /// its source tree ships (`shipped`, embedded at configure time so the test needs no
 /// checkout at run time) must record the selector revision this build computes.
 ///
-/// A model whose recorded revision differs is still used at load (RFC 0019 §4.1), with a
-/// warning, so engines are ranked on an estimate for other code; nothing else fails. So a
-/// change to the engine's selector inputs, or a rebase onto one, must fail the build here
-/// instead, at the model that is now stale.
+/// A model whose recorded revision differs is refused at load (RFC 0019 §4.1) with a log
+/// line, and engine selection then falls back to priority as if no model shipped; nothing
+/// else fails. So a change to the engine's selector inputs, or a rebase onto one, must
+/// fail the build here instead, at the model that no longer binds.
 ///
 /// @param engineName   The engine's registered name; it names this build's selector dump.
 /// @param dumpEngine   The `HKP_ENGINE` value of HkpSelectorManifest.cmake for it.
@@ -95,9 +95,8 @@ template <typename ShippedModels, typename DeclaredIds>
             .append(recorded)
             .append("' but this build computes '")
             .append(revision)
-            .append("'. The loader uses it anyway, with a warning, so engines are ranked on an "
-                    "estimate for other code.\n  Restamp it only with proof:\n    python -m "
-                    "uhd_gen restamp ")
+            .append("'. The loader refuses it and engine selection falls back as if no model "
+                    "shipped.\n  Restamp it only with proof:\n    python -m uhd_gen restamp ")
             .append(model.path)
             .append(" --selector-before <dump at the training build> --selector-after ")
             .append(dump)

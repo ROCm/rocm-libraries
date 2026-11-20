@@ -277,8 +277,8 @@ TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndN
 }
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
-/// A shipped model that records another revision is used at load with only a warning, so
-/// the engine is ranked on an estimate for other code; this is where that fails the build.
+/// A shipped model that records another revision is refused at load and the engine reports
+/// no estimate, silently; this is where that fails the build.
 TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComputes)
 {
     EXPECT_TRUE(hip_kernel_provider::shipped_model_gate::shippedL1ModelsBindThisBuild(

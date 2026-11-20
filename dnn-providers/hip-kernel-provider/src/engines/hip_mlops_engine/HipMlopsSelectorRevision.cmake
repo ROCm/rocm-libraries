@@ -8,9 +8,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/../../../cmake/HkpSourceDigest.cmake")
 # hkp_hip_mlops_revision(<out-revision> <engine-dir> [CONFIGURE_DEPENDS] [MANIFEST <file>])
 # ============================================================================
 # The HIP_MLOPS_ENGINE selector revision: 16 hex digits over everything that decides which
-# kernel a graph gets and the code it runs. L1 models record it; the loader warns on a
-# mismatch and the shipped-model test fails the build, so a missing input lets a stale model
-# estimate a kernel that changed without either noticing.
+# kernel a graph gets and the code it runs. L1 models record it and the loader refuses a
+# mismatch, so a missing input lets a stale model estimate a kernel that changed.
 #
 # Every source under the engine directory is an input: the plan builders choose the kernel
 # and its compile options and launch geometry, kernels/ is the source hiprtc compiles, and
