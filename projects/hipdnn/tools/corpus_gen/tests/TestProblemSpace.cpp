@@ -695,6 +695,56 @@ TEST(TestProblemSpace, AnchorScalingNeverShrinksTheFixedQuotasAndNeedsATarget)
     }
 }
 
+TEST(TestProblemSpace, AnchorScalingSharesTheTargetOverTheCombinationsThatCanHoldAProblem)
+{
+    // Layout c is empty by the declaration, so the corpus is split over layouts a and b: each
+    // gets half of the target, not a third, and the quotas sum to the target.
+    const auto metadata = metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "N":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"],
+                    "weights": {"a": 1, "b": 1, "c": 1} }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] },
+      "constraints": [ { "!=": ["$q.layout", "c"] } ],
+      "archetypes": [
+        { "name": "layers",
+          "values": { "M": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536],
+                      "N": [64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536] } }
+      ],
+      "neighbourhood": {
+        "M": { "kind": "scale", "factors": [0.5, 0.75, 1, 1.5, 2] },
+        "N": { "kind": "scale", "factors": [0.5, 1, 2] }
+      },
+      "mixture": { "archetypes": 0.25, "neighbourhood": 0.5, "exploration": 0.25 }
+    })");
+    ExplorationRequest request;
+    request.pointsPerCombination = 2;
+    request.corpusTarget = 120;
+    request.anchorScaling = true;
+    request.seed = 8;
+
+    const auto corpus = exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING);
+
+    int64_t fromArchetypes = 0;
+    for(const auto& combination : corpus.combinations)
+    {
+        if(!combination.problems.empty())
+        {
+            // The quarter of 120 / 2.
+            EXPECT_EQ(combination.fromArchetypes, 15) << detail::describe(combination.categorical);
+        }
+        fromArchetypes += combination.fromArchetypes;
+    }
+    EXPECT_EQ(fromArchetypes, 30);
+}
+
 TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIsDropped)
 {
     // Past maxCombinations the product is sampled, which the manifest reports as skipped
@@ -994,10 +1044,12 @@ TEST(TestProblemSpace, AWeightedValueRealisesItsShareOfTheFirstPassAndOfTheGrown
     }
 }
 
-TEST(TestProblemSpace, EqualWeightsAreNoWeights)
+TEST(TestProblemSpace, EqualWeightsAreNoWeightsInTheSharesAndTheFirstPassIsTheUnweightedMean)
 {
-    // Weights are relative: declaring every value equal must not move a single first-pass
-    // problem or any value's share.
+    // Weights are relative: declaring every value equal must not move any value's share. It does
+    // move the size of the first pass: the weighted axis splits pointsPerCombination for each
+    // dtype combination (2 x 25) among its three values, where the unweighted search gives each
+    // of the six combinations 25.
     for(const int64_t target : {int64_t{0}, int64_t{250}})
     {
         ExplorationRequest request;
@@ -1009,16 +1061,19 @@ TEST(TestProblemSpace, EqualWeightsAreNoWeights)
         const auto equal = exploreProblemSpace(
             weightedToy(R"(, "weights": {"a": 3, "b": 3, "c": 3})"), request, ACCEPT_EVERYTHING);
 
+        EXPECT_NEAR(shareOf(equal, "layout", "a"), shareOf(absent, "layout", "a"), 0.03);
+        EXPECT_NEAR(shareOf(equal, "layout", "b"), shareOf(absent, "layout", "b"), 0.03);
+        EXPECT_NEAR(shareOf(equal, "dtype", "fp32"), shareOf(absent, "dtype", "fp32"), 0.03);
         if(target == 0)
         {
-            EXPECT_EQ(described(equal), described(absent));
+            EXPECT_EQ(absent.problems().size(), size_t{150});
+            EXPECT_EQ(equal.problems().size(), size_t{50});
         }
         else
         {
             // Growing splits the need exactly (largest remainder) where the unweighted search
-            // rounds each share up, so the points differ; the shares must not.
-            EXPECT_NEAR(shareOf(equal, "layout", "a"), shareOf(absent, "layout", "a"), 0.03);
-            EXPECT_NEAR(shareOf(equal, "layout", "b"), shareOf(absent, "layout", "b"), 0.03);
+            // rounds each share up, so the points differ.
+            EXPECT_GE(equal.problems().size(), static_cast<size_t>(target));
         }
     }
 }
@@ -1067,11 +1122,15 @@ TEST(TestProblemSpace, ApportionSplitsByLargestRemainderAndSumsExactly)
 
 TEST(TestProblemSpace, AWeightedValueKeepsItsShareAtASmallPointsPerCombination)
 {
-    // 0.75 of two points rounds to two, and 1.5 of two to three: a per-combination rounding
-    // (and a per-combination ceiling when growing) puts every small value above its weight.
-    // The split of the whole first pass by largest remainder lands exactly on 2:1:1.
+    // The first pass is 6 for each of the two dtypes, 12 points, so a layout-b or -c
+    // combination's ideal is 1.5 and a layout-a one's 3. A per-combination rounding (and a
+    // per-combination ceiling when growing) puts every such light value above its weight; the
+    // split of the whole first pass by largest remainder lands exactly on 2:1:1. Below 6 points
+    // the floor of one for each of the six combinations (see
+    // TheFirstPassNeverDropsACombinationItsBudgetCannotCover) lifts the light values above their
+    // weight.
     ExplorationRequest request;
-    request.pointsPerCombination = 2;
+    request.pointsPerCombination = 6;
     request.seed = 14;
     const auto corpus
         = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
@@ -1080,7 +1139,6 @@ TEST(TestProblemSpace, AWeightedValueKeepsItsShareAtASmallPointsPerCombination)
     EXPECT_NEAR(shareOf(corpus, "layout", "a"), 0.5, 0.01);
     EXPECT_NEAR(shareOf(corpus, "layout", "b") + shareOf(corpus, "layout", "c"), 0.5, 0.01);
 
-    request.pointsPerCombination = 2;
     request.corpusTarget = 400;
     const auto grown
         = exploreProblemSpace(weightedToy(R"(, "weights": {"a": 2})"), request, ACCEPT_EVERYTHING);
@@ -1154,5 +1212,220 @@ TEST(TestProblemSpace, SizesAreRakedOverTheCombinationsThatCanHoldAProblem)
     // The mean over combinations that can hold a problem is 1, as it is for unweighted ones.
     EXPECT_NEAR(all, static_cast<double>(combinations.size() - empty), 1e-6);
 }
+
+TEST(TestProblemSpace, TheFirstPassNeverDropsACombinationItsBudgetCannotCover)
+{
+    // pointsPerCombination x the two dtypes is 2 points for six live combinations: each keeps
+    // one, so no layout (and no dtype) disappears, and the first pass is the number of live
+    // combinations rather than the budget.
+    ExplorationRequest request;
+    request.pointsPerCombination = 1;
+    request.seed = 15;
+    const auto metadata = weightedToy(R"(, "weights": {"a": 2})");
+    size_t total = 0;
+    const auto combinations = detail::categoricalCombinations(metadata.parameters, 0, total);
+    const auto sizes = detail::combinationSizes(metadata, combinations);
+
+    EXPECT_EQ(detail::firstPassTargets(metadata, request, combinations, sizes),
+              std::vector<int64_t>(6, 1));
+    EXPECT_EQ(exploreProblemSpace(metadata, request, ACCEPT_EVERYTHING).problems().size(), 6U);
+
+    // Nothing weighted: pointsPerCombination for each combination.
+    const auto plain = weightedToy("");
+    const auto plainCombinations = detail::categoricalCombinations(plain.parameters, 0, total);
+    const auto plainSizes = detail::combinationSizes(plain, plainCombinations);
+    request.pointsPerCombination = 9;
+    EXPECT_EQ(detail::firstPassTargets(plain, request, plainCombinations, plainSizes),
+              std::vector<int64_t>(6, 9));
+}
+
+namespace
+{
+
+/// Three equally weighted layouts over two extents and nothing else, so the first pass is
+/// pointsPerCombination points split over three combinations.
+OperationMetadata threeEqualLayouts()
+{
+    return metadataFor(R"({
+      "schema_version": "1.0",
+      "operation": "toy",
+      "parameters": {
+        "M":      { "type": "int64" },
+        "N":      { "type": "int64" },
+        "layout": { "type": "enum", "values": ["a", "b", "c"],
+                    "weights": {"a": 1, "b": 1, "c": 1} }
+      },
+      "stratification_axis": "working_set",
+      "regimes": {},
+      "graph_builder": { "function": "createValidMatmulGraph", "source": "x.hpp",
+                         "arguments": [] }
+    })");
+}
+
+/// Layout c admits every extent up to @p wideLimit; a and b admit only M = N = 1, so each is
+/// exhausted by its first point.
+ProblemOracle oneWideLayout(int64_t wideLimit)
+{
+    return [wideLimit](const ProblemPoint& point) {
+        const auto m = std::get<int64_t>(point.at("M"));
+        const auto n = std::get<int64_t>(point.at("N"));
+        return std::get<std::string>(point.at("layout")) == "c" ? m <= wideLimit && n <= wideLimit
+                                                                : m <= 1 && n <= 1;
+    };
+}
+
+} // namespace
+
+TEST(TestProblemSpace, WeightedGrowthKeepsGoingWhenTheRoundsShareFallsOnExhaustedCombinations)
+{
+    // A round's need split by weight gives a unit to only some combinations: a need of one goes
+    // to one of the three. When that one is exhausted it adds nothing and is spent, but the
+    // others were never searched, so growth has to go on and reach layout c's points rather
+    // than stop short of the target.
+    for(uint64_t seed = 0; seed < 20; ++seed)
+    {
+        ExplorationRequest request;
+        request.pointsPerCombination = 8;
+        request.numericCeiling = 256;
+        request.seed = seed;
+        const auto firstPass = exploreProblemSpace(threeEqualLayouts(), request, oneWideLayout(256))
+                                   .problems()
+                                   .size();
+
+        request.corpusTarget = static_cast<int64_t>(firstPass) + 1;
+        const auto grown = exploreProblemSpace(threeEqualLayouts(), request, oneWideLayout(256));
+
+        EXPECT_GE(grown.problems().size(), static_cast<size_t>(request.corpusTarget))
+            << "seed " << seed;
+        EXPECT_TRUE(grown.shortfall.empty()) << "seed " << seed;
+    }
+}
+
+TEST(TestProblemSpace, WeightedGrowthStopsWhenEveryCombinationIsExhausted)
+{
+    // Each layout holds one point, so no target above three can be met. Growth must end with the
+    // shortfall reported, having searched every combination rather than re-splitting a need
+    // nobody can take.
+    ExplorationRequest request;
+    request.pointsPerCombination = 8;
+    request.numericCeiling = 256;
+    request.corpusTarget = 1000;
+    request.seed = 3;
+
+    const auto corpus = exploreProblemSpace(threeEqualLayouts(), request, oneWideLayout(1));
+
+    EXPECT_EQ(corpus.problems().size(), 3U);
+    ASSERT_EQ(corpus.shortfall.size(), 4U);
+    for(size_t i = 1; i < corpus.shortfall.size(); ++i)
+    {
+        EXPECT_NE(corpus.shortfall[i].find("saturated"), std::string::npos) << corpus.shortfall[i];
+    }
+}
+
+/// The shipped attention declarations, whose weighted facets and forms cross to thousands of
+/// combinations.
+class TestShippedFirstPass : public ::testing::TestWithParam<std::string>
+{
+};
+
+TEST_P(TestShippedFirstPass, TheShippedSdpaDeclarationsKeepTheDefaultFirstPassNearItsUnweightedSize)
+{
+    // Weighted axes split a budget; they do not multiply it. The budget is pointsPerCombination
+    // for each distinct live combination of the unweighted parameters (is_causal, alignment,
+    // dtype, and for the forward generate_stats), not for each of the thousands of weighted
+    // combinations: crossing four weighted axes in made the forward first pass fifty times the
+    // size it was before they were declared.
+    const auto metadata = test::shippedOperation(GetParam());
+    const ExplorationRequest request;
+    size_t total = 0;
+    const auto combinations = detail::categoricalCombinations(
+        metadata.parameters,
+        request.maxCombinations,
+        total,
+        [&metadata](const ProblemPoint& combination) {
+            return !detail::excludedByCategoricals(metadata, combination);
+        });
+    const auto sizes = detail::combinationSizes(metadata, combinations);
+    const auto targets = detail::firstPassTargets(metadata, request, combinations, sizes);
+    ASSERT_EQ(targets.size(), combinations.size());
+
+    // U, counted here from the declaration: live combinations, projected onto the enumerable
+    // parameters that have no weights.
+    std::set<std::string> unweighted;
+    int64_t live = 0;
+    for(size_t i = 0; i < combinations.size(); ++i)
+    {
+        if(sizes[i] <= 0.0)
+        {
+            EXPECT_EQ(targets[i], 0) << detail::describe(combinations[i]);
+            continue;
+        }
+        ++live;
+        EXPECT_GE(targets[i], 1) << detail::describe(combinations[i]);
+        ProblemPoint projected;
+        for(const auto& parameter : metadata.parameters)
+        {
+            if(parameter.weights.empty() && !parameter.enumerable().empty())
+            {
+                projected[parameter.name] = combinations[i].at(parameter.name);
+            }
+        }
+        unweighted.insert(detail::describe(projected));
+    }
+    const auto distinct = static_cast<int64_t>(unweighted.size());
+    ASSERT_GT(live, 0);
+    ASSERT_GT(distinct, 0);
+
+    int64_t sum = 0;
+    for(const auto target : targets)
+    {
+        sum += target;
+    }
+    EXPECT_EQ(sum, std::max(request.pointsPerCombination * distinct, live));
+    EXPECT_LT(sum, int64_t{5} * 24 * request.pointsPerCombination);
+
+    // The floor of one point each puts most of a first pass this small into every combination
+    // alike, so the declared shares are only approached (plain holds 0.37 of the forward's
+    // first pass against its declared 0.5), but the order the weights declare holds. Where the
+    // budget exceeds the floor the shares are realised
+    // (AWeightedValueRealisesItsShareOfTheFirstPassAndOfTheGrownCorpus).
+    for(const auto& parameter : metadata.parameters)
+    {
+        if(parameter.weights.empty())
+        {
+            continue;
+        }
+        std::map<std::string, double> share;
+        for(const auto& value : parameter.values)
+        {
+            int64_t held = 0;
+            for(size_t i = 0; i < combinations.size(); ++i)
+            {
+                held += std::get<std::string>(combinations[i].at(parameter.name)) == value
+                            ? targets[i]
+                            : 0;
+            }
+            share[value] = static_cast<double>(held) / static_cast<double>(sum);
+        }
+        for(const auto& heavier : parameter.values)
+        {
+            for(const auto& lighter : parameter.values)
+            {
+                const auto weightGap
+                    = parameter.relativeWeight(heavier) - parameter.relativeWeight(lighter);
+                if(weightGap > 1e-9)
+                {
+                    EXPECT_GT(share[heavier], share[lighter])
+                        << GetParam() << " " << parameter.name << ": " << heavier << " over "
+                        << lighter;
+                }
+            }
+        }
+    }
+}
+
+INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
+                         TestShippedFirstPass,
+                         ::testing::Values("sdpa_fwd", "sdpa_bwd"));
 
 } // namespace hipdnn_corpus_gen

@@ -53,7 +53,14 @@ inline ProblemOracle allOf(std::vector<ProblemOracle> oracles)
 struct ExplorationRequest
 {
     /// Problem points wanted per categorical combination, so one dtype cannot take the whole
-    /// budget.
+    /// budget. When the declaration weights the values of a parameter (Parameter::weights) the
+    /// weighted parameters split a budget rather than multiply it: the first pass is this many
+    /// points for each distinct combination of the unweighted parameters, divided among the
+    /// combinations by weight, so it is the mean per unweighted combination, not per combination.
+    /// A combination gets at least one point, so the first pass is never smaller than the number
+    /// of explored combinations that can hold a problem (it is that many when the budget is
+    /// smaller); a combination the declared constraints make empty gets none. See
+    /// detail::firstPassTargets.
     int64_t pointsPerCombination = 50;
 
     /// Oracle calls per categorical combination.
@@ -93,11 +100,12 @@ struct ExplorationRequest
     int64_t budgetGrowthLimit = 64;
 
     /// Scales the archetype and neighbourhood quotas with @ref corpusTarget instead of fixing
-    /// them at the mixture's share of @ref pointsPerCombination: each combination's anchored
-    /// quota is the mixture share of max(pointsPerCombination, corpusTarget / combinations), so
-    /// the declared mixture holds at a large --count rather than collapsing into the
-    /// exploration share. Off by default (the fixed quotas); without a corpusTarget it changes
-    /// nothing.
+    /// them at the mixture's share of the combination's first-pass count: each combination's
+    /// anchored quota is the mixture share of max(its first-pass count, corpusTarget / the
+    /// explored combinations that can hold a problem), times its relative size when values are
+    /// weighted, so the quotas sum to the target and the declared mixture holds at a large
+    /// --count rather than collapsing into the exploration share. Off by default (the fixed
+    /// quotas); without a corpusTarget it changes nothing.
     bool anchorScaling = false;
 };
 
@@ -722,6 +730,102 @@ inline std::vector<ShapeDimension> numericWindow(const OperationMetadata& metada
     return window;
 }
 
+/// The first pass's problem count for each of @p combinations, @p sizes being their
+/// combinationSizes.
+///
+/// Nothing weighted: pointsPerCombination for each. Weighted: the weighted parameters split a
+/// budget and do not multiply it. The budget is pointsPerCombination for each distinct live
+/// combination (one that can hold a problem) of the parameters that have no weights, so
+/// declaring a weight on layout, scale, window or form reshapes the corpus without growing it
+/// by the number of their values. It is divided by size, the units placed as apportion places
+/// them, and every live combination gets at least one point so no declared value disappears:
+/// the first pass is the budget, but never smaller than the number of live combinations,
+/// whatever the budget. A combination the declared constraints make empty gets none.
+inline std::vector<int64_t> firstPassTargets(const OperationMetadata& metadata,
+                                             const ExplorationRequest& request,
+                                             const std::vector<ProblemPoint>& combinations,
+                                             const std::vector<double>& sizes)
+{
+    std::vector<int64_t> targets(combinations.size(), request.pointsPerCombination);
+    if(!anyWeighted(metadata.parameters))
+    {
+        return targets;
+    }
+
+    std::vector<std::string> unweighted;
+    for(const auto& parameter : metadata.parameters)
+    {
+        if(parameter.weights.empty() && !parameter.enumerable().empty())
+        {
+            unweighted.push_back(parameter.name);
+        }
+    }
+    std::set<ProblemPoint> distinct;
+    std::vector<uint64_t> keys(combinations.size());
+    for(size_t index = 0; index < combinations.size(); ++index)
+    {
+        keys[index] = tieKey(request.seed, index);
+        if(!(sizes[index] > 0.0))
+        {
+            continue;
+        }
+        ProblemPoint projected;
+        for(const auto& name : unweighted)
+        {
+            const auto found = combinations[index].find(name);
+            if(found != combinations[index].end())
+            {
+                projected.insert(*found);
+            }
+        }
+        distinct.insert(std::move(projected));
+    }
+
+    const auto budget = request.pointsPerCombination
+                        * std::max<int64_t>(1, static_cast<int64_t>(distinct.size()));
+
+    // A combination whose share of what is left is under one point is given one and set aside;
+    // the rest split what remains, until none is under. So the floor costs the combinations that
+    // would otherwise round to nothing, not the budget: the total stays the budget, or one point
+    // for each live combination when that is more.
+    std::fill(targets.begin(), targets.end(), int64_t{0});
+    std::vector<double> open = sizes;
+    int64_t remaining = budget;
+    for(;;)
+    {
+        double openSum = 0.0;
+        for(const auto size : open)
+        {
+            openSum += size;
+        }
+        std::vector<size_t> floored;
+        for(size_t index = 0; index < open.size(); ++index)
+        {
+            if(open[index] > 0.0
+               && (remaining <= 0 || static_cast<double>(remaining) * open[index] < openSum))
+            {
+                floored.push_back(index);
+            }
+        }
+        if(floored.empty())
+        {
+            break;
+        }
+        for(const auto index : floored)
+        {
+            targets[index] = 1;
+            open[index] = 0.0;
+        }
+        remaining -= static_cast<int64_t>(floored.size());
+    }
+    const auto shares = apportion(remaining, open, keys);
+    for(size_t index = 0; index < targets.size(); ++index)
+    {
+        targets[index] += shares[index];
+    }
+    return targets;
+}
+
 } // namespace detail
 
 /// @brief Explores the space @p metadata declares, keeping the points @p admits accepts.
@@ -769,27 +873,13 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     // combination when nothing is weighted, and then the counts below are the unweighted ones.
     const bool weighted = detail::anyWeighted(metadata.parameters);
     const auto sizes = detail::combinationSizes(metadata, combinations);
-    // The first pass's per-combination problem count: pointsPerCombination for each, or the
-    // whole first pass (pointsPerCombination x combinations) split by size, largest remainder,
-    // with at least one each so no combination (and so no declared value) is dropped.
-    std::vector<int64_t> firstPass(combinations.size(), request.pointsPerCombination);
-    if(weighted)
-    {
-        std::vector<uint64_t> keys(combinations.size());
-        for(size_t i = 0; i < keys.size(); ++i)
-        {
-            keys[i] = detail::tieKey(request.seed, i);
-        }
-        // The first pass is pointsPerCombination for every combination that can hold a problem.
-        const auto live
-            = std::count_if(sizes.begin(), sizes.end(), [](double size) { return size > 0.0; });
-        firstPass = detail::apportion(
-            request.pointsPerCombination * static_cast<int64_t>(live), sizes, keys);
-        for(size_t i = 0; i < firstPass.size(); ++i)
-        {
-            firstPass[i] = sizes[i] > 0.0 ? std::max<int64_t>(1, firstPass[i]) : 0;
-        }
-    }
+    // The first pass's per-combination problem count: pointsPerCombination for each, or, when
+    // weighted, pointsPerCombination for each distinct unweighted combination split by size, with
+    // at least one each so no combination (and so no declared value) is dropped.
+    const auto firstPass = detail::firstPassTargets(metadata, request, combinations, sizes);
+    // The combinations that can hold a problem; all of them when nothing is weighted.
+    const auto live = std::max<std::ptrdiff_t>(
+        1, std::count_if(sizes.begin(), sizes.end(), [](double size) { return size > 0.0; }));
     const auto pointsFor = [&firstPass](size_t index) { return firstPass[index]; };
     std::vector<size_t> anchoredCounts(combinations.size(), 0);
     std::vector<std::map<Shape, bool>> answered(combinations.size());
@@ -919,7 +1009,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
             {
                 total = std::max(total,
                                  static_cast<double>(request.corpusTarget) * sizes[index]
-                                     / static_cast<double>(combinations.size()));
+                                     / static_cast<double>(live));
             }
             archetypeQuota
                 = static_cast<size_t>(std::max(0.0, metadata.mixture.archetypes * total));
@@ -1042,6 +1132,7 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
     while(request.corpusTarget > 0 && !numericWindow.empty())
     {
         const auto before = supplied();
+        const auto spentBefore = std::count(spent.begin(), spent.end(), true);
         const auto need = request.corpusTarget - before;
         if(need <= 0)
         {
@@ -1191,9 +1282,12 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
                                    std::make_move_iterator(selection.fresh.end()));
         }
 
-        if(supplied() <= before)
+        // Only the combinations that got a share were searched, and a small need leaves most
+        // without one. A round that added no point but spent a combination (its search proved
+        // saturated or capped) has not shown the others empty: the next splits the need over
+        // those still open. Every round adds a point or spends one, so this ends.
+        if(supplied() <= before && std::count(spent.begin(), spent.end(), true) == spentBefore)
         {
-            // No combination added a point: each is now saturated or capped.
             break;
         }
     }
