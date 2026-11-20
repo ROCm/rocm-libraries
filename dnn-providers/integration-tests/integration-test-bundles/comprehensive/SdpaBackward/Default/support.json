@@ -501,6 +501,12 @@
           "gfx1100": [
             "linux"
           ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
           "gfx950": [
             "linux"
           ]
@@ -513,6 +519,12 @@
           "m25n_b1h8k1v1_128x128_d512_bfp16_cm_tlw32rinf_bshd_tolu"
         ],
         "support": {
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
           "gfx950": [
             "linux"
           ]

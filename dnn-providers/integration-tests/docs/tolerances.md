@@ -320,8 +320,8 @@ difference no relative term of the output sees: bfloat16 results 1 and
 
 The CPU reference used to ignore the node's compute type: its pointwise nodes
 added in double and rounded once, whatever `compute_data_type` said, while
-the GPU reference and the engine honour it. That is fixed (e766aebc760c and
-60837ab26fa7: the plan passes the compute type to the reference), and the
+the GPU reference and the engine honour it. That is fixed (#15139: the plan
+passes the compute type to the reference), and the
 two figures above were measured before it. Re-measured against the fixed
 reference (see "Calibration of the rounding points"), the reference matches the
 emulation with the roundings at 99.96 % or more of the elements of every

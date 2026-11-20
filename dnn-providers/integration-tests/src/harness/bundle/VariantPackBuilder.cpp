@@ -3,6 +3,7 @@
 
 #include "harness/bundle/VariantPackBuilder.hpp"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -12,6 +13,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 
 #include "harness/DeviceCallCheck.hpp"
 #include <hip/hip_runtime.h>
@@ -114,6 +116,42 @@ bool tryFillSentinelOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor)
     }
 }
 
+// Fill packed host storage with the exact sentinel object representation using bulk
+// copies. This avoids the tensor iterator's per-element index calculation for layouts
+// whose physical storage is dense but whose logical iteration order is permuted.
+template <class T>
+bool tryFillSentinelOnHost(hipdnn_data_sdk::utilities::ITensor& tensor)
+{
+    static_assert(std::is_trivially_copyable_v<T>);
+
+    auto* typed = dynamic_cast<hipdnn_data_sdk::utilities::TensorBase<T>*>(&tensor);
+    if(typed == nullptr || !typed->isPacked())
+    {
+        return false;
+    }
+
+    auto& memory = typed->memory();
+    memory.markHostModified();
+    const size_t byteCount = typed->elementSpace() * sizeof(T);
+    if(byteCount == 0)
+    {
+        return true;
+    }
+
+    auto* bytes = reinterpret_cast<std::byte*>(memory.hostData());
+    const T value = sentinelValue<T>();
+    std::memcpy(bytes, &value, sizeof(value));
+
+    size_t initializedBytes = sizeof(value);
+    while(initializedBytes < byteCount)
+    {
+        const size_t copyBytes = std::min(initializedBytes, byteCount - initializedBytes);
+        std::memcpy(bytes + initializedBytes, bytes, copyBytes);
+        initializedBytes += copyBytes;
+    }
+    return true;
+}
+
 // Every element type the tensor factory builds as a plain tensor of 1, 2 or 4 byte
 // elements. Wider types (double, INT64) and packed sub-byte tensors fall through to the
 // host fill.
@@ -129,6 +167,22 @@ bool fillSentinelOnDevice(hipdnn_data_sdk::utilities::ITensor& tensor)
            || tryFillSentinelOnDevice<fp8_e8m0>(tensor) || tryFillSentinelOnDevice<fp4_e2m1>(tensor)
            || tryFillSentinelOnDevice<fp6_e2m3>(tensor)
            || tryFillSentinelOnDevice<fp6_e3m2>(tensor);
+}
+
+bool fillSentinelOnHost(hipdnn_data_sdk::utilities::ITensor& tensor)
+{
+    using namespace hipdnn_data_sdk::types;
+    return tryFillSentinelOnHost<float>(tensor) || tryFillSentinelOnHost<half>(tensor)
+           || tryFillSentinelOnHost<bfloat16>(tensor) || tryFillSentinelOnHost<double>(tensor)
+           || tryFillSentinelOnHost<std::int32_t>(tensor)
+           || tryFillSentinelOnHost<std::int64_t>(tensor)
+           || tryFillSentinelOnHost<std::uint8_t>(tensor)
+           || tryFillSentinelOnHost<std::int8_t>(tensor) || tryFillSentinelOnHost<bool>(tensor)
+           || tryFillSentinelOnHost<fp8_e4m3>(tensor) || tryFillSentinelOnHost<fp8_e5m2>(tensor)
+           || tryFillSentinelOnHost<fp8_e4m3_fnuz>(tensor)
+           || tryFillSentinelOnHost<fp8_e5m2_fnuz>(tensor)
+           || tryFillSentinelOnHost<fp8_e8m0>(tensor) || tryFillSentinelOnHost<fp4_e2m1>(tensor)
+           || tryFillSentinelOnHost<fp6_e2m3>(tensor) || tryFillSentinelOnHost<fp6_e3m2>(tensor);
 }
 
 } // namespace
@@ -221,11 +275,18 @@ OutputTensors allocateSentinelOutputs(
             outputs[uid] = hipdnn_test_sdk::detail::createTensorFromAttribute(attributes);
         }
 
-        if(onDevice && fillSentinelOnDevice(*outputs[uid]))
+        bool filled = false;
+        if(onDevice)
         {
-            deviceFillPending = true;
+            filled = fillSentinelOnDevice(*outputs[uid]);
+            deviceFillPending = deviceFillPending || filled;
         }
         else
+        {
+            filled = fillSentinelOnHost(*outputs[uid]);
+        }
+
+        if(!filled)
         {
             outputs[uid]->fillWithSentinelValue();
         }

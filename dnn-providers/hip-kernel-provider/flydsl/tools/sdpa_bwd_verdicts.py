@@ -1,21 +1,28 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Expected verdicts of the gfx11-generic SDPA backward split engine, derived without the engine.
+"""Expected verdicts of the SDPA backward split engine of one arch, derived without the engine.
 
-    python tools/sdpa_bwd_verdicts.py            # rewrite tests/data/sdpa_bwd_gfx11_verdicts.csv
-    python tools/sdpa_bwd_verdicts.py --check    # regenerate and diff against the committed CSV
+    python tools/sdpa_bwd_verdicts.py [--arch ARCH]          # rewrite tests/data/sdpa_bwd_<arch>_verdicts.csv
+    python tools/sdpa_bwd_verdicts.py [--arch ARCH] --check  # regenerate and diff against the committed CSV
     python tools/sdpa_bwd_verdicts.py --import-bundle BUNDLE_DIR
-                                                 # refresh tests/data/sdpa_bwd_gfx11_selection.csv from the bundle
+                                                 # gfx11-generic: refresh tests/data/sdpa_bwd_gfx11_selection.csv from the bundle
+    python tools/sdpa_bwd_verdicts.py --arch gfx90a --write-selection
+                                                 # gfx942, gfx90a: derive tests/data/sdpa_bwd_<arch>_selection.csv from the S1 reference
+
+``ARCH`` is gfx11-generic (the default, ``tests/data/sdpa_bwd_gfx11_*``), gfx942 or gfx90a. The rung rule is per (arch, dtype): the
+smallest rung of the arch's ladder for the dtype (``_sdpa_bwd_spec.ladder``) that is at least the head dim; gfx942 and gfx90a have a
+12-rung 16-bit ladder (16..256, 512) and an fp32 ladder of 8 rungs and 512 (``ArchModel``).
 
 One row per graph spec (columns in ``COLUMNS``); the verdict is ``served`` with the 12-hex spec hash of each slot
 object, or ``declined`` with the rule ID of the matcher (``no_row`` when no matcher rule names the decline: the graph
-matcher accepts it and no gfx11 object serves it). Every expectation comes from one of:
+matcher accepts it and no object serves it). Every expectation comes from one of:
 
-* the RDNA bundle's routing: ``tests/data/sdpa_bwd_gfx11_selection.csv`` is the ``handover/selection.json`` of the
-  RDNA kernel bundle the gfx11-generic objects were taken from, one row per entry with the hash of its ``exact: false`` row and of its default row;
-  ``--import-bundle`` rewrites it from the bundle and cross-checks the vendored ``check_request`` below against the
-  bundle's ``tools/selection.py``;
+* the routing table of the arch, ``tests/data/sdpa_bwd_<arch>_selection.csv``, one row per entry with the hash of its
+  ``exact: false`` row and of its default row. gfx11-generic: the ``handover/selection.json`` of the RDNA kernel bundle the objects
+  were taken from; ``--import-bundle`` rewrites it from the bundle and cross-checks the vendored ``check_request`` below against the
+  bundle's ``tools/selection.py``. gfx942, gfx90a: derived from the arch's S1 reference (``tests/data/sdpa_bwd_<arch>_reference.csv``,
+  one row per pinned object): every class and dropout entry names the one object of its rung;
 * the bundle's refusals: ``to_rung`` and ``check_request`` are the bundle's ``source/tools/selection.py`` verbatim
   (minus the CSV table helpers), the vendored minimum;
 * the matcher's rule documentation (the doc comments of ``FlydslSdpaBwdCommon.hpp`` and
@@ -35,12 +42,16 @@ import difflib
 import importlib.util
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from generators._sdpa_bwd_spec import GENERIC_LADDER  # noqa: E402
 
 FLYDSL = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(FLYDSL))
+from generators._sdpa_bwd_spec import Spec, ladder  # noqa: E402
+
 DATA = FLYDSL / "tests" / "data"
 VERDICTS_CSV = DATA / "sdpa_bwd_gfx11_verdicts.csv"
 SELECTION_CSV = DATA / "sdpa_bwd_gfx11_selection.csv"
@@ -109,24 +120,32 @@ class RoutingRefusal(ValueError):
         self.code = code
 
 
-def to_rung(hd, tile=None, dtype=None):
+GFX11_LADDERS = dict.fromkeys(SHIPPED_DTYPES, GENERIC_LADDER)
+
+
+def to_rung(hd, tile=None, dtype=None, ladders=GFX11_LADDERS):
+    """The rung of @p hd on the ladder of @p dtype (``ladders``: dtype -> rungs; none: the 16-bit one): the smallest rung of at least @p hd.
+
+    ``hd_gt_256`` is the bundle's code for a head dim above the ladder's last rung, whatever that rung is on the arch.
+    """
     if dtype is not None and dtype not in SHIPPED_DTYPES:
         raise RoutingRefusal(
             "dtype_not_shipped", f"dtype {dtype!r} is not one of {SHIPPED_DTYPES}"
         )
+    lad = ladders["f16" if dtype is None else dtype]
     if hd < 1:
         raise RoutingRefusal("hd_lt_1", f"head dim {hd} < 1")
-    if hd > GENERIC_LADDER[-1]:
+    if hd > lad[-1]:
         raise RoutingRefusal(
             "hd_gt_256",
-            f"head dim {hd} > {GENERIC_LADDER[-1]}: the ladder ends at {GENERIC_LADDER[-1]}",
+            f"head dim {hd} > {lad[-1]}: the ladder ends at {lad[-1]}",
         )
     if tile is None:
-        rung = next(r for r in GENERIC_LADDER if r >= hd)
+        rung = next(r for r in lad if r >= hd)
     else:
-        if tile not in GENERIC_LADDER:
+        if tile not in lad:
             raise RoutingRefusal(
-                "tile_not_rung", f"tile {tile} is not a ladder rung {GENERIC_LADDER}"
+                "tile_not_rung", f"tile {tile} is not a ladder rung {lad}"
             )
         if hd > tile:
             raise RoutingRefusal("hdim_gt_tile", f"head dim {hd} > tile {tile}")
@@ -146,10 +165,11 @@ def check_request(
     window=False,
     bias_bcast="",
     dbias=False,
+    ladders=GFX11_LADDERS,
 ):
     hd_v = hd_qk if hd_v is None else hd_v
-    rung, _ = to_rung(max(hd_qk, hd_v), tile, dtype)
-    to_rung(min(hd_qk, hd_v))
+    rung, _ = to_rung(max(hd_qk, hd_v), tile, dtype, ladders)
+    to_rung(min(hd_qk, hd_v), None, None, ladders)
     if bias:
         if varlen:
             raise RoutingRefusal(
@@ -167,6 +187,44 @@ def check_request(
                 "a q-broadcast bias cannot return dBias (a zero dB q stride means 'not requested'); pass a full-shape bias",
             )
     return rung, (hd_qk, hd_v) != (rung, rung)
+
+
+@dataclass(frozen=True)
+class ArchModel:
+    """What an arch's verdicts depend on besides the matcher's rules: its rung ladders, where its routing table comes from, and
+    which dtypes carry the dBias reduce kernel inside the dQ object (``combined_reduce``: no standalone reduce slot).
+    The dtype is the one of Q: the fp32 Q dQ of gfx942 and gfx90a is combined, and the fp32 ``dbias_reduce`` object of those arches (the
+    f32 dB reduce of a 16-bit row, the gfx11 kernel) is routed by the ``bias_f32`` rows, which the graph specs here do not model.
+    """
+
+    arch: str
+    stem: str  # ``tests/data/sdpa_bwd_<stem>_{selection,verdicts,reference}.csv``
+    from_bundle: bool  # the routing table is the RDNA bundle's selection.json (``--import-bundle``), else derived from the reference
+    combined_reduce: tuple[str, ...] = ()
+
+    @property
+    def ladders(self) -> dict[str, tuple]:
+        return {d: ladder(self.arch, d) for d in SHIPPED_DTYPES}
+
+    @property
+    def selection_csv(self) -> Path:
+        return DATA / f"sdpa_bwd_{self.stem}_selection.csv"
+
+    @property
+    def verdicts_csv(self) -> Path:
+        return DATA / f"sdpa_bwd_{self.stem}_verdicts.csv"
+
+    @property
+    def reference_csv(self) -> Path:
+        return DATA / f"sdpa_bwd_{self.stem}_reference.csv"
+
+
+MODELS = {
+    "gfx11-generic": ArchModel("gfx11-generic", "gfx11", True),
+    "gfx942": ArchModel("gfx942", "gfx942", False, ("fp32",)),
+    "gfx90a": ArchModel("gfx90a", "gfx90a", False, ("fp32",)),
+}
+GFX11 = MODELS["gfx11-generic"]
 
 
 # ---------------------------------------------------------------------------
@@ -346,17 +404,81 @@ def load_selection(path=SELECTION_CSV):
     return table
 
 
-def in_tree_hashes(content=CONTENT):
-    """{slot: set of 12-hex hashes} of the installed gfx11-generic content: manifest `spec_hash`es, reduce from the dq companions."""
+def selection_from_reference(rows, model):
+    """The routing table (``load_selection``'s keys; both hashes the pinned object's) of the pins in @p rows, the rows of the arch's
+    reference CSV: a prep object serves every class and dropout of its rung; a dQ bias object serves both dBias requests unless a
+    ``store_db=0`` object of its rung serves the "null" one; the standalone reduce objects serve both dropouts. The routing is keyed
+    by the graph's class and dtype: a feature row (``bias_f32`` or ``u2``) is a different object family chosen by the graph's bias
+    dtype or head counts, so it holds no routing entry and is not read as the plain object of its slot.
+    """
+    table = {}
+
+    def put(key, hash_):
+        assert table.setdefault(key, (hash_, hash_)) == (hash_, hash_), (
+            key,
+            "two objects",
+        )
+
+    nulls = set()
+    for row in rows:
+        spec = Spec.parse(row["spec"])
+        assert spec.arch == model.arch, (row["spec"], model.arch)
+        if spec.bias_f32 or spec.u2:
+            continue
+        if spec.kernel == "dq" and spec.store_db == 0:
+            nulls.add((spec.dtype, spec.tile, spec.dropout))
+    for row in rows:
+        spec, h = Spec.parse(row["spec"]), row["hash"]
+        if spec.bias_f32 or spec.u2:
+            continue
+        if spec.kernel == "prep":
+            for cls in ("plain", "causal", "bias"):
+                for drop in (0, 1):
+                    put(("prep", spec.dtype, spec.tile, cls, drop, ""), h)
+        elif spec.kernel == "dkdv":
+            put(("dkdv", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), h)
+        elif spec.kernel == "dq" and spec.cls != "bias":
+            put(("dq", spec.dtype, spec.tile, spec.cls, spec.dropout, ""), h)
+        elif spec.kernel == "dq":
+            args = (spec.dtype, spec.tile, "bias", spec.dropout)
+            if spec.store_db == 0:
+                put(("dq", *args, "null"), h)
+            else:
+                put(("dq", *args, "requested"), h)
+                if (spec.dtype, spec.tile, spec.dropout) not in nulls:
+                    put(("dq", *args, "null"), h)
+        elif spec.kernel == "dbias_reduce":
+            for drop in (0, 1):
+                put(("dbias_reduce", spec.dtype, 0, "bias", drop, ""), h)
+    return table
+
+
+def write_selection(model, reference=None, out=None):
+    """Derive the arch's routing CSV @p out from its reference CSV @p reference (gfx942, gfx90a; the arch's own files by default)."""
+    assert (
+        not model.from_bundle
+    ), f"{model.arch}'s routing is the bundle's: --import-bundle"
+    reference = reference or model.reference_csv
+    out = out or model.selection_csv
+    with reference.open(newline="") as fh:
+        table = selection_from_reference(list(csv.DictReader(fh)), model)
+    rows = sorted((k[0], k[1], k[2], k[3], k[4], k[5], *h) for k, h in table.items())
+    with open(out, "w", newline="") as fh:
+        w = csv.writer(fh, lineterminator="\n")
+        w.writerow(SELECTION_COLUMNS)
+        w.writerows(rows)
+    print(f"wrote {len(rows)} routing entries to {out}")
+
+
+def in_tree_hashes(content=CONTENT, arch="gfx11-generic"):
+    """{slot: set of 12-hex hashes} of the installed content of @p arch: manifest `spec_hash`es, reduce from the dq companions."""
     have = {}
     for op, slot in (
         ("sdpa_bwd_prep", "prep"),
         ("sdpa_bwd_dkdv", "dkdv"),
         ("sdpa_bwd_dq", "dq"),
     ):
-        manifest = json.loads(
-            (content / op / "gfx11-generic" / "manifest.json").read_text()
-        )
+        manifest = json.loads((content / op / arch / "manifest.json").read_text())
         have[slot] = {i["spec_hash"] for i in manifest["instances"]}
         if slot == "dq":
             have["reduce"] = {c["hash"] for c in manifest["companions"]}
@@ -378,13 +500,15 @@ def needs_reduce(r):
     )
 
 
-def expect(r, sel):
-    """-> (verdict, prep, dkdv, dq, reduce, rule, basis) of one graph spec."""
+def expect(r, sel, model=GFX11):
+    """-> (verdict, prep, dkdv, dq, reduce, rule, basis) of one graph spec on the arch of @p model."""
+    ladders = model.ladders
     try:
         check_request(
             dtype=r["dtype"], hd_qk=r["dqk"], hd_v=r["dv"], bias=r["bias"] != "none", varlen=r["varlen"] != "none",
             causal=r["mask"] != "none", window=r["window_left"] != -1 or r["window_right"] != -1,
             bias_bcast="" if r["bias"] == "full" else r["bias"].replace("none", ""), dbias=bool(r["dbias"]),
+            ladders=ladders,
         )  # fmt: skip
         refusal = None
     except RoutingRefusal as e:
@@ -397,20 +521,21 @@ def expect(r, sel):
         return ("declined", "", "", "", "", expected, basis)
     if rule:
         return ("declined", "", "", "", "", rule, f"contract:{rule}")
-    tile, _ = to_rung(max(r["dqk"], r["dv"]))
+    tile, _ = to_rung(max(r["dqk"], r["dv"]), None, r["dtype"], ladders)
     cls, drop = row_class(r), r["dropout"]
     store_db = ("requested" if r["dbias"] else "null") if cls == "bias" else ""
     # selection.json problem key: `tile` is the rung >= max(Dqk, Dv); for `prep` the rung >= Dv.
     # Each routing entry is keyed (kernel, dtype, tile, class, dropout, store_db).
-    prep_tile, _ = to_rung(r["dv"])
+    prep_tile, _ = to_rung(r["dv"], None, r["dtype"], ladders)
     tiles = {"prep": prep_tile, "dkdv": tile, "dq": tile}
     hashes = [
         sel[(k, r["dtype"], tiles[k], cls, drop, store_db if k == "dq" else "")][1]
         for k in ("prep", "dkdv", "dq")
     ]
+    # A dtype whose reduce kernel is inside the dQ object has no standalone reduce slot.
     reduce = (
         sel[("dbias_reduce", r["dtype"], 0, "bias", drop, "")][1]
-        if needs_reduce(r)
+        if needs_reduce(r) and r["dtype"] not in model.combined_reduce
         else ""
     )
     basis = (
@@ -472,7 +597,8 @@ def make(rid, source, **kw):
     return r
 
 
-def build_rows():
+def build_rows(model=GFX11):
+    """The graph specs of the table of the arch of @p model: its routing entries, ladder boundaries and the arch-independent rows."""
     rows = []
 
     def add(rid, source, **kw):
@@ -480,7 +606,7 @@ def build_rows():
 
     # (a) selection: every routing entry realised as an exact and a forced-padded graph.
     for dtype in SHIPPED_DTYPES:
-        for tile in GENERIC_LADDER:
+        for tile in model.ladders[dtype]:
             for drop in (0, 1):
                 for exact in (True, False):
                     d = (
@@ -521,7 +647,7 @@ def build_rows():
 
     # (b) boundaries
     for dtype in SHIPPED_DTYPES:
-        for rung in GENERIC_LADDER:
+        for rung in model.ladders[dtype]:
             add(f"bnd-{dtype}-d{rung}", "boundary", dtype=dtype, dqk=rung)
             add(f"bnd-{dtype}-d{rung + 1}", "boundary", dtype=dtype, dqk=rung + 1)
         for d in (1, 255):
@@ -563,11 +689,14 @@ def build_rows():
     # (c) refusals (every check_request code a graph can express)
     add("ref-hd-lt-1-qk0", "refusal", dqk=0, dv=64)
     add("ref-hd-lt-1-v0", "refusal", dqk=64, dv=0)
-    add("ref-hd-gt-256-bf16-384", "refusal", dtype="bf16", dqk=384)
-    add("ref-hd-gt-256-fp32-512", "refusal", dtype="fp32", dqk=512)
-    add("ref-hd-gt-256-f16-513", "refusal", dqk=513)
-    add("ref-hd-gt-256-f16-1024", "refusal", dqk=1024)
-    add("ref-hd-gt-256-v400", "refusal", dqk=64, dv=400)
+    top = model.ladders["f16"][
+        -1
+    ]  # the head dims above the last rung: 384, 512, 513, 1024 and 400 on gfx11's 256
+    add(f"ref-hd-gt-{top}-bf16-{top + 128}", "refusal", dtype="bf16", dqk=top + 128)
+    add(f"ref-hd-gt-{top}-fp32-{top + 256}", "refusal", dtype="fp32", dqk=top + 256)
+    add(f"ref-hd-gt-{top}-f16-{top + 257}", "refusal", dqk=top + 257)
+    add(f"ref-hd-gt-{top}-f16-{top * 4}", "refusal", dqk=top * 4)
+    add(f"ref-hd-gt-{top}-v{top + 144}", "refusal", dqk=64, dv=top + 144)
     for dtype in SHIPPED_DTYPES:
         add(
             f"ref-bias-varlen-{dtype}",
@@ -686,14 +815,15 @@ def dedupe_check(rows):
     assert not dups, f"duplicate graph specs: {sorted(dups)}"
 
 
-def generate(selection=SELECTION_CSV, content=CONTENT):
-    sel = load_selection(selection)
-    rows = build_rows()
+def generate(model=GFX11, selection=None, content=CONTENT):
+    """The verdict rows of the arch of @p model, checked against the objects installed under @p content (none: not checked)."""
+    sel = load_selection(model.selection_csv if selection is None else selection)
+    rows = build_rows(model)
     dedupe_check(rows)
-    have = in_tree_hashes(content)
+    have = in_tree_hashes(content, model.arch) if content is not None else None
     out = []
     for r in rows:
-        verdict, prep, dkdv, dq, reduce, rule, basis = expect(r, sel)
+        verdict, prep, dkdv, dq, reduce, rule, basis = expect(r, sel, model)
         r.update(
             verdict=verdict,
             prep=prep,
@@ -703,17 +833,17 @@ def generate(selection=SELECTION_CSV, content=CONTENT):
             rule=rule,
             basis=basis,
         )
-        for slot in SLOT_COLUMNS:
+        for slot in SLOT_COLUMNS if have is not None else ():
             if r[slot] and r[slot] not in have[slot]:
                 raise SystemExit(
-                    f"STOP: {r['id']}: {slot} hash {r[slot]} is not an in-tree gfx11-generic object"
+                    f"STOP: {r['id']}: {slot} hash {r[slot]} is not an in-tree {model.arch} object"
                 )
         out.append(r)
-    for (kernel, *_), hashes in sel.items():
+    for (kernel, *_), hashes in sel.items() if have is not None else ():
         for h in hashes:
             if h not in have["reduce" if kernel == "dbias_reduce" else kernel]:
                 raise SystemExit(
-                    f"STOP: selection hash {h} ({kernel}) is not an in-tree gfx11-generic object"
+                    f"STOP: selection hash {h} ({kernel}) is not an in-tree {model.arch} object"
                 )
     out.sort(key=lambda r: r["id"])
     return out
@@ -759,6 +889,7 @@ def import_bundle(bundle):
         SHIPPED_DTYPES,
         REASONS,
     )
+    assert GFX11.ladders == GFX11_LADDERS
     cases = [
         dict(
             dtype=d,
@@ -812,6 +943,12 @@ def import_bundle(bundle):
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument(
+        "--arch",
+        default="gfx11-generic",
+        choices=sorted(MODELS),
+        help="the arch whose verdict table to write or check",
+    )
+    ap.add_argument(
         "--check",
         action="store_true",
         help="regenerate and diff against the committed CSV",
@@ -819,16 +956,28 @@ def main(argv=None):
     ap.add_argument(
         "--import-bundle",
         metavar="BUNDLE_DIR",
-        help="refresh the vendored routing table from the RDNA bundle",
+        help="gfx11-generic: refresh the vendored routing table from the RDNA bundle",
     )
-    ap.add_argument("--out", type=Path, default=VERDICTS_CSV)
+    ap.add_argument(
+        "--write-selection",
+        action="store_true",
+        help="gfx942, gfx90a: derive the routing table from the arch's S1 reference CSV",
+    )
+    ap.add_argument("--out", type=Path, default=None)
     args = ap.parse_args(argv)
+    model = MODELS[args.arch]
     if args.import_bundle:
+        if not model.from_bundle:
+            ap.error(f"{args.arch} has no bundle: --write-selection")
         import_bundle(args.import_bundle)
         return 0
-    text = render(generate())
+    if args.write_selection:
+        write_selection(model)
+        return 0
+    out = args.out or model.verdicts_csv
+    text = render(generate(model))
     if args.check:
-        have = args.out.read_text()
+        have = out.read_text()
         if have != text:
             sys.stdout.writelines(
                 difflib.unified_diff(
@@ -845,11 +994,11 @@ def main(argv=None):
             )
             return 1
         print(
-            f"sdpa_bwd_verdicts: {args.out.name} is up to date ({text.count(chr(10)) - 1} rows)"
+            f"sdpa_bwd_verdicts: {out.name} is up to date ({text.count(chr(10)) - 1} rows)"
         )
         return 0
-    args.out.write_text(text)
-    print(f"wrote {text.count(chr(10)) - 1} rows to {args.out}")
+    out.write_text(text)
+    print(f"wrote {text.count(chr(10)) - 1} rows to {out}")
     return 0
 
 

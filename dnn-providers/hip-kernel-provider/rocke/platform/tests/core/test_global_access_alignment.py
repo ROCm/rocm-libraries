@@ -11,8 +11,11 @@ hand-written IR reaches the lowerers' default; these tests feed such IR to the
 LLVM and HIP lowerers. Each case runs per engine: the Python engine
 everywhere, the C++ engine where its binding is built, emitting the same text
 or refusing with the same message and status. The builder cases check the
-``align`` the builders record. ``test_global_access_alignment.cpp`` runs the
-same cases through the C API.
+``align`` the builders record. The scalar global loads and stores check a
+given ``align`` with the same rule when they are built, and read it with that
+rule (``core.ir.align_attr``) when they are lowered; without one they keep
+their own claims. ``test_global_access_alignment.cpp`` runs the same cases
+through the C API.
 """
 
 from __future__ import annotations
@@ -20,7 +23,25 @@ from __future__ import annotations
 import re
 
 import pytest
-from rocke.core.ir import F16, F32, F64, I8, IRBuilder, KernelDef, PtrType, VectorType
+from rocke.core.ir import (
+    BF8E5M2,
+    BF16,
+    F16,
+    F32,
+    F64,
+    FP8E4M3,
+    I1,
+    I8,
+    I16,
+    I32,
+    I64,
+    IRBuilder,
+    KernelDef,
+    Op,
+    PtrType,
+    Type,
+    VectorType,
+)
 from rocke.core.ir_serialize import parse
 from rocke.core.lower_llvm import LLVM_FLAVOR_LLVM20
 from rocke.tests.engines import (
@@ -68,6 +89,30 @@ kernel @global_store_without_align {{
     cf.return (  )
   }}
 }}
+"""
+    )
+
+
+def _scalar_copy() -> KernelDef:
+    """Serialized IR that loads an ``f16`` and an ``f32`` from global memory and
+    stores them back through the four scalar global ops, none of them carrying
+    an ``align`` attribute."""
+    return parse(
+        """ckdsl.ir v1
+kernel @global_scalar_copy_without_align {
+  params {
+    %h : ptr<f16,global>
+    %f : ptr<f32,global>
+  }
+  region @entry {
+    %c0 : i32 = arith.constant (  ) { ity = s:"i32", value = i:0 }
+    %x : f16 = memref.global_load ( %h, %c0 )
+    %y : f32 = memref.global_load_typed ( %f, %c0 ) { elem_type = s:"f32" }
+    memref.global_store ( %h, %c0, %x ) { elem_type = s:"f16" }
+    memref.global_store_typed ( %f, %c0, %y )
+    cf.return (  )
+  }
+}
 """
     )
 
@@ -152,6 +197,62 @@ def test_an_llvm_vector_load_refuses_an_invalid_align(
     )
 
 
+@pytest.mark.parametrize("engine", ENGINES)
+def test_an_llvm_scalar_global_access_without_align_keeps_its_claim(engine):
+    """Without ``align`` the ``f16`` load and store claim 2 bytes and the typed
+    load and store claim 1, as each did before it read the shared rule."""
+    ll = lower_with_engine(
+        _scalar_copy(), _ARCH, engine=engine, llvm_flavor=LLVM_FLAVOR_LLVM20
+    )
+    assert re.search(r"= load half, ptr addrspace\(1\) \S+, align 2$", ll, re.MULTILINE)
+    assert re.search(
+        r"= load float, ptr addrspace\(1\) \S+, align 1$", ll, re.MULTILINE
+    )
+    assert re.search(
+        r"store half \S+, ptr addrspace\(1\) \S+, align 2$", ll, re.MULTILINE
+    )
+    assert re.search(
+        r"store float \S+, ptr addrspace\(1\) \S+, align 1$", ll, re.MULTILINE
+    )
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "op_name",
+    [
+        "memref.global_load",
+        "memref.global_load_typed",
+        "memref.global_store",
+        "memref.global_store_typed",
+    ],
+)
+@pytest.mark.parametrize(
+    ("align", "error_type", "refusal"),
+    [
+        (True, TypeError, "align=bool, expected an integer"),
+        (8.0, TypeError, "align=float, expected an integer"),
+        (24, ValueError, "align=24, expected a positive power of two"),
+    ],
+)
+def test_an_llvm_scalar_global_access_refuses_an_invalid_align(
+    engine, op_name, align, error_type, refusal
+):
+    """A scalar global load or store refuses an ``align`` that is not a
+    positive power of two with the vector ops' text, instead of printing
+    ``align 24`` or reading ``True`` or ``8.0`` as another alignment."""
+    kernel = _scalar_copy()
+    (access,) = [op for op in kernel.body.ops if op.name == op_name]
+    access.attrs["align"] = align
+    assert_engine_rejects(
+        kernel,
+        _ARCH,
+        engine=engine,
+        error_type=error_type,
+        message=f"{op_name} failed - {refusal}",
+        llvm_flavor=LLVM_FLAVOR_LLVM20,
+    )
+
+
 @pytest.mark.parametrize(
     ("elem", "lanes", "claim"),
     [(F32, 4, 16), (F32, 3, 4), (F16, 6, 2), (F16, 16, 32), (I8, 12, 1)],
@@ -192,6 +293,7 @@ def test_the_global_vector_store_builder_defaults_to_the_natural_alignment(
     [
         (6, ValueError, "align=6, expected a positive power of two"),
         (0, ValueError, "align=0, expected a positive power of two"),
+        (-4, ValueError, "align=-4, expected a positive power of two"),
         (True, TypeError, "align=bool, expected an integer"),
         (8.0, TypeError, "align=float, expected an integer"),
     ],
@@ -210,3 +312,90 @@ def test_the_global_vector_builders_refuse_an_invalid_align(align, error_type, r
     with pytest.raises(error_type) as store_refusal:
         b.global_store_vN(p, c0, v, 4, align=align)
     assert str(store_refusal.value) == f"memref.global_store_vN failed - {refusal}"
+
+
+# Every scalar global builder: its name, the op it records, the element type it
+# moves, and the ``align`` it records when the caller gives none (``None``:
+# the op records no ``align``).
+_SCALAR_BUILDERS = [
+    ("global_load", "memref.global_load_typed", F32, 1),
+    ("global_load_f16", "memref.global_load", F16, 2),
+    ("global_load_f32", "memref.global_load_typed", F32, 4),
+    ("global_load_i32", "memref.global_load_typed", I32, 4),
+    ("global_load_i64", "memref.global_load_typed", I64, 8),
+    ("global_load_bf16", "memref.global_load_typed", BF16, 2),
+    ("global_load_f64", "memref.global_load_typed", F64, 8),
+    ("global_load_i8", "memref.global_load_typed", I8, 1),
+    ("global_load_i16", "memref.global_load_typed", I16, 2),
+    ("global_load_bf8e5m2", "memref.global_load_typed", BF8E5M2, 1),
+    ("global_load_fp8e4m3", "memref.global_load_typed", FP8E4M3, 1),
+    ("masked_global_load", "memref.global_load_typed", F32, 1),
+    ("global_store", "memref.global_store_typed", F32, 1),
+    ("store", "memref.global_store_typed", F32, None),
+]
+
+
+def _build_scalar_access(builder_name: str, elem: Type, **align: object) -> Op:
+    """Build one access through scalar global builder ``builder_name`` on a
+    ``ptr<elem>`` parameter, passing ``align`` only when given; return the
+    memory op it recorded."""
+    b = IRBuilder(f"{builder_name}_align")
+    ptr = b.param("p", PtrType(elem, "global"))
+    idx = b.const_i32(0)
+    if builder_name == "global_load":
+        b.global_load(ptr, idx, elem, **align)
+    elif builder_name == "masked_global_load":
+        mask = b.param("mask", I1)
+        other = b.param("other", elem)
+        b.masked_global_load(ptr, idx, mask, other, elem, **align)
+    elif builder_name == "global_store":
+        b.global_store(ptr, idx, b.param("v", elem), **align)
+    elif builder_name == "store":
+        b.store(b.param("v", elem), ptr, idx, **align)
+    else:
+        getattr(b, builder_name)(ptr, idx, **align)
+    (access,) = [op for op in b.kernel.body.ops if op.name.startswith("memref.global_")]
+    return access
+
+
+@pytest.mark.parametrize(
+    ("builder_name", "op_name", "elem", "default"),
+    _SCALAR_BUILDERS,
+    ids=[row[0] for row in _SCALAR_BUILDERS],
+)
+def test_a_scalar_global_builder_records_its_default_or_the_given_align(
+    builder_name, op_name, elem, default
+):
+    """Without ``align`` each scalar builder records its own default (``store``
+    records none); a given power of two is recorded as given."""
+    omitted = _build_scalar_access(builder_name, elem)
+    assert omitted.name == op_name
+    assert omitted.attrs.get("align") == default
+    assert _build_scalar_access(builder_name, elem, align=8).attrs["align"] == 8
+
+
+@pytest.mark.parametrize(
+    ("builder_name", "op_name", "elem"),
+    [row[:3] for row in _SCALAR_BUILDERS],
+    ids=[row[0] for row in _SCALAR_BUILDERS],
+)
+@pytest.mark.parametrize(
+    ("align", "error_type", "refusal"),
+    [
+        (0, ValueError, "align=0, expected a positive power of two"),
+        (-4, ValueError, "align=-4, expected a positive power of two"),
+        (3, ValueError, "align=3, expected a positive power of two"),
+        (24, ValueError, "align=24, expected a positive power of two"),
+        (True, TypeError, "align=bool, expected an integer"),
+        (8.0, TypeError, "align=float, expected an integer"),
+    ],
+)
+def test_a_scalar_global_builder_refuses_an_invalid_align(
+    builder_name, op_name, elem, align, error_type, refusal
+):
+    """A given ``align`` that is not a positive power of two is refused when
+    the op is built, with the lowering's text, rather than recorded (``True``
+    as 1, ``8.0`` as 8)."""
+    with pytest.raises(error_type) as refused:
+        _build_scalar_access(builder_name, elem, align=align)
+    assert str(refused.value) == f"{op_name} failed - {refusal}"

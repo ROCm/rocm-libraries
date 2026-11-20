@@ -77,6 +77,12 @@
           "gfx1100": [
             "linux"
           ],
+          "gfx90a": [
+            "linux"
+          ],
+          "gfx942": [
+            "linux"
+          ],
           "gfx950": [
             "linux"
           ]

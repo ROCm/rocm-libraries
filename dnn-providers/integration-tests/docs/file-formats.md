@@ -217,6 +217,9 @@ suffix only when the readable part is not already unique.
 case, for example to add its `golden` pointer. Do not rename ids without a
 reason, because support-claim sidecars name cases by id.
 
+Ops with a per-op plan are written by their generator; edit the plan, not the
+bundle ([test-plans/README.md](test-plans/README.md)).
+
 #### `tensor_patches`
 
 This field is for a case that differs from the template by more than a

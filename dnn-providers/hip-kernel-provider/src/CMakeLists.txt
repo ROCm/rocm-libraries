@@ -716,7 +716,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 
     # The FlyDSL SDPA backward engines, hipkernel:flydsl_sdpa_bwd_split and
-    # hipkernel:flydsl_sdpa_bwd_merged. Split ships gfx950 content and gfx11-generic
+    # hipkernel:flydsl_sdpa_bwd_merged. Split ships gfx950, gfx942 and gfx90a content and gfx11-generic
     # content, which the pack expands to every gfx11 member this build targets; merged
     # ships gfx950 only. Each (engine, architecture) the product ships gets its own
     # engine-pinned target in that architecture's shard, for the reason the gfx950 dense

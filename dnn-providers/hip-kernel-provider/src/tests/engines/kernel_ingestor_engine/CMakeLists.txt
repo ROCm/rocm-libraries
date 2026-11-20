@@ -9,6 +9,8 @@ target_sources(hip_kernel_provider_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/TestKernelIngestorEngine.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestLaunchKernelDefinition.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestMultiLaunchEndToEnd.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestRankingTraceSupport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/TestUnpulledModelsRecord.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/TestRestoredIngestorPlan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddDispatchHandler.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestPointwiseAddMatchers.cpp
@@ -129,6 +131,7 @@ target_sources(hip_kernel_provider_census_tests PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx950AttentionUnified3DCatalogTiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDensePacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseCatalogTiles.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx942AttentionDenseModelBinding.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionPacks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionCatalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestGfx1151WmmaAttentionDecodePacks.cpp
@@ -181,24 +184,30 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
                 HIPKERNELPROVIDER_FLYDSL_ARCHS_${_flydsl_op_upper}="${_flydsl_archs}")
         endforeach()
     endforeach()
-    # The gfx11 verdict table and the manifests whose hashes it names, staged beside the
+    # The gfx11, gfx90a and gfx942 verdict tables and the manifests whose hashes they name, staged beside the
     # descriptor trees so a relocated or staged build tree carries them: the split SDPA
     # backward suites (census and seam) resolve them from the executable's own directory like
     # the descriptor roots. configure_file re-copies when a source changes.
     set(HKP_FLYDSL_SDPA_BWD_DATA_RELDIR "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_RELDIR}/flydsl_sdpa_bwd")
     set(_hkp_bwd_data "${HIPKERNELPROVIDER_TEST_DESCRIPTOR_BUILD_DIR}/flydsl_sdpa_bwd")
     set(_hkp_provider_root "${HKP_INGESTOR_PLAN_SOURCE_DIR}/../../..")
-    configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_gfx11_verdicts.csv"
-                   "${_hkp_bwd_data}/sdpa_bwd_gfx11_verdicts.csv" COPYONLY)
     configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_probe_graphs.csv"
                    "${_hkp_bwd_data}/sdpa_bwd_probe_graphs.csv" COPYONLY)
-    foreach(_hkp_bwd_op sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq)
-        set(_hkp_bwd_manifest
-            "${HKP_INGESTOR_PLAN_SOURCE_DIR}/descriptors/FlyDSL/${_hkp_bwd_op}/gfx11-generic/manifest.json")
-        if(EXISTS "${_hkp_bwd_manifest}")
-            configure_file("${_hkp_bwd_manifest}"
-                           "${_hkp_bwd_data}/${_hkp_bwd_op}/gfx11-generic/manifest.json" COPYONLY)
-        endif()
+    # Each entry is <verdict table arch>:<content directory the table's hashes name>.
+    foreach(_hkp_bwd_table gfx11:gfx11-generic gfx90a:gfx90a gfx942:gfx942)
+        string(REPLACE ":" ";" _hkp_bwd_table_parts "${_hkp_bwd_table}")
+        list(GET _hkp_bwd_table_parts 0 _hkp_bwd_table_arch)
+        list(GET _hkp_bwd_table_parts 1 _hkp_bwd_table_content)
+        configure_file("${_hkp_provider_root}/flydsl/tests/data/sdpa_bwd_${_hkp_bwd_table_arch}_verdicts.csv"
+                       "${_hkp_bwd_data}/sdpa_bwd_${_hkp_bwd_table_arch}_verdicts.csv" COPYONLY)
+        foreach(_hkp_bwd_op sdpa_bwd_prep sdpa_bwd_dkdv sdpa_bwd_dq)
+            set(_hkp_bwd_manifest
+                "${HKP_INGESTOR_PLAN_SOURCE_DIR}/descriptors/FlyDSL/${_hkp_bwd_op}/${_hkp_bwd_table_content}/manifest.json")
+            if(EXISTS "${_hkp_bwd_manifest}")
+                configure_file("${_hkp_bwd_manifest}"
+                               "${_hkp_bwd_data}/${_hkp_bwd_op}/${_hkp_bwd_table_content}/manifest.json" COPYONLY)
+            endif()
+        endforeach()
     endforeach()
     foreach(_hkp_verdict_target hip_kernel_provider_tests hip_kernel_provider_census_tests)
         target_compile_definitions(${_hkp_verdict_target} PRIVATE
@@ -213,5 +222,6 @@ if(HIPKERNELPROVIDER_FLYDSL_ACTIVE)
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaCdnaPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdPacks.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslSdpaBwdSplitPacks.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/packs/TestFlydslModelBinding.cpp
     )
 endif()

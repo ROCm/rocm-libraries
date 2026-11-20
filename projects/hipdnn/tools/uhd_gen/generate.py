@@ -59,6 +59,7 @@ from .immediate import (
     training_binding,
     validate_signature,
 )
+from .optional import optional_feature_of, optional_features
 from .ranking_metrics import DEFAULT_RANKING_METRIC, RANKING_METRICS, ranking_metric
 
 logger = logging.getLogger(__name__)
@@ -1647,11 +1648,15 @@ def feature_recipe(
     kmd_fields: list[str] | None,
     knobs: list[str],
     pairs: list[tuple[str, str]],
+    optional: tuple = (),
 ) -> tuple[list, list]:
     """(signature, omitted proposals): the authored recipe, or one proposed from the corpus.
 
     `kmd_fields` is None for an engine-level run. For a catalog run, `$kernel.*` axes must
-    be shipping UED knobs, checked here before training rather than at promotion.
+    be shipping UED knobs, checked here before training rather than at promotion. A column
+    some rows leave unbound is proposed only if it is one of hipDNN's `optional` features,
+    which training reads through value_or_default; any other gap (a rank some rows' tensor
+    lacks) leaves the column out.
     """
     omitted = []
     if authored is not None:
@@ -1661,8 +1666,15 @@ def feature_recipe(
         scalar_columns = [
             name
             for name in sorted(published)
-            if train_frame[name].notna().all()
+            if (
+                train_frame[name].notna().all()
+                or (
+                    train_frame[name].notna().any()
+                    and optional_feature_of(name, optional) is not None
+                )
+            )
             and train_frame[name]
+            .dropna()
             .map(lambda value: isinstance(value, (str, int, float, bool)))
             .all()
         ]
@@ -1744,7 +1756,8 @@ def _train_and_score(
         if metric:
             raise ValueError(
                 f"slot '{slot}' ranker declares score.metric '{metric}'; a slot ranker "
-                "must be metric-less; train it on a timing label without --metric"
+                "must be metric-less: train it on a timing column with --target <column> "
+                "--objective min and no --metric tflops"
             )
     if main(["evaluate", *eval_args]):
         raise ValueError(f"evaluating {what} failed; no model was published")
@@ -1853,6 +1866,10 @@ def _generate_published(
         str(args.early_stopping),
         *model_encoding_args(args),
         *adapter_args(args),
+        # An mlp_data artifact names its metric, so `train` must be told it. A tree_data
+        # model stays what --target/--objective make it: `--metric time` there only picks the
+        # label, and a slot ranker has to stay metric-less.
+        *(["--metric", named.name] if args.adapter == "mlp_data" else []),
     ]
     if arches:
         train_args += ["--training-arches", *arches]
@@ -1959,6 +1976,9 @@ def _check_generate_arguments(
     args: argparse.Namespace, immediate: bool, output: Path, tree: Path
 ) -> None:
     """Refuse a `generate` request that cannot be honoured, before anything is measured."""
+    from .__main__ import check_adapter_options
+
+    check_adapter_options(args)
     if not 0 <= args.max_graph_failures < 1:
         raise ValueError("--max-graph-failures must be a fraction in [0, 1)")
     if output.exists():
@@ -1993,6 +2013,23 @@ def _check_generate_arguments(
         raise ValueError(
             "--slot selects one slot's rows of a slotted sweep; it needs --dataset"
         )
+    if args.adapter == "mlp_data":
+        if args.slot:
+            raise ValueError(
+                f"--slot {args.slot} trains a slot ranker, and a slot has no time of its own, "
+                "so a slot ranker must be metric-less (RFC 0021 §7); an mlp_data model "
+                "always names the metric it predicts. Train a slot ranker with tree_data or "
+                "linear_data; mlp_data may be the L1 (--role predict_engine) of a slotted "
+                "engine"
+            )
+        if args.metric is None and not immediate:
+            raise ValueError(
+                "an mlp_data model names the metric it predicts, and without --metric "
+                "generate cannot know before measuring that the corpus supplies the label "
+                "(an engine that publishes no graph.flops would fall back to a metric-less "
+                "robustMeanMs label, which mlp_data cannot train): pass --metric tflops or "
+                "--metric time"
+            )
     if args.dataset and (args.knob or args.device or args.workspace_limit is not None):
         raise ValueError(
             "--knob, --device and --workspace-limit shape a measurement, and a "
@@ -2125,7 +2162,13 @@ def _feature_signature(
     else:
         authored = None
     signature, omitted = feature_recipe(
-        train_frame, published, authored, kmd_fields, knobs, pairs
+        train_frame,
+        published,
+        authored,
+        kmd_fields,
+        knobs,
+        pairs,
+        optional_features(args.feature_evaluator),
     )
     withheld = withheld_kernel_fields(kmd_fields or [], knobs, published)
     if immediate:

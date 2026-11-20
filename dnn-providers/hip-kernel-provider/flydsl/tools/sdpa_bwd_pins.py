@@ -10,6 +10,8 @@ ships as it is, except two kinds the content never holds:
   reduce kernel, so it is not the pin;
 * a standalone reduce kernel (``dbias_reduce``, ``dsink_reduce``) of gfx950, whose objects ride inside the dQ and merged ones.
 
+On gfx942 and gfx90a only the first kind occurs: the combined fp32 dQ rows. Their 16-bit rows and standalone reduces ship their pins.
+
 ``tests/data/sdpa_bwd_pin_functions.csv`` holds, per such pin, the sha256 of the pin's kernel function bytes. The per-kernel gate
 (``sdpa_bwd_gate.py``) and ``sdpa_bwd_compare.py`` read it when the reference directory has no object for the pin.
 """
@@ -34,7 +36,14 @@ REDUCE_KERNELS = ("dbias_reduce", "dsink_reduce")
 def holds_no_shipped_object(spec) -> bool:
     """Whether the pin of @p spec (a ``Spec``) is an object the shipped content does not hold."""
     from generators._sdpa_bwd_cdna_build import reduce_symbol_of
+    from generators._sdpa_bwd_spec import CDNA9_ARCHES, family
 
+    if spec.arch in CDNA9_ARCHES:
+        # An fp32 dQ row (the CDNA family) ships its dBias reduce inside its own object; a 16-bit row's reduce is a standalone companion
+        # and its object is its pin.
+        return family(spec.arch, spec.dtype, spec.kernel) == "cdna" and bool(
+            reduce_symbol_of(spec)
+        )
     if spec.arch != "gfx950":
         return False
     return bool(reduce_symbol_of(spec)) or spec.kernel in REDUCE_KERNELS

@@ -338,6 +338,7 @@ TUNING_FIELDS = {
     "block_q",
     "tight_registers",
     "num_stream_buffers",
+    "vec_tail",
 }
 
 # Graph-determined fields that are also knobs of one op, because kernels of that op with
@@ -363,6 +364,12 @@ ALTERNATIVE_KNOBS: dict[str, frozenset[str]] = {
     ),
     "sdpa_bwd_merged": frozenset({"padded", "gqa_pack", "store_db"}),
 }
+
+
+# Per op, the knobs an instance row may leave out, which the KMD reads at the value given here. The KMD of an op is one for every arch,
+# so its schema holds these knobs whichever arch's rows are being described: prep's ``vec_tail`` is set only on the padded gfx942 and
+# gfx90a rows, so the rows of every other arch (and the unset rows) do not carry it.
+KMD_DEFAULTS: dict[str, dict[str, Any]] = {"sdpa_bwd_prep": {"vec_tail": -1}}
 
 
 def knob_fields(op: str, fields: Any) -> list[str]:
@@ -419,6 +426,13 @@ def installed_models(
     installed: dict[str, dict[str, list[tuple[str | None, str]]]] = {}
     for path in sorted(root.rglob("*.uhd.json")) if root.is_dir() else []:
         parts = path.relative_to(root).parts
+        if len(parts) in (4, 5) and parts[0] != ued_id and _is_uuid(parts[0]):
+            raise HkpPackError(
+                f"{path}: filed under engine id {parts[0]}, but this engine's id is now "
+                f"{ued_id}: the id fingerprints the op's KMD fields (ued_id), so a field "
+                "change moved it. Retrain the model, or move it under the new id with its "
+                "trained_against UED id and selector revision updated"
+            )
         if len(parts) not in (4, 5) or parts[0] != ued_id:
             raise HkpPackError(
                 f"{path}: a trained model is installed at "
@@ -454,11 +468,19 @@ def installed_models(
     return installed
 
 
+def _is_uuid(text: str) -> bool:
+    try:
+        uuid.UUID(text)
+    except ValueError:
+        return False
+    return True
+
+
 # uuid5 from a name, so ids are stable across regenerations and adding a
 # thirteenth instance cannot disturb the twelve already shipped. The namespace
-# is itself derived from a URL rather than being a magic constant. The names are
-# unchanged from when these descriptors were emitted in shipped form, so the ids
-# the runtime sees did not move with the switch to authoring them.
+# is itself derived from a URL rather than being a magic constant. The engine's
+# (UED) id also carries a fingerprint of its kernel fields (`ued_id`), so it moves
+# exactly when they do; every other id is the op's name alone.
 _NAMESPACE = uuid.uuid5(
     uuid.NAMESPACE_URL,
     "https://github.com/ROCm/rocm-libraries/dnn-providers/hip-kernel-provider/flydsl",
@@ -467,6 +489,54 @@ _NAMESPACE = uuid.uuid5(
 
 def _uuid(name: str) -> str:
     return str(uuid.uuid5(_NAMESPACE, name))
+
+
+def kmd_fields(op: str, fields: dict[str, str]) -> list[dict[str, Any]]:
+    """The KMD's field records for an op's knobs, in the order its instances declare them."""
+    records = []
+    for name, type_token in fields.items():
+        record: dict[str, Any] = {"name": name, "type": type_token}
+        # Only the tunable field and the knobs of ``KMD_DEFAULTS`` carry a default. The rest are required:
+        # `coerceKernelMetadata` (DescriptorLoader.hpp:1291) drops the whole
+        # pack when a field with no default is missing, which is the loud
+        # failure we want if an instance ever ships without its dtype or N.
+        if name == "block_threads":
+            record["default_value"] = 256
+        elif name in KMD_DEFAULTS.get(op, {}):
+            record["default_value"] = KMD_DEFAULTS[op][name]
+        records.append(record)
+    return records
+
+
+def ued_id(op: str, fields: dict[str, str]) -> str:
+    """The engine's id: its op name and a fingerprint of its KMD's field records.
+
+    Measurements are filed by engine id, and a model is trained against one field list
+    (the UHD pipeline keys each engine's datasets by this id and refuses a collection
+    whose fields differ from the ones its dataset holds). So an engine whose kernel
+    fields change gets a new id, and with it new datasets and a new selector revision,
+    rather than mixing measurements that disagree on what a kernel's fields are.
+    Unchanged fields keep the id, and with it every model trained against the engine.
+    """
+    return _uuid(f"ued/{op}/fields-{_fingerprint(kmd_fields(op, fields))}")
+
+
+def split_ued_id(slot_fields: dict[str, dict[str, str]]) -> str:
+    """The split engine's id: ``ued_id``'s rule over every slot's KMD field records.
+
+    Its slots share one UED, so the id fingerprints each slot's fields in slot (launch)
+    order and moves when any slot's fields change.
+    """
+    records = [
+        {"slot": slot_of(op), "fields": kmd_fields(op, slot_fields[op])}
+        for op in SPLIT_SLOT_OPS
+    ]
+    return _uuid(f"ued/{SPLIT_ENGINE}/fields-{_fingerprint(records)}")
+
+
+def _fingerprint(records: list[dict[str, Any]]) -> str:
+    canonical = json.dumps(records, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
 
 
 class KernelEntry(NamedTuple):
@@ -605,11 +675,14 @@ def collect(content_dir: Path, arch: str) -> list[KernelEntry]:
                 if (source_role, dtype) in by_key
             }
             # A dQ or merged row that stores dB through a reduce names its symbol; the reduce is a standalone companion object (gfx11) or a
-            # second kernel of the row's own object (gfx950), launched through ``sources`` either way. A row with no ``reduce_symbol``
-            # launches none.
+            # second kernel of the row's own object (gfx950; a gfx942/gfx90a ``ship: combined`` fp32 row, beside 16-bit rows whose reduce is
+            # a standalone companion), launched through ``sources`` either way. A row with no ``reduce_symbol`` launches none.
             reduce = row_companions.pop(REDUCE_ROLE, None)
+            combined = record.get("ship") == "combined"
+            if combined:
+                reduce = None
             reduce_symbol = knobs.get("reduce_symbol") if op in MAIN_LAUNCH else None
-            standalone = any(role == REDUCE_ROLE for role, _ in by_key)
+            standalone = not combined and any(role == REDUCE_ROLE for role, _ in by_key)
             if reduce_symbol:
                 if reduce is None and standalone:
                     raise ValueError(
@@ -791,6 +864,7 @@ class OpDescriptors:
         op: str,
         fields: dict[str, str],
         installed: dict[str, dict[str, list[tuple[str | None, str]]]] | None = None,
+        ued: str | None = None,
     ) -> None:
         self.op = op
         self.slot = slot_of(op)
@@ -809,7 +883,13 @@ class OpDescriptors:
         self.udd_id = _uuid(f"udd/{op}")
         # The dispatches of the op's extra packs (``EXTRA_PACKS``): dispatch suffix -> file stem.
         self.extra_packs = EXTRA_PACKS.get(op, {})
-        self.ued_id = _uuid(f"ued/{engine}")
+        if ued is None:
+            if self.slot is not None:
+                raise ValueError(
+                    f"{op}: a slot op shares the split engine's UED id; pass it"
+                )
+            ued = ued_id(op, fields)
+        self.ued_id = ued
         self.umd_id = _uuid(f"umd/{op}/kernel")
         self.estimate_uhd_id = _uuid(f"uhd/{op}/predict_engine")
 
@@ -834,16 +914,7 @@ class OpDescriptors:
         # ingestor declines any graph whose schema floor is above it.
         if self.op in SDK_VERSION_BY_OP:
             ued["sdk_version"] = SDK_VERSION_BY_OP[self.op]
-        kmd_fields = []
-        for name, type_token in self.fields.items():
-            field: dict[str, Any] = {"name": name, "type": type_token}
-            # Only the tunable field carries a default. The rest are required:
-            # `coerceKernelMetadata` (DescriptorLoader.hpp:1291) drops the whole
-            # pack when a field with no default is missing, which is the loud
-            # failure we want if an instance ever ships without its dtype or N.
-            if name == "block_threads":
-                field["default_value"] = 256
-            kmd_fields.append(field)
+        kmd = kmd_fields(self.op, self.fields)
 
         # The dispatches of the extra packs of an op (``EXTRA_PACKS``): shared documents, authored with
         # every arch's pack of the op whether or not that arch has such rows.
@@ -938,7 +1009,7 @@ class OpDescriptors:
                 "version": DESCRIPTOR_VERSION,
                 "id": self.kmd_id,
                 "name": f"flydsl {self.op} variant fields",
-                "fields": kmd_fields,
+                "fields": kmd,
             },
             f"{self.stem}.uhd.json": {
                 "version": DESCRIPTOR_VERSION,
@@ -1060,25 +1131,33 @@ def kmd_knobs(entry: KernelEntry, lds_limits: dict[str, int]) -> dict[str, Any]:
 def _fields_for_op(entries: list[KernelEntry]) -> dict[str, str]:
     """The metadata schema for an op, derived from its instances' knobs (``kmd_knobs``).
 
-    Every instance must declare the same knob set: a schema is one shape, and an
+    Every instance must declare the same knob set, but for the knobs of ``KMD_DEFAULTS``, which a row may leave out: a schema is one shape, and an
     instance that carries a knob its siblings do not is a generator bug that
     would otherwise surface as a silently unselectable kernel.
     """
     fields: dict[str, str] = {}
     first: dict[str, Any] | None = None
+    defaults = KMD_DEFAULTS.get(entries[0].op, {})
     limits = _lds_tile_limits(entries)
     for entry in entries:
         knobs = kmd_knobs(entry, limits)
         if first is None:
             first = knobs
             fields["dtype"] = "string"
-            for key, value in knobs.items():
-                fields[key] = _metadata_type(value)
-        elif set(knobs) != set(first):
+        # Rows differ only in the knobs of KMD_DEFAULTS, which a row may leave out.
+        elif set(knobs) - set(defaults) != set(first) - set(defaults):
             raise HkpPackError(
                 f"{entry.record['name']} declares knobs {sorted(knobs)} but its "
                 f"siblings declare {sorted(first)}; one op is one schema"
             )
+        for key, value in knobs.items():
+            fields.setdefault(key, _metadata_type(value))
+    # The schema does not depend on which arch's rows are described, nor on which of them spell a default knob: it sits before ``grid``.
+    for key, value in defaults.items():
+        type_token = fields.pop(key, None) or _metadata_type(value)
+        tail = {"grid": fields.pop("grid")} if "grid" in fields else {}
+        fields[key] = type_token
+        fields.update(tail)
     for name in fields:
         homes = [
             label
@@ -1267,7 +1346,8 @@ class SplitEngine:
     engine's plans cannot be saved.
     """
 
-    def __init__(self, slot_ops: dict[str, OpDescriptors]) -> None:
+    def __init__(self, slot_ops: dict[str, OpDescriptors], engine_id: str) -> None:
+        self.ued_id = engine_id
         self.slot_ops = slot_ops
         self.stem = f"flydsl_{SPLIT_ENGINE}"
         self.symbols = f"hipkernel.{self.stem}"
@@ -1275,7 +1355,7 @@ class SplitEngine:
     def documents(self) -> dict[str, dict[str, Any]]:
         ued: dict[str, Any] = {
             "version": SLOTTED_VERSION,
-            "id": _uuid(f"ued/{SPLIT_ENGINE}"),
+            "id": self.ued_id,
             "name": f"hipkernel:{self.stem}",
             # Pass-by-value scalars (softmax scale, dropout seed and offset), ragged
             # tensors, non-default alignment and ragged offset multipliers.
@@ -1297,20 +1377,33 @@ class SplitEngine:
 
 
 def build_documents(
-    entries: list[KernelEntry], arch: str, content_dir: Path = CONTENT_DIR
+    entries: list[KernelEntry], arch: str, content_dir: Path | None = None
 ) -> dict[Path, dict[str, dict[str, Any]]]:
     """Every document for `arch`, grouped by the folder (relative to the content
-    root) it is written into."""
+    root) it is written into. Installed models are read from `content_dir`
+    (default: the provider's content root)."""
+    if content_dir is None:
+        content_dir = CONTENT_DIR
     by_op: dict[str, list[KernelEntry]] = {}
     for entry in entries:
         by_op.setdefault(entry.op, []).append(entry)
 
     folders: dict[Path, dict[str, dict[str, Any]]] = {}
+    fields_by_op = {op: _fields_for_op(op_entries) for op, op_entries in by_op.items()}
+    split_id = None
+    if any(slot_of(op) is not None for op in by_op):
+        # With a slot missing this id is provisional: the per-op checks below run first,
+        # then the arch is refused for the missing slot.
+        split_id = split_ued_id({op: fields_by_op.get(op, {}) for op in SPLIT_SLOT_OPS})
     slot_ops: dict[str, OpDescriptors] = {}
     slot_packs: dict[str, list[dict[str, Any]]] = {}
     for op_name, op_entries in sorted(by_op.items()):
-        installed = installed_models(content_dir / op_name, _uuid(f"ued/{op_name}"))
-        op = OpDescriptors(op_name, _fields_for_op(op_entries), installed)
+        fields = fields_by_op[op_name]
+        engine_id = (
+            split_id if slot_of(op_name) is not None else ued_id(op_name, fields)
+        )
+        installed = installed_models(content_dir / op_name, engine_id)
+        op = OpDescriptors(op_name, fields, installed, engine_id)
         folders[Path(op_name)] = op.documents()
         folders[Path(op_name) / arch] = pack = _arch_documents(op_entries, op, arch)
         if op.slot is not None:
@@ -1330,7 +1423,7 @@ def build_documents(
                 f"no content for {missing}"
             )
         _require_disjoint_ids(slot_packs)
-        engine = SplitEngine({op: slot_ops[op] for op in SPLIT_SLOT_OPS})
+        engine = SplitEngine({op: slot_ops[op] for op in SPLIT_SLOT_OPS}, split_id)
         folders[Path(SPLIT_ENGINE)] = engine.documents()
     return folders
 

@@ -270,3 +270,36 @@ def test_a_published_dataset_is_written_in_the_encoding_asked_for(
     )
     assert code == 0
     assert encoding_of(output / "model" / "model.bin") == written
+
+
+def test_a_published_dataset_trains_an_mlp_data_model_that_names_its_metric(
+    published, evaluator
+):
+    """An mlp_data artifact names the metric it predicts, so `generate` must hand `train` the
+    metric, not only the label column and direction it implies."""
+    code, output = _generate(
+        published,
+        evaluator,
+        "mlp",
+        "--features",
+        "q.M",
+        "kernel.solver_id",
+        "--adapter",
+        "mlp_data",
+        "--metric",
+        "time",
+        "--mlp-epochs",
+        "5",
+        "--mlp-members",
+        "1",
+    )
+    assert code == 0
+    uhd = json.loads(
+        (output / "model" / "heuristic.uhd.json").read_text(encoding="utf-8")
+    )
+    assert uhd["adapter"] == "mlp_data" and "tree_data" not in uhd
+    assert (uhd["score"]["metric"], uhd["objective"]) == ("time", "min")
+    manifest = json.loads(
+        (output / "generation_manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest["models"][0]["target"] == "avgTimeMs"

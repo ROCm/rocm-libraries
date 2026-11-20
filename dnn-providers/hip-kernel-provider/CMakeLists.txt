@@ -569,12 +569,12 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
     endif()
 endif()
 
-# The architectures the FlyDSL SDPA backward engines can ship for: gfx950 and every gfx11
-# member the gfx11-generic content expands to, as flydsl/ expands it. The backward test
+# The architectures the FlyDSL SDPA backward engines can ship for: gfx950, gfx90a, gfx942 and every
+# gfx11 member the gfx11-generic content expands to, as flydsl/ expands it. The backward test
 # registrations in src/ and src/integration_tests/ both iterate this list.
 include(${CMAKE_CURRENT_LIST_DIR}/flydsl/FlydslArchFamilies.cmake)
 _flydsl_target_members(gfx11-generic HKP_FLYDSL_SDPA_BWD_ARCHS _hkp_bwd_gfx11_members)
-set(HKP_FLYDSL_SDPA_BWD_ARCHS gfx950 ${_hkp_bwd_gfx11_members})
+set(HKP_FLYDSL_SDPA_BWD_ARCHS gfx950 gfx90a gfx942 ${_hkp_bwd_gfx11_members})
 
 # hkp_flydsl_sdpa_bwd_arch_toml(<out_var> <engine> <arch>)
 #

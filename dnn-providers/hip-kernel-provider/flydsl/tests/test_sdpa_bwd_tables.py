@@ -28,6 +28,7 @@ sys.path.insert(0, str(FLYDSL))
 from generators import _instances  # noqa: E402
 from generators._sdpa_bwd_cdna_build import read_reference  # noqa: E402
 from generators._sdpa_bwd_spec import (  # noqa: E402
+    ABSENT_WHEN_UNSET,
     KERNELS,
     LADDER,
     KNOBS,
@@ -46,6 +47,7 @@ DOMAIN = {
     "tight_registers": {-1, 0, 1},
     "gqa_pack": {-1, 1},
     "sink": {-1, 1},
+    "vec_tail": {-1, 1},
     "bias_stage": {"auto", "direct"},
     "role_order": {"auto", "concat", "lpt"},
     "bias_f32": {-1, 1},
@@ -72,7 +74,11 @@ def test_every_row_of_an_op_has_that_ops_knob_set(tables) -> None:
             set(ROW_FIELDS) | set(KNOBS[kernel]) | set(NON_KEY_FIELDS.get(kernel, ()))
         )
         for instance in tables[f"sdpa_bwd_{kernel}"]:
-            assert set(instance.knobs) == expected, instance.name
+            # A row leaves out the knobs it does not set (``ABSENT_WHEN_UNSET``).
+            assert set(instance.knobs) - set(ABSENT_WHEN_UNSET) == (
+                expected - set(ABSENT_WHEN_UNSET)
+            ), instance.name
+            assert "vec_tail" not in instance.knobs or instance.knobs["vec_tail"] != -1
 
 
 def test_knobs_stay_in_their_domains(tables) -> None:
@@ -100,7 +106,7 @@ def test_merged_rows_name_the_reduce_kernel_of_their_class(tables) -> None:
             instance,
             knobs={k: v for k, v in instance.knobs.items() if k != "reduce_symbol"},
         )
-        assert to_spec(stripped) == to_spec(instance)
+        assert to_spec(stripped, "gfx950") == to_spec(instance, "gfx950")
     assert sum(bool(i.knobs["reduce_symbol"]) for i in rows) == 60
     assert sum(bool(i.knobs["has_bias"]) for i in rows) == 136
     assert len(rows) == 325
@@ -130,14 +136,14 @@ def test_dq_rows_name_the_reduce_kernel_of_their_dtype(tables) -> None:
 def test_only_the_merged_and_dq_rows_may_carry_a_reduce_symbol(tables) -> None:
     row = tables["sdpa_bwd_prep"][0]
     with pytest.raises(ValueError, match="reduce_symbol"):
-        to_spec(replace(row, knobs={**row.knobs, "reduce_symbol": ""}))
+        to_spec(replace(row, knobs={**row.knobs, "reduce_symbol": ""}), "gfx950")
 
 
 def test_rows_round_trip_through_the_spec(tables) -> None:
     """Row -> Spec -> key -> Spec is stable."""
     for rows in tables.values():
         for instance in rows:
-            spec = to_spec(instance)  # validates: a malformed row raises here
+            spec = to_spec(instance, "gfx950")  # validates: a malformed row raises here
             assert Spec.parse(spec.key()) == spec
 
 
@@ -147,7 +153,7 @@ def test_tables_are_the_reference_set(tables) -> None:
     built = {}
     for rows in tables.values():
         for instance in rows:
-            key = to_spec(instance).key()
+            key = to_spec(instance, "gfx950").key()
             digest = hashlib.sha256(key.encode()).hexdigest()[:12]
             assert reference[digest]["spec"] == key
             built[digest] = key
@@ -162,7 +168,7 @@ def test_the_superseded_pins_are_replaced_in_the_tables_and_the_reference(
     tables,
 ) -> None:
     """Asserted against literals, not against the generator's own filter: a regression there would feed both sides."""
-    in_tables = {to_spec(i).hash() for rows in tables.values() for i in rows}
+    in_tables = {to_spec(i, "gfx950").hash() for rows in tables.values() for i in rows}
     assert sum(len(rows) for rows in tables.values()) == 2707
     assert {op: len(rows) for op, rows in tables.items()} == {
         "sdpa_bwd_prep": 86,
@@ -264,8 +270,10 @@ def test_the_engines_restated_ladder_and_exact_tiles_match_the_tables(tables) ->
     ladder, exact_tiles, _ = _engine_constants()
     assert ladder == LADDER
     rows = tables["sdpa_bwd_merged"]
-    assert {to_spec(r).tile for r in rows} == {32, *exact_tiles}
-    assert {to_spec(r).tile for r in rows if to_spec(r).padded} == {32}
+    assert {to_spec(r, "gfx950").tile for r in rows} == {32, *exact_tiles}
+    assert {to_spec(r, "gfx950").tile for r in rows if to_spec(r, "gfx950").padded} == {
+        32
+    }
 
 
 def test_the_engines_pack_bound_covers_every_packed_row(tables, monkeypatch) -> None:
@@ -277,7 +285,10 @@ def test_the_engines_pack_bound_covers_every_packed_row(tables, monkeypatch) -> 
 
     packed = [r for r in tables["sdpa_bwd_merged"] if r.knobs["gqa_pack"] == 1]
     assert packed
-    block_q = {r.name: build._build_merged(to_spec(r)).knobs[0].block_q for r in packed}
+    block_q = {
+        r.name: build._build_merged(to_spec(r, "gfx950")).knobs[0].block_q
+        for r in packed
+    }
     bound = _engine_constants()[2]
     assert (
         max(block_q.values()) <= bound
@@ -304,12 +315,12 @@ def test_gfx11_rows_are_the_s1_reference_set() -> None:
         reference = {row["hash"]: row["spec"] for row in csv.DictReader(fh)}
     built = {}
     for kind in ("prep", "dkdv", "dq", "dbias_reduce"):
-        for spec in build.specs_for(kind):
+        for spec in build.specs_for(kind, GFX11):
             assert spec.hash() not in built
             built[spec.hash()] = spec.key()
     assert built == reference
     assert [
-        len(build.specs_for(k)) for k in ("prep", "dkdv", "dq", "dbias_reduce")
+        len(build.specs_for(k, GFX11)) for k in ("prep", "dkdv", "dq", "dbias_reduce")
     ] == [
         33,
         238,
@@ -410,6 +421,8 @@ def _tables_tool():
     [
         ("gfx950", "sdpa_bwd_reference.csv"),
         ("gfx11-generic", "sdpa_bwd_gfx11_reference.csv"),
+        ("gfx942", "sdpa_bwd_gfx942_reference.csv"),
+        ("gfx90a", "sdpa_bwd_gfx90a_reference.csv"),
     ],
 )
 def test_the_tables_tool_renders_the_installed_tables_from_their_reference(
@@ -459,6 +472,17 @@ def test_every_gfx950_pin_records_its_rmir_scan() -> None:
         newline="", encoding="utf-8"
     ) as fh:
         assert "rmir_scan" not in (csv.DictReader(fh).fieldnames or ())
+
+
+@pytest.mark.parametrize("arch", ["gfx942", "gfx90a"])
+def test_every_cdna9_pin_records_a_clean_rmir_scan(arch: str) -> None:
+    """The detector reads gfx942 and gfx90a MIR: each pin is a `clean` scan of the pinned object (no pinned exceptions there)."""
+    with (DATA / f"sdpa_bwd_{arch}_reference.csv").open(
+        newline="", encoding="utf-8"
+    ) as fh:
+        scans = [row["rmir_scan"] for row in csv.DictReader(fh)]
+    assert scans
+    assert set(scans) == {"clean"}
 
 
 def test_the_merged_engine_declines_exactly_the_biased_pinned_exceptions() -> None:

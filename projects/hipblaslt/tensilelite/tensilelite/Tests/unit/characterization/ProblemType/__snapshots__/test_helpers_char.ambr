@@ -42,6 +42,7 @@
     'NumIndicesLD',
     'OperationType',
     'OutputAmaxD',
+    'OutputPeerD',
     'ScaleBlockSizesA',
     'ScaleZeroPointA',
     'SetConstStrideA',
@@ -193,6 +194,9 @@
       'str',
     ]),
     'OutputAmaxD': list([
+      'bool',
+    ]),
+    'OutputPeerD': list([
       'bool',
     ]),
     'ScaleBlockSizesA': list([

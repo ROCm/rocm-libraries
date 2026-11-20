@@ -42,6 +42,13 @@ FORBIDDEN_UED_MEMBERS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_installed_models(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # These rows are synthetic, so their fields give engine ids no installed model was
+    # trained against: the models in the real tree must stay out of reach.
+    monkeypatch.setattr(gd, "CONTENT_DIR", tmp_path)
+
+
 def _entry(
     op: str,
     name: str,
@@ -211,7 +218,7 @@ def test_a_slots_knobs_are_its_own_tuning_fields() -> None:
     # head_dim is a graph fact but also an alternative of every slot, whose tiles overlap,
     # and every slot's schedule fields are knobs.
     assert by_slot == {
-        "prep": ["head_dim", "block_m", "waves_per_eu"],
+        "prep": ["head_dim", "block_m", "waves_per_eu", "vec_tail"],
         "dkdv": ["head_dim", "block_m", "waves_per_eu"],
         "dq": ["head_dim", "block_m", "waves_per_eu"],
     }

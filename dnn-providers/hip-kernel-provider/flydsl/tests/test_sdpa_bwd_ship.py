@@ -108,11 +108,11 @@ def rig(tmp_path, monkeypatch):
     plain, bias, bias_no_db = _rows()
     reference_dir = tmp_path / "reference"
     reference_dir.mkdir()
-    (reference_dir / f"{to_spec(bias_no_db).hash()}.hsaco").write_bytes(PIN)
+    (reference_dir / f"{to_spec(bias_no_db, "gfx950").hash()}.hsaco").write_bytes(PIN)
     reference = {
-        to_spec(i).hash(): {
-            "hash": to_spec(i).hash(),
-            "spec": to_spec(i).key(),
+        to_spec(i, "gfx950").hash(): {
+            "hash": to_spec(i, "gfx950").hash(),
+            "spec": to_spec(i, "gfx950").key(),
             "sha256": _sha(REBUILT if i is plain else PIN),
             "rmir_scan": "clean",
         }
@@ -130,10 +130,10 @@ def rig(tmp_path, monkeypatch):
     # The bias row that never stores dB is the nondeterministic list's standalone row, its rebuild a recorded variant; `rig.exceptions` starts empty.
     rig.exceptions = {}
     rig.listed = {
-        to_spec(bias_no_db).hash(): nondet.Row(
+        to_spec(bias_no_db, "gfx950").hash(): nondet.Row(
             ARCH,
-            to_spec(bias_no_db).hash(),
-            to_spec(bias_no_db).key(),
+            to_spec(bias_no_db, "gfx950").hash(),
+            to_spec(bias_no_db, "gfx950").key(),
             "variants",
             _sha(PIN),
             (_sha(REBUILT),),
@@ -141,7 +141,7 @@ def rig(tmp_path, monkeypatch):
             "test",
         )
     }
-    rig.expected_shipped = {to_spec(bias_no_db).hash()}
+    rig.expected_shipped = {to_spec(bias_no_db, "gfx950").hash()}
     rig.shipped_gates = []
     rig.outcomes = {
         plain.name: build.Outcome(
@@ -166,7 +166,9 @@ def rig(tmp_path, monkeypatch):
         assert reference_dir == rig.reference_dir
         assert rebuild_unstable
         assert shipped_pins == rig.expected_shipped
-        by_hash = {to_spec(i).hash(): i.name for i in (plain, bias, bias_no_db)}
+        by_hash = {
+            to_spec(i, "gfx950").hash(): i.name for i in (plain, bias, bias_no_db)
+        }
         return [rig.outcomes[by_hash[s.hash()]] for s in specs]
 
     def run_gate(
@@ -238,8 +240,8 @@ def rig(tmp_path, monkeypatch):
         folder.mkdir(parents=True, exist_ok=True)
         (folder / "bias.hsaco").write_bytes(blob)
         row = {
-            "spec_hash": to_spec(bias).hash(),
-            "spec": to_spec(bias).key(),
+            "spec_hash": to_spec(bias, "gfx950").hash(),
+            "spec": to_spec(bias, "gfx950").key(),
             "file": "bias.hsaco",
             "sha256": manifest_sha or _sha(blob),
         }
@@ -249,10 +251,10 @@ def rig(tmp_path, monkeypatch):
         rig.stored_dir = tmp_path / "stored"
 
     def list_combined(variant_functions=(FUNCTION_VARIANT,)):
-        rig.listed[to_spec(bias).hash()] = nondet.Row(
+        rig.listed[to_spec(bias, "gfx950").hash()] = nondet.Row(
             ARCH,
-            to_spec(bias).hash(),
-            to_spec(bias).key(),
+            to_spec(bias, "gfx950").hash(),
+            to_spec(bias, "gfx950").key(),
             "variants",
             _sha(PIN),
             (),
@@ -342,7 +344,7 @@ def test_a_tailzero_object_that_does_not_build_ships_nothing(rig) -> None:
 
 def test_a_tuned_row_without_a_reference_row_still_stops_the_run(rig) -> None:
     reference = build.read_reference()
-    del reference[build.to_spec(rig.plain).hash()]
+    del reference[build.to_spec(rig.plain, "gfx950").hash()]
     with pytest.raises(GeneratorError, match="the reference has no row"):
         rig.generate()
 
@@ -373,10 +375,10 @@ def test_a_listed_row_ships_its_pin_when_its_rebuild_is_a_recorded_variant(
     rig,
 ) -> None:
     variant = b"a recorded variant"
-    rig.listed[to_spec(rig.bias_no_db).hash()] = nondet.Row(
+    rig.listed[to_spec(rig.bias_no_db, "gfx950").hash()] = nondet.Row(
         ARCH,
-        to_spec(rig.bias_no_db).hash(),
-        to_spec(rig.bias_no_db).key(),
+        to_spec(rig.bias_no_db, "gfx950").hash(),
+        to_spec(rig.bias_no_db, "gfx950").key(),
         "variants",
         _sha(PIN),
         (_sha(variant),),
@@ -396,11 +398,11 @@ def test_a_listed_row_whose_rebuild_has_a_recorded_main_function_ships_its_pin(
     rig,
 ) -> None:
     function = "f" * 64
-    key = to_spec(rig.bias_no_db).hash()
+    key = to_spec(rig.bias_no_db, "gfx950").hash()
     rig.listed[key] = nondet.Row(
         ARCH,
         key,
-        to_spec(rig.bias_no_db).key(),
+        to_spec(rig.bias_no_db, "gfx950").key(),
         "variants",
         _sha(PIN),
         (),
@@ -489,12 +491,12 @@ def test_a_listed_combined_row_without_an_intact_stored_object_stops_the_run(
 
 
 def test_an_exception_row_ships_its_pin_with_the_exceptions_reason(rig) -> None:
-    key = to_spec(rig.bias_no_db).hash()
+    key = to_spec(rig.bias_no_db, "gfx950").hash()
     rig.listed = {}
     rig.exceptions = {
         key: {
             "hash": key,
-            "spec": to_spec(rig.bias_no_db).key(),
+            "spec": to_spec(rig.bias_no_db, "gfx950").key(),
             "pin_sha256": _sha(PIN),
             "reason": "known-bad-fresh-build",
             "evidence": "test",
@@ -505,17 +507,17 @@ def test_an_exception_row_ships_its_pin_with_the_exceptions_reason(rig) -> None:
 
 
 def _combined_exception(rig, pin_sha256: str) -> None:
-    key = to_spec(rig.bias).hash()
+    key = to_spec(rig.bias, "gfx950").hash()
     rig.exceptions = {
         key: {
             "hash": key,
-            "spec": to_spec(rig.bias).key(),
+            "spec": to_spec(rig.bias, "gfx950").key(),
             "pin_sha256": pin_sha256,
             "reason": "known-bad-fresh-build",
             "evidence": "test",
         }
     }
-    rig.expected_shipped = {key, to_spec(rig.bias_no_db).hash()}
+    rig.expected_shipped = {key, to_spec(rig.bias_no_db, "gfx950").hash()}
 
 
 def test_a_combined_exception_row_ships_its_stored_object_whatever_its_rebuild_is(
@@ -564,12 +566,12 @@ def test_a_combined_exception_row_without_its_stored_object_stops_the_run(
 
 
 def test_a_plain_exception_row_must_name_its_reference_pin(rig) -> None:
-    key = to_spec(rig.bias_no_db).hash()
+    key = to_spec(rig.bias_no_db, "gfx950").hash()
     rig.listed = {}
     rig.exceptions = {
         key: {
             "hash": key,
-            "spec": to_spec(rig.bias_no_db).key(),
+            "spec": to_spec(rig.bias_no_db, "gfx950").key(),
             "pin_sha256": _sha(STORED),
             "reason": "known-bad-fresh-build",
             "evidence": "test",
@@ -602,7 +604,7 @@ def test_a_combined_row_is_rebuilt_until_its_dual_object_resolves(monkeypatch) -
         build, "_compile_all", lambda compile_one, tasks, arch, label: [next(results)]
     )
     (outcome,) = build.compile_specs(
-        [to_spec(bias)], ARCH, rebuild_unstable=True, shipped_pins=frozenset()
+        [to_spec(bias, "gfx950")], ARCH, rebuild_unstable=True, shipped_pins=frozenset()
     )
     assert (outcome.status, outcome.attempts) == ("ok", 3)
 
@@ -619,21 +621,24 @@ def test_a_row_that_ships_its_pin_is_built_once_and_the_others_are_rebuilt(
 
     monkeypatch.setattr(build, "_compile_all", compile_all)
     outcomes = build.compile_specs(
-        [to_spec(plain), to_spec(pinned)],
+        [to_spec(plain, "gfx950"), to_spec(pinned, "gfx950")],
         ARCH,
         rebuild_unstable=True,
-        shipped_pins=frozenset({to_spec(pinned).hash()}),
+        shipped_pins=frozenset({to_spec(pinned, "gfx950").hash()}),
     )
-    assert rounds[0] == [to_spec(plain).hash(), to_spec(pinned).hash()]
-    assert all(r == [to_spec(plain).hash()] for r in rounds[1:])
+    assert rounds[0] == [
+        to_spec(plain, "gfx950").hash(),
+        to_spec(pinned, "gfx950").hash(),
+    ]
+    assert all(r == [to_spec(plain, "gfx950").hash()] for r in rounds[1:])
     assert len(rounds) == build._ATTEMPTS
     assert [o.attempts for o in outcomes] == [build._ATTEMPTS, 1]
 
 
 def test_a_listed_pin_that_is_not_its_reference_object_is_refused(rig) -> None:
-    (rig.reference_dir / f"{to_spec(rig.bias_no_db).hash()}.hsaco").write_bytes(
-        b"edited"
-    )
+    (
+        rig.reference_dir / f"{to_spec(rig.bias_no_db, "gfx950").hash()}.hsaco"
+    ).write_bytes(b"edited")
     with pytest.raises(GeneratorError, match="not the pin its reference row names"):
         rig.generate()
 
@@ -751,19 +756,19 @@ def test_a_listed_pin_that_is_its_own_red_rebuild_stops_the_run(rig) -> None:
 @pytest.mark.parametrize("scan", ["", "unscanned"])
 def test_a_shipped_pin_without_a_recorded_clean_scan_stops_the_run(rig, scan) -> None:
     """A stored pin ships only when its reference row records the pin's own scan (`clean`, or `exception` for a pinned exception)."""
-    rig.reference[to_spec(rig.bias_no_db).hash()]["rmir_scan"] = scan
+    rig.reference[to_spec(rig.bias_no_db, "gfx950").hash()]["rmir_scan"] = scan
     with pytest.raises(GeneratorError, match="no recorded clean R-MIR scan") as stop:
         rig.generate()
     assert rig.bias_no_db.name in str(stop.value)
 
 
 def test_a_pinned_exception_ships_with_an_exception_scan_record(rig) -> None:
-    key = to_spec(rig.bias_no_db).hash()
+    key = to_spec(rig.bias_no_db, "gfx950").hash()
     rig.listed = {}
     rig.exceptions = {
         key: {
             "hash": key,
-            "spec": to_spec(rig.bias_no_db).key(),
+            "spec": to_spec(rig.bias_no_db, "gfx950").key(),
             "pin_sha256": _sha(PIN),
             "reason": "known-bad-fresh-build",
             "evidence": "test",
@@ -783,12 +788,12 @@ def test_a_listed_pin_whose_rebuild_is_a_red_variant_still_ships(rig) -> None:
 
 def test_an_exception_pin_that_is_its_own_red_rebuild_ships(rig) -> None:
     """A pinned exception is covered by its device screen, not by R-MIR."""
-    key = to_spec(rig.bias_no_db).hash()
+    key = to_spec(rig.bias_no_db, "gfx950").hash()
     rig.listed = {}
     rig.exceptions = {
         key: {
             "hash": key,
-            "spec": to_spec(rig.bias_no_db).key(),
+            "spec": to_spec(rig.bias_no_db, "gfx950").key(),
             "pin_sha256": _sha(PIN),
             "reason": "known-bad-fresh-build",
             "evidence": "test",
@@ -805,7 +810,7 @@ def test_the_specs_mode_fails_on_an_object_that_is_not_scanned_clean(
     tmp_path, monkeypatch, capsys, verdict, rc
 ) -> None:
     plain, _, _ = _rows()
-    spec = to_spec(plain)
+    spec = to_spec(plain, "gfx950")
     specs = tmp_path / "specs.csv"
     specs.write_text(f'spec\n"{spec.key()}"\n')
     monkeypatch.setattr(
@@ -865,7 +870,7 @@ def two_kernels(monkeypatch):
     monkeypatch.setattr(build, "verify_arch", lambda described, arch, where: None)
 
     def verify(reduce_symbol=REDUCE_SYMBOL):
-        return build.verify(b"", to_spec(bias), ARCH, "where", reduce_symbol)
+        return build.verify(b"", to_spec(bias, "gfx950"), ARCH, "where", reduce_symbol)
 
     verify.objects = objects
     return verify
@@ -918,12 +923,18 @@ def test_verify_of_a_merged_kernel_with_the_wrong_layout_is_refused(
 
 def test_every_pinned_exception_names_its_reference_row() -> None:
     """A plain row ships the reference pin; a combined row ships a stored combined object, so its pin differs from the reference's."""
-    reference = build.read_reference()
+    data = FLYDSL / "tests" / "data"
+    references = {
+        "gfx950": build.read_reference(),
+        "gfx90a": build.read_reference(data / "sdpa_bwd_gfx90a_reference.csv"),
+        "gfx942": build.read_reference(data / "sdpa_bwd_gfx942_reference.csv"),
+    }
     nondeterministic = nondet.read()
     exceptions = build.read_exceptions()
     assert exceptions
     for h, row in exceptions.items():
         spec = build.Spec.parse(row["spec"])
+        reference = references[spec.arch]
         assert spec.hash() == h
         assert spec.kernel != "merged" or h not in nondeterministic
         assert reference[h]["spec"] == row["spec"]

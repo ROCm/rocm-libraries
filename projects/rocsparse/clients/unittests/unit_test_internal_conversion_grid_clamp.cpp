@@ -747,10 +747,10 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_grid_stride)
 }
 
 // The f64 -> f32 conversion error is reduced on the device, copied back
-// asynchronously and printed by convert_array. The host may only read the copy
-// after the stream synchronization, so the printed value must be the exact
-// maximum error. The largest error sits in the last item, reached only by the
-// stride loop.
+// asynchronously and written to the debug log by convert_array. The host may only
+// read the copy after the stream synchronization, so the logged value must be the
+// exact maximum error. The largest error sits in the last item, reached only by the
+// stride loop. Nothing is printed to stdout.
 TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
 {
     std::vector<double> source(convert_nitems);
@@ -769,13 +769,13 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
     ASSERT_GT(expected_error, 0.0);
 
     std::ostringstream expected;
-    expected << "rocsparse_convert_array numerical conversion error " << expected_error
-             << " invalid data." << std::endl;
+    expected << "rocsparse_convert_array numerical conversion error " << expected_error;
 
     device_vector<double> d_source(source);
     device_vector<float>  d_target(std::vector<float>(convert_nitems, -1.0f));
 
     ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+    ScopedDebugLog     log(handle);
     testing::internal::CaptureStdout();
     const rocsparse_status status  = rocsparse::convert_array(handle,
                                                              convert_nitems,
@@ -786,7 +786,8 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
     const std::string      printed = testing::internal::GetCapturedStdout();
 
     ASSERT_EQ(status, rocsparse_status_success);
-    EXPECT_EQ(printed, expected.str());
+    EXPECT_EQ(printed, "");
+    EXPECT_NE(log.sink.str().find(expected.str()), std::string::npos) << log.sink.str();
 }
 
 // ===========================================================================
