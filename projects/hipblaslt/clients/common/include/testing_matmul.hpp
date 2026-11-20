@@ -2738,13 +2738,26 @@ void testing_matmul_with_bias(const Arguments& arg,
 
     std::vector<HipHostBuffer> hE, hE_gold, hBias, hBias_gold;
     std::vector<HipHostBuffer> hA, hB, hC, hD_gold, hD_1;
+    // Strided batches: hC only seeds hD_gold unless c_equal_d restores C from it, so it is
+    // released before hD_1, the device result, is allocated. This lowers the host peak.
+    auto hD_1_follows_hC = [&](int i) {
+        return batchMode == HIPBLASLT_BATCH_MODE_STRIDED && size_D_copy[i] && !arg.c_equal_d;
+    };
+    // Whether the strided CPU reference runs an epilogue. The memory estimate needs it before
+    // epilogue_on is set; keep the two in step.
+    const bool epilogue_reference = batchMode == HIPBLASLT_BATCH_MODE_STRIDED
+                                    && (arg.bias_vector || arg.scaleAlpha_vector || arg.amaxD
+                                        || arg.activation_type == hipblaslt_activation_type::relu
+                                        || arg.activation_type == hipblaslt_activation_type::gelu
+                                        || arg.activation_type == hipblaslt_activation_type::swish
+                                        || arg.activation_type == hipblaslt_activation_type::clamp);
     // Contiguous host copies of the A, B and C regions, without padding, for fast_check, and the
     // expected probe sums, which depend only on the inputs and are shared by every solution.
     std::vector<std::unique_ptr<char[]>> fcA(gemm_count), fcB(gemm_count), fcC(gemm_count);
     std::vector<hipDataType>             fcTypeA(gemm_count), fcTypeB(gemm_count);
     std::vector<FastCheckExpected>       fcExpected(gemm_count);
     std::vector<HipHostBuffer> hScaleAlphaVec, hScaleA, hScaleB, hScaleC, hScaleD, hScaleE,
-        hAmaxD_gold, hAmaxD, hD_gold_epl, hD_gold_ScaleAlpha, hBias_gold_epl;
+        hAmaxD_gold, hAmaxD, hD_gold_epl, hBias_gold_epl;
 
     // These two vectors store the float values of MX data. mxDataGenerator
     // can generate MX data and return the corresponding float values. The float
@@ -3200,10 +3213,16 @@ void testing_matmul_with_bias(const Arguments& arg,
                     pin(size_A[i] * realDataTypeSize(TiA));
                 if(!fast_check_only || mxB)
                     pin(size_B[i] * realDataTypeSize(TiB));
+                const size_t bytesC = size_C[i] * sizeTo, bytesD = size_D_copy[i] * sizeTo;
+                // hD_1 reuses hC's memory when the pool would hand it out for that size.
+                const bool hD_1_reuses_hC = hD_1_follows_hC(i)
+                                            && host_pool_capacity(bytesC) >= bytesD
+                                            && host_pool_capacity(bytesC) < 2 * bytesD;
                 if(!fast_check_only || arg.c_equal_d)
-                    pin(size_C[i] * sizeTo);
-                pin(size_D_copy[i] * sizeTo, 2);
-                pin(size_D_copy[i] * sizeAlpha, 3);
+                    pin(bytesC);
+                pin(bytesD, hD_1_reuses_hC ? 1 : 2);
+                if(epilogue_reference)
+                    pin(size_D_copy[i] * sizeAlpha, 2);
                 pin(size_bias[i] * realDataTypeSize(Tbias), 2);
                 pin(size_E[i] * realDataTypeSize(Taux), arg.use_e && !arg.gradient ? 2 : 1);
                 pin(size_scaleAlphaVec[i] * sizeAlpha);
@@ -3681,16 +3700,23 @@ void testing_matmul_with_bias(const Arguments& arg,
             // With c_equal_d, hC restores the shared C/D buffer before each solution.
             hC.emplace_back(To, fast_check_only && !arg.c_equal_d ? 0 : size_C[i]);
             hD_gold.emplace_back(To, size_D_copy[i]);
-            hD_1.emplace_back(To, size_D_copy[i]);
+            // hD_1 is allocated after this loop, once hC has seeded hD_gold and can be released.
             if(size_bias[i] * block_count != 0)
             {
                 hBias.emplace_back(Tbias, size_bias[i]);
                 hBias_gold.emplace_back(Tbias, size_bias[i]);
             }
 
-            hD_gold_epl.emplace_back(Talpha, size_D_copy[i]);
-            hD_gold_ScaleAlpha.emplace_back(Talpha, size_D_copy[i]);
-            hBias_gold_epl.emplace_back(Talpha, size_D_copy[i]); // Reduction for matrix D
+            // Only the epilogue reference reads these two; each is D in the compute type.
+            if(epilogue_on[i] != epilogue_reference)
+            {
+                hipblaslt_cerr << "epilogue_reference is out of step with epilogue_on" << std::endl;
+                CHECK_SUCCESS(false);
+            }
+            // Without an epilogue they are empty, so that index i still means gemm i.
+            const size_t size_D_epl = epilogue_on[i] ? size_D_copy[i] : 0;
+            hD_gold_epl.emplace_back(Talpha, size_D_epl);
+            hBias_gold_epl.emplace_back(Talpha, size_D_epl); // Reduction for matrix D
 
             if(useDeviceAlpha)
                 hScaleAlphaVec.emplace_back(Talpha, size_scaleAlphaVec[i]);
@@ -3897,7 +3923,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                                                        &hAmaxD_gold,
                                                        &hAmaxD,
                                                        &hD_gold_epl,
-                                                       &hD_gold_ScaleAlpha,
                                                        &hBias_gold_epl}));
 
         hipblaslt_seedrand();
@@ -5091,6 +5116,19 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[b][i], attr, &scaleB_addr, sizeof(void*)));
             }
+        }
+    }
+
+    // Nothing reads a released hC again, so hD_1 takes its place instead of adding to the peak.
+    // This comes after the loop above because its allocation check scans every hC.
+    if(batchMode == HIPBLASLT_BATCH_MODE_STRIDED)
+    {
+        for(int i = 0; i < gemm_count; i++)
+        {
+            if(hD_1_follows_hC(i))
+                hC[i].release();
+            hD_1.emplace_back(To, size_D_copy[i]);
+            CHECK_HOST_ALLOCATION(host_allocation_failure(hD_1.back()));
         }
     }
 
