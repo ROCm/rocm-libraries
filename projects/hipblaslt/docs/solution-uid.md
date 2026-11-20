@@ -13,19 +13,21 @@ A solution has three numbers:
   file starts at 0, and the file's size table refers to solutions by this
   position. Tuning, `TensileMergeLibrary`, and Geko renumber it when they add,
   remove, or copy solutions.
-- The solution index used by `hipblaslt-bench --solution_index`,
-  `getIndexFromAlgo`, and `MatchTable.yaml` is not stored anywhere. Each
-  `TensileCreateLibrary` run assigns it by numbering the solutions of every
-  architecture and logic file in the build, so adding, removing, or filtering
-  logic files, or building a different set of architectures, can change it.
+- The solution index used by `hipblaslt-bench --solution_index` and
+  `getIndexFromAlgo` is not stored in logic YAML. Each `TensileCreateLibrary`
+  run assigns it by numbering the solutions of every architecture and logic
+  file in the build, and writes it only to that build's outputs, such as
+  `MatchTable.yaml`. Adding, removing, or filtering logic files, or building a
+  different set of architectures, can change it.
 - `SolutionUID` is stored with the solution record and is not derived from
-  either position. Tools that move, copy, or renumber a record keep its UID, so
-  the UID stays the same while both indices change. Generation needs no shared
-  counter: the timestamp separates UIDs drawn at different times, and the
-  random bits separate UIDs drawn in the same millisecond.
+  either position, so renumbering leaves it unchanged. Generation needs no
+  shared counter: the timestamp separates UIDs drawn in different
+  milliseconds, and the 24 random bits make a collision within one millisecond
+  unlikely. The uniqueness check catches the rare collision.
 
-A UID is stable only while the YAML keeps it. A tool that rewrites a logic
-file must carry `SolutionUID` forward instead of dropping or regenerating it.
+A UID is stable only while the YAML keeps it. Regenerating it with
+`TensileGenerateUID`, or a tool that writes a new solution record instead of
+copying the old one, gives the solution a new UID.
 
 ## Identifier format
 
