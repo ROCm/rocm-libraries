@@ -7,6 +7,8 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <utility>
+#include <vector>
 
 #include <gtest/gtest.h>
 
@@ -152,6 +154,19 @@ TEST(TestGfx942AttentionUnified3dGeometry, IndicesFitInt32IsTotal)
     EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, -1, 16, 128));
     EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, 32, 0, 128));
     EXPECT_FALSE(gfx942Unified3dIndicesFitInt32(4, 32, 16, 0));
+}
+
+/// The head pairs rocKE's split-KV reduce predicate (supports_split_kv_reduce, through
+/// check_head_counts) refuses: a non-positive count, or query heads that do not group evenly
+/// over the KV heads. The C++ selector refuses each of them too, so no graph routes to a reduce
+/// the pack could not have built.
+TEST(TestGfx942AttentionUnified3dGeometry, RefusesEveryHeadPairTheReducePredicateRefuses)
+{
+    for(const auto& [hq, hkv] : std::vector<std::pair<int64_t, int64_t>>{
+            {0, 8}, {-16, 8}, {16, 0}, {16, -8}, {-16, -8}, {12, 8}, {9, 2}, {8, 16}})
+    {
+        EXPECT_FALSE(gfx942Unified3dServesGqaGroup(hq, hkv)) << "Hq " << hq << " Hkv " << hkv;
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

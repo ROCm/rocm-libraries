@@ -221,7 +221,8 @@ endif()
 # fmha_mfma free-stride ABI and layout contracts, the 2D/3D mask_type spec
 # fields, the gfx942 2D head counts and batch being IR-neutral at a fixed GQA
 # ratio, the 3D segment+reduce module's pairing, the reduce's LDS segment
-# bound against the compiled code object, the tiled C++ entries' head-count
+# bound against the compiled code object, run_all.py's forwarding of the
+# installed-asset --rocke-require-* flags, the tiled C++ entries' head-count
 # and arch refusals, the dense segment-combine launch ABI, the drift guard
 # that pins the shared dense spec's C++ mirror to the Python, the
 # oracle-free uniform-probability checker and subject contracts, the gfx942
@@ -259,6 +260,7 @@ set(_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS
     "tests/library/tests/test_attention_tiled_3d_module.py"
     "tests/library/tests/test_attention_tiled_3d_module_gfx942.py"
     "tests/library/tests/test_attention_tiled_3d_reduce_lds.py"
+    "tests/library/tests/test_run_all_asset_require_flags.py"
     "tests/library/tests/test_attention_unified_masked_tile_ir.py"
     "tests/library/tests/test_attention_unified_2d_lse_ir.py"
     "tests/library/tests/test_gfx942_cfvst_i64_kv_addr.py"
@@ -285,12 +287,25 @@ foreach(_t ${_ROCKE_LIBRARY_ATTENTION_CPU_TEST_RELPATHS})
   string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS
          " \"${ROCKE_TEST_CTEST_REL}${_t}\"")
 endforeach()
+# The rocKE umbrella sets the requirement when it stages the provider's pack
+# headers (tests/hkp_packs); standalone platform builds leave it disabled.
+if(ROCKE_REQUIRE_INSTALLED_HKP_PACK_HEADERS)
+  string(APPEND _ROCKE_LIBRARY_ATTENTION_CPU_TESTS " --rocke-require-hkp-pack-headers")
+endif()
+# test_attention_tiled_3d_reduce_lds.py compiles the reduce through comgr and
+# reads its LDS size with llvm-objdump, so the entry takes the compiler tool
+# discovery list; it also reads the requirement list (TESTING.md §5.1.4), so a
+# missing llvm-objdump fails the entry instead of silently skipping those cases.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set(_rocke_library_attention_cpu_pytest_environment \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\")\n"
+       "list(APPEND _rocke_library_attention_cpu_pytest_environment\n"
+       "     \${_rocke_compiler_tool_environment}\n"
+       "     \${_rocke_compiler_requirement_environment})\n"
        "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
-       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  ENVIRONMENT \"\${_rocke_library_attention_cpu_pytest_environment}\"\n"
        "  TIMEOUT 180)\n")
 
 # The pure runner policy and the real subprocess/process-tree contracts run as
