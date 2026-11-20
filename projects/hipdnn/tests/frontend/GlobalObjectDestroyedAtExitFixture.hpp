@@ -11,11 +11,19 @@
 // plugin. A PluginUnloadProbe destroyed after the object checks that the plugin is still loaded
 // and exits with PLUGIN_RELEASED_AT_EXIT otherwise, so a late plugin call fails the test even
 // when it does not crash.
+//
+// A test may also replace the frontend's backend instance with an ExitObservingBackend. The
+// frontend's destroy paths check the exit flag before looking up the backend, so a destroy that
+// reaches that instance during exit means a frontend check did not hold, even when a backend
+// check behind it keeps the plugin loaded. A BackendReachedProbe then exits with
+// BACKEND_REACHED_AT_EXIT.
 
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstdlib>
+#include <memory>
 #include <string>
 
 #include <gtest/gtest.h>
@@ -23,6 +31,8 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
+#include <hipdnn_frontend/detail/HipdnnDirectBackendWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/ProcessUtils.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -36,6 +46,59 @@ namespace hipdnn_tests
 inline constexpr int PLUGIN_RELEASED_AT_EXIT = 3;
 inline constexpr int PROBE_FAILED_AT_EXIT = 4;
 inline constexpr int DESTROY_FAILED_AT_EXIT = 5;
+inline constexpr int BACKEND_REACHED_AT_EXIT = 6;
+
+/// Set when an ExitObservingBackend is reached by a destroy after exit began. Trivially
+/// destructible, so a destructor running during exit can still read it.
+inline std::atomic<bool> gBackendReachedAfterShutdown{false};
+
+/// The direct-link backend the frontend of these test binaries uses, also recording a destroy()
+/// or backendDestroyDescriptor() made after exit began.
+class ExitObservingBackend : public hipdnn_frontend::detail::HipdnnDirectBackendWrapper
+{
+public:
+    using HipdnnDirectBackendWrapper::HipdnnDirectBackendWrapper;
+
+    hipdnnStatus_t destroy(hipdnnHandle_t handle) override
+    {
+        recordIfShutdown();
+        return HipdnnDirectBackendWrapper::destroy(handle);
+    }
+
+    hipdnnStatus_t backendDestroyDescriptor(hipdnnBackendDescriptor_t descriptor) override
+    {
+        recordIfShutdown();
+        return HipdnnDirectBackendWrapper::backendDestroyDescriptor(descriptor);
+    }
+
+private:
+    static void recordIfShutdown()
+    {
+        if(hipdnn_frontend::detail::IHipdnnBackend::isShutdown())
+        {
+            gBackendReachedAfterShutdown.store(true, std::memory_order_release);
+        }
+    }
+};
+
+/// Define at namespace scope before every other object of the test, so it is destroyed last.
+class BackendReachedProbe
+{
+public:
+    BackendReachedProbe() = default;
+    BackendReachedProbe(const BackendReachedProbe&) = delete;
+    BackendReachedProbe& operator=(const BackendReachedProbe&) = delete;
+    BackendReachedProbe(BackendReachedProbe&&) = delete;
+    BackendReachedProbe& operator=(BackendReachedProbe&&) = delete;
+
+    ~BackendReachedProbe()
+    {
+        if(gBackendReachedAfterShutdown.load(std::memory_order_acquire))
+        {
+            std::_Exit(BACKEND_REACHED_AT_EXIT);
+        }
+    }
+};
 
 /// Define at namespace scope before the objects under test, so it is destroyed after them.
 class PluginUnloadProbe
@@ -103,6 +166,22 @@ protected:
         probe.arm(plugin_constants::testGoodPluginPath());
     }
 
+    // Replaces the frontend's backend instance, which must already exist, with an
+    // ExitObservingBackend owned by @p holder. Define the holder at namespace scope before the
+    // objects under test: the frontend's own reference is destroyed before them, and the holder
+    // keeps the observer alive for any lookup made during exit.
+    static void observeBackend(std::shared_ptr<ExitObservingBackend>& holder)
+    {
+        using hipdnn_frontend::detail::HipdnnDirectBackendWrapper;
+        using hipdnn_frontend::detail::IHipdnnBackend;
+
+        const auto real
+            = std::dynamic_pointer_cast<HipdnnDirectBackendWrapper>(IHipdnnBackend::getInstance());
+        ASSERT_NE(real, nullptr) << "this binary's frontend must link the backend directly";
+        holder = std::make_shared<ExitObservingBackend>(real->version());
+        IHipdnnBackend::setInstance(holder);
+    }
+
     static bool isTestGoodPluginLoaded()
     {
         return hipdnn_test_sdk::utilities::isLibraryLoaded(plugin_constants::testGoodPluginPath());
@@ -124,8 +203,9 @@ protected:
                                << PLUGIN_RELEASED_AT_EXIT
                                << ": the engine plugin was released during exit; "
                                << PROBE_FAILED_AT_EXIT << ": the plugin check itself failed; "
-                               << DESTROY_FAILED_AT_EXIT
-                               << ": a destroy failed, or reached the backend, during exit; "
+                               << DESTROY_FAILED_AT_EXIT << ": a destroy failed during exit; "
+                               << BACKEND_REACHED_AT_EXIT
+                               << ": a destroy reached the frontend's backend during exit; "
                                   "negative: killed by that signal; anything else: a crash";
     }
 };

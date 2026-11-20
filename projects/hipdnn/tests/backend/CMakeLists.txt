@@ -19,6 +19,7 @@ add_executable(
     IntegrationEngineHeuristicApi.cpp
     IntegrationExecutionPlanApi.cpp
     IntegrationGetLastErrorString.cpp
+    IntegrationGlobalDescriptorDestroyedAtExit.cpp
     IntegrationHandleApi.cpp
     IntegrationKnobsApi.cpp
     IntegrationLoggingPipeline.cpp

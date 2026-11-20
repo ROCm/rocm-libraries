@@ -10,11 +10,13 @@
 
 #include <hipdnn_backend.h>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 #include "GlobalObjectDestroyedAtExitFixture.hpp"
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
+using hipdnn_frontend::detail::ScopedHipdnnBackendDescriptor;
 using hipdnn_tests::IntegrationGlobalObjectDestroyedAtExit;
 
 namespace
@@ -47,10 +49,32 @@ private:
     hipdnnHandle_t _handle = nullptr;
 };
 
+hipdnn_tests::BackendReachedProbe gBackendReachedProbe;
 hipdnn_tests::PluginUnloadProbe gPluginUnloadProbe;
+std::shared_ptr<hipdnn_tests::ExitObservingBackend> gObservingBackend;
 HipdnnHandlePtr gHandle;
 std::shared_ptr<Graph> gGraph;
 LateBackendHandle gBackendHandle;
+ScopedHipdnnBackendDescriptor gScopedDescriptor;
+
+// Move-assigns an empty descriptor over gScopedDescriptor from its destructor, which runs during
+// exit before gScopedDescriptor's own.
+class ScopedDescriptorReplacer
+{
+public:
+    ScopedDescriptorReplacer() = default;
+    ScopedDescriptorReplacer(const ScopedDescriptorReplacer&) = delete;
+    ScopedDescriptorReplacer& operator=(const ScopedDescriptorReplacer&) = delete;
+    ScopedDescriptorReplacer(ScopedDescriptorReplacer&&) = delete;
+    ScopedDescriptorReplacer& operator=(ScopedDescriptorReplacer&&) = delete;
+
+    ~ScopedDescriptorReplacer()
+    {
+        gScopedDescriptor = ScopedHipdnnBackendDescriptor();
+    }
+};
+
+ScopedDescriptorReplacer gScopedDescriptorReplacer;
 
 std::shared_ptr<Graph> makeConvFpropGraph()
 {
@@ -86,6 +110,7 @@ TEST_F(IntegrationGlobalObjectDestroyedAtExit, HandleExitsCleanly)
     ASSERT_TRUE(error.is_good()) << error.get_message();
     ASSERT_TRUE(isTestGoodPluginLoaded());
     gHandle = std::move(handle);
+    ASSERT_NO_FATAL_FAILURE(observeBackend(gObservingBackend));
 }
 
 TEST_F(IntegrationGlobalObjectDestroyedAtExit, BuiltGraphExitsCleanly)
@@ -134,6 +159,19 @@ TEST_F(IntegrationGlobalObjectDestroyedAtExit, BackendHandleExitsCleanly)
     gBackendHandle.adopt(handle);
     ASSERT_TRUE(isTestGoodPluginLoaded());
 #endif
+}
+
+TEST_F(IntegrationGlobalObjectDestroyedAtExit, DescriptorReplacedExitsCleanly)
+{
+    if(!isChild())
+    {
+        expectChildExitsCleanly();
+        return;
+    }
+
+    gScopedDescriptor = ScopedHipdnnBackendDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR);
+    ASSERT_TRUE(gScopedDescriptor.valid());
+    ASSERT_NO_FATAL_FAILURE(observeBackend(gObservingBackend));
 }
 
 } // namespace
