@@ -35,12 +35,15 @@
 #include "../include/rocsparse_clients_log.hpp"
 #include "rocsparse.h"
 
+#include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -170,6 +173,43 @@ namespace rocsparse_ut
     inline rocsparse_bfloat16 scalar<rocsparse_bfloat16>(float v)
     {
         return rocsparse_bfloat16(v);
+    }
+
+    // ----- NaN probes ---------------------------------------------------------
+    // A quiet NaN of type T (both parts for a complex type). Used to pre-fill an
+    // output that a routine is documented to overwrite without reading (beta == 0,
+    // alpha == 0 with beta == 1): any NaN left in the result shows that it was read.
+    template <typename T>
+    inline T nan_of()
+    {
+        return scalar<T>(std::numeric_limits<float>::quiet_NaN());
+    }
+    template <>
+    inline rocsparse_float_complex nan_of<rocsparse_float_complex>()
+    {
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        return rocsparse_float_complex(nan, nan);
+    }
+    template <>
+    inline rocsparse_double_complex nan_of<rocsparse_double_complex>()
+    {
+        const double nan = std::numeric_limits<double>::quiet_NaN();
+        return rocsparse_double_complex(nan, nan);
+    }
+
+    // True when the value (either part of a complex value) is NaN.
+    template <typename T>
+    inline bool has_nan(const T& v)
+    {
+        return std::isnan(static_cast<double>(v));
+    }
+    inline bool has_nan(const rocsparse_float_complex& v)
+    {
+        return std::isnan(std::real(v)) || std::isnan(std::imag(v));
+    }
+    inline bool has_nan(const rocsparse_double_complex& v)
+    {
+        return std::isnan(std::real(v)) || std::isnan(std::imag(v));
     }
 
     // ----- tiny device buffer RAII ------------------------------------------
