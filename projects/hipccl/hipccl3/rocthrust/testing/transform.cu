@@ -657,11 +657,10 @@ public:
   }
 
   template <typename Tuple>
-  THRUST_HOST_DEVICE auto
-  operator()(Tuple&& t) const -> decltype(detail::zip_detail::apply(std::declval<sum_five>(), THRUST_FWD(t)))
+  THRUST_HOST_DEVICE double operator()(Tuple&&) const
   {
     // not calling func, so we would get a wrong result if we were called
-    return {};
+    return 0;
   }
 
 private:
