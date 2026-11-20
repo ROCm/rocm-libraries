@@ -262,11 +262,14 @@ template <size_t queueSize>
     // queue[index] in the meantime:
     // Let q be the position work was pushed at, so index == q % queueSize. The next push into queue[index] is
     // position q + queueSize, and waitForSpace (or waitForSpaceInCPUQueue) makes that pusher wait until popCount > q.
-    // popCount only goes from q to q + 1 through the atomicCAS below, made by a caller holding a worknode it took from
-    // queue[index] while popCount == q. That worknode can only be the one at q: the push of q + queueSize is still
-    // waiting for exactly this CAS, and the worknode at q - queueSize was taken and returned from tryPop before q was
-    // pushed (its pusher waited for that). We hold the worknode at q and queue[index] is empty, so nobody else can make
-    // that CAS. popCount stays <= q, and queue[index] stays empty until we put work back.
+    // popCount only goes from q to q + 1 through the atomicCAS below, made by a caller that read popCount == q and
+    // then took a worknode from queue[index]. That worknode can only be the one at q: the push of q + queueSize is
+    // still waiting for exactly this CAS, and the worknode at q - queueSize was taken and returned from tryPop before
+    // q was pushed (its pusher waited for popCount > q - queueSize, which by the same argument one lap earlier means
+    // that worknode was returned). A caller that succeeds at this CAS returns the worknode at q from tryPop instead of
+    // putting it back, so since we just took work from queue[index], nobody has made this CAS yet. And since we hold
+    // the worknode at q and queue[index] is empty, nobody else can make it. So popCount stays <= q, and queue[index]
+    // stays empty until we put work back.
     // To everyone else this looks the same as detachWorkNode locking a worknode that is still in the queue and later
     // unlocking it back into the same entry: popCount doesn't move, and other callers find the entry empty (locked) and
     // try again later.
