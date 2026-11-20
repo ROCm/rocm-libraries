@@ -42,11 +42,11 @@ BEGIN_HIPCUB_NAMESPACE
 namespace detail
 {
 template<typename IntArithmeticT, typename LevelT, typename CommonT>
-    HIPCUB_HOST_DEVICE
-HIPCUB_FORCEINLINE bool may_overflow(LevelT /* lower_level */,
-                                     LevelT /* upper_level */,
-                                     CommonT /* num_bins */,
-                                     ::std::false_type /* is_integral */)
+    _CCCL_HOST_DEVICE
+_CCCL_FORCEINLINE bool may_overflow(LevelT /* lower_level */,
+                                    LevelT /* upper_level */,
+                                    CommonT /* num_bins */,
+                                    ::std::false_type /* is_integral */)
 {
     return false;
 }
@@ -54,11 +54,11 @@ HIPCUB_FORCEINLINE bool may_overflow(LevelT /* lower_level */,
 // Returns true if the bin computation for a given combination of range (max_level - min_level)
 // and number of bins may overflow.
 template<typename IntArithmeticT, typename LevelT, typename CommonT>
-    HIPCUB_HOST_DEVICE
-HIPCUB_FORCEINLINE bool may_overflow(LevelT  lower_level,
-                                     LevelT  upper_level,
-                                     CommonT num_bins,
-                                     ::std::true_type /* is_integral */)
+    _CCCL_HOST_DEVICE
+_CCCL_FORCEINLINE bool may_overflow(LevelT  lower_level,
+                                    LevelT  upper_level,
+                                    CommonT num_bins,
+                                    ::std::true_type /* is_integral */)
 {
     return static_cast<IntArithmeticT>(upper_level - lower_level)
            > (_HIPCUB_STD::numeric_limits<IntArithmeticT>::max()
@@ -84,8 +84,8 @@ struct int_arithmetic_t
 
 // If potential overflow is detected, returns hipErrorInvalidValue, otherwise hipSuccess.
 template<typename SampleIteratorT, typename LevelT>
-HIPCUB_HOST_DEVICE
-HIPCUB_FORCEINLINE hipError_t check_overflow(LevelT lower_level, LevelT upper_level, int num_levels)
+_CCCL_HOST_DEVICE
+_CCCL_FORCEINLINE hipError_t check_overflow(LevelT lower_level, LevelT upper_level, int num_levels)
 {
     using sample_type      = it_value_t<SampleIteratorT>;
     using common_type      = typename hipcub::common_type<LevelT, sample_type>::type;

@@ -472,28 +472,28 @@ private:
     {
         ScalarOutputIt out;
         using value_type = ::cub::KeyValuePair<int, T>;
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
         value_only_pair_output_iterator(ScalarOutputIt o)
             : out(o)
         {}
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
         value_only_pair_output_iterator& operator*()
         {
             return *this;
         }
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
         value_only_pair_output_iterator& operator=(value_type const& p)
         {
             *out = p.value;
             return *this;
         }
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
         value_only_pair_output_iterator& operator++()
         {
             ++out;
             return *this;
         }
-        HIPCUB_HOST_DEVICE
+        _CCCL_HOST_DEVICE
         value_only_pair_output_iterator operator++(int)
         {
             value_only_pair_output_iterator tmp = *this;

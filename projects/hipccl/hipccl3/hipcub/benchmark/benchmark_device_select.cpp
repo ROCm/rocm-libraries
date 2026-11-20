@@ -115,9 +115,8 @@ struct SelectOperator
 {
     float true_probability;
     SelectOperator(float true_probability_) : true_probability(true_probability_) {}
-    HIPCUB_DEVICE
-    inline constexpr bool
-        operator()(const T& value)
+    _CCCL_DEVICE
+    inline constexpr bool operator()(const T& value)
     {
         return value < T(1000 * true_probability);
     }

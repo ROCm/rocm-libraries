@@ -57,11 +57,13 @@ struct DigitExtractorAdopter
 {
     DigitExtractorT& digit_extractor_;
 
-    HIPCUB_DEVICE DigitExtractorAdopter(DigitExtractorT& digit_extractor)
+    _CCCL_DEVICE
+    DigitExtractorAdopter(DigitExtractorT& digit_extractor)
         : digit_extractor_(digit_extractor)
     {}
 
-    HIPCUB_DEVICE inline UnsignedBits operator()(const UnsignedBits key)
+    _CCCL_DEVICE
+    inline UnsignedBits operator()(const UnsignedBits key)
     {
         UnsignedBits digit = digit_extractor_.Digit(key);
         if constexpr(IsDescending)
@@ -73,6 +75,38 @@ struct DigitExtractorAdopter
     }
 };
 } // namespace detail
+
+enum RadixRankAlgorithm
+{
+    RADIX_RANK_BASIC,
+    RADIX_RANK_MEMOIZE,
+    RADIX_RANK_MATCH,
+    RADIX_RANK_MATCH_EARLY_COUNTS_ANY,
+    RADIX_RANK_MATCH_EARLY_COUNTS_ATOMIC_OR
+};
+
+inline ::std::ostream& operator<<(::std::ostream& os, RadixRankAlgorithm algo)
+{
+    switch(algo)
+    {
+        case RADIX_RANK_BASIC: return os << "RADIX_RANK_BASIC";
+        case RADIX_RANK_MEMOIZE: return os << "RADIX_RANK_MEMOIZE";
+        case RADIX_RANK_MATCH: return os << "RADIX_RANK_MATCH";
+        case RADIX_RANK_MATCH_EARLY_COUNTS_ANY: return os << "RADIX_RANK_MATCH_EARLY_COUNTS_ANY";
+        case RADIX_RANK_MATCH_EARLY_COUNTS_ATOMIC_OR:
+            return os << "RADIX_RANK_MATCH_EARLY_COUNTS_ATOMIC_OR";
+        default: return os << "<unknown RadixRankAlgorithm: " << static_cast<int>(algo) << ">";
+    }
+}
+
+/** Empty callback implementation */
+template<int BINS_PER_THREAD>
+struct BlockRadixRankEmptyCallback
+{
+    _CCCL_DEVICE
+    _CCCL_FORCEINLINE void operator()(int (&)[BINS_PER_THREAD])
+    {}
+};
 
 /**
  * \brief BlockRadixRank provides operations for ranking unsigned integer types within a CUDA thread block.
@@ -165,7 +199,8 @@ private:
     // Reference to temporary storage (usually shared memory)
     TempStorage& temp_storage_;
 
-    HIPCUB_DEVICE inline TempStorage& PrivateStorage()
+    _CCCL_DEVICE
+    inline TempStorage& PrivateStorage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;
@@ -182,18 +217,22 @@ public:
     /**
      * \brief Collective constructor using a private static allocation of shared memory as temporary storage.
      */
-    HIPCUB_DEVICE inline BlockRadixRank() : temp_storage_(PrivateStorage()) {}
+    _CCCL_DEVICE
+    inline BlockRadixRank()
+        : temp_storage_(PrivateStorage())
+    {}
 
     /**
      * \brief Collective constructor using the specified memory allocation as temporary storage.
      */
-    HIPCUB_DEVICE inline BlockRadixRank(
+    _CCCL_DEVICE
+    inline BlockRadixRank(
         TempStorage&
             temp_storage) ///< [in] Reference to memory allocation having layout type TempStorage
         : temp_storage_(temp_storage)
     {}
 
-    //@}  end member group
+    //@}
     /******************************************************************/ /**
      * \name Ranking
      *********************************************************************/
@@ -205,7 +244,8 @@ public:
     template<typename UnsignedBits,
              int KEYS_PER_THREAD,
              typename DigitExtractorT>
-    HIPCUB_DEVICE inline void RankKeys(
+    _CCCL_DEVICE
+    inline void RankKeys(
         UnsignedBits (&keys)[KEYS_PER_THREAD], ///< [in] Keys for this tile
         int (&ranks)[KEYS_PER_THREAD], ///< [out] For each key, the local rank within the tile
         DigitExtractorT digit_extractor) ///< [in] The digit extractor
@@ -224,7 +264,7 @@ public:
     template<typename UnsignedBits,
              int KEYS_PER_THREAD,
              typename DigitExtractorT>
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline void RankKeys(
         UnsignedBits (&keys)[KEYS_PER_THREAD], ///< [in] Keys for this tile
         int (&ranks)
@@ -278,7 +318,8 @@ private:
     // Reference to temporary storage (usually shared memory)
     TempStorage& temp_storage_;
 
-    HIPCUB_DEVICE inline TempStorage& PrivateStorage()
+    _CCCL_DEVICE
+    inline TempStorage& PrivateStorage()
     {
         HIPCUB_SHARED_MEMORY TempStorage private_storage;
         return private_storage;
@@ -296,18 +337,22 @@ public:
     /**
      * \brief Collective constructor using a private static allocation of shared memory as temporary storage.
      */
-    HIPCUB_DEVICE inline BlockRadixRankMatch() : temp_storage_(PrivateStorage()) {}
+    _CCCL_DEVICE
+    inline BlockRadixRankMatch()
+        : temp_storage_(PrivateStorage())
+    {}
 
     /**
      * \brief Collective constructor using the specified memory allocation as temporary storage.
      */
-    HIPCUB_DEVICE inline BlockRadixRankMatch(
+    _CCCL_DEVICE
+    inline BlockRadixRankMatch(
         TempStorage&
             temp_storage) ///< [in] Reference to memory allocation having layout type TempStorage
         : temp_storage_(temp_storage)
     {}
 
-    //@}  end member group
+    //@}
     /******************************************************************//**
      * \name Raking
      *********************************************************************/

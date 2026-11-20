@@ -46,6 +46,8 @@
 
 #include _HIPCUB_LIBCXX_INCLUDE(__functional/maximum.h)
 #include _HIPCUB_LIBCXX_INCLUDE(__functional/minimum.h)
+#include _HIPCUB_LIBCXX_INCLUDE(__execution/determinism.h)
+#include _HIPCUB_STD_INCLUDE(__execution/env.h)
 #include _HIPCUB_STD_INCLUDE(__functional/operations.h)
 #include _HIPCUB_STD_INCLUDE(__limits/numeric_limits.h)
 #include _HIPCUB_STD_INCLUDE(cstdint)
@@ -211,7 +213,7 @@ struct transform_idx_to_offset_op
     _HIPCUB_STD::int64_t segments;
     unsigned int         segment_length;
 
-    HIPCUB_DEVICE
+    _CCCL_DEVICE
     inline OffsetT       operator()(_HIPCUB_STD::int64_t i) const
     {
         if(i < segments)
@@ -317,6 +319,28 @@ public:
     }
 };
 
+namespace segmented_reduce
+{
+template<typename EnvT>
+HIPCUB_RUNTIME_FUNCTION
+static inline constexpr void check_supported_determinism()
+{
+    using requirements_t
+        = _HIPCUB_STD_EXEC::__query_result_or_t<EnvT,
+                                                _HIPCUB_LIBCXX_EXEC::__get_requirements_t,
+                                                _HIPCUB_STD_EXEC::env<>>;
+
+    using requested_determinism_t = _HIPCUB_STD_EXEC::__query_result_or_t<
+        requirements_t,
+        _HIPCUB_LIBCXX_EXEC::determinism::__get_determinism_t,
+        _HIPCUB_LIBCXX_EXEC::determinism::run_to_run_t>;
+
+    // Static assert to reject gpu_to_gpu determinism since it's not properly implemented
+    static_assert(!_HIPCUB_STD::is_same_v<requested_determinism_t,
+                                          _HIPCUB_LIBCXX_EXEC::determinism::gpu_to_gpu_t>,
+                  "gpu_to_gpu determinism is not supported for device segmented reductions");
+}
+} // namespace segmented_reduce
 } // namespace detail
 
 struct DeviceSegmentedReduce
@@ -477,6 +501,33 @@ struct DeviceSegmentedReduce
                    d_begin_offsets,
                    d_end_offsets,
                    stream);
+    }
+
+    template<typename InputIteratorT,
+             typename OutputIteratorT,
+             typename OffsetIteratorT,
+             typename EnvT = _HIPCUB_STD_EXEC::env<>>
+    HIPCUB_RUNTIME_FUNCTION
+    static hipError_t Sum(InputIteratorT       d_in,
+                          OutputIteratorT      d_out,
+                          _HIPCUB_STD::int64_t num_segments,
+                          OffsetIteratorT      d_begin_offsets,
+                          OffsetIteratorT      d_end_offsets,
+                          EnvT                 env = {})
+    {
+        detail::segmented_reduce::check_supported_determinism<EnvT>();
+        return detail::env_invoke(env,
+                                  [&](void* d_temp_storage, size_t& temp_storage_bytes, auto stream)
+                                  {
+                                      return Sum(d_temp_storage,
+                                                 temp_storage_bytes,
+                                                 d_in,
+                                                 d_out,
+                                                 num_segments,
+                                                 d_begin_offsets,
+                                                 d_end_offsets,
+                                                 stream);
+                                  });
     }
 
     template<typename InputIteratorT, typename OutputIteratorT>
