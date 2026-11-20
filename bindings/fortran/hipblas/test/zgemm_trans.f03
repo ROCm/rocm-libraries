@@ -108,18 +108,21 @@ program hipblas_zgemm_trans_test
       call hipCheck(hipDeviceSynchronize())
       call hipCheck(hipMemcpy(c_loc(hC(1,1)), dC, size(hC, kind=c_size_t) * elem, hipMemcpyDeviceToHost))
 
+      allocate(opA(m, k))
       if (ops(ia) == HIPBLAS_OP_N) then
         opA = hA(1:m, 1:k)
       else
         opA = transpose(hA(1:k, 1:m))
         if (ops(ia) == HIPBLAS_OP_C) opA = conjg(opA)
       end if
+      allocate(opB(k, n))
       if (ops(ib) == HIPBLAS_OP_N) then
         opB = hB(1:k, 1:n)
       else
         opB = transpose(hB(1:n, 1:k))
         if (ops(ib) == HIPBLAS_OP_C) opB = conjg(opB)
       end if
+      allocate(hC_ref(m, n))
       hC_ref = alpha * matmul(opA, opB) + beta * hC0(1:m, 1:n)
 
       error = maxval(abs(hC(1:m, 1:n) - hC_ref))

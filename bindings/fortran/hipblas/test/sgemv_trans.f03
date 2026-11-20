@@ -96,11 +96,13 @@ program hipblas_sgemv_trans_test
     call hipCheck(hipDeviceSynchronize())
     call hipCheck(hipMemcpy(c_loc(hy(1)), dy, size(hy, kind=c_size_t) * elem, hipMemcpyDeviceToHost))
 
+    allocate(opA(ly, lx))
     if (ops(it) == HIPBLAS_OP_N) then
       opA = hA(1:m, 1:n)
     else
       opA = transpose(hA(1:m, 1:n))
     end if
+    allocate(y_ref(ly))
     y_ref = alpha * matmul(opA, hx(1::incx)) + beta * hy0(1::incy)
 
     error = maxval(abs(hy(1::incy) - y_ref))
