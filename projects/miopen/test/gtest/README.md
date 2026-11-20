@@ -4,6 +4,28 @@ Full test-naming rules live on the wiki: https://github.com/ROCm/MIOpen/wiki/GTe
 (`Smoke`/`Standard`/`Full`/`Perf`/`Unit` prefixes, `CPU`/`GPU` hardware token, datatype
 suffix). `check_names.py` enforces that schema against `miopen_gtest --gtest_list_tests`.
 
+## GPU-free database synchronization
+
+TheRock's `miopen-dbsync` component runs the packaged
+`share/miopen/bin/run_dbsync_rocjitsu.py` on a CPU runner. It builds rocjitsu with
+Ninja, matching the MIOpen component CI naming check. Missing build tools,
+including `ninja-build`, are installed through `sudo apt-get`; the environment
+needs passwordless sudo and network access to the package repositories and GitHub.
+
+With matching non-ASAN artifacts unpacked into `build`, run:
+
+```sh
+AMDGPU_FAMILIES=gfx94X-dcgpu TEST_TYPE=standard \
+  python3 build/share/miopen/bin/run_dbsync_rocjitsu.py
+```
+
+Run separately with `AMDGPU_FAMILIES=gfx950-dcgpu` and that family's artifacts.
+The gfx942 run covers 304 and 228 CUs; the gfx950 run covers 256 CUs. Each artifact
+tree must contain `miopen_gtest`, the matching CK grouped-convolution plugin, and
+the SystemDBs. Require non-skipped `StaticFDBSync` results for every CU count:
+exit status zero alone does not prove coverage. The `quick` tier intentionally
+skips this runner.
+
 ## hipDNN shim surface
 
 A test belongs to the hipDNN backend-swap surface if its full gtest name contains the
@@ -336,3 +358,63 @@ as a missing backend.
 The fake is built as a CMake `MODULE` library, not `SHARED`. On Windows a `SHARED` library's DLL
 is written next to `MIOpen.dll`, where hipDNN looks for its backend, so every other test would
 load the fake. A `MODULE` library goes to its own directory on every platform.
+
+## Re-entry from a hipDNN plugin
+
+A hipDNN MIOpen plugin built against the public `libMIOpen.so` calls the wrapper from inside
+hipDNN. The wrapper fails that call with `miopenStatusInternalError` instead of forwarding it
+again (`ScopedHipdnnCall` and `RejectReentrantCall` in `src/private/hipdnn_graph.cpp`, checked in
+`MIOPEN_WRAPPER_FORWARD`); the full account is in RFC 0001 section 4.7. These tests cover it:
+
+- `CPU_WrapperRoutingReentry_NONE.*` in `wrapper_routing.cpp` test the per-thread guard, the
+  failure it records, the trace line, and the build and run steps (`AcquireGraphWith`,
+  `RunGraphWith`) against a stand-in for hipDNN. A re-entry fails the call even when hipDNN
+  succeeded, outranks hipDNN's own failure, and is never cached. Like every `CPU_` test in
+  `miopen_gtest`, they need a visible device.
+- `CPU_HipdnnEraseOutsideLock_NONE.*` test the two helpers that create and release a handle's
+  hipDNN state without holding the map lock. The plugin's handle destructor takes that lock again
+  (when the plugin is built against the public library), which would deadlock `miopenDestroy`.
+- `CPU_WrapperRoutingReentryMacro_NONE.*` run the dispatch macro itself, through a stub named
+  like an entry point. The route is read from `MIOPEN_HIPDNN_FORWARDING` once per process, so the
+  tests skip unless it enables forwarding. The `wrapper_reentry_macro` ctest entry sets it and
+  fails when a test skips: gtest exits 0 for a skip, and a stray `MIOPEN_DISABLE_HIPDNN_FOR`
+  would otherwise leave an entry that checks nothing. It needs a visible device (without one,
+  `miopen_gtest` aborts at start-up) but no compute, and no hipDNN install: with hipDNN missing
+  the route is still hipDNN, so the tests do not skip. It is registered for the build tree and, in
+  a combined build, the packaged test list, with the per-architecture entries
+  `check_wrapper_registration.py` checks.
+  The flag-on workflow does not run it because its runner has no device.
+- `miopen-provider-plugin-reentry-guard` (registered by `dnn-providers/miopen-provider` in a
+  superbuild that has both) runs `script/check_plugin_reentry.py`, which runs
+  `GPU_HipdnnReentry_FP32.RejectedCallThenDestroyReturns` (`hipdnn_reentry.cpp`): one forwarded
+  convolution on a fresh handle, then `miopenDestroy`. The script makes a stand-in plugin (the
+  provider's own sources built against the public library) the only engine through
+  `HIPDNN_PLUGIN_DIR` and sets `MIOPEN_TEST_EXPECT_REENTRY_REJECTION=1`. The test then passes only
+  if the convolution failed with `miopenStatusInternalError`, `miopenGetLastForwardedError` agrees,
+  the error string has the `[hipDNN-forwarded]` prefix and `miopenDestroy` returned within 30 s.
+  The script also requires MIOpen's message in the output. Without the guard the process recurses
+  until `hipblasLtCreate` fails and exits without a message.
+
+  The entry needs a built test binary, a GPU the test supports and a usable hipDNN. It is
+  **skipped** (exit 77, `SKIP_RETURN_CODE`) when the machine lacks any of them: a run that did not
+  pass is repeated with hipDNN's default plugins, and if that control run fails too, the machine
+  cannot run the test. Only a machine that passes the control and still fails with the stand-in has
+  a real failure. A binary without the test is a failure, not a skip. The script drops the caller's
+  shard, filter, deny-list, plugin-directory and log-level settings, which would hide a failure or
+  the message.
+
+`script/check_public_abi.py check-plugin` checks a plugin binary without running it. The provider
+registers it for the plugin it builds (must pass) and for the stand-in (must fail), and the flag-on
+workflow's provider job runs both. It is never given a plugin built elsewhere.
+
+No pull-request lane builds the wrapper, so none of these run automatically. The flag-on workflow
+(`miopen-wrapper-flag-on.yml`, manual dispatch) builds the wrapper and runs the two plugin ABI
+entries in its provider job. The routing and macro entries run where MIOpen's ctest suite runs on
+a machine with a device and the wrapper flag on. The re-entry entry is registered only by the
+provider's CMake, in a build tree of a superbuild that has both, so it is not in the installed test
+list.
+
+A default discrete build's ctest does not register the plain-named re-entry and erase tests (it
+keeps only `Smoke` names unless `MIOPEN_TEST_ALL` is on), like most `CPU_` tests. A combined
+build's quick tier runs them; in a discrete build run `bin/test_wrapper_routing` and
+`bin/test_hipdnn_erase_outside_lock` directly.
