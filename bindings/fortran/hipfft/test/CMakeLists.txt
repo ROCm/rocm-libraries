@@ -25,6 +25,10 @@
 # hipFFT and hipFFTW Fortran binding tests: one GPU executable per test. Each
 # half guards itself on its C library.
 
+# The tests are free form whatever their extension: with the Intel compilers,
+# which read .f03 and .f08 as fixed form, this adds -free.
+set(CMAKE_Fortran_FORMAT FREE)
+
 # ifx/ifort skip .f03/.f08 files unless -Tf precedes the source.
 if(CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
   string(REPLACE "<SOURCE>" "-Tf <SOURCE>"
