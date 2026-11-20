@@ -25,8 +25,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   Find for each problem measures again, and the user waits for it. Deterministic immediate mode no
   longer reads the shipped find-db times. Those times can come from split-K > 1 kernels, so they
   do not apply to deterministic mode.
-* [Conv] Fixed the NHWC Winograd solvers being skipped in the default find mode and in immediate
-  mode when a problem is missing from the find-db (for example deterministic convolutions), which
+* [Conv] The NHWC Winograd solvers (`TransposedConv*Wino*`) now report the same `IsDynamic()` as
+  the solver they wrap. They were skipped in the default `DYNAMIC_HYBRID` Find and in immediate
+  mode when a problem was missing from the find-db (for example deterministic convolutions), which
   selected a 2-3 times slower GEMM or implicit-GEMM solver.
 * [Conv] Fixed the 3D grouped backward-weights CK xdlops convolution solver skipping
   `valid_kernels[0]` during exhaustive tuning: the populate branch fell through instead of emitting
