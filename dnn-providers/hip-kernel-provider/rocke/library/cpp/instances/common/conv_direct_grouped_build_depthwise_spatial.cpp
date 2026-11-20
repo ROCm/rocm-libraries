@@ -216,7 +216,23 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
     /* ---- parameters ---- */
     {
         /* The AOT kernarg block, in conv_abi order. */
-        rocke_dconv_emit_params(bld, &params, "fwd", rocke_dconv_io_type(bld, dtype));
+        if(spec->dgrad)
+        {
+            /* Read dY, write dX: the forward roles of the extents swap. The
+             * dgrad block already binds the dY strides to the A slot. */
+            rocke_value_t* t;
+            rocke_dconv_emit_params(bld, &params, "dgrad", rocke_dconv_io_type(bld, dtype));
+            t = params.p_Hi;
+            params.p_Hi = params.p_Ho;
+            params.p_Ho = t;
+            t = params.p_Wi;
+            params.p_Wi = params.p_Wo;
+            params.p_Wo = t;
+        }
+        else
+        {
+            rocke_dconv_emit_params(bld, &params, "fwd", rocke_dconv_io_type(bld, dtype));
+        }
         A = params.A;
         Bp = params.Bp;
         D = params.D;
@@ -283,6 +299,8 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
         b_desc_v = rocke_tensor_descriptor_naive(bld, "B", b_lengths, 4, NULL, b_coords, 4);
     }
 
+    d_desc = NULL;
+    if(!spec->dgrad)
     {
         /* d_desc = D[N, Ho, Wo, total_k] with runtime extents. */
         rocke_dynamic_tensor_descriptor_t* d_dyn = rocke_dconv_d_descriptor_dynamic(bld, &params);
@@ -305,9 +323,11 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
                 const char* bn[4] = {"k", "r", "s", "c"};
                 rocke_value_t* bv[4];
 
+                /* The dgrad mode reads tap (r, s) from the rotated position
+                 * (KH-1-r, KW-1-s). */
                 bv[0] = ch;
-                bv[1] = rocke_b_const_i32(bld, r_const);
-                bv[2] = rocke_b_const_i32(bld, s_const);
+                bv[1] = rocke_b_const_i32(bld, spec->dgrad ? p->KH - 1 - r_const : r_const);
+                bv[2] = rocke_b_const_i32(bld, spec->dgrad ? p->KW - 1 - s_const : s_const);
                 bv[3] = c0;
                 rocke_transforms_descriptor_offset(bld, b_desc_v, bn, bv, 4, &w_off, &w_valid_desc);
 
@@ -533,15 +553,28 @@ rocke_kernel_def_t* rocke_build_direct_depthwise_spatial(
 
             d_off = NULL;
             d_valid = NULL;
-            dn[0] = "n";
-            dv[0] = n;
-            dn[1] = "h";
-            dv[1] = ho_row_j;
-            dn[2] = "w";
-            dv[2] = q_out;
-            dn[3] = "k";
-            dv[3] = ch;
-            rocke_transforms_descriptor_offset(bld, d_desc, dn, dv, 4, &d_off, &d_valid);
+            if(spec->dgrad)
+            {
+                /* dX[n, ho, wo, ch] through the dgrad block's dX strides. */
+                rocke_value_t* m_n = rocke_b_mul(bld, n, params.p_D_stride_n);
+                rocke_value_t* m_h = rocke_b_mul(bld, ho_row_j, params.p_D_stride_ho);
+                rocke_value_t* nh = rocke_b_add(bld, m_n, m_h);
+                rocke_value_t* m_w = rocke_b_mul(bld, q_out, params.p_D_stride_wo);
+                rocke_value_t* wc = rocke_b_add(bld, m_w, ch);
+                d_off = rocke_b_add(bld, nh, wc);
+            }
+            else
+            {
+                dn[0] = "n";
+                dv[0] = n;
+                dn[1] = "h";
+                dv[1] = ho_row_j;
+                dn[2] = "w";
+                dv[2] = q_out;
+                dn[3] = "k";
+                dv[3] = ch;
+                rocke_transforms_descriptor_offset(bld, d_desc, dn, dv, 4, &d_off, &d_valid);
+            }
 
             safe_d = rocke_b_select(
                 bld, store_ok, rocke_b_mul(bld, d_off, c_half_bytes), oob_sentinel);

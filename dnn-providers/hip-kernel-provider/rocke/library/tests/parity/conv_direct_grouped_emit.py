@@ -2521,8 +2521,87 @@ def _wgrad_pp_spec(idx: int):
     return ("wgrad_tiled", sel, "gfx950")
 
 
+
+# ---------------------------------------------------------------------------
+# DwWgradFoldSpec block shapes, indices 371..381: the narrow, deep fold the
+# gfx1250 grouped WMMA wgrad runs with (cols 32, slices 32, unroll 8) on
+# gfx1250 and gfx950, wide / shallow and narrow shapes, the defaults spelled
+# out (the original kernel name), a one-load unroll; then no unroll, no
+# slices, no cols, negative cols and a 2048-thread block (slices * cols past
+# 1024), which both engines must reject. Follows the 7 tiled wgrad
+# ping-pong configs.
+# ---------------------------------------------------------------------------
+_FOLD_KNOB_CFG_BASE = 371
+
+
+def _fold_knob_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_FOLD_KNOB_CFG_BASE + idx``, or None."""
+    F = DwWgradFoldSpec
+    table = {
+        0: (
+            F(taps=36, name="rocke_direct_wgrad_fold", cols=32, slices=32, unroll=8),
+            "gfx1250",
+        ),
+        1: (F(taps=72, cols=32, slices=32, unroll=8), "gfx950"),
+        2: (F(taps=9, cols=64, slices=8, unroll=2), "gfx950"),
+        3: (F(taps=27, name="fold27", cols=16, slices=16, unroll=4), "gfx1250"),
+        4: (F(taps=9, cols=64, slices=16, unroll=4), "gfx950"),
+        5: (F(taps=9, cols=128, slices=4, unroll=1), "gfx950"),
+        6: (F(taps=9, unroll=0), "gfx950"),
+        7: (F(taps=9, slices=0), "gfx950"),
+        8: (F(taps=9, cols=0), "gfx950"),
+        9: (F(taps=9, cols=-32), "gfx950"),
+        10: (F(taps=9, cols=64, slices=32), "gfx950"),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("dw_wgrad_fold", sel[0], sel[1])
+
+
+# ---------------------------------------------------------------------------
+# DirectDepthwiseSpatialSpec(dgrad=True): stride-1 depthwise dgrad on the
+# small-group spatial kernel with the filter rotated by 180 degrees (11x11 and
+# 5x5 at C=3, 3x3 at C=16, both wave sizes); a stride-2 dgrad both engines
+# must reject. Follows the DwWgradFoldSpec configs.
+# ---------------------------------------------------------------------------
+_SPATIAL_DGRAD_CFG_BASE = 382
+
+
+def _spatial_dgrad_spec(idx: int):
+    """Return (kind, spec, arch) for config ``_SPATIAL_DGRAD_CFG_BASE + idx``, or None."""
+
+    def prob(groups, k, dtype="fp16", stride=1):
+        return DirectConvProblem(
+            N=2, H=14, W=17, groups=groups, cpg=1, kpg=1, KH=k, KW=k,
+            PAD=(k - 1) // 2, stride=stride, dtype=dtype,
+        )
+
+    S = DirectDepthwiseSpatialSpec
+    table = {
+        0: (S(problem=prob(3, 11), block_waves=2, wave_size=32, dgrad=True), "gfx1250"),
+        1: (S(problem=prob(3, 5, "bf16"), block_waves=1, dgrad=True), "gfx950"),
+        2: (S(problem=prob(16, 3), block_waves=1, wave_size=32, dgrad=True), "gfx1250"),
+        3: (S(problem=prob(3, 3, stride=2), block_waves=1, dgrad=True), "gfx950"),
+    }
+    sel = table.get(idx)
+    if sel is None:
+        return None
+    return ("spatial", sel[0], sel[1])
+
+
 def _spec(idx: int):
     """Return (kind, spec, arch) for config index `idx`."""
+    if idx >= _SPATIAL_DGRAD_CFG_BASE:
+        sel = _spatial_dgrad_spec(idx - _SPATIAL_DGRAD_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
+    if idx >= _FOLD_KNOB_CFG_BASE:
+        sel = _fold_knob_spec(idx - _FOLD_KNOB_CFG_BASE)
+        if sel is not None:
+            return sel
+        raise SystemExit(f"unknown config index {idx}")
     if idx >= _WGRAD_PP_CFG_BASE:
         sel = _wgrad_pp_spec(idx - _WGRAD_PP_CFG_BASE)
         if sel is not None:

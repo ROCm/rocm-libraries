@@ -13832,6 +13832,12 @@ class DirectDepthwiseSpatialSpec:
     name: str = "direct_depthwise_spatial"
     block_waves: int = 1
     wave_size: int = 64
+    # Stride-1 depthwise dgrad as a forward pass (see
+    # DirectDepthwiseTiledSpec.dgrad): dX is the correlation of dY with the
+    # filter rotated by 180 degrees. The kernel reads dY and writes dX through
+    # the dgrad kernarg block; "same" padding keeps the rotated padding
+    # KH - 1 - PAD equal to PAD, so the row stream is unchanged.
+    dgrad: bool = False
 
     @property
     def n_w_per_wave(self) -> int:
@@ -13853,7 +13859,7 @@ class DirectDepthwiseSpatialSpec:
             self.name,
             p.short(),
             f"bwv{self.block_waves}",
-            flags=_scalar_name_flags(p.dtype),
+            flags={"dg": self.dgrad, **_scalar_name_flags(p.dtype)},
         )
 
     def validate(self) -> None:
@@ -13874,6 +13880,10 @@ class DirectDepthwiseSpatialSpec:
         if self.n_w_per_wave == 0:
             raise ValueError(
                 f"groups={p.groups} == wave_size={self.wave_size}: no W positions per wave"
+            )
+        if self.dgrad and p.stride != 1:
+            raise ValueError(
+                f"DirectDepthwiseSpatialSpec(dgrad=True) needs stride 1 (got {p.stride})"
             )
 
 
@@ -13907,6 +13917,8 @@ def is_valid_depthwise_spatial_spec(
         return False, f"groups {p.groups} > wave_size {spec.wave_size}"
     if spec.n_w_per_wave == 0:
         return False, f"groups={p.groups} == wave_size: no W positions per wave"
+    if spec.dgrad and p.stride != 1:
+        return False, f"the dgrad mode needs stride 1 (got {p.stride})"
     return True, "ok"
 
 
@@ -13942,8 +13954,19 @@ def build_direct_depthwise_spatial(
     b.kernel.attrs["waves_per_eu"] = 2
 
     io_type = _io_type(p.dtype)
+    DG = spec.dgrad
 
-    params = emit_direct_params(b, io_type=io_type)
+    if DG:
+        # Read dY, write dX: the forward roles of the extents and strides swap.
+        params = emit_direct_params(b, direction="dgrad", io_type=io_type)
+        params = dict(params)
+        params["p_Hi"], params["p_Ho"] = params["p_Ho"], params["p_Hi"]
+        params["p_Wi"], params["p_Wo"] = params["p_Wo"], params["p_Wi"]
+        params["p_A_stride_n"] = params["p_dY_stride_n"]
+        params["p_A_stride_hi"] = params["p_dY_stride_ho"]
+        params["p_A_stride_wi"] = params["p_dY_stride_wo"]
+    else:
+        params = emit_direct_params(b, io_type=io_type)
     A = params["A"]
     Bp = params["B"]
     D = params["D"]
@@ -13991,15 +14014,18 @@ def build_direct_depthwise_spatial(
     b_desc = TensorDescriptor.naive(
         "B", lengths=[p.total_k, p.KH, p.KW, 1], coord_names=("k", "r", "s", "c")
     )
-    d_desc = direct_d_descriptor_dynamic(b, params)
+    d_desc = None if DG else direct_d_descriptor_dynamic(b, params)
 
-    # Preload weights: KH * KW f32 per thread (one channel each).
+    # Preload weights: KH * KW f32 per thread (one channel each); the dgrad
+    # mode reads tap (r, s) from the rotated position (KH-1-r, KW-1-s).
     weights_f32: List[List[Value]] = []
     for r_const in range(p.KH):
         row: List[Value] = []
         for s_const in range(p.KW):
+            r_src = p.KH - 1 - r_const if DG else r_const
+            s_src = p.KW - 1 - s_const if DG else s_const
             w_off, _ = b_desc.offset(
-                b, k=ch, r=b.const_i32(r_const), s=b.const_i32(s_const), c=c0
+                b, k=ch, r=b.const_i32(r_src), s=b.const_i32(s_src), c=c0
             )
             safe_w = b.select(w_valid, b.mul(w_off, c_half_bytes), oob_sentinel)
             w_h = _scalar_load(b, p.dtype, b_rsrc, safe_w, c0)
@@ -14103,7 +14129,17 @@ def build_direct_depthwise_spatial(
             store_ok = b.land(q_ok, should_flush)
 
             acc_val = new_accs[P_FLUSH_j]  # STATIC index
-            d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=q_out, k=ch)
+            if DG:
+                # dX[n, ho, wo, ch] through the dgrad block's dX strides.
+                d_off = b.add(
+                    b.add(
+                        b.mul(n, params["p_dX_stride_n"]),
+                        b.mul(ho_row_j, params["p_dX_stride_hi"]),
+                    ),
+                    b.add(b.mul(q_out, params["p_dX_stride_wi"]), ch),
+                )
+            else:
+                d_off, _ = d_desc.offset(b, n=n, h=ho_row_j, w=q_out, k=ch)
             safe_d = b.select(store_ok, b.mul(d_off, c_half_bytes), oob_sentinel)
             _scalar_store(b, p.dtype, d_rsrc, safe_d, c0, acc_val)
 
@@ -14572,8 +14608,9 @@ def direct_launch_geometry(spec) -> Tuple[Tuple[int, int, int], Tuple[int, int, 
         grid = (ceil_div(p.Wo, spec.block_q), p.groups // spec.block_groups, p.N)
         return grid, (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseSpatialSpec):
-        # Every channel of the image lives in one wavefront.
-        return (ceil_div(p.Wo, spec.block_w), 1, p.N), (spec.threads_per_block, 1, 1)
+        # Every channel of the image lives in one wavefront; dgrad tiles dX.
+        out_w = p.W if spec.dgrad else p.Wo
+        return (ceil_div(out_w, spec.block_w), 1, p.N), (spec.threads_per_block, 1, 1)
     if isinstance(spec, DirectDepthwiseSpec):
         grid = (ceil_div(p.Wo, spec.block_w), ceil_div(p.groups, spec.block_ch), p.N)
         return grid, (spec.threads_per_block, 1, 1)

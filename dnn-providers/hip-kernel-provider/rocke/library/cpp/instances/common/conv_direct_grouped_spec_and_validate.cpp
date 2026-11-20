@@ -1740,19 +1740,20 @@ rocke_status_t rocke_direct_depthwise_spatial_kernel_name(
     {
         return ROCKE_ERR_VALUE;
     }
-    /* kernel_name_join(name, p.short(), f"bwv{block_waves}", flags={"bf16": dtype=="bf16"}) */
+    /* kernel_name_join(name, p.short(), f"bwv{block_waves}",
+     *                  flags={"dg": dgrad, **_scalar_name_flags(dtype)}) */
     snprintf(bwv_buf, sizeof(bwv_buf), "bwv%d", spec->block_waves);
     parts[0] = prob_short;
     parts[1] = bwv_buf;
     {
-        /* flags=_scalar_name_flags(dtype) */
-        const char* flag_names[2] = {"bf16", "f32"};
-        int flag_on[2];
+        const char* flag_names[3] = {"dg", "bf16", "f32"};
+        int flag_on[3];
         const char* dt = spec->problem.dtype ? spec->problem.dtype : "fp16";
-        flag_on[0] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
-        flag_on[1] = rocke_dconv_scalar_f32_flag(dt);
+        flag_on[0] = spec->dgrad ? 1 : 0;
+        flag_on[1] = (strcmp(dt, "bf16") == 0) ? 1 : 0;
+        flag_on[2] = rocke_dconv_scalar_f32_flag(dt);
         return rocke_kernel_name_join(
-            spec->name, parts, 2, flag_names, flag_on, 2, out, out_cap, NULL);
+            spec->name, parts, 2, flag_names, flag_on, 3, out, out_cap, NULL);
     }
 }
 
@@ -1842,6 +1843,14 @@ bool rocke_direct_depthwise_spatial_is_valid_spec(const rocke_direct_depthwise_s
         }
         return false;
     }
+    if(spec->dgrad && p->stride != 1)
+    {
+        if(reason && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "the dgrad mode needs stride 1 (got %d)", p->stride);
+        }
+        return false;
+    }
     rocke_spec_set_reason(reason, reason_cap, "ok");
     return true;
 }
@@ -1867,6 +1876,15 @@ rocke_status_t rocke_direct_depthwise_spatial_validate(
                      "DirectDepthwiseSpatialSpec requires cpg=kpg=1 (got cpg=%d, kpg=%d)",
                      p->cpg,
                      p->kpg);
+        return ROCKE_ERR_VALUE;
+    }
+    if(spec->dgrad && p->stride != 1)
+    {
+        if(reason && reason_cap > 0)
+            snprintf(reason,
+                     reason_cap,
+                     "DirectDepthwiseSpatialSpec(dgrad=True) needs stride 1 (got %d)",
+                     p->stride);
         return ROCKE_ERR_VALUE;
     }
     rocke_spec_set_reason(reason, reason_cap, "ok");

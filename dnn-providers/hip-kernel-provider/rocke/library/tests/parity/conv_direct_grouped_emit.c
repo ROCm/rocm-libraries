@@ -173,6 +173,11 @@ static int make_4c_bf16_cfg(int idx, rocke_direct_conv_4c_spec_t* s4, const char
 #define WGRAD_STEM_CFG_BASE 356
 #define WGRAD_AUTO_CFG_BASE 359
 #define WGRAD_PP_CFG_BASE 364
+/* DwWgradFoldSpec block shapes (cols / slices / unroll) follow the 7 tiled
+ * wgrad ping-pong configs. */
+#define FOLD_KNOB_CFG_BASE 371
+/* DirectDepthwiseSpatialSpec(dgrad=True) configs follow the fold configs. */
+#define SPATIAL_DGRAD_CFG_BASE 382
 
 /* Problem helper mirroring prob() in the Python _dw_wgrad_spec: N=2, H=9,
  * W=13, groups = C, cpg = kpg. */
@@ -3461,6 +3466,84 @@ static int make_f32_cfg(int idx, int* kind, const f32_specs_t* sp, const char** 
     return -1;
 }
 
+/* DwWgradFoldSpec block shapes, emitted as FOLD_KNOB_CFG_BASE + idx (see
+ * _fold_knob_spec in the Python emitter). Returns 0 on success, -1 if unknown. */
+static int make_fold_knob_cfg(int idx, rocke_dw_wgrad_fold_spec_t* f, const char** arch)
+{
+    /* (taps, cols, slices, unroll, gfx1250) per index; name set below. */
+    static const int table[11][5] = {
+        {36, 32, 32, 8, 1},
+        {72, 32, 32, 8, 0},
+        {9, 64, 8, 2, 0},
+        {27, 16, 16, 4, 1},
+        {9, 64, 16, 4, 0},
+        {9, 128, 4, 1, 0},
+        {9, 64, 16, 0, 0},
+        {9, 64, 0, 4, 0},
+        {9, 0, 16, 4, 0},
+        {9, -32, 16, 4, 0},
+        {9, 64, 32, 4, 0},
+    };
+    if(idx < 0 || idx >= 11)
+        return -1;
+    *f = rocke_dw_wgrad_fold_spec_default();
+    f->taps = table[idx][0];
+    f->cols = table[idx][1];
+    f->slices = table[idx][2];
+    f->unroll = table[idx][3];
+    *arch = table[idx][4] ? "gfx1250" : "gfx950";
+    if(idx == 0)
+        f->name = "rocke_direct_wgrad_fold";
+    else if(idx == 3)
+        f->name = "fold27";
+    return 0;
+}
+
+/* DirectDepthwiseSpatialSpec(dgrad=True) configs, emitted as
+ * SPATIAL_DGRAD_CFG_BASE + idx (mirrors _spatial_dgrad_spec in the Python
+ * emitter): N=2, H=14, W=17, "same" padding. */
+static int make_spatial_dgrad_cfg(int idx,
+                                  rocke_direct_depthwise_spatial_spec_t* ssp,
+                                  const char** arch)
+{
+    int groups, k, stride = 1, block_waves = 1, wave_size = 64;
+    const char* dtype = "fp16";
+    rocke_direct_conv_problem_t p = rocke_direct_conv_problem_default();
+    switch(idx)
+    {
+    case 0:
+        groups = 3, k = 11, block_waves = 2, wave_size = 32, *arch = "gfx1250";
+        break;
+    case 1:
+        groups = 3, k = 5, dtype = "bf16", *arch = "gfx950";
+        break;
+    case 2:
+        groups = 16, k = 3, wave_size = 32, *arch = "gfx1250";
+        break;
+    case 3:
+        groups = 3, k = 3, stride = 2, *arch = "gfx950";
+        break;
+    default: return -1;
+    }
+    p.N = 2;
+    p.H = 14;
+    p.W = 17;
+    p.groups = groups;
+    p.cpg = 1;
+    p.kpg = 1;
+    p.KH = k;
+    p.KW = k;
+    p.PAD = (k - 1) / 2;
+    p.stride = stride;
+    p.dtype = dtype;
+    *ssp = rocke_direct_depthwise_spatial_spec_default();
+    ssp->problem = p;
+    ssp->block_waves = block_waves;
+    ssp->wave_size = wave_size;
+    ssp->dgrad = 1;
+    return 0;
+}
+
 int main(int argc, char** argv)
 {
     if(argc < 2)
@@ -3492,7 +3575,25 @@ int main(int argc, char** argv)
     rocke_direct_depthwise_dgrad_stream_spec_t sdgs;
     rocke_direct_depthwise_wgrad_spec_t sdww;
     const char* arch = "gfx950";
-    if(idx >= WGRAD_PP_CFG_BASE)
+    if(idx >= SPATIAL_DGRAD_CFG_BASE)
+    {
+        if(make_spatial_dgrad_cfg(idx - SPATIAL_DGRAD_CFG_BASE, &ssp, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_SPATIAL;
+    }
+    else if(idx >= FOLD_KNOB_CFG_BASE)
+    {
+        if(make_fold_knob_cfg(idx - FOLD_KNOB_CFG_BASE, &swd.fold, &arch) != 0)
+        {
+            fprintf(stderr, "unknown config index %d\n", idx);
+            return 2;
+        }
+        kind = KIND_DW_WGRAD_FOLD;
+    }
+    else if(idx >= WGRAD_PP_CFG_BASE)
     {
         if(make_wgrad_pp_cfg(idx - WGRAD_PP_CFG_BASE, &swd.tiled) != 0)
         {

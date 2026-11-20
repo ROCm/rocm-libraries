@@ -28,6 +28,7 @@ from kernels.conv.direct_variants import (
     DIRECT_DGRAD_SMALLC_WMMA as _DGRAD_SMALLC,
     DIRECT_DGRAD_WMMA as _DGRAD_WMMA,
     DIRECT_DEPTHWISE_TILED_DGRAD as _DW_TILED_DGRAD,
+    DIRECT_DEPTHWISE_SPATIAL_DGRAD as _DW_SPATIAL_DGRAD,
     DIRECT_DW_FWD_WMMA as _DW_FWD_WMMA,
     DIRECT_FWD_GSTREAM_WMMA as _FWD_GSTREAM,
     DIRECT_FWD_TAPOUTER_WMMA as _FWD_TAPOUTER,
@@ -1602,6 +1603,16 @@ DIRECT_CAPABILITIES: Dict[str, Tuple[str, Tuple[DirectCaps, ...]]] = {
             for pad in _all_pads(k)
         ),
     ),
+    # Small-group stride-1 depthwise dgrad as a rotated-filter forward pass on
+    # the spatial kernel (lanes over channels x columns, groups <= wave size):
+    # the few-channel layers the one-channel-per-lane kernels leave idle.
+    _DW_SPATIAL_DGRAD: (
+        "dgrad",
+        tuple(
+            DirectCaps(KH=k, PAD=_same_pad(k), stride=1, cpg=1, kpg=1)
+            for k in _DEPTHWISE_FILTERS
+        ),
+    ),
     # Large-filter stride-1 depthwise dgrad as a rotated-filter forward pass
     # (13x13 .. 31x31, "same" padding); the row-streaming kernel
     # (direct_depthwise_dgrad) preloads every tap and stops at 11x11.
@@ -2168,7 +2179,7 @@ def _knob_grid(
             for cpl, bws, waves_list in DW_FWD_CPL_GRID:
                 for bw, waves in itertools.product(bws, waves_list):
                     yield dict(block_w=bw, block_waves=waves, cpl=cpl)
-    elif variant == "direct_depthwise_spatial":
+    elif variant in ("direct_depthwise_spatial", _DW_SPATIAL_DGRAD):
         for waves in DW_BLOCK_WAVES:
             yield dict(block_waves=waves)
     elif variant == "direct_depthwise_tiled":
@@ -3281,7 +3292,7 @@ def probe_problem(
             pad_w=caps.pad_w,
         )
     n_images = 1
-    if variant == "direct_depthwise_spatial":
+    if variant in ("direct_depthwise_spatial", _DW_SPATIAL_DGRAD):
         groups = 8
     elif variant == "direct_grouped_dgrad_fused":
         # Its rows share channel counts with the dense MFMA dgrad rows but

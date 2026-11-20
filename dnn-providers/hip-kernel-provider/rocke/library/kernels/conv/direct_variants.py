@@ -28,6 +28,7 @@ __all__ = [
     "DIRECT_DGRAD_SMALLC_WMMA",
     "DIRECT_DGRAD_WMMA",
     "DIRECT_DEPTHWISE_WIN_FWD",
+    "DIRECT_DEPTHWISE_SPATIAL_DGRAD",
     "DIRECT_FWD_SMALLC_WMMA",
     "DIRECT_FWD_SMALLC_MFMA",
     "DIRECT_FWD_SMALLK_MFMA",
@@ -155,6 +156,10 @@ DIRECT_FWD_FLEX_MFMA = "direct_fwd_flex_mfma"
 # Stride-1 depthwise dgrad through the output-stationary forward kernel with
 # the filter rotated by 180 degrees (DirectDepthwiseTiledSpec(dgrad=True)).
 DIRECT_DEPTHWISE_TILED_DGRAD = "direct_depthwise_tiled_dgrad"
+# Stride-1 depthwise dgrad through the small-group spatial forward kernel with
+# the filter rotated by 180 degrees (DirectDepthwiseSpatialSpec(dgrad=True)):
+# "same" padding, groups up to the wave size (lanes over channels x columns).
+DIRECT_DEPTHWISE_SPATIAL_DGRAD = "direct_depthwise_spatial_dgrad"
 # The variants that offset columns by a column padding of their own
 # (problem.PAD_W != problem.PAD) and the only ones with a non-square filter:
 # the rotated-filter depthwise dgrad and the direct (1 x R, rectangular,
@@ -233,6 +238,7 @@ DIRECT_WAVE_PARAMETRIC = frozenset(
         "direct_depthwise_tiled",
         "direct_depthwise_col",
         DIRECT_DEPTHWISE_TILED_DGRAD,
+        DIRECT_DEPTHWISE_SPATIAL_DGRAD,
     }
 )
 
@@ -368,6 +374,10 @@ def make_direct_spec(variant: str, problem, knobs: dict, wave_size: int = 64):
     if variant == DIRECT_DEPTHWISE_TILED_DGRAD:
         return dc.DirectDepthwiseTiledSpec(
             problem=problem, name="rocke_direct_dw_tiled_dgrad", dgrad=True, **knobs
+        )
+    if variant == DIRECT_DEPTHWISE_SPATIAL_DGRAD:
+        return dc.DirectDepthwiseSpatialSpec(
+            problem=problem, name="rocke_direct_dw_spatial_dgrad", dgrad=True, **knobs
         )
     if variant == "direct_depthwise_col":
         # The col spec carries its own element type; a binary serves only the
@@ -805,7 +815,7 @@ def validate_direct_spec(variant: str, spec, arch: str) -> tuple[bool, str]:
             )
 
             return is_valid_tapouter_spec(spec, arch=arch)
-        if variant == "direct_depthwise_spatial":
+        if variant in ("direct_depthwise_spatial", DIRECT_DEPTHWISE_SPATIAL_DGRAD):
             return dc.is_valid_depthwise_spatial_spec(spec, arch=arch)
         if variant in ("direct_depthwise_tiled", DIRECT_DEPTHWISE_TILED_DGRAD):
             return dc.is_valid_depthwise_tiled_spec(spec, arch=arch)
@@ -956,6 +966,7 @@ def select_direct_kernel_builder(variant: str, spec, arch: str):
         "direct_dgrad_mfma_rtc": dc.build_direct_conv,
         "direct_depthwise": dc.build_direct_depthwise,
         "direct_depthwise_spatial": dc.build_direct_depthwise_spatial,
+        DIRECT_DEPTHWISE_SPATIAL_DGRAD: dc.build_direct_depthwise_spatial,
         "direct_depthwise_tiled": dc.build_direct_depthwise_tiled,
         DIRECT_DEPTHWISE_TILED_DGRAD: dc.build_direct_depthwise_tiled,
         "direct_depthwise_col": dc.build_direct_depthwise_col,

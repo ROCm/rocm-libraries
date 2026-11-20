@@ -525,6 +525,10 @@ typedef struct rocke_direct_depthwise_spatial_spec
     const char* name; /* default "direct_depthwise_spatial" */
     int block_waves; /* default 1  */
     int wave_size; /* default 64 */
+    /* Stride-1 depthwise dgrad as a forward pass over the 180-degree rotated
+     * filter, reading dY and writing dX through the dgrad kernarg block
+     * (Python: DirectDepthwiseSpatialSpec.dgrad). Default 0. */
+    int dgrad;
 } rocke_direct_depthwise_spatial_spec_t;
 
 rocke_direct_depthwise_spatial_spec_t rocke_direct_depthwise_spatial_spec_default(void);
