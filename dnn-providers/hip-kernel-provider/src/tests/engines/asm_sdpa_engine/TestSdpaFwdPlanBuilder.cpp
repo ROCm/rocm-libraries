@@ -808,6 +808,15 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableCuSeqLenContract)
          false},
         {GraphTest{sdpa::withSeqLenQ(createRaggedCuSeqLenSdpaFwdGraph()), "seq_len_q set"}, false},
         {GraphTest{sdpa::withSeqLenKv(createRaggedCuSeqLenSdpaFwdGraph()), "seq_len_kv set"},
+         false},
+        // seq_len_q/kv decline without cu_seq_len too, in batch and group mode alike.
+        {GraphTest{sdpa::withSeqLenQ(createSdpaFwdGraph()), "Batch mode with seq_len_q"}, false},
+        {GraphTest{sdpa::withSeqLenKv(createSdpaFwdGraph()), "Batch mode with seq_len_kv"}, false},
+        {GraphTest{sdpa::withSeqLenQ(createRaggedBshdSdpaFwdGraph()),
+                   "Group mode with seq_len_q and no cu_seq_len"},
+         false},
+        {GraphTest{sdpa::withSeqLenKv(createRaggedBshdSdpaFwdGraph()),
+                   "Group mode with seq_len_kv and no cu_seq_len"},
          false}};
 
     // The cu_seq_len tensors are validated separately, so every defect is exercised on both.

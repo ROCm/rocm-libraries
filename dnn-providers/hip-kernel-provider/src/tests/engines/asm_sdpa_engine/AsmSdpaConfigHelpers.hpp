@@ -26,6 +26,8 @@ enum class GroupLengths
     /// A batch with more queries than keys (fully masked rows under bottom-right causal), a
     /// batch with no queries and a batch with no keys.
     EDGE,
+    /// One batch that spans several Q-tiles and has at least as many keys as queries.
+    SINGLE_BATCH,
 };
 
 /**
