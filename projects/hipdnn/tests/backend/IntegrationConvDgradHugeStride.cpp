@@ -1,14 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Port of the exploratory test Issue_C3_06_conv_dgrad_huge_stride_applicability_hang.
-//
-// A serialized conv dgrad graph whose stride is far larger than its dims allow must be declined
-// at some step up to and including the ENGINEHEUR finalize, or that finalize must return, within
-// a bounded time. Engine applicability for such a graph has been observed not to return for
-// minutes, so the sequence runs on a worker thread with an internal deadline. A worker that
-// misses the deadline can be neither joined nor cancelled, so the test reports the failure and
-// ends the process.
+// A serialized conv dgrad graph whose stride is far larger than its dims allow is rejected with
+// HIPDNN_STATUS_BAD_PARAM when it is deserialized, because the descriptor's finalize checks the
+// stride against the dims. Without that check, engine applicability for such a graph has been
+// observed not to return for minutes, so the whole sequence up to and including the ENGINEHEUR
+// finalize runs on a worker thread with an internal deadline. A worker that misses the deadline
+// can be neither joined nor cancelled, so the test reports the failure and ends the process.
 
 #include "hipdnn_backend.h"
 
@@ -56,6 +54,7 @@ using ScopedHandle = std::unique_ptr<std::remove_pointer_t<hipdnnHandle_t>, Hand
 struct SequenceOutcome
 {
     bool setupFailed = false;
+    hipdnnStatus_t deserializeStatus = HIPDNN_STATUS_SUCCESS;
     std::string detail;
 };
 
@@ -98,6 +97,7 @@ SequenceOutcome runDgradSequence(int64_t widthStride)
     auto status = hipdnnBackendCreateAndDeserializeGraph_ext(
         &rawGraph, builder.GetBufferPointer(), builder.GetSize());
     const ScopedDescriptor graph(rawGraph);
+    outcome.deserializeStatus = status;
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         outcome.detail = stepResult("hipdnnBackendCreateAndDeserializeGraph_ext", status);
@@ -147,7 +147,7 @@ SequenceOutcome runDgradSequence(int64_t widthStride)
     return outcome;
 }
 
-void expectDeclinedOrReturnedWithinDeadline(int64_t widthStride)
+void expectRejectedAtDeserializeWithinDeadline(int64_t widthStride)
 {
     auto worker = std::async(std::launch::async, runDgradSequence, widthStride);
     if(worker.wait_for(K_DEADLINE) == std::future_status::timeout)
@@ -164,14 +164,16 @@ void expectDeclinedOrReturnedWithinDeadline(int64_t widthStride)
 
     const auto outcome = worker.get();
     EXPECT_FALSE(outcome.setupFailed) << "stride [1, " << widthStride << "]: " << outcome.detail;
+    EXPECT_EQ(outcome.deserializeStatus, HIPDNN_STATUS_BAD_PARAM)
+        << "stride [1, " << widthStride << "]: " << outcome.detail;
 }
 
 } // namespace
 
-TEST(IntegrationConvDgradHugeStride, DeclinedOrHeuristicFinalizeReturnsWithinDeadline)
+TEST(IntegrationConvDgradHugeStride, DeserializeRejectsWithinDeadline)
 {
     SKIP_IF_NO_DEVICES();
 
-    expectDeclinedOrReturnedWithinDeadline(100000);
-    expectDeclinedOrReturnedWithinDeadline(1048577);
+    expectRejectedAtDeserializeWithinDeadline(100000);
+    expectRejectedAtDeserializeWithinDeadline(1048577);
 }

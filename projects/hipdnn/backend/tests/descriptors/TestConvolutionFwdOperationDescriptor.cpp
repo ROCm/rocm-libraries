@@ -12,6 +12,7 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvFpropConstants.hpp>
@@ -122,16 +123,6 @@ protected:
 namespace
 {
 
-std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
-{
-    std::vector<int64_t> strides(dims.size(), 1);
-    for(size_t i = dims.size() - 1; i > 0; --i)
-    {
-        strides[i - 1] = strides[i] * dims[i];
-    }
-    return strides;
-}
-
 // Finalizes a fprop descriptor built from packed tensors with the given dims, zero padding,
 // unit dilation and the given stride.
 void finalizeFpropWithShape(const std::vector<int64_t>& xDims,
@@ -139,9 +130,11 @@ void finalizeFpropWithShape(const std::vector<int64_t>& xDims,
                             const std::vector<int64_t>& yDims,
                             const std::vector<int64_t>& stride)
 {
-    auto xTensor = createFinalizedTensor(K_FPROP_TENSOR_X_UID, xDims, packedStrides(xDims));
-    auto wTensor = createFinalizedTensor(K_FPROP_TENSOR_W_UID, wDims, packedStrides(wDims));
-    auto yTensor = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, yDims, packedStrides(yDims));
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    auto xTensor = createFinalizedTensor(K_FPROP_TENSOR_X_UID, xDims, generateStrides(xDims));
+    auto wTensor = createFinalizedTensor(K_FPROP_TENSOR_W_UID, wDims, generateStrides(wDims));
+    auto yTensor = createFinalizedTensor(K_FPROP_TENSOR_Y_UID, yDims, generateStrides(yDims));
     HipdnnBackendDescriptor* xPtr = xTensor.get();
     HipdnnBackendDescriptor* wPtr = wTensor.get();
     HipdnnBackendDescriptor* yPtr = yTensor.get();

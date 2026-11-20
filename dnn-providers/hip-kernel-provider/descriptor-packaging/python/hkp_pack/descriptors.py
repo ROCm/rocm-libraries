@@ -791,9 +791,17 @@ _SDK_VERSION_RE = re.compile(
 
 
 def _sdk_version_fits(text):
-    """Whether Version(text) parses: the shape above, each part within int."""
+    """Whether Version(text) parses: the shape above, each part within int. A part
+    may carry any number of leading zeros, as std::from_chars reads it; the length
+    bound comes before int(), which refuses strings longer than 4300 digits."""
     parsed = _SDK_VERSION_RE.fullmatch(text)
-    return parsed is not None and all(int(part) < 2**31 for part in parsed.groups())
+    if parsed is None:
+        return False
+    for part in parsed.groups():
+        digits = part.lstrip("0") or "0"
+        if len(digits) > 10 or int(digits) >= 2**31:
+            return False
+    return True
 
 
 def _role_references(doc, role):

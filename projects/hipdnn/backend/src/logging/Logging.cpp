@@ -345,6 +345,21 @@ void loggerShutdown()
 {
     auto& state = getBackendLogState();
 
+    // On Windows, loggerShutdown() also runs from ~BackendLogState while the loader detaches
+    // the library at process exit. ExitProcess has already terminated every other thread,
+    // including the pool worker and any thread that was inside a callback or held
+    // loggerStateMutex, so taking that lock or waiting for those threads could never return:
+    // the pool's destructor enqueues a terminate message for a worker that no longer exists.
+    // This thread is the only one left, so the pool is read without the lock and leaked;
+    // queued messages are dropped and nothing else is reset.
+    if(platform_utilities::isProcessTerminating())
+    {
+        // NOLINTNEXTLINE(cppcoreguidelines-owning-memory) - deliberately never freed
+        static_cast<void>(
+            new std::shared_ptr<spdlog::details::thread_pool>(std::move(state.sharedThreadPool)));
+        return;
+    }
+
     std::vector<std::shared_ptr<UserCallbackSink>> removedSinks;
     std::shared_ptr<spdlog::details::thread_pool> threadPool;
     {

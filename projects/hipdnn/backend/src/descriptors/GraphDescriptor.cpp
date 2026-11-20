@@ -86,6 +86,7 @@ void GraphDescriptor::finalize()
     }
     catch(...)
     {
+        // Uncovered by tests: every throw on the graph-dump path derives from std::exception.
         HIPDNN_BACKEND_LOG_WARN("Failed to log graph \"{}\" with id {}: unknown exception",
                                 _name,
                                 hipdnn_flatbuffers_sdk::utilities::formatUuid(*_graphId));

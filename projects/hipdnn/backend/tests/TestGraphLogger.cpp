@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "ScopedBackendWarningCapture.hpp"
 #include "descriptors/GraphDescriptor.hpp"
 #include "descriptors/GraphTestUtils.hpp"
 #include "logging/GraphLogger.hpp"
@@ -12,11 +13,45 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 #include <hipdnn_test_sdk/utilities/ScopedEnvironmentVariableSetter.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <nlohmann/json.hpp>
+#include <system_error>
 #include <thread>
 
 using namespace hipdnn_backend;
+
+namespace
+{
+
+// Enters a directory for the lifetime of the object and returns to the previous working
+// directory afterwards.
+class ScopedWorkingDirectory
+{
+public:
+    explicit ScopedWorkingDirectory(const std::filesystem::path& directory)
+        : _previous(std::filesystem::current_path())
+    {
+        std::filesystem::current_path(directory);
+    }
+
+    ~ScopedWorkingDirectory()
+    {
+        std::error_code ec;
+        std::filesystem::current_path(_previous, ec);
+    }
+
+    ScopedWorkingDirectory(const ScopedWorkingDirectory&) = delete;
+    ScopedWorkingDirectory& operator=(const ScopedWorkingDirectory&) = delete;
+    ScopedWorkingDirectory(ScopedWorkingDirectory&&) = delete;
+    ScopedWorkingDirectory& operator=(ScopedWorkingDirectory&&) = delete;
+
+private:
+    std::filesystem::path _previous;
+};
+
+} // namespace
 
 class TestGraphLogger : public ::testing::Test
 {
@@ -226,6 +261,36 @@ TEST_F(TestGraphLogger, NonUtf8GraphNameStillBuilds)
     ASSERT_TRUE(j.contains("name"));
     EXPECT_NE(j["name"].get<std::string>().find("\xEF\xBF\xBD"), std::string::npos)
         << "Expected U+FFFD in the dumped name";
+}
+
+// A graph dump that throws is reported as a warning and does not fail finalize. A relative
+// HIPDNN_LOG_GRAPH_DIR is resolved against the working directory, and
+// std::filesystem::current_path() throws once that directory has been removed.
+TEST_F(TestGraphLogger, FinalizeSucceedsWhenGraphLoggingThrows)
+{
+    // A process cannot remove its own working directory on Windows.
+    SKIP_IF_WINDOWS();
+
+    const auto removedDirectory = _tempDir / "removed_working_directory";
+    std::filesystem::create_directories(removedDirectory);
+
+    hipdnn_data_sdk::utilities::setEnv("HIPDNN_LOG_GRAPH_DIR", "graphs");
+    hipdnn_backend::logging::loggerShutdown();
+
+    auto recorder
+        = hipdnn_test_sdk::utilities::IsolatedLogRecorder::withOverrideLevel(HIPDNN_SEV_WARN);
+    const test_utilities::ScopedBackendWarningCapture capture;
+
+    const ScopedWorkingDirectory workingDirectory(removedDirectory);
+    std::filesystem::remove(removedDirectory);
+
+    std::error_code ec;
+    static_cast<void>(std::filesystem::current_path(ec));
+    ASSERT_TRUE(ec) << "The removed working directory still resolves; the dump would not throw";
+
+    EXPECT_NO_THROW(static_cast<void>(createAndFinalizeGraph()));
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_WARN, "Failed to log graph"))
+        << recorder.getRecordedLogsAsString();
 }
 
 TEST_F(TestGraphLogger, DifferentGraphsLoggedSeparately)

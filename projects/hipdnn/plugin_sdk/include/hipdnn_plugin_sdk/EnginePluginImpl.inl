@@ -467,6 +467,8 @@ hipdnnPluginStatus_t
                                                                                opGraph->size);
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper config(
             engineConfig->ptr, engineConfig->size);
+        throwIfInvalid(graph);
+        throwIfInvalid(config);
         typedHandle->getEngineManager().enumerateCandidates(
             *typedHandle, graph, config, offset, limit, *engineDetails);
     });

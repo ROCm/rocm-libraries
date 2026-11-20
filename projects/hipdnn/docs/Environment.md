@@ -380,8 +380,8 @@ The root directory hipDNN writes its on-disk caches to. Two features share it to
 | (unset)    | A per-user default is used: `~/.cache/hipdnn/` on Linux, `%USERPROFILE%\.hipdnn\cache\` on Windows (the default) |
 | `<path>`   | Use the given directory as the cache root instead       |
 
-A leading `~` (and, on Windows, a leading `%USERPROFILE%`) is expanded;
-every other character is left alone, so an embedded `~` is never substituted. If the relevant home variable is unset or empty, the value is used verbatim rather than being redirected somewhere unexpected. Relative paths resolve against the current working directory. The directory is created if it does not exist.
+A leading `~` alone or followed by a path separator (and, on Windows, a leading `%USERPROFILE%`) is expanded to the home directory (`HOME`, or `USERPROFILE` on Windows);
+every other character is left alone, so an embedded `~` is never substituted and a `~user` form is not expanded. If the value still starts with `~` or `%USERPROFILE%` after expansion, because the home variable is unset or empty or because the value uses a `~user` form, hipDNN logs a warning once and disables on-disk caching instead of creating a directory with that literal name. Relative paths resolve against the current working directory. The directory is created if it does not exist.
 
 Each feature owns a child directory beneath the root, so caches never collide: the ingestor's winner cache lives under `ingestor-winners/`, further split per hipDNN version, per engine, and per GPU architecture; the autotune exact-match ranking cache lives under `autotune-rankings/`, further split per `data_sdk` library version (see below).
 

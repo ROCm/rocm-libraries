@@ -11,6 +11,7 @@
 #include "hipdnn_backend.h"
 
 #include <gtest/gtest.h>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_wrw_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_test_sdk/constants/ConvWgradConstants.hpp>
@@ -121,16 +122,6 @@ protected:
 namespace
 {
 
-std::vector<int64_t> packedStrides(const std::vector<int64_t>& dims)
-{
-    std::vector<int64_t> strides(dims.size(), 1);
-    for(size_t i = dims.size() - 1; i > 0; --i)
-    {
-        strides[i - 1] = strides[i] * dims[i];
-    }
-    return strides;
-}
-
 // Finalizes a wgrad descriptor built from packed tensors with the given dims, zero padding,
 // unit dilation and the given stride.
 void finalizeWgradWithShape(const std::vector<int64_t>& xDims,
@@ -138,9 +129,11 @@ void finalizeWgradWithShape(const std::vector<int64_t>& xDims,
                             const std::vector<int64_t>& dyDims,
                             const std::vector<int64_t>& stride)
 {
-    auto xTensor = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, xDims, packedStrides(xDims));
-    auto dwTensor = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, dwDims, packedStrides(dwDims));
-    auto dyTensor = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, dyDims, packedStrides(dyDims));
+    using hipdnn_data_sdk::utilities::generateStrides;
+
+    auto xTensor = createFinalizedTensor(K_WGRAD_TENSOR_X_UID, xDims, generateStrides(xDims));
+    auto dwTensor = createFinalizedTensor(K_WGRAD_TENSOR_DW_UID, dwDims, generateStrides(dwDims));
+    auto dyTensor = createFinalizedTensor(K_WGRAD_TENSOR_DY_UID, dyDims, generateStrides(dyDims));
     HipdnnBackendDescriptor* xPtr = xTensor.get();
     HipdnnBackendDescriptor* dwPtr = dwTensor.get();
     HipdnnBackendDescriptor* dyPtr = dyTensor.get();

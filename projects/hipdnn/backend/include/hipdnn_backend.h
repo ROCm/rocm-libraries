@@ -92,9 +92,12 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnCreate(hipdnnHandle_t* handle);
  *
  * @param [in] handle        An instance of hipdnnHandle_t
  *
- * A handle destroyed after process exit has begun (for example by the destructor of an object
- * with static storage duration) is not released and the call returns HIPDNN_STATUS_SUCCESS, so
- * that it never calls into plugins whose static objects are already destroyed.
+ * On Linux, a handle destroyed after process exit has begun (for example by the destructor of an
+ * object with static storage duration) is not released and the call returns
+ * HIPDNN_STATUS_SUCCESS, so that it never calls into plugins whose static objects are already
+ * destroyed. On Windows the backend's exit handler runs when the backend DLL detaches, after the
+ * caller's static destructors, so such a call releases the handle normally while the plugins are
+ * still loaded.
  *
  * @retval HIPDNN_STATUS_BAD_PARAM          The descriptor is not a valid (NULL) descriptor.
  * @retval HIPDNN_STATUS_SUCCESS            The destruction was successful
@@ -158,8 +161,10 @@ HIPDNN_BACKEND_EXPORT hipdnnStatus_t hipdnnBackendCreateDescriptor(
  * @param  [in]  descriptor  Instance of hipdnnBackendDescriptor_t previously created by
  *                           hipdnnBackendCreateDescriptor()
  *
- * A descriptor destroyed after process exit has begun is not released and the call returns
- * HIPDNN_STATUS_SUCCESS.
+ * On Linux, a descriptor destroyed after process exit has begun is not released and the call
+ * returns HIPDNN_STATUS_SUCCESS. On Windows the backend's exit handler runs when the backend DLL
+ * detaches, after the caller's static destructors, so such a call releases the descriptor
+ * normally while the plugins are still loaded.
  *
  * @retval  HIPDNN_STATUS_SUCCESS       The memory was destroyed successfully
  * @retval  HIPDNN_STATUS_ALLOC_FAILED   The destruction of memory failed.

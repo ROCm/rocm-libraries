@@ -1,9 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "LastErrorTestUtils.hpp"
 #include "hipdnn_backend.h"
 
-#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -22,6 +22,7 @@
 #include <vector>
 
 using namespace hipdnn_test_sdk::utilities;
+using hipdnn_backend::test_utilities::takeLastErrorString;
 
 // Test fixture for backend user log callback API
 class IntegrationBackendUserLoggingApis : public ::testing::Test
@@ -109,19 +110,6 @@ protected:
 
 constexpr auto ASYNC_LOG_TIMEOUT = std::chrono::seconds(10);
 constexpr auto NEGATIVE_ASSERT_TIMEOUT = std::chrono::milliseconds(100);
-
-namespace
-{
-
-// Reads and clears the calling thread's last backend error.
-std::string takeLastErrorString()
-{
-    std::array<char, HIPDNN_ERROR_STRING_MAX_LENGTH> buffer{};
-    hipdnnGetLastErrorString(buffer.data(), buffer.size());
-    return buffer.data();
-}
-
-} // namespace
 
 // Test: User callback receives backend logs
 TEST_F(IntegrationBackendUserLoggingApis, UserCallbackReceivesLogs)

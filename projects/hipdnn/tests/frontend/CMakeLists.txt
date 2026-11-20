@@ -89,6 +89,7 @@ add_executable(
     # only built when the shim is enabled.
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimUmbrella.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimHandle.cpp>
+    $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnShimGlobalObjectDestroyedAtExit.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8Builders.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8FindPlan.cpp>
     $<$<BOOL:${HIPDNN_ENABLE_CUDNN_COMPATIBILITY}>:IntegrationCudnnCompatibilityV8BuilderEngines.cpp>

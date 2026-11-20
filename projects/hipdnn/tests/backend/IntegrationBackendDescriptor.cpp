@@ -135,25 +135,19 @@ TEST_F(IntegrationBackendDescriptor, GetAttributeRejectsNegativeRequestedCount)
 
 TEST_F(IntegrationBackendDescriptor, SetAttributeRejectsNegativeElementCount)
 {
-    std::array<void*, 1> devPtrs = {reinterpret_cast<void*>(0x1234)};
-
     // An invalid descriptor is reported before the count is looked at.
-    EXPECT_EQ(hipdnnBackendSetAttribute(nullptr,
-                                        HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
-                                        HIPDNN_TYPE_VOID_PTR,
-                                        -1,
-                                        static_cast<const void*>(devPtrs.data())),
+    EXPECT_EQ(hipdnnBackendSetAttribute(
+                  nullptr, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, -1, nullptr),
               HIPDNN_STATUS_BAD_PARAM_NULL_POINTER);
 
     hipdnnBackendDescriptor_t descriptor = nullptr;
-    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR, &descriptor),
+    ASSERT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, &descriptor),
               HIPDNN_STATUS_SUCCESS);
 
-    EXPECT_EQ(hipdnnBackendSetAttribute(descriptor,
-                                        HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS,
-                                        HIPDNN_TYPE_VOID_PTR,
-                                        -1,
-                                        static_cast<const void*>(devPtrs.data())),
+    // The descriptor alone would report the null array first; the negative count
+    // is refused before the descriptor sees the call.
+    EXPECT_EQ(hipdnnBackendSetAttribute(
+                  descriptor, HIPDNN_ATTR_TENSOR_DIMENSIONS, HIPDNN_TYPE_INT64, -1, nullptr),
               HIPDNN_STATUS_BAD_PARAM);
 
     EXPECT_EQ(hipdnnBackendDestroyDescriptor(descriptor), HIPDNN_STATUS_SUCCESS);

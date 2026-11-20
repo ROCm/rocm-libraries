@@ -1904,6 +1904,14 @@ _INT_MAX = 2**31 - 1
 _INT64_MIN, _INT64_MAX = -(2**63), 2**63 - 1
 
 
+def _version_component_fits(part: str) -> bool:
+    """Whether a run of decimal digits fits ``int`` as ``std::from_chars`` reads it:
+    any number of leading zeros, a value of at most ``_INT_MAX``. The length bound
+    comes before ``int()``, which refuses strings longer than 4300 digits."""
+    digits = part.lstrip("0") or "0"
+    return len(digits) <= len(str(_INT_MAX)) and int(digits) <= _INT_MAX
+
+
 def _reject_repeats(values: list, what: str, where: str) -> None:
     """``DescriptorLoader.hpp``'s ``requireNoDuplicates`` (634-645), in Python.
 
@@ -1936,7 +1944,7 @@ def _check_engine_declaration(config: IngestorConfig) -> None:
             f"Quote it, with all three components: '1.0.0'."
         )
     match = _SDK_VERSION_PATTERN.fullmatch(version)
-    if not match or not all(int(part) <= _INT_MAX for part in match.groups()):
+    if not match or not all(_version_component_fits(part) for part in match.groups()):
         raise ConfigError(
             f"engine.sdk_version '{version}' is not a version the loader can "
             f"parse. hipdnn_data_sdk::utilities::Version reads three unsigned "

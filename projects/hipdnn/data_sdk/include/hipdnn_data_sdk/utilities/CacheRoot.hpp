@@ -38,9 +38,9 @@ inline bool cacheDisabledByEnv()
 namespace detail
 {
 
-/// Set once this shared object has warned that the cache root cannot be resolved because the
-/// home directory is unknown, so the warning is not repeated on every cache access. Tests reset
-/// it to observe the warning again.
+/// Set once this shared object has warned that the cache root still starts with an unexpanded
+/// '~', so the warning is not repeated on every cache access. Tests reset it to observe the
+/// warning again.
 HIPDNN_HIDDEN inline std::atomic<bool>& unexpandedCacheRootWarned()
 {
     static std::atomic<bool> s_warned{false};
@@ -48,10 +48,14 @@ HIPDNN_HIDDEN inline std::atomic<bool>& unexpandedCacheRootWarned()
 }
 
 /// Warns, once per shared object while WARN logging is enabled, that @p rawPath still starts
-/// with an unexpanded home token because @p homeVariable is unset, so on-disk caching is off.
-/// @p fromEnv tells whether @p rawPath is the value of HIPDNN_CACHE_DIR or the built-in default.
-inline void
-    warnUnexpandedCacheRoot(const std::string& rawPath, bool fromEnv, const char* homeVariable)
+/// with an unexpanded home token, so on-disk caching is off. @p fromEnv tells whether @p rawPath
+/// is the value of HIPDNN_CACHE_DIR or the built-in default. @p homeIsSet tells whether
+/// @p homeVariable is set: when it is unset no token can be expanded, and when it is set the
+/// token is a form the expansion does not handle, such as `~user`.
+inline void warnUnexpandedCacheRoot(const std::string& rawPath,
+                                    bool fromEnv,
+                                    const char* homeVariable,
+                                    bool homeIsSet)
 {
     if(!::hipdnn_data_sdk::logging::isLogLevelEnabled(HIPDNN_SEV_WARN)
        || unexpandedCacheRootWarned().exchange(true))
@@ -59,18 +63,14 @@ inline void
         return;
     }
 
-    if(fromEnv)
-    {
-        HIPDNN_SDK_LOG_WARN("HIPDNN_CACHE_DIR='" << rawPath << "' cannot be expanded because "
-                                                 << homeVariable
-                                                 << " is unset; on-disk caching is disabled");
-    }
-    else
-    {
-        HIPDNN_SDK_LOG_WARN("HIPDNN_CACHE_DIR is unset and its default '"
-                            << rawPath << "' cannot be expanded because " << homeVariable
-                            << " is unset; on-disk caching is disabled");
-    }
+    const std::string subject = fromEnv
+                                    ? "HIPDNN_CACHE_DIR='" + rawPath + "'"
+                                    : "HIPDNN_CACHE_DIR is unset and its default '" + rawPath + "'";
+    const std::string reason
+        = homeIsSet ? std::string(" starts with a '~' form that is not expanded (only a leading '~'"
+                                  " alone or followed by a path separator is)")
+                    : " cannot be expanded because " + std::string(homeVariable) + " is unset";
+    HIPDNN_SDK_LOG_WARN(subject << reason << "; on-disk caching is disabled");
 }
 
 } // namespace detail
@@ -143,15 +143,17 @@ inline std::filesystem::path cacheRoot()
     }
 
     const std::wstring expanded = expandUserW(rawPath);
-    // expandUserW() returns its input unchanged when USERPROFILE is unset, so a surviving
-    // leading '~' or '%userprofile%' means the home directory is unknown, not that the
-    // user asked for a directory with that literal name. Creating it would silently make
-    // the cache per-working-directory. Empty is what every caller already treats as "no
-    // disk cache".
+    // expandUserW() returns its input unchanged when USERPROFILE is unset, and for a '~' not
+    // followed by a separator (`~user`), so a surviving leading '~' or '%userprofile%' is a
+    // home directory that cannot be resolved, not a request for a directory with that literal
+    // name. Creating it would silently make the cache per-working-directory. Empty is what
+    // every caller already treats as "no disk cache".
     if(expanded.empty() || expanded.front() == L'~' || detail::startsWithUserProfileToken(expanded))
     {
-        detail::warnUnexpandedCacheRoot(
-            detail::pathForDiagnostic(std::filesystem::path(rawPath)), fromEnv, "USERPROFILE");
+        detail::warnUnexpandedCacheRoot(detail::pathForDiagnostic(std::filesystem::path(rawPath)),
+                                        fromEnv,
+                                        "USERPROFILE",
+                                        !getEnvW(L"USERPROFILE").empty());
         return {};
     }
 
@@ -165,13 +167,13 @@ inline std::filesystem::path cacheRoot()
     }
 
     const std::string expanded = expandUser(rawPath);
-    // expandUser() returns its input unchanged when HOME is unset, so a surviving leading '~' means
-    // the home directory is unknown, not that the user asked for a directory named "~". Creating it
-    // would silently make the cache per-working-directory. Empty is what every caller already
-    // treats as "no disk cache".
+    // expandUser() returns its input unchanged when HOME is unset, and for a '~' not followed by
+    // '/' (`~user`), so a surviving leading '~' is a home directory that cannot be resolved, not a
+    // request for a directory named "~". Creating it would silently make the cache
+    // per-working-directory. Empty is what every caller already treats as "no disk cache".
     if(expanded.empty() || expanded.front() == '~')
     {
-        detail::warnUnexpandedCacheRoot(rawPath, fromEnv, "HOME");
+        detail::warnUnexpandedCacheRoot(rawPath, fromEnv, "HOME", !getEnv("HOME").empty());
         return {};
     }
 

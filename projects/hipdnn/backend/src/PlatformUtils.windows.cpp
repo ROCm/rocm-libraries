@@ -151,6 +151,22 @@ std::array<uint8_t, 16> generateUuidV4()
     return bytes;
 }
 
+bool isProcessTerminating()
+{
+    // RtlDllShutdownInProgress reports whether the loader is detaching DLLs because the
+    // process is exiting (as opposed to a FreeLibrary).
+    typedef BOOLEAN(WINAPI * RtlDllShutdownInProgressPtr)();
+    HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    if(ntdll == nullptr)
+    {
+        return false;
+    }
+
+    auto rtlDllShutdownInProgress = reinterpret_cast<RtlDllShutdownInProgressPtr>(
+        GetProcAddress(ntdll, "RtlDllShutdownInProgress"));
+    return rtlDllShutdownInProgress != nullptr && rtlDllShutdownInProgress() != FALSE;
+}
+
 }
 
 #endif // _WIN32

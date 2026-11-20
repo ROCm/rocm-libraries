@@ -208,10 +208,12 @@ public:
      * @brief True once process exit has begun (static, MT-safe).
      *
      * Set by an exit handler that getOrCreatePluginManager() registers when it first creates
-     * a plugin manager, during main. The handler therefore runs before the destructors of the
-     * program's namespace-scope objects, so a handle or descriptor released by such a
+     * a plugin manager, during main. On Linux the handler therefore runs before the destructors
+     * of the program's namespace-scope objects, so a handle or descriptor released by such a
      * destructor finds it set and is left to the operating system instead of calling into
-     * plugin state that may already be torn down.
+     * plugin state that may already be torn down. On Windows the handler belongs to the backend
+     * DLL and runs when that DLL detaches, after the executable's static destructors, so those
+     * destructors find it unset and release normally while the plugins are still loaded.
      */
     static bool isShuttingDown()
     {

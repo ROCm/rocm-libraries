@@ -155,6 +155,27 @@ TEST_F(TestGraphDescriptor, WillCorrectlySetGraph)
     ASSERT_NO_THROW(descriptor.finalize());
 }
 
+TEST_F(TestGraphDescriptor, SetOperationsRejectsNegativeCountAndKeepsOperations)
+{
+    auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    ASSERT_NO_THROW(descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size()));
+
+    std::array<hipdnnBackendDescriptor_t, 1> ops = {nullptr};
+    ASSERT_THROW_HIPDNN_STATUS(descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                                       HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                                       -1,
+                                                       static_cast<const void*>(ops.data())),
+                               HIPDNN_STATUS_BAD_PARAM);
+
+    int64_t opsCount = 0;
+    ASSERT_NO_THROW(descriptor.getAttribute(
+        HIPDNN_ATTR_OPERATIONGRAPH_OPS, HIPDNN_TYPE_BACKEND_DESCRIPTOR, 0, &opsCount, nullptr));
+    EXPECT_EQ(opsCount, 1);
+}
+
 TEST_F(TestGraphDescriptor, WillCorrectlySetGraphReverseOrder)
 {
     auto builder = createValidGraph();

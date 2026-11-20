@@ -5283,6 +5283,18 @@ using GetEngineDetailsFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t,
                                                     int64_t,
                                                     const hipdnnPluginConstData_t*,
                                                     hipdnnPluginConstData_t*);
+using EnumerateCandidatesFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t,
+                                                       const hipdnnPluginConstData_t*,
+                                                       const hipdnnPluginConstData_t*,
+                                                       uint64_t,
+                                                       uint64_t,
+                                                       hipdnnPluginConstData_t*);
+using GetPredictionFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t,
+                                                 const hipdnnPluginConstData_t*,
+                                                 const hipdnnPluginConstData_t*,
+                                                 hipdnnEnginePredictionKind_t,
+                                                 int32_t,
+                                                 hipdnnPluginConstData_t*);
 using GetWorkspaceSizeFn = hipdnnPluginStatus_t (*)(hipdnnEnginePluginHandle_t,
                                                     const hipdnnPluginConstData_t*,
                                                     const hipdnnPluginConstData_t*,
@@ -5307,6 +5319,9 @@ protected:
             "hipdnnEnginePluginGetApplicableEngineIds");
         _getEngineDetails
             = _library.getSymbol<GetEngineDetailsFn>("hipdnnEnginePluginGetEngineDetails");
+        _enumerateCandidates
+            = _library.getSymbol<EnumerateCandidatesFn>("hipdnnEnginePluginEnumerateCandidates");
+        _getPrediction = _library.getSymbol<GetPredictionFn>("hipdnnEnginePluginGetPrediction");
         _getWorkspaceSize
             = _library.getSymbol<GetWorkspaceSizeFn>("hipdnnEnginePluginGetWorkspaceSize");
         _createExecutionContext = _library.getSymbol<CreateExecutionContextFn>(
@@ -5367,6 +5382,8 @@ protected:
     DestroyHandleFn _destroyHandle = nullptr;
     GetApplicableEngineIdsFn _getApplicableEngineIds = nullptr;
     GetEngineDetailsFn _getEngineDetails = nullptr;
+    EnumerateCandidatesFn _enumerateCandidates = nullptr;
+    GetPredictionFn _getPrediction = nullptr;
     GetWorkspaceSizeFn _getWorkspaceSize = nullptr;
     CreateExecutionContextFn _createExecutionContext = nullptr;
     DestroyExecutionContextFn _destroyExecutionContext = nullptr;
@@ -5441,6 +5458,56 @@ TEST_F(TestCodegenFixtureEntryPoints, CreateExecutionContextRejectsUnverifiableG
 
     EXPECT_EQ(createExecutionContext(engineConfig, unverifiable), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
     EXPECT_EQ(createExecutionContext(unverifiable, opGraph), HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+}
+
+// The fixture engine declines enumeration without reading the graph, and the engine
+// manager reads the config's engine ID before any engine runs, so BAD_PARAM for either
+// buffer comes only from the entry point's own check.
+TEST_F(TestCodegenFixtureEntryPoints, EnumerateCandidatesRejectsUnverifiableGraphOrConfig)
+{
+    constexpr uint64_t PAGE_LIMIT = 10;
+    const auto engineConfig = validConfig();
+    const auto opGraph = validGraph();
+    const auto unverifiable = unverifiableBuffer();
+    int sentinel = 0;
+    hipdnnPluginConstData_t page{&sentinel, 1};
+
+    EXPECT_EQ(_enumerateCandidates(_handle, &engineConfig, &unverifiable, 0, PAGE_LIMIT, &page),
+              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(page.ptr, nullptr);
+    EXPECT_EQ(page.size, 0U);
+
+    page = {&sentinel, 1};
+    EXPECT_EQ(_enumerateCandidates(_handle, &unverifiable, &opGraph, 0, PAGE_LIMIT, &page),
+              HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(page.ptr, nullptr);
+    EXPECT_EQ(page.size, 0U);
+}
+
+// The fixture answers an ENGINE prediction without reading the graph, and an unverifiable
+// config fails on its engine ID, so each buffer needs the entry point's own check.
+TEST_F(TestCodegenFixtureEntryPoints, GetPredictionRejectsUnverifiableGraphOrConfig)
+{
+    const auto engineConfig = validConfig();
+    const auto opGraph = validGraph();
+    const auto unverifiable = unverifiableBuffer();
+    int sentinel = 0;
+    hipdnnPluginConstData_t prediction{&sentinel, 1};
+
+    EXPECT_EQ(
+        _getPrediction(
+            _handle, &engineConfig, &unverifiable, HIPDNN_ENGINE_PREDICTION_ENGINE, 1, &prediction),
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(prediction.ptr, nullptr);
+    EXPECT_EQ(prediction.size, 0U);
+
+    prediction = {&sentinel, 1};
+    EXPECT_EQ(
+        _getPrediction(
+            _handle, &unverifiable, &opGraph, HIPDNN_ENGINE_PREDICTION_ENGINE, 1, &prediction),
+        HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+    EXPECT_EQ(prediction.ptr, nullptr);
+    EXPECT_EQ(prediction.size, 0U);
 }
 
 // A page missing a schema-required string is refused at the plugin boundary, and the
