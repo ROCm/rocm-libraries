@@ -635,6 +635,50 @@ def test_preloop_seeds_one_scale_epoch(base_src):
         % wait)
 
 
+@pytest.fixture(scope="module", params=["half-disjoint", "uniform-epoch"])
+def streamk_kernel(request):
+    """The 8x4 kernel with StreamK on each base schedule, ready to simulate.
+
+    StreamK lets a workgroup start part-way into K, so its completed-DepthU
+    count and the global K parity can differ."""
+    from mxfp8_scale_provenance import Kernel
+    from tensilelite.Components.Subtile.Kernel import MXFP8_HALF_DISJOINT_ENV
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(MXFP8_HALF_DISJOINT_ENV, "1" if request.param == "half-disjoint" else "0")
+        res = _codegen_kernel(extra={"StreamK": 3})
+    assert res.err == 0, "kernel codegen failed (err=%s)" % res.err
+    src = res.src
+    if isinstance(src, (bytes, bytearray)):
+        src = src.decode(errors="replace")
+    return Kernel(src)
+
+
+# No tail, K < DepthU, and odd and even completed-DepthU counts at every K
+# remainder, plus one long count of each parity.
+_PROVENANCE_K = sorted({128 * L + r for L in range(6) for r in (0, 32, 64, 96)} - {0}
+                       | {4288, 4416})
+
+
+def test_every_mfma_reads_the_scales_of_its_depthu(streamk_kernel):
+    """Each scaled MFMA reads scale epoch DU // 2, half DU % 2, of the DepthU
+    its A/B operands come from.
+
+    StreamK starts a workgroup on a whole scale epoch, so only even starts are
+    valid. The tail cases are the fragile ones: the tail's own scale load has
+    to land in the half the tail reads on an odd count, and when the
+    workgroup ran at most one DepthU it is the only load that fills it."""
+    bad = []
+    for K in _PROVENANCE_K:
+        for start in (0, 2, 4):
+            if start >= -(-K // 128):
+                continue
+            checks, unresolved = streamk_kernel.run(K, start)
+            assert checks and unresolved == 0, (K, start, len(checks), unresolved)
+            bad += [(K, start, c["line"], c["du"], c["got"]) for c in checks
+                    if c["got"] != (c["du"] // 2, c["du"] % 2)]
+    assert not bad, "(K, start, line, DU, (epoch, half) read): %s" % bad[:8]
+
+
 def _code(ln):
     return ln.split("//")[0].strip()
 
