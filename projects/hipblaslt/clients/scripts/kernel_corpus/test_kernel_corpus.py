@@ -15,6 +15,7 @@ import textwrap
 import unittest
 import zlib
 from pathlib import Path
+from typing import Optional
 from unittest import mock
 
 import msgpack
@@ -24,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import corpus_index  # noqa: E402
 import known_bugs  # noqa: E402
 import plan  # noqa: E402
+import refusals  # noqa: E402
 import report  # noqa: E402
 import run  # noqa: E402
 
@@ -91,6 +93,39 @@ def write_library(lib_dir: Path, solutions: list[dict]) -> None:
 
 def record(sol: dict) -> dict:
     return corpus_index.solution_record(sol, "test.dat", "gfx90a")
+
+
+def mx_solution(index, *, a="Float6", k=65536, swizzle_b=True, scale_format=3, **problem):
+    """An exact-size MX FP6 custom kernel as the rocKE Equality logic registers it: TN, bf16 D,
+    M = N = 4096, one K, alpha 1, beta 0 and scales in 128x4 tiles."""
+    exact = [
+        {"type": "SizeEqual", "index": 0, "value": 4096},
+        {"type": "SizeEqual", "index": 1, "value": 4096},
+        {"type": "SizeEqual", "index": 2, "value": 1},
+        {"type": "SizeEqual", "index": 3, "value": k},
+        {"type": "StrideAEqual", "index": 1, "value": k},
+        {"type": "StrideBEqual", "index": 1, "value": k},
+        {"type": "StrideDEqual", "index": 1, "value": 4096},
+        {"type": "AlphaValue", "value": "1"},
+        {"type": "BetaZero"},
+        {"type": "MXScaleFormatEquals", "value": scale_format},
+    ]
+    fields = {
+        "c": "BFloat16",
+        "trans": (True, False),
+        "mt": (256, 256),
+        "du": 128,
+        "extra_predicates": exact,
+        "mxBlockA": 32,
+        "mxBlockB": 32,
+        "swizzleTensorA": True,
+        "swizzleTensorB": swizzle_b,
+        "useBeta": False,
+        **problem,
+    }
+    sol = solution(index, a=a, **fields)
+    sol["name"] = f"rocke_gemm_mx_{a}_4096x4096x{k}_{index}"
+    return sol
 
 
 class CorpusIndexTests(unittest.TestCase):
@@ -195,7 +230,7 @@ class PlanTests(unittest.TestCase):
             )
         )
         shapes = {s.tag: s for s in plan.smoke_shapes(r)}
-        self.assertEqual(set(shapes), set(plan.SHAPE_TAGS))
+        self.assertEqual(set(shapes), set(plan.SMOKE_TAGS))
         for s in shapes.values():
             self.assertEqual(s.m % 8, 0)
             self.assertGreaterEqual(s.k, 16 * 3)
@@ -224,6 +259,150 @@ class PlanTests(unittest.TestCase):
         s = entry["matrix_size"][0]
         self.assertGreaterEqual(entry["stride_a"], s["lda"] * s["K"])
         self.assertGreaterEqual(entry["stride_d"], s["ldd"] * s["N"])
+
+
+class MXPlanTests(unittest.TestCase):
+    def test_fp6_with_128x4_scales_maps_to_scale_mode_1018_and_its_orders(self):
+        t, reason = plan.problem_types(record(mx_solution(0)))
+        self.assertIsNone(reason)
+        self.assertEqual(
+            (t["a_type"], t["b_type"], t["d_type"], t["compute_type"], t["scaleA"], t["scaleB"]),
+            ("f6_r", "f6_r", "bf16_r", "c_f32_r", 1018, 1018),
+        )
+        self.assertEqual((t["swizzle_a"], t["swizzle_b"]), (True, True))
+        t, _ = plan.problem_types(record(mx_solution(0, a="BFloat6", swizzle_b=False)))
+        self.assertEqual((t["a_type"], t["swizzle_b"]), ("bf6_r", False))
+
+    def test_other_mx_kernels_stay_deferred_with_the_reason(self):
+        for sol, what in (
+            (mx_solution(0, a="Float4"), "Float4 A"),
+            (mx_solution(0, scale_format=1), "scale format 1"),
+            (mx_solution(0, swizzleTensorA=False), "only FP6 TN"),
+            (mx_solution(0, trans=(False, False)), "only FP6 TN"),
+        ):
+            with self.subTest(what=what):
+                types, reason = plan.problem_types(record(sol))
+                self.assertIsNone(types)
+                self.assertTrue(reason.startswith("deferred: MX block scales"), reason)
+                self.assertIn(what, reason)
+        # Swizzled operands without MX are still deferred.
+        self.assertEqual(
+            plan.problem_types(record(solution(0, swizzleTensorA=True)))[1], "deferred: swizzled A"
+        )
+
+    def test_an_exact_size_kernel_gets_its_registered_problem_and_the_cpu_reference(self):
+        cases, reason = plan.plan_kernel(record(mx_solution(7)))
+        self.assertIsNone(reason)
+        self.assertEqual([c.shape.tag for c in cases], [plan.REGISTERED_TAG])
+        case = cases[0]
+        self.assertTrue(case.cpu_reference)
+        entry = plan.case_yaml_entry(case)
+        self.assertEqual(
+            entry["matrix_size"],
+            [
+                {
+                    "M": 4096,
+                    "N": 4096,
+                    "K": 65536,
+                    "lda": 65536,
+                    "ldb": 65536,
+                    "ldc": 4096,
+                    "ldd": 4096,
+                }
+            ],
+        )
+        self.assertEqual(
+            {k: entry[k] for k in ("alpha", "beta", "use_ext", "use_ext_setproblem")},
+            {"alpha": 1.0, "beta": 0.0, "use_ext": 1, "use_ext_setproblem": 1},
+        )
+        self.assertEqual(
+            {k: entry[k] for k in ("initialization", "fast_check", "unit_check", "norm_check")},
+            {"initialization": "rand_int", "fast_check": 0, "unit_check": 1, "norm_check": 1},
+        )
+
+    def test_e3m2_past_exact_fp32_sums_is_checked_within_tolerances(self):
+        exact = plan.plan_kernel(record(mx_solution(0, a="BFloat6", k=65536)))[0][0].args
+        self.assertEqual((exact["initialization"], exact["unit_check"]), ("rand_int", 1))
+        far = plan.plan_kernel(record(mx_solution(0, a="BFloat6", k=131584)))[0][0].args
+        self.assertEqual(
+            (far["initialization"], far["unit_check"], far["norm_check"], far["allclose_check"]),
+            ("trig_float", 0, 1, 1),
+        )
+        e2m3 = plan.plan_kernel(record(mx_solution(0, k=131584)))[0][0].args
+        self.assertEqual(e2m3["initialization"], "rand_int")
+
+    def test_the_fast_check_mx_oracle_uses_sparse_k_integer_exact_data_at_any_k(self):
+        for a, k in (("Float6", 2048), ("BFloat6", 131584)):
+            cases, reason = plan.plan_kernel(
+                record(mx_solution(4, a=a, k=k)), "smoke", "fast_check"
+            )
+            self.assertIsNone(reason)
+            case = cases[0]
+            self.assertFalse(case.cpu_reference)
+            entry = plan.case_yaml_entry(case)
+            self.assertEqual(
+                {
+                    key: entry.get(key)
+                    for key in (
+                        "initialization",
+                        "integer_exact_pattern",
+                        "fast_check",
+                        "unit_check",
+                        "norm_check",
+                        "allclose_check",
+                    )
+                },
+                {
+                    "initialization": "integer_exact",
+                    "integer_exact_pattern": "sparse_k",
+                    "fast_check": 1,
+                    "unit_check": 0,
+                    "norm_check": None,
+                    "allclose_check": None,
+                },
+            )
+            self.assertEqual(entry["matrix_size"][0]["K"], k)
+        # Kernels without MX scales are unchanged, and edges still check only for a refusal.
+        plain = plan.plan_kernel(record(solution(5)), "smoke", "fast_check")[0]
+        self.assertEqual(plain, plan.plan_kernel(record(solution(5)))[0])
+        edges = plan.plan_kernel(record(mx_solution(3)), "edges", "fast_check")[0]
+        self.assertTrue(all(c.expect == "refused" and not c.cpu_reference for c in edges))
+        with self.assertRaises(ValueError):
+            plan.plan_kernel(record(mx_solution(3)), "smoke", "cpu")
+
+    def test_edges_break_one_predicate_each_and_expect_a_refusal(self):
+        cases, reason = plan.plan_kernel(record(mx_solution(3)), "edges")
+        self.assertIsNone(reason)
+        by_tag = {c.shape.tag: c for c in cases}
+        self.assertEqual(set(by_tag), set(plan.EDGE_TAGS))
+        self.assertTrue(all(c.expect == "refused" and not c.cpu_reference for c in cases))
+        size = {tag: plan.case_yaml_entry(c)["matrix_size"][0] for tag, c in by_tag.items()}
+        self.assertEqual((size["kup"]["K"], size["kup"]["lda"]), (65536 + 128, 65536 + 128))
+        self.assertEqual((size["kdown"]["K"], size["khalf"]["K"]), (65536 - 128, 32768))
+        self.assertEqual((size["ldapad"]["K"], size["ldapad"]["lda"]), (65536, 65536 + 128))
+        self.assertEqual((size["mup"]["M"], size["mup"]["ldd"]), (4096 + 256, 4096 + 256))
+        self.assertEqual((size["lddpad"]["M"], size["lddpad"]["ldd"]), (4096, 4096 + 256))
+        self.assertEqual(plan.case_yaml_entry(by_tag["batch2"])["batch_count"], 2)
+        self.assertEqual(by_tag["alpha2"].args["alpha"], 2.0)
+        self.assertEqual(by_tag["beta1"].args["beta"], 1.0)
+        self.assertEqual(by_tag["border"].types["swizzle_b"], False)
+        self.assertEqual(by_tag["kup"].types["swizzle_b"], True)
+
+    def test_edges_and_mx_need_an_exact_size_solution(self):
+        self.assertEqual(
+            plan.plan_kernel(record(solution(0)), "edges"),
+            ([], "deferred: the edges profile needs an exact-size (SizeEqual) solution"),
+        )
+        tiled = mx_solution(0)
+        tiled["problemPredicate"]["value"] = [
+            p for p in tiled["problemPredicate"]["value"] if p["type"] != "SizeEqual"
+        ]
+        self.assertTrue(plan.plan_kernel(record(tiled))[1].startswith("deferred: the smoke"))
+
+    def test_new_tags_round_trip_through_gtest_names(self):
+        for tag in (plan.REGISTERED_TAG, "batch2", "batch", "kup"):
+            gtest = f"_/matmul_test.matmul/pre_checkin_kc_9_{tag}_f6_r_TN_1_2_APIAlgoIndex"
+            self.assertEqual(plan.case_id_from_test_name(gtest), f"9:{tag}")
 
 
 class ParseTests(unittest.TestCase):
@@ -272,6 +451,78 @@ class ParseTests(unittest.TestCase):
         c.feed("[ RUN      ] x/pre_checkin_kc_1_exact_f32\n")
         c.feed("Warning: Queue error - HSA_STATUS_ERROR_MEMORY_FAULT\n")
         self.assertTrue(c.fault)
+
+
+class ExpectationTests(unittest.TestCase):
+    def test_a_case_planned_to_be_refused_passes_only_when_refused(self):
+        edge = plan.plan_kernel(record(mx_solution(2)), "edges")[0][0]
+        got = {
+            status: run.apply_expectation(edge, {"status": status, "message": "m"})
+            for status in ("refused", "pass", "crash", "skip")
+        }
+        self.assertEqual(
+            {s: r["status"] for s, r in got.items()},
+            {"refused": "expected_refusal", "pass": "fail", "crash": "crash", "skip": "skip"},
+        )
+        self.assertTrue(got["pass"]["message"].startswith(run.ACCEPTED_OUTSIDE_PREDICATES))
+        self.assertIn("[runner]", report.failure_reason({**got["pass"], "fault": False}))
+        registered = plan.plan_kernel(record(mx_solution(2)))[0][0]
+        self.assertEqual(
+            run.apply_expectation(registered, {"status": "refused"})["status"], "refused"
+        )
+
+    def test_relaunch_command_replaces_timing_and_adds_the_relaunch_check(self):
+        cmd = run.relaunch_command(
+            "hipblaslt-bench --api_method c -m 64 -i 10 --cold_iters 2 --solution_index 4",
+            Path("/r/bin/hipblaslt-bench"),
+            25,
+        )
+        self.assertEqual(
+            cmd,
+            [
+                "/r/bin/hipblaslt-bench",
+                "--api_method",
+                "c",
+                "-m",
+                "64",
+                "--solution_index",
+                "4",
+                "-j",
+                "1",
+                "-i",
+                "1",
+                "--post_bench_verify_iters",
+                "25",
+                "--verify_strict",
+            ],
+        )
+
+    def test_host_memory_estimate_matches_the_gtest_measurement(self):
+        case = plan.plan_kernel(record(mx_solution(0, k=131584)))[0][0]
+        self.assertAlmostEqual(run.host_reference_bytes(case) / 2**30, 12, delta=0.5)
+
+    def test_a_repro_keeps_leading_dimensions_arguments_and_expectation(self):
+        edge = next(
+            c
+            for c in plan.plan_kernel(record(mx_solution(2)), "edges")[0]
+            if c.shape.tag == "ldapad"
+        )
+        row = {
+            "index": 2,
+            "shape": "ldapad",
+            "m": edge.shape.m,
+            "n": edge.shape.n,
+            "k": edge.shape.k,
+            "batch": 1,
+            "types": edge.types,
+            "trans": "TN",
+            "ld": [edge.shape.lda, edge.shape.ldb, edge.shape.ldd],
+            "args": edge.args,
+            "expect": edge.expect,
+        }
+        rebuilt = report.case_from_row(json.loads(json.dumps(row)))
+        self.assertEqual(plan.case_yaml_entry(rebuilt), plan.case_yaml_entry(edge))
+        self.assertEqual(rebuilt.expect, "refused")
 
 
 class ReachabilityTests(unittest.TestCase):
@@ -330,9 +581,11 @@ class ShardSelectionTests(unittest.TestCase):
 
 
 # Stands in for hipblaslt-test. Every case passes except those whose YAML name starts with BAD,
-# which fault the GPU or hang (MODE). With SICKEN set, the first bad case leaves the GPU unable
-# to run anything, so every later process fails at once, the runner's health check included.
-FAKE_TEST_BODY = textwrap.dedent(r"""
+# which fault the GPU or hang (MODE), and those REFUSE matches, which the pinned solution
+# declines. With SICKEN set, the first bad case leaves the GPU unable to run anything, so every
+# later process fails at once, the runner's health check included.
+FAKE_TEST_BODY = textwrap.dedent(
+    r"""
     import os, re, sys, time
     print("hipBLASLt git version: fake123")
     if DEVICE_LINE:
@@ -357,30 +610,62 @@ FAKE_TEST_BODY = textwrap.dedent(r"""
                 time.sleep(30)
             print("Warning: Queue error - HSA_STATUS_ERROR_MEMORY_FAULT", flush=True)
             sys.exit(134)
+        if REFUSE and re.search(REFUSE, name):
+            print("NO solution found!", flush=True)
+            print("[  FAILED  ] " + test + ", where GetParam() = { } (1 ms)", flush=True)
+            continue
+        index = name.split("_")[1]
+        print("hipblaslt-bench -m 64 --algo_method index --solution_index " + index + " -i 10")
         print("[       OK ] " + test + " (1 ms)", flush=True)
     print("[  PASSED  ] %d test%s." % (len(names), "" if len(names) == 1 else "s"))
-    """)
+    """
+)
+
+# Stands in for hipblaslt-bench --post_bench_verify_iters: logs its arguments and fails the
+# relaunch check, with exit code 2, for solution index BENCH_FAIL.
+FAKE_BENCH_BODY = textwrap.dedent(
+    r"""
+    import sys
+    args = sys.argv[1:]
+    with open(BENCH_LOG, "a") as f:
+        f.write(" ".join(args) + "\n")
+    if args[args.index("--solution_index") + 1] == BENCH_FAIL:
+        print("post_bench_verify_iters failed for solution: 1 of 3 relaunches gave a different D")
+        sys.exit(2)
+    """
+)
 
 
 def fake_rocm(
-    root: Path, bad: str = "kc_4_", mode: str = "fault", sicken: bool = False, device: bool = True
+    root: Path,
+    bad: str = "kc_4_",
+    mode: str = "fault",
+    sicken: bool = False,
+    device: bool = True,
+    refuse: str = "",
+    solutions: Optional[list[dict]] = None,
+    bench_fail: str = "",
 ) -> Path:
-    """An install tree with the fake hipblaslt-test and a 9-solution gfx90a library: solutions
-    0 to 7 plan 4 cases each, and solution 8 is a deferred grouped GEMM."""
+    """An install tree with the fake hipblaslt-test and hipblaslt-bench and, by default, a
+    9-solution gfx90a library: solutions 0 to 7 plan 4 cases each, and solution 8 is a
+    deferred grouped GEMM."""
     rocm = root / "rocm"
     (rocm / "bin").mkdir(parents=True)
     fake = rocm / "bin" / "hipblaslt-test"
     settings = (
         f"BAD = {bad!r}\nMODE = {mode!r}\nSICKEN = {sicken!r}\nDEVICE_LINE = {device!r}\n"
-        f"SICK_MARKER = {str(root / 'gpu-is-sick')!r}\n"
+        f"SICK_MARKER = {str(root / 'gpu-is-sick')!r}\nREFUSE = {refuse!r}\n"
     )
     fake.write_text(f"#!{sys.executable}\n{settings}{FAKE_TEST_BODY}")
     fake.chmod(0o755)
+    bench = rocm / "bin" / "hipblaslt-bench"
+    settings = f"BENCH_LOG = {str(root / 'bench.log')!r}\nBENCH_FAIL = {bench_fail!r}\n"
+    bench.write_text(f"#!{sys.executable}\n{settings}{FAKE_BENCH_BODY}")
+    bench.chmod(0o755)
     (rocm / "bin" / "hipblaslt_common.yaml").write_text("---\n")
-    write_library(
-        rocm / "lib" / "hipblaslt" / "library" / "gfx90a",
-        [solution(i) for i in range(8)] + [solution(8, groupedGemm=True)],
-    )
+    if solutions is None:
+        solutions = [solution(i) for i in range(8)] + [solution(8, groupedGemm=True)]
+    write_library(rocm / "lib" / "hipblaslt" / "library" / "gfx90a", solutions)
     return rocm
 
 
@@ -464,6 +749,155 @@ class EndToEndTests(unittest.TestCase):
             self.assertIn("hipBLASLt git version: fake123", stderr.getvalue())
 
 
+class MXEndToEndTests(unittest.TestCase):
+    """Two exact-size MX kernels, one with B tiled and one with B in plain columns."""
+
+    SOLUTIONS = [mx_solution(0), mx_solution(1, swizzle_b=False)]
+
+    def test_edges_pass_when_refused_and_fail_when_the_kernel_runs(self):
+        with tempfile.TemporaryDirectory() as d:
+            # Solution 1 wrongly runs a K one DepthU past its registered size.
+            rocm = fake_rocm(
+                Path(d), bad="none", refuse=r"^kc_0_|^kc_1_(?!kup)", solutions=self.SOLUTIONS
+            )
+            out = Path(d) / "out"
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch("time.sleep"):
+                code = run.main(corpus_argv(rocm, out, "--profile", "edges"))
+            self.assertEqual(code, run.EXIT_FAILURES)
+            summary = json.loads((out / "summary.json").read_text())
+            n = len(plan.EDGE_TAGS)
+            self.assertEqual(summary["case_status"], {"fail": 1, "expected_refusal": 2 * n - 1})
+            self.assertEqual(summary["kernel_outcomes"], {"passing": 1, "failing": 1})
+            failure = summary["failures"][0]
+            self.assertEqual(failure["case_id"], "1:kup")
+            self.assertEqual(failure["reason"], run.ACCEPTED_OUTSIDE_PREDICATES)
+            self.assertIn('"lda": 65664', (out / "repro" / "1_kup.yaml").read_text())
+
+    def test_cpu_reference_cases_run_alone_and_relaunch_checks_each_solution(self):
+        with tempfile.TemporaryDirectory() as d:
+            rocm = fake_rocm(Path(d), bad="none", solutions=self.SOLUTIONS, bench_fail="1")
+            out = Path(d) / "out"
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch("time.sleep"):
+                code = run.main(corpus_argv(rocm, out, "--relaunch", "3"))
+            self.assertEqual(code, run.EXIT_FAILURES)
+            summary = json.loads((out / "summary.json").read_text())
+            self.assertEqual(summary["case_status"], {"pass": 3, "fail": 1})
+            self.assertEqual([f["case_id"] for f in summary["failures"]], ["1:relaunch"])
+            self.assertIn("post_bench_verify_iters failed", summary["failures"][0]["reason"])
+            log = (out / "shard-1-of-1" / "hipblaslt-test.log").read_text()
+            self.assertEqual(log.count("(1 cases)"), 2)
+            bench = (Path(d) / "bench.log").read_text().splitlines()
+            self.assertEqual(len(bench), 2)
+            self.assertTrue(
+                all(line.endswith("--post_bench_verify_iters 3 --verify_strict") for line in bench)
+            )
+            self.assertNotIn("-i 10", bench[0])
+
+            # A rerun relaunches nothing again.
+            with mock.patch("sys.stdout", io.StringIO()):
+                run.main(corpus_argv(rocm, out, "--relaunch", "3"))
+            self.assertEqual(len((Path(d) / "bench.log").read_text().splitlines()), 2)
+
+
+# Stands in for refusal_probe: accepts every registered problem and refuses the rest, except
+# labels ACCEPT matches, which it accepts. It names each solution by the planner's convention.
+FAKE_PROBE_BODY = textwrap.dedent(
+    r"""
+    import re, sys
+    for line in sys.stdin:
+        label, index, a_type = line.split()[:3]
+        accept = label.endswith("registered") or (ACCEPT and re.search(ACCEPT, label))
+        name = "rocke_gemm_mx_%s_4096x4096x65536_%s" % (
+            "Float6" if a_type == "f6_r" else "BFloat6", index)
+        print("RESULT %s %s isAlgoSupported %s %s" % (
+            label, "accepted" if accept else "refused",
+            "SUCCESS" if accept else "INVALID_VALUE", name), flush=True)
+    """
+)
+
+
+def fake_probe(root: Path, accept: str = "") -> Path:
+    probe = root / "fake_refusal_probe"
+    probe.write_text(f"#!{sys.executable}\nACCEPT = {accept!r}\n{FAKE_PROBE_BODY}")
+    probe.chmod(0o755)
+    return probe
+
+
+class RefusalProbeTests(unittest.TestCase):
+    def test_probe_lines_carry_the_problems_hipblaslt_test_cannot_build(self):
+        cases = {c.shape.tag: c for c in refusals.probe_cases(record(mx_solution(4)))}
+        self.assertEqual(set(cases), {plan.REGISTERED_TAG, *plan.EDGE_TAGS})
+        line = dict((tag, refusals.probe_line(c).split()) for tag, c in cases.items())
+        # label index a_type tiled_b m n k batch lda ldb ldd alpha beta
+        self.assertEqual(
+            line["registered"],
+            "4:probe-registered 4 f6_r 1 4096 4096 65536 1 65536 65536 4096 1.0 0.0".split(),
+        )
+        self.assertEqual(line["batch2"][7], "2")
+        self.assertEqual((line["ldapad"][8], line["ldbpad"][9]), ("65664", "65664"))
+        self.assertEqual(line["border"][3], "0")
+        self.assertEqual(refusals.probe_cases(record(solution(0))), [])
+
+    def test_answers_are_judged_against_the_plan(self):
+        rec = record(mx_solution(4))
+        cases = {c.shape.tag: c for c in refusals.probe_cases(rec)}
+        answer = {"verdict": "refused", "probe_name": rec["name"], "line": "RESULT x"}
+        accepted = {**answer, "verdict": "accepted"}
+        judge = lambda tag, a: refusals.classify(cases[tag], rec, a)[0]  # noqa: E731
+        self.assertEqual(judge("registered", accepted), "pass")
+        self.assertEqual(judge("registered", answer), "fail")
+        self.assertEqual(judge("batch2", answer), "expected_refusal")
+        self.assertEqual(judge("batch2", accepted), "fail")
+        self.assertEqual(judge("batch2", None), "crash")
+        renamed = {**accepted, "probe_name": "Cijk_something_else"}
+        status, message = refusals.classify(cases["registered"], rec, renamed)
+        self.assertEqual(status, "fail")
+        self.assertIn("Cijk_something_else", message)
+
+    def test_parse_results_reads_only_result_lines(self):
+        got = refusals.parse_results(
+            "rocblaslt warning\nRESULT 4:probe-kup refused isAlgoSupported INVALID_VALUE n\n"
+            "RESULT 4:probe-kdown refused setProblem INVALID_VALUE -\n"
+        )
+        self.assertEqual(set(got), {"4:probe-kup", "4:probe-kdown"})
+        self.assertIsNone(got["4:probe-kdown"]["probe_name"])
+
+    def test_a_missing_header_stops_the_build_with_the_reason(self):
+        with tempfile.TemporaryDirectory() as d:
+            with self.assertRaisesRegex(RuntimeError, "blas dev artifact"):
+                refusals.build_probe(Path(d), Path(d) / "out")
+
+
+class RefusalEndToEndTests(unittest.TestCase):
+    def test_refusals_run_once_and_report_an_accepted_edge(self):
+        with tempfile.TemporaryDirectory() as d:
+            rocm = fake_rocm(Path(d), bad="none", solutions=MXEndToEndTests.SOLUTIONS)
+            probe = fake_probe(Path(d), accept=r"^1:probe-ldapad$")
+            out = Path(d) / "out"
+            argv = corpus_argv(
+                rocm, out, "--profile", "edges", "--refusals", "--refusal-probe", str(probe)
+            )
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch("time.sleep"):
+                code = run.main(argv)
+            self.assertEqual(code, run.EXIT_FAILURES)
+            summary = json.loads((out / "summary.json").read_text())
+            n = len(plan.EDGE_TAGS)
+            # The fake hipblaslt-test runs every edge (2n fails); the probe refuses 2n - 1.
+            self.assertEqual(
+                summary["case_status"],
+                {"pass": 2, "fail": 2 * n + 1, "expected_refusal": 2 * n - 1},
+            )
+            probe_failures = [f for f in summary["failures"] if "probe" in f["case_id"]]
+            self.assertEqual([f["case_id"] for f in probe_failures], ["1:probe-ldapad"])
+            self.assertEqual(probe_failures[0]["reason"], refusals.ACCEPTED_WITHOUT_DATA)
+
+            log = out / "shard-1-of-1" / "hipblaslt-test.log"
+            before = log.read_text().count("refusal probe")
+            with mock.patch("sys.stdout", io.StringIO()):
+                run.main(argv)
+            self.assertEqual(log.read_text().count("refusal probe"), before)
+
+
 class ReportTests(unittest.TestCase):
     def test_rows_written_before_a_classification_rule_are_classified_again(self):
         with tempfile.TemporaryDirectory() as d:
@@ -483,6 +917,34 @@ class ReportTests(unittest.TestCase):
         message = "fast_check does not support data type 4"
         self.assertEqual(report.classify_failure(message, fault=True), "fail")
         self.assertEqual(report.classify_failure("NO solution found!"), "refused")
+
+    def test_a_layout_the_client_cannot_build_is_unsupported_not_a_kernel_failure(self):
+        for message in (
+            "Received uncaught exception: HIPBLASLT_ORDER_COL256_R128_EXT requires batch count 1",
+            "Received uncaught exception: MX scales require lda equal to the rows stored",
+        ):
+            self.assertEqual(report.classify_failure(message), "unsupported")
+        self.assertEqual(report.classify_failure("Received uncaught exception: boom"), "fail")
+
+    def test_unsupported_cases_are_listed_as_cases_with_the_line_that_explains_them(self):
+        why = "Received uncaught exception: MX scales require lda equal to the rows stored"
+        results = {
+            "0:ldapad": {
+                "case_id": "0:ldapad",
+                "index": 0,
+                "shape": "ldapad",
+                "status": "unsupported",
+                "message": f"hipblaslt_test.cpp:256: Failure\n{why}",
+            },
+            "1:-": {"case_id": "1:-", "index": 1, "shape": None, "status": "deferred"},
+        }
+        results["1:-"]["message"] = "deferred: grouped GEMM"
+        summary = report.summarize(results, [], today=TODAY)
+        self.assertEqual(summary["unsupported_reasons"], {why: 1})
+        self.assertEqual(summary["not_run_reasons"], {"deferred: grouped GEMM": 1})
+        text = report.markdown(summary)
+        self.assertIn(f"## Unsupported cases\n\n- 1 cases: {why}", text)
+        self.assertIn("## Solutions not planned\n\n- 1 solutions: deferred: grouped GEMM", text)
 
 
 TODAY = datetime.date(2026, 11, 1)

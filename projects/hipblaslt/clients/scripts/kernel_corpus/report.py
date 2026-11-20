@@ -43,6 +43,7 @@ STATUS_ORDER = (
     "crash",
     "timeout",
     "refused",
+    "expected_refusal",
     "skip",
     "unsupported",
     "deferred",
@@ -60,11 +61,18 @@ _ORACLE_REFUSAL = re.compile(
 )
 
 
+# hipblaslt-test throws, before it calls the library, for a pre-swizzled MX layout its data
+# generator cannot build (testing_matmul.hpp). The case then says nothing about the kernel.
+_CLIENT_LAYOUT_REFUSAL = re.compile(
+    r"Received uncaught exception: (HIPBLASLT_ORDER_\w+ requires|MX scales require)"
+)
+
+
 def classify_failure(message: str, fault: bool = False) -> str:
     """The outcome of a gtest FAILED case from its output."""
     if "NO solution found!" in message:
         return "refused"
-    if _ORACLE_REFUSAL.search(message) and not fault:
+    if (_ORACLE_REFUSAL.search(message) or _CLIENT_LAYOUT_REFUSAL.search(message)) and not fault:
         return "unsupported"
     return "fail"
 
@@ -88,9 +96,21 @@ def load_results(out: Path) -> dict[str, dict]:
 def case_from_row(row: dict) -> Optional[plan.Case]:
     if row.get("shape") is None or "types" not in row:
         return None
-    shape = plan.Shape(row["shape"], row["m"], row["n"], row["k"], row.get("batch", 1))
+    lda, ldb, ldd = row.get("ld") or (None, None, None)
+    shape = plan.Shape(
+        row["shape"], row["m"], row["n"], row["k"], row.get("batch", 1), lda, ldb, ldd
+    )
     trans = row.get("trans", "NN")
-    return plan.Case(row["index"], row.get("name", ""), shape, row["types"], trans[0], trans[1])
+    return plan.Case(
+        row["index"],
+        row.get("name", ""),
+        shape,
+        row["types"],
+        trans[0],
+        trans[1],
+        row.get("args") or {},
+        row.get("expect", "pass"),
+    )
 
 
 def first_line(text: str, needle: str = "") -> str:
@@ -101,6 +121,16 @@ def first_line(text: str, needle: str = "") -> str:
     return ""
 
 
+def unsupported_reason(message: str) -> str:
+    """The line of an unsupported case's output that says why it could not be checked. The first
+    line is usually gtest's failure location, which says nothing."""
+    for line in (message or "").splitlines():
+        line = line.strip()
+        if _ORACLE_REFUSAL.search(line) or _CLIENT_LAYOUT_REFUSAL.search(line):
+            return line[:200]
+    return first_line(message, "fast_check") or first_line(message) or "unsupported"
+
+
 def failure_reason(row: dict) -> str:
     message = row.get("message") or ""
     if row.get("fault"):
@@ -109,7 +139,14 @@ def failure_reason(row: dict) -> str:
         return "hung (no output before the case timeout)"
     if row["status"] == "crash":
         return "process crashed"
-    for needle in ("fast_check", "mismatch", "expected", "Failure"):
+    for needle in (
+        "[runner]",
+        "post_bench_verify_iters failed",
+        "fast_check",
+        "mismatch",
+        "expected",
+        "Failure",
+    ):
         line = first_line(message, needle)
         if line:
             return line
@@ -136,8 +173,9 @@ def summarize(
             return "failing"
         if statuses["known_fail"]:
             return "known failing"
-        if statuses["pass"]:
-            return "passing" if statuses["pass"] == sum(statuses.values()) else "partly passing"
+        as_planned = statuses["pass"] + statuses["expected_refusal"]
+        if as_planned:
+            return "passing" if as_planned == sum(statuses.values()) else "partly passing"
         if statuses["refused"] and not statuses["skip"]:
             return "refused every case"
         return "not tested"
@@ -158,7 +196,12 @@ def summarize(
     not_run_reasons = collections.Counter(
         first_line(r.get("message", ""), "fast_check") or first_line(r.get("message", ""))
         for r in results.values()
-        if r["status"] in ("deferred", "unmapped", "unreachable", "unsupported")
+        if r["status"] in ("deferred", "unmapped", "unreachable")
+    )
+    unsupported_reasons = collections.Counter(
+        unsupported_reason(r.get("message", ""))
+        for r in results.values()
+        if r["status"] == "unsupported"
     )
     meta = {}
     for row in results.values():
@@ -193,6 +236,7 @@ def summarize(
         "by_problem_type": {k: dict(v) for k, v in sorted(by_type.items())},
         "skip_reasons": dict(skip_reasons.most_common(20)),
         "not_run_reasons": dict(not_run_reasons.most_common(20)),
+        "unsupported_reasons": dict(unsupported_reasons.most_common(20)),
     }
 
 
@@ -264,6 +308,9 @@ def markdown(summary: dict) -> str:
     if summary["skip_reasons"]:
         lines += ["", "## Skip reasons", ""]
         lines += [f"- {n} cases: {k}" for k, n in summary["skip_reasons"].items()]
+    if summary.get("unsupported_reasons"):
+        lines += ["", "## Unsupported cases", ""]
+        lines += [f"- {n} cases: {k}" for k, n in summary["unsupported_reasons"].items()]
     if summary["not_run_reasons"]:
         lines += ["", "## Solutions not planned", ""]
         lines += [f"- {n} solutions: {k}" for k, n in summary["not_run_reasons"].items()]

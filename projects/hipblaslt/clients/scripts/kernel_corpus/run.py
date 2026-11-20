@@ -14,6 +14,13 @@ stopped.
 
     run.py --rocm-dir build/dist/rocm --out corpus-gfx90a
 
+Cases checked against the CPU reference (MX kernels) run one per process, with their own case
+timeout and every available CPU for the reference. --relaunch N then relaunches each solution's
+first passing case N more times with hipblaslt-bench, which checks on the GPU that every
+relaunch gives the same D, bit for bit, as the first launch. --refusals asks the library, without
+building data, whether each exact-size MX FP6 solution accepts its registered problem and refuses
+every edges problem (refusals.py), including those hipblaslt-test cannot build.
+
 Sharding follows TheRock's test jobs: SHARD_INDEX (1-based) and TOTAL_SHARDS select a
 contiguous slice of the corpus. Failures that match the known-bugs list (known_bugs.py) are
 reported as known_fail. The exit code is 1 when a case failed, crashed or timed out outside that
@@ -30,6 +37,7 @@ import json
 import os
 import re
 import selectors
+import shlex
 import signal
 import socket
 import subprocess
@@ -42,6 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import corpus_index  # noqa: E402
 import plan  # noqa: E402
+import refusals  # noqa: E402
 import report  # noqa: E402
 
 EXIT_FAILURES = 1
@@ -81,18 +90,19 @@ class Tool:
     def __init__(self, rocm_dir: Path):
         self.rocm_dir = rocm_dir
         self.test_bin = rocm_dir / "bin" / "hipblaslt-test"
+        self.bench_bin = rocm_dir / "bin" / "hipblaslt-bench"
         self.common_yaml = rocm_dir / "bin" / "hipblaslt_common.yaml"
         for path in (self.test_bin, self.common_yaml):
             if not path.exists():
                 raise FileNotFoundError(path)
 
-    def env(self) -> dict:
+    def env(self, reference: bool = False) -> dict:
         env = dict(os.environ)
         # Prints the hipblaslt-bench command for each launch, which becomes the reproduction.
         env.setdefault("HIPBLASLT_LOG_MASK", "32")
         # The host side of a smoke case is tiny; a full OpenMP team spins on it and halves the
-        # case rate.
-        env.setdefault("OMP_NUM_THREADS", "8")
+        # case rate. A CPU reference GEMM is the opposite, and gets every CPU the job has.
+        env.setdefault("OMP_NUM_THREADS", str(len(os.sched_getaffinity(0))) if reference else "8")
         return env
 
     def device(self, attempts: int = 3) -> dict:
@@ -180,6 +190,60 @@ def unreachable_reason(record: dict, cu_count: Optional[int], chip_id: Optional[
             wanted = ", ".join(f"0x{c:x}" for c in chip_ids)
             return f"unreachable: needs PCI chip ID {wanted}, device is 0x{chip_id:x}"
     return ""
+
+
+ACCEPTED_OUTSIDE_PREDICATES = (
+    "[runner] the pinned solution ran a problem outside its predicates; expected it to refuse"
+)
+
+
+def apply_expectation(case: plan.Case, result: dict) -> dict:
+    """A case planned to be refused passes when the solution declines it, and fails when the
+    solution runs it: a kernel without bounds checks relies on its predicates to stay in bounds."""
+    if case.expect != "refused":
+        return result
+    if result["status"] == "refused":
+        return {**result, "status": "expected_refusal"}
+    if result["status"] == "pass":
+        message = f"{ACCEPTED_OUTSIDE_PREDICATES}\n{result.get('message') or ''}".rstrip()
+        return {**result, "status": "fail", "message": message}
+    return result
+
+
+_TIMING_FLAGS = {"-i", "--iters", "-j", "--cold_iters"}
+
+
+def relaunch_command(bench_cmd: str, bench_bin: Path, relaunches: int) -> list[str]:
+    """The logged hipblaslt-bench command of a passing case, run once untimed and then relaunched:
+    --post_bench_verify_iters compares every relaunch's D with the first launch's on the GPU,
+    and --verify_strict makes a difference, or a wrong first launch, exit with code 2."""
+    words = shlex.split(bench_cmd)[1:]
+    cmd = [str(bench_bin)]
+    skip_value = False
+    for word in words:
+        if skip_value:
+            skip_value = False
+        elif word in _TIMING_FLAGS:
+            skip_value = True
+        else:
+            cmd.append(word)
+    return cmd + [
+        "-j",
+        "1",
+        "-i",
+        "1",
+        "--post_bench_verify_iters",
+        str(relaunches),
+        "--verify_strict",
+    ]
+
+
+def host_reference_bytes(case: plan.Case) -> int:
+    """Roughly the host memory of a CPU reference case: about 12 bytes per element of A and B,
+    for the packed operands, their float values and the copies the reference reads
+    (matmul_gtest.yaml measures about 12 GiB at M = N = 4096, K = 131584)."""
+    s = case.shape
+    return 12 * (s.m + s.n) * s.k * s.batch
 
 
 class ChunkRun:
@@ -366,6 +430,9 @@ class Shard:
             "problem_type": corpus_index.problem_type_key(record),
             "types": case.types,
             "trans": case.trans_a + case.trans_b,
+            "ld": [s.lda, s.ldb, s.ldd],
+            "args": case.args,
+            "expect": case.expect,
         }
 
     def healthy(self) -> bool:
@@ -419,12 +486,32 @@ class Shard:
         return False
 
     def run_cases(self, cases: list[plan.Case]) -> int:
-        """Runs the pending cases chunk by chunk. Returns an exit code."""
-        size = max(self.args.chunk_cases, 1)
-        total = len(cases)
-        finished = 0
-        started = time.monotonic()
-        for start in range(0, total, size):
+        """Runs the pending cases chunk by chunk, fast_check cases first, then the CPU reference
+        cases one per process. Returns an exit code."""
+        fast = [c for c in cases if not c.cpu_reference]
+        slow = [c for c in cases if c.cpu_reference]
+        if slow:
+            largest = max(host_reference_bytes(c) for c in slow) / 2**30
+            print(
+                f"{len(slow)} cases check D against the CPU reference, one per process, with a "
+                f"{self.args.reference_timeout:.0f} s case timeout; the largest needs about "
+                f"{largest:.0f} GiB of host memory",
+                flush=True,
+            )
+        progress = {"total": len(cases), "finished": 0, "started": time.monotonic()}
+        for group, size, timeout, env in (
+            (fast, self.args.chunk_cases, self.args.case_timeout, self.tool.env()),
+            (slow, 1, self.args.reference_timeout, self.tool.env(reference=True)),
+        ):
+            code = self._run_group(group, max(size, 1), timeout, env, progress)
+            if code:
+                return code
+        return 0
+
+    def _run_group(
+        self, cases: list[plan.Case], size: int, timeout: float, env: dict, progress: dict
+    ) -> int:
+        for start in range(0, len(cases), size):
             pending = {c.case_id: c for c in cases[start : start + size]}
             stalls = 0
             while pending:
@@ -438,17 +525,18 @@ class Shard:
                 ]
                 with self.log_path.open("a") as log:
                     log.write(f"\n### {utc_now()} {' '.join(cmd)} ({len(pending)} cases)\n")
-                    chunk = ChunkRun(pending, self.args.case_timeout, log)
-                    ending = chunk.run(cmd, self.tool.env(), self.dir)
+                    chunk = ChunkRun(pending, timeout, log)
+                    ending = chunk.run(cmd, env, self.dir)
                 if chunk.version:
                     self.base["hipblaslt_git_version"] = chunk.version
                 rows = []
                 for result in chunk.results:
                     case = pending.pop(result["case_id"], None)
                     if case is not None:
+                        result = apply_expectation(case, result)
                         rows.append({**self.describe(case), **result, "time": utc_now()})
                 self.append(rows)
-                finished += len(rows)
+                progress["finished"] += len(rows)
                 for row in rows:
                     if row["status"] in FAILING:
                         print(
@@ -484,13 +572,144 @@ class Shard:
                                 for c in pending.values()
                             ]
                         )
-                        finished += len(pending)
+                        progress["finished"] += len(pending)
                         pending.clear()
                 else:
                     stalls = 0
-            elapsed = time.monotonic() - started
+            finished = progress["finished"]
+            elapsed = time.monotonic() - progress["started"]
             rate = finished / elapsed if elapsed > 0 else 0
-            print(f"[{utc_now()}] {finished}/{total} cases, {rate:.1f} cases/s", flush=True)
+            print(
+                f"[{utc_now()}] {finished}/{progress['total']} cases, {rate:.1f} cases/s",
+                flush=True,
+            )
+        return 0
+
+    def relaunch_cases(self, relaunches: int) -> None:
+        """Relaunches the first passing case of each solution in this shard, see
+        relaunch_command. A solution already relaunched in an earlier run is not run again."""
+        latest: dict[str, dict] = {}
+        if self.results_path.exists():
+            for row in corpus_index.read_jsonl(self.results_path):
+                latest[row["case_id"]] = row
+        done = {r["index"] for r in latest.values() if r.get("shape") == "relaunch"}
+        chosen: dict[int, dict] = {}
+        for row in latest.values():
+            if (
+                row["status"] == "pass"
+                and row.get("bench_cmd")
+                and row.get("expect", "pass") == "pass"
+                and row["index"] in self.records
+                and row["index"] not in done
+            ):
+                chosen.setdefault(row["index"], row)
+        if not chosen:
+            return
+        if not self.tool.bench_bin.exists():
+            print(f"warning: no {self.tool.bench_bin}; skipping --relaunch", file=sys.stderr)
+            return
+        print(f"relaunching {len(chosen)} solutions {relaunches} times each", flush=True)
+        for index, row in sorted(chosen.items()):
+            cmd = relaunch_command(row["bench_cmd"], self.tool.bench_bin, relaunches)
+            started = time.monotonic()
+            try:
+                proc = subprocess.run(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    errors="replace",
+                    timeout=self.args.reference_timeout,
+                    cwd=self.dir,
+                    env=self.tool.env(reference=True),
+                )
+                output, code = proc.stdout, proc.returncode
+                status = "pass" if code == 0 else "fail" if code == 2 else "crash"
+            except subprocess.TimeoutExpired as e:
+                raw = e.stdout or ""
+                output = raw.decode(errors="replace") if isinstance(raw, bytes) else raw
+                code, status = None, "timeout"
+            with self.log_path.open("a") as log:
+                log.write(f"\n### {utc_now()} {shlex.join(cmd)} (relaunch, exit {code})\n")
+                log.write(output)
+            result = {
+                k: row[k]
+                for k in ("index", "m", "n", "k", "batch", "name", "problem_type", "trans")
+                if k in row
+            }
+            self.append(
+                [
+                    {
+                        **result,
+                        "case_id": f"{index}:relaunch",
+                        "shape": "relaunch",
+                        "relaunches": relaunches,
+                        "relaunched_case": row["case_id"],
+                        "status": status,
+                        "ms": int((time.monotonic() - started) * 1000),
+                        "fault": bool(_FAULT.search(output)),
+                        "returncode": code,
+                        "message": output[-_MAX_MESSAGE:],
+                        "bench_cmd": shlex.join(cmd),
+                        "time": utc_now(),
+                    }
+                ]
+            )
+            if status in FAILING:
+                print(f"  {status.upper():8s} {index}:relaunch {row['problem_type']}", flush=True)
+
+    def refusal_checks(self, cu_count: Optional[int], chip_id: Optional[int]) -> int:
+        """The data-free refusal checks for the exact-size MX FP6 solutions in this shard that
+        this device can run, see refusals.py. A solution checked in an earlier run is not
+        checked again. Returns an exit code."""
+        done = set()
+        if self.results_path.exists():
+            done = {
+                row["index"]
+                for row in corpus_index.read_jsonl(self.results_path)
+                if str(row.get("shape") or "").startswith("probe-")
+            }
+        cases: list[plan.Case] = []
+        for index, record in sorted(self.records.items()):
+            if index not in done and not unreachable_reason(record, cu_count, chip_id):
+                cases += refusals.probe_cases(record)
+        if not cases:
+            return 0
+        try:
+            exe = refusals.default_probe(self.args.refusal_probe, self.tool.rocm_dir, self.dir)
+        except RuntimeError as e:
+            print(f"error: {e}", file=sys.stderr)
+            return EXIT_USAGE
+        print(f"asking the library about {len(cases)} problems without data", flush=True)
+        answers, output, code = refusals.run_probe(
+            exe, cases, self.tool.env(), self.args.reference_timeout, self.dir
+        )
+        with self.log_path.open("a") as log:
+            log.write(f"\n### {utc_now()} {exe} (refusal probe, exit {code})\n{output}")
+        rows = []
+        for case in cases:
+            record = self.records[case.index]
+            status, message = refusals.classify(
+                case, record, answers.get(refusals.probe_label(case))
+            )
+            if status == "crash" and code is None:
+                status = "timeout"
+            row = {k: v for k, v in self.describe(case).items() if k != "types"}
+            rows.append(
+                {
+                    **row,
+                    **answers.get(refusals.probe_label(case), {}),
+                    "case_id": refusals.probe_label(case),
+                    "shape": f"probe-{case.shape.tag}",
+                    "status": status,
+                    "message": message,
+                    "returncode": code,
+                    "time": utc_now(),
+                }
+            )
+            if status in FAILING:
+                print(f"  {status.upper():8s} {rows[-1]['case_id']}", flush=True)
+        self.append(rows)
         return 0
 
 
@@ -547,6 +766,14 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
     parser.add_argument("--arch", help="Library architecture to test (default: the device's)")
     parser.add_argument("--profile", default="smoke", choices=plan.PROFILES)
     parser.add_argument(
+        "--mx-oracle",
+        default="reference",
+        choices=plan.MX_ORACLES,
+        help="How MX FP6 kernels are checked: the CPU reference (default), or fast_check with "
+        "sparse_k integer_exact data, which needs a hipblaslt-test whose MX generator supports "
+        "sparse_k",
+    )
+    parser.add_argument(
         "--shard-index",
         type=int,
         default=env_int("SHARD_INDEX", 1),
@@ -569,6 +796,33 @@ def parse_args(argv: Optional[list[str]]) -> argparse.Namespace:
         type=float,
         default=300.0,
         help="Seconds without output before a running case counts as hung",
+    )
+    parser.add_argument(
+        "--reference-timeout",
+        type=float,
+        default=7200.0,
+        help="The case timeout for cases checked against the CPU reference, and for each "
+        "--relaunch command (default: 7200)",
+    )
+    parser.add_argument(
+        "--relaunch",
+        type=int,
+        default=0,
+        metavar="N",
+        help="After the cases, relaunch each solution's first passing case N more times with "
+        "hipblaslt-bench and check every relaunch gives the first launch's D (default: 0, off)",
+    )
+    parser.add_argument(
+        "--refusals",
+        action="store_true",
+        help="Ask the library, without data, whether each exact-size MX FP6 solution accepts "
+        "its registered problem and refuses every edges problem",
+    )
+    parser.add_argument(
+        "--refusal-probe",
+        type=Path,
+        help="A built refusal_probe to use (default: build refusal_probe.cpp with the install "
+        "tree's amdclang++)",
     )
     parser.add_argument("--index-range", help="Solution index range lo:hi (hi exclusive)")
     parser.add_argument("--problem-filter", help="Regex on the problem-type key, e.g. 'Half/Half'")
@@ -647,6 +901,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         "host": socket.gethostname(),
         "hipblaslt_git_version": device["hipblaslt_git_version"],
         "profile": args.profile,
+        "mx_oracle": args.mx_oracle,
     }
     meta = {
         **shard.base,
@@ -676,7 +931,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         reason = unreachable_reason(record, cu_count, chip_id)
         kernel_cases = []
         if not reason:
-            kernel_cases, reason = plan.plan_kernel(record, args.profile)
+            kernel_cases, reason = plan.plan_kernel(record, args.profile, args.mx_oracle)
         if reason:
             case_id = f"{record['index']}:-"
             if case_id not in done:
@@ -705,6 +960,10 @@ def main(argv: Optional[list[str]] = None) -> int:
     code = 0
     if not args.dry_run and cases:
         code = shard.run_cases(cases)
+    if not args.dry_run and code == 0 and args.relaunch > 0:
+        shard.relaunch_cases(args.relaunch)
+    if not args.dry_run and code == 0 and args.refusals:
+        code = shard.refusal_checks(cu_count, chip_id)
     summary = report.write_reports(out, known=known)
     if code == 0 and (report.run_failed(summary) or summary["case_status"].get("harness_error")):
         code = EXIT_FAILURES
