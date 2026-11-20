@@ -20,11 +20,12 @@
   knobs are registered values and plan on representative requests of its
   key; run on every entry when the package is imported) and that turns the
   sweep's emitted entries into table entries. The performance-status tables
-  are empty by policy (information only). :mod:`.rdna_entry_rule` is the
-  checked, unit-tested selection rule the RDNA tables apply (no entry beats
-  the competitor there, so an entry is the best rocKE configuration of its
-  key instead); its provenance is ``rdna_entries_manifest.json`` and
-  ``rdna_general_tuning_case_study.md``.
+  are empty by policy (information only). The RDNA tables apply a different
+  selection rule (few or no keys beat the competitor there, so an entry is the
+  best rocKE configuration of its key instead), stated and unit-tested in
+  ``benchmarks/common/attention_bwd_rdna_entry_rule.py`` (offline; no
+  runtime path imports it); its provenance is ``rdna_entries_manifest.json``
+  and ``rdna_general_tuning_case_study.md``.
 * :mod:`.routing`: the route of an accepted request (dense when its dense key
   is in the tuned pack, else general) and the plan of exactly one family;
   a rocKE unified (paged KV) request has its own entry,

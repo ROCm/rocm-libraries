@@ -487,7 +487,217 @@
         "cells_checked": 1,
         "correct": true
       }
-    ]
+    ],
+    "finalists": {
+      "01d6b467b4abb044620a": {
+        "key": "01d6b467b4abb044620a",
+        "spec": {
+          "acc_in_lds": true,
+          "agpr_alloc": null,
+          "atom_g02": "wmma16x16x16",
+          "atom_g13": "wmma16x16x16",
+          "atom_g4": "wmma16x16x16",
+          "block_k4": 16,
+          "block_m": 32,
+          "block_n": 16,
+          "edge_tiles": false,
+          "global_path": "vgpr",
+          "head_pack": false,
+          "kt_source": "lds",
+          "kv_residency": "lds",
+          "pt_route": "lds",
+          "ring_depth": 1,
+          "s_in_agpr": false,
+          "sched": "none",
+          "scheduler_strategy": "iterative-minreg",
+          "setprio": false,
+          "transpose_source": "wmma_lds",
+          "warp_grid_g02": [
+            2,
+            1
+          ],
+          "warp_grid_g13": [
+            1,
+            2
+          ],
+          "warp_grid_g4": [
+            2,
+            1
+          ],
+          "waves": 2,
+          "waves_per_eu": null,
+          "ws_layout": "head_major"
+        },
+        "runtime": {},
+        "slice": {
+          "arch": "gfx1151",
+          "family": "general",
+          "head_size": 128,
+          "dtype": "bf16",
+          "mask_class": "band",
+          "seq_mode": "batched",
+          "dkv_mode": "direct",
+          "stage_vec": 8,
+          "kind": "primary"
+        }
+      },
+      "115ad83fb144e43c34c1": {
+        "key": "115ad83fb144e43c34c1",
+        "spec": {
+          "acc_in_lds": true,
+          "agpr_alloc": null,
+          "atom_g02": "wmma16x16x16",
+          "atom_g13": "wmma16x16x16",
+          "atom_g4": "wmma16x16x16",
+          "block_k4": 16,
+          "block_m": 64,
+          "block_n": 32,
+          "edge_tiles": false,
+          "global_path": "vgpr",
+          "head_pack": false,
+          "kt_source": "lds",
+          "kv_residency": "lds",
+          "pt_route": "lds",
+          "ring_depth": 1,
+          "s_in_agpr": false,
+          "sched": "none",
+          "scheduler_strategy": null,
+          "setprio": false,
+          "transpose_source": "wmma_lds",
+          "warp_grid_g02": [
+            4,
+            1
+          ],
+          "warp_grid_g13": [
+            1,
+            4
+          ],
+          "warp_grid_g4": [
+            1,
+            4
+          ],
+          "waves": 4,
+          "waves_per_eu": null,
+          "ws_layout": "head_major"
+        },
+        "runtime": {},
+        "slice": {
+          "arch": "gfx1151",
+          "family": "general",
+          "head_size": 64,
+          "dtype": "bf16",
+          "mask_class": "band",
+          "seq_mode": "batched",
+          "dkv_mode": "direct",
+          "stage_vec": 8,
+          "kind": "primary"
+        }
+      },
+      "198b4415c3e61585b231": {
+        "key": "198b4415c3e61585b231",
+        "spec": {
+          "acc_in_lds": true,
+          "agpr_alloc": null,
+          "atom_g02": "wmma16x16x16",
+          "atom_g13": "wmma16x16x16",
+          "atom_g4": "wmma16x16x16",
+          "block_k4": 16,
+          "block_m": 32,
+          "block_n": 32,
+          "edge_tiles": false,
+          "global_path": "vgpr",
+          "head_pack": false,
+          "kt_source": "lds",
+          "kv_residency": "lds",
+          "pt_route": "lds",
+          "ring_depth": 1,
+          "s_in_agpr": false,
+          "sched": "none",
+          "scheduler_strategy": null,
+          "setprio": false,
+          "transpose_source": "wmma_lds",
+          "warp_grid_g02": [
+            1,
+            2
+          ],
+          "warp_grid_g13": [
+            2,
+            1
+          ],
+          "warp_grid_g4": [
+            2,
+            1
+          ],
+          "waves": 2,
+          "waves_per_eu": null,
+          "ws_layout": "head_major"
+        },
+        "runtime": {},
+        "slice": {
+          "arch": "gfx1151",
+          "family": "general",
+          "head_size": 64,
+          "dtype": "bf16",
+          "mask_class": "band",
+          "seq_mode": "batched",
+          "dkv_mode": "direct",
+          "stage_vec": 8,
+          "kind": "primary"
+        }
+      },
+      "61062eb51c5f0878d1c9": {
+        "key": "61062eb51c5f0878d1c9",
+        "spec": {
+          "acc_in_lds": true,
+          "agpr_alloc": null,
+          "atom_g02": "wmma16x16x16",
+          "atom_g13": "wmma16x16x16",
+          "atom_g4": "wmma16x16x16",
+          "block_k4": 16,
+          "block_m": 32,
+          "block_n": 16,
+          "edge_tiles": false,
+          "global_path": "vgpr",
+          "head_pack": false,
+          "kt_source": "lds",
+          "kv_residency": "lds",
+          "pt_route": "lds",
+          "ring_depth": 1,
+          "s_in_agpr": false,
+          "sched": "none",
+          "scheduler_strategy": "iterative-minreg",
+          "setprio": false,
+          "transpose_source": "wmma_lds",
+          "warp_grid_g02": [
+            2,
+            1
+          ],
+          "warp_grid_g13": [
+            1,
+            2
+          ],
+          "warp_grid_g4": [
+            1,
+            2
+          ],
+          "waves": 2,
+          "waves_per_eu": null,
+          "ws_layout": "head_major"
+        },
+        "runtime": {},
+        "slice": {
+          "arch": "gfx1151",
+          "family": "general",
+          "head_size": 128,
+          "dtype": "bf16",
+          "mask_class": "band",
+          "seq_mode": "batched",
+          "dkv_mode": "direct",
+          "stage_vec": 8,
+          "kind": "primary"
+        }
+      }
+    }
   },
   "gfx1201": {
     "entries": [
@@ -977,6 +1187,164 @@
         "cells_checked": 1,
         "correct": true
       }
-    ]
+    ],
+    "finalists": {
+      "69947925e2b7f8968503": {
+        "key": "69947925e2b7f8968503",
+        "spec": {
+          "acc_in_lds": true,
+          "agpr_alloc": null,
+          "atom_g02": "wmma16x16x16",
+          "atom_g13": "wmma16x16x16",
+          "atom_g4": "wmma16x16x16",
+          "block_k4": 16,
+          "block_m": 32,
+          "block_n": 64,
+          "edge_tiles": false,
+          "global_path": "vgpr",
+          "head_pack": false,
+          "kt_source": "lds",
+          "kv_residency": "lds",
+          "pt_route": "lds",
+          "ring_depth": 1,
+          "s_in_agpr": false,
+          "sched": "none",
+          "scheduler_strategy": null,
+          "setprio": false,
+          "transpose_source": "wmma_lds",
+          "warp_grid_g02": [
+            1,
+            4
+          ],
+          "warp_grid_g13": [
+            4,
+            1
+          ],
+          "warp_grid_g4": [
+            1,
+            4
+          ],
+          "waves": 4,
+          "waves_per_eu": null,
+          "ws_layout": "head_major"
+        },
+        "runtime": {},
+        "slice": {
+          "arch": "gfx1201",
+          "family": "general",
+          "head_size": 64,
+          "dtype": "bf16",
+          "mask_class": "band",
+          "seq_mode": "batched",
+          "dkv_mode": "direct",
+          "stage_vec": 8,
+          "kind": "primary"
+        }
+      },
+      "6bc46b2920120a6e3720": {
+        "key": "6bc46b2920120a6e3720",
+        "spec": {
+          "acc_in_lds": true,
+          "agpr_alloc": null,
+          "atom_g02": "wmma16x16x16",
+          "atom_g13": "wmma16x16x16",
+          "atom_g4": "wmma16x16x16",
+          "block_k4": 16,
+          "block_m": 16,
+          "block_n": 32,
+          "edge_tiles": false,
+          "global_path": "vgpr",
+          "head_pack": false,
+          "kt_source": "lds",
+          "kv_residency": "lds",
+          "pt_route": "lds",
+          "ring_depth": 1,
+          "s_in_agpr": false,
+          "sched": "none",
+          "scheduler_strategy": "iterative-minreg",
+          "setprio": false,
+          "transpose_source": "wmma_lds",
+          "warp_grid_g02": [
+            1,
+            2
+          ],
+          "warp_grid_g13": [
+            2,
+            2
+          ],
+          "warp_grid_g4": [
+            1,
+            4
+          ],
+          "waves": 4,
+          "waves_per_eu": null,
+          "ws_layout": "head_major"
+        },
+        "runtime": {},
+        "slice": {
+          "arch": "gfx1201",
+          "family": "general",
+          "head_size": 128,
+          "dtype": "bf16",
+          "mask_class": "band",
+          "seq_mode": "batched",
+          "dkv_mode": "direct",
+          "stage_vec": 8,
+          "kind": "primary"
+        }
+      },
+      "d9533b9bd0afe4318773": {
+        "key": "d9533b9bd0afe4318773",
+        "spec": {
+          "acc_in_lds": true,
+          "agpr_alloc": null,
+          "atom_g02": "wmma16x16x16",
+          "atom_g13": "wmma16x16x16",
+          "atom_g4": "wmma16x16x16",
+          "block_k4": 16,
+          "block_m": 16,
+          "block_n": 32,
+          "edge_tiles": false,
+          "global_path": "vgpr",
+          "head_pack": false,
+          "kt_source": "lds",
+          "kv_residency": "lds",
+          "pt_route": "lds",
+          "ring_depth": 1,
+          "s_in_agpr": false,
+          "sched": "none",
+          "scheduler_strategy": "iterative-minreg",
+          "setprio": false,
+          "transpose_source": "wmma_lds",
+          "warp_grid_g02": [
+            1,
+            2
+          ],
+          "warp_grid_g13": [
+            2,
+            1
+          ],
+          "warp_grid_g4": [
+            1,
+            2
+          ],
+          "waves": 2,
+          "waves_per_eu": null,
+          "ws_layout": "head_major"
+        },
+        "runtime": {},
+        "slice": {
+          "arch": "gfx1201",
+          "family": "general",
+          "head_size": 128,
+          "dtype": "bf16",
+          "mask_class": "band",
+          "seq_mode": "batched",
+          "dkv_mode": "direct",
+          "stage_vec": 8,
+          "kind": "primary"
+        }
+      }
+    }
   }
 }

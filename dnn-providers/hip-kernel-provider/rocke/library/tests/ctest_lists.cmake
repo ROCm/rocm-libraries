@@ -330,20 +330,43 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # Attention backward tuned tables (no GPU): every shipped general entry of every
 # arch plans on every representative request of its key, the routed plan takes
 # the entry, the registry ranks the tuned family first, and the tables pass the
-# import-time check. Named file by file (the rest of tests/dispatch/attention_bwd
-# includes slow registry sweeps); about a minute, so a standard-tier entry.
+# import-time check; every RDNA entry ships its manifest finalist's knobs, the
+# RDNA entry rule (benchmarks/common/attention_bwd_rdna_entry_rule.py) picks
+# what it states, every fixed-length tuned key gets a device numeric case, and
+# the bench's class arches are the declared arches. Named file by file (the
+# rest of tests/dispatch/attention_bwd includes slow registry sweeps); about a
+# minute, so a standard-tier entry.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_bwd_tables_pytest ${_ROCKE_INSTALLED_PYTEST}"
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention_bwd/test_tuned_tables.py\""
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention_bwd/test_gfx950_tuning.py\""
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention_bwd/test_registry.py\""
        " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention_bwd/test_tuned_table_import_check.py\""
+       " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_bwd_rdna_entry_rule.py\""
+       " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_bwd_key_cases.py\""
+       " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_bwd_bench.py\""
        " -v -rs --timeout=120)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_bwd_tables_pytest PROPERTIES\n"
        "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT 600)\n")
+
+# Attention backward RDNA routing differential (no GPU): the routed policy with
+# the shipped RDNA tables against the same policy with them emptied (develop's
+# state), over the dispatcher's exhaustive request domain -- CDNA unchanged,
+# RDNA changed only at shipped tuned keys. Each RDNA case plans every request
+# twice (tens of seconds), so its own standard-tier entry with a longer per-test
+# limit.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_library_attention_bwd_rdna_differential_pytest ${_ROCKE_INSTALLED_PYTEST}"
+       " \"${ROCKE_TEST_CTEST_REL}tests/library/tests/dispatch/attention_bwd/test_rdna_routing_differential.py\""
+       " -v -rs --timeout=600)\n")
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "set_tests_properties(rocke_library_attention_bwd_rdna_differential_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;standard\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
+       "  TIMEOUT 1500)\n")
 
 # Exhaustive counted-sync gates are intentionally outside normal pytest
 # discovery. The structural gate is host-only; the compiler gate additionally

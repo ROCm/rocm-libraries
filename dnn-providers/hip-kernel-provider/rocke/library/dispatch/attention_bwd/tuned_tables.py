@@ -43,23 +43,16 @@ requests).
 RDNA entries (gfx1151, gfx1201)
 -------------------------------
 On the RDNA targets the CDNA rule's required win against the competitor (an
-entry wins the bench's confirm stage on every cell of its key) does not hold,
-so rocKE being the only hipDNN backward there, an RDNA entry is instead the
-best rocKE configuration of its key (the qualifying measured comparison is in
-``rdna_general_tuning_case_study.md``, a relative-only result document, not
-here). A finalist of the sweep's ``runtime`` stage is the entry of tuning key
-K when, on every dense census cell of K,
-
-1. it is correct (its arm completes and passes the pruning-set gate),
-2. it has a clean A/A control (its ``#aa`` twin is not judged different from
-   it either way), and
-3. it is not slower than the shipped plan (the paired verdict against it is
-   ``pass``, or ``ambiguous`` with a time ratio within ``TIE_EPS``);
-
-of the finalists that pass every cell of K, the one with the lowest
-geometric-mean time ratio against the shipped plan is the entry, and only
-when that ratio is below 1. Keys with no qualifying finalist keep the
-defaults. Head size 32 is not swept (the census has no d = 32 cell).
+entry wins the bench's confirm stage on every cell of its key) holds on few
+or no keys, so, rocKE being the only hipDNN backward there, an RDNA entry is
+instead the best rocKE configuration of its key: a finalist of the sweep's ``runtime``
+stage that is correct, A/A-clean and not slower than the shipped plan on
+every dense census cell of its key, picked by geometric mean against the
+shipped plan. The rule is stated, with its gate behaviour, once:
+:func:`benchmarks.common.attention_bwd_rdna_entry_rule.select_rdna_general_entries`
+(offline; no runtime path imports it). The qualifying measured comparison is
+in ``rdna_general_tuning_case_study.md`` (a relative-only result document),
+not here. Head size 32 is not swept (the census has no d = 32 cell).
 
 Regeneration (on a device of the arch; results outside the source tree):
 
@@ -75,18 +68,20 @@ Regeneration (on a device of the arch; results outside the source tree):
    ``--competitor-arms default --aa-control all --gate
    tests._attention_bwd_perf_gate:gate --gate-constants CONSTS``, where
    ``CONSTS`` are the bench's gate constants for the device;
-4. build a judge document (``{"slices": {"<d>": {"keys": {key: {"cells",
-   "finalists": {finalist: {"ok", "geomean_vs_shipped", "why"}}}}}}}``, keys
-   from the cells' requests with the device's ``num_cus``) and apply the rule
-   with :func:`.rdna_entry_rule.select_rdna_general_entries` (the checked,
-   unit-tested implementation of the rule above -- see that module for the
-   tolerance / false-positive policy of its ``tie_eps``), then write the
-   winning finalists' knobs as ``{"entries": [{"key", "knobs"}]}``;
+4. build a judge document (the schema of
+   :func:`~benchmarks.common.attention_bwd_rdna_entry_rule.load_cell_verdicts`;
+   keys from the cells' requests with the device's ``num_cus``) and apply
+   :func:`~benchmarks.common.attention_bwd_rdna_entry_rule.select_rdna_general_entries`;
+   write each winning finalist's knobs (its ``tuning_knobs()`` without the
+   unset ones, plus its runtime values) as ``{"entries": [{"key", "knobs"}]}``;
 5. ``<gfx>_tuning.general_entries(doc)`` checks every entry; the checked
    mapping replaces the module's ``GENERAL_TUNED_TABLE``;
 6. record each entry's qualifying verdict (finalist id, cells checked,
-   correct -- no ratio) in ``rdna_entries_manifest.json``, checked against
-   the shipped table in ``tests.dispatch.attention_bwd.test_tuned_tables``.
+   correct -- no ratio) and each named finalist's sweep record
+   (``Candidate.record()``) in ``rdna_entries_manifest.json``; the tests in
+   ``tests.dispatch.attention_bwd.test_tuned_tables`` check that the manifest
+   and the table name the same keys, that each record hashes to its finalist
+   id, and that the shipped knobs are the record's.
 """
 
 from __future__ import annotations

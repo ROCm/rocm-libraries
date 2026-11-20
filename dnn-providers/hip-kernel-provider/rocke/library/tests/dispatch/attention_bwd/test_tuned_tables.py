@@ -8,7 +8,10 @@ CPU only (plans, no device):
   entry on representative requests of its key: an unknown knob, an illegal
   value or a value that needs a device hint the key does not carry is
   refused with the plan's reason, a valid entry passes;
-* every shipped entry (gfx942 and gfx950, general and dense) passes it;
+* every shipped entry (every arch of ``routing.ARCH_TUNING``, general and
+  dense) passes it;
+* every RDNA entry has a qualifying verdict in ``rdna_entries_manifest.json``
+  whose finalist's sweep record reproduces its id and its shipped knobs;
 * routing takes the tuned configuration for requests of a tuned key on each
   arch (the dense route for a packed dense key), and keeps the defaults for
   requests of an untuned key.
@@ -336,7 +339,7 @@ def test_every_rdna_entry_has_a_manifest_verdict(arch):
     """Every promoted RDNA entry names its qualifying verdict
     (``rdna_entries_manifest.json``: the finalist that won its key, the
     cells it was checked on, and that it was correct on all of them --
-    :mod:`dispatch.attention_bwd.rdna_entry_rule`), and every manifest
+    :mod:`benchmarks.common.attention_bwd_rdna_entry_rule`), and every manifest
     record is a shipped entry: the table and the manifest cannot drift
     apart without failing this test."""
     manifest = json.loads(_MANIFEST_PATH.read_text())
@@ -347,3 +350,38 @@ def test_every_rdna_entry_has_a_manifest_verdict(arch):
         assert rec["correct"] is True
         assert rec["cells_checked"] >= 1
         assert rec["finalist"]
+
+
+def _norm_knobs(knobs):
+    def norm(v):
+        return [norm(x) for x in v] if isinstance(v, (list, tuple)) else v
+
+    return {k: norm(v) for k, v in dict(knobs).items()}
+
+
+@pytest.mark.parametrize("arch", ["gfx1151", "gfx1201"])
+def test_every_rdna_entry_ships_its_named_finalists_knobs(arch):
+    """The manifest carries the sweep record of every finalist it names; the
+    record hashes to the finalist's id (the sweep's own
+    :meth:`Candidate.key`), and the knobs it hands the plan
+    (``tuning_knobs`` without the unset ones, plus its runtime values -- what
+    the judge wrote as the entry) are exactly the shipped entry's. A shipped
+    entry whose knobs are edited, or a manifest that names another
+    finalist, fails here."""
+    from benchmarks.common.attention_bwd_sweep import Candidate
+
+    manifest = json.loads(_MANIFEST_PATH.read_text())[arch]
+    table = routing.ARCH_TUNING[arch].GENERAL_TUNED_TABLE
+    named = {e["finalist"] for e in manifest["entries"]}
+    assert set(manifest["finalists"]) == named
+    expected = {}
+    for fid, rec in manifest["finalists"].items():
+        cand = Candidate.from_record(rec)
+        assert cand.slice.arch == arch
+        assert cand.key()[:20] == fid
+        knobs = {k: v for k, v in cand.tuning_knobs().items() if v is not None}
+        knobs.update(cand.r)
+        expected[fid] = _norm_knobs(knobs)
+    for e in manifest["entries"]:
+        key = tuple(e["key"])
+        assert _norm_knobs(table[key]) == expected[e["finalist"]], key

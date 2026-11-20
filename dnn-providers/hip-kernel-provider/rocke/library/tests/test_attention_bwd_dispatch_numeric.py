@@ -11,9 +11,11 @@ sentinels, canaries, poisoned workspace):
 
 * ``test_general_cases``: smoke-tier table cases the general predicate
   accepts on the device;
-* ``test_tuned_general_keys`` (CDNA): one case per shipped tuned general key
-  of a fixed-length class (its request carries the key's ``num_cus``): the
-  dispatcher plans the tuned configuration and it passes;
+* ``test_tuned_general_keys``: one case per shipped tuned general key of a
+  fixed-length class (its request carries the key's ``num_cus``): the
+  dispatcher plans the tuned configuration and it passes (that every such
+  key gets a case is checked on the host, in
+  ``test_attention_bwd_key_cases.py``);
 * ``test_tuned_dense_keys`` (gfx950): the shipped dense keys whose float64
   oracle fits the host (the dense family is selected and passes);
 * ``test_unified_cases`` (gfx942 / gfx950): smoke-tier unified cases without
@@ -30,13 +32,12 @@ import numpy as np
 import pytest
 
 from dispatch.attention_bwd import registry as reg
-from dispatch.attention_bwd import routing, tuned_tables
+from dispatch.attention_bwd import routing
 from kernels.common.attention_bwd_plan import (
     _dense_key,
     _lse_kernarg_strides,
     _table_knobs,
     attn_bwd_support,
-    attn_bwd_tuning_key,
 )
 from kernels.common.attention_bwd_run import TensorMeta
 from kernels.common.attention_bwd_unified_plan import (
@@ -45,6 +46,7 @@ from kernels.common.attention_bwd_unified_plan import (
 )
 
 from . import _attention_bwd_harness as H
+from ._attention_bwd_key_cases import ORACLE_CELLS, general_key_case
 from . import _attention_bwd_unified_harness as HU
 from .sdpa.bwd_cases import _mkb, compare_bwd, select_bwd
 from .sdpa.bwd_kernel_cases import SUPPLEMENTARY_CASES, request_from_case
@@ -61,7 +63,7 @@ pytestmark = [
 ]
 
 # float64 oracle budget: batches * heads * s_q * s_kv
-_ORACLE_CELLS = 160 * 1024 * 1024
+_ORACLE_CELLS = ORACLE_CELLS
 _CACHE: dict = {}
 
 
@@ -182,60 +184,6 @@ def test_negative_control_general(through_dispatcher, monkeypatch):
     assert compare_bwd(run.case, run.dq, run.dk, run.dv, run.ref) or run.integrity
 
 
-_MASK_CASE = {
-    "none": {},
-    "causal_tl": {"diagonal": "top_left", "right_bound": 0},
-    "causal_br": {"diagonal": "bottom_right", "right_bound": 0},
-}
-
-
-def _mask_case(mask, req):
-    """The case mask fields of a ``mask`` request (a window takes the
-    request's own band), or None for a mask kind with no case form."""
-    if mask in _MASK_CASE:
-        return _MASK_CASE[mask]
-    if mask == "window" and req.left_bound is not None and req.left_bound >= 0:
-        return {
-            "diagonal": "bottom_right" if req.bottom_right else "top_left",
-            "left_bound": req.left_bound,
-            "right_bound": req.right_bound,
-        }
-    return None
-
-
-def _general_key_case(arch, key):
-    """A fixed-length bhsd / bshd case of tuned key ``key`` and the request
-    fields that put it in the key (``num_cus``, ``num_xcds``), or None."""
-    for req in tuned_tables.general_key_requests(arch, key):
-        if req.layout != "dense" or req.padding or req.num_cus is None:
-            continue
-        mask_kw = _mask_case(key[4], req)
-        if mask_kw is None or req.b * req.h_q * req.s_q * req.s_kv > _ORACLE_CELLS:
-            continue
-        layout = "bhsd" if req.strides is None else "bshd"
-        tag = "_".join(str(x) for x in key[2:]).replace("*", "any")
-        case = _mkb(
-            f"disp_{arch}_{tag}_b{req.b}h{req.h_q}k{req.h_k}s{req.s_q}x{req.s_kv}",
-            reqs=(1,),
-            tier="full",
-            dtype=req.dtype,
-            d=req.d_qk,
-            b=req.b,
-            h_q=req.h_q,
-            h_k=req.h_k,
-            h_v=req.h_v,
-            s_q=req.s_q,
-            s_kv=req.s_kv,
-            layout=layout,
-            **mask_kw,
-        )
-        extra = {"num_cus": req.num_cus, "num_xcds": req.num_xcds}
-        got = dataclasses.replace(request_from_case(case), **extra)
-        if attn_bwd_tuning_key(got, arch) == key and attn_bwd_support(got, arch).ok:
-            return case, extra
-    return None
-
-
 def _tuned_general_params():
     if ARCH not in routing.ARCH_TUNING:
         return [pytest.param(None, None, None, id="no-tables")]
@@ -243,22 +191,10 @@ def _tuned_general_params():
     for key in routing.ARCH_TUNING[ARCH].GENERAL_TUNED_TABLE:
         if key[7] != "fixed":
             continue
-        found = _general_key_case(ARCH, key)
+        found = general_key_case(ARCH, key)
         if found is not None:
             out.append(pytest.param(key, *found, id=found[0].id))
     return out
-
-
-@pytest.mark.skipif(ARCH not in routing.ARCH_TUNING, reason="no tuned tables")
-def test_every_fixed_tuned_key_has_a_numeric_case():
-    """Every fixed-length tuned general key of the device's table (window
-    keys included) gets a dispatch numeric case: none is silently left out."""
-    missing = [
-        key
-        for key in routing.ARCH_TUNING[ARCH].GENERAL_TUNED_TABLE
-        if key[7] == "fixed" and _general_key_case(ARCH, key) is None
-    ]
-    assert not missing, missing
 
 
 @pytest.mark.parametrize("key,case,extra", _tuned_general_params())

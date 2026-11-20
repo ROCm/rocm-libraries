@@ -3331,16 +3331,19 @@ Distilled rules (also folded into §8.6):
 Full study:
 [`library/dispatch/attention_bwd/rdna_general_tuning_case_study.md`](../../../library/dispatch/attention_bwd/rdna_general_tuning_case_study.md).
 On gfx1151 / gfx1201 the backward's own CDNA tuning rule (an entry must beat
-the competitor's backward) admits no entry: PyTorch's own backward beats
-rocKE's shipped plan by a wide margin on every measured cell there. The
-lesson: when a target cannot win the competitor comparison a tuned table
+the competitor's backward on every cell of its key) would leave most keys at
+the defaults: PyTorch's own backward is faster than rocKE's shipped plan on
+every measured gfx1201 cell and on most gfx1151 cells (the case study has the
+per-arch split). The lesson: when a target cannot win the competitor comparison a tuned table
 still has value as the *best available configuration of the shipped
 backend*, measured against its own shipped plan (not the competitor) with
 the same rigor (correctness gate, A/A control, geometric-mean ranking) as
 the comparison it replaces. The selection rule itself is a checked, unit-
-tested pure function (`dispatch/attention_bwd/rdna_entry_rule.py`), not a
-manual step, and every shipped entry's qualifying verdict is a checked
-artifact (`rdna_entries_manifest.json`) rather than free-text documentation.
+tested pure function (`benchmarks/common/attention_bwd_rdna_entry_rule.py`,
+beside the bench that feeds it), not a manual step, and every shipped entry's
+qualifying verdict and its finalist's sweep record are a checked artifact
+(`rdna_entries_manifest.json`: the record must hash to the named finalist and
+carry the shipped knobs) rather than free-text documentation.
 
 ---
 
