@@ -4541,7 +4541,47 @@ def _emit_epilogue_cshuffle(
     # wave32 accumulator holds a lane's ``c_per_lane`` slots in one *column*
     # (N elements apart in C), so a direct store costs one scalar store per
     # slot, while the LDS round-trip recovers contiguous ``store_vec`` stores.
-    if op.family == "wmma":
+    # EXPERIMENT: ROCKE_EXP_EPI_PACK=1 -> neighbouring lanes (adjacent C
+    # columns) trade one packed pair of their 16-bit rows (dpp xor 1), so each
+    # lane writes one 4-byte LDS store per two rows instead of two 2-byte ones:
+    # even lanes (row i, cols c, c+1), odd lanes (row i+1, cols c-1, c).
+    import os as _os_pk
+
+    _pack = (
+        _os_pk.environ.get("ROCKE_EXP_EPI_PACK") == "1"
+        and op.family == "wmma"
+        and c_per_lane % 2 == 0
+        and _dtype_bytes(c_dtype.name if hasattr(c_dtype, "name") else str(c_dtype)) == 2
+    )
+    if _pack:
+        t = spec.tile
+        c_map = op.c_layout()
+        even = b.cmp_eq(b.land(lane, b.const_i32(1)), b.const_i32(0))
+        lo_mask, hi_mask = b.const_i32(0xFFFF), b.const_i32(-0x10000)
+        c16 = b.const_i32(16)
+        flat = 0
+        for mi in range(t.mfmas_per_warp_m):
+            atom_m = b.add(warp_m_off, b.const_i32(mi * t.warp_tile_m))
+            for ni in range(t.mfmas_per_warp_n):
+                acc_h = b.vec_cast_f32_to(accs[flat], c_dtype)
+                flat += 1
+                atom_n = b.add(warp_n_off, b.const_i32(ni * t.warp_tile_n))
+                words = b.vec_bitcast(acc_h, VectorType(I32, c_per_lane // 2))
+                for j in range(c_per_lane // 2):
+                    pw = b.vec_extract(words, j)
+                    qw = b.dpp_xor(pw, 1)
+                    word = b.select(
+                        even,
+                        b.lor(b.land(pw, lo_mask), b.shl(qw, c16)),
+                        b.lor(b.lshr(qw, c16), b.land(pw, hi_mask)),
+                    )
+                    r0, c0_ = c_map.coord(b, lane, 2 * j)
+                    r1, _ = c_map.coord(b, lane, 2 * j + 1)
+                    row = b.select(even, r0, r1)
+                    col = b.select(even, c0_, b.sub(c0_, b.const_i32(1)))
+                    v2 = b.vec_bitcast(b.vec_pack([word], I32), VectorType(c_dtype, 2))
+                    b.smem_store_vN(Cs, [b.add(atom_m, row), b.add(atom_n, col)], v2, n=2)
+    elif op.family == "wmma":
         _emit_wmma_acc_scatter(
             b,
             spec,
