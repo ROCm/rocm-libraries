@@ -240,6 +240,15 @@ mod tests {
     }
 
     #[test]
+    fn writelane_encodes_two_sources_not_the_tied_old_value() {
+        let write = |dst, data, lane| words(MInst::new(Opc::VWritelaneB32, [v(dst, 1)], [data, Opnd::Imm(lane), v(dst, 1)]));
+        assert_eq!(write(7, s(5, 1), 0), [0xd761_0007, 0x0001_0005]); // v7, s5, 0
+        assert_eq!(write(255, s(99, 1), 31), [0xd761_00ff, 0x0001_3e63]); // v255, s99, 31
+        assert_eq!(write(7, Opnd::Imm(0x1234_5678), 31), [0xd761_0007, 0x0001_3eff, 0x1234_5678]);
+        assert_eq!(words(MInst::new(Opc::VReadlaneB32, [s(7, 1)], [v(5, 1), Opnd::Imm(31)])), [0xd760_0007, 0x0001_3f05]);
+    }
+
+    #[test]
     fn gfx11_sync_instructions_are_refused() {
         for op in [Opc::SWaitcnt, Opc::SBarrier, Opc::BufferGl0Inv] {
             let mut out = Vec::new();

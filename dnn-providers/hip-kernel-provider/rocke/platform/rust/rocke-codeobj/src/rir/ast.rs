@@ -433,6 +433,8 @@ pub enum OpKind {
     Permlane32Swap,
     /// `tile.readlane (v: i32|f32, lane: i32)`: lane `lane`'s `v`, uniform.
     ReadLane,
+    /// `tile.writelane (uniform, lane: i32, passthrough)`: replace one lane's 32 bits.
+    WriteLane,
     /// `arith.cvt_fp8_to_f32 (fp8e4m3) -> f32` and its bf8e5m2 twin (gfx950).
     CvtFp8ToF32,
     CvtBf8ToF32,
@@ -694,6 +696,7 @@ impl OpKind {
             "tile.ds_read_tr_b8" => OpKind::DsReadTr8,
             "tile.permlane32_swap" => OpKind::Permlane32Swap,
             "tile.readlane" => OpKind::ReadLane,
+            "tile.writelane" => OpKind::WriteLane,
             "arith.cvt_fp8_to_f32" => OpKind::CvtFp8ToF32,
             "arith.cvt_bf8_to_f32" => OpKind::CvtBf8ToF32,
             "arith.cvt_pk_f32_fp8x4" => OpKind::CvtPkF32Fp8,
@@ -804,6 +807,7 @@ impl OpKind {
                 | OpKind::LdsReadTr
                 | OpKind::Permlane32Swap
                 | OpKind::ReadLane
+                | OpKind::WriteLane
                 | OpKind::WaitAsyncCnt
                 | OpKind::FlagWaitEq
                 | OpKind::FlagStore
@@ -860,6 +864,7 @@ impl OpKind {
                     | OpKind::LdsReadTr
                     | OpKind::Permlane32Swap
                     | OpKind::ReadLane
+                    | OpKind::WriteLane
                     | OpKind::BufferLoadCp
                     | OpKind::Permlane16Swap
                     | OpKind::DppOp

@@ -99,6 +99,17 @@ past the wave size reads a lane a 32-lane wave does not have
 (`target/gfx12/lanes.rs`). gfx1201's SGPR spill and LDS swizzle models are
 gfx1151's.
 
+On the two gfx12 targets, `tile.writelane(value, lane, passthrough)` copies
+the uniform `i32` or `f32` value's **bits** to one lane in each wave. Every
+other lane keeps its own passthrough (of the same type); the result is not
+uniform in general. The direct backend requires provably wave-uniform data,
+a lane that selects as an integer constant in `0..32`, and no enclosing
+divergent branch or loop bound. It does not truncate a selector or pick a
+representative value from divergent data. The matching stash restore,
+`tile.readlane(v, lane)`, broadcasts the selected lane's word to the wave;
+it has the same static-selector and uniform-control restrictions on gfx12.
+`tile.writelane` is not admitted on gfx1151 or gfx950.
+
 ## Using it
 
 ### `compile_kernel`

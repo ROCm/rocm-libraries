@@ -162,7 +162,7 @@ mod tests {
             Ok(k) => k,
             Err(e) => return format!("{}: {}", e.kind, e.message),
         };
-        if let Err(e) = validate::kernel(&kernel) {
+        if let Err(e) = validate::kernel(&kernel, crate::target::Target::Gfx1151) {
             return format!("{}: {}", e.kind, e.message);
         }
         let (mut lds, size) = analysis::lds_layout(&kernel);

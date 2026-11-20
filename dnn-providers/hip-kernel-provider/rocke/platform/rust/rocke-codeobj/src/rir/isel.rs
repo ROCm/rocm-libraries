@@ -1628,10 +1628,8 @@ impl<'a> Isel<'a> {
             }
             LdsReadTr => return Err(unsupported("a transposing LDS read on gfx1151")),
             DsReadTr16 | DsReadTr8 => return Err(unsupported("a transposing LDS read before address legalization")),
-            Permlane32Swap | ReadLane if self.t.target.gfx11_pipeline() => {
-                let name = if op.kind == ReadLane { "tile.readlane" } else { "tile.permlane32_swap" };
-                return Err(unsupported(format!("{name} on {}", self.t.name)));
-            }
+            Permlane32Swap if self.t.target.gfx11_pipeline() => return Err(unsupported(format!("tile.permlane32_swap on {}", self.t.name))),
+            ReadLane if self.t.target == Target::Gfx1151 => return Err(unsupported("tile.readlane on gfx1151")),
             Permlane32Swap => {
                 let (a, b) = (self.w(op.operands[0])?, self.w(op.operands[1])?);
                 let (x, y) = (self.vgpr(1), self.vgpr(1));
@@ -1642,6 +1640,7 @@ impl<'a> Isel<'a> {
                 self.set(op.results[1], Val::W(r(y)));
             }
             ReadLane => self.readlane(op)?,
+            WriteLane => self.writelane(op)?,
             CvtFp8ToF32 | CvtBf8ToF32 | CvtPkF32Fp8 | CvtPkF32Bf8 | CvtF32ToFp8 | CvtF32ToBf8 | CvtPkFp8F32 | CvtPkBf8F32 => {
                 use crate::target::gfx9::fp8::{self, Cvt};
                 if self.t.target.gfx11_pipeline() {
@@ -5045,16 +5044,39 @@ impl<'a> Isel<'a> {
         Ok(())
     }
 
-    /// Lane `lane`'s copy of a 32-bit value, in an SGPR (`v_readlane_b32`): the
-    /// lane from an SGPR or an inline constant, its low six bits as the
-    /// hardware reads them; a divergent lane index is the first active lane's.
+    /// No dynamic selector or implicit wrap into a smaller wave in the gfx12 lane ops.
+    fn static_lane32(&mut self, op: &Op, name: &str) -> Result<Opnd, CompileError> {
+        match self.w(op.operands[1])? {
+            lane @ Opnd::Imm(0..=31) => Ok(lane),
+            _ => Err(unsupported(format!("{name} needs a constant lane in 0..32"))),
+        }
+    }
+
+    fn writelane(&mut self, op: &Op) -> Result<(), CompileError> {
+        let lane = self.static_lane32(op, "tile.writelane")?;
+        let data = self.w(op.operands[0])?;
+        let data = self.first_lane(data); // validation proved wave uniformity
+        let old = self.w(op.operands[2])?;
+        // The ISA has no passthrough field: the destination IS the old value.
+        // Do not destructively update a live SSA operand. Keep the tied use
+        // until allocation so a copy can coalesce only if it is safe.
+        let dst = self.vgpr(1);
+        self.copy(dst, old);
+        self.emit(MInst::new(Opc::VWritelaneB32, [r(dst)], [data, lane, r(dst)]));
+        self.set(op.results[0], Val::W(r(dst)));
+        Ok(())
+    }
+
+    /// Lane `lane`'s copy of a 32-bit value, in an SGPR. gfx12 admits only a
+    /// static wave32 lane; gfx950 uses the low six bits of a scalar selector.
     fn readlane(&mut self, op: &Op) -> Result<(), CompileError> {
+        let selector = if self.t.target.gfx12() { self.static_lane32(op, "tile.readlane")? } else { self.w(op.operands[1])? };
         let x = self.w(op.operands[0])?;
         if !self.is_v(x) {
             self.set(op.results[0], Val::W(x));
             return Ok(());
         }
-        let lane = match self.w(op.operands[1])? {
+        let lane = match selector {
             Opnd::Imm(k) => Opnd::Imm(k & 63),
             l if self.is_v(l) => self.to_s(l),
             l => l,

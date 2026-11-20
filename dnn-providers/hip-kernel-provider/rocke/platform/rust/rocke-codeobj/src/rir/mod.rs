@@ -1408,7 +1408,7 @@ fn compile_with(
         crate::target::gfx9::mask_splat::fold(&mut kernel);
         crate::target::gfx9::cpol::take_nontemporal(&mut kernel);
     }
-    validate::kernel(&kernel)?;
+    validate::kernel(&kernel, target)?;
     if target.gfx12() {
         crate::target::gfx12::lanes::check(&kernel)?;
     }
@@ -1439,7 +1439,7 @@ fn compile_with(
     let (facts, lds_size) = lds_swizzle::run(&mut kernel, facts, &mut lds, lds_size);
     laps.lap("swizzle");
     let uniform = analysis::classify(&kernel);
-    validate::uniformity(&kernel, &uniform)?;
+    validate::uniformity(&kernel, &uniform, target)?;
     let mut sel = isel::select_for(target, &kernel, &facts, uniform, &lds, lds_size)?;
     sel.func.vgpr_limit = kernel.vgpr_limit;
     sel.func.agpr_limit = kernel.agpr_limit;
