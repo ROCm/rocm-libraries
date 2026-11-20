@@ -87,16 +87,28 @@ def _lib(pkg) -> str:
     return os.path.join(str(pkg), "lib", name)
 
 
-def test_finds_the_bundled_comgr_and_vintage_without_importing_torch(fake_torch):
+@pytest.fixture
+def no_heavy_import():
+    """Fail the test if it imports torch or the SDK package. Either may
+    already be imported by an earlier test of the same process, so compare
+    with the modules present before the test."""
+    heavy = ("torch", "_rocm_sdk_core")
+    before = {m for m in heavy if m in sys.modules}
+    yield
+    assert {m for m in heavy if m in sys.modules} == before
+
+
+def test_finds_the_bundled_comgr_and_vintage_without_importing_torch(
+    fake_torch, no_heavy_import
+):
     from rocke.runtime import comgr
 
     assert pc.torch_package_dir() == fake_torch
     assert pc.torch_bundled_comgr() == _lib(fake_torch)
     assert comgr._torch_package_rocm_version(_lib(fake_torch)) == (7, 2)
-    assert "torch" not in sys.modules
 
 
-def test_pin_exports_the_library_and_keeps_an_explicit_one(fake_torch):
+def test_pin_exports_the_library_and_keeps_an_explicit_one(fake_torch, no_heavy_import):
     env = {}
     assert pc.pin_production_comgr(env) == _lib(fake_torch)
     assert env == {pc.COMGR_LIB_ENV: _lib(fake_torch)}
@@ -109,10 +121,9 @@ def test_pin_exports_the_library_and_keeps_an_explicit_one(fake_torch):
     (fake_torch / "lib" / "amd_comgr0702.dll").unlink()
     env = {}
     assert pc.pin_production_comgr(env) is None and env == {}
-    assert "torch" not in sys.modules
 
 
-def test_hip_runtime_pin_pairs_with_the_bundled_comgr(fake_torch):
+def test_hip_runtime_pin_pairs_with_the_bundled_comgr(fake_torch, no_heavy_import):
     """The HIP runtime beside the pinned torch comgr is pinned with it, so a
     torch-free process maps the comgr it compiles with (Linux only)."""
     hip = os.path.join(str(fake_torch), "lib", "libamdhip64.so")
@@ -134,10 +145,9 @@ def test_hip_runtime_pin_pairs_with_the_bundled_comgr(fake_torch):
     os.unlink(hip)  # a torch package without a HIP runtime: nothing to pin
     env = {pc.COMGR_LIB_ENV: _lib(fake_torch)}
     assert pc.pin_production_hip(env) is None and pc.HIP_LIB_ENV not in env
-    assert "torch" not in sys.modules
 
 
-def test_therock_wheel_pins_the_sdk_core_comgr_and_hip(fake_therock):
+def test_therock_wheel_pins_the_sdk_core_comgr_and_hip(fake_therock, no_heavy_import):
     """A TheRock torch keeps comgr and the HIP runtime in ``_rocm_sdk_core``
     under their SONAMEs; both are pinned, as a pair, without importing torch
     or the SDK package."""
@@ -151,7 +161,6 @@ def test_therock_wheel_pins_the_sdk_core_comgr_and_hip(fake_therock):
     assert pc.pin_production_comgr(env) == comgr
     assert pc.pin_production_hip(env) == str(fake_therock / "lib" / "libamdhip64.so.7")
     assert env[pc.COMGR_LIB_ENV] == comgr
-    assert "torch" not in sys.modules and "_rocm_sdk_core" not in sys.modules
 
 
 def test_comgr_cache_is_owned_by_the_process_unless_set(monkeypatch, tmp_path):
@@ -219,7 +228,9 @@ def test_each_process_tree_gets_its_own_comgr_cache_removed_at_exit(tmp_path):
     assert out.stdout.split()[-2] == str(tmp_path / "inherited")  # a child keeps it
 
 
-def test_torch_free_vintage_follows_the_pinned_torch_library(fake_torch, monkeypatch):
+def test_torch_free_vintage_follows_the_pinned_torch_library(
+    fake_torch, no_heavy_import, monkeypatch
+):
     """The platform dates a library in a torch package's ``lib`` directory by
     that package's ``version.py`` while torch is not imported, so the
     toolchain identity of a torch-free process names the pinned library's
@@ -230,7 +241,6 @@ def test_torch_free_vintage_follows_the_pinned_torch_library(fake_torch, monkeyp
     assert comgr.resolved_lib_rocm_version() == (7, 2)
     (fake_torch / "version.py").write_text(_VERSION_PY.format(hip="7.13.0"))
     assert comgr.resolved_lib_rocm_version() == (7, 13)
-    assert "torch" not in sys.modules
 
 
 _COMPILE_ONLY = textwrap.dedent(
