@@ -1420,3 +1420,166 @@ TEST_F(EstimateAsmCyclesTest, PostLoopSetpcUsesNonEdgeStore) {
     EXPECT_EQ(phases.mainLoopCycles, 5u);
     EXPECT_EQ(phases.postLoopCycles, 6u);
 }
+
+// InsertClusterBarrierPass leaves the dispatch named label_LoopBeginL and
+// retargets the wave-0 latch to label_LoopBeginL_CBWave0. That body stays in
+// the main loop. The other wave's copy is the same iteration, so it is not
+// added to the epilogue.
+TEST_F(EstimateAsmCyclesTest, ClusterBarrierWave0BodyStaysInMainLoop) {
+    BasicBlock* pre = func->createBasicBlockBefore(loopBB, "prologue");
+    BasicBlock* wave0 = func->createBasicBlockAfter(loopBB, "label_LoopBeginL_CBWave0");
+    BasicBlock* other = func->createBasicBlockAfter(wave0, "label_skipCBPreSignal_deadbeef");
+    BasicBlock* post = func->createBasicBlockAfter(other, "epilogue");
+
+    auto add = [&](BasicBlock* bb, int issueCycles) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        inst->addDestReg(StinkyRegister("v", 0, 1));
+        inst->addSrcReg(StinkyRegister("v", 1, 1));
+        inst->addSrcReg(StinkyRegister("v", 2, 1));
+        inst->issueCycles = issueCycles;
+    };
+    auto branchTo = [&](BasicBlock* bb, std::string const& label) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+        inst->addModifier(LabelData(label));
+        inst->issueCycles = 0;
+    };
+    add(pre, 3);
+    add(loopBB, 1);
+    branchTo(loopBB, "label_skipCBPreSignal_deadbeef");
+    add(wave0, 5);
+    branchTo(wave0, "label_LoopBeginL_CBWave0");
+    add(other, 9);
+    branchTo(other, "label_skipCBPreSignal_deadbeef");
+    add(post, 4);
+
+    func->setGemmTileConfig(gemmConfig);
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
+    EXPECT_EQ(phases.preLoopCycles, 3u);
+    EXPECT_EQ(phases.mainLoopCycles, 6u);
+    EXPECT_EQ(phases.postLoopCycles, 4u);
+}
+
+// label_skipCBPreSignal_LCL_* is the LoopCounterL == 0 join, not the other
+// wave's loop. The branch that reaches it is in an earlier block, and the
+// CFG fall-through keeps the same prefix. Both stay in the prologue.
+TEST_F(EstimateAsmCyclesTest, LoopCounterSkipJoinStaysInPreLoop) {
+    BasicBlock* cont = func->createBasicBlockBefore(loopBB, "label_skipCBPreSignal_LCL_abc_1");
+    BasicBlock* lcl = func->createBasicBlockBefore(cont, "label_skipCBPreSignal_LCL_abc");
+    BasicBlock* skipped = func->createBasicBlockBefore(lcl, "barrier");
+    BasicBlock* gate = func->createBasicBlockBefore(skipped, "gate");
+    BasicBlock* post = func->createBasicBlockAfter(loopBB, "epilogue");
+
+    auto add = [&](BasicBlock* bb, int issueCycles) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        inst->addDestReg(StinkyRegister("v", 0, 1));
+        inst->addSrcReg(StinkyRegister("v", 1, 1));
+        inst->addSrcReg(StinkyRegister("v", 2, 1));
+        inst->issueCycles = issueCycles;
+    };
+    add(gate, 2);
+    add(skipped, 7);
+    add(lcl, 4);
+    add(cont, 5);
+    add(loopBB, 1);
+    add(post, 3);
+    {
+        AsmIRBuilder builder(*gate, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_cbranch_scc1, arch));
+        inst->addModifier(LabelData("label_skipCBPreSignal_LCL_abc"));
+        inst->issueCycles = 0;
+    }
+    {
+        AsmIRBuilder builder(*loopBB, arch);
+        StinkyInstruction* back = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+        back->addModifier(LabelData("label_LoopBeginL"));
+        back->issueCycles = 0;
+    }
+
+    func->setGemmTileConfig(gemmConfig);
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
+    // gate -> barrier -> LCL -> continuation. The branch to LCL is the shorter side.
+    EXPECT_EQ(phases.preLoopCycles, 18u);
+    EXPECT_EQ(phases.mainLoopCycles, 1u);
+    EXPECT_EQ(phases.postLoopCycles, 3u);
+}
+
+// The load and the wait are in different blocks. The wait still retires the
+// load: one ds_load_b128 issues in 1 cycle and drains in 56, so s_wait_dscnt 0
+// stalls for the remaining 55.
+TEST_F(EstimateAsmCyclesTest, WaitDscntSeesLoadFromPreviousBlock) {
+    BasicBlock* post = func->createBasicBlockAfter(loopBB, "epilogue");
+    {
+        AsmIRBuilder builder(*loopBB, arch);
+        StinkyInstruction* load = builder.create(getMCIDByUOp(GFX::ds_load_b128, arch));
+        load->issueCycles = 1;
+        load->latencyCycles = 56;
+    }
+    {
+        AsmIRBuilder builder(*loopBB, arch);
+        StinkyInstruction* back = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+        back->addModifier(LabelData("label_LoopBeginL"));
+        back->issueCycles = 1;
+    }
+    {
+        AsmIRBuilder builder(*post, arch);
+        StinkyInstruction* wait = builder.create(getMCIDByUOp(GFX::s_wait_dscnt, arch));
+        wait->addSrcReg(StinkyRegister(0));
+        wait->issueCycles = 1;
+    }
+
+    func->setGemmTileConfig(gemmConfig);
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
+    EXPECT_EQ(phases.mainLoopCycles, 1u);
+    EXPECT_EQ(phases.postLoopCycles, 55u);
+}
+
+// Data-ready lives in the issue queue. A consumer in the next block still waits
+// for the producer's remaining latency. That is the same queue that holds the
+// WMMA window.
+TEST_F(EstimateAsmCyclesTest, DataReadyStallCrossesBlocks) {
+    BasicBlock* post = func->createBasicBlockAfter(loopBB, "epilogue");
+    {
+        AsmIRBuilder builder(*loopBB, arch);
+        StinkyInstruction* prod = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        prod->addDestReg(StinkyRegister("v", 0, 1));
+        prod->addSrcReg(StinkyRegister("v", 1, 1));
+        prod->addSrcReg(StinkyRegister("v", 2, 1));
+        prod->issueCycles = 1;
+        prod->latencyCycles = 20;
+    }
+    {
+        AsmIRBuilder builder(*loopBB, arch);
+        StinkyInstruction* back = builder.create(getMCIDByUOp(GFX::s_cbranch_scc0, arch));
+        back->addModifier(LabelData("label_LoopBeginL"));
+        back->issueCycles = 0;
+    }
+    {
+        AsmIRBuilder builder(*post, arch);
+        StinkyInstruction* cons = builder.create(getMCIDByUOp(GFX::v_add_f32, arch));
+        cons->addDestReg(StinkyRegister("v", 3, 1));
+        cons->addSrcReg(StinkyRegister("v", 0, 1));
+        cons->addSrcReg(StinkyRegister("v", 2, 1));
+        cons->issueCycles = 1;
+        cons->latencyCycles = 1;
+    }
+
+    func->setGemmTileConfig(gemmConfig);
+    PassContext passCtx;
+    passCtx.setGemmTileConfig(gemmConfig);
+    passCtx.setBasicBlockFilter(BasicBlockFilterBuilder::all());
+    EstimateAsmCyclePhases phases = calculateEstimateAsmCyclePhases(*func, passCtx);
+    EXPECT_EQ(phases.mainLoopCycles, 1u);
+    EXPECT_EQ(phases.postLoopCycles, 20u);
+}

@@ -65,6 +65,41 @@ bool isPrimaryLoopHeader(stinkytofu::BasicBlock const& bb) {
     return label == "label_LoopBeginL" || label == "LoopBeginL";
 }
 
+// InsertClusterBarrierPass keeps the dispatch block named label_LoopBeginL and
+// retargets the wave-0 latch to label_LoopBeginL_CBWave0. That branch still
+// closes the primary loop. A peeled InitC clone does not use this exact name.
+bool isPrimaryLoopBackTarget(std::string const& target) {
+    return target == "label_LoopBeginL" || target == "LoopBeginL" ||
+           target == "label_LoopBeginL_CBWave0" || target == "LoopBeginL_CBWave0";
+}
+
+// The non-zero-wave copy is the same iteration as wave 0. Counting it again in
+// the epilogue would add a second copy of the body. The name alone is not
+// enough: label_skipCBPreSignal_LCL_* is the LoopCounterL == 0 join, and
+// CFGBuilder names the straight-line piece after it with the same prefix.
+// Only a branch at or after the block, back to that block, marks the copy.
+bool isAlternateWaveHeader(std::string const& label) {
+    return label.starts_with("label_skipCBPreSignal_");
+}
+
+void markAlternateWaveLoopBlocks(std::vector<BasicBlock*> const& ordered,
+                                 std::vector<char>& excluded) {
+    for (size_t headerIdx = 0; headerIdx < ordered.size(); ++headerIdx) {
+        std::string const& header = ordered[headerIdx]->getLabel();
+        if (!isAlternateWaveHeader(header)) continue;
+        std::optional<size_t> latch;
+        for (size_t i = headerIdx; i < ordered.size(); ++i) {
+            for (IRBase& irNode : *ordered[i]) {
+                StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&irNode);
+                if (inst == nullptr || !isBranch(*inst)) continue;
+                if (getBranchTarget(*inst) == header) latch = i;
+            }
+        }
+        if (!latch.has_value()) continue;
+        for (size_t i = headerIdx; i <= *latch; ++i) excluded[i] = 1;
+    }
+}
+
 // Global-write edge fork. NonEdge is the full tile. Then/Else are the
 // partial-tile stores, reached by a short cbranch or by an annotated
 // s_setpc_b64. The estimate always keeps NonEdge.
@@ -204,6 +239,16 @@ struct IssuedDsOp {
     DsLoadDrainEntry entry;
 };
 
+// One issue timeline for the whole kernel. A fresh queue per basic block drops
+// the WMMA window, data-ready counters, and in-flight DS ops, so a wait cannot
+// see a load that issued in the previous block.
+struct CycleReplay {
+    std::unique_ptr<dag::ReadyQueue> queue;
+    std::deque<IssuedDsOp> inflightDs;
+    const StinkyInstruction* prevIssued = nullptr;
+    int cycles = 0;
+};
+
 // s_wait_dscnt(N) / the ds half of s_wait_loadcnt_dscnt. N is how many LDS ops may still be
 // outstanding when the wait completes. Absent when this instruction does not wait on dscnt.
 std::optional<int> dsWaitKeepCount(const StinkyInstruction& inst) {
@@ -284,19 +329,23 @@ class EstimateAsmCyclesPassImpl : public Pass {
         // The per-instruction query is a read-only slice of the unrolled loop.
         // Phase totals are for the publishing pass, which sees the whole kernel.
         if (perInstructionCycleQuery_) {
+            CycleReplay replay;
+            replay.queue = dag::chooseReadyQueue(passCtx);
             for (BasicBlock& bb : func) {
                 if (!passCtx.shouldProcessBasicBlock(bb)) continue;
-                calculateMathClocksInUnrolledLoop(bb, passCtx, BlockCycleScope::Legacy);
+                calculateMathClocksInUnrolledLoop(bb, passCtx, BlockCycleScope::Legacy, replay);
             }
             PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] totalCycles=" << totalCycles_ << "\n");
             return PreservedAnalyses::all();
         }
 
         // detectLoops walks CFG successor edges. The K-loop back-edge is the
-        // branch to label_LoopBeginL, but that edge is often missing after later
-        // passes split the body. Close the range on the branch instruction itself:
-        // every block from the header through the block that branches back is the
-        // loop. detectLoops still contributes when its edges are present.
+        // branch to label_LoopBeginL, or to label_LoopBeginL_CBWave0 after
+        // InsertClusterBarrierPass retargets the wave-0 latch. That edge is often
+        // missing after later passes split the body. Close the range on the branch
+        // instruction itself: every block from the header through the block that
+        // branches back is the loop. detectLoops still contributes when its edges
+        // are present.
         std::vector<BasicBlock*> ordered;
         ordered.reserve(func.size());
         for (BasicBlock& bb : func) ordered.push_back(&bb);
@@ -313,7 +362,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&irNode);
                 if (inst == nullptr || !isBranch(*inst)) continue;
                 std::string const target = getBranchTarget(*inst);
-                if (target == "label_LoopBeginL" || target == "LoopBeginL") return true;
+                if (isPrimaryLoopBackTarget(target)) return true;
             }
             return false;
         };
@@ -378,6 +427,13 @@ class EstimateAsmCyclesPassImpl : public Pass {
             }
         }
 
+        std::vector<char> excluded(ordered.size(), 0);
+        markAlternateWaveLoopBlocks(ordered, excluded);
+
+        // Replay every block on one timeline. The other wave's copy is skipped so
+        // the epilogue continues from the wave-0 body, not from that copy.
+        CycleReplay replay;
+        replay.queue = dag::chooseReadyQueue(passCtx);
         std::unordered_map<BasicBlock*, uint32_t> blockCost;
         std::string primaryLoopLabels;
         std::vector<BasicBlock*> preBlocks;
@@ -386,16 +442,18 @@ class EstimateAsmCyclesPassImpl : public Pass {
             BasicBlock& bb = *ordered[i];
             bool const inLoop = rangeBegin.has_value() && i >= *rangeBegin && i <= *rangeEnd;
             uint32_t blockCycles = 0;
-            if (passCtx.shouldProcessBasicBlock(bb)) {
+            if (excluded[i] == 0 && passCtx.shouldProcessBasicBlock(bb)) {
                 if (inLoop) {
                     if (!primaryLoopLabels.empty()) primaryLoopLabels += ',';
                     primaryLoopLabels += bb.getLabel();
                 }
                 calculateMathClocksInUnrolledLoop(
-                    bb, passCtx, inLoop ? BlockCycleScope::LoopBody : BlockCycleScope::EntireBlock);
+                    bb, passCtx, inLoop ? BlockCycleScope::LoopBody : BlockCycleScope::EntireBlock,
+                    replay);
                 blockCycles = totalCycles_;
             }
             blockCost[&bb] = blockCycles;
+            if (excluded[i] != 0) continue;
             if (inLoop) {
                 phaseCycles_.mainLoopCycles += blockCycles;
             } else if (rangeBegin.has_value() && i > *rangeEnd) {
@@ -476,9 +534,10 @@ class EstimateAsmCyclesPassImpl : public Pass {
         }
     }
 
-    /// Process a single basic block to estimate asm cycles
+    /// Process a single basic block to estimate asm cycles. \p replay is the
+    /// kernel timeline and is not rebuilt here.
     void calculateMathClocksInUnrolledLoop(BasicBlock& bb, PassContext& passCtx,
-                                           BlockCycleScope scope) {
+                                           BlockCycleScope scope, CycleReplay& replay) {
         totalCycles_ = 0;
         // Collect all instructions in this basic block
         std::vector<StinkyInstruction*> instructions;
@@ -490,8 +549,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
 
         if (instructions.empty()) return;
 
-        int cycles = 0;
-        uint32_t totalCycles = 0;
+        int const blockStart = replay.cycles;
         // Loop-body modelling runs in any basic block whose label contains label_LoopBeginL
         // (tensilelite names the block ^label_LoopBeginL, and the rocisa split adds suffixes
         // such as _CBWave0). computeEstimatedCyclesPerInstruction() also covers blocks that
@@ -514,12 +572,9 @@ class EstimateAsmCyclesPassImpl : public Pass {
         }
         // chooseReadyQueue is the only arch switch. A queue with no issue model
         // (anything other than CDNA5 today) leaves the total at 0.
-        std::unique_ptr<dag::ReadyQueue> issueQueue = dag::chooseReadyQueue(passCtx);
-        const bool useSchedulerTiming = issueQueue->modelsIssueTiming();
+        const bool useSchedulerTiming = replay.queue->modelsIssueTiming();
         const HWModel& hw = passCtx.getHWModel();
         const int numWaves = static_cast<int>(passCtx.getGemmTileConfig().NumWaves);
-        const StinkyInstruction* prevIssued = nullptr;
-        std::deque<IssuedDsOp> inflightDs;
         for (std::size_t idx = startIdx; idx < instructions.size(); ++idx) {
             StinkyInstruction* inst = instructions[idx];
             if (useSchedulerTiming) {
@@ -533,22 +588,24 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 }
                 // Co-issued s_set_vgpr_msb stays on the previous instruction's cycle.
                 const bool coIssuedMsb = !isLabel(*inst) && isSetVgprMsb(*inst) &&
-                                         prevIssued != nullptr && msbCoIssuesWith(*prevIssued);
+                                         replay.prevIssued != nullptr &&
+                                         msbCoIssuesWith(*replay.prevIssued);
                 if (coIssuedMsb) {
                     // Clock stays on the previous instruction.
                 } else if (const std::optional<int> keep = dsWaitKeepCount(*inst)) {
                     // The stall is how long the waited-for LDS op still has left. The
                     // instruction still issues in one cycle when that op has already returned.
-                    const int stall = dsWaitStallCycles(hw, inflightDs, *keep, cycles, numWaves);
+                    const int stall =
+                        dsWaitStallCycles(hw, replay.inflightDs, *keep, replay.cycles, numWaves);
                     const int savedIssue = inst->issueCycles;
                     inst->issueCycles = std::max(stall, savedIssue);
-                    issueQueue->replayIssue(*inst);
+                    replay.queue->replayIssue(*inst);
                     inst->issueCycles = savedIssue;
-                    cycles = issueQueue->elapsedCycles();
-                    retireReturnedDsOps(hw, inflightDs, cycles, numWaves);
+                    replay.cycles = replay.queue->elapsedCycles();
+                    retireReturnedDsOps(hw, replay.inflightDs, replay.cycles, numWaves);
                 } else {
                     const bool dsOp = isDSRead(*inst) || isDSWrite(*inst);
-                    const int issueClock = cycles;
+                    const int issueClock = replay.cycles;
                     DsLoadDrainEntry entry;
                     if (dsOp) {
                         const HwInstDesc* desc = inst->getHwInstDesc();
@@ -556,30 +613,28 @@ class EstimateAsmCyclesPassImpl : public Pass {
                                                      desc != nullptr ? desc->dsThroughput : 0,
                                                      desc != nullptr ? desc->dsMaxDrain : 0);
                     }
-                    issueQueue->replayIssue(*inst);
-                    cycles = issueQueue->elapsedCycles();
-                    if (dsOp) inflightDs.push_back(IssuedDsOp{issueClock, entry});
+                    replay.queue->replayIssue(*inst);
+                    replay.cycles = replay.queue->elapsedCycles();
+                    if (dsOp) replay.inflightDs.push_back(IssuedDsOp{issueClock, entry});
                 }
             }
-            if (!isLabel(*inst)) prevIssued = inst;
+            if (!isLabel(*inst)) replay.prevIssued = inst;
 
             // Record the cumulative cycle position of every processed
             // instruction so other passes can query it (see
             // computeEstimatedCyclesPerInstruction).
-            perInstCycles_[inst] = static_cast<uint32_t>(cycles < 0 ? 0 : cycles);
+            perInstCycles_[inst] = static_cast<uint32_t>(replay.cycles < 0 ? 0 : replay.cycles);
 
             // Update total cycles
             if (annotateComments_ && !isLabel(*inst)) {
-                // inst->dump(std::cout, false, "AsmCycles "+std::to_string(cycles - totalCycles));
-                appendComment(inst, "<This is " + std::to_string(cycles) + "-cycle>");
+                appendComment(inst, "<This is " + std::to_string(replay.cycles) + "-cycle>");
             }
-            // std::cout << "cycles: " << cycles - totalCycles << std::endl;
-            totalCycles = cycles;
         }
-        totalCycles_ = totalCycles;
-        if (totalCycles > 0 || bb.getLabel().find("LoopBegin") != std::string::npos) {
+        int const blockCycles = replay.cycles - blockStart;
+        totalCycles_ = static_cast<uint32_t>(blockCycles < 0 ? 0 : blockCycles);
+        if (totalCycles_ > 0 || bb.getLabel().find("LoopBegin") != std::string::npos) {
             PASS_DEBUG(std::cerr << "[EstimateAsmCyclesPass] bb=" << bb.getLabel()
-                                 << " cycles=" << totalCycles << " publish=" << publishMetadata_
+                                 << " cycles=" << totalCycles_ << " publish=" << publishMetadata_
                                  << " perInstQuery=" << perInstructionCycleQuery_ << "\n");
         }
     }
