@@ -26,19 +26,21 @@ def test_lookup_order_on_linux():
         "ROCM_HOME": "/rh",
     }
     c = L.candidate_libraries(env, "linux", ["/sdk/libhipblaslt.so.1"], "/build/lib")
+    # The build-time library comes before ROCM_PATH and ROCM_HOME: they usually name a base ROCm,
+    # not the hipBLASLt the bindings were built against.
     assert [x.source for x in c] == [
         L.LIBRARY_ENV,
         "rocm-sdk",
+        "build",
         "ROCM_PATH",
         "ROCM_HOME",
-        "build",
     ]
     assert [x.path for x in c] == [
         "/o/libhipblaslt.so.1",
         "/sdk/libhipblaslt.so.1",
+        _J("/build/lib", "libhipblaslt.so.1"),
         _J("/rp", "lib", "libhipblaslt.so.1"),
         _J("/rh", "lib", "libhipblaslt.so.1"),
-        _J("/build/lib", "libhipblaslt.so.1"),
     ]
 
 
@@ -68,6 +70,77 @@ def test_nothing_found_lists_every_place_tried():
     with pytest.raises(L.HipblasLtLoadError) as e:
         L.choose_library(c, lambda p: False)
     assert "/rp" in str(e.value) and "/b" in str(e.value)
+
+
+def test_an_exported_rocm_path_doesnt_beat_the_build_time_library():
+    c = L.candidate_libraries({"ROCM_PATH": "/opt/rocm"}, "linux", [], "/install/lib")
+    assert L.choose_library(c, lambda p: True).source == "build"
+    assert L.choose_library(c, lambda p: p.startswith("/opt")).source == "ROCM_PATH"
+
+
+# --- import didn't get the build-time library ---------------------------------------------------
+
+
+def test_the_build_time_library_is_quiet():
+    b = "/install/lib/libhipblaslt.so.1"
+    assert L.not_the_build_warning(b, "build", b, True, "linux") is None
+
+
+def test_the_override_is_quiet():
+    # The override warns separately, and is what the caller asked for.
+    msg = L.not_the_build_warning(
+        "/o/libhipblaslt.so.1",
+        L.LIBRARY_ENV,
+        "/install/lib/libhipblaslt.so.1",
+        True,
+        "linux",
+    )
+    assert msg is None
+
+
+@pytest.mark.parametrize(
+    "source,why",
+    [
+        ("rocm-sdk", "rocm-sdk wheels"),
+        ("already loaded", "already loaded"),
+        ("ROCM_PATH", "through ROCM_PATH"),
+    ],
+)
+def test_another_library_warns_and_names_both(source, why):
+    msg = L.not_the_build_warning(
+        "/other/libhipblaslt.so.1",
+        source,
+        "/install/lib/libhipblaslt.so.1",
+        True,
+        "linux",
+    )
+    assert msg and why in msg and "/other/" in msg and "/install/lib/" in msg
+    assert L.LIBRARY_ENV in msg
+
+
+def test_a_missing_build_time_library_says_so():
+    msg = L.not_the_build_warning(
+        "/opt/rocm/lib/libhipblaslt.so.1",
+        "ROCM_PATH",
+        "/gone/libhipblaslt.so.1",
+        False,
+        "linux",
+    )
+    assert msg and "no longer exists" in msg
+
+
+def test_the_same_file_under_another_name_is_quiet(tmp_path):
+    # The rocm-sdk wheels hard-link one libhipblaslt into two packages.
+    name = L.library_file_name(sys.platform)
+    (tmp_path / "devel").mkdir()
+    (tmp_path / "libraries").mkdir()
+    built = tmp_path / "devel" / name
+    built.write_bytes(b"library")
+    os.link(built, tmp_path / "libraries" / name)
+    msg = L.not_the_build_warning(
+        str(tmp_path / "libraries" / name), "rocm-sdk", str(built), True, sys.platform
+    )
+    assert msg is None
 
 
 # --- check 1: the override can't take effect ----------------------------------------------------
