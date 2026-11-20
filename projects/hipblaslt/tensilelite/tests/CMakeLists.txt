@@ -104,6 +104,7 @@ if(NOT TENSILELITE_ENABLE_YAML)
             "${CMAKE_CURRENT_SOURCE_DIR}/MessagePackWriting_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/SolutionState_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/SolutionRecord_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/MeshBasedTableBin_test.cpp"
     )
 endif()
 
