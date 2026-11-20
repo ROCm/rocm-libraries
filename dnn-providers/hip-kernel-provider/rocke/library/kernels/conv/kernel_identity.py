@@ -1396,8 +1396,9 @@ def identity_supports_problem(
             # The gapped halo tile is sized for W rows of >= 32 pixels
             # (conv_implicit_gemm_dgrad.PP_XHALO_GAP_MIN_WI).
             return False, "tapk_pp_xhalo 2/3 serves Wi >= 32 only"
-        # x-halo split-K accumulates through a packed-atomic store that
-        # treats dX as one dense (M, C) matrix: ungrouped problems only.
+        # x-halo / ping-pong split-K: the box stores (pp_boxes) address dX
+        # without a group term, so the cache offers these binaries to
+        # ungrouped problems only.
         if (
             (identity.tapk_xhalo or identity.tapk_pingpong)
             and identity.split_k > 1

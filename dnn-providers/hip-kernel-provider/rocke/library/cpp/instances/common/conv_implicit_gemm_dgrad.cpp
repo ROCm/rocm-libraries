@@ -5602,15 +5602,16 @@ static rocke_kernel_def_t*
            && strcmp(spec->epilogue, "cshuffle") == 0 && !spec->pp_boxes)
         {
             /* ping-pong split-K without boxes: the cshuffle packed-atomic
-             * store of the dense (M, C) dX (pair lanes under sapl). */
+             * store of the dense (M, C) dX (pair lanes under sapl), a group's
+             * columns offset to its channel slab. */
             rocke_cshuffle_epilogue_t epi
                 = rocke_cshuffle_epilogue_from_grid(atom, &grid, _dgrad_store_vec(spec));
             epi.out_dtype = spec->dtype_d;
             if(spec->split_atomic_pairs)
                 epi.atomic_pair_lanes = true;
             epi.lds_barriers = spec->epi_lds_barriers;
-            rocke_cshuffle_epilogue_atomic_store(
-                b, &epi, epi_accs_, n_epi, dX, c_C, rec_gemm_m, c_dg_N);
+            rocke_cshuffle_epilogue_atomic_store_ex(
+                b, &epi, epi_accs_, n_epi, dX, c_C, rec_gemm_m, c_dg_N, c_group_base);
             return;
         }
         if(spec->split_k > 1 && spec->tapk_pingpong && !is_wmma && spec->epilogue

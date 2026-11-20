@@ -5608,10 +5608,11 @@ def _build_tilde_dgrad(
             and use_cshuffle
             and not is_wmma
         ):
-            # x-halo split-K: stride-1 dX of an ungrouped problem is a dense
-            # (M, C) row-major matrix, so the cshuffle packed-atomic epilogue
-            # (wgrad's) applies with row stride C (identity_supports_problem
-            # serves groups == 1 only).
+            # x-halo split-K: stride-1 dX is a dense (M, C) row-major matrix,
+            # so the cshuffle packed-atomic epilogue (wgrad's) applies with row
+            # stride C, a group's columns offset to its channel slab. The box
+            # stores (pp_boxes) carry no group term: identity_supports_problem
+            # serves groups == 1 only.
             _epi = CShuffleEpilogue.from_grid(
                 atom=spec.atom,
                 grid=grid,
@@ -5700,8 +5701,15 @@ def _build_tilde_dgrad(
             else:
                 if spec.split_atomic_pairs:
                     _epi = dc_replace(_epi, atomic_pair_lanes=True)
+                # A grouped problem's GEMM columns are its group's channels:
+                # offset them to the group's slab of the C-wide dX row.
                 _epi.atomic_store(
-                    b, accs=final_accs, dw_ptr=dX, wg_N=c_C, bounds=(rec_gemm_m, c_dg_N)
+                    b,
+                    accs=final_accs,
+                    dw_ptr=dX,
+                    wg_N=c_C,
+                    bounds=(rec_gemm_m, c_dg_N),
+                    col_offset=c_group_base,
                 )
         elif spec.split_k > 1 and use_cshuffle and not is_wmma:
             _emit_dgrad_tilde_cshuffle_epilogue(
