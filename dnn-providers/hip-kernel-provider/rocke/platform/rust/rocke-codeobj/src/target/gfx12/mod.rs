@@ -8,6 +8,8 @@
 //! kernel compiles through the gfx11 pipeline and this module supplies what
 //! differs:
 //!
+//! * `lanes::check`, before optimization: a kernel that reads a lane of the
+//!   other half of a wave64 is refused.
 //! * `lower_sync`, after allocation: gfx12 has no `s_waitcnt`,
 //!   `s_waitcnt_vscnt` or `s_barrier`. Loads, LDS, scalar loads and stores
 //!   each have a counter with its own wait, and a barrier is a signal and a
@@ -22,6 +24,7 @@
 //! encoding reference, offline.
 
 pub mod asm;
+pub mod lanes;
 pub mod sgpr;
 
 use crate::error::CompileError;

@@ -1409,6 +1409,9 @@ fn compile_with(
         crate::target::gfx9::cpol::take_nontemporal(&mut kernel);
     }
     validate::kernel(&kernel)?;
+    if target.gfx12() {
+        crate::target::gfx12::lanes::check(&kernel)?;
+    }
     let (mut lds, lds_size) = analysis::lds_layout(&kernel);
     validate::lds_pool(lds_size, target.info())?;
     laps.lap("parse");
