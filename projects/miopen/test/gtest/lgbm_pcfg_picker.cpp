@@ -42,8 +42,8 @@ namespace {
 using miopen::ai::lgbm::LgbmForest;
 using miopen::ai::lgbm::NormalizeArchName;
 using miopen::ai::lgbm::pcfg::BucketKey;
-using miopen::ai::lgbm::pcfg::GfxCode;
 using miopen::ai::lgbm::pcfg::DefaultMargin;
+using miopen::ai::lgbm::pcfg::GfxCode;
 using miopen::ai::lgbm::pcfg::HeldOutOfPicker;
 using miopen::ai::lgbm::pcfg::KeepAboveDefaultMargin;
 using miopen::ai::lgbm::pcfg::kNumBaseProbFeatures;
