@@ -480,7 +480,7 @@ class TestFwdLdsKnobSpec(unittest.TestCase):
         self.assertEqual(
             _fwd_kloop_conflict(self._spec(uk_xhalo=8, xh_wait_smem=True)), ""
         )
-        # opt-fwds: setprio also wraps the rpf1 loop's deferred MFMA phase.
+        # setprio also wraps the rpf1 loop's deferred MFMA phase.
         self.assertEqual(
             _fwd_kloop_conflict(self._spec(rpf_setprio=1, defer_mfma=1)), ""
         )

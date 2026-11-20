@@ -1983,7 +1983,7 @@ class DgradConvSpec:
     # first XCDs only the longest boxes' tiles: several full rounds there,
     # short tiles elsewhere). Default 0; tags ``pbo<n>``.
     pp_box_order: int = 0
-    # With pp_boxes and split_k > 1 (det-dgrad): deterministic split-K. A
+    # With pp_boxes and split_k > 1: deterministic split-K. A
     # split box's slices do not atomically add into dX: each stores its f32
     # accumulators, in the MFMA register layout, to its own workspace slot
     # (one tile per workgroup, slot = the logical block id) behind the record

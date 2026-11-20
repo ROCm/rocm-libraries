@@ -781,7 +781,7 @@ def _dgrad_pp_knob_cfg(knobs, *, epilogue: str):
         if d.get("pbo"):
             cfg["pp_box_order"] = d["pbo"]
     if d.get("pbd"):
-        # det-dgrad: deterministic box split-K (DgradConvSpec.pp_box_det).
+        # Deterministic box split-K (DgradConvSpec.pp_box_det).
         if not d.get("pbx") or d.get("sk", 1) <= 1:
             return None
         cfg["pp_box_det"] = d["pbd"]
@@ -1786,7 +1786,7 @@ def _fwd_kloop_scope() -> Optional[List[Tuple[int, ...]]]:
     return out
 
 
-# The opt-in K-loop knobs ROCKE_AOT_FWD_KLOOP_SCOPE confines: opt-fwdl's, plus
+# The opt-in K-loop knobs ROCKE_AOT_FWD_KLOOP_SCOPE confines: the _FWD_KLOOP_KNOBS, plus
 # the scheduling knobs (ROCKE_AOT_FWD_SCHED) and uk_nopad. (ukd split-K and
 # split_tail are confined by _fwd_job_variants on the same scope.)
 _FWD_SCOPED_KNOBS = _FWD_KLOOP_KNOBS + (
@@ -3452,7 +3452,7 @@ _WGRAD_ESF_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_ESF_MIN_MN", "0") or 0)
 _WGRAD_EQX_MIN_MN = int(_os.environ.get("ROCKE_AOT_WGRAD_EQX_MIN_MN", "0") or 0)
 
 
-# ROCKE_AOT_WGRAD_DET_WSS=<r> (det-wgrad): deterministic twins of the
+# ROCKE_AOT_WGRAD_DET_WSS=<r>: deterministic twins of the
 # two-stage xwin variants -- ws_store=<m> (one plain-stored scratch slab per
 # split-K slice, folded in slab order by Stage 2) with ws_replicas=<r>, so a
 # launch may split up to r ways. ROCKE_AOT_WGRAD_DET_WSS_MODE=<m>[,<m>]

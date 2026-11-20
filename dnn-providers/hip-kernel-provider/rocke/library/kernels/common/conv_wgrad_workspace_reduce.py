@@ -146,7 +146,7 @@ class WgradReduceSpec:
     # The Stage 1 slabs hold bf16 partials (WgradConvSpec.ws_store 2): load
     # bf16, fold in f32. Needs vec > 1. Default False: unchanged.
     ws_bf16: bool = False
-    # Deterministic many-slab fold (det-wgrad): > 0 = the R slabs are folded
+    # Deterministic many-slab fold: > 0 = the R slabs are folded
     # by a loop instead of the flat unroll -- ``fold_loop`` slab loads per
     # iteration, each thread summing its slabs strictly in slab order -- for
     # the per-slice slabs of ws_store at large split degrees, where R loads

@@ -779,7 +779,7 @@ class WgradConvSpec:
     # that of a bf16 split-K atomic). Tags ``wss2``. Default 0:
     # byte-identical.
     ws_store: int = 0
-    # ws_store 1, one group per workgroup (det-wgrad): a commutative pairwise
+    # ws_store 1, one group per workgroup: a commutative pairwise
     # reduction tree of ``ws_tree`` levels in the Stage 1 epilogue. Slices
     # (2j, 2j+1) of a tile form a pair: each device-coherently (sc1) stores
     # its partial into its level-0 slab and takes a ticket from a per-(level,
