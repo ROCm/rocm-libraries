@@ -259,13 +259,14 @@ std::vector<SdpaBwdTestCase> getSdpaBwdComprehensiveTestCases()
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}),
         SdpaBwdTestCase({1, 2, 256, 192}, {1, 2, 256, 192}, std::nullopt, -1, 0, true),
         // S_q = 1 on the hd64 and hd192 rows, which gfx950 runs as the gfx942
-        // kernels rebuilt. hd64 takes the atol of the other S_q = 1 cases. At a
-        // 1e-2 atol the hd192 bf16 case reached a worst ratio of 0.885 on gfx942
-        // (seeds 0-3), above the 0.5 limit, so it uses 6.25e-2. Over seeds 0-7 on
-        // an MI325X (gfx942) and an MI355X (gfx950) the worst ratio is 0.18 at hd64
-        // and 0.06 at hd192, and at hd192 the smallest largest |dV|, |dK| and |dQ|
-        // are 0.25, 0.38 and 0.80. A halved or all-zero output fails once its
-        // largest |ref| exceeds 0.16, so each of them fails.
+        // kernels rebuilt. hd64 takes the atol of the other S_q = 1 cases. hd192
+        // uses 6.25e-2 because its bf16 dQ is close to the 0.5 limit at 1e-2: over
+        // seeds 0-7 at 1e-2 the worst ratio is 0.45 on an MI325X (gfx942) and 0.36
+        // on an MI355X (gfx950), against at most 0.08 for its dK and dV and for
+        // fp16. At 6.25e-2, over seeds 0-7 on the same GPU models, the worst ratio
+        // is 0.18 at hd64 and 0.06 at hd192, and at hd192 the smallest largest |dV|,
+        // |dK| and |dQ| are 0.25, 0.38 and 0.80. A halved or all-zero output fails
+        // once its largest |ref| exceeds 0.16, so each of them fails.
         SdpaBwdTestCase({1, 2, 1, 64}, {1, 2, 256, 64}).withAbsoluteTolerance(1e-2f),
         SdpaBwdTestCase({1, 2, 1, 192}, {1, 2, 256, 192}).withAbsoluteTolerance(6.25e-2f),
         // D_qk = 192 with D_v = 128: the hd128 odo, the 192 x 128 dqdkdv and the
