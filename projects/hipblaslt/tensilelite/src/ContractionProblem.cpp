@@ -47,6 +47,35 @@ namespace TensileLite
         m_names.resize(size);
     }
 
+    ContractionProblemGemm ContractionProblemGemm::GEMM_InnerProduct(rocisa::DataType inputType,
+                                                                     rocisa::DataType outputType,
+                                                                     size_t           k,
+                                                                     double           beta)
+    {
+        auto problem = GEMM_Strides(/*transA=*/false,
+                                    /*transB=*/false,
+                                    inputType,
+                                    inputType,
+                                    outputType,
+                                    outputType,
+                                    /*m=*/1,
+                                    /*n=*/1,
+                                    k,
+                                    /*batchSize=*/1,
+                                    /*lda=*/1,
+                                    /*aStride=*/k,
+                                    /*ldb=*/k,
+                                    /*bStride=*/k,
+                                    /*ldc=*/1,
+                                    /*cStride=*/1,
+                                    /*ldd=*/1,
+                                    /*dStride=*/1,
+                                    beta);
+        problem.setComputeInputTypeA(inputType);
+        problem.setComputeInputTypeB(inputType);
+        return problem;
+    }
+
     ContractionProblemGemm ContractionProblemGemm::GEMM_Strides(bool             transA,
                                                                 bool             transB,
                                                                 rocisa::DataType aType,

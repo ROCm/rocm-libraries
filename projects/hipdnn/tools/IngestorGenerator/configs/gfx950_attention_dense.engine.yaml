@@ -29,10 +29,10 @@ engine:
   heuristics:
     sort_kernel_catalog:
       gfx950:
-      - df4ca2de-53c4-44d4-b92c-ead86e287fa5
-      - 6f606e00-09cf-4e43-968b-77eb71de64db
+      - a1e85dc0-4c37-495a-b8d3-5b49a1b5f8f8
+      - 83088640-725f-4fd2-8e3b-1259b7ebb898
   trained_catalog_sha256:
-    gfx950: 85faef422144bc770fb095b624b26732de9361b2ebce25d29d32cc08a3bfe513
+    gfx950: 520640f58adf672d3d0c56cb986c07b034b8490f8af09d26668aa74152ffc675
 kmd_fields:
 - name: dtype
   type: string
@@ -70,6 +70,10 @@ kmd_fields:
 - name: block_n
   type: int
   default_value: 64
+# Additive bias (an fp32 attn_mask tensor); 0 on every kernel built before it.
+- name: use_additive_bias
+  type: int
+  default_value: 0
 specialization:
   metadata_fields:
   - dtype
@@ -82,6 +86,7 @@ specialization:
   - seqlen_kv
   - block_m
   - block_n
+  - use_additive_bias
   matcher_only_fields: []
   vocabulary:
     dtype:
@@ -108,6 +113,8 @@ specialization:
       field: block_m
     block_n:
       field: block_n
+    use_additive_bias:
+      field: use_additive_bias
 kernel_source_kind: rocke
 workspace_policy: none
 
@@ -140,6 +147,14 @@ enumerate:
       values: [bf16, fp16]
     - fields: [mask_type]
       values: [TOP_LEFT_CAUSAL, NO_MASK]
+    - fields: [use_attn_bias]
+      values: [false, true]
+  # Bias kernels ship at one tile, 128/64: one per head size, dtype and mask (8), which keeps
+  # the catalog small. 128/64 rather than the default 256/64 because kernel_match needs
+  # Sq % block_m == 0, and every Sq a 256 tile serves a 128 tile serves too, plus the odd
+  # multiples of 128.
+  feature_fields:
+    use_additive_bias: {name_token: _addb, select: {block_m: 128, block_n: 64}}
   sweep_level: production
   space: slice
   # Spec fields the sweep may vary away from the candidate's own default spec.
@@ -153,15 +168,16 @@ enumerate:
   # lds_k_row_pad too: `space: slice` leaves it at its default while `space: full`
   # varies it. tests/test_registry_regeneration.py asserts the defaults (g1) and
   # diffs the enumeration against the shipped catalog on the shipped fields (g3).
-  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks]
+  spec_fields: [dtype, head_size, num_query_heads, num_kv_heads, causal, batch, seqlen_q, seqlen_kv, sliding_window, ragged, varlen, paged, persistent, block_m, block_n, waves_per_eu, lds_k_group_pad, lds_v_row_pad, lds_k_row_pad, lazy_rescale, wide_lds_dma, interleave, persist_decode, nonpersist_decode, num_persistent, block_size, num_kv_blocks, use_sinks, use_additive_bias]
   # Frozen build cost: a registry that grows past this fails here, not at pack time.
-  max_kernels: 52
+  # 52 bias-off kernels plus 8 bias kernels.
+  max_kernels: 60
 
 # How the variant space is reduced; copied verbatim into the generated config.
 # Feature fields define a cell; performance knobs are the tuning arms, in priority order.
 reduction:
   fields:
-    feature: [dtype, head_size, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv]
+    feature: [dtype, head_size, causal, sliding_window, ragged, batch, seqlen_q, seqlen_kv, use_additive_bias]
     performance:
       - {name: block_m, divides: seqlen_q}
       - {name: block_n, divides: seqlen_kv}
@@ -228,11 +244,12 @@ launch_surface:
   - name: matcher
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
-    kmd_fields: [dtype, head_size, causal, sliding_window, ragged, block_m, block_n]
+    kmd_fields: [dtype, head_size, causal, sliding_window, ragged, block_m, block_n, use_additive_bias]
     guard: >
-      kernelMatches() returns false (no panic) if dtype, head_size, causal or
-      sliding_window disagrees with the graph, the candidate's tile is illegal,
-      or the candidate is ragged (ragged != 0). The metadata carries no head
+      kernelMatches() returns false (no panic) if dtype, head_size, causal,
+      sliding_window or use_additive_bias disagrees with the graph (an attn_mask
+      tensor asks for use_additive_bias=1), the candidate's tile is illegal, or
+      the candidate is ragged (ragged != 0). The metadata carries no head
       counts and none are compared: one kernel serves every (num_query_heads,
       num_kv_heads), and their legality (positive, Hq % Hkv == 0, 32-bit
       extents) is checked on the graph by
@@ -245,17 +262,22 @@ launch_surface:
   - name: kernargs
     python_source: kernels/gfx950/attention_dense.py:build_attention_dense
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/AttentionDenseNative.cpp
-    kmd_fields: [ragged, seqlen_q, batch]
+    kmd_fields: [ragged, seqlen_q, batch, use_additive_bias]
     guard: >
       kernelSignature(RUNTIME_STRIDES), the catalog's strided contract
-      (dispatch.v3), returns the 22-arg form
+      (dispatch.v4), returns the 22-arg form
       (q,k,v,o,scale,batch,seqlen_q,seqlen_kv,num_query_heads,num_kv_heads, then
       the twelve i32 stride_{q,k,v,o}_{batch,head,token} last): the runtime-shape
       grid body reads the shape, both head counts and every stride as kernargs,
       all taken from the graph at launch (the metadata carries no head fields).
       kernelSignature(RUNTIME_HEAD_COUNTS), the 10-arg form without the strides,
       and kernelSignature(BAKED_HEAD_COUNTS), the 8-arg form, are used only to
-      restore plans saved under dispatch.v2 and dispatch.v1. Every variant is non-persistent
+      restore plans saved under dispatch.v2 and dispatch.v1. A use_additive_bias=1
+      candidate takes the RUNTIME_STRIDES_WITH_BIAS form of the dispatch.v5 contract:
+      the 10-arg list, then additive_bias_ptr and its batch/head/sq strides, then the
+      twelve strides (26 args); its body addresses packed Q/K/V/O and ignores the
+      strides. The 14-arg RUNTIME_HEAD_COUNTS_WITH_BIAS form (the v2 list, then the
+      bias) restores plans saved with a bias under dispatch.v3. Every variant is non-persistent
       and on the runtime-shape path, which enumerate.pin and the aligned catalog
       keep true. use_sinks=False; no sink_ptr slot. Validated at prepare() time
       by buildIngestorKernelCode(..., expectedSignature).
@@ -267,16 +289,29 @@ launch_surface:
   - name: layout
     python_source: kernels/gfx950/attention_dense.py:body_serves_strides
     cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
-    kmd_fields: [ragged]
+    kmd_fields: [ragged, use_additive_bias]
     guard: >
       candidateReadsStrides() restates rocKE's body_serves_strides: a ragged record
-      reads no strides; a record without a persistent field is the grid body and
+      or one that adds a bias (use_additive_bias 1, or a malformed value) reads no strides; a record without a persistent field is the grid body and
       reads them; a persistent record reads them unless its persist_decode is a
       gqa_pair order or is malformed. A graph whose operands are not packed BSHD
       matches only a candidate that reads them, after graphMatches() has run the
       host stride predicate (denseStridesAdmit) on Q, K, V and O at the loosest
       tile and kernelMatches() has asked again at the candidate's own block_n.
     test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseCatalogTiles.cpp
+
+  # The gfx950 arch descriptor's additive-bias hook: the shared pack reads use_additive_bias
+  # through it, never by name.
+  - name: bias
+    python_source: kernels/gfx950/attention_dense.py:build_attention_dense
+    cpp_mirror: dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/packs/Gfx950AttentionDenseNative.cpp
+    kmd_fields: [use_additive_bias]
+    guard: >
+      candidateAdditiveBias() reads use_additive_bias as the KMD default 0 when
+      the record omits it, 1 for a bias kernel, and nullopt (kernelMatches
+      declines, prepare() throws) for any other type or value, so a malformed
+      record never reads as a plain kernel.
+    test: dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950AttentionDenseMatchers.cpp
 
   # The cold ranking reads only the tile, through the shared candidateTile().
   - name: score

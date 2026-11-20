@@ -44,20 +44,38 @@ namespace hip_kernel_provider::kernel_ingestor_engine
 inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1
     = "hipkernel.gfx942_attention_dense.dispatch.v1";
 
-/// The strided contract, v2: v1's values with `stride_layout` replaced by the twelve
+/// Contract v2: the v1 values plus the bias uid and its batch, query-head and query-row
+/// element strides (attention_dense::BIAS_*_VALUE); the launch passes the v1 arguments, then
+/// additive_bias_ptr and the three strides, last after any lse_ptr: v1's 10, 11, 14, 15, 16
+/// or 17 arguments plus four. Plans with an additive bias were saved under it before the
+/// strides became runtime arguments; its handler stays registered so they still load.
+inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2
+    = "hipkernel.gfx942_attention_dense.dispatch.v2";
+
+/// The strided contract, v3: v1's values with `stride_layout` replaced by the twelve
 /// element strides (attention_dense::DENSE_STRIDE_NAMES), and the launch passes v1's
 /// arguments and then those strides last (22, 23, 26, 27, 28 or 29 kernel arguments), for
 /// kernels that read every stride at runtime. It also saves the kernel's `block_n` and
-/// `reads_strides` (whether its body reads them: 0 for the KDB and VPF pipelines, whose plans
-/// hold packed strides only). New plans are saved under it. Its version is spelled only here:
-/// the next free number of this dispatch name.
+/// `reads_strides` (whether its body reads them: 0 for the KDB and VPF pipelines and the bias
+/// kernels, whose plans hold packed strides only). New plans without an additive bias are
+/// saved under it. Its version is spelled only here: the next free number of this dispatch
+/// name.
 inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED
-    = "hipkernel.gfx942_attention_dense.dispatch.v2";
+    = "hipkernel.gfx942_attention_dense.dispatch.v3";
 
-/// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` contract
+/// The strided bias contract, v4: v3's values plus the bias uid and its batch, query-head and
+/// query-row element strides (attention_dense::BIAS_*_VALUE); the launch passes v3's
+/// arguments with additive_bias_ptr and the three bias strides before the twelve strides
+/// (v3's 22, 23, 26, 27, 28 or 29 arguments plus four). New plans with an additive bias are
+/// saved under it. The strided handler also serves it.
+inline constexpr std::string_view GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED_BIAS
+    = "hipkernel.gfx942_attention_dense.dispatch.v4";
+
+/// The values of the `hipkernel.gfx942_attention_dense.dispatch.v1` and `.v2` contracts
 /// (attention_dense::launchValues): the sixteen both arches save without strides,
 /// `stride_layout` among them, and, as gfx942 serves stats and grids, `stats.uid`,
-/// `grid_order`, `persist_decode` and `num_persistent`.
+/// `grid_order`, `persist_decode` and `num_persistent`. v2 adds the four bias values, which
+/// this writes exactly when the binding has a bias.
 hipdnn_plugin_sdk::ingestor::MetadataValues
     gfx942AttentionDenseLaunchValues(const AttentionDenseBinding& binding,
                                      const AttentionDenseProblem& problem,
@@ -66,7 +84,9 @@ hipdnn_plugin_sdk::ingestor::MetadataValues
 
 /// The values of the strided contract (GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED), which
 /// new plans are saved under: v1's with `stride_layout` replaced by the binding's twelve
-/// strides, its block_n and its reads-strides flag.
+/// strides, its block_n and its reads-strides flag; for a binding with an additive bias,
+/// those of the strided bias contract (GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED_BIAS),
+/// which add the four bias values.
 hipdnn_plugin_sdk::ingestor::MetadataValues
     gfx942AttentionDenseStridedLaunchValues(const AttentionDenseBinding& binding,
                                             const AttentionDenseProblem& problem,
@@ -76,18 +96,20 @@ hipdnn_plugin_sdk::ingestor::MetadataValues
 /// Everything a gfx942 dense-attention launch is computed from.
 using Gfx942AttentionDenseLaunchInputs = AttentionDenseLaunchInputs;
 
-/// The engine's arch descriptor: its current and legacy contracts, each with the kernel
+/// The engine's arch descriptor: its current, bias and legacy contracts, each with the kernel
 /// arguments it launches (attention_dense::kernelSignature), and the per-candidate rules the
 /// shared matching and dispatch apply. Process-lifetime.
 const attention_dense::AttentionDenseArch& gfx942AttentionDenseArch();
 
-/// Reads the values of the strided contract or of `hipkernel.gfx942_attention_dense.
-/// dispatch.v1`. `block_m` must be one gfx942 builds: a positive multiple of 32 within a
-/// 1024-thread workgroup. For every other rule, including those for the strides, the stats and
-/// the grid values, see attention_dense::readLaunchInputs.
+/// Reads the values of the strided contract, the strided bias contract, or of the
+/// `hipkernel.gfx942_attention_dense.dispatch.v1` or `.v2` contract (the legacy ones differ
+/// in the bias values v2 adds and the kernel arguments the launch passes). `block_m` must be
+/// one gfx942 builds: a positive multiple of 32 within a 1024-thread workgroup. For every
+/// other rule, including those for the strides, the stats, the grid and the bias values, see
+/// attention_dense::readLaunchInputs.
 ///
-/// @throws HipdnnPluginException with a load refusal when the dispatch name is neither
-///         contract, or when a value is missing, extra, of another type or out of range.
+/// @throws HipdnnPluginException with a load refusal when the dispatch name is none of
+///         those contracts, or when a value is missing, extra, of another type or out of range.
 Gfx942AttentionDenseLaunchInputs readGfx942AttentionDenseLaunchInputs(
     const hipdnn_plugin_sdk::ingestor::SavedLaunchInputs& inputs);
 

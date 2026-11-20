@@ -7,7 +7,9 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -30,6 +32,9 @@
  * (TestGfx94xAttentionDenseMatchers.cpp) keep what differs: masks, stats, tiles, ranking.
  * Each decline here is checked by the cause the matcher logs, so a graph declined for an
  * earlier, unrelated reason cannot pass for the rule under test.
+ *
+ * The additive-bias cases at the end run on the arches that serve one, which is both
+ * (biasServingArches()); the gfx950 suite's own bias cases stay in its file.
  *
  * Matcher-only: no device, no compile, no launch.
  */
@@ -754,6 +759,377 @@ TEST_P(TestAttentionDenseMatch, DeclinesMixedOperandDataTypes)
 INSTANTIATE_TEST_SUITE_P(,
                          TestAttentionDenseMatch,
                          ::testing::Values(&GFX942_ATTENTION_DENSE, &GFX950_ATTENTION_DENSE),
+                         attentionDenseArchName);
+
+// =============================================================================
+// The additive bias (attn_mask), on the arches that serve one
+// =============================================================================
+
+namespace
+{
+
+/// The int32_t element count: a bias element index below it is addressable in 32 bits.
+constexpr int64_t INT32_LIMIT = int64_t{1} << 31;
+
+/// The bound value of @p arch's bias token @p suffix (".bias", ".bias.uid", ...), or -1.
+int64_t
+    boundBias(const AttentionDenseTestArch& arch, const BoundTokens& bound, std::string_view suffix)
+{
+    return hipdnn_plugin_sdk::ingestor::tryGetBoundInt(
+               bound, std::string(arch.tokenPrefix) + std::string(suffix))
+        .value_or(-1);
+}
+
+/// The arches that serve an additive bias.
+class TestAttentionDenseBiasMatch : public ::testing::TestWithParam<const AttentionDenseTestArch*>
+{
+protected:
+    static const AttentionDenseTestArch& arch()
+    {
+        return *GetParam();
+    }
+};
+
+} // namespace
+
+TEST_P(TestAttentionDenseBiasMatch, BindsAFullBiasAndItsStrides)
+{
+    const auto bound = matchGraph(arch(), withBias({BATCH, HEADS, SEQ, SEQ}));
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias"), 1);
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias.uid"), BIAS_UID);
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias.stride_batch"), HEADS * SEQ * SEQ);
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias.stride_head"), SEQ * SEQ);
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias.stride_query"), SEQ);
+}
+
+/// An extent-1 axis broadcasts through stride 0, whatever stride the tensor writes on it:
+/// the kernel multiplies every axis index by its stride, and only a zero keeps a broadcast
+/// axis on its one row.
+TEST_P(TestAttentionDenseBiasMatch, BindsStrideZeroOnEveryBroadcastAxis)
+{
+    constexpr int64_t ANY = 12345;
+    const auto keyRow = matchGraph(arch(), withBias({1, 1, 1, SEQ}, {{ANY, ANY, ANY, 1}}));
+    ASSERT_TRUE(keyRow.has_value());
+    EXPECT_EQ(boundBias(arch(), *keyRow, ".bias.stride_batch"), 0);
+    EXPECT_EQ(boundBias(arch(), *keyRow, ".bias.stride_head"), 0);
+    EXPECT_EQ(boundBias(arch(), *keyRow, ".bias.stride_query"), 0);
+
+    const auto perBatch
+        = matchGraph(arch(), withBias({BATCH, 1, SEQ, SEQ}, {{SEQ * SEQ, ANY, SEQ, 1}}));
+    ASSERT_TRUE(perBatch.has_value());
+    EXPECT_EQ(boundBias(arch(), *perBatch, ".bias.stride_batch"), SEQ * SEQ);
+    EXPECT_EQ(boundBias(arch(), *perBatch, ".bias.stride_head"), 0);
+    EXPECT_EQ(boundBias(arch(), *perBatch, ".bias.stride_query"), SEQ);
+
+    const auto perHead = matchGraph(arch(), withBias({1, HEADS, SEQ, SEQ}));
+    ASSERT_TRUE(perHead.has_value());
+    EXPECT_EQ(boundBias(arch(), *perHead, ".bias.stride_batch"), 0);
+    EXPECT_EQ(boundBias(arch(), *perHead, ".bias.stride_head"), SEQ * SEQ);
+    EXPECT_EQ(boundBias(arch(), *perHead, ".bias.stride_query"), SEQ);
+
+    // A broadcast axis's written stride is never used, so one the range check would refuse
+    // on a full axis (negative, or 2^31 and above) is accepted there.
+    const auto unusable
+        = matchGraph(arch(), withBias({1, 1, SEQ, SEQ}, {{-1, int64_t{1} << 40, SEQ, 1}}));
+    ASSERT_TRUE(unusable.has_value());
+    EXPECT_EQ(boundBias(arch(), *unusable, ".bias.stride_batch"), 0);
+    EXPECT_EQ(boundBias(arch(), *unusable, ".bias.stride_head"), 0);
+}
+
+TEST_P(TestAttentionDenseBiasMatch, BindsNoBiasForAGraphWithoutOne)
+{
+    const auto bound = matchGraph(arch(), GraphSpec{});
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias"), 0);
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias.uid"), -1);
+}
+
+TEST_P(TestAttentionDenseBiasMatch, DeclinesABiasTheKernelCannotRead)
+{
+    struct Case
+    {
+        const char* what;
+        GraphSpec spec;
+        const char* cause;
+    };
+    std::vector<Case> cases;
+
+    auto halfBias = withBias({BATCH, HEADS, SEQ, SEQ});
+    biasTensor(halfBias).dataType = data_objects::DataType::BFLOAT16;
+    cases.push_back({"a bf16 bias (the kernel reads fp32)", halfBias, "attn_mask"});
+
+    cases.push_back({"a rank-3 bias", withBias({HEADS, SEQ, SEQ}), "attn_mask"});
+    cases.push_back(
+        {"a key extent other than Skv", withBias({BATCH, HEADS, SEQ, SEQ / 2}), "attn_mask"});
+    cases.push_back(
+        {"a key axis that is not unit-stride",
+         withBias({BATCH, HEADS, SEQ, SEQ}, {{HEADS * SEQ * SEQ * 2, SEQ * SEQ * 2, SEQ * 2, 2}}),
+         "attn_mask"});
+    cases.push_back(
+        {"a head extent that is neither 1 nor Hq", withBias({BATCH, 2, SEQ, SEQ}), "attn_mask"});
+    cases.push_back(
+        {"a query extent that is neither 1 nor Sq", withBias({BATCH, HEADS, 2, SEQ}), "attn_mask"});
+    cases.push_back({"a negative stride on a full axis",
+                     withBias({BATCH, HEADS, SEQ, SEQ}, {{-HEADS * SEQ * SEQ, SEQ * SEQ, SEQ, 1}}),
+                     "attn_mask"});
+    cases.push_back({"a stride of 2^31",
+                     withBias({BATCH, HEADS, SEQ, SEQ}, {{int64_t{1} << 31, SEQ * SEQ, SEQ, 1}}),
+                     "attn_mask"});
+    // One less passes the stride check, so only the reach check stops it: the batch axis
+    // alone then reaches past element 2^31 - 1.
+    cases.push_back(
+        {"a stride of 2^31 - 1 on a full axis",
+         withBias({BATCH, HEADS, SEQ, SEQ}, {{(int64_t{1} << 31) - 1, SEQ * SEQ, SEQ, 1}}),
+         "size_limit"});
+    // Every stride fits in i32, but (B-1)*2^30 + (Hq-1)*2^29 is past 2^31.
+    cases.push_back(
+        {"a last element past 2^31",
+         withBias({BATCH, HEADS, SEQ, SEQ}, {{int64_t{1} << 30, int64_t{1} << 29, SEQ, 1}}),
+         "size_limit"});
+
+    auto virtualBias = withBias({BATCH, HEADS, SEQ, SEQ});
+    biasTensor(virtualBias).isVirtual = true;
+    cases.push_back({"a virtual bias", virtualBias, "attn_mask"});
+
+    auto raggedBias = withBias({BATCH, HEADS, SEQ, SEQ});
+    biasTensor(raggedBias).raggedOffsetUid = EXTRA_UID;
+    cases.push_back({"a ragged bias", raggedBias, "attn_mask"});
+
+    auto byValueBias = withBias({BATCH, HEADS, SEQ, SEQ});
+    biasTensor(byValueBias).passByValue = true;
+    cases.push_back({"a pass-by-value bias", byValueBias, "attn_mask"});
+
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.what);
+        const auto decline = loggedDecline(arch(), c.spec);
+        EXPECT_EQ(decline.cause, c.cause) << decline.detail;
+        EXPECT_NE(decline.detail.find("attn_mask"), std::string::npos) << decline.detail;
+    }
+}
+
+/// The last element the kernel reaches is (Skv-1) + (Sq-1)*sq + (Hq-1)*hs + (B-1)*bs. A
+/// batch stride that puts it at 2^31 - 1 is the largest bias the kernel can address; one
+/// more element is refused.
+TEST_P(TestAttentionDenseBiasMatch, AdditiveBiasReachAdmitsTheLastGraphUnderIt)
+{
+    ASSERT_EQ(BATCH, 2) << "the batch stride below is (B-1) * stride with B-1 = 1";
+    const int64_t headStride = SEQ * SEQ;
+    const int64_t rest = (SEQ - 1) + (SEQ - 1) * SEQ + (HEADS - 1) * headStride;
+    const int64_t lastFittingBatchStride = INT32_LIMIT - 1 - rest;
+
+    const auto under = matchGraph(
+        arch(), withBias({BATCH, HEADS, SEQ, SEQ}, {{lastFittingBatchStride, headStride, SEQ, 1}}));
+    ASSERT_TRUE(under.has_value()) << "last element 2^31 - 1";
+    EXPECT_EQ(boundBias(arch(), *under, ".bias.stride_batch"), lastFittingBatchStride);
+
+    const auto decline = loggedDecline(
+        arch(),
+        withBias({BATCH, HEADS, SEQ, SEQ}, {{lastFittingBatchStride + 1, headStride, SEQ, 1}}));
+    EXPECT_EQ(decline.cause, "size_limit") << "last element exactly 2^31: " << decline.detail;
+}
+
+namespace
+{
+
+// Every case above has Hq = Hkv and Sq = Skv, where a bias extent read from the wrong side
+// of the graph (key/value heads for query heads, the key length for the query length) would
+// match too. The cases below use a GQA cross-attention graph, where the four differ.
+constexpr int64_t GQA_Q_HEADS = 8;
+constexpr int64_t GQA_KV_HEADS = 2;
+constexpr int64_t CROSS_SQ = 256;
+constexpr int64_t CROSS_SKV = 512;
+
+/// The base graph at Hq = 8, Hkv = 2, Sq = 256, Skv = 512 with an fp32 bias of @p dims.
+GraphSpec crossAttentionWithBias(std::vector<int64_t> dims,
+                                 const std::optional<std::vector<int64_t>>& strides = {})
+{
+    GraphSpec spec = withBias(std::move(dims), strides);
+    spec.numQueryHeads = GQA_Q_HEADS;
+    spec.numKvHeads = GQA_KV_HEADS;
+    spec.seqLenQ = CROSS_SQ;
+    spec.seqLenKv = CROSS_SKV;
+    return spec;
+}
+
+} // namespace
+
+/// The bias a graph carries is [B, Hq, Sq, Skv]: query heads and query rows on the middle
+/// axes, the key length last.
+TEST_P(TestAttentionDenseBiasMatch, BindsABiasSizedFromTheQueryExtentsOfACrossAttentionGraph)
+{
+    const auto bound
+        = matchGraph(arch(), crossAttentionWithBias({BATCH, GQA_Q_HEADS, CROSS_SQ, CROSS_SKV}));
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias.stride_batch"), GQA_Q_HEADS * CROSS_SQ * CROSS_SKV);
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias.stride_head"), CROSS_SQ * CROSS_SKV);
+    EXPECT_EQ(boundBias(arch(), *bound, ".bias.stride_query"), CROSS_SKV);
+
+    // Each axis at 1 broadcasts, whatever its neighbours are.
+    EXPECT_TRUE(
+        matchGraph(arch(), crossAttentionWithBias({1, 1, CROSS_SQ, CROSS_SKV})).has_value());
+    EXPECT_TRUE(matchGraph(arch(), crossAttentionWithBias({1, 1, 1, CROSS_SKV})).has_value());
+}
+
+TEST_P(TestAttentionDenseBiasMatch, DeclinesABiasSizedFromAnotherExtentOfACrossAttentionGraph)
+{
+    struct Case
+    {
+        const char* what;
+        std::vector<int64_t> dims;
+    };
+    const std::vector<Case> cases{
+        {"key/value heads where query heads belong", {BATCH, GQA_KV_HEADS, CROSS_SQ, CROSS_SKV}},
+        {"the key length where the query length belongs",
+         {BATCH, GQA_Q_HEADS, CROSS_SKV, CROSS_SKV}},
+        {"the query length where the key length belongs", {BATCH, GQA_Q_HEADS, CROSS_SQ, CROSS_SQ}},
+    };
+    for(const auto& c : cases)
+    {
+        SCOPED_TRACE(c.what);
+        const auto decline = loggedDecline(arch(), crossAttentionWithBias(c.dims));
+        EXPECT_EQ(decline.cause, "attn_mask") << decline.detail;
+    }
+}
+
+/// The last element the kernel reaches is sized by the query heads and the query rows, not
+/// by the key/value heads or the key length. Each graph below is on one side of the 2^31
+/// limit by the correct extents and on the other by the wrong ones.
+TEST_P(TestAttentionDenseBiasMatch, AdditiveBiasReachIsSizedByQueryHeadsAndQueryRows)
+{
+    // Reach (Sq - 1) * 5e6 + (Skv - 1) = 1.275e9 + 511: under the limit. Sized by Skv
+    // instead of Sq it is 2.555e9, over it.
+    constexpr int64_t QUERY_STRIDE = 5'000'000;
+    EXPECT_TRUE(
+        matchGraph(arch(),
+                   crossAttentionWithBias({1, 1, CROSS_SQ, CROSS_SKV}, {{0, 0, QUERY_STRIDE, 1}}))
+            .has_value())
+        << "a reach sized from the key length instead of the query length";
+
+    // Reach (Hq - 1) * 335544320 + (Skv - 1) = 2.349e9: over the limit. Sized by Hkv
+    // instead of Hq it is 3.4e8, under it.
+    constexpr int64_t FAR_HEAD_STRIDE = (int64_t{1} << 28) + (int64_t{1} << 26);
+    const auto decline = loggedDecline(
+        arch(),
+        crossAttentionWithBias({1, GQA_Q_HEADS, 1, CROSS_SKV}, {{0, FAR_HEAD_STRIDE, 1, 1}}));
+    EXPECT_EQ(decline.cause, "size_limit") << decline.detail;
+}
+
+/// A bias graph is served by bias candidates only, and a plain graph by plain ones: their
+/// scores differ, and so do their argument lists. A record without the field is a plain
+/// candidate (the KMD default 0).
+TEST_P(TestAttentionDenseBiasMatch, PairsBiasGraphsWithBiasCandidatesOnly)
+{
+    const auto biasGraph = withBias({BATCH, HEADS, SEQ, SEQ});
+    const auto withField = [](int64_t value) {
+        auto kernel = makeKernel(arch(), baseGraph());
+        kernel.metadata[std::string("use_additive_bias")] = value;
+        return kernel;
+    };
+    const auto biasKernel = withField(1);
+    const auto plainKernel = withField(0);
+    auto legacyKernel = makeKernel(arch(), baseGraph());
+    legacyKernel.metadata.erase(std::string("use_additive_bias"));
+
+    EXPECT_TRUE(matchesKernel(arch(), biasGraph, biasKernel));
+    EXPECT_FALSE(matchesKernel(arch(), biasGraph, plainKernel));
+    EXPECT_FALSE(matchesKernel(arch(), biasGraph, legacyKernel));
+
+    EXPECT_FALSE(matchesKernel(arch(), GraphSpec{}, biasKernel));
+    EXPECT_TRUE(matchesKernel(arch(), GraphSpec{}, plainKernel));
+    EXPECT_TRUE(matchesKernel(arch(), GraphSpec{}, legacyKernel));
+
+    // A field that is neither 0 nor 1, or not an integer, is a malformed record: it serves
+    // no graph.
+    auto outOfRange = withField(2);
+    auto notAnInteger = withField(0);
+    notAnInteger.metadata[std::string("use_additive_bias")] = std::string("1");
+    for(const auto* malformed : {&outOfRange, &notAnInteger})
+    {
+        EXPECT_FALSE(matchesKernel(arch(), biasGraph, *malformed));
+        EXPECT_FALSE(matchesKernel(arch(), GraphSpec{}, *malformed));
+    }
+}
+
+/// The catalog ships no bias kernel with a sliding window: its bias cells are causal or
+/// plain with window 0, and its windowed kernels carry no bias. A bias graph with a window
+/// must therefore find no candidate (so the engine is not applicable and no plan is built),
+/// and in particular not the window-less bias kernel, which would run the full causal
+/// attention, nor the window kernel without the bias, which would drop it. gfx950 declines
+/// the window at graph_match, so nothing reaches kernel_match; gfx942 binds the window and
+/// kernel_match refuses each of those candidates, and would serve a bias kernel built with
+/// that window if the catalog gained one (the control that keeps this from passing for an
+/// unrelated reason).
+TEST_P(TestAttentionDenseBiasMatch, ServesNoBiasGraphWithASlidingWindowFromTheShippedKernels)
+{
+    static constexpr int64_t WINDOW = 128;
+    const auto windowed = [](GraphSpec spec) {
+        spec.leftBound = WINDOW;
+        spec.rightBound = 0;
+        return spec;
+    };
+    const auto candidate = [&](int64_t bias, int64_t window) {
+        auto kernel = makeKernel(arch(), baseGraph());
+        kernel.metadata[std::string("use_additive_bias")] = bias;
+        kernel.metadata[std::string("sliding_window")] = window;
+        return kernel;
+    };
+    const auto servedBy = [&](const GraphSpec& spec, const KernelDefinition& kernel) {
+        const Graph graph(arch(), spec);
+        const auto bound = graph.match();
+        return bound.has_value()
+               && hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+                   std::string(arch().kernelMatchSymbol))(graph.context(), *bound, kernel);
+    };
+
+    const auto biasWindowGraph = windowed(withBias({BATCH, HEADS, SEQ, SEQ}));
+    EXPECT_EQ(matchGraph(arch(), biasWindowGraph).has_value(), arch().servesSlidingWindow);
+
+    // The three shapes the catalog ships for this tile: plain, bias without a window, and a
+    // window without a bias.
+    for(const auto& [bias, window] : {std::pair{int64_t{0}, int64_t{0}},
+                                      std::pair{int64_t{1}, int64_t{0}},
+                                      std::pair{int64_t{0}, WINDOW}})
+    {
+        SCOPED_TRACE("candidate use_additive_bias " + std::to_string(bias) + ", sliding_window "
+                     + std::to_string(window));
+        EXPECT_FALSE(servedBy(biasWindowGraph, candidate(bias, window)));
+    }
+
+    if(arch().servesSlidingWindow)
+    {
+        // Each half of the combination is served on its own, by the candidate built for it.
+        EXPECT_TRUE(servedBy(windowed(baseGraph()), candidate(0, WINDOW)));
+        EXPECT_TRUE(servedBy(withBias({BATCH, HEADS, SEQ, SEQ}), candidate(1, 0)));
+        // So the matcher is not what refuses the combination: a bias kernel built with the
+        // window would serve it, and its absence from the catalog is what leaves none.
+        EXPECT_TRUE(servedBy(biasWindowGraph, candidate(1, WINDOW)));
+    }
+}
+
+/// kernel_match reads the bias flag from the binding instead of assuming one; a binding
+/// that lacks it (a renamed token) is refused rather than read as "no bias".
+TEST_P(TestAttentionDenseBiasMatch, RefusesABindingWithoutTheBiasFlag)
+{
+    const Graph graph(arch(), GraphSpec{});
+    auto bound = graph.match();
+    ASSERT_TRUE(bound.has_value());
+    auto plainKernel = makeKernel(arch(), baseGraph());
+    plainKernel.metadata[std::string("use_additive_bias")] = int64_t{0};
+    const auto kernelMatches = [&](const BoundTokens& binding, const KernelDefinition& kernel) {
+        return hipdnn_plugin_sdk::ingestor::KernelMatcherRegistry::resolve(
+            std::string(arch().kernelMatchSymbol))(graph.context(), binding, kernel);
+    };
+    ASSERT_TRUE(kernelMatches(*bound, plainKernel));
+
+    bound->erase(std::string(arch().tokenPrefix) + ".bias");
+    EXPECT_FALSE(kernelMatches(*bound, plainKernel));
+}
+
+INSTANTIATE_TEST_SUITE_P(,
+                         TestAttentionDenseBiasMatch,
+                         ::testing::ValuesIn(biasServingArches()),
                          attentionDenseArchName);
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

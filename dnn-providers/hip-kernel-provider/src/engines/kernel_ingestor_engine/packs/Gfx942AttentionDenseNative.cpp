@@ -39,16 +39,18 @@
  * `build_attention_dense`, packaged (kind: rocke -> kpack) for gfx942 only. Matching and
  * dispatch, the [2^-64, 2^4] scale range included, are shared with the gfx950 twin
  * (AttentionDenseNative.cpp); what is gfx942's own is bound here: the gfx942 tile rules, the
- * causal sliding window baked per candidate with this engine's zero-trip guard, the stats
+ * causal sliding window baked per candidate, the stats
  * (LSE) output an emit_lse candidate writes, the launch grid each candidate is built for
  * (the qb_minor, bt_hkv_minor or hq_minor_swz block order, or the D128 persistent grid),
- * and the launch contracts: the strided one the catalog dispatches through, and the legacy
- * v1 one older plans restore through.
+ * and the launch contracts: the strided one the catalog dispatches through (a kernel with an
+ * additive bias takes its own strided bias contract: the bias pointer and its strides before
+ * the twelve), and the legacy v1 (no bias) and v2 (bias) ones older plans restore through.
+ * The bias itself (fp32 attn_mask) is matched and launched by the shared code, as on gfx950;
+ * its body addresses packed Q/K/V/O and ignores the strides.
  *
  * The body reads both head counts at runtime as well as batch and the sequence lengths
- * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Unlike the gfx950 twin, whose
- * catalog lists each head configuration and whose kernelMatches compares them, a
- * candidate here is never compared against the graph's head counts.
+ * (`Gfx942AttentionDenseSpec.runtime_param_fields`). Like the gfx950 twin, a candidate
+ * here is never compared against the graph's head counts.
  */
 namespace hip_kernel_provider::kernel_ingestor_engine
 {
@@ -143,7 +145,7 @@ std::optional<bool> candidateWritesLse(const KernelDefinition& kernel)
  *        and VPF pipelines keep packed addressing and ignore them.
  *
  * rocKE's `body_serves_strides` (`_reads_dense_strides`, kernels/gfx942/attention_dense.py):
- * a runtime-shape body (not ragged), not two K LDS buffers (KDB, lds_num_buffers 2) and not the
+ * a runtime-shape body (not ragged, no additive bias), not two K LDS buffers (KDB, lds_num_buffers 2) and not the
  * next-tile V prefetch (VPF, v_reg_prefetch 1). A record without the fields reaches here
  * completed to the baseline (0, 1 and 0) through the KMD defaults, so an absent, mistyped or
  * other value is malformed and answers false: a graph with packed operands still matches such a
@@ -155,6 +157,13 @@ std::optional<bool> candidateWritesLse(const KernelDefinition& kernel)
  */
 bool candidateReadsStrides(const KernelDefinition& kernel)
 {
+    // The bias bodies address packed Q/K/V/O (rocKE's _reads_dense_strides): a record that
+    // adds a bias, or whose bias field is malformed, is not assumed to read the strides.
+    const auto addsBias = attention_dense::candidateAdditiveBias(kernel);
+    if(!addsBias.has_value() || *addsBias)
+    {
+        return false;
+    }
     const auto ragged = attention_dense::integerMetadata(kernel, RAGGED_FIELD);
     const auto buffers = attention_dense::integerMetadata(kernel, LDS_NUM_BUFFERS_FIELD);
     const auto prefetch = attention_dense::integerMetadata(kernel, V_REG_PREFETCH_FIELD);
@@ -221,8 +230,9 @@ attention_dense::AttentionDenseGeometry gfx942Geometry(int64_t blockM,
         geometry.gridX, geometry.gridY, geometry.gridZ, geometry.blockX};
 }
 
-/// Where gfx942Arch() keeps its legacy contract in AttentionDenseArch::legacyContracts.
+/// Where gfx942Arch() keeps each legacy contract in AttentionDenseArch::legacyContracts.
 constexpr std::size_t V1_SLOT = 0;
+constexpr std::size_t V2_SLOT = 1;
 
 constexpr attention_dense::AttentionDenseArch gfx942Arch()
 {
@@ -237,28 +247,47 @@ constexpr attention_dense::AttentionDenseArch gfx942Arch()
     arch.tokens.slidingWindow = "gfx942_attention_dense.sliding_window";
     arch.tokens.scaleBits = "gfx942_attention_dense.scale_bits";
     arch.tokens.stats = "gfx942_attention_dense.stats.uid";
+    arch.tokens.bias = "gfx942_attention_dense.bias";
+    arch.tokens.biasUid = "gfx942_attention_dense.bias.uid";
+    arch.tokens.biasStrideBatch = "gfx942_attention_dense.bias.stride_batch";
+    arch.tokens.biasStrideHead = "gfx942_attention_dense.bias.stride_head";
+    arch.tokens.biasStrideQuery = "gfx942_attention_dense.bias.stride_query";
     // The head fields of the KMD are canonical build inputs, never compared.
     arch.isSupportedTile = &isSupportedGfx942AttentionDenseTile;
     arch.geometry = &gfx942Geometry;
-    arch.windowReachesKeys = &gfx942AttentionDenseWindowReachesKeys;
+    arch.servesWindows = true;
     // An emit_lse candidate writes the stats output; the catalog pairs each kernel with one.
     arch.candidateWritesLse = &candidateWritesLse;
     // Each candidate's grid: a block order of the one-CTA-per-block grid, or (D128) the
     // persistent grid with its fast-division kernargs.
     arch.candidateGrid = &candidateGrid;
     // The grid and persistent bodies read the strides; the KDB and VPF pipelines (12 library
-    // rows) address packed storage, so they serve packed graphs only.
+    // rows) and the bias bodies address packed storage, so they serve packed graphs only.
     arch.candidateReadsStrides = &candidateReadsStrides;
+    // A use_additive_bias candidate adds the bias, which appends four kernel arguments; the
+    // catalog pairs each kernel with a graph that has one or has none. The shared hook reads
+    // the field as gfx950 does: absent is the KMD default 0, not a malformed record.
+    arch.candidateAddsBias = &attention_dense::candidateAdditiveBias;
     arch.currentContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED,
                             attention_dense::AttentionDenseAbi::RUNTIME_STRIDES};
-    // No gfx942 kernel ever baked the head counts, so v1, the form before the strides, is the
-    // one superseded contract.
+    // A bias kernel takes the strided arguments and the bias's before the strides, so its
+    // plans are saved under their own name; the current handler serves both.
+    arch.biasContract = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED_BIAS,
+                         attention_dense::AttentionDenseAbi::RUNTIME_STRIDES_WITH_BIAS};
+    // No gfx942 kernel ever baked the head counts, so v1 (the plain form before the strides)
+    // and v2 (v1's arguments, then the bias's) are the superseded contracts.
     arch.legacyContracts[V1_SLOT] = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1,
                                      attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS};
+    arch.legacyContracts[V2_SLOT]
+        = {GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
+           attention_dense::AttentionDenseAbi::RUNTIME_HEAD_COUNTS_WITH_BIAS};
     return arch;
 }
 
 constexpr attention_dense::AttentionDenseArch GFX942_ARCH = gfx942Arch();
+static_assert(GFX942_ARCH.isConsistent(),
+              "gfx942Arch(): a served feature's token is unspelled, or the bias hook and the bias "
+              "contract do not come together (their tokens, name and kernel-argument form)");
 
 std::optional<BoundTokens> gfx942AttentionDenseGraphMatches(const MatchContext& context)
 {
@@ -467,8 +496,16 @@ MetadataValues gfx942AttentionDenseLaunchValues(const AttentionDenseBinding& bin
                                                 int64_t blockM,
                                                 const attention_dense::AttentionDenseGrid& grid)
 {
-    return attention_dense::launchValues(
-        binding, problem, blockM, GFX942_ARCH, GFX942_ARCH.legacyContracts[V1_SLOT], grid);
+    // The values of the legacy contract a plan with this binding was saved under before the
+    // strides: v2 with a bias, v1 without.
+    return attention_dense::launchValues(binding,
+                                         problem,
+                                         blockM,
+                                         GFX942_ARCH,
+                                         binding.bias.has_value()
+                                             ? GFX942_ARCH.legacyContracts[V2_SLOT]
+                                             : GFX942_ARCH.legacyContracts[V1_SLOT],
+                                         grid);
 }
 
 MetadataValues
@@ -477,8 +514,13 @@ MetadataValues
                                             int64_t blockM,
                                             const attention_dense::AttentionDenseGrid& grid)
 {
-    return attention_dense::launchValues(
-        binding, problem, blockM, GFX942_ARCH, GFX942_ARCH.currentContract, grid);
+    return attention_dense::launchValues(binding,
+                                         problem,
+                                         blockM,
+                                         GFX942_ARCH,
+                                         binding.bias.has_value() ? GFX942_ARCH.biasContract
+                                                                  : GFX942_ARCH.currentContract,
+                                         grid);
 }
 
 const attention_dense::AttentionDenseArch& gfx942AttentionDenseArch()
@@ -506,17 +548,36 @@ void resetGfx942AttentionDenseModuleCache()
 namespace
 {
 
-/// This engine's dispatch handler for the current (strided) contract or the legacy (v1)
-/// one, process-lifetime. Both share one module cache and loader.
-const IKernelDispatchHandler<Handle>& gfx942AttentionDenseDispatchHandler(bool legacy)
+/// Which of this engine's contracts a dispatch handler serves.
+enum class Gfx942Contract
+{
+    STRIDED,
+    V2,
+    V1
+};
+
+/// This engine's dispatch handler for the current (strided) contract, which also serves the
+/// strided bias contract, or a legacy (v2, v1) one, process-lifetime. All share one module
+/// cache and loader.
+const IKernelDispatchHandler<Handle>& gfx942AttentionDenseDispatchHandler(Gfx942Contract contract)
 {
     static const compilation::KpackKernelLoader s_kpackLoader(
         gfx942AttentionDenseKpackModuleCache());
     static const auto s_v1 = attention_dense::makeDispatchHandler(
         s_kpackLoader, GFX942_ARCH, GFX942_ARCH.legacyContracts[V1_SLOT]);
+    static const auto s_v2 = attention_dense::makeDispatchHandler(
+        s_kpackLoader, GFX942_ARCH, GFX942_ARCH.legacyContracts[V2_SLOT]);
     static const auto s_strided = attention_dense::makeDispatchHandler(
         s_kpackLoader, GFX942_ARCH, GFX942_ARCH.currentContract);
-    return legacy ? *s_v1 : *s_strided;
+    if(contract == Gfx942Contract::V1)
+    {
+        return *s_v1;
+    }
+    if(contract == Gfx942Contract::V2)
+    {
+        return *s_v2;
+    }
+    return *s_strided;
 }
 
 } // namespace
@@ -526,15 +587,22 @@ void registerGfx942AttentionDenseSymbols(SymbolScope<Handle>& scope)
     scope.add(std::string(GRAPH_MATCHER_SYMBOL), &gfx942AttentionDenseGraphMatches);
     scope.add(std::string(KERNEL_MATCHER_SYMBOL), &kernelMatches);
     scope.add(std::string(SCORE_SYMBOL), &scoreKernel);
-    // One handler under the unversioned and the strided name: the UDD's unversioned name
-    // dispatches the catalog, and a save stores the versioned name, which must resolve to
-    // the handler that saved it.
-    scope.add(std::string(DISPATCH_SYMBOL), &gfx942AttentionDenseDispatchHandler(/*legacy=*/false));
+    // The UDD's unversioned name dispatches the catalog, and a save stores the versioned
+    // name, which must resolve to the handler that saved it: the strided handler serves the
+    // strided name and the strided bias name (a plain plan saves under the first, a plan
+    // with an additive bias under the second).
+    scope.add(std::string(DISPATCH_SYMBOL),
+              &gfx942AttentionDenseDispatchHandler(Gfx942Contract::STRIDED));
     scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED),
-              &gfx942AttentionDenseDispatchHandler(/*legacy=*/false));
-    // Kept so plans saved under v1 still load and launch their code object without strides.
+              &gfx942AttentionDenseDispatchHandler(Gfx942Contract::STRIDED));
+    scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED_BIAS),
+              &gfx942AttentionDenseDispatchHandler(Gfx942Contract::STRIDED));
+    // Kept so plans saved under v2 and v1 still load and launch their code objects without
+    // strides.
+    scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+              &gfx942AttentionDenseDispatchHandler(Gfx942Contract::V2));
     scope.add(std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
-              &gfx942AttentionDenseDispatchHandler(/*legacy=*/true));
+              &gfx942AttentionDenseDispatchHandler(Gfx942Contract::V1));
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

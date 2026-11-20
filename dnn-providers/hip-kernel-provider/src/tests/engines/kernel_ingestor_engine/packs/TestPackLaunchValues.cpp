@@ -145,6 +145,54 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseValuesMatchTheV1Contract)
     EXPECT_EQ(restoredBits, originalBits);
 }
 
+TEST(TestPackLaunchValues, Gfx950AttentionDenseBiasValuesMatchTheV3Contract)
+{
+    AttentionDenseBinding binding;
+    binding.q = 41;
+    binding.k = 42;
+    binding.v = 43;
+    binding.o = 44;
+    binding.causal = 1;
+    binding.slidingWindow = 45;
+    binding.scale = 0.1F;
+    binding.bias = AttentionDenseBias{46, {61, 62, 63}};
+
+    AttentionDenseProblem problem;
+    problem.batch = 51;
+    problem.seqLenQ = 52;
+    problem.seqLenKv = 53;
+    problem.numQueryHeads = 54;
+    problem.numKvHeads = 55;
+    problem.headSize = 56;
+    problem.dataType = hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16;
+
+    const MetadataValues values = gfx950AttentionDenseLaunchValues(binding, problem, 128);
+
+    const MetadataValues expected{{"q.uid", int64_t{41}},
+                                  {"k.uid", int64_t{42}},
+                                  {"v.uid", int64_t{43}},
+                                  {"o.uid", int64_t{44}},
+                                  {"causal", int64_t{1}},
+                                  {"sliding_window", int64_t{45}},
+                                  {"batch", int64_t{51}},
+                                  {"seqlen_q", int64_t{52}},
+                                  {"seqlen_kv", int64_t{53}},
+                                  {"num_query_heads", int64_t{54}},
+                                  {"num_kv_heads", int64_t{55}},
+                                  {"head_size", int64_t{56}},
+                                  {"block_m", int64_t{128}},
+                                  {"scale", static_cast<double>(0.1F)},
+                                  {"data_type", std::string("BFLOAT16")},
+                                  {"stride_layout", std::string("bshd")},
+                                  {"bias.uid", int64_t{46}},
+                                  {"bias.stride_batch", int64_t{61}},
+                                  {"bias.stride_head", int64_t{62}},
+                                  {"bias.stride_query", int64_t{63}}};
+    EXPECT_EQ(values, expected);
+    EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3,
+              "hipkernel.gfx950_attention_dense.dispatch.v3");
+}
+
 // ---------------------------------------------------------------------------
 // Reading saved values back
 // ---------------------------------------------------------------------------
@@ -188,6 +236,21 @@ Gfx950AttentionDenseLaunchInputs gfx950AttentionDenseInputs()
     return launch;
 }
 
+// The inputs above with a full [B, Hq, Sq, Skv] bias, packed with the key axis innermost.
+Gfx950AttentionDenseLaunchInputs gfx950AttentionDenseBiasInputs()
+{
+    auto launch = gfx950AttentionDenseInputs();
+    const auto& problem = launch.problem;
+    const int64_t queryStride = problem.seqLenKv;
+    const int64_t headStride = problem.seqLenQ * queryStride;
+    const int64_t batchStride = problem.numQueryHeads * headStride;
+    launch.binding.bias = AttentionDenseBias{46,
+                                             {static_cast<int32_t>(batchStride),
+                                              static_cast<int32_t>(headStride),
+                                              static_cast<int32_t>(queryStride)}};
+    return launch;
+}
+
 SavedLaunchInputs savedPointwise()
 {
     const auto launch = pointwiseInputs();
@@ -207,6 +270,14 @@ SavedLaunchInputs savedGfx950AttentionDense()
 {
     const auto launch = gfx950AttentionDenseInputs();
     return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
+            gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
+}
+
+// Saved under v3, the contract of a plan with a bias.
+SavedLaunchInputs savedGfx950AttentionDenseBias()
+{
+    const auto launch = gfx950AttentionDenseBiasInputs();
+    return {std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3),
             gfx950AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
 }
 
@@ -344,11 +415,28 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseInputsRoundTripThroughTheirValues
     EXPECT_EQ(read.problem.headSize, expected.problem.headSize);
     EXPECT_EQ(read.problem.dataType, expected.problem.dataType);
     EXPECT_EQ(read.blockM, expected.blockM);
+    EXPECT_FALSE(read.binding.bias.has_value());
+}
+
+TEST(TestPackLaunchValues, Gfx950AttentionDenseBiasInputsRoundTripThroughTheirValues)
+{
+    const auto expected = gfx950AttentionDenseBiasInputs();
+
+    const auto read = readGfx950AttentionDenseLaunchInputs(savedGfx950AttentionDenseBias());
+
+    EXPECT_EQ(read.binding.q, expected.binding.q);
+    EXPECT_EQ(read.binding.o, expected.binding.o);
+    EXPECT_EQ(read.problem.batch, expected.problem.batch);
+    EXPECT_EQ(read.blockM, expected.blockM);
+    ASSERT_TRUE(read.binding.bias.has_value());
+    EXPECT_EQ(read.binding.bias->uid, expected.binding.bias->uid);
+    EXPECT_EQ(read.binding.bias->strides, expected.binding.bias->strides);
 }
 
 // v1 and v2 differ only in the kernel arguments the launch passes, so one value set reads
 // the same under either name, and a version the pack never defined is refused. (v3, the
-// strided contract, has a value set of its own: see the strided contracts below.)
+// legacy bias contract, and v4, the strided contract, have value sets of their own: see the
+// bias and strided contracts.)
 TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsTheSameValuesUnderV1AndV2)
 {
     auto v1 = savedGfx950AttentionDense();
@@ -364,9 +452,9 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsTheSameValuesUnderV1AndV2)
     EXPECT_EQ(fromV1.problem.numKvHeads, fromV2.problem.numKvHeads);
     EXPECT_EQ(fromV1.blockM, fromV2.blockM);
 
-    auto v4 = savedGfx950AttentionDense();
-    v4.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v4";
-    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, v4, "names no launch-value contract");
+    auto v6 = savedGfx950AttentionDense();
+    v6.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v6";
+    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, v6, "names no launch-value contract");
 }
 
 TEST(TestPackLaunchValues, PointwiseRefusesMalformedValues)
@@ -421,6 +509,88 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesMalformedValues)
     expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, unbuiltTile, "launch value 'block_m'");
 }
 
+TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesMalformedBiasValues)
+{
+    const auto valid = savedGfx950AttentionDenseBias();
+    expectCommonReadRefusals(&readGfx950AttentionDenseLaunchInputs,
+                             valid,
+                             "hipkernel.gfx950_attention_dense.dispatch",
+                             "bias.stride_head");
+
+    // v1 and v2 carry no bias, and v3 needs every bias value. The values are a std::map,
+    // so the first name v1 and v2 lack, and the one refused, is 'bias.stride_batch'.
+    for(const char* plainContract : {"hipkernel.gfx950_attention_dense.dispatch.v1",
+                                     "hipkernel.gfx950_attention_dense.dispatch.v2"})
+    {
+        SCOPED_TRACE(plainContract);
+        SavedLaunchInputs biasUnderPlain = valid;
+        biasUnderPlain.dispatchSymbol = plainContract;
+        expectReadRefusal(&readGfx950AttentionDenseLaunchInputs,
+                          biasUnderPlain,
+                          "launch value 'bias.stride_batch' is not part of the contract");
+    }
+
+    SavedLaunchInputs noBiasUid = valid;
+    noBiasUid.values.erase("bias.uid");
+    expectReadRefusal(
+        &readGfx950AttentionDenseLaunchInputs, noBiasUid, "needs launch value 'bias.uid'");
+
+    // The kernel takes each stride as an int32_t.
+    for(const int64_t stride : {int64_t{-1}, int64_t{2147483648}})
+    {
+        SCOPED_TRACE(stride);
+        SavedLaunchInputs outside = valid;
+        outside.values["bias.stride_query"] = stride;
+        expectReadRefusal(
+            &readGfx950AttentionDenseLaunchInputs, outside, "launch value 'bias.stride_query'");
+    }
+
+    // Each stride fits an int32_t, but the batch axis then reaches past element 2^31.
+    SavedLaunchInputs farReach = valid;
+    farReach.values["bias.stride_batch"] = int64_t{2147483647};
+    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, farReach, "reach element 2^31");
+
+    // A plain plan relabelled v3 holds none of the bias values v3 needs.
+    SavedLaunchInputs plainUnderV3 = savedGfx950AttentionDense();
+    plainUnderV3.dispatchSymbol = "hipkernel.gfx950_attention_dense.dispatch.v3";
+    expectReadRefusal(
+        &readGfx950AttentionDenseLaunchInputs, plainUnderV3, "needs launch value 'bias.uid'");
+}
+
+// The kernel indexes the bias in 32-bit elements, so element 2^31 - 1 is the last one a
+// plan may reach, as additiveBiasFor() decides for a graph. With a batch of 2 and the head
+// and query axes broadcast, the reach is stride_batch + (seqlen_kv - 1).
+TEST(TestPackLaunchValues, Gfx950AttentionDenseReadsABiasReachingTheLastInt32Element)
+{
+    constexpr int64_t LAST_ELEMENT = 2147483647; // 2^31 - 1
+
+    SavedLaunchInputs edge = savedGfx950AttentionDenseBias();
+    const int64_t keyReach = std::get<int64_t>(edge.values.at("seqlen_kv")) - 1;
+    edge.values["batch"] = int64_t{2};
+    edge.values["bias.stride_head"] = int64_t{0};
+    edge.values["bias.stride_query"] = int64_t{0};
+    edge.values["bias.stride_batch"] = LAST_ELEMENT - keyReach;
+
+    const auto read = readGfx950AttentionDenseLaunchInputs(edge);
+    ASSERT_TRUE(read.binding.bias.has_value());
+    EXPECT_EQ(read.binding.bias->strides[0], LAST_ELEMENT - keyReach);
+
+    SavedLaunchInputs past = edge;
+    past.values["bias.stride_batch"] = LAST_ELEMENT - keyReach + 1;
+    expectReadRefusal(&readGfx950AttentionDenseLaunchInputs, past, "reach element 2^31");
+
+    // With a single key, the batch stride is the whole reach, so the largest stride the
+    // kernel takes is read too. No window: one key would leave a windowed plan's last query
+    // rows without any, which the reader refuses for its own reason.
+    SavedLaunchInputs widest = edge;
+    widest.values["seqlen_kv"] = int64_t{1};
+    widest.values["sliding_window"] = int64_t{0};
+    widest.values["bias.stride_batch"] = LAST_ELEMENT;
+    const auto readWidest = readGfx950AttentionDenseLaunchInputs(widest);
+    ASSERT_TRUE(readWidest.binding.bias.has_value());
+    EXPECT_EQ(readWidest.binding.bias->strides[0], LAST_ELEMENT);
+}
+
 TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAScaleOfAnotherType)
 {
     const auto valid = savedGfx950AttentionDense();
@@ -472,10 +642,11 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseRefusesAStringValueOfAnotherType)
 // ---------------------------------------------------------------------------
 // gfx942 dense attention
 //
-// One contract, v1, with gfx950's value set plus stats.uid. Its reader holds the restore to
-// what the gfx942 graph and kernel match bind: besides the scale range and the mask and shape
-// rules both dense readers share (below), a block_m gfx942 builds and a stats uid that is -1
-// (none) or non-negative.
+// Two contracts: v1, with gfx950's value set plus stats.uid and the grid values, and v2, the
+// contract of a plan with an additive bias: v1's values plus the four bias values. Its reader
+// holds the restore to what the gfx942 graph and kernel match bind: besides the scale range
+// and the mask and shape rules both dense readers share (below), a block_m gfx942 builds and
+// a stats uid that is -1 (none) or non-negative.
 // ---------------------------------------------------------------------------
 
 // A shape the gfx942 match serves, with distinct values. seqlen_q 1536 is a multiple of
@@ -510,6 +681,29 @@ SavedLaunchInputs savedGfx942AttentionDense()
 {
     const auto launch = gfx942AttentionDenseInputs();
     return {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
+            gfx942AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
+}
+
+// The inputs above with a full [B, Hq, Sq, Skv] bias, packed with the key axis innermost.
+Gfx942AttentionDenseLaunchInputs gfx942AttentionDenseBiasInputs()
+{
+    auto launch = gfx942AttentionDenseInputs();
+    const auto& problem = launch.problem;
+    const int64_t queryStride = problem.seqLenKv;
+    const int64_t headStride = problem.seqLenQ * queryStride;
+    const int64_t batchStride = problem.numQueryHeads * headStride;
+    launch.binding.bias = AttentionDenseBias{66,
+                                             {static_cast<int32_t>(batchStride),
+                                              static_cast<int32_t>(headStride),
+                                              static_cast<int32_t>(queryStride)}};
+    return launch;
+}
+
+// Saved under v2, the contract of a plan with a bias.
+SavedLaunchInputs savedGfx942AttentionDenseBias()
+{
+    const auto launch = gfx942AttentionDenseBiasInputs();
+    return {std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2),
             gfx942AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM)};
 }
 
@@ -587,6 +781,122 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseInputsRoundTripThroughTheirValues
         std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1),
         gfx942AttentionDenseLaunchValues(withStats.binding, withStats.problem, withStats.blockM)};
     EXPECT_EQ(readGfx942AttentionDenseLaunchInputs(saved).binding.stats, 65);
+}
+
+TEST(TestPackLaunchValues, Gfx942AttentionDenseBiasValuesMatchTheV2Contract)
+{
+    auto launch = gfx942AttentionDenseBiasInputs();
+    launch.binding.bias = AttentionDenseBias{66, {61, 62, 63}};
+
+    const MetadataValues values
+        = gfx942AttentionDenseLaunchValues(launch.binding, launch.problem, launch.blockM);
+
+    // v1's twenty values (stats.uid and the three grid values included) plus the four bias
+    // values, and no more.
+    MetadataValues expected = gfx942AttentionDenseLaunchValues(
+        gfx942AttentionDenseInputs().binding, launch.problem, launch.blockM);
+    expected.insert({{"bias.uid", int64_t{66}},
+                     {"bias.stride_batch", int64_t{61}},
+                     {"bias.stride_head", int64_t{62}},
+                     {"bias.stride_query", int64_t{63}}});
+    EXPECT_EQ(values, expected);
+    EXPECT_EQ(values.size(), 24U);
+    EXPECT_EQ(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2,
+              "hipkernel.gfx942_attention_dense.dispatch.v2");
+}
+
+TEST(TestPackLaunchValues, Gfx942AttentionDenseBiasInputsRoundTripThroughTheirValues)
+{
+    const auto expected = gfx942AttentionDenseBiasInputs();
+
+    const auto read = readGfx942AttentionDenseLaunchInputs(savedGfx942AttentionDenseBias());
+
+    EXPECT_EQ(read.binding.q, expected.binding.q);
+    EXPECT_EQ(read.binding.o, expected.binding.o);
+    EXPECT_EQ(read.problem.batch, expected.problem.batch);
+    EXPECT_EQ(read.blockM, expected.blockM);
+    ASSERT_TRUE(read.binding.bias.has_value());
+    EXPECT_EQ(read.binding.bias->uid, expected.binding.bias->uid);
+    EXPECT_EQ(read.binding.bias->strides, expected.binding.bias->strides);
+    EXPECT_FALSE(
+        readGfx942AttentionDenseLaunchInputs(savedGfx942AttentionDense()).binding.bias.has_value());
+}
+
+TEST(TestPackLaunchValues, Gfx942AttentionDenseRefusesMalformedBiasValues)
+{
+    const auto valid = savedGfx942AttentionDenseBias();
+    expectCommonReadRefusals(&readGfx942AttentionDenseLaunchInputs,
+                             valid,
+                             "hipkernel.gfx942_attention_dense.dispatch",
+                             "bias.stride_head");
+
+    // v1 carries no bias, and v2 needs every bias value. The values are a std::map, so the
+    // first name v1 lacks, and the one refused, is 'bias.stride_batch'.
+    SavedLaunchInputs biasUnderPlain = valid;
+    biasUnderPlain.dispatchSymbol = GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1;
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
+                      biasUnderPlain,
+                      "launch value 'bias.stride_batch' is not part of the contract");
+
+    SavedLaunchInputs noBiasUid = valid;
+    noBiasUid.values.erase("bias.uid");
+    expectReadRefusal(
+        &readGfx942AttentionDenseLaunchInputs, noBiasUid, "needs launch value 'bias.uid'");
+
+    // The kernel takes each stride as an int32_t.
+    for(const int64_t stride : {int64_t{-1}, int64_t{2147483648}})
+    {
+        SCOPED_TRACE(stride);
+        SavedLaunchInputs outside = valid;
+        outside.values["bias.stride_query"] = stride;
+        expectReadRefusal(
+            &readGfx942AttentionDenseLaunchInputs, outside, "launch value 'bias.stride_query'");
+    }
+
+    // Each stride fits an int32_t, but the batch axis then reaches past element 2^31.
+    SavedLaunchInputs farReach = valid;
+    farReach.values["bias.stride_batch"] = int64_t{2147483647};
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, farReach, "reach element 2^31");
+
+    // A plain plan relabelled v2 holds none of the bias values v2 needs.
+    SavedLaunchInputs plainUnderV2 = savedGfx942AttentionDense();
+    plainUnderV2.dispatchSymbol = GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2;
+    expectReadRefusal(
+        &readGfx942AttentionDenseLaunchInputs, plainUnderV2, "needs launch value 'bias.uid'");
+}
+
+// The kernel indexes the bias in 32-bit elements, so element 2^31 - 1 is the last one a
+// plan may reach, as additiveBiasFor() decides for a graph. With a batch of 2 and the head
+// and query axes broadcast, the reach is stride_batch + (seqlen_kv - 1).
+TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsABiasReachingTheLastInt32Element)
+{
+    constexpr int64_t LAST_ELEMENT = 2147483647; // 2^31 - 1
+
+    SavedLaunchInputs edge = savedGfx942AttentionDenseBias();
+    const int64_t keyReach = std::get<int64_t>(edge.values.at("seqlen_kv")) - 1;
+    edge.values["batch"] = int64_t{2};
+    edge.values["bias.stride_head"] = int64_t{0};
+    edge.values["bias.stride_query"] = int64_t{0};
+    edge.values["bias.stride_batch"] = LAST_ELEMENT - keyReach;
+
+    const auto read = readGfx942AttentionDenseLaunchInputs(edge);
+    ASSERT_TRUE(read.binding.bias.has_value());
+    EXPECT_EQ(read.binding.bias->strides[0], LAST_ELEMENT - keyReach);
+
+    SavedLaunchInputs past = edge;
+    past.values["bias.stride_batch"] = LAST_ELEMENT - keyReach + 1;
+    expectReadRefusal(&readGfx942AttentionDenseLaunchInputs, past, "reach element 2^31");
+
+    // With a single key, the batch stride is the whole reach, so the largest stride the
+    // kernel takes is read too. No window: one key would leave a windowed plan's last query
+    // rows without any, which the reader refuses for its own reason.
+    SavedLaunchInputs widest = edge;
+    widest.values["seqlen_kv"] = int64_t{1};
+    widest.values["sliding_window"] = int64_t{0};
+    widest.values["bias.stride_batch"] = LAST_ELEMENT;
+    const auto readWidest = readGfx942AttentionDenseLaunchInputs(widest);
+    ASSERT_TRUE(readWidest.binding.bias.has_value());
+    EXPECT_EQ(readWidest.binding.bias->strides[0], LAST_ELEMENT);
 }
 
 // The launch grid round-trips: a persistent plan reads back its decode and CTA count, a grid
@@ -749,15 +1059,17 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseSavesAndReadsNoStatsUid)
     }
 }
 
-// gfx942 has two contracts, v1 and the strided v2. gfx950's version names, a version gfx942
-// never defined, and its values under them, are neither; each is refused against the
-// current, strided one.
+// gfx942 has four contracts: v1 and v2 (with a bias), which predate the strides, the strided
+// v3 and the strided bias v4. gfx950's version names, a version gfx942 never defined, and
+// its values under them, are none of them; each is refused against the current, strided one.
 TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsOnlyItsOwnContracts)
 {
-    for(const char* other : {"hipkernel.gfx942_attention_dense.dispatch.v3",
+    for(const char* other : {"hipkernel.gfx942_attention_dense.dispatch.v5",
                              "hipkernel.gfx950_attention_dense.dispatch.v1",
                              "hipkernel.gfx950_attention_dense.dispatch.v2",
-                             "hipkernel.gfx950_attention_dense.dispatch.v3"})
+                             "hipkernel.gfx950_attention_dense.dispatch.v3",
+                             "hipkernel.gfx950_attention_dense.dispatch.v4",
+                             "hipkernel.gfx950_attention_dense.dispatch.v5"})
     {
         SCOPED_TRACE(other);
         auto saved = savedGfx942AttentionDense();
@@ -767,7 +1079,7 @@ TEST(TestPackLaunchValues, Gfx942AttentionDenseReadsOnlyItsOwnContracts)
         expectReadRefusal(&readGfx942AttentionDenseLaunchInputs,
                           saved,
                           "the handler reads the contract "
-                          "'hipkernel.gfx942_attention_dense.dispatch.v2'");
+                          "'hipkernel.gfx942_attention_dense.dispatch.v3'");
     }
 }
 
@@ -881,13 +1193,30 @@ TEST_P(TestAttentionDenseSavedValues, RefusesAMaskOutsideTheMaskRules)
     expectReadRefusal(read, windowWithoutCausal, "launch value 'sliding_window'");
 
     // A 512-key window over seqlen_q 1536 and seqlen_kv 1024: row 1535 sees (1023, 1535], no
-    // key.
+    // key. gfx950 serves no window, so its reader refuses the plan. gfx942 restores it when
+    // the plan binds no stats output and refuses it with one.
     SavedLaunchInputs keylessRows = valid;
     keylessRows.values["seqlen_q"] = int64_t{1536};
     keylessRows.values["seqlen_kv"] = int64_t{1024};
     keylessRows.values["sliding_window"] = int64_t{512};
-    expectReadRefusal(read, keylessRows, "launch value 'sliding_window'");
-    expectReadRefusal(read, keylessRows, "no key");
+    if(GetParam()->label == "Gfx942")
+    {
+        EXPECT_EQ(read(keylessRows).binding.slidingWindow, 512);
+
+        SavedLaunchInputs keylessRowsWithStats = keylessRows;
+        keylessRowsWithStats.values["stats.uid"] = int64_t{7};
+        expectReadRefusal(read, keylessRowsWithStats, "launch value 'sliding_window'");
+        expectReadRefusal(read, keylessRowsWithStats, "not yet supported with a stats output");
+
+        // One key wider, the plan with stats restores.
+        keylessRowsWithStats.values["sliding_window"] = int64_t{513};
+        EXPECT_EQ(read(keylessRowsWithStats).binding.slidingWindow, 513);
+    }
+    else
+    {
+        expectReadRefusal(read, keylessRows, "launch value 'sliding_window'");
+        expectReadRefusal(read, keylessRows, "this arch serves no sliding window");
+    }
 
     // One key wider and the last row sees the last key.
     SavedLaunchInputs lastRowReaches = keylessRows;
@@ -1097,7 +1426,9 @@ TEST(TestPackLaunchValues, AttentionDensePackedStridesAreThoseOfTokenMajorHeadFa
 TEST(TestPackLaunchValues, Gfx950AttentionDenseStridedValuesMatchTheV3Contract)
 {
     EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED,
-              "hipkernel.gfx950_attention_dense.dispatch.v3");
+              "hipkernel.gfx950_attention_dense.dispatch.v4");
+    EXPECT_EQ(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED_BIAS,
+              "hipkernel.gfx950_attention_dense.dispatch.v5");
     const auto launch = withPackedStrides(gfx950AttentionDenseInputs());
 
     const MetadataValues values
@@ -1128,7 +1459,9 @@ TEST(TestPackLaunchValues, Gfx950AttentionDenseStridedValuesMatchTheV3Contract)
 TEST(TestPackLaunchValues, Gfx942AttentionDenseStridedValuesMatchTheV2Contract)
 {
     EXPECT_EQ(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED,
-              "hipkernel.gfx942_attention_dense.dispatch.v2");
+              "hipkernel.gfx942_attention_dense.dispatch.v3");
+    EXPECT_EQ(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED_BIAS,
+              "hipkernel.gfx942_attention_dense.dispatch.v4");
     const auto launch = withPackedStrides(gfx942AttentionDenseInputs());
 
     const MetadataValues values

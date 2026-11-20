@@ -94,7 +94,8 @@ inline void
 
 /**
  * @brief Requires every kernel @p engineName loads to record exactly the argument list
- *        @p arch's current contract launches it with.
+ *        @p arch's current contract launches it with: its bias contract, for a kernel that
+ *        adds an additive bias.
  *
  * The expected list is attention_dense::kernelSignature for the contract's ABI at the
  * kernel's own launch grid and LSE form, read from its metadata through the arch's own hooks,
@@ -138,8 +139,16 @@ inline void expectEveryShippedAttentionDenseKernelTakesTheLaunchedArguments(
                 writesLse = *candidateWritesLse;
             }
 
-            const auto expected
-                = attention_dense::kernelSignature(arch.currentContract.abi, grid, writesLse);
+            bool addsBias = false;
+            if(arch.servesBias())
+            {
+                const auto candidateAddsBias = arch.candidateAddsBias(definition);
+                ASSERT_TRUE(candidateAddsBias.has_value()) << "declares no valid use_additive_bias";
+                addsBias = *candidateAddsBias;
+            }
+
+            const auto& contract = addsBias ? arch.biasContract : arch.currentContract;
+            const auto expected = attention_dense::kernelSignature(contract.abi, grid, writesLse);
             const auto& recorded = kernel.source.signature;
             const std::string both
                 = "recorded [" + hipdnn_plugin_sdk::ingestor::describeKernelSignature(recorded)

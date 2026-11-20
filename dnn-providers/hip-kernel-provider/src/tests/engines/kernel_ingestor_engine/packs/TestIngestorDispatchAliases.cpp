@@ -54,7 +54,8 @@ TEST(TestIngestorDispatchAliases, EachVersionedAliasResolvesToTheSameHandler)
 
 // A superseded contract keeps its own handler, so a plan saved under it still restores
 // and launches the arguments its code object takes, not the current contract's: on gfx950
-// v1 (eight arguments) and v2 (ten), on gfx942 v1 (no strides).
+// v1 (eight arguments), v2 (ten) and v3 (fourteen, with a bias), on gfx942 v1 (no strides)
+// and v2 (with a bias, no strides).
 TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
 {
     registerNativeIngestorSymbols();
@@ -64,8 +65,12 @@ TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
                                                        GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1},
          std::pair<std::string_view, std::string_view>{"hipkernel.gfx950_attention_dense.dispatch",
                                                        GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2},
+         std::pair<std::string_view, std::string_view>{"hipkernel.gfx950_attention_dense.dispatch",
+                                                       GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3},
          std::pair<std::string_view, std::string_view>{"hipkernel.gfx942_attention_dense.dispatch",
-                                                       GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1}})
+                                                       GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1},
+         std::pair<std::string_view, std::string_view>{"hipkernel.gfx942_attention_dense.dispatch",
+                                                       GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2}})
     {
         const auto* current = DispatchRegistry<Handle>::tryResolve(std::string(unversioned));
         const auto* legacy = DispatchRegistry<Handle>::tryResolve(std::string(superseded));
@@ -79,17 +84,40 @@ TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
               DispatchRegistry<Handle>::tryResolve(
                   std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2)))
         << "gfx950's v1 and v2 launch different argument lists, so they need their own handlers";
+    EXPECT_NE(DispatchRegistry<Handle>::tryResolve(
+                  std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V2)),
+              DispatchRegistry<Handle>::tryResolve(
+                  std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V3)))
+        << "gfx950's v2 and v3 launch different argument lists, so they need their own handlers";
+    EXPECT_NE(DispatchRegistry<Handle>::tryResolve(
+                  std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1)),
+              DispatchRegistry<Handle>::tryResolve(
+                  std::string(GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V2)))
+        << "gfx942's v1 and v2 launch different argument lists, so they need their own handlers";
+}
+
+// The catalog's handler saves a bias plan under the strided bias contract, and a plan may be
+// saved only under a name registered to the handler that saves it, so that name resolves to
+// the current handler.
+TEST(TestIngestorDispatchAliases, TheBiasContractIsServedByTheCurrentHandler)
+{
+    registerNativeIngestorSymbols();
+
+    expectOneHandler("hipkernel.gfx950_attention_dense.dispatch",
+                     GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED_BIAS);
+    expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
+                     GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_STRIDED_BIAS);
 }
 
 // No dense engine answers to a version it never defined: the next number past each
-// engine's strided contract.
+// engine's strided bias contract.
 TEST(TestIngestorDispatchAliases, AttentionDenseHasNoVersionItNeverDefined)
 {
     registerNativeIngestorSymbols();
 
-    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx950_attention_dense.dispatch.v4"),
+    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx950_attention_dense.dispatch.v6"),
               nullptr);
-    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v3"),
+    EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v5"),
               nullptr);
 }
 

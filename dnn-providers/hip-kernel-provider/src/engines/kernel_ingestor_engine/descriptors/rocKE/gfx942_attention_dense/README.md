@@ -13,8 +13,10 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 - Mask: causal (top-left), unmasked, and causal sliding windows of 128, 512, 1024 and 2048
   keys (graph `left_bound` 128, 512, 1024 and 2048: `left_bound` L keeps L keys, the
   diagonal included, SdpaSemanticsRegister SEM-001). A window with
-  seqlen_q - seqlen_kv >= W, whose last query rows see no key, is declined as this pack's
-  own policy; `windowLeavesRowsWithoutKeys` in `packs/AttentionDenseNative.cpp` says why.
+  seqlen_q - seqlen_kv >= W, whose last query rows see no key, is served for a graph
+  without a stats output: the kernel writes O = 0 for those rows. With a stats (LSE) output
+  it is not yet supported, because no device-site validator compares the keyless rows'
+  infinite LSE; `windowLeavesRowsWithoutKeys` in `packs/AttentionDenseNative.cpp` says why.
   An installed pack built before the kernel change still holds the old code.
 - Stats (LSE): the `emit_lse` variants (KMD field `emit_lse` 1, name slot `_lse1`) also
   write the natural-log softmax normalizer through a trailing `lse_ptr`. A graph whose
@@ -22,6 +24,22 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   other graph only by the `emit_lse` 0 variants. The LSE cells are reduced on their own
   timings, so they need not mirror the non-LSE cells. Max, Sum_exp, the dropout RNG dump
   and any other stats layout or dtype are declined.
+- Additive bias (`use_additive_bias`, KMD field, name slot `_addb`): the bias variants are
+  D64 and D128, bf16 and fp16, causal and unmasked, with and without LSE, and no window.
+  They sweep the tile only (`block_m`, `block_n`; every other knob is held at its default)
+  and are all on the `qb_minor` grid: no persistent, `bt_hkv_minor` or `hq_minor_swz`
+  variant carries a bias, and a bias graph with a window matches no kernel. A bias graph
+  needs `Sq % block_m == 0` and `Skv % block_n == 0` for a bias tile the selection lists,
+  and a forced `block_m`/`block_n` knob outside them matches no bias kernel. A bias graph
+  with no matching bias kernel misses silently, like any other kernel-level miss.
+- `attn_mask`: the engine serves an fp32 tensor `[B|1, Hq|1, Sq|1, Skv]` (extent 1 or
+  full on each leading axis, indexed by the query head), real, not ragged and not
+  pass-by-value, with a unit-stride key axis and its largest element index below 2^31.
+  It declines any other `attn_mask`, with the cause in the INFO log.
+  `-inf` masks a key; a row with no unmasked key outputs 0, as the hipDNN reference
+  does for a row of `-inf` scores. A finite value, `finfo(float32).min` included, is a
+  score like any other (a row of them gets the uniform softmax), and a NaN on a visible
+  key makes its row NaN, as in the reference.
 - Launch grids: the one-CTA-per-block grid at the `qb_minor` block order (every cell),
   `bt_hkv_minor` and `hq_minor_swz` where the reduction kept them, and at D128 without a
   window the persistent grid: 304 CTAs (`num_persistent`) striding over the work items in
@@ -67,30 +85,35 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
   declares another alignment is declined first, with `alignment`, before its layout is
   judged; the stride predicate's own `pointer_alignment` reason is the second line for the
   same rule and is what refuses a plan when it is prepared.
-- Saved plans: new plans are saved under `hipkernel.gfx942_attention_dense.dispatch.v2`, which
-  records the twelve strides. Plans saved under `dispatch.v1` still restore and launch their
-  own older kernel arguments.
+- Saved plans: new plans are saved under `hipkernel.gfx942_attention_dense.dispatch.v3`, which
+  records the twelve strides, and plans with a bias under `dispatch.v4`, which also records the
+  bias. Plans saved under `dispatch.v1` and `dispatch.v2` (the bias contract before the
+  strides) still restore and launch their own older kernel arguments. A bias kernel addresses
+  packed BSHD and ignores the strides, so a bias graph is served only with packed operands.
 - Each grid is held fixed by its registry candidate: `gfx942_dense_qbminor`,
   `gfx942_dense_btminor_aot`, `gfx942_dense_hqswz_aot` and `gfx942_dense_persist_aot`.
+  Only `gfx942_dense_qbminor` declares the `attn_bias` feature, which is what keeps the
+  bias variants on that grid.
 - Not covered by this engine (follow-ups). A graph-level gap is declined with an INFO line
   naming the cause. A window size the catalog lacks, or a sequence length no shipped tile
-  divides, passes the graph match and then matches no kernel.
+  divides, passes the graph match and then matches no kernel; so does a bias graph that
+  needs a window, a tile or a grid no bias variant ships.
   - Not yet supported by this pack; the gfx942 kernel builds it, no variant ships it:
     - Attention sinks (`use_sinks`; gpt-oss). When this work started, hipDNN's SDPA
       references could not validate sinks; #14358 added that on 2026-11-02. gpt-oss's W=128
       layers need sink variants of the shipped W=128 cells.
     - Bottom-right causal with seqlen_q != seqlen_kv (`causal_bottom_right`).
     - Split KV (`kv_segments` > 1; needs a workspace and a combine launch).
-    - Window rows that see no key (seqlen_q - seqlen_kv >= W), with or without a stats
-      output: see the Mask entry above.
+    - Window rows that see no key (seqlen_q - seqlen_kv >= W) in a graph that binds a stats
+      (LSE) output: see the Mask entry above.
   - Not in the catalog: sliding windows other than 128, 512, 1024 and 2048 keys (W is a
     compile-time parameter). W=4096 (Mistral-7B-v0.1, StarCoder2, Command R7B, OLMo 3,
     EXAONE 4.0; all D128) is the first to add.
   - Not implemented in the gfx942 kernel: sequence lengths no shipped tile divides (no
     partial-tile path), varlen, ragged (packed) tensors and paged K/V (other rocKE kernels
     serve them), bottom-right windows, non-causal bands (`right_bound` > 0), head sizes
-    other than 64 and 128, FP32 and FP8 data types, dropout, additive / ALiBi / block
-    masks, scale tensors, and the Max and Sum_exp outputs. The shipped tiles are block_m
+    other than 64 and 128, FP32 and FP8 data types, dropout, block masks, an `attn_mask`
+    other than the fp32 additive bias above, scale tensors, and the Max and Sum_exp outputs. The shipped tiles are block_m
     64, 128, 256 and 512 with block_n 32, 64 and 128, per cell as listed in the selection.
   - Addressing limit: K/V under 2^31 bytes and Q/O under 2^31 elements (32-bit offsets). With strided
     operands the same limits also hold per batch-and-head slab, where a K/V slab counts the two
@@ -112,7 +135,7 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 ## Models
 
 One trained model (UHD), the L2 `sort_kernel_catalog` kernel ranker
-`18bb432e-d871-4290-9ae8-f5111aaf2ffe` (ranks this catalog's kernels and picks the one to run), is
+`948543e3-03a7-4ff1-b8bc-50424275b002` (ranks this catalog's kernels and picks the one to run), is
 bound in the UED for gfx942; other architectures keep the native selector. It is tracked at
 `heuristics/a74a5afb-30c0-41c2-8006-501d2961f808/sort_kernel_catalog/gfx942/tflops/` (the UED id,
 role, arch and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git, `model.bin`
@@ -125,8 +148,11 @@ for the head size), a tensor uid, or a feature that depends on how many tensors 
 through `graph.nodes[0].{q,k,v,o}`, and reads an unset `generate_stats` as false. It reads no FLOPs
 feature: hipDNN publishes none for a sliding-window graph, and a ranker that cannot evaluate falls
 back to declared kernel order, so the L2 ranks every graph the engine serves. No training graph had
-a window (`hipdnn_corpus_gen`'s `sdpa_fwd` has no window parameter), so its window rankings, and the
-TFLOPS scores it reports for them, are extrapolated. Retrain it when the catalog's kernels change;
+a window or an additive bias (`hipdnn_corpus_gen`'s `sdpa_fwd` has no window or `attn_mask`
+parameter), so its window rankings, and the TFLOPS scores it reports for them, are extrapolated. So
+are its rankings of the 48 bias variants: no bias kernel was timed, and the L2 reads no
+`use_additive_bias` field, so it ranks them from their tile and knob fields as it ranks the plain
+variants. Retrain it when the catalog's kernels change;
 `tests/test_trained_rankers.py` in the IngestorGenerator fails when the shipped KDP no longer
 matches the fingerprint the configs record.
 
@@ -139,7 +165,8 @@ then `TestGfx942AttentionDenseModelBinding.TheBoundL1EnginePredictorLoadsAndMatc
 that no L1 loads.
 
 How the L2 was trained (the `hipdnn-uhd` skill; `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`), on
-one gfx942 device with the catalog compiled by CI's COMGR:
+one gfx942 device with the catalog compiled by CI's COMGR (last trained on the 272-entry catalog:
+its 224 plain kernels and 48 bias variants; only the plain kernels have a graph to time):
 
 - Shape sets: two `hipdnn_corpus_gen --operation sdpa_fwd` sets for this engine, 200 graphs
   (`--seed 1`) and 1800 graphs (`--seed 2`, excluding the first), each with its evaluation slice
@@ -148,7 +175,8 @@ one gfx942 device with the catalog compiled by CI's COMGR:
   sort_kernel_catalog`), then trained with `--metric tflops` and an explicit `--feature-signature`:
   the automatic signature minus the features excluded above, with
   `{"value_or_default": ["$graph.nodes[0].generate_stats", false]}`.
-- Validated on the held-out graphs with Stage V (`validate_l2.py` against the native scorer), then
+- Validated on the held-out graphs with Stage V (`validate_l2.py` against the native scorer, or
+  against the ranker it replaces), then
   installed with `uhd_gen promote`, `model.bin` pushed with `dvc push -r ingestor`, and the id and
   the catalog fingerprint (`tools/catalog_fingerprint.py <this
   bundle>/artifacts/gfx942_attention_dense.kdp.json`) recorded in both IngestorGenerator configs.
@@ -162,6 +190,15 @@ order. Release builds set `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`, which 
 - Fetch `artifacts/` with `dvc pull -r ingestor artifacts.dvc`, and the L2 model with
   `dvc pull -r ingestor --recursive heuristics/`. See `../../README.md`.
 - The native symbols (`hipkernel.gfx942_attention_dense.*`) are registered in
-  `packs/Gfx942AttentionDenseNative.cpp`.
+  `packs/Gfx942AttentionDenseNative.cpp`, which binds this engine's arch descriptor
+  (tile rules, launch contracts, the `use_additive_bias` field). Matching, dispatch and the
+  saved launch values, the additive bias included, are shared with the gfx950 engine in
+  `packs/AttentionDenseNative.cpp`.
 - Changing the KDP changes its md5. Update the `.dvc` pointer in the same commit, and retrain the
   L2 if the KDP's kernels changed (see Models).
+- Saved plans store their launch values under `hipkernel.gfx942_attention_dense.dispatch.v3`
+  (the kernel reads the head counts and the strides at runtime), or `.v4` for a plan that
+  serves a bias kernel (v3 plus the bias uid and its batch, query-head and query-row
+  strides). Plans saved under `.v1` (this engine's first contract: head counts at runtime)
+  and `.v2` (its bias contract before the strides) still load. All four stay registered so
+  saved plans keep loading.
