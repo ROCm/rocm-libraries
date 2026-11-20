@@ -58,6 +58,7 @@ program rocsolver_alg_mode
     [rocsolver_alg_mode_2stage, rocsolver_alg_mode_1stage, rocsolver_alg_mode_auto]
 
   integer(kind(rocsolver_alg_mode_gpu)) :: mode, want
+  integer(kind(rocblas_status_success)) :: status
   integer :: i, j
 
   write(*,"(a)",advance="no") "-- Running test 'rocsolver_alg_mode' &
@@ -81,6 +82,17 @@ program rocsolver_alg_mode
         end if
      end do
   end do
+
+  ! rocsolver_function_sytrd_hetrd only exists since rocSOLVER gained the
+  ! 2-stage tridiagonalization; older versions reject it as an invalid value.
+  status = rocsolver_set_alg_mode(handle, rocsolver_function_sytrd_hetrd, tridiag_modes(1))
+  if (status == rocblas_status_invalid_value) then
+     call rocblasCheck(rocblas_destroy_handle(handle))
+     write(*,*) "PASSED! alg mode round-tripped for 5 rocSOLVER functions (gpu/hybrid); &
+                &this rocSOLVER has no sytrd_hetrd alg mode"
+     stop
+  end if
+  call rocsolverCheck(status)
 
   do j = 1, size(tridiag_modes)
      want = tridiag_modes(j)
