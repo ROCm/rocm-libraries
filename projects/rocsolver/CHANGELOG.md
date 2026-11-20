@@ -13,6 +13,8 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Resolved issues
 
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
+* Fixed memory access faults for matrices with more than 2^31 elements (for example in GEQLF and ORGQL/UNGQL), caused by 32-bit internal matrix offsets.
+
 ### Known issues
 ### Upcoming changes
 
