@@ -337,8 +337,10 @@ def emitTDMStoreStaging(gwb, stagedElements) -> Module:
   regsPerElement = max(1, kw.states.bpeCexternalGSU1 // kw.states.bpr)
   for sumIdx, coordOffset0, coordOffset1 in stagedElements:
     # dsStore writes at most 32 bytes, so a wider vector is staged at offset + piece * width; the last piece
-    # is what has to fit the 16-bit field.
-    addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1, span=max(0, bps - width))
+    # is what has to fit the 16-bit field. A 32-byte piece is itself two 16-byte stores, the second of them
+    # at a further 16, so the span is measured in the 16 bytes one DS instruction really writes.
+    addr, offset = _tdmStoreLdsAddress(gwb, module, coordOffset0, coordOffset1,
+                                       span=max(0, bps - min(width, 16)))
     for piece in range(bps // width):
       src = vgpr(formatting(sumIdx * regsPerElement + piece * numRegs, "ValuC+", kw.states.c.startVgprValu), numRegs)
       module.add(dsStore(width, dstAddr=vgpr(addr), src=src, ds=DSModifiers(offset=offset + piece * width),
