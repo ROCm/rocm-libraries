@@ -467,6 +467,70 @@ namespace
             EXPECT_EQ(rocsparse_bsrmv_clear(handle, info), rocsparse_status_success);
     }
 
+    // bsrmv with the scalars that the kernels special-case: alpha == 0 (the matrix
+    // must not matter, y = beta * y) and beta == 0 (y must be overwritten, so a NaN
+    // already in y must not survive).
+    template <typename T>
+    void check_bsrmv_scalars(rocsparse_handle    handle,
+                             int32_t             bd,
+                             rocsparse_direction dir,
+                             int                 base,
+                             T                   alpha,
+                             T                   beta,
+                             bool                nan_y,
+                             bool                device_mode)
+    {
+        const int32_t mb  = 7;
+        const int32_t nb  = 9;
+        const int32_t bpr = 3;
+        SCOPED_TRACE(::testing::Message()
+                     << describe("bsrmv scalars", bd, bd, bpr, static_cast<int>(dir), base)
+                     << " alpha=" << alpha << " beta=" << beta << (nan_y ? " nan_y" : "")
+                     << (device_mode ? " device" : " host"));
+
+        const host_bsr<T> A  = make_bsr<T>(mb, nb, bpr, bd, bd, dir, base);
+        const size_t      ys = static_cast<size_t>(mb) * bd;
+
+        const std::vector<T> x   = make_vector<T>(static_cast<size_t>(nb) * bd, 4);
+        const std::vector<T> yin = make_vector<T>(ys, 6);
+        const std::vector<T> y0  = nan_y ? make_nan_vector<T>(ys) : yin;
+        const std::vector<T> want
+            = bsr_gemv(A, all_rows(mb), {}, alpha, x, beta, nan_y ? std::vector<T>(ys, T{}) : yin);
+
+        mat_descr descr;
+        ASSERT_NE(descr.d, nullptr);
+        ASSERT_EQ(rocsparse_set_mat_index_base(descr, to_base(base)), rocsparse_status_success);
+        device_vector<rocsparse_int> dptr(convert_vector<rocsparse_int>(A.ptr)),
+            dind(convert_vector<rocsparse_int>(A.ind));
+        device_vector<T> dval(A.val), dx(x), dy(y0);
+        device_vector<T> dalpha(std::vector<T>(1, alpha)), dbeta(std::vector<T>(1, beta));
+        ASSERT_TRUE(dptr.ptr && dind.ptr && dval.ptr && dx.ptr && dy.ptr && dalpha.ptr
+                    && dbeta.ptr);
+
+        scoped_pointer_mode mode(handle, device_mode);
+        ASSERT_EQ(bsrmv<T>(handle,
+                           dir,
+                           rocsparse_operation_none,
+                           mb,
+                           nb,
+                           A.nnzb(),
+                           device_mode ? dalpha.ptr : &alpha,
+                           descr,
+                           dval,
+                           dptr,
+                           dind,
+                           bd,
+                           nullptr,
+                           dx,
+                           device_mode ? dbeta.ptr : &beta,
+                           dy),
+                  rocsparse_status_success);
+        const std::vector<T> got = to_host(dy);
+        if(nan_y)
+            expect_no_nan(got, "bsrmv y with beta == 0");
+        EXPECT_TRUE(expect_near(want, got, "bsrmv y"));
+    }
+
     class L2DeviceBsrxmv : public rocsparse_ut::HandleTest
     {
     protected:
@@ -747,6 +811,36 @@ namespace
     {
         sweep_mv<float>({1, 2}, {3, 40}, true);
         sweep_mv<rocsparse_double_complex>({1, 3}, {4}, true);
+    }
+
+    TEST_F(L2DeviceBsrmv, alpha_zero_scales_y_by_beta)
+    {
+        // alpha == 0 with beta != 1 (host pointers): the early return is reserved
+        // for alpha == 0 and beta == 1, so y must still become beta * y.
+        for(const int32_t bd : {2, 3, 9})
+            for(int d = 0; d < 2; ++d)
+                for(const float beta : {2.0f, 0.0f, -0.5f})
+                {
+                    check_bsrmv_scalars<float>(handle,
+                                               bd,
+                                               d == 0 ? rocsparse_direction_row
+                                                      : rocsparse_direction_column,
+                                               bd & 1,
+                                               0.0f,
+                                               beta,
+                                               false,
+                                               false);
+                    if(::testing::Test::HasFailure())
+                        return;
+                }
+        check_bsrmv_scalars<rocsparse_double_complex>(handle,
+                                                      5,
+                                                      rocsparse_direction_row,
+                                                      0,
+                                                      rocsparse_double_complex(0.0, 0.0),
+                                                      rocsparse_double_complex(2.0, -1.0),
+                                                      false,
+                                                      false);
     }
 
     TEST_F(L2DeviceBsrmv, empty_matrix_scales_y_by_beta)
