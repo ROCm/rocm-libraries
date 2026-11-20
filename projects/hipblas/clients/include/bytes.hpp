@@ -47,9 +47,9 @@
 
 /* \brief byte counts of SET/GET_MATRIX/_ASYNC calls done in pairs for timing */
 template <typename T>
-constexpr double set_get_matrix_gbyte_count(int64_t m, int64_t n)
+constexpr double set_get_matrix_gbyte_count(int64_t rows, int64_t cols)
 {
-    return (sizeof(T) * m * n * 2.0) / 1e9;
+    return (sizeof(T) * rows * cols * 2.0) / 1e9;
 }
 
 /* \brief byte counts of SET/GET_VECTOR/_ASYNC */
@@ -312,26 +312,26 @@ constexpr double syr2_gbyte_count(int64_t n)
 
 /* \brief byte counts of TBMV */
 template <typename T>
-constexpr double tbmv_gbyte_count(int64_t m, int64_t k)
+constexpr double tbmv_gbyte_count(int64_t n, int64_t k)
 {
     // read band of A (main diagonal and k off-diagonals), x; write x
-    return (sizeof(T) * (band_count(m, m, 0, k) + 2.0 * m)) / 1e9;
+    return (sizeof(T) * (band_count(n, n, 0, k) + 2.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of TPMV */
 template <typename T>
-constexpr double tpmv_gbyte_count(int64_t m)
+constexpr double tpmv_gbyte_count(int64_t n)
 {
     // read triangle of A, x; write x
-    return (sizeof(T) * (tri_count(m) + 2.0 * m)) / 1e9;
+    return (sizeof(T) * (tri_count(n) + 2.0 * n)) / 1e9;
 }
 
 /* \brief byte counts of TRMV */
 template <typename T>
-constexpr double trmv_gbyte_count(int64_t m)
+constexpr double trmv_gbyte_count(int64_t n)
 {
     // read triangle of A, x; write x
-    return (sizeof(T) * ((m * (m + 1.0)) / 2 + 2 * m)) / 1e9;
+    return (sizeof(T) * ((n * (n + 1.0)) / 2 + 2 * n)) / 1e9;
 }
 
 /* \brief byte counts of TBSV */
@@ -434,7 +434,7 @@ constexpr double herkx_gbyte_count(int64_t n, int64_t k)
 
 /* \brief byte counts of DGMM */
 template <typename T>
-constexpr double dgmm_gbyte_count(int64_t n, int64_t m, int64_t k)
+constexpr double dgmm_gbyte_count(int64_t m, int64_t n, int64_t k)
 {
     // read A, read x, write C
     return (sizeof(T) * (2 * m * n + k)) / 1e9;
@@ -442,7 +442,7 @@ constexpr double dgmm_gbyte_count(int64_t n, int64_t m, int64_t k)
 
 /* \brief byte counts of GEAM */
 template <typename T>
-constexpr double geam_gbyte_count(int64_t n, int64_t m)
+constexpr double geam_gbyte_count(int64_t m, int64_t n)
 {
     // read A, read B, write to C
     return (sizeof(T) * 3 * m * n) / 1e9;
@@ -450,7 +450,7 @@ constexpr double geam_gbyte_count(int64_t n, int64_t m)
 
 /* \brief byte counts of HEMM */
 template <typename T>
-constexpr double hemm_gbyte_count(int64_t n, int64_t m, int64_t k)
+constexpr double hemm_gbyte_count(int64_t m, int64_t n, int64_t k)
 {
     // read A, B, C, write C
     return (sizeof(T) * (3 * m * n + tri_count(k))) / 1e9;
@@ -458,7 +458,7 @@ constexpr double hemm_gbyte_count(int64_t n, int64_t m, int64_t k)
 
 /* \brief byte counts of SYMM */
 template <typename T>
-constexpr double symm_gbyte_count(int64_t n, int64_t m, int64_t k)
+constexpr double symm_gbyte_count(int64_t m, int64_t n, int64_t k)
 {
     // read A, B, C, write C
     return (sizeof(T) * (3 * m * n + tri_count(k))) / 1e9;
