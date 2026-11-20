@@ -1205,10 +1205,12 @@ FWD_SMALLC_STEMS = (
 )
 # Small-K rows: (KH, KW, PAD, PAD_W, stride, K). 3x3 K=4: the SD VAE
 # quant_conv; 3x3 K=3: RGB output layers (SD VAE conv_out, Real-ESRGAN);
+# 3x3 K=1: single-channel heads (the Adobe denoiser's 32 -> 1 output conv);
 # 1x7 K=1 with "same" column padding: the HiFi-GAN conv_post on a 1-D signal.
 FWD_SMALLK_LAYERS = (
     (3, 3, 1, 1, 1, 4),
     (3, 3, 1, 1, 1, 3),
+    (3, 3, 1, 1, 1, 1),
     (1, 7, 0, 3, 1, 1),
 )
 # Flattened-pixel implicit-GEMM forward (direct_fwd_flex_mfma, gfx950): the
@@ -1391,6 +1393,19 @@ FWD_SMALLK_KNOBS_BY_LAYER = {
         (1, 8, 1, 2, 1, 250, 32, 2, True),
         (1, 4, 1, 8, 1, 506, 32, 2, True),
         (1, 8, 1, 4, 1, 506, 32, 2, True),
+    ),
+    # 3x3 K=1: 9 GEMM columns in one 16-wide tile; windows fill block_p.
+    (3, 3, 1): (
+        (1, 2, 1, 4, 6, 14, 32, 2, True),
+        (1, 2, 1, 8, 14, 14, 32, 2, True),
+        (1, 4, 1, 4, 14, 14, 32, 2, True),
+        (1, 4, 1, 4, 6, 30, 32, 2, False),
+        (1, 4, 1, 4, 6, 30, 32, 2, True),
+        (1, 4, 1, 8, 14, 30, 32, 2, True),
+        (1, 4, 1, 8, 2, 126, 32, 2, True),
+        (1, 8, 1, 4, 14, 30, 32, 2, True),
+        (1, 8, 1, 8, 30, 30, 32, 2, True),
+        (1, 8, 1, 8, 14, 62, 32, 2, True),
     ),
 }
 
