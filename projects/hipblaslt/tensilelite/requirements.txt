@@ -1,10 +1,56 @@
-packaging
-pyyaml
-msgpack>=1.0
-joblib>=1.4.0
-filelock
-numpy
-pandas
-# Math CI installs this file before running invoke build-client.
-# This bootstrap tool is not a wheel runtime dependency (see setup.py).
-invoke
+# Generated from pyproject.toml and uv.lock; do not edit directly.
+# Regenerate with: python scripts/generate_requirements.py
+
+# Minimal Python requirements to build and use the core project.
+
+cmake==4.3.1
+exceptiongroup==1.3.1 ; python_full_version < '3.11'
+    # via scikit-build-core
+filelock==3.25.2
+    # via tensilelite
+invoke==3.0.3
+joblib==1.5.3
+    # via tensilelite
+msgpack==1.1.2
+    # via tensilelite
+nanobind==2.12.0
+numpy==2.2.6 ; python_full_version < '3.11'
+    # via
+    #   pandas
+    #   tensilelite
+numpy==2.4.4 ; python_full_version >= '3.11'
+    # via
+    #   pandas
+    #   tensilelite
+packaging==26.0
+    # via
+    #   scikit-build-core
+    #   tensilelite
+pandas==2.3.3 ; python_full_version < '3.11'
+    # via tensilelite
+pandas==3.1.1 ; python_full_version >= '3.11'
+    # via tensilelite
+pathspec==1.1.1
+    # via scikit-build-core
+python-dateutil==3.0.0 ; python_full_version < '3.11'
+    # via pandas
+python-dateutil==4.0.0 ; python_full_version >= '3.11'
+    # via pandas
+pytz==2026.6 ; python_full_version < '3.11'
+    # via pandas
+pyyaml==6.0.2
+    # via tensilelite
+scikit-build-core==1.1.1
+setuptools==82.0.1
+six==1.17.0 ; python_full_version < '3.11'
+    # via python-dateutil
+tomli==2.4.1 ; python_full_version < '3.11'
+    # via scikit-build-core
+typing-extensions==4.15.0 ; python_full_version < '3.11'
+    # via
+    #   exceptiongroup
+    #   scikit-build-core
+tzdata==2026.6
+    # via
+    #   pandas
+    #   python-dateutil
