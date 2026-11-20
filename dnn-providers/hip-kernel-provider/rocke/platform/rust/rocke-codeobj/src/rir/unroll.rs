@@ -710,23 +710,33 @@ impl Unroller<'_> {
         self.constant_trips(op)
     }
 
-    /// `(lb, step, iterations)` of a loop with constant bounds.
-    fn constant_trips(&self, op: &Op) -> Option<(i64, i64, i64)> {
+    /// `(lb, ub, step)` of a loop with constant bounds and a step other than 0.
+    fn constant_bounds(&self, op: &Op) -> Option<(i64, i64, i64)> {
         let bound = |i: usize| op.operands.get(i).and_then(|v| self.consts.get(v)).map(|&c| c as i32 as i64);
         let (lb, ub, step) = (bound(0)?, bound(1)?, bound(2)?);
-        if step == 0 {
-            return None;
-        }
+        (step != 0).then_some((lb, ub, step))
+    }
+
+    /// `(lb, step, iterations)` of a loop with constant bounds that the IR
+    /// unrolls: `(ub - lb) // step`, as the reference lowering counts them.
+    fn constant_trips(&self, op: &Op) -> Option<(i64, i64, i64)> {
+        let (lb, ub, step) = self.constant_bounds(op)?;
         Some((lb, step, (ub - lb).div_euclid(step) - i64::from((ub - lb).rem_euclid(step) != 0 && step < 0)))
     }
 
-    /// `trip_count` of a loop without the hint that `self.auto` admits.
+    /// `(lb, step, iterations)` of a loop without the hint that `self.auto`
+    /// admits. Rolled, such a loop runs while `iv < ub`, so a last step
+    /// shorter than `step` is an iteration.
     fn auto_trip_count(&self, op: &Op) -> Option<(i64, i64, i64)> {
         let auto = self.auto?;
         if op.kind != OpKind::For || op.bool_attr("unroll") == Some(true) {
             return None;
         }
-        let (lb, step, trips) = self.constant_trips(op)?;
+        let (lb, ub, step) = self.constant_bounds(op)?;
+        if step < 0 {
+            return None;
+        }
+        let trips = (ub - lb + step - 1).div_euclid(step);
         let body = &op.regions[0].ops;
         if !(1..=auto.max_trips).contains(&trips) || has_loop(body) {
             return None;
@@ -1025,6 +1035,14 @@ mod tests {
         let mut k = super::super::parse::parse(&text).expect("parses");
         unroll_loops(&mut k, &mut FxHashMap::default()).expect("unrolls");
         assert_eq!(count_kind(&k.body, OpKind::For), 1);
+    }
+
+    /// 0, 4 and 8 are below 9: the rolled loop's third trip is one of the copies.
+    #[test]
+    fn a_last_short_step_is_an_iteration() {
+        let text = rolled(9, "", &masked_load("%base", 16)).replace("scf.for ( %c0, %ub, %c1, %z )", "scf.for ( %c0, %ub, %c4, %z )");
+        let (k, n) = auto_unrolled(&text, Auto::DEFAULT);
+        assert_eq!((n, count_kind(&k.body, OpKind::For), count_kind(&k.body, OpKind::BufferLoadScalar)), (1, 0, 3));
     }
 
     #[test]

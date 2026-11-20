@@ -815,6 +815,22 @@ impl<'k> Simplifier<'k> {
             OpKind::For => {
                 let body = op.regions.pop().ok_or_else(|| malformed("scf.for without a body"))?;
                 let iv = op.block_args[0];
+                // Constant bounds that give the loop no trip: its results are the values carried in. A rolled
+                // loop runs while `iv < ub`; one the IR unrolls counts `(ub - lb) // step`, the same with a
+                // positive step.
+                if let (Some(lb), Some(ub)) = (self.int(op.operands[0]), self.int(op.operands[1])) {
+                    let counted = op.bool_attr("unroll") == Some(true);
+                    if lb >= ub && (!counted || self.int(op.operands[2]).is_some_and(|step| step > 0)) {
+                        for (i, &result) in op.results.iter().enumerate() {
+                            let carried_in = op.operands[3 + i];
+                            self.replace(result, carried_in);
+                        }
+                        self.changed = true;
+                        self.rewrote = true;
+                        self.step = Step::Done;
+                        return Ok(());
+                    }
+                }
                 if let (Some(lb), Some(ub)) = (self.range(op.operands[0]), self.range(op.operands[1])) {
                     let step = self.int(op.operands[2]).unwrap_or(0);
                     if step > 0 {
@@ -3826,6 +3842,37 @@ kernel @smem_offset_probe {
         assert_eq!(ops.iter().filter(|op| op.kind == OpKind::GStore).count(), 2);
         let code = insts(&text);
         assert!(code.iter().any(|i| i.op == super::super::mir::Opc::SCbranchScc1));
+    }
+
+    #[test]
+    fn constant_loops_without_a_trip_go() {
+        let looped = |ub: i64| {
+            let body = format!(
+                "    %c1 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:1 }}\n    \
+                 %c4 : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:4 }}\n    \
+                 %ub : i32 = arith.constant (  ) {{ ity = s:\"i32\", value = i:{ub} }}\n    \
+                 %f0 : f32 = arith.bitcast ( %tid )\n    \
+                 %r : f32 = scf.for ( %c4, %ub, %c1, %f0 ) {{ iter_args = l:[ {{ name = s:\"%acc\", type = s:\"f32\" }} ], iv = s:\"%i\", \
+                 iv_type = s:\"i32\", num_iter_args = i:1 }}\n      region @body {{\n        \
+                 %s : f32 = arith.fadd ( %acc, %acc )\n        memref.global_store_typed ( %Y, %i, %s ) {{ align = i:4 }}\n        \
+                 scf.yield ( %s ) {{ num = i:1 }}\n      }}\n    memref.global_store_typed ( %Y, %tid, %r ) {{ align = i:4 }}\n"
+            );
+            let mut kernel = super::super::parse::parse(&probe("", &body)).unwrap();
+            let (mut lds, _) = super::super::analysis::lds_layout(&kernel);
+            optimize(&mut kernel, &mut lds).unwrap();
+            kernel
+        };
+        // 4..4 and 4..3: the body's store goes with the loop, and the value carried in is stored.
+        for ub in [4, 3] {
+            let kernel = looped(ub);
+            let ops = all_ops(&kernel.body);
+            assert!(ops.iter().all(|op| op.kind != OpKind::For), "ub {ub}");
+            let stores: Vec<_> = ops.iter().filter(|op| op.kind == OpKind::GStore).collect();
+            let cast = ops.iter().find(|op| op.kind == OpKind::Bitcast).expect("the value carried in");
+            assert_eq!((stores.len(), stores[0].operands[2]), (1, cast.results[0]), "ub {ub}");
+        }
+        // 4..5 runs once.
+        assert!(all_ops(&looped(5).body).iter().any(|op| op.kind == OpKind::For));
     }
 
     #[test]
