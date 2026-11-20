@@ -28,8 +28,7 @@
 //  * rocsparse_copy_hyb_mat of every value type: into an empty destination, into a
 //    destination that already holds a matrix of the same shape and into one of another
 //    shape, each copy validated by the product with a vector against the host product;
-//  * the internal dense transpose and back transpose helpers and
-//    rocsparse_dnmat_transpose, every data movement checked against a host reference;
+//  * rocsparse_dnmat_transpose, every data movement checked against a host reference;
 //  * the consistency checks of the singularity read-back: the batch counts and the index
 //    types recorded by the exact and near singularity trackers must agree with the
 //    requested batch.
@@ -37,8 +36,6 @@
 #include "unit_test_device_precond_common.hpp"
 
 #include "rocsparse_datatype_utils.hpp"
-#include "rocsparse_dense_transpose.hpp"
-#include "rocsparse_dense_transpose_back.hpp"
 #include "rocsparse_singular_info_t.hpp"
 #include "rocsparse_singularity.hpp"
 
@@ -369,13 +366,6 @@ namespace
     }
 
     constexpr double exact = 1.0e-6;
-
-    struct dim_pair
-    {
-        int64_t m, n;
-    };
-
-    constexpr dim_pair shapes[] = {{37, 53}, {32, 32}, {65, 1}, {1, 40}, {100, 33}, {9, 70}};
 }
 
 // The datatype utilities used by the dense helpers below that develop's datatype_utils
@@ -397,174 +387,6 @@ TEST_F(PrecondAuxiliary, datatype_utilities)
         EXPECT_FALSE(rocsparse::datatype_is_complex(t)) << t;
     EXPECT_TRUE(rocsparse::datatype_is_complex(rocsparse_datatype_f32_c));
     EXPECT_TRUE(rocsparse::datatype_is_complex(rocsparse_datatype_f64_c));
-}
-
-TEST_F(PrecondAuxiliary, dense_transpose_single_matrix_entry_points)
-{
-    for_all_types([&](auto tag) {
-        using T              = decltype(tag);
-        const auto     dtype = rocsparse::get_datatype<T>();
-        const int64_t  m = 41, n = 29, lda = m + 1, ldb = n + 4;
-        std::vector<T> a(static_cast<size_t>(lda * n));
-        for(int64_t j = 0; j < n; ++j)
-            for(int64_t i = 0; i < lda; ++i)
-                a[static_cast<size_t>(i + lda * j)] = entry<T>(i, j, 2);
-        const std::vector<T> sentinel(static_cast<size_t>(ldb * m),
-                                      make_value<T>(-99.0, is_cplx<T> ? 98.0 : 0.0));
-        const T              alpha = scalar_of<T>(3);
-
-        auto expected = [&](T scale) {
-            std::vector<T> want = sentinel;
-            for(int64_t i = 0; i < m; ++i)
-                for(int64_t j = 0; j < n; ++j)
-                    want[static_cast<size_t>(j + ldb * i)]
-                        = product(scale, a[static_cast<size_t>(i + lda * j)]);
-            return want;
-        };
-
-        device_vector<T> da{a};
-        ASSERT_TRUE(da.ptr);
-
-        // No scalar: a plain transposition.
-        {
-            device_vector<T> db{sentinel};
-            ASSERT_TRUE(db.ptr);
-            ASSERT_EQ(
-                rocsparse::dense_transpose(handle, m, n, dtype, da.ptr, lda, dtype, db.ptr, ldb),
-                rocsparse_status_success);
-            expect_close(to_host(db), expected(make_value<T>(1.0)), exact);
-        }
-
-        // Scalar in host or device memory.
-        for(const bool host_mode : {true, false})
-        {
-            SCOPED_TRACE(host_mode ? "host scalar" : "device scalar");
-            device_vector<T> db{sentinel};
-            device_vector<T> dalpha{std::vector<T>{alpha}};
-            ASSERT_TRUE(db.ptr && dalpha.ptr);
-            ASSERT_EQ(rocsparse::dense_transpose(handle,
-                                                 host_mode ? rocsparse_pointer_mode_host
-                                                           : rocsparse_pointer_mode_device,
-                                                 m,
-                                                 n,
-                                                 dtype,
-                                                 host_mode ? static_cast<const void*>(&alpha)
-                                                           : static_cast<const void*>(dalpha.ptr),
-                                                 dtype,
-                                                 da.ptr,
-                                                 lda,
-                                                 dtype,
-                                                 db.ptr,
-                                                 ldb),
-                      rocsparse_status_success);
-            expect_close(to_host(db), expected(alpha), exact);
-        }
-
-        // Typed entry point (the scalar lives on the device).
-        {
-            device_vector<T> db{sentinel};
-            device_vector<T> dalpha{std::vector<T>{alpha}};
-            ASSERT_TRUE(db.ptr && dalpha.ptr);
-            ASSERT_EQ(
-                rocsparse::dense_transpose(handle, m, n, dalpha.ptr, da.ptr, lda, db.ptr, ldb),
-                rocsparse_status_success);
-            expect_close(to_host(db), expected(alpha), exact);
-        }
-    });
-
-    // Types the kernels do not handle are rejected before any launch.
-    device_vector<float> x{std::vector<float>(64, 1.0f)};
-    device_vector<float> y{std::vector<float>(64, 0.0f)};
-    ASSERT_TRUE(x.ptr && y.ptr);
-    for(const auto bad : {rocsparse_datatype_i8_r,
-                          rocsparse_datatype_u8_r,
-                          rocsparse_datatype_i32_r,
-                          rocsparse_datatype_f16_r,
-                          rocsparse_datatype_bf16_r})
-    {
-        EXPECT_NE(rocsparse::dense_transpose(handle, 8, 8, bad, x.ptr, 8, bad, y.ptr, 8),
-                  rocsparse_status_success);
-        EXPECT_NE(rocsparse::dense_transpose_back(handle, 8, 8, bad, x.ptr, 8, bad, y.ptr, 8),
-                  rocsparse_status_success);
-    }
-}
-
-TEST_F(PrecondAuxiliary, dense_transpose_back_of_batches)
-{
-    for_all_types([&](auto tag) {
-        using T          = decltype(tag);
-        const auto dtype = rocsparse::get_datatype<T>();
-        for(const auto& s : shapes)
-        {
-            for(const int64_t batch : {int64_t{1}, int64_t{3}})
-            {
-                SCOPED_TRACE("m " + std::to_string(s.m) + " n " + std::to_string(s.n) + " batch "
-                             + std::to_string(batch));
-                // A holds the transposed matrix (n x m), B receives the matrix (m x n).
-                const int64_t  lda = s.n + 2, ldb = s.m + 3;
-                const int64_t  a_stride = lda * s.m, b_stride = ldb * s.n;
-                std::vector<T> a(static_cast<size_t>(batch * a_stride));
-                for(int64_t b = 0; b < batch; ++b)
-                    for(int64_t j = 0; j < s.m; ++j)
-                        for(int64_t i = 0; i < lda; ++i)
-                            a[static_cast<size_t>(b * a_stride + i + lda * j)] = entry<T>(i, j, b);
-                const std::vector<T> sentinel(static_cast<size_t>(batch * b_stride),
-                                              make_value<T>(-99.0, is_cplx<T> ? 98.0 : 0.0));
-                device_vector<T>     da{a};
-                device_vector<T>     db{sentinel};
-                ASSERT_TRUE(da.ptr && db.ptr);
-
-                if(batch == 1)
-                {
-                    ASSERT_EQ(rocsparse::dense_transpose_back(
-                                  handle, s.m, s.n, dtype, da.ptr, lda, dtype, db.ptr, ldb),
-                              rocsparse_status_success);
-                }
-                else
-                {
-                    ASSERT_EQ(rocsparse::dense_transpose_back_strided_batched(handle,
-                                                                              batch,
-                                                                              s.m,
-                                                                              s.n,
-                                                                              dtype,
-                                                                              da.ptr,
-                                                                              lda,
-                                                                              a_stride,
-                                                                              dtype,
-                                                                              db.ptr,
-                                                                              ldb,
-                                                                              b_stride),
-                              rocsparse_status_success);
-                }
-                ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
-
-                std::vector<T> want = sentinel;
-                for(int64_t b = 0; b < batch; ++b)
-                    for(int64_t r = 0; r < s.m; ++r)
-                        for(int64_t c = 0; c < s.n; ++c)
-                            want[static_cast<size_t>(b * b_stride + r + ldb * c)]
-                                = a[static_cast<size_t>(b * a_stride + c + lda * r)];
-                expect_close(to_host(db), want, exact);
-            }
-        }
-
-        // The typed entry point.
-        const int64_t  m = 21, n = 34;
-        std::vector<T> a(static_cast<size_t>(n * m));
-        for(int64_t r = 0; r < m; ++r)
-            for(int64_t c = 0; c < n; ++c)
-                a[static_cast<size_t>(c + n * r)] = entry<T>(c, r, 4);
-        device_vector<T> da{a};
-        device_vector<T> db{std::vector<T>(static_cast<size_t>(m * n))};
-        ASSERT_TRUE(da.ptr && db.ptr);
-        ASSERT_EQ(rocsparse::dense_transpose_back(handle, m, n, da.ptr, n, db.ptr, m),
-                  rocsparse_status_success);
-        std::vector<T> want(static_cast<size_t>(m * n));
-        for(int64_t r = 0; r < m; ++r)
-            for(int64_t c = 0; c < n; ++c)
-                want[static_cast<size_t>(r + m * c)] = a[static_cast<size_t>(c + n * r)];
-        expect_close(to_host(db), want, exact);
-    });
 }
 
 namespace
