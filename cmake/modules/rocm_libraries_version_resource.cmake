@@ -30,8 +30,9 @@
 # Fails configuration, on every platform, if a DLL, EXE or module target
 # defined under <dir> was never passed to rocm_libraries_add_version_resource.
 # Call it once at the end of a project's top-level CMakeLists.txt. Targets
-# from other source trees, from the build tree (e.g. FetchContent
-# dependencies), under EXCLUDE_DIRECTORIES or listed in EXCLUDE are skipped.
+# from other source trees, FetchContent dependencies (under
+# FETCHCONTENT_BASE_DIR, by default <build>/_deps), targets under
+# EXCLUDE_DIRECTORIES and targets listed in EXCLUDE are skipped.
 
 include_guard(GLOBAL)
 
