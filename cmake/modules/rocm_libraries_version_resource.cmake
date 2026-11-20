@@ -80,17 +80,6 @@ function(_rocm_libraries_version_resource_file TARGET OUT_FILENAME OUT_FILETYPE)
     set(${OUT_FILETYPE} ${filetype} PARENT_SCOPE)
 endfunction()
 
-# Write CONTENT to PATH only when it differs, so an unchanged resource keeps its timestamp.
-function(_rocm_libraries_version_resource_write PATH CONTENT)
-    set(existing "")
-    if(EXISTS "${PATH}")
-        file(READ "${PATH}" existing)
-    endif()
-    if(NOT existing STREQUAL CONTENT)
-        file(WRITE "${PATH}" "${CONTENT}")
-    endif()
-endfunction()
-
 # Embed VERSIONINFO in TARGET; see the top of this file for the arguments.
 function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
     # PARSE_ARGV keeps a quoted value containing ';' (e.g. a git subject) as one argument.
@@ -133,47 +122,14 @@ function(rocm_libraries_add_version_resource TARGET NAME DESCRIPTION)
     if(DEFINED ARG_COMMENTS)
         set(comments "${ARG_COMMENTS}")
         _rocm_libraries_version_resource_escape(comments)
-        set(comments_value "      VALUE \"Comments\", \"${comments}\\0\"\n")
+        set(comments_value "      VALUE \"Comments\", \"${comments}\\0\"")
     endif()
 
     set(version "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}")
     set(version_csv "${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0")
     string(TIMESTAMP year "%Y")
     set(rc_path "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_version.rc")
-    _rocm_libraries_version_resource_write("${rc_path}" "#include <winver.h>
-VS_VERSION_INFO VERSIONINFO
-FILEVERSION     ${version_csv}
-PRODUCTVERSION  ${version_csv}
-FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
-#ifdef _DEBUG
-FILEFLAGS       VS_FF_DEBUG
-#else
-FILEFLAGS       0
-#endif
-FILEOS          VOS_NT_WINDOWS32
-FILETYPE        ${filetype}
-FILESUBTYPE     VFT2_UNKNOWN
-BEGIN
-  BLOCK \"StringFileInfo\"
-  BEGIN
-    BLOCK \"040904B0\"
-    BEGIN
-      VALUE \"CompanyName\", \"Advanced Micro Devices, Inc.\\0\"
-      VALUE \"FileDescription\", \"${DESCRIPTION}\\0\"
-      VALUE \"FileVersion\", \"${version}.0\\0\"
-      VALUE \"InternalName\", \"${NAME}\\0\"
-      VALUE \"LegalCopyright\", \"Copyright (c) ${year} Advanced Micro Devices, Inc. All rights reserved.\\0\"
-      VALUE \"OriginalFilename\", \"${filename}\\0\"
-      VALUE \"ProductName\", \"${product_name}\\0\"
-      VALUE \"ProductVersion\", \"${version}\\0\"
-${comments_value}    END
-  END
-  BLOCK \"VarFileInfo\"
-  BEGIN
-    VALUE \"Translation\", 0x409, 1200
-  END
-END
-")
+    configure_file("${CMAKE_CURRENT_FUNCTION_LIST_DIR}/rocm_libraries_version_resource.rc.in" "${rc_path}" @ONLY)
     target_sources(${TARGET} PRIVATE "${rc_path}")
 endfunction()
 

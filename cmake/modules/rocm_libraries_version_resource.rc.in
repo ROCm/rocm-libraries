@@ -1,0 +1,40 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+//
+// Template for rocm_libraries_add_version_resource in rocm_libraries_version_resource.cmake.
+// String values arrive already escaped for RC.
+
+#include <winver.h>
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION     @version_csv@
+PRODUCTVERSION  @version_csv@
+FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+#ifdef _DEBUG
+FILEFLAGS       VS_FF_DEBUG
+#else
+FILEFLAGS       0
+#endif
+FILEOS          VOS_NT_WINDOWS32
+FILETYPE        @filetype@
+FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "CompanyName", "Advanced Micro Devices, Inc.\0"
+      VALUE "FileDescription", "@DESCRIPTION@\0"
+      VALUE "FileVersion", "@version@.0\0"
+      VALUE "InternalName", "@NAME@\0"
+      VALUE "LegalCopyright", "Copyright (c) @year@ Advanced Micro Devices, Inc. All rights reserved.\0"
+      VALUE "OriginalFilename", "@filename@\0"
+      VALUE "ProductName", "@product_name@\0"
+      VALUE "ProductVersion", "@version@\0"
+@comments_value@
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
