@@ -372,8 +372,9 @@ default), and they run on a two-GPU gfx950 node in Math CI's `precheckin` on pul
 **How the tiers are applied in CI.** TheRock's test lane runs hipBLASLt through the CTest presets
 built from this file ([TheRock#5230](https://github.com/ROCm/TheRock/pull/5230)), so the tiers above
 are what CI actually runs. A pull request to this repository gets the `standard` tier in Multi-Arch
-CI, because TheRock treats any rocm-libraries change as a submodule change; scheduled nightly runs
-get `comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
+CI, because TheRock treats any rocm-libraries change as a submodule change, except on gfx950, where
+a pull request that touches hipBLASLt gets the `quick` tier; scheduled nightly runs get
+`comprehensive`. The hipBLASLt ASAN lane drives `hipblaslt-test` directly through
 [`test/therock/test_hipblaslt.py`](../../test/therock/test_hipblaslt.py) with these filters:
 
 | ASAN tier | GTest filter |
@@ -664,6 +665,7 @@ the C++ build and test.
 | Library logic validation (`TensileLogic --check-all`) | Yes, implicitly | Component team | Runs inside the build ahead of codegen, so it blocks any kernel-generating build. No check name, no test report |
 | Logic corpus checks (`TensileLogic --check-all --strict-known-bugs`, `@needs_logic_corpus` tests) | Yes, when the logic or its validators are touched | Component team / CI | Enforced by the `Component CI: hipBLASLt Logic Corpus` lane, which rolls up to the required `Component CI Summary`. Unlike the build-wired call, it checks every architecture the change touches, and the whole corpus when a validator changes |
 | Unit tests (TensileLite Python) | Yes | Component team | Create, maintain, review |
+| CPU reference GEMM (`cpu-gemm-driver`, TensileLite C++ gtests) | Yes, in the selected standard tier | Component team | TheRock's TensileLite job runs the installed CTest suite and reports through `Multi-Arch CI Summary`. Math CI separately runs the build-tree cases for C++ coverage. AMAX-D uses thread limits 1, 3 and 8; see [CPU reference GEMM tests](tensilelite/TESTING.md#cpu-reference-gemm-tests) |
 | Integration / smoke tests (client GTest) | Yes | Component team | Validate behavior across key scenarios |
 | Characterization goldens | Yes, when `tensilelite/` is touched | Component team | Asserted by the gating `preliminary` job and by the TensileLite coverage lane. Review every golden diff; never bulk-regenerate |
 | AddressSanitizer build and tests | **No** | Component team | The hipBLASLt ASAN lane runs quick tests for relevant PRs, standard tests nightly, and the selected test type manually, but its summary check is not required. Keep it green anyway |
@@ -692,8 +694,8 @@ tracked as a gap.
 **Trusted gate.** A failure here is a real problem with the change.
 
 - Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
-- Client GTest `standard` tier on gfx94X-dcgpu and gfx950-dcgpu (Linux) and gfx110X (Windows),
-  through Multi-Arch CI
+- Client GTest `standard` tier on gfx94X-dcgpu (Linux) and gfx110X (Windows), and `quick` tier on
+  gfx950-dcgpu (Linux), through Multi-Arch CI
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
   gfx950 GPUs
 - The Math CI sensitive-word scan, the job named `static-analysis`

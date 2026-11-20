@@ -4077,20 +4077,31 @@ class IRBuilder:
     def global_load(
         self, ptr: Value, idx: Value, dtype: Type, *, align: int = 1
     ) -> Value:
+        """Load one ``dtype`` value from ``ptr[idx]``.
+
+        ``align`` is the alignment, in bytes, the caller guarantees for the
+        accessed element; one that is not an integer (``True``, ``8.0``) or
+        not a positive power of two is refused (:func:`_checked_align`). The typed wrappers (``global_load_f32`` ...) and
+        :meth:`masked_global_load` pass their ``align`` through here.
+        """
         return self._op(
             "memref.global_load_typed",
             [ptr, idx],
             [dtype],
-            attrs={"elem_type": dtype.name, "align": int(align)},
+            attrs={
+                "elem_type": dtype.name,
+                "align": _checked_align("memref.global_load_typed", align),
+            },
             result_name_hint="gl",
         ).result
 
     def global_load_f16(self, ptr: Value, idx: Value, *, align: int = 2) -> Value:
+        """Load one ``f16`` from ``ptr[idx]``; ``align`` as in :meth:`global_load`."""
         return self._op(
             "memref.global_load",
             [ptr, idx],
             [F16],
-            attrs={"align": int(align)},
+            attrs={"align": _checked_align("memref.global_load", align)},
             result_name_hint="gl",
         ).result
 
@@ -4151,10 +4162,19 @@ class IRBuilder:
     def global_store(
         self, ptr: Value, idx: Value, value: Value, *, align: int = 1
     ) -> None:
+        """Store scalar ``value`` to ``ptr[idx]``.
+
+        ``align`` is the alignment, in bytes, the caller guarantees for the
+        accessed element; one that is not an integer (``True``, ``8.0``) or
+        not a positive power of two is refused (:func:`_checked_align`).
+        """
         self._op(
             "memref.global_store_typed",
             [ptr, idx, value],
-            attrs={"elem_type": value.type.name, "align": int(align)},
+            attrs={
+                "elem_type": value.type.name,
+                "align": _checked_align("memref.global_store_typed", align),
+            },
         )
 
     def global_load_vN_f16(
@@ -7588,12 +7608,14 @@ class IRBuilder:
 
         Unlike :meth:`store_f16` (hardcoded ``half``), this derives the element
         type from ``value`` and lowers through ``memref.global_store_typed``.
+        A given ``align`` is checked as in :meth:`global_store`; without one
+        the op records none.
         """
         if idx is None:
             idx = self.const_i32(0)
         attrs: Dict[str, Any] = {}
         if align is not None:
-            attrs["align"] = int(align)
+            attrs["align"] = _checked_align("memref.global_store_typed", align)
         self._op("memref.global_store_typed", [ptr, idx, value], attrs=attrs)
 
     def ret(self) -> None:

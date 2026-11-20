@@ -4,17 +4,23 @@
 // =============================================================================
 // AITER Provenance
 //
-// Commit:  17d4a33b6f9535e820353ebc6217769efc3766d6
+// Release: AITER v0.1.29
+// Commit:  a0c4b69c146d94e393984bbe553b704e8c89a5e4
+//          (pinned in asm/asm_kernels/aiter_pins.json)
 // Sources:
-//   - aiter/csrc/include/mha_bwd.h           (lines 149-305: backward kernel args)
-//   - aiter/csrc/include/aiter_hip_common.h  (lines 48-62: p2, p3 padding structs)
+//   - aiter/csrc/include/mha_bwd.h           (lines 168-345: backward kernel args)
+//   - aiter/csrc/include/aiter_hip_common.h  (lines 144-154: p3, p2 padding structs)
 //
 // Adaptations:
 //   - Replaced AITER padding types p2/p3 with SgprPad2/SgprPad3 (see SgprPadding.hpp)
 //   - Removed all AITER #include directives
+//   - Omitted the gfx1250-only tail fields of fmha_bwd_dqdkdv_args (nsplit,
+//     split_stride) and fmha_bwd_post_kernel_args (max_seqlen_dq, nsplit,
+//     split_stride): the gfx942 and gfx950 kernels end at 0x2c0 and 0xc0
 //   - Added static_assert on sizeof to catch ABI drift
 //   - Added detailed field documentation for all three backward kernels
-//   - Organized into 3-kernel pipeline: odo → dqdkdv → dq_convert
+//   - Organized by pipeline: odo → dqdkdv → dq_convert or dq_shuffle (no post
+//     stage for gfx942 A16)
 // =============================================================================
 
 #pragma once
@@ -91,7 +97,7 @@ struct __attribute__((packed)) fmha_bwd_odo_args
     // ---- Dimensions --------------------------------------------------------
     uint32_t seqlen_q; // co:seqlen_q  Query sequence length
     SgprPad3 _p12;
-    uint32_t head_dim; // co:head_dim  Head dimension (D_v)
+    uint32_t head_dim; // co:head_dim  Head dimension (D_qk, as AITER passes it)
     SgprPad3 _p13;
 
     // ---- Group mode sequence pointers (nullptr for batch mode) -------------
@@ -116,7 +122,9 @@ struct __attribute__((packed)) fmha_bwd_odo_args
 struct __attribute__((packed)) fmha_bwd_dqdkdv_args
 {
     // ---- Outputs -----------------------------------------------------------
-    void* ptr_dq; // co:ptr_dq  Gradient w.r.t. Q (dq_acc if a32, else dQ)
+    // co:ptr_dq  dq_acc when a post stage follows, else dQ, which must then
+    // share Q's strides: the struct carries no dQ strides
+    void* ptr_dq;
     SgprPad2 _p0;
     void* ptr_dk; // co:ptr_dk  Gradient w.r.t. K [B, H_kv, S_k, D_qk]
     SgprPad2 _p1;
@@ -234,50 +242,61 @@ struct __attribute__((packed)) fmha_bwd_dqdkdv_args
     SgprPad2 _p40;
 
     // ---- dq_acc buffer configuration ---------------------------------------
-    uint32_t max_seqlen_dq; // co:max_seqlen_dq  Max Q seqlen (for a16)
+    uint32_t max_seqlen_dq; // co:max_seqlen_dq  S_q (A32) or ceil16(S_q) rows (A16)
     SgprPad3 _p41;
 
     // ---- Window attention mask coordinates ---------------------------------
-    int32_t mask_x; // co:mask_x  Window mask X coordinate (-1 if disabled)
+    // Both are 0 for the masks the kernel bakes in (none and causal). For a
+    // window, gfx942 takes window coordinates (computeMaskCoordinates) and
+    // gfx950 the FlashAttention window sizes, -1 for an unbounded side
+    // (dqdkdvMaskCoordinates()).
+    int32_t mask_x; // co:mask_x  gfx942 X coordinate; gfx950 right window size
     SgprPad3 _p42;
-    int32_t mask_y; // co:mask_y  Window mask Y coordinate (-1 if disabled)
+    int32_t mask_y; // co:mask_y  gfx942 Y coordinate; gfx950 left window size
     SgprPad3 _p43;
 };
 
 // =============================================================================
-// Kernel 3: DQ_CONVERT Post-Processing Kernel
+// Kernel 3: Post-processing kernel (DQ_CONVERT or DQ_SHUFFLE)
 // =============================================================================
-// Converts dQ from FP32 accumulator (dq_acc) to BF16 output format.
-// Only used with a32 accumulator kernels.  The a16 accumulator kernels write
-// dQ directly in BF16 and skip this step.
+// Writes dQ from the dq_acc buffer the DQDKDV kernel accumulated into. AITER
+// v0.1.29 runs one of two kernels with these arguments (mha_bwd.cu
+// fmha_v3_bwd(), :327-355):
+// - DQ_CONVERT for the A32 accumulator: dq_acc is FP32 [B, H_q, S_q, D_qk].
+// - DQ_SHUFFLE for the gfx950 A16 accumulator: dq_acc is in the Q dtype,
+//   [B, H_q, ceil16(S_q), 128 or 192].
+// The gfx942 A16 kernels write dQ directly and have no post stage.
 //
-// Inputs:  dq_acc [B, H_q, S_q, D_qk] (FP32 from dqdkdv kernel)
-// Outputs: dQ [B, H_q, S_q, D_qk] (BF16)
+// Outputs: dQ [B, H_q, S_q, D_qk] in the Q dtype
 //
 // Tensor layout: [Batch, Head, SeqLen, HeadDim]  (BHSD)
 struct __attribute__((packed)) fmha_bwd_post_kernel_args
 {
-    // ---- Input: FP32 dq accumulator buffer ---------------------------------
-    void* ptr_dq_acc; // co:ptr_dq_acc  dQ in FP32 [B, H_q, S_q, D_qk]
+    // ---- Input: dq accumulator buffer --------------------------------------
+    void* ptr_dq_acc; // co:ptr_dq_acc  dq_acc
     SgprPad2 _p0;
 
-    // ---- Output: BF16 dQ ---------------------------------------------------
-    void* ptr_dq; // co:ptr_dq  dQ in BF16 [B, H_q, S_q, D_qk]
+    // ---- Output: dQ --------------------------------------------------------
+    void* ptr_dq; // co:ptr_dq  dQ [B, H_q, S_q, D_qk]
     SgprPad2 _p1;
 
-    // ---- dq_acc tensor strides (in bytes, FP32) ----------------------------
-    uint32_t Hs_dq_acc; // co:Hs_dq_acc  dq_acc head stride
-    SgprPad3 _p2;
-    uint32_t BAs_dq_acc; // co:BAs_dq_acc  dq_acc batch stride
-    SgprPad3 _p3;
+    // ---- dq_acc tensor strides (in bytes) ----------------------------------
+    // The head and batch strides are 64-bit: the gfx950 post kernels load them
+    // as 64-bit, and the gfx942 kernels read the low 32 bits.
+    uint64_t Hs_dq_acc; // co:Hs_dq_acc  dq_acc head stride
+    SgprPad2 _p2;
+    uint64_t BAs_dq_acc; // co:BAs_dq_acc  dq_acc batch stride
+    SgprPad2 _p3;
     uint32_t Seqs_dq_acc; // co:Seqs_dq_acc  dq_acc sequence stride
     SgprPad3 _p4;
 
     // ---- dQ tensor strides (in bytes, BF16) --------------------------------
-    uint32_t Hs_dq; // co:Hs_dq  dQ head stride
-    SgprPad3 _p5;
-    uint32_t BAs_dq; // co:BAs_dq  dQ batch stride
-    SgprPad3 _p6;
+    // 64-bit like the dq_acc ones; the gfx942 and gfx950 kernels read the low
+    // 32 bits.
+    uint64_t Hs_dq; // co:Hs_dq  dQ head stride
+    SgprPad2 _p5;
+    uint64_t BAs_dq; // co:BAs_dq  dQ batch stride
+    SgprPad2 _p6;
     uint32_t Seqs_dq; // co:Seqs_dq  dQ sequence stride
     SgprPad3 _p7;
 
@@ -294,9 +313,11 @@ struct __attribute__((packed)) fmha_bwd_post_kernel_args
     SgprPad2 _p11;
 };
 
-// Compile-time ABI verification: the struct sizes must match AITER's
-// definitions exactly.  Any mismatch indicates the kernel ABI has changed and
-// the structs must be updated.
+// Compile-time ABI verification: the struct sizes match AITER's definitions up
+// to the gfx1250-only tail fields of the dqdkdv and post structs, which the
+// gfx942 and gfx950 kernels do not declare (their kernarg segments are 704 and
+// 192 bytes). Any mismatch indicates the kernel ABI has changed and the structs
+// must be updated.
 static_assert(sizeof(fmha_bwd_dqdkdv_args) == 704,
               "fmha_bwd_dqdkdv_args size mismatch with AITER ABI");
 
@@ -305,12 +326,13 @@ static_assert(sizeof(fmha_bwd_odo_args) == 256, "fmha_bwd_odo_args size mismatch
 static_assert(sizeof(fmha_bwd_post_kernel_args) == 192,
               "fmha_bwd_post_kernel_args size mismatch with AITER ABI");
 
-// Per-field offset checks for the most load-bearing kernarg fields.  sizeof
-// pins total layout, but the kernel reads each field by SGPR index — a
+// Per-field offset checks for the fields most exposed to drift. sizeof pins
+// the total layout, but the kernel reads each field by SGPR index — a
 // toolchain change that honoured `__attribute__((packed))` differently could
 // keep the total size while shifting individual offsets and silently corrupt
-// the dispatch.  Offsets below come from AITER's mha_bwd.h hex annotations
-// (commit 9522048).
+// the dispatch. Offsets below come from AITER v0.1.29 mha_bwd.h (hex
+// annotations on fmha_bwd_dqdkdv_args; 16-byte SGPR slots on
+// fmha_bwd_post_kernel_args).
 static_assert(offsetof(fmha_bwd_dqdkdv_args, ptr_dq) == 0x00,
               "fmha_bwd_dqdkdv_args::ptr_dq offset drift vs AITER ABI");
 static_assert(offsetof(fmha_bwd_dqdkdv_args, seqlen_q) == 0xb0,
@@ -319,6 +341,8 @@ static_assert(offsetof(fmha_bwd_dqdkdv_args, Ts) == 0xc0,
               "fmha_bwd_dqdkdv_args::Ts offset drift vs AITER ABI");
 static_assert(offsetof(fmha_bwd_post_kernel_args, Hs_dq_acc) == 0x20,
               "fmha_bwd_post_kernel_args::Hs_dq_acc offset drift vs AITER ABI");
+static_assert(offsetof(fmha_bwd_post_kernel_args, Hs_dq) == 0x50,
+              "fmha_bwd_post_kernel_args::Hs_dq offset drift vs AITER ABI");
 
 // NOLINTEND(readability-identifier-naming)
 
