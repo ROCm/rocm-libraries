@@ -99,6 +99,28 @@ class ParseInstalledCTestTest(unittest.TestCase):
             )
             self.assertEqual(sweep.discover(root, label="^quick$"), [])
 
+    def test_missing_components_accepts_source_quick_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "share" / "rocdecode" / "samples" / "videoDecodeRaw").mkdir(
+                parents=True
+            )
+            (root / "share" / "rocdecode" / "video").mkdir()
+            self.assertEqual(
+                sweep.missing_components(root, "^quick$", ["rocdecode", "rocjpeg"]),
+                ["rocjpeg"],
+            )
+
+    def test_sample_binary_path_is_absolute(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "share" / "rocdecode" / "samples" / "videoDecodeRaw").mkdir(
+                parents=True
+            )
+            (root / "share" / "rocdecode" / "video").mkdir()
+            found = sweep.discover(root, label="^quick$", components=["rocdecode"])
+            self.assertTrue(Path(found[0]["tests"][0]["command"][0]).is_absolute())
+
     def test_rocjitsu_timeout_is_one_hour(self):
         self.assertEqual(sweep.timeout_seconds({"timeout": 300}), 3600)
         self.assertEqual(sweep.timeout_seconds({"timeout": 7200}), 3600)

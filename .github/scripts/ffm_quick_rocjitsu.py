@@ -217,7 +217,8 @@ def component_name_for(rocm_root: Path, ctest_file: Path) -> str | None:
 
 
 def _sample_root() -> Path:
-    return Path(os.environ.get("ROCJITSU_SAMPLE_ROOT", "rj-samples"))
+    # Absolute: each test runs with cwd set to the nightly source directory.
+    return Path(os.environ.get("ROCJITSU_SAMPLE_ROOT", "rj-samples")).resolve()
 
 
 def _quick_test(name: str, command: list[str]) -> dict:
@@ -338,7 +339,11 @@ def missing_components(rocm_root: Path, label: str, names: list[str]) -> list[st
     """Names from ``names`` that have no installed tests for ``label``."""
     if not names:
         return []
-    found = {group["component"] for group in discover(rocm_root, label=label)}
+    # Named lookups include the source-built rocjpeg/rocdecode cases.
+    found = {
+        group["component"]
+        for group in discover(rocm_root, label=label, components=names)
+    }
     return [name for name in names if name not in found]
 
 
