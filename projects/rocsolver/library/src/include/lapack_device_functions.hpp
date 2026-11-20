@@ -1067,7 +1067,7 @@ __device__ void nrm2(const rocblas_int tid, const rocblas_int n, T* A, const roc
 
 /** DOT finds the dot product of vectors x and y (or conj(y)).
     MAX_THDS should be 64, 128, 256, 512, or 1024, and sval should
-    be a shared array of size MAX_THDS. **/
+    be a shared array of size MaxWarpCount<MAX_THDS>. **/
 template <int MAX_THDS, bool CONJY, typename T>
 __device__ void dot(const rocblas_int tid,
                     const rocblas_int n,
