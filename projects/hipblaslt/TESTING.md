@@ -680,6 +680,7 @@ the C++ build and test.
 | Performance | No | Component team | Pull requests are not benchmarked. Benchmarking runs nightly, outside this repository (see above) |
 | rocjitsu race checks | No | Component team | Not running on PRs yet; planned in [TheRock#9914](https://github.com/ROCm/TheRock/pull/9914). The installed [`rocjitsu_race_smoke.py`](clients/scripts/rocjitsu/rocjitsu_race_smoke.py) runs a small hipblaslt-bench GEMM and a small TensileLite GEMM, emulating gfx942 or gfx950 on a CPU. TheRock must first select a rocm-libraries revision containing the runner; rocm-libraries CI must then select TheRock's integration. The planned test is advisory (`expect_failure`). The script's unit tests already run in the `Component CI: hipBLASLt rocjitsu scripts` lane |
 | rocjitsu GEMM workload runner unit tests (`clients/scripts/rocjitsu`) | Yes, when that directory changes | Component team | `Component CI: hipBLASLt rocjitsu scripts` lane, which rolls up to the required `Component CI Summary`. Stand-in benchmark and emulator, CPU only, seconds per run. The race workload itself runs nightly; see [Nightly Validation](#nightly-validation) |
+| Windows VERSIONINFO metadata | Yes, implicitly | Component team | `rocm_libraries_check_version_resources` at the end of the top-level `CMakeLists.txt` (and origami's) fails configure, on every platform, if a DLL or EXE target has no version-resource call (`hipblaslt_add_version_resource`, or `rocm_libraries_add_version_resource` in origami) and is not in its exclusion list, so a build catches any new binary that its options enable and that would ship without metadata. On Windows, configure also fails when no resource compiler can attach the resource, unless the build sets `ROCM_LIBRARIES_REQUIRE_VERSION_RESOURCE=OFF`, so every listed binary has the resource in its sources. No check name, no test report. Nothing inspects the linked binary |
 | Shared validation infrastructure | N/A | TheRock team | Provide shared build and test infrastructure |
 | System validation | N/A | QA | Execute system-level and release validation |
 | Release qualification | N/A | Component team + QA + TPM | Confirm readiness, review known risks |
@@ -697,6 +698,7 @@ tracked as a gap.
 **Trusted gate.** A failure here is a real problem with the change.
 
 - Build on both platforms, which includes the `TensileLogic --check-all` library logic validation
+  and the Windows version-resource completeness check
 - Client GTest `standard` tier on gfx94X-dcgpu (Linux) and gfx110X (Windows), and `quick` tier on
   gfx950-dcgpu (Linux), through Multi-Arch CI
 - The Math CI client suite on gfx90a, gfx942, gfx950 and gfx12, plus the multi-GPU cases on two
