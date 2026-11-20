@@ -250,6 +250,46 @@ set(rocsparse_source
   src/level3/csrmm/row_split/csrmmnn_device_row_split_shared_256_8.cpp
   src/level3/csrmm/row_split/csrmmnn_device_row_split_256_8_8.cpp
   src/level3/csrmm/row_split/csrmmnn_device_row_split_256_8_1.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_1.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_2.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_3.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_4.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_5.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_6.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_7.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_8.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_9.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_10.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_11.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_12.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_13.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_14.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_15.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_16.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_17.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_18.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_19.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_20.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_21.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_22.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_23.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_24.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_25.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_26.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_27.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_28.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_29.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_30.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_31.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_32.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_33.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_34.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_35.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_36.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_37.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_38.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_39.cpp
+  src/level3/csrmm/row_split/csrmmnn_device_row_split_general_256_8_40.cpp
   src/level3/csrmm/row_split/csrmmtn_device_row_split_256_4.cpp
   src/level3/csrmm/row_split/csrmmtt_device_row_split_256_4.cpp
   src/level3/csrmm/row_split/csrmm_device_row_split_remainder_256_8_8.cpp
@@ -270,6 +310,30 @@ set(rocsparse_source
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_14.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_15.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_16.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_17.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_18.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_19.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_20.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_21.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_22.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_23.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_24.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_25.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_26.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_27.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_28.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_29.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_30.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_31.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_32.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_33.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_34.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_35.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_36.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_37.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_38.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_39.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_32_40.cpp
   src/level3/csrmm/row_split/csrmm_device_row_split_256_8_8_2.cpp
   src/level3/csrmm/row_split/csrmm_device_row_split_256_32_8_2.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_1.cpp
@@ -288,6 +352,30 @@ set(rocsparse_source
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_14.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_15.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_16.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_17.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_18.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_19.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_20.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_21.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_22.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_23.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_24.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_25.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_26.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_27.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_28.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_29.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_30.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_31.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_32.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_33.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_34.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_35.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_36.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_37.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_38.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_39.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_8_40.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_1.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_2.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_3.cpp
@@ -304,6 +392,30 @@ set(rocsparse_source
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_14.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_15.cpp
   src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_16.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_17.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_18.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_19.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_20.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_21.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_22.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_23.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_24.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_25.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_26.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_27.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_28.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_29.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_30.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_31.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_32.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_33.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_34.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_35.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_36.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_37.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_38.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_39.cpp
+  src/level3/csrmm/row_split/csrmmnt_device_row_split_general_256_16_40.cpp
   # csrmm nnz split
   src/level3/csrmm/nnz_split/csrmmnn_device_nnz_split_main_256_8.cpp
   src/level3/csrmm/nnz_split/csrmmnn_device_nnz_split_main_256_4.cpp
