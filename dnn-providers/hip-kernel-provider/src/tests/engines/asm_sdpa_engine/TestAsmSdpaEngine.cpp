@@ -242,6 +242,23 @@ TEST_F(TestAsmSdpaEngine, ReportsNoEstimateWhenNoDeclaredModelIsDeployed)
     EXPECT_EQ(prediction.kind, hipdnn_flatbuffers_sdk::data_objects::PredictionKind::ENGINE);
 }
 
+/// The L1 models are trained on forward SDPA only; a backward graph binds every feature they
+/// read, so the engine must refuse it rather than answer with a forward model.
+TEST(TestAsmSdpaEngineDeclaration, ModelsCoverForwardSdpaOnly)
+{
+    using hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper;
+    auto forward = hipdnn_test_sdk::utilities::createValidSdpaFwdGraph();
+    auto backward = hipdnn_test_sdk::utilities::createValidSdpaBwdGraph();
+    auto batchnorm = hipdnn_test_sdk::utilities::createValidBatchnormInferenceGraph();
+
+    EXPECT_TRUE(
+        AsmSdpaEngine::modelsCover(GraphWrapper(forward.GetBufferPointer(), forward.GetSize())));
+    EXPECT_FALSE(
+        AsmSdpaEngine::modelsCover(GraphWrapper(backward.GetBufferPointer(), backward.GetSize())));
+    EXPECT_FALSE(AsmSdpaEngine::modelsCover(
+        GraphWrapper(batchnorm.GetBufferPointer(), batchnorm.GetSize())));
+}
+
 TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
 {
     std::set<std::string> seenArch;
