@@ -28,6 +28,9 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=0, help="K instead of the config shape's (0: keep)")
     ap.add_argument("--launches", type=int, default=4)
     ap.add_argument("--data", choices=("rand", "mxgemm"), default="mxgemm")
+    ap.add_argument("--seconds", type=float, default=0,
+                    help="instead of --launches: launch back to back (no sync between) for this long, "
+                         "e.g. while sampling power and clocks with amd-smi")
     ap.add_argument("--stamps", action="store_true",
                     help="set ROCKE_EXP_MX_RA_STAMP=1 and report the per-tile wave stamps of the last launch")
     o = ap.parse_args()
@@ -75,12 +78,24 @@ def main() -> None:
     args = prob.args()
     rt.launch(fn, grid, block, args, cluster=cluster)
     rt.wait_stream(0)
-    t0 = time.perf_counter()
-    for _ in range(o.launches):
-        rt.launch(fn, grid, block, args, cluster=cluster)
-        rt.wait_stream(0)
-    dt = (time.perf_counter() - t0) / o.launches
-    print(f"{o.launches} launches, {dt * 1e6:.1f} us each (host-timed, synchronised)", flush=True)
+    if o.seconds:
+        # Back to back: queue a batch, wait for it, repeat until the time is up.
+        n, t0 = 0, time.perf_counter()
+        while time.perf_counter() - t0 < o.seconds:
+            for _ in range(200):
+                rt.launch(fn, grid, block, args, cluster=cluster)
+            rt.wait_stream(0)
+            n += 200
+        dt = (time.perf_counter() - t0) / n
+        tf = 2.0 * shape[0] * shape[1] * shape[2] / dt / 1e12
+        print(f"{n} launches back to back in {o.seconds:.0f} s: {dt * 1e6:.1f} us each, {tf:.0f} TFLOP/s", flush=True)
+    else:
+        t0 = time.perf_counter()
+        for _ in range(o.launches):
+            rt.launch(fn, grid, block, args, cluster=cluster)
+            rt.wait_stream(0)
+        dt = (time.perf_counter() - t0) / o.launches
+        print(f"{o.launches} launches, {dt * 1e6:.1f} us each (host-timed, synchronised)", flush=True)
     if n_stamp:
         _report(rt, prob, shape, gx, gy, tiles, n_stamp, cluster)
     prob.free()
