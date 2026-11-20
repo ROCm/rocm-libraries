@@ -1618,6 +1618,18 @@ namespace TensileLite
             return m_beta;
         }
 
+        // The host alpha scalar. Defaults to 1 when the caller did not set one,
+        // so a predicate can reject alpha 0 without treating every problem as zero.
+        void setRuntimeAlpha(double alpha)
+        {
+            m_runtimeAlpha = alpha;
+        }
+
+        double runtimeAlpha() const
+        {
+            return m_runtimeAlpha;
+        }
+
         std::string const& aNames() const
         {
             return m_names[ContractionProblemGemm::TENSOR::A];
@@ -1823,6 +1835,7 @@ namespace TensileLite
 
         bool   m_transposeC01;
         double m_beta;
+        double m_runtimeAlpha = 1.0;
 
         size_t m_maxProblemSize = 1;
 
