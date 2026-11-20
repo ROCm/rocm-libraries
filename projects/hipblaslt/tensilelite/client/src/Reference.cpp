@@ -355,6 +355,37 @@ namespace TensileLite
                                             * static_cast<RMultT>(static_cast<RMathOpMultT>(r)));
         }
 
+        // Int32 epilogues wrap modulo 2^32 like the GPU kernels (v_mul_lo_u32,
+        // v_add_u32); signed int32_t arithmetic would make overflow undefined.
+        template <typename EpilogueT, typename TypeL, typename TypeR>
+        inline EpilogueT epilogueMultiply(TypeL l, TypeR r)
+        {
+            if constexpr(std::is_same_v<EpilogueT, int32_t>)
+                return static_cast<int32_t>(static_cast<uint32_t>(static_cast<int32_t>(l))
+                                            * static_cast<uint32_t>(static_cast<int32_t>(r)));
+            else
+                return multiply<EpilogueT>(l, r);
+        }
+
+        template <typename EpilogueT, typename T>
+        inline void epilogueMulAssign(EpilogueT& l, T r)
+        {
+            if constexpr(std::is_same_v<EpilogueT, int32_t>)
+                l = epilogueMultiply<int32_t>(l, r);
+            else
+                l *= r;
+        }
+
+        template <typename EpilogueT, typename T>
+        inline void epilogueAddAssign(EpilogueT& l, T r)
+        {
+            if constexpr(std::is_same_v<EpilogueT, int32_t>)
+                l = static_cast<int32_t>(static_cast<uint32_t>(l)
+                                         + static_cast<uint32_t>(static_cast<int32_t>(r)));
+            else
+                l += r;
+        }
+
         template <typename Accumulator,
                   typename MathOpAccum = Accumulator,
                   typename TypeL,
@@ -2155,11 +2186,11 @@ namespace TensileLite
                         = GetValue<EpilogueT>(problem.alphaType(), inputs.scaleB, 0, aConjugate);
                     if constexpr(sizeof(typename Inputs::AType)
                                  <= sizeof(typename Inputs::ComputeInputTypeA))
-                        alpha *= scaleA;
+                        epilogueMulAssign(alpha, scaleA);
 
                     if constexpr(sizeof(typename Inputs::BType)
                                  <= sizeof(typename Inputs::ComputeInputTypeB))
-                        alpha *= scaleB;
+                        epilogueMulAssign(alpha, scaleB);
                 }
                 else if(problem.useScaleAB() == "Vector")
                 {
@@ -2171,14 +2202,14 @@ namespace TensileLite
                         = GetValue<EpilogueT>(problem.alphaType(), inputs.scaleB, posB, aConjugate);
                     if constexpr(sizeof(typename Inputs::AType)
                                  <= sizeof(typename Inputs::ComputeInputTypeA))
-                        alpha *= scaleA;
+                        epilogueMulAssign(alpha, scaleA);
 
                     if constexpr(sizeof(typename Inputs::BType)
                                  <= sizeof(typename Inputs::ComputeInputTypeB))
-                        alpha *= scaleB;
+                        epilogueMulAssign(alpha, scaleB);
                 }
 
-                auto resultD = multiply<EpilogueT>(alpha, value);
+                auto resultD = epilogueMultiply<EpilogueT>(alpha, value);
 
                 if(problem.useScaleAlphaVec() && !problem.getParams().deviceScalarAlpha())
                 {
@@ -2190,20 +2221,20 @@ namespace TensileLite
                         pos = int(dNum % problem.d().sizes()[0]);
                     EpilogueT scaleAlphaVec = GetValue<EpilogueT>(
                         problem.alphaType(), inputs.scaleAlphaVec, pos, aConjugate);
-                    resultD *= scaleAlphaVec;
+                    epilogueMulAssign(resultD, scaleAlphaVec);
                 }
 
                 if(beta != zero)
                 {
-                    EpilogueT cValue = multiply<EpilogueT>(beta, cPtr[cIndex]);
+                    EpilogueT cValue = epilogueMultiply<EpilogueT>(beta, cPtr[cIndex]);
                     if(problem.useScaleCD())
                     {
                         EpilogueT scaleC
                             = GetValue<EpilogueT>(problem.betaType(), inputs.scaleC, 0, aConjugate);
-                        cValue *= scaleC;
+                        epilogueMulAssign(cValue, scaleC);
                     }
 
-                    resultD += cValue;
+                    epilogueAddAssign(resultD, cValue);
                 }
 
                 // bias
@@ -2220,7 +2251,7 @@ namespace TensileLite
                     EpilogueT bias = GetValue<EpilogueT>(
                         problem.bias().dataType(), inputs.bias, pos, aConjugate);
 
-                    resultD += bias;
+                    epilogueAddAssign(resultD, bias);
                 }
                 // E
                 if(problem.useE() && !problem.useGradient())
@@ -2256,7 +2287,7 @@ namespace TensileLite
                                        dataE,
                                        problem.getParams().activationEnum(),
                                        actArgs);
-                    resultD *= dataE;
+                    epilogueMulAssign(resultD, dataE);
                 }
                 else
                 {
@@ -2280,7 +2311,7 @@ namespace TensileLite
                 {
                     EpilogueT scaleD
                         = GetValue<EpilogueT>(problem.betaType(), inputs.scaleD, 0, aConjugate);
-                    resultD *= scaleD;
+                    epilogueMulAssign(resultD, scaleD);
                 }
                 if(problem.useBias() && problem.useGradient()
                    && (problem.biasSrc() == ContractionProblemGemm::D))
