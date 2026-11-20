@@ -27190,7 +27190,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ztrtri_strided_batched(rocblas_handle 
     @param[out]
     info        pointer to a rocblas_int on the GPU.
                 If info = 0, successful exit.
-                If info = i > 0, D is singular. D[i,i] is the first diagonal zero.
+                If info = i > 0, D is singular. D[i,i] is the first diagonal zero, or the first
+                pivot that is NaN (as in LAPACK).
     ********************************************************************/
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ssytf2(rocblas_handle handle,
@@ -27320,7 +27321,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2(rocblas_handle handle,
     @param[out]
     info        pointer to rocblas_int. Array of batch_count integers on the GPU.
                 If info[l] = 0, successful exit for factorization of A_l.
-                If info[l] = i > 0, D_l is singular. D_l[i,i] is the first diagonal zero.
+                If info[l] = i > 0, D_l is singular. D_l[i,i] is the first diagonal zero, or the first
+                pivot that is NaN (as in LAPACK).
     @param[in]
     batch_count rocblas_int. batch_count >= 0.
                 Number of matrices in the batch.
@@ -27465,7 +27467,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2_batched(rocblas_handle handle,
     @param[out]
     info        pointer to rocblas_int. Array of batch_count integers on the GPU.
                 If info[l] = 0, successful exit for factorization of A_l.
-                If info[l] = i > 0, D_l is singular. D_l[i,i] is the first diagonal zero.
+                If info[l] = i > 0, D_l is singular. D_l[i,i] is the first diagonal zero, or the first
+                pivot that is NaN (as in LAPACK).
     @param[in]
     batch_count rocblas_int. batch_count >= 0.
                 Number of matrices in the batch.
