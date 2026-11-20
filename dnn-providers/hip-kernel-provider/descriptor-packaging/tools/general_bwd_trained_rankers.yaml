@@ -8,5 +8,9 @@
 #   trained_catalog_sha256:   arch -> projects/hipdnn/tools/IngestorGenerator/tools/
 #                             catalog_fingerprint.py over every main-slot KDP of that arch
 # Empty binds nothing: the main slot ranks by its native score alone.
-sort_kernel_catalog: {}
-trained_catalog_sha256: {}
+sort_kernel_catalog:
+  gfx942: [10c3f054-934d-4c8d-98ca-f8c9111c8009]
+  gfx950: [8b6c4f63-6c5a-4206-941a-da5c14a10aff]
+trained_catalog_sha256:
+  gfx942: 3fefd02306d60b6685428b792c7628c6de104c3d1a8e8d361438048588e556d1
+  gfx950: 329334a3fd39058104aaa0e2bd72c4ad71244d08ed76e8fa3b7c0f60d5c0b4e2
