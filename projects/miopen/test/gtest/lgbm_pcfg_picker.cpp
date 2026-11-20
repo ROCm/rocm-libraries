@@ -1,7 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// CPU-only unit tests for the per-solver perf-config picker. No GPU required.
+// Unit tests for the per-solver perf-config picker. All but one are CPU-only.
+// GPU_LgbmPcfgPickerStrictArch_NONE needs a HIP device for its MockHandle.
 // Three kinds of checks:
 //   * a self-contained ranking invariant: ScorePickForTest returns a
 //     deterministic permutation of the bucket's real candidate descriptors

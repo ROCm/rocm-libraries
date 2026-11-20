@@ -1,7 +1,8 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// CPU-only unit tests for the cross-arch LGBM solver picker. No GPU required.
+// Unit tests for the cross-arch LGBM solver picker. All but one are CPU-only.
+// GPU_LgbmPickerStrictArch_NONE needs a HIP device for its MockHandle.
 // Two kinds of checks:
 //   * self-contained invariants (vocab loads and is self-consistent; the
 //     scoring seam picks a valid in-range candidate deterministically), and
