@@ -80,7 +80,7 @@ module rocrand
     enumerator :: ROCRAND_SCRAMBLED_DIRECTION_VECTORS_64_JOEKUO6 = 104
   end enum
 
-  integer(c_int), parameter :: ROCRAND_VERSION = 500200
+  integer(c_int), parameter :: ROCRAND_VERSION = 500300
   integer(c_int), parameter :: ROCRAND_DEFAULT_MAX_BLOCK_SIZE = 256
 
 
