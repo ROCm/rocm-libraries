@@ -750,6 +750,10 @@ struct BlockFmhaPipelineQRKSVSTdmSchedFp8
                 });
             });
         }
+#if CK_TILE_HAS_ASYNCMARK
+        // s_wait_asynccnt counts asyncmarks: an unmarked copy would not be waited on.
+        asyncmark();
+#endif
     }
 
     // Lane l reads the scales of WMMA row/column i * 16 + l % 16; p points at its lane's first.
