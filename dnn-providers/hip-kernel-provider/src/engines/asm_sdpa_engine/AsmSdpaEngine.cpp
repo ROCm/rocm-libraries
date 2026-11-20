@@ -155,6 +155,13 @@ void AsmSdpaEngine::getDetails(Handle& handle,
         handle, id(), knobs, behaviorNotes, detailsOut);
 }
 
+bool AsmSdpaEngine::modelsCover(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph)
+{
+    return graph.nodeCount() == 1
+           && graph.getNodeWrapper(0).attributesType()
+                  == hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::SdpaAttributes;
+}
+
 hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPrediction(
     Handle& handle,
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
@@ -176,6 +183,11 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
         // RFC 0019 §11.2's "A only (opaque)" row: this engine exposes no catalog and no
         // knobs, so it selects its own kernel and has no exact configuration to name.
         result.reason = "ASM SDPA selects its own kernel and predicts no exact configuration";
+        return result;
+    }
+    if(!modelsCover(graph))
+    {
+        result.reason = "ASM SDPA's engine models cover forward SDPA graphs only";
         return result;
     }
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
