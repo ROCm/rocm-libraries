@@ -3714,7 +3714,8 @@ __device__ inline void k1Col2im(const K1Col2imArgs& a)
     const int quads = (a.c + 3) / 4;
     const long long cols = static_cast<long long>(a.c) * a.ft * a.fr * a.fs;
     const long long elems = static_cast<long long>(a.n) * a.di * a.hi * a.wi * quads;
-    const bool whole = a.c % 4 == 0;
+    const bool whole = a.c % 4 == 0 && a.tapMajor != 0;
+    const long long taps = static_cast<long long>(a.ft) * a.fr * a.fs;
     const long long step = static_cast<long long>(gridDim.x) * blockDim.x;
     for(long long i = static_cast<long long>(blockIdx.x) * blockDim.x + threadIdx.x; i < elems;
         i += step)
@@ -3748,8 +3749,9 @@ __device__ inline void k1Col2im(const K1Col2imArgs& a)
                         continue;
                     const long long row
                         = ((n * a.dout + od) * a.ho + oh) * static_cast<long long>(a.wo) + ow;
-                    const long long col
-                        = ((static_cast<long long>(t) * a.fr + q) * a.fs + s) * a.c + c0;
+                    const long long tap = (static_cast<long long>(t) * a.fr + q) * a.fs + s;
+                    const long long col = a.tapMajor != 0 ? tap * a.c + c0 : c0 * taps + tap;
+                    const long long cstep = a.tapMajor != 0 ? 1 : taps;
                     for(int sp = 0; sp < a.splits; ++sp)
                     {
                         const float* p = a.partial + sp * a.splitElems + row * cols + col;
@@ -3764,7 +3766,7 @@ __device__ inline void k1Col2im(const K1Col2imArgs& a)
                         else
                         {
                             for(int e = 0; e < 4 && c0 + e < a.c; ++e)
-                                sum[e] += p[e];
+                                sum[e] += p[e * cstep];
                         }
                     }
                 }

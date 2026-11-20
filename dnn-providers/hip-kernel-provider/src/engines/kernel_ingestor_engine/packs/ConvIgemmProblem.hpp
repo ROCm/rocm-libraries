@@ -72,6 +72,8 @@ struct IgemmProblem
     /// dx, after the staged operands in the workspace; 0 bytes otherwise.
     size_t col2imOffset = 0;
     size_t col2imBytes = 0;
+    /// The columns' order, the filter's: (tap, c) for K T R S C, (c, tap) for K C T R S.
+    bool col2imTapMajor = true;
 };
 
 /// @p problem without the filter staging, for a direct-filter config: the remaining staged
@@ -106,10 +108,11 @@ std::optional<IgemmProblem> withPatchView(const IgemmProblem& problem);
 /**
  * @brief Backward data @p problem as the col2im configs run it, or nullopt where they do not.
  *
- * One GEMM over dy's positions with the filter's T R S C as columns (as withPatchView's
+ * One GEMM over dy's positions with the filter's taps x channels as columns (as withPatchView's
  * backward data), for any filter, stride, padding and dilation: its fp32 columns go to the
  * workspace and ConvIgemmCol2im adds, for each dx element, those of the dy positions it reaches,
- * tap by tap. Served for one group and a packed, unreflected K T R S C filter (read in place),
+ * tap by tap. Served for one group and a packed, unreflected K T R S C or K C T R S filter (read
+ * in place; the columns follow its order, col2imTapMajor),
  * where the GEMM has fewer multiply-adds than the GEMMs over dx's rows (dy positions times taps
  * below dx positions times the taps a stride phase reaches: "valid" or partly padded layers,
  * whose dx rows mostly multiply padding), for convolutions that are not patch convolutions
