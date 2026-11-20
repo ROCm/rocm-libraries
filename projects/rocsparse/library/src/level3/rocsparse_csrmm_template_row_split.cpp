@@ -1096,6 +1096,206 @@ namespace rocsparse
         return rocsparse_status_success;
     }
 
+#define LAUNCH_CSRMM_ROW_SPLIT_GENERAL(CSRMM_DIM, WFSIZE, COL)                                  \
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                         \
+        (rocsparse::csrmm_row_split_general_kernel<CSRMM_DIM, WFSIZE, COL>),                    \
+        dim3((m - 1) / (CSRMM_DIM / WFSIZE) + 1, get_grid_size_y<J>(handle, batch_count_C)),    \
+        dim3(CSRMM_DIM),                                                                        \
+        0,                                                                                      \
+        handle->stream,                                                                         \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),                           \
+        ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, beta_device_host),                            \
+        handle->pointer_mode == rocsparse_pointer_mode_host,                                    \
+        conj_A,                                                                                 \
+        conj_B,                                                                                 \
+        order_B,                                                                                \
+        trans_B,                                                                                \
+        start,                                                                                  \
+        m,                                                                                      \
+        batch_count_C,                                                                          \
+        offsets_batch_stride_A,                                                                 \
+        columns_values_batch_stride_A,                                                          \
+        csr_row_ptr,                                                                            \
+        csr_col_ind,                                                                            \
+        csr_val,                                                                                \
+        dense_B,                                                                                \
+        ldb,                                                                                    \
+        batch_stride_B,                                                                         \
+        dense_C,                                                                                \
+        ldc,                                                                                    \
+        batch_stride_C,                                                                         \
+        order_C,                                                                                \
+        descr->base);
+
+#define CSRMM_GENERAL_ENTRY(COL) {COL, csrmm_launch_general<I, J, A, B, C, T, COL>}
+
+    // One exact column count of the combined NN/NT general kernel. Block 256, wavefront 8.
+    template <typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C,
+              typename T,
+              uint32_t COL>
+    rocsparse_status csrmm_launch_general(rocsparse_handle          handle,
+                                          const T*                  alpha_device_host,
+                                          const T*                  beta_device_host,
+                                          J                         start,
+                                          J                         end,
+                                          J                         m,
+                                          J                         n,
+                                          J                         batch_count_C,
+                                          int64_t                   offsets_batch_stride_A,
+                                          int64_t                   columns_values_batch_stride_A,
+                                          int64_t                   ldb,
+                                          int64_t                   batch_stride_B,
+                                          int64_t                   ldc,
+                                          int64_t                   batch_stride_C,
+                                          const I*                  csr_row_ptr,
+                                          const J*                  csr_col_ind,
+                                          const A*                  csr_val,
+                                          const B*                  dense_B,
+                                          C*                        dense_C,
+                                          rocsparse_order           order_C,
+                                          const rocsparse_mat_descr descr,
+                                          bool                      conj_A,
+                                          bool                      conj_B,
+                                          rocsparse_order           order_B,
+                                          rocsparse_operation       trans_B)
+    {
+        LAUNCH_CSRMM_ROW_SPLIT_GENERAL(256, 8, COL);
+        return rocsparse_status_success;
+    }
+
+    // NN and NT, trans_A == none. Columns are covered by the combined general kernel,
+    // 64 at a time, with a shorter kernel for a trailing remainder.
+    template <typename I, typename J, typename A, typename B, typename C, typename T>
+    rocsparse_status csrmm_template_row_split_general(rocsparse_handle          handle,
+                                                      bool                      conj_A,
+                                                      bool                      conj_B,
+                                                      J                         m,
+                                                      J                         n,
+                                                      J                         k,
+                                                      I                         nnz,
+                                                      J                         batch_count_A,
+                                                      int64_t                   offsets_batch_stride_A,
+                                                      int64_t                   columns_values_batch_stride_A,
+                                                      const T*                  alpha_device_host,
+                                                      const rocsparse_mat_descr descr,
+                                                      const A*                  csr_val,
+                                                      const I*                  csr_row_ptr,
+                                                      const J*                  csr_col_ind,
+                                                      const B*                  dense_B,
+                                                      int64_t                   ldb,
+                                                      J                         batch_count_B,
+                                                      int64_t                   batch_stride_B,
+                                                      rocsparse_order           order_B,
+                                                      rocsparse_operation       trans_B,
+                                                      const T*                  beta_device_host,
+                                                      C*                        dense_C,
+                                                      int64_t                   ldc,
+                                                      J                         batch_count_C,
+                                                      int64_t                   batch_stride_C,
+                                                      rocsparse_order           order_C,
+                                                      int64_t                   max_row_nnz)
+    {
+        ROCSPARSE_ROUTINE_TRACE;
+
+        using launch_t = rocsparse_status (*)(rocsparse_handle,
+                                              const T*,
+                                              const T*,
+                                              J,
+                                              J,
+                                              J,
+                                              J,
+                                              J,
+                                              int64_t,
+                                              int64_t,
+                                              int64_t,
+                                              int64_t,
+                                              int64_t,
+                                              int64_t,
+                                              const I*,
+                                              const J*,
+                                              const A*,
+                                              const B*,
+                                              C*,
+                                              rocsparse_order,
+                                              const rocsparse_mat_descr,
+                                              bool,
+                                              bool,
+                                              rocsparse_order,
+                                              rocsparse_operation);
+
+        static const std::map<int, launch_t> s_general_dispatch = {
+            CSRMM_GENERAL_ENTRY(1),  CSRMM_GENERAL_ENTRY(2),  CSRMM_GENERAL_ENTRY(3),
+            CSRMM_GENERAL_ENTRY(4),  CSRMM_GENERAL_ENTRY(5),  CSRMM_GENERAL_ENTRY(6),
+            CSRMM_GENERAL_ENTRY(7),  CSRMM_GENERAL_ENTRY(8),  CSRMM_GENERAL_ENTRY(9),
+            CSRMM_GENERAL_ENTRY(10), CSRMM_GENERAL_ENTRY(11), CSRMM_GENERAL_ENTRY(12),
+            CSRMM_GENERAL_ENTRY(13), CSRMM_GENERAL_ENTRY(14), CSRMM_GENERAL_ENTRY(15),
+            CSRMM_GENERAL_ENTRY(16), CSRMM_GENERAL_ENTRY(17), CSRMM_GENERAL_ENTRY(18),
+            CSRMM_GENERAL_ENTRY(19), CSRMM_GENERAL_ENTRY(20), CSRMM_GENERAL_ENTRY(21),
+            CSRMM_GENERAL_ENTRY(22), CSRMM_GENERAL_ENTRY(23), CSRMM_GENERAL_ENTRY(24),
+            CSRMM_GENERAL_ENTRY(25), CSRMM_GENERAL_ENTRY(26), CSRMM_GENERAL_ENTRY(27),
+            CSRMM_GENERAL_ENTRY(28), CSRMM_GENERAL_ENTRY(29), CSRMM_GENERAL_ENTRY(30),
+            CSRMM_GENERAL_ENTRY(31), CSRMM_GENERAL_ENTRY(32), CSRMM_GENERAL_ENTRY(33),
+            CSRMM_GENERAL_ENTRY(34), CSRMM_GENERAL_ENTRY(35), CSRMM_GENERAL_ENTRY(36),
+            CSRMM_GENERAL_ENTRY(37), CSRMM_GENERAL_ENTRY(38), CSRMM_GENERAL_ENTRY(39),
+            CSRMM_GENERAL_ENTRY(40), CSRMM_GENERAL_ENTRY(41), CSRMM_GENERAL_ENTRY(42),
+            CSRMM_GENERAL_ENTRY(43), CSRMM_GENERAL_ENTRY(44), CSRMM_GENERAL_ENTRY(45),
+            CSRMM_GENERAL_ENTRY(46), CSRMM_GENERAL_ENTRY(47), CSRMM_GENERAL_ENTRY(48),
+            CSRMM_GENERAL_ENTRY(49), CSRMM_GENERAL_ENTRY(50), CSRMM_GENERAL_ENTRY(51),
+            CSRMM_GENERAL_ENTRY(52), CSRMM_GENERAL_ENTRY(53), CSRMM_GENERAL_ENTRY(54),
+            CSRMM_GENERAL_ENTRY(55), CSRMM_GENERAL_ENTRY(56), CSRMM_GENERAL_ENTRY(57),
+            CSRMM_GENERAL_ENTRY(58), CSRMM_GENERAL_ENTRY(59), CSRMM_GENERAL_ENTRY(60),
+            CSRMM_GENERAL_ENTRY(61), CSRMM_GENERAL_ENTRY(62), CSRMM_GENERAL_ENTRY(63),
+            CSRMM_GENERAL_ENTRY(64)};
+
+        J col = 0;
+        while(col < n)
+        {
+            const J   remain = n - col;
+            const int width  = remain >= 64 ? 64 : static_cast<int>(remain);
+            const auto it    = s_general_dispatch.find(width);
+            if(it == s_general_dispatch.end())
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
+
+            RETURN_IF_ROCSPARSE_ERROR(it->second(handle,
+                                                 alpha_device_host,
+                                                 beta_device_host,
+                                                 col,
+                                                 static_cast<J>(col + width),
+                                                 m,
+                                                 n,
+                                                 batch_count_C,
+                                                 offsets_batch_stride_A,
+                                                 columns_values_batch_stride_A,
+                                                 ldb,
+                                                 batch_stride_B,
+                                                 ldc,
+                                                 batch_stride_C,
+                                                 csr_row_ptr,
+                                                 csr_col_ind,
+                                                 csr_val,
+                                                 dense_B,
+                                                 dense_C,
+                                                 order_C,
+                                                 descr,
+                                                 conj_A,
+                                                 conj_B,
+                                                 order_B,
+                                                 trans_B));
+            col = static_cast<J>(col + width);
+        }
+
+        return rocsparse_status_success;
+    }
+
+#undef CSRMM_GENERAL_ENTRY
+#undef LAUNCH_CSRMM_ROW_SPLIT_GENERAL
+
     template <typename T, typename I, typename J, typename A, typename B, typename C>
     rocsparse_status csrmm_template_row_split(rocsparse_handle    handle,
                                               rocsparse_operation trans_A,
@@ -1133,22 +1333,34 @@ namespace rocsparse
         // Run different csrmv kernels
         if(trans_A == rocsparse_operation_none)
         {
-            if((order_B == rocsparse_order_column && trans_B == rocsparse_operation_none)
-               || (order_B == rocsparse_order_row && trans_B == rocsparse_operation_transpose)
-               || (order_B == rocsparse_order_row
-                   && trans_B == rocsparse_operation_conjugate_transpose))
-            {
-                return ROCSPARSE_CSRMM_TEMPLATE_ROW_SPLIT_IMPL(
-                    rocsparse::csrmmnn_template_row_split);
-            }
-            else if((order_B == rocsparse_order_column && trans_B == rocsparse_operation_transpose)
-                    || (order_B == rocsparse_order_column
-                        && trans_B == rocsparse_operation_conjugate_transpose)
-                    || (order_B == rocsparse_order_row && trans_B == rocsparse_operation_none))
-            {
-                return ROCSPARSE_CSRMM_TEMPLATE_ROW_SPLIT_IMPL(
-                    rocsparse::csrmmnt_template_row_split);
-            }
+            return csrmm_template_row_split_general(handle,
+                                                    conj_A,
+                                                    conj_B,
+                                                    m,
+                                                    n,
+                                                    k,
+                                                    nnz,
+                                                    batch_count_A,
+                                                    offsets_batch_stride_A,
+                                                    columns_values_batch_stride_A,
+                                                    alpha_device_host,
+                                                    descr,
+                                                    csr_val,
+                                                    csr_row_ptr,
+                                                    csr_col_ind,
+                                                    dense_B,
+                                                    ldb,
+                                                    batch_count_B,
+                                                    batch_stride_B,
+                                                    order_B,
+                                                    trans_B,
+                                                    beta_device_host,
+                                                    dense_C,
+                                                    ldc,
+                                                    batch_count_C,
+                                                    batch_stride_C,
+                                                    order_C,
+                                                    max_row_nnz);
         }
         else
         {

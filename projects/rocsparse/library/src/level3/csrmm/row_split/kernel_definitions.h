@@ -368,6 +368,70 @@ namespace rocsparse
 
     template <uint32_t BLOCKSIZE,
               uint32_t WF_SIZE,
+              uint32_t COL,
+              typename T,
+              typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C>
+    __launch_bounds__(BLOCKSIZE) __global__
+        void csrmm_row_split_general_kernel(ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
+                                            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),
+                                            bool                 is_host_mode,
+                                            bool                 conj_A,
+                                            bool                 conj_B,
+                                            rocsparse_order      order_B,
+                                            rocsparse_operation  trans_B,
+                                            J                    col_start,
+                                            J                    m,
+                                            int64_t              batch_count,
+                                            int64_t              offsets_batch_stride_A,
+                                            int64_t              columns_values_batch_stride_A,
+                                            const I*             csr_row_ptr,
+                                            const J*             csr_col_ind,
+                                            const A*             csr_val,
+                                            const B*             dense_B,
+                                            int64_t              ldb,
+                                            int64_t              batch_stride_B,
+                                            C*                   dense_C,
+                                            int64_t              ldc,
+                                            int64_t              batch_stride_C,
+                                            rocsparse_order      order_C,
+                                            rocsparse_index_base idx_base)
+    {
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(alpha);
+        ROCSPARSE_DEVICE_HOST_SCALAR_GET(beta);
+        if(alpha == 0 && beta == 1)
+        {
+            return;
+        }
+
+        for(int64_t batch = hipBlockIdx_y; batch < batch_count; batch += hipGridDim_y)
+        {
+            rocsparse::csrmm_row_split_general_device<BLOCKSIZE, WF_SIZE, COL>(
+                alpha,
+                beta,
+                conj_A,
+                conj_B,
+                order_B,
+                trans_B,
+                col_start,
+                m,
+                load_pointer(csr_row_ptr, batch, offsets_batch_stride_A),
+                load_pointer(csr_col_ind, batch, columns_values_batch_stride_A),
+                load_pointer(csr_val, batch, columns_values_batch_stride_A),
+                load_pointer(dense_B, batch, batch_stride_B),
+                ldb,
+                load_pointer(dense_C, batch, batch_stride_C),
+                ldc,
+                order_C,
+                idx_base);
+        }
+    }
+
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
               typename T,
               typename I,
               typename J,
@@ -1664,3 +1728,160 @@ namespace rocsparse
 #define CSRMMTN_ROW_SPLIT_256_4(T, I, J, A, B, C) CSRMMTN_ROW_SPLIT_KERNEL(T, I, J, A, B, C, 256, 4)
 
 #define CSRMMTT_ROW_SPLIT_256_4(T, I, J, A, B, C) CSRMMTT_ROW_SPLIT_KERNEL(T, I, J, A, B, C, 256, 4)
+
+
+#define CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, BLOCKSIZE, WFSIZE, COL) \
+    template __launch_bounds__(BLOCKSIZE) __global__ void                          \
+        rocsparse::csrmm_row_split_general_kernel<BLOCKSIZE, WFSIZE, COL>(         \
+            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),                         \
+            ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, beta),                          \
+            bool                 is_host_mode,                                     \
+            bool                 conj_A,                                           \
+            bool                 conj_B,                                           \
+            rocsparse_order      order_B,                                          \
+            rocsparse_operation  trans_B,                                          \
+            J                    col_start,                                        \
+            J                    m,                                                \
+            int64_t              batch_count,                                      \
+            int64_t              offsets_batch_stride_A,                           \
+            int64_t              columns_values_batch_stride_A,                    \
+            const I*             csr_row_ptr,                                      \
+            const J*             csr_col_ind,                                      \
+            const A*             csr_val,                                          \
+            const B*             dense_B,                                          \
+            int64_t              ldb,                                              \
+            int64_t              batch_stride_B,                                   \
+            C*                   dense_C,                                          \
+            int64_t              ldc,                                              \
+            int64_t              batch_stride_C,                                   \
+            rocsparse_order      order_C,                                          \
+            rocsparse_index_base idx_base);
+
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_1(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 1)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_2(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 2)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_3(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 3)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_4(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 4)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_5(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 5)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_6(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 6)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_7(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 7)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_8(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 8)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_9(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 9)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_10(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 10)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_11(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 11)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_12(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 12)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_13(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 13)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_14(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 14)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_15(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 15)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_16(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 16)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_17(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 17)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_18(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 18)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_19(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 19)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_20(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 20)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_21(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 21)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_22(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 22)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_23(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 23)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_24(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 24)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_25(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 25)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_26(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 26)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_27(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 27)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_28(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 28)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_29(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 29)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_30(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 30)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_31(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 31)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_32(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 32)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_33(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 33)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_34(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 34)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_35(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 35)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_36(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 36)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_37(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 37)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_38(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 38)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_39(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 39)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_40(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 40)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_41(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 41)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_42(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 42)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_43(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 43)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_44(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 44)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_45(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 45)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_46(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 46)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_47(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 47)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_48(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 48)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_49(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 49)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_50(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 50)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_51(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 51)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_52(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 52)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_53(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 53)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_54(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 54)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_55(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 55)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_56(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 56)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_57(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 57)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_58(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 58)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_59(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 59)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_60(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 60)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_61(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 61)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_62(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 62)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_63(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 63)
+#define CSRMM_ROW_SPLIT_GENERAL_256_8_64(T, I, J, A, B, C) \
+    CSRMM_ROW_SPLIT_GENERAL_KERNEL(T, I, J, A, B, C, 256, 8, 64)

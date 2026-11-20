@@ -703,8 +703,8 @@ namespace rocsparse
             }
 
             constexpr uint32_t max_owned = (TILE + WF_SIZE - 1) / WF_SIZE;
-            const uint32_t     begin = csrmmnn_owned_begin<WF_SIZE, TILE>(static_cast<uint32_t>(lid));
-            const uint32_t     count
+            const uint32_t begin = csrmmnn_owned_begin<WF_SIZE, TILE>(static_cast<uint32_t>(lid));
+            const uint32_t count
                 = csrmmnn_owned_begin<WF_SIZE, TILE>(static_cast<uint32_t>(lid) + 1) - begin;
 
 #pragma unroll
@@ -801,33 +801,29 @@ namespace rocsparse
         {
             if constexpr(WF_SIZE > 1)
             {
-                csrmmnn_scatter_tiles<WF_SIZE, COL, 0, T>(
-                    sum,
-                    lid,
-                    [&](uint32_t p, T acc)
+                csrmmnn_scatter_tiles<WF_SIZE, COL, 0, T>(sum, lid, [&](uint32_t p, T acc) {
+                    if(beta == static_cast<T>(0))
                     {
-                        if(beta == static_cast<T>(0))
+                        if(order_C == rocsparse_order_column)
                         {
-                            if(order_C == rocsparse_order_column)
-                            {
-                                dense_C[row + (col_start + p) * ldc] = alpha * acc;
-                            }
-                            else
-                            {
-                                dense_C[row * ldc + (col_start + p)] = alpha * acc;
-                            }
-                        }
-                        else if(order_C == rocsparse_order_column)
-                        {
-                            dense_C[row + (col_start + p) * ldc] = rocsparse::fma<T>(
-                                beta, dense_C[row + (col_start + p) * ldc], alpha * acc);
+                            dense_C[row + (col_start + p) * ldc] = alpha * acc;
                         }
                         else
                         {
-                            dense_C[row * ldc + (col_start + p)] = rocsparse::fma<T>(
-                                beta, dense_C[row * ldc + (col_start + p)], alpha * acc);
+                            dense_C[row * ldc + (col_start + p)] = alpha * acc;
                         }
-                    });
+                    }
+                    else if(order_C == rocsparse_order_column)
+                    {
+                        dense_C[row + (col_start + p) * ldc] = rocsparse::fma<T>(
+                            beta, dense_C[row + (col_start + p) * ldc], alpha * acc);
+                    }
+                    else
+                    {
+                        dense_C[row * ldc + (col_start + p)] = rocsparse::fma<T>(
+                            beta, dense_C[row * ldc + (col_start + p)], alpha * acc);
+                    }
+                });
             }
             else
             {
@@ -910,6 +906,156 @@ namespace rocsparse
                     }
                 }
             }
+        }
+    }
+
+    // NN and NT general kernels share this row walk. order_B and trans_B select the B
+    // layout at runtime: K-contiguous (NN) steps columns by ldb, N-contiguous (NT) steps
+    // by 1. order_C selects the C layout the same way. Double NN keeps the reduce-scatter;
+    // every other case all-reduces.
+    template <uint32_t BLOCKSIZE,
+              uint32_t WF_SIZE,
+              uint32_t COL,
+              typename T,
+              typename I,
+              typename J,
+              typename A,
+              typename B,
+              typename C>
+    ROCSPARSE_DEVICE_ILF void csrmm_row_split_general_device(T                   alpha,
+                                                             T                   beta,
+                                                             bool                conj_A,
+                                                             bool                conj_B,
+                                                             rocsparse_order     order_B,
+                                                             rocsparse_operation trans_B,
+                                                             J                   col_start,
+                                                             J                   M,
+                                                             const I* __restrict__ csr_row_ptr,
+                                                             const J* __restrict__ csr_col_ind,
+                                                             const A* __restrict__ csr_val,
+                                                             const B* __restrict__ dense_B,
+                                                             int64_t ldb,
+                                                             C* __restrict__ dense_C,
+                                                             int64_t              ldc,
+                                                             rocsparse_order      order_C,
+                                                             rocsparse_index_base idx_base)
+    {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+        static_assert(COL > 0, "COL must be positive.");
+
+        const int lid = hipThreadIdx_x & (WF_SIZE - 1);
+
+        const J gid = hipBlockIdx_x * BLOCKSIZE + hipThreadIdx_x;
+        const J row = gid / WF_SIZE;
+
+        if(row >= M)
+        {
+            return;
+        }
+
+        // K-contiguous B is the NN layout. N-contiguous B is the NT layout.
+        const bool k_contiguous
+            = (order_B == rocsparse_order_column && trans_B == rocsparse_operation_none)
+              || (order_B == rocsparse_order_row
+                  && (trans_B == rocsparse_operation_transpose
+                      || trans_B == rocsparse_operation_conjugate_transpose));
+
+        const I row_start = csr_row_ptr[row] - idx_base;
+        const I row_end   = csr_row_ptr[row + 1] - idx_base;
+
+        T sum[COL]{};
+
+        for(I j = row_start + lid; j < row_end; j += WF_SIZE)
+        {
+            const J       col_k       = csr_col_ind[j] - idx_base;
+            const T       val         = static_cast<T>(rocsparse::conj_val(csr_val[j], conj_A));
+            const int64_t col_k64     = static_cast<int64_t>(col_k);
+            const int64_t col_start64 = static_cast<int64_t>(col_start);
+            const B*      b_k         = k_contiguous ? (dense_B + (col_k64 + col_start64 * ldb))
+                                                     : (dense_B + (col_k64 * ldb + col_start64));
+            const int64_t b_stride    = k_contiguous ? ldb : static_cast<int64_t>(1);
+
+#pragma unroll
+            for(uint32_t p = 0; p < COL; p++)
+            {
+                sum[p] = rocsparse::fma<T>(
+                    val,
+                    static_cast<T>(rocsparse::conj_val(
+                        rocsparse::ldg(b_k + static_cast<int64_t>(p) * b_stride), conj_B)),
+                    sum[p]);
+            }
+        }
+
+        auto store = [&](uint32_t p, T acc) {
+            if(beta == static_cast<T>(0))
+            {
+                if(order_C == rocsparse_order_column)
+                {
+                    dense_C[row + (col_start + p) * ldc] = alpha * acc;
+                }
+                else
+                {
+                    dense_C[row * ldc + (col_start + p)] = alpha * acc;
+                }
+            }
+            else if(order_C == rocsparse_order_column)
+            {
+                dense_C[row + (col_start + p) * ldc]
+                    = rocsparse::fma<T>(beta, dense_C[row + (col_start + p) * ldc], alpha * acc);
+            }
+            else
+            {
+                dense_C[row * ldc + (col_start + p)]
+                    = rocsparse::fma<T>(beta, dense_C[row * ldc + (col_start + p)], alpha * acc);
+            }
+        };
+
+        auto allreduce_and_store = [&]() {
+#pragma unroll
+            for(uint32_t p = 0; p < COL; p++)
+            {
+                sum[p] = rocsparse::wfreduce_sum<WF_SIZE>(sum[p]);
+            }
+
+            if(lid == WF_SIZE - 1)
+            {
+#pragma unroll
+                for(uint32_t p = 0; p < COL; p++)
+                {
+                    store(p, sum[p]);
+                }
+            }
+        };
+
+        if constexpr(std::is_same<T, double>::value
+                     || std::is_same<T, rocsparse_double_complex>::value)
+        {
+            if(k_contiguous)
+            {
+                if constexpr(WF_SIZE > 1)
+                {
+                    csrmmnn_scatter_tiles<WF_SIZE, COL, 0, T>(sum, lid, store);
+                }
+                else
+                {
+#pragma unroll
+                    for(uint32_t p = 0; p < COL; p++)
+                    {
+                        store(p, sum[p]);
+                    }
+                }
+            }
+            else
+            {
+                allreduce_and_store();
+            }
+        }
+        else
+        {
+            allreduce_and_store();
         }
     }
 
