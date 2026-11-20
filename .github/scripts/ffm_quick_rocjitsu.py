@@ -6,8 +6,10 @@
 
 Walks the nightly's CTestTestfile.cmake files, selects tests by CTest label,
 and launches each selected command as ``rocjitsu --config <gfx942> --
-<command>``. A failing suite is recorded and the walk continues. Each test is
-capped at one hour so one suite cannot consume the whole six-hour job.
+<command>``. A failing suite is recorded and the walk continues. Installed
+CTest TIMEOUT values are the GPU budget, so rocJITsu multiplies them. Each
+suite is still capped at three hours so one case cannot consume the whole
+six-hour job.
 
 By default the label is ``^ffm-quick$`` so the existing hipRAND sweep keeps
 working. Pass ``--label '^quick$'`` for the on-demand component workflow, and
@@ -27,7 +29,10 @@ from pathlib import Path
 EXCLUDE_PATTERN = re.compile(r"ex_gpu")
 DEFAULT_LABEL = r"^ffm-quick$"
 DEFAULT_TIMEOUT = 1800
-TIMEOUT_CAP = 3600
+# Installed TIMEOUT is the GPU limit. rocJITsu needs a longer budget.
+ROCJITSU_TIMEOUT_MULTIPLIER = 10
+# Three hours. The component job limit is six hours.
+TIMEOUT_CAP = 3 * 60 * 60
 
 
 def tokenize_cmake_args(text: str) -> list[str]:
@@ -170,10 +175,16 @@ def selects_ffm_quick(test: dict) -> bool:
 
 
 def timeout_seconds(test: dict) -> int:
+    """Return the rocJITsu kill time for one installed test.
+
+    A missing TIMEOUT keeps the 30-minute default. An installed GPU timeout is
+    multiplied, then raised to that default and capped at three hours.
+    """
     raw = test.get("timeout")
     if raw is None:
         return DEFAULT_TIMEOUT
-    return max(1, min(int(raw), TIMEOUT_CAP))
+    scaled = max(int(raw) * ROCJITSU_TIMEOUT_MULTIPLIER, DEFAULT_TIMEOUT)
+    return max(1, min(scaled, TIMEOUT_CAP))
 
 
 def parse_component_names(text: str) -> list[str]:

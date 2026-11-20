@@ -71,8 +71,14 @@ class ParseInstalledCTestTest(unittest.TestCase):
         )
         self.assertEqual(sweep.timeout_seconds(tests["test_hiprand_kernel"]), 1800)
         self.assertEqual(
-            sweep.timeout_seconds(tests["rocblas-test_ffm-quick_suite"]), 3600
+            sweep.timeout_seconds(tests["rocblas-test_ffm-quick_suite"]), 10800
         )
+
+    def test_installed_gpu_timeout_is_scaled_for_rocjitsu(self):
+        self.assertEqual(sweep.timeout_seconds({"timeout": 300}), 3000)
+        self.assertEqual(sweep.timeout_seconds({"timeout": 30}), 1800)
+        self.assertEqual(sweep.timeout_seconds({"timeout": 7200}), 10800)
+        self.assertEqual(sweep.timeout_seconds({"timeout": None}), 1800)
 
     def test_skip_regex_matches_ctest_output(self):
         regex = sweep.parse_ctest_file(SAMPLE)["bilinear ffm-quick"]["skip_regex"]
