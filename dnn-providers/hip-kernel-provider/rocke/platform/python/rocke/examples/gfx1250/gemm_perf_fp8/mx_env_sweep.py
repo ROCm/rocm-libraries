@@ -180,6 +180,21 @@ def _pick_gpu(o):
     gmap = _hip_index_map()
     if not gmap:
         sys.exit("--gpu auto: could not map amd-smi GPUs to HIP indices; pass --gpu N")
+    deadline = time.time() + o.wait_free * 60
+    while True:
+        got = _pick_once(o, gmap)
+        if got is not None:
+            return got
+        if time.time() >= deadline:
+            sys.exit("--gpu auto: no free pair" + ("" if o.allow_single else " (--allow-single takes one)")
+                     + (f" after waiting {o.wait_free} min" if o.wait_free else " (--wait-free N waits)"))
+        _log(f"--gpu auto: no free pair; checking again in {o.wait_interval} s "
+             f"(until {time.strftime('%H:%M', time.localtime(deadline))})")
+        time.sleep(o.wait_interval)
+
+
+def _pick_once(o, gmap):
+    """One sampling pass: (gpu, pair, gmap, single), or None when nothing is free."""
     counts = {}
     for s in range(o.free_samples):
         for i in _busy(gmap):
@@ -200,7 +215,7 @@ def _pick_gpu(o):
                 if i in gmap.values() and i not in counts:
                     _log(f"--gpu auto: no free pair; SINGLE partition HIP {i} (quick check only)")
                     return i, (i,), gmap, True
-    sys.exit("--gpu auto: no free pair" + ("" if o.allow_single else " (--allow-single takes one)"))
+    return None
 
 
 # ------------------------------------------------------------ running on GPU
@@ -335,6 +350,9 @@ def main():
     ap.add_argument("--free-samples", type=int, default=6)
     ap.add_argument("--free-interval", type=float, default=10.0)
     ap.add_argument("--allow-single", action="store_true")
+    ap.add_argument("--wait-free", type=float, default=0,
+                    help="--gpu auto: keep checking up to this many minutes for a free pair (0: no wait)")
+    ap.add_argument("--wait-interval", type=float, default=60, help="--wait-free: seconds between checks")
     ap.add_argument("--no-pair-check", action="store_true", help="do not tag busy batches")
     ap.add_argument("--data", choices=("rand", "mxgemm"), default="rand",
                     help="timed inputs: rand (normal(0, 0.1) -> e4m3) or the mx_gemm bench's (uniform codes, |x| < 2)")
