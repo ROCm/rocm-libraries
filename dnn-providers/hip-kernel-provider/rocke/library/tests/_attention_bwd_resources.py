@@ -817,6 +817,24 @@ def gate_toolchain_gap(arch: str) -> str | None:
     return None
 
 
+def skip_unless_gate_toolchain(arch: str) -> None:
+    """Skip the calling resource-gate test before it builds or compiles
+    anything, unless ``llvm-objdump`` is found and the loaded toolchain is the
+    gate's for ``arch`` (:func:`gate_toolchain_gap`). Pins the production
+    comgr first, as the gate tests do."""
+    import pytest
+
+    pin_production_comgr()
+    if find_objdump() is None:
+        pytest.skip("llvm-objdump not found (needed for the resource gate's ISA rules)")
+    gap = gate_toolchain_gap(arch)
+    if gap is not None:
+        pytest.skip(
+            f"resource gate is valid on {GATE_FLAVOR} with the production comgr "
+            f"only ({gap})"
+        )
+
+
 def compile_or_skip(kernel: Any, *, arch: str, **kw: Any) -> Any:
     """``compile_kernel(kernel, arch=arch, **kw)`` for a test that compiles.
 

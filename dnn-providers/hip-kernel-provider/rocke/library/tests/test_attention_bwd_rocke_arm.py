@@ -22,6 +22,8 @@ from benchmarks.common import attention_bwd_sweep as sw
 from kernels.common.attention_bwd_plan import attn_bwd_plan
 from rocke.numeric.sdpa_reference import keep, resolve_diagonal_band
 
+from ._attention_bwd_stage_sample import sampled_geometry_stage
+
 
 class _T:
     """Shape / stride / pointer stand-in for a device tensor."""
@@ -213,7 +215,9 @@ def test_sweep_kernel_is_the_timed_kernel(arch, d):
     the sweep compiled for the candidate (also with a head split)."""
     sl = sw.primary_slice(arch, "general", d)
     cells = sw.representative_cells(sl)
-    cands = sw.geometry_stage(sl, sw.Release(frozenset({1}))).candidates[::4]
+    # default-legal and fallback geometries, spread over the tile sizes
+    rel = sw.Release(frozenset({1}))
+    cands = sampled_geometry_stage(sl, rel, n_default=4, n_fallback=2).candidates
     assert cells and cands
     for c in cands:
         for x in (c, c.with_runtime(g_split=2, lb_order="reverse")):

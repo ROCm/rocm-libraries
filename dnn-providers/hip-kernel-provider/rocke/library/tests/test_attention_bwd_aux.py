@@ -24,11 +24,12 @@ import re
 
 import pytest
 from kernels.common import attention_bwd_aux as X
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 from ._attention_bwd_test_utils import kernel_signature
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 
 # The ABI lists, written out independently of the module.
 PREP = (

@@ -26,13 +26,14 @@ from pathlib import Path
 import pytest
 from rocke.core.arch.target import LayoutMap
 from rocke.core.ir import F16, F32, IRBuilder, PtrType, VectorType
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
 from kernels.common import _attention_bwd_frag as F
 from kernels.common._attention_bwd_caps import BWD_ARCHES, bwd_atoms
 
 DTYPES = ("fp16", "bf16")
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 _LIB = Path(__file__).resolve().parents[1]
 
 

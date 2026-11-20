@@ -28,12 +28,13 @@ from kernels.common._attention_bwd_addr import (
     decode_thd,
 )
 from rocke.core.ir import F16, F32, I32, IRBuilder, PtrType
+from rocke.core.lower_llvm import LLVM_FLAVORS
 
 from ._attention_bwd_test_utils import device_arch
 from ._attention_bwd_int_eval import IntEvalBuilder, VirtualTensor
 
 ARCHS = ("gfx942", "gfx950", "gfx1151", "gfx1201")
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 
 
 def _frag(b, vals, k_m0, D, *, runtime_rows=False):

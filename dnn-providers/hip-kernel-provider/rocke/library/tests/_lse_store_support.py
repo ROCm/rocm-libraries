@@ -8,7 +8,17 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-_INSTANCES = Path(__file__).resolve().parents[2] / "platform" / "tests" / "instances"
+# The platform test harnesses: platform/tests/instances in the source tree,
+# tests/instances beside tests/library/tests in the installed test tree.
+_ROOT = Path(__file__).resolve().parents[2]
+_INSTANCES = next(
+    (
+        p
+        for p in (_ROOT / "platform" / "tests" / "instances", _ROOT / "instances")
+        if (p / "_attention_fwd_ext_run.py").is_file()
+    ),
+    _ROOT / "platform" / "tests" / "instances",
+)
 if str(_INSTANCES) not in sys.path:
     sys.path.insert(0, str(_INSTANCES))
 

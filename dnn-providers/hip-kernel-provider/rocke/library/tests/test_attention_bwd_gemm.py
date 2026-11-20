@@ -16,6 +16,7 @@ from dataclasses import replace
 
 import pytest
 from rocke.core.ir import F16, F32, IRBuilder, VectorType
+from rocke.core.lower_llvm import LLVM_FLAVORS
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as lower
 
 from kernels.common._attention_bwd_caps import (
@@ -32,7 +33,7 @@ from kernels.common._attention_bwd_gemm import (
 
 from ._attention_bwd_gemm_probe import make_chain_probe, make_gemm_probe
 
-FLAVORS = ("llvm20", "llvm22", "llvm23")
+FLAVORS = LLVM_FLAVORS
 GRIDS = ((1, 4), (4, 1), (2, 2), (1, 1))
 _MMA = re.compile(r"call [^\n]*@llvm\.amdgcn\.(mfma|wmma)[.\w]*\(")
 _TR_B128 = re.compile(r"tr16[._]b128|tr_b128|load\.tr\.b128", re.IGNORECASE)

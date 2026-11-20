@@ -12,10 +12,12 @@ from __future__ import annotations
 
 import hashlib
 import time
+from pathlib import Path
 
 import pytest
 
 from benchmarks.common import attention_bwd_compile as bc
+from kernels.common import attention_bwd_cache as ac
 from kernels.common.attention_bwd import AttnBwdSpec, validate_attn_bwd_spec
 
 from ._compiler_test_utils import skip_where_compiler_refuses_option
@@ -31,7 +33,8 @@ def _spec(**kw):
 
 # --------------------------------------------------------------------------- source hash
 def test_source_files_cover_the_lowering_and_the_kernels():
-    rel = {p.relative_to(bc._ROOT).as_posix() for p in bc.source_files()}
+    rel = {name for name, _ in ac.source_entries()}
+    assert len(rel) == len(bc.source_files())
     for must in (
         "platform/python/rocke/core/lower_llvm.py",
         "platform/python/rocke/helpers/compile.py",
@@ -60,6 +63,44 @@ def test_source_hash_is_line_ending_neutral_and_content_sensitive(tmp_path):
     (tmp_path / "a/library/kernels/common/extra.py").write_bytes(b"")
     assert bc.backward_source_hash(tmp_path / "a") != ha  # a new file counts
     assert len(bc.backward_source_hash()) == 16
+
+
+def test_source_hash_does_not_depend_on_the_install_layout(tmp_path, monkeypatch):
+    """The sources of an installed test tree (the rocke package beside the
+    Python install, the kernels under tests/library) hash like the same
+    sources in the source tree: entries are named by their source paths."""
+    src = tmp_path / "src"
+    inst = {
+        "platform/python/rocke": tmp_path / "prefix/python/rocke",
+        "library/kernels": tmp_path / "prefix/tests/library/kernels",
+    }
+    for label, d in inst.items():
+        for root in (src / label, d):
+            (root / "core").mkdir(parents=True, exist_ok=True)
+            (root / "core" / "m.py").write_bytes(f"x = {label!r}\n".encode())
+    want = bc.backward_source_hash(src)
+    monkeypatch.setattr(
+        ac,
+        "_source_roots",
+        lambda root=None: (
+            tuple((k, Path(root) / k) for k in inst) if root else tuple(inst.items())
+        ),
+    )
+    assert ac.backward_source_hash() == want
+    assert [n for n, _ in ac.source_entries()] == [n for n, _ in ac.source_entries(src)]
+
+
+def test_imported_packages_are_the_hashed_roots():
+    """The roots are the imported rocke and kernels packages, so their code is
+    never mistaken for a test's monkeypatch, wherever they are installed."""
+    import rocke
+
+    roots = dict(ac._source_roots())
+    assert roots["platform/python/rocke"] == Path(rocke.__file__).resolve().parent
+    assert roots["library/kernels"] == Path(ac.__file__).resolve().parents[1]
+    from rocke.core import lower_llvm
+
+    assert not ac._foreign(lower_llvm._resolve_llvm_flavor)
 
 
 # --------------------------------------------------------------------------- keys

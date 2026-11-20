@@ -23,10 +23,13 @@ try:
 except Exception:  # noqa: BLE001 - no runtime / no device
     _ARCH = None
 
-pytestmark = pytest.mark.skipif(
-    _ARCH not in ("gfx942", "gfx950", "gfx1151"),
-    reason=f"needs gfx942/gfx950/gfx1151; device is {_ARCH}",
-)
+pytestmark = [
+    pytest.mark.gpu,
+    pytest.mark.skipif(
+        _ARCH not in ("gfx942", "gfx950", "gfx1151"),
+        reason=f"needs gfx942/gfx950/gfx1151; device is {_ARCH}",
+    ),
+]
 
 from _attention_fwd_ext_run import run_case  # noqa: E402
 
