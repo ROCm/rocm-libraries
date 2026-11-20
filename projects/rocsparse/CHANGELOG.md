@@ -3,6 +3,8 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+## (Unreleased) rocSPARSE 5.3.0
+
 ## (Unreleased) rocSPARSE 5.2.0
 
 ### Added
