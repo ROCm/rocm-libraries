@@ -162,6 +162,10 @@ struct Options
     /// Unlike a quota, a regime the engine does not serve is reported short and the run succeeds.
     int64_t regimeFloor = 0;
 
+    /// `--form-floor`: at least this many problems under every label of every form axis an
+    /// operation declares, reported and short-tolerant as a regime floor is.
+    int64_t formFloor = 0;
+
     /// `--include-extremes`: take each numeric parameter's served min and max points first.
     bool includeExtremes = false;
 
@@ -171,77 +175,88 @@ struct Options
 
 void printHelp(const char* program)
 {
-    std::cout << "Usage: " << program << " --operations <dir> --output <dir> [options]\n\n"
-              << "  --operations <dir>     Directory of *.opmeta.json declarations (default:\n"
-              << "                         the shipped ones installed beside this tool)\n"
-              << "  --engine-name <name>   REQUIRED. Engine to generate for, e.g.\n"
-              << "                         hipkernel:ConvFwd. Every problem is offered to it,\n"
-              << "                         so the corpus is what that engine actually serves.\n"
-              << "                         Needs a GPU and --plugin-dir.\n"
-              << "  --engine-id <id>       Same, by id; decimal or 0x-prefixed hex\n"
-              << "  --also-engine-name <name>  Another engine that must ALSO serve every\n"
-              << "                         problem (repeatable): the corpus is then the\n"
-              << "                         shapes all of them serve, for comparing engines.\n"
-              << "  --without-engine       Generate with no engine, on no GPU. The corpus is\n"
-              << "                         then every problem the DECLARATIONS express, which\n"
-              << "                         is a superset of what any engine serves, and any\n"
-              << "                         narrowing you add with --keep or --kdp-root is a\n"
-              << "                         guess that nothing here verifies. Use only when a\n"
-              << "                         provider cannot be staged.\n"
-              << "  --plugin-dir <dir>     Engine plugin directory (repeatable)\n"
-              << "  --output <dir>         Corpus root: graphs/, manifest.json, manifest.csv, and\n"
-              << "                         commands.txt, one bench sweep per graph into results/\n"
-              << "  --bench-path <path>    hipdnn_bench to name in commands.txt\n"
-              << "  --operation <name>     Restrict to one declared operation\n"
-              << "  --count <n>            Corpus size per operation. Combinations the engine\n"
-              << "                         serves are searched further until it is met; fewer\n"
-              << "                         is returned only when every one saturates (exit 0,\n"
-              << "                         with a warning) and otherwise fails (exit 3).\n"
-              << "                         0 (default) takes what the first pass finds. The\n"
-              << "                         per-combination count is --per-combination.\n"
-              << "  --per-combination <n>  First-pass problems per categorical combination\n"
-              << "                         (default 50)\n"
-              << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
-              << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable)\n"
-              << "  --model-share <f>      Share of the corpus per source; a share of 0\n"
-              << "  --kernel-share <f>     excludes that source rather than deferring it\n"
-              << "  --sweep-share <f>\n"
-              << "  --keep q.<p>=<v>       Keep only problems with this facet. Repeatable:\n"
-              << "                         different parameters conjoin, the same parameter\n"
-              << "                         repeated widens it (q.head_dim=64 q.head_dim=128)\n"
-              << "  --exclude-corpus <m>   manifest.json whose graphs must not recur (repeatable)\n"
-              << "  --regime-quota <r>=<n> At least n problems in regime r, as manifest.csv\n"
-              << "                         labels it (decode_short_mha); every operation.\n"
-              << "                         Repeatable. A regime the first pass under-fills is\n"
-              << "                         searched again with its declared equalities pinned.\n"
-              << "                         --count below the quotas' sum does not trim them;\n"
-              << "                         above it, the rest is cut as usual. 0 (default)\n"
-              << "                         with quotas means the quotas alone. Exit 3 when a\n"
-              << "                         quota is short and not shown saturated.\n"
-              << "  --regime-quotas <f>    The same as JSON: {\"<operation>\": {\"<regime>\": n}}\n"
-              << "  --regime-floor <n>     At least n problems in every regime the declaration\n"
-              << "                         can spell (a named quota overrides it). Searched as\n"
-              << "                         quotas are; a regime the engine does not serve is\n"
-              << "                         reported short in manifest.json, never an error.\n"
-              << "  --include-extremes     Take, before anything else, the served point with the\n"
-              << "                         smallest and the largest value of each numeric\n"
-              << "                         parameter: the edges of what the engine serves, which\n"
-              << "                         a spread cut can leave out. Counts against --count.\n"
-              << "                         manifest.json's served_extent is reported either way.\n"
-              << "  --budget <n>           First-pass oracle calls per combination (default\n"
-              << "                         20000); growth toward --count may reach 64x this\n"
-              << "  --ceiling <n>          Largest extent to propose (default 4096). A served\n"
-              << "                         maximum within a tenth of it is marked\n"
-              << "                         at_search_ceiling in served_extent: the search's\n"
-              << "                         edge, not the engine's\n"
-              << "  --probe <k=v,...>      Report what happens to one point, and stop\n"
-              << "  --max-bytes <n>        Ceiling on a searched problem's tensors (default\n"
-              << "                         256 MiB). Pack and model shapes are exempt: they\n"
-              << "                         are real workloads, not proposals.\n"
-              << "  --max-skeleton <n>     Declared regime combinations to try (default 512)\n"
-              << "  --seed <n>             Reproducibility seed\n\n"
-              << "Exit status: 0 success; 1 bad arguments or an unregistered engine; 2 empty\n"
-              << "corpus; 3 fewer than --count without the engine being shown to serve no more.\n";
+    std::cout
+        << "Usage: " << program << " --operations <dir> --output <dir> [options]\n\n"
+        << "  --operations <dir>     Directory of *.opmeta.json declarations (default:\n"
+        << "                         the shipped ones installed beside this tool)\n"
+        << "  --engine-name <name>   REQUIRED. Engine to generate for, e.g.\n"
+        << "                         hipkernel:ConvFwd. Every problem is offered to it,\n"
+        << "                         so the corpus is what that engine actually serves.\n"
+        << "                         Needs a GPU and --plugin-dir.\n"
+        << "  --engine-id <id>       Same, by id; decimal or 0x-prefixed hex\n"
+        << "  --also-engine-name <name>  Another engine that must ALSO serve every\n"
+        << "                         problem (repeatable): the corpus is then the\n"
+        << "                         shapes all of them serve, for comparing engines.\n"
+        << "  --without-engine       Generate with no engine, on no GPU. The corpus is\n"
+        << "                         then every problem the DECLARATIONS express, which\n"
+        << "                         is a superset of what any engine serves, and any\n"
+        << "                         narrowing you add with --keep or --kdp-root is a\n"
+        << "                         guess that nothing here verifies. Use only when a\n"
+        << "                         provider cannot be staged.\n"
+        << "  --plugin-dir <dir>     Engine plugin directory (repeatable)\n"
+        << "  --output <dir>         Corpus root: graphs/, manifest.json, manifest.csv, and\n"
+        << "                         commands.txt, one bench sweep per graph into results/\n"
+        << "  --bench-path <path>    hipdnn_bench to name in commands.txt\n"
+        << "  --operation <name>     Restrict to one declared operation\n"
+        << "  --count <n>            Corpus size per operation. Combinations the engine\n"
+        << "                         serves are searched further until it is met; fewer\n"
+        << "                         is returned only when every one saturates (exit 0,\n"
+        << "                         with a warning) and otherwise fails (exit 3).\n"
+        << "                         0 (default) takes what the first pass finds. The\n"
+        << "                         per-combination count is --per-combination.\n"
+        << "  --per-combination <n>  First-pass problems per categorical combination\n"
+        << "                         (default 50)\n"
+        << "  --kdp-root <path>      A *.kdp.json pack, or a directory of them (repeatable)\n"
+        << "  --model-shapes <csv>   Recorded shapes as q.<parameter> columns (repeatable). A\n"
+        << "                         file with no q.form column reads every row as plain\n"
+        << "  --model-share <f>      Share of the corpus per source; a share of 0\n"
+        << "  --kernel-share <f>     excludes that source rather than deferring it\n"
+        << "  --sweep-share <f>\n"
+        << "  --keep q.<p>=<v>       Keep only problems with this facet. Repeatable:\n"
+        << "                         different parameters conjoin, the same parameter\n"
+        << "                         repeated widens it (q.head_dim=64 q.head_dim=128)\n"
+        << "  --exclude-corpus <m>   manifest.json whose graphs must not recur (repeatable)\n"
+        << "  --regime-quota <r>=<n> At least n problems in regime r, as manifest.csv\n"
+        << "                         labels it (decode_short_mha); every operation.\n"
+        << "                         Repeatable. A regime the first pass under-fills is\n"
+        << "                         searched again with its declared equalities pinned.\n"
+        << "                         --count below the quotas' sum does not trim them;\n"
+        << "                         above it, the rest is cut as usual. 0 (default)\n"
+        << "                         with quotas means the quotas alone. Exit 3 when a\n"
+        << "                         quota is short and not shown saturated.\n"
+        << "  --regime-quotas <f>    The same as JSON: {\"<operation>\": {\"<regime>\": n}}\n"
+        << "  --regime-floor <n>     At least n problems in every regime the declaration\n"
+        << "                         can spell (a named quota overrides it). Searched as\n"
+        << "                         quotas are; a regime the engine does not serve is\n"
+        << "                         reported short in manifest.json, never an error.\n"
+        << "  --form-floor <n>       At least n problems under every label of every form\n"
+        << "                         axis an operation declares (sdpa_fwd's `form`: which\n"
+        << "                         optional attributes and tensors the graph binds).\n"
+        << "                         Keyed <axis>:<label> (form:padded) in manifest.json's\n"
+        << "                         reports.regime_quota; searched and reported as\n"
+        << "                         --regime-floor is, and a graph counts toward its\n"
+        << "                         regime's floor too. A form is a column of its own in\n"
+        << "                         manifest.csv, not part of the regime label. 0 (default)\n"
+        << "                         asks for none.\n"
+        << "  --include-extremes     Take, before anything else, the served point with the\n"
+        << "                         smallest and the largest value of each numeric\n"
+        << "                         parameter: the edges of what the engine serves, which\n"
+        << "                         a spread cut can leave out. Counts against --count.\n"
+        << "                         manifest.json's served_extent is reported either way.\n"
+        << "  --budget <n>           First-pass oracle calls per combination (default\n"
+        << "                         20000); growth toward --count may reach 64x this\n"
+        << "  --ceiling <n>          Largest extent to propose (default 4096). A served\n"
+        << "                         maximum within a tenth of it is marked\n"
+        << "                         at_search_ceiling in served_extent: the search's\n"
+        << "                         edge, not the engine's\n"
+        << "  --probe <k=v,...>      Report what happens to one point, and stop\n"
+        << "  --max-bytes <n>        Ceiling on a searched problem's tensors (default\n"
+        << "                         256 MiB). Pack and model shapes are exempt: they\n"
+        << "                         are real workloads, not proposals.\n"
+        << "  --max-skeleton <n>     Declared regime combinations to try (default 512)\n"
+        << "  --seed <n>             Reproducibility seed\n\n"
+        << "Exit status: 0 success; 1 bad arguments or an unregistered engine; 2 empty\n"
+        << "corpus; 3 fewer than --count without the engine being shown to serve no more.\n";
 }
 
 /// What the command line asks for: a run, the help text, or nothing it can parse.
@@ -373,6 +388,10 @@ ParseOutcome parseArguments(const std::vector<std::string>& args, Options& optio
         else if(arg == "--regime-floor")
         {
             reader.integer(options.regimeFloor, 0);
+        }
+        else if(arg == "--form-floor")
+        {
+            reader.integer(options.formFloor, 0);
         }
         else if(arg == "--include-extremes")
         {
@@ -717,17 +736,30 @@ int runGenerator(const std::vector<std::string>& args)
         std::cerr << "--regime-floor is negative\n";
         return 1;
     }
+    // A form key (`form:padded`) never equals a regime label, so regime and form floors share
+    // the maps.
+    const auto addFloors = [&](const std::string& operation,
+                               std::map<std::string, hipdnn_corpus_gen::RegimeFocus> floors,
+                               int64_t count) {
+        for(auto& [key, focus] : floors)
+        {
+            quotasFor[operation][key] = count;
+            focusFor[operation].emplace(key, std::move(focus));
+            floorsFor[operation].insert(key);
+        }
+    };
     for(const auto& entry : selected.operations)
     {
         const auto& operation = entry.second.operation;
-        for(auto& [regime, focus] :
-            options.regimeFloor > 0
-                ? hipdnn_corpus_gen::regimeFloors(entry.second, quotasFor[operation])
-                : std::map<std::string, hipdnn_corpus_gen::RegimeFocus>{})
+        if(options.regimeFloor > 0)
         {
-            quotasFor[operation][regime] = options.regimeFloor;
-            focusFor[operation].emplace(regime, std::move(focus));
-            floorsFor[operation].insert(regime);
+            addFloors(operation,
+                      hipdnn_corpus_gen::regimeFloors(entry.second, quotasFor[operation]),
+                      options.regimeFloor);
+        }
+        if(options.formFloor > 0)
+        {
+            addFloors(operation, hipdnn_corpus_gen::formFloors(entry.second), options.formFloor);
         }
     }
 
@@ -1360,8 +1392,14 @@ int runGenerator(const std::vector<std::string>& args)
             {
                 for(const auto& entry : pool.second)
                 {
-                    // Counted as the deduplication below counts them, by graph.
-                    byRegime[entry.regime].insert(contentKey(entry.point));
+                    // Counted as the deduplication below counts them, by graph. A form key
+                    // counts beside the regime: one graph serves both quotas.
+                    const auto key = contentKey(entry.point);
+                    byRegime[entry.regime].insert(key);
+                    for(const auto& form : hipdnn_corpus_gen::formQuotaKeys(metadata, entry.point))
+                    {
+                        byRegime[form].insert(key);
+                    }
                     everything.insert(hipdnn_corpus_gen::detail::describe(entry.point));
                     anchors.push_back(entry.point);
                 }
@@ -1461,6 +1499,7 @@ int runGenerator(const std::vector<std::string>& args)
                     }
                 }
                 entry.stratum = stratum + "|" + entry.regime;
+                entry.forms = hipdnn_corpus_gen::formQuotaKeys(metadata, entry.point);
             }
         }
 
@@ -1489,18 +1528,30 @@ int runGenerator(const std::vector<std::string>& args)
             = quotas != quotasFor.end() ? quotas->second : std::map<std::string, int64_t>{};
         // With quotas and count 0, the corpus is the quotas alone; a short quota stays short
         // rather than being padded from another regime.
-        int64_t cut = count;
-        if(!owed.empty() && options.count == 0)
+        const bool quotasAlone = !owed.empty() && options.count == 0;
+        const auto chosen = hipdnn_corpus_gen::select(deduplicated,
+                                                      quotasAlone ? 0 : count,
+                                                      options.shares,
+                                                      allocation,
+                                                      owed,
+                                                      quotaOutcome,
+                                                      reserved);
+        if(quotasAlone)
         {
-            cut = 0;
-            count = 0;
-            for(const auto& quota : owed)
+            // One graph can fill a regime's quota and a form's, so the quotas' sum overstates
+            // what was asked. Ask for the graphs the quotas took plus the fewest more that
+            // could fill what is still short, which keeps the gap to the row count the
+            // shortfall. A graph has one regime and one label per form axis, so the regimes'
+            // shortfalls (and the forms') need graphs of their own; a form key has a ':'.
+            int64_t regimesShort = 0;
+            int64_t formsShort = 0;
+            for(const auto& [key, outcome] : quotaOutcome)
             {
-                count += quota.second;
+                (key.find(':') == std::string::npos ? regimesShort : formsShort)
+                    += outcome.asked - outcome.taken;
             }
+            count = static_cast<int64_t>(chosen.size()) + std::max(regimesShort, formsShort);
         }
-        const auto chosen = hipdnn_corpus_gen::select(
-            deduplicated, cut, options.shares, allocation, owed, quotaOutcome, reserved);
         for(const auto& [regime, outcome] : quotaOutcome)
         {
             const auto search = focused.find(regime);
@@ -1581,6 +1632,7 @@ int runGenerator(const std::vector<std::string>& args)
             row.file = "graphs/" + name;
             row.operation = result.operation;
             row.regimeAxes = metadata.regimeLabel;
+            row.formAxes = metadata.formLabel;
             // Tensor footprint, not file size.
             row.bytes = hipdnn_corpus_gen::graphBytes(graph.bytes);
             manifestRows.push_back(std::move(row));
