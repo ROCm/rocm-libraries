@@ -44,6 +44,7 @@ from rocke.tests.engines import (
     lower_hip_with_both_engines,
     lower_hip_with_engine,
     lower_with_both_engines,
+    lower_with_engine,
 )
 from rocke.tests.hipcc import assert_hipcc_accepts
 from rocke.tests.ir_validity import assert_target_accepts
@@ -86,6 +87,11 @@ def _zeros(elem, count):
 
 
 _F32_MFMAS = [("mfma_f32_16x16x4_f32", 4), ("mfma_f32_32x32x2_f32", 16)]
+_BF16_1K_MFMAS = [
+    ("mfma_f32_4x4x4_bf16", 4),
+    ("mfma_f32_16x16x16_bf16", 4),
+    ("mfma_f32_32x32x8_bf16", 16),
+]
 
 
 @pytest.mark.parametrize("role", ["a", "b"])
@@ -109,9 +115,7 @@ def test_mma_register_bridge_rejects_non_integer_vector_counts(role, count, fiel
     )
 
 
-@pytest.mark.parametrize(
-    "op_id", ["mfma_f32_4x4x4_bf16", "mfma_f32_16x16x16_bf16", "mfma_f32_32x32x8_bf16"]
-)
+@pytest.mark.parametrize("op_id", [op_id for op_id, _ in _BF16_1K_MFMAS])
 @pytest.mark.parametrize("role", ["a", "b"])
 @pytest.mark.parametrize("arch", ["gfx90a", "gfx942", "gfx950"])
 def test_a_bf16_1k_mfma_takes_bf16_operands_as_its_short_register(arch, role, op_id):
@@ -162,6 +166,31 @@ def test_an_f32_mfma_reinterprets_only_the_one_element_vector(
     )
     assert re.search(
         rf"\(float {re.escape(reinterpreted)}, float 0x3FF0000000000000,",
+        _mma_call(text),
+    )
+    assert_target_accepts(text, arch)
+
+
+@pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(("op_id", "accumulator_count"), _BF16_1K_MFMAS)
+@pytest.mark.parametrize("arch", ["gfx90a", "gfx942", "gfx950"])
+def test_a_bf16_1k_mfma_reinterprets_both_operands(
+    arch, op_id, accumulator_count, engine
+):
+    kernel = _mma_kernel(
+        arch,
+        op_id,
+        _zeros(BF16, 4),
+        _zeros(BF16, 4),
+        _zeros(F32, accumulator_count),
+        F32,
+    )
+    text = lower_with_engine(kernel, arch, engine=engine)
+    a_register, b_register = re.findall(
+        r"(%reg\.\d+) = bitcast <4 x bfloat> \S+ to <4 x i16>", text
+    )
+    assert re.search(
+        rf"\(<4 x i16> {re.escape(a_register)}, <4 x i16> {re.escape(b_register)}, ",
         _mma_call(text),
     )
     assert_target_accepts(text, arch)

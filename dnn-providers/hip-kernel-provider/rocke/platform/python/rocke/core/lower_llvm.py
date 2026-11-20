@@ -1735,6 +1735,10 @@ _BF16_MAX_FINITE = 0x7F7F
 _BF16_SIGN_BIT = -0x8000
 
 
+# The register type of A and B of the bf16 `_1k` MFMAs.
+_BF16_1K_OPERAND = VectorType(I16, 4)
+
+
 def _mma_op_id(op: Op) -> str:
     """The op_id of an MMA op; MMA ops reach their handlers as ``tile.<op_id>``."""
     if not op.name.startswith("tile."):
@@ -4216,21 +4220,14 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_16x16x16_bf16(self, op: Op) -> None:
         validate_mfma(op)
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.16x16x16bf16.1k")
-        # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
-        a_cast = self._fresh("mfma_a_i16")
-        b_cast = self._fresh("mfma_b_i16")
-        self._current().emit(
-            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
-        )
-        self._current().emit(
-            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
-        )
+        a_arg = self._mma_operand(op, "a", _BF16_1K_OPERAND)
+        b_arg = self._mma_operand(op, "b", _BF16_1K_OPERAND)
         self._current().emit(
             f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.16x16x16bf16.1k("
-            f"<4 x i16> {a_cast}, "
-            f"<4 x i16> {b_cast}, "
+            f"<4 x i16> {a_arg}, "
+            f"<4 x i16> {b_arg}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -4353,20 +4350,14 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_32x32x8_bf16(self, op: Op) -> None:
         validate_mfma(op)
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.32x32x8bf16.1k")
-        a_cast = self._fresh("mfma_a_i16")
-        b_cast = self._fresh("mfma_b_i16")
-        self._current().emit(
-            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
-        )
-        self._current().emit(
-            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
-        )
+        a_arg = self._mma_operand(op, "a", _BF16_1K_OPERAND)
+        b_arg = self._mma_operand(op, "b", _BF16_1K_OPERAND)
         self._current().emit(
             f"  {op.result.name} = call <16 x float> @llvm.amdgcn.mfma.f32.32x32x8bf16.1k("
-            f"<4 x i16> {a_cast}, "
-            f"<4 x i16> {b_cast}, "
+            f"<4 x i16> {a_arg}, "
+            f"<4 x i16> {b_arg}, "
             f"<16 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
@@ -4745,21 +4736,14 @@ class _Lowerer:
 
     def _op_tile_mfma_f32_4x4x4_bf16(self, op: Op) -> None:
         validate_mfma(op)
-        a, b, c = op.operands
+        c = op.operands[2]
         self._need("mfma.f32.4x4x4bf16.1k")
-        # bitcast <4 x bfloat> -> <4 x i16> for the `_1k` intrinsic.
-        a_cast = self._fresh("mfma_a_i16")
-        b_cast = self._fresh("mfma_b_i16")
-        self._current().emit(
-            f"  {a_cast} = bitcast <4 x bfloat> {self._operand(a)} to <4 x i16>"
-        )
-        self._current().emit(
-            f"  {b_cast} = bitcast <4 x bfloat> {self._operand(b)} to <4 x i16>"
-        )
+        a_arg = self._mma_operand(op, "a", _BF16_1K_OPERAND)
+        b_arg = self._mma_operand(op, "b", _BF16_1K_OPERAND)
         self._current().emit(
             f"  {op.result.name} = call <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k("
-            f"<4 x i16> {a_cast}, "
-            f"<4 x i16> {b_cast}, "
+            f"<4 x i16> {a_arg}, "
+            f"<4 x i16> {b_arg}, "
             f"<4 x float> {self._operand(c)}, "
             f"i32 0, i32 0, i32 0)"
         )
