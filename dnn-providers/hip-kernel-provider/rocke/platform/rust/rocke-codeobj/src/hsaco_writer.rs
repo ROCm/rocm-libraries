@@ -228,6 +228,15 @@ pub const GFX1151_OBJECT: ObjectTarget = ObjectTarget {
     ro_segment_to_descriptor: false,
 };
 
+/// gfx1201: gfx1151's wave32 WGP-mode object under gfx1201's machine
+/// (`EF_AMDGPU_MACH_AMDGCN_GFX1201`), with the same `s_code_end` padding.
+pub const GFX1201_OBJECT: ObjectTarget = ObjectTarget {
+    processor: "gfx1201",
+    e_flags: 0x4e,
+    producer: b"rocKE Rust direct gfx1201 encoder + ELF writer\0",
+    ..GFX1151_OBJECT
+};
+
 /// gfx950 with xnack and sramecc `any` (`e_flags` 0x54f, so it loads in
 /// every mode): `s_nop 0` padding to 64 bytes plus sixteen lines.
 pub const GFX950_OBJECT: ObjectTarget = ObjectTarget {

@@ -50,15 +50,16 @@ def _e_flags(hsaco: bytes) -> int:
     return struct.unpack_from("<I", hsaco, 48)[0]
 
 
+_TARGETS = ["gfx1151", "gfx950", "gfx1201"]
+
+
 def test_the_library_reports_its_targets() -> None:
     _require_direct_library()
-    assert code_object.direct_supported_targets() == ["gfx1151", "gfx950"]
-    assert "amdgcn-amd-amdhsa--gfx950" in code_object.supported_isas("direct")
+    assert code_object.direct_supported_targets() == _TARGETS
+    isas = code_object.supported_isas("direct")
+    assert isas == [f"amdgcn-amd-amdhsa--{target}" for target in _TARGETS]
     info = code_object.loaded_compiler_info("direct")
-    assert info is not None and info.details["supported_targets"] == [
-        "gfx1151",
-        "gfx950",
-    ]
+    assert info is not None and info.details["supported_targets"] == _TARGETS
 
 
 def test_gfx950_compiles_through_the_target_entry() -> None:
@@ -72,6 +73,16 @@ def test_gfx950_compiles_through_the_target_entry() -> None:
         _SUPPORTED
     )
     assert _e_flags(gfx1151) != 0x54F
+
+
+def test_gfx1201_compiles_through_the_target_entry() -> None:
+    _require_direct_library()
+    gfx1201, _timings, _info, diagnostics = code_object.build_direct_rocke_ir_hsaco(
+        _SUPPORTED, isa="amdgcn-amd-amdhsa--gfx1201"
+    )
+    # EF_AMDGPU_MACH_AMDGCN_GFX1201.
+    assert _e_flags(gfx1201) == 0x4E
+    assert diagnostics.startswith("instructions=")
 
 
 def test_unsupported_targets_and_operations_are_direct_unsupported() -> None:

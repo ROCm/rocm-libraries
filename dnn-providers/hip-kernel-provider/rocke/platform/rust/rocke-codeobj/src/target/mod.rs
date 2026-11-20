@@ -9,10 +9,11 @@
 //! from instruction selection on (`mir::MFunc::target`), so the passes after
 //! it find the facts there.
 
+pub mod gfx12;
 pub mod gfx9;
 
 use crate::error::CompileError;
-use crate::hsaco_writer::{ObjectTarget, GFX1151_OBJECT, GFX950_OBJECT};
+use crate::hsaco_writer::{ObjectTarget, GFX1151_OBJECT, GFX1201_OBJECT, GFX950_OBJECT};
 
 /// A GPU the direct compiler knows.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -20,34 +21,52 @@ pub enum Target {
     #[default]
     Gfx1151,
     Gfx950,
+    Gfx1201,
 }
 
 impl Target {
     /// Every target the compiler knows, supported or not.
-    pub const ALL: [Target; 2] = [Target::Gfx1151, Target::Gfx950];
+    pub const ALL: [Target; 3] = [Target::Gfx1151, Target::Gfx950, Target::Gfx1201];
 
     #[inline]
     pub fn info(self) -> &'static TargetInfo {
         match self {
             Target::Gfx1151 => &GFX1151,
             Target::Gfx950 => &GFX950,
+            Target::Gfx1201 => &GFX1201,
         }
+    }
+
+    /// Whether the target compiles through the gfx11 pipeline: gfx1151, and
+    /// the gfx12 targets, which add their own lowering and encodings at the
+    /// end of it (`target::gfx12`). gfx950 has its own back end.
+    #[inline]
+    pub fn gfx11_pipeline(self) -> bool {
+        matches!(self, Target::Gfx1151 | Target::Gfx1201)
+    }
+
+    /// Whether the target has the gfx12 instruction set (`target::gfx12`).
+    #[inline]
+    pub fn gfx12(self) -> bool {
+        matches!(self, Target::Gfx1201)
     }
 
     pub fn name(self) -> &'static str {
         self.info().name
     }
 
-    /// The target named `name` (`"gfx1151"`, `"gfx950"`).
+    /// The target named `name` (`"gfx1151"`, `"gfx950"`, `"gfx1201"`).
     pub fn from_name(name: &str) -> Option<Target> {
         Target::ALL.into_iter().find(|t| t.name() == name)
     }
 
     /// Whether the direct compiler compiles kernels for this target. On
     /// gfx950 it compiles the families of phase G1; a kernel using an
-    /// operation it does not lower there fails with `ROCKE_DIRECT_UNSUPPORTED`.
+    /// operation it does not lower there fails with `ROCKE_DIRECT_UNSUPPORTED`,
+    /// as does one on a gfx12 target that needs what `target::gfx12` does
+    /// not lower.
     pub fn supported(self) -> bool {
-        matches!(self, Target::Gfx1151 | Target::Gfx950)
+        matches!(self, Target::Gfx1151 | Target::Gfx950 | Target::Gfx1201)
     }
 
     /// `self`, or the `request` error a compile request for an unsupported
@@ -62,11 +81,15 @@ impl Target {
     /// Whether this target's encoder encodes `op`. gfx950's opcode facts come
     /// from its description (`gfx9::gen_isa`), its own opcodes (`Opc::Gfx9`)
     /// included; gfx1151 encodes every shared opcode that is no pseudo, and
-    /// no `Opc::Gfx9` (a pseudo in the gfx11 tables).
+    /// no `Opc::Gfx9` (a pseudo in the gfx11 tables) or `Opc::Gfx12`;
+    /// the gfx12 targets encode their own opcodes and the shared ones gfx12
+    /// kept.
     pub fn encodes(self, op: crate::rir::mir::Opc) -> bool {
+        use crate::rir::mir::{Fmt, Opc};
         match self {
-            Target::Gfx1151 => op.fmt() != crate::rir::mir::Fmt::Pseudo,
+            Target::Gfx1151 => op.fmt() != Fmt::Pseudo && !matches!(op, Opc::Gfx12(_)),
             Target::Gfx950 => gfx9::gen_isa::info(op).is_some_and(|i| i.table),
+            Target::Gfx1201 => op.fmt() != Fmt::Pseudo && !gfx12::removed(op),
         }
     }
 
@@ -83,13 +106,14 @@ impl Target {
     }
 }
 
-/// The supported targets' names, comma-separated (`"gfx1151,gfx950"`).
+/// The supported targets' names, comma-separated
+/// (`"gfx1151,gfx950,gfx1201"`).
 pub fn supported_names() -> String {
     Target::ALL.into_iter().filter(|t| t.supported()).map(Target::name).collect::<Vec<_>>().join(",")
 }
 
 /// `supported_names()` as the static C string the FFI hands out.
-pub const SUPPORTED_NAMES: &std::ffi::CStr = c"gfx1151,gfx950";
+pub const SUPPORTED_NAMES: &std::ffi::CStr = c"gfx1151,gfx950,gfx1201";
 
 /// What the shared passes read about a target.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -164,6 +188,11 @@ pub const GFX950: TargetInfo = TargetInfo {
     object: GFX950_OBJECT,
 };
 
+/// gfx1201 in wave32 WGP mode. The register file, wave count and LDS facts
+/// are gfx1151's: LLVM gives gfx12 the same 1536 VGPRs per SIMD, and the
+/// device reports 16 waves per SIMD and 64 KiB of LDS per workgroup.
+pub const GFX1201: TargetInfo = TargetInfo { target: Target::Gfx1201, name: "gfx1201", object: GFX1201_OBJECT, ..GFX1151 };
+
 impl TargetInfo {
     /// Waves per SIMD that can be resident with `vgprs` VGPRs per lane and
     /// `lds_bytes` of LDS per workgroup of `workgroup_size` lanes.
@@ -171,7 +200,7 @@ impl TargetInfo {
         let by_vgprs = self.vgprs_per_simd / vgprs.max(1).next_multiple_of(self.vgpr_granule);
         let by_vgprs = match self.target {
             Target::Gfx950 => gfx9::rules::whole_workgroups(by_vgprs, workgroup_size.div_ceil(self.wave), self.simds_per_lds),
-            Target::Gfx1151 => by_vgprs,
+            Target::Gfx1151 | Target::Gfx1201 => by_vgprs,
         };
         let by_lds = match lds_bytes {
             0 => self.max_waves,
@@ -279,10 +308,11 @@ mod tests {
         assert_eq!(Target::from_name("gfx942"), None);
         assert_eq!(Target::requested("gfx1151").ok(), Some(Target::Gfx1151));
         assert_eq!(Target::requested("gfx950").ok(), Some(Target::Gfx950));
-        for name in ["gfx942", "", "GFX1151", "gfx950:xnack-"] {
+        assert_eq!(Target::requested("gfx1201").ok(), Some(Target::Gfx1201));
+        for name in ["gfx942", "", "GFX1151", "gfx950:xnack-", "gfx1250", "gfx1200", "gfx12", "gfx12-generic"] {
             assert_eq!(Target::requested(name).err().map(|e| e.kind), Some("request"), "{name}");
         }
-        assert_eq!(supported_names(), "gfx1151,gfx950");
+        assert_eq!(supported_names(), "gfx1151,gfx950,gfx1201");
         assert_eq!(SUPPORTED_NAMES.to_str().ok(), Some(supported_names().as_str()));
         for t in Target::ALL {
             assert_eq!(t.info().target, t);

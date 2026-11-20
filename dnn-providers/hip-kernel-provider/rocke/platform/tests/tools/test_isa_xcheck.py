@@ -119,6 +119,41 @@ def test_gfx950_instructions_render_in_gfx9_syntax():
         text("VCmp", ["vcc"], ["v1x1", "v2x1"], mods=1, code=0x4A)
 
 
+def test_gfx1201_instructions_render_in_gfx12_syntax():
+    info = isa_xcheck.load_info(CRATE)
+    vcmp, vopd = isa_xcheck.vcmp_names(), isa_xcheck.vopd_names(CRATE)
+
+    def text(name, defs, uses, imm=0, mods=0, words=""):
+        v = isa_xcheck.Variant(0, name, None, defs, uses, imm, mods, words, "-")
+        return isa_xcheck.render12(v, info, vcmp, vopd)
+
+    assert text("Gfx12:s_wait_loadcnt", [], [], imm=3) == "s_wait_loadcnt 0x3"
+    assert text("Gfx12:s_barrier_signal", [], [], imm=0xFFFF) == "s_barrier_signal -1"
+    # No offset register is null, not gfx11's inline 0.
+    assert (
+        text("BufLoadB32", ["v2x1"], ["v2x1", "s4x4", "i0"], imm=16)
+        == "buffer_load_b32 v2, v2, s[4:7], null offen offset:16"
+    )
+    assert (
+        text("GAtomicAddU32Rtn", ["v2x1"], ["v2x2", "v4x1"], mods=1 << 12)
+        == "global_atomic_add_u32 v2, v[2:3], v4, off th:TH_ATOMIC_RETURN"
+    )
+    # The VOP3 form of an instruction that gained a VOP2 one on gfx12.
+    assert (
+        text("VAddF64", ["v2x2"], ["v3x2", "v3x2"], words="d5020002,00020703")
+        == "v_add_f64_e64 v[2:3], v[3:4], v[3:4]"
+    )
+    # A and B are half as wide as gfx11's.
+    assert (
+        text("VWmmaF32F16", ["v2x8"], ["v2x8", "v10x8", "v2x8"])
+        == "v_wmma_f32_16x16x16_f16 v[2:9], v[2:5], v[10:13], v[2:9]"
+    )
+    dual = text(
+        "VDual", ["v0x1", "v3x1"], ["v1x1", "v2x1", "v6x1", "v7x1"], imm=10 << 8, mods=2
+    )
+    assert dual == "v_dual_fmac_f32 v0, v1, v2 :: v_dual_max_num_f32 v3, v6, v7"
+
+
 def test_report_counts_verdicts(tmp_path):
     vs = [
         variant("SAddU32", ["s4x1"], ["s6x1", "s7x1"]),

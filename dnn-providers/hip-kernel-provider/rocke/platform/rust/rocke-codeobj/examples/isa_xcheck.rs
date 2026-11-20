@@ -9,11 +9,16 @@
 //! `s<r>x<n>`, a special register name or `i<hex>`.
 //! `platform/tools/isa_xcheck.py` writes them in LLVM syntax, assembles them
 //! with llvm-mc and compares the encodings. `-- --target gfx950` prints the
-//! same for the gfx950 tables and encoder (`target::gfx9`).
+//! same for the gfx950 tables and encoder (`target::gfx9`), and
+//! `-- --target gfx1201` the gfx11 variants as gfx1201 encodes them (the
+//! hand column is `-`), without the opcodes gfx12 removed and with gfx12's
+//! own (`Gfx12:<mnemonic>`).
 
 use rocke_codeobj_ffi::rir::gen_isa::{self as t, Class, Imm};
 use rocke_codeobj_ffi::rir::mir::*;
 use rocke_codeobj_ffi::rir::{asm, isa};
+use rocke_codeobj_ffi::target::gfx12::{self, Gfx12Op};
+use rocke_codeobj_ffi::target::Target;
 
 /// Inline in some source: integers, f32 constants, and the high dwords of
 /// f64 1.0 and -0.5 (inline in f64 sources only).
@@ -470,29 +475,48 @@ mod gfx950 {
     }
 }
 
+/// Immediates of a gfx12 wait or barrier: counts, the two-counter word, the
+/// all-waves operand, and the three `s_wait_alu` fields the compiler writes.
+fn gfx12_imms(op: Gfx12Op) -> &'static [i64] {
+    match op {
+        Gfx12Op::SWaitLoadcntDscnt => &[0, 0x203, 0x3f00],
+        Gfx12Op::SBarrierSignal | Gfx12Op::SBarrierWait => &[0xffff],
+        Gfx12Op::SWaitAlu => &[0xff9e, 0xf19f, 0xff9d],
+        _ => &[0, 1, 3],
+    }
+}
+
 fn main() {
-    if std::env::args().skip(1).collect::<Vec<_>>() == ["--target", "gfx950"] {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args == ["--target", "gfx950"] {
         gfx950::main();
         return;
     }
+    let gfx1201 = args == ["--target", "gfx1201"];
     let mut index = 0usize;
     let mut emit = |inst: &MInst, code: Option<u8>| {
-        let table = words(isa::encode_words(inst));
-        let hand = words(asm::encode_legacy_words(inst));
+        let (table, hand) = match gfx1201 {
+            true => (words(asm::encode_words(inst, Target::Gfx1201)), "-".to_string()),
+            false => (words(isa::encode_words(inst)), words(asm::encode_legacy_words(inst))),
+        };
+        let name = match inst.op {
+            Opc::Gfx12(op) => format!("Gfx12:{}", op.mnemonic()),
+            op => t::variant(op).to_string(),
+        };
         let defs: Vec<String> = inst.defs.iter().map(token).collect();
         let uses: Vec<String> = inst.uses.iter().map(token).collect();
         let code = code.map_or("-".to_string(), |c| format!("{c:#04x}"));
-        println!(
-            "{index}\t{}\t{code}\t{}\t{}\t{}\t{:#x}\t{table}\t{hand}",
-            t::variant(inst.op),
-            defs.join(","),
-            uses.join(","),
-            inst.imm,
-            inst.mods
-        );
+        println!("{index}\t{name}\t{code}\t{}\t{}\t{}\t{:#x}\t{table}\t{hand}", defs.join(","), uses.join(","), inst.imm, inst.mods);
         index += 1;
     };
-    for &op in t::ALL.iter().filter(|&&op| t::table_encoded(op)) {
+    if gfx1201 {
+        for op in Gfx12Op::ALL {
+            for &imm in gfx12_imms(op) {
+                emit(&MInst::new(Opc::Gfx12(op), [], []).with_imm(imm), None);
+            }
+        }
+    }
+    for &op in t::ALL.iter().filter(|&&op| t::table_encoded(op) && !(gfx1201 && gfx12::removed(op))) {
         if op == Opc::VDual {
             for inst in vopd_variants() {
                 emit(&inst, None);
@@ -503,7 +527,7 @@ fn main() {
             emit(&inst, None);
         }
     }
-    for &(code, _) in &t::VCMP {
+    for &(code, _) in t::VCMP.iter().filter(|&&(code, _)| !(gfx1201 && gfx12::removed(Opc::VCmp(code)))) {
         for inst in variants(Opc::VCmp(code)) {
             emit(&inst, Some(code));
         }

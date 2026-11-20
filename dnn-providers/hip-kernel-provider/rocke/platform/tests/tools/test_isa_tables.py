@@ -110,10 +110,8 @@ def test_gfx9_own_opcodes_are_the_opc_gfx9_family():
     assert "pub enum Gfx9Op {" in gfx9
     for name in own:
         assert f"Opc::Gfx9(Gfx9Op::{name})" in gfx9
-    # gfx11 gives the family one arm per table that matches every opcode, and
-    # its opcode rows and description name none of them.
-    gfx11 = (CRATE / isa_tables.GEN_ISA).read_text()
-    assert gfx11.count("Opc::Gfx9(_) =>") == 9
+    # gfx11's opcode rows and description name none of them (its tables give
+    # the family one arm each, which the Rust match checks).
     rows = (CRATE / isa_tables.GEN_OPCODES).read_text()
     desc = isa_tables.Tree(CRATE).read(isa_tables.DESCRIPTION)
     assert not any(f" {name} = (" in rows or f" {name} " in desc for name in own)

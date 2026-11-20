@@ -669,11 +669,15 @@ impl Checker<'_> {
                 // (`vec<i8x16>` for iu8; i4 has no values).
                 let (f16, bf16, f32x8, i32x8) = (Type::Vec(Scalar::F16, 16), Type::Vec(Scalar::BF16, 16), Type::Vec(Scalar::F32, 8), Type::Vec(Scalar::I32, 8));
                 let (i32x4, i8x16, i32x2) = (Type::Vec(Scalar::I32, 4), Type::Vec(Scalar::I8, 16), Type::Vec(Scalar::I32, 2));
+                // gfx12's atoms take eight A and B elements a lane.
+                let (f16x8, bf16x8) = (Type::Vec(Scalar::F16, 8), Type::Vec(Scalar::BF16, 8));
                 let shape: Option<(&[&Type], &Type)> = match self.str(op, "op_id")? {
                     Some("wmma_f32_16x16x16_f16") => Some((&[&f16], &f32x8)),
                     Some("wmma_f32_16x16x16_bf16") => Some((&[&bf16], &f32x8)),
                     Some("wmma_i32_16x16x16_iu8") => Some((&[&i32x4, &i8x16], &i32x8)),
                     Some("wmma_i32_16x16x16_iu4") => Some((&[&i32x2], &i32x8)),
+                    Some("wmma_gfx12_f32_16x16x16_f16") => Some((&[&f16x8], &f32x8)),
+                    Some("wmma_gfx12_f32_16x16x16_bf16") => Some((&[&bf16x8], &f32x8)),
                     _ => None,
                 };
                 if let Some((ab, cd)) = shape {

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 //! The 32-bit path of a 64-bit `arith.div` / `arith.mod` by a runtime value
-//! on gfx1151: LLVM's slow-division bypass (`BypassSlowDivision`, which AMDGPU
+//! on gfx1151 and gfx1201: LLVM's slow-division bypass (`BypassSlowDivision`, which AMDGPU
 //! enables for 64-bit division). When the high halves of both operands are
 //! zero, both are in [0, 2^32) and one unsigned 32-bit division gives the
 //! result; otherwise the 64-bit expansion runs as before. As in LLVM, the
@@ -23,7 +23,6 @@
 use super::{r, sub, Isel};
 use crate::rir::ast::OpKind;
 use crate::rir::mir::{MInst, Opc, Opnd, VRef};
-use crate::target::Target;
 
 /// `v_cmp_ne_u32`.
 const VCMP_NE_U32: u8 = 0x4d;
@@ -44,11 +43,11 @@ pub(super) struct Bypass {
 impl Isel<'_> {
     /// Tests whether `n` and `d` both fit in 32 bits and branches to the
     /// 32-bit path if so; what is selected next, up to `bypass64_close`, is
-    /// the 64-bit path. `None`, with nothing emitted, off gfx1151, with
+    /// the 64-bit path. `None`, with nothing emitted, on gfx950, with
     /// `nodivbypass`, when a high half is a constant other than zero (it
     /// never fits), or when both are zero (no test to make).
     pub(super) fn bypass64_open(&mut self, n: (Opnd, Opnd), d: (Opnd, Opnd), uniform: bool) -> Option<Bypass> {
-        if self.t.target != Target::Gfx1151 || crate::rir::debug_flag("nodivbypass") {
+        if !self.t.target.gfx11_pipeline() || crate::rir::debug_flag("nodivbypass") {
             return None;
         }
         let tested: Vec<Opnd> = [n.1, d.1].into_iter().filter(|&h| h != Opnd::Imm(0)).collect();
