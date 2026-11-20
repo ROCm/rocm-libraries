@@ -15,6 +15,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -67,9 +68,12 @@
  * whose gradient is summed over batch and heads. A multi-launch object (gfx11) is checked to
  * carry the companion it was enrolled with.
  *
- * Two tiers. `OnePerForm` runs one object per (slot, form) -- a form being what changes the
- * code an object runs beyond its head dim -- and is the pre-merge case. `Full/...Every` runs all
- * of them, padded objects at two widths; it is the nightly one.
+ * Three tiers. `Standard/...Representative` runs one object per slot and (dtype, causal, has_bias,
+ * has_dropout) -- per dtype for prep, which has no class -- the one with the lowest (padded, head
+ * dim, name): a launch count bounded by the number of classes, not of forms. The host census
+ * prints the objects it picks per architecture. `Comprehensive/...OnePerForm` runs one object per
+ * (slot, form) -- a form being what changes the code an object runs beyond its head dim -- and
+ * `Full/...Every` runs all of them, padded objects at two widths; it is the full-tier one.
  *
  * The merged engine's objects are launched on their own too (`TestGpuFlydslSdpaBwdMergedObject`,
  * one test per object): each runs the cells of the merged objects' device screen -- the bias
@@ -134,6 +138,7 @@ const SlotTraits& traitsOfSlot(ObjectSlot slot)
 /// Which of the staged objects a case launches.
 enum class ObjectSelection
 {
+    REPRESENTATIVE,
     ONE_PER_FORM,
     EVERY
 };
@@ -362,10 +367,27 @@ std::string formOf(const KernelDefinition& kernel)
     return form;
 }
 
-/// @p kernels in name order, or one per form when @p selection asks for that: the first of
-/// each in name order, so the choice is the same on every run.
-std::vector<KernelDefinition> select(std::vector<KernelDefinition> kernels,
-                                     ObjectSelection selection)
+/// What a REPRESENTATIVE launch keys on: the dtype and, except for prep, which has no class, the
+/// causal class, whether the object carries a bias and whether it bakes dropout.
+std::tuple<std::string, int64_t, int64_t, int64_t>
+    representativeKeyOf(ObjectSlot slot, const KernelDefinition& kernel)
+{
+    const auto dtype = stringField(kernel, "dtype");
+    if(slot == ObjectSlot::PREP)
+    {
+        return {dtype, 0, 0, 0};
+    }
+    return {dtype,
+            intField(kernel, "causal"),
+            intField(kernel, "has_bias"),
+            intField(kernel, "has_dropout")};
+}
+
+/// @p kernels in name order, or per @p selection: `EVERY` all of them; `ONE_PER_FORM` the first of
+/// each form in name order; `REPRESENTATIVE` the first of each representativeKeyOf() in order of
+/// (padded, head dim, name). Every choice is the same on every run.
+std::vector<KernelDefinition>
+    select(ObjectSlot slot, std::vector<KernelDefinition> kernels, ObjectSelection selection)
 {
     std::sort(kernels.begin(), kernels.end(), [](const auto& lhs, const auto& rhs) {
         return lhs.name < rhs.name;
@@ -374,11 +396,22 @@ std::vector<KernelDefinition> select(std::vector<KernelDefinition> kernels,
     {
         return kernels;
     }
+    if(selection == ObjectSelection::REPRESENTATIVE)
+    {
+        std::stable_sort(kernels.begin(), kernels.end(), [](const auto& lhs, const auto& rhs) {
+            return std::make_tuple(intField(lhs, "padded"), intField(lhs, "head_dim"))
+                   < std::make_tuple(intField(rhs, "padded"), intField(rhs, "head_dim"));
+        });
+    }
     std::vector<KernelDefinition> chosen;
-    std::set<std::string> seen;
+    std::set<std::string> seenForms;
+    std::set<std::tuple<std::string, int64_t, int64_t, int64_t>> seenKeys;
     for(auto& kernel : kernels)
     {
-        if(seen.insert(formOf(kernel)).second)
+        const bool fresh = selection == ObjectSelection::REPRESENTATIVE
+                               ? seenKeys.insert(representativeKeyOf(slot, kernel)).second
+                               : seenForms.insert(formOf(kernel)).second;
+        if(fresh)
         {
             chosen.push_back(std::move(kernel));
         }
@@ -514,7 +547,7 @@ void expectStagedObjectsMatch(ObjectSlot slot, ObjectSelection selection, bool n
 
     const auto& set = loadedSet(SPLIT_ENGINE_NAME);
     const auto device = packedArchDeviceProperties();
-    const auto kernels = select(staged, selection);
+    const auto kernels = select(slot, staged, selection);
     int launches = 0;
     for(const auto& kernel : kernels)
     {
@@ -604,11 +637,21 @@ TEST_P(TestFlydslSdpaBwdObjectGraphs, EveryLoadedObjectAdmitsTheGraphsBuiltFromI
     }
     for(const auto& [arch, archObjects] : objectsPerArch)
     {
-        const auto forms = select(archObjects, ObjectSelection::ONE_PER_FORM);
-        size_t quickLaunches = 0;
+        const auto representatives
+            = select(GetParam(), archObjects, ObjectSelection::REPRESENTATIVE);
+        size_t standardLaunches = 0;
+        std::string picked;
+        for(const auto& object : representatives)
+        {
+            standardLaunches
+                += objectCases(GetParam(), object, ObjectSelection::REPRESENTATIVE).size();
+            picked += (picked.empty() ? "" : ", ") + object.name;
+        }
+        const auto forms = select(GetParam(), archObjects, ObjectSelection::ONE_PER_FORM);
+        size_t perFormLaunches = 0;
         for(const auto& form : forms)
         {
-            quickLaunches += objectCases(GetParam(), form, ObjectSelection::ONE_PER_FORM).size();
+            perFormLaunches += objectCases(GetParam(), form, ObjectSelection::ONE_PER_FORM).size();
         }
         size_t fullLaunches = 0;
         for(const auto& object : archObjects)
@@ -616,8 +659,12 @@ TEST_P(TestFlydslSdpaBwdObjectGraphs, EveryLoadedObjectAdmitsTheGraphsBuiltFromI
             fullLaunches += objectCases(GetParam(), object, ObjectSelection::EVERY).size();
         }
         std::cout << "[ objects  ] " << traits.label << " " << arch << ": " << archObjects.size()
-                  << " objects, " << forms.size() << " forms, " << quickLaunches
-                  << " launches one per form, " << fullLaunches << " launches every object\n";
+                  << " objects, " << representatives.size() << " representatives, "
+                  << standardLaunches << " launches representative, " << forms.size() << " forms, "
+                  << perFormLaunches << " launches one per form, " << fullLaunches
+                  << " launches every object\n";
+        std::cout << "[ objects  ] " << traits.label << " " << arch
+                  << " representatives: " << picked << "\n";
     }
 }
 
@@ -668,19 +715,45 @@ TEST_P(TestGpuFlydslSdpaBwdObjects, DbiasReduceObjectsMatchTheReference)
 
 /// The biased dkdv objects of the 16-row family that pin `mfma_rows = 16` or `gqa_pack`, each with a
 /// NaN in the bias: a NaN reaches dK and dV at its key, where the reference is NaN. The `*NanBias*`
-/// cases select the 32-row dkdv object and the policy-picked 16-row one at head dim 128.
+/// cases select the 32-row dkdv object and the policy-picked 16-row one at head dim 128. This
+/// `Standard` case launches the first such object per dtype (ObjectSelection::REPRESENTATIVE);
+/// `TestGpuFlydslSdpaBwdObjectsComprehensiveTier` launches every one.
 TEST(TestGpuFlydslSdpaBwdDkdvNanBias, SixteenRowObjectsPropagateToDkAndDv)
+{
+    SKIP_IF_NO_DEVICES();
+    expectStagedObjectsMatch(ObjectSlot::DKDV, ObjectSelection::REPRESENTATIVE, true);
+}
+
+class TestGpuFlydslSdpaBwdObjectsComprehensiveTier : public ::testing::TestWithParam<int>
+{
+};
+
+TEST_P(TestGpuFlydslSdpaBwdObjectsComprehensiveTier, SixteenRowDkdvObjectsPropagateNanBiasToDkAndDv)
 {
     SKIP_IF_NO_DEVICES();
     expectStagedObjectsMatch(ObjectSlot::DKDV, ObjectSelection::EVERY, true);
 }
 
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaBwdObjectsComprehensiveTier,
+                         ::testing::Values(0),
+                         [](const ::testing::TestParamInfo<int>&) { return std::string("Sweep"); });
+
 std::string selectionName(const ::testing::TestParamInfo<ObjectSelection>& info)
 {
+    if(info.param == ObjectSelection::REPRESENTATIVE)
+    {
+        return "Representative";
+    }
     return info.param == ObjectSelection::EVERY ? "Every" : "OnePerForm";
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(Standard,
+                         TestGpuFlydslSdpaBwdObjects,
+                         ::testing::Values(ObjectSelection::REPRESENTATIVE),
+                         selectionName);
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuFlydslSdpaBwdObjects,
                          ::testing::Values(ObjectSelection::ONE_PER_FORM),
                          selectionName);
@@ -700,14 +773,40 @@ constexpr int MERGED_REPEAT_LAUNCHES = 20;
 /// What the test is named when the build's descriptors list no merged object.
 constexpr const char* NO_MERGED_OBJECTS = "NoMergedObjectsListed";
 
-/// The name of every merged object the build staged, or with @p sixteenRowBiasOnly only the
-/// biased ones of the 16-row family, without dropout (`isSixteenRowBias` over the descriptor's metadata), from
-/// the descriptor files themselves: a parameterized suite is instantiated before main() points
-/// the descriptor loader at this binary's trees, so the loaded sets are not there yet.
-/// NO_MERGED_OBJECTS when none is listed.
-std::vector<std::string> listedMergedObjects(bool sixteenRowBiasOnly = false)
+/// Which of the build's merged objects a suite lists.
+enum class MergedListing
 {
-    std::set<std::string> names;
+    /// Every object.
+    ALL,
+    /// One object per (dtype, causal, has_bias, has_dropout) with `gqa_pack == 0`: the one with the
+    /// smallest (head_dim, name).
+    REPRESENTATIVE,
+    /// The biased objects of the 16-row family, without dropout (`isSixteenRowBias`).
+    SIXTEEN_ROW_BIAS,
+    /// The first SIXTEEN_ROW_BIAS object, by (head_dim, name), per (dtype, causal, has_bias,
+    /// has_dropout).
+    SIXTEEN_ROW_BIAS_REPRESENTATIVE
+};
+
+/// What a merged object's listing selection reads from its descriptor's metadata.
+struct ListedMergedObject
+{
+    std::string name;
+    std::string dtype;
+    int64_t causal;
+    int64_t hasBias;
+    int64_t hasDropout;
+    int64_t gqaPack;
+    int64_t headDim;
+};
+
+/// The name of every merged object the build staged that @p listing selects, from the descriptor
+/// files themselves: a parameterized suite is instantiated before main() points the descriptor
+/// loader at this binary's trees, so the loaded sets are not there yet. NO_MERGED_OBJECTS when
+/// none is listed.
+std::vector<std::string> listedMergedObjects(MergedListing listing)
+{
+    std::map<std::string, ListedMergedObject> objects;
     const auto root = hip_kernel_provider::testing::descriptorSetRoot(
         HIPKERNELPROVIDER_FLYDSL_PRODUCT_DESCRIPTOR_RELDIR);
     std::error_code failed;
@@ -732,19 +831,63 @@ std::vector<std::string> listedMergedObjects(bool sixteenRowBiasOnly = false)
         for(const auto& kernel : pack["kernelDescriptors"])
         {
             const auto metadata = kernel.value("metadata", nlohmann::json::object());
-            if(!sixteenRowBiasOnly
-               || isSixteenRowBias(metadata.value("has_bias", int64_t{0}),
-                                   metadata.value("mfma_rows", int64_t{0}),
-                                   metadata.value("gqa_pack", int64_t{0}),
-                                   metadata.value("has_dropout", int64_t{0})))
+            const bool sixteenRow = isSixteenRowBias(metadata.value("has_bias", int64_t{0}),
+                                                     metadata.value("mfma_rows", int64_t{0}),
+                                                     metadata.value("gqa_pack", int64_t{0}),
+                                                     metadata.value("has_dropout", int64_t{0}));
+            const bool sixteenRowOnly
+                = listing == MergedListing::SIXTEEN_ROW_BIAS
+                  || listing == MergedListing::SIXTEEN_ROW_BIAS_REPRESENTATIVE;
+            if(sixteenRowOnly && !sixteenRow)
             {
-                names.insert(kernel.value("name", std::string()));
+                continue;
+            }
+            ListedMergedObject object{kernel.value("name", std::string()),
+                                      metadata.value("dtype", std::string()),
+                                      metadata.value("causal", int64_t{0}),
+                                      metadata.value("has_bias", int64_t{0}),
+                                      metadata.value("has_dropout", int64_t{0}),
+                                      metadata.value("gqa_pack", int64_t{0}),
+                                      metadata.value("head_dim", int64_t{0})};
+            if(!object.name.empty())
+            {
+                objects.emplace(object.name, std::move(object));
             }
         }
     }
-    names.erase(std::string());
-    return names.empty() ? std::vector<std::string>{NO_MERGED_OBJECTS}
-                         : std::vector<std::string>(names.begin(), names.end());
+
+    std::vector<std::string> names;
+    if(listing == MergedListing::ALL || listing == MergedListing::SIXTEEN_ROW_BIAS)
+    {
+        for(const auto& [name, object] : objects)
+        {
+            names.push_back(name);
+        }
+    }
+    else
+    {
+        std::vector<ListedMergedObject> candidates;
+        for(const auto& [name, object] : objects)
+        {
+            if(listing == MergedListing::SIXTEEN_ROW_BIAS_REPRESENTATIVE || object.gqaPack != 1)
+            {
+                candidates.push_back(object);
+            }
+        }
+        std::stable_sort(
+            candidates.begin(), candidates.end(), [](const auto& lhs, const auto& rhs) {
+                return std::tie(lhs.headDim, lhs.name) < std::tie(rhs.headDim, rhs.name);
+            });
+        std::set<std::tuple<std::string, int64_t, int64_t, int64_t>> seen;
+        for(const auto& object : candidates)
+        {
+            if(seen.emplace(object.dtype, object.causal, object.hasBias, object.hasDropout).second)
+            {
+                names.push_back(object.name);
+            }
+        }
+    }
+    return names.empty() ? std::vector<std::string>{NO_MERGED_OBJECTS} : names;
 }
 
 /// The staged merged object @p name, or nullptr.
@@ -915,6 +1058,8 @@ TEST_P(TestGpuFlydslSdpaBwdMergedObject, IsBitwiseStableAndMatchesTheReference)
 /// A NaN in the bias, on the bias cell of each biased merged object of the 16-row family (`mfma_rows
 /// = 16` or `gqa_pack`): it reaches dK and dV at its key, where the reference is NaN. The `*NanBias*`
 /// cases select the merged d64 32-row object and the policy-picked 16-row one at head dim 128.
+/// `Standard` runs the first such object per dtype (MergedListing::SIXTEEN_ROW_BIAS_REPRESENTATIVE),
+/// `Comprehensive` every one.
 class TestGpuFlydslSdpaBwdMergedNanBiasObject : public TestGpuFlydslSdpaBwdMergedObject
 {
 };
@@ -938,16 +1083,29 @@ TEST_P(TestGpuFlydslSdpaBwdMergedNanBiasObject, PropagatesToDkAndDv)
     });
 }
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(
+    Standard,
+    TestGpuFlydslSdpaBwdMergedNanBiasObject,
+    ::testing::ValuesIn(listedMergedObjects(MergedListing::SIXTEEN_ROW_BIAS_REPRESENTATIVE)),
+    [](const ::testing::TestParamInfo<std::string>& info) { return info.param; });
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
                          TestGpuFlydslSdpaBwdMergedNanBiasObject,
-                         ::testing::ValuesIn(listedMergedObjects(true)),
+                         ::testing::ValuesIn(listedMergedObjects(MergedListing::SIXTEEN_ROW_BIAS)),
                          [](const ::testing::TestParamInfo<std::string>& info) {
                              return info.param;
                          });
 
-INSTANTIATE_TEST_SUITE_P(,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          TestGpuFlydslSdpaBwdMergedObject,
-                         ::testing::ValuesIn(listedMergedObjects()),
+                         ::testing::ValuesIn(listedMergedObjects(MergedListing::REPRESENTATIVE)),
+                         [](const ::testing::TestParamInfo<std::string>& info) {
+                             return info.param;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Comprehensive,
+                         TestGpuFlydslSdpaBwdMergedObject,
+                         ::testing::ValuesIn(listedMergedObjects(MergedListing::ALL)),
                          [](const ::testing::TestParamInfo<std::string>& info) {
                              return info.param;
                          });

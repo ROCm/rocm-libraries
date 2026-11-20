@@ -3,9 +3,14 @@
 
 #pragma once
 
-#include <string>
+#include <gtest/gtest.h>
 
+#include <hipdnn_corpus_gen/OperationMetadata.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
+#include <nlohmann/json.hpp>
+
+#include <fstream>
+#include <string>
 
 namespace hipdnn_corpus_gen::test
 {
@@ -18,6 +23,18 @@ inline std::string operationsDir()
     return (hipdnn_data_sdk::utilities::getCurrentExecutableDirectory() / HIPDNN_TEST_DATA_RELDIR
             / HIPDNN_CORPUS_GEN_OPERATIONS_SUBDIR)
         .string();
+}
+
+/// The shipped declaration of @p operation, parsed as the generator parses it. A file that is
+/// missing or does not load fails the calling test and yields an empty declaration.
+inline OperationMetadata shippedOperation(const std::string& operation)
+{
+    const auto path = operationsDir() + "/" + operation + ".opmeta.json";
+    std::ifstream file(path);
+    EXPECT_TRUE(file.is_open()) << path;
+    const auto parsed = parseOperationMetadata(nlohmann::json::parse(file));
+    EXPECT_TRUE(parsed.ok()) << (parsed.errors.empty() ? "" : parsed.errors.front());
+    return parsed.metadata.value_or(OperationMetadata{});
 }
 
 } // namespace hipdnn_corpus_gen::test
