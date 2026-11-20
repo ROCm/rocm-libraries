@@ -204,6 +204,36 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, ModeBQueriesHipdnnModeB)
     expectModeQuery(CUDNN_HEUR_MODE_B, HIPDNN_HEUR_MODE_B);
 }
 
+// A backend older than 0.5.0 rejects hipDNN modes A and B, so the mode query sends FALLBACK with
+// the mode's policy order instead (RFC 0005 §4.6.3).
+TEST_F(TestCudnnCompatibilityV8BuilderEngines, OlderBackendGetsFallbackModeWithThePolicyOrder)
+{
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    EXPECT_CALL(*_mockBackend, version())
+        .WillRepeatedly(::testing::Return(hipdnn_data_sdk::utilities::Version{0, 4, 0}));
+    EXPECT_CALL(*_mockBackend, versionString()).WillRepeatedly(::testing::Return("0.4.0"));
+    installHeuristicResults({5, -2});
+
+    for(const auto& [mode, policy] :
+        {std::pair{CUDNN_HEUR_MODE_A, hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME},
+         std::pair{CUDNN_HEUR_MODE_B, hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME}})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        fe::OperationGraph_v8 graph = convGraph();
+        EXPECT_EQ(results(graph, mode).size(), 2U);
+
+        const hipdnnBackendDescriptor_t query
+            = created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR).back();
+        EXPECT_EQ(attributeOn(query, HIPDNN_ATTR_ENGINEHEUR_MODE).value<hipdnnBackendHeurMode_t>(),
+                  HIPDNN_HEUR_MODE_FALLBACK);
+        EXPECT_EQ(
+            attributeOn(query, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT).values<std::int64_t>(),
+            (std::vector<std::int64_t>{policyNameToId("SelectionHeuristic::Config"),
+                                       policyNameToId(policy),
+                                       policyNameToId("SelectionHeuristic::StaticOrdering")}));
+    }
+}
+
 TEST_F(TestCudnnCompatibilityV8BuilderEngines, FallbackModeQueriesHipdnnFallbackOnly)
 {
     installHeuristicResults({5, -2});

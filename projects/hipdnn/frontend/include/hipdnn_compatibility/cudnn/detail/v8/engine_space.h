@@ -21,6 +21,7 @@
 #include <hipdnn_frontend/Logging.hpp>
 #include <hipdnn_frontend/Types.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
+#include <hipdnn_frontend/detail/CreateBackendDescriptor.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
 
 namespace hipdnn_frontend::compatibility::cudnn_frontend::detail::v8
@@ -186,11 +187,7 @@ private:
                                                          1,
                                                          static_cast<const void*>(&graph)),
                     "setting the hipDNN engine heuristic graph");
-        checkHipdnn(hipdnnBackend()->backendSetAttribute(heuristic,
-                                                         HIPDNN_ATTR_ENGINEHEUR_MODE,
-                                                         HIPDNN_TYPE_HEUR_MODE,
-                                                         1,
-                                                         static_cast<const void*>(&mode)),
+        checkHipdnn(hipdnn_frontend::detail::setEngineHeuristicMode(heuristic, mode),
                     "setting the hipDNN engine heuristic mode");
         checkHipdnn(hipdnnBackend()->backendFinalize(heuristic),
                     "finalizing the hipDNN engine heuristic");

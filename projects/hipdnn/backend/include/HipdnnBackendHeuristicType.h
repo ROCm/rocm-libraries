@@ -43,7 +43,8 @@ typedef enum
      * SelectionHeuristic::StaticOrdering]. ModeA ranks the applicable engines
      * by their L1 prediction in the ranking metric; engines without one follow
      * in static order, and when no engine has one ModeA declines and
-     * StaticOrdering decides. Returns the same engines as FALLBACK.
+     * StaticOrdering decides. Returns the same engines as FALLBACK. Added in
+     * hipdnn_backend 0.5.0.
      */
     HIPDNN_HEUR_MODE_A = 1,
 
@@ -52,11 +53,12 @@ typedef enum
      *
      * Policy list [SelectionHeuristic::Config, SelectionHeuristic::ModeB,
      * SelectionHeuristic::StaticOrdering]. ModeB prefers each engine's L2
-     * prediction and falls back to its L1 prediction.
+     * prediction and falls back to its L1 prediction. Added in hipdnn_backend
+     * 0.5.0.
      */
     HIPDNN_HEUR_MODE_B = 2,
 
-    /** @brief Alias of HIPDNN_HEUR_MODE_A, as cuDNN's A aliases INSTANT */
+    /** @brief Alias of HIPDNN_HEUR_MODE_A, as cuDNN's A aliases INSTANT. Added in hipdnn_backend 0.5.0 */
     HIPDNN_HEUR_MODE_INSTANT = HIPDNN_HEUR_MODE_A,
 
 } hipdnnBackendHeurMode_t;

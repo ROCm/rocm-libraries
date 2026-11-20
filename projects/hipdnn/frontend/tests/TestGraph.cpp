@@ -17526,6 +17526,69 @@ TEST_F(TestGraph, HeuristicModeTravelsAsTheBackendMode)
     }
 }
 
+// A backend older than 0.5.0 rejects modes A and B, so the frontend sends what that backend
+// accepts (RFC 0005 §4.6.3): mode FALLBACK, plus the mode's policy order for A and B.
+TEST_F(TestGraph, OlderBackendGetsFallbackModeWithThePolicyOrder)
+{
+    using hipdnn_data_sdk::utilities::policyNameToId;
+    EXPECT_CALL(*_mockBackend, version())
+        .WillRepeatedly(Return(hipdnn_data_sdk::utilities::Version{0, 4, 0}));
+    EXPECT_CALL(*_mockBackend, versionString()).WillRepeatedly(Return("0.4.0"));
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_OPERATION_GRAPH, _, _, _))
+        .Times(AnyNumber());
+    std::vector<hipdnnBackendHeurMode_t> sentModes;
+    EXPECT_CALL(*_mockBackend,
+                backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_MODE, HIPDNN_TYPE_HEUR_MODE, 1, _))
+        .WillRepeatedly([&sentModes](hipdnnBackendDescriptor_t,
+                                     hipdnnBackendAttributeName_t,
+                                     hipdnnBackendAttributeType_t,
+                                     int64_t,
+                                     const void* arrayOfElements) {
+            sentModes.push_back(*static_cast<const hipdnnBackendHeurMode_t*>(arrayOfElements));
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    std::vector<int64_t> sentOrder;
+    EXPECT_CALL(
+        *_mockBackend,
+        backendSetAttribute(_, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT, HIPDNN_TYPE_INT64, _, _))
+        .WillRepeatedly([&sentOrder](hipdnnBackendDescriptor_t,
+                                     hipdnnBackendAttributeName_t,
+                                     hipdnnBackendAttributeType_t,
+                                     int64_t elementCount,
+                                     const void* arrayOfElements) {
+            const auto* ids = static_cast<const int64_t*>(arrayOfElements);
+            sentOrder.assign(ids, ids + elementCount);
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    const auto orderFor = [](const char* predictionPolicy) {
+        return std::vector<int64_t>{policyNameToId("SelectionHeuristic::Config"),
+                                    policyNameToId(predictionPolicy),
+                                    policyNameToId("SelectionHeuristic::StaticOrdering")};
+    };
+    const std::vector<std::pair<HeuristicMode, std::vector<int64_t>>> cases{
+        {HeuristicMode::A, orderFor(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME)},
+        {HeuristicMode::B, orderFor(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME)},
+        {HeuristicMode::FALLBACK, {}},
+        {HeuristicMode::OPENSOURCE, {}}};
+    for(const auto& [mode, expectedOrder] : cases)
+    {
+        sentModes.clear();
+        sentOrder.clear();
+        detail::ScopedHipdnnBackendDescriptor heuristicDesc;
+        const auto error = detail::createEngineHeuristicDescriptorForGraph(
+            heuristicDesc,
+            // NOLINTNEXTLINE(performance-no-int-to-ptr)
+            reinterpret_cast<hipdnnBackendDescriptor_t>(0x4242),
+            mode);
+        ASSERT_TRUE(error.is_good()) << error.get_message();
+        EXPECT_EQ(sentModes, std::vector<hipdnnBackendHeurMode_t>{HIPDNN_HEUR_MODE_FALLBACK})
+            << to_string(mode);
+        EXPECT_EQ(sentOrder, expectedOrder) << to_string(mode);
+    }
+}
+
 // As cudnn-frontend's get_heuristics_list: one query per mode in the order given, results
 // concatenated. An engine returned by an earlier mode is not repeated, and a repeated mode is
 // not queried again.
