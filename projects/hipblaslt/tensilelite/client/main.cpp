@@ -242,6 +242,7 @@ namespace TensileLite
                 ("split-dim",              po::value<std::string>()->default_value("M"), "Dimension --split-devices splits: M or N.")
                 ("split-align",            po::value<std::string>()->default_value("auto"), "With --split-devices, how the share of the split dimension is rounded so each device's slice of the split operand, C and D starts on a multiple of 256 bytes, the same rule as hipBLASLt PartitionedGemm: auto = round up when the balance changes by at most 1%; off = always size/N (to measure the misaligned case); force = always round up, as long as the last device keeps work.")
                 ("split-placement",        po::value<std::string>()->default_value("RRRR"), "With --split-devices, one letter each for A, B, C, D: R = a copy on every device, S = one copy that the other devices access over peer access. Only the operand the split does not cut (B for --split-dim M, A for --split-dim N) and D can be shared; a shared operand is the copy of the last device, and the other devices validate against its data. A shared D is the one of device-idx, and every device writes its slice into it.")
+                ("split-free-run",         po::value<bool>()->default_value(false), "With --split-devices, do not join the devices after every launch. By default each launch ends with a join (every device's stream writes a counter after its slice and waits for the other devices' counters), so a launch starts only when the one before it has finished on every device, as successive launches of one kernel on one stream do; that is the time to compare with an unsplit run. With this option the devices run their launches back to back, each at its own pace, and are only waited for at the end of a group of enqueues.")
                 ("mx-scale-format",          po::value<int>()->default_value(0), "MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
                 ("activation-compute-type",  po::value<rocisa::DataType>()->default_value(rocisa::DataType::None), "Activation compute type.")
                 ("high-precision-accumulate", po::value<bool>()->default_value(false), "Use high-precision accumulate.")
@@ -1254,9 +1255,52 @@ int main(int argc, const char* argv[])
     // Pointer-array batches: the kernels take one pointer per batch (batchA/B/C/D) instead of the
     // scalar pointers, so every redirected D also needs its own pointer array on the device.
     std::vector<std::vector<std::shared_ptr<void>>> fullBatchD; // [device][rotating slot]
-    // One host word per device: the target of the stream write that publishes a device's writes
-    // into another device's D (see launchAll).
-    std::vector<std::shared_ptr<void>> publishWords; // [device]
+    // One counter per device, in host memory every device can reach. Joined run (the default):
+    // after its slice of a launch a device's stream writes the launch number into its counter,
+    // then waits until the other devices' counters have reached it (see launchAll). That write
+    // also publishes the device's stores into another device's D. With --split-free-run there is
+    // no join and the write is only the publish. Created here and not at the first launch, so that
+    // a launch only enqueues.
+    std::vector<std::shared_ptr<void>> joinCounters; // [device]
+    uint64_t                           joinLaunch = 0;
+    const bool joinSplit = problemFactory.numSlices() > 1 && !args["split-free-run"].as<bool>();
+    if(problemFactory.numSlices() > 1)
+        for(auto const& ctx : devices)
+        {
+            ScopedDevice device(ctx->deviceId);
+            int          canWait = 0;
+            HIP_CHECK_EXC(hipDeviceGetAttribute(
+                &canWait, hipDeviceAttributeCanUseStreamWaitValue, ctx->deviceId));
+            if(joinSplit && !canWait)
+                throw std::runtime_error(
+                    "--split-devices joins the devices with hipStreamWaitValue64, which device "
+                    + std::to_string(ctx->deviceId) + " does not support; use --split-free-run");
+            void* word = nullptr;
+            HIP_CHECK_EXC(hipHostMalloc(
+                &word, sizeof(uint64_t), hipHostMallocCoherent | hipHostMallocPortable));
+            *static_cast<uint64_t*>(word) = 0;
+            joinCounters.emplace_back(word, [](void* q) { static_cast<void>(hipHostFree(q)); });
+        }
+    // The batch of each device: write its own counter, then wait for every other device's. Built
+    // once; a launch only fills in the launch number. A split run uses all the devices.
+    std::vector<std::vector<hipStreamBatchMemOpParams>> joinOps(joinCounters.size());
+    for(size_t d = 0; d < joinCounters.size(); d++)
+    {
+        auto& ops = joinOps[d];
+        ops.resize(joinCounters.size());
+        ops[0].writeValue.operation = hipStreamMemOpWriteValue64;
+        ops[0].writeValue.address   = joinCounters[d].get();
+        size_t k                    = 1;
+        for(size_t other = 0; other < joinCounters.size(); other++)
+        {
+            if(other == d)
+                continue;
+            ops[k].waitValue.operation = hipStreamMemOpWaitValue64;
+            ops[k].waitValue.address   = joinCounters[other].get();
+            ops[k].waitValue.flags     = hipStreamWaitValueGte;
+            k++;
+        }
+    }
     auto attachFullOutput = [&](ContractionProblem* problem, size_t firstSlot, size_t endSlot) {
         if(problemFactory.numSlices() < 2)
             return;
@@ -1710,21 +1754,8 @@ int main(int argc, const char* argv[])
                                 auto       publish = [&](size_t d) {
                                     if(!peerD && !(sharedD && d > 0))
                                         return;
-                                    if(publishWords.size() < active.size())
-                                        publishWords.resize(active.size());
-                                    if(!publishWords[d])
-                                    {
-                                        void* word = nullptr;
-                                        HIP_CHECK_EXC(hipHostMalloc(&word,
-                                                                    sizeof(uint64_t),
-                                                                    hipHostMallocCoherent
-                                                                        | hipHostMallocMapped));
-                                        publishWords[d] = std::shared_ptr<void>(word, [](void* q) {
-                                            static_cast<void>(hipHostFree(q));
-                                        });
-                                    }
                                     HIP_CHECK_EXC(hipStreamWriteValue64(
-                                        active[d]->stream, publishWords[d].get(), 1, 0));
+                                        active[d]->stream, joinCounters[d].get(), 1, 0));
                                 };
 
                                 // One counter across warmups, the profiler run and every sync.
@@ -1746,7 +1777,27 @@ int main(int argc, const char* argv[])
                                         else
                                             HIP_CHECK_EXC(ctx.adapter->launchKernels(
                                                 launch[d], ctx.stream, nullptr, nullptr));
-                                        publish(d);
+                                        if(!joinSplit)
+                                            publish(d);
+                                    }
+                                    // Join the devices: the next launch starts on every device
+                                    // only when this one has finished on all of them, as
+                                    // successive launches of an unsplit problem do on one stream.
+                                    // One batch per stream; its write comes first, so no stream
+                                    // can block another.
+                                    if(!joinSplit || active.size() < 2)
+                                        return;
+                                    ++joinLaunch;
+                                    for(size_t d = 0; d < active.size(); d++)
+                                    {
+                                        auto& ops                 = joinOps[d];
+                                        ops[0].writeValue.value64 = joinLaunch;
+                                        for(size_t k = 1; k < active.size(); k++)
+                                            ops[k].waitValue.value64 = joinLaunch;
+                                        HIP_CHECK_EXC(hipStreamBatchMemOp(active[d]->stream,
+                                                                          unsigned(active.size()),
+                                                                          ops.data(),
+                                                                          0));
                                     }
                                 };
 
