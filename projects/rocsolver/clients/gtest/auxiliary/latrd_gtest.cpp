@@ -83,6 +83,12 @@ const vector<vector<int>> large_matrix_size_range
 
 const vector<vector<int>> large_op_range = {{64, 0}, {98, 1}, {130, 0}, {150, 1}};
 
+// for weekly_lapack tests
+// each matrix_size_range is a {n, lda, ldw}
+const vector<vector<int>> large_weekly_matrix_size_range = {{8192, 8192, 8192}};
+
+const vector<vector<int>> large_weekly_op_range = {{64, 0}, {64, 1}};
+
 Arguments latrd_setup_arguments(latrd_tuple tup)
 {
     vector<int> matrix_size = std::get<0>(tup);
@@ -199,3 +205,13 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          LATRD_FORSYTRD,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(op_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LATRD,
+                         Combine(ValuesIn(large_weekly_matrix_size_range),
+                                 ValuesIn(large_weekly_op_range)));
+
+INSTANTIATE_TEST_SUITE_P(weekly_lapack,
+                         LATRD_FORSYTRD,
+                         Combine(ValuesIn(large_weekly_matrix_size_range),
+                                 ValuesIn(large_weekly_op_range)));

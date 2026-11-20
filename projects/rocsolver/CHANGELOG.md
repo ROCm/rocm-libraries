@@ -10,6 +10,10 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Changed
 ### Removed
 ### Optimized
+* Replaced remaining compile-time `WarpSize` assumptions in GPU reduction
+paths with runtime `warpSize` handling, and updated shared-memory warp
+accumulator sizing helpers accordingly.
+
 ### Resolved issues
 
 * Fixed failure of large batch count > 64 * 1024 for POTRF, POTF2, POTRS, POSV, POTRI.
@@ -96,7 +100,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 * Support added for the gfx1250 architecture.
 
 ### Optimized
-
 * Refined `potf2_run_small` dispatch by `BS2` to avoid over-generating specialized kernels while preserving runtime bounds checks on `nb`.
 
 ### Resolved issues
