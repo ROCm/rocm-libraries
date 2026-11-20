@@ -14,3 +14,5 @@
   bindings with `-DROCSPARSE_ILP64=ON` against an ILP64 build, and nothing Fortran is built.
   The archive has one section per procedure: link with `-Wl,--gc-sections` to keep only the wrappers
   you call.
+  The package sets `rocsparse_FORTRAN_LIBRARIES`, the target to link (`roc::rocsparse_fortran`), and
+  `rocsparse_FORTRAN_INCLUDE_DIRS`, the directory of its `.mod` files.
