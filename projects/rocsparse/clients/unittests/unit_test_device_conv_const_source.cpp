@@ -24,8 +24,8 @@
 
 // A const sparse descriptor stores its arrays in const_row_data / const_col_data /
 // const_val_data and leaves the mutable pointers null. These tests run rocsparse_extract
-// (CSR and CSC) and the BSR-to-CSR, CSR-to-BSR and CSR-to-ELL conversions of
-// rocsparse_sparse_to_sparse on a const source. Extract calls the shared run_extract helper,
+// (CSR and CSC) and the BSR-to-CSR, CSR-to-BSR, CSR-to-ELL, CSR-to-COO and CSR-to-COO AoS
+// conversions of rocsparse_sparse_to_sparse on a const source. Extract calls the shared run_extract helper,
 // which builds the source with the const constructor and checks the output against its host
 // reference, including the sentinel and the guard tail. The other conversions run a mutable
 // source and a const source that share the same arrays; both must return the same statuses
@@ -781,6 +781,157 @@ namespace
         }
     }
 
+    // CSR to COO (and COO AoS): the row pointer is expanded and the columns and values are
+    // copied. The COO index type is the column type J of the source; the row pointer type
+    // P may differ. Both index bases; with base one a column array left unwritten (or copied
+    // from a null mutable pointer) cannot pass for the right one.
+    template <typename P, typename J, typename T>
+    void run_csr_to_coo(rocsparse_handle      handle,
+                        bool                  aos,
+                        int                   base,
+                        int64_t               rows,
+                        int64_t               cols,
+                        const std::vector<P>& ptr_h,
+                        const std::vector<J>& ind_h,
+                        const std::vector<T>& val_h,
+                        const std::string&    label)
+    {
+        SCOPED_TRACE(label + (aos ? " coo_aos" : " coo"));
+        const int64_t nnz = static_cast<int64_t>(ind_h.size());
+
+        std::vector<J> want_row, want_col, want_aos;
+        for(int64_t r = 0; r < rows; ++r)
+            for(int64_t k = ptr_h[r] - base; k < ptr_h[r + 1] - base; ++k)
+            {
+                want_row.push_back(static_cast<J>(r + base));
+                want_col.push_back(ind_h[k]);
+                want_aos.push_back(static_cast<J>(r + base));
+                want_aos.push_back(ind_h[k]);
+            }
+
+        DevBuf<P> src_ptr(ptr_h);
+        DevBuf<J> src_ind(ind_h);
+        DevBuf<T> src_val(val_h);
+        // Only the arrays of the chosen target layout are allocated.
+        const std::vector<J> soa_init = aos ? std::vector<J>() : sentinel_vector<J>(nnz);
+        const std::vector<J> aos_init = aos ? sentinel_vector<J>(2 * nnz) : std::vector<J>();
+        DevBuf<J>  mut_row(soa_init), cst_row(soa_init), mut_col(soa_init), cst_col(soa_init);
+        DevBuf<J>  mut_aos(aos_init), cst_aos(aos_init);
+        DevBuf<T>  mut_val(sentinel_vector<T>(nnz)), cst_val(sentinel_vector<T>(nnz));
+        const auto ib = base_of(base);
+        const auto pt = it_of<P>();
+        const auto jt = it_of<J>();
+        const auto dt = dt_of<T>();
+
+        const auto once = [&](bool       as_const,
+                              DevBuf<J>& dst_row,
+                              DevBuf<J>& dst_col,
+                              DevBuf<J>& dst_aos,
+                              DevBuf<T>& dst_val) {
+            Spmat      mutable_source, target;
+            ConstSpmat const_source;
+            const auto created = as_const ? rocsparse_create_const_csr_descr(&const_source,
+                                                                             rows,
+                                                                             cols,
+                                                                             nnz,
+                                                                             src_ptr.get(),
+                                                                             src_ind.get(),
+                                                                             src_val.get(),
+                                                                             pt,
+                                                                             jt,
+                                                                             ib,
+                                                                             dt)
+                                          : rocsparse_create_csr_descr(&mutable_source,
+                                                                       rows,
+                                                                       cols,
+                                                                       nnz,
+                                                                       src_ptr.get(),
+                                                                       src_ind.get(),
+                                                                       src_val.get(),
+                                                                       pt,
+                                                                       jt,
+                                                                       ib,
+                                                                       dt);
+            EXPECT_EQ(created, st_ok);
+            EXPECT_EQ(aos ? rocsparse_create_coo_aos_descr(
+                                &target, rows, cols, nnz, dst_aos.get(), dst_val.get(), jt, ib, dt)
+                          : rocsparse_create_coo_descr(&target,
+                                                       rows,
+                                                       cols,
+                                                       nnz,
+                                                       dst_row.get(),
+                                                       dst_col.get(),
+                                                       dst_val.get(),
+                                                       jt,
+                                                       ib,
+                                                       dt),
+                      st_ok);
+            if(created != st_ok || target.get() == nullptr)
+                return Run{};
+            rocsparse_const_spmat_descr source
+                = as_const ? const_source.get() : mutable_source.get();
+            Run run;
+            run.st = sparse_to_sparse(handle, source, target);
+            int64_t r, c;
+            EXPECT_EQ(rocsparse_spmat_get_size(target, &r, &c, &run.nnz), st_ok);
+            return run;
+        };
+
+        const Run mut = once(false, mut_row, mut_col, mut_aos, mut_val);
+        const Run cst = once(true, cst_row, cst_col, cst_aos, cst_val);
+        expect_same_status(label, mut.st, cst.st);
+        if(!healthy(mut.st) || !healthy(cst.st))
+            return;
+        EXPECT_EQ(mut.nnz, nnz) << "mutable target nnz";
+        EXPECT_EQ(cst.nnz, nnz) << "const target nnz";
+        if(aos)
+        {
+            expect_written(mut_aos, want_aos, "mutable ind");
+            expect_written(cst_aos, want_aos, "const ind");
+        }
+        else
+        {
+            expect_written(mut_row, want_row, "mutable row");
+            expect_written(cst_row, want_row, "const row");
+            expect_written(mut_col, want_col, "mutable col");
+            expect_written(cst_col, want_col, "const col");
+        }
+        expect_written(mut_val, val_h, "mutable val");
+        expect_written(cst_val, val_h, "const val");
+    }
+
+    template <typename P, typename J, typename T>
+    void csr_to_coo_sweep(rocsparse_handle handle)
+    {
+        const std::string kind = type_label<P, J, T>();
+        for(bool aos : {false, true})
+            for(int base : {0, 1})
+            {
+                if(failed())
+                    return;
+                const std::string label = kind + " base " + std::to_string(base);
+                // Rows of length 2, 0, 1 and 3.
+                run_csr_to_coo<P, J, T>(handle,
+                                        aos,
+                                        base,
+                                        4,
+                                        5,
+                                        shift<P>({0, 2, 2, 3, 6}, base),
+                                        shift<J>({1, 4, 0, 1, 2, 4}, base),
+                                        numbered_vector<T>(6),
+                                        label + " 4x5");
+                run_csr_to_coo<P, J, T>(handle,
+                                        aos,
+                                        base,
+                                        3,
+                                        4,
+                                        std::vector<P>(4, static_cast<P>(base)),
+                                        {},
+                                        {},
+                                        label + " empty 3x4");
+            }
+    }
+
     // Pointer and index widths, in the style of ConvExtract.ExtractIndexTypesAndFormats.
     // The null mutable pointers do not depend on the value type, so each conversion runs
     // as float. The four widths are 32/32, 64/32, 32/64 and 64/64.
@@ -808,6 +959,7 @@ namespace
     CONST_SOURCE_SWEEP(Bsr2CsrSweep, bsr_to_csr_sweep);
     CONST_SOURCE_SWEEP(Csr2EllSweep, csr_to_ell_sweep);
     CONST_SOURCE_SWEEP(Csr2BsrSweep, csr_to_bsr_sweep);
+    CONST_SOURCE_SWEEP(Csr2CooSweep, csr_to_coo_sweep);
 #undef CONST_SOURCE_SWEEP
 
     // rocm-libraries#15888: one 2x2 row-major block of a const BSR matrix.
@@ -832,6 +984,13 @@ namespace
     TEST_F(ConvConstSource, Csr2BsrMatchesReference)
     {
         type_sweep<Csr2BsrSweep>(handle);
+    }
+
+    // The CSR-to-COO conversion copies the columns from the source descriptor's column
+    // pointer, which only the const field holds for a const source.
+    TEST_F(ConvConstSource, Csr2CooMatchesReference)
+    {
+        type_sweep<Csr2CooSweep>(handle);
     }
 
     // A single-precision source and a double-precision target. The conversion rejects the
