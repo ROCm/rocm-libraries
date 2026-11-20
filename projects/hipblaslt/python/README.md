@@ -56,7 +56,7 @@ pytest projects/hipblaslt/python/tests
 
 Tests marked `gpu` skip when no device is visible. Set `HIPBLASLT_PY_REQUIRE_GPU=1` to make them fail instead, as the GPU CI lanes do.
 
-Component CI runs these tests through [`scripts/ci_lane.sh`](scripts/ci_lane.sh), which installs a pinned TheRock nightly into a fresh venv, builds the bindings and runs pytest. It works the same way locally:
+Component CI runs these tests through [`scripts/ci_lane.sh`](scripts/ci_lane.sh), which installs a pinned TheRock nightly into a fresh venv, builds the bindings and runs pytest. CI runs those as separate steps; with no step named, the script runs them all, so it works the same way locally:
 
 ```bash
 HIPBLASLT_PY_ROCM_VERSION=10.3.0a20261116 HIPBLASLT_PY_DEVICE=gfx942 \
