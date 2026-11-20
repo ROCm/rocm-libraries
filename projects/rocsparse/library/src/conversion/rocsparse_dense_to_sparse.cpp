@@ -102,6 +102,10 @@ namespace rocsparse
 
                 *buffer_size = sizeof(int64_t) * static_cast<size_t>(mb);
             }
+            else
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+            }
             return rocsparse_status_success;
         }
 

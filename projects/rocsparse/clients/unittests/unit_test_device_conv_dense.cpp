@@ -25,7 +25,8 @@
 // csr2dense / csc2dense / dense2csr / dense2csc: every value type, both index bases, empty
 // matrices and the pointer checks; rocsparse_sparse_to_dense for the CSR, CSC and COO
 // formats, both index types, both index bases and both orders of the dense matrix;
-// rocsparse_dense_to_sparse and rocsparse_sparse_to_dense with mismatched dimensions.
+// rocsparse_dense_to_sparse and rocsparse_sparse_to_dense with mismatched dimensions or an
+// unsupported sparse format.
 
 #include "rocsparse_spmat_descr.hpp"
 #include "unit_test_device_conv_common.hpp"
@@ -513,4 +514,49 @@ namespace
         expect_dense_to_sparse_dim_mismatch(handle, rocsparse_format_bell, false, true);
     }
 
+    // The ELL descriptor matches the dense dimensions, so only the format is unsupported.
+    // Every stage must fail and leave buffer_size, the descriptor and its arrays unchanged.
+    TEST_F(ConvDense, DenseToSparseEllNotImplemented)
+    {
+        constexpr auto             alg        = rocsparse_dense_to_sparse_alg_default;
+        constexpr auto             st_ni      = rocsparse_status_not_implemented;
+        const size_t               sentinel_b = 0xA5A5A5A5u;
+        const std::vector<int32_t> idx(6, 0x5a5a5a5a);
+        const std::vector<float>   val(6, 42.0f);
+        DevBuf<int32_t>            d_col(idx);
+        DevBuf<float>              d_val(val);
+        DevBuf<float>              d_dense(std::vector<float>(6, 1.0f));
+
+        Dnmat mat_A;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(
+                      &mat_A, 3, 2, 3, d_dense.get(), f32, rocsparse_order_column),
+                  st_ok);
+        Spmat mat_B;
+        ASSERT_EQ(
+            rocsparse_create_ell_descr(&mat_B, 3, 2, d_col.get(), d_val.get(), 2, i32, base0, f32),
+            st_ok);
+
+        size_t buffer_size = sentinel_b;
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle, mat_A, mat_B, alg, &buffer_size, nullptr),
+                  st_ni)
+            << "buffer-size query";
+        EXPECT_EQ(buffer_size, sentinel_b);
+
+        DevBuf<char> temp(64);
+        EXPECT_EQ(rocsparse_dense_to_sparse(handle, mat_A, mat_B, alg, nullptr, temp.get()), st_ni)
+            << "analysis";
+
+        size_t compute_buffer_size = sentinel_b;
+        EXPECT_EQ(
+            rocsparse_dense_to_sparse(handle, mat_A, mat_B, alg, &compute_buffer_size, temp.get()),
+            st_ni)
+            << "compute";
+        EXPECT_EQ(compute_buffer_size, sentinel_b);
+
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+        EXPECT_EQ(mat_B.get()->nnz, 6);
+        EXPECT_EQ(mat_B.get()->ell_width, 2);
+        EXPECT_EQ(d_col.read(), idx);
+        EXPECT_EQ(d_val.read(), val);
+    }
 } // namespace

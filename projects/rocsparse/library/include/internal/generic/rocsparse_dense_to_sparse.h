@@ -144,6 +144,8 @@ extern "C" {
 *               whose rows or columns were rounded up past the dense size is rejected.
 *               The same status is returned when the workspace size for the blocked ELL
 *               block-row count does not fit in \p size_t.
+*  \retval      rocsparse_status_not_implemented \p mat_B is not in CSR, CSC, COO, or
+*               Blocked ELL format, or \p mat_A or \p mat_B is batched.
 *
 *  \par Example
 *  \snippet example_rocsparse_dense_to_sparse.cpp doc example
