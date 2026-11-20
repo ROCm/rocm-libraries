@@ -162,7 +162,7 @@ module hipsolver
   end enum
 
   integer(c_int), parameter :: hipsolverVersionMajor = 3
-  integer(c_int), parameter :: hipsolverVersionMinor = 8
+  integer(c_int), parameter :: hipsolverVersionMinor = 9
   integer(c_int), parameter :: hipsolverVersionPatch = 0
 
 
