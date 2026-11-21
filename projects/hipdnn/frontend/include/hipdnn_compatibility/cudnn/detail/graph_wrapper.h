@@ -146,9 +146,10 @@ public:
     }
 
     /// @brief Creates execution plans and applies pending plan filters.
-    /// @note A and B select hipDNN's prediction policies; OPENSOURCE is accepted with a warning
-    ///       and runs fallback selection.
-    error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+    /// @note A, B and FALLBACK run hipDNN's ModeA, ModeB and model-free selection, one query
+    ///       per mode in order, as upstream; OPENSOURCE is accepted with a warning and runs as
+    ///       FALLBACK. Upstream requires @p modes; the default {A} is a hipDNN convenience.
+    error_t create_execution_plans(const std::vector<HeurMode_t>& modes = {HeurMode_t::A})
     {
         warnUnhonoredHeuristicModes(modes);
 
@@ -189,7 +190,7 @@ public:
     /// @brief hipDNN extension: reports whether any engine can run the graph; creates no plans.
     /// @note Builds the operation graph as a side effect.
     error_t is_supported_ext(cudnnHandle_t handle,
-                             const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK})
+                             const std::vector<HeurMode_t>& modes = {HeurMode_t::A})
     {
         warnUnhonoredHeuristicModes(modes);
 
@@ -444,7 +445,7 @@ public:
 
     /// @brief Runs the full validate-to-build_plans sequence.
     error_t build(const cudnnHandle_t& handle,
-                  const std::vector<HeurMode_t>& modes = {HeurMode_t::FALLBACK},
+                  const std::vector<HeurMode_t>& modes = {HeurMode_t::A},
                   BuildPlanPolicy_t policy = BuildPlanPolicy_t::HEURISTICS_CHOICE,
                   bool doMultithreadedBuilds = false)
     {

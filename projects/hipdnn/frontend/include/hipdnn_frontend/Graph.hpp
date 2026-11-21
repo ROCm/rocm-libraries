@@ -1341,7 +1341,7 @@ private:
                != notes.end();
     }
 
-    Error initializeEngineConfig(hipdnnBackendDescriptor_t engineHeuristicDesc)
+    Error initializeEngineConfig(const std::vector<HeuristicMode>& modes)
     {
         // The backend's SelectionHeuristic::Config built-in honors
         // HIPDNN_HEUR_CONFIG_PATH inside the policy loop, so the
@@ -1352,8 +1352,8 @@ private:
         // back to the heuristic's choice.
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
         std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigs(
-            engineConfigs, engineIds, engineHeuristicDesc, /*getAll=*/true));
+        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::getEngineConfigsForModes(
+            engineConfigs, engineIds, _graphDesc->get(), modes, _rankingMetric));
 
         size_t selectedIndex = 0;
         if(_preferredEngineId.has_value())
@@ -2937,7 +2937,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming, readability-convert-member-functions-to-static)
     Error get_ranked_engine_ids(std::vector<int64_t>& rankedEngineIds,
-                                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                                const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         if(!hasReadyGraphDesc())
         {
@@ -2946,13 +2946,9 @@ public:
                     "ranked engine ids."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
-
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigs;
-        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
-            engineConfigs, rankedEngineIds, engineHeuristicDesc.get(), true));
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigsForModes(
+            engineConfigs, rankedEngineIds, _graphDesc->get(), modes, _rankingMetric));
 
         return {ErrorCode::OK, ""};
     }
@@ -3163,8 +3159,7 @@ public:
      *         get_message() for the specific failure reason.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error create_execution_plans(const std::vector<HeuristicMode>& modes
-                                 = {HeuristicMode::FALLBACK})
+    Error create_execution_plans(const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         HIPDNN_FE_LOG_INFO("Creating execution plans for graph " << graph_attributes.get_name());
 
@@ -3184,11 +3179,7 @@ public:
                     "execution plan."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
-
-        HIPDNN_CHECK_ERROR(initializeEngineConfig(engineHeuristicDesc.get()));
+        HIPDNN_CHECK_ERROR(initializeEngineConfig(modes));
 
         // Allocate an unfinalized execution plan descriptor for each engine
         // config. build_plans() will finalize the active plan (default) or all
@@ -3322,7 +3313,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error is_supported_ext(hipdnnHandle_t handle,
-                           const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                           const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         HIPDNN_FE_LOG_INFO("Checking engine support for graph " << graph_attributes.get_name());
 
@@ -3335,9 +3326,18 @@ public:
             HIPDNN_CHECK_ERROR(finalizeGraphDescWithHandle(handle));
         }
 
+        // Applicability does not depend on the mode, so one query answers for every mode.
+        if(modes.empty())
+        {
+            return {ErrorCode::INVALID_VALUE, "No heuristic mode was requested."};
+        }
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/true, _rankingMetric));
+        HIPDNN_CHECK_ERROR(
+            hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(engineHeuristicDesc,
+                                                                             _graphDesc->get(),
+                                                                             modes.front(),
+                                                                             /*findFirst=*/true,
+                                                                             _rankingMetric));
 
         HIPDNN_CHECK_ERROR(detail::hasEngineConfigs(engineHeuristicDesc.get()));
 
@@ -4155,7 +4155,7 @@ public:
      */
     // NOLINTBEGIN(readability-identifier-naming)
     Error build(hipdnnHandle_t handle,
-                const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK},
+                const std::vector<HeuristicMode>& modes = {HeuristicMode::A},
                 BuildPlanPolicy policy = BuildPlanPolicy::HEURISTICS_CHOICE,
                 [[maybe_unused]] bool do_multithreaded_builds = false)
     // NOLINTEND(readability-identifier-naming)
@@ -4211,7 +4211,7 @@ public:
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_engine_configs(hipdnnHandle_t handle,
                              std::vector<EngineConfigInfo>& configs,
-                             const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                             const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         configs.clear();
 
@@ -4221,14 +4221,10 @@ public:
                     "Graph has not been built. Call build_operation_graph() first."};
         }
 
-        detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
-        HIPDNN_CHECK_ERROR(hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(
-            engineHeuristicDesc, _graphDesc->get(), modes, /*findFirst=*/false, _rankingMetric));
-
         std::vector<std::unique_ptr<detail::ScopedHipdnnBackendDescriptor>> engineConfigDescs;
         std::vector<int64_t> engineIds;
-        HIPDNN_CHECK_ERROR(detail::getEngineConfigs(
-            engineConfigDescs, engineIds, engineHeuristicDesc.get(), /*getAll=*/true));
+        HIPDNN_CHECK_ERROR(detail::getEngineConfigsForModes(
+            engineConfigDescs, engineIds, _graphDesc->get(), modes, _rankingMetric));
 
         configs.reserve(engineIds.size());
         for(size_t i = 0; i < engineIds.size(); ++i)
@@ -4289,7 +4285,7 @@ public:
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_engine_configs(std::vector<EngineConfigInfo>& configs,
-                             const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+                             const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         return get_engine_configs(nullptr, configs, modes);
     }
@@ -4591,7 +4587,7 @@ public:
      * @return ErrorCode::OK on success
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
-    Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::FALLBACK})
+    Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
     {
         if(!_compiledPlans.empty())
         {
@@ -7534,8 +7530,9 @@ public:
      * @brief Choose the ranking metric engine selection and kernel choice optimize.
      *
      * @c "tflops" ranks higher first; @c "time" (milliseconds) lower first (RFC 0019 §4.4).
-     * Engine order changes only under HeuristicMode A/B, where engines with no model for the
-     * metric rank last; the default FALLBACK mode (Config, then StaticOrdering) ignores it.
+     * Engine order follows it under every heuristic mode while an applicable engine has a
+     * model for the metric; engines with none rank last. HeuristicMode A (the default) ranks
+     * by ModeA, B by ModeB; FALLBACK is model-free and ignores the metric for engine order.
      * An engine that ranks its own kernels ranks them by it in every mode. Applies to later
      * heuristic queries and explicit-engine configurations; HIPDNN_HEUR_RANKING_METRIC
      * overrides it for heuristic selection.
