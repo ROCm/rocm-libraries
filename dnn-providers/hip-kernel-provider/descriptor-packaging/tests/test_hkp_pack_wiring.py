@@ -263,7 +263,8 @@ def test_the_root_probe_answers_under_a_base_interpreter_without_pip(
     shutil.copytree(rocke_fixture, consumer.source / "authored" / "rocKE" / "attention")
     kinds = "rocke" if enable_rocke == "OFF" else ""
     consumer._write(
-        f"""_hkp_root_probe(_shipped _offered _ok "${{CMAKE_CURRENT_SOURCE_DIR}}/authored"
+        f"""_hkp_root_probe(_shipped _predicting _offered _ok
+    "${{CMAKE_CURRENT_SOURCE_DIR}}/authored"
     "gfx950;gfx942" "{folders}" "{kinds}")
 {_report("ok", "${_ok}")}
 {_report("shipped", "${_shipped}")}
@@ -442,6 +443,38 @@ endif()
     assert evaluate({"gfx950": ["x:Other"]}, "TRUE") == "FALSE"
     assert evaluate({"gfx950": ["hipkernel:Gfx950AttentionDense"]}, "TRUE") == "TRUE"
     assert evaluate({}, "FALSE") == ("TRUE" if enable_rocke == "ON" else "FALSE")
+
+
+@pytest.mark.parametrize("enable_rocke", ["ON", "OFF"])
+def test_the_engine_prediction_arches_are_the_wired_arches_whose_shard_ships_an_l1(
+    consumer, enable_rocke
+):
+    """The engine-prediction census registers for the wired arches whose shard ships
+    an engine binding an L1, in wiring order, and for none when no shard does or the
+    product pack is not wired. A probe that could not answer reads as
+    HIPKERNELPROVIDER_ENABLE_ROCKE for every wired arch."""
+
+    def evaluate(predicting, probe_ok, labels="product"):
+        consumer._write(
+            f"""set(HIPKERNELPROVIDER_ENABLE_ROCKE {enable_rocke})
+set_property(GLOBAL PROPERTY HKP_PACK_LABELS {labels})
+set_property(GLOBAL PROPERTY HKP_PACK_ARCHES_product "gfx908;gfx950;gfx942")
+set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_product {probe_ok})
+set_property(GLOBAL PROPERTY HKP_PACK_PREDICTING_ENGINES_product
+    "{_cmake_string(json.dumps(predicting))}")
+hkp_product_engine_prediction_arches(_arches)
+{_report("arches", "${_arches}")}
+"""
+        )
+        return _reported(consumer.configure(), "arches")
+
+    some = {"gfx908": [], "gfx950": ["x:A"], "gfx942": ["x:A", "x:B"]}
+    assert evaluate(some, "TRUE") == "gfx950;gfx942"
+    assert evaluate({"gfx908": [], "gfx950": [], "gfx942": []}, "TRUE") == ""
+    assert evaluate(some, "TRUE", labels="other") == ""
+    assert evaluate({}, "FALSE") == (
+        "gfx908;gfx950;gfx942" if enable_rocke == "ON" else ""
+    )
 
 
 def test_a_probe_failure_prints_the_packers_reason_and_wires_the_root(consumer):

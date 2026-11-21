@@ -16,5 +16,10 @@
   },
   "knobs": [
     "num_segments"
-  ]
+  ],
+  "predict_engine": {
+    "gfx950": [
+      "3a81fea5-ec9e-41f3-b085-d3c0dc820dc4"
+    ]
+  }
 }

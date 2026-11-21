@@ -10,12 +10,19 @@ engine:
   heuristic: native
   # Trained sort_kernel_catalog models (tflops, time) for gfx950, beside the native
   # default, and the catalog they were trained on; retrain when it changes
-  # (tests/test_trained_rankers.py, README "Shipping a trained model").
+  # (tests/test_trained_rankers.py, README "Shipping a trained model"). The engine
+  # predictor (L1, `predict_engine`, 3a81fea5) estimates the engine under their pick, and
+  # its selector revision digests them and the pack-time rocKE code objects: retrain it
+  # (UHD pipeline `uhd-engine-build`) whenever they, the catalog, rocKE's code objects or
+  # the compiler change.
   heuristics:
     sort_kernel_catalog:
       gfx950:
       - 80b57cd6-ce8f-41cd-9a8e-18e0b1862304
       - a6acccb8-8263-41f3-98c0-ad7e29918422
+    predict_engine:
+      gfx950:
+      - 3a81fea5-ec9e-41f3-b085-d3c0dc820dc4
   trained_catalog_sha256:
     gfx950: 50d895459012b9e4dd65c779688440434ca23f8291d55cba2830376fdb719a6f
 kmd_fields:
