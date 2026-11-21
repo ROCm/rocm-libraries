@@ -364,7 +364,10 @@ def test_durations_cover_rocjitsu_slow_configs():
     durations = json.loads(plugin.DEFAULT_DURATIONS.read_text())
     common = EMULATION.parent / "common"
     slow = [p for p in common.rglob("*.yaml") if "rocjitsu_slow" in p.read_text()]
-    assert len(slow) == 5
+    assert len(slow) == 7
     for path in slow:
         key = f"test_config[tensilelite/Tests/common/{path.relative_to(common).as_posix()}]"
-        assert durations[key] >= 10800, key
+        assert durations[key] > 45 * 60, key
+    # And every recorded config over 45 min is marked.
+    marked = {f"test_config[tensilelite/Tests/common/{p.relative_to(common).as_posix()}]" for p in slow}
+    assert {key for key, seconds in durations.items() if seconds > 45 * 60} <= marked
