@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include "DeviceTestUtils.hpp"
 #include <Tensile/TensorDescriptor.hpp>
 #include <Tensile/hip/HipUtils.hpp>
 
@@ -12,6 +13,7 @@
 
 TEST(HipUtilsCopyTensor, CopiesContiguousSource)
 {
+    SKIP_IF_NO_DEVICE();
     std::array<int32_t, 12> const src{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
     std::array<int32_t, 12>       dst;
     dst.fill(-1);
@@ -25,6 +27,7 @@ TEST(HipUtilsCopyTensor, CopiesContiguousSource)
 
 TEST(HipUtilsCopyTensor, CopiesPaddedSourceWithoutChangingPadding)
 {
+    SKIP_IF_NO_DEVICE();
     // Include trailing padding so an over-wide copy is visible in the comparison.
     std::array<int32_t, 26> const src{1, 2, 3, 99, 99, 4,  5,  6,  99, 99, 99, 99, 99,
                                       7, 8, 9, 99, 99, 10, 11, 12, 99, 99, 99, 99, 99};

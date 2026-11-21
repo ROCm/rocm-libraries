@@ -1,0 +1,126 @@
+name: "Component CI: TensileLite gtest"
+
+# Why this lane exists
+#
+# A pre-submit GATE for the TensileLite C++ host-library gtest suite
+# (tensilelite/tests/, target `tensilelite-tests`), built from source and run
+# CPU-only on the lightweight AWS scale pool. It moves the host-only slice of
+# that suite off the TheRock multi-arch GPU runner, where the `standard` tier ran
+# `ctest -L standard -LE ex_gpu` on a gfx942 GPU it never used.
+#
+# Distinct from the `unit`/`coverage` lanes (pytest); neither builds the C++ gtest.
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ${{ inputs.linux_runner }}
+    container:
+      image: ${{ inputs.docker_image }}
+    # The same mirror, versions and pins as TheRock's third-party/msgpack-cxx and
+    # third-party/googletest, which build tensilelite-tests in TheRock's CI.
+    env:
+      DEPS_MIRROR: https://rocm-third-party-deps.s3.us-east-2.amazonaws.com
+      MSGPACK_SHA256: 7504b7af7e7b9002ce529d4f941e1b7fb1fb435768780ce7da4abaac79bb156f
+      GTEST_SHA256: 65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
+    # ROCM_PATH comes from setup-rocm-linux.
+    defaults:
+      run:
+        working-directory: projects/hipblaslt/tensilelite
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          submodules: recursive
+          sparse-checkout: |
+            .github
+            projects/hipblaslt
+            shared/origami
+            shared/rocroller
+            shared/mxdatagenerator
+            shared/stinkytofu
+            cmake
+          sparse-checkout-cone-mode: true
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Provide msgpack-cxx and GTest
+        run: |
+          set -euo pipefail
+          D="$RUNNER_TEMP/deps"
+          mkdir -p "$D"
+          # Pinned by checksum: a changed or tampered tarball fails here, not mid-build.
+          # The mirror first; the upstream release asset (same checksum) if it's unreachable.
+          fetch() {  # file name, sha256, upstream URL
+            curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o "$D/$1" "$DEPS_MIRROR/$1" \
+              || curl -fsSL --retry 5 --retry-connrefused --retry-delay 5 -o "$D/$1" "$3"
+            echo "$2  $D/$1" | sha256sum -c -
+            tar xzf "$D/$1" -C "$RUNNER_TEMP"
+          }
+          fetch msgpack-cxx-7.0.0.tar.gz "$MSGPACK_SHA256" \
+            https://github.com/msgpack/msgpack-c/releases/download/cpp-7.0.0/msgpack-cxx-7.0.0.tar.gz
+          cmake -S "$RUNNER_TEMP/msgpack-cxx-7.0.0" -B "$RUNNER_TEMP/msgpack-build" -DMSGPACK_USE_BOOST=OFF -DMSGPACK_BUILD_TESTS=OFF
+          cmake --install "$RUNNER_TEMP/msgpack-build"
+          fetch googletest-1.17.0.tar.gz "$GTEST_SHA256" \
+            https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
+          cmake -S "$RUNNER_TEMP/googletest-1.17.0" -B "$RUNNER_TEMP/gtest-build" -DBUILD_GMOCK=ON -DINSTALL_GTEST=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+          cmake --build "$RUNNER_TEMP/gtest-build" --parallel --target install
+
+      - name: System build deps (zlib, python headers)
+        run: |
+          set -euo pipefail
+          if command -v dnf >/dev/null 2>&1; then
+            dnf install -y zlib-devel python3-devel
+          elif command -v apt-get >/dev/null 2>&1; then
+            apt-get update -qq || echo "::warning::apt-get update failed; installing from the image's package lists"
+            apt-get install -y -qq zlib1g-dev python3-dev
+          else
+            echo "::error::no dnf or apt-get to install zlib and the Python headers"; exit 1
+          fi
+
+      # `tensilelite` preset lives one dir up (-S ../); YAML=OFF forces msgpack.
+      - name: Build tensilelite-tests
+        env:
+          CMAKE_GENERATOR: Ninja
+        run: |
+          export CMAKE_PREFIX_PATH="/usr/local${CMAKE_PREFIX_PATH:+:$CMAKE_PREFIX_PATH}"
+          cmake --preset tensilelite -S ../ -B build \
+            -DGPU_TARGETS=gfx942 \
+            -DCMAKE_C_COMPILER="${ROCM_PATH}/bin/amdclang" \
+            -DCMAKE_CXX_COMPILER="${ROCM_PATH}/bin/amdclang++" \
+            -DTENSILELITE_BUILD_TESTING=ON \
+            -DHIPBLASLT_ENABLE_YAML=OFF
+          cmake --build build --parallel --target tensilelite-tests cpu-gemm-driver
+
+      # A PR that changes only a file this build reads, but the lane's path filter misses,
+      # would skip the lane. Fail here instead, naming the file to add to component_ci.py.
+      - name: Check the path filter covers the build's inputs
+        run: python3 "$GITHUB_WORKSPACE/.github/scripts/check_component_inputs.py" tensilelite_gtest build
+
+      # No install: the label module (shared/ctest) is TheRock-only and a full
+      # install hits the unbuilt rocisa target; run ctest from the build tree.
+      - name: Run tensilelite gtest (host-only, CPU)
+        env:
+          # Lets SKIP_IF_NO_DEVICE() skip the device tests here; elsewhere they fail without a GPU.
+          TENSILE_SKIP_IF_NO_DEVICE: "1"
+        run: |
+          # --no-tests=error fails an empty discovery.
+          ctest --test-dir build/tensilelite/tests --output-on-failure --no-tests=error
