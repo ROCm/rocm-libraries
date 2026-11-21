@@ -53,7 +53,8 @@ static ramdb_clock::time_point GetDbModificationTime(const fs::path& path)
         return {};
 
     ramdb_clock::rep time;
-    file >> time;
+    if(!(file >> time))
+        return {};
     return ramdb_clock::time_point{ramdb_clock::duration{time}};
 }
 
@@ -197,7 +198,7 @@ bool RamDb::RemoveRecord(const std::string& key)
     if(is_valid)
     {
         cache.erase(key);
-        file_read_time = ramdb_clock::now();
+        file_read_time = GetDbModificationTime(GetFileName());
     }
 #else
     Prefetch();
@@ -244,7 +245,7 @@ bool RamDb::Remove(const std::string& key, const std::string& id)
             it->second.content = ss.str();
         }
 
-        file_read_time = ramdb_clock::now();
+        file_read_time = GetDbModificationTime(GetFileName());
     }
 #else
     Prefetch();
@@ -278,7 +279,10 @@ template <class TFunc>
 static void Measure(const std::string& funcName, TFunc&& func)
 {
     if(!miopen::IsLogging(LoggingLevel::Info))
+    {
         func();
+        return;
+    }
 
     const auto start = std::chrono::high_resolution_clock::now();
     func();
@@ -292,11 +296,13 @@ bool RamDb::ValidateUnsafe()
         return true;
     if(!fs::exists(GetFileName()))
         return cache.empty();
+    // Monotonic clocks reset on reboot, so stamps are version tokens, not comparable times.
     const auto file_mod_time     = GetDbModificationTime(GetFileName());
-    const auto validation_result = file_mod_time < file_read_time;
-    MIOPEN_LOG_I2("DB file is " << (validation_result ? "older" : "newer")
-                                << " than cache: " << file_mod_time.time_since_epoch().count()
-                                << ", " << file_read_time.time_since_epoch().count());
+    const auto validation_result = file_mod_time == file_read_time;
+    MIOPEN_LOG_I2("DB file stamp is "
+                  << (validation_result ? "unchanged" : "changed")
+                  << " relative to cache: " << file_mod_time.time_since_epoch().count() << ", "
+                  << file_read_time.time_since_epoch().count());
     return validation_result;
 }
 
@@ -343,7 +349,7 @@ void RamDb::Prefetch()
             cache.emplace(key, CacheItem{n_line, contents});
         }
 
-        file_read_time = ramdb_clock::now();
+        file_read_time = GetDbModificationTime(GetFileName());
     });
 }
 
@@ -371,7 +377,7 @@ void RamDb::UpdateCacheEntryUnsafe(const DbRecord& record)
         {
             cache.emplace(key, CacheItem{-1, ss.str()});
         }
-        file_read_time = ramdb_clock::now();
+        file_read_time = GetDbModificationTime(GetFileName());
     }
 }
 #endif

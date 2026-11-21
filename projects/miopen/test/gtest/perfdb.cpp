@@ -37,6 +37,7 @@
 #include <miopen/temp_file.hpp>
 
 #include <array>
+#include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <mutex>
@@ -1565,6 +1566,39 @@ protected:
 };
 
 TEST_F(CPU_PerfDb_NONE, RamDb_AllTests) { DbTests<RamDb>(); }
+
+TEST_F(CPU_PerfDb_NONE, RamDb_CacheStampSurvivesRestart)
+{
+    const auto db_path   = temp_file.Path();
+    const auto time_path = RamDb::GetTimeFilePath(db_path);
+    const auto stamp     = (ramdb_clock::now() + std::chrono::hours{24}).time_since_epoch().count();
+
+    std::ofstream(db_path) << "1x2=0:3x4\n";
+    std::ofstream(time_path) << stamp;
+
+    RamDb db(DbKinds::PerfDb, db_path);
+    auto record = db.FindRecord(std::string{"1x2"});
+    ASSERT_TRUE(record);
+    TestData value(TestData::NoInit{});
+    ASSERT_TRUE(record->GetValues("0", value));
+    EXPECT_EQ(value, TestData(3, 4));
+
+    // Simulate a stamp from an earlier boot; unchanged stamps must preserve cached records.
+    std::ofstream(db_path) << "1x2=0:5x6\n";
+    record = db.FindRecord(std::string{"1x2"});
+    ASSERT_TRUE(record);
+    ASSERT_TRUE(record->GetValues("0", value));
+    EXPECT_EQ(value, TestData(3, 4));
+
+    // An external writer's changed stamp must invalidate the cache.
+    std::ofstream(time_path) << stamp - 1;
+    record = db.FindRecord(std::string{"1x2"});
+    ASSERT_TRUE(record);
+    ASSERT_TRUE(record->GetValues("0", value));
+    EXPECT_EQ(value, TestData(5, 6));
+
+    fs::remove(time_path);
+}
 
 TEST_F(CPU_PerfDb_NONE, PlainTextDb_AllTests) { DbTests<PlainTextDb>(); }
 
