@@ -66,24 +66,30 @@
 #include "rocke/instance_conv_direct_dw_fwd_wmma.h"
 #include "rocke/instance_conv_direct_dw_wgrad.h"
 #include "rocke/instance_conv_direct_dw_wgrad_mfma.h"
+#include "rocke/instance_conv_direct_dw_wgrad_wmma.h"
 #include "rocke/instance_conv_direct_fwd_gstream_wmma.h"
 #include "rocke/instance_conv_direct_fwd_tapouter_wmma.h"
 #include "rocke/instance_conv_direct_fwd_wmma.h"
 #include "rocke/instance_conv_direct_grouped.h"
 #include "rocke/instance_conv_direct_grouped_dw_dgrad.h"
 #include "rocke/instance_conv_direct_grouped_wgrad_mfma.h"
+#include "rocke/instance_conv_direct_grouped_wgrad_wmma.h"
 #include "rocke/instance_conv_direct_wgrad_gather.h"
 #include "rocke/instance_conv_direct_wgrad_tiled.h"
+#include "rocke/instance_conv_direct_wgrad_wmma.h"
 #include "rocke/instance_conv_fwd_small_wmma.h"
 #include "rocke/instance_conv_winograd_gemm_wmma.h"
 #include "rocke/lower_llvm.h"
 
 /* Layout canary, as in test_mma_catalog_lookup.cpp: growing
- * rocke_direct_fwd_wmma_spec_t fails the build here until ROCKE_ABI_VERSION in
- * rocke/abi.h moves with it. 64-bit only. */
+ * rocke_direct_fwd_wmma_spec_t or rocke_dw_wgrad_fold_spec_t fails the build
+ * here until ROCKE_ABI_VERSION in rocke/abi.h moves with it. 64-bit only. */
 #if INTPTR_MAX == INT64_MAX
 static_assert(sizeof(rocke_direct_fwd_wmma_spec_t) == 152 && ROCKE_ABI_VERSION >= 8,
               "rocke_direct_fwd_wmma_spec_t changed size: bump ROCKE_ABI_VERSION in "
+              "rocke/abi.h, then update this pin");
+static_assert(sizeof(rocke_dw_wgrad_fold_spec_t) == 32 && ROCKE_ABI_VERSION >= 21,
+              "rocke_dw_wgrad_fold_spec_t changed size: bump ROCKE_ABI_VERSION in "
               "rocke/abi.h, then update this pin");
 #endif
 
@@ -306,6 +312,55 @@ static void check_wmma_per_axis_padding(const char* kernel, Spec spec, Valid is_
     CHECK(strstr(reason, "pad_w") != NULL, "%s reason names pad_w: %s", kernel, reason);
 }
 
+/* rocke_dw_wgrad_fold_is_valid_spec refuses with is_valid_dw_wgrad_fold_spec's
+ * texts (test_direct_grouped_wgrad_wmma.py _FOLD_REJECTED), and the builder
+ * fails with them. */
+static void test_fold_block_shape_refused(void)
+{
+    struct
+    {
+        int cols, slices, unroll;
+        const char* want;
+    } cases[] = {
+        {0, 16, 4, "cols 0 < 1"},
+        {-32, 16, 4, "cols -32 < 1"},
+        {64, 0, 4, "slices 0 < 1"},
+        {64, 16, 0, "unroll 0 < 1"},
+        {64, 32, 4, "slices * cols = 2048 threads > 1024"},
+    };
+    char reason[ERR_CAP];
+    for(const auto& c : cases)
+    {
+        rocke_dw_wgrad_fold_spec_t f = rocke_dw_wgrad_fold_spec_default();
+        f.taps = 9;
+        f.cols = c.cols;
+        f.slices = c.slices;
+        f.unroll = c.unroll;
+        CHECK(!rocke_dw_wgrad_fold_is_valid_spec(&f, reason, sizeof(reason)),
+              "fold accepted cols=%d slices=%d unroll=%d",
+              c.cols,
+              c.slices,
+              c.unroll);
+        CHECK(strcmp(reason, c.want) == 0, "fold reason: %s (want %s)", reason, c.want);
+        char want[ERR_CAP];
+        snprintf(want, sizeof(want), "invalid DwWgradFoldSpec: %s", c.want);
+        rocke_ir_builder_t b;
+        rocke_kernel_def_t* k = rocke_build_dw_wgrad_fold_new(&b, &f, "gfx950");
+        const char* err = rocke_ir_builder_error(&b);
+        CHECK(k == NULL, "fold built cols=%d slices=%d unroll=%d", c.cols, c.slices, c.unroll);
+        CHECK(err != NULL && strcmp(err, want) == 0, "fold build error: %s", err ? err : "(none)");
+        rocke_ir_builder_free(&b);
+    }
+    rocke_dw_wgrad_fold_spec_t f = rocke_dw_wgrad_fold_spec_default();
+    f.taps = 9;
+    f.cols = 32;
+    f.slices = 32;
+    f.unroll = 8;
+    CHECK(rocke_dw_wgrad_fold_is_valid_spec(&f, reason, sizeof(reason)),
+          "fold refused 32 x 32 x 8: %s",
+          reason);
+}
+
 static void test_wmma_kernels_refuse_per_axis_padding(void)
 {
     rocke_direct_fwd_wmma_spec_t fwd = rocke_direct_fwd_wmma_spec_default();
@@ -320,6 +375,13 @@ static void test_wmma_kernels_refuse_per_axis_padding(void)
     rocke_fwd_smallk_wmma_spec_t smallk = rocke_fwd_smallk_wmma_spec_default();
     smallk.problem = dense_problem(32, 48, 64, 4);
     check_wmma_per_axis_padding("fwd_smallk_wmma", smallk, rocke_fwd_smallk_wmma_is_valid_spec);
+    rocke_direct_wgrad_wmma_spec_t wgrad = rocke_direct_wgrad_wmma_spec_default();
+    wgrad.problem = dense_problem(13, 40, 64, 96);
+    check_wmma_padding("direct_wgrad_wmma", wgrad, rocke_direct_wgrad_wmma_is_valid_spec);
+    rocke_grouped_wgrad_wmma_spec_t gwgrad = rocke_grouped_wgrad_wmma_spec_default();
+    gwgrad.problem = dense_problem(19, 45, 4, 4);
+    gwgrad.problem.groups = 16;
+    check_wmma_padding("grouped_wgrad_wmma", gwgrad, rocke_grouped_wgrad_wmma_is_valid_spec);
 }
 
 /* `spec` must be refused with exactly `want` (Python's reason), or accepted
@@ -941,6 +1003,9 @@ static void test_wgrad_dilation_reason(void)
     check_wgrad_dilation("grouped_wgrad_mfma",
                          rocke_grouped_wgrad_mfma_spec_default(),
                          rocke_grouped_wgrad_mfma_is_valid_spec);
+    check_wgrad_dilation("grouped_wgrad_wmma",
+                         rocke_grouped_wgrad_wmma_spec_default(),
+                         rocke_grouped_wgrad_wmma_is_valid_spec);
 }
 
 /* The tiled wgrad host geometry the launcher sizes the grid with: auto launch
@@ -1094,6 +1159,11 @@ static void test_channel_totals_refused(void)
                          1 << 28,
                          8,
                          rocke_grouped_wgrad_mfma_is_valid_spec);
+    check_channel_totals("grouped_wgrad_wmma",
+                         rocke_grouped_wgrad_wmma_spec_default(),
+                         1 << 28,
+                         8,
+                         rocke_grouped_wgrad_wmma_is_valid_spec);
 }
 
 /* A zero or negative extent is refused first, with Python's
@@ -1165,8 +1235,151 @@ static void test_problem_dims_refused(void)
     check_problem_dims("fwd_smallk_wmma", sk, rocke_fwd_smallk_wmma_is_valid_spec);
 }
 
+/* The WMMA wgrad validators' empty-problem refusals (every zero extent, an
+ * output with no rows or columns) and the depthwise one's i32 tensor bound,
+ * with the texts of the Python validators (test_direct_*wgrad_wmma.py). */
+template <typename Spec, typename Valid>
+static void check_empty_output(const char* kernel, Spec spec, Valid is_valid)
+{
+    char reason[ERR_CAP];
+    Spec rows = spec;
+    rows.problem.H = 2;
+    rows.problem.PAD = 0;
+    reason[0] = '\0';
+    CHECK(!is_valid(&rows, "gfx1250", reason, sizeof(reason)), "%s accepted Ho = 0", kernel);
+    CHECK(strncmp(reason, "empty output 0x", 15) == 0, "%s Ho = 0 reason: %s", kernel, reason);
+    Spec cols = spec;
+    cols.problem.W = 2;
+    cols.problem.PAD = 0;
+    reason[0] = '\0';
+    CHECK(!is_valid(&cols, "gfx1250", reason, sizeof(reason)), "%s accepted Wo = 0", kernel);
+    CHECK(strstr(reason, "empty output ") == reason && strstr(reason, "x0") != NULL,
+          "%s Wo = 0 reason: %s",
+          kernel,
+          reason);
+}
+
+static void test_wmma_wgrad_empty_problems(void)
+{
+    rocke_direct_wgrad_wmma_spec_t wgrad = rocke_direct_wgrad_wmma_spec_default();
+    wgrad.problem = dense_problem(13, 40, 64, 96);
+    check_problem_dims("direct_wgrad_wmma", wgrad, rocke_direct_wgrad_wmma_is_valid_spec);
+    check_empty_output("direct_wgrad_wmma", wgrad, rocke_direct_wgrad_wmma_is_valid_spec);
+
+    rocke_grouped_wgrad_wmma_spec_t gwgrad = rocke_grouped_wgrad_wmma_spec_default();
+    gwgrad.problem = dense_problem(19, 45, 4, 4);
+    gwgrad.problem.groups = 16;
+    check_problem_dims("grouped_wgrad_wmma", gwgrad, rocke_grouped_wgrad_wmma_is_valid_spec);
+    check_empty_output("grouped_wgrad_wmma", gwgrad, rocke_grouped_wgrad_wmma_is_valid_spec);
+
+    rocke_direct_dw_wgrad_wmma_spec_t dw = rocke_direct_dw_wgrad_wmma_spec_default();
+    dw.problem = dw_problem(3, 3, 1, -1);
+    dw.problem.dtype = "bf16";
+    check_problem_dims("direct_dw_wgrad_wmma", dw, rocke_direct_dw_wgrad_wmma_is_valid_spec);
+
+    /* 4 x 512 x 512 x 1024 bf16 is 2 GiB: the masked-lane offset INT32_MAX
+     * would be inside the buffer, so it is refused (3 images are kept). */
+    char reason[ERR_CAP];
+    dw.problem = dw_problem(7, 7, 0, -1);
+    dw.problem.dtype = "bf16";
+    dw.problem.N = 4;
+    dw.problem.H = 512;
+    dw.problem.W = 512;
+    dw.problem.groups = 1024;
+    reason[0] = '\0';
+    CHECK(!rocke_direct_dw_wgrad_wmma_is_valid_spec(&dw, "gfx1250", reason, sizeof(reason)),
+          "direct_dw_wgrad_wmma accepted a 2 GiB input");
+    CHECK(strcmp(reason, "tensors of 2147483648 B exceed the i32 byte offsets") == 0,
+          "direct_dw_wgrad_wmma 2 GiB input reason: %s",
+          reason);
+    dw.problem.N = 3;
+    dw.problem.PAD = 3;
+    reason[0] = '\0';
+    CHECK(rocke_direct_dw_wgrad_wmma_is_valid_spec(&dw, "gfx1250", reason, sizeof(reason)),
+          "direct_dw_wgrad_wmma refused a 1.5 GiB input: %s",
+          reason);
+}
+
+/* The WMMA wgrad validators' remaining refusals with the Python validators'
+ * texts and inputs (test_direct_wgrad_wmma.py, test_direct_grouped_wgrad_wmma.py,
+ * test_direct_dw_wgrad_wmma.py): a negative PAD, the wave counts, the fp32
+ * dW / partial-slot / replicated-scratch buffers past 32 bits. */
+template <typename Spec, typename Valid>
+static void
+    expect_wgrad_reason(const char* what, const Spec& spec, Valid is_valid, const char* want)
+{
+    char reason[ERR_CAP];
+    reason[0] = '\0';
+    CHECK(!is_valid(&spec, "gfx1250", reason, sizeof(reason)), "%s accepted", what);
+    CHECK(strstr(reason, want) == reason, "%s reason: %s (want %s)", what, reason, want);
+}
+
+static void test_wmma_wgrad_remaining_refusals(void)
+{
+    rocke_direct_wgrad_wmma_spec_t d = rocke_direct_wgrad_wmma_spec_default();
+    d.problem = dense_problem(12, 40, 64, 96);
+    d.problem.PAD = -1;
+    d.tdm = 1;
+    expect_wgrad_reason(
+        "dense PAD -1", d, rocke_direct_wgrad_wmma_is_valid_spec, "PAD >= 0 (got -1)");
+    d.problem = dense_problem(13, 40, 64, 96);
+    d.tdm = rocke_direct_wgrad_wmma_spec_default().tdm;
+    d.waves_k = -1;
+    d.waves_c = -2;
+    expect_wgrad_reason("dense waves -1 x -2",
+                        d,
+                        rocke_direct_wgrad_wmma_is_valid_spec,
+                        "waves_k and waves_c >= 1");
+    d.waves_k = 0;
+    d.waves_c = 4;
+    expect_wgrad_reason(
+        "dense waves_k 0", d, rocke_direct_wgrad_wmma_is_valid_spec, "waves_k and waves_c >= 1");
+    d.waves_k = 4;
+    d.waves_c = 0;
+    expect_wgrad_reason(
+        "dense waves_c 0", d, rocke_direct_wgrad_wmma_is_valid_spec, "waves_k and waves_c >= 1");
+    /* Both rules hit: the dW-size rule comes first, as in Python. */
+    d.problem = dense_problem(13, 40, 8192, 8192);
+    d.waves_k = 0;
+    d.waves_c = 2;
+    expect_wgrad_reason("dense fp32 dW past 32 bits",
+                        d,
+                        rocke_direct_wgrad_wmma_is_valid_spec,
+                        "fp32 dW of 2415919104 B exceeds the 32-bit");
+
+    rocke_grouped_wgrad_wmma_spec_t g = rocke_grouped_wgrad_wmma_spec_default();
+    g.problem = dense_problem(19, 45, 4, 4);
+    g.problem.groups = 16;
+    g.problem.PAD = -1;
+    expect_wgrad_reason(
+        "grouped PAD -1", g, rocke_grouped_wgrad_wmma_is_valid_spec, "PAD >= 0 (got -1)");
+    g.problem = dense_problem(32, 32, 8, 8);
+    g.problem.N = 64;
+    g.problem.groups = 2048;
+    g.rows_per_chunk = 1;
+    g.target_blocks = 1048576;
+    expect_wgrad_reason("grouped partial slots",
+                        g,
+                        rocke_grouped_wgrad_wmma_is_valid_spec,
+                        "fp32 partial slots of 9663676416 B exceeds the 32-bit buffer size");
+
+    rocke_direct_dw_wgrad_wmma_spec_t dw = rocke_direct_dw_wgrad_wmma_spec_default();
+    dw.problem = dw_problem(7, 7, 0, -1);
+    dw.problem.dtype = "bf16";
+    dw.problem.N = 1;
+    dw.problem.H = 7;
+    dw.problem.W = 7;
+    dw.problem.groups = 342400;
+    expect_wgrad_reason("depthwise replicated scratch",
+                        dw,
+                        rocke_direct_dw_wgrad_wmma_is_valid_spec,
+                        "fp32 replicated scratch of 4295065600 B exceeds the 32-bit buffer size");
+}
+
 int main(void)
 {
+    test_wmma_wgrad_remaining_refusals();
+    test_wmma_wgrad_empty_problems();
     test_problem_dims_refused();
     test_channel_totals_refused();
     test_wgrad_dilation_reason();
@@ -1183,6 +1396,7 @@ int main(void)
     test_tiled_dgrad_name_carries_per_axis_padding();
     test_tiled_dgrad_refuses_cpl();
     test_wmma_kernels_refuse_per_axis_padding();
+    test_fold_block_shape_refused();
     test_stem_wmma_kernels_refuse_per_axis_padding();
     test_toeplitz_wmma_refusals();
     test_dw_fwd_build_null_arch();
