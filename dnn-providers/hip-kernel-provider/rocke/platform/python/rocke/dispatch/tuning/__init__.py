@@ -11,6 +11,9 @@ supplies everything else:
 - :mod:`.space` -- :class:`KnobSpace`, the one place specs are made;
 - :mod:`.waves` -- :class:`WavesPerEuSpace`, ``waves_per_eu`` as the outer
   knob and its ``_wpe{N}`` id stem;
+- :mod:`.search` -- the search engine: ask/tell strategies (differential
+  evolution, successive halving, TPE/GP, hill climbing, a bandit portfolio)
+  that tune a space within a measurement budget instead of sweeping it.
 - :mod:`.candidate` -- :func:`make_tuned_candidate` and pin resolution;
 - :mod:`.spec` -- the :class:`TunedSpec` / :class:`TunableRequest` protocols;
 - :mod:`.testing` -- :func:`assert_tuning_contract`, the conformance kit.

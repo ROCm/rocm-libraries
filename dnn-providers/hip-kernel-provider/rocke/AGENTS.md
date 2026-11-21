@@ -148,6 +148,7 @@ the matching doc first.
 | Task | Doc |
 |---|---|
 | Optimizing ANY kernel — **start here** (Step 0 exhaustive lever sweep + The Loop are mandatory) | [optimization_runbook.md](platform/dsl_docs/optimization/optimization_runbook.md) |
+| Search / tune / sweep a kernel's knob space (staged search, lookback, measurement gate) | [search-optimize-rocke.md](platform/dsl_docs/optimization/utilities/skills/search-optimize-rocke.md) |
 | Runbook section ⇄ DSL primitive/helper/op mapping (concept → code) | [runbook_compliance.md](platform/dsl_docs/optimization/runbook_compliance.md) |
 | Section-by-section primitive table | [runbook_mapping.md](platform/dsl_docs/optimization/runbook_mapping.md) |
 | Historical validation archive (frozen; do not add or update measurements) | [measured_results.md](platform/dsl_docs/optimization/measured_results.md) |
