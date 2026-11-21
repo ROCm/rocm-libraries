@@ -562,7 +562,7 @@ protected:
     static double documentedBand(bool isHalf, double sigma, double reference)
     {
         const double eps = std::ldexp(1.0, isHalf ? -10 : -7);
-        const double lambda = isHalf ? 12.0 : 0.0;
+        const double lambda = isHalf ? 3.0 : 0.0;
         const double minNormal = std::ldexp(1.0, isHalf ? -14 : -126);
         const double u32 = std::ldexp(1.0, -24);
         const double atol
@@ -637,15 +637,15 @@ TEST_F(TestConvFwdToleranceGradingFixture, Bfloat16OutputIsGradedWithTheBfloat16
                    dynamicTolerance(false, defaultFillScale()));
 }
 
-// Half at |ref| = 8: the band is about 0.039 (atol 0.023 + rtol 0.002 * 8), the fixed default's
-// 0.9. Four half steps (0.03125) are inside the dynamic band, eight (0.0625) outside it and far
+// Half at |ref| = 8: the band is about 0.022 (atol 0.006 + rtol 0.002 * 8), the fixed default's
+// 0.9. Two half steps (0.0156) are inside the dynamic band, four (0.03125) outside it and far
 // inside the fixed one.
 TEST_F(TestConvFwdToleranceGradingFixture, HalfOutputInsideTheDynamicBandPassesAndOutsideFails)
 {
     Spec spec;
     spec.isHalf = true;
-    EXPECT_FALSE(grade(spec, K_REFERENCE + 0.03125f, K_REFERENCE).failed);
-    EXPECT_TRUE(grade(spec, K_REFERENCE + 0.0625f, K_REFERENCE).failed);
+    EXPECT_FALSE(grade(spec, K_REFERENCE + 0.015625f, K_REFERENCE).failed);
+    EXPECT_TRUE(grade(spec, K_REFERENCE + 0.03125f, K_REFERENCE).failed);
 }
 
 // bfloat16 at |ref| = 8: the band is about 0.125, two bfloat16 steps (0.0625 each); the fixed
@@ -1239,7 +1239,7 @@ constexpr const char* K_THREE_TABLES_TOML = R"([meta]
 version = 1
 
 [conv_fwd_tolerance.half]
-lambda = 3.0
+lambda = 5.0
 
 [conv_dgrad_tolerance.half]
 lambda = 20.0
@@ -1337,7 +1337,7 @@ TEST_F(TestConvFwdToleranceGradingFixture, DgradOutputIsGradedWithTheDgradTableA
 {
     useTomlSettings(K_THREE_TABLES_TOML);
     const auto own = dgradTolerance<half>(coefficientsOf(std::nullopt, 20.0));
-    expectApart(own, dgradTolerance<half>(coefficientsOf(std::nullopt, 3.0))); // the forward table
+    expectApart(own, dgradTolerance<half>(coefficientsOf(std::nullopt, 5.0))); // the forward table
     expectApart(own, dgradTolerance<half>(coefficientsOf(std::nullopt, 40.0, 1.0))); // wrw
     expectApart(own, dgradTolerance<half>());
     expectReported(grade(backwardSpec(Direction::DGRAD, true), K_FAR_OFF, K_REFERENCE), own);
@@ -1348,7 +1348,7 @@ TEST_F(TestConvFwdToleranceGradingFixture, WrwOutputIsGradedWithTheWrwTableAndNo
     useTomlSettings(K_THREE_TABLES_TOML);
     // lambda 40 and 1 per K^(1/4), which is 2 at K = 16
     const auto own = wrwTolerance<half>(coefficientsOf(std::nullopt, 40.0, 1.0));
-    expectApart(own, wrwTolerance<half>(coefficientsOf(std::nullopt, 3.0))); // the forward table
+    expectApart(own, wrwTolerance<half>(coefficientsOf(std::nullopt, 5.0))); // the forward table
     expectApart(own, wrwTolerance<half>(coefficientsOf(std::nullopt, 20.0))); // dgrad
     expectApart(own, wrwTolerance<half>());
     expectReported(grade(backwardSpec(Direction::WRW, true), K_FAR_OFF, K_REFERENCE), own);
@@ -1357,7 +1357,7 @@ TEST_F(TestConvFwdToleranceGradingFixture, WrwOutputIsGradedWithTheWrwTableAndNo
 TEST_F(TestConvFwdToleranceGradingFixture, ForwardOutputIsGradedWithTheForwardTableAndNoOther)
 {
     useTomlSettings(K_THREE_TABLES_TOML);
-    const auto own = fwdTolerance<half>(coefficientsOf(std::nullopt, 3.0));
+    const auto own = fwdTolerance<half>(coefficientsOf(std::nullopt, 5.0));
     expectApart(own, fwdTolerance<half>(coefficientsOf(std::nullopt, 20.0)));
     expectApart(own, fwdTolerance<half>(coefficientsOf(std::nullopt, 40.0, 1.0)));
     expectApart(own, fwdTolerance<half>());

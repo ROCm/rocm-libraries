@@ -486,7 +486,7 @@ struct ConvToleranceCoefficients
     std::optional<double> summationOrder;
     /// The allowance of the intermediates and partial results, in units of eps * rms, with rms
     /// the root mean square of an output element (the means of the inputs included). When set it
-    /// replaces the SDK's allowance of the direction and output type, per-K part included.
+    /// replaces the SDK's allowance of the direction and output type.
     /// Finite and not negative.
     std::optional<double> lambda;
     /// Added to lambda per K^(1/4), for kernels that split a longer reduction into more parts
@@ -506,23 +506,24 @@ enum class ConvDirection
 };
 
 /// The allowance of the model per direction and output type when the engine sets none: lambda
-/// covers intermediates and partial results, in units of eps * sigma0, plus
-/// lambdaPerQuarticRootK * K^(1/4) where the need grows with the reduction length;
-/// summationOrder is c, in units of sqrt(K) * u32. These are the allowance of kernels that sum
-/// the K products in float and round once. An engine whose kernels need more (Winograd, or
-/// split-K kernels that add partial results in the output type) sets its own through
-/// ConvToleranceCoefficients; it replaces lambda, and is priced on the root mean square of the
-/// output instead of sigma0.
+/// covers intermediates and partial results, in units of eps * sigma0; summationOrder is c, in
+/// units of sqrt(K) * u32. Both are flat in K.
 ///
-///   (lambda, c)   float                half                   bfloat16
-///   forward       (0, 4)               (12, 1)                (0, 1)
-///   dgrad         (13, 4)              (12, 1)                (6, 1)
-///   wrw           (15, 4)              (22 + 1.5 K^1/4, 1)    (13 + 0.5 K^1/4, 1)
+/// These are the allowance of kernels that sum the K products in float and round once. They were
+/// measured on MIOpen's GEMM, CK, naive and non-split xdlops solvers, at a headroom of 1.5. What
+/// such a kernel does not do is an engine's own allowance, set through ConvToleranceCoefficients
+/// (in its TOML), which replaces lambda and is priced on the root mean square of the output
+/// instead of sigma0: Winograd, split-K kernels that add their partial results in the output
+/// type, and operands rounded below the io type.
+///
+///   lambda (c)    float     half      bfloat16
+///   forward       0 (4)     3 (1)     0 (1)
+///   dgrad         13 (4)    6 (1)     3 (1)
+///   wrw           5 (4)     11 (1)    9 (1)
 struct ConvToleranceAllowances
 {
     double intermediateLambda = 0.0;
     double summationOrder = 1.0;
-    double lambdaPerQuarticRootK = 0.0;
 };
 
 template <ConvDirection Direction, typename OutputType>
@@ -535,23 +536,25 @@ constexpr ConvToleranceAllowances convToleranceAllowances()
     {
         if constexpr(Direction == ConvDirection::FPROP)
         {
-            return {0.0, DEFAULT_FLOAT_SUMMATION_ORDER, 0.0};
+            return {0.0, DEFAULT_FLOAT_SUMMATION_ORDER};
         }
-        return {Direction == ConvDirection::WRW ? 15.0 : 13.0, DEFAULT_FLOAT_SUMMATION_ORDER, 0.0};
+        return {Direction == ConvDirection::WRW ? 5.0 : 13.0, DEFAULT_FLOAT_SUMMATION_ORDER};
     }
     else if constexpr(std::is_same_v<OutputType, half>)
     {
-        return Direction == ConvDirection::WRW ? ConvToleranceAllowances{22.0, 1.0, 1.5}
-                                               : ConvToleranceAllowances{12.0, 1.0, 0.0};
+        if constexpr(Direction == ConvDirection::FPROP)
+        {
+            return {3.0, 1.0};
+        }
+        return {Direction == ConvDirection::WRW ? 11.0 : 6.0, 1.0};
     }
     else if constexpr(Direction == ConvDirection::FPROP)
     {
-        return {0.0, 1.0, 0.0};
+        return {0.0, 1.0};
     }
     else
     {
-        return Direction == ConvDirection::WRW ? ConvToleranceAllowances{13.0, 1.0, 0.5}
-                                               : ConvToleranceAllowances{6.0, 1.0, 0.0};
+        return {Direction == ConvDirection::WRW ? 9.0 : 3.0, 1.0};
     }
 }
 
@@ -648,11 +651,11 @@ AbsRelTolerance convOutputTolerance(const ConvOutputStatistics& s,
     // The allowance of the intermediates and partial results. The SDK's is in units of sigma0.
     // An engine's replaces it whole and is in units of the root mean square of the output, which
     // adds what the means of the inputs sum to: K * (K - 1) * E[a]^2 * E[b]^2.
-    const double quarticRootK = std::sqrt(std::sqrt(k));
-    double lambda = ALLOWANCES.intermediateLambda + ALLOWANCES.lambdaPerQuarticRootK * quarticRootK;
+    double lambda = ALLOWANCES.intermediateLambda;
     double magnitude = sigma0;
     if(coefficients.lambda.has_value())
     {
+        const double quarticRootK = std::sqrt(std::sqrt(k));
         lambda = *coefficients.lambda
                  + coefficients.lambdaPerQuarticRootK.value_or(0.0) * quarticRootK;
         const double meanProduct = s.firstMean * s.secondMean;
@@ -701,9 +704,10 @@ AbsRelTolerance convOutputTolerance(const ConvOutputStatistics& s,
  *   minNormal the smallest normal number of the output type.
  * - c is the summation-order coefficient: 1 for half and bfloat16, and for float
  *   DEFAULT_FLOAT_SUMMATION_ORDER, unless `coefficients` sets it.
- * - Without an engine lambda, lambda(K) is the SDK's allowance for the output type (12 for half,
- *   0 for bfloat16 and float) and M = sigma0. These values are for kernels that sum the K
- *   products in float and round once.
+ * - Without an engine lambda, lambda(K) is the SDK's allowance for the output type (3 for half,
+ *   0 for bfloat16 and float), flat in K, and M = sigma0. These values are for kernels that sum
+ *   the K products in float and round once (measured on MIOpen's GEMM, CK, naive and non-split
+ *   xdlops solvers, at a headroom of 1.5).
  * - With `coefficients.lambda`, lambda(K) = lambda + lambdaPerQuarticRootK * K^(1/4) (an unset
  *   per-K coefficient is 0) replaces the SDK's allowance, and M = rms. An engine whose kernels
  *   need more than the SDK's allowance (Winograd, split-K kernels that add partial results in
@@ -755,11 +759,13 @@ AbsRelTolerance calculateConvFpropOutputTolerance(const ConvFpropErrorScale& sca
  *
  * The model of calculateConvFpropOutputTolerance() with dy and w in place of x and w, K from
  * convDgradAccumulationLength(), and the SDK's allowance of this direction, for kernels that sum
- * the K products in float and round once: lambda 12 for half, 6 for bfloat16 and 13 for float;
- * c 1 for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for float. The float lambda covers
- * the shortest reductions, where a few products differ by several float steps of a typical
- * output. An engine whose kernels need more sets `coefficients`, priced on the root mean square
- * of the output (see calculateConvFpropOutputTolerance()).
+ * the K products in float and round once (measured on MIOpen's GEMM, CK, naive and non-split
+ * xdlops solvers, at a headroom of 1.5): lambda 6 for half, 3 for bfloat16 and 13 for float; c 1
+ * for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for float. The float lambda covers the
+ * shortest reductions, where a few products differ by several float steps of a typical output.
+ * An engine whose kernels need more (Winograd, split-K kernels that add partial results in the
+ * output type, operands rounded below the io type) sets `coefficients`, priced on the root mean
+ * square of the output (see calculateConvFpropOutputTolerance()).
  *
  * @tparam OutputType half, bfloat16 or float.
  * @param scale The problem statistics; see ConvDgradErrorScale.
@@ -790,11 +796,12 @@ AbsRelTolerance calculateConvDgradOutputTolerance(const ConvDgradErrorScale& sca
  *
  * The model of calculateConvFpropOutputTolerance() with x and dy in place of x and w, K from
  * convWrwAccumulationLength(), and the SDK's allowance of this direction, for kernels that sum
- * the K products in float and round once: lambda 22 + 1.5 * K^(1/4) for half, 13 + 0.5 * K^(1/4)
- * for bfloat16 and 15 for float; c 1 for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for
- * float. An engine whose kernels need more (for instance split-K kernels that add partial
- * results in the output type, more of them the longer the reduction) sets `coefficients`, priced
- * on the root mean square of the output (see calculateConvFpropOutputTolerance()).
+ * the K products in float and round once (measured on MIOpen's GEMM, CK, naive and non-split
+ * xdlops solvers, at a headroom of 1.5): lambda 11 for half, 9 for bfloat16 and 5 for float; c 1
+ * for half and bfloat16 and DEFAULT_FLOAT_SUMMATION_ORDER for float. An engine whose kernels need
+ * more (Winograd, split-K kernels that add partial results in the output type, more of them the
+ * longer the reduction, operands rounded below the io type) sets `coefficients`, priced on the
+ * root mean square of the output (see calculateConvFpropOutputTolerance()).
  *
  * @tparam OutputType half, bfloat16 or float.
  * @param scale The problem statistics; see ConvWrwErrorScale.

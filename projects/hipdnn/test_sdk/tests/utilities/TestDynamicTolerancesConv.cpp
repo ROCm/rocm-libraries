@@ -1365,13 +1365,12 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, NearZeroOutputsNeedTheSummationOrder
     }
 }
 
-// lambda is the allowance for half outputs of solvers that keep intermediates in half: MIOpen's
-// Winograd solvers (up to 8.09 * eps * sigma near zero, the largest measured) and
-// ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC (5.21), tracked by ALMIOPEN-3243. No solver
-// accumulates the products in a half running sum (the allowance does not cover one at long K).
-// Near zero the band is that allowance: 8.1 * eps * sigma, the measured maximum, passes, and
-// 12.5 * eps * sigma, above lambda = 12, fails. K = 144 and mean squares 1/3 give sigma = 4.
-TEST(TestConvFpropOutputToleranceFp16, AllowanceCoversTheLargestMeasuredWinogradError)
+// lambda is the allowance for half outputs of kernels that keep intermediates in half, and
+// the SDK's is for kernels that sum in float and round once: near zero the band is
+// 3 * eps * sigma. 2.9 * eps * sigma passes and 3.5 * eps * sigma fails, on either side. A
+// kernel that needs more (MIOpen's Winograd solvers reach 8.09, tracked by ALMIOPEN-3243) sets
+// its own lambda in its engine file. K = 144 and mean squares 1/3 give sigma = 4.
+TEST(TestConvFpropOutputToleranceFp16, AllowanceIsThatOfKernelsThatRoundOnce)
 {
     ConvFpropErrorScale s;
     s.accumulationLength = 144;
@@ -1381,14 +1380,13 @@ TEST(TestConvFpropOutputToleranceFp16, AllowanceCoversTheLargestMeasuredWinograd
     const double epsSigma = std::ldexp(1.0, -10) * 4.0;
     for(const double sign : {1.0, -1.0})
     {
-        EXPECT_TRUE(withinTolerance<half>(sign * 8.1 * epsSigma, 0.0, tol));
-        EXPECT_TRUE(withinTolerance<half>(sign * 11.9 * epsSigma, 0.0, tol));
-        EXPECT_FALSE(withinTolerance<half>(sign * 12.5 * epsSigma, 0.0, tol));
+        EXPECT_TRUE(withinTolerance<half>(sign * 2.9 * epsSigma, 0.0, tol));
+        EXPECT_FALSE(withinTolerance<half>(sign * 3.5 * epsSigma, 0.0, tol));
     }
 }
 
 // The calibrated constants at one scale: K = 144, mean squares 1/3, so sigma = 4. rtol is
-// 2 eps; atol is (12 * u32 + lambda * eps) * 4 + minNormal with lambda 12 for half and 0 for
+// 2 eps; atol is (12 * u32 + lambda * eps) * 4 + minNormal with lambda 3 for half and 0 for
 // bfloat16.
 TYPED_TEST(ConvFpropOutputToleranceFixture, ConstantsAtAFixedScale)
 {
@@ -1402,7 +1400,7 @@ TYPED_TEST(ConvFpropOutputToleranceFixture, ConstantsAtAFixedScale)
 
     const double eps = std::ldexp(1.0, IS_HALF ? -10 : -7);
     const double minNormal = std::ldexp(1.0, IS_HALF ? -14 : -126);
-    const double lambda = IS_HALF ? 12.0 : 0.0;
+    const double lambda = IS_HALF ? 3.0 : 0.0;
     const double expectedAtol = (12.0 * std::ldexp(1.0, -24) + lambda * eps) * 4.0 + minNormal;
     EXPECT_NEAR(tol.rtol, 2.0 * eps, 1e-12 * eps);
     EXPECT_NEAR(tol.atol, expectedAtol, 1e-9 * expectedAtol);
@@ -1880,18 +1878,12 @@ struct OutputCase
     }
 };
 
-// The SDK's lambda (lambda0 + perQuarticRootK * K^(1/4)) and c of each case, written out here so
-// that a change of the constants in the header shows as a failing test.
+// The SDK's lambda and c of each case, written out here so that a change of the constants in the
+// header shows as a failing test.
 struct Allowances
 {
-    double lambda0;
-    double perQuarticRootK;
+    double lambda;
     double c;
-
-    double lambdaAt(uint64_t k) const
-    {
-        return lambda0 + perQuarticRootK * std::sqrt(std::sqrt(static_cast<double>(k)));
-    }
 };
 
 template <typename Case>
@@ -1902,19 +1894,15 @@ constexpr Allowances calibratedAllowances()
     constexpr bool IS_FPROP = Case::DIRECTION == ConvDirection::FPROP;
     if constexpr(std::is_same_v<T, float>)
     {
-        return {IS_FPROP ? 0.0 : IS_WRW ? 15.0 : 13.0, 0.0, 4.0};
+        return {IS_FPROP ? 0.0 : IS_WRW ? 5.0 : 13.0, 4.0};
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        return IS_WRW ? Allowances{22.0, 1.5, 1.0} : Allowances{12.0, 0.0, 1.0};
-    }
-    else if constexpr(IS_FPROP)
-    {
-        return {0.0, 0.0, 1.0};
+        return {IS_FPROP ? 3.0 : IS_WRW ? 11.0 : 6.0, 1.0};
     }
     else
     {
-        return IS_WRW ? Allowances{13.0, 0.5, 1.0} : Allowances{6.0, 0.0, 1.0};
+        return {IS_FPROP ? 0.0 : IS_WRW ? 9.0 : 3.0, 1.0};
     }
 }
 
@@ -1992,7 +1980,7 @@ TYPED_TEST(ConvBackwardOutputToleranceFixture, ConstantsAtAFixedScale)
     const auto minNormal = static_cast<double>(std::numeric_limits<T>::min());
     const double summation = allowances.c * 12.0 * std::ldexp(1.0, -24);
     const double expectedRtol = 2.0 * eps + (std::is_same_v<T, float> ? summation : 0.0);
-    const double expectedAtol = (summation + allowances.lambdaAt(144) * eps) * 4.0 + minNormal;
+    const double expectedAtol = (summation + allowances.lambda * eps) * 4.0 + minNormal;
     EXPECT_NEAR(tol.rtol, expectedRtol, 1e-12 * expectedRtol);
     EXPECT_NEAR(tol.atol, expectedAtol, 1e-9 * expectedAtol);
 }
@@ -2040,9 +2028,8 @@ class ConvBackwardSingleTermToleranceFixture : public ::testing::Test
 {
 };
 
-// Every backward case but bfloat16 wrw: its lambda, which MIOpen's split-K reductions need (about
-// 16 at K = 1152), is about 1.4 at this scale and hides a single product of up to 1 (tolerances.md,
-// limits).
+// Every backward case but bfloat16 wrw: its lambda of 9 is about 0.8 at this scale and, with the
+// rounding of the output, hides a single product of up to 1 (tolerances.md, limits).
 using ConvBackwardSingleTermCases = ::testing::Types<OutputCase<ConvDirection::DGRAD, float>,
                                                      OutputCase<ConvDirection::DGRAD, half>,
                                                      OutputCase<ConvDirection::DGRAD, bfloat16>,
@@ -2086,63 +2073,25 @@ using ConvBackwardLowPrecisionCases = ::testing::Types<OutputCase<ConvDirection:
                                                        OutputCase<ConvDirection::WRW, bfloat16>>;
 TYPED_TEST_SUITE(ConvBackwardLowPrecisionToleranceFixture, ConvBackwardLowPrecisionCases, );
 
-namespace
-{
-
-// The largest lambda each 16-bit backward case was measured to need near zero, in eps * sigma,
-// at the reduction length where it was measured (tolerances.md, "Which backward solvers need
-// lambda"), with the solvers that set it: Winograd for backward data half, CK grouped backward
-// data with split-K for bfloat16, and the split-K backward-weights kernels that add partial
-// results in the output type for both wrw types, whose need grows with K.
-struct MeasuredNeed
-{
-    uint64_t k;
-    double lambda;
-};
-
-template <typename Case>
-std::vector<MeasuredNeed> measuredNeeds()
-{
-    using T = typename Case::OutputType;
-    if constexpr(Case::DIRECTION == ConvDirection::DGRAD)
-    {
-        return std::is_same_v<T, half> ? std::vector<MeasuredNeed>{{2, 7.71}}
-                                       : std::vector<MeasuredNeed>{{1568, 2.33}};
-    }
-    else if constexpr(std::is_same_v<T, half>)
-    {
-        return {{8192, 21.62}, {1638400, 43.33}, {2765952, 36.45}};
-    }
-    else
-    {
-        return {{65536, 11.53}, {524288, 14.10}};
-    }
-}
-
-} // namespace
-
-// lambda is the allowance for intermediates kept in the output type. Near zero the band is that
-// allowance: at each reduction length where a largest error was measured, that error passes, an
-// error just below lambda * eps * sigma passes, and one half an eps * sigma above it fails. Mean
-// squares 1/3 give sigma = sqrt(K) / 3.
-TYPED_TEST(ConvBackwardLowPrecisionToleranceFixture, AllowanceCoversTheLargestMeasuredError)
+// lambda is the allowance for intermediates kept in the output type, and it does not depend on
+// the reduction length. Near zero the band is that allowance at every K: an error just below
+// lambda * eps * sigma passes, and one half an eps * sigma above it fails, from the shortest
+// reduction to the longest. Mean squares 1/3 give sigma = sqrt(K) / 3.
+TYPED_TEST(ConvBackwardLowPrecisionToleranceFixture, AllowanceIsFlatInTheReductionLength)
 {
     using T = typename TypeParam::OutputType;
-    const auto allowances = calibratedAllowances<TypeParam>();
-    for(const auto& need : measuredNeeds<TypeParam>())
+    const double lambda = calibratedAllowances<TypeParam>().lambda;
+    for(const uint64_t k : {uint64_t{2}, uint64_t{1568}, uint64_t{65536}, uint64_t{2765952}})
     {
-        const auto tol = TypeParam::tolerance(DotScale{need.k, 1.0 / 3.0, 1.0 / 3.0});
-        const double lambda = allowances.lambdaAt(need.k);
+        const auto tol = TypeParam::tolerance(DotScale{k, 1.0 / 3.0, 1.0 / 3.0});
         const double epsSigma = static_cast<double>(std::numeric_limits<T>::epsilon())
-                                * std::sqrt(static_cast<double>(need.k)) / 3.0;
+                                * std::sqrt(static_cast<double>(k)) / 3.0;
         for(const double sign : {1.0, -1.0})
         {
-            EXPECT_TRUE(withinTolerance<T>(sign * need.lambda * epsSigma, 0.0, tol))
-                << "K=" << need.k;
             EXPECT_TRUE(withinTolerance<T>(sign * (lambda - 0.1) * epsSigma, 0.0, tol))
-                << "K=" << need.k;
+                << "K=" << k;
             EXPECT_FALSE(withinTolerance<T>(sign * (lambda + 0.5) * epsSigma, 0.0, tol))
-                << "K=" << need.k;
+                << "K=" << k;
         }
     }
 }
@@ -2198,8 +2147,8 @@ double atolWithoutLambda(double c, uint64_t k, double sigma0)
 // An engine's lambda replaces the SDK's (it is not added to it) and is priced on the root mean
 // square of the output, which has the inputs' means in it: K * m_a * m_b for constant operands.
 // K = 144 and operands of mean 3 and 0.5, mean squares 9 and 0.25: sigma0 = 12 * 1.5 = 18 and
-// rms = 144 * 1.5 = 216. The SDK's lambda differs from 7 in every case but forward float and
-// bfloat16 (which have none), so an engine lambda added to the SDK's, or ignored, fails the rest.
+// rms = 144 * 1.5 = 216. The SDK's lambda is not 7 in any case, so an engine lambda added to the
+// SDK's, or ignored, fails.
 TYPED_TEST(ConvOutputMeanToleranceFixture, EngineLambdaReplacesTheSdkLambdaAndIsPricedOnTheRms)
 {
     using T = typename TypeParam::OutputType;
@@ -2226,8 +2175,8 @@ TYPED_TEST(ConvOutputMeanToleranceFixture, EngineLambdaReplacesTheSdkLambdaAndIs
     EXPECT_NEAR(TypeParam::tolerance(oneSided, engine).atol, spread.atol, 1e-9 * spread.atol);
 }
 
-// The engine's per-K coefficient adds lambdaPerQuarticRootK * K^(1/4) to its lambda, and the SDK's
-// own per-K term is gone with the SDK's lambda: K = 16, 256 and 65536 have K^(1/4) of 2, 4 and 16.
+// The engine's per-K coefficient adds lambdaPerQuarticRootK * K^(1/4) to its lambda; the SDK's
+// lambda has no per-K term: K = 16, 256 and 65536 have K^(1/4) of 2, 4 and 16.
 TYPED_TEST(ConvOutputMeanToleranceFixture, EnginePerQuarticRootKTermGrowsAsTheFourthRootOfK)
 {
     using T = typename TypeParam::OutputType;
