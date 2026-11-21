@@ -300,6 +300,7 @@
       'StaggerUMapping',
       'StaggerUStride',
       'StinkyTofuRegisterAllocation',
+      'StoreCachelineAlign',
       'StorePriorityOpt',
       'StoreRemapVectorWidth',
       'StoreSwapAddr',
