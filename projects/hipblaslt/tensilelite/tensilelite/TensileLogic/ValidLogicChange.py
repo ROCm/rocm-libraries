@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional
 
 from .ValidLibraryShape import library_shape_errors
+from .ValidLogicPolicy import policy_errors
 
 try:
     import yaml
@@ -28,6 +29,8 @@ except ImportError:  # pragma: no cover
     yaml = None  # type: ignore
 
 _LOGIC_MARK = "src/amd_detail/rocblaslt/src/Tensile/Logic/"
+# One tuning run can touch thousands of ExactLogic sizes in a file.
+MAX_MESSAGES_PER_FILE = 20
 
 _LEAD_KEYS = ("SolutionIndex", "SolutionUID", "KernelNameMin", "SolutionNameMin")
 
@@ -312,12 +315,13 @@ def _introduced(new_errors: list[str], base_errors: list[str]) -> list[str]:
     return introduced
 
 
-def file_errors(rel: str, data: Any) -> list[str]:
+def file_errors(rel: str, data: Any, policy: bool = False) -> list[str]:
     """Run the checks that read one revision of one file.
 
     Args:
         rel: Repository-relative posix path.
         data: Parsed logic document.
+        policy: Also run the tuning-policy checks in ``ValidLogicPolicy``.
 
     Returns:
         Error messages.
@@ -325,10 +329,15 @@ def file_errors(rel: str, data: Any) -> list[str]:
     Raises:
         No exceptions are raised.
     """
-    return library_shape_errors(data, Path(rel))
+    errors = library_shape_errors(data, Path(rel))
+    if policy:
+        errors += policy_errors(data, Path(rel))
+    return errors
 
 
-def logic_change_errors(rel: str, new_data: Any, base_data: Any, added: bool) -> list[str]:
+def logic_change_errors(
+    rel: str, new_data: Any, base_data: Any, added: bool, policy: bool = False
+) -> list[str]:
     """Run every change check on one added or modified logic file.
 
     A modified file reports only the single-revision errors that its base
@@ -339,6 +348,7 @@ def logic_change_errors(rel: str, new_data: Any, base_data: Any, added: bool) ->
         new_data: Parsed changed file.
         base_data: Parsed base revision, or None when the file is new.
         added: True when the base revision has no such file.
+        policy: Also run the tuning-policy checks in ``ValidLogicPolicy``.
 
     Returns:
         Error messages.
@@ -349,14 +359,15 @@ def logic_change_errors(rel: str, new_data: Any, base_data: Any, added: bool) ->
     errors = list_format_errors(new_data, base_data, added)
     errors += solution_uid_errors(new_data, base_data)
     errors += key_order_errors(new_data, base_data, added)
-    base_errors = [] if added else file_errors(rel, base_data)
-    return errors + _introduced(file_errors(rel, new_data), base_errors)
+    base_errors = [] if added else file_errors(rel, base_data, policy)
+    return errors + _introduced(file_errors(rel, new_data, policy), base_errors)
 
 
 def check_changed_logic(
     repo_root: Path,
     list_file: Path,
     show_text: Callable[[str], Optional[str]],
+    policy: bool = False,
 ) -> list[str]:
     """Check each changed logic file in ``list_file`` against its base text.
 
@@ -367,9 +378,11 @@ def check_changed_logic(
             prints them.
         show_text: ``(repo-relative posix path) -> base text``. None means the
             path is not in the base revision.
+        policy: Also run the tuning-policy checks in ``ValidLogicPolicy``.
 
     Returns:
-        ``path: message`` lines. Empty when every changed logic file passes.
+        ``path: message`` lines, at most ``MAX_MESSAGES_PER_FILE`` per file
+        plus one line counting the rest. Empty when every changed file passes.
 
     Raises:
         RuntimeError: If PyYAML is not installed.
@@ -381,6 +394,8 @@ def check_changed_logic(
         base_text = show_text(rel)
         new_data = _load(path.read_text(encoding="utf-8"))
         base_data = _load(base_text) if base_text is not None else None
-        for message in logic_change_errors(rel, new_data, base_data, base_text is None):
-            errors.append(f"{rel}: {message}")
+        messages = logic_change_errors(rel, new_data, base_data, base_text is None, policy)
+        errors += [f"{rel}: {message}" for message in messages[:MAX_MESSAGES_PER_FILE]]
+        if len(messages) > MAX_MESSAGES_PER_FILE:
+            errors.append(f"{rel}: {len(messages) - MAX_MESSAGES_PER_FILE} more errors not shown.")
     return errors
