@@ -1358,6 +1358,13 @@ rocblaslt_status rocblaslt_matrix_layout_set_attribute(rocblaslt_matrix_layout  
                 {
                     int32_t mode = 0;
                     memcpy(&mode, buf, sizeof(int32_t));
+                    if(mode != HIPBLASLT_BATCH_MODE_STRIDED
+                       && mode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY
+                       && mode != HIPBLASLT_BATCH_MODE_GROUPED)
+                    {
+                        log_error(__func__, "invalid batch mode", mode);
+                        return rocblaslt_status_invalid_value;
+                    }
                     // Grouped layouts come only from rocblaslt_grouped_matrix_layout_create.
                     if((mode == HIPBLASLT_BATCH_MODE_GROUPED)
                        != (matLayout->batch_mode == HIPBLASLT_BATCH_MODE_GROUPED))

@@ -22,7 +22,7 @@ C API -> descriptors + Handle -> ProblemDescription + ExecutionContext
 - **Find versus immediate:** legacy algorithm-enum convolution execution needs an algorithm-mapped invoker, normally registered by Find. Immediate APIs select a solver ID and can prepare/cache its invoker lazily. Find 2.0 uses problem/solution objects; not every operation supports standalone discovery (see `src/problem.cpp`).
 - **Persistence:** FindDb stores selected solutions/timings/workspace; PerfDb stores tuning configurations; binary and invoker caches are separate. Keep the key formats distinct: FindDb uses `ProblemDescription::Serialize`, PerfDb uses `VisitAll`, invokers use `MakeNetworkConfig`. A user FindDb record replaces the system record; PerfDb merges per solver ID, preferring user values.
 - **Kernel backends:** `addkernels/` embeds `src/kernels/` sources; `src/hipoc/` compiles/loads HIP, assembly, and optional MLIR code. CK grouped convolution ships as per-architecture plugins built in `src/ck_impl/`; legacy/static CK sources (`src/legacy_composable_kernel/`, `src/kernels/static_composable_kernel/`) are embedded like other kernels. Driver and test executables link `MIOpen_with_plugins` so the plugins build with them; the plugins link the implementation target. GEMM work can be delegated to rocBLAS/hipBLASLt through `src/gemm_v2.cpp`.
-- **Optional hipDNN wrapper:** `MIOPEN_ENABLE_HIPDNN_WRAPPER` splits public `libMIOpen` from `libMIOpen_private`. `src/private/wrapper.cpp` routes selected APIs through hipDNN or native `_impl` functions. The forwarded entry points are listed in `src/private/routing.cpp`; they are convolution execution APIs, while Find and immediate APIs stay native. Routing settings are cached; set them before first use. Forwarded failures return errors, not silent native fallback.
+- **Optional hipDNN wrapper:** `MIOPEN_ENABLE_HIPDNN_WRAPPER` splits public `libMIOpen` from `libMIOpen_private`. `src/private/wrapper.cpp` routes selected APIs through hipDNN or native `_impl` functions. The forwarded entry points are listed in `src/private/routing.cpp`; they are convolution execution APIs, while Find and immediate APIs stay native. Routing settings are cached; set them before first use. Forwarded failures return errors, not silent native fallback. The hipDNN provider plugin must link `libMIOpen_private` and call `_impl` entry points. A plugin built against the public library binds to the wrapper and loops back into it from inside hipDNN; the wrapper fails that call with `miopenStatusInternalError` (`ScopedHipdnnCall` in `src/private/hipdnn_graph.cpp`), and `check_public_abi.py check-plugin` fails a provider-built plugin that binds to the public library. See RFC 0001 section 4.7 (`rfcs/0001_HipdnnForwardingWrapper.md`) for the full account.
 
 ## Key Directories
 
@@ -90,6 +90,8 @@ The `miopen-with-provider` preset also includes hipDNN and its MIOpen provider. 
 ## Code Conventions & Common Patterns
 
 - **Formatting:** follow the nearest `.clang-format`; the project-local file (not the super-repo root one) applies, and `src/hipconv/` has its own. The project style: four spaces, no tabs, 100 columns, custom Allman-style braces, left-aligned pointers, no automatic include sorting. Preserve existing header guards and license headers on edit. New files use the two-line AMD copyright and `SPDX-License-Identifier: MIT` header (see `src/solver/conv/conv_hip_dir2D11x11.cpp`), not a copied legacy MIT block.
+- **Header guards:** new headers use `#pragma once`, as most headers in `src/`, `test/` and `driver/` do. Keep the existing guard when editing a header that has one.
+- **Tickets and host names:** do not put ticket IDs (Jira, issue or PR numbers) in code or code comments. The exception is a workaround: there the comment names the ticket so a reader knows what is being worked around and when it can go. Do not put host names, runner names or CI job IDs in PR text or commit messages; name the architecture and device (e.g. gfx942, MI300X) instead.
 - **Naming:** public functions use `miopen...`; internal types/methods use names such as `TensorDescriptor`, `Handle`, and `GetSolution` in `miopen` namespaces.
 - **Errors:** `MIOPEN_THROW` carries status information. Most status-returning APIs translate exceptions with `miopen::try_` and use `miopen::deref` for checked access. Inspect the specific API before assuming exception/null-check coverage.
 - **Logging:** `MIOPEN_ENABLE_LOGGING` enables API-call logging; `MIOPEN_LOG_LEVEL` independently controls severity; `MIOPEN_ENABLE_LOGGING_CMD` emits the associated MIOpenDriver command lines, which are incomplete for some paths (e.g. pooling with FP8 types). Reuse `MIOPEN_LOG_FUNCTION` and `MIOPEN_LOG_E/W/I/I2/T`.
@@ -117,6 +119,7 @@ Public entry-point changes touch two hand-written headers: `include/miopen/miope
 - `driver/README.md`, `docs/reference/env_variables.rst`, `docs/how-to/debug-log.rst`: reproduction and diagnostics. Edit navigation template `docs/sphinx/_toc.yml.in`, not generated `_toc.yml`.
 - `CONTRIBUTING.md`, `.github/pull_request_template.md`, `CHANGELOG.md`: contribution expectations and release notes.
 - `Jenkinsfile`, `vars/utils.groovy`: Jenkins hardware/datatype lanes and `rocm/miopen-dev` image publishing. `../../.github/workflows/component-ci-miopen.yml`: GitHub PR build variants, clang-tidy, naming, header, and ABI gates. `../../.github/workflows/miopen-wrapper-flag-on.yml`: manual-dispatch wrapper-ON lane (`wrapper_abi_check`, installed-header check, parity registration); it does not gate PRs.
+- The HIP package CI naming check and packaged GPU-free dbsync runner build rocjitsu with Ninja. See `test/gtest/README.md` for dbsync validation.
 
 ## Runtime/Tooling Preferences
 
@@ -165,7 +168,7 @@ python3 script/check_public_abi.py check-headers --require-provider
 # Wrapper-OFF (default) shared build only; wrapper-ON builds use wrapper_abi_check below.
 python3 script/check_public_abi.py check build/lib/libMIOpen.so \
   --baseline test/public_abi/public_symbols.baseline
-python3 -m pytest script/test_check_public_abi.py
+python3 -m pytest script/test_check_public_abi.py script/test_check_plugin_reentry.py
 # test_forwarding_parity_gpu_labels and test_check_wrapper_registration live in test/gtest/, hence
 # PYTHONPATH; the rest are in script/.
 (cd script && PYTHONPATH=../test/gtest python3 -m unittest \
@@ -173,9 +176,20 @@ python3 -m pytest script/test_check_public_abi.py
   test_compare_forwarding_runs test_forwarding_parity_gpu_labels test_check_wrapper_registration \
   test_check_bare_link)
 # Wrapper-ON builds, after building miopen-tests (the libraries, forwarding_failure_probe,
-# and the fake hipDNN backend); no GPU needed:
+# and the fake hipDNN backend). Only wrapper_reentry_macro needs a device: a visible one, but no
+# compute. It runs the miopen_gtest (or, in a discrete build, test_wrapper_routing) re-entry
+# tests with forwarding on:
 ctest --test-dir build --output-on-failure --no-tests=error \
-  -R '^(wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes|test_forwarding_parity_scripts)$'
+  -R '^(wrapper_abi_check|wrapper_bare_link_check|forwarding_failure_modes|wrapper_reentry_macro|test_forwarding_parity_scripts)$'
+# Wrapper-ON superbuild with the provider: the miopen-with-provider preset plus
+# -DMIOPEN_ENABLE_HIPDNN_WRAPPER=ON and -DROCM_LIBS_ENABLE_ROOT_CTEST=ON (the preset alone enables
+# neither, and then no plugin entry is registered). The first two need
+# no GPU; the third needs a GPU and a built test binary (test_hipdnn_reentry in the default discrete
+# build, miopen_gtest with -DMIOPEN_TEST_DISCRETE=OFF), and skips without them:
+ctest --test-dir build --output-on-failure --no-tests=error \
+  -R '^miopen-provider-plugin-(abi-check|abi-check-rejects-public-plugin|reentry-guard)$'
+# A built plugin by hand (it must link libMIOpen_private and call only _impl entry points):
+python3 script/check_public_abi.py check-plugin <plugin.so> --private-lib <libMIOpen_private.so.1.0>
 # GPU/backend required (not registered when configure detects no GPU):
 ctest --test-dir build --output-on-failure --no-tests=error -L forwarding_parity
 ```

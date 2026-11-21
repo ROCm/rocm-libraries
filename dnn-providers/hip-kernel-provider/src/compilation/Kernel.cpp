@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "Kernel.hpp"
+#include "LaunchLimits.hpp"
 #include "Program.hpp"
 #include "Utils.hpp"
 #include "device/ScopedDevice.hpp"
@@ -15,6 +16,28 @@
 
 namespace hip_kernel_provider::compilation
 {
+
+namespace
+{
+
+// HIP refuses a launch past the limit with a bare "invalid argument"; this names the kernel
+// and the axis instead.
+void requireAxisFits(const std::string& kernelName,
+                     char axis,
+                     unsigned int grid,
+                     unsigned int block)
+{
+    if(!launchAxisFits(grid, block))
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "kernel '" + kernelName + "' launch does not fit one launch axis (at most "
+                + std::to_string(LAUNCH_AXIS_ITEM_LIMIT) + " work-items, non-empty block): axis "
+                + axis + ", grid " + std::to_string(grid) + " x block " + std::to_string(block));
+    }
+}
+
+} // namespace
 
 Kernel::Kernel(const Program& program, const std::string& kernelName)
     : _kernelName(kernelName)
@@ -50,6 +73,10 @@ void Kernel::setSharedMemBytes(unsigned int bytes)
 
 void Kernel::launchImpl(hipStream_t stream, void** kernelParams) const
 {
+    requireAxisFits(_kernelName, 'x', _gridX, _blockX);
+    requireAxisFits(_kernelName, 'y', _gridY, _blockY);
+    requireAxisFits(_kernelName, 'z', _gridZ, _blockZ);
+
     // A module belongs to the device that was current at hipModuleLoadData, and the launch
     // has to be made from there. Measured on a two-GPU MI300X: with the module on device 0
     // and device 1 current, the launch is refused with "invalid resource handle" even though

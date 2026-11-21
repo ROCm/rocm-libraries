@@ -92,9 +92,9 @@ namespace rocalution
         T min_a_ik = static_cast<T>(0);
         T max_a_ik = static_cast<T>(0);
 
-        // Shared boolean that holds diagonal sign for each wavefront
-        // where true means, the diagonal element is negative
-        __shared__ bool sign[BLOCKSIZE / WFSIZE];
+        // 1, if the diagonal element is negative. A row without diagonal counts as having a
+        // positive one.
+        int neg = 0;
 
         J int_row_begin = csr_row_ptr[row];
         J int_row_end   = csr_row_ptr[row + 1];
@@ -108,7 +108,7 @@ namespace rocalution
             if(col == row)
             {
                 // Get diagonal entry sign
-                sign[wid] = val < static_cast<T>(0);
+                neg = val < static_cast<T>(0);
             }
             else
             {
@@ -133,13 +133,16 @@ namespace rocalution
             }
         }
 
-        __threadfence_block();
+        // Obtain the diagonal sign on all threads of the wavefront
+        wf_reduce_max<WFSIZE>(&neg);
+
+        const bool sign = neg != 0;
 
         // Maximum or minimum, depending on the diagonal sign
-        T cond = sign[wid] ? max_a_ik : min_a_ik;
+        T cond = sign ? max_a_ik : min_a_ik;
 
         // Obtain extrema on all threads of the wavefront
-        if(sign[wid])
+        if(sign)
         {
             wf_reduce_max<WFSIZE>(&cond);
         }
@@ -157,7 +160,7 @@ namespace rocalution
             I col = csr_col_ind[j];
             T val = csr_val[j];
 
-            if(col != row && val < cond)
+            if(col != row && (sign ? val > cond : val < cond))
             {
                 // col is strongly connected to row
                 S[j] = true;
@@ -181,7 +184,7 @@ namespace rocalution
                 I col = bnd_col_ind[j];
                 T val = bnd_val[j];
 
-                if(val < cond)
+                if(sign ? val > cond : val < cond)
                 {
                     // col is strongly connected to row
                     S[j + nnz] = true;

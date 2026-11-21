@@ -195,6 +195,7 @@ namespace TensileLite
         bool    hasScaleE        = false;
         bool    hasScaleAlphaVec = false;
         bool    hasAmaxD         = false;
+        bool    hasPeerD         = false; // a second D buffer (OutputPeerD kernels)
 
         // Kernel-shaping hints that change which solution is applicable
         bool    swizzleA              = false;
@@ -256,6 +257,7 @@ namespace TensileLite
                             hasScaleE,
                             hasScaleAlphaVec,
                             hasAmaxD,
+                            hasPeerD,
                             swizzleA,
                             swizzleB,
                             streamkTileScheduling,

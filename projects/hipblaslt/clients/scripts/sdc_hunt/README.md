@@ -35,7 +35,9 @@ The default filter, `*sdc_hunt*`, selects the `matmul_fast_check_sdc_hunt*` case
 in `clients/tests/data/matmul_gtest.yaml`: the Achilles GEMM sizes and data types,
 each launched and checked 20 times on the heuristic's first 4 solutions. Their
 category, `sdc_hunt`, is in no tier, so they run only when asked for. Pass
-`--filter` to run any other fast_check cases. For Stream-K solutions, export
+`--filter` to run any other fast_check cases. A filter for `sdc_hunt` cases must
+contain `sdc_hunt`, such as `*sdc_hunt*fp8*` rather than `*fp8*`; hipblaslt-test
+skips them otherwise. For Stream-K solutions, export
 `TENSILE_SOLUTION_SELECTION_METHOD=2` before running (it is recorded).
 
 The script exits non-zero if any run failed. A failing run's full output is saved
