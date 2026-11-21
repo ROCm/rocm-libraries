@@ -26,6 +26,8 @@ These are the supported datatypes:
 
 These are the supported layouts:
 
+- **NCL**: Batch, Channels, Length (1D, channel-first)
+- **NLC**: Batch, Length, Channels (1D, channel-last)
 - **NCHW**: Batch, Channels, Height, Width (2D, channel-first)
 - **NHWC**: Batch, Height, Width, Channels (2D, channel-last)
 - **NCDHW**: Batch, Channels, Depth, Height, Width (3D, channel-first)
@@ -43,40 +45,40 @@ This table lists all operations supported in hipDNN:
      - Notes
    * - Batchnorm Inference with Variance
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
      - Spatial mode only¹
    * - Batchnorm Inference + DRelu + Backward
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
      - Fused graph³
    * - Batchnorm Training
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
      - Spatial mode only¹, no running stats⁴
    * - Batchnorm Training + Activation
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
      - Fused graph³ ⁴
    * - Batchnorm Backward
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
      - Spatial mode only¹
    * - Convolution Dgrad
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
-     - Cross-correlation only², explicit ``dx`` dimensions⁶
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
+     - Cross-correlation only², explicit ``dx`` dimensions⁶, applicability limits⁸
    * - Convolution Forward
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
-     - Cross-correlation only²
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
+     - Cross-correlation only², applicability limits⁸
    * - Convolution Forward + (Bias) + Activation⁵
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
-     - Fused graph²³
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
+     - Fused graph²³, applicability limits⁸
    * - Convolution Wgrad
      - ``FP16``, ``BFP16``, ``FP32``
-     - NCHW, NHWC, NCDHW, NDHWC
-     - Cross-correlation only², explicit ``dw`` dimensions⁶
+     - NCL, NLC, NCHW, NHWC, NCDHW, NDHWC
+     - Cross-correlation only², explicit ``dw`` dimensions⁶, applicability limits⁸
    * - Pointwise Activation (standalone)
      - ``FP16``, ``FP32``
      - NCHW, NHWC
@@ -88,7 +90,7 @@ This table lists all operations supported in hipDNN:
 
 .. note::
 
-  - For annotations ¹ through ⁴, ⁶ and ⁷, see :ref:`operations`.
+  - For annotations ¹ through ⁴, ⁶, ⁷ and ⁸, see :ref:`operations`.
   - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
@@ -116,6 +118,12 @@ Bias node (optional)
 - Output tensor
     - Virtual
     - Data type: ``FP32`` or the input data type
+- Bias operand (the ADD operand that is not the convolution output)
+
+    - Rank: at most the convolution output rank; a lower-rank bias is right-aligned against the output, so its missing leading dimensions are 1
+    - Dims, once aligned: ``[1, K, 1, ..]``, where K is the convolution output channel count
+    - Channel stride: 1 when K > 1
+    - Data type: the input data type
 
 Activation node
 ~~~~~~~~~~~~~~~
@@ -148,6 +156,15 @@ Operation notes
 - **Standalone Activation**: A single-node pointwise graph supports ReLU, Clipped ReLU (configurable upper clip), CLAMP (configurable lower/upper clips), Leaky ReLU (configurable negative slope), Sigmoid and Tanh.
 - **ReLU Parameters**: An unset ``relu_lower_clip`` is treated as 0, an unset ``relu_upper_clip`` as no upper bound, and an unset ``relu_lower_clip_slope`` or a slope of exactly 0 as no leaky slope, so equivalent encodings select the same MIOpen activation. A non-zero ``relu_lower_clip`` without an upper clip is not supported.
 - ⁷ **Standalone Binary Elementwise**: A single-node pointwise graph supports ADD, SUB, MUL, MAX and MIN across ranks 3-5, with packed channels-first strides and ``FP16``/``FP32`` datatypes only. ``in_0`` must be the full-shape operand; only ``in_1`` may broadcast per-axis at matching rank, and all three tensors must share one datatype. In-place execution (``out_0`` aliasing an input) isn't supported.
+- ⁸ **Convolution Applicability**: The plugin declines the convolution graphs below. A declined graph falls to another engine, or no engine is found for it. These are limits of the plugin's MIOpen-backed convolution engines, not errors in the graph: for graphs of these kinds MIOpen can return wrong output or fault. The rules are conservative and also decline some graphs MIOpen computes correctly. The data type, layout, packing and size rules apply to the plain Convolution Forward, Dgrad and Wgrad rows; the fused row is subject to the last rule only.
+
+  - **Data type** (plain Convolution Forward, Dgrad and Wgrad): the three tensors (``x``, ``w``, ``y``; ``dy``, ``w``, ``dx``; ``x``, ``dy``, ``dw``) must share one data type, ``FP32``, ``FP16`` or ``BFP16``.
+  - **Layout** (plain Convolution Forward, Dgrad and Wgrad): the three tensors must share one layout: all channels-first (NCL, NCHW, NCDHW) or all channels-last (NLC, NHWC, NDHWC). A packed tensor is judged by its exact canonical strides, including those of extent-1 dimensions; a non-packed tensor is judged by its stride order. Forward also accepts three packed tensors whose strides, read in one layout's order, never increase, extent-1 dimensions included: for example a 1x1 convolution on an ``[N, C, 1, 1]`` channels-first input with a channels-last output, or a batch-1 input sliced from a wider channel dimension.
+  - **Packing, plain Convolution Forward**: a non-packed tensor (the strides do not address exactly the element count) is declined in a grouped convolution and in a 3D channels-last convolution, and when two of its elements share an address (a zero, negative or overlapping stride). Other non-packed tensors, such as padded rows or a channel slice, are accepted.
+  - **Packing, plain Convolution Dgrad and Wgrad**: a channels-first non-packed tensor is accepted; a channels-last non-packed tensor is declined.
+  - **Size, plain Convolution Dgrad**: ``dy`` and ``dx`` must each have at most 2^31 - 1 elements.
+  - **Fused Convolution Forward + (Bias) + Activation**: none of the rules above is applied to its ``x``, ``w`` and ``y``. The graph is declined when the bias operand does not meet the requirements under :ref:`detailed` (dims, channel stride and data type), or when the final activation output does not have the data type of ``x`` and the dims of the convolution output, packed in the same layout as ``x``. An ADD with any other operand, for example a residual of the output's shape, is not treated as a bias and the graph is declined.
+
 - **Sparse Support**: All operations only work with dense tensors.
 
 Knobs
