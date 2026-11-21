@@ -312,6 +312,18 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             SubtractsInTheRightDirection
     )
 
+    hkp_product_offers_engine(_standalone_pointwise_available "hipkernel:StandalonePointwise")
+    if(_standalone_pointwise_available)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            SUITES TestStandalonePointwisePacks
+            EXPECTED_CASES
+                ShipsOneShapeDynamicKernelPerArchitecture
+                EveryKernelDeclaresTheDynamicLaunchSignature
+        )
+    endif()
+
     # FlyDSL's kernels ship in the production shard, so their census addresses that
     # pack, narrowed to the architectures FlyDSL ships for: the product pack may be
     # wired for an architecture FlyDSL has no objects for, where these suites would find
