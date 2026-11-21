@@ -256,6 +256,11 @@ def test_list_json_describes_every_golden(tool, index, capsys):
     assert tool.main(["list", "--json"]) == 0
     described = json.loads(capsys.readouterr().out)
     assert [entry["name"] for entry in described] == [g.name for g in index.GOLDENS]
+    # The command a failing check prints, so a reader of the listing does not
+    # spell it again.
+    assert [entry["rerecord"] for entry in described] == [
+        rerecord_command(g.name) for g in index.GOLDENS
+    ]
 
 
 @pytest.mark.parametrize(

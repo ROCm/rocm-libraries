@@ -51,7 +51,7 @@ from golden_index import (
     Golden,
     golden_named,
 )
-from rocke.core.golden_file import rerecord_hint, verify_fingerprint
+from rocke.core.golden_file import rerecord_command, rerecord_hint, verify_fingerprint
 
 __all__ = ["TreeLayout", "golden_problems", "main"]
 
@@ -308,6 +308,7 @@ def _describe(golden: Golden) -> dict[str, object]:
         "fingerprint": golden.fingerprint,
         "needs_gpu": golden.needs_gpu,
         "takes_families": golden.takes_families,
+        "rerecord": rerecord_command(golden.name),
         "record": [
             {
                 "cwd": step.cwd,
