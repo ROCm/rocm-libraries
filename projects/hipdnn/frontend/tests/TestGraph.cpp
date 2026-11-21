@@ -54,9 +54,9 @@ namespace hipdnn_frontend
 static_assert(!std::is_copy_constructible_v<INode>, "INode must not be copy constructible");
 static_assert(!std::is_copy_assignable_v<INode>, "INode must not be copy assignable");
 
-// Ensure Graph cannot be copied, only moved (inherits deleted copy from INode or explicitly deleted)
-static_assert(!std::is_copy_constructible_v<Graph>, "Graph must not be copy constructible");
-static_assert(!std::is_copy_assignable_v<Graph>, "Graph must not be copy assignable");
+// Graph is copyable, as a cuDNN frontend graph is
+static_assert(std::is_copy_constructible_v<Graph>, "Graph must be copy constructible");
+static_assert(std::is_copy_assignable_v<Graph>, "Graph must be copy assignable");
 
 // Optional: Explicitly verify that move semantics ARE available
 static_assert(std::is_move_constructible_v<Graph>, "Graph must be move constructible");
@@ -71,6 +71,7 @@ public:
     using Graph::build_operation_graph_via_descriptors;
     using Graph::CompiledPlan;
     using Graph::compilePlanFromSpec;
+    using Graph::get_raw_graph_descriptor;
 
     std::vector<std::shared_ptr<INode>>& getPrivateGraphSubnodes()
     {
@@ -361,6 +362,24 @@ public:
     std::optional<int64_t> selectedEngineIdForTest() const
     {
         return _selectedEngineId;
+    }
+
+    /// The execution plan descriptor's backend handle of the plan at `index`.
+    hipdnnBackendDescriptor_t executionPlanHandleAt(size_t index) const
+    {
+        const auto& desc = _compiledPlans.at(index).executionPlanDesc;
+        return desc ? desc->get() : nullptr;
+    }
+
+    hipdnnBackendDescriptor_t engineConfigHandleAt(size_t index) const
+    {
+        const auto& desc = _compiledPlans.at(index).engineConfigDesc;
+        return desc ? desc->get() : nullptr;
+    }
+
+    std::vector<NumericalNote> getDeselectedNumericalNotes() const
+    {
+        return _deselectedNumericalNotes;
     }
 };
 }
@@ -13101,6 +13120,224 @@ TEST_F(TestGraph, FiltersSurviveASecondCreateExecutionPlans)
     ASSERT_TRUE(result.is_good()) << result.get_message();
     ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
     EXPECT_EQ(*graph.selectedEngineIdForTest(), 20);
+}
+
+// --------------------------------------------------------------------------
+// Graph copies
+// --------------------------------------------------------------------------
+
+TEST_F(TestGraph, CopySharesTheOperationGraphAndFinalizedPlans)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+
+    const hipdnn_frontend::GraphTestUtils copy = graph;
+
+    EXPECT_EQ(copy.get_raw_graph_descriptor(), graph.get_raw_graph_descriptor());
+    ASSERT_EQ(copy.getCompiledPlansCount(), 2u);
+    EXPECT_EQ(copy.engineConfigHandleAt(0), graph.engineConfigHandleAt(0));
+    EXPECT_EQ(copy.engineConfigHandleAt(1), graph.engineConfigHandleAt(1));
+    EXPECT_EQ(copy.executionPlanHandleAt(0), graph.executionPlanHandleAt(0));
+    EXPECT_EQ(copy.getActivePlanIndex(), 0u);
+    EXPECT_TRUE(copy.isExecutionPlanFinalized());
+    ASSERT_TRUE(copy.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*copy.selectedEngineIdForTest(), 10);
+
+    // Plan 1 was not built, so its descriptor would be finalized in place: the copy owns a
+    // new one.
+    EXPECT_NE(copy.executionPlanHandleAt(1), nullptr);
+    EXPECT_NE(copy.executionPlanHandleAt(1), graph.executionPlanHandleAt(1));
+}
+
+TEST_F(TestGraph, CopySharesADeserializedPlan)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.installDeserializedPlanForTest();
+
+    const hipdnn_frontend::GraphTestUtils copy = graph;
+
+    EXPECT_EQ(copy.executionPlanHandleAt(0), graph.executionPlanHandleAt(0));
+    EXPECT_TRUE(copy.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, BuildingACopyLeavesTheOriginalsPlansUnbuilt)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    EXPECT_CALL(*_mockBackend, backendFinalize(graph.executionPlanHandleAt(0))).Times(0);
+    EXPECT_CALL(*_mockBackend, backendFinalize(graph.executionPlanHandleAt(1))).Times(0);
+
+    const auto built = copy.build_plans(BuildPlanPolicy::ALL);
+    ASSERT_TRUE(built.is_good()) << built.get_message();
+
+    EXPECT_TRUE(copy.isExecutionPlanFinalized());
+    EXPECT_FALSE(graph.isExecutionPlanFinalized());
+}
+
+TEST_F(TestGraph, RecreatingPlansOnACopyLeavesTheOriginalsBuiltPlan)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils graph;
+    prepareRankedGraph(graph, {10, 20});
+    ASSERT_TRUE(graph.create_execution_plans().is_good());
+    ASSERT_TRUE(graph.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+    const auto builtPlan = graph.executionPlanHandleAt(0);
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    copy.deselect_engines(std::vector<int64_t>{10});
+    ASSERT_TRUE(copy.create_execution_plans().is_good());
+    ASSERT_TRUE(copy.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+    ASSERT_TRUE(copy.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*copy.selectedEngineIdForTest(), 20);
+
+    EXPECT_TRUE(graph.getBarredEngineIds().empty());
+    EXPECT_EQ(graph.executionPlanHandleAt(0), builtPlan);
+    ASSERT_TRUE(graph.selectedEngineIdForTest().has_value());
+    EXPECT_EQ(*graph.selectedEngineIdForTest(), 10);
+    EXPECT_TRUE(graph.isExecutionPlanFinalized());
+    auto variantPack = testVariantPack();
+    const auto executed = graph.execute(_handle, variantPack, nullptr);
+    EXPECT_TRUE(executed.is_good()) << executed.get_message();
+}
+
+TEST_F(TestGraph, CopiesOwnTheirEngineFilters)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    graph.deselect_engines(std::vector<int64_t>{10});
+    graph.deselect_workspace_greater_than(100);
+    graph.deselect_numeric_notes({NumericalNote::NONDETERMINISTIC});
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    EXPECT_EQ(copy.getBarredEngineIds(), (std::unordered_set<int64_t>{10}));
+    EXPECT_EQ(copy.getMaxWorkspaceAllowed(), 100);
+    EXPECT_EQ(copy.getDeselectedNumericalNotes(),
+              (std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC}));
+
+    copy.deselect_engines(std::vector<int64_t>{20});
+    copy.deselect_workspace_greater_than(50);
+    copy.deselect_numeric_notes({NumericalNote::TENSOR_CORE});
+    graph.deselect_engines(std::vector<int64_t>{});
+
+    EXPECT_TRUE(graph.getBarredEngineIds().empty());
+    EXPECT_EQ(graph.getMaxWorkspaceAllowed(), 100);
+    EXPECT_EQ(graph.getDeselectedNumericalNotes(),
+              (std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC}));
+    EXPECT_EQ(copy.getBarredEngineIds(), (std::unordered_set<int64_t>{20}));
+    EXPECT_EQ(copy.getMaxWorkspaceAllowed(), 50);
+    EXPECT_EQ(
+        copy.getDeselectedNumericalNotes(),
+        (std::vector<NumericalNote>{NumericalNote::NONDETERMINISTIC, NumericalNote::TENSOR_CORE}));
+}
+
+TEST_F(TestGraph, CopyLowersItsOwnOperationGraphWhenTheOriginalsIsNotFinalized)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    ON_CALL(*_mockBackend, backendGetSerializedBinaryGraphExt(_, _, _, _))
+        .WillByDefault([](hipdnnBackendDescriptor_t,
+                          size_t requestedSize,
+                          size_t* graphByteSize,
+                          uint8_t* buf) {
+            *graphByteSize = 4;
+            if(buf != nullptr && requestedSize >= 4)
+            {
+                std::memset(buf, 0xAA, 4);
+            }
+            return HIPDNN_STATUS_SUCCESS;
+        });
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+    // serialize() lowers the graph without a handle, so the descriptor is not finalized.
+    std::vector<uint8_t> data;
+    ASSERT_TRUE(graph.serialize(data).is_good());
+    const auto originalDesc = graph.get_raw_graph_descriptor();
+    ASSERT_NE(originalDesc, nullptr);
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    EXPECT_EQ(copy.get_raw_graph_descriptor(), nullptr);
+
+    EXPECT_CALL(*_mockBackend, backendFinalize(_)).Times(AnyNumber());
+    EXPECT_CALL(*_mockBackend, backendFinalize(originalDesc)).Times(0);
+    const auto built = copy.build_operation_graph(_handle);
+    ASSERT_TRUE(built.is_good()) << built.get_message();
+    EXPECT_NE(copy.get_raw_graph_descriptor(), nullptr);
+    EXPECT_NE(copy.get_raw_graph_descriptor(), originalDesc);
+    EXPECT_EQ(graph.get_raw_graph_descriptor(), originalDesc);
+}
+
+TEST_F(TestGraph, NodesAddedToACopyAreNotInTheOriginal)
+{
+    hipdnn_frontend::GraphTestUtils graph;
+    createBasicBatchnormGraph(graph);
+
+    hipdnn_frontend::GraphTestUtils copy = graph;
+    EXPECT_EQ(copy.getPrivateGraphSubnodes(), graph.getPrivateGraphSubnodes());
+
+    createBasicBatchnormGraph(copy);
+    EXPECT_EQ(graph.getPrivateGraphSubnodes().size(), 1u);
+    EXPECT_EQ(copy.getPrivateGraphSubnodes().size(), 2u);
+}
+
+TEST_F(TestGraph, SharedDescriptorsAreDestroyedOnceByTheLastCopy)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    std::unordered_map<hipdnnBackendDescriptor_t, int> destroyed;
+    ON_CALL(*_mockBackend, backendDestroyDescriptor(_))
+        .WillByDefault([&destroyed](hipdnnBackendDescriptor_t desc) {
+            ++destroyed[desc];
+            return HIPDNN_STATUS_SUCCESS;
+        });
+
+    auto graph = std::make_unique<hipdnn_frontend::GraphTestUtils>();
+    prepareRankedGraph(*graph, {10, 20});
+    ASSERT_TRUE(graph->create_execution_plans().is_good());
+    ASSERT_TRUE(graph->build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+    const auto graphDesc = graph->get_raw_graph_descriptor();
+    const auto builtPlan = graph->executionPlanHandleAt(0);
+
+    hipdnnBackendDescriptor_t copysOwnPlan = nullptr;
+    {
+        // The copy and its destruction are what this test checks.
+        // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
+        const hipdnn_frontend::GraphTestUtils copy = *graph;
+        copysOwnPlan = copy.executionPlanHandleAt(1);
+    }
+    EXPECT_EQ(destroyed[graphDesc], 0);
+    EXPECT_EQ(destroyed[builtPlan], 0);
+    EXPECT_EQ(destroyed[copysOwnPlan], 1);
+
+    graph.reset();
+    EXPECT_EQ(destroyed[graphDesc], 1);
+    EXPECT_EQ(destroyed[builtPlan], 1);
+}
+
+TEST_F(TestGraph, CopyAssignmentReplacesTheTargetsState)
+{
+    ::testing::FLAGS_gmock_verbose = "error";
+    hipdnn_frontend::GraphTestUtils source;
+    prepareRankedGraph(source, {10, 20});
+    ASSERT_TRUE(source.create_execution_plans().is_good());
+    ASSERT_TRUE(source.build_plans(BuildPlanPolicy::HEURISTICS_CHOICE).is_good());
+
+    hipdnn_frontend::GraphTestUtils target;
+    target.deselect_engines(std::vector<int64_t>{30});
+    target = source;
+
+    EXPECT_EQ(target.get_raw_graph_descriptor(), source.get_raw_graph_descriptor());
+    EXPECT_EQ(target.executionPlanHandleAt(0), source.executionPlanHandleAt(0));
+    EXPECT_TRUE(target.isExecutionPlanFinalized());
+    EXPECT_TRUE(target.getBarredEngineIds().empty());
+
+    const auto& alias = target;
+    target = alias;
+    EXPECT_EQ(target.executionPlanHandleAt(0), source.executionPlanHandleAt(0));
+    EXPECT_TRUE(target.isExecutionPlanFinalized());
 }
 
 TEST_F(TestGraph, CreateExecutionPlanExtOnEngineRemovedByFilterFailsCheckSupportAndBuildPlans)

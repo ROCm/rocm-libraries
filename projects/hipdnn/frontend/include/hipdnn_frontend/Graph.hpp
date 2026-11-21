@@ -206,7 +206,8 @@ struct OverrideEntry
 class Graph : public INode
 {
 private:
-    std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
+    // Shared with copies only once finalized; see the copy constructor.
+    std::shared_ptr<detail::ScopedHipdnnBackendDescriptor> _graphDesc;
     bool _graphDescFinalized = false;
 
 protected:
@@ -215,16 +216,21 @@ protected:
     // settings produced it. The single-plan lifecycle populates a vector of size 1
     // at index 0; autotuning populates multiple entries and sets the active index
     // to the winner.
+    //
+    // A copy of the graph shares the engine config, which is finalized when created, and
+    // the execution plan once it is finalized. An unfinalized execution plan is finalized
+    // in place, so a copy gets a new one.
     struct CompiledPlan
     {
-        std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> engineConfigDesc;
-        std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> executionPlanDesc;
+        std::shared_ptr<detail::ScopedHipdnnBackendDescriptor> engineConfigDesc;
+        std::shared_ptr<detail::ScopedHipdnnBackendDescriptor> executionPlanDesc;
         int64_t engineId = -1;
         std::vector<KnobSetting> knobSettings;
         int64_t workspaceSize = -1; ///< Cached workspace size; -1 = not yet queried
         bool barred = false; ///< A filter removed the plan; never set on the finalized active plan
         bool deserialized
             = false; ///< Installed by deserialization: no engine config, never filtered
+        bool executionPlanFinalized = false; ///< executionPlanDesc is finalized
     };
 
     // All compiled plans. create_execution_plans() retains all engine configs
@@ -307,6 +313,10 @@ protected:
         }
 
         _executionPlanFinalized = (finalization == detail::ActivePlanFinalization::FINALIZED);
+        if(_executionPlanFinalized)
+        {
+            _compiledPlans[_activePlanIndex].executionPlanFinalized = true;
+        }
         _selectedEngineId = _compiledPlans[_activePlanIndex].engineId;
     }
 
@@ -334,7 +344,8 @@ protected:
         CompiledPlan plan;
         plan.deserialized = true;
         plan.executionPlanDesc
-            = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+            = std::make_shared<detail::ScopedHipdnnBackendDescriptor>(executionPlan);
+        plan.executionPlanFinalized = true;
 
         // A deserialized compiled plan is finalized by construction. Saving it again returns the
         // plan bytes the backend kept at load; the plan is not serialized again.
@@ -519,6 +530,7 @@ protected:
                     std::string("Failed to finalize execution plan descriptor")
                         + " Backend error: " + backendErrMsg.data()};
         }
+        plan.executionPlanFinalized = true;
 
         int64_t wsSize = 0;
         auto wsStatus = detail::hipdnnBackend()->backendGetAttribute(
@@ -1127,7 +1139,7 @@ private:
     }
 
     /// Set the graph descriptor and its finalization state atomically
-    void setGraphDesc(std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc, bool finalized)
+    void setGraphDesc(std::shared_ptr<detail::ScopedHipdnnBackendDescriptor> desc, bool finalized)
     {
         _noteVerdicts.clear();
         _graphDesc = std::move(desc);
@@ -2550,8 +2562,72 @@ public:
         HIPDNN_FE_LOG_INFO("Creating new Graph instance");
     }
 
-    // Copy operations disabled via INode base class
-    // Move operations defaulted - automatically handles all members
+    /**
+     * @brief Copy a graph the way a cuDNN frontend graph is copied
+     *
+     * The copy shares the nodes and tensors, the built operation graph and the finalized
+     * execution plans with @p other. It owns its plan list, active plan, engine filters and
+     * graph settings, so recreating plans, changing filters or building through one graph
+     * leaves the other alone. Nodes added to one graph after the copy are not in the other.
+     *
+     * Descriptors that are not finalized yet are finalized in place later, so they are never
+     * shared: an operation graph lowered without a handle stays with @p other and the copy
+     * lowers its own when it next needs one, and each unfinalized execution plan gets a new
+     * descriptor.
+     */
+    Graph(const Graph& other)
+        : INode(other.graph_attributes)
+    {
+        // Copies every data member; a member added to Graph must be added here too.
+        _sub_nodes = other._sub_nodes;
+
+        if(other._graphDescFinalized)
+        {
+            _graphDesc = other._graphDesc;
+            _graphDescFinalized = true;
+        }
+
+        _compiledPlans = other._compiledPlans;
+        for(auto& plan : _compiledPlans)
+        {
+            if(plan.executionPlanDesc && !plan.executionPlanFinalized)
+            {
+                plan.executionPlanDesc = std::make_shared<detail::ScopedHipdnnBackendDescriptor>(
+                    HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
+            }
+        }
+        _activePlanIndex = other._activePlanIndex;
+        _executionPlanFinalized = other._executionPlanFinalized;
+        _selectedEngineId = other._selectedEngineId;
+        _planSpecs = other._planSpecs;
+
+        _maxWorkspaceAllowed = other._maxWorkspaceAllowed;
+        _barredEngineIds = other._barredEngineIds;
+        _selectedNumericalNotes = other._selectedNumericalNotes;
+        _deselectedNumericalNotes = other._deselectedNumericalNotes;
+        _selectedBehaviorNotes = other._selectedBehaviorNotes;
+        _deselectedBehaviorNotes = other._deselectedBehaviorNotes;
+        // Verdicts belong to the operation graph, so they carry over only with it.
+        if(_graphDescFinalized)
+        {
+            _noteVerdicts = other._noteVerdicts;
+        }
+
+        _preferredEngineId = other._preferredEngineId;
+        _isOverrideShapeEnabled = other._isOverrideShapeEnabled;
+        _rankingMetric = other._rankingMetric;
+    }
+
+    /// @brief Replace this graph with a copy of @p other; see the copy constructor.
+    Graph& operator=(const Graph& other)
+    {
+        if(this != &other)
+        {
+            *this = Graph(other);
+        }
+        return *this;
+    }
+
     Graph(Graph&&) = default;
     Graph& operator=(Graph&&) = default;
 
