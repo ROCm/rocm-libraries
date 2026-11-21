@@ -58,6 +58,7 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/PredictionLibrary_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceValidator_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFastPath_test.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceAmaxD_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceInt8Accumulation_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFloat8Dispatch_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ReferenceFloat8Scaling_test.cpp"
@@ -760,49 +761,55 @@ endif()
 #################################################
 #     AMAX-D output tests                       #
 #################################################
-# --outputAmaxD makes the reference also write AMAX-D (max |D| over every
-# batch); the driver checks it against max |D| of the golden GEMM, so the
-# check does not depend on which CPU path ran. The fast path does not support
-# AMAX-D (isFastPathEligible rejects it), so these run without
-# --tryFastPath, on the slow path.
-foreach(TYPE f32 f16 bf16)
-    get_test_sizes(${TYPE} SIZES)
-    add_cpu_gemm_test(slow_${TYPE}_AmaxD
-        ARGS ${SIZES} --type ${TYPE} --validate --outputAmaxD
-    )
-    add_cpu_gemm_test(slow_${TYPE}_AmaxD_AllFeatures
-        ARGS ${SIZES} --transA --type ${TYPE} --beta 0.5 --validate --bias --activation relu --scaleAlphaVec --useScaleAB Vector --outputAmaxD
-    )
-endforeach()
-add_cpu_gemm_test(slow_f64_AmaxD
-    ARGS ${F64_SIZES} --type f64 --validate --outputAmaxD
-)
-add_cpu_gemm_test(slow_tf32_AmaxD
-    ARGS ${F32_SIZES} --type tf32 --validate --outputAmaxD
-)
-# Max over every batch, not only the first.
-add_cpu_gemm_test(slow_f32_AmaxD_Batched
-    ARGS ${F32_SIZES} --type f32 --validate --batchCount 3 --outputAmaxD
-)
-# All-zero D: AMAX-D must be written as 0 (the driver starts it at -1).
-add_cpu_gemm_test(slow_f32_AmaxD_Alpha0
-    ARGS ${F32_SIZES} --type f32 --alpha 0 --validate --outputAmaxD
-)
-# Fewer output elements than threads. The single D element is negative with
-# the driver's fixed seed, so this also checks that AMAX-D is |D|, not D.
-add_cpu_gemm_test(slow_f32_AmaxD_1x1
-    ARGS -M 1 -N 1 -K 165 --type f32 --validate --outputAmaxD
-)
-if(NOT WIN32)
-    foreach(TYPE f8 bf8)
-        add_cpu_gemm_test(slow_${TYPE}_AmaxD
-            ARGS ${F16_SIZES} --type ${TYPE} --validate --outputAmaxD
+# --outputAmaxD validates max |D| after activation/gradient, before ScaleD,
+# gate residual and output narrowing, over every batch. Both requested paths
+# have separate thread-limit registrations through the shared helper.
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+    foreach(TYPE f32 f16 bf16)
+        get_test_sizes(${TYPE} SIZES)
+        add_cpu_gemm_test(${PATH}_${TYPE}_AmaxD
+            ARGS ${SIZES} --type ${TYPE} --validate --outputAmaxD ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_AmaxD_AllFeatures
+            ARGS ${SIZES} --transA --type ${TYPE} --beta 0.5 --validate --bias --activation relu --scaleAlphaVec --useScaleAB Vector --outputAmaxD ${PATH_FLAGS}
         )
     endforeach()
-    add_cpu_gemm_test(slow_f4_MX32_AmaxD
-        ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate --outputAmaxD
+    add_cpu_gemm_test(${PATH}_f64_AmaxD
+        ARGS ${F64_SIZES} --type f64 --validate --outputAmaxD ${PATH_FLAGS}
     )
-endif()
+    add_cpu_gemm_test(${PATH}_tf32_AmaxD
+        ARGS ${F32_SIZES} --type tf32 --validate --outputAmaxD ${PATH_FLAGS}
+    )
+    # Max over every batch, not only the first.
+    add_cpu_gemm_test(${PATH}_f32_AmaxD_Batched
+        ARGS ${F32_SIZES} --type f32 --validate --batchCount 3 --outputAmaxD ${PATH_FLAGS}
+    )
+    # All-zero D: AMAX-D must be written as 0 (the driver starts it at -1).
+    add_cpu_gemm_test(${PATH}_f32_AmaxD_Alpha0
+        ARGS ${F32_SIZES} --type f32 --alpha 0 --validate --outputAmaxD ${PATH_FLAGS}
+    )
+    # Fewer output elements than threads. The single D element is negative with
+    # the driver's fixed seed, so this also checks that AMAX-D is |D|, not D.
+    add_cpu_gemm_test(${PATH}_f32_AmaxD_1x1
+        ARGS -M 1 -N 1 -K 165 --type f32 --validate --outputAmaxD ${PATH_FLAGS}
+    )
+    if(NOT WIN32)
+        foreach(TYPE f8 bf8)
+            add_cpu_gemm_test(${PATH}_${TYPE}_AmaxD
+                ARGS ${F16_SIZES} --type ${TYPE} --validate --outputAmaxD ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_f4_MX32_AmaxD
+            ARGS -M 133 -N 147 -K 160 --type f4 --mxBlockA 32 --mxBlockB 32 --validate --outputAmaxD ${PATH_FLAGS}
+        )
+    endif()
+
+endforeach()
 
 #################################################
 #     Int8 input tests (fast & slow)            #
@@ -1283,9 +1290,10 @@ add_cpu_gemm_test(slow_I8_I32_I32_Int32BetaBoundary
 )
 
 # A valid GEMM can still require the slow path; explain why forcing fast fails.
-add_cpu_gemm_test(fast_AmaxD_Rejected
-    EXPECTED_ERROR "AMAX-D output is not supported by the fast path"
-    ARGS -M 1 -N 1 -K 1 --type f32 --outputAmaxD --tryFastPath --validate
+add_cpu_gemm_test(fast_ScalarHalfToFloat8_Rejected
+    EXPECTED_ERROR "Scalar scaling before Half-to-Float8 input narrowing requires the slow path"
+    ARGS -M 1 -N 1 -K 1 --typeA f8fnuz --typeB f16 --computeInputB f8fnuz
+        --typeCD f8fnuz --useScaleAB Scalar --tryFastPath --validate
 )
 
 if(NOT WIN32)
