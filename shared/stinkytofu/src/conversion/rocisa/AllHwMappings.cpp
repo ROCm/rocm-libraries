@@ -181,6 +181,8 @@ std::vector<StinkyInstruction*> lowerRocisaSchedulingFence(rocisa::Instruction& 
 // the last line) and legalizeBarrier's behavior. We mirror the mem
 // token onto signal manually so the implicit-dependency pass groups
 // both halves with the fenced memory ops (see BarrierTest::TokenGrouped_*).
+// GirActionData is different: ToStinkyTofuUtils attaches it generically
+// to every instruction returned by a conversion.
 std::vector<StinkyInstruction*> lowerRocisaSBarrier(rocisa::Instruction& inst,
                                                     AsmIRBuilder& irBuilder) {
     auto* sBarrier = dynamic_cast<rocisa::SBarrier*>(&inst);

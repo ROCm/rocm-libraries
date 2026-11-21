@@ -33,8 +33,10 @@ struct Arguments;
 // for each of the norm and allclose checks, plus one per solution whose post_bench_verify_iters
 // relaunches differed from the first launch (however many gemms or relaunches differed). With
 // verify_strict set, verification_exit_code turns a run that would exit 0 into exit code 2 when
-// any check failed. apply_to enables these checks for every case when verify_strict
+// any check of D failed. apply_to enables these checks for every case when verify_strict
 // is set, even if a case disables them; strict verification is a run-wide requirement.
+// extra_check_failures counts the failed norm checks of E, the bias gradient and amaxD,
+// which do not affect the exit code; reported_failures is the sum of both.
 //
 // post_bench_verify_iters is the number of untimed relaunches of each solution after timing
 // (0 turns them off); every relaunch must give the same D, bit for bit, as the first launch.
@@ -52,6 +54,8 @@ namespace hipblaslt_bench_options
     std::string& uniform_summation_order_str();
     bool&        verify_strict();
     int64_t&     verification_failures();
+    int64_t&     extra_check_failures();
+    int64_t      reported_failures();
     int          verification_exit_code(int ret);
     // Defined in hipblaslt_arguments.cpp because tensilelite-tests compiles
     // hipblaslt_bench_options.cpp without the headers required by Arguments.
