@@ -252,6 +252,9 @@ hipsparseStatus_t hipsparseSpSM_analysis(hipsparseHandle_t           handle,
 *  which does not take the external buffer parameter. hipSPARSE provides the alternate routine \ref hipsparseSpSM_solve_ex, which
 *  correctly matches the parameter list of \p cusparseSpSM_solve.
 *
+*  \deprecated
+*  This routine will be removed in a future release. Use \ref hipsparseSpSM_solve_ex going forward.
+*
 *  @param[in]
 *  handle          handle to the hipSPARSE library context queue.
 *  @param[in]

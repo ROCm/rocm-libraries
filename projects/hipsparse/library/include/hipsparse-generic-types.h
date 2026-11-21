@@ -262,8 +262,10 @@ typedef enum
  */
 typedef enum
 {
-    HIPSPARSE_ORDER_COLUMN HIPSPARSE_DEPRECATED_MSG("Please use HIPSPARSE_ORDER_COL instead")
-    = 1, /**< Column major */
+    HIPSPARSE_ORDER_COLUMN HIPSPARSE_DEPRECATED_MSG(
+        "HIPSPARSE_ORDER_COLUMN is deprecated and will be removed in a future release. Use "
+        "HIPSPARSE_ORDER_COL instead.")
+    = 1, /**< Column major. \deprecated This value will be removed in a future release. Use \ref HIPSPARSE_ORDER_COL instead. */
     HIPSPARSE_ORDER_COL = 1, /**< Column major */
     HIPSPARSE_ORDER_ROW = 2 /**< Row major */
 } hipsparseOrder_t;
@@ -271,16 +273,20 @@ typedef enum
 #if(CUDART_VERSION >= 11000)
 typedef enum
 {
-    HIPSPARSE_ORDER_COLUMN HIPSPARSE_DEPRECATED_MSG("Please use HIPSPARSE_ORDER_COL instead")
-    = 1, /**< Column major */
+    HIPSPARSE_ORDER_COLUMN HIPSPARSE_DEPRECATED_MSG(
+        "HIPSPARSE_ORDER_COLUMN is deprecated and will be removed in a future release. Use "
+        "HIPSPARSE_ORDER_COL instead.")
+    = 1, /**< Column major. \deprecated This value will be removed in a future release. Use \ref HIPSPARSE_ORDER_COL instead. */
     HIPSPARSE_ORDER_COL = 1, /**< Column major */
     HIPSPARSE_ORDER_ROW = 2 /**< Row major */
 } hipsparseOrder_t;
 #elif(CUDART_VERSION >= 10010)
 typedef enum
 {
-    HIPSPARSE_ORDER_COLUMN HIPSPARSE_DEPRECATED_MSG("Please use HIPSPARSE_ORDER_COL instead")
-    = 1, /**< Column major */
+    HIPSPARSE_ORDER_COLUMN HIPSPARSE_DEPRECATED_MSG(
+        "HIPSPARSE_ORDER_COLUMN is deprecated and will be removed in a future release. Use "
+        "HIPSPARSE_ORDER_COL instead.")
+    = 1, /**< Column major. \deprecated This value will be removed in a future release. Use \ref HIPSPARSE_ORDER_COL instead. */
     HIPSPARSE_ORDER_COL = 1 /**< Column major */
 } hipsparseOrder_t;
 #endif
