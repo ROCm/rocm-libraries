@@ -84,10 +84,6 @@ CubicV
   - Colour uses FFmpeg's integer table math (ff_yuv2rgb_coeffs, scaled as
     ff_yuv2rgb_c_init_tables does for RGB24), not the float matrix above.
 
-  The rppt_yuv_to_rgb_cubic_v doxygen (odd luma rows pass chroma through, even
-  rows use a symmetric 4-tap filter, unknown standards use BT.709) is a
-  documentation error; the model follows the kernel.
-
 Notes
   Unknown ranges behave like studio on all three ops. Unknown colour
   standards fall back to BT.709 for Nearest and LinearV, but to BT.601

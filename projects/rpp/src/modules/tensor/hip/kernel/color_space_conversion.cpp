@@ -32,7 +32,7 @@ __constant__ float rpp_nv12_yuv_to_rgb_mat[3][3];
 __constant__ int rpp_nv12_y_bias;
 
 // FFmpeg swscale-exact integer YUV->RGB constants (libswscale/yuv2rgb.c, RGB24 scaled path).
-// Used ONLY by the cubic_v kernel (the FFmpeg>4 10-bit path). See FFmpeg9_YUV_to_RGB_spec.md.
+// Used ONLY by the cubic_v kernel (the FFmpeg>4 10-bit path).
 //   R = clip8((kR*cy + C) >> 16), kR = Y + off(crv_s, V)
 //   B = clip8((kB*cy + C) >> 16), kB = Y + off(cbu_s, U)
 //   G = clip8((kG*cy + C) >> 16), kG = Y + off(cgu_s, U) + off(cgv_s, V)
@@ -160,8 +160,8 @@ __global__ void yuv_to_rgb_cubic_v_hip_kernel(uint8_t* __restrict__ dp_y, int y_
     // 4-tap cubic vertical chroma upsampling (bicubic B=0, C=0.6), applied bit-exactly like
     // FFmpeg swscale's scaled path: integer taps (sum = 4096 = `one`) applied in the 15-bit
     // domain (8-bit chroma << 7) with round-to-nearest (acc + (1<<18)) >> 19. These integer taps
-    // are FFmpeg initFilter's normalized output (see FFmpeg9_YUV_to_RGB_spec.md sec 4c) — the
-    // exact integer values differ slightly from the naive float taps (e.g. 3572 vs 3571.2).
+    // are FFmpeg initFilter's normalized output — the exact integer values differ slightly from
+    // the naive float taps (e.g. 3572 vs 3571.2).
     //   Even y (phase .75): base = (y>>1)-2, taps {-115, 985, 3572, -346}
     //   Odd  y (phase .25): base = (y>>1)-1, taps {-346, 3572, 985, -115}
     // Top boundary rows 0 and 2 need FFmpeg initFilter's exact folded+renormalized taps (they
@@ -318,7 +318,7 @@ static hipError_t rpp_nv12_set_mat_yuv2rgb(RpptColorStandard col_standard,
     // --- FFmpeg swscale-exact integer constants (used by the cubic_v kernel only) ---
     // Reproduces libswscale/yuv2rgb.c ff_yuv2rgb_c_init_tables for RGB24 (case 24). The integer
     // ff_yuv2rgb_coeffs {crv, cbu, cgu_abs, cgv_abs} must be used verbatim (deriving from wr/wb
-    // would be off by a few LSB and break bit-exactness). See FFmpeg9_YUV_to_RGB_spec.md.
+    // would be off by a few LSB and break bit-exactness).
     int crv, cbu, cgu_a, cgv_a;
     switch (col_standard) {
         case RpptColorStandard_BT709:
