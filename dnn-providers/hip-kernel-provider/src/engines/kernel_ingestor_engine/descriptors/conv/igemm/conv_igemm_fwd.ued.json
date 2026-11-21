@@ -29,7 +29,8 @@
     "patch",
     "split_policy",
     "cfx",
-    "flex"
+    "flex",
+    "box"
   ],
   "behavior_notes": [
     "runtime_compilation"
