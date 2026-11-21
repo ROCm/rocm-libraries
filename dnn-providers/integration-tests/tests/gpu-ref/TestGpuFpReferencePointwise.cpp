@@ -156,6 +156,61 @@ TEST(TestGpuPointwiseMixedTypes, BinaryMixedInputs)
                    getDynamicTolerance<float, HalfType>(operation, fillRange));
 }
 
+namespace
+{
+// A FLOAT input0 with a narrow input1 and FLOAT compute, the operand types of a FLOAT matmul
+// output plus a narrow bias.
+template <typename OutputType, typename Input1Type>
+void runFloatInputNarrowBiasAdd()
+{
+    SKIP_IF_NO_DEVICES();
+
+    Tensor<float> input0Tensor({1, 3, 2, 2});
+    Tensor<Input1Type> input1Tensor({1, 3, 2, 2});
+    Tensor<OutputType> outputCpuTensor({1, 3, 2, 2});
+    Tensor<OutputType> outputGpuTensor({1, 3, 2, 2});
+
+    const unsigned int seed = getGlobalTestSeed();
+    const float fillRange = 1.0f;
+    fillWithRandomValues(input0Tensor, -fillRange, fillRange, seed);
+    fillWithRandomValues(input1Tensor, Input1Type{-fillRange}, Input1Type{fillRange}, seed);
+
+    input0Tensor.memory().hostData();
+    input1Tensor.memory().hostData();
+
+    auto operation = PointwiseMode::ADD;
+    CpuReferencePointwiseImpl<OutputType, float, Input1Type>::pointwiseCompute(
+        operation, outputCpuTensor, input0Tensor, input1Tensor);
+
+    GpuReferencePointwise::pointwiseCompute<OutputType, float, Input1Type, float>(
+        operation, outputGpuTensor, input0Tensor, input1Tensor);
+
+    assertAllClose(outputCpuTensor,
+                   outputGpuTensor,
+                   getDynamicTolerance<OutputType, Input1Type>(operation, fillRange));
+}
+} // namespace
+
+TEST(TestGpuPointwiseMixedTypes, AddFloatInputHalfBiasHalfOutput)
+{
+    runFloatInputNarrowBiasAdd<HalfType, HalfType>();
+}
+
+TEST(TestGpuPointwiseMixedTypes, AddFloatInputBfloat16BiasBfloat16Output)
+{
+    runFloatInputNarrowBiasAdd<BFloat16Type, BFloat16Type>();
+}
+
+TEST(TestGpuPointwiseMixedTypes, AddFloatInputHalfBiasFloatOutput)
+{
+    runFloatInputNarrowBiasAdd<float, HalfType>();
+}
+
+TEST(TestGpuPointwiseMixedTypes, AddFloatInputBfloat16BiasFloatOutput)
+{
+    runFloatInputNarrowBiasAdd<float, BFloat16Type>();
+}
+
 // --- Test 1D/2D/3D shapes ---
 
 TEST(TestGpuPointwise1DShapes, Unary)

@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <hipblaslt/hipblaslt.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
@@ -13,27 +14,31 @@
 #include <string>
 #include <vector>
 
-#define LOG_ON_HIPBLASLT_FAILURE(status)                                              \
-    do                                                                                \
-    {                                                                                 \
-        if((status) != HIPBLAS_STATUS_SUCCESS)                                        \
-        {                                                                             \
-            HIPDNN_PLUGIN_LOG_ERROR(                                                  \
-                "hipBLASLt error occurred: "                                          \
-                << hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString(status)); \
-        }                                                                             \
+// Each macro evaluates its argument exactly once, so a wrapped call is never re-issued and the
+// message names the status of the first call.
+#define LOG_ON_HIPBLASLT_FAILURE(status)                                                         \
+    do                                                                                           \
+    {                                                                                            \
+        const hipblasStatus_t hipblasltMacroStatus = (status);                                   \
+        if(hipblasltMacroStatus != HIPBLAS_STATUS_SUCCESS)                                       \
+        {                                                                                        \
+            HIPDNN_PLUGIN_LOG_ERROR("hipBLASLt error occurred: "                                 \
+                                    << hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString( \
+                                           hipblasltMacroStatus));                               \
+        }                                                                                        \
     } while(0)
 
 #define THROW_ON_HIPBLASLT_FAILURE(status)                                                  \
     do                                                                                      \
     {                                                                                       \
-        if((status) != HIPBLAS_STATUS_SUCCESS)                                              \
+        const hipblasStatus_t hipblasltMacroStatus = (status);                              \
+        if(hipblasltMacroStatus != HIPBLAS_STATUS_SUCCESS)                                  \
         {                                                                                   \
             throw hipdnn_plugin_sdk::HipdnnPluginException(                                 \
                 HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,                                        \
                 "hipBLASLt error occurred: "                                                \
-                    + std::string(                                                          \
-                        hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString(status))); \
+                    + std::string(hipblaslt_plugin::hipblaslt_utils::hipblasStatusToString( \
+                        hipblasltMacroStatus)));                                            \
         }                                                                                   \
     } while(0)
 
@@ -99,6 +104,28 @@ hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper findTensor
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap,
     int64_t uid);
+
+// Storage order of the matrix formed by the last two dims. A size-1 dim has no
+// meaningful stride, so a matrix is row-major when dims[rank-1] == 1 or
+// strides[rank-1] == 1; otherwise column-major when dims[rank-2] == 1 or
+// strides[rank-2] == 1; otherwise unsupported.
+enum class MatrixOrder
+{
+    ROW_MAJOR,
+    COLUMN_MAJOR,
+    UNSUPPORTED
+};
+
+MatrixOrder matrixOrder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides);
+
+// hipBLASLt transpose op for an input matrix: row-major -> HIPBLAS_OP_N,
+// column-major -> HIPBLAS_OP_T. Throws BAD_PARAM for any other layout.
+hipblasOperation_t operandTranspose(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
+
+// Throws BAD_PARAM unless the output matrix is row-major.
+void requireRowMajorOutput(
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& tensor);
 
 /// True when `strides` describe dense row-major data for `dims` (innermost dimension
 /// contiguous, each outer stride the product of the inner extents). The stride of a

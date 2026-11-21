@@ -2747,6 +2747,13 @@ inline flatbuffers::FlatBufferBuilder
 {
     flatbuffers::FlatBufferBuilder builder;
 
+    // A fused intermediate is virtual: the matmul output when a bias or activation follows,
+    // the bias output when an activation follows.
+    const bool hasActivation
+        = activMode != hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::UNSET;
+    const bool matmulOutputVirtual = doBias || hasActivation;
+    const bool biasOutputVirtual = doBias && hasActivation;
+
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
     int64_t tensorUid = 1;
@@ -2761,7 +2768,7 @@ inline flatbuffers::FlatBufferBuilder
 
     const auto cMatmulTensorUid = tensorUid++;
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-        builder, cMatmulTensorUid, "C_matmul", dataType, &cStrides, &cDims));
+        builder, cMatmulTensorUid, "C_matmul", dataType, &cStrides, &cDims, matmulOutputVirtual));
 
     int64_t biasTensorUid;
     int64_t cBiasTensorUid;
@@ -2778,7 +2785,7 @@ inline flatbuffers::FlatBufferBuilder
         cBiasTensorUid = tensorUid++;
         tensorAttributes.push_back(
             hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
-                builder, cBiasTensorUid, "C_bias", dataType, &cStrides, &cDims));
+                builder, cBiasTensorUid, "C_bias", dataType, &cStrides, &cDims, biasOutputVirtual));
     }
 
     const auto cTensorUid = tensorUid;

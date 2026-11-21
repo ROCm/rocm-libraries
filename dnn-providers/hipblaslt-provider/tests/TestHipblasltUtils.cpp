@@ -7,6 +7,8 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginLogging.hpp>
+#include <hipdnn_test_sdk/utilities/LogRecorder.hpp>
 
 using namespace hipblaslt_plugin;
 using namespace hipblaslt_utils;
@@ -243,6 +245,92 @@ TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataTypeThrowsOnUnsupported)
 }
 
 // ============================================================================
+// operandTranspose / requireRowMajorOutput
+// ============================================================================
+
+namespace
+{
+// Builds a FLOAT tensor with the given dims and strides and keeps the builder alive.
+struct TensorHolder
+{
+    flatbuffers::FlatBufferBuilder builder;
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attrs = nullptr;
+
+    TensorHolder(const std::vector<int64_t>& dims, const std::vector<int64_t>& strides)
+    {
+        builder.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
+            builder,
+            1,
+            "t",
+            hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+            &strides,
+            &dims));
+        attrs = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>(
+            builder.GetBufferPointer());
+    }
+};
+} // namespace
+
+TEST(TestHipblasltUtils, OperandTransposeFollowsMatrixOrder)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+        hipblasOperation_t expected;
+    };
+
+    const std::vector<Row> rows = {
+        {{4, 8}, {8, 1}, HIPBLAS_OP_N},
+        {{4, 8}, {1, 4}, HIPBLAS_OP_T},
+        // A [M, 1] operand with column-style strides is row-major: its size-1 stride is ignored.
+        {{4, 1}, {1, 4}, HIPBLAS_OP_N},
+        // A [1, K] operand whose strides are neither 1 is column-major by its size-1 dim.
+        {{1, 6}, {99, 100}, HIPBLAS_OP_T},
+    };
+
+    for(const auto& row : rows)
+    {
+        const TensorHolder holder(row.dims, row.strides);
+        EXPECT_EQ(
+            operandTranspose(hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper(
+                holder.attrs)),
+            row.expected)
+            << "dims " << row.dims[0] << "x" << row.dims[1] << " strides " << row.strides[0] << ","
+            << row.strides[1];
+    }
+}
+
+TEST(TestHipblasltUtils, OperandTransposeThrowsOnUnsupportedLayout)
+{
+    const TensorHolder holder({4, 8}, {16, 2});
+    EXPECT_THROW(
+        operandTranspose(
+            hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper(holder.attrs)),
+        hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestHipblasltUtils, RequireRowMajorOutputAcceptsOnlyRowMajor)
+{
+    using hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper;
+
+    const TensorHolder rowMajor({4, 8}, {8, 1});
+    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(rowMajor.attrs)));
+
+    // A [M, 1] output is row-major whatever stride its size-1 dim carries.
+    const TensorHolder singleColumn({4, 1}, {1, 4});
+    EXPECT_NO_THROW(requireRowMajorOutput(TensorAttributesWrapper(singleColumn.attrs)));
+
+    const TensorHolder columnMajor({4, 8}, {1, 4});
+    EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(columnMajor.attrs)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+
+    const TensorHolder unsupported({4, 8}, {16, 2});
+    EXPECT_THROW(requireRowMajorOutput(TensorAttributesWrapper(unsupported.attrs)),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
 // FindTensorAttributes
 // ============================================================================
 
@@ -344,6 +432,46 @@ TEST(TestHipblasltUtils, IsTypeMxOcp)
 }
 
 // ============================================================================
+// MatrixOrder
+// ============================================================================
+
+TEST(TestHipblasltUtils, MatrixOrderClassifiesLastTwoDims)
+{
+    struct Row
+    {
+        std::vector<int64_t> dims;
+        std::vector<int64_t> strides;
+        MatrixOrder expected;
+    };
+
+    const std::vector<Row> rows = {
+        {{4, 8}, {8, 1}, MatrixOrder::ROW_MAJOR},
+        {{4, 8}, {1, 4}, MatrixOrder::COLUMN_MAJOR},
+        {{2, 4, 8}, {32, 8, 1}, MatrixOrder::ROW_MAJOR},
+        {{2, 4, 8}, {32, 1, 4}, MatrixOrder::COLUMN_MAJOR},
+        // A size-1 last dim is row-major whatever its stride says.
+        {{8, 1}, {1, 8}, MatrixOrder::ROW_MAJOR},
+        {{33, 1}, {1, 33}, MatrixOrder::ROW_MAJOR},
+        {{1, 1}, {5, 7}, MatrixOrder::ROW_MAJOR},
+        // A size-1 second-to-last dim is column-major only when the last dim is not 1 and
+        // strides[rank-1] != 1.
+        {{1, 6}, {6, 1}, MatrixOrder::ROW_MAJOR},
+        {{1, 6}, {99, 100}, MatrixOrder::COLUMN_MAJOR},
+        // Neither stride is 1 and no dim is 1.
+        {{4, 8}, {16, 2}, MatrixOrder::UNSUPPORTED},
+        // Rank below 2 and dims/strides size mismatch.
+        {{8}, {1}, MatrixOrder::UNSUPPORTED},
+        {{4, 8}, {1}, MatrixOrder::UNSUPPORTED},
+    };
+
+    for(const auto& row : rows)
+    {
+        EXPECT_EQ(matrixOrder(row.dims, row.strides), row.expected)
+            << "rank " << row.dims.size() << " last dim " << row.dims.back();
+    }
+}
+
+// ============================================================================
 // IsDenseRowMajor
 // ============================================================================
 
@@ -384,4 +512,59 @@ TEST(TestHipblasltUtils, IsDenseRowMajorDeclinesRankMismatch)
     EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({4, 5}, {5}));
     EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({4}, {5, 1}));
     EXPECT_FALSE(hipblaslt_utils::isDenseRowMajor({}, {1}));
+}
+
+// ============================================================================
+// THROW_ON_HIPBLASLT_FAILURE / LOG_ON_HIPBLASLT_FAILURE
+// ============================================================================
+
+TEST(TestHipblasltUtils, ThrowOnHipblasltFailureEvaluatesItsArgumentOnce)
+{
+    int calls = 0;
+    auto failsOnce = [&calls]() {
+        return ++calls == 1 ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS;
+    };
+
+    try
+    {
+        THROW_ON_HIPBLASLT_FAILURE(failsOnce());
+        FAIL() << "expected HipdnnPluginException";
+    }
+    catch(const hipdnn_plugin_sdk::HipdnnPluginException& e)
+    {
+        EXPECT_NE(e.getMessage().find("HIPBLAS_STATUS_INVALID_VALUE"), std::string::npos)
+            << e.getMessage();
+    }
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(TestHipblasltUtils, ThrowOnHipblasltFailureDoesNotThrowOnSuccess)
+{
+    int calls = 0;
+    auto succeeds = [&calls]() {
+        ++calls;
+        return HIPBLAS_STATUS_SUCCESS;
+    };
+
+    EXPECT_NO_THROW(THROW_ON_HIPBLASLT_FAILURE(succeeds()));
+    EXPECT_EQ(calls, 1);
+}
+
+TEST(TestHipblasltUtils, LogOnHipblasltFailureEvaluatesItsArgumentOnce)
+{
+    hipdnn_plugin_sdk::logging::initializeCallbackLogging(
+        "hipblaslt_plugin_tests", hipdnn_test_sdk::utilities::initializeTestLogRecordingShared());
+    const auto recorder
+        = hipdnn_test_sdk::utilities::SharedLogRecorder::withOverrideLevel(HIPDNN_SEV_ERROR);
+
+    int calls = 0;
+    auto failsOnce = [&calls]() {
+        return ++calls == 1 ? HIPBLAS_STATUS_INVALID_VALUE : HIPBLAS_STATUS_SUCCESS;
+    };
+
+    LOG_ON_HIPBLASLT_FAILURE(failsOnce());
+
+    EXPECT_EQ(calls, 1);
+    EXPECT_TRUE(recorder.hasLogContaining(HIPDNN_SEV_ERROR, "HIPBLAS_STATUS_INVALID_VALUE"))
+        << recorder.getRecordedLogsAsString();
 }

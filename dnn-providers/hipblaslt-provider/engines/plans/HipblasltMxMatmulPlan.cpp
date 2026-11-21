@@ -20,28 +20,6 @@ namespace hipblaslt_plugin
 namespace
 {
 
-// Infer the hipBLASLt transpose op from a tensor's strides: row-major
-// (stride[-1]==1) → HIPBLAS_OP_N; column-major (stride[-2]==1) → HIPBLAS_OP_T.
-// Mirrors MatmulParams::getTrans for the plain matmul plan.
-hipblasOperation_t getTransFromStrides(
-    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::TensorAttributesWrapper& t)
-{
-    const auto& strides = t.strides();
-    PLUGIN_THROW_IF_FALSE(strides.size() > 1,
-                          HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                          "Unsupported stride for MX input matrix: " + t.name());
-    if(strides[strides.size() - 1] == 1)
-    {
-        return HIPBLAS_OP_N;
-    }
-    if(strides[strides.size() - 2] == 1)
-    {
-        return HIPBLAS_OP_T;
-    }
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM, "Unsupported stride for MX input matrix: " + t.name());
-}
-
 // Matches hipMalloc's 256-byte alignment guarantee, so the matmul workspace
 // following the reserved scale region stays as aligned as a fresh allocation.
 constexpr size_t WORKSPACE_ALIGNMENT = 256;
@@ -71,6 +49,7 @@ MxMatmulParams::MxMatmulParams(
     // hipBLAS's A operand and our A as its B operand. The swap is applied once,
     // here, so every member is already in hipBLAS's frame and execute() needs no
     // further swapping: a()/aScaleUid() are what hipBLAS receives as A/A_SCALE.
+    hipblaslt_utils::requireRowMajorOutput(tC);
     _matrixLayoutA = HipblasltMatrixLayout(tXB); // hipBLAS A <- our B
     _matrixLayoutB = HipblasltMatrixLayout(tXA); // hipBLAS B <- our A
     _matrixLayoutC = HipblasltMatrixLayout(tC);
@@ -86,9 +65,11 @@ MxMatmulParams::MxMatmulParams(
     _kBlocks = aDims[aDims.size() - 1] / VEC32_BLOCK_SIZE;
 
     // MX GEMM always uses HIPBLAS_COMPUTE_32F. desc transA/transB are in
-    // hipBLAS's frame too: transA = getTrans(hipBLAS A = our B), transB = our A.
-    _matmulDesc = HipblasltMatmulDesc(
-        getTransFromStrides(tXB), getTransFromStrides(tXA), HIPBLAS_COMPUTE_32F, HIP_R_32F);
+    // hipBLAS's frame too: transA = operandTranspose(hipBLAS A = our B), transB = our A.
+    _matmulDesc = HipblasltMatmulDesc(hipblaslt_utils::operandTranspose(tXB),
+                                      hipblaslt_utils::operandTranspose(tXA),
+                                      HIPBLAS_COMPUTE_32F,
+                                      HIP_R_32F);
 
     _matmulDesc.setAScaleMode(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);
     _matmulDesc.setBScaleMode(HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0);

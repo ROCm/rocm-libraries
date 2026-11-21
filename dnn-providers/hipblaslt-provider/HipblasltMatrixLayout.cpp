@@ -21,21 +21,24 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
                          "Tensor rank must be at least 2 for matrix layout. UID: "
                              + std::to_string(_uid));
 
-    // Different types of matrices require different initialization of layout:
-    // - If this is column-major matrix (strides[rank-2] == 1):
-    //   we need to use the dimensions and the strides as-is since hipBLASLT expects column-major layout.
-    // - If this is row-major matrix (strides[rank-1] == 1):
-    //   we need to swap the dimensions and the strides.
+    // Different types of matrices require different initialization of layout
+    // (orientation per hipblaslt_utils::matrixOrder, which ignores the stride of
+    // a size-1 dim):
+    // - Column-major matrix: use the dimensions and the strides as-is since
+    //   hipBLASLt expects column-major layout.
+    // - Row-major matrix: swap the dimensions and the strides. A size-1 row
+    //   count has no row stride, so ld is the column count of the row-major matrix.
     uint64_t rows;
     uint64_t cols;
     int64_t ld;
-    if(strides[rank - 1] == 1) // row-major matrix
+    const auto order = hipblaslt_utils::matrixOrder(dims, strides);
+    if(order == hipblaslt_utils::MatrixOrder::ROW_MAJOR)
     {
         rows = static_cast<uint64_t>(dims[rank - 1]);
         cols = static_cast<uint64_t>(dims[rank - 2]);
-        ld = strides[rank - 2]; // row stride
+        ld = (dims[rank - 2] == 1) ? dims[rank - 1] : strides[rank - 2]; // row stride
     }
-    else if(strides[strides.size() - 2] == 1) // column-major matrix
+    else if(order == hipblaslt_utils::MatrixOrder::COLUMN_MAJOR)
     {
         rows = static_cast<uint64_t>(dims[rank - 2]);
         cols = static_cast<uint64_t>(dims[rank - 1]);
@@ -47,6 +50,13 @@ HipblasltMatrixLayout::HipblasltMatrixLayout(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
             "Unsupported matrix: only column major and row major matrices are supported");
     }
+
+    // hipBLASLt does not reject every non-positive ld (-1 passes) and reads out of bounds with it.
+    // Only the ld this layout actually uses is checked; the stride of a size-1 dim is ignored.
+    PLUGIN_THROW_IF_TRUE(ld <= 0,
+                         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                         "Leading dimension must be positive, got " + std::to_string(ld)
+                             + ". UID: " + std::to_string(_uid));
 
     THROW_ON_HIPBLASLT_FAILURE(
         hipblasLtMatrixLayoutCreate(&_matrixLayout,
