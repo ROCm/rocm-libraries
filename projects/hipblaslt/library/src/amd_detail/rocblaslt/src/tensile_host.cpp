@@ -4431,6 +4431,26 @@ namespace
         }
     };
 
+    // Where a test makes later tuning attempts go wrong on purpose. Without the
+    // test hooks nothing can set one, and every check below is constant false.
+    enum class TuningFailureStage : int
+    {
+        None               = 0,
+        Setup              = 1,
+        Enumeration        = 2,
+        MidSearch          = 3,
+        TruncateAfterFirst = 4,
+        BudgetSpent        = 5,
+        ScratchAlloc       = 6,
+    };
+
+    std::atomic<int> g_injectedTuningFailure{0};
+
+    bool tuningFailureInjected(TuningFailureStage stage)
+    {
+        return g_injectedTuningFailure.load(std::memory_order_relaxed) == static_cast<int>(stage);
+    }
+
     /**
      * Device memory owned by the tuning path.
      *
@@ -4506,7 +4526,10 @@ namespace
 
             Slot& slot = m_slots[device];
 
-            if(bytes <= slot.size)
+            // A test's refusal goes through hipMalloc too, past a buffer that
+            // would fit, so HIP records the failure as it does for a full device.
+            const bool refuse = tuningFailureInjected(TuningFailureStage::ScratchAlloc);
+            if(bytes <= slot.size && !refuse)
                 return slot.ptr;
 
             if(slot.ptr)
@@ -4515,8 +4538,13 @@ namespace
             slot.size = 0;
 
             void* fresh = nullptr;
-            if(hipMalloc(&fresh, bytes) != hipSuccess)
+            if(hipMalloc(&fresh, refuse ? SIZE_MAX : bytes) != hipSuccess)
+            {
+                // The matmul goes on without this search and succeeds, so this
+                // error must not reach the caller's next hipGetLastError.
+                static_cast<void>(hipGetLastError());
                 return deny(Denial::Unavailable);
+            }
 
             slot.ptr  = fresh;
             slot.size = bytes;
@@ -5081,25 +5109,6 @@ namespace
     {
         static std::mutex gLock;
         return gLock;
-    }
-
-    // Where a test makes later tuning attempts go wrong on purpose. Without the
-    // test hooks nothing can set one, and every check below is constant false.
-    enum class TuningFailureStage : int
-    {
-        None               = 0,
-        Setup              = 1,
-        Enumeration        = 2,
-        MidSearch          = 3,
-        TruncateAfterFirst = 4,
-        BudgetSpent        = 5,
-    };
-
-    std::atomic<int> g_injectedTuningFailure{0};
-
-    bool tuningFailureInjected(TuningFailureStage stage)
-    {
-        return g_injectedTuningFailure.load(std::memory_order_relaxed) == static_cast<int>(stage);
     }
 
     bool streamIsCapturing(hipStream_t stream)

@@ -98,18 +98,21 @@ protected:
     virtual unsigned int maxThreadsPerBlock(const fmha_v3_fwdConfig& config) const;
 
     // Architecture name ("gfx942", "gfx950", ...) of the device behind the handle's
-    // stream; isApplicable's only device query. Virtual so tests can check the
-    // applicability rules of each served architecture on a host without that GPU.
-    virtual std::string deviceArch(const Handle& handle) const;
+    // stream, or std::nullopt when the query fails; isApplicable's only device query.
+    // Virtual so tests can check the applicability rules of each served architecture
+    // on a host without that GPU.
+    virtual std::optional<std::string> deviceArch(const Handle& handle) const;
 
 private:
     // Describes why the resolved kernel cannot be launched with the block the
     // plan uses, or std::nullopt when it can.
     std::optional<std::string> launchLimitViolation(const fmha_v3_fwdConfig& config) const;
 
-    // launchLimitViolation as an isApplicable verdict: logs the reason and
-    // returns false when the kernel cannot be launched with the plan's block.
-    bool acceptsLaunchBlock(const fmha_v3_fwdConfig& config) const;
+    // Why isApplicable declines the graph, or std::nullopt when it accepts it.
+    // isApplicable logs the reason once.
+    std::optional<std::string> checkFwdApplicability(
+        const Handle& handle,
+        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const;
 };
 
 } // namespace asm_sdpa_engine

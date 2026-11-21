@@ -49,28 +49,6 @@ using hipdnn_flatbuffers_sdk::data_objects::GraphT;
 using hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT;
 using hipdnn_test_sdk::utilities::CuSeqLenSides;
 
-flatbuffers::FlatBufferBuilder mutateGraph(flatbuffers::FlatBufferBuilder&& builder,
-                                           const std::function<void(GraphT&)>& mutate)
-{
-    auto graph = hipdnn_flatbuffers_sdk::data_objects::UnPackGraph(builder.GetBufferPointer());
-    mutate(*graph);
-    flatbuffers::FlatBufferBuilder mutated;
-    mutated.Finish(hipdnn_flatbuffers_sdk::data_objects::CreateGraph(mutated, graph.get()));
-    return mutated;
-}
-
-TensorAttributesT& findTensor(GraphT& graph, const std::string& name)
-{
-    for(auto& tensor : graph.tensors)
-    {
-        if(tensor->name == name)
-        {
-            return *tensor;
-        }
-    }
-    throw std::runtime_error("No tensor named " + name);
-}
-
 TensorAttributesT& findTensorByUid(GraphT& graph, int64_t uid)
 {
     for(auto& tensor : graph.tensors)
@@ -140,7 +118,7 @@ public:
     }
 
 protected:
-    std::string deviceArch(const Handle& /*handle*/) const override
+    std::optional<std::string> deviceArch(const Handle& /*handle*/) const override
     {
         return _arch;
     }
@@ -378,6 +356,82 @@ TEST_P(TestSdpaFwdPlanBuilderOnArch, IsApplicableSdpaVariations)
     {
         EXPECT_EQ(_planBuilder.isApplicable(_handle, test.graphWrapper()), applicability)
             << test.message;
+    }
+}
+
+// A virtual or pass-by-value operand has no device buffer, and execute needs a pointer for every
+// operand. The builder checks them in one data-driven loop, so cover every entry: dropping one
+// must fail here.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsOperandThatIsNotADeviceTensor)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest control{createSdpaFwdGraph(), "unmodified graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    const std::vector<std::pair<std::string, std::function<void(TensorAttributesT&)>>> mutations
+        = {{"virtual", [](TensorAttributesT& tensor) { tensor.virtual_ = true; }},
+           {"pass-by-value",
+            [](TensorAttributesT& tensor) { tensor.is_runtime_pass_by_value = true; }}};
+    for(const char* name : {"q", "k", "v", "o"})
+    {
+        for(const auto& entry : mutations)
+        {
+            const std::string& mutationName = entry.first;
+            const auto& mutation = entry.second;
+            SCOPED_TRACE(mutationName + " " + name);
+            const GraphTest test{
+                mutateGraph(createSdpaFwdGraph(),
+                            [&](GraphT& graph) { mutation(findTensor(graph, name)); }),
+                mutationName + " " + name};
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+        }
+    }
+}
+
+// A node that references a tensor UID the graph does not define must decline, not throw
+// std::out_of_range out of isApplicable.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesOperandUidMissingFromGraph)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    const GraphTest control{createSdpaFwdGraph(), "unmodified graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    for(const auto& entry : {std::pair{"q", &SdpaAttributesT::q_tensor_uid},
+                             std::pair{"k", &SdpaAttributesT::k_tensor_uid},
+                             std::pair{"v", &SdpaAttributesT::v_tensor_uid},
+                             std::pair{"o", &SdpaAttributesT::o_tensor_uid}})
+    {
+        const std::string name = std::string("missing ") + entry.first;
+        const auto uidField = entry.second;
+        SCOPED_TRACE(name);
+        const GraphTest test{
+            mutateGraph(createSdpaFwdGraph(),
+                        [uidField](GraphT& graph) {
+                            graph.nodes.front()->attributes.AsSdpaAttributes()->*uidField
+                                = maxTensorUid(graph) + 1;
+                        }),
+            name};
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
     }
 }
 
@@ -1929,6 +1983,105 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithNonScalarDescale)
         builder.GetBufferPointer(), builder.GetSize());
     EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper))
         << "fp8 inputs with non-scalar (per-[B, H_kv]) descales must be rejected";
+}
+
+// The kernel reads each fp8 descale through a device pointer. A virtual descale has no buffer,
+// and a pass-by-value one reaches the kernel as a host pointer (or not at all).
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8DescaleThatIsNotADeviceTensor)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    const GraphTest control{createSdpaFwdFp8Graph(/*withDescale=*/true), "unmodified fp8 graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    const std::vector<std::pair<std::string, std::function<void(TensorAttributesT&)>>> mutations
+        = {{"virtual", [](TensorAttributesT& tensor) { tensor.virtual_ = true; }},
+           {"pass-by-value",
+            [](TensorAttributesT& tensor) { tensor.is_runtime_pass_by_value = true; }}};
+    for(const char* name : {"descale_q", "descale_k", "descale_v"})
+    {
+        for(const auto& entry : mutations)
+        {
+            const std::string& mutationName = entry.first;
+            const auto& mutation = entry.second;
+            SCOPED_TRACE(mutationName + " " + name);
+            const GraphTest test{
+                mutateGraph(createSdpaFwdFp8Graph(/*withDescale=*/true),
+                            [&](GraphT& graph) { mutation(findTensor(graph, name)); }),
+                mutationName + " " + name};
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+        }
+    }
+}
+
+// A node that references a descale UID the graph does not define must decline, not throw
+// std::out_of_range out of isApplicable.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableDeclinesFp8DescaleUidMissingFromGraph)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    const GraphTest control{createSdpaFwdFp8Graph(/*withDescale=*/true), "unmodified fp8 graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    for(const auto& entry : {std::pair{"descale_q", &SdpaAttributesT::descale_q_tensor_uid},
+                             std::pair{"descale_k", &SdpaAttributesT::descale_k_tensor_uid},
+                             std::pair{"descale_v", &SdpaAttributesT::descale_v_tensor_uid}})
+    {
+        const std::string name = std::string("missing ") + entry.first;
+        const auto uidField = entry.second;
+        SCOPED_TRACE(name);
+        const GraphTest test{
+            mutateGraph(createSdpaFwdFp8Graph(/*withDescale=*/true),
+                        [uidField](GraphT& graph) {
+                            graph.nodes.front()->attributes.AsSdpaAttributes()->*uidField
+                                = maxTensorUid(graph) + 1;
+                        }),
+            name};
+        EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+    }
+}
+
+// The kernel reads each fp8 descale as an FP32 value, so any other dtype must decline rather
+// than have its bytes reinterpreted as a float.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8DescaleThatIsNotFloat)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    const GraphTest control{createSdpaFwdFp8Graph(/*withDescale=*/true), "unmodified fp8 graph"};
+    ASSERT_TRUE(_planBuilder.isApplicable(_handle, control.graphWrapper()));
+
+    for(const std::string name : {"descale_q", "descale_k", "descale_v"})
+    {
+        for(const DataType dataType :
+            {DataType::BFLOAT16, DataType::HALF, DataType::FP8_E4M3_FNUZ, DataType::INT32})
+        {
+            const std::string description = name + " " + EnumNameDataType(dataType);
+            SCOPED_TRACE(description);
+            const GraphTest test{
+                mutateGraph(createSdpaFwdFp8Graph(/*withDescale=*/true),
+                            [&](GraphT& graph) { findTensor(graph, name).data_type = dataType; }),
+                description};
+            EXPECT_FALSE(_planBuilder.isApplicable(_handle, test.graphWrapper()));
+        }
+    }
 }
 
 // The mode names the MMA path: cuDNN treats FP8_E4M3 (the sdpa_fp8() default) and FP8_E5M2
