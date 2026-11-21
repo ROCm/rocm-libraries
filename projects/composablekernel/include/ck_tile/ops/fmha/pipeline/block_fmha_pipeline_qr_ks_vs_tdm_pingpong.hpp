@@ -79,6 +79,14 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
     static constexpr bool kSeparateLseSum     = kStoreLSE && kRowSumOnMatrixUnit;
 
     // The matrix-unit row sum multiplies P by ones without P's per-block scale.
+    // Lazy rebase bound on the row max gap (log2). fp8 keeps it small and shifts P up by
+    // kPShiftLog2 so every row's largest P lies in [2^6, 2^8]: inside e4m3's range, with no
+    // per-block scale, and well above its subnormals. l and O carry the same shift, the LSE
+    // removes it.
+    static constexpr float kRebaseLog2 = kQuantized ? 2.0f : 8.0f;
+    static constexpr float kPShiftLog2 = kQuantized ? 8.0f - kRebaseLog2 : 0.0f;
+    static_assert(!kQuantized || !kHasSink, "the sink seeds l without the P shift");
+
     static_assert(!kQuantized || !kRowSumOnMatrixUnit,
                   "qr_tdm_pingpong: quantized P needs the fp32 row sum (gemm_1 warps on N)");
 
@@ -757,10 +765,10 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
 
             // Lazy rebasing: o_acc and l stay normalised to m_base, and are
             // rescaled only when a row max outgrows it by more than
-            // kRebaseThreshold (p then stays below 2^kRebaseThreshold). The gap
-            // uses the raw maxima: a row whose m_base is -inf always rebases, a
+            // kRebaseThreshold (p then stays below 2^(kRebaseThreshold + kPShiftLog2)).
+            // The gap uses the raw maxima: a row whose m_base is -inf always rebases, a
             // fully masked row (NaN gap) never does.
-            constexpr auto kRebaseThreshold = SMPLComputeDataType{8}; // 256x
+            constexpr auto kRebaseThreshold = SMPLComputeDataType{kRebaseLog2};
             const auto row_gap              = [&](auto i_idx) {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                              BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
@@ -795,7 +803,7 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[I0], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                auto row_max         = get_row_exp(m_base[i_idx]);
+                auto row_max         = get_row_exp(m_base[i_idx]) - kPShiftLog2;
                 sweep_tile_span(p_spans[I1], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
@@ -832,7 +840,23 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                     l(i_idx) += rowsum_p[i_idx];
                 });
             }
-            auto p_tile = Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+            // fp8: P is cast with the neutral scale (see kPShiftLog2); p_compute then holds
+            // the q(P) gemm_1 multiplies, as after MakePForGemm1
+            auto p_tile = [&] {
+                if constexpr(kQuantized)
+                {
+                    using Gemm1 = remove_cvref_t<decltype(gemm_1)>;
+                    static_assert(Gemm1::MIterPerWarp * (kN0 / Gemm1::WarpGemm::kK) == 1);
+                    auto p_q = make_static_distributed_tensor<PDataType>(
+                        Policy::template MakePRegTileDistribution<Problem>());
+                    p_q.get_thread_buffer() = cast_tile<PDataType>(p_compute).get_thread_buffer();
+                    p_compute               = cast_tile<SMPLComputeDataType>(p_q);
+                    p_scale                 = Base::e8m0_one();
+                    return p_q;
+                }
+                else
+                    return Base::template MakePForGemm1<decltype(gemm_1)>(p_compute, p_scale);
+            }();
 
             // l{j}; o_acc is already in p's m_base frame.
             if constexpr(kQuantized)
@@ -929,6 +953,12 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
             }
             if constexpr(kSeparateLseSum)
                 StoreLse(lse_acc_dram_window_tmp, m_lse, l_lse, scale_s);
+            else if constexpr(kPShiftLog2 != 0)
+            {
+                auto l_lse_shifted = l;
+                tile_elementwise_inout([](auto& x) { x *= exp2(-kPShiftLog2); }, l_lse_shifted);
+                StoreLse(lse_acc_dram_window_tmp, m_lse, l_lse_shifted, scale_s);
+            }
             else
                 StoreLse(lse_acc_dram_window_tmp, m_lse, l, scale_s);
         }
