@@ -380,7 +380,14 @@ for dt in ("HALF", "BFLOAT16"):
                 xpf=1,
                 run=256,
             )
-        ],
+        ]
+        # 256-pixel runs (a 352-pixel stage): one weight fragment serves 64 pixels a wave, for
+        # the 64-channel outputs (4 x 1 waves of 64 x 64) and 128 (2 x 4 waves of 128 x 32).
+        + [
+            M(f"mfma16_{e}", F333, 256, bn, 16, wm, wn, 8, ring=0, xpf=1, run=352)
+            for bn, wm, wn in ((64, 4, 1), (128, 2, 4))
+        ]
+        + [M(f"mfma16_{e}", F333, 128, 64, 16, 4, 1, 8, ring=0, xpf=1, run=256)],
     )
     # Packed channels-first activations in place on the dword-DMA parts (gather transpose in
     # LDS): the 16 x 16 x 256, 16 x 32 x 128 and 20-row tiles at 16-channel chunks, and the
