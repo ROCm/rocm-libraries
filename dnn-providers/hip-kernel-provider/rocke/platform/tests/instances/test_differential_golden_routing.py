@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import contextlib
 import io
+import json
 import os
 import sys
 import unittest
@@ -153,6 +154,28 @@ class TestGoldenRoutingGates(unittest.TestCase):
         code, out = self.main("--check-golden")
         self.assertEqual(code, 1)
         self.assertIn("GOLDEN MISMATCH", out)
+
+    def test_a_mismatch_prints_the_rerecord_command_for_its_families(self):
+        self.bless(self.golden, {"plat": {"0": "p0"}})
+        self.bless(self.lib_golden, {"libfam": {"0": "old"}})
+        code, out = self.main("--check-golden")
+        self.assertEqual(code, 1)
+        self.assertIn(
+            "\n    python tools/golden.py rerecord differential --only libfam\n", out
+        )
+
+    def test_a_hash_edited_without_a_rerecord_is_a_stale_fingerprint(self):
+        self.bless(self.golden, {"plat": {"0": "p0"}})
+        self.bless(self.lib_golden, {"libfam": {"0": "l0"}})
+        # A hand edit, or a merge that took one side's hashes: the hashes match
+        # the emitters, but not the fingerprint the record wrote.
+        document = json.loads(self.golden.read_text())
+        document["ll"]["llvm23"]["plat"]["1"] = "merged"
+        self.golden.write_text(json.dumps(document))
+        code, out = self.main("--check-golden")
+        self.assertEqual(code, 1)
+        self.assertIn(f"GOLDEN FINGERPRINT STALE ({self.golden}): plat\n", out)
+        self.assertIn("python tools/golden.py rerecord differential --only plat", out)
 
     def test_a_family_blessed_in_both_files_is_a_conflict(self):
         # Reported even when the run leaves that family out: a second library

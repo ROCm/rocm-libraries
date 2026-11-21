@@ -37,11 +37,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
-from .golden_file import golden_json_text
+from .golden_file import golden_json_text, rerecord_hint
 from .llvm_profile import LLVM_EMISSION_ALIASES, LLVM_EMISSION_FLAVORS, LLVM_FLAVORS
 from .lower_llvm import _lower_kernel_to_llvm_python
 
@@ -61,6 +62,8 @@ __all__ = [
     "check_golden",
     "check_golden_flavors",
     "compare",
+    "drift_families",
+    "drift_hint",
     "golden_document",
     "golden_main",
     "golden_shard",
@@ -157,6 +160,37 @@ def compare(base: Mapping[str, Any], cur: Mapping[str, Any]) -> list[str]:
         ):
             errors.append(f"{cid}: failure changed {brec} -> {crec}")
     return errors
+
+
+# One drift line of :func:`compare` that names a case, optionally behind the
+# ``[<flavor>] `` prefix :func:`check_golden` adds: ``<section>: missing current
+# <case>``, ``<section>: new current <case>``, or ``<case>: <what changed>``.
+_DRIFT_CASE = re.compile(
+    r"^(?:\[[^\]]+\] )?(?:(?:cases|expected_failures): (?:missing|new) current "
+    r"(?P<listed>\S+)$|(?P<changed>[^\s/]+/\S*?): )"
+)
+
+
+def drift_families(drift: Iterable[str]) -> list[str] | None:
+    """The families (shards) a check's drift lines name, sorted.
+
+    None when a line names no case (a wrong flavor set, an unreadable shard):
+    then the whole golden is re-recorded rather than a guessed subset.
+    """
+    families: set[str] = set()
+    for line in drift:
+        match = _DRIFT_CASE.match(line)
+        if match is None:
+            return None
+        families.add(golden_shard(match.group("listed") or match.group("changed")))
+    return sorted(families)
+
+
+def drift_hint(golden: str, drift: Iterable[str]) -> str:
+    """The re-record hint for ``drift`` against the shard golden ``golden`` (its
+    golden-index name): narrowed to the drifting families when every line names
+    a case."""
+    return rerecord_hint(golden, drift_families(drift))
 
 
 def _flavor_set_errors(doc: Mapping[str, Any]) -> list[str]:
@@ -377,6 +411,7 @@ def write_golden_shards(
 
 def golden_main(
     *,
+    golden_name: str,
     cases: Callable[[], Iterable[Mapping[str, Any]]],
     write_golden: Callable[[Path, set[str] | None], Mapping[str, Any]],
     check_golden: Callable[[Path, str | None], list[str]],
@@ -388,7 +423,9 @@ def golden_main(
     """The ``--write`` / ``--check`` command line of a representative-IR golden.
 
     ``write_golden(dir, shards)`` blesses ``dir`` and returns the document it
-    wrote; ``check_golden(path, flavor)`` returns the drift (empty == OK).
+    wrote; ``check_golden(path, flavor)`` returns the drift (empty == OK), which
+    is printed with the re-record command for ``golden_name`` (the golden's
+    name in the golden index).
 
     With ``default_golden``, ``--write`` and ``--check`` take that directory
     when given no path, and a bare run checks it. Otherwise ``--write`` and
@@ -476,5 +513,6 @@ def golden_main(
     if errors:
         for e in errors:
             print(f"IR DRIFT: {e}")
+        print(drift_hint(golden_name, errors))
         raise SystemExit(1)
     print(f"{label} OK [{checked}] vs {golden}")

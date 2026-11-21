@@ -50,6 +50,8 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "mla_prefill_gfx942_ir_sha256.json"
 )
+# This golden's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "mla_prefill_gfx942"
 _ARCH = "gfx942"
 _SCHEMA = "mla_prefill_gfx942.ir_golden_sha256/v1"
 
@@ -259,11 +261,17 @@ def test_mla_prefill_gfx942_golden_expected_failures_are_the_llvm20_agpr_refusal
 
 
 def test_mla_prefill_gfx942_ir_matches_golden():
+    from rocke.core.golden_file import rerecord_hint
     from rocke.core.ir_golden import check_golden
 
     _golden()
     drift = check_golden(_GOLDEN, _run)
-    assert not drift, "gfx942 MLA prefill IR drift vs golden:\n  " + "\n  ".join(drift)
+    assert not drift, (
+        "gfx942 MLA prefill IR drift vs golden:\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
+    )
 
 
 def test_dispatch_case_tracks_the_shipped_spec():

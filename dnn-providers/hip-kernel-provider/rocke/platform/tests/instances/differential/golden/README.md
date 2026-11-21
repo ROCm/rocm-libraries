@@ -19,6 +19,11 @@ It holds two kinds of hash (format: `golden_store.py`):
   renumbering). It is produced before lowering and is the same in every flavor, so it has one
   section.
 
+Beside them, `fingerprint` holds one checksum per family over that family's hashes, written by
+every record. Two changes that re-record the same family both rewrite its line, so git reports
+a conflict instead of merging two sets of hashes into a file neither tree produced; a check
+fails on a family whose fingerprint no longer matches its hashes.
+
 ## Check
 
 ```bash
@@ -43,8 +48,13 @@ reported missing. It matches by substring (`--only conv_implicit_gemm` also sele
 
 ## Re-bless (only for a reviewed, intended output change)
 
+From the rocke directory, `python tools/golden.py rerecord differential [--only <families>]`
+runs both records below (the command a failing check prints). On a merge or rebase conflict
+in either golden file, `python tools/golden.py rerecord --conflicted` re-records it on the
+merged tree.
+
 ```bash
-python3 run_diff.py --mode ll --python-only --record-golden --flavor llvm20,llvm22,llvm23,llvm24
+python3 run_diff.py --mode ll --python-only --record-golden --flavor all
 python3 run_diff.py --mode ir --canonical --python-only --record-golden
 ```
 

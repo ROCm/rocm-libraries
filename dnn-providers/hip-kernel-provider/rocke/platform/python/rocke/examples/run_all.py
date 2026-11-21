@@ -54,8 +54,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from ..core.golden_file import rerecord_hint
+
 HERE = Path(__file__).resolve().parent
 GOLDEN_DIR = HERE / "_goldens"
+# The goldens' name in the golden index, printed in their re-record command.
+GOLDEN_NAME = "examples"
 PYROOT = HERE.parent.parent  # python/ (holds rocke)
 
 
@@ -342,7 +346,12 @@ def run_one(ex: Example, *, bless: bool, live_arch: Optional[str]) -> RunResult:
         gl = golden.get("lines", [])
         diff_lines = [f"- {x}" for x in gl if x not in r.lines]
         diff_lines += [f"+ {x}" for x in r.lines if x not in gl]
-        r.reason = "digest != golden:\n      " + "\n      ".join(diff_lines[:12])
+        r.reason = (
+            "digest != golden:\n      "
+            + "\n      ".join(diff_lines[:12])
+            + "\n"
+            + rerecord_hint(GOLDEN_NAME, [ex.name])
+        )
     return r
 
 

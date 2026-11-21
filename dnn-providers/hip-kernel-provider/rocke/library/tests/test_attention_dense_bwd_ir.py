@@ -41,6 +41,7 @@ import sys
 from pathlib import Path
 
 import pytest
+from rocke.core.golden_file import rerecord_hint
 from rocke.core.ir_golden import (
     GOLDEN_ALIASES,
     GOLDEN_FLAVORS,
@@ -56,6 +57,8 @@ if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
 _GOLDEN = _TESTS / "golden" / "attention_dense_bwd_ir_sha256.json"
+# This golden's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "attention_dense_bwd"
 _FLAVORS = GOLDEN_FLAVORS
 _ARCHS = ("gfx942", "gfx950")
 
@@ -425,7 +428,12 @@ def test_dense_bwd_ir_matches_golden(arch, flavor):
         got, _ = _sha(arch, over, flavor, dq=dq)
         if got != want:
             drift.append(f"{key}: {want} -> {got}")
-    assert not drift, "dense backward IR drift vs golden:\n  " + "\n  ".join(drift)
+    assert not drift, (
+        "dense backward IR drift vs golden:\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
+    )
 
 
 def test_golden_covers_every_case_and_flavor():

@@ -17,17 +17,23 @@ import pytest
 
 from kernels.common.attention_kv_cache import KvTensorLayout, StridedKvCacheLayout
 from kernels.common.attention_unified import _tiled_3d_signatures
+from rocke.core.golden_file import rerecord_hint, write_golden_json
 from rocke.core.verify import verify
 
 from ._tiled_3d_binding_ir import lower_like_tiled_3d_binding
 
+_TESTS = Path(__file__).resolve().parent
+# The sha256 of each strided-KV parity config's LLVM IR, per flavor.
+_STRIDED_KV_GOLDEN = _TESTS / "golden" / "attention_strided_kv_ir_sha256.json"
+# Its name in the golden index, printed in its re-record command.
+_STRIDED_KV_GOLDEN_NAME = "attention_strided_kv"
+_STRIDED_KV_FLAVORS = ("llvm20", "llvm22", "llvm23")
+_STRIDED_KV_CONFIGS = tuple(str(index) for index in range(14))
 
-@pytest.mark.parametrize("flavor", ["llvm20", "llvm22", "llvm23"])
-def test_attention_strided_kv_golden(flavor):
-    tests = Path(__file__).resolve().parent
-    golden = json.loads(
-        (tests / "golden" / "attention_strided_kv_ir_sha256.json").read_text()
-    )
+
+def _strided_kv_ir_sha256(flavor: str, config: str) -> str:
+    """The sha256 of one strided-KV config's LLVM IR at ``flavor``, emitted the
+    way the parity emitter runs: its own process, Python backend."""
     from rocke.assets import platform_root
 
     env = dict(os.environ, ROCKE_LLVM_FLAVOR=flavor, ROCKE_BACKEND="python")
@@ -35,20 +41,37 @@ def test_attention_strided_kv_golden(flavor):
         [
             str(platform_root() / "tests" / "instances" / "parity"),
             str(platform_root() / "python"),
-            str(tests.parent),
+            str(_TESTS.parent),
         ]
     )
-    assert set(golden[flavor]) == {str(i) for i in range(14)}
-    for idx, expected in golden[flavor].items():
-        data = subprocess.check_output(
-            [
-                sys.executable,
-                str(tests / "parity" / "attention_strided_kv_emit.py"),
-                idx,
-            ],
-            env=env,
-        )
-        assert hashlib.sha256(data).hexdigest() == expected, (flavor, idx)
+    data = subprocess.check_output(
+        [
+            sys.executable,
+            str(_TESTS / "parity" / "attention_strided_kv_emit.py"),
+            config,
+        ],
+        env=env,
+    )
+    return hashlib.sha256(data).hexdigest()
+
+
+@pytest.mark.parametrize("flavor", _STRIDED_KV_FLAVORS)
+def test_attention_strided_kv_golden(flavor):
+    golden = json.loads(_STRIDED_KV_GOLDEN.read_text())
+    assert set(golden[flavor]) == set(_STRIDED_KV_CONFIGS), rerecord_hint(
+        _STRIDED_KV_GOLDEN_NAME
+    )
+    drift = []
+    for config, expected in golden[flavor].items():
+        got = _strided_kv_ir_sha256(flavor, config)
+        if got != expected:
+            drift.append(f"{config}: {expected} -> {got}")
+    assert not drift, (
+        f"strided-KV IR drift vs golden ({flavor}):\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(_STRIDED_KV_GOLDEN_NAME)
+    )
 
 
 @pytest.mark.parametrize("shape", [(3, 2, 65, 64), (2, 4, 17, 128), (1, 1, 1, 256)])
@@ -843,3 +866,21 @@ def test_paged_runtime_accepts_specs_without_layout(arch, path, monkeypatch):
             tuning_spec=spec,
         )
     assert calls == [(kernel, path)]
+
+
+if __name__ == "__main__":
+    # Runs as a module (it imports a sibling relatively), from rocke/library:
+    #   python -m tests.test_strided_kv_decode --write
+    if sys.argv[1:] != ["--write"]:
+        sys.exit("usage: python -m tests.test_strided_kv_decode --write")
+    write_golden_json(
+        _STRIDED_KV_GOLDEN,
+        {
+            flavor: {
+                config: _strided_kv_ir_sha256(flavor, config)
+                for config in _STRIDED_KV_CONFIGS
+            }
+            for flavor in _STRIDED_KV_FLAVORS
+        },
+    )
+    print(f"wrote {_STRIDED_KV_GOLDEN}")

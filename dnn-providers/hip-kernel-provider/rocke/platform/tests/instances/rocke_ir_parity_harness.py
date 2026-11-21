@@ -17,6 +17,10 @@ from rocke.core.ir_golden import (
 )
 from rocke.core.ir_golden import check_golden as _check_golden
 
+#: This corpus's name in the golden index (``python tools/golden.py list``), which
+#: a failing check prints in its re-record command.
+GOLDEN_NAME = "representative"
+
 
 def safe(name: str) -> str:
     return name.replace("/", "__").replace(":", "_") + ".ll"
@@ -2480,6 +2484,7 @@ def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
 
 def main():
     golden_main(
+        golden_name=GOLDEN_NAME,
         cases=cases,
         write_golden=write_golden,
         check_golden=check_golden,

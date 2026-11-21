@@ -101,9 +101,10 @@ TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
 TOOLS = ROCKE / "tools"  # absent in an installed tree, which ships _hostcaps.py here
 # A script launch gets HERE from Python automatically; import-by-path does not.
-# Bootstrap both homes explicitly so this module has the same imports in focused
+# Bootstrap these homes explicitly so this module has the same imports in focused
 # pytest and in isolated xdist workers as it does at its command-line entry point.
-for module_root in (HERE, TOOLS):
+# The rocke package (PYROOT) serves golden_store's golden_file import.
+for module_root in (HERE, TOOLS, PYROOT):
     if module_root.is_dir() and str(module_root) not in sys.path:
         sys.path.insert(0, str(module_root))
 
@@ -115,6 +116,11 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
     GoldenStore,
     compare,
 )
+from rocke.core.golden_file import rerecord_hint  # noqa: E402 -- PYROOT bootstrap
+
+# The differential golden's name in the golden index, printed in its re-record
+# command (which re-records both golden files, every mode and flavor).
+GOLDEN_NAME = "differential"
 
 # L5 golden anchor: committed per-(mode,family,config) reference shas. This is
 # the absolute regression anchor -- any future change that alters an emitted
@@ -1209,8 +1215,8 @@ def _main():
         default="",
         help="LLVM flavor to emit for and to record / check under (llvm20, "
         "llvm22, llvm23); default ROCKE_LLVM_FLAVOR, else the host's flavor. "
-        "--python-only --mode ll takes a comma-separated list and handles "
-        "each flavor in turn",
+        "--python-only --mode ll takes a comma-separated list, or 'all' for "
+        "every flavor rocke qualifies, and handles each flavor in turn",
     )
     ap.add_argument(
         "--golden-file",
@@ -1240,7 +1246,10 @@ def _main():
 
     golden = args.record_golden or args.check_golden
     kind = golden_kind(args.mode, args.canonical) if golden else None
-    flavors = [f for f in args.flavor.split(",") if f.strip()] or [""]
+    if args.flavor == "all":
+        flavors = list(_llvm_flavors())
+    else:
+        flavors = [f for f in args.flavor.split(",") if f.strip()] or [""]
     if len(flavors) > 1 and not (args.python_only and kind == LL):
         ap.error("several --flavor values need --python-only --mode ll")
 
@@ -1466,8 +1475,15 @@ def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
     blessed = store.section(kind, flavor)
     if not blessed:
         print(
-            f"\nNO GOLDEN for {where}. Bless first: run_diff.py --mode {args.mode}"
-            f"{' --canonical' if args.canonical else ''} --flavor {flavor} --record-golden"
+            f"\nNO GOLDEN for {where} in {golden_file}.\n" + rerecord_hint(GOLDEN_NAME)
+        )
+        return 1
+    stale = store.stale_fingerprints(scope)
+    if stale:
+        print(
+            f"\nGOLDEN FINGERPRINT STALE ({golden_file}): {', '.join(stale)}\n"
+            "  their hashes changed without a re-record (a hand edit or a merge).\n"
+            + rerecord_hint(GOLDEN_NAME, stale)
         )
         return 1
     result = compare(blessed, cur, families=scope)
@@ -1479,10 +1495,11 @@ def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
     for fam, idx in (result.changed + result.missing)[:30]:
         print(f"    {fam}[{idx}]")
     if not result.ok:
+        drifting = {family for family, _ in result.changed + result.missing}
         print(
-            "\nGOLDEN MISMATCH: emitted output changed vs the committed "
-            "anchor. If this change is expected & reviewed, re-bless with "
-            "--record-golden; otherwise you introduced a regression."
+            "\nGOLDEN MISMATCH: emitted output changed vs the committed anchor; "
+            "unless the change is intended, it is a regression.\n"
+            + rerecord_hint(GOLDEN_NAME, drifting)
         )
         return 1
     if result.new:

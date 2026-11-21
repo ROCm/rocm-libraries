@@ -71,7 +71,7 @@ from kernels.common.attention_dense_spec import (
 )
 from kernels.gfx942.attention_dense import Gfx942AttentionDenseSpec
 from kernels.gfx950.attention_dense import Gfx950AttentionDenseSpec
-from rocke.core.golden_file import stamp_fingerprint
+from rocke.core.golden_file import rerecord_command, stamp_fingerprint
 
 # Source tree: rocke/platform/tests/golden. Installed tree (library tests under
 # tests/library/tests, platform tests under tests/): tests/golden.
@@ -92,6 +92,8 @@ VECTORS = next(
     _ROOT / "platform" / "tests" / "golden" / "attention_dense_spec_vectors.json",
 )
 CPP_MIRROR = "platform/cpp/instances/common/attention_dense_spec.cpp"
+# This golden's name in the golden index, printed in its re-record command.
+GOLDEN_NAME = "attention_dense_spec_vectors"
 
 _BASE = dict(
     batch=1,
@@ -757,7 +759,8 @@ def _load() -> dict:
 
 _STALE = (
     "AttentionDenseSpec no longer matches {path}. If the Python change is intended: "
-    "run `python {test} --regenerate` and the rocke_attention_dense_spec ctest. "
+    "run `{rerecord}` from the rocke directory and the "
+    "rocke_attention_dense_spec ctest. "
     "Mirror the change in the C++ port ({cpp}) only if a rule it mirrors changed; "
     "a subclass's name parts and hook answers are recorded C inputs."
 )
@@ -765,7 +768,9 @@ _STALE = (
 
 def _stale(detail: str) -> str:
     return (
-        _STALE.format(path=VECTORS.name, test=Path(__file__).name, cpp=CPP_MIRROR)
+        _STALE.format(
+            path=VECTORS.name, rerecord=rerecord_command(GOLDEN_NAME), cpp=CPP_MIRROR
+        )
         + "\n"
         + detail
     )

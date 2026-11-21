@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rocke.core import ir_golden
+from rocke.core.golden_file import rerecord_hint
 from rocke.core.ir_golden import (
     GOLDEN_ALIASES,
     GOLDEN_FLAVORS,
@@ -344,6 +345,7 @@ class TestGoldenMain(unittest.TestCase):
         out = io.StringIO() if out is None else out
         with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
             golden_main(
+                golden_name="sample",
                 cases=lambda: [{"case_id": c} for c in cases],
                 write_golden=self._write(cases),
                 check_golden=self._check,
@@ -368,7 +370,10 @@ class TestGoldenMain(unittest.TestCase):
     def test_needs_a_default_or_a_dump(self):
         with self.assertRaises(TypeError):
             golden_main(
-                cases=list, write_golden=self._write(()), check_golden=self._check
+                golden_name="sample",
+                cases=list,
+                write_golden=self._write(()),
+                check_golden=self._check,
             )
 
     def test_write_refuses_a_json_file_path(self):
@@ -449,6 +454,7 @@ class TestGoldenMain(unittest.TestCase):
         out = io.StringIO()
         with contextlib.redirect_stdout(out), self.assertRaises(SystemExit):
             golden_main(
+                golden_name="sample",
                 cases=list,
                 write_golden=self._write(()),
                 check_golden=self._check,
@@ -457,7 +463,11 @@ class TestGoldenMain(unittest.TestCase):
             )
         self.assertEqual(
             out.getvalue().splitlines(),
-            ["IR DRIFT: x/1 changed", "IR DRIFT: y/1 missing"],
+            [
+                "IR DRIFT: x/1 changed",
+                "IR DRIFT: y/1 missing",
+                *rerecord_hint("sample").splitlines(),
+            ],
         )
 
     def test_a_clean_check_returns(self):

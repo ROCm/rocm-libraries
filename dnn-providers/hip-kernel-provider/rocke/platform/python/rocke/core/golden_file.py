@@ -27,13 +27,16 @@ A file that holds one family stores ``"fingerprint": "<hex>"`` at the top level
 and its entries are the rest of the document (:func:`stamp_fingerprint`,
 :func:`verify_fingerprint`). A file shared by several families stores one entry
 per family; its format owner builds the entries and calls :func:`fingerprint`.
+
+:func:`rerecord_command` is the one spelling of the command that re-records a
+golden through ``rocke/tools/golden.py``; a golden test prints it on drift.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +44,8 @@ __all__ = [
     "FINGERPRINT_KEY",
     "fingerprint",
     "golden_json_text",
+    "rerecord_command",
+    "rerecord_hint",
     "stamp_fingerprint",
     "verify_fingerprint",
     "write_golden_json",
@@ -48,6 +53,9 @@ __all__ = [
 
 #: Top-level key a golden document records its fingerprint under.
 FINGERPRINT_KEY = "fingerprint"
+
+# The re-record front door, run from the rocke directory.
+_RERECORD_TOOL = "tools/golden.py"
 
 
 def fingerprint(entries: object) -> str:
@@ -102,3 +110,27 @@ def write_golden_json(path: Path, document: Mapping[str, Any]) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(golden_json_text(document), encoding="utf-8")
+
+
+def rerecord_command(golden: str, families: Iterable[str] | None = None) -> str:
+    """The command, run from the rocke directory, that re-records ``golden``.
+
+    ``golden`` is a name from the golden index (``python tools/golden.py
+    list``). ``families`` narrows a multi-family golden to those families;
+    without it every family is re-recorded.
+    """
+    if not golden or not golden.strip():
+        raise ValueError(f"rerecord_command - golden={golden!r}, expected a name")
+    command = f"python {_RERECORD_TOOL} rerecord {golden}"
+    chosen = sorted(set(families or ()))
+    if chosen:
+        command += " --only " + ",".join(chosen)
+    return command
+
+
+def rerecord_hint(golden: str, families: Iterable[str] | None = None) -> str:
+    """The lines a failing golden check prints: review, then this command."""
+    return (
+        "If the change is intended, review it and re-record from the rocke "
+        f"directory:\n    {rerecord_command(golden, families)}"
+    )

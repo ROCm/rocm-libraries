@@ -29,6 +29,8 @@ _TESTS = Path(__file__).resolve().parent
 _LIBRARY = _TESTS.parent
 _PLATFORM_PYTHON = _LIBRARY.parent / "platform" / "python"
 _GOLDEN = _TESTS / "golden" / "kda_gfx950_ir_sha256.json"
+# This golden's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "kda_gfx950"
 _ARCH = "gfx950"
 
 # The library path must precede tests/ so tests/dispatch cannot shadow the real
@@ -226,6 +228,7 @@ def _build_doc() -> dict:
 
 
 def test_kda_gfx950_ir_matches_golden():
+    from rocke.core.golden_file import rerecord_hint
     from rocke.core.ir_golden import check_golden
 
     assert _GOLDEN.exists(), (
@@ -238,7 +241,12 @@ def test_kda_gfx950_ir_matches_golden():
     # Every flavor in LLVM_FLAVORS, from any host, so a datalayout or intrinsic
     # change for a flavor this host does not run still fails here.
     drift = check_golden(_GOLDEN, _run)
-    assert not drift, "gfx950 KDA LLVM IR drift vs golden:\n  " + "\n  ".join(drift)
+    assert not drift, (
+        "gfx950 KDA LLVM IR drift vs golden:\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
+    )
 
 
 if __name__ == "__main__":

@@ -36,6 +36,8 @@ from pathlib import Path
 _GOLDEN = (
     Path(__file__).resolve().parent / "golden" / "gdn_decode_gfx950_ir_sha256.json"
 )
+# This golden's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "gdn_decode"
 _ARCH = "gfx950"
 
 # Pin the library root ahead of everything on sys.path so that running this file
@@ -505,6 +507,7 @@ def _build_doc():
 
 def test_gdn_decode_ir_matches_golden():
     import pytest
+    from rocke.core.golden_file import rerecord_hint
     from rocke.core.ir_golden import check_golden
 
     if not _GOLDEN.exists():
@@ -522,8 +525,10 @@ def test_gdn_decode_ir_matches_golden():
     # change for a flavor this host does not run still fails here.
     drift = check_golden(_GOLDEN, _run)
     assert not drift, (
-        "gdn_decode IR drift vs golden (re-record with --write if intended):\n  "
+        "gdn_decode IR drift vs golden:\n  "
         + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
     )
 
 

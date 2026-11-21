@@ -33,9 +33,16 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
     expand_sweep,
 )
 from rocke.core.arch import known_arches
-from rocke.core.ir_golden import GOLDEN_FLAVORS, check_golden_flavors, load_golden
+from rocke.core.golden_file import rerecord_hint
+from rocke.core.ir_golden import (
+    GOLDEN_FLAVORS,
+    check_golden_flavors,
+    drift_hint,
+    load_golden,
+)
 from rocke.tests.arch_marks import COVERED_ARCHES
 from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
+    GOLDEN_NAME,
     cases,
     check_golden,
     write_golden,
@@ -167,10 +174,8 @@ class TestIrParityCoverage(unittest.TestCase):
 # per-test timeout. Together these check exactly what one all-flavor
 # check_golden call does -- the golden's flavor documents once, then every case
 # at every flavor in GOLDEN_FLAVORS (every lane rocke qualifies, not just the
-# one this host autodetects). A drift means emitted IR changed -- if intended
-# and reviewed, re-bless the changed families' shards with:
-#   python tests/instances/rocke_ir_parity_harness.py \
-#     --write tests/golden/rocke_representative_ir_sha256 --only <family>
+# one this host autodetects). A drift means emitted IR changed; a failure prints
+# the command that re-records the drifting families.
 
 
 def test_golden_holds_every_llvm_flavor():
@@ -178,7 +183,12 @@ def test_golden_holds_every_llvm_flavor():
     for a flavor rocke no longer qualifies."""
     assert _GOLDEN.exists(), f"golden missing: {_GOLDEN} (bless with harness --write)"
     errors = check_golden_flavors(_GOLDEN)
-    assert errors == [], "golden flavor set is wrong:\n  " + "\n  ".join(errors)
+    assert errors == [], (
+        "golden flavor set is wrong:\n  "
+        + "\n  ".join(errors)
+        + "\n"
+        + rerecord_hint(GOLDEN_NAME)
+    )
 
 
 @pytest.mark.parametrize("flavor", GOLDEN_FLAVORS)
@@ -187,7 +197,12 @@ def test_ir_cases_match_golden_sha256(flavor):
     ``flavor`` matches the committed golden."""
     assert _GOLDEN.exists(), f"golden missing: {_GOLDEN} (bless with harness --write)"
     drift = check_golden(_GOLDEN, flavor)
-    assert drift == [], f"IR drift vs golden at {flavor}:\n  " + "\n  ".join(drift)
+    assert drift == [], (
+        f"IR drift vs golden at {flavor}:\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + drift_hint(GOLDEN_NAME, drift)
+    )
 
 
 class TestGoldenShardWriter(unittest.TestCase):

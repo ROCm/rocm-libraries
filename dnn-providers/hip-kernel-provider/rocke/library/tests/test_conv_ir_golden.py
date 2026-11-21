@@ -57,9 +57,11 @@ _LIB_ROOT = str(Path(__file__).resolve().parent.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
+from rocke.core.golden_file import rerecord_hint  # noqa: E402
 from rocke.core.ir_golden import (  # noqa: E402 -- library root pinned above
     GOLDEN_FLAVORS,
     check_golden_flavors,
+    drift_hint,
     golden_document,
     golden_main,
     lower_golden_case,
@@ -70,6 +72,8 @@ from rocke.core.ir_golden import check_golden as _check_golden  # noqa: E402
 from rocke.tests.arch_marks import arch_specific  # noqa: E402
 
 _GOLDEN = Path(__file__).resolve().parent / "golden" / "conv_representative_ir"
+# This corpus's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "conv"
 
 
 # The platform harness's lowering, (record, llvm), so
@@ -4984,7 +4988,12 @@ def test_conv_ir_golden_holds_every_llvm_flavor():
     if not _GOLDEN.is_dir():
         pytest.skip("conv golden fixture missing; generate with --write")
     errors = check_golden_flavors(_GOLDEN)
-    assert not errors, "conv golden flavor set is wrong:\n  " + "\n  ".join(errors)
+    assert not errors, (
+        "conv golden flavor set is wrong:\n  "
+        + "\n  ".join(errors)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
+    )
 
 
 def test_conv_ir_matches_golden(flavor):
@@ -4993,11 +5002,17 @@ def test_conv_ir_matches_golden(flavor):
     if not _GOLDEN.is_dir():
         pytest.skip("conv golden fixture missing; generate with --write")
     drift = check_golden(_GOLDEN, flavor)
-    assert not drift, f"conv IR drift vs golden at {flavor}:\n  " + "\n  ".join(drift)
+    assert not drift, (
+        f"conv IR drift vs golden at {flavor}:\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + drift_hint(_GOLDEN_NAME, drift)
+    )
 
 
 def main():
     golden_main(
+        golden_name=_GOLDEN_NAME,
         cases=cases,
         write_golden=write_golden,
         check_golden=check_golden,

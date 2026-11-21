@@ -30,6 +30,8 @@ _TESTS = Path(__file__).resolve().parent
 _LIBRARY = _TESTS.parent
 _PLATFORM_PYTHON = _LIBRARY.parent / "platform" / "python"
 _GOLDEN = _TESTS / "golden" / "dsa_indexer_ir_sha256.json"
+# This golden's name in the golden index, printed in its re-record command.
+_GOLDEN_NAME = "dsa_indexer"
 _SCHEMA = "dsa_indexer.ir_golden_sha256/v1"
 _ARCHES = ("gfx942", "gfx950")
 
@@ -37,6 +39,7 @@ for _path in (str(_LIBRARY), str(_PLATFORM_PYTHON)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
+from rocke.core.golden_file import rerecord_hint  # noqa: E402
 from rocke.core.ir_golden import (  # noqa: E402
     GOLDEN_ALIASES,
     GOLDEN_FLAVORS,
@@ -151,7 +154,8 @@ def test_dsa_indexer_ir_matches_golden(arch: str, flavor: str):
     recorded = arch_doc["flavors"][golden_flavor]["cases"]
     assert set(recorded) == set(cases), (
         f"{arch} indexer golden case set drifted: "
-        f"recorded={sorted(recorded)}, current={sorted(cases)}"
+        f"recorded={sorted(recorded)}, current={sorted(cases)}\n"
+        + rerecord_hint(_GOLDEN_NAME)
     )
 
     drift = []
@@ -162,8 +166,11 @@ def test_dsa_indexer_ir_matches_golden(arch: str, flavor: str):
             drift.append(
                 f"{cid}: {want} -> {got} ({recorded[cid]['bytes']} -> {nbytes} bytes)"
             )
-    assert not drift, f"{arch} indexer LLVM IR drift vs golden:\n  " + "\n  ".join(
-        drift
+    assert not drift, (
+        f"{arch} indexer LLVM IR drift vs golden:\n  "
+        + "\n  ".join(drift)
+        + "\n"
+        + rerecord_hint(_GOLDEN_NAME)
     )
 
 

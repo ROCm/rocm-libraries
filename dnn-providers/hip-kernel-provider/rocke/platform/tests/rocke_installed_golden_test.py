@@ -92,8 +92,10 @@ def _find_golden() -> Path:
 def main() -> int:
     _add_installed_python_paths()
 
+    from rocke.core.ir_golden import drift_hint
     from rocke_ir_parity_harness import (
         GOLDEN_FLAVORS,
+        GOLDEN_NAME,
         check_golden,
     )
 
@@ -102,6 +104,7 @@ def main() -> int:
     drift = check_golden(golden)
     if drift:
         print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
+        print(drift_hint(GOLDEN_NAME, drift))
         return 1
     print(f"rocKE installed golden gate: PASS " f"({flavors}, golden={golden.name})")
     return 0

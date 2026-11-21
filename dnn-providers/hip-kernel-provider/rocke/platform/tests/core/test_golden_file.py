@@ -18,6 +18,8 @@ from rocke.core.golden_file import (
     FINGERPRINT_KEY,
     fingerprint,
     golden_json_text,
+    rerecord_command,
+    rerecord_hint,
     stamp_fingerprint,
     verify_fingerprint,
     write_golden_json,
@@ -26,6 +28,10 @@ from rocke.core.ir_golden import (
     GOLDEN_ALIASES,
     GOLDEN_PROFILE_FLAVORS,
     GOLDEN_SCHEMA,
+    check_golden,
+    compare,
+    drift_families,
+    drift_hint,
     write_golden_shards,
 )
 from rocke.tests.git_merge import merges_cleanly
@@ -92,6 +98,71 @@ def test_edited_entries_make_the_fingerprint_stale():
 def test_stamp_refuses_a_non_object():
     with pytest.raises(TypeError, match="golden document must be a JSON object"):
         stamp_fingerprint(["not", "an", "object"])
+
+
+def test_rerecord_command_names_the_tool_golden_and_families():
+    assert rerecord_command("kda_gfx942") == (
+        "python tools/golden.py rerecord kda_gfx942"
+    )
+    assert rerecord_command("representative", ["gemm", "attention", "gemm"]) == (
+        "python tools/golden.py rerecord representative --only attention,gemm"
+    )
+    assert rerecord_hint("conv").endswith(
+        "re-record from the rocke directory:\n"
+        "    python tools/golden.py rerecord conv"
+    )
+
+
+@pytest.mark.parametrize("name", ["", "  "])
+def test_rerecord_command_refuses_an_empty_name(name):
+    with pytest.raises(ValueError, match="expected a name"):
+        rerecord_command(name)
+
+
+# --- the drift a shard golden reports names its families -------------------------
+
+
+def test_stale_shard_golden_prints_the_command_for_its_drifting_families(tmp_path):
+    recorded = {"gemm/gfx942/a": "aa", "gemm/gfx942/b": "bb", "moe/gfx950/c": "cc"}
+    write_golden_shards(tmp_path, _profile_document(recorded))
+    current = {**recorded, "gemm/gfx942/b": "b2", "conv/gfx950/new": "dd"}
+    del current["moe/gfx950/c"]
+
+    def run(flavor: str) -> dict:
+        return _profile_document(current)["flavors"][flavor]
+
+    drift = check_golden(tmp_path, run)
+    assert drift_families(drift) == ["conv", "gemm", "moe"]
+    assert drift_hint("representative", drift).endswith(
+        "python tools/golden.py rerecord representative --only conv,gemm,moe"
+    )
+
+
+def test_every_kind_of_compare_drift_names_its_family():
+    # drift_families parses compare's message text: each kind of line compare
+    # writes, bare (one flavor checked) and flavor-prefixed, maps to its family.
+    base = {
+        "cases": {"gemm/gfx942/a": {"sha256": "aa"}, "moe/gfx950/b": {"sha256": "bb"}},
+        "expected_failures": {"conv/gfx942/c": {"type": "ValueError", "message": "x"}},
+    }
+    current = {
+        "cases": {"gemm/gfx942/a": {"sha256": "a2"}, "lse/gfx942/d": {"sha256": "dd"}},
+        "expected_failures": {
+            "conv/gfx942/c": {"type": "ValueError", "message": "y"},
+            "attn/gfx950/e": {"type": "KeyError", "message": "z"},
+        },
+    }
+    drift = compare(base, current)
+    assert len(drift) == 5  # missing, two new, a changed hash, a changed failure
+    expected = ["attn", "conv", "gemm", "lse", "moe"]
+    assert drift_families(drift) == expected
+    assert drift_families(f"[llvm22] {line}" for line in drift) == expected
+
+
+def test_drift_naming_no_case_rerecords_the_whole_golden():
+    drift = ["golden profile documents ['llvm20'] do not match [...]; re-bless it"]
+    assert drift_families(drift) is None
+    assert drift_hint("conv", drift).endswith("python tools/golden.py rerecord conv")
 
 
 # --- two re-records of one family conflict in git; of two families they merge ---
