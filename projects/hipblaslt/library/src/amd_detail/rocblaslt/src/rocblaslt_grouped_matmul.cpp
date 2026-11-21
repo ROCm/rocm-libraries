@@ -655,6 +655,26 @@ namespace
         records[g] = r;
     }
 
+    // hipLaunchKernel returns this launch's own status. hipGetLastError after
+    // hipLaunchKernelGGL would also return an error the caller left pending, and
+    // fail a matmul that ran.
+    template <typename Record>
+    hipError_t launchPackGroupedRecords(unsigned    grid,
+                                        unsigned    block,
+                                        hipStream_t stream,
+                                        Record      templ,
+                                        PackArgs    args,
+                                        Record*     records)
+    {
+        void* kernelArgs[] = {&templ, &args, &records};
+        return hipLaunchKernel(reinterpret_cast<const void*>(&packGroupedRecords<Record>),
+                               dim3(grid),
+                               dim3(block),
+                               kernelArgs,
+                               0,
+                               stream);
+    }
+
     // MX record with the fields from alpha on taken from the standard record.
     GroupedRecordMX mxTemplate(const GroupedRecord& t)
     {
@@ -994,27 +1014,22 @@ rocblaslt_status rocblaslt_grouped_matmul(rocblaslt_handle             handle,
             args.betaPtr   = beta;
         }
 
-        unsigned block = 256;
-        unsigned grid  = (static_cast<unsigned>(groups) + block - 1) / block;
-        if(mx)
-            hipLaunchKernelGGL(packGroupedRecords<GroupedRecordMX>,
-                               dim3(grid),
-                               dim3(block),
-                               0,
-                               stream,
-                               mxTemplate(launch->templ),
-                               args,
-                               static_cast<GroupedRecordMX*>(workspace));
-        else
-            hipLaunchKernelGGL(packGroupedRecords<GroupedRecord>,
-                               dim3(grid),
-                               dim3(block),
-                               0,
-                               stream,
-                               launch->templ,
-                               args,
-                               static_cast<GroupedRecord*>(workspace));
-        if(hipGetLastError() != hipSuccess)
+        unsigned         block = 256;
+        unsigned         grid  = (static_cast<unsigned>(groups) + block - 1) / block;
+        const hipError_t packed
+            = mx ? launchPackGroupedRecords(grid,
+                                            block,
+                                            stream,
+                                            mxTemplate(launch->templ),
+                                            args,
+                                            static_cast<GroupedRecordMX*>(workspace))
+                 : launchPackGroupedRecords(grid,
+                                            block,
+                                            stream,
+                                            launch->templ,
+                                            args,
+                                            static_cast<GroupedRecord*>(workspace));
+        if(packed != hipSuccess)
         {
             log_error(__func__, "failed to launch the grouped record pack kernel");
             return rocblaslt_status_internal_error;

@@ -56,6 +56,9 @@ namespace
         // Further calls, one per entry, with these shapes (each no larger than in groups);
         // needs !fixedM.
         std::vector<std::vector<GroupShape>> reruns;
+        // Before each further call, leave an error the caller has not read, which the call
+        // must neither fail on nor clear.
+        bool callerErrorPending = false;
     };
 
     constexpr size_t kWorkspace = size_t{64} << 20;
@@ -771,7 +774,15 @@ namespace
                     rewrite(layout, rowsAttr, m);
                     rewrite(layout, colsAttr, n);
                 }
+                if(tc.callerErrorPending)
+                {
+                    void* unused = nullptr;
+                    ASSERT_EQ(hipMalloc(&unused, SIZE_MAX), hipErrorOutOfMemory);
+                }
                 matmulAndCheck();
+                if(tc.callerErrorPending)
+                    EXPECT_EQ(hipGetLastError(), hipErrorOutOfMemory)
+                        << "the call consumed the caller's error";
             }
         }
 
@@ -1004,6 +1015,17 @@ namespace
         tc.opA    = HIPBLAS_OP_T;
         tc.groups = {{64, 64, 32}, {48, 32, 64}, {96, 80, 16}, {32, 16, 32}};
         tc.reruns = {{{16, 64, 8}, {48, 0, 64}, {5, 3, 0}, {32, 16, 31}}};
+        run(tc);
+    }
+
+    // An error the caller left unread is not the record pack's launch failure: each call
+    // with the launch setup reused succeeds, and leaves the error for the caller to read.
+    TEST_F(GroupedMatmul, smoke_CallerErrorPendingIsNotALaunchFailure)
+    {
+        Case tc;
+        tc.groups             = {{64, 48, 32}, {17, 5, 64}, {33, 70, 40}};
+        tc.reruns             = {tc.groups, tc.groups};
+        tc.callerErrorPending = true;
         run(tc);
     }
 
