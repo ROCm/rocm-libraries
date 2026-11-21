@@ -1268,23 +1268,26 @@ function(_hkp_disabled_families out_var)
 endfunction()
 
 # ---------------------------------------------------------------------------
-# _hkp_root_probe(<out_shipped> <out_offered> <out_ok> <root> <arches>
+# _hkp_root_probe(<out_shipped> <out_predicting> <out_offered> <out_ok> <root> <arches>
 #                 <exclude_folders> <disabled_kinds>)
 #   What a pack of <root> would ship, asked of the packer: its own load_flat_input(),
-#   shipped_engines() and offered_engines(), with the same excluded folders and disabled
-#   kinds (bare kind names) the pack step gets, run under the base interpreter.
+#   shipped_engines(), predicting_engines() and offered_engines(), with the same excluded
+#   folders and disabled kinds (bare kind names) the pack step gets, run under the base
+#   interpreter.
 #
 #   <out_ok> is TRUE when the packer answered. Then <out_shipped> is JSON
 #   {"<arch>": ["<engine name>", ...]}, where every arch mapping to an empty list is a
-#   root with nothing to pack, and <out_offered> is the CMake list of engine names the
-#   root carries for any arch at all, independent of <arches>.
+#   root with nothing to pack, <out_predicting> is the same JSON over the shipped engines
+#   whose UED binds an engine-prediction (L1) model under the arch or `default`, and
+#   <out_offered> is the CMake list of engine names the root carries for any arch at all,
+#   independent of <arches>.
 #
 #   Asked of the packer rather than mirrored here: what survives turns on the KDP arch
 #   list, each UKD's own arch list, standalone-UKD resolution and the filters, and
 #   CMake's JSON reader takes seconds per configure on a KDP of a few hundred UKDs.
 #
 #   When the packer cannot answer -- a malformed root, an interpreter that cannot run
-#   it -- <out_ok> is FALSE, both answers are empty, and a STATUS line carries the
+#   it -- <out_ok> is FALSE, every answer is empty, and a STATUS line carries the
 #   packer's own reason. Callers then wire the root, so the pack reports what is wrong
 #   with it.
 #
@@ -1292,9 +1295,10 @@ endfunction()
 #   answer turns on their contents.
 # ---------------------------------------------------------------------------
 # cmake-lint: disable=R0913
-function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_folders
-         disabled_kinds)
+function(_hkp_root_probe out_shipped out_predicting out_offered out_ok root arches
+         exclude_folders disabled_kinds)
     set(${out_shipped} "" PARENT_SCOPE)
+    set(${out_predicting} "" PARENT_SCOPE)
     set(${out_offered} "" PARENT_SCOPE)
     set(${out_ok} FALSE PARENT_SCOPE)
 
@@ -1312,7 +1316,7 @@ function(_hkp_root_probe out_shipped out_offered out_ok root arches exclude_fold
 from hkp_pack.descriptors import load_flat_input
 from hkp_pack.errors import HkpPackError
 from hkp_pack.generic_targets import GenericTargets
-from hkp_pack.pipeline import offered_engines, shipped_engines
+from hkp_pack.pipeline import offered_engines, predicting_engines, shipped_engines
 lists = {k: tuple(v for v in rest.split(',') if v)
          for k, _, rest in (a.partition('=') for a in sys.argv[3:])}
 try:
@@ -1320,7 +1324,9 @@ try:
                            log=lambda *_args: None,
                            exclude_folders=lists['folders'],
                            disabled_kinds=lists['kinds'])
-    print(json.dumps({'shipped': shipped_engines(flat, lists['arches']),
+    shipped = shipped_engines(flat, lists['arches'])
+    print(json.dumps({'shipped': shipped,
+                      'predicting': predicting_engines(flat, shipped),
                       'offered': offered_engines(flat)}))
 except HkpPackError as exc:
     sys.exit(str(exc))
@@ -1357,6 +1363,7 @@ except HkpPackError as exc:
     endif()
 
     string(JSON _shipped GET "${_out}" shipped)
+    string(JSON _predicting GET "${_out}" predicting)
     set(_offered "")
     string(JSON _count LENGTH "${_out}" offered)
     if(_count GREATER 0)
@@ -1369,12 +1376,14 @@ except HkpPackError as exc:
     endif()
     set(${out_ok} TRUE PARENT_SCOPE)
     set(${out_shipped} "${_shipped}" PARENT_SCOPE)
+    set(${out_predicting} "${_predicting}" PARENT_SCOPE)
     set(${out_offered} "${_offered}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
 # _hkp_shipped_engines_for_arch(<out_var> <shipped-json> <arch>)
-#   The engine names <shipped-json> (from _hkp_root_probe) lists for <arch>.
+#   The engine names <shipped-json> (from _hkp_root_probe, shipped or predicting) lists
+#   for <arch>.
 # ---------------------------------------------------------------------------
 function(_hkp_shipped_engines_for_arch out_var shipped arch)
     set(_engines "")
@@ -1443,6 +1452,44 @@ endfunction()
 function(hkp_product_ships_engine_for_arch out_var engine arch)
     _hkp_root_ships_engine_for_arch(_ships product "${engine}" "${arch}")
     set(${out_var} "${_ships}" PARENT_SCOPE)
+endfunction()
+
+# ---------------------------------------------------------------------------
+# hkp_product_engine_prediction_arches(<out>)
+#   The architectures the `product` pack target is wired for whose shard ships an engine
+#   that binds an engine-prediction (L1, `predict_engine`) model under that architecture or
+#   `default`, in wiring order: the shards a census of those models has something to read.
+#   Empty when `product` is not wired.
+#
+#   Arch-aware like hkp_product_ships_engine_for_arch(), and like it a probe that could not
+#   answer reads as HIPKERNELPROVIDER_ENABLE_ROCKE, here for every wired architecture.
+# ---------------------------------------------------------------------------
+function(hkp_product_engine_prediction_arches out_var)
+    set(${out_var} "" PARENT_SCOPE)
+
+    get_property(_labels GLOBAL PROPERTY HKP_PACK_LABELS)
+    if(NOT "product" IN_LIST _labels)
+        return()
+    endif()
+
+    get_property(_wired GLOBAL PROPERTY HKP_PACK_ARCHES_product)
+    get_property(_probe_ok GLOBAL PROPERTY HKP_PACK_PROBE_OK_product)
+    if(NOT _probe_ok)
+        if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+            set(${out_var} "${_wired}" PARENT_SCOPE)
+        endif()
+        return()
+    endif()
+
+    get_property(_predicting GLOBAL PROPERTY HKP_PACK_PREDICTING_ENGINES_product)
+    set(_arches "")
+    foreach(_arch IN LISTS _wired)
+        _hkp_shipped_engines_for_arch(_engines "${_predicting}" "${_arch}")
+        if(_engines)
+            list(APPEND _arches "${_arch}")
+        endif()
+    endforeach()
+    set(${out_var} "${_arches}" PARENT_SCOPE)
 endfunction()
 
 # ---------------------------------------------------------------------------
@@ -1736,8 +1783,8 @@ endfunction()
 #
 #   Every probed root, wired or dormant, sets the global properties
 #   HKP_PACK_PROBE_OK_<NAME> and HKP_PACK_OFFERED_ENGINES_<NAME>; a wired root also sets
-#   HKP_PACK_SHIPPED_ENGINES_<NAME>. A root with an empty SOURCE_ROOT is never probed and
-#   leaves HKP_PACK_PROBE_OK_<NAME> unset.
+#   HKP_PACK_SHIPPED_ENGINES_<NAME> and HKP_PACK_PREDICTING_ENGINES_<NAME>. A root with an
+#   empty SOURCE_ROOT is never probed and leaves HKP_PACK_PROBE_OK_<NAME> unset.
 #
 #   Forwards each parsed keyword to hkp_wire_pack_target() by naming it again, never
 #   through ${ARGN} or ${ARGV}: ARCHES is a one-value keyword whose list value would be
@@ -1754,12 +1801,13 @@ function(_hkp_wire_root)
 
     _hkp_disabled_kinds(_disabled_pairs "${W_ENABLE_ROCKE}")
     set(_shipped "")
+    set(_predicting "")
     if(NOT W_SOURCE_ROOT)
         set(_reason "empty-root")
     else()
         _hkp_disabled_kind_names(_kinds "${W_ENABLE_ROCKE}")
-        _hkp_root_probe(_shipped _offered _probe_ok "${W_SOURCE_ROOT}" "${W_ARCHES}"
-                        "${W_EXCLUDE_FOLDERS}" "${_kinds}")
+        _hkp_root_probe(_shipped _predicting _offered _probe_ok "${W_SOURCE_ROOT}"
+                        "${W_ARCHES}" "${W_EXCLUDE_FOLDERS}" "${_kinds}")
         set_property(GLOBAL PROPERTY HKP_PACK_PROBE_OK_${W_NAME} "${_probe_ok}")
         set_property(GLOBAL PROPERTY HKP_PACK_OFFERED_ENGINES_${W_NAME} "${_offered}")
         _hkp_dormant_reason(_reason "${W_SOURCE_ROOT}" "${_shipped}" "${W_ARCHES}")
@@ -1775,6 +1823,7 @@ function(_hkp_wire_root)
             ${W_UNPARSED_ARGUMENTS}
             EXCLUDE_FOLDERS ${W_EXCLUDE_FOLDERS})
         set_property(GLOBAL PROPERTY HKP_PACK_SHIPPED_ENGINES_${W_NAME} "${_shipped}")
+        set_property(GLOBAL PROPERTY HKP_PACK_PREDICTING_ENGINES_${W_NAME} "${_predicting}")
         return()
     endif()
 
