@@ -257,7 +257,7 @@ void graphBindings(nb::module_& m)
             "Build the operation graph with the given handle")
         .def("create_execution_plans",
              &graph::Graph::create_execution_plans,
-             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
              "Create execution plans with specified heuristic modes")
         .def("create_execution_plan_ext",
              &graph::Graph::create_execution_plan_ext,
@@ -295,7 +295,7 @@ void graphBindings(nb::module_& m)
                 }
                 return ids;
             },
-            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
             "Get ranked engine IDs for the built operation graph. Requires "
             "build_operation_graph() to have been called first.")
         .def(
@@ -510,7 +510,7 @@ void graphBindings(nb::module_& m)
                 }
                 return configs;
             },
-            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+            nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
             nb::arg("handle") = nb::none(),
             "Discover engine metadata (id, name, knobs, workspace estimate) for the built "
             "operation graph. Requires build_operation_graph() to have been called first. "
@@ -582,7 +582,7 @@ void graphBindings(nb::module_& m)
              "Add the Cartesian product of each EngineSweepSpec's knob axes as plan specs.")
         .def("add_all_engines",
              &graph::Graph::add_all_engines,
-             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::FALLBACK},
+             nb::arg("modes") = std::vector<HeuristicMode>{HeuristicMode::A},
              "Add every engine applicable to the built operation graph as a plan spec.")
         .def("deselect_workspace_greater_than",
              &graph::Graph::deselect_workspace_greater_than,
