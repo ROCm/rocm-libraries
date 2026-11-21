@@ -179,12 +179,14 @@ else()
   endif()
   if(NOT DEFINED GPU_TARGETS)
     set(XNACK_PLUS_TARGETS
+      amdgcnspirv
       gfx90a:xnack+
       gfx908:xnack+
       gfx942:xnack+
       gfx950:xnack+)
     set(XNACK_MINUS_TARGETS gfx90a:xnack-)
     set(MISC_TARGETS
+      amdgcnspirv
       gfx942
       gfx950
       gfx10-1-generic

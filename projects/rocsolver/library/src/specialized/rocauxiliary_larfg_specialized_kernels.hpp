@@ -72,7 +72,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(MAX_THDS) larfg_kernel_small(const I n,
     S* b = beta ? load_ptr_batch<S>(beta, bid, shiftB, strideB) : nullptr;
 
     // shared variables
-    __shared__ T sval[MAX_THDS / WarpSize];
+    T* sval = ROCSOLVER_GET_WARPSIZE_AGNOSTIC_SHARED_BUFFER(T, MAX_THDS);
 
     // dot
     T norm2 = 0;
