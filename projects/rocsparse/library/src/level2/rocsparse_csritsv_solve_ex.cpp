@@ -248,6 +248,11 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
         //
         if(diag_type == rocsparse_diag_type_unit)
         {
+            if(nmaxiter <= 0)
+            {
+                return rocsparse_status_success;
+            }
+
             //
             // Compute the residual.
             //
@@ -276,8 +281,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 }
             }
 
-            host_nmaxiter[0] = 0;
-            if(host_nrm[0] > host_tol[0])
+            if(!breakable || host_nrm[0] > host_tol[0])
             {
                 if(compute_nrm)
                 {
@@ -297,8 +301,29 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                     RETURN_IF_ROCSPARSE_ERROR(
                         rocsparse::scale_array(handle, m, alpha_device_host, y));
                 }
-                host_nmaxiter[0] = 1;
             }
+
+            if(breakable)
+            {
+                host_nmaxiter[0] = (host_nrm[0] > host_tol[0]) ? 1 : 0;
+                if(recordable && host_nmaxiter[0] == 1 && nmaxiter > 1)
+                {
+                    host_history[1] = static_cast<rocsparse::floating_data_t<T>>(0);
+                }
+            }
+            else if(recordable)
+            {
+                //
+                // Without a tolerance all the iterations are run, as for a non-empty matrix.
+                // The ones after the first do not change y, so their residual is zero.
+                //
+                for(rocsparse_int iter = 1; iter < nmaxiter; ++iter)
+                {
+                    host_history[iter] = static_cast<rocsparse::floating_data_t<T>>(0);
+                }
+            }
+
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
             return rocsparse_status_success;
         }
         else
@@ -308,6 +333,7 @@ rocsparse_status rocsparse::csritsv_solve_ex_template(rocsparse_handle handle,
                 reinterpret_cast<rocsparse_int*>(info->csritsv_info->get_position()),
                 (rocsparse_int)descr->base,
                 stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
             return rocsparse_status_success;
         }
     }
