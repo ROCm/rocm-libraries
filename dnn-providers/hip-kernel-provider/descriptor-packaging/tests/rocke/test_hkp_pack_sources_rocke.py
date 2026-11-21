@@ -17,6 +17,7 @@ from synthesised_objects import _arg, _kernel, _object, requires_msgpack
 from hkp_pack import agreement, desk_check
 from hkp_pack.errors import HkpPackError
 from hkp_pack.kernel_signature import kernel_signature
+from hkp_pack.rocke_compile import code_object_identity
 from pack_helpers import GENERIC_TARGETS, _restamp, _run_cli, read_shipped, run_pipeline
 
 ARCH = "gfx1100"
@@ -119,10 +120,29 @@ _STUB_MODULE = """
 
 
 class _FakeArtifact:
-    def __init__(self, name, companion_names, data):
+    def __init__(self, name, companion_names, data, llvm_texts, isa):
         self.kernel_name = name
         self.companion_names = companion_names
         self.hsaco = data
+        self.llvm_text = llvm_texts[0]
+        self.llvm_texts = llvm_texts
+        self.isa = isa
+
+
+def _ir(name):
+    """The IR the stub compilers report for kernel `name`."""
+    return f"; IR of {name}"
+
+
+def _isa(arch):
+    return f"amdgcn-amd-amdhsa--{arch}"
+
+
+def _identity(*names):
+    """The identity of an object compiled from kernels `names`, in link order. The
+    toy kernels set no attribute implying a COMGR option, so rocke compiles them
+    with `-O3` alone."""
+    return code_object_identity([_ir(n) for n in names], _isa(ARCH), ["-O3"])
 
 
 class _FakeComgrError(Exception):
@@ -143,7 +163,13 @@ def _patch_compilers(monkeypatch):
 
     def _fake_kernel(kernel, *, arch, capture_ir_text=False, backend=None):
         seen.append(("kernel", (kernel.name,)))
-        return _FakeArtifact(kernel.name, {}, _object_for([kernel.name]))
+        return _FakeArtifact(
+            kernel.name,
+            {},
+            _object_for([kernel.name]),
+            (_ir(kernel.name),),
+            _isa(arch),
+        )
 
     def _fake_module(module, *, arch, capture_ir_text=False, backend=None):
         names = {role: k.name for role, k in module.companions.items()}
@@ -152,6 +178,8 @@ def _patch_compilers(monkeypatch):
             module.primary.name,
             names,
             _object_for([module.primary.name, *names.values()]),
+            tuple(_ir(k.name) for k in module.kernels),
+            _isa(arch),
         )
 
     monkeypatch.setattr(
@@ -324,12 +352,13 @@ def _module(tmp_path, name):
 
 # --- A. single-launch output is unchanged -------------------------------------
 @pytest.mark.quick
-@pytest.mark.parametrize("authored", ["0.1", "1.0", "1.2"])
+@pytest.mark.parametrize("authored", ["0.1", "1.0", "1.2", "1.3"])
 def test_a_single_kernel_ukd_ships_exactly_the_historical_shape(
     tmp_path, monkeypatch, rocke_importable, rocm_kpack_dir, authored
 ):
-    """No `sources` means no new key anywhere and the authored version untouched,
-    so the bytes a single-kernel UKD ships are what they were before `sources`."""
+    """No `sources` means no `sources`-only key anywhere: a single-kernel UKD ships
+    one `kernel_source`, stamped with the identity of what its object was compiled
+    from, at the version that reads it (1.2) or the later one authored."""
     src = _module(tmp_path, "toymod_single")
     seen = _patch_compilers(monkeypatch)
     root = _root(
@@ -341,7 +370,8 @@ def test_a_single_kernel_ukd_ships_exactly_the_historical_shape(
 
     shipped, ukd = _shipped(tmp_path)
     assert seen == [("kernel", ("toy_scale_a",))]
-    assert ukd["version"] == authored
+    major, minor = (int(p) for p in authored.split("."))
+    assert ukd["version"] == (authored if (major, minor) >= (1, 2) else "1.2")
     assert "sources" not in ukd
     assert set(ukd) == {
         "id",
@@ -359,8 +389,10 @@ def test_a_single_kernel_ukd_ships_exactly_the_historical_shape(
         "toc_key",
         "symbol",
         "sha256",
+        "identity",
         "signature",
     }
+    assert ukd["kernel_source"]["identity"] == _identity("toy_scale_a")
     provenance = ukd["provenance"]
     assert {"source", "builder", "spec", "compile_target"} <= set(provenance)
     assert "sources" not in provenance
@@ -374,6 +406,7 @@ def test_a_single_kernel_ukd_ships_exactly_the_historical_shape(
     }
     assert set(evidence["observations"]) == {
         "arch",
+        "code_object_identity",
         "code_object_sha256",
         "compile_target",
         "producer",
@@ -392,7 +425,7 @@ def test_a_single_kernel_ukd_ships_exactly_the_historical_shape(
 
 # --- B. entries on one module compile once -------------------------------------
 @pytest.mark.quick
-@pytest.mark.parametrize("authored", ["0.1", "1.0", "1.1", "1.2"])
+@pytest.mark.parametrize("authored", ["0.1", "1.0", "1.1", "1.2", "1.3"])
 def test_one_module_two_entries_compile_once_and_share_the_object(
     tmp_path, monkeypatch, rocke_importable, rocm_kpack_dir, authored
 ):
@@ -415,7 +448,7 @@ def test_one_module_two_entries_compile_once_and_share_the_object(
     shipped, ukd = _shipped(tmp_path)
     assert "kernel_source" not in ukd
     major, minor = (int(p) for p in authored.split("."))
-    assert ukd["version"] == (authored if (major, minor) >= (1, 1) else "1.1")
+    assert ukd["version"] == (authored if (major, minor) >= (1, 2) else "1.2")
     decode, merge = ukd["sources"]["decode"], ukd["sources"]["merge"]
     assert (decode["symbol"], merge["symbol"]) == ("toy_scale_a", "toy_merge_a")
     assert (decode["library"], decode["toc_key"], decode["sha256"]) == (
@@ -424,6 +457,13 @@ def test_one_module_two_entries_compile_once_and_share_the_object(
         merge["sha256"],
     )
     assert all("role" not in ks and ks["kind"] == "kpack" for ks in (decode, merge))
+    # One object linked from both kernels: each entry carries its identity, which
+    # digests the IR of every kernel in link order.
+    assert (
+        decode["identity"]
+        == merge["identity"]
+        == _identity("toy_scale_a", "toy_merge_a")
+    )
     blobs = _blobs(tmp_path, rocm_kpack_dir, ukd)
     assert hashlib.sha256(blobs["decode"]).hexdigest() == decode["sha256"]
     # Each signature is read off the object for its own symbol.
@@ -489,8 +529,12 @@ def test_two_builders_ship_two_entries_with_their_own_objects_and_evidence(
     seg, red = ukd["sources"]["segment"], ukd["sources"]["reduce"]
     assert (seg["symbol"], red["symbol"]) == ("toy_seg_a", "toy_red_a")
     assert seg["toc_key"] != red["toc_key"] and seg["sha256"] != red["sha256"]
+    assert (seg["identity"], red["identity"]) == (
+        _identity("toy_seg_a"),
+        _identity("toy_red_a"),
+    )
     assert seg["library"] == red["library"]
-    assert ukd["version"] == "1.1"
+    assert ukd["version"] == "1.2"
     provenance = ukd["provenance"]
     assert set(provenance["sources"]) == {"segment", "reduce"}
     assert provenance["sources"]["segment"]["builder"] == "build_seg"

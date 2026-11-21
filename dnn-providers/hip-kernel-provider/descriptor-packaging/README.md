@@ -334,19 +334,28 @@ argument list back out of the compiled object — sniffing a clang offload bundl
 ELF, and dropping compiler-appended `hidden_` arguments — catching a kernel whose
 parameters changed while its bytes stayed internally consistent.
 
+A rocKE kernel also carries an optional sixth key, `identity`: 64 lowercase hex digesting
+what COMGR compiled (the LLVM IR of every kernel in the object, the COMGR ISA name and the
+COMGR options), but not the COMGR library itself. A compiler change that only rebuilds the
+bytes moves `sha256` and keeps `identity`, which the selector revision of a trained model
+hashes in its place. HIP and hsaco kernels carry none. A UKD whose kernel source (or any
+`sources` entry) carries `identity` reads at version 1.2: the packer raises an earlier
+version to 1.2, the packer and the loader refuse `identity` under an earlier one, and a
+runtime that predates the key skips a 1.2 file at its version gate.
+
 ### Multi-launch kernels: `sources`
 
 A UKD carries **exactly one** of `kernel_source` (one launch) or `sources` (several), as
 [RFC 0017 §15.1](../../../projects/hipdnn/docs/rfcs/0017_UniversalKernelDescriptor.md) describes. A
 packed `sources` is a JSON object keyed by launch name with at least two entries, each a
-complete `kpack` source with the five keys above, and its UKD declares `"version": "1.1"`.
+complete `kpack` source with the five keys above, and its UKD declares `"version": "1.1"` or later.
 Launch names are lowercase identifiers (`^[a-z][a-z0-9_]*$`). Neither key, both keys, a
 single entry, a bad name, a packed `sources` under version 1.0 and an entry that is not `kpack`
 are all refused, by the packer and by the loader. Two launch names may name one kernel (a
 stage that runs one kernel twice with different arguments): such entries carry equal
-`library`, `toc_key` and `symbol`. Key order carries no meaning. The packer stamps 1.1 on a UKD with
-`sources` only; every other UKD packs byte for byte as before, and a runtime that predates
-the key skips a 1.1 file at its version gate.
+`library`, `toc_key` and `symbol`. Key order carries no meaning. The packer raises a UKD
+with `sources` to at least 1.1 (1.2 when its entries carry `identity`), and a runtime that
+predates the key skips a 1.1 file at its version gate.
 
 ```json
 "sources": {

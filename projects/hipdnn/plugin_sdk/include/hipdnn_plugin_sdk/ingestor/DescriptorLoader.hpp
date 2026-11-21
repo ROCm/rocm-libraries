@@ -318,12 +318,15 @@ struct DescriptorVersion
 
 /// The UKD version this build reads. Named here as well as in the UKD row, which reads
 /// these, because an inline kernel gates against them from above where FILE_TYPES is
-/// assembled. 1.1 added `sources`: a 1.0 reader skips such a file at the version gate, and
-/// parseKernelDescriptor() refuses the key under a document that still declares 1.0.
+/// assembled. 1.1 added `sources` and 1.2 a packed source's `identity`: an older reader skips
+/// such a file at the version gate, and parseKernelDescriptor() refuses the key under a
+/// document that declares an older minor.
 inline constexpr int UKD_VERSION_MAJOR = 1;
-inline constexpr int UKD_VERSION_MINOR = 1;
+inline constexpr int UKD_VERSION_MINOR = 2;
 /// The first UKD minor that may carry `sources`.
 inline constexpr int UKD_SOURCES_MINOR = 1;
+/// The first UKD minor whose packed sources may carry `identity`.
+inline constexpr int UKD_IDENTITY_MINOR = 2;
 
 /// Parses `<major>.<minor>` as two separate integers, not a decimal fraction: RFC 0020
 /// §11.1 compares them as integers, so `1.10` is newer than `1.9` -- reading the field as
@@ -352,19 +355,20 @@ inline DescriptorVersion parseDescriptorVersion(const std::string& text, const s
     return version;
 }
 
-/// Checks that a `sha256` value has the shape `hashlib.sha256(...).hexdigest()` produces:
+/// Checks that the value of @p key has the shape `hashlib.sha256(...).hexdigest()` produces:
 /// exactly 64 characters of `[0-9a-f]`. Lowercase only -- the packer emits nothing else.
 ///
 /// A maintainability guard, not a security control: descriptor and archive travel together,
 /// so anyone able to substitute one can rewrite the other. What it catches is a truncated,
 /// misspelled, or wrong-algorithm digest, at parse time and with a locator.
-inline void requireSha256Shape(const std::string& text, const std::string& where)
+inline void
+    requireSha256Shape(const std::string& text, const std::string& key, const std::string& where)
 {
     const auto isLowerHex
         = [](unsigned char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); };
     if(text.size() != 64 || !std::all_of(text.begin(), text.end(), isLowerHex))
     {
-        fail("key 'sha256' in " + where
+        fail("key '" + key + "' in " + where
              + " must be 64 lowercase hex characters, as sha256 hexdigest, not '" + text + "'");
     }
 }
@@ -785,6 +789,8 @@ inline HeuristicDescriptor parseHeuristicDescriptor(const nlohmann::json& root,
         // Validated by the common UHD parser; opaque here and only compared for equality.
         heuristic.trainedAgainstSelectorRevision
             = config.trainedAgainst.value("selector_revision", std::string{});
+        heuristic.trainedAgainstCodegenRevision
+            = config.trainedAgainst.value("codegen_revision", std::string{});
     }
     if(config.trainedAgainst.contains("ued"))
     {
@@ -1344,7 +1350,8 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
                       "toc_key",
                       "symbol",
                       "sha256",
-                      "signature"},
+                      "signature",
+                      "identity"},
                      where);
 
     KernelSource source;
@@ -1367,15 +1374,21 @@ inline KernelSource parseKernelSource(const nlohmann::json& root, const std::str
     else if(source.kind == KernelSourceKind::KPACK)
     {
         // All five are mandatory: the packager emits them together, and an adapter needs
-        // every one of them to name a code object and vouch for it. Only sha256 and
-        // signature are checked past non-empty, and only for shape -- see
+        // every one of them to name a code object and vouch for it. Only sha256, signature
+        // and the optional identity are checked past non-empty, and only for shape -- see
         // requireSha256Shape and requireKernelSignature.
         source.library = requireString(root, "library", where);
         source.tocKey = requireString(root, "toc_key", where);
         source.symbol = requireString(root, "symbol", where);
         source.sha256 = requireString(root, "sha256", where);
-        requireSha256Shape(source.sha256, where);
+        requireSha256Shape(source.sha256, "sha256", where);
         source.signature = requireKernelSignature(root, where);
+        // Optional: the packager stamps it only on a code object it compiled from rocKE IR.
+        if(root.contains("identity"))
+        {
+            source.identity = requireString(root, "identity", where);
+            requireSha256Shape(source.identity, "identity", where);
+        }
     }
     else
     {
@@ -1477,21 +1490,34 @@ inline KernelDescriptor parseKernelDescriptor(const nlohmann::json& root,
                "(several launches), "
              + std::string(hasSource ? "not both" : "and carries neither"));
     }
-    if(hasSources)
-    {
+    const auto requireMinor = [&](int minor, const std::string& carried) {
         const auto version
             = parseDescriptorVersion(requireString(root, "version", entryLabel), entryLabel);
-        if(version.minor < UKD_SOURCES_MINOR)
+        if(version.minor < minor)
         {
-            fail(where + " carries 'sources', which needs UKD " + std::to_string(UKD_VERSION_MAJOR)
-                 + "." + std::to_string(UKD_SOURCES_MINOR) + "; its version says "
-                 + std::to_string(version.major) + "." + std::to_string(version.minor));
+            fail(where + " carries " + carried + ", which needs UKD "
+                 + std::to_string(UKD_VERSION_MAJOR) + "." + std::to_string(minor)
+                 + "; its version says " + std::to_string(version.major) + "."
+                 + std::to_string(version.minor));
         }
+    };
+    if(hasSources)
+    {
+        requireMinor(UKD_SOURCES_MINOR, "'sources'");
         kernel.sources = parseKernelSources(root.at("sources"), where + " sources");
     }
     else
     {
         kernel.source = parseKernelSource(root.at("kernel_source"), where + " kernel_source");
+    }
+    const auto identified
+        = !kernel.source.identity.empty()
+          || std::any_of(kernel.sources.begin(), kernel.sources.end(), [](const auto& launch) {
+                 return !launch.second.identity.empty();
+             });
+    if(identified)
+    {
+        requireMinor(UKD_IDENTITY_MINOR, "a source 'identity'");
     }
 
     if(const auto it = root.find("metadata"); it != root.end())
