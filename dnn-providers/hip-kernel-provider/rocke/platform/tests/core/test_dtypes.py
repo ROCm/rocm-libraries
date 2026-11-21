@@ -555,6 +555,8 @@ def test_quant_instances_scale_to_the_target_fp8_bound(case, vec, arch, other_ar
     "out_dtype, arch, reason",
     [
         ("fp4", "gfx950", "unsupported out_dtype 'fp4'"),
+        # An alias of a quant dtype is refused: the spec takes canonical names.
+        ("fp8", "gfx950", "unsupported out_dtype 'fp8'"),
         (
             "fp8e4m3",
             "gfx1151",

@@ -85,7 +85,6 @@ import re
 import subprocess
 import sys
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
 from pathlib import Path
 from types import ModuleType
 from typing import Literal
@@ -598,7 +597,7 @@ def assert_accepted_everywhere(
     lower_hip_with_engine(kernel, arch, engine=engine)
 
 
-@dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True)
 class HipRefusal:
     """One engine's refusal to lower a kernel to HIP source.
 
