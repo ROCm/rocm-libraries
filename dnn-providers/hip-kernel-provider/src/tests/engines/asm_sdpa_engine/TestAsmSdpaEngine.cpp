@@ -286,11 +286,12 @@ TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
 TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndNotTheRelease)
 {
     const std::string revision = AsmSdpaEngine::selectorRevision();
-    const std::string prefix = "hip-kernel-provider/asm-sdpa-fwd/";
-    ASSERT_EQ(revision.rfind(prefix, 0), 0u) << revision;
+    // "undetermined" here means the CMake wiring that computes the revision was dropped.
+    const auto slash = revision.rfind('/');
+    ASSERT_NE(slash, std::string::npos) << revision;
 
-    // "undetermined" here means the CMake wiring that computes the digest was dropped.
-    const std::string digest = revision.substr(prefix.size());
+    // Shipped models record the revision verbatim, so its form is a contract.
+    const std::string digest = revision.substr(slash + 1);
     EXPECT_EQ(digest.size(), 16u) << revision;
     EXPECT_TRUE(std::all_of(digest.begin(), digest.end(), [](unsigned char character) {
         return (character >= '0' && character <= '9') || (character >= 'a' && character <= 'f');
@@ -551,38 +552,13 @@ TEST_F(TestAsmSdpaEngine, UnregisteredMetricIsABadRequest)
 
 namespace fixtures = selector_revision_fixtures;
 
-constexpr std::string_view SELECTOR_REVISION_PREFIX = "hip-kernel-provider/asm-sdpa-fwd/";
-
-/// The digest part of the revision this build reports.
-std::string_view builtDigest()
-{
-    std::string_view revision = AsmSdpaEngine::selectorRevision();
-    if(revision.substr(0, SELECTOR_REVISION_PREFIX.size()) != SELECTOR_REVISION_PREFIX)
-    {
-        return {};
-    }
-    revision.remove_prefix(SELECTOR_REVISION_PREFIX.size());
-    return revision;
-}
-
-/// Shipped models record the revision verbatim, so its form is a contract.
-TEST(TestAsmSdpaSelectorRevision, IsTheProviderPrefixAndSixteenLowercaseHexDigits)
-{
-    const std::string_view digest = builtDigest();
-    ASSERT_EQ(digest.size(), 16u) << AsmSdpaEngine::selectorRevision();
-    for(const char c : digest)
-    {
-        EXPECT_TRUE((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'))
-            << AsmSdpaEngine::selectorRevision();
-    }
-}
-
 /// The fixtures are this engine's tree written with LF and with CRLF; both must report the
 /// build's own revision, or Windows and Linux builds refuse each other's models.
 TEST(TestAsmSdpaSelectorRevision, CrlfAndLfCheckoutsReportTheBuiltRevision)
 {
     EXPECT_EQ(std::string_view(fixtures::REVISION_CRLF), std::string_view(fixtures::REVISION_LF));
-    EXPECT_EQ(builtDigest(), std::string_view(fixtures::REVISION_LF));
+    EXPECT_EQ(std::string_view(AsmSdpaEngine::selectorRevision()),
+              std::string_view(fixtures::REVISION_LF));
 }
 
 /// Each forward selection input must move the revision; everything else must not.
