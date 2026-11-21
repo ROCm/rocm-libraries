@@ -34,6 +34,10 @@ std::vector<Param> params()
     // no window, both layouts and the long-split wave layout
     add("full_b2_s3000", {2, 16, 1, {3000}, 0});
     add("full_b1_s20000", {1, 16, 1, {20000}, 0});
+    // several cluster groups per (batch, kv head), merged by the last split to finish
+    add("groups_full_b1_s32768", {1, 16, 1, {32768}, 0});
+    add("groups_mixed", {3, 16, 1, {40000, 5000, 70}, 0});
+    add("groups_forced", {2, 16, 2, {6000}, 2048, 30});
     add("full_coop", {2, 16, 1, {5000}, 0, 0, 0, "coop"});
     add("swa_wave", {2, 16, 1, {5000}, 2048, 0, 0, "wave"});
     // one split (direct output), many small splits

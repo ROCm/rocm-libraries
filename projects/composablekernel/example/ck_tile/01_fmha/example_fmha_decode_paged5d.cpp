@@ -51,7 +51,7 @@ int main(int argc, char* argv[])
     if(validate)
         std::printf(
             "max abs err %.4g (max |ref| %.4g), cos %.6f, ", r.max_err, r.max_ref, r.cosine);
-    std::printf("b:%d h:%d/%d s_k:%d window:%d layout:%s splits:%d pages/split:%d, "
+    std::printf("b:%d h:%d/%d s_k:%d window:%d layout:%s groups:%d splits:%d pages/split:%d, "
                 "stream %.2f us, graph %.2f us%s\n",
                 c.batch,
                 c.nhead,
@@ -59,6 +59,7 @@ int main(int argc, char* argv[])
                 c.seqlen_k.front(),
                 c.window,
                 r.config.wave_split ? "wave" : "coop",
+                r.config.num_groups,
                 r.config.num_splits,
                 r.config.pages_per_split,
                 r.us_stream,

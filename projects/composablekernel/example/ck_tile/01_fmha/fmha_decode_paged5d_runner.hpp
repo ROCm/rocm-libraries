@@ -24,13 +24,13 @@ using ck_tile::index_t;
 constexpr index_t kHdim = 128;
 constexpr index_t kPage = 16;
 
-template <bool kWaveSplit, index_t kNumSplits>
+template <bool kWaveSplit, index_t kNumSplits, bool kGroups>
 hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t stream)
 {
-    using K    = ck_tile::FmhaDecodePaged5dKernel<kWaveSplit, kNumSplits>;
+    using K    = ck_tile::FmhaDecodePaged5dKernel<kWaveSplit, kNumSplits, kGroups>;
     auto kargs = K::MakeKargs(h);
     hipLaunchConfig_t cfg{};
-    cfg.gridDim  = K::GridSize(h.batch, h.nhead_k);
+    cfg.gridDim  = K::GridSize(h.batch, h.nhead_k, h.num_groups);
     cfg.blockDim = K::BlockSize();
     cfg.stream   = stream;
     // must match the cluster_dims of the entry
@@ -44,7 +44,7 @@ hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t s
     return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
 }
 
-template <bool kWaveSplit, index_t... Ns>
+template <bool kWaveSplit, bool kGroups, index_t... Ns>
 hipError_t dispatch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                     index_t splits,
                     hipStream_t stream,
@@ -53,7 +53,7 @@ hipError_t dispatch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
     hipError_t e       = hipErrorInvalidValue;
     const auto try_one = [&](auto ns) {
         if(splits == decltype(ns)::value)
-            e = launch_one<kWaveSplit, decltype(ns)::value>(h, stream);
+            e = launch_one<kWaveSplit, decltype(ns)::value, kGroups>(h, stream);
     };
     (try_one(ck_tile::number<Ns + 1>{}), ...);
     return e;
@@ -64,8 +64,11 @@ inline hipError_t launch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                          hipStream_t stream)
 {
     const auto seq = std::make_integer_sequence<index_t, 15>{};
-    return c.wave_split ? dispatch<true>(h, c.num_splits, stream, seq)
-                        : dispatch<false>(h, c.num_splits, stream, seq);
+    if(c.num_groups > 1)
+        return c.wave_split ? dispatch<true, true>(h, c.num_splits, stream, seq)
+                            : dispatch<false, true>(h, c.num_splits, stream, seq);
+    return c.wave_split ? dispatch<true, false>(h, c.num_splits, stream, seq)
+                        : dispatch<false, false>(h, c.num_splits, stream, seq);
 }
 
 inline float bf16_to_float(uint16_t x)
@@ -125,13 +128,13 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         cfg.pages_per_split = c.pages_per_split;
     if(c.splits > 0)
         cfg.pages_per_split = (span + c.splits - 1) / c.splits;
-    cfg.num_splits = (span + cfg.pages_per_split - 1) / cfg.pages_per_split;
-    res.config     = cfg;
-    if(cfg.num_splits > 15)
+    if(c.pages_per_split > 0 || c.splits > 0)
     {
-        res.error = "more than 15 splits";
-        return res;
+        const index_t total = (span + cfg.pages_per_split - 1) / cfg.pages_per_split;
+        cfg.num_groups      = (total + 14) / 15;
+        cfg.num_splits      = (total + cfg.num_groups - 1) / cfg.num_groups;
     }
+    res.config = cfg;
 
     std::mt19937 rng(c.seed);
     std::uniform_real_distribution<float> uni(-1.f, 1.f);
@@ -186,8 +189,9 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     ck_tile::DeviceMem q_buf(q.size() * 2), k_buf(k.size()), v_buf(v.size());
     ck_tile::DeviceMem bt_buf(block_table.size() * 4), sl_buf(seqlens32.size() * 4);
     ck_tile::DeviceMem o_buf(q.size() * 2), scale_buf(8);
-    ck_tile::DeviceMem ws_buf(
-        ck_tile::fmha_decode_paged5d_workspace_bytes(batch, c.nhead_k, cfg.num_splits));
+    ck_tile::DeviceMem ws_buf(ck_tile::fmha_decode_paged5d_workspace_bytes(
+        batch, c.nhead_k, cfg.num_splits, cfg.num_groups));
+    ws_buf.SetZero();
     q_buf.ToDevice(q.data());
     k_buf.ToDevice(k.data());
     v_buf.ToDevice(v.data());
@@ -212,6 +216,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         max_blocks,
         c.window,
         cfg.pages_per_split,
+        cfg.num_groups,
         scale_s};
 
     hipStream_t stream;
