@@ -142,6 +142,7 @@ Integration tests are device tests. They require a physical AMD GPU matching the
 | Contraction — scale (`C = alpha * A * B`) | `scale_contraction_test_m{1-6}n{1-6}k{1-6}` | Same type matrix as bilinear |
 | Contraction — complex bilinear/scale | `complex_{bilinear,scale}_contraction_test_m{1-6}...` | CF32, CF64 |
 | Contraction — trinary | `trinary_bilinear_contraction_test`, `trinary_scale_contraction_test` | Three-tensor contractions |
+| Contraction — trinary workspace | `trinary_contraction_workspace_test` | FP32 trinary contractions (with and without D, DEFAULT and ACTOR_CRITIC, with a unary operator on A) executed twice on a workspace filled with NaN before each call; the result must match a host reference bit for bit |
 | Contraction — unary ops | `bilinear_contraction_with_unary_ops_test`, `scale_contraction_with_unary_ops_test` | Fused unary activation ops |
 | Plan cache | `plan_cache_test` | Cache write/read round-trip on device |
 | Plan cache — file and LRU | `plan_cache_lru_test` | Write/read of plan cache files, handle destruction after a write, LRU eviction when full (launches a permute kernel) |
