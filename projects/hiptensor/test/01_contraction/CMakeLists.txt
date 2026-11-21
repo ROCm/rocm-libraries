@@ -153,6 +153,11 @@ set (TrinaryScaleContractionTestSources ${TrinaryContractionCommonSources}
 set (TrinaryScaleContractionTestConfig  ${CMAKE_CURRENT_SOURCE_DIR}/configs/validation/standard/trinary_scale_test_params.yaml)
 add_hiptensor_test(trinary_scale_contraction_test ${TrinaryScaleContractionTestConfig} ${TrinaryScaleContractionTestSources})
 
+# Contraction with padded strides planned by the timing selection algorithms
+add_hiptensor_unit_test(contraction_padded_strides_test
+    ${HIPTENSOR_COMMON_TEST_SOURCES}
+    ${CMAKE_CURRENT_SOURCE_DIR}/contraction_padded_strides_test.cpp)
+
 # Contraction mode tests
 set (ContractionModeTestSources ${ContractionCommonSources}
 ${CMAKE_CURRENT_SOURCE_DIR}/contraction_mode_test.cpp)
