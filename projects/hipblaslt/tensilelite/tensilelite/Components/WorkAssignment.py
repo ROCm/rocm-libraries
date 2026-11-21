@@ -167,23 +167,27 @@ class WorkAssignment(Component):
         always = Module("Persistent tile completion")
         beforeReentry = Module("Persistent tile handoff")
         debug = kernel.get("DebugPersistentKernelLoopForever", False)
-        tdm = ((kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False))
-               and kernel["NumThreads"] > kernel["WavefrontSize"])
+        # The next tile's prologue writes LDS (local writes, DirectToLds or TDM
+        # loads) that slower waves may still read in this tile's epilogue, e.g.
+        # bias or scaleAlphaVec staging, so every multi-wave kernel needs the fence.
+        multiWave = kernel["NumThreads"] > kernel["WavefrontSize"]
+        tdm = multiWave and (kernel.get("enableTDMA", False) or kernel.get("enableTDMB", False))
         epilogue = (kernel.get("_PersistentVectorEpilogueLds", False)
                     and not kernel["PrefetchAcrossPersistent"])
         cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
         # Hybrid calls the concrete assignment's closeLoop. Debug bypasses the queue.
         queue = self.kernel["WorkAssignment"] == "DynamicWorkQueue" and not debug
-        if not (tdm or epilogue or cluster or queue):
+        if not (multiWave or epilogue or cluster or queue):
             return always, beforeReentry
 
         # Preserve the epilogue's exit fence; it also covers re-entry.
         fence = always if epilogue else beforeReentry
-        if tdm or epilogue or cluster:
+        if multiWave or epilogue or cluster:
             # DS-only: disjoint PAP tensor loads need not complete at this boundary.
             fence.add(SWaitCnt(dscnt=0, comment="finish LDS reads before next persistent tile"))
         barrier = SBarrier(comment="hand epilogue LDS back to persistent compute" if epilogue
                            else "hand compute LDS back to persistent TDM prefetch" if tdm
+                           else "hand LDS back to the next persistent tile" if multiWave
                            else "Sync before persistent re-entry")
         if epilogue:
             barrier.setMemToken(MemTokenData([writer.states.memTokenEpilogue]))
