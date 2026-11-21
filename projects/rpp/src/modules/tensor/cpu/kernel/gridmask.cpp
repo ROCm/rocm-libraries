@@ -1479,7 +1479,7 @@ RppStatus gridmask_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                     dstPtrTempChn = dstPtrTempR;
 
                     for (int c = 0; c < srcDescPtr->c; c++) {
-                        *dstPtrTempChn = *srcPtrTemp * m;
+                        *dstPtrTempChn = m ? *srcPtrTemp : (Rpp8s)-128;
                         srcPtrTemp += srcDescPtr->strides.cStride;
                         dstPtrTempChn += dstDescPtr->strides.cStride;
                     }
@@ -1551,7 +1551,7 @@ RppStatus gridmask_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                     srcPtrTempChn = srcPtrTempR;
 
                     for (int c = 0; c < srcDescPtr->c; c++) {
-                        *dstPtrTemp = *srcPtrTempChn * m;
+                        *dstPtrTemp = m ? *srcPtrTempChn : (Rpp8s)-128;
                         srcPtrTempChn += srcDescPtr->strides.cStride;
                         dstPtrTemp += dstDescPtr->strides.cStride;
                     }
@@ -1613,7 +1613,7 @@ RppStatus gridmask_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                              (gridColRatio.y - std::floor(gridColRatio.y) >= gridRatio);
 
                     for (int c = 0; c < srcDescPtr->c; c++) {
-                        *dstPtrTemp = *srcPtrTemp * m;
+                        *dstPtrTemp = m ? *srcPtrTemp : (Rpp8s)-128;
                         srcPtrTemp += srcDescPtr->strides.cStride;
                         dstPtrTemp += dstDescPtr->strides.cStride;
                     }
@@ -1690,7 +1690,7 @@ RppStatus gridmask_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                     dstPtrTempChn = dstPtrTempR;
 
                     for (int c = 0; c < srcDescPtr->c; c++) {
-                        *dstPtrTempChn = *srcPtrTempChn * m;
+                        *dstPtrTempChn = m ? *srcPtrTempChn : (Rpp8s)-128;
                         srcPtrTempChn += srcDescPtr->strides.cStride;
                         dstPtrTempChn += dstDescPtr->strides.cStride;
                     }
@@ -1753,7 +1753,7 @@ RppStatus gridmask_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8
                     gridColRatio.y = gridRowRatio.y + vectorLoopCount * sinRatio;
                     auto m = (gridColRatio.x - std::floor(gridColRatio.x) >= gridRatio) ||
                              (gridColRatio.y - std::floor(gridColRatio.y) >= gridRatio);
-                    *dstPtrTemp = *srcPtrTemp * m;
+                    *dstPtrTemp = m ? *srcPtrTemp : (Rpp8s)-128;
 
                     srcPtrTemp++;
                     dstPtrTemp++;
