@@ -112,6 +112,11 @@ add_custom_target(${TEST_NAME} DEPENDS ${TEST_NAME}_fwd ${TEST_NAME}_bwd
 
 set(FMHA_QR_TDM_TEST_TARGETS)
 if(SUPPORTED_GPU_TARGETS MATCHES "gfx125")
+    add_gtest_executable(test_ck_tile_fmha_decode_paged5d test_fmha_decode_paged5d.cpp)
+    target_include_directories(test_ck_tile_fmha_decode_paged5d
+        PRIVATE ${PROJECT_SOURCE_DIR}/example/ck_tile/01_fmha)
+    set_tests_properties(test_ck_tile_fmha_decode_paged5d PROPERTIES
+        LABELS "${TEST_NAME};CK_TILE_FMHA_TESTS")
     add_gtest_executable(test_ck_tile_fmha_bwd_tdm_padding
         test_fmha_bwd_tdm_padding.cpp
         test_fmha_bwd_tdm_layout.cpp)
