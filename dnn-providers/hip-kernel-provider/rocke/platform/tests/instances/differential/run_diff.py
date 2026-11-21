@@ -492,6 +492,11 @@ def python_emitter_env(src_dir: Path) -> dict[str, str]:
     # compared where the comparison is meaningful -- one kernel, both lowerers --
     # by tests/core/test_debug_info.py under ROCKE_BACKEND=both.
     env.pop("ROCKE_DEBUG_LOC", None)  # ir.LOC_CAPTURE_ENV
+    # A library emitter locates the platform parity driver through
+    # ROCKE_PLATFORM_PARITY_DIR when it is set. This runner has no conftest to
+    # set it, so it names PARITY, the driver's home in a checkout and in an
+    # installed test tree alike.
+    env.setdefault("ROCKE_PLATFORM_PARITY_DIR", str(PARITY))
     roots = [str(PY_REF_ROOT), str(LIB_ROOT), str(src_dir), str(PARITY)]
     if SHIM_DIR:
         roots.insert(0, str(SHIM_DIR))
