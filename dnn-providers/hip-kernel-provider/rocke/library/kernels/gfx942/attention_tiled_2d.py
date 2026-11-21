@@ -2738,6 +2738,42 @@ def build_unified_attention_2d_tiled(
     KV_PAGES = (
         not FAST_PAGED_KV_DESC and T % BS == 0 and (BS * HD) % KV_HALVES_PER_CALL == 0
     )
+
+    def _tile_page_ids(kv_tile_idx: Value) -> list[Value]:
+        """The tile's page ids: one guarded block-table read each,
+        wave-uniform."""
+        first = b.add(seq_base, b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)))
+        pages = []
+        for page in range(N_BLOCKS_PER_TILE):
+            idx = b.add(first, b.const_i32(page))
+            physical = b.masked_global_load(
+                block_tables,
+                idx,
+                b.cmp_lt(idx, block_table_max_idx),
+                b.const_i32(0),
+                dtype=I32,
+                align=4,
+            )
+            pages.append(b.to_sgpr_u32(physical))
+        return pages
+
+    def _page_base(src: Value, page: Value) -> Value:
+        """Base pointer of page ``page`` of the K or V cache ``src``."""
+        return b.global_ptr_add(
+            src, b.mul(b.zext(page, I64), b.zext(kv_stride_blk_b, I64))
+        )
+
+    def _kv_head_page_b() -> Value:
+        """The kv head's byte offset within a page."""
+        return b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+
+    def _kv_page_off(token: Value, dim: Value, kv_head_b: Value) -> Value:
+        """Byte offset of K/V[token, dim] within its page."""
+        return b.add(
+            b.add(b.mul(token, kv_stride_tok_b), kv_head_b),
+            b.mul(dim, b.const_i32(KV_BYTES)),
+        )
+
     # i64 K/V addressing has no whole-cache loader: every K/V loader reads
     # through per-page bases.
     PAGE_RSRC_I64 = I64_KV_ADDR and not FAST_PAGED_KV_DESC
@@ -2753,35 +2789,8 @@ def build_unified_attention_2d_tiled(
             )
 
         def _tile_page_ptrs(src: Value, kv_tile_idx: Value) -> list[Value]:
-            """Base pointers of the tile's pages, from one page-id load each."""
-            first = b.add(seq_base, b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)))
-            ptrs = []
-            for page in range(N_BLOCKS_PER_TILE):
-                idx = b.add(first, b.const_i32(page))
-                physical = b.masked_global_load(
-                    block_tables,
-                    idx,
-                    b.cmp_lt(idx, block_table_max_idx),
-                    b.const_i32(0),
-                    dtype=I32,
-                    align=4,
-                )
-                base = b.mul(
-                    b.zext(b.to_sgpr_u32(physical), I64), b.zext(kv_stride_blk_b, I64)
-                )
-                ptrs.append(b.global_ptr_add(src, base))
-            return ptrs
-
-        def _kv_head_page_b() -> Value:
-            # The kv head's byte offset within a page.
-            return b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
-
-        def _kv_page_off(token: Value, dim: Value, kv_head_b: Value) -> Value:
-            # Byte offset of K/V[token, dim] within its page; shared with cfvst.
-            return b.add(
-                b.add(b.mul(token, kv_stride_tok_b), kv_head_b),
-                b.mul(dim, b.const_i32(KV_BYTES)),
-            )
+            """Base pointers of the tile's pages (cfvst), one page-id read each."""
+            return [_page_base(src, page) for page in _tile_page_ids(kv_tile_idx)]
 
     # The bf16/fp16 async K and V loaders take page copies; the register V
     # loaders, the K slice ring and fp8 keep their own addressing.
@@ -2812,21 +2821,17 @@ def build_unified_attention_2d_tiled(
         # copy's part, the same for every lane. Otherwise (head size 192 with
         # one warp) each copy builds its whole offset within the page.
         SPLIT_COPY = KV_HALVES_PER_CALL % HD == 0 or HD % KV_HALVES_PER_CALL == 0
-        page_kv_head_b = b.mul(kv_head_idx, b.const_i32(kv_stride_h_b))
+        page_kv_head_b = _kv_head_page_b()
         # i32: pages that lie wholly below the whole-cache bound. The
         # whole-cache resource read zeros past it; a page id at or above this
         # (a corrupt or padding id, negative ones included) gets an empty
         # resource instead of a fault.
-        page_limit = (
-            None if I64_KV_ADDR else b.div(b.const_i32(0x7FFF0000), kv_stride_blk_b)
-        )
+        page_limit = None if I64_KV_ADDR else b.div(big_bytes, kv_stride_blk_b)
         if SPLIT_COPY:
-            lane_within_b = b.add(
-                b.add(
-                    b.mul(b.div(lane_half_base, b.const_i32(HD)), kv_stride_tok_b),
-                    page_kv_head_b,
-                ),
-                b.mul(b.mod(lane_half_base, b.const_i32(HD)), b.const_i32(KV_BYTES)),
+            lane_within_b = _kv_page_off(
+                b.div(lane_half_base, b.const_i32(HD)),
+                b.mod(lane_half_base, b.const_i32(HD)),
+                page_kv_head_b,
             )
 
         def _copy_part(slot: int) -> Optional[Value]:
@@ -2845,31 +2850,11 @@ def build_unified_attention_2d_tiled(
             """This lane's byte offset within the page for copy ``slot``, for
             copies that do not split."""
             half = b.add(b.const_i32(slot * KV_HALVES_PER_CALL), lane_half_base)
-            return b.add(
-                b.add(
-                    b.mul(b.div(half, b.const_i32(HD)), kv_stride_tok_b),
-                    page_kv_head_b,
-                ),
-                b.mul(b.mod(half, b.const_i32(HD)), b.const_i32(KV_BYTES)),
+            return _kv_page_off(
+                b.div(half, b.const_i32(HD)),
+                b.mod(half, b.const_i32(HD)),
+                page_kv_head_b,
             )
-
-    def _tile_page_ids(kv_tile_idx: Value) -> list[Value]:
-        """The tile's page ids: one guarded block-table read each,
-        wave-uniform."""
-        first = b.add(seq_base, b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE)))
-        pages = []
-        for page in range(N_BLOCKS_PER_TILE):
-            idx = b.add(first, b.const_i32(page))
-            physical = b.masked_global_load(
-                block_tables,
-                idx,
-                b.cmp_lt(idx, block_table_max_idx),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
-            pages.append(b.to_sgpr_u32(physical))
-        return pages
 
     if PAGE_COPIES:
 
@@ -2882,10 +2867,7 @@ def build_unified_attention_2d_tiled(
                 pages = _tile_page_ids(kv_tile_idx)
             bases = []
             for page in pages:
-                page64 = b.zext(page, I64)
-                stride64 = b.zext(kv_stride_blk_b, I64)
-                page_off = b.mul(page64, stride64)
-                ptr = b.global_ptr_add(src, page_off)
+                ptr = _page_base(src, page)
                 if ptrs:
                     bases.append(ptr)
                     continue
