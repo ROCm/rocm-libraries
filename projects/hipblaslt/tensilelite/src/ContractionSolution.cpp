@@ -1771,6 +1771,41 @@ namespace TensileLite
         return std::make_tuple(defaultWGM, defaultWGMXCC, defaultWGMXCCCHUNK, defaultWGMXCCSPLITK);
     }
 
+    // Per target: a leading dimension that is a multiple of this many bytes starts every
+    // row on the same DRAM channels. Targets not listed never adjust the stagger.
+    static const std::unordered_map<AMDGPU::Processor, size_t> kStaggerAliasBytes
+        = {{AMDGPU::Processor::gfx1151, 2048}};
+
+    // Exact: elementBytes() is a float (sub-byte types), which would drop low bits of a
+    // leading dimension above 2^24, so form the byte stride from the integer segment size.
+    static bool ldAliasesChannels(size_t ld, TensorDescriptor const& t, size_t aliasBytes)
+    {
+        auto const&  info         = DataTypeInfo::Get(t.dataType());
+        const size_t segmentBytes = static_cast<size_t>(info.elementSize * info.packing + 0.5f);
+        return (ld * segmentBytes) % (aliasBytes * info.packing) == 0;
+    }
+
+    // True if no A/B leading dimension aliases, but at least one would alias if it were
+    // packed, i.e. the caller padded the stride. Solutions are tuned on packed strides.
+    // TT is excluded: measured mixed (-6% to +4%) where every other layout gains or is flat.
+    static bool callerPaddedAwayAliasing(ContractionProblemGemm const& problem, size_t aliasBytes)
+    {
+        if(problem.transA() && problem.transB())
+            return false;
+        bool padded = false;
+        for(auto const* t : {&problem.a(), &problem.b()})
+        {
+            if(t->dimensions() < 2 || t->sizes()[1] < 2)
+                continue;
+            size_t ld     = t->strides()[1];
+            size_t packed = t->sizes()[0];
+            if(ldAliasesChannels(ld, *t, aliasBytes))
+                return false;
+            padded |= ld != packed && ldAliasesChannels(packed, *t, aliasBytes);
+        }
+        return padded;
+    }
+
     std::tuple<size_t, size_t, size_t> ContractionSolution::calculateAutoStaggerU(
         Problem const& problem, Hardware const* hardware, uint32_t skgrid, int32_t autoWGM) const
     {
@@ -1847,6 +1882,17 @@ namespace TensileLite
             defaultStaggerUMapping     = sizeMapping.staggerUMapping;
             defaultStaggerU            = sizeMapping.staggerU;
             defaultStaggerUStrideShift = sizeMapping.staggerStrideShift;
+
+            // The tuned stagger spreads aliased rows over DRAM channels. With the aliasing
+            // padded away it only breaks L2 sharing, so do not stagger.
+            auto aliasBytes = kStaggerAliasBytes.find(pAMDGPU->processor);
+            if(aliasBytes != kStaggerAliasBytes.end() && defaultStaggerU != 0
+               && callerPaddedAwayAliasing(problem, aliasBytes->second))
+            {
+                defaultStaggerUMapping     = StaggerUMapping::WG0;
+                defaultStaggerU            = 0;
+                defaultStaggerUStrideShift = 0;
+            }
         }
 
         // If values are explicitly specified at runtime, they override predictions and default values
@@ -1871,7 +1917,7 @@ namespace TensileLite
             const bool rowUniformStaggerCapable
                 = internalArgsSupport.staggerU
                   && (!sizeMapping.isPersistent() || internalArgsSupport.perTileExtraIters);
-            if(!(rowUniformStaggerCapable && defaultStaggerUMapping == 1))
+            if(!(rowUniformStaggerCapable && defaultStaggerUMapping == StaggerUMapping::WG1))
             {
                 defaultStaggerUMapping     = 0;
                 defaultStaggerU            = 0;
@@ -1879,8 +1925,7 @@ namespace TensileLite
             }
         }
 
-        // Mapping should be in this range: [0, 1, 2, 3, 4]
-        assert(defaultStaggerUMapping < 5);
+        assert(defaultStaggerUMapping <= StaggerUMapping::InPhase);
         // StaggerU should be power of 2 and less than 65: [0, 2, 4, 8, 16, 32, 64]
         assert((defaultStaggerU & (defaultStaggerU - 1)) == 0 && defaultStaggerU < 65);
         // StaggerUStrideShift is packed in 5-bit field (bits [12:8]), valid range [0, 31]
