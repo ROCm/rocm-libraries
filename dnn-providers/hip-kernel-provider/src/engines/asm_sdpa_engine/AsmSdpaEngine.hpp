@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <string_view>
 #include <utility>
@@ -11,6 +12,8 @@
 
 #include <hipdnn_plugin_sdk/interfaces/IEngine.hpp>
 #include <hipdnn_plugin_sdk/interfaces/IPlanBuilder.hpp>
+
+#include <hip/hip_runtime_api.h>
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 #include <hipdnn_plugin_sdk/heuristics/uhd/EnginePredictor.hpp>
@@ -80,6 +83,19 @@ public:
                       const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
                       hipdnnEnginePredictionKind_t kind,
                       bool evaluate) const override;
+
+    /// @brief getPrediction for the device @p device returns, rather than the one the
+    /// handle's stream runs on.
+    ///
+    /// @p device is called only for a request the models can answer, so a declined request
+    /// never asks for one. getPrediction passes the stream's device; a test passes an
+    /// architecture's properties to reach the models on a host without that device.
+    hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT
+        getPredictionOn(const std::function<const hipDeviceProp_t&()>& device,
+                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+                        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+                        hipdnnEnginePredictionKind_t kind,
+                        bool evaluate) const;
 
     size_t
         // NOLINTNEXTLINE(portability-template-virtual-member-function)
