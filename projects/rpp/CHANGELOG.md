@@ -13,6 +13,12 @@ Full documentation for RPP is available at [https://rocm.docs.amd.com/projects/r
 
 - Audio augmentations are now always enabled. The `RPP_AUDIO_SUPPORT` CMake option has been removed.
 - `rppt_spectrogram` returns `RPP_ERROR_INVALID_ARGUMENTS` when `power` is not 1 or 2, when `windowLength` or `windowStep` is not positive, or when `nfft` is nonzero and smaller than `windowLength`.
+- `rppGetKernelTime` and `rppEnableProfiling` are removed from `api/rpp.h`. Both were
+  declared `SHARED_PUBLIC` but were never defined in any RPP source file, so a caller
+  compiled cleanly against the header and then failed at link time with an undefined
+  symbol. Nothing in RPP called the two `HandleImpl` members they were meant to drive,
+  so there was no partially working feature to preserve. Use `rocprofv3` for kernel
+  timing.
 
 ### Removed
 
