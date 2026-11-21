@@ -222,8 +222,7 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, OlderBackendGetsFallbackModeWithT
         fe::OperationGraph_v8 graph = convGraph();
         EXPECT_EQ(results(graph, mode).size(), 2U);
 
-        const hipdnnBackendDescriptor_t query
-            = created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR).back();
+        hipdnnBackendDescriptor_t query = created(HIPDNN_BACKEND_ENGINEHEUR_DESCRIPTOR).back();
         EXPECT_EQ(attributeOn(query, HIPDNN_ATTR_ENGINEHEUR_MODE).value<hipdnnBackendHeurMode_t>(),
                   HIPDNN_HEUR_MODE_FALLBACK);
         EXPECT_EQ(

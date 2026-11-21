@@ -2732,9 +2732,11 @@ estimates wherever an engine ships one; the thorough policy is selected by mode 
 is model-free. A caller names the metric through
 `HIPDNN_ATTR_ENGINEHEUR_RANKING_METRIC_EXT`, `Graph::set_ranking_metric()`, or
 `HIPDNN_HEUR_RANKING_METRIC` ([Environment variables](../Environment.md)). Item 3 is the models' to meet.
-In tree, only the FlyDSL `rmsnorm` and `rmsnorm_bwd` engines in hip-kernel-provider bind trained `tflops`
-L1 models, for gfx1100, gfx1151, gfx1201, gfx90a, gfx942 and gfx950; every other in-tree engine binding is
-a disabled `default` placeholder. Calibration across engines stays the models' obligation: an engine's
+Which in-tree engines bind trained L1 models changes as models land: an engine has one for an
+architecture and metric when its descriptor set holds
+`heuristics/<uhd id>/predict_engine/<arch>/<metric>/heuristic.uhd.json` (today several FlyDSL engines in
+hip-kernel-provider, on architectures that differ per engine). An engine with none for the device ranks
+after those that have one, in static order. Calibration across engines stays the models' obligation: an engine's
 estimate may only outrank another's if both are in the metric's real units.
 
 ### 11.4 Selecting a UHD by Metric

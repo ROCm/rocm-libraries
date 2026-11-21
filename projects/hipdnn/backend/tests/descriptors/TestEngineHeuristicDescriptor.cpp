@@ -1280,20 +1280,25 @@ TEST_F(TestGpuEngineHeuristicDescriptor, EnvironmentVariablePolicyOrderIsRespect
 {
     // The mock setup in setupMockHeuristicPlugin() makes the catch-all return a
     // null handle for any unknown policy and StaticOrdering succeed. With no
-    // descriptor-level override, FALLBACK's list [Config, StaticOrdering] therefore
+    // descriptor-level override, every mode's list ends in StaticOrdering and therefore
     // succeeds. Restricting the env-var order to a policy nothing maps to should
-    // make finalize() throw, proving the env var supersedes the mode's list.
+    // make finalize() throw in every mode, proving the env var supersedes the mode's list.
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter guard(
         "HIPDNN_HEUR_POLICY_ORDER", "Vendor::Unregistered");
-
-    auto heur = getEngineHeuristicDescriptor();
-    setGraph();
-    setHeuristicMode();
 
     EXPECT_CALL(*_mockEnginePluginResourceManager, getApplicableEngineIds(_, _))
         .WillRepeatedly(Return(std::vector<int64_t>{1, 2}));
 
-    ASSERT_THROW_HIPDNN_STATUS(heur->finalize(), HIPDNN_STATUS_INTERNAL_ERROR);
+    for(const auto mode : {HIPDNN_HEUR_MODE_FALLBACK, HIPDNN_HEUR_MODE_A, HIPDNN_HEUR_MODE_B})
+    {
+        SCOPED_TRACE(static_cast<int>(mode));
+        _engineHeuristicWrapper = createDescriptor<EngineHeuristicDescriptor>();
+        auto heur = getEngineHeuristicDescriptor();
+        setGraph();
+        setHeuristicMode(mode);
+
+        ASSERT_THROW_HIPDNN_STATUS(heur->finalize(), HIPDNN_STATUS_INTERNAL_ERROR);
+    }
 }
 
 TEST_F(TestGpuEngineHeuristicDescriptor, EnvironmentPolicyOrderTakesPrecedenceOverDescriptor)

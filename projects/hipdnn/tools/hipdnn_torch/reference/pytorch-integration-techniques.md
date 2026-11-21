@@ -469,7 +469,7 @@ Providers: Multiple engines compete for best performance per-configuration:
 - **rocKE SDPA engine** — high-performance kernels authored via rocKE's agentic kernel authoring platform
 - **AITER kernels** (when available via plugin) — proven MI3XX performance
 - **RDNA-tuned kernels** — Wave32/WMMA-based for consumer GPUs (gfx1100, gfx1201)
-- hipDNN's engine selection picks from available providers based on configurable static ordering, auto-tuning, or the default heuristic mode A, which ranks engines by trained engine-level predictions where an applicable engine binds a model (today only the FlyDSL `rmsnorm` and `rmsnorm_bwd` engines) and otherwise falls back to static ordering. Pass `HeuristicMode.FALLBACK` for the static order alone.
+- hipDNN's engine selection picks from available providers based on configurable static ordering, auto-tuning, or the default heuristic mode A, which ranks engines by trained engine-level (L1) predictions where an applicable engine binds a model for the device (several FlyDSL engines today, including the SDPA ones, with more landing) and otherwise falls back to static ordering. Pass `HeuristicMode.FALLBACK` for the static order alone.
 
 ### 3.6 Fallback Strategy
 

@@ -304,7 +304,8 @@ model exists. Pass ``{HeuristicMode::FALLBACK}`` for the static order. A list of
 modes runs one heuristic query per mode, in the order given, and concatenates the
 results, skipping an engine an earlier mode already returned, so
 ``{HeuristicMode::A, HeuristicMode::FALLBACK}`` is mode A's ranking. An empty list
-is an error.
+returns ``INVALID_VALUE`` before any query, where cudnn-frontend accepts it and fails
+later, at ``check_support()``.
 
 Both modes rank by one *ranking metric*, ``tflops`` by default: calibrated
 throughput, highest first. ``graph.set_ranking_metric("time")`` ranks by predicted
