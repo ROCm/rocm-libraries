@@ -1569,6 +1569,15 @@ def prune(flat, arch):
     )
 
 
+def _packed_identity(origin_kind, observations):
+    """The packed kernel_source's `identity` entry: `{"identity": digest}` for a
+    rocke compile, which digests what COMGR compiled (see
+    `rocke_compile.code_object_identity`), and `{}` for every other kind."""
+    if origin_kind != "rocke":
+        return {}
+    return {"identity": observations["code_object_identity"]}
+
+
 def _rewrite_ukd_kpack(
     ukd,
     arch,
@@ -1588,7 +1597,7 @@ def _rewrite_ukd_kpack(
     and its `toc_key`, `sha256` and `signature` from `packed_launches`
     (`{launch: {toc_key, sha256, signature}}`, read off the object). Then
     `toc_key`, `sha256` and `signature` above are unused, and the UKD reads at
-    document version 1.1.
+    document version 1.1 or later.
 
     `toolchain_fields` carries the fields describing what actually produced the kernel
     (hipcc version, resolved comgr, rocKE wheel digest) as opposed to what the
@@ -1597,6 +1606,13 @@ def _rewrite_ukd_kpack(
     could not affect.
 
     An hsaco UKD records the authored file, its digest and its symbol.
+
+    A rocke kernel_source, and each rocke `sources` entry, also carries `identity`,
+    a digest of the IR, ISA name and options its code object was compiled from.
+    The runtime's selector revision hashes it in place of `sha256`, so a model
+    trained against these kernels survives a compiler that only changes their
+    bytes. hip and hsaco kernels carry none. A UKD carrying `identity` reads at
+    document version 1.2 or later.
     """
     if "effective_spec" in ukd.provenance:
         raise HkpPackError(
@@ -1651,6 +1667,7 @@ def _rewrite_ukd_kpack(
                 "toc_key": packed_launches[name]["toc_key"],
                 "symbol": launch.symbol,
                 "sha256": packed_launches[name]["sha256"],
+                **_packed_identity(ukd.origin_kind, launch.observations),
                 "signature": packed_launches[name]["signature"],
             }
             for name, launch in ukd.launches.items()
@@ -1663,6 +1680,7 @@ def _rewrite_ukd_kpack(
             "toc_key": toc_key,
             "symbol": ukd.symbol,
             "sha256": sha256,
+            **_packed_identity(ukd.origin_kind, ukd.observations),
             "signature": signature,
         }
     doc = {
@@ -1679,9 +1697,11 @@ def _rewrite_ukd_kpack(
             f"{sorted(set(doc) & ukd.extra.keys())}"
         )
     doc.update(ukd.extra)
-    if ukd.launches and not sources.reads_sources(doc["version"]):
-        # Before `publish`, so the digest binds the version that ships.
-        doc["version"] = sources.SOURCES_VERSION
+    # Before `publish`, so the digest binds the version that ships.
+    if ukd.launches:
+        doc["version"] = sources.at_least(doc["version"], sources.SOURCES_VERSION)
+    if any("identity" in ks for ks in sources.kernel_sources(doc).values()):
+        doc["version"] = sources.at_least(doc["version"], sources.IDENTITY_VERSION)
     # Every shipped UKD carries the single shard arch, matching the KDP. Set it
     # after the extra passthrough so a source multi-arch list can't leak through.
     doc["arch"] = [arch]

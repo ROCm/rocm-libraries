@@ -91,15 +91,19 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx942AttentionDense`.
 | `gfx942_attention_dense.uhd.json` | git | native selector |
 | `kernel_dtype_matches_graph.umd.json` | git | dtype matcher |
 | `heuristics/a74a5afb-30c0-41c2-8006-501d2961f808/sort_kernel_catalog/gfx942/tflops/` | git + DVC | the L2 kernel ranker: `heuristic.uhd.json`, `model.bin.dvc`, `.gitignore` in git; `model.bin` from DVC |
+| `heuristics/a74a5afb-30c0-41c2-8006-501d2961f808/predict_engine/gfx942/tflops/` | git + DVC | the L1 engine predictor, laid out the same way |
 
 ## Models
 
-One trained model (UHD), the L2 `sort_kernel_catalog` kernel ranker
-`18bb432e-d871-4290-9ae8-f5111aaf2ffe` (ranks this catalog's kernels and picks the one to run), is
-bound in the UED for gfx942; other architectures keep the native selector. It is tracked at
-`heuristics/a74a5afb-30c0-41c2-8006-501d2961f808/sort_kernel_catalog/gfx942/tflops/` (the UED id,
-role, arch and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git, `model.bin`
-from DVC.
+Two trained models (UHDs) are bound in the UED for gfx942; other architectures keep the native
+selector. Each is tracked at `heuristics/a74a5afb-30c0-41c2-8006-501d2961f808/<role>/gfx942/tflops/`
+(the UED id, role, arch and metric): `heuristic.uhd.json`, `model.bin.dvc` and `.gitignore` in git,
+`model.bin` from DVC.
+
+| Role | UHD | What it does |
+|---|---|---|
+| L2 `sort_kernel_catalog` | `18bb432e-d871-4290-9ae8-f5111aaf2ffe` | ranks this catalog's kernels and picks the one to run |
+| L1 `predict_engine` | `abcebb04-2efd-4618-8f03-d19de3726c9c` | predicts the engine's TFLOPS for the L2's pick |
 
 The L2 does not read the attention scale (every training graph used 1/sqrt(d), so it would stand in
 for the head size), a tensor uid, or a feature that depends on how many tensors the graph holds
@@ -113,15 +117,15 @@ TFLOPS scores it reports for them, are extrapolated. Retrain it when the catalog
 `tests/test_trained_rankers.py` in the IngestorGenerator fails when the shipped KDP no longer
 matches the fingerprint the configs record.
 
-The L1 `predict_engine` (predicts the engine's TFLOPS) is held. Its selector revision digests every
-code object packed at build time, and this bundle's code objects are compiled by the CI toolchain on
-every build, so a TheRock compiler bump that changes their bytes makes the runtime refuse it (and
-`TestGfx942AttentionDenseModelBinding` fail). One was trained (it read `graph.flops` as well) and
-went stale at the next pin bump. It follows once a policy for compiler-only drift is agreed; until
-then `TestGfx942AttentionDenseModelBinding.TheBoundL1EnginePredictorLoadsAndMatchesThisBuild` checks
-that no L1 loads.
+The L1 reads the same operand features as the L2, plus the `causal` field and the FLOPs features
+(`graph.flops` among them), so it reports no prediction for a window graph, where TFLOPS is
+undefined. It is measured under the L2, and its selector revision
+digests the L2 and the code identity of every kernel packed at build time, so retrain it when the
+L2, the catalog or the kernels' code changes; `TestGfx942AttentionDenseModelBinding` fails the build
+when the revision no longer matches. A compiler that only rebuilds the code objects moves its codegen
+revision instead: the runtime still binds the L1 and logs a warning, and the census prints a note.
 
-How the L2 was trained (the `hipdnn-uhd` skill; `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`), on
+How they were trained (the `hipdnn-uhd` skill; `hipdnn_corpus_gen`, `hipdnn_bench`, `uhd_gen`), on
 one gfx942 device with the catalog compiled by CI's COMGR:
 
 - Shape sets: two `hipdnn_corpus_gen --operation sdpa_fwd` sets for this engine, 200 graphs
@@ -131,14 +135,19 @@ one gfx942 device with the catalog compiled by CI's COMGR:
   sort_kernel_catalog`), then trained with `--metric tflops` and an explicit `--feature-signature`:
   the automatic signature minus the features excluded above, with
   `{"value_or_default": ["$graph.nodes[0].generate_stats", false]}`.
-- Validated on the held-out graphs with Stage V (`validate_l2.py` against the native scorer), then
-  installed with `uhd_gen promote`, `model.bin` pushed with `dvc push -r ingestor`, and the id and
+- L1: measured under that L2 (`candidate_tree.py --promote ... sort_kernel_catalog`, an empty
+  `HIPDNN_CACHE_DIR`, `--role predict_engine`), trained the same way with the FLOPs features and
+  the `causal` field added.
+- Validated on the held-out graphs with Stage V (`validate_l2.py` against the native scorer;
+  `validate_l1.py` with `decide.py l1 --no-incumbent`, since no L1 was bound before), then
+  installed with `uhd_gen promote`, `model.bin` pushed with `dvc push -r ingestor`, and the ids and
   the catalog fingerprint (`tools/catalog_fingerprint.py <this
   bundle>/artifacts/gfx942_attention_dense.kdp.json`) recorded in both IngestorGenerator configs.
 
-A build without `dvc pull -r ingestor` on `model.bin.dvc` packs the bundle without the model: the
-pack warns, its UHD does not ship, and the loader logs the dangling id and ranks kernels in declared
-order. Release builds set `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`, which makes it an error.
+A build without `dvc pull -r ingestor` on a `model.bin.dvc` packs the bundle without that model: the
+pack warns, its UHD does not ship, and the loader logs the dangling id and runs the engine with that
+role off (declared kernel order for the L2). An L2 left out this way also turns the L1 off: the
+build's selector revision no longer matches the L1's. Release builds set `HIPKERNELPROVIDER_REQUIRE_DVC_DESCRIPTORS=ON`, which makes it an error.
 
 ## Notes
 

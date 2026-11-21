@@ -216,10 +216,11 @@ inline const hipdnn_plugin_sdk::ingestor::HeuristicDescriptor*
 /// ModelBinding census checks it: with none bound, none loaded; with one bound and the packed
 /// tree obliging it to load (packedTreeObligesLoad), one for @p metric survived the loader's
 /// pre-flight, its model file is present, and it records the selector revision this build
-/// computes. The engine selector's revision digests every launch's code-object hash and the
-/// L2 rankers, so a compiler bump, a catalog change or a retrained L2 makes GenericEngine
-/// refuse the L1 (PredictionStatus::UNAVAILABLE) with nothing but a log line; this fails the
-/// build instead.
+/// computes. The engine selector's revision digests every launch's code identity and the L2
+/// rankers, so a kernel or catalog change or a retrained L2 makes GenericEngine refuse the L1
+/// (PredictionStatus::UNAVAILABLE) with nothing but a log line; this fails the build instead.
+/// A compiler that only rebuilt the code objects moves the codegen revision, which the engine
+/// warns about and still binds; this prints a note so the team can decide when to retrain.
 inline void
     expectBoundPredictorMatchesThisBuild(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set,
                                          const std::string& metric,
@@ -268,7 +269,55 @@ inline void
               hipdnn_plugin_sdk::ingestor::engineSelectorRevision(set))
         << "GenericEngine refuses this model and reports no prediction: the shipped UHD was "
            "trained against another selector revision than this build computes. Retrain the "
-           "L1 against this build, or find what changed the code objects.";
+           "L1 against this build, or find what changed the kernels.";
+
+    const auto codegenRevision = hipdnn_plugin_sdk::ingestor::engineCodegenRevision(set);
+    if(!model->trainedAgainstCodegenRevision.empty()
+       && model->trainedAgainstCodegenRevision != codegenRevision)
+    {
+        std::cout << "[  NOTE    ] the L1 predict_engine model was measured on other code objects "
+                     "(codegen revision "
+                  << model->trainedAgainstCodegenRevision << ", this build " << codegenRevision
+                  << "); the engine still binds it and warns. Retrain it when the compiler "
+                     "change matters.\n";
+    }
+}
+
+/// Every code object in @p set's packs carries the packager's compiler-independent identity,
+/// for an engine whose kernels are all compiled from rocKE IR at pack time. Without one the
+/// selector revision falls back to the code object's bytes, and the next compiler bump refuses
+/// the L1.
+inline void expectEveryPackedKernelIdentified(const hipdnn_plugin_sdk::ingestor::DescriptorSet& set)
+{
+    std::vector<const hipdnn_plugin_sdk::ingestor::KernelDescriptorPack*> packs;
+    for(const auto& pack : set.packs)
+    {
+        packs.push_back(&pack);
+    }
+    for(const auto& slot : set.slots)
+    {
+        for(const auto& pack : slot.packs)
+        {
+            packs.push_back(&pack);
+        }
+    }
+    ASSERT_FALSE(packs.empty()) << "the engine loaded no packs";
+    for(const auto* pack : packs)
+    {
+        for(const auto& kernel : pack->kernels)
+        {
+            if(kernel.sources.empty())
+            {
+                EXPECT_FALSE(kernel.source.identity.empty())
+                    << "kernel " << kernel.name << " carries no code identity";
+            }
+            for(const auto& [launch, source] : kernel.sources)
+            {
+                EXPECT_FALSE(source.identity.empty()) << "kernel " << kernel.name << " launch "
+                                                      << launch << " carries no code identity";
+            }
+        }
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

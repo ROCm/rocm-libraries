@@ -10,13 +10,16 @@ import pytest
 pd = pytest.importorskip("pandas")
 np = pytest.importorskip("numpy")
 
+from uhd_gen.dataset.training_table import best_per_shape
 from uhd_gen.features import compute_features_hash
 from uhd_gen.immediate import (
     ROLE,
+    check_model_binding,
     evaluate_immediate,
     normalize_corpus,
     normalize_row,
     prediction_scorer,
+    training_binding,
     validate_model,
     validate_signature,
 )
@@ -199,6 +202,195 @@ def test_engine_selector_provenance_is_the_descriptor_set_and_cannot_drift_mid_c
         ValueError, match="provenance changed within the immediate corpus"
     ):
         normalize_corpus(pd.DataFrame([first, third]))
+
+
+def _built_by(codegen, **arguments):
+    """A measurement whose engine reports `codegen` as its code objects' revision."""
+    row = measurement(**arguments)
+    if codegen is not None:
+        row["binding"]["trained_against"]["codegen_revision"] = codegen
+    return row
+
+
+def _rebuilt(row, drift):
+    """`row` measured again after a rebuild: by another compiler, or with another selector."""
+    row = copy.deepcopy(row)
+    if drift == "codegen":
+        row["binding"]["trained_against"]["codegen_revision"] = "cg-B"
+    else:
+        selector = "provider-1/immediate-9/library-3"
+        row["binding"]["selector_revision"] = selector
+        row["binding"]["trained_against"]["selector_revision"] = selector
+    return row
+
+
+def _scored_by_the_runtime(measured, runtime):
+    response = copy.deepcopy(runtime)
+    response.update(model=UHD, status="available", metric="tflops", value=1234)
+    scorer = prediction_scorer(descriptor(measured), [response])
+    assert scorer(normalize_corpus(pd.DataFrame([measured]))).tolist() == [1234]
+
+
+#: Each compares a first measurement (or the model trained on it) with a second one.
+_BINDING_SITES = {
+    "normalize_corpus": lambda first, second: normalize_corpus(
+        pd.DataFrame([first, dict(second, graph_id="other", graph_key="other")])
+    ),
+    "best_per_shape": lambda first, second: best_per_shape(
+        [("a", normalize_row(first)), ("b", normalize_row(second))]
+    ),
+    "prediction_scorer": _scored_by_the_runtime,
+    "check_model_binding": lambda first, second: check_model_binding(
+        descriptor(first), normalize_corpus(pd.DataFrame([second]))
+    ),
+}
+
+
+@pytest.mark.parametrize("drift", ["codegen", "selector"])
+@pytest.mark.parametrize("site", sorted(_BINDING_SITES))
+def test_code_objects_from_another_compiler_are_the_same_binding(
+    evaluator, caplog, site, drift
+):
+    """`trained_against.codegen_revision` names the code objects, which the runtime binds
+    a model across with a warning; the selector revision stays the contract."""
+    first = _built_by("cg-A")
+    second = _rebuilt(first, drift)
+    if drift == "selector":
+        with pytest.raises(
+            ValueError, match="selector|provenance changed|two engine bindings"
+        ):
+            _BINDING_SITES[site](first, second)
+        return
+    _BINDING_SITES[site](first, second)
+    # A model checked against an engine built by another compiler is warned about.
+    if site in ("prediction_scorer", "check_model_binding"):
+        assert "codegen_revision" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "revisions, recorded",
+    [(("cg-A", "cg-A"), "cg-A"), (("cg-A", "cg-B"), None), (("cg-A", None), None)],
+    ids=["shared", "two_compilers", "one_unrecorded"],
+)
+def test_training_records_the_codegen_revision_every_row_shares(
+    caplog, revisions, recorded
+):
+    rows = [
+        _built_by(codegen, graph=f"g{index}") for index, codegen in enumerate(revisions)
+    ]
+    _, binding, warning = training_binding(normalize_corpus(pd.DataFrame(rows)))
+    assert binding["trained_against"].get("codegen_revision") == recorded
+    assert (
+        binding["trained_against"]["selector_revision"]
+        == rows[0]["binding"]["selector_revision"]
+    )
+    assert (warning is not None and "code generations" in warning) == (recorded is None)
+
+
+def test_every_runtime_response_is_checked_against_the_model(evaluator):
+    """Each response's provenance is compared, not only the first one's."""
+    row = measurement()
+    first = copy.deepcopy(row)
+    first.update(model=UHD, status="available", metric="tflops", value=1234)
+    second = _rebuilt(dict(first, graph_id="other", graph_key="other"), "selector")
+    with pytest.raises(ValueError, match="selector_revision"):
+        prediction_scorer(descriptor(row), [first, second])
+
+
+@pytest.mark.parametrize(
+    "snapshot, snapshot_codegen",
+    [
+        ("provenance", None),
+        ("provenance", "cg-A"),
+        ("provenance", "cg-B"),
+        ("descriptor_tree", None),
+    ],
+    ids=["unrecorded", "agreeing", "disagreeing", "descriptor_tree"],
+)
+def test_an_l1_records_the_codegen_revision_of_its_rows_not_of_its_snapshot(
+    tmp_path, evaluator, caplog, snapshot, snapshot_codegen
+):
+    """A provenance snapshot names the contract the rows were measured under; the
+    code objects they were measured on are the rows' to say. A snapshot that records
+    other code objects is warned about."""
+    pytest.importorskip("lightgbm")
+    from uhd_gen.__main__ import main
+
+    root = tmp_path / "descriptors"
+    root.mkdir()
+    rows = []
+    for index in range(24):
+        row = measurement(graph=f"graph-{index}")
+        row["features"]["graph.flops"] = float(2e9 * (index + 1))
+        # Bound by the descriptor set, which a descriptor tree also names.
+        row["binding"]["trained_against"] = {**PROVENANCE, "codegen_revision": "cg-A"}
+        rows.append(row)
+    corpus = tmp_path / "immediate.json"
+    corpus.write_text(json.dumps(rows), encoding="utf-8")
+    if snapshot == "provenance":
+        recorded = tmp_path / "provenance.json"
+        recorded.write_text(
+            json.dumps(
+                {
+                    **PROVENANCE,
+                    **(
+                        {"codegen_revision": snapshot_codegen}
+                        if snapshot_codegen
+                        else {}
+                    ),
+                }
+            ),
+            encoding="utf-8",
+        )
+        source = ["--provenance", str(recorded)]
+    else:
+        (root / "engine.ued.json").write_text(
+            json.dumps(
+                {
+                    "version": "1.0",
+                    "id": UED,
+                    "name": rows[0]["engine_name"],
+                    "metadata": KMD,
+                }
+            ),
+            encoding="utf-8",
+        )
+        (root / "metadata.kmd.json").write_text(
+            json.dumps({"version": "1.0", "id": KMD}), encoding="utf-8"
+        )
+        source = ["--descriptor-tree", str(root), "--engine", rows[0]["engine_name"]]
+    model_dir = tmp_path / "trained"
+    assert (
+        main(
+            [
+                "train",
+                "--role",
+                ROLE,
+                "--input",
+                str(corpus),
+                *source,
+                "--features",
+                "graph.flops",
+                "--num-boost-round",
+                "4",
+                "--early-stopping",
+                "2",
+                "--output-dir",
+                str(model_dir),
+            ]
+        )
+        == 0
+    )
+    (model,) = model_dir.glob("*.uhd.json")
+    trained = json.loads(model.read_text(encoding="utf-8"))["trained_against"]
+    assert trained["codegen_revision"] == "cg-A"
+    assert {key: trained[key] for key in PROVENANCE} == PROVENANCE
+    warned = [
+        r.getMessage()
+        for r in caplog.records
+        if "codegen_revision" in r.getMessage() or "code generations" in r.getMessage()
+    ]
+    assert len(warned) == (snapshot_codegen == "cg-B"), warned
 
 
 def test_cross_engine_labels_require_the_same_full_graph_work_count():

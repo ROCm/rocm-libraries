@@ -38,6 +38,7 @@ pytestmark = pytest.mark.quick
 ARCH = "gfx942"
 PAYLOAD = b"\x7fELF-not-really-a-code-object"
 PAYLOAD_SHA = hashlib.sha256(PAYLOAD).hexdigest()
+PAYLOAD_IDENTITY = hashlib.sha256(b"what PAYLOAD was compiled from").hexdigest()
 SYMBOL = "attention_dense_bf16_d128"
 # One argument in the shape kernel_signature emits -- `name` is present only when the
 # code object carries one, so a bare kind/size/offset triple is a valid produced entry.
@@ -143,6 +144,7 @@ def observe_for(spec, *consumers, schema=FULL_KMD):
     observations["arch"] = ARCH
     observations["symbol"] = SYMBOL
     observations["code_object_sha256"] = PAYLOAD_SHA
+    observations["code_object_identity"] = PAYLOAD_IDENTITY
     return observations
 
 
@@ -499,7 +501,8 @@ def shipped_ukd(**overrides):
         build=None,
         symbol=SYMBOL,
         variant_key="vk-demo",
-        extra=overrides.pop("extra", {}),
+        # Every authored UKD carries a version.
+        extra={"version": "1.0", **overrides.pop("extra", {})},
         origin_kind="rocke",
         builder="demo_builder",
         spec={"head_size": 64},
