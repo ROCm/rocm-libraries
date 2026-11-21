@@ -28,9 +28,6 @@
 #include "src64/blas3/rocblas_gemm_64.hpp"
 
 template <typename T>
-static const T beta_1 = T(1);
-
-template <typename T>
 static const T alpha_0 = T(0);
 
 //-- Innovative Computing Laboratory
@@ -1338,6 +1335,9 @@ rocblas_status rocblas_trmm_outofplace_template(rocblas_handle   handle,
         rocblas_stride strideCgemm = k_stride * c_block_stride;
 
         // already zeroed out C, so set beta to 1
+        const T* one = nullptr;
+        RETURN_IF_ROCBLAS_ERROR(rocblas_internal_get_one_ptr(handle, one));
+
         RETURN_IF_ROCBLAS_ERROR(
             rocblas_internal_gemm_64<false>(handle,
                                             LEFT ? transA : rocblas_operation_none,
@@ -1354,7 +1354,7 @@ rocblas_status rocblas_trmm_outofplace_template(rocblas_handle   handle,
                                             LEFT ? offsetBin : offsetAin,
                                             LEFT ? ldb : lda,
                                             LEFT ? strideBgemm : strideAgemm,
-                                            &beta_1<T>,
+                                            one,
                                             dC,
                                             offsetCin,
                                             ldc,
@@ -1390,7 +1390,7 @@ rocblas_status rocblas_trmm_outofplace_template(rocblas_handle   handle,
                                                 LEFT ? offsetBin : offsetAin,
                                                 LEFT ? ldb : lda,
                                                 0,
-                                                &beta_1<T>,
+                                                one,
                                                 dC,
                                                 offsetCin,
                                                 ldc,
@@ -1581,6 +1581,14 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                            batch_count);
     }
 
+    // gemm takes a single alpha, so per-batch device alpha is only supported by trmm_small
+    if(handle->pointer_mode == rocblas_pointer_mode_device && stride_alpha != 0 && batch_count > 1)
+        return rocblas_status_not_implemented;
+
+    // gemm accumulates into C
+    const T* one = nullptr;
+    RETURN_IF_ROCBLAS_ERROR(rocblas_internal_get_one_ptr(handle, one));
+
     rocblas_int shape = rocblas_trmm_get_shape(side, uplo, trans_a);
 
     rocblas_status status = rocblas_status_success;
@@ -1629,7 +1637,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_B(0, 0),
                                                                       ldb,
                                                                       stride_b,
-                                                                      &beta_1<T>,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(m1, 0),
                                                                       ldc,
@@ -1704,7 +1712,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_B(m1, 0),
                                                                       ldb,
                                                                       stride_b,
-                                                                      &beta_1<T>,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, 0),
                                                                       ldc,
@@ -1779,7 +1787,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_B(m1, 0),
                                                                       ldb,
                                                                       stride_b,
-                                                                      &beta_1<T>,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, 0),
                                                                       ldc,
@@ -1854,7 +1862,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_B(0, 0),
                                                                       ldb,
                                                                       stride_b,
-                                                                      &beta_1<T>,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(m1, 0),
                                                                       ldc,
@@ -1929,7 +1937,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_A(n1, 0),
                                                                       lda,
                                                                       stride_a,
-                                                                      &beta_1<T>,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, 0),
                                                                       ldc,
@@ -2004,7 +2012,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_A(0, n1),
                                                                       lda,
                                                                       stride_a,
-                                                                      &beta_1<T>,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, n1),
                                                                       ldc,
@@ -2079,7 +2087,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_A(n1, 0),
                                                                       lda,
                                                                       stride_a,
-                                                                      &beta_1<T>,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, n1),
                                                                       ldc,
@@ -2154,7 +2162,7 @@ rocblas_status rocblas_internal_trmm_recursive_template(rocblas_handle    handle
                                                                       CALC_OFFSET_A(0, n1),
                                                                       lda,
                                                                       stride_a,
-                                                                      &beta_1<T>,
+                                                                      one,
                                                                       dC,
                                                                       CALC_OFFSET_C(0, 0),
                                                                       ldc,
@@ -2223,15 +2231,19 @@ rocblas_status rocblas_internal_trmm_launcher(rocblas_handle    handle,
     // rocblas_internal_trmm_outofplace_template() only supports single batches
     bool inplace = (dB == dC) || BATCHED || batch_count != 1;
 
-    rocblas_int k = side == rocblas_side_left ? m : n;
     if(!inplace)
     {
         // always !BATCHED here so avoiding reference to uninstantiated code
         if constexpr(!BATCHED)
         {
-            // single bathc so applying offset here
-            RETURN_IF_ROCBLAS_ERROR((rocblas_set_matrix_zero_if_alpha_zero_template(
-                handle, m, n, &alpha_0<T>, 0, dC + offset_c, ldc, 0, 1)));
+            {
+                // alpha_0 is a host constant
+                auto saved_pointer_mode = handle->push_pointer_mode(rocblas_pointer_mode_host);
+
+                // single bathc so applying offset here
+                RETURN_IF_ROCBLAS_ERROR((rocblas_set_matrix_zero_if_alpha_zero_template(
+                    handle, m, n, &alpha_0<T>, 0, dC + offset_c, ldc, 0, 1)));
+            }
             return rocblas_internal_trmm_outofplace_template<T>(handle,
                                                                 side,
                                                                 uplo,

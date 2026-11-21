@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -21,6 +21,7 @@
  * ************************************************************************ */
 
 #include "utility.hpp"
+#include "handle.hpp"
 #include "rocblas_ostream.hpp"
 
 /*******************************************************************************
@@ -73,3 +74,44 @@ rocblas_status rocblas_internal_convert_hip_to_rocblas_status_and_log(hipError_t
                  << "':" << status << std::endl;
     return lib_status;
 }
+
+template <typename T>
+static const T rocblas_host_one = T(1);
+
+__constant__ float                  rocblas_internal_device_one_s = 1;
+__constant__ double                 rocblas_internal_device_one_d = 1;
+__constant__ rocblas_float_complex  rocblas_internal_device_one_c{1, 0};
+__constant__ rocblas_double_complex rocblas_internal_device_one_z{1, 0};
+
+template <typename T>
+rocblas_status rocblas_internal_get_one_ptr(rocblas_handle handle, const T*& one)
+{
+    if(handle->pointer_mode == rocblas_pointer_mode_host)
+    {
+        one = &rocblas_host_one<T>;
+        return rocblas_status_success;
+    }
+
+    void* ptr = nullptr;
+    if constexpr(std::is_same_v<T, float>)
+        RETURN_IF_HIP_ERROR(hipGetSymbolAddress(&ptr, rocblas_internal_device_one_s));
+    else if constexpr(std::is_same_v<T, double>)
+        RETURN_IF_HIP_ERROR(hipGetSymbolAddress(&ptr, rocblas_internal_device_one_d));
+    else if constexpr(std::is_same_v<T, rocblas_float_complex>)
+        RETURN_IF_HIP_ERROR(hipGetSymbolAddress(&ptr, rocblas_internal_device_one_c));
+    else if constexpr(std::is_same_v<T, rocblas_double_complex>)
+        RETURN_IF_HIP_ERROR(hipGetSymbolAddress(&ptr, rocblas_internal_device_one_z));
+
+    one = static_cast<const T*>(ptr);
+    return rocblas_status_success;
+}
+
+#define INSTANTIATE_GET_ONE_PTR(T_) \
+    template rocblas_status rocblas_internal_get_one_ptr<T_>(rocblas_handle, const T_*&);
+
+INSTANTIATE_GET_ONE_PTR(float)
+INSTANTIATE_GET_ONE_PTR(double)
+INSTANTIATE_GET_ONE_PTR(rocblas_float_complex)
+INSTANTIATE_GET_ONE_PTR(rocblas_double_complex)
+
+#undef INSTANTIATE_GET_ONE_PTR
