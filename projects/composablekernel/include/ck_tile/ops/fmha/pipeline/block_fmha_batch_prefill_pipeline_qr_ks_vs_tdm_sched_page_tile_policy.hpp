@@ -79,6 +79,98 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
         return Base::template IsSupportedGeometryProblem<Problem>();
     }
 
+    // The forward policy's row maxima, except that on M128 tiles with compiler-scheduled maxima
+    // each MSB's score pairs (c, c + 1) reduce as two-wide vectors before one horizontal max. On
+    // scalars, the clang 24 SLP vectorizer pairs the two row halves' max chains into <2 x float>
+    // maxima (gfx1250 has no packed FP32 maximum) and carries that row pairing into the score PHIs
+    // and the mask selects: 342 VGPRs and occupancy 2 instead of 322 and 3 (D64 M128 masked tile).
+    // The maximum is associative and commutative, so the regrouped result is the same.
+    template <typename Problem, typename ScoreTensor, typename RowTensor>
+    CK_TILE_DEVICE static void RunSplitSoftmaxPart01(
+        ScoreTensor& score, RowTensor& row_max, float log2e_scale, float& delta_m0, float& delta_m1)
+    {
+        using Softmax = typename Base::ScoreSoftmax;
+        using Mapping = typename Softmax::Mapping;
+        if constexpr(Mapping::kNumMIter != 2 || !Base::template UseCompilerMax<Problem>())
+        {
+            Base::template RunSplitSoftmaxPart01<Problem>(
+                score, row_max, log2e_scale, delta_m0, delta_m1);
+        }
+        else
+        {
+            static_assert(ScoreTensor::get_thread_buffer_size() == Mapping::kThreadBufferSize);
+            static_assert(RowTensor::get_thread_buffer_size() == 2);
+            const float old_max_m0 = row_max.get_thread_buffer()[number<0>{}];
+            const float old_max_m1 = row_max.get_thread_buffer()[number<1>{}];
+            const float local_m0   = PairLocalMax<0>(score, old_max_m0);
+            const float local_m1   = PairLocalMax<1>(score, old_max_m0);
+            const float local_m2   = PairLocalMax<2>(score, old_max_m1);
+            const float local_m3   = PairLocalMax<3>(score, old_max_m1);
+
+            constexpr bool kValidateMax = Base::template ValidateRowMax<Problem>();
+            const auto p1_m0            = Softmax::template RunPart1<kValidateMax>(
+                local_m0, local_m1, old_max_m0 * log2e_scale, log2e_scale);
+            const auto p1_m1 = Softmax::template RunPart1<kValidateMax>(
+                local_m2, local_m3, old_max_m1 * log2e_scale, log2e_scale);
+
+            row_max.get_thread_buffer()[number<0>{}] = p1_m0.row_max;
+            row_max.get_thread_buffer()[number<1>{}] = p1_m1.row_max;
+            delta_m0                                 = p1_m0.delta;
+            delta_m1                                 = p1_m1.delta;
+        }
+    }
+
+    // RunPart0's local max of MSB Msb (lane max, its lane-half partner and the old max), with the
+    // lane max formed on score pairs.
+    template <index_t Msb, typename ScoreTensor>
+    CK_TILE_DEVICE static float PairLocalMax(const ScoreTensor& score, float old_max)
+    {
+        using Softmax = typename Base::ScoreSoftmax;
+        using Mapping = typename Softmax::Mapping;
+        array<typename Mapping::Pair, Mapping::kPairsPerMsb> pairs{};
+        static_for<0, Mapping::kPairsPerMsb, 1>{}(
+            [&](auto p) { pairs(p) = Mapping::template LoadPair<Msb, decltype(p)::value>(score); });
+        const auto pair_max  = PairTreeMax(pairs);
+        const float lane_max = Softmax::Max2(pair_max[0], pair_max[1]);
+        return Softmax::template Max3<true>(lane_max, Softmax::PermuteLaneX16(lane_max), old_max);
+    }
+
+    // Softmax::Max2 on two-wide vectors: the maximum of the row max option, else the max.
+    template <typename Pair>
+    CK_TILE_DEVICE static Pair PairMax(const Pair& x, const Pair& y)
+    {
+#if defined(__HIP_DEVICE_COMPILE__)
+        if constexpr(Base::Options::kRowMaxMaximum)
+            return __builtin_elementwise_maximum(x, y);
+#endif
+        return __builtin_elementwise_max(x, y);
+    }
+
+    // Max of N pairs by max3 levels, lane by lane.
+    template <typename Pair, index_t N>
+    CK_TILE_DEVICE static Pair PairTreeMax(const array<Pair, N>& v)
+    {
+        if constexpr(N == 1)
+            return v[number<0>{}];
+        else if constexpr(N == 2)
+            return PairMax(v[number<0>{}], v[number<1>{}]);
+        else
+        {
+            constexpr index_t kTriples = N / 3;
+            constexpr index_t kRest    = N % 3;
+            array<Pair, kTriples + kRest> next{};
+            static_for<0, kTriples, 1>{}([&](auto i) {
+                constexpr index_t k = 3 * decltype(i)::value;
+                next(i) = PairMax(PairMax(v[number<k>{}], v[number<k + 1>{}]), v[number<k + 2>{}]);
+            });
+            static_for<0, kRest, 1>{}([&](auto i) {
+                constexpr index_t k          = decltype(i)::value;
+                next(number<kTriples + k>{}) = v[number<3 * kTriples + k>{}];
+            });
+            return PairTreeMax(next);
+        }
+    }
+
     // Steady-loop shape for D64/V64, N128, one page per wave slice (P >= 64), no sink and no bias.
     // It is used for every grid; the benefit is largest with one wave per SIMD (grids of at
     // most one workgroup per CU), where every scalar stall in the tile loop is on the critical
