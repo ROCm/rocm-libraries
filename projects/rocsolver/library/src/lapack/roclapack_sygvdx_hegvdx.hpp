@@ -246,12 +246,12 @@ rocblas_status rocsolver_sygvdx_hegvdx_template(rocblas_handle handle,
     dim3 threads(BS1, 1, 1);
 
     // info=0 (starting with no errors)
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
+    reset_info(handle, info, batch_count, 0);
 
     // quick return with n = 0
     if(n == 0)
     {
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, nev, batch_count, 0);
+        reset_info(handle, nev, batch_count, 0);
         return rocblas_status_success;
     }
 

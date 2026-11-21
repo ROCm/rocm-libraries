@@ -581,7 +581,7 @@ rocblas_status rocsolver_getf2_template(rocblas_handle handle,
 
     // info=0 (starting with a nonsingular matrix)
     if(offset == 0)
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, grid, threads, 0, stream, info, batch_count, 0);
+        reset_info(handle, info, batch_count, 0);
 
     // quick return if no dimensions
     if(m == 0 || n == 0)

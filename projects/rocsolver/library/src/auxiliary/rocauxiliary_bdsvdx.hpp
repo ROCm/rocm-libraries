@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -295,8 +295,7 @@ rocblas_status rocsolver_bdsvdx_template(rocblas_handle handle,
 
     // set info = 0
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocksReset, 1, 1), dim3(BS1, 1, 1), 0, stream, info,
-                            batch_count, 0);
+    reset_info(handle, info, batch_count, 0);
 
     // quick return
     if(n == 0)
@@ -304,8 +303,7 @@ rocblas_status rocsolver_bdsvdx_template(rocblas_handle handle,
 
     // zero out diagonal of tridiagonal matrix (Dtgk)
     rocblas_int blocksZero = (2 * n * batch_count - 1) / BS1 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocksZero, 1, 1), dim3(BS1, 1, 1), 0, stream, Dtgk,
-                            2 * n * batch_count, 0);
+    reset_info(handle, Dtgk, 2 * n * batch_count, 0);
 
     // populate off-diagonal of tridiagonal matrix (Etgk) by interleaving entries of D and E
     rocblas_int blocksCopy = (n - 1) / BS1 + 1;

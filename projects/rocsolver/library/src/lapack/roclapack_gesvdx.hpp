@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     April 2012
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -348,10 +348,8 @@ rocblas_status rocsolver_gesvdx_template(rocblas_handle handle,
 
     // set info = 0 and nsv = 0
     rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocksReset, 1, 1), dim3(BS1, 1, 1), 0, stream, info,
-                            batch_count, 0);
-    ROCSOLVER_LAUNCH_KERNEL(reset_info, dim3(blocksReset, 1, 1), dim3(BS1, 1, 1), 0, stream, nsv,
-                            batch_count, 0);
+    reset_info(handle, info, batch_count, 0);
+    reset_info(handle, nsv, batch_count, 0);
 
     // quick return (no dimensions)
     if(n == 0 || m == 0)

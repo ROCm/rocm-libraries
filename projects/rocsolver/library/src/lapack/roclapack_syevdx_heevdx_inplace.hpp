@@ -247,7 +247,7 @@ rocblas_status rocsolver_syevdx_heevdx_inplace_template(rocblas_handle handle,
         rocblas_int blocksReset = (batch_count - 1) / BS1 + 1;
         dim3 gridReset(blocksReset, 1, 1);
         dim3 threads(BS1, 1, 1);
-        ROCSOLVER_LAUNCH_KERNEL(reset_info, gridReset, threads, 0, stream, info, batch_count, 0);
+        reset_info(handle, info, batch_count, 0);
 
         memset(h_nev, 0, sizeof(rocblas_int) * batch_count);
         return rocblas_status_success;
