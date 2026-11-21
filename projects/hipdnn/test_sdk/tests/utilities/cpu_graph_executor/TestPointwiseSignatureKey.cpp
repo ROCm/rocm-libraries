@@ -682,6 +682,30 @@ TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForImplementedBinaryModes)
     }
 }
 
+TEST(TestPointwiseSignatureKeyFp32, PlanBuildersRegisteredWithHalfOperandWrittenAsHalf)
+{
+    const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();
+
+    // An fp32 operand with an fp16 or bf16 operand, computed in fp32 and written as fp16 or bf16:
+    // a fused bias or residual add whose other operand is a virtual fp32 tensor. The key order is
+    // mode, input0, compute, output, input1, so the compute type is fp32 and the output is the
+    // narrow type.
+    for(auto mode : {PointwiseMode::ADD, PointwiseMode::SUB, PointwiseMode::MUL})
+    {
+        for(auto narrow : {DataType::HALF, DataType::BFLOAT16})
+        {
+            const PointwiseSignatureKey registered{
+                mode, DataType::FLOAT, DataType::FLOAT, narrow, narrow};
+            EXPECT_EQ(planBuilders.count(registered), 1u) << registered;
+
+            // The compute and output types swapped is not a registered combination
+            const PointwiseSignatureKey swapped{
+                mode, DataType::FLOAT, narrow, DataType::FLOAT, narrow};
+            EXPECT_EQ(planBuilders.count(swapped), 0u) << swapped;
+        }
+    }
+}
+
 TEST(TestPointwiseSignatureKey, PlanBuildersRegisteredForGenIndexInt32Output)
 {
     const auto planBuilders = PointwiseSignatureKey::getPlanBuilders();

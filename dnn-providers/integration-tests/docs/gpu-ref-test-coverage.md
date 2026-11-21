@@ -29,7 +29,7 @@ Parameters that are compile-time defines (each value is a new compile):
 | Batchnorm | dtypes, launch geometry (`LOCAL_SIZE_X/Y`), channel-last flag |
 | Reduction | dtypes, `MODE`, rank |
 | Resample | dtypes, `RESAMPLE_MODE`, `PADDING_MODE`, `HAS_INDEX`, spatial rank |
-| Pointwise | dtypes, op |
+| Pointwise | dtypes (including `bool` and `int32`), op; `elu_alpha` and `softplus_beta` are runtime arguments; BINARY_SELECT is a separate ternary kernel |
 | Matmul | dtypes, rank |
 | Conv | dtypes, spatial rank |
 

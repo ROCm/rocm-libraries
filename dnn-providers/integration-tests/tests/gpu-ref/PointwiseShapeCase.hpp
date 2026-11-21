@@ -42,4 +42,58 @@ void assertAllClose(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
     ASSERT_TRUE(validator.allClose(expected, actual));
 }
 
+// assertAllClose treats any NaN or infinity as a failure. This accepts a NaN where both sides have
+// one and an infinity where both have the same one, and compares finite values with the tolerance
+// scaled by the size of the expected value. Both tensors must have the same layout.
+template <typename T>
+void assertAllCloseWithSpecialValues(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
+                                     hipdnn_data_sdk::utilities::TensorBase<T>& actual,
+                                     float tolerance)
+{
+    ASSERT_EQ(expected.elementSpace(), actual.elementSpace());
+    const auto* expectedData = expected.memory().hostData();
+    const auto* actualData = actual.memory().hostData();
+    for(size_t i = 0; i < expected.elementSpace(); ++i)
+    {
+        const auto expectedValue = static_cast<float>(expectedData[i]);
+        const auto actualValue = static_cast<float>(actualData[i]);
+        if(std::isnan(expectedValue) || std::isinf(expectedValue))
+        {
+            ASSERT_TRUE(std::isnan(expectedValue) ? std::isnan(actualValue)
+                                                  : actualValue == expectedValue)
+                << "Mismatch at index " << i << ": expected " << expectedValue << ", actual "
+                << actualValue;
+        }
+        else
+        {
+            ASSERT_LE(std::fabs(actualValue - expectedValue),
+                      tolerance * std::max(1.0f, std::fabs(expectedValue)))
+                << "Mismatch at index " << i << ": expected " << expectedValue << ", actual "
+                << actualValue;
+        }
+    }
+}
+
+// Exact comparison for results that are not subject to rounding (bool, selection, MAX/MIN).
+// A NaN matches a NaN and the sign of a zero must match. Both tensors must have the same layout.
+template <typename T>
+void assertAllEqual(hipdnn_data_sdk::utilities::TensorBase<T>& expected,
+                    hipdnn_data_sdk::utilities::TensorBase<T>& actual)
+{
+    ASSERT_EQ(expected.elementSpace(), actual.elementSpace());
+    const auto* expectedData = expected.memory().hostData();
+    const auto* actualData = actual.memory().hostData();
+    for(size_t i = 0; i < expected.elementSpace(); ++i)
+    {
+        const auto expectedValue = static_cast<float>(expectedData[i]);
+        const auto actualValue = static_cast<float>(actualData[i]);
+        // -0.0 and +0.0 compare equal, so the sign of a zero is checked separately
+        ASSERT_TRUE((std::isnan(expectedValue) && std::isnan(actualValue))
+                    || (expectedValue == actualValue
+                        && std::signbit(expectedValue) == std::signbit(actualValue)))
+            << "Mismatch at index " << i << ": expected " << expectedValue << ", actual "
+            << actualValue;
+    }
+}
+
 } // namespace gpu_pointwise_ref_test
