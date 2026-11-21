@@ -1,0 +1,471 @@
+# Source of truth for the shipped hipkernel:hip_conv_dgrad_fma_1d_rdna catalog: the backward data
+# of a 1-D convolution that is not depthwise, which is also the forward of a ConvTranspose1d, for
+# the gfx11 (RDNA3/3.5) and gfx12 (RDNA4) targets, compiled from HIP source. No variant needs a
+# workspace.
+#
+# The specialized kernel (kernels/ConvDgradFma1d.cpp, ConvDgradFma1d) takes NCL with groups == 1
+# and dilation 1 and compiles the filter width, stride and tile in. It is built for the
+# ConvTranspose1d shapes of audio decoders and vocoders, k = 16 / 8 / 4 / 9 at stride 8 / 4 / 2
+# / 5, at every dx-channel tile (channels_per_wave) a layer can take: fp32 weights are read in
+# place (CT_WS 1), fp16 / bf16 weights as 32-bit words (CT_WS 0). Every other problem runs on
+# the generic kernel of the same file (ConvDgradGeneric1d). The native matcher
+# (HipConvDgradFma1dRdnaNative.cpp, geometryOf) picks one variant per graph; the variants here
+# must match it.
+
+dialect: packaged
+authored_subpath: hip/conv_dgrad_fma_1d_rdna
+engine:
+  name: hipkernel:hip_conv_dgrad_fma_1d_rdna
+  sdk_version: "1.0.0"
+  knobs: []
+  heuristic: native
+
+kmd_fields:
+- name: kernel_family
+  type: string
+- name: variant
+  type: string
+- name: dtype
+  type: string
+- name: layout
+  type: string
+- name: filter_w
+  type: int
+- name: stride
+  type: int
+- name: channels_per_wave
+  type: int
+
+graph_match:
+  shape: shared_shape
+  discriminator: none
+
+kernel_source_kind: hip
+workspace_policy: none
+
+packs:
+- name: hip_conv_dgrad_fma_1d_rdna
+  arch: [gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
+  kernels:
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k16_s8_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 4, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k16_s8_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 2, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k16_s8_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 1, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k8_s4_cw8
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 8, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 8}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k8_s4_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 4, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k8_s4_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 2, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k8_s4_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 1, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k4_s2_cw8
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 8, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 8}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k4_s2_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 4, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k4_s2_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 2, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k4_s2_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 1, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k9_s5_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 9, CT_S: 5, CT_QR: 2, CT_CO_W: 4, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 9, stride: 5, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k9_s5_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 9, CT_S: 5, CT_QR: 2, CT_CO_W: 2, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 9, stride: 5, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_k9_s5_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 0, CT_K: 9, CT_S: 5, CT_QR: 2, CT_CO_W: 1, CT_WS: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 9, stride: 5, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_ncl_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradGeneric1d
+      build:
+        defines: {CT_GENERIC: 1, CT_DTYPE: 0, CT_CHANNELS_LAST: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: generic, dtype: FLOAT, layout: CHANNELS_FIRST, filter_w: 0, stride: 0, channels_per_wave: 0}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f32_nlc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradGeneric1d
+      build:
+        defines: {CT_GENERIC: 1, CT_DTYPE: 0, CT_CHANNELS_LAST: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: generic, dtype: FLOAT, layout: CHANNELS_LAST, filter_w: 0, stride: 0, channels_per_wave: 0}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k16_s8_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 4, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k16_s8_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 2, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k16_s8_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 1, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k8_s4_cw8
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 8, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 8}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k8_s4_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 4, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k8_s4_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 2, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k8_s4_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 1, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k4_s2_cw8
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 8, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 8}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k4_s2_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 4, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k4_s2_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 2, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k4_s2_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 1, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k9_s5_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 9, CT_S: 5, CT_QR: 4, CT_CO_W: 2, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 9, stride: 5, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_k9_s5_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 1, CT_K: 9, CT_S: 5, CT_QR: 4, CT_CO_W: 1, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 9, stride: 5, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_ncl_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradGeneric1d
+      build:
+        defines: {CT_GENERIC: 1, CT_DTYPE: 1, CT_CHANNELS_LAST: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: generic, dtype: HALF, layout: CHANNELS_FIRST, filter_w: 0, stride: 0, channels_per_wave: 0}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.f16_nlc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradGeneric1d
+      build:
+        defines: {CT_GENERIC: 1, CT_DTYPE: 1, CT_CHANNELS_LAST: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: generic, dtype: HALF, layout: CHANNELS_LAST, filter_w: 0, stride: 0, channels_per_wave: 0}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k16_s8_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 4, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k16_s8_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 2, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k16_s8_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 16, CT_S: 8, CT_QR: 2, CT_CO_W: 1, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 16, stride: 8, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k8_s4_cw8
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 8, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 8}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k8_s4_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 4, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k8_s4_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 2, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k8_s4_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 8, CT_S: 4, CT_QR: 2, CT_CO_W: 1, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 8, stride: 4, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k4_s2_cw8
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 8, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 8}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k4_s2_cw4
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 4, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 4}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k4_s2_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 2, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k4_s2_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 4, CT_S: 2, CT_QR: 2, CT_CO_W: 1, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 4, stride: 2, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k9_s5_cw2
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 9, CT_S: 5, CT_QR: 4, CT_CO_W: 2, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 9, stride: 5, channels_per_wave: 2}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_k9_s5_cw1
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradFma1d
+      build:
+        defines: {CT_DTYPE: 2, CT_K: 9, CT_S: 5, CT_QR: 4, CT_CO_W: 1, CT_WS: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: specialized, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 9, stride: 5, channels_per_wave: 1}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_ncl_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradGeneric1d
+      build:
+        defines: {CT_GENERIC: 1, CT_DTYPE: 2, CT_CHANNELS_LAST: 0}
+    metadata: {kernel_family: dgrad_fma_1d, variant: generic, dtype: BFLOAT16, layout: CHANNELS_FIRST, filter_w: 0, stride: 0, channels_per_wave: 0}
+    priority: 0
+  - name: hip_conv_dgrad_fma_1d_rdna.bf16_nlc_generic
+    kernel_source:
+      kind: hip
+      source: kernels/ConvDgradFma1d.cpp
+      entry: ConvDgradGeneric1d
+      build:
+        defines: {CT_GENERIC: 1, CT_DTYPE: 2, CT_CHANNELS_LAST: 1}
+    metadata: {kernel_family: dgrad_fma_1d, variant: generic, dtype: BFLOAT16, layout: CHANNELS_LAST, filter_w: 0, stride: 0, channels_per_wave: 0}
+    priority: 0
+
+# hip kernels are compiled from source by hkp_pack and hydrate no builder object, so every
+# field is matcher-only.
+specialization:
+  metadata_fields: []
+  matcher_only_fields: [kernel_family, variant, dtype, layout, filter_w, stride, channels_per_wave]
+  bindings: {}
+  vocabulary: {}

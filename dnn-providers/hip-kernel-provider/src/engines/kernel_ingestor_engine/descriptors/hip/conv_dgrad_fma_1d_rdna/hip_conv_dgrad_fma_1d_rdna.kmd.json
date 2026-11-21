@@ -1,0 +1,35 @@
+{
+  "version": "1.0",
+  "id": "9f5ce9b0-bce4-4989-b85a-3b712416c923",
+  "name": "hip_conv_dgrad_fma_1d_rdna variant fields",
+  "fields": [
+    {
+      "name": "kernel_family",
+      "type": "string"
+    },
+    {
+      "name": "variant",
+      "type": "string"
+    },
+    {
+      "name": "dtype",
+      "type": "string"
+    },
+    {
+      "name": "layout",
+      "type": "string"
+    },
+    {
+      "name": "filter_w",
+      "type": "int"
+    },
+    {
+      "name": "stride",
+      "type": "int"
+    },
+    {
+      "name": "channels_per_wave",
+      "type": "int"
+    }
+  ]
+}
