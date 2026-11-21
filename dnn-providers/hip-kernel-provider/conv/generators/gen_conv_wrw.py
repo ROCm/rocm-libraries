@@ -928,6 +928,32 @@ BREADTH = {
     # 700 (3214 against 3894), 1888 against 2461 (6472 against 7702); gfx1201 only: inception c80
     # 73^2 2992 against 3339 and c32 147^2 (3x3r1) 2087 against 3037, and channels-last sd unet,
     # flux vae and efficientnet layers 4-12% faster at 4 blocks a unit.
+    # 1 x N rows (HiFi-GAN 1 x 3 / 7 / 11 at dilation 1, 3, 5, Inception's 17-wide 1 x 7; fp16),
+    # channels-first, CDNA ring: one-fragment waves at 4 blocks a unit and 2 x 2 / 4 x 2-wave
+    # tiles. The 32 x 64 tile alone left one wave a SIMD; over the corpus's 152 HiFi-GAN wrw
+    # layers (autotuned, CONV_WRW alone) these tiles run 1.43x on gfx950 and 1.16x on MI325X, and
+    # Inception's 1 x 7 layers 1.2-1.7x on gfx950.
+    **{
+        (atoms, tag): [
+            (CF, (32, 64, 1, 2, 32), (4,)),
+            (CF, (64, 64, 2, 2, 32), (2, 4)),
+            (CF, (64, 64, 2, 2, 64), (2,)),
+            (CF, (128, 64, 4, 2, 32), (1, 2)),
+            (CF, (64, 32, 2, 1, 32), (4,)),
+        ]
+        for atoms in (("mfma32x16_f16",), ("mfma32_f16",))
+        for tag in (
+            "1x3",
+            "1x3d3",
+            "1x3d5",
+            "1x7",
+            "1x7d3",
+            "1x7d5",
+            "1x11",
+            "1x11d3",
+            "1x11d5",
+        )
+    },
     (RDNA_16, "3x3pk"): [(CF, (128, 32, 4, 2, 64), (2,))],
     (RDNA_16, "3x3s2pk"): [(CF, (128, 32, 4, 2, 32), (2,))],
     (RDNA_16, "1x1"): [(CF, (128, 64, 4, 2, 32), (4,))],
