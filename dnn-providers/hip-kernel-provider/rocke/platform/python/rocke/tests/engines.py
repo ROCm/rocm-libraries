@@ -47,9 +47,9 @@ returns each engine's HIP source, or its refusal as a ``HipRefusal`` (error
 type and message), for a test that accepts either as long as the two agree.
 ``python_hip_outcome`` and ``native_hip_outcomes`` are each engine's half, the
 second over many kernels in one call, and ``ir_lower_cli_hip_outcomes`` runs
-the program alone, for a test that holds it to the binding.
-``REFUSAL_ERROR_TYPES`` are the exception types that stand for a refusal in
-both engines.
+the program alone, for a test that holds it to the binding. ``HipRefusal``
+and the exception types that stand for a refusal in both engines live in
+``rocke.tests.hip_outcomes``, which imports no test framework.
 
 A test that loops over the engines itself, rather than through ``pytest``
 parameters, iterates ``available_engines()``: the part of :data:`ENGINES` this
@@ -97,12 +97,17 @@ from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python, lower_kernel_to_llvm
 from rocke.core.verify import verify
+from rocke.tests.hip_outcomes import (
+    NATIVE_REFUSAL_STATUS,
+    HipRefusal,
+    hip_refusal_of,
+    python_hip_outcome_of_kernel,
+)
 
 __all__ = [
     "BACKEND_LANES",
     "ENGINES",
     "IR_LOWER_CLI_ENV",
-    "REFUSAL_ERROR_TYPES",
     "Engine",
     "HipRefusal",
     "all_engines_backend",
@@ -129,20 +134,6 @@ __all__ = [
 
 Engine = Literal["python", "cpp"]
 ENGINES: tuple[Engine, ...] = ("python", "cpp")
-
-# The rocke_status_t (rocke/ir.h is the source of truth) each Python exception
-# type maps to. Matched by exact type: ArchDomainError (status 6) is left out, as
-# no refusal checked here raises it.
-_NATIVE_STATUS: dict[type[Exception], int] = {
-    ValueError: 1,
-    TypeError: 2,
-    KeyError: 3,
-    NotImplementedError: 5,
-}
-
-#: The exception types a lowerer or builder raises to refuse a kernel: those a
-#: C++ engine status code stands for. Any other exception is a failure.
-REFUSAL_ERROR_TYPES: tuple[type[Exception], ...] = tuple(_NATIVE_STATUS)
 
 # The C++ engine's refusal text, from the binding or rocke_ir_lower_cli:
 # "<entry point>: lower failed for arch '<gfx>' (status <code>): <message>".
@@ -260,10 +251,10 @@ def _require_hip_engine(engine: Engine) -> None:
 
 
 def _native_status(error_type: type[Exception]) -> int:
-    if error_type not in _NATIVE_STATUS:
-        names = sorted(t.__name__ for t in _NATIVE_STATUS)
+    if error_type not in NATIVE_REFUSAL_STATUS:
+        names = sorted(t.__name__ for t in NATIVE_REFUSAL_STATUS)
         raise ValueError(f"error_type={error_type.__name__}, expected one of {names}")
-    return _NATIVE_STATUS[error_type]
+    return NATIVE_REFUSAL_STATUS[error_type]
 
 
 def _assert_python_rejects(
@@ -597,19 +588,6 @@ def assert_accepted_everywhere(
     lower_hip_with_engine(kernel, arch, engine=engine)
 
 
-@dataclasses.dataclass(frozen=True)
-class HipRefusal:
-    """One engine's refusal to lower a kernel to HIP source.
-
-    ``error_type_name`` is the Python exception's type name -- for the C++
-    engine, the name of the type its status code stands for, or
-    ``"status <code>"`` for a code that stands for none.
-    """
-
-    error_type_name: str
-    message: str
-
-
 def hip_outcomes_of_both_engines(
     ir_text: str, arch: str
 ) -> tuple[str | HipRefusal, str | HipRefusal]:
@@ -626,15 +604,14 @@ def hip_outcomes_of_both_engines(
 
 def python_hip_outcome(ir_text: str, arch: str) -> str | HipRefusal:
     """The Python engine's HIP source for the serialized kernel ``ir_text``, or
-    its refusal. Any exception the lowering raises is its refusal, so a crash
-    shows as a refusal that the C++ engine does not share."""
+    its refusal: ``ir_text`` parsed, then ``python_hip_outcome_of_kernel``. Any
+    exception parsing or lowering raises is its refusal, so a crash shows as a
+    refusal that the C++ engine does not share."""
     try:
-        return lower_kernel_to_hip(parse(ir_text), arch=arch)
+        kernel = parse(ir_text)
     except Exception as error:  # noqa: BLE001 -- a refusal is an outcome
-        error_type = next(
-            (kind for kind in _NATIVE_STATUS if isinstance(error, kind)), type(error)
-        )
-        return HipRefusal(error_type.__name__, error.args[0] if error.args else "")
+        return hip_refusal_of(error)
+    return python_hip_outcome_of_kernel(kernel, arch)
 
 
 def _native_refusal(error_text: str) -> HipRefusal | None:
@@ -649,7 +626,7 @@ def _native_refusal(error_text: str) -> HipRefusal | None:
 def _native_status_refusal(status: int, message: str) -> HipRefusal:
     """The refusal the C++ engine's ``status`` code and ``message`` stand for."""
     error_type = next(
-        (kind for kind, code in _NATIVE_STATUS.items() if code == status), None
+        (kind for kind, code in NATIVE_REFUSAL_STATUS.items() if code == status), None
     )
     type_name = error_type.__name__ if error_type else f"status {status}"
     return HipRefusal(type_name, message)

@@ -352,11 +352,15 @@ Key semantics:
   differential oracle with generated `(spec, arch)` inputs rather than a fixed list.
 - **The HIP-source route has its own identity test.** Both engines also lower a
   kernel to HIP source. [`test_hip_source_identity.py`](platform/tests/instances/differential/test_hip_source_identity.py)
-  runs every parity emitter in its `target-ir` mode and lowers each Python-built
-  kernel through both HIP lowerers: the text must match, or both must refuse
-  with the same error type and message. A config that fails other than by its
-  builder refusing it fails the test. It runs in the developer's differential
-  pytest pass with `rocke_engine`, and in installed host CI as the
+  runs every parity emitter in its `hip-case` mode, which prints, for each
+  kernel the Python builder made, its serialization and the Python HIP
+  lowering's outcome, taken in the emitter's process; the emitter also requires
+  the serialization to read back through the Python parser to the same text.
+  The test lowers the serialization with the C++ HIP lowerer: the text must
+  match, or both must refuse with the same error type and message. A config
+  that fails other than by its builder refusing it fails the test. It runs in
+  the developer's differential pytest pass with `rocke_engine`, and in
+  installed host CI as the
   `rocke_hip_source_identity` CTest, which lowers through the installed
   `rocke_ir_lower_cli` program (`ROCKE_IR_LOWER_CLI`, one `--hip-batch` run per
   family) because the wheel has no binding. The op-by-op HIP parity files

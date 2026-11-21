@@ -22,7 +22,7 @@ try:
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
-from _emit_common import MODES, target_ir
+from _emit_common import MODES, hip_case
 from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
@@ -141,8 +141,8 @@ def main() -> int:
         sys.stdout.write(text)
     elif mode == "ir":
         sys.stdout.write(serialize(kernel))
-    elif mode == "target-ir":
-        sys.stdout.write(target_ir(kernel, "gfx950"))
+    elif mode == "hip-case":
+        sys.stdout.write(hip_case(kernel, "gfx950"))
     elif mode == "verify":
         sys.stdout.write("".join(str(d) + "\n" for d in verify(kernel)))
     else:

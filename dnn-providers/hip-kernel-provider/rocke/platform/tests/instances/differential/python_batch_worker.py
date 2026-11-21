@@ -106,6 +106,16 @@ def _run_one(
     return record
 
 
+def _failed_without_output(record: dict) -> bool:
+    """True when the config exited non-zero without printing anything."""
+    return record["returncode"] != 0 and not record["has_output"]
+
+
+def _ends_the_config_list(record: dict) -> bool:
+    """True when the emitter reported the index is past its last config."""
+    return not record["has_output"] and "unknown config" in record["stderr"].lower()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--output-dir", type=Path)
@@ -113,6 +123,13 @@ def main() -> int:
         "--canonical",
         action="store_true",
         help="also report each output's canonical ck.dsl.ir/v1 hash",
+    )
+    parser.add_argument(
+        "--recheck-failures-in",
+        metavar="MODE",
+        help="run again, in MODE and in this process, each config that exits "
+        "non-zero without printing anything; report that run as the record's "
+        "'recheck'",
     )
     parser.add_argument("emitter", type=Path)
     # The emitter owns its mode list (``_emit_common.MODES`` for most) and
@@ -132,10 +149,19 @@ def main() -> int:
             args.output_dir,
             args.canonical,
         )
+        ends_the_list = _ends_the_config_list(record)
+        if (
+            args.recheck_failures_in
+            and _failed_without_output(record)
+            and not ends_the_list
+        ):
+            record["recheck"] = _run_one(
+                emitter_main, args.emitter, index, args.recheck_failures_in, None
+            )
         # One flushed record per configuration lets the parent apply TIMEOUT to
         # each invocation while retaining this process and its imported module.
         print(json.dumps(record, separators=(",", ":")), flush=True)
-        if not record["has_output"] and "unknown config" in record["stderr"].lower():
+        if ends_the_list:
             break
     return 0
 

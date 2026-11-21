@@ -35,7 +35,7 @@ try:
 except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
 from rocke.core.ir_serialize import serialize
-from _emit_common import target_ir
+from _emit_common import hip_case
 from rocke.core.verify import verify
 
 
@@ -384,7 +384,7 @@ def main() -> int:
     mode = sys.argv[2] if len(sys.argv) > 2 else "ll"
     if mode == "ll":
         sys.stdout.write(_emit(idx))
-    elif mode in ("ir", "target-ir"):
+    elif mode in ("ir", "hip-case"):
         cfg = _CONFIGS[idx] if idx in _CONFIGS else None
         if cfg is None:
             raise SystemExit(f"unknown config index {idx}")
@@ -403,7 +403,7 @@ def main() -> int:
             if mode == "ir":
                 sys.stdout.write(serialize(kernel))
             else:
-                sys.stdout.write(target_ir(kernel, "gfx950"))
+                sys.stdout.write(hip_case(kernel, "gfx950"))
     elif mode == "verify":
         cfg = _CONFIGS[idx] if idx in _CONFIGS else None
         if cfg is None:

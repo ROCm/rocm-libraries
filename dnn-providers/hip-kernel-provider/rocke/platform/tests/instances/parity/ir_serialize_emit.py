@@ -18,7 +18,7 @@ from rocke.instances.common.gemm_universal import (
     build_universal_gemm,
 )
 from rocke.core.ir_serialize import serialize
-from _emit_common import target_ir
+from _emit_common import hip_case
 
 
 def _spec(idx: int) -> UniversalGemmSpec:
@@ -176,8 +176,8 @@ def main() -> int:
     idx = int(sys.argv[1])
     spec = _spec(idx)
     kernel = build_universal_gemm(spec, arch="gfx950")
-    if len(sys.argv) > 2 and sys.argv[2] == "target-ir":
-        sys.stdout.write(target_ir(kernel, "gfx950"))
+    if len(sys.argv) > 2 and sys.argv[2] == "hip-case":
+        sys.stdout.write(hip_case(kernel, "gfx950"))
     else:
         sys.stdout.write(serialize(kernel))
     return 0

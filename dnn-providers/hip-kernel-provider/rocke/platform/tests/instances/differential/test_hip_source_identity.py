@@ -13,17 +13,29 @@ at least one kernel to the same source, unless ``FAMILIES_WITHOUT_HIP_LOWERING``
 names what the HIP lowering lacks for it; such a family must lower none, and
 refuse each kernel with NotImplementedError.
 
-The input is the Python-built kernel, serialized. Whether the two engines'
-builders produce the same IR is the differential gate's ``ir`` mode; here one
-kernel goes through both HIP lowerers, so a difference can only come from them.
+The input is the kernel the Python builder made. Whether the two engines'
+builders produce the same IR is the differential gate's ``ir`` mode; here the
+Python engine lowers that kernel and the C++ engine its serialization, so a
+difference comes from the two HIP lowerings, or from something the
+serialization does not carry, which is a defect as well.
 
 Each family's emitter runs in its own process through ``python_batch_worker.py``
-(the gate's worker) in the ``target-ir`` mode, which prints a ``target <gfx>``
-line and the serialized kernel for every kernel a config builds. A config the
-Python builder rejects prints nothing and has nothing to lower; the test checks
-that the ``ir`` mode rejects it with the same error, so a failure of the
-target-ir path cannot pass as a rejection, and it fails any config that exits
-non-zero after printing output.
+(the gate's worker) in the ``hip-case`` mode, which prints, for every kernel a
+config builds, its target, its serialization and the Python engine's HIP
+outcome, taken in that process from the built kernel
+(``rocke.tests.hip_identity_cases``). The emitter also requires each
+serialization to read back through the Python parser to the same text, and a
+config whose serialization does not fails the test, named. A config the Python
+builder rejects prints
+nothing and has nothing to lower; the worker runs it again in the ``ir`` mode,
+in the same process, and the test checks that it is rejected there with the
+same error, so a failure of the hip-case path cannot pass as a rejection. It
+fails any config that exits non-zero after printing output.
+
+Each family's check -- its emitter run and the C++ lowering of its kernels --
+runs in a worker thread ahead of the test that reads it, several families at a
+time. The emitter run is a subprocess, as is the C++ lowering through the
+program below, so the families overlap on the CPUs this process may use.
 
 The C++ lowering runs through the ``rocke_engine`` extension, or where it is not
 built -- the installed test tree -- through the ``rocke_ir_lower_cli`` program
@@ -32,8 +44,8 @@ built -- the installed test tree -- through the ``rocke_ir_lower_cli`` program
 
 from __future__ import annotations
 
+import dataclasses
 import json
-import os
 import subprocess
 import sys
 import tempfile
@@ -42,20 +54,28 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from rocke.core.ir import F32, IRBuilder, KernelDef, PtrType
+from rocke.core.ir_serialize import serialize
 from rocke.tests.engines import (
-    REFUSAL_ERROR_TYPES,
-    HipRefusal,
     native_hip_outcomes,
     python_hip_outcome,
     skip_without_native_hip_lowering,
 )
+from rocke.tests.hip_identity_cases import (
+    HipIdentityCase,
+    SerializationRoundTripError,
+    hip_case_text,
+    parse_hip_cases,
+    require_serialization_round_trip,
+)
+from rocke.tests.hip_outcomes import REFUSAL_ERROR_TYPES, HipRefusal
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
 import run_diff
 
-# Emitters that build no kernel, so they have no target-ir output.
+# Emitters that build no kernel, so they have no hip-case output.
 NO_KERNEL_FAMILIES = {
     "conv_abi": "prints kernel argument lists, not a kernel",
 }
@@ -97,7 +117,10 @@ def test_the_family_lists_name_families() -> None:
 
 # One family's emitter run: every config, one process. This bounds a hung
 # emitter below the 120 s per-test limit of the rocke_hip_source_identity CTest,
-# so the hang is reported here rather than as a pytest-timeout kill.
+# so the hang is reported here rather than as a pytest-timeout kill. A family's
+# check then lowers its kernels with the C++ engine, a run that engines.py
+# bounds on its own; it takes a few seconds for the largest family, so the two
+# together stay well inside the per-test limit.
 EMITTER_TIMEOUT_S = 100
 
 # How a builder refusing a config ends: the exception line of one of these.
@@ -107,17 +130,30 @@ _REFUSAL_TYPE_NAMES = frozenset(
 
 FAMILIES = run_diff.find_families(python_only=True)
 
-# Emitter runs started ahead of the tests that read them. Each is a subprocess,
-# so threads overlap them with the in-process Python lowering of earlier
-# families; a few at a time leaves that lowering a core.
-PREFETCHED_EMITTER_RUNS = min(4, os.cpu_count() or 1)
+# At most this many families are checked at once, ahead of the tests that read
+# them: one worker thread per CPU this process may use (run_diff's
+# tools/_hostcaps.py count). The cap bounds memory, as a family's check holds
+# all of its kernels until it has compared them.
+MAX_PREFETCHED_FAMILIES = 8
 
 
-def _emitter_runs(
-    name: str, src_dir: Path, mode: str, indices: list[int]
-) -> list[tuple[int, str, run_diff.Emission]]:
-    """Run one family's emitter in ``mode`` over the configs ``indices``, in one
-    process; return ``(config index, stdout, emission)`` for every config it ran."""
+@dataclasses.dataclass(frozen=True)
+class EmitterRun:
+    """How one config of a family's hip-case emitter run ended.
+
+    ``ir_recheck`` is the same config run again in the ``ir`` mode when the
+    hip-case run failed without printing anything, or None. It runs in the same
+    process, after the failed run, so it sees any module state that run left."""
+
+    index: int
+    output: bytes
+    emission: run_diff.Emission
+    ir_recheck: run_diff.Emission | None
+
+
+def _hip_case_runs(name: str, src_dir: Path, indices: list[int]) -> list[EmitterRun]:
+    """Run one family's emitter in the hip-case mode over the configs
+    ``indices``, in one process; return every config it ran."""
     emitter = src_dir / f"{name}_emit.py"
     with tempfile.TemporaryDirectory(prefix=f"hip_identity_{name}_") as out_dir:
         proc = subprocess.run(
@@ -126,8 +162,10 @@ def _emitter_runs(
                 str(run_diff.PYTHON_BATCH_WORKER),
                 "--output-dir",
                 out_dir,
+                "--recheck-failures-in",
+                "ir",
                 str(emitter),
-                mode,
+                "hip-case",
                 *map(str, indices),
             ],
             env=run_diff.python_emitter_env(src_dir),
@@ -143,16 +181,23 @@ def _emitter_runs(
         for line in proc.stdout.splitlines():
             record = json.loads(line)
             out = Path(out_dir) / f"{record['idx']}.out"
-            text = out.read_text(encoding="utf-8") if out.exists() else ""
-            runs.append((record["idx"], text, run_diff.emission_from_record(record)))
+            recheck = record.get("recheck")
+            runs.append(
+                EmitterRun(
+                    index=record["idx"],
+                    output=out.read_bytes() if out.exists() else b"",
+                    emission=run_diff.emission_from_record(record),
+                    ir_recheck=(
+                        run_diff.emission_from_record(recheck) if recheck else None
+                    ),
+                )
+            )
         return runs
 
 
-def _unexpected_failures(
-    name: str, src_dir: Path, runs: list[tuple[int, str, run_diff.Emission]]
-) -> list[str]:
-    """The configs of ``runs`` (target-ir mode) that failed for any reason but
-    the end of the config list or the builder refusing the config.
+def _unexpected_failures(runs: list[EmitterRun]) -> list[str]:
+    """The configs of ``runs`` that failed for any reason but the end of the
+    config list or the builder refusing the config.
 
     A config that exits non-zero after printing output, or exits zero with
     none, is a failure: its kernels would silently drop out of the comparison.
@@ -160,56 +205,41 @@ def _unexpected_failures(
     raised one of the refusal types (``REFUSAL_ERROR_TYPES``), so a builder
     crashing with, say, an AttributeError is a failure, and only if the ``ir``
     mode, which builds the same kernel and only serializes it, refuses it with
-    the same error; otherwise the target-ir path itself failed."""
+    the same error; otherwise the hip-case path itself failed."""
     failures = []
-    refused: dict[int, str] = {}
-    for index, _, emission in runs:
+    refused: list[tuple[EmitterRun, str]] = []
+    for run in runs:
+        emission = run.emission
         if run_diff.is_end_emission(emission):
             continue
         if emission.returncode == 0 and emission.has_output:
             continue
         if emission.has_output:
             failures.append(
-                f"config {index}: exited {emission.returncode} after printing "
+                f"config {run.index}: exited {emission.returncode} after printing "
                 f"output: {run_diff.last_error_line(emission)}"
             )
         elif emission.returncode == 0:
-            failures.append(f"config {index}: exited 0 without printing a kernel")
+            failures.append(f"config {run.index}: exited 0 without printing a kernel")
         else:
             error = run_diff.last_error_line(emission)
             if error.split(":", 1)[0] in _REFUSAL_TYPE_NAMES:
-                refused[index] = error
+                refused.append((run, error))
             else:
-                failures.append(f"config {index}: failed, not refused: {error}")
-    if refused:
-        for index, _, emission in _emitter_runs(name, src_dir, "ir", list(refused)):
-            ir_error = run_diff.last_error_line(emission)
-            if emission.returncode == 0 or emission.has_output:
-                failures.append(
-                    f"config {index}: failed in target-ir ({refused[index]}) but "
-                    "builds in ir"
-                )
-            elif ir_error != refused[index]:
-                failures.append(
-                    f"config {index}: failed in target-ir ({refused[index]}) and "
-                    f"in ir with another error ({ir_error})"
-                )
-    return failures
-
-
-def _kernels(text: str) -> list[tuple[str, str]]:
-    """Split target-ir output into ``(arch, serialized kernel)`` blocks."""
-    blocks: list[tuple[str, list[str]]] = []
-    for line in text.splitlines(keepends=True):
-        if line.startswith("target "):
-            blocks.append((line.split()[1], []))
-        elif blocks:
-            blocks[-1][1].append(line)
-        else:
-            raise ValueError(
-                f"target-ir output does not start with a target line: {line!r}"
+                failures.append(f"config {run.index}: failed, not refused: {error}")
+    for run, error in refused:
+        recheck = run.ir_recheck
+        assert recheck is not None, f"config {run.index}: the worker did not recheck it"
+        if recheck.returncode == 0 or recheck.has_output:
+            failures.append(
+                f"config {run.index}: failed in hip-case ({error}) but builds in ir"
             )
-    return [(arch, "".join(lines)) for arch, lines in blocks]
+        elif (ir_error := run_diff.last_error_line(recheck)) != error:
+            failures.append(
+                f"config {run.index}: failed in hip-case ({error}) and in ir with "
+                f"another error ({ir_error})"
+            )
+    return failures
 
 
 def _first_difference(python_outcome: str, native_outcome: str) -> str:
@@ -258,8 +288,8 @@ def main():
     elif index == 1:
         raise ValueError("the builder refuses this config")
     elif index == 2:
-        if mode == "target-ir":
-            raise ValueError("the target-ir path broke")
+        if mode == "hip-case":
+            raise ValueError("the hip-case path broke")
         print("kernel")
     elif index == 3:
         print("half a kernel")
@@ -270,6 +300,12 @@ def main():
         raise ValueError(f"refused as {mode}")
     elif index == 6:
         raise AttributeError("the builder broke")
+    elif index == 7:
+        from rocke.tests.hip_identity_cases import require_serialization_round_trip
+
+        if mode == "hip-case":
+            require_serialization_round_trip("seeded", "not a kernel")
+        print("kernel")
     else:
         sys.stderr.write(f"unknown config {index}\\n")
         return 1
@@ -278,33 +314,242 @@ def main():
 
 def test_only_builder_refusals_and_the_end_of_the_list_pass(tmp_path: Path) -> None:
     (tmp_path / "outcomes_emit.py").write_text(_OUTCOME_EMITTER, encoding="utf-8")
-    runs = _emitter_runs("outcomes", tmp_path, "target-ir", list(range(9)))
-    assert [index for index, _, _ in runs] == [0, 1, 2, 3, 4, 5, 6, 7]
-    failures = _unexpected_failures("outcomes", tmp_path, runs)
+    runs = _hip_case_runs("outcomes", tmp_path, list(range(10)))
+    assert [run.index for run in runs] == [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    # Only a config that fails without printing anything is run again in ir,
+    # and the end of the list is not a failure.
+    assert [run.index for run in runs if run.ir_recheck is not None] == [
+        1,
+        2,
+        5,
+        6,
+        7,
+    ]
+    failures = _unexpected_failures(runs)
     assert failures == [
         "config 3: exited 1 after printing output: RuntimeError: failed after printing",
         "config 4: exited 0 without printing a kernel",
         "config 6: failed, not refused: AttributeError: the builder broke",
         (
-            "config 2: failed in target-ir (ValueError: the target-ir path "
+            "config 7: failed, not refused: "
+            "rocke.tests.hip_identity_cases.SerializationRoundTripError: "
+            "require_serialization_round_trip failed - kernel='seeded', the Python "
+            "parser raised ValueError: bad header 'not a kernel'; expected "
+            "'ckdsl.ir <ver>', expected it to read the serialization"
+        ),
+        (
+            "config 2: failed in hip-case (ValueError: the hip-case path "
             "broke) but builds in ir"
         ),
         (
-            "config 5: failed in target-ir (ValueError: refused as target-ir) "
+            "config 5: failed in hip-case (ValueError: refused as hip-case) "
             "and in ir with another error (ValueError: refused as ir)"
         ),
     ]
 
 
+def _store_one_kernel() -> KernelDef:
+    builder = IRBuilder("store_one")
+    out = builder.param("D", PtrType(F32, "global"))
+    builder.global_store(out, builder.thread_id_x(), builder.const_f32(1.0))
+    return builder.kernel
+
+
+def test_a_hip_case_reads_back_as_its_serialization_and_python_outcome() -> None:
+    """The Python outcome an emitter records for the built kernel is the one
+    the Python engine gives its parsed serialization, lowered or refused."""
+    kernel = _store_one_kernel()
+    serialization = serialize(kernel)
+    output = hip_case_text(kernel, "gfx942") + hip_case_text(kernel, "gfx000")
+    lowered, refused = parse_hip_cases(output.encode("utf-8"))
+    assert lowered == HipIdentityCase(
+        "gfx942", serialization, python_hip_outcome(serialization, "gfx942")
+    )
+    assert "void store_one(" in lowered.python_outcome
+    assert refused == HipIdentityCase(
+        "gfx000", serialization, python_hip_outcome(serialization, "gfx000")
+    )
+    assert refused.python_outcome.error_type_name == "KeyError"
+
+
+def test_hip_case_byte_counts_are_of_the_utf8_text() -> None:
+    """Counted in characters, a non-ASCII message would shift where the next
+    case starts."""
+    output = "hip-case gfx942 3 refusal ValueError 6\nir\nnot \u00e9".encode()
+    assert parse_hip_cases(output) == [
+        HipIdentityCase("gfx942", "ir\n", HipRefusal("ValueError", "not \u00e9"))
+    ]
+
+
+_EXPECTED_HEADER = (
+    "expected 'hip-case <arch> <bytes> source <bytes>' or "
+    "'hip-case <arch> <bytes> refusal <error type> <bytes>'"
+)
+
+
+@pytest.mark.parametrize(
+    ("output", "message"),
+    [
+        (
+            b"target gfx942\nkernel",
+            (
+                "parse_hip_cases failed - header='target gfx942' at byte 0, "
+                f"{_EXPECTED_HEADER}"
+            ),
+        ),
+        (
+            b"hip-case gfx942 2 source 1\nirxkernel",
+            (
+                "parse_hip_cases failed - header='kernel' at byte 30, "
+                f"{_EXPECTED_HEADER}"
+            ),
+        ),
+        (
+            b"hip-case gfx942 10 source 5\nshort",
+            (
+                "parse_hip_cases failed - header='hip-case gfx942 10 source 5' at "
+                "byte 0 counts 15 bytes, expected at most the 5 that follow it"
+            ),
+        ),
+        (
+            b"hip-case gfx942 1 source 0\n\xff",
+            (
+                "parse_hip_cases failed - header='hip-case gfx942 1 source 0' at "
+                "byte 0, expected UTF-8 text after it: 'utf-8' codec can't decode "
+                "byte 0xff in position 0: invalid start byte"
+            ),
+        ),
+    ],
+    ids=["not-a-case", "trailing-text", "truncated", "not-utf8"],
+)
+def test_output_that_is_not_hip_cases_is_refused(output: bytes, message: str) -> None:
+    """Output that is not hip-case records fails loudly rather than dropping the
+    kernels it holds from the comparison."""
+    with pytest.raises(ValueError) as error:
+        parse_hip_cases(output)
+    assert str(error.value) == message
+
+
+@pytest.mark.parametrize(
+    ("change", "message"),
+    [
+        (
+            ("{ axis", "{  axis"),
+            (
+                "line 7 reads back as '    %tid_1 : i32 = gpu.thread_id (  ) "
+                "{ axis = s:\"x\" }', expected '    %tid_1 : i32 = gpu.thread_id "
+                '(  ) {  axis = s:"x" }\''
+            ),
+        ),
+        (
+            ("kernel @", "kernel  @"),
+            (
+                "the Python parser raised ValueError: bad kernel line 'kernel  "
+                "@store_one {', expected it to read the serialization"
+            ),
+        ),
+    ],
+    ids=["reads-back-differently", "parser-rejects"],
+)
+def test_a_serialization_that_does_not_round_trip_is_refused(
+    change: tuple[str, str], message: str
+) -> None:
+    """hip_case_text holds every serialization to reading back through the
+    Python parser to the same text: the parser coverage the test had when it
+    parsed each serialization itself."""
+    serialization = serialize(_store_one_kernel())
+    require_serialization_round_trip("store_one", serialization)
+    with pytest.raises(SerializationRoundTripError) as error:
+        require_serialization_round_trip("store_one", serialization.replace(*change, 1))
+    assert str(error.value) == (
+        f"require_serialization_round_trip failed - kernel='store_one', {message}"
+    )
+
+
+@pytest.mark.parametrize("arch", ["gfx 942", ""])
+def test_a_hip_case_needs_a_one_word_arch(arch: str) -> None:
+    """The header is split on whitespace, so an arch with any would be misread."""
+    with pytest.raises(ValueError) as error:
+        hip_case_text(_store_one_kernel(), arch)
+    assert str(error.value) == (
+        f"hip_case_text failed - arch={arch!r}, expected one word with no whitespace"
+    )
+
+
+@dataclasses.dataclass(frozen=True)
+class FamilyCheck:
+    """One family's hip-case run, reduced to what its test asserts, so that its
+    kernels' sources are dropped once the two engines' outcomes are compared.
+
+    ``failures`` are the configs that failed other than by the builder refusing
+    them; ``disagreements`` say, for each kernel whose two outcomes differ,
+    where it is and how they differ; ``python_refusals`` are the Python
+    engine's outcomes, among the ``compared`` kernels, that refuse."""
+
+    emissions: list[run_diff.Emission]
+    failures: list[str]
+    compared: int
+    disagreements: list[str]
+    python_refusals: list[HipRefusal]
+
+
+def _check_family(name: str, src_dir: Path) -> FamilyCheck:
+    """Run ``name``'s emitter in the hip-case mode over every config, lower
+    the kernels of the configs that built them with the C++ engine, and compare
+    each kernel's two outcomes."""
+    runs = _hip_case_runs(name, src_dir, list(range(run_diff.config_limit(name))))
+    emissions = [run.emission for run in runs]
+    if name in NO_KERNEL_FAMILIES or any(map(run_diff.mode_unsupported, emissions)):
+        return FamilyCheck(emissions, [], 0, [], [])
+    failures = _unexpected_failures(runs)
+    cases: list[tuple[str, HipIdentityCase]] = []
+    for run in runs:
+        if run.emission.returncode != 0:
+            continue
+        try:
+            config_cases = parse_hip_cases(run.output)
+        except ValueError as error:
+            failures.append(f"config {run.index}: printed other than hip-case: {error}")
+            continue
+        cases += [
+            (f"{name} config {run.index} kernel {number} ({case.arch})", case)
+            for number, case in enumerate(config_cases)
+        ]
+    native_outcomes = (
+        native_hip_outcomes([(case.serialized_kernel, case.arch) for _, case in cases])
+        if cases
+        else []
+    )
+    return FamilyCheck(
+        emissions=emissions,
+        failures=failures,
+        compared=len(cases),
+        disagreements=[
+            f"{where}: {difference}"
+            for (where, case), native_outcome in zip(cases, native_outcomes)
+            if (difference := _disagreement(case.python_outcome, native_outcome))
+            is not None
+        ],
+        python_refusals=[
+            case.python_outcome
+            for _, case in cases
+            if isinstance(case.python_outcome, HipRefusal)
+        ],
+    )
+
+
 @pytest.fixture(scope="module")
-def target_ir_runs(
+def family_checks(
     request: pytest.FixtureRequest,
-) -> Iterator[dict[str, Future[list[tuple[int, str, run_diff.Emission]]]]]:
-    """Each selected family's target-ir emitter run, started in the order the
-    session runs the family tests, so a test waits only for its own family.
-    Started only where the C++ lowering can run; runs not yet started when
-    the module ends are cancelled. Not meant for pytest-xdist, whose workers
-    would each start every selected family."""
+) -> Iterator[dict[str, Future[FamilyCheck]]]:
+    """Each selected family's check, started in the order the session runs the
+    family tests, so a test waits only for its own family. The checks share one
+    process safely because the ``rocke_engine`` binding holds the GIL: the C++
+    HIP lowerer has mutable globals (``g_smem_registry``, ``g_dispatch``), so a
+    binding that released the GIL would need a lock here. Started only where
+    the C++ lowering can run; checks not yet started when the module ends are
+    cancelled. Not meant for pytest-xdist, whose workers would each start every
+    selected family."""
     skip_without_native_hip_lowering()
     source_dirs = dict(FAMILIES)
     selected = [
@@ -312,16 +557,12 @@ def target_ir_runs(
         for item in request.session.items
         if getattr(item, "function", None) is test_both_engines_emit_the_same_hip_source
     ]
-    pool = ThreadPoolExecutor(max_workers=PREFETCHED_EMITTER_RUNS)
+    pool = ThreadPoolExecutor(
+        max_workers=min(MAX_PREFETCHED_FAMILIES, run_diff.available_cpus())
+    )
     try:
         yield {
-            name: pool.submit(
-                _emitter_runs,
-                name,
-                source_dirs[name],
-                "target-ir",
-                list(range(run_diff.config_limit(name))),
-            )
+            name: pool.submit(_check_family, name, source_dirs[name])
             for name in selected
         }
     finally:
@@ -332,49 +573,32 @@ def target_ir_runs(
     ("name", "src_dir"), FAMILIES, ids=[name for name, _ in FAMILIES]
 )
 def test_both_engines_emit_the_same_hip_source(
-    name: str, src_dir: Path, target_ir_runs
+    name: str, src_dir: Path, family_checks
 ) -> None:
-    runs = target_ir_runs[name].result()
+    check = family_checks[name].result()
     if name in NO_KERNEL_FAMILIES:
-        assert runs and all(
-            run_diff.mode_unsupported(emission) for _, _, emission in runs
+        assert check.emissions and all(
+            map(run_diff.mode_unsupported, check.emissions)
         ), (
             f"{name} is listed as building no kernel "
-            f"({NO_KERNEL_FAMILIES[name]}) but accepted the target-ir mode"
+            f"({NO_KERNEL_FAMILIES[name]}) but accepted the hip-case mode"
         )
         return
     assert not any(
-        run_diff.mode_unsupported(emission) for _, _, emission in runs
-    ), f"{name}_emit.py does not accept the target-ir mode"
-    failures = _unexpected_failures(name, src_dir, runs)
-    assert not failures, (
-        f"{name}: {len(failures)} configs failed other than by the builder "
-        "refusing them:\n" + "\n".join(failures[:20])
+        map(run_diff.mode_unsupported, check.emissions)
+    ), f"{name}_emit.py does not accept the hip-case mode"
+    assert not check.failures, (
+        f"{name}: {len(check.failures)} configs failed other than by the builder "
+        "refusing them:\n" + "\n".join(check.failures[:20])
     )
 
-    kernels = [
-        (f"{name} config {index} kernel {block} ({arch})", ir, arch)
-        for index, text, _ in runs
-        for block, (arch, ir) in enumerate(_kernels(text))
-    ]
-    native_outcomes = native_hip_outcomes([(ir, arch) for _, ir, arch in kernels])
-    disagreements = []
-    python_outcomes = []
-    for (where, ir, arch), native_outcome in zip(kernels, native_outcomes):
-        python_outcome = python_hip_outcome(ir, arch)
-        python_outcomes.append(python_outcome)
-        difference = _disagreement(python_outcome, native_outcome)
-        if difference is not None:
-            disagreements.append(f"{where}: {difference}")
-    compared = len(kernels)
+    compared = check.compared
     assert compared, f"{name}: the emitter built no kernel in any config"
-    assert not disagreements, (
-        f"{len(disagreements)} of {compared} {name} kernels lower to different "
-        "HIP source:\n" + "\n".join(disagreements[:20])
+    assert not check.disagreements, (
+        f"{len(check.disagreements)} of {compared} {name} kernels lower to different "
+        "HIP source:\n" + "\n".join(check.disagreements[:20])
     )
-    refusals = [
-        outcome for outcome in python_outcomes if isinstance(outcome, HipRefusal)
-    ]
+    refusals = check.python_refusals
     lowered = compared - len(refusals)
     if name in FAMILIES_WITHOUT_HIP_LOWERING:
         assert not lowered, (
