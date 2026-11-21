@@ -87,13 +87,16 @@ extern "C" {
  * (16 N-tiles for HD=256/16 * 1) or HD=256 narrow (16 N-tiles * 2 atoms). 64
  * covers any buildable shape. */
 #define ROCKE_GFX942_ATTN2D_MAX_ACCS 64
-/* Online-softmax iter-args: 2*SOFTMAX_STATE_SLOTS (m,l per slot) + ACCS, the
- * K/V buffer slot and two tiles' carried page ids. */
-#define ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS 128
 /* Pages per tile the loop carries page ids for (Python PAGE_PREFETCH bound). */
 #define ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES 16
 /* Per-lane register slots (REGS_PER_LANE): 4 (M=16), 8 (M=32), 16 (32x32). */
 #define ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE 16
+/* Loop carry: m and l per softmax state slot (at most REGS_PER_LANE slots), the
+ * accumulators, the K/V buffer slot and two tiles' carried page ids. Derived from
+ * the bounds above so every spec Python builds fits. */
+#define ROCKE_GFX942_ATTN2D_MAX_ITER_ARGS                                         \
+    (2 * ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE + ROCKE_GFX942_ATTN2D_MAX_ACCS + 1 \
+     + 2 * ROCKE_GFX942_ATTN2D_MAX_PREFETCH_PAGES)
 /* QK / PV K-iters: HD/16 or T/16 on the narrow atom, HD/8 on the 32x32x8 wide
  * atom; HD<=256, T<=128 -> <=32. */
 #define ROCKE_GFX942_ATTN2D_MAX_K_ITERS 32
