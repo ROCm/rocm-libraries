@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <stdexcept>
 
 #include "ck_tile/host.hpp"
 #include "image_to_column.hpp"
@@ -50,6 +51,11 @@ float image_to_column(const image_to_column_traits& traits,
                                        args.conv_filter_dilations,
                                        args.input_left_pads,
                                        args.input_right_pads);
+
+        if(!Kernel::IsSupportedArgument(kargs))
+        {
+            throw std::runtime_error("Wrong! Arguments not supported! Skipping image_to_column!\n");
+        }
 
         const dim3 grids = Kernel::GridSize(
             args.N * args.output_spatial_lengths[0] * args.output_spatial_lengths[1],

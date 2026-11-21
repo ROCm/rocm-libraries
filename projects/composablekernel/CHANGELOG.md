@@ -18,6 +18,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Resolved issues
 
+* Fixed silently wrong columns from CK Tile `ImageToColumn` when a vector read of the image crosses a filter-window row (for example `X * C` not a multiple of the vector size). The new `ImageToColumn::IsSupportedArgument` rejects these arguments with the vector-access checks of the CK `DeviceImageToColumnImpl`, and the `04_img2col` example checks it before launching ([#15883](https://github.com/ROCm/rocm-libraries/issues/15883)).
+
 ### Known issues
 
 ### Upcoming changes

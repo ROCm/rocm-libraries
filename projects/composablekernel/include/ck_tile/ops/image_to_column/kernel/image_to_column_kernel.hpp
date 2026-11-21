@@ -93,6 +93,63 @@ struct ImageToColumn
 
     CK_TILE_HOST static constexpr auto BlockSize() { return Problem::BlockShape::kBlockSize; }
 
+    /// @brief Checks that every vector read of the image stays inside one filter-window row.
+    ///
+    /// The kernel reads the image with vectors of AligmentIn elements along the merged (Y, X, C)
+    /// dimension of the [M, K] view. In memory, a vector only follows that dimension while it
+    /// stays inside one filter-window row, so these are the vector-access conditions of legacy
+    /// CK's DeviceImageToColumnImpl::IsSupportedArgument.
+    ///
+    /// @param kargs The kernel arguments.
+    ///
+    /// @return true if the arguments are supported, false otherwise.
+    CK_TILE_HOST static bool IsSupportedArgument(const Kargs& kargs)
+    {
+        static_assert(NDimSpatial == 2, "Not supported.");
+
+        const auto C           = kargs.C;
+        const auto X           = kargs.filter_spatial_lengths[I1];
+        const auto w_pad_left  = kargs.input_left_pads[I1];
+        const auto w_pad_right = kargs.input_right_pads[I1];
+        const auto dilation_x  = kargs.conv_filter_dilations[I1];
+        const auto stride_x    = kargs.conv_filter_strides[I1];
+        // image_g_n_c_wis_strides is {G, N, C, Hi, Wi}
+        const bool is_c_packed = kargs.image_g_n_c_wis_strides[I2] == 1;
+        const bool is_w_packed = kargs.image_g_n_c_wis_strides[I4] == C;
+
+        const auto reject = [](const char* msg) {
+            if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+            {
+                CK_TILE_ERROR(msg);
+            }
+            return false;
+        };
+
+        // a vector of C needs C to be contiguous
+        if(!is_c_packed && AligmentIn != 1)
+            return reject("ImageToColumn: C must have stride 1 when AligmentIn > 1!");
+        // without packed W, a vector must stay inside one pixel's C
+        if(!is_w_packed && C % AligmentIn != 0)
+            return reject(
+                "ImageToColumn: C must be a multiple of AligmentIn when W is not packed!");
+        // a vector must stay inside one filter-window row (X * C)
+        if(X * C % AligmentIn != 0)
+            return reject("ImageToColumn: X * C must be a multiple of AligmentIn!");
+        // a vector must not straddle the W padding and the image
+        if(w_pad_left * C % AligmentIn != 0 || w_pad_right * C % AligmentIn != 0)
+            return reject("ImageToColumn: W pads * C must be a multiple of AligmentIn!");
+        // with padding and a stride, a vector must stay inside one pixel's C
+        if((w_pad_left != 0 || w_pad_right != 0) && stride_x > 1 && C % AligmentIn != 0)
+            return reject("ImageToColumn: C must be a multiple of AligmentIn with W padding "
+                          "and a W stride > 1!");
+        // with dilation, consecutive window pixels are not adjacent in memory
+        if(dilation_x > 1 && C % AligmentIn != 0)
+            return reject(
+                "ImageToColumn: C must be a multiple of AligmentIn with a W dilation > 1!");
+
+        return true;
+    }
+
     CK_TILE_DEVICE auto MakeImageMKDesc(const Kargs& kargs) const
     {
         static_assert(NDimSpatial == 2, "Not supported.");
