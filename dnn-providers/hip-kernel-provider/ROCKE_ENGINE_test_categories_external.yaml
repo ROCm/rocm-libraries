@@ -25,15 +25,22 @@
 # compiler-option reproducibility gate joins it: it re-measures which -mllvm
 # options the loaded compiler accepts. Both are registered in build-tree and
 # installed-artifact CTest, so developers and provider CI execute the same
-# logical gates against their respective package data. The python-standard
-# category holds Python entries that start at the standard tier. Thus the quick
-# tier does not run them. An example is rocke_ctest_shard_pytest, the tests of
-# the rocke.tests.ctest_shard plugin. These tests start many child pytest and
-# CTest runs. The tier rule gives a category whose name is not a tier only its
-# own name as a label. Thus python-standard lists the standard, comprehensive
-# and full labels itself. The pytest-scaling runner and counted-sync entries
-# start at comprehensive so they add no work to quick/standard pre-merge and
-# post-merge runs.
+# logical gates against their respective package data. The pytest-scaling
+# runner and counted-sync entries start at comprehensive so they add no work to
+# quick/standard pre-merge and post-merge runs.
+#
+# The quick tier is the smoke tier. CI runs it as one shard, so every entry in
+# it runs whole there, and the tier's rocKE share has a 300-second budget. It
+# holds the entries that cost seconds and show at a glance that an install
+# works: the native C++ tests, the Python import smoke, the golden checks, the
+# oracle-free GPU checks and the pinned GPU reference lanes with their
+# reference contracts. The Python unit, IR and GPU numeric suites start at the
+# standard tier instead (the python-standard and gpu-standard categories),
+# where CI splits their tests across its shards. Before an entry joins the
+# quick category, check that the tier stays inside its budget on the slowest
+# CI runner. The tier rule gives a category whose name is not a tier only its
+# own name as a label, so python-standard and gpu-standard list the standard,
+# comprehensive and full labels themselves.
 #
 # The pinned GPU reference entries are regex patterns, unlike most
 # entries here: rocke/platform/CMakeLists.txt registers
@@ -57,8 +64,8 @@
 # a new group is labeled without an edit here. The rocke_pytest_ prefix is
 # reserved for those entries.
 # rocke/platform/tests/test_engine_linkage.py checks that every registered
-# part gets the same labels, including the quick, standard and ffm-quick
-# tiers.
+# part gets the same labels, including the standard and ffm-quick tiers, and
+# not the quick tier.
 #
 # The comprehensive tier holds tests for scheduled CI only: its entries get
 # only the comprehensive and full labels, so a `ctest -L '^quick$'` or
@@ -158,23 +165,6 @@ test_categories:
       - "rocke_hip_source_identity"
       - "rocke_hip_lowering_parity"
       - "rocke_library_dsa_pytest"
-      - "rocke_library_conv_pytest"
-      - "rocke_library_conv_ir_pytest"
-      - "rocke_library_conv_tf32_pytest"
-      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
-      # parser ignores a listed name that has no registered test.
-      - "rocke_library_conv_tf32_lowering_pytest"
-      - "rocke_library_attention_cpu_pytest"
-      - "rocke_library_attention_cache_key_pytest"
-      - "rocke_library_attention_pytest"
-      - "rocke_library_attention_gpu_pytest"
-      - "rocke_library_attention_bias_gpu_pytest"
-      - "rocke_library_mla_pytest"
-      - "rocke_library_sdpa_pytest"
-      - "rocke_pytest_[a-z0-9_]+"
-      - "rocke_tiling_pytest"
-      - "rocke_library_gpu_pytest"
-      - "rocke_tiling_gpu_pytest"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
@@ -304,11 +294,23 @@ test_categories:
     description: "rocKE Python checks that start at the standard tier, not quick"
     test_patterns:
       - "rocke_ctest_shard_pytest"
+      - "rocke_pytest_[a-z0-9_]+"
+      - "rocke_tiling_pytest"
+      - "rocke_library_conv_pytest"
+      - "rocke_library_conv_ir_pytest"
+      - "rocke_library_conv_tf32_pytest"
+      # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
+      # parser ignores a listed name that has no registered test.
+      - "rocke_library_conv_tf32_lowering_pytest"
+      - "rocke_library_conv_fwd_aot_packaging_pytest"
+      - "rocke_library_attention_cpu_pytest"
+      - "rocke_library_attention_cache_key_pytest"
+      - "rocke_library_attention_pytest"
+      - "rocke_library_mla_pytest"
+      - "rocke_library_sdpa_pytest"
       # Not registered on Windows (see rocke/library/tests/ctest_lists.cmake); the
       # parser ignores a listed name that has no registered test.
       - "rocke_library_gdn_pytest"
-      # Its host tests are too slow for the single-shard quick tier.
-      - "rocke_library_conv_fwd_aot_packaging_pytest"
       # Compiles kernels to check the backend's access widths: a performance check.
       - "rocke_tiling_backend_width_pytest"
     labels:
@@ -316,6 +318,22 @@ test_categories:
       - "comprehensive"
       - "full"
       - "host"
+      - "python"
+      - "ckc"
+      - "hip-kernel-provider"
+
+  gpu-standard:
+    description: "rocKE GPU numeric checks that start at the standard tier, not quick"
+    test_patterns:
+      - "rocke_tiling_gpu_pytest"
+      - "rocke_library_gpu_pytest"
+      - "rocke_library_attention_gpu_pytest"
+      - "rocke_library_attention_bias_gpu_pytest"
+    labels:
+      - "standard"
+      - "comprehensive"
+      - "full"
+      - "gpu"
       - "python"
       - "ckc"
       - "hip-kernel-provider"

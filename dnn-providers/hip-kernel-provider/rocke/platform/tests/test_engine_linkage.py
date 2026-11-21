@@ -765,7 +765,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
         properties = {prop["name"]: prop["value"] for prop in part["properties"]}
         # One label string, as the single entry had: the generated CTest text
         # escapes the semicolons.
-        assert properties["LABELS"] == ["ckc;python;quick"], name
+        assert properties["LABELS"] == ["ckc;python;standard"], name
         assert properties["TIMEOUT"] == resource_class_timeouts()["TOOLCHAIN"], name
 
     other_paths, other_ignored = split_ignored_files(selection_by_part.pop("other"))
@@ -841,17 +841,19 @@ def test_installed_platform_pytest_parts_partition_the_suite(
 def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     """TheRock CI selects provider tests by tier label. The provider categories
     tier the parts by their name prefix, so every part, and a part a new CMake
-    group would add, gets the same labels, among them the quick, standard and
-    ffm-quick tiers that the single entry ran in. The tiling package's entries
-    run tests outside tests/, so they are not parts and do not take their
-    prefix; the categories tier each by its own name: rocke_tiling_pytest like
-    the parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
+    group would add, gets the same labels, among them the standard and
+    ffm-quick tiers that the single entry ran in. They are not in the quick
+    tier: CI runs quick as one shard, where a pytest suite runs whole, so quick
+    keeps only entries that cost seconds. The tiling package's entries run
+    tests outside tests/, so they are not parts and do not take their prefix;
+    the categories tier each by its own name: rocke_tiling_pytest like the
+    parts, rocke_tiling_gpu_pytest like the library's GPU entry, and
     rocke_tiling_visualization_pytest in the comprehensive tier only, which
     pull-request and push CI (quick and standard) do not select.
     rocke_ctest_shard_pytest, rocke_tiling_backend_width_pytest,
-    rocke_library_gdn_pytest and rocke_library_conv_fwd_aot_packaging_pytest run
-    in the standard, comprehensive and full tiers and not in the quick tier.
-    Another category keeps rocke_library_gdn_pytest and
+    rocke_library_gdn_pytest, rocke_library_conv_fwd_aot_packaging_pytest and
+    the GPU entries run in the standard, comprehensive and full tiers and not in
+    the quick tier. Another category keeps rocke_library_gdn_pytest and
     rocke_library_conv_fwd_aot_packaging_pytest in the ffm-quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
     names = [test["name"] for test in list_installed_ctests(ctest_dir)]
@@ -880,7 +882,8 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         tmp_path,
     )
     expected = labels.get(parts[0], set())
-    assert {"quick", "standard", "ffm-quick"} <= expected, expected
+    assert {"standard", "ffm-quick"} <= expected, expected
+    assert "quick" not in expected, expected
     for name in [*parts, future_part, "rocke_tiling_pytest"]:
         assert labels.get(name) == expected, name
     library_gpu_labels = labels.get("rocke_library_gpu_pytest")
@@ -892,6 +895,8 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         "rocke_tiling_backend_width_pytest",
         "rocke_library_gdn_pytest",
         "rocke_library_conv_fwd_aot_packaging_pytest",
+        "rocke_library_gpu_pytest",
+        "rocke_tiling_gpu_pytest",
     ]
     for name in standard_entries:
         standard_labels = labels.get(name, set())
@@ -906,6 +911,33 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
         "rocke_library_conv_fwd_aot_packaging_pytest",
     ]:
         assert "ffm-quick" in labels.get(name, set()), name
+
+
+@requires_cmake
+def test_every_installed_entry_runs_in_a_ci_tier(tmp_path):
+    """TheRock CI selects provider tests with an anchored tier label, so an
+    installed entry that no provider category labels never runs in CI: the
+    labels its own registration bakes in are one escaped string, which no
+    anchored label matches. Every installed entry gets the comprehensive and
+    full tiers from a category, and every quick entry also the standard tier,
+    so moving an entry out of quick keeps it in standard CI."""
+    _, ctest_dir = configure_installed_ctest(
+        tmp_path, "-DROCKE_INSTALL_PROVIDER_CTEST_SUBDIR=hip_kernel_provider"
+    )
+    names = [test["name"] for test in list_installed_ctests(ctest_dir)]
+    labels = provider_category_labels(names, tmp_path)
+    untiered = sorted(
+        name
+        for name in names
+        if not {"comprehensive", "full"} <= labels.get(name, set())
+    )
+    assert not untiered, untiered
+    quick_only = sorted(
+        name
+        for name in names
+        if "quick" in labels[name] and "standard" not in labels[name]
+    )
+    assert not quick_only, quick_only
 
 
 # (exported target, installed header, extern "C" symbol it declares). The

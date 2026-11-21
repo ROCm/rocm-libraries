@@ -185,7 +185,7 @@ function(rocke_platform_pytest_entry out_var part)
   string(CONCAT _entry
          "add_test(${_test_name} ${_ROCKE_INSTALLED_PYTEST}${_pytest_arguments} -m \"not integration\" -v -rs --timeout=60)\n"
          "set_tests_properties(${_test_name} PROPERTIES\n"
-         "  LABELS \"ckc\\;python\\;quick\"\n"
+         "  LABELS \"ckc\\;python\\;standard\"\n"
          "  ENVIRONMENT \"\${_rocke_platform_pytest_environment}\"\n"
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
   set(${out_var} "${_entry}" PARENT_SCOPE)
@@ -927,7 +927,7 @@ if(ROCKE_INSTALL_TESTS)
              "list(APPEND _rocke_tiling_pytest_environment \${_rocke_compiler_tool_environment})\n"
              "add_test(rocke_tiling_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_TESTS}\" --ignore \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"
              "set_tests_properties(rocke_tiling_pytest PROPERTIES\n"
-             "  LABELS \"ckc\\;python\\;quick\"\n"
+             "  LABELS \"ckc\\;python\\;standard\"\n"
              "  ENVIRONMENT \"\${_rocke_tiling_pytest_environment}\"\n"
              "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n"
              "add_test(rocke_tiling_visualization_pytest ${_rocke_tiling_pytest_launcher} \"${_ROCKE_TILING_VISUALIZATION_TESTS}\" ${_rocke_tiling_pytest_options} -m \"not gpu\")\n"

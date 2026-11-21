@@ -96,7 +96,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
         "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -137,7 +137,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_ir_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_IR_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_ir_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -164,9 +164,9 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
 # test_conv_direct_grouped_backend_parity.py runs in
 # rocke_library_conv_pytest, not here. Their own entries rather than part
 # of rocke_library_conv_pytest: the build-and-lower matrices take tens of
-# seconds, past that entry's per-test timeout. Both run in the quick and
+# seconds, past that entry's per-test timeout. Both run in the standard and
 # ffm-quick tiers (ROCKE_ENGINE_test_categories_external.yaml), and both
-# bake in the quick label so `ctest -L quick` finds them without that
+# bake in the standard label so `ctest -L standard` finds them without that
 # file's labelling.
 set(_ROCKE_LIBRARY_CONV_TF32_TEST_RELPATHS
     "tests/library/tests/test_conv_fwd_tf32.py"
@@ -192,7 +192,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_conv_tf32_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and not (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_conv_tf32_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;conv\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 if(WIN32)
@@ -202,7 +202,7 @@ else()
          "add_test(rocke_library_conv_tf32_lowering_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_CONV_TF32_TESTS} -k \"not Gpu and (${_ROCKE_LIBRARY_CONV_TF32_LOWERING_K})\" -v -rs --timeout=120)\n")
   string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
          "set_tests_properties(rocke_library_conv_tf32_lowering_pytest PROPERTIES\n"
-         "  LABELS \"ckc\\;python\\;conv\\;host\\;quick\"\n"
+         "  LABELS \"ckc\\;python\\;conv\\;host\\;standard\"\n"
          "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
          "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 endif()
@@ -293,7 +293,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_cpu_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_ATTENTION_CPU_TESTS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cpu_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -312,15 +312,14 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
 # Tiled attention cache-key contract (no GPU). The targeted share/split
-# checks take seconds and run in the quick tier. The invariant sweep compares
-# key equality with build equality across every selector threshold for each
-# tiled arch, so each sweep case runs for tens of seconds: it is a separate
-# standard-tier entry with its own budget.
+# checks take seconds. The invariant sweep compares key equality with build
+# equality across every selector threshold for each tiled arch, so each sweep
+# case runs for tens of seconds: it is a separate entry with its own budget.
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_attention_cache_key_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_attention_tiled_cache_key.py\" -k \"not test_key_matches_build_identity\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_cache_key_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;attention\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
@@ -422,7 +421,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_library_mla_pytest ${_ROCKE_INSTALLED_PYTEST}${_ROCKE_LIBRARY_MLA_TESTS} -v -rs --timeout=120)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_mla_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;mla\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;mla\\;host\\;standard\"\n"
        "  ENVIRONMENT \"\${_rocke_library_mla_pytest_environment}\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
 
@@ -456,7 +455,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        " -v -rs --timeout=60)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_attention_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;attention\\;dispatch\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
@@ -480,7 +479,7 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "${_ROCKE_SDPA_PYTEST_ARGS} -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "set_tests_properties(rocke_library_sdpa_pytest PROPERTIES\n"
-       "  LABELS \"ckc\\;python\\;sdpa\\;host\\;quick\"\n"
+       "  LABELS \"ckc\\;python\\;sdpa\\;host\\;standard\"\n"
        "  ENVIRONMENT \"PYTHONPATH=${ROCKE_TEST_CTEST_REL}tests/library\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
 
