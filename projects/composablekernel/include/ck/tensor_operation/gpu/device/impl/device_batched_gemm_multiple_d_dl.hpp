@@ -3,7 +3,9 @@
 
 #pragma once
 
+#include <cstdint>
 #include <iostream>
+#include <limits>
 #include <sstream>
 
 #include "ck/utility/common_header.hpp"
@@ -70,9 +72,9 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch,
         const Block2CTileMap block_2_ctile_map)
 {
-#if defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx94__) || \
-    defined(__gfx101__) || defined(__gfx103__) || defined(__gfx11__) || defined(__gfx12__) ||  \
-    defined(__gfx117__)
+#if defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__) || defined(__gfx90c__) || \
+    defined(__gfx94__) || defined(__gfx101__) || defined(__gfx103__) || defined(__gfx11__) ||   \
+    defined(__gfx12__) || defined(__gfx117__)
 
     const index_t num_blocks_per_batch =
         __builtin_amdgcn_readfirstlane(get_grid_size() / batch_count);
@@ -451,6 +453,9 @@ struct DeviceBatchedGemmMultipleD_Dl : public DeviceBatchedGemmMultiD<ALayout,
               p_e_grid_{static_cast<EDataType*>(p_e_grid)},
               K_(K),
               Batch_(Batch),
+              StrideA_(StrideA),
+              StrideB_(StrideB),
+              StrideE_(StrideE),
               a_grid_desc_k0_m0_m1_k1_{},
               b_grid_desc_k0_n0_n1_k1_{},
               e_grid_desc_m0_m10_m11_n0_n10_n11_{},
@@ -506,6 +511,9 @@ struct DeviceBatchedGemmMultipleD_Dl : public DeviceBatchedGemmMultiD<ALayout,
 
         // Batch
         index_t Batch_;
+        index_t StrideA_;
+        index_t StrideB_;
+        index_t StrideE_;
 
         AGridDesc_K0_M_K1 a_grid_desc_k0_m_k1_;
         BGridDesc_K0_N_K1 b_grid_desc_k0_n_k1_;
@@ -648,7 +656,91 @@ struct DeviceBatchedGemmMultipleD_Dl : public DeviceBatchedGemmMultiD<ALayout,
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(ck::get_device_name() == "gfx906" || ck::is_xdl_supported() ||
+        const bool is_gfx90c = ck::get_device_name() == "gfx90c";
+        if(is_gfx90c)
+        {
+            // Bound gfx90c admission to this existing 64x64 FP16 instance.
+            // In particular, do not admit fused D tensors, other epilogues or tunings.
+            using Row            = tensor_layout::gemm::RowMajor;
+            using Col            = tensor_layout::gemm::ColumnMajor;
+            using PassThrough    = ck::tensor_operation::element_wise::PassThrough;
+            using Gfx90cInstance = DeviceBatchedGemmMultipleD_Dl<Col,
+                                                                 Row,
+                                                                 Tuple<>,
+                                                                 Row,
+                                                                 half_t,
+                                                                 half_t,
+                                                                 float,
+                                                                 Tuple<>,
+                                                                 half_t,
+                                                                 PassThrough,
+                                                                 PassThrough,
+                                                                 PassThrough,
+                                                                 GemmSpecialization::Default,
+                                                                 64,
+                                                                 64,
+                                                                 64,
+                                                                 8,
+                                                                 2,
+                                                                 4,
+                                                                 4,
+                                                                 1,
+                                                                 Sequence<4, 2>,
+                                                                 Sequence<4, 2>,
+                                                                 Sequence<2, 1, 4, 2>,
+                                                                 Sequence<4, 1, 16, 1>,
+                                                                 Sequence<0, 3, 1, 2>,
+                                                                 Sequence<0, 3, 1, 2>,
+                                                                 Sequence<1, 1, 4, 1>,
+                                                                 Sequence<0, 3, 1, 2>,
+                                                                 Sequence<1, 1, 4, 2>,
+                                                                 Sequence<2, 1, 4, 2>,
+                                                                 Sequence<4, 1, 16, 1>,
+                                                                 Sequence<0, 3, 1, 2>,
+                                                                 Sequence<0, 3, 1, 2>,
+                                                                 Sequence<1, 1, 4, 1>,
+                                                                 Sequence<0, 3, 1, 2>,
+                                                                 Sequence<1, 1, 4, 2>,
+                                                                 Sequence<0, 1, 2, 3, 4, 5>,
+                                                                 5,
+                                                                 4>;
+            if constexpr(!is_same_v<DeviceOp, Gfx90cInstance>)
+            {
+                return false;
+            }
+
+            const auto M              = arg.a_grid_desc_k0_m_k1_.GetLength(I1);
+            const auto N              = arg.b_grid_desc_k0_n_k1_.GetLength(I1);
+            const auto batch_stride_a = arg.compute_ptr_offset_of_batch_.GetAPtrOffset(1);
+            const auto batch_stride_b = arg.compute_ptr_offset_of_batch_.GetBPtrOffset(1);
+            const auto batch_stride_e = arg.compute_ptr_offset_of_batch_.GetEPtrOffset(1);
+            // Gridwise validity does not yet check transfer alignment or overlapping
+            // rows/batches. Bound the new path to positive, aligned, disjoint matrices.
+            if(M <= 0 || N <= 0 || arg.K_ <= 0 || arg.Batch_ <= 0 || arg.StrideA_ < M ||
+               arg.StrideB_ < N || arg.StrideE_ < N || arg.StrideA_ % 4 != 0 ||
+               arg.StrideB_ % 4 != 0 || arg.StrideE_ % 4 != 0 ||
+               batch_stride_a < static_cast<long_index_t>(arg.StrideA_) * arg.K_ ||
+               batch_stride_b < static_cast<long_index_t>(arg.StrideB_) * arg.K_ ||
+               batch_stride_e < static_cast<long_index_t>(arg.StrideE_) * M ||
+               batch_stride_a % 4 != 0 || batch_stride_b % 4 != 0 || batch_stride_e % 4 != 0 ||
+               reinterpret_cast<std::uintptr_t>(arg.p_a_grid_) % 8 != 0 ||
+               reinterpret_cast<std::uintptr_t>(arg.p_b_grid_) % 8 != 0 ||
+               reinterpret_cast<std::uintptr_t>(arg.p_e_grid_) % 8 != 0)
+            {
+                return false;
+            }
+
+            // The kernel broadcasts each batch offset through a signed 32-bit lane intrinsic.
+            const auto last_batch = static_cast<long_index_t>(arg.Batch_) - 1;
+            if(last_batch * batch_stride_a > std::numeric_limits<index_t>::max() ||
+               last_batch * batch_stride_b > std::numeric_limits<index_t>::max() ||
+               last_batch * batch_stride_e > std::numeric_limits<index_t>::max())
+            {
+                return false;
+            }
+        }
+
+        if(is_gfx90c || ck::get_device_name() == "gfx906" || ck::is_xdl_supported() ||
            ck::is_gfx103_supported() || ck::is_gfx11_supported() || ck::is_gfx117_supported() ||
            ck::is_gfx12_supported())
         {
