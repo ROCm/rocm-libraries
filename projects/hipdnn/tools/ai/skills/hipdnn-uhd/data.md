@@ -131,6 +131,20 @@ segment is the selector revision with `/` as `-`.
   Every model trained from the set holds those graphs out (`uhd_gen generate
   --eval-benchmarks`; several sets: `eval_slice.py holdout <slices> --out
   eval_benchmarks.json`), and is scored and validated on them.
+- **Benchmark ids move with the graph schema.** A graph's `benchmark` id (in `manifest.json`,
+  `manifest.csv`, slices, collections and datasets) is the content key `hipdnn_bench`
+  computes over the deserialized graph, not a hash of the file, so a build whose graph schema
+  grew gives the same files other ids. Regime labels are unaffected: collection joins
+  `manifest.csv` to graphs by file and warns when the ids differ. A slice is not: once a
+  collection's ids differ from the set's (training says none, or only some, of the
+  `--eval-benchmarks` graphs were measured), rekey the slice against the collections that
+  will train, `eval_slice.py rekey <set>/eval_slice.json ... --collection <collection> ...
+  --out-dir <dir>`, and use the rekeyed slices (written to `<dir>/<set>/eval_slice.json`)
+  for `holdout`, `sample` and `rows`. It finds each slice graph in the collections'
+  `collection_manifest.json` by file. A graph a collection named but did not measure (it
+  failed there) keeps its old id, which no rows carry, so it is not held out; `rekey`
+  prints their count. It refuses a graph no collection names, or a collection made before
+  collections recorded ids.
 - **Closed shape set.** An engine `projects/hipdnn/tools/corpus_gen/operations/engines.json`
   lists with `coverage: pack` serves exactly its pack: corpus_gen takes the pack
   (`--kdp-root`), there is no slice, and the model trains on every shape and is scored by
