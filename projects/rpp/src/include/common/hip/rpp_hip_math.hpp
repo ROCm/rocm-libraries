@@ -26,16 +26,96 @@ SOFTWARE.
 #define RPP_HIP_MATH_HPP
 #define RPP_HIP_MATH_DEPENDENCIES
 
+#include <limits>
+#include <type_traits>
+
 // Arithmetic operations: Add (+), Subtract (-), Multiply (*)
 enum class ArithmeticOp { Add, Subtract, Multiply };
 
-template <ArithmeticOp Op>
-struct Arithmetic {
-    template <typename T>
-    __device__ __forceinline__ static T op(T a, T b) {
+// Rounds to the nearest integer and saturates to T's representable range. Mirrors
+// saturate_arithmetic_result in tensor_binary_operations.cpp (HOST) -- Add/Subtract/Multiply of
+// integers is always exact, so nearbyint only guards against the double accumulator losing
+// precision on the largest (uint32) products; it is a no-op for every other lane type, and the
+// clamp below still lands on the correct side even when it isn't.
+template <typename T>
+__device__ __forceinline__ T rpp_hip_saturate_scalar(double value) {
+    constexpr double lo = static_cast<double>(std::numeric_limits<T>::lowest());
+    constexpr double hi = static_cast<double>(std::numeric_limits<T>::max());
+    value = nearbyint(value);
+    if (value < lo) return static_cast<T>(lo);
+    if (value > hi) return static_cast<T>(hi);
+    return static_cast<T>(value);
+}
+
+// Applies Op to a single scalar lane. Integer lanes (uchar/schar/ushort/short/uint/int) are
+// computed in a double accumulator and saturated instead of wrapping; float is plain, unclamped
+// arithmetic. Called both directly -- T is a scalar type in the tail/remainder loops of
+// tensor_binary_operations.cpp's *_hip_tensor kernels -- and per-component from the vector-4
+// overloads of Arithmetic<Op>::op below (T is then the scalar element of uchar4/char4/ushort4/
+// short4/uint4/int4).
+template <ArithmeticOp Op, typename T>
+__device__ __forceinline__ T rpp_hip_arithmetic_scalar_op(T a, T b) {
+    if constexpr (std::is_integral_v<T>) {
+        double av = static_cast<double>(a);
+        double bv = static_cast<double>(b);
+        double result;
+        if constexpr (Op == ArithmeticOp::Add) result = av + bv;
+        if constexpr (Op == ArithmeticOp::Subtract) result = av - bv;
+        if constexpr (Op == ArithmeticOp::Multiply) result = av * bv;
+        return rpp_hip_saturate_scalar<T>(result);
+    } else {
         if constexpr (Op == ArithmeticOp::Add) return a + b;
         if constexpr (Op == ArithmeticOp::Subtract) return a - b;
         if constexpr (Op == ArithmeticOp::Multiply) return a * b;
+    }
+}
+
+template <ArithmeticOp Op>
+struct Arithmetic {
+    // Scalar overload: uchar, schar, ushort, short, uint, int (saturating) and float (plain).
+    // Used directly by the tail/remainder loops in tensor_binary_operations.cpp, and this is
+    // also what float4 resolves to below since it has no dedicated vector-4 overload here.
+    template <typename T>
+    __device__ __forceinline__ static T op(T a, T b) {
+        return rpp_hip_arithmetic_scalar_op<Op>(a, b);
+    }
+
+    // Vector-4 overloads: uchar4/char4/ushort4/short4/uint4/int4, used by the vectorized 8-wide
+    // path (rpp_hip_math_add8/subtract8/multiply8). Each lane saturates independently via the
+    // scalar helper above instead of letting the narrower vector-type '+'/'-'/'*' wrap. A
+    // non-template overload is always preferred over the generic template above for an exact
+    // argument-type match, so these take priority when T is one of these vector types; float4
+    // has no such override, so it correctly falls through to the plain, unclamped scalar
+    // template instantiated with T = float4 (HIP vector types support component-wise '+'/'-'/'*').
+    __device__ __forceinline__ static uchar4 op(uchar4 a, uchar4 b) {
+        return make_uchar4(
+            rpp_hip_arithmetic_scalar_op<Op>(a.x, b.x), rpp_hip_arithmetic_scalar_op<Op>(a.y, b.y),
+            rpp_hip_arithmetic_scalar_op<Op>(a.z, b.z), rpp_hip_arithmetic_scalar_op<Op>(a.w, b.w));
+    }
+    __device__ __forceinline__ static char4 op(char4 a, char4 b) {
+        return make_char4(
+            rpp_hip_arithmetic_scalar_op<Op>(a.x, b.x), rpp_hip_arithmetic_scalar_op<Op>(a.y, b.y),
+            rpp_hip_arithmetic_scalar_op<Op>(a.z, b.z), rpp_hip_arithmetic_scalar_op<Op>(a.w, b.w));
+    }
+    __device__ __forceinline__ static ushort4 op(ushort4 a, ushort4 b) {
+        return make_ushort4(
+            rpp_hip_arithmetic_scalar_op<Op>(a.x, b.x), rpp_hip_arithmetic_scalar_op<Op>(a.y, b.y),
+            rpp_hip_arithmetic_scalar_op<Op>(a.z, b.z), rpp_hip_arithmetic_scalar_op<Op>(a.w, b.w));
+    }
+    __device__ __forceinline__ static short4 op(short4 a, short4 b) {
+        return make_short4(
+            rpp_hip_arithmetic_scalar_op<Op>(a.x, b.x), rpp_hip_arithmetic_scalar_op<Op>(a.y, b.y),
+            rpp_hip_arithmetic_scalar_op<Op>(a.z, b.z), rpp_hip_arithmetic_scalar_op<Op>(a.w, b.w));
+    }
+    __device__ __forceinline__ static int4 op(int4 a, int4 b) {
+        return make_int4(
+            rpp_hip_arithmetic_scalar_op<Op>(a.x, b.x), rpp_hip_arithmetic_scalar_op<Op>(a.y, b.y),
+            rpp_hip_arithmetic_scalar_op<Op>(a.z, b.z), rpp_hip_arithmetic_scalar_op<Op>(a.w, b.w));
+    }
+    __device__ __forceinline__ static uint4 op(uint4 a, uint4 b) {
+        return make_uint4(
+            rpp_hip_arithmetic_scalar_op<Op>(a.x, b.x), rpp_hip_arithmetic_scalar_op<Op>(a.y, b.y),
+            rpp_hip_arithmetic_scalar_op<Op>(a.z, b.z), rpp_hip_arithmetic_scalar_op<Op>(a.w, b.w));
     }
 };
 
