@@ -23,6 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
+#include "hipBuffer.hpp"
 #include "hipblaslt/hipblaslt-ext.hpp"
 #include "hipblaslt_arguments.hpp"
 #include "hipblaslt_data.hpp"
@@ -864,6 +865,21 @@ namespace
         ScopedVariable limit("HIPBLASLT_CLIENT_HOST_MEMORY_LIMIT", "64M");
         ScopedVariable fail("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", "1");
         EXPECT_FATAL_FAILURE(run_short_unit_check_case(), MEMORY_SHORTAGE_STRING "this case needs");
+    }
+
+    // A pinned host allocation far beyond any host, checked as a test checks its buffers after the
+    // memory preflight let its case run.
+    void check_impossible_host_allocation()
+    {
+        HipHostBuffer impossible(HIP_R_8I, size_t(1) << 60);
+        CHECK_HOST_ALLOCATION(host_allocation_failure(impossible));
+    }
+
+    TEST(MatmulMemory_pre_checkin, failed_allocation_fails_a_pre_checkin_test_by_default)
+    {
+        ScopedVariable unset("HIPBLASLT_TEST_FAIL_ON_MEMORY_SKIP", nullptr);
+        EXPECT_FATAL_FAILURE(check_impossible_host_allocation(),
+                             MEMORY_SHORTAGE_STRING "could not allocate");
     }
 
     // A pointer-array f16 GEMM whose batches start at the given element offsets, as in the
