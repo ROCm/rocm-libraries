@@ -2,22 +2,27 @@
 // SPDX-License-Identifier: MIT
 
 // Regression test: runtime-compiled MIOpen kernels must stay self-contained
-// when the runtime compiler cannot reach a host C++ standard library (the
-// AMD Windows ROCm wheels compile HIPRTC without one; kernels then failed
-// with "'type_traits' file not found", see miopen_type_traits.hpp). An
+// when the host C++ standard library is unusable by the runtime compiler:
+// either unreachable (the AMD Windows ROCm wheels compile HIPRTC without
+// one; kernels then failed with "'type_traits' file not found", see
+// miopen_type_traits.hpp) or reachable but unparseable by the device
+// compiler (libstdc++ 12 headers mixed with GCC 13's bits/c++config.h). An
 // inline kernel using the STL-like parts added for that case must compile,
-// launch and produce correct values while the host STL is unreachable.
+// launch and produce correct values without the host STL.
 // A unique per-run option keeps the options-keyed kernel binary cache from
 // satisfying any compile below.
 
 #include <gtest/gtest.h>
 
+#include <miopen/config.h>
 #include <miopen/handle.hpp>
 
 #include "get_handle.hpp"
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -34,8 +39,8 @@ const char* kTrivialKernel = "#ifndef MIOPEN_HIP_RUNTIME_COMPILE\n"
                              "#endif\n"
                              "extern \"C\" __global__ void gtest_rtc_trivial() {}\n";
 
-// Fails to compile (via #error) exactly when any of the standard-library
-// headers the self-contained fallbacks gate on is reachable.
+// Fails to compile (via #error) exactly when any host standard-library
+// header is reachable.
 const char* kStlProbeKernel = "#ifndef MIOPEN_HIP_RUNTIME_COMPILE\n"
                               "#include <hip/hip_runtime.h>\n"
                               "#endif\n"
@@ -94,6 +99,11 @@ std::string NonceOption()
     return "-DMIOPEN_GTEST_RTC_NONCE=" + std::to_string(stamp) + "_" + std::to_string(seq++);
 }
 
+// Real host STL headers placed before the kernel headers.
+const std::string kPreincludeHostStl = "#include <type_traits>\n"
+                                       "#include <utility>\n"
+                                       "#include <initializer_list>\n";
+
 // Compile `src` through the production runtime-compilation path. AddKernel
 // compiles, loads the module and resolves the kernel symbol eagerly.
 bool Compiles(miopen::Handle& h,
@@ -125,7 +135,9 @@ bool Compiles(miopen::Handle& h,
 // Launch the inline kernel and check the values it writes: the layout
 // fields verify real initializer_list lowering, the forwarded values verify
 // std::forward for an lvalue and an rvalue.
-void RunSelfContainedKernel(miopen::Handle& h, const std::string& params)
+void RunSelfContainedKernel(miopen::Handle& h,
+                            const std::string& params,
+                            const std::string& preamble = "")
 {
     std::vector<uint64_t> out;
     try
@@ -139,7 +151,7 @@ void RunSelfContainedKernel(miopen::Handle& h, const std::string& params)
                     {1, 1, 1},
                     params + " " + NonceOption(),
                     0,
-                    kSelfContainedKernel)(out_dev.get());
+                    preamble + kSelfContainedKernel)(out_dev.get());
         out = h.Read<uint64_t>(out_dev, 4);
     }
     catch(const std::exception&)
@@ -154,7 +166,93 @@ void RunSelfContainedKernel(miopen::Handle& h, const std::string& params)
     EXPECT_EQ(out[3], 11u) << "forwarded rvalue";
 }
 
+// A directory whose <type_traits>, <utility> and <initializer_list> fail to
+// compile, standing in for a host standard library the device compiler cannot
+// parse (libstdc++ 12 headers mixed with GCC 13's bits/c++config.h failed
+// inside <type_traits>). Searched first via -isystem, so any kernel
+// header that still reaches the host STL fails the compile.
+class BrokenHostStlDir
+{
+public:
+    BrokenHostStlDir() : path_(MakePath())
+    {
+        std::filesystem::create_directories(path_);
+        for(const char* header : {"type_traits", "utility", "initializer_list"})
+            std::ofstream(path_ / header)
+                << "#error \"runtime-compiled kernel reached the host STL\"\n";
+    }
+    ~BrokenHostStlDir()
+    {
+        std::error_code ec;
+        std::filesystem::remove_all(path_, ec);
+    }
+    BrokenHostStlDir(const BrokenHostStlDir&)            = delete;
+    BrokenHostStlDir& operator=(const BrokenHostStlDir&) = delete;
+
+    // Joined form: MIOpen glues a separate "-isystem <dir>" pair into one
+    // argument, which HIPRTC silently ignores.
+    std::string IsystemOption() const { return "-isystem" + path_.string(); }
+
+    // Build options are split on whitespace without quoting, so a path with a
+    // space cannot be passed to the compiler.
+    bool IsUsable() const { return path_.string().find(' ') == std::string::npos; }
+
+private:
+    static std::filesystem::path MakePath()
+    {
+        const std::string nonce = NonceOption();
+        return std::filesystem::temp_directory_path() /
+               ("miopen_gtest_broken_stl_" + nonce.substr(nonce.rfind('=') + 1));
+    }
+
+    std::filesystem::path path_;
+};
+
 } // namespace
+
+// Regression test: the kernel headers must not depend on the
+// host STL being parseable, even where one is reachable (so this runs on Linux
+// comgr too, unlike the -nostdinc test below).
+TEST(CPU_HipRtcSelfContained_NONE, RtIgnoresUnusableHostStl)
+{
+    auto&& h = get_handle();
+    RecordProperty("device", h.GetTargetProperties().Name());
+
+#if !MIOPEN_USE_HIPRTC
+    // Without HIPRTC the kernel is built offline with the host STL by design.
+    GTEST_SKIP() << "runtime compilation is not HIPRTC";
+#endif
+
+    const BrokenHostStlDir broken_stl;
+    if(!broken_stl.IsUsable())
+        GTEST_SKIP() << "temporary directory path contains a space";
+    RunSelfContainedKernel(h, broken_stl.IsystemOption());
+}
+
+// A real host STL header that was included before the kernel headers must be
+// respected: defining the built-in fallbacks as well would redefine std types.
+TEST(CPU_HipRtcSelfContained_NONE, RtRespectsPreincludedHostStl)
+{
+    auto&& h = get_handle();
+    RecordProperty("device", h.GetTargetProperties().Name());
+
+#if !MIOPEN_USE_HIPRTC
+    GTEST_SKIP() << "runtime compilation is not HIPRTC";
+#endif
+
+    if(!Compiles(h, "gtest_rtc_stl_use.cpp", "gtest_rtc_stl_use", "", kStlUseKernel))
+        GTEST_SKIP() << "host STL is not usable by the runtime compiler: nothing to pre-include";
+
+    RunSelfContainedKernel(h, "", kPreincludeHostStl);
+
+    // A single header that transitively declares only part of what the kernel headers provide
+    // (e.g. <string> declares std::forward without defining the <utility> include guard).
+    for(const char* header : {"<string>", "<type_traits>"})
+    {
+        SCOPED_TRACE(header);
+        RunSelfContainedKernel(h, "", std::string("#include ") + header + "\n");
+    }
+}
 
 TEST(CPU_HipRtcSelfContained_NONE, RtCompilesInlineKernelWithoutHostStl)
 {
