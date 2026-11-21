@@ -61,29 +61,52 @@ This will result in an executable `build/bin/tile_example_gemm_basic` & `build/b
 
 ### Fused GEMM + permute (gfx950)
 
-`tile_example_gemm_permute` fuses two ops into one CK-Tile kernel:
+`tile_example_gemm_permute` fuses two ops into one kernel:
 `C[t*B+b, d*H+h] = A[t,b,:] * W[:,d,h]` (BF16, FP32 accumulation) followed by
-`Y[h,b,t,d] = C[t,b,d,h]`, at T=768, B=512, K=384, D=256, H=8.
+`Y[h,b,t,d] = C[t,b,d,h]`, at T=768, B=512, K=384, D=256, H=8. It runs two fused paths that take
+the same inputs (`A[t,b,k]` and the original weight `W[k,d,h]`, i.e. `[K, N]` row-major with
+`n = d*H+h`) and write the same dense `Y`; neither writes an intermediate tensor. BF16 outputs
+are converted by truncation, the CK default.
 
-The example is a thin user of the library kernel `ck_tile::GemmEPermuteKernel`
-(`include/ck_tile/ops/gemm/kernel/gemm_e_permute_kernel.hpp`). It consumes the weight reordered
-once to `Wp[k,h,d]` (1.5 MiB, `prepermute_weight`), so `C[t*B+b, h*D+d]` is stored through the
-`[T, B, H, D]` view of `Y` with strides `(D, T*D, B*T*D, 1)`. The stock CompV3 pipeline,
-`CShuffleEpilogue` and `GemmSpatiallyLocalTilePartitioner` are used unchanged, and
-`IsSupportedArgument` checks the view (ragged T and B are supported). No intermediate tensor is
-written.
+- **Library kernel** (`gemm_permute.hpp`): a thin user of `ck_tile::GemmEPermuteKernel`
+  (`include/ck_tile/ops/gemm/kernel/gemm_e_permute_kernel.hpp`). It consumes the weight reordered
+  to `Wp[k,h,d]` (1.5 MiB, `prepermute_weight`), so `C[t*B+b, h*D+d]` is stored through the
+  `[T, B, H, D]` view of `Y` with strides `(D, T*D, B*T*D, 1)`. The stock CompV3 pipeline,
+  `CShuffleEpilogue` and `GemmSpatiallyLocalTilePartitioner` are used unchanged, and
+  `IsSupportedArgument` checks the view (ragged T and B are supported).
+- **A-stationary kernel** (`gemm_permute_astationary.hpp`): a hand-written kernel built from
+  CK-Tile parts. One workgroup per `(b, 128 rows of t)` loads its A tile into LDS once (the only
+  workgroup barrier); each wave streams the weight from global memory straight into MFMA
+  registers and stores its accumulators directly into the interleaved `Y`, with no LDS shuffle,
+  overlapping the store of one output tile with the MFMAs of the next. The weight is repacked
+  on every call into the `ck_tile::shuffle_b_permuteN` layout (`repack_weight`, about 6 us).
+  Any T, and B up to 21845, are supported (the A window of a workgroup uses 32-bit offsets);
+  buffers must be 16-byte aligned.
 
 ```sh
 cmake --build . --target tile_example_gemm_permute
-./bin/tile_example_gemm_permute               # bit-exact checks at three small shapes
+./bin/tile_example_gemm_permute               # bit-exact checks at four small shapes
 ./bin/tile_example_gemm_permute --benchmark   # also check and time the trace shape
 ```
 
-The driver compares every output bit of both paths with `reference_gemm_gpu` followed by an
-independent permute, and checks guard regions around the fused output. The benchmark times the
-fused path (weight reorder included on every call) against the two existing CK-Tile ops launched
-back to back: the stock `GemmKernel`, tuned for this shape, and `ElementWiseKernel` as a strided
-copy. It also reports the GEMM op alone.
+The driver compares every output bit of both fused paths and both unfused baselines with
+`reference_gemm_gpu` followed by an independent permute, and checks guard regions around every
+output. The benchmark times each path with its weight reorder included on every call, as the
+median of 11 interleaved, rotated samples of 20 back-to-back launches, against two existing
+CK-Tile op pairs launched back to back: the weight-preshuffle `GemmKernel`
+(`WeightPreshufflePipelineAGmemBGmemCRegV2`, the fastest existing GEMM op for this shape) or the
+CompV3 `GemmKernel` the library kernel builds on, each followed by `ElementWiseKernel` as a
+strided copy. It also reports both GEMM ops alone. Medians on MI350X (ROCm 7.1.1), speedup over
+the best two-op pair:
+
+| Path | Time (us) | Speedup |
+|---|---:|---:|
+| A-stationary fused | 694 | 2.47x |
+| Library fused (`GemmEPermuteKernel`) | 1005 | 1.71x |
+| Weight-preshuffle `GemmKernel` + `ElementWiseKernel` | 1715 | 1.00x |
+| CompV3 `GemmKernel` + `ElementWiseKernel` | 1902 | 0.90x |
+| Weight-preshuffle `GemmKernel` alone | 785 | |
+| CompV3 `GemmKernel` alone | 993 | |
 
 ## example
 ```
