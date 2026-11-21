@@ -9,15 +9,15 @@
  * This translation unit implements the small shared closures/emitters that the
  * rest of the build driver invokes everywhere:
  *
- *   _emit_loop_cadence_hint  (Python lines 203-214)
- *   _emit_sgb_gateup_dtla    (Python lines 225-239)
- *   _emit_sgb_down_group     (Python lines 242-254)
- *   _emit_mfma               (Python lines 257-267)
- *   _emit_mfma_down          (Python lines 270-282)
- *   _elem_bytes_b            (Python lines 1710-1713)
- *   _b_base                  (Python lines 1724-1728)
- *   _scale_base              (Python lines 1733-1738)
- *   _select_item             (Python lines 1749-1772)
+ *   _emit_loop_cadence_hint
+ *   _emit_sgb_gateup_dtla
+ *   _emit_sgb_down_group
+ *   _emit_mfma
+ *   _emit_mfma_down
+ *   _elem_bytes_b
+ *   _b_base
+ *   _scale_base
+ *   _select_item
  *
  * The builder-call sequence is byte-identical to the Python body; every other
  * phase is implemented in its own peer .c file and reached through the shared
@@ -29,7 +29,7 @@
 #include "rocke/helper_helpers.asm.h" /* rocke_mfma_f8f6f4_agpr */
 #include "rocke/instance_moe_fused_mega_fp8_internal.h"
 
-/* sched_group_barrier mask bits (Python module-level _SGB_*; lines 218-222). */
+/* sched_group_barrier mask bits (Python module-level _SGB_*). */
 #define ROCKE_MOE_FP8_SGB_MFMA 0x008
 #define ROCKE_MOE_FP8_SGB_VMEM_READ 0x020
 #define ROCKE_MOE_FP8_SGB_VMEM_WRITE 0x040
@@ -63,7 +63,7 @@ static bool moe_fp8_cadence_is(const char* eff, const char* want)
 }
 
 /* ======================================================================= *
- * scheduling-cadence emitters (Python lines 203-254)
+ * scheduling-cadence emitters
  * ======================================================================= */
 
 /* _emit_loop_cadence_hint: emit b.iglp_opt(1) iff effective cadence == "iglp1". */
@@ -102,7 +102,7 @@ void rocke_moe_fp8_emit_sgb_down_group(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ======================================================================= *
- * MFMA dispatchers (Python lines 257-282)
+ * MFMA dispatchers
  * ======================================================================= */
 
 /* Atom-shape predicate matching Python `atom.k == 128 and atom.dtype_in ==
@@ -157,7 +157,7 @@ rocke_value_t* rocke_moe_fp8_emit_mfma_down(rocke_moe_fp8_build_ctx_t* ctx,
 }
 
 /* ======================================================================= *
- * per-expert pointer rebasing closures (Python lines 1710-1772)
+ * per-expert pointer rebasing closures
  * ======================================================================= */
 
 /* Integration (link fix, no emit change): the per-expert pointer rebasing

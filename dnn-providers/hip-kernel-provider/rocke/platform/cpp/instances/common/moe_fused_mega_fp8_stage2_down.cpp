@@ -5,9 +5,9 @@
  * STAGE 2 (down GEMM + weighted atomic reduce) module emitters of
  * rocke/instances/common/moe_fused_mega_fp8.py:
  *
- *   _emit_fp8_down_group_gemm  (lines 1258-1395)
+ *   _emit_fp8_down_group_gemm
  *       -> rocke_moe_fp8_emit_fp8_down_group_gemm
- *   _emit_down_atomic_reduce   (lines 1398-1473)
+ *   _emit_down_atomic_reduce
  *       -> rocke_moe_fp8_emit_down_atomic_reduce
  *
  * Both bind to the shared build context (rocke_moe_fp8_build_ctx_t) via the private
@@ -42,7 +42,7 @@ static rocke_value_t* rocke_moe_fp8_atom_zero_acc(rocke_ir_builder_t* b,
 }
 
 /* ====================================================================== *
- *  _emit_fp8_down_group_gemm  (Python lines 1258-1395)
+ *  _emit_fp8_down_group_gemm
  *
  *  Down fp8 GEMM for one warp-atom output cell -> per-lane f32 vector.
  *  Group-accumulator pattern: the outer loop walks 128-wide groups along the
@@ -178,7 +178,7 @@ rocke_value_t* rocke_moe_fp8_emit_fp8_down_group_gemm(rocke_moe_fp8_build_ctx_t*
 }
 
 /* ====================================================================== *
- *  _emit_down_atomic_reduce  (Python lines 1398-1473)
+ *  _emit_down_atomic_reduce
  *
  *  Weighted, token-validity-masked atomic reduce of the down result into Y:
  *  Y[token, h_out] += weight * down_dq (f32 atomic add). Padded rows (sorted
