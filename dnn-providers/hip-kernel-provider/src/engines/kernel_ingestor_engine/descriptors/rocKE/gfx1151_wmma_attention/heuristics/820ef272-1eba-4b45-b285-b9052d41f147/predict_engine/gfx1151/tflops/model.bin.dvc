@@ -1,5 +1,5 @@
 outs:
-- md5: c72e841f0eeb0196c2bde8332cba8945
+- md5: 84c7e390ac4da73239f53547556eeb2a
   size: 289336
   hash: md5
   path: model.bin
