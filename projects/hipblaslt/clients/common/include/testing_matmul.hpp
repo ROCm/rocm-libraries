@@ -26,6 +26,13 @@
 
 #pragma once
 
+// --partitions runs through the experimental PartitionedGemm, so a target that includes this
+// header links roc::hipblaslt_experimental (hipblaslt-clients-common does).
+#if !defined(ROCM_ENABLE_EXPERIMENTAL_APIS) || !ROCM_ENABLE_EXPERIMENTAL_APIS
+#error "testing_matmul.hpp needs roc::hipblaslt_experimental (ROCM_ENABLE_EXPERIMENTAL_APIS=1)"
+#endif
+#include <hipblaslt/hipblaslt-experimental.h>
+
 #include "allclose.hpp"
 #include "candidate_search.hpp"
 #include "cblas_interface.hpp"
@@ -1294,7 +1301,7 @@ inline std::string fast_check_unsupported_reason(const Arguments&     arg,
 }
 
 // Returns why --partitions cannot run this configuration, or an empty string when it can.
-// hipblaslt_ext::experimental::PartitionedGemm runs a plain GEMM, so whatever it has no input for is refused.
+// hipblaslt_experimental::PartitionedGemm runs a plain GEMM, so whatever it has no input for is refused.
 inline std::string partitioned_unsupported_reason(const Arguments& arg,
                                                   hipDataType      TiA,
                                                   hipDataType      TiB,
@@ -2001,6 +2008,18 @@ void testing_matmul(const Arguments& arg)
     hipblasltSetColdIterationsValue(arg.cold_iters);
     hipblasltSetHotIterationsValue(arg.iters);
 
+    // maf2_0_unit_scale is the MAF2.0 plan for block-scaled FP8 and FP4 (all scales 1, N(0,1)
+    // data); reject block-scaled FP6 before any resources are created.
+    auto const unitScaleType = [](hipDataType t) {
+        return t == HIP_R_8F_E4M3 || t == HIP_R_8F_E5M2
+               || t == static_cast<hipDataType>(HIP_R_4F_E2M1);
+    };
+    if(arg.initialization == hipblaslt_initialization::maf2_0_unit_scale
+       && ((isBlockScaling(arg.scaleA) && !unitScaleType(arg.a_type))
+           || (isBlockScaling(arg.scaleB) && !unitScaleType(arg.b_type))))
+        throw std::invalid_argument(
+            "maf2_0_unit_scale applies to block-scaled fp8 and fp4 inputs only; use maf2_0");
+
     // integer_exact: skip gfx11 only for 16-bit A (fp16/bf16)—GPU vs CPU exact match unreliable there;
     // f32/f64 (and TF32x1 f32 path) still run on Navi.
     if(arg.initialization == hipblaslt_initialization::integer_exact)
@@ -2283,7 +2302,7 @@ private:
     hipStream_t m_stream = nullptr;
 };
 
-// --partitions N: one GEMM run as N slices with hipblaslt_ext::experimental::PartitionedGemm. The slices run on the
+// --partitions N: one GEMM run as N slices with hipblaslt_experimental::PartitionedGemm. The slices run on the
 // partitions of a GPU in DPX mode when the current device is one of them (see partition_devices.hpp),
 // and all on the current device otherwise (SPX: the same result, only for checking results, not for speed).
 // Partition 0 runs on the caller's handle and stream; this holds the others (handle, stream,
@@ -2301,9 +2320,9 @@ public:
                    hipStream_t        stream0,
                    hipblasOperation_t transA,
                    hipblasOperation_t transB)
-        : m_dim(arg.split_dim == 'M'   ? hipblaslt_ext::experimental::SplitDim::M
-                : arg.split_dim == 'B' ? hipblaslt_ext::experimental::SplitDim::Batch
-                                       : hipblaslt_ext::experimental::SplitDim::N)
+        : m_dim(arg.split_dim == 'M'   ? hipblaslt_experimental::SplitDim::M
+                : arg.split_dim == 'B' ? hipblaslt_experimental::SplitDim::Batch
+                                       : hipblaslt_experimental::SplitDim::N)
         , m_dElem(realDataTypeSize(arg.d_type))
     {
         for(int t = 0; t < 4; t++)
@@ -2349,14 +2368,14 @@ public:
                 }
             }
             check(hipSetDevice(previous), "hipSetDevice");
-            m_gemm = std::make_unique<hipblaslt_ext::experimental::PartitionedGemm>(handles,
-                                                                      transA,
-                                                                      transB,
-                                                                      arg.a_type,
-                                                                      arg.b_type,
-                                                                      arg.c_type,
-                                                                      arg.d_type,
-                                                                      arg.compute_type);
+            m_gemm = std::make_unique<hipblaslt_experimental::PartitionedGemm>(handles,
+                                                                               transA,
+                                                                               transB,
+                                                                               arg.a_type,
+                                                                               arg.b_type,
+                                                                               arg.c_type,
+                                                                               arg.d_type,
+                                                                               arg.compute_type);
         }
         catch(...)
         {
@@ -2487,7 +2506,7 @@ public:
         if(!m_replicated[3])
             return;
         check(hipStreamSynchronize(m_streams[0]), "hipStreamSynchronize");
-        const bool   splitM = m_dim == hipblaslt_ext::experimental::SplitDim::M;
+        const bool   splitM = m_dim == hipblaslt_experimental::SplitDim::M;
         const size_t pitch  = size_t(m_ldd) * m_dElem;
         for(size_t i = 1; i < m_streams.size(); i++)
         {
@@ -2496,7 +2515,7 @@ public:
                 throw std::runtime_error("getSlice failed");
             // A column-major D: an M slice is `size` rows of every column, an N slice is `size`
             // whole columns, and a batch slice is `size` whole matrices.
-            if(m_dim == hipblaslt_ext::experimental::SplitDim::Batch)
+            if(m_dim == hipblaslt_experimental::SplitDim::Batch)
             {
                 for(int64_t b = offset; b < offset + size; b++)
                 {
@@ -2601,7 +2620,7 @@ private:
             throw std::runtime_error(std::string(what) + ": " + hipGetErrorString(e));
     }
 
-    hipblaslt_ext::experimental::SplitDim                                m_dim;
+    hipblaslt_experimental::SplitDim                       m_dim;
     size_t                                                 m_dElem = 0;
     bool                                                   m_replicated[4] = {};
     std::vector<void*>                                     m_replica[4]; // partitions 1..N-1
@@ -2614,7 +2633,7 @@ private:
     std::vector<void*>                                     m_workspaces; // partitions 1..N-1
     std::vector<uint64_t*>                                 m_counters; // per partition, host memory
     uint64_t                                               m_launch = 0;
-    std::unique_ptr<hipblaslt_ext::experimental::PartitionedGemm>        m_gemm;
+    std::unique_ptr<hipblaslt_experimental::PartitionedGemm> m_gemm;
 };
 
 void testing_matmul_with_bias(const Arguments& arg,
@@ -3968,6 +3987,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf1_0
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && integer_exact_mx_element_type(TiA)))
             {
@@ -3977,7 +3999,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 #else
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
-                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf1_0, maf2_0, maf2_0_unit_scale, "
                        "or integer_exact with fp8 or fp6 elements, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
@@ -4017,7 +4040,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutA,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      mxSeedIndex(/*isMatrixA=*/true, b, stride_a[i]));
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -4083,6 +4108,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::norm_dist
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision
+               && arg.initialization != hipblaslt_initialization::maf1_0
+               && arg.initialization != hipblaslt_initialization::maf2_0
+               && arg.initialization != hipblaslt_initialization::maf2_0_unit_scale
                && !(arg.initialization == hipblaslt_initialization::integer_exact
                     && integer_exact_mx_element_type(TiB)))
             {
@@ -4092,7 +4120,8 @@ void testing_matmul_with_bias(const Arguments& arg,
 #else
                 hipblaslt_cout
                     << "Initialization of microscaling data only allows hpl, trig_float, "
-                       "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, "
+                       "uniform_01, zero, norm_dist, rand_int, uniform_low_precision, "
+                       "maf1_0, maf2_0, maf2_0_unit_scale, "
                        "or integer_exact with fp8 or fp6 elements, not "
                     << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
@@ -4134,7 +4163,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutB,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f);
+                                      /*max_val=*/1.0f,
+                                      /*scaleInitMethod=*/"",
+                                      mxSeedIndex(/*isMatrixA=*/false, b, stride_b[i]));
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));

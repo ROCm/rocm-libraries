@@ -440,9 +440,10 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
               HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }
 
-// The provider's schema guard's opt-in list (GraphSchema.hpp): the built-in engines claim graph
-// schema 1.4.0 (each of them gates ragged tensors, declared alignments and offset multipliers),
-// and the six FlyDSL SDPA forward engines claim 1.6.0, the SDK's newest, and the two FlyDSL SDPA
+// The provider's schema guard's opt-in list (GraphSchema.hpp): the HIP MLOps and HIP Flash2
+// engines claim graph schema 1.4.0 (each of them gates ragged tensors, declared alignments and
+// offset multipliers), and the ASM SDPA engine and the six FlyDSL SDPA forward engines claim 1.6.0,
+// the SDK's newest (their forward matchers also gate cu_seq_len), and the two FlyDSL SDPA
 // backward engines claim 1.4.0 (their UEDs' sdk_version; their matchers reviewed against every field
 // up to it, and a backward graph never carries cu_seq_len). So does the RDNA WMMA prefill engine,
 // whose matcher gates paged K/V, ragged Q / O and their offset multipliers, and every declared
@@ -456,7 +457,7 @@ TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
     const std::map<std::string, std::string> optedIn{
         {"hipkernel:Gfx950ConvDgradAot", "1.3.0"},
         {"hipkernel:Gfx1151WmmaAttention", "1.4.0"},
-        {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.4.0"},
+        {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.6.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME), "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_FLASH2_ENGINE_NAME), "1.4.0"},
         {"hipkernel:flydsl_sdpa_rdna", "1.6.0"},
