@@ -53,7 +53,7 @@ constexpr std::string_view SCORE_SYMBOL = "hipkernel.gfx950_attention_unified_2d
 constexpr std::string_view DISPATCH_SYMBOL = "hipkernel.gfx950_attention_unified_2d.dispatch";
 
 // KMD fields (14-field schema). Fields a shipped variant holds at one value across the whole
-// catalog (waves_per_eu, kv_storage_dtype, the sink/alibi/qq-bias/softcap switches) are absent:
+// catalog (waves_per_eu, kv_storage_dtype, the sink/qq-bias/softcap switches) are absent:
 // a variant that moved one of them would have to add it here first, or the candidates collide
 // on the catalog key and the loader drops one. `num_seqs` is declared but not read: the kernel
 // takes the batch as a kernarg and derives its cu_q search trip count from it, so no batch is
@@ -69,6 +69,8 @@ constexpr std::string_view NUM_WARPS_FIELD = "num_warps";
 constexpr std::string_view BLOCK_M_PER_WARP_FIELD = "block_m_per_warp";
 constexpr std::string_view USE_MFMA_32X32_FIELD = "use_mfma_32x32";
 constexpr std::string_view USE_TRANSPOSED_QK_32X32_FIELD = "use_transposed_qk_32x32";
+/// 1 for a kernel that adds ALiBi (hipDNN's slopes, top-left causal only).
+constexpr std::string_view USE_ALIBI_FIELD = "use_alibi";
 /// 1 for an LSE-on kernel, which also writes the stats output head-major ([B, Hq, Sq, 1]).
 constexpr std::string_view EMIT_LSE_FIELD = "emit_lse";
 
@@ -88,6 +90,8 @@ constexpr std::string_view MASK_TOKEN = "gfx950_attention_unified_2d.mask_type";
 constexpr std::string_view SLIDING_WINDOW_TOKEN = "gfx950_attention_unified_2d.sliding_window";
 /// The softmax scale, f32, bound as its bit pattern (BoundTokens carry int64_t).
 constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_2d.scale_bits";
+/// 1 when the graph asks for ALiBi (alibi_mask), else 0.
+constexpr std::string_view ALIBI_TOKEN = "gfx950_attention_unified_2d.alibi";
 /// The stats output's uid, or NO_STATS for a graph that asks for none.
 constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_2d.stats.uid";
 
@@ -104,6 +108,7 @@ constexpr unified_attention::BoundTokenNames tokenNames()
     names.scaleBits = SCALE_BITS_TOKEN;
     names.stats = STATS_TOKEN;
     names.dispatchLabel = "gfx950 attention_unified_2d";
+    names.alibi = ALIBI_TOKEN;
     return names;
 }
 
@@ -125,6 +130,7 @@ struct AttentionUnified2DCandidate
     int64_t blockMPerWarp = 0;
     bool useMfma32x32 = false;
     bool useTransposedQk32x32 = false;
+    bool useAlibi = false;
     /// Also writes the stats output; its kernarg list ends in lse_ptr.
     bool emitLse = false;
 };
@@ -151,10 +157,11 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
     const auto blockMPerWarp = integerMetadata(kernel, BLOCK_M_PER_WARP_FIELD);
     const auto useMfma32x32 = integerMetadata(kernel, USE_MFMA_32X32_FIELD);
     const auto useTransposedQk32x32 = integerMetadata(kernel, USE_TRANSPOSED_QK_32X32_FIELD);
+    const auto useAlibi = integerMetadata(kernel, USE_ALIBI_FIELD);
     const auto emitLse = integerMetadata(kernel, EMIT_LSE_FIELD);
     if(!headSize || !numQueryHeads || !numKvHeads || !blockSize || !maskType || !slidingWindow
        || !tileSize || !numWarps || !blockMPerWarp || !useMfma32x32 || !useTransposedQk32x32
-       || !emitLse)
+       || !useAlibi || !emitLse)
     {
         return std::nullopt;
     }
@@ -174,7 +181,8 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
         return std::nullopt;
     }
     if(*useMfma32x32 < 0 || *useMfma32x32 > 1 || *useTransposedQk32x32 < 0
-       || *useTransposedQk32x32 > 1 || *emitLse < 0 || *emitLse > 1)
+       || *useTransposedQk32x32 > 1 || *useAlibi < 0 || *useAlibi > 1 || *emitLse < 0
+       || *emitLse > 1)
     {
         return std::nullopt;
     }
@@ -201,6 +209,7 @@ std::optional<AttentionUnified2DCandidate> candidateFor(const KernelDefinition& 
                                        *blockMPerWarp,
                                        *useMfma32x32 != 0,
                                        *useTransposedQk32x32 != 0,
+                                       *useAlibi != 0,
                                        *emitLse != 0};
 }
 
@@ -214,8 +223,9 @@ bool headsMatch(const AttentionUnified2DCandidate& candidate, const SdpaShape& p
 
 /// This engine's rules and records, for the shared graph match, kernel match and dispatch.
 /// All three mask kinds are served, each by its own kernel: top-left and bottom-right coincide
-/// only at Sq == Skv, but they are distinct kernel bodies and the catalog carries both. Decode
-/// is handed to Unified3D wherever its split-KV kernel can be built. The catalog lists each
+/// only at Sq == Skv, but they are distinct kernel bodies and the catalog carries both; ALiBi
+/// (top-left causal only) has kernels of its own. Decode without ALiBi is handed to Unified3D
+/// wherever its split-KV kernel can be built. The catalog lists each
 /// head pair as its own entry (e.g. 28/4 and 40/8, ratios 7 and 5, ship while 7/1 does not), so
 /// no GQA ratio list can say which graphs it serves and none is judged at graph_match.
 constexpr unified_attention::Unified2DArch<AttentionUnified2DCandidate> ARCH{

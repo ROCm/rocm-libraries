@@ -318,6 +318,35 @@ static int make_spec(int idx, rocke_attention_tiled_2d_spec_t* s)
         s->use_conflict_free_v_store = true;
         s->use_i64_kv_addr = (idx == 19);
         break;
+    case 20: /* ALiBi, per-row hoist, GQA with 24 heads. */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 24;
+        s->num_kv_heads = 6;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        break;
+    case 21: /* ALiBi, transposed x8 per-iter slope (mask-once). */
+        s->head_size = 64;
+        s->block_size = 32;
+        s->num_query_heads = 32;
+        s->num_kv_heads = 32;
+        s->dtype = "fp16";
+        s->use_sinks = false;
+        s->sliding_window = 0;
+        s->has_softcap = false;
+        s->use_alibi = true;
+        s->num_warps = 2;
+        s->block_m_per_warp = 32;
+        s->has_tile_size = true;
+        s->tile_size = 64;
+        s->use_mfma_32x32x8 = true;
+        s->use_transposed_qk_32x32 = true;
+        s->use_transposed_mask_once = true;
+        break;
     default:
         return -1;
     }

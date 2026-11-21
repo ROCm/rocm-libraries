@@ -902,6 +902,17 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
         s.kv_storage_dtype = st.keep(v);
     if(a_str(d, "kv_cache_policy", v))
         s.kv_cache_policy = st.keep(v);
+    if(a_str(d, "alibi_design", v))
+        s.alibi_design = st.keep(v);
+    return s;
+}
+
+/* The gfx942 spec has no alibi_design: refuse it rather than build without it. */
+rocke_attention_tiled_2d_spec_t t942_build(const py::dict& d, Store& st)
+{
+    rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+    if(s.alibi_design != NULL)
+        throw py::value_error("gfx942_attention_tiled_2d: alibi_design is a gfx950 spec field");
     return s;
 }
 
@@ -909,7 +920,7 @@ std::string t942_lower(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
     Store st;
-    rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+    rocke_attention_tiled_2d_spec_t s = t942_build(d, st);
     rocke_ir_builder_t b;
     const char* a = arch.c_str();
     rocke_kernel_def_t* k = rocke_build_unified_attention_2d_tiled_scalar_new(&b, &s, a);
@@ -933,7 +944,7 @@ std::string t942_serialize(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
     Store st;
-    rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+    rocke_attention_tiled_2d_spec_t s = t942_build(d, st);
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = rocke_build_unified_attention_2d_tiled_scalar_new(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
@@ -951,7 +962,7 @@ std::vector<std::string> t942_verify(const py::dict& d, const std::string& arch)
 {
     require_arch(arch);
     Store st;
-    rocke_attention_tiled_2d_spec_t s = t2d_build(d, st);
+    rocke_attention_tiled_2d_spec_t s = t942_build(d, st);
     rocke_ir_builder_t b;
     rocke_kernel_def_t* k = rocke_build_unified_attention_2d_tiled_scalar_new(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))

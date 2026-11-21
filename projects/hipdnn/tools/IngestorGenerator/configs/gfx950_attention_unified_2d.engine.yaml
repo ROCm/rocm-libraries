@@ -99,6 +99,12 @@ kmd_fields:
 - name: emit_lse
   type: int
   default_value: 0
+# 1 for a kernel that adds hipDNN's ALiBi (satellite bundle gfx950_attention_unified_2d_alibi);
+# builder_default keeps it out of this bundle's descriptors.
+- name: use_alibi
+  type: int
+  default_value: 0
+  builder_default: true
 specialization:
   metadata_fields:
   - dtype
@@ -115,7 +121,8 @@ specialization:
   - use_mfma_32x32
   - use_transposed_qk_32x32
   - emit_lse
-  matcher_only_fields: []
+  # The ALiBi satellite's field: no kernel here is built with it (builder_default).
+  matcher_only_fields: [use_alibi]
   vocabulary:
     dtype:
       bf16: BF16

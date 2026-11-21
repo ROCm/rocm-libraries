@@ -9,10 +9,11 @@ TestGfx942AttentionDenseMatchers.cpp checks the C++ against:
     use_exp2_fast resolve to (default_use_cfvst, default_use_exp2_fast), restated by
     gfx942AttentionDenseCfvstPolicy and gfx942AttentionDenseExp2FastPolicy;
   * SCORE_GOLDENS: every kernel of hipkernel:Gfx942AttentionDense's full enumeration
-    (registry_enumerator over configs/gfx942_attention_dense.engine.yaml), with its cell,
-    the KMD fields the score reads, and whether it is its cell's policy arm on the
-    one-CTA-per-block grid (the gfx942_dense_qbminor base spec, the cell default) or on
-    the persistent grid (the gfx942_dense_persist_aot base spec, D128 cells only).
+    (registry_enumerator over configs/gfx942_attention_dense.engine.yaml and its ALiBi
+    satellite), with its cell, the KMD fields the score reads, and whether it is its
+    cell's policy arm on the one-CTA-per-block grid (the gfx942_dense_qbminor base spec,
+    the cell default) or on the persistent grid (the gfx942_dense_persist_aot base spec,
+    D128 cells only).
 
     cd projects/hipdnn/tools/IngestorGenerator
     .venv/bin/python ../../../../dnn-providers/hip-kernel-provider/src/tests/engines/\\
@@ -36,7 +37,10 @@ sys.path.insert(0, str(GEN / "tools"))
 import registry_enumerator as enumerator  # noqa: E402
 
 OUT = Path(__file__).with_name("TestGfx942AttentionDenseScoreGoldens.inc")
-MANIFEST = GEN / "configs/gfx942_attention_dense.engine.yaml"
+MANIFESTS = (
+    GEN / "configs/gfx942_attention_dense.engine.yaml",
+    GEN / "configs/gfx942_attention_dense_alibi.engine.yaml",
+)
 PERSIST_PIN = "gfx942_dense_persist_aot"
 # The shape every catalog record is built at; the C++ test's records carry the same.
 CANONICAL = {
@@ -68,29 +72,46 @@ def policy_rows():
 
 
 def score_rows():
-    manifest = enumerator.load_manifest(str(MANIFEST))
-    enumerator.bind_provider(manifest.get("provider_root"))
-    registry = enumerator.Registry(manifest)
-    enumeration = enumerator.enumerate_space(manifest, registry)
-    config = enumerator.build_config(manifest, registry, warn=lambda _: None)
-    kernels = config["packs"][0]["kernels"]
-    assert len(kernels) == len(enumeration.rows)
-
-    persist = [p for p, _ in registry.extra_pins if p["spec_id"] == PERSIST_PIN]
-    assert len(persist) == 1, registry.extra_pins
-    cells = registry.cells()
-    persist_base = {
-        index: registry.base_spec(cell, persist[0])
-        for index, cell in enumerate(cells)
-        if cell["hdim_q"] == 128
-    }
+    # The home's cells first, then its ALiBi satellite's, so the ALiBi cells follow the
+    # swept ones; a section pinning the persistent grid gives its D128 cells a policy arm.
+    cells, persist_base, enumerated = [], {}, []
+    for path in MANIFESTS:
+        arms_before = len(persist_base)
+        manifest = enumerator.load_manifest(str(path))
+        enumerator.bind_provider(manifest.get("provider_root"))
+        registry = enumerator.Registry(manifest)
+        enumeration = enumerator.enumerate_space(manifest, registry)
+        config = enumerator.build_config(manifest, registry, warn=lambda _: None)
+        kernels = config["packs"][0]["kernels"]
+        assert len(kernels) == len(enumeration.rows)
+        enumerated += zip(enumeration.rows, kernels, enumeration.sections)
+        for section in registry.sections():
+            pins = [section.pin, *(p for p, _ in section.extra_pins)]
+            persist = [p for p in pins if p["spec_id"] == PERSIST_PIN]
+            for cell in section.cells():
+                if cell not in cells:
+                    cells.append(cell)
+                if persist and cell["hdim_q"] == 128 and not section.spec_overrides:
+                    base = section.base_spec(cell, persist[0])
+                    persist_base.setdefault(cells.index(cell), base)
+        # A section with spec_overrides (the ALiBi tile) has no raw base spec: its
+        # persistent policy arm is its one kernel per cell.
+        for (cell, spec, _), section in zip(enumeration.rows, enumeration.sections):
+            if section.spec_overrides and section.pin["spec_id"] == PERSIST_PIN:
+                persist_base.setdefault(cells.index(cell), spec)
+        assert len(persist_base) > arms_before, f"{path.name}: no persistent policy arm"
 
     def cell_index(cell):
         return next(i for i, c in enumerate(cells) if c == cell)
 
     rows = []
     seen_persist = set()
-    for (cell, spec, is_default), kernel in zip(enumeration.rows, kernels):
+    for (cell, spec, is_default), kernel, section in enumerated:
+        # The grid policy arm is the cell's default on the one-CTA-per-block grid; an
+        # override section on the persistent grid keeps a default of its own, which is
+        # the persistent arm, not the grid's.
+        if section.spec_overrides and section.pin["spec_id"] == PERSIST_PIN:
+            is_default = False
         md = kernel["metadata"]
         assert all(md[k] == v for k, v in CANONICAL.items()), kernel["name"]
         index = cell_index(cell)
@@ -110,14 +131,14 @@ def render() -> str:
         "// SPDX-License-Identifier:  MIT",
         "",
         "// Generated by gen_gfx942_attention_dense_score_goldens.py from rocKE and the",
-        "// gfx942_attention_dense manifest's full enumeration. Do not edit.",
+        "// gfx942_attention_dense manifests' enumeration (home and ALiBi satellite). Do not edit.",
         "// clang-format off",
         "",
     ]
     # Bind the manifest's rocKE before policy_rows imports it, so both halves of the
     # table come from the same tree whatever is first on sys.path.
     enumerator.bind_provider(
-        enumerator.load_manifest(str(MANIFEST)).get("provider_root")
+        enumerator.load_manifest(str(MANIFESTS[0])).get("provider_root")
     )
     policies = policy_rows()
     scores = score_rows()

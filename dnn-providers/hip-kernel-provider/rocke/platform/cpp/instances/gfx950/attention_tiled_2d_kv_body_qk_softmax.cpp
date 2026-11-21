@@ -43,6 +43,7 @@
 #include "rocke/helper_helper_rocke.helpers.attention.h" /* softcap_log2 / mfma_16x16x16 */
 #include "rocke/helper_rocke.helpers.attention.h" /* warp_xor_reduce_sum   */
 #include "rocke/helper_rocke.helpers.mfma_attention.h" /* 32x32x16_for_dtype    */
+#include "rocke/helper_rocke.instances.common._attention_alibi.h"
 #include "rocke/instance_gfx950_attention_tiled_2d.h" /* mfma_32x32_c_row/_col */
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
@@ -216,6 +217,8 @@ static rocke_value_t* fh_c32_col(rocke_gfx950_attn2d_build_ctx_t* ctx, int n_til
  *      hoist_state_row <- causal_lim   hoist_q_head <- qh_r (or ALiBi slope)
  *  hoist_in_warp_row caches the per-reg row.
  * ===================================================================== */
+static void rocke_gfx950_attn2d_emit_alibi_arm_state(rocke_gfx950_attn2d_build_ctx_t* ctx);
+
 void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     rocke_ir_builder_t* b = ctx->b;
@@ -259,13 +262,11 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
 
     if(ctx->USE_ALIBI)
     {
-        const rocke_type_t* f32 = rocke_f32();
+        rocke_value_t* slopes = ctx->alibi_slopes_ptr;
         for(reg = 0; reg < ctx->REGS_PER_LANE; ++reg)
         {
-            rocke_value_t* qh_r = ctx->hoist_q_head[reg];
-            rocke_value_t* qh_ok = rocke_b_cmp_lt(b, qh_r, ctx->num_qh_p);
-            rocke_value_t* slope = rocke_b_masked_global_load(
-                b, ctx->alibi_slopes_ptr, qh_r, qh_ok, rocke_b_const_f32(b, 0.0), f32, 4);
+            rocke_value_t* slope
+                = rocke_attn_alibi_slope(b, ctx->hoist_q_head[reg], ctx->num_qh_p, slopes);
             ctx->hoist_q_head[reg] = slope;
         }
     }
@@ -301,18 +302,100 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
             ctx->st_row_ok_hoist = st_ok_inner;
         }
         ctx->st_causal_lim_hoist = rocke_b_add(b, ctx->context_len, st_qp);
-        if(ctx->USE_ALIBI)
+        if(ctx->USE_ALIBI && ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_NONE)
         {
-            rocke_value_t* st_qh_ok = rocke_b_cmp_lt(b, st_qh, ctx->num_qh_p);
-            ctx->st_alibi_slope_hoist = rocke_b_masked_global_load(b,
-                                                                   ctx->alibi_slopes_ptr,
-                                                                   st_qh,
-                                                                   st_qh_ok,
-                                                                   rocke_b_const_f32(b, 0.0),
-                                                                   rocke_f32(),
-                                                                   4);
+            ctx->st_alibi_slope_hoist
+                = rocke_attn_alibi_slope(b, st_qh, ctx->num_qh_p, ctx->alibi_slopes_ptr);
         }
     }
+
+    rocke_gfx950_attn2d_emit_alibi_arm_state(ctx);
+}
+
+/* ALiBi arm state, loop-invariant (Python ad_* before the KV loop). Transposed
+ * 32x32: one query per lane, the key of element i of 32-key block n is the block
+ * start + (lane / 32) * 4 + (i / 4) * 8 + i % 4. 16x16: query rows per reg, key =
+ * block start + lane % 16. */
+static void rocke_gfx950_attn2d_emit_alibi_arm_state(rocke_gfx950_attn2d_build_ctx_t* ctx)
+{
+    rocke_ir_builder_t* b = ctx->b;
+    if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_NONE)
+        return;
+    rocke_value_t* qk_scale = fh_qk_scale(ctx);
+    if(ctx->TRANSPOSED_QK_32X32)
+    {
+        rocke_value_t* row = rocke_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
+        rocke_value_t* nqk_a = rocke_b_const_i32(b, ctx->NQK);
+        rocke_value_t* qh_mul = rocke_b_mul(b, ctx->kv_head_idx, nqk_a);
+        rocke_value_t* nqk_b = rocke_b_const_i32(b, ctx->NQK);
+        rocke_value_t* qh_mod = rocke_b_mod(b, row, nqk_b);
+        rocke_value_t* qh = rocke_b_add(b, qh_mul, qh_mod);
+        rocke_value_t* nqk_c = rocke_b_const_i32(b, ctx->NQK);
+        rocke_value_t* q_off = rocke_b_div(b, row, nqk_c);
+        rocke_value_t* q_pos = rocke_b_add(b, ctx->qb_start_pos, q_off);
+        ctx->ad_anchor = rocke_b_add(b, ctx->context_len, q_pos);
+        ctx->ad_slope = rocke_attn_alibi_slope_log2(b, qh, ctx->num_qh_p, ctx->alibi_slopes_ptr);
+        rocke_value_t* four = rocke_b_const_i32(b, 4);
+        ctx->ad_key_off = rocke_b_mul(b, fh_lane_half32(ctx), four);
+        rocke_value_t* unit = ctx->ad_slope;
+        if(ctx->AD_SEED)
+        {
+            ctx->ad_seed_slope = rocke_b_fdiv(b, ctx->ad_slope, qk_scale);
+            unit = ctx->ad_seed_slope;
+        }
+        if(ctx->AD_SPLIT)
+        {
+            rocke_attn_alibi_split_lane_terms(b, unit, ctx->ad_key_off, ctx->ad_split_c);
+            if(ctx->AD_SEED)
+            {
+                rocke_value_t* v = rocke_b_zero_vec_f32(b, 16);
+                for(int i = 0; i < 16; ++i)
+                    v = rocke_b_vec_insert(b, v, ctx->ad_split_c[i], i);
+                ctx->ad_seed_vec = v;
+            }
+        }
+        return;
+    }
+    rocke_value_t* rcp_ln2 = fh_rcp_ln2(ctx);
+    const int REGS_PER_LANE = ctx->REGS_PER_LANE;
+    for(int r = 0; r < REGS_PER_LANE; ++r)
+        ctx->ad_slope_r[r] = rocke_b_fmul(b, ctx->hoist_q_head[r], rcp_ln2);
+    rocke_value_t* const* unit_r = ctx->ad_slope_r;
+    if(ctx->AD_SEED)
+    {
+        for(int r = 0; r < REGS_PER_LANE; ++r)
+            ctx->ad_seed_slope_r[r] = rocke_b_fdiv(b, ctx->ad_slope_r[r], qk_scale);
+        unit_r = ctx->ad_seed_slope_r;
+    }
+    if(ctx->AD_SPLIT)
+    {
+        rocke_value_t* lane_col = fh_lane_col(ctx);
+        for(int r = 0; r < REGS_PER_LANE; ++r)
+            for(int n = 0; n < ctx->QK_N_TILES; ++n)
+            {
+                rocke_value_t* key_base = rocke_b_const_i32(b, n * 16);
+                rocke_value_t* key = rocke_b_add(b, key_base, lane_col);
+                ctx->ad_split_c16[r][n] = rocke_b_fmul(b, unit_r[r], rocke_b_sitofp_f32(b, key));
+            }
+    }
+}
+
+/* Transposed 32x32: the [n][i] term of one KV tile in the units of ``unit``. */
+static void fh_ad_tile_terms(rocke_gfx950_attn2d_build_ctx_t* ctx,
+                             rocke_value_t* unit,
+                             rocke_value_t* group_tile_off,
+                             rocke_value_t** out)
+{
+    rocke_attn_alibi_tile_bias(
+        ctx->b, unit, group_tile_off, ctx->ad_key_off, ctx->ad_anchor, ctx->QK_N_TILES, out);
+}
+
+static rocke_value_t* fh_ad_vec(rocke_ir_builder_t* b, rocke_value_t* const* vals, int n)
+{
+    rocke_value_t* v = rocke_b_zero_vec_f32(b, n);
+    for(int i = 0; i < n; ++i)
+        v = rocke_b_vec_insert(b, v, vals[i], i);
+    return v;
 }
 
 /* ===================================================================== *
@@ -534,16 +617,10 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
             st_row_ok_iter = st_ok_inner;
         }
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
-        if(ctx->USE_ALIBI)
+        if(ctx->USE_ALIBI && ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_NONE)
         {
-            rocke_value_t* st_qh_iter_ok = rocke_b_cmp_lt(b, st_qh_iter, ctx->num_qh_p);
-            st_alibi_slope_iter = rocke_b_masked_global_load(b,
-                                                             ctx->alibi_slopes_ptr,
-                                                             st_qh_iter,
-                                                             st_qh_iter_ok,
-                                                             rocke_b_const_f32(b, 0.0),
-                                                             rocke_f32(),
-                                                             4);
+            st_alibi_slope_iter
+                = rocke_attn_alibi_slope(b, st_qh_iter, ctx->num_qh_p, ctx->alibi_slopes_ptr);
         }
     }
 
@@ -625,9 +702,26 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* lane_col32_qk = lane_col32;
         rocke_value_t* ST32_n[ROCKE_GFX950_ATTN2D_MAX_N_TILES];
         rocke_value_t* ST32_n_g1[ROCKE_GFX950_ATTN2D_MAX_N_TILES];
+        /* ALiBi seed designs: the QK accumulator starts at the term (raw units). */
+        rocke_value_t* ad_seed[ROCKE_GFX950_ATTN2D_MAX_N_TILES];
+        bool have_ad_seed = false;
+        if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_TILE)
+        {
+            rocke_value_t* terms[ROCKE_GFX950_ATTN2D_MAX_N_TILES * 16];
+            fh_ad_tile_terms(ctx, ctx->ad_seed_slope, tile_off, terms);
+            for(int n = 0; n < QK_N_TILES; ++n)
+                ad_seed[n] = fh_ad_vec(b, &terms[n * 16], 16);
+            have_ad_seed = true;
+        }
+        else if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_SPLIT)
+        {
+            for(int n = 0; n < QK_N_TILES; ++n)
+                ad_seed[n] = ctx->ad_seed_vec;
+            have_ad_seed = true;
+        }
         for(int n = 0; n < QK_N_TILES; ++n)
         {
-            rocke_value_t* acc32 = rocke_b_zero_vec_f32(b, 16);
+            rocke_value_t* acc32 = have_ad_seed ? ad_seed[n] : rocke_b_zero_vec_f32(b, 16);
             rocke_value_t* k_row_t = rocke_b_add(b, rocke_b_const_i32(b, n * 32), lane_col32_qk);
             for(int k = 0; k < QK_K_ITERS; ++k)
             {
@@ -647,9 +741,16 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         {
             rocke_b_s_waitcnt(b, /*vmcnt=*/0, /*lgkmcnt=*/0, /*expcnt=*/-1);
             rocke_b_sync(b);
+            if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_TILE)
+            {
+                rocke_value_t* terms[ROCKE_GFX950_ATTN2D_MAX_N_TILES * 16];
+                fh_ad_tile_terms(ctx, ctx->ad_seed_slope, tile_off_g1, terms);
+                for(int n = 0; n < QK_N_TILES; ++n)
+                    ad_seed[n] = fh_ad_vec(b, &terms[n * 16], 16);
+            }
             for(int n = 0; n < QK_N_TILES; ++n)
             {
-                rocke_value_t* acc32 = rocke_b_zero_vec_f32(b, 16);
+                rocke_value_t* acc32 = have_ad_seed ? ad_seed[n] : rocke_b_zero_vec_f32(b, 16);
                 rocke_value_t* k_row_t = rocke_b_add(b, rocke_b_const_i32(b, n * 32), lane_col32);
                 for(int k = 0; k < QK_K_ITERS; ++k)
                 {
@@ -702,10 +803,40 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     b, valid_tail_eff, rocke_b_const_i32(b, (reg / 4) * 8 + (reg % 4)));
         }
 
+        /* Per-lane ALiBi slope: hoisted, per-iter (mask-once), or loaded here. */
+        rocke_value_t* slope_for_lane = NULL;
+        if(ctx->USE_ALIBI && ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_NONE)
+        {
+            if(ctx->TRANSPOSED_INVARIANT_HOIST)
+                slope_for_lane = ctx->st_alibi_slope_hoist;
+            else if(ctx->TRANSPOSED_MASK_ONCE)
+                slope_for_lane = st_alibi_slope_iter;
+            else
+            {
+                rocke_value_t* q_row_t = rocke_b_add(b, ctx->wave_row_base, fh_c32_col(ctx, 0));
+                rocke_value_t* qh_mul
+                    = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
+                rocke_value_t* qh_mod = rocke_b_mod(b, q_row_t, rocke_b_const_i32(b, ctx->NQK));
+                rocke_value_t* qh_t = rocke_b_add(b, qh_mul, qh_mod);
+                slope_for_lane
+                    = rocke_attn_alibi_slope(b, qh_t, ctx->num_qh_p, ctx->alibi_slopes_ptr);
+            }
+        }
+
+        /* ALiBi arms: fma_tile terms per group; split designs keep a max per
+         * (group, n) sub-block and its offset T, folded into the row max. */
+        rocke_value_t* ad_terms[ROCKE_GFX950_ATTN2D_MAX_N_TILES * 16];
+        rocke_value_t* ad_T[2][ROCKE_GFX950_ATTN2D_MAX_N_TILES];
+        rocke_value_t* ad_nmax[2][ROCKE_GFX950_ATTN2D_MAX_N_TILES];
         for(int group_idx = 0; group_idx < n_groups; ++group_idx)
         {
             rocke_value_t* const* st_regs = (group_idx == 0) ? ST32_n : ST32_n_g1;
             rocke_value_t* group_tile_off = (group_idx == 0) ? tile_off : tile_off_g1;
+            if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_FMA_TILE)
+                fh_ad_tile_terms(ctx, ctx->ad_slope, group_tile_off, ad_terms);
+            if(ctx->AD_SPLIT)
+                rocke_attn_alibi_split_tile_offsets(
+                    b, ctx->ad_slope, group_tile_off, ctx->ad_anchor, QK_N_TILES, ad_T[group_idx]);
             for(int n = 0; n < QK_N_TILES; ++n)
             {
                 /* MASK_LIMIT per-(group,n) col_abs_base (Python 2862-2865). */
@@ -799,18 +930,24 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                         }
                     } /* end non-MASK_LIMIT mask path */
                     rocke_value_t* s_raw = rocke_b_vec_extract(b, st_regs[n], reg);
-                    rocke_value_t* s_scaled = rocke_b_fmul(b, s_raw, qk_scale);
+                    rocke_value_t* s_scaled;
+                    if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_FMA_TILE)
+                        s_scaled = rocke_b_fma(b, s_raw, qk_scale, ad_terms[n * 16 + reg]);
+                    else if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_FMA_SPLIT)
+                        s_scaled = rocke_b_fma(b, s_raw, qk_scale, ctx->ad_split_c[reg]);
+                    else
+                        s_scaled = rocke_b_fmul(b, s_raw, qk_scale);
                     if(ctx->USE_SOFTCAP)
                     {
                         s_scaled = rocke_b_fmul(b, fh_apply_softcap(ctx, s_scaled), rcp_ln2);
                     }
                     rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
-                    if(ctx->USE_ALIBI)
+                    if(ctx->USE_ALIBI && ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_NONE)
                     {
-                        rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                        rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                         rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                         rocke_value_t* add_term
-                            = rocke_b_fmul(b, rocke_b_fmul(b, st_alibi_slope_iter, pos_f), rcp_ln2);
+                            = rocke_b_fmul(b, rocke_b_fmul(b, slope_for_lane, pos_f), rcp_ln2);
                         score = rocke_b_fadd(b, score, add_term);
                     }
                     if(ctx->USE_QQ_BIAS)
@@ -841,15 +978,32 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                         st_scores0[n][reg] = score;
                     else
                         st_scores1[n][reg] = score;
-                    st_local_max = rocke_b_fmax(b, st_local_max, score);
+                    if(ctx->AD_SPLIT)
+                        ad_nmax[group_idx][n]
+                            = rocke_b_fmax(b, reg == 0 ? neg_inf : ad_nmax[group_idx][n], score);
+                    else
+                        st_local_max = rocke_b_fmax(b, st_local_max, score);
                 }
             }
         }
+        if(ctx->AD_SPLIT)
+            for(int group_idx = 0; group_idx < n_groups; ++group_idx)
+                for(int n = 0; n < QK_N_TILES; ++n)
+                    st_local_max
+                        = rocke_b_fmax(b,
+                                       st_local_max,
+                                       rocke_b_fadd(b, ad_nmax[group_idx][n], ad_T[group_idx][n]));
         rocke_value_t* st_remote_max = rocke_b_warp_shuffle_xor(b, st_local_max, 32);
         rocke_value_t* st_tile_max = rocke_b_fmax(b, st_local_max, st_remote_max);
         rocke_value_t* st_m_raw = rocke_b_fmax(b, ctx->m_cur[0], st_tile_max);
         rocke_value_t* st_ok = rocke_b_fcmp(b, "ogt", st_m_raw, neg_inf);
         rocke_value_t* st_m_new = rocke_b_select(b, st_ok, st_m_raw, zero_f);
+        /* Split designs: the exp2 offset of sub-block n is m_new - T. */
+        rocke_value_t* ad_moff[2][ROCKE_GFX950_ATTN2D_MAX_N_TILES];
+        if(ctx->AD_SPLIT)
+            for(int group_idx = 0; group_idx < n_groups; ++group_idx)
+                for(int n = 0; n < QK_N_TILES; ++n)
+                    ad_moff[group_idx][n] = rocke_b_fsub(b, st_m_new, ad_T[group_idx][n]);
 
         rocke_value_t* st_l_local = zero_f;
         for(int group_idx = 0; group_idx < n_groups; ++group_idx)
@@ -861,7 +1015,8 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 {
                     rocke_value_t* score
                         = (group_idx == 0) ? st_scores0[n][reg] : st_scores1[n][reg];
-                    rocke_value_t* p_t = rocke_b_exp2(b, rocke_b_fsub(b, score, st_m_new));
+                    rocke_value_t* p_off = ctx->AD_SPLIT ? ad_moff[group_idx][n] : st_m_new;
+                    rocke_value_t* p_t = rocke_b_exp2(b, rocke_b_fsub(b, score, p_off));
                     pt32[n * 16 + reg] = p_t;
                     st_l_local = rocke_b_fadd(b, st_l_local, p_t);
                 }
@@ -1001,7 +1156,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
                 if(ctx->USE_ALIBI)
                 {
-                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                     rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                     rocke_value_t* slope = ctx->hoist_q_head[reg];
                     rocke_value_t* add_term
@@ -1090,11 +1245,55 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
          * Storage [atom][n] mirrors Python's S_n[atom][n]. */
         rocke_value_t* S_n[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE]
                           [ROCKE_GFX950_ATTN2D_MAX_N_TILES]; /* [atom][n] */
+        /* ALiBi seed_tile: the term of key tile_off + lane_col per reg, raw units. */
+        rocke_value_t* ad_base16[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+        if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_TILE)
+        {
+            for(int r = 0; r < REGS_PER_LANE; ++r)
+            {
+                rocke_value_t* key = rocke_b_add(b, tile_off, lane_col);
+                rocke_value_t* dist = rocke_b_sub(b, key, ctx->hoist_state_row[r]);
+                ad_base16[r]
+                    = rocke_b_fmul(b, ctx->ad_seed_slope_r[r], rocke_b_sitofp_f32(b, dist));
+            }
+        }
         for(int n = 0; n < QK_N_TILES; ++n)
         {
             rocke_value_t* acc_per_atom[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
-            for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
-                acc_per_atom[atom] = rocke_b_zero_vec_f32(b, 4);
+            if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_TILE)
+            {
+                for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
+                {
+                    rocke_value_t* vals[4];
+                    for(int i = 0; i < 4; ++i)
+                    {
+                        int r = atom * 4 + i;
+                        if(n == 0)
+                        {
+                            vals[i] = ad_base16[r];
+                            continue;
+                        }
+                        rocke_value_t* step = rocke_b_const_f32(b, 16.0 * n);
+                        vals[i] = rocke_b_fma(b, ctx->ad_seed_slope_r[r], step, ad_base16[r]);
+                    }
+                    acc_per_atom[atom] = fh_ad_vec(b, vals, 4);
+                }
+            }
+            else if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_SEED_SPLIT)
+            {
+                for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
+                {
+                    rocke_value_t* vals[4];
+                    for(int i = 0; i < 4; ++i)
+                        vals[i] = ctx->ad_split_c16[atom * 4 + i][n];
+                    acc_per_atom[atom] = fh_ad_vec(b, vals, 4);
+                }
+            }
+            else
+            {
+                for(int atom = 0; atom < M_ATOMS_PER_WARP; ++atom)
+                    acc_per_atom[atom] = rocke_b_zero_vec_f32(b, 4);
+            }
             for(int k = 0; k < QK_K_ITERS; ++k)
             {
                 /* Match Python arg-eval order (left-to-right): const(k*32)
@@ -1157,6 +1356,13 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
             rocke_value_t* qp_r = ctx->hoist_q_pos[reg];
             rocke_value_t* row_ok = ctx->hoist_row_mask[reg];
             rocke_value_t* causal_lim = ctx->hoist_state_row[reg];
+            rocke_value_t* ad_tbase = NULL;
+            if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_FMA_TILE)
+            {
+                rocke_value_t* key = rocke_b_add(b, tile_off, lane_col);
+                rocke_value_t* dist = rocke_b_sub(b, key, causal_lim);
+                ad_tbase = rocke_b_fmul(b, ctx->ad_slope_r[reg], rocke_b_sitofp_f32(b, dist));
+            }
             for(int n = 0; n < QK_N_TILES; ++n)
             {
                 rocke_value_t* ca_n = rocke_b_const_i32(b, n);
@@ -1173,15 +1379,29 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                     m_ok = rocke_b_land(b, m_ok, rocke_b_cmp_lt(b, dist, sw_const));
                 }
                 rocke_value_t* s_raw = rocke_b_vec_extract(b, S_n[atom][n], in_atom);
-                rocke_value_t* s_scaled = rocke_b_fmul(b, s_raw, qk_scale);
+                rocke_value_t* s_scaled;
+                if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_FMA_TILE)
+                {
+                    rocke_value_t* ad_term = ad_tbase;
+                    if(n != 0)
+                    {
+                        rocke_value_t* step = rocke_b_const_f32(b, 16.0 * n);
+                        ad_term = rocke_b_fma(b, ctx->ad_slope_r[reg], step, ad_tbase);
+                    }
+                    s_scaled = rocke_b_fma(b, s_raw, qk_scale, ad_term);
+                }
+                else if(ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_FMA_SPLIT)
+                    s_scaled = rocke_b_fma(b, s_raw, qk_scale, ctx->ad_split_c16[reg][n]);
+                else
+                    s_scaled = rocke_b_fmul(b, s_raw, qk_scale);
                 if(ctx->USE_SOFTCAP)
                 {
                     s_scaled = rocke_b_fmul(b, fh_apply_softcap(ctx, s_scaled), rcp_ln2);
                 }
                 rocke_value_t* score = rocke_b_select(b, m_ok, s_scaled, neg_inf);
-                if(ctx->USE_ALIBI)
+                if(ctx->USE_ALIBI && ctx->ALIBI_DESIGN == ROCKE_GFX950_ATTN2D_AD_NONE)
                 {
-                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, ctx->context_len);
+                    rocke_value_t* pos_off = rocke_b_sub(b, col_abs, causal_lim);
                     rocke_value_t* pos_f = rocke_b_sitofp_f32(b, pos_off);
                     rocke_value_t* slope = ctx->hoist_q_head[reg];
                     rocke_value_t* add_term
@@ -1216,6 +1436,7 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
 
         /* per-row max via cross-lane butterfly + online update. */
         rocke_value_t* m_new[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
+        rocke_value_t* ad_T16[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE];
         rocke_value_t* s_local[ROCKE_GFX950_ATTN2D_MAX_REGS_PER_LANE]
                               [ROCKE_GFX950_ATTN2D_MAX_N_TILES];
         for(int reg = 0; reg < REGS_PER_LANE; ++reg)
@@ -1228,6 +1449,13 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                 local_max = rocke_b_fmax(b, local_max, v);
             }
             rocke_value_t* tile_max = fh_warp_xor_reduce_max(ctx, local_max);
+            if(ctx->AD_SPLIT)
+            {
+                /* Same for every lane of the row, so added after the reduce. */
+                rocke_attn_alibi_split_tile_offsets(
+                    b, ctx->ad_slope_r[reg], tile_off, ctx->hoist_state_row[reg], 1, &ad_T16[reg]);
+                tile_max = rocke_b_fadd(b, tile_max, ad_T16[reg]);
+            }
             rocke_value_t* full_max_raw = rocke_b_fmax(b, ctx->m_cur[reg], tile_max);
             rocke_value_t* ok = rocke_b_fcmp(b, "ogt", full_max_raw, neg_inf);
             m_new[reg] = rocke_b_select(b, ok, full_max_raw, zero_f);
@@ -1241,7 +1469,9 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
             rocke_value_t* sum_p = zero_f;
             for(int n = 0; n < QK_N_TILES; ++n)
             {
-                rocke_value_t* p = rocke_b_exp2(b, rocke_b_fsub(b, s_local[reg][n], m_new[reg]));
+                rocke_value_t* p_off
+                    = ctx->AD_SPLIT ? rocke_b_fsub(b, m_new[reg], ad_T16[reg]) : m_new[reg];
+                rocke_value_t* p = rocke_b_exp2(b, rocke_b_fsub(b, s_local[reg][n], p_off));
                 if(ctx->REGISTER_PV)
                     p_regs_f32_buf[reg * QK_N_TILES + n] = p;
                 if(!ctx->REGISTER_PV)

@@ -1152,6 +1152,73 @@ def _bias_cases():
     return out
 
 
+def _alibi_cases():
+    """ALiBi (SEM-021) through the SDPA gates and bindings: admission, routing and
+    operand handling; the kernels have their own ALiBi suites."""
+    tl = _mask("tl")
+    return [
+        _mk("alibi_square", reqs=(17, 5), tier="smoke", s_q=128, alibi=True, **tl),
+        _mk(
+            "alibi_q_lt_kv",
+            reqs=(17, 5, 8),
+            tier="smoke",
+            s_q=96,
+            s_kv=160,
+            alibi=True,
+            **tl,
+        ),
+        _mk("alibi_q_gt_kv", reqs=(17, 5, 8), s_q=160, s_kv=96, alibi=True, **tl),
+        # h_q = 12 takes hipDNN's second slope series (not a power of two).
+        _mk(
+            "alibi_gqa_h12_bf16_d64",
+            reqs=(17, 3, 1, 9),
+            tier="smoke",
+            dtype="bf16",
+            h_q=12,
+            h_k=4,
+            d=64,
+            s_q=128,
+            alibi=True,
+            **tl,
+        ),
+        # The dense kernels take a window of whole 64-key tiles (W + 1 = 128).
+        _mk(
+            "alibi_window",
+            reqs=(17, 11),
+            s_q=256,
+            left_bound=127,
+            right_bound=0,
+            alibi=True,
+        ),
+        _mk(
+            "alibi_d256_gqa_bf16",
+            reqs=(17, 3, 9, 1),
+            dtype="bf16",
+            h_k=2,
+            d=256,
+            s_q=128,
+            alibi=True,
+            **tl,
+        ),
+        _mk(
+            "alibi_lse", reqs=(17, 7), s_q=96, s_kv=160, emit_lse=True, alibi=True, **tl
+        ),
+        _mk(
+            "alibi_padded",
+            reqs=(17, 10),
+            b=3,
+            q_lens=(64, 30, 12),
+            kv_lens=(90, 60, 70),
+            alibi=True,
+            **tl,
+        ),
+        # Top-left causal decode attends to key 0 only: routing, not the term.
+        _mk(
+            "alibi_decode", reqs=(17, 13), b=4, h_k=2, s_q=1, s_kv=300, alibi=True, **tl
+        ),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # cross-product: GQA ratio x length mode x mask x bias x q/kv relation
 # ---------------------------------------------------------------------------
@@ -1261,6 +1328,35 @@ def _intersection_cases():
     """Hand-picked intersections beyond the cross grid."""
     out = []
     add = out.append
+    add(
+        _mk(
+            "x_gqa_ragged_alibi_lse_d64",
+            reqs=(3, 12, 17, 7, 5),
+            tags=("cross",),
+            d=64,
+            h_k=2,
+            q_lens=(12, 30),
+            kv_lens=(40, 64),
+            length_mode="ragged",
+            alibi=True,
+            emit_lse=True,
+            **_mask("tl"),
+        )
+    )
+    add(
+        _mk(
+            "x_strided_bshd_alibi_bf16",
+            reqs=(2, 17, 1, 5),
+            tags=("cross",),
+            dtype="bf16",
+            h_q=4,
+            s_q=40,
+            d=64,
+            layout="strided_bshd",
+            alibi=True,
+            **_mask("tl"),
+        )
+    )
     add(
         _mk(
             "x_gqa_varlen_br_bias_d256",
@@ -1479,6 +1575,7 @@ _BUILDERS = (
     _ragged_cases,
     _decode_cases,
     _bias_cases,
+    _alibi_cases,
     _intersection_cases,
     _cross_cases,
     _dense_tile_cases,

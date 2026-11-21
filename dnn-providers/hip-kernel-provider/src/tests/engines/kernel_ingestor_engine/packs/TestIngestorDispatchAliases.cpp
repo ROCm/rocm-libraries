@@ -65,15 +65,36 @@ TEST(TestIngestorDispatchAliases, ASupersededContractKeepsItsOwnHandler)
                            << " resolves to the current contract's handler";
 }
 
-// gfx942 has one contract. Its versioned name resolves to the handler of the unversioned
-// one, so a plan saved through the catalog's handler names that same handler, and it has
-// no version it never defined.
-TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasOneContractOnItsCatalogHandler)
+// Saving requires the saved name to resolve to the handler that saved the plan, and the
+// current handler saves ALiBi plans, so the ALiBi name must resolve to it (not to v1's).
+TEST(TestIngestorDispatchAliases, TheAlibiContractResolvesToTheCurrentHandler)
+{
+    registerNativeIngestorSymbols();
+
+    const auto* current
+        = DispatchRegistry<Handle>::tryResolve("hipkernel.gfx950_attention_dense.dispatch");
+    const auto* v1 = DispatchRegistry<Handle>::tryResolve(
+        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_V1));
+    const auto* alibi = DispatchRegistry<Handle>::tryResolve(
+        std::string(GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1));
+
+    ASSERT_NE(alibi, nullptr) << GFX950_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1
+                              << " is not registered";
+    EXPECT_EQ(alibi, current);
+    EXPECT_NE(alibi, v1);
+}
+
+// gfx942 has one plain contract and the ALiBi one. Both versioned names resolve to the
+// handler of the unversioned one, which saves plain and ALiBi plans alike, so a saved plan
+// names that same handler; and it has no version it never defined.
+TEST(TestIngestorDispatchAliases, Gfx942AttentionDenseHasItsContractsOnItsCatalogHandler)
 {
     registerNativeIngestorSymbols();
 
     expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
                      GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_V1);
+    expectOneHandler("hipkernel.gfx942_attention_dense.dispatch",
+                     GFX942_ATTENTION_DENSE_DISPATCH_SYMBOL_ALIBI_V1);
     EXPECT_EQ(DispatchRegistry<Handle>::tryResolve("hipkernel.gfx942_attention_dense.dispatch.v2"),
               nullptr);
 }

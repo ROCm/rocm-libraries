@@ -45,6 +45,7 @@ from .common import (
     attention_problem,
     _request_errors,
     _selector_matches,
+    UNIFIED_ALIBI_ARCHES,
 )
 
 # The unified paths are portable, so they declare every known target rather than
@@ -70,12 +71,13 @@ _UNIFIED_CAPABILITY = Capability(
     # between each sequence's KV and query lengths (bottom-right); top-left
     # cross-length selects the ``causal_top_left`` kernel variant on gfx950 and
     # the scalar kernel elsewhere (tiled gates reject it off gfx950).
-    supports_features=ATTENTION_FEATURES,
+    supports_features=ATTENTION_FEATURES | {"alibi", "alibi_external_slopes"},
 )
 # Both unified paths write the optional LSE output; each path's own gate (in
 # ``support`` below) still refuses it on arches/features that cannot.
 _UNIFIED_LSE_CAPABILITY = dataclasses.replace(
-    _UNIFIED_CAPABILITY, supports_features=ATTENTION_FEATURES | {"lse"}
+    _UNIFIED_CAPABILITY,
+    supports_features=_UNIFIED_CAPABILITY.supports_features | {"lse"},
 )
 
 # The two generic unified-path algorithms this module registers, named so a
@@ -102,8 +104,10 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
         if not ok:
             return False, why
         problem = attention_problem(req)
-        # The scalar gate refuses LSE (the scalar kernel writes none), so coverage
-        # is asked with LSE off; the path's own gate rules on LSE below.
+        if problem.use_alibi and req.arch not in UNIFIED_ALIBI_ARCHES:
+            return False, f"unified ALiBi runs on {UNIFIED_ALIBI_ARCHES} only"
+        # The scalar gate refuses LSE and ALiBi (the scalar kernel has neither), so
+        # coverage is asked with both off; the path's own gate rules on them below.
         ok, why = supports_native_unified_attention_coverage(problem, arch=req.arch)
         if not ok:
             return False, why
@@ -116,8 +120,9 @@ def _make_candidate(*, path: str, priority: int) -> KernelCandidate:
             return False, (
                 f"problem routes to {problem.select_path(req.arch)!r} path, not {path!r}"
             )
-        if problem.emit_lse:
-            # The path's own gate owns which arches and features can write LSE.
+        if problem.emit_lse or problem.use_alibi:
+            # The path's own gate owns which arches and features can write LSE
+            # or apply ALiBi.
             ok, why = unified_lse_path_gate(path)(problem, arch=req.arch)
             if not ok:
                 return False, why

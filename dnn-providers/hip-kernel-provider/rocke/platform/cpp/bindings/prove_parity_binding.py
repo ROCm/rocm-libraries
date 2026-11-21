@@ -1639,6 +1639,16 @@ def problems_gfx950_attention_tiled_2d():
         # ---- misc flag combinations ----
         p(64, 64, 32, 32, 64, 32, 1, 4096, use_sinks=True),
         p(512, 2, 64, 8, 64, 32, 512, 4096, use_sinks=True),  # combo + sinks
+        # ---- ALiBi takes the path of the same problem without it on gfx950
+        # (the tiled 2D kernel applies it on every path) ----
+        p(2048, 1, 32, 8, 128, 64, 2048, 2048, use_alibi=True),  # single-batch d128
+        p(2048, 1, 32, 8, 192, 64, 2048, 2048, use_alibi=True),  # single-batch d192
+        p(4096, 4, 32, 8, 128, 64, 1024, 4096, use_alibi=True),  # multi-batch d128
+        p(1024, 2, 32, 32, 64, 32, 64, 4096, use_alibi=True),  # register-P
+        p(512, 1, 32, 32, 64, 32, 512, 4096, use_alibi=True),  # single-batch d64
+        p(
+            64, 64, 32, 32, 64, 16, 2048, 4096, use_sinks=True, use_alibi=True
+        ),  # sinks wpe3
     ]
 
 
@@ -1791,7 +1801,8 @@ def _is_biased_combo_2d(problem_dict):
     """Check if problem hits the #9220 bug (biased combo_2d divergence).
 
     Returns True for problems with combo_2d geometry (gfx950, bf16, d64, b32 or 64, GQA-8, and
-    seqlen_q>256) and any bias flag (use_qq_bias, use_alibi, softcap!=0).
+    seqlen_q>256) and QQ bias or softcap. ALiBi is not part of it: both selectors
+    route it like the problem without it.
     """
     is_combo_geom = (
         problem_dict.get("head_size") == 64
@@ -1806,7 +1817,6 @@ def _is_biased_combo_2d(problem_dict):
     # Bias flags that trigger the bug (from skipped tests)
     has_bias = (
         problem_dict.get("use_qq_bias", False)
-        or problem_dict.get("use_alibi", False)
         or problem_dict.get("softcap", 0.0) != 0.0
     )
 

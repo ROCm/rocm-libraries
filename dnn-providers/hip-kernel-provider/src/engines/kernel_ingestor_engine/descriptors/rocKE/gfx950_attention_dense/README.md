@@ -11,6 +11,9 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
 - head_size: 64, 128.
 - causal: both.
 - block_m: 128, 256. block_n: 32, 64, 128, 256.
+- ALiBi (`use_alibi`, hipDNN's `alibi_mask` with the slopes computed in the kernel): the 26 kernels
+  (the causal variants of this bundle, built with ALiBi) live in the satellite bundle
+  `../gfx950_attention_dense_alibi/` (same engine and KMD, KDP of its own).
 - Query heads and KV heads: any. They are not variant fields -- the kernel reads
   `num_query_heads` / `num_kv_heads` as kernargs from the graph, so one variant per
   (dtype, head_size, causal, tile) serves every head configuration. Each variant is

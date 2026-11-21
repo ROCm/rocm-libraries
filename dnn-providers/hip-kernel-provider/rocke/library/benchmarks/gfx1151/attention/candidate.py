@@ -72,6 +72,7 @@ class RockeKernels:
             use_softcap=case.softcap > 0,
             use_sinks=case.sinks,
             use_alibi=case.alibi,
+            use_alibi_external_slopes=case.alibi,
             use_qq_bias=case.qq_bias,
             use_fp8=bool(case.kv_dtype),
         )

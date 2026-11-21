@@ -71,6 +71,20 @@ _AOT_GRIDS = (
     ),
 )
 
+# What the ingestor's grid candidates admit: the kernel's features, ALiBi included
+# (hipDNN's alibi_mask is served by use_alibi kernels on every grid).
+_INGESTOR_FEATURES = frozenset(
+    {
+        "causal",
+        "causal_bottom_right",
+        "sliding_window",
+        "sinks",
+        "alibi",
+        "alibi_external_slopes",
+        "lse",
+    }
+)
+
 # block_n (KV tile) the default spec ships; 64 is the resource-efficient peak
 # (see AttentionDenseSpec.block_n). The knob space sweeps block_m / block_n.
 _DENSE_BLOCK_N = 64
@@ -305,6 +319,7 @@ def _make_spec(
         causal_bottom_right=bottom_right,
         causal_diag_split=diag_split,
         window_wave_skip=window_wave_skip,
+        use_alibi=bool(req.use_alibi),
         **dense_paged_fields(req),
     )
 
@@ -342,7 +357,7 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
         base_spec=tuned_base_spec,
         supports=_supports,
         # Dense: causal (top-left or bottom-right), sliding-window and sinks (alone
-        # or combined), optional LSE output, paged K/V. Head size stays out: D64/D128
+        # or combined), ALiBi, optional LSE output, paged K/V. Head size stays out: D64/D128
         # coverage is ``supports_attention_dense``'s call.
         features=frozenset(
             {
@@ -350,6 +365,8 @@ def _make_gfx942_attention_dense_candidate() -> KernelCandidate:
                 "causal_bottom_right",
                 "sliding_window",
                 "sinks",
+                "alibi",
+                "alibi_external_slopes",
                 "lse",
                 "layout_paged",
             }
@@ -372,9 +389,7 @@ def _make_gfx942_attention_dense_qbminor_candidate() -> KernelCandidate:
         variant_id=_QBMINOR_VARIANT_ID,
         base_spec=_qbminor_base_spec,
         supports=_supports,
-        features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
-        ),
+        features=_INGESTOR_FEATURES,
         recorded=frozenset({"waves_per_eu"}),
     )
 
@@ -402,9 +417,7 @@ def _make_gfx942_attention_dense_aot_candidate(
             nonpersist_decode=nonpersist_decode,
         ),
         supports=_supports,
-        features=frozenset(
-            {"causal", "causal_bottom_right", "sliding_window", "sinks", "lse"}
-        ),
+        features=_INGESTOR_FEATURES,
         recorded=frozenset({"waves_per_eu"}),
         axis_names=None if persistent else frozenset(),
     )

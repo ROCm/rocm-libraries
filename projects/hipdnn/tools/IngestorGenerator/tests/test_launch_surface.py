@@ -769,6 +769,10 @@ _LAUNCH_SURFACE_STALE = {
     "gfx950_attention_unified_2d": (
         "'capacity' surface names binary_search_iters, removed from rocKE by #15024"
     ),
+    # The ALiBi satellite bundle of the same engine repeats the home's launch_surface.
+    "gfx950_attention_unified_2d_alibi": (
+        "'capacity' surface names binary_search_iters, removed from rocKE by #15024"
+    ),
 }
 
 

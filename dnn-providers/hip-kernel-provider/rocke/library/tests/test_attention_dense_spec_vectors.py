@@ -92,6 +92,12 @@ VECTORS = next(
 )
 CPP_MIRROR = "platform/cpp/instances/common/attention_dense_spec.cpp"
 
+# Builder-only fields the C++ port does not mirror (hipDNN descriptors take their
+# defaults): kept out of the vectors (fields, defaults, case specs) and their
+# rejects out of the reject sites. Each must default to a value that leaves every
+# mirrored answer unchanged.
+_NON_MIRRORED_FIELDS = ("alibi_design",)
+
 _BASE = dict(
     batch=1,
     seqlen_q=512,
@@ -262,6 +268,25 @@ _CASES: tuple[dict, ...] = (
         block_size=16,
         num_kv_blocks=512,
     ),
+    # ALiBi: each excluded mode on its own (the emit_lse reject reads a subclass
+    # field, so its cases are hook cases).
+    dict(use_alibi=True, use_sinks=True),  # top-left causal: accepted
+    dict(use_alibi=True, use_sinks=True, sliding_window=128),  # accepted
+    dict(use_alibi=True, use_sinks=True, causal=False),
+    dict(use_alibi=True, use_sinks=True, causal_bottom_right=True),
+    dict(
+        use_alibi=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
+    ),
+    dict(use_alibi=True, varlen=True),
+    # The ALiBi rejects come before the sinks ones.
+    dict(
+        use_alibi=True,
+        use_sinks=True,
+        paged=True,
+        block_size=16,
+        num_kv_blocks=64,
+        sliding_window=256,
+    ),
     dict(
         use_sinks=True, paged=True, block_size=16, num_kv_blocks=64, sliding_window=256
     ),
@@ -328,6 +353,10 @@ _CASES: tuple[dict, ...] = (
     dict(head_size=64, block_n=32, lds_k_group_pad=16),
     dict(seqlen_q=256, seqlen_kv=1024, causal_bottom_right=True, sliding_window=256),
     dict(ragged=True, seqlen_q=500, seqlen_kv=500, use_sinks=True),
+    dict(use_alibi=True),
+    dict(use_alibi=True, sliding_window=128),
+    dict(use_alibi=True, causal_bottom_right=True, seqlen_q=256, seqlen_kv=1024),
+    dict(use_alibi=True, causal=False, persistent=True, num_persistent=4),
     dict(varlen=True, batch=4, sliding_window=128),
     dict(paged=True, block_size=16, num_kv_blocks=64, sliding_window=256),
     dict(persistent=True, num_persistent=304, interleave=True),
@@ -501,6 +530,19 @@ _HOOK_CASES: dict[type, tuple[dict, ...]] = {
         # Auto-decode boundaries (review, 10-29).
         dict(seqlen_q=512, seqlen_kv=512, sliding_window=512, persistent=True),
         dict(causal_bottom_right=True, seqlen_q=256, seqlen_kv=1024),
+        # ALiBi reads the class's emit_lse: rejected with bottom-right only.
+        dict(
+            use_alibi=True,
+            causal_bottom_right=True,
+            seqlen_q=256,
+            seqlen_kv=1024,
+            emit_lse=True,
+        ),
+        dict(use_alibi=True, causal_bottom_right=True, emit_lse=True),
+        dict(use_alibi=True, emit_lse=True),
+        # Sinks + ALiBi need right bound 0 (a lookahead moves the anchor).
+        dict(use_alibi=True, use_sinks=True, right_bound=64),
+        dict(use_alibi=True, use_sinks=True, sliding_window=128),
     ),
     _G942: (
         {},  # runtime shape: head and shape parts off
@@ -534,7 +576,9 @@ _HOOKS = (
 
 
 def _field_names() -> list[str]:
-    return [f.name for f in fields(AttentionDenseSpec)]
+    return [
+        f.name for f in fields(AttentionDenseSpec) if f.name not in _NON_MIRRORED_FIELDS
+    ]
 
 
 def _defaults() -> dict:
@@ -543,7 +587,7 @@ def _defaults() -> dict:
     return {
         f.name: f.default
         for f in fields(AttentionDenseSpec)
-        if f.default is not MISSING
+        if f.default is not MISSING and f.name not in _NON_MIRRORED_FIELDS
     }
 
 
@@ -668,6 +712,10 @@ def _record_hook_case(spec) -> dict:
         "spec": {name: getattr(spec, name) for name in _field_names()},
         "lookahead": _lookahead(spec),
     }
+    if spec.use_alibi and getattr(spec, "emit_lse", False):
+        # The ALiBi check reads the subclass's emit_lse (the C struct's
+        # emit_lse); no other answer depends on it, so only ALiBi cases record it.
+        case["spec"]["emit_lse"] = True
     if expect["valid"]:
         case["name_parts"] = _name_parts(spec)
     case["expect"] = expect
@@ -863,8 +911,19 @@ def _reject_sites() -> tuple[set, set]:
             if not isinstance(node, ast.FunctionDef):
                 continue
             if mod is spec_mod and node.name == "__post_init__":
+                # Rejects of a non-mirrored field sit under an ``if`` on that field.
+                skip = {
+                    n.lineno
+                    for branch in ast.walk(node)
+                    if isinstance(branch, ast.If)
+                    and any(f in ast.unparse(branch.test) for f in _NON_MIRRORED_FIELDS)
+                    for n in ast.walk(branch)
+                    if isinstance(n, ast.Raise)
+                }
                 sites |= {
-                    (path, n.lineno) for n in ast.walk(node) if isinstance(n, ast.Raise)
+                    (path, n.lineno)
+                    for n in ast.walk(node)
+                    if isinstance(n, ast.Raise) and n.lineno not in skip
                 }
             elif mod is paged_mod and node.name == "paged_tile_check":
                 sites |= {
@@ -920,7 +979,7 @@ def _reject_sites() -> tuple[set, set]:
 
 
 def test_cases_reach_every_reject_site():
-    """Every reject the C++ port mirrors is hit by some base case. A count would
+    """Every reject the C++ port mirrors is hit by some base or hook case. A count would
     not notice a site that no case reaches. Reaching a site is necessary, not
     sufficient: a condition with several terms still needs a case each term
     decides on its own (as the varlen and paged pair-decode rows do)."""
@@ -953,6 +1012,10 @@ def test_cases_reach_every_reject_site():
     try:
         for c in _load()["cases"]:
             _evaluate(c["spec"])
+        # Rejects that read a subclass field (emit_lse) are reached by hook cases.
+        for cls, table in _HOOK_CASES.items():
+            for overrides in table:
+                _expect(_hook_spec(cls, overrides))
     finally:
         sys.settrace(None)
     missed = sorted(sites - hit)

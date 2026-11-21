@@ -295,6 +295,10 @@ struct AttentionDenseMask
 {
     int64_t causal = 0;
     int64_t slidingWindow = 0;
+    /// A bottom-right causal band or window the kernel serves as top-left
+    /// (seqlen_q == seqlen_kv). Only the ALiBi rule reads it: hipDNN defines ALiBi on the
+    /// top-left causal band only.
+    bool bottomRight = false;
 };
 
 /**
@@ -364,7 +368,7 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
                                       "all top-left");
             return std::nullopt;
         }
-        return AttentionDenseMask{1, 0};
+        return AttentionDenseMask{1, 0, true};
     case PlanMaskType::SLIDING_WINDOW:
     {
         if(!arch.servesSlidingWindow())
@@ -394,7 +398,7 @@ std::optional<AttentionDenseMask> maskFor(const data_objects::SdpaAttributes& at
             return std::nullopt;
         }
         const int64_t window = band.leftBound + 1;
-        return AttentionDenseMask{1, window};
+        return AttentionDenseMask{1, window, bottomRight};
     }
     default:
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "mask") << "mask type " << static_cast<int>(planMask)
@@ -766,12 +770,25 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
                 mask->slidingWindow, problem.seqLenQ, problem.seqLenKv, /*bindsStats=*/true));
         return std::nullopt;
     }
-    // ALiBi slopes and padding masks.
-    if(attributes.alibi_mask())
+    // ALiBi: served by an arch's use_alibi variants, which compute hipDNN's slopes from the
+    // query head count (SdpaSemanticsRegister SEM-021). hipDNN defines ALiBi only on the
+    // top-left causal band (any left window, no right bound), so every other mask is
+    // declined, even bottom-right at seqlen_q == seqlen_kv. A window needs no check here:
+    // maskFor declines it on an arch without window variants.
+    const bool alibi = attributes.alibi_mask();
+    if(alibi && !arch.servesAlibi())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "alibi_mask") << "alibi_mask is not supported");
         return std::nullopt;
     }
+    if(alibi && (mask->causal != 1 || mask->bottomRight))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(declined(arch, "alibi_mask")
+                               << "alibi_mask needs a top-left causal mask; hipDNN defines ALiBi "
+                                  "on the top-left causal band only");
+        return std::nullopt;
+    }
+    // Padding masks.
     if(attributes.padding_mask())
     {
         HIPDNN_PLUGIN_LOG_INFO(declined(arch, "padding_mask") << "padding_mask is not supported");
@@ -836,6 +853,10 @@ std::optional<BoundTokens> graphMatches(const MatchContext& context, const Atten
     {
         bound[std::string(arch.tokens.stats)] = statsUid;
     }
+    if(arch.servesAlibi())
+    {
+        bound[std::string(arch.tokens.alibi)] = int64_t{alibi ? 1 : 0};
+    }
     return bound;
 }
 
@@ -871,6 +892,10 @@ AttentionDenseBinding attentionDenseBinding(const BoundTokens& bound,
     if(arch.servesStats())
     {
         binding.stats = read(arch.tokens.stats);
+    }
+    if(arch.servesAlibi())
+    {
+        binding.alibi = read(arch.tokens.alibi) != 0;
     }
     return binding;
 }
@@ -1049,6 +1074,18 @@ bool kernelMatches(const MatchContext& context,
         }
     }
 
+    // On an arch that serves ALiBi: an ALiBi graph needs an ALiBi candidate and a plain graph
+    // a plain one, since the scores and the argument lists differ.
+    if(arch.servesAlibi())
+    {
+        const auto alibi = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.tokens.alibi);
+        const auto usesAlibi = arch.candidateUsesAlibi(kernel);
+        if(!alibi.has_value() || !usesAlibi.has_value() || *usesAlibi != (*alibi != 0))
+        {
+            return false;
+        }
+    }
+
     // No per-block check here: a block that sees no key tile runs a zero-trip key loop and the
     // kernel zeroes its rows. A graph that binds stats and has such rows is declined by the
     // graph match (windowLeavesRowsWithoutKeys says why), before any candidate is matched.
@@ -1118,14 +1155,16 @@ AttentionDenseGrid savedGridSelector(const SavedLaunchInputs& inputs)
 }
 
 /// The kernel signature a contract's launch passes, for a kernel on @p grid that writes LSE
-/// (@p writesLse) or not.
+/// (@p writesLse) or not, and adds ALiBi (@p alibi) or not.
 ///
 /// RUNTIME_HEAD_COUNTS is the form every kernel in both catalogs takes; BAKED_HEAD_COUNTS is
 /// the 8-argument form of kernels built before the head counts became runtime arguments. A
 /// kernel on the persistent grid (gfx942 only) takes a `<d>_magic`, `<d>_shift` i32 pair per
 /// fast-division divisor of its decode after the shape (runtime_kernarg_fields), 14 or 16
-/// arguments; a non-persistent order takes none. An emit_lse kernel (gfx942 only) takes one
-/// more argument, lse_ptr, last. use_sinks=False everywhere, so there is no sink_ptr slot.
+/// arguments; a non-persistent order takes none. A use_alibi kernel then takes
+/// alibi_slopes_ptr, which the launch passes null for hipDNN's built-in slopes. An emit_lse
+/// kernel (gfx942 only) takes one more argument, lse_ptr, last. use_sinks=False everywhere,
+/// so there is no sink_ptr slot.
 ///
 /// NAMES ARE LOAD-BEARING. requireSignatureMatch compares kind and size always, but names
 /// only when BOTH sides carry one. Kind and size alone cannot tell the four pointers
@@ -1139,8 +1178,10 @@ AttentionDenseGrid savedGridSelector(const SavedLaunchInputs& inputs)
 /// Offsets mirror the packed kernarg layout. They are not compared -- they exist so the
 /// mismatch diagnostic prints the real layout beside the recorded one instead of ten
 /// zeroes that read as data.
-std::vector<KernelArgument>
-    kernelSignature(AttentionDenseAbi abi, const AttentionDenseGrid& grid, bool writesLse)
+std::vector<KernelArgument> kernelSignature(AttentionDenseAbi abi,
+                                            const AttentionDenseGrid& grid,
+                                            bool writesLse,
+                                            bool alibi)
 {
     constexpr auto PTR = static_cast<uint32_t>(sizeof(void*));
     constexpr auto I32 = static_cast<uint32_t>(sizeof(int32_t));
@@ -1171,13 +1212,20 @@ std::vector<KernelArgument>
             }
         }
     }
-    if(writesLse)
-    {
-        // At the next pointer-aligned offset: 56 after num_kv_heads, 72 or 80 after two or
-        // three fast-division pairs.
+    // Each pointer at the next pointer-aligned offset: 56 after num_kv_heads, 72 or 80 after
+    // two or three fast-division pairs.
+    const auto appendPointer = [&signature](const char* name) {
         const uint32_t end = signature.back().offset + signature.back().size;
         signature.push_back(
-            KernelArgument{"global_buffer", PTR, (end + PTR - 1) / PTR * PTR, "lse_ptr"});
+            KernelArgument{"global_buffer", PTR, (end + PTR - 1) / PTR * PTR, name});
+    };
+    if(alibi)
+    {
+        appendPointer("alibi_slopes_ptr");
+    }
+    if(writesLse)
+    {
+        appendPointer("lse_ptr");
     }
     return signature;
 }
@@ -1381,15 +1429,34 @@ public:
             }
         }
 
+        // kernel_match pairs an ALiBi graph with an ALiBi candidate only, so the binding and
+        // the candidate agree; the same defence in depth, since ALiBi decides the scores and
+        // the kernel arguments. An ALiBi plan takes the ALiBi contract.
+        if(_arch.servesAlibi())
+        {
+            const auto usesAlibi = _arch.candidateUsesAlibi(kernel);
+            if(!usesAlibi.has_value() || *usesAlibi != binding.alibi)
+            {
+                throw hipdnn_plugin_sdk::HipdnnPluginException(
+                    HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                    std::string(_arch.label) + " attention_dense: kernel '"
+                        + toString(kernel.kernelId) + "' and the graph disagree on ALiBi");
+            }
+        }
+        const auto contract = binding.alibi ? _arch.alibiContract : _contract;
+
         auto code = buildIngestorKernelCode(
-            _kpackLoader, context, kernel, kernelSignature(_contract.abi, grid, writesLse));
+            _kpackLoader,
+            context,
+            kernel,
+            kernelSignature(contract.abi, grid, writesLse, binding.alibi));
 
         return makePreparedAttentionDense(
             std::move(code),
             AttentionDenseLaunchInputs{binding, problem, tile->blockM, grid},
             toString(kernel.kernelId),
             _arch,
-            _contract);
+            contract);
     }
 
     std::unique_ptr<PreparedDispatch> restoreLaunch(const SavedLaunchInputs& inputs,
@@ -1397,10 +1464,15 @@ public:
                                                     int deviceOrdinal) const override
     {
         const std::string kernelName = toString(code.kernelId);
+        // The current contract's handler saves ALiBi plans too (saving requires the saved
+        // name to resolve to the handler that saved), so it restores them as well.
+        const bool alibi = _arch.servesAlibi() && _contract.symbol == _arch.currentContract.symbol
+                           && inputs.dispatchSymbol == _arch.alibiContract.symbol;
+        const auto contract = alibi ? _arch.alibiContract : _contract;
         // The saved code object must take this contract's arguments (checked first, inside
         // restoreIngestorLaunch), and its values must be saved under this contract's name.
-        const auto readThisContract = [this](const SavedLaunchInputs& saved) {
-            requireLaunchContract(saved, _contract.symbol);
+        const auto readThisContract = [this, contract](const SavedLaunchInputs& saved) {
+            requireLaunchContract(saved, contract.symbol);
             return readLaunchInputs(saved, _arch);
         };
         // Which of the contract's argument lists the saved kernel must take is selected by
@@ -1415,11 +1487,11 @@ public:
         auto restored = restoreIngestorLaunch<AttentionDenseLaunchInputs>(
             inputs,
             std::move(code),
-            kernelSignature(_contract.abi, grid, writesLse),
+            kernelSignature(contract.abi, grid, writesLse, alibi),
             readThisContract,
             deviceOrdinal);
         return makePreparedAttentionDense(
-            std::move(restored.code), restored.launch, kernelName, _arch, _contract);
+            std::move(restored.code), restored.launch, kernelName, _arch, contract);
     }
 
     std::optional<SavedLaunchInputs>
@@ -1461,9 +1533,10 @@ public:
 
         // Exactly the arguments the code object was checked against (kernelSignature): a
         // BAKED_HEAD_COUNTS code object bakes the head counts, a RUNTIME_HEAD_COUNTS one
-        // reads them after seqlen_kv, a persistent one then takes its fast-division pairs,
-        // and one that writes LSE takes lse_ptr last. Only gfx950 has a BAKED_HEAD_COUNTS
-        // contract, and it binds no stats output and launches no persistent grid.
+        // reads them after seqlen_kv, a persistent one then takes its fast-division pairs, an
+        // ALiBi one alibi_slopes_ptr (null: the kernel computes hipDNN's slopes), and one
+        // that writes LSE takes lse_ptr last. Only gfx950 has a BAKED_HEAD_COUNTS contract,
+        // and it binds no stats output and launches no persistent grid.
         std::array<void*, 4> pointers{q.ptr, k.ptr, v.ptr, o.ptr};
         float scale = binding.scale;
         std::array<int32_t, 5> shape{static_cast<int32_t>(p.batch),
@@ -1473,6 +1546,7 @@ public:
                                      static_cast<int32_t>(p.numKvHeads)};
         auto fastDiv = preparedDense.fastDiv();
         const bool writesLse = binding.stats != ATTENTION_DENSE_NO_STATS;
+        void* alibiSlopes = nullptr;
         void* lse = writesLse ? hipdnn_plugin_sdk::findDeviceBuffer(
                                     binding.stats, deviceBuffers, numDeviceBuffers)
                                     .ptr
@@ -1481,7 +1555,7 @@ public:
         const bool headCounts
             = preparedDense.contract().abi == AttentionDenseAbi::RUNTIME_HEAD_COUNTS;
         std::vector<void*> params;
-        params.reserve(pointers.size() + 1 + shape.size() + 2 * fastDiv.size() + 1);
+        params.reserve(pointers.size() + 1 + shape.size() + 2 * fastDiv.size() + 2);
         for(auto& pointer : pointers)
         {
             params.push_back(static_cast<void*>(&pointer));
@@ -1496,13 +1570,19 @@ public:
             params.push_back(&pair.magic);
             params.push_back(&pair.shift);
         }
+        if(binding.alibi)
+        {
+            params.push_back(static_cast<void*>(&alibiSlopes));
+        }
         if(writesLse)
         {
             params.push_back(static_cast<void*>(&lse));
         }
         // The count is the signature's by construction; checked so a skew can never launch.
         const auto expected
-            = kernelSignature(preparedDense.contract().abi, launchInputs.grid, writesLse).size();
+            = kernelSignature(
+                  preparedDense.contract().abi, launchInputs.grid, writesLse, binding.alibi)
+                  .size();
         if(params.size() != expected)
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -1530,12 +1610,13 @@ private:
                                           + inputs.dispatchSymbol + "' " + reason);
 }
 
-// Refuses a saved causal flag or window outside maskFor's rules, without asking whether the
-// arch serves a window (see readLaunchInputs for gfx950's exception). The one exception is a
-// window that leaves the last query rows no key: an arch that serves windows restores it for
-// a plan without a stats output, and every other plan is refused (windowLeavesRowsWithoutKeys
-// says why). Both are baked into the code object and the launch does not read them, so these
-// are checks of the plan's integrity, not of the launch.
+// Refuses a saved causal flag or window outside maskFor's rules (and, in an ALiBi plan,
+// outside graphMatches' ALiBi rule), without asking whether the arch serves a window (see
+// readLaunchInputs for gfx950's exception). The one exception is a window that leaves the
+// last query rows no key: an arch that serves windows restores it for a plan without a
+// stats output, and every other plan is refused (windowLeavesRowsWithoutKeys says why).
+// Both are baked into the code object and the launch does not read them, so these are
+// checks of the plan's integrity, not of the launch.
 void requireServedSavedMask(const SavedLaunchInputs& inputs,
                             const AttentionDenseLaunchInputs& launch,
                             const AttentionDenseArch& arch)
@@ -1577,6 +1658,13 @@ void requireServedSavedMask(const SavedLaunchInputs& inputs,
                                 problem.seqLenQ,
                                 problem.seqLenKv,
                                 binding.stats != ATTENTION_DENSE_NO_STATS));
+    }
+    if(binding.alibi && binding.causal != 1)
+    {
+        refuseAttentionDenseLaunchValue(inputs,
+                                        CAUSAL_VALUE,
+                                        "must be 1 in an ALiBi plan; hipDNN defines ALiBi on the "
+                                        "top-left causal band only");
     }
 }
 
@@ -1741,11 +1829,22 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
                                             const AttentionDenseArch& arch)
 {
     // Every contract of an arch shares this value set; anything else, including the
-    // unversioned name, is refused against the current contract.
+    // unversioned name, is refused against the current contract. Only the ALiBi contract's
+    // name says that the plan binds ALiBi.
     const bool legacy = !arch.legacyContract.symbol.empty()
                         && inputs.dispatchSymbol == arch.legacyContract.symbol;
-    requireLaunchContract(inputs,
-                          legacy ? arch.legacyContract.symbol : arch.currentContract.symbol);
+    const bool alibi
+        = !arch.alibiContract.symbol.empty() && inputs.dispatchSymbol == arch.alibiContract.symbol;
+    std::string_view contract = arch.currentContract.symbol;
+    if(legacy)
+    {
+        contract = arch.legacyContract.symbol;
+    }
+    else if(alibi)
+    {
+        contract = arch.alibiContract.symbol;
+    }
+    requireLaunchContract(inputs, contract);
     // The sixteen values both arches share; an arch that serves stats also saves the
     // stats uid.
     std::vector<std::string_view> names{Q_UID_VALUE,
@@ -1787,6 +1886,7 @@ AttentionDenseLaunchInputs readLaunchInputs(const SavedLaunchInputs& inputs,
     binding.o = requireLaunchInt(inputs, O_UID_VALUE);
     binding.causal = requireLaunchInt(inputs, CAUSAL_VALUE);
     binding.slidingWindow = requireLaunchInt(inputs, SLIDING_WINDOW_VALUE);
+    binding.alibi = alibi;
     // A uid, or ATTENTION_DENSE_NO_STATS: graph_match binds no negative uid.
     if(arch.servesStats())
     {

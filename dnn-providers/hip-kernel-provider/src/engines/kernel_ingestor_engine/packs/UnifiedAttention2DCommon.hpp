@@ -198,7 +198,9 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
     // built: there the 2D kernel runs one under-filled Q block per sequence while the
     // split-KV kernel splits the keys across CTAs. No select_path crossover is replayed: the
     // boundary is this static rule.
-    if(problem.seqLenQ == 1 && arch.decodeHandedOff(problem.numQueryHeads, problem.numKvHeads))
+    // The split-KV engines ship no ALiBi kernels, so ALiBi decode stays here.
+    if(problem.seqLenQ == 1 && !operands->attributes->alibi_mask()
+       && arch.decodeHandedOff(problem.numQueryHeads, problem.numKvHeads))
     {
         HIPDNN_PLUGIN_LOG_INFO((DeclinedBy{arch.engineName, "decode"})
                                << "decode (seqlen_q 1) with a GQA group of " << *ratio
@@ -207,8 +209,8 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
         return std::nullopt;
     }
 
-    const auto matched
-        = matchAttributes(context, *operands->attributes, problem, arch.engineName, *arch.traits);
+    const auto matched = matchAttributes(
+        context, *operands->attributes, problem, arch.engineName, *arch.traits, arch.tokens);
     if(!matched.has_value())
     {
         return std::nullopt;
@@ -233,8 +235,9 @@ inline std::optional<BoundTokens> graphMatches(const MatchContext& context,
 
 /// What the kernel match and the handler ask of one architecture's engine, over its candidate
 /// record @p Candidate (which must carry `headSize`, `blockSize`, `maskType`, `slidingWindow`,
-/// `numWarps`, `blockMPerWarp` and `emitLse`: whether the kernel also writes the stats output,
-/// always false where no LSE-on kernel ships).
+/// `numWarps`, `blockMPerWarp`, `useAlibi`, always false for an engine that binds no ALiBi
+/// token, and `emitLse`: whether the kernel also writes the stats output, always false where
+/// no LSE-on kernel ships).
 template <typename Candidate>
 struct Unified2DArch
 {
@@ -275,8 +278,8 @@ inline std::string errorPrefix(std::string_view label)
  * carries no shape and none is compared. What a candidate does bake, and what this checks
  * against the graph:
  *
- *   - dtype, head_size, the arch's head facts (Unified2DArch::headsMatch), the mask kind and
- *     the sliding window;
+ *   - dtype, head_size, the arch's head facts (Unified2DArch::headsMatch), the mask kind, the
+ *     sliding window and ALiBi (use_alibi);
  *   - the stats output: a candidate that writes it (emit_lse) serves only a graph that asks
  *     for it, and every other candidate only a graph that does not;
  *   - block_size, which must divide seqlen_kv (the identity cache is whole blocks).
@@ -334,6 +337,18 @@ bool kernelMatches(const MatchContext& context,
     const auto slidingWindow
         = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.graph.tokens.slidingWindow);
     if(!slidingWindow.has_value() || candidate->slidingWindow != *slidingWindow)
+    {
+        return false;
+    }
+
+    // An ALiBi graph needs an ALiBi candidate and a plain graph a plain one. An engine that
+    // binds no ALiBi token sees only plain graphs (matchAttributes declines alibi_mask).
+    std::optional<int64_t> alibi = int64_t{0};
+    if(!arch.graph.tokens.alibi.empty())
+    {
+        alibi = hipdnn_plugin_sdk::ingestor::tryGetBoundInt(bound, arch.graph.tokens.alibi);
+    }
+    if(!alibi.has_value() || candidate->useAlibi != (*alibi != 0))
     {
         return false;
     }
@@ -554,6 +569,14 @@ public:
                        + (candidate.emitLse ? "' writes stats, but the graph asks for none"
                                             : "' writes no stats, but the graph asks for them"));
         }
+        // kernelMatches pairs an ALiBi graph with an ALiBi candidate only; a mismatch would
+        // launch the wrong scores.
+        if(candidate.useAlibi != binding.alibi)
+        {
+            refuse(_arch.graph.label,
+                   "kernel '" + hipdnn_plugin_sdk::ingestor::toString(kernel.kernelId)
+                       + "' and the graph disagree on ALiBi");
+        }
         const auto problem = boundProblem(context, binding, _arch.graph.label);
         if(_arch.prepareChecks != nullptr)
         {
@@ -641,7 +664,9 @@ public:
         void* const queryStartLen = base + layout.queryStartLenOffset;
 
         // Unused pointers are null and the unused scalars neutral: the shipped variants have
-        // no sinks, ALiBi, qq-bias, softcap or fp8, so the kernel never reads them.
+        // no sinks, qq-bias, softcap or fp8, so the kernel never reads them. A null
+        // alibi_slopes_ptr makes a use_alibi variant compute hipDNN's slopes from the query
+        // head count.
         void* const unused = nullptr;
         const float neutralScale = 1.0F;
         const float noSoftcap = 0.0F;

@@ -429,6 +429,8 @@ rocke_attention_dense_spec_t rocke_attention_dense_spec_default(void)
     s.causal_bottom_right = false;
     s.nonpersist_decode = "auto";
     s.chiplet_num_xcds = 8;
+    s.use_alibi = false;
+    s.emit_lse = false;
     return s;
 }
 
@@ -658,6 +660,27 @@ bool rocke_attention_dense_spec_validate(const rocke_attention_dense_spec_t* s,
         if(s->causal_bottom_right)
             ROCKE_SPEC_FAIL(reason, cap, "causal_bottom_right is not yet supported with paged KV");
     }
+    if(s->use_alibi)
+    {
+        if(s->paged)
+            ROCKE_SPEC_FAIL(reason, cap, "use_alibi is not yet supported with paged");
+        if(s->varlen)
+            ROCKE_SPEC_FAIL(reason, cap, "use_alibi is not yet supported with varlen");
+        /* Python _alibi_anchor_is_query (gfx950 adds right_bound == 0: !lookahead).
+         * The sink logit has no positional term, so it needs the exact
+         * slope * (j - i): the kernels anchor each row at its diagonal on top-left
+         * causal masks with right bound 0 only. */
+        if(s->use_sinks && !(s->causal && !s->causal_bottom_right && !lookahead))
+            ROCKE_SPEC_FAIL(reason,
+                            cap,
+                            "use_alibi with use_sinks needs a top-left causal mask with "
+                            "right bound 0");
+        /* hipDNN defines ALiBi on the top-left diagonal only; off it, the LSE
+         * depends on which query index the term uses (O does not). */
+        if(s->causal_bottom_right && s->emit_lse)
+            ROCKE_SPEC_FAIL(
+                reason, cap, "use_alibi with causal_bottom_right does not support emit_lse");
+    }
     if(s->use_sinks && s->paged)
         ROCKE_SPEC_FAIL(reason, cap, "use_sinks is not yet supported with paged KV");
     if(s->use_sinks && s->varlen)
@@ -840,6 +863,8 @@ rocke_status_t rocke_attention_dense_kernel_name(const rocke_attention_dense_spe
         add("swa%d", s->sliding_window);
     if(s->use_sinks)
         add("sinks");
+    if(s->use_alibi)
+        add("alibi");
     if(s->varlen)
         add("varlen");
     if(s->paged)

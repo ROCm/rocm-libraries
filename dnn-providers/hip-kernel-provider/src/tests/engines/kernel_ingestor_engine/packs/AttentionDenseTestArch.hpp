@@ -38,6 +38,8 @@ struct AttentionDenseTestArch
     std::string_view kernelMatchSymbol;
     /// The head of every decline line the graph match logs.
     std::string_view engineName;
+    /// Binds an ALiBi flag and ships use_alibi forms (both arches do).
+    bool bindsAlibi;
 };
 
 inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
@@ -50,7 +52,8 @@ inline constexpr AttentionDenseTestArch GFX942_ATTENTION_DENSE{
     true,
     true,
     "hipkernel.gfx942_attention_dense.kernel_match",
-    "hipkernel:Gfx942AttentionDense"};
+    "hipkernel:Gfx942AttentionDense",
+    true};
 
 inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     "Gfx950",
@@ -62,7 +65,8 @@ inline constexpr AttentionDenseTestArch GFX950_ATTENTION_DENSE{
     false,
     false,
     "hipkernel.gfx950_attention_dense.kernel_match",
-    "hipkernel:Gfx950AttentionDense"};
+    "hipkernel:Gfx950AttentionDense",
+    true};
 
 inline std::string
     attentionDenseArchName(const ::testing::TestParamInfo<const AttentionDenseTestArch*>& info)

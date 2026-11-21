@@ -54,8 +54,19 @@ _WINDOW_TILE = "bm128"
 _WINDOW_NUM_PERSISTENT = 2 * _DEFAULT_NUM_PERSISTENT
 _WINDOW_TILE_MAX_CTAS_PER_CU = 8
 _FEATURES = frozenset(
-    {"causal", "sliding_window", "full_attention", "band", "sinks", "lse"}
+    {
+        "causal",
+        "sliding_window",
+        "full_attention",
+        "band",
+        "sinks",
+        "lse",
+        "alibi",
+        "alibi_external_slopes",
+    }
 )
+# Served by the grid body only.
+_GRID_FEATURES = _FEATURES | {"causal_bottom_right", "layout_paged"}
 
 
 @dataclass(frozen=True)
@@ -87,7 +98,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         wide_lds_dma=False,
         # fp8 KV is grid-only -- the spec rejects persistent/paged (so the
         # persistent variants do not advertise it).
-        features=_FEATURES | {"causal_bottom_right", "layout_paged", "fp8"},
+        features=_GRID_FEATURES | {"fp8"},
     ),
     # The grid body at the qb_minor block order: the grid the hipDNN kernel ingestor
     # launches.
@@ -96,7 +107,7 @@ GFX950_DENSE_VARIANTS: Tuple[Gfx950DenseVariant, ...] = (
         DENSE_GRID_ALGORITHM,
         persistent=False,
         wide_lds_dma=False,
-        features=_FEATURES | {"causal_bottom_right", "layout_paged"},
+        features=_GRID_FEATURES,
         nonpersist_decode="qb_minor",
     ),
     Gfx950DenseVariant(
@@ -303,6 +314,7 @@ def _base_spec(req: AttentionRequest, variant: Gfx950DenseVariant):
         emit_lse=bool(req.emit_lse),
         right_bound=right_bound,
         kv_segments=kv_segments,
+        use_alibi=bool(req.use_alibi),
         **dense_paged_fields(req),
         kv_storage_dtype="fp8e4m3" if req.use_fp8 else None,
     )
@@ -330,9 +342,10 @@ def dense_auto_order(req: AttentionRequest) -> Tuple[str, ...]:
     bm, bn = int(geometry["block_m"]), int(geometry["block_n"])
     sq, sk = int(req.seqlen_q), int(req.seqlen_k)
     work_items = -(-sq // bm) * int(req.nhead_q) * int(req.batch)
-    persistent = not moving_bottom_right and work_items >= _DEFAULT_NUM_PERSISTENT
+    grid_only = moving_bottom_right
+    persistent = not grid_only and work_items >= _DEFAULT_NUM_PERSISTENT
     wide_ok = (
-        not moving_bottom_right
+        not grid_only
         and int(req.hdim_q) == int(req.hdim_v) == 128
         and causal
         and not int(req.sliding_window)

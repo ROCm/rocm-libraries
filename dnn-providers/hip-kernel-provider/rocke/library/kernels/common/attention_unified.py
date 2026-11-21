@@ -61,6 +61,7 @@ from rocke.helpers.transforms import (
 )
 
 from ._attention_additive_bias import append_additive_bias_signature
+from ._attention_alibi import check_alibi_slopes
 from ._lse_store import validate_unified_lse
 from ._spec_checks import require_bool
 
@@ -100,6 +101,8 @@ class UnifiedAttentionProblem:
     sliding_window: int = 0
     softcap: float = 0.0
     use_sinks: bool = False
+    # ALiBi (hipDNN SEM-021): the launch's ``alibi_slopes`` (fp32, one per query
+    # head) or, when it is None, hipDNN's built-in slopes from the head count.
     use_alibi: bool = False
     use_qq_bias: bool = False
     use_additive_bias: bool = False
@@ -542,9 +545,21 @@ def _reject_mask_semantics(
     The ALiBi / QQ-bias offsets are defined on the causal diagonal (``key - context_len``
     with the future masked); with a right bound other than 0 there is no standard
     meaning for them, so reject instead of guessing.
+
+    hipDNN defines ALiBi on the top-left diagonal only. The kernels measure it from
+    each query's own diagonal, which fixes O for any alignment, but on a bottom-right
+    diagonal the LSE would depend on which query index the term uses, so ALiBi with
+    LSE output is rejected there. A sink logit gets no ALiBi term (SEM-022). On the
+    top-left diagonal the anchor is the query's own position, so the scores carry
+    hipDNN's exact term and the sink joins them unshifted, as in the dense kernels;
+    elsewhere no reference defines the pair, so ALiBi with sinks is rejected.
     """
     if problem.right_bound != 0 and (problem.use_alibi or problem.use_qq_bias):
         return False, "ALiBi / QQ-bias are only defined for causal masks"
+    if problem.use_alibi and problem.use_sinks and not problem.causal_top_left:
+        return False, "ALiBi with sinks is only defined on the top-left diagonal"
+    if problem.use_alibi and not problem.causal_top_left and problem.emit_lse:
+        return False, "ALiBi with LSE output is only defined on the top-left diagonal"
     return None
 
 
@@ -799,19 +814,20 @@ def supports_native_unified_attention_coverage(
     arch: str,
 ) -> Tuple[bool, str]:
     """The scalar coverage gate (head size, block size, dtype, features), asked
-    about the LSE-off problem.
+    about the problem with LSE and ALiBi off.
 
-    The scalar kernel writes no LSE, so the scalar gate refuses ``emit_lse``. The
-    path's own gate (:func:`unified_lse_path_gate`) rules on LSE; this one never does.
+    The scalar kernel has neither, so the scalar gate refuses ``emit_lse`` and
+    ``use_alibi``. The path's own gate (:func:`unified_lse_path_gate`) rules on
+    them; this one never does.
     """
-    if problem.emit_lse:
-        problem = replace(problem, emit_lse=False)
+    if problem.emit_lse or problem.use_alibi:
+        problem = replace(problem, emit_lse=False, use_alibi=False)
     return supports_native_unified_attention(problem, arch=arch)
 
 
 def unified_lse_path_gate(path: str) -> Callable[..., Tuple[bool, str]]:
     """The gate of ``path`` (``"3d"`` split-KV, else tiled 2D). It owns which
-    arches and features can write LSE."""
+    arches and features can write LSE or apply ALiBi."""
     if path == "3d":
         return supports_native_unified_attention_3d_tiled
     return supports_native_unified_attention_tiled
@@ -965,6 +981,15 @@ def _has_score_bias(problem: "UnifiedAttentionProblem") -> bool:
     return problem.use_alibi or problem.use_qq_bias or problem.use_additive_bias
 
 
+def _has_non_alibi_score_bias(problem: "UnifiedAttentionProblem") -> bool:
+    """A score term other than ALiBi: QQ bias or the additive bias.
+
+    For the gates of paths that apply ALiBi themselves but no other score term,
+    so ALiBi takes the same path as the problem without it.
+    """
+    return problem.use_qq_bias or problem.use_additive_bias
+
+
 def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
     """Arch-agnostic cohort for the gfx950 bf16 D256 prefill fast path.
 
@@ -979,7 +1004,7 @@ def _d256_gfx950_cohort(problem: "UnifiedAttentionProblem") -> bool:
         and problem.sliding_window == 0
         and problem.softcap == 0
         and not problem.use_sinks
-        and not _has_score_bias(problem)
+        and not _has_non_alibi_score_bias(problem)
         and problem.max_seqlen_q > 1
     )
 
@@ -2084,8 +2109,8 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem, arch: str) -> b
         early-V, V double-buffer, Q direct-reg) stay off for it.
       * no softcap.
       * ALiBi / QQ bias ARE admitted: the transposed softmax body applies
-        them per-score, so biased single-batch prefill takes the combo path
-        instead of the fallback.
+        them (ALiBi by the path's design, ``_alibi_design``), so biased
+        single-batch prefill takes the combo path instead of the fallback.
       * sliding window and sinks: D64 and D128, both dtypes, every block size.
         The narrow 16x16 path they otherwise take is far slower there. The
         no-SW VALU sub-flags auto-disable via _enable_transposed_subflags, and
@@ -2275,7 +2300,8 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem, arch: str) -> 
       * ALiBi / QQ bias ARE admitted: ``_enable_combo_2d`` and
         ``_enable_single_batch_combo`` short-circuit to True for biased
         problems, routing them onto the transposed path (whose softmax body
-        applies bias per-score). Only softcap/sinks stay excluded below.
+        applies them; ALiBi by the path's design). Only softcap/sinks stay
+        excluded below.
 
     The validated ``_enable_combo_2d`` family is a superset that DOES wire
     sinks (and sliding window) through the transposed softmax, so it
@@ -2394,7 +2420,7 @@ def _enable_gfx950_sink_prefill_wpe3(
         and problem.use_sinks
         and problem.sliding_window == 0
         and problem.softcap == 0
-        and not _has_score_bias(problem)
+        and not _has_non_alibi_score_bias(problem)
     )
 
 
@@ -2874,9 +2900,15 @@ def _enable_register_pv(problem: UnifiedAttentionProblem, arch: str) -> bool:
         return False
     if _kv_storage_dtype(problem) is not None:
         return False
-    # register-pv v1 does not implement softcap, ALiBi, or QQ-bias paths;
-    # the spec __post_init__ enforces this.
-    if problem.softcap > 0 or _has_score_bias(problem):
+    # register-pv v1 does not implement softcap, QQ bias or additive bias (the
+    # spec __post_init__ enforces this). gfx950 applies ALiBi there; gfx942
+    # keeps ALiBi off it until its arms are ported.
+    score_bias = (
+        _has_non_alibi_score_bias(problem)
+        if arch == "gfx950"
+        else _has_score_bias(problem)
+    )
+    if problem.softcap > 0 or score_bias:
         return False
     # use_register_pv requires the 16x16x32 MFMA path; it conflicts with
     # use_mfma_32x32. When the 32x32 path is selected we leave it disabled
@@ -2969,9 +3001,9 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem, arch: str) -> 
     """
     if problem.sliding_window > 0:
         return False
-    # use_transposed_mask_limit (and the other VALU sub-flags) do not support
-    # softcap, ALiBi, QQ bias, or additive bias; the spec __post_init__ enforces this.
-    if problem.softcap > 0 or _has_score_bias(problem):
+    # The VALU sub-flags do not support softcap, QQ bias or additive bias (the
+    # spec __post_init__ enforces this); they apply ALiBi.
+    if problem.softcap > 0 or _has_non_alibi_score_bias(problem):
         return False
     return _enable_transposed_qk_32x32(problem, arch)
 
@@ -6268,12 +6300,12 @@ def run_unified_attention_torch(
       - `"scalar"`: force the slow correctness kernel.
       - `"auto"`: prefer tiled when supported, else scalar.
 
-    ``alibi_slopes`` is an optional `[num_query_heads]` f32 tensor; when
-    supplied, the kernel applies the ALiBi linear bias on each row.
+    ``alibi_slopes`` is the optional `[num_query_heads]` f32 tensor of ALiBi
+    slopes (``problem.use_alibi`` only); ``None`` selects hipDNN's built-in
+    slopes, which the gfx1250 kernels do not implement.
     ``qq_bias`` is an optional 2D f32 query-to-query bias; ``qq_bias_stride_0``
-    is its first-axis stride (in elements). Both follow AITER's Triton
-    semantics exactly and require the corresponding ``problem.use_alibi`` /
-    ``problem.use_qq_bias`` flags to be set.
+    is its first-axis stride (in elements). It follows AITER's Triton semantics
+    exactly and requires ``problem.use_qq_bias``.
 
     ``additive_bias`` is an f32 tensor read as
     ``bias[seq*batch_stride + q_head*head_stride + q_row*sq_stride + k]``
@@ -6301,6 +6333,7 @@ def run_unified_attention_torch(
     """
     if kv_layout == "strided" and problem.emit_lse:
         raise NotImplementedError("LSE output is not implemented for strided-KV decode")
+    check_alibi_slopes(problem, alibi_slopes)
     # Caller-owned LSE output ([total_q, Hq, 1] FP32, ``problem.emit_lse``):
     # validated before any compile so a bad buffer never reaches a launch.
     validate_unified_lse(
@@ -6331,6 +6364,9 @@ def run_unified_attention_torch(
     # arch is the explicit ``arch`` parameter threaded through
     # ``supports_native_unified_attention*``.
     _launch_arch = _resolve_attention_arch()
+    if problem.use_alibi and _launch_arch == "gfx1250":
+        # No gfx1250 unified kernel (tiled or scalar) implements ALiBi.
+        raise NotImplementedError("gfx1250 unified attention does not support ALiBi")
     if tuning_spec is not None:
         _require_explicit_tuning_spec(tuning_spec)
         # The spec's kernel declares the bias params iff its use_additive_bias is
