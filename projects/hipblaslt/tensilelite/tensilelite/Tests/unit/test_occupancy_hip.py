@@ -340,6 +340,7 @@ def test_writer_stub_supports_getoccupancy(gfx):
 
 # ── Main test ───────────────────────────────────────────────────────────────────
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not HIP_AVAILABLE, reason="hip-python not installed")
 @pytest.mark.skipif(GFX_TARGET is None, reason="No GPU detected")
 @pytest.mark.parametrize(
@@ -415,6 +416,7 @@ def test_hip_occupancy_matches_tensile(
 
 # ── Regression: gfx950 old behavior would have returned 10 ─────────────────────
 
+@pytest.mark.gpu
 @pytest.mark.skipif(not HIP_AVAILABLE, reason="hip-python not installed")
 @pytest.mark.skipif(GFX_TARGET != "gfx950", reason="Requires gfx950 GPU")
 def test_gfx950_occupancy_not_overcounted(tmp_path):
