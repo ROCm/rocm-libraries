@@ -43,6 +43,7 @@ from ..Common import assignParameterWithDefault, IsaInfo, \
                     deriveWaveParams, \
                     swizzleGeometry
 from ..Common.DataType import DataType
+from ..Common.DebugInstrMask import debugDisableInstrMaskConflict
 from ..Common.ScaleAlphaVec import scaleAlphaSupportsDeviceScalar, scaleAlphaVectorMode
 from ..Common.LdsPaddingLimits import B128_PAD_STEP_BYTES, LDS_PAD_STEP_BYTES, \
                                        ldsBlockError, ldsPadError
@@ -2944,6 +2945,10 @@ class Solution(collections.abc.Mapping):
       state["PrefetchAcrossPersistent"] = 0
       state["ReuseAcrossPersistent"] = 0
       state["DebugPersistentKernelLoopForever"] = False
+
+    ddimConflict = debugDisableInstrMaskConflict(state)
+    if ddimConflict:
+      reject(state, printRejectionReason, ddimConflict)
 
     if not state["BufferStore"]:
       if state["GlobalSplitU"] != 0:
