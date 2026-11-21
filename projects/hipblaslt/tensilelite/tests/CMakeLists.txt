@@ -73,13 +73,10 @@ target_sources(tensilelite-tests
         "${CMAKE_CURRENT_SOURCE_DIR}/TensorDescriptor_test.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/TestData.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/ThreadSafeValue_test.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/HashmapEnumLookup_test.cpp"
 )
 
-# MasterSolutionLibraryMapping_test exercises TensileLite::LoadLibraryMapping,
-# which is only defined when MSGPACK is the active serialization format
-# (see tensilelite/src/Tensile.cpp). The test also writes msgpack mapping
-# files directly via <msgpack.hpp>, so it has no meaning in YAML builds.
+# These tests exercise MessagePack loaders or serialization traits that are not
+# part of the YAML backend.
 if(NOT TENSILELITE_ENABLE_YAML)
     # The solution-record fixtures are written into TEST_DATA_DIR on every
     # build, where TestData::Instance() finds them in build and installed trees.
@@ -100,6 +97,7 @@ if(NOT TENSILELITE_ENABLE_YAML)
         PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/MasterSolutionLibraryMapping_test.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/CompressedLibraryLoad_test.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/HashmapEnumLookup_test.cpp"
             # The indexed library layout is msgpack-only: its solution blob is a
             # msgpack BIN, and mapRawBytes has no YAML implementation.
             "${CMAKE_CURRENT_SOURCE_DIR}/IndexedLibraryLoad_test.cpp"

@@ -537,9 +537,7 @@ rocblaslt_status rocblaslt_validate_fused_epilogue_dispatch(rocblaslt_handle    
 }
 #endif
 
-#ifdef __cplusplus
 extern "C" {
-#endif
 
 #define RETURN_IF_HIPBLASLT_ERROR(INPUT_STATUS_FOR_CHECK)              \
     {                                                                  \
@@ -1709,6 +1707,4 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
-#ifdef __cplusplus
 }
-#endif

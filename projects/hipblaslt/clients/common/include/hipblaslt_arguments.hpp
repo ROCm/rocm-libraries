@@ -651,7 +651,6 @@ inline void set_computeInterface(computeTypeInterface& src, double value, hipDat
         return;
     }
 
-
     switch(typeCompute)
     {
     case HIP_R_32F:
@@ -759,8 +758,6 @@ enum hipblaslt_argument : int
 // the FOR_EACH_ARGUMENT loop. Those out-of-range enum values are not used except here, and are
 // only used so that the FOR_EACH_ARGUMENT loop can be used to loop over all of the arguments.
 
-#if __cplusplus >= 201703L
-// C++17
 // ArgumentsHelper contains a templated lambda apply<> where there is a template
 // specialization for each line in the CPP macro FOR_EACH_ARGUMENT. For example,
 // the first lambda is:  apply<e_M> = [](auto&& func, const Arguments& arg, auto){func("M", arg.m)}
@@ -1071,10 +1068,6 @@ namespace ArgumentsHelper
         };
 };
 // clang-format on
-
-#else
-#error "Unsupported C++ version"
-#endif
 
 #undef APPLY
 
