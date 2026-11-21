@@ -197,19 +197,34 @@ NATIVE_PARITY_TESTS = (
 )
 
 
+def _ctest_command_index(
+    build_root: Path, config: str, requested: set[str]
+) -> dict[str, list[str]]:
+    """Read one CTest listing and index the requested test commands by name."""
+    commands: dict[str, list[str]] = {}
+    for test in ctest_tests(build_root, config):
+        name = test["name"]
+        if name not in requested:
+            continue
+        if name in commands:
+            raise ValueError(f"CTest registered {name} more than once")
+        commands[name] = test.get("command", [])
+    return commands
+
+
 def _native_executable(
-    env: dict[str, str], build_root: Path, config: str, var: str, ctest_name: str
+    env: dict[str, str],
+    ctest_commands: dict[str, list[str]] | None,
+    var: str,
+    ctest_name: str,
 ) -> str | None:
-    """An explicit env value wins; otherwise ask CTest for the built binary."""
+    """An explicit env value wins; otherwise use the configured CTest command."""
     executable = env.get(var)
-    if not executable and (build_root / "CMakeCache.txt").is_file():
-        tests = ctest_tests(build_root, config, f"^{ctest_name}$")
-        commands = [
-            test.get("command", []) for test in tests if test["name"] == ctest_name
-        ]
-        if len(commands) != 1 or not commands[0]:
+    if not executable and ctest_commands is not None:
+        command = ctest_commands.get(ctest_name)
+        if not command:
             raise ValueError(f"CTest did not resolve the built {ctest_name} executable")
-        executable = commands[0][0]
+        executable = command[0]
     return executable
 
 
@@ -270,7 +285,8 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
     # Only this runner may claim that its own complete corpus gate succeeded.
     # An ambient value must not suppress the standalone pytest delegation.
     env.pop(_ARCH_DOMAIN_COMPLETE_ENV, None)
-    if (build_root / "CMakeCache.txt").is_file():
+    configured = (build_root / "CMakeCache.txt").is_file()
+    if configured:
         subprocess.run(
             [
                 "cmake",
@@ -283,8 +299,16 @@ def native_pytest_env(build_root: Path, config: str) -> dict[str, str]:
             ],
             check=True,
         )
+    unresolved_ctests = {
+        ctest_name for var, ctest_name, _ in NATIVE_PARITY_TESTS if not env.get(var)
+    }
+    ctest_commands = (
+        _ctest_command_index(build_root, config, unresolved_ctests)
+        if configured and unresolved_ctests
+        else None
+    )
     for var, ctest_name, label in NATIVE_PARITY_TESTS:
-        executable = _native_executable(env, build_root, config, var, ctest_name)
+        executable = _native_executable(env, ctest_commands, var, ctest_name)
         if executable:
             path = Path(executable).resolve()
             if not path.is_file():
