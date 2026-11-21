@@ -1776,6 +1776,26 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // The register-staged 256 x 256 tile on grids of fewer tiles than units runs only unsplit:
+    // its splits there are twice as deep as the 256 x 128 tile's, which measured slower.
+    if(flexForm(*tile) == 2 && tile->bn == 256
+       && static_cast<long long>(grid->x) * grid->y * grid->z
+              < device_units::dispatchUnits(context.deviceProperties)
+       && conv_igemm::splitPlanFor(*problem,
+                                   tile->bm,
+                                   tile->bn,
+                                   tile->bk,
+                                   context.deviceProperties,
+                                   tile->pack,
+                                   tile->patch != 0,
+                                   tile->splitPolicy,
+                                   residentBlocksFor(*tile, *problem, context.deviceProperties),
+                                   flexForm(*tile))
+                  .splits
+              > 1)
+    {
+        return false;
+    }
     // The XCD block order numbers a launch's blocks in 32 bits.
     const long long launchTiles = conv_igemm::launchTilesFor(grid->x, tile->blockThreads());
     if(tile->xcd != 0

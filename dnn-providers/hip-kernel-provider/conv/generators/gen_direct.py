@@ -327,6 +327,12 @@ for dt in ("HALF", "BFLOAT16"):
             M(f"mfma16_{e}", F333, 128, 64, 32, 1, 4, 8, ring=1, xpf=1),
             M(f"mfma16_{e}", F333, 128, 192, 16, 1, 4, 8, ring=0, xpf=1),
             M(f"mfma16_{e}", F333, 128, 256, 16, 1, 8, 8, ring=0, xpf=1),
+            # 256-pixel tiles of 128 x 32 wave tiles: a wave's weight fragment serves 128 pixels,
+            # half the weight loads per MMA of the 128-pixel tiles, whose weight-load issue
+            # stalls took a third of the wave time on 128-channel large 3-D layers
+            # (1.10x there, MI300A).
+            M(f"mfma16_{e}", F333, 256, 64, 16, 2, 2, 8, ring=0, xpf=1),
+            M(f"mfma16_{e}", F333, 256, 128, 16, 2, 4, 8, ring=0, xpf=1),
             # Split-C twins for under-filled grids (the planner splits the channel chunks only
             # below two blocks a CU): the 512 / 1024-channel layers on small 3-D and smaller
             # outputs run 64-192 blocks on 228-304 CUs unsplit.
