@@ -23,6 +23,7 @@
 
 #include "internal/generic/rocsparse_dense_to_sparse.h"
 #include "rocsparse_control.hpp"
+#include "rocsparse_grid.hpp"
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
@@ -31,6 +32,7 @@
 #include "rocsparse_dense2csx_impl.hpp"
 #include "rocsparse_nnz_impl.hpp"
 
+#include <limits>
 #include <map>
 
 // LCOV_EXCL_START
@@ -91,9 +93,18 @@ namespace rocsparse
             }
             else if(mat_B->format == rocsparse_format_bell)
             {
-                const int64_t mb = (mat_B->rows + mat_B->block_dim - 1) / mat_B->block_dim;
+                const int64_t mb = rocsparse::ceil_div(mat_B->rows, mat_B->block_dim);
+                ROCSPARSE_CHECKARG(2,
+                                   mat_B,
+                                   (mb > static_cast<int64_t>(std::numeric_limits<size_t>::max()
+                                                              / sizeof(int64_t))),
+                                   rocsparse_status_invalid_size);
 
-                *buffer_size = sizeof(int64_t) * mb;
+                *buffer_size = sizeof(int64_t) * static_cast<size_t>(mb);
+            }
+            else
+            {
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
             return rocsparse_status_success;
         }
@@ -386,6 +397,12 @@ try
 
     ROCSPARSE_CHECKARG(1, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
+
+    // Reject a mismatch before dispatch. Nothing has been allocated or written.
+    ROCSPARSE_CHECKARG(2,
+                       mat_B,
+                       (mat_B->rows != mat_A->rows || mat_B->cols != mat_A->cols),
+                       rocsparse_status_invalid_size);
 
     rocsparse::dense_to_sparse_t f;
     if(mat_B->format == rocsparse_format_csc)

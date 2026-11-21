@@ -312,7 +312,8 @@ hipsparseStatus_t hipsparseCreateConstCsc(hipsparseConstSpMatDescr_t* spMatDescr
 *  \brief Create a sparse Blocked ELL matrix descriptor.
 *  \details
 *  \p hipsparseCreateBlockedEll creates a sparse Blocked ELL matrix descriptor. It should be
-*  destroyed at the end using \p hipsparseDestroySpMat.
+*  destroyed at the end using \p hipsparseDestroySpMat. \p ellCols must be a multiple of
+*  \p ellBlockSize and must not exceed \p cols rounded up to a multiple of \p ellBlockSize.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
@@ -332,7 +333,8 @@ hipsparseStatus_t hipsparseCreateBlockedEll(hipsparseSpMatDescr_t* spMatDescr,
 *  \brief Create a sparse Blocked ELL matrix descriptor.
 *  \details
 *  \p hipsparseCreateConstBlockedEll creates a sparse Blocked ELL matrix descriptor. It should be
-*  destroyed at the end using \p hipsparseDestroySpMat.
+*  destroyed at the end using \p hipsparseDestroySpMat. \p ellCols must be a multiple of
+*  \p ellBlockSize and must not exceed \p cols rounded up to a multiple of \p ellBlockSize.
 */
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCreateConstBlockedEll(hipsparseConstSpMatDescr_t* spMatDescr,

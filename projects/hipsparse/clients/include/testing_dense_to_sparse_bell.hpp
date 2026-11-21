@@ -312,9 +312,10 @@ void testing_dense_to_sparse_bell(Arguments argus)
     // Create dense matrix descriptor.
     hipsparseLocalDnMat matA(m, n, ld, ddense, typeT, order);
 
-    // Create blocked ELL descriptor with null pointers; ellCols is discovered during analysis.
-    hipsparseLocalBlockedEll matB(
-        mb * blockDim, nb * blockDim, ellBlockSize, 0, nullptr, nullptr, typeI, idx_base, typeT);
+    // The descriptor dimensions equal the dense dimensions, m x n. ellCols is
+    // discovered during analysis, and the column-index array is then allocated
+    // from the block-row count mb.
+    hipsparseLocalBlockedEll matB(m, n, ellBlockSize, 0, nullptr, nullptr, typeI, idx_base, typeT);
 
     // Query DenseToSparse buffer size.
     size_t bufferSize;

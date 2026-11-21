@@ -113,6 +113,12 @@ extern "C" {
 *  \note
 *  This routine does not support batched computation.
 *
+*  \note
+*  For the Blocked ELL format, the rows and columns of \p mat_B must equal those of \p mat_A. When they
+*  are not multiples of \p ell_block_dim, the result has a partial last block row or column, which
+*  \ref rocsparse_spmm does not support. To multiply the result with \ref rocsparse_spmm, pad the dense
+*  matrix with zeros to whole blocks before the conversion.
+*
 *  @param[in]
 *  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
@@ -133,6 +139,13 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
 *  \retval      rocsparse_status_invalid_pointer \p mat_A, \p mat_B, or \p buffer_size
 *               pointer is invalid.
+*  \retval      rocsparse_status_invalid_size the number of rows or columns of
+*               \p mat_A differs from \p mat_B. For blocked ELL, a descriptor
+*               whose rows or columns were rounded up past the dense size is rejected.
+*               The same status is returned when the workspace size for the blocked ELL
+*               block-row count does not fit in \p size_t.
+*  \retval      rocsparse_status_not_implemented \p mat_B is not in CSR, CSC, COO, or
+*               Blocked ELL format, or \p mat_A or \p mat_B is batched.
 *
 *  \par Example
 *  \snippet example_rocsparse_dense_to_sparse.cpp doc example

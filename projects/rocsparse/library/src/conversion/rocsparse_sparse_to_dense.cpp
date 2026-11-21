@@ -287,6 +287,10 @@ try
 
     ROCSPARSE_CHECKARG(1, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
+    ROCSPARSE_CHECKARG(2,
+                       mat_B,
+                       (mat_B->rows != mat_A->rows || mat_B->cols != mat_A->cols),
+                       rocsparse_status_invalid_size);
 
     rocsparse::sparse_to_dense_t f;
     if(mat_A->format == rocsparse_format_csc)

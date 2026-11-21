@@ -161,9 +161,20 @@ namespace
         }
         case Fmt::bell:
         {
-            lay.val_len = 8;
-            return rocsparse_create_bell_descr(
-                &out.p, 4, 4, rocsparse_direction_row, bdim, 2, lay.add({0, 1}), val, it, base, dt);
+            // One block per row: ell_cols must be a whole number of blocks.
+            const int64_t ell_cols = bdim;
+            lay.val_len            = 4 * ell_cols;
+            return rocsparse_create_bell_descr(&out.p,
+                                               4,
+                                               4,
+                                               rocsparse_direction_row,
+                                               bdim,
+                                               ell_cols,
+                                               lay.add({0, 1}),
+                                               val,
+                                               it,
+                                               base,
+                                               dt);
         }
         case Fmt::sell:
         {
