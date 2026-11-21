@@ -708,15 +708,15 @@ class TestGfx1250Qwen3KvCache(unittest.TestCase):
             # clamped to the largest value of gfx1250's encoding.
             bound = quant_max_abs(kv_storage_dtype, arch="gfx1250")
             clamped_convert = re.compile(
-                r"  %(fdiv\d+) = fdiv float %\w+, %[kv]_scale\n"
-                r"  %(fmax\d+) = call float @llvm\.maxnum\.f32\(float "
+                r"  %(fdiv_\d+) = fdiv float %\w+, %[kv]_scale\n"
+                r"  %(fmax_\d+) = call float @llvm\.maxnum\.f32\(float "
                 + re.escape(llvm_f32_literal(-bound))
                 + r", float %\1\)\n"
-                r"  %(fmin\d+) = call float @llvm\.minnum\.f32\(float "
+                r"  %(fmin_\d+) = call float @llvm\.minnum\.f32\(float "
                 + re.escape(llvm_f32_literal(bound))
                 + r", float %\2\)\n"
-                r"  %(fcmp\d+) = fcmp uno float %\1, %\1\n"
-                r"  %(sel\d+) = select i1 %\4, float %\1, float %\3\n"
+                r"  %(fcmp_\d+) = fcmp uno float %\1, %\1\n"
+                r"  %(sel_\d+) = select i1 %\4, float %\1, float %\3\n"
                 r"  %\w+ = call i32 @" + re.escape(needle) + r"\(float %\5, "
             )
             for engine in available_engines():

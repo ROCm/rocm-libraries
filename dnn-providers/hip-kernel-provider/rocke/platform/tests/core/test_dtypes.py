@@ -404,7 +404,7 @@ def _quantize_kernel(
 # Each quantize helper as (its _quantize_kernel mode, the value its clamp
 # reads, the number of the clamp's first register): quantize_scalar_f32 clamps
 # its multiply, quantize_prescaled_f32 the loaded value itself.
-_QUANTIZE_HELPERS = [("scalar", "%fmul6", 7), ("prescaled", "%gl2", 5)]
+_QUANTIZE_HELPERS = [("scalar", "%fmul_6", 7), ("prescaled", "%gl_2", 5)]
 
 
 @pytest.mark.parametrize("engine", ENGINES)
@@ -429,7 +429,7 @@ def test_quantize_helpers_clamp_to_the_target_bound_and_keep_nan(
     kernel = _quantize_kernel(qdtype, arch, mode=mode)
     text = lower_with_engine(kernel, arch, engine=engine)
     fmax, fmin, fcmp, sel = (
-        f"%{name}{first + offset}"
+        f"%{name}_{first + offset}"
         for offset, name in enumerate(("fmax", "fmin", "fcmp", "sel"))
     )
     assert (
@@ -453,7 +453,7 @@ def test_quantize_helpers_clamp_i8_without_a_nan_select(engine, mode, scaled, fi
     kernel = _quantize_kernel("i8", "gfx942", mode=mode)
     text = lower_with_engine(kernel, "gfx942", engine=engine)
     assert "fcmp uno" not in text
-    assert f"call float @llvm.rint.f32(float %fmin{first + 1})" in text
+    assert f"call float @llvm.rint.f32(float %fmin_{first + 1})" in text
 
 
 @pytest.mark.parametrize(
