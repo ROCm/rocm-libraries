@@ -445,15 +445,17 @@ TEST(TestContainer, GetEngineNameRejectsANullNameArgument)
 // backward engines claim 1.4.0 (their UEDs' sdk_version; their matchers reviewed against every field
 // up to it, and a backward graph never carries cu_seq_len). So does the RDNA WMMA prefill engine,
 // whose matcher gates paged K/V, ragged Q / O and their offset multipliers, and every declared
-// alignment. The gfx950 rocKE conv dgrad engine
-// claims 1.3.0: its graph matcher gates alignment (multiples of 16 bytes) and declines ragged
-// tensors. Every other engine stays at or below the 1.2.0 baseline, so ragged, aligned and
-// multiplier graphs never reach it. Opting an engine in is an edit here, reviewed with that
-// engine's matchers.
+// alignment. The three rocKE conv dgrad engines (gfx950, gfx942, gfx1250) claim 1.3.0: their
+// shared graph matcher (ConvDgradAotNative.cpp) gates alignment (multiples of 16 bytes) and
+// declines ragged tensors. Every other engine stays at or below the 1.2.0 baseline, so ragged,
+// aligned and multiplier graphs never reach it. Opting an engine in is an edit here, reviewed with
+// that engine's matchers.
 TEST(TestContainer, PinsEveryEnginesDeclaredGraphSchema)
 {
     const std::map<std::string, std::string> optedIn{
         {"hipkernel:Gfx950ConvDgradAot", "1.3.0"},
+        {"hipkernel:Gfx942ConvDgradAot", "1.3.0"},
+        {"hipkernel:Gfx1250ConvDgradAot", "1.3.0"},
         {"hipkernel:Gfx1151WmmaAttention", "1.4.0"},
         {std::string(hipdnn_data_sdk::utilities::ASM_SDPA_ENGINE_NAME), "1.6.0"},
         {std::string(hipdnn_data_sdk::utilities::HIP_MLOPS_ENGINE_NAME), "1.4.0"},

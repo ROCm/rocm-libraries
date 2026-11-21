@@ -25,8 +25,9 @@
 /// @file ConvDgradMatcherTestSupport.hpp
 /// What the dgrad AOT engines' matcher tests build their graphs and kernels from: a
 /// backward-data problem as hipDNN graph tensors and a node, and a catalog instance as
-/// the kpack kernel the descriptor loader delivers. Shared by the gfx950 and gfx1250
-/// suites; the arch-specific device properties and symbols stay in each.
+/// the kpack kernel the descriptor loader delivers, and the problems and catalog instances
+/// the suites pick. Shared by the gfx950, gfx942 and
+/// gfx1250 suites; the arch-specific device properties and symbols stay in each.
 namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_matcher_test
 {
 
@@ -265,6 +266,67 @@ inline std::vector<KernelDefinition> catalogPack(const std::string& dtype,
     }
     prepareKernels(kernels, kernelMatcher);
     return kernels;
+}
+
+/// The first @p dtype instance of @p target's catalog of variant @p variant that @p pick
+/// accepts.
+inline const catalog::Entry& variantEntry(
+    const conv_dgrad_aot::Target& target,
+    const std::string& variant,
+    const std::function<bool(const catalog::Entry&)>& pick
+    = [](const catalog::Entry&) { return true; },
+    const std::string& dtype = "fp16")
+{
+    return catalog::firstEntry(
+        dtype,
+        [&](const catalog::Entry& e) { return e.text("direct_variant") == variant && pick(e); },
+        target);
+}
+
+/// The MFMA weight-transform helpers of @p target's @p dtype catalog, in catalog order.
+inline std::vector<const catalog::Entry*> helperEntries(const conv_dgrad_aot::Target& target,
+                                                        const std::string& dtype = "fp16")
+{
+    std::vector<const catalog::Entry*> helpers;
+    for(const auto& entry : catalog::catalog(dtype, target))
+    {
+        if(entry.isHelper())
+        {
+            helpers.push_back(&entry);
+        }
+    }
+    return helpers;
+}
+
+/// A depthwise problem of @p channels channels.
+inline DgradShape depthwiseShape(int64_t channels = 96)
+{
+    DgradShape shape;
+    shape.c = shape.k = shape.groups = channels;
+    return shape;
+}
+
+/// A grouped problem tall enough for every fused row: an xcd_tiles row needs eight image
+/// row bands.
+inline DgradShape groupedShape(int64_t cpg, int64_t groups)
+{
+    DgradShape shape;
+    shape.n = 16;
+    shape.h = shape.w = 28;
+    shape.c = shape.k = cpg * groups;
+    shape.groups = groups;
+    return shape;
+}
+
+/// The dense c4k320 problem the MFMA rows serve.
+inline DgradShape mfmaShape()
+{
+    DgradShape shape;
+    shape.n = 1;
+    shape.c = 4;
+    shape.k = 320;
+    shape.h = shape.w = 32;
+    return shape;
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::dgrad_matcher_test

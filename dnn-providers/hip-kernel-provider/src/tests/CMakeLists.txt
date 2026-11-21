@@ -642,6 +642,7 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     set_source_files_properties(
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionUnified3dModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942AttentionDenseModelBinding.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx942ConvDgradAotModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestGfx1250ConvDgradAotModelBinding.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/engines/kernel_ingestor_engine/packs/TestFlydslModelBinding.cpp"
         PROPERTIES COMPILE_DEFINITIONS
@@ -875,6 +876,34 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
         message(STATUS
             "hkp: this configuration does not ship hipkernel:Gfx950ConvDgradAot for "
             "gfx950, so its census is not registered.")
+    endif()
+
+    # ... its gfx942 sibling, hipkernel:Gfx942ConvDgradAot ...
+    hkp_product_ships_engine_for_arch(_hkp_gfx942_conv_dgrad_aot
+                                      "hipkernel:Gfx942ConvDgradAot" gfx942)
+    if(_hkp_gfx942_conv_dgrad_aot)
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942ConvDgradAotPacks
+            EXPECTED_CASES ${_hkp_generated_packs_cases}
+        )
+        # Its trained ranker, as gfx1250's below: the bound model loads and scores every
+        # shipped kernel.
+        hkp_register_census_tests(
+            TARGET hip_kernel_provider_census_tests
+            PACK_NAME product
+            ARCHES gfx942
+            SUITES TestGfx942ConvDgradAotModelBinding
+            EXPECTED_CASES
+                TheBoundL2KernelRankerLoads
+                TheBoundL2KernelRankerScoresEveryShippedKernel
+        )
+    else()
+        message(STATUS
+            "hkp: this configuration does not ship hipkernel:Gfx942ConvDgradAot for "
+            "gfx942, so its census is not registered.")
     endif()
 
     # ... and its gfx1250 sibling, hipkernel:Gfx1250ConvDgradAot.

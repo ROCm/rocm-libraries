@@ -5,8 +5,10 @@
 
 The bundle and catalog tests run for every engine (the ``arch`` fixture: the
 adapter's ``TARGETS``); the rest pin hipkernel:Gfx950ConvDgradAot. Cases only
-hipkernel:Gfx1250ConvDgradAot has are test_make_gfx1250_conv_dgrad_aot_config.py's,
-which reuses the loaders here."""
+hipkernel:Gfx1250ConvDgradAot or hipkernel:Gfx942ConvDgradAot has are
+test_make_gfx1250_conv_dgrad_aot_config.py's and
+test_make_gfx942_conv_dgrad_aot_config.py's, which reuse the loaders and
+fixtures here."""
 
 import collections
 import copy
@@ -29,6 +31,7 @@ _TOOLS = Path(__file__).resolve().parent.parent / "tools"
 sys.path.insert(0, str(_TOOLS))
 
 import enumerate_conv_dgrad_aot_instances as enumerate_tool  # noqa: E402
+from catalog_fingerprint import catalog_fingerprint  # noqa: E402
 import launch_surface  # noqa: E402
 import conv_aot_common  # noqa: E402
 import make_conv_dgrad_aot_config as tool  # noqa: E402
@@ -44,6 +47,8 @@ _FWD_DIRS = (
     _PROVIDER / "test_descriptors/integration/rocKE/gfx950_conv_fwd_aot_seed",
 )
 _FILE_SIZE_LIMIT = 50 * 1000 * 1000
+#: An architecture with no dgrad engine.
+_NO_ENGINE_ARCH = "gfx90a"
 _JOBS = min(32, os.cpu_count() or 1)
 
 
@@ -62,13 +67,29 @@ def _adapter_arches():
 ARCHES = _adapter_arches()
 #: Per engine, the implicit-GEMM pipelines its shards are named for.
 _PIPELINES = {
+    "gfx942": ("mem", "compv3", "compv4"),
     "gfx950": ("mem", "compv3", "compv4"),
     "gfx1250": ("mem", "wavelet"),
 }
 #: Per engine, the (dtype, family, capability) partitions its matched kernels span,
 #: and its implicit-GEMM kernels per dtype.
-_PARTITIONS = {"gfx950": 34, "gfx1250": 46}
-_IMPLICIT_PER_DTYPE = {"gfx950": 141, "gfx1250": 25}
+_PARTITIONS = {"gfx942": 32, "gfx950": 34, "gfx1250": 46}
+_IMPLICIT_PER_DTYPE = {"gfx942": 128, "gfx950": 141, "gfx1250": 25}
+#: Per engine, whether it has the MFMA pipelines, whose instances launch
+#: weight-transform helpers of their own shard.
+_MFMA_HELPERS = {"gfx942": True, "gfx950": True, "gfx1250": False}
+#: Per engine, the fingerprint (tools/catalog_fingerprint.py) of the catalog its shipped
+#: ranker was trained on, every shard's kernels together; None for an engine that ships
+#: no ranker. A recorded fingerprint means its UED binds the model after the native
+#: scorer and ``heuristics.dvc`` sits beside the KDPs. Stated here, not read from the
+#: bundle under test, so a regenerated bundle that drops its ranker fails, and so does a
+#: catalog edit its ranker was not retrained on. No dgrad config is committed, so
+#: tests/test_trained_rankers.py's gate does not cover these rankers: this table does.
+_TRAINED_CATALOG_SHA256 = {
+    "gfx942": "e516b8f07203e50edb3a708d0437ab61d230feb5cbf445353d3e93f7bb8cab2b",
+    "gfx950": "78f455fdb56bba652301d6aac4ab95c980b420a7ac3cf8d768d2c9a04d6f0820",
+    "gfx1250": "141fa30e3e3423a0ca5d0e8be1b1f5d4ed8a39be90aeb1fa9ed99570076cbdc9",
+}
 
 
 def slug(arch):
@@ -127,6 +148,10 @@ def document(arch, kind):
     return json.loads((shipped_dir(arch) / f"{slug(arch)}.{kind}.json").read_text())
 
 
+def ships_a_ranker(arch):
+    return _TRAINED_CATALOG_SHA256[arch] is not None
+
+
 @pytest.fixture(scope="module", autouse=True)
 def _rocke_on_path():
     before = list(sys.path)
@@ -165,14 +190,15 @@ def gfx950_specs():
     return list(load_specs("gfx950"))
 
 
-@pytest.fixture(scope="module")
-def gfx950_shipped():
-    return load_shipped("gfx950")
-
-
 def test_every_engine_states_its_expectations():
     """A dgrad engine the adapter gains fails here until its expectations are stated."""
-    for table in (_PIPELINES, _PARTITIONS, _IMPLICIT_PER_DTYPE):
+    for table in (
+        _PIPELINES,
+        _PARTITIONS,
+        _IMPLICIT_PER_DTYPE,
+        _MFMA_HELPERS,
+        _TRAINED_CATALOG_SHA256,
+    ):
         assert set(table) == set(ARCHES)
 
 
@@ -259,12 +285,8 @@ def test_the_shipped_bundle_is_sharded_below_the_hosting_size_limit(arch, specs)
     }
     assert names == sorted(
         [f"{slug(arch)}.{kind}.json" for kind in ("kmd", "udd", "ued", "uhd")]
-        + [
-            "kernel_dtype_matches_graph.umd.json",
-            "artifacts.dvc",
-            "heuristics.dvc",
-            ".gitignore",
-        ]
+        + ["kernel_dtype_matches_graph.umd.json", "artifacts.dvc", ".gitignore"]
+        + (["heuristics.dvc"] if ships_a_ranker(arch) else [])
     )
     matcher = json.loads((folder / "kernel_dtype_matches_graph.umd.json").read_text())
     top_level = [path for path in folder.iterdir() if path.is_file()]
@@ -293,13 +315,44 @@ def test_the_bundle_names_its_own_native_symbols(arch):
     # id after it instead of replacing it, so "default" is a list once one ships.
     assert list(ued["sort_kernel_catalog"]) == ["default"]
     default = ued["sort_kernel_catalog"]["default"]
-    assert isinstance(default, list) and default[0] == uhd["id"]
-    assert all(isinstance(i, str) for i in default)
+    if ships_a_ranker(arch):
+        assert len(default) > 1 and default[0] == uhd["id"]
+        assert all(isinstance(i, str) for i in default)
+    else:
+        assert default == uhd["id"]
     assert ued["knobs"] == list(tool.engine_knobs(arch))
     kmd_names = [f["name"] for f in kmd["fields"]]
     assert kmd_names == [f["name"] for f in tool.kmd_fields(arch)]
     assert set(ued["knobs"]) <= set(kmd_names)
     assert "instance_id" not in ued["knobs"] and "max_sub_gemms" not in ued["knobs"]
+
+
+def test_the_shipped_ranker_was_trained_on_the_shipped_catalog(arch):
+    """The descriptor loader ties a ranker to its engine's UED/KMD/UMD ids only, so a
+    catalog edit that keeps them leaves it ranking a catalog it never saw. The catalog
+    is every shard's kernels: one ranker serves them all."""
+    trained = _TRAINED_CATALOG_SHA256[arch]
+    if trained is None:
+        pytest.skip(f"{tool.product_engine(arch)} ships no trained ranker")
+    artifacts = shipped_dir(arch) / "artifacts"
+    kdps = sorted(artifacts.glob("*.kdp.json"))
+    if not kdps:
+        pytest.skip(f"shipped KDPs not in this checkout (dvc pull): {artifacts}")
+    kernels = [
+        kernel
+        for kdp in kdps
+        for kernel in json.loads(kdp.read_text())["kernelDescriptors"]
+    ]
+    shipped = catalog_fingerprint({"kernelDescriptors": kernels})
+    ranker = document(arch, "ued")["sort_kernel_catalog"]["default"][1:]
+    assert shipped == trained, (
+        f"{tool.product_engine(arch)}'s ranker(s) {ranker} were trained on catalog "
+        f"{trained}, but its shards in {artifacts} are now {shipped}. The loader would "
+        f"keep using the stale model silently: retrain on the new catalog (hipdnn-uhd "
+        f"skill) and record the new fingerprint (tools/catalog_fingerprint.py "
+        f"{artifacts}/*.kdp.json) in "
+        f"_TRAINED_CATALOG_SHA256, or remove the binding and record None."
+    )
 
 
 def test_the_config_borrows_no_native_symbols(arch, tmp_path, specs):
@@ -424,16 +477,16 @@ def test_the_mfma_row_tile_is_the_knob_token_not_the_identity_field(
     assert seen == {8, 16}
 
 
-def test_every_mfma_instance_finds_its_helpers_in_the_bundle(gfx950_shipped):
+def test_every_mfma_instance_finds_its_helpers_in_the_bundle(arch, shipped):
     """The MFMA dispatch looks its helpers up by KMD field values; each lookup finds
-    exactly one helper kernel of the same shard."""
+    exactly one helper kernel of the same shard, and every helper is used. An engine
+    without the MFMA pipelines ships neither."""
     from builders.common.convolution_backward_data import (
-        gfx950_conv_dgrad_aot_helper_fields,
+        conv_dgrad_aot_helper_fields,
     )
 
-    shipped = gfx950_shipped
     defaults = {
-        f["name"]: f.get("default_value") for f in document("gfx950", "kmd")["fields"]
+        f["name"]: f.get("default_value") for f in document(arch, "kmd")["fields"]
     }
     # Every helper states each lookup field itself (fold_k32 included, 0 for the
     # transpose), so the lookup does not depend on KMD defaults being applied.
@@ -445,15 +498,20 @@ def test_every_mfma_instance_finds_its_helpers_in_the_bundle(gfx950_shipped):
         for shard, k in shipped.values()
         if k["metadata"].get("kernel_family") == 2
     ]
+    # Both MFMA pipelines: the baked-channel one and the runtime-channel one, whose
+    # transforms are the _rtc pair.
+    mfma = [
+        (shard, kernel)
+        for shard, kernel in shipped.values()
+        if kernel["metadata"].get("direct_variant")
+        in ("grouped_dgrad_mfma", "dgrad_mfma_rtc")
+    ]
+    assert bool(helpers) == bool(mfma) == _MFMA_HELPERS[arch]
     used = set()
-    specs = {s.instance_id: s for s in _specs_of(shipped)}
-    for shard, kernel in shipped.values():
+    specs = {s.instance_id: s for s in _specs_of(arch, shipped)}
+    for shard, kernel in mfma:
         meta = kernel["metadata"]
-        # Both MFMA pipelines: the baked-channel one and the runtime-channel one,
-        # whose transforms are the _rtc pair.
-        if meta.get("direct_variant") not in ("grouped_dgrad_mfma", "dgrad_mfma_rtc"):
-            continue
-        for wanted in gfx950_conv_dgrad_aot_helper_fields(specs[meta["instance_id"]]):
+        for wanted in conv_dgrad_aot_helper_fields(specs[meta["instance_id"]]):
             found = [
                 (s, h)
                 for s, h in helpers
@@ -465,11 +523,11 @@ def test_every_mfma_instance_finds_its_helpers_in_the_bundle(gfx950_shipped):
     assert used == {h["instance_id"] for _, h in helpers}
 
 
-def _specs_of(shipped):
-    from builders.common.convolution_backward_data import Gfx950ConvDgradAotSpec
+def _specs_of(arch, shipped):
+    from builders.common.convolution_backward_data import SPEC_CLASSES
 
     return [
-        Gfx950ConvDgradAotSpec(**kernel["kernel_source"]["spec"])
+        SPEC_CLASSES[arch](**kernel["kernel_source"]["spec"])
         for _, kernel in shipped.values()
     ]
 
@@ -490,7 +548,7 @@ def test_the_census_names_every_pack_and_kernel(arch, shipped):
     [
         ({"direction": "fwd"}, "dgrad implicit-GEMM"),
         ({"direction": "wgrad"}, "dgrad implicit-GEMM"),
-        ({"arch": "gfx942"}, "no packaged dgrad engine"),
+        ({"arch": _NO_ENGINE_ARCH}, "no packaged dgrad engine"),
         ({"dtype_d": "fp32"}, "mixed operand dtypes"),
         ({"split_k": 2}, "split_k"),
         # Padding stays runtime-only: the tilde records carry it, and nothing bakes it.
@@ -635,8 +693,8 @@ def test_main_dedups_and_refuses_unsupported_unless_asked(
 
 def test_main_refuses_an_arch_the_adapter_does_not_package(capsys):
     with pytest.raises(SystemExit):
-        tool.main(["--arch", "gfx942", "--stabilize-ids", "x.kdp.json"])
-    assert "invalid choice: 'gfx942'" in capsys.readouterr().err
+        tool.main(["--arch", _NO_ENGINE_ARCH, "--stabilize-ids", "x.kdp.json"])
+    assert f"invalid choice: '{_NO_ENGINE_ARCH}'" in capsys.readouterr().err
 
 
 def test_stabilize_ids_derives_product_ids_and_matches_the_shipped_kdp(
