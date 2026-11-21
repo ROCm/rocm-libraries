@@ -1290,7 +1290,90 @@ __device__ inline void k3WithOut(const K3Args& a, const K3Out& o, Store&& store)
 
 /// The sums, lanes along c: acc[f S + s] holds tap (tapRow0 + f) S + s; filter rows at or past
 /// `frows` are skipped. Into fp32 partials [split][g][tap][k][c], or dw (k3OutOf).
-template <class T, class Atom, int FR, int S, int FK, int FC, int WTK, int WTC>
+/// Where the ring stores interior wave tiles by k3StorePartialsInterior: the gfx950 32 x 32 x 16
+/// atoms at steps of at most 32 positions, the tiles of the short-reduction layers whose
+/// per-block epilogue is a large share of the kernel. Elsewhere the range-tested store, unchanged.
+template <class Atom, int BQ>
+inline constexpr bool K3_INTERIOR_STORE = Atom::DIM == 32 && Atom::KA == 16 && BQ <= 32;
+
+/// k3StorePartials for a wave whose WTK x WTC output tile lies wholly within the group's
+/// channels (the common case): no per-element range test, and each element one buffer store
+/// at the lane's offset plus a wave-uniform one. Every atom's accumulator row is a lane term
+/// plus an element term (dRow(lane, e) = dRow(lane, 0) + dRow(0, e) - dRow(0, 0)), so the
+/// element and tap terms are scalar. The group's partials span at most the workspace limit, so
+/// 32-bit byte offsets hold them. Returns false (nothing stored) for an edge tile.
+template <class Atom, int FR, int S, int FK, int FC, int WTK, int WTC>
+__device__ inline bool k3StorePartialsInterior(const K3Args& a,
+                                               const typename Atom::acc (&acc)[FR * S][FK][FC],
+                                               int g,
+                                               int tapRow0,
+                                               int frows,
+                                               int k0,
+                                               int c0,
+                                               int wk,
+                                               int wc,
+                                               int lane,
+                                               unsigned split,
+                                               int rowStep,
+                                               int rowEnd)
+{
+    constexpr int DIM = Atom::DIM;
+    const int kg = a.k / a.groups, cg = a.c / a.groups;
+    const int kw = __builtin_amdgcn_readfirstlane(k0 + wk * WTK);
+    const int cw = __builtin_amdgcn_readfirstlane(c0 + wc * WTC);
+    if(kw + WTK > kg || cw + WTC > cg)
+        return false;
+    const long long kc = static_cast<long long>(kg) * cg;
+    const int taps = frows * S;
+    const float* base = a.partial + split * a.partialElems + static_cast<long long>(g) * taps * kc;
+    const k3i4 rs = k3Rsrc4(base, static_cast<long long>(taps) * kc * 4);
+    const __amdgpu_buffer_rsrc_t r = __builtin_amdgcn_make_buffer_rsrc(
+        reinterpret_cast<void*>(
+            static_cast<unsigned long long>(static_cast<unsigned>(rs[0]))
+            | (static_cast<unsigned long long>(static_cast<unsigned>(rs[1])) << 32)),
+        static_cast<short>(0),
+        rs[2],
+        K1_RSRC_FLAGS);
+    const int cg4 = cg * 4;
+    const int vo = (kw + Atom::dRow(lane, 0)) * cg4 + (cw + lane % DIM) * 4;
+#pragma unroll
+    for(int f = 0; f < FR; ++f)
+    {
+        const int row = tapRow0 + f * rowStep;
+        if(row >= frows || row >= rowEnd)
+            continue;
+#pragma unroll
+        for(int s = 0; s < S; ++s)
+        {
+            const int to = static_cast<int>((row * S + s) * kc) * 4;
+#pragma unroll
+            for(int x = 0; x < FK; ++x)
+#pragma unroll
+                for(int e = 0; e < Atom::ACC; ++e)
+                {
+                    const int so = to + (x * DIM + Atom::dRow(0, e) - Atom::dRow(0, 0)) * cg4;
+#pragma unroll
+                    for(int y = 0; y < FC; ++y)
+                    {
+                        const float v = acc[f * S + s][x][y][e];
+                        __builtin_amdgcn_raw_buffer_store_b32(
+                            __builtin_bit_cast(unsigned, v), r, vo + y * DIM * 4, so, 0);
+                    }
+                }
+        }
+    }
+    return true;
+}
+
+template <class T,
+          class Atom,
+          int FR,
+          int S,
+          int FK,
+          int FC,
+          int WTK,
+          int WTC,
+          bool INTERIOR = false>
 __device__ inline void k3StorePartials(const K3Args& a,
                                        const typename Atom::acc (&acc)[FR * S][FK][FC],
                                        int g,
@@ -1307,6 +1390,15 @@ __device__ inline void k3StorePartials(const K3Args& a,
 {
     constexpr int DIM = Atom::DIM;
     const int kg = a.k / a.groups, cg = a.c / a.groups;
+    if constexpr(INTERIOR)
+    {
+        if((CONV_K3_DWS == 0 || a.dwStore == 0)
+           && k3StorePartialsInterior<Atom, FR, S, FK, FC, WTK, WTC>(
+               a, acc, g, tapRow0, frows, k0, c0, wk, wc, lane, split, rowStep, rowEnd))
+        {
+            return;
+        }
+    }
     if constexpr(!CONV_K3_DWS)
     {
         const long long kc = static_cast<long long>(kg) * cg;
@@ -3301,7 +3393,7 @@ __device__ K3_LOOP_INLINE void k3WrwRing(const K3Args& a)
     }
     k3WaitLoads<0>();
     // Filter rows of this phase: t fr + r0 + phases i (the ring's rows of filter depth t).
-    k3StorePartials<T, Atom, R, S, FK, FC, WTK, WTC>(
+    k3StorePartials<T, Atom, R, S, FK, FC, WTK, WTC, K3_INTERIOR_STORE<Atom, BQ>>(
         a, acc, g, t * a.fr + r0, a.ft * a.fr, k0, c0, wk, wc, lane, bz, phases, (t + 1) * a.fr);
 }
 
