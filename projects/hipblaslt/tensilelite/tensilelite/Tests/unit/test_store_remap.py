@@ -32,13 +32,13 @@ def test_remap_readback_buffers_do_not_overlap(
     kernel = dict(
         WavefrontSize=32, MIWaveGroup=[2, 2], MatrixInstM=16, MatrixInstN=16,
         MatrixInstBM=1, MatrixInstBN=1, MIOutputVectorWidth=4,
-        MacroTile0=32, StoreRemapVectorWidth=4,
+        MacroTile0=32, StoreRemapVectorWidth=4, VectorWidthA=1, VectorWidthB=1,
         GlobalSplitU=global_split_u, _GlobalAccumulation=global_accumulation,
     )
     writer = KernelWriterAssembly.__new__(KernelWriterAssembly)
     writer.states = SimpleNamespace(
         kernel=kernel, bpeCexternal=output_bytes, bpeCexternalGSU1=output_bytes,
-        bpeCinternal=accumulation_bytes, bpr=4, regCaps={"MaxSgpr": 102},
+        bpeCinternal=accumulation_bytes, bpr=4, regCaps={"MaxSgpr": 102}, version=(12, 5, 0),
     )
     writer.vgprs = SimpleNamespace()
     writer.vgprPool = RegisterPool(0, RegisterType.Vgpr, False)
