@@ -5532,8 +5532,8 @@ def _run_2d_graphed(
     # primes the module + produces the correct `out`).
     with no_fence():
         _do()
-    # torch is needed only to capture the graph; everything above, including
-    # the kernarg guards, runs without it.
+    # Only the graph capture below needs torch; the launch and kernel-argument
+    # checks above run without it.
     import torch
 
     graph = torch.cuda.CUDAGraph()
