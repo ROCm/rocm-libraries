@@ -38,7 +38,8 @@ using namespace std;
 // (null handle, null pointers and invalid values)
 
 // for checkin_lapack tests
-const vector<vector<int>> lahr2_size_range = {
+template<typename I>
+const vector<vector<I>> lahr2_size_range = {
     // quick return
     {0, 1, 1, 1, 1, 1},
     // invalid
@@ -59,29 +60,32 @@ const vector<vector<int>> lahr2_size_range = {
 };
 
 // for daily_lapack tests
-const vector<vector<int>> lahr2_large_size_range = {
+template<typename I>
+const vector<vector<I>> lahr2_large_size_range = {
     {200, 10, 40, 200, 40, 200},
     {512, 20, 60, 512, 60, 512},
     {1000, 50, 100, 1024, 100, 1024},
 };
 
-Arguments lahr2_setup_arguments(vector<int> sz)
+template<typename I>
+Arguments lahr2_setup_arguments(vector<I> sz)
 {
     Arguments arg;
 
-    arg.set<rocblas_int>("n", sz[0]);
-    arg.set<rocblas_int>("k", sz[1]);
-    arg.set<rocblas_int>("nb", sz[2]);
-    arg.set<rocblas_int>("lda", sz[3]);
-    arg.set<rocblas_int>("ldt", sz[4]);
-    arg.set<rocblas_int>("ldy", sz[5]);
+    arg.set<I>("n", sz[0]);
+    arg.set<I>("k", sz[1]);
+    arg.set<I>("nb", sz[2]);
+    arg.set<I>("lda", sz[3]);
+    arg.set<I>("ldt", sz[4]);
+    arg.set<I>("ldy", sz[5]);
 
     arg.timing = 0;
 
     return arg;
 }
 
-class LAHR2 : public ::TestWithParam<vector<int>>
+template<typename I>
+class LAHR2_BASE : public ::TestWithParam<vector<I>>
 {
 protected:
     void TearDown() override
@@ -92,13 +96,21 @@ protected:
     template <typename T>
     void run_tests()
     {
-        Arguments arg = lahr2_setup_arguments(GetParam());
+        Arguments arg = lahr2_setup_arguments(this->GetParam());
 
-        if(arg.peek<rocblas_int>("n") == 0)
-            testing_lahr2_bad_arg<T>();
+        if(arg.peek<I>("n") == 0)
+            testing_lahr2_bad_arg<T, I>();
 
-        testing_lahr2<T>(arg);
+        testing_lahr2<T, I>(arg);
     }
+};
+
+class LAHR2 : public LAHR2_BASE<rocblas_int>
+{
+};
+
+class LAHR2_64 : public LAHR2_BASE<int64_t>
+{
 };
 
 // non-batch tests
@@ -123,6 +135,30 @@ TEST_P(LAHR2, __double_complex)
     run_tests<rocblas_double_complex>();
 }
 
-INSTANTIATE_TEST_SUITE_P(daily_lapack, LAHR2, ValuesIn(lahr2_large_size_range));
+TEST_P(LAHR2_64, __float)
+{
+    run_tests<float>();
+}
 
-INSTANTIATE_TEST_SUITE_P(checkin_lapack, LAHR2, ValuesIn(lahr2_size_range));
+TEST_P(LAHR2_64, __double)
+{
+    run_tests<double>();
+}
+
+TEST_P(LAHR2_64, __float_complex)
+{
+    run_tests<rocblas_float_complex>();
+}
+
+TEST_P(LAHR2_64, __double_complex)
+{
+    run_tests<rocblas_double_complex>();
+}
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, LAHR2, ValuesIn((lahr2_large_size_range<rocblas_int>)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, LAHR2, ValuesIn((lahr2_size_range<rocblas_int>)));
+
+INSTANTIATE_TEST_SUITE_P(daily_lapack, LAHR2_64, ValuesIn((lahr2_large_size_range<int64_t>)));
+
+INSTANTIATE_TEST_SUITE_P(checkin_lapack, LAHR2_64, ValuesIn((lahr2_size_range<int64_t>)));
