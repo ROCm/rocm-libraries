@@ -260,22 +260,6 @@ def test_fp8_element_format_gives_each_targets_encoding(arch, dtype, encoding):
 
 
 @pytest.mark.parametrize(
-    "encoding, decode_table",
-    [
-        (FP8_E4M3_OCP, fp8e4m3_decode_table),
-        (BF8_E5M2_OCP, bf8e5m2_decode_table),
-        (FP8_E4M3_FNUZ, fp8e4m3fnuz_decode_table),
-        (BF8_E5M2_FNUZ, bf8e5m2fnuz_decode_table),
-    ],
-    ids=lambda value: getattr(value, "name", ""),
-)
-def test_largest_value_is_the_largest_finite_code(encoding, decode_table):
-    """Each encoding's largest_value is the largest magnitude its codec decodes,
-    so the quantization bound and the host reference cannot drift apart."""
-    assert encoding.largest_value == float(np.nanmax(np.abs(decode_table())))
-
-
-@pytest.mark.parametrize(
     "dtype, arch, message",
     [
         (

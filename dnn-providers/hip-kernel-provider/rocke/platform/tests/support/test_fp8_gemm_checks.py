@@ -1,7 +1,8 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""The fp8 / bf8 operand bytes the GPU checks of the scaled GEMMs feed an MFMA.
+"""The fp8 / bf8 operand bytes the GPU checks of the scaled GEMMs feed an MFMA,
+and the host codec of each element format.
 
 Each arch's code for every exact operand value is checked against the code
 written out from the format: sign, biased exponent, mantissa. The OCP formats
@@ -13,7 +14,18 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-from rocke.tests.fp8_gemm_checks import EXACT_OPERAND_VALUES, mfma_operand_bytes
+from rocke.helpers.fp8_encoding import (
+    BF8_E5M2_FNUZ,
+    BF8_E5M2_OCP,
+    FP8_E4M3_FNUZ,
+    FP8_E4M3_OCP,
+    Fp8ElementFormat,
+)
+from rocke.tests.fp8_gemm_checks import (
+    EXACT_OPERAND_VALUES,
+    fp8_host_codec,
+    mfma_operand_bytes,
+)
 
 # (arch, mantissa) -> (exponent bias, mantissa bits) of the encoding its MFMA reads.
 _FORMATS = {
@@ -60,3 +72,39 @@ def test_a_fnuz_value_whose_double_ocp_does_not_hold_is_refused():
 def test_an_arch_without_an_mfma_fp8_format_is_refused():
     with pytest.raises(ValueError, match="no fp8e4m3 element format known for gfx90a"):
         mfma_operand_bytes("gfx90a", "fp8e4m3", EXACT_OPERAND_VALUES)
+
+
+_ENCODINGS = (FP8_E4M3_OCP, BF8_E5M2_OCP, FP8_E4M3_FNUZ, BF8_E5M2_FNUZ)
+
+
+@pytest.mark.parametrize("encoding", _ENCODINGS, ids=lambda value: value.name)
+def test_host_codec_decodes_the_format_largest_value(encoding):
+    """Each encoding's largest_value is the largest magnitude its host codec
+    decodes, so the quantization bound and the host reference cannot drift
+    apart; and the codec is FNUZ exactly for the FNUZ encodings."""
+    codec = fp8_host_codec(encoding)
+    assert encoding.largest_value == float(np.nanmax(np.abs(codec.decode_table())))
+    assert codec.is_fnuz == (encoding in (FP8_E4M3_FNUZ, BF8_E5M2_FNUZ))
+
+
+@pytest.mark.parametrize(
+    "encoding", (FP8_E4M3_OCP, FP8_E4M3_FNUZ), ids=lambda value: value.name
+)
+def test_host_codec_rounds_e4m3_to_codes_it_decodes(encoding):
+    """An E4M3 codec rounds each finite value it decodes back to that value."""
+    codec = fp8_host_codec(encoding)
+    table = codec.decode_table()
+    finite = table[np.isfinite(table)]
+    np.testing.assert_array_equal(table[codec.round_to_codes(finite)], finite)
+
+
+@pytest.mark.parametrize(
+    "encoding", (BF8_E5M2_OCP, BF8_E5M2_FNUZ), ids=lambda value: value.name
+)
+def test_host_codec_of_e5m2_has_no_rounding(encoding):
+    assert fp8_host_codec(encoding).round_to_codes is None
+
+
+def test_host_codec_of_an_unknown_format_is_refused():
+    with pytest.raises(KeyError, match="fp8_host_codec failed - element_format="):
+        fp8_host_codec(Fp8ElementFormat("E3M4", 15.5))

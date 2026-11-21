@@ -46,7 +46,7 @@ import pytest
 from rocke.core.backend import import_engine
 from rocke.dispatch.families.moe import MoeRequest, dispatch_moe
 from rocke.helpers import compile_kernel
-from rocke.helpers.fp8_encoding import FP8_E4M3_FNUZ, fp8_element_format
+from rocke.helpers.fp8_encoding import fp8_element_format
 from rocke.helpers.quant import quant_max_abs
 from rocke.instances.common.moe_fused_mega_fp8 import (
     AMAX_FLOOR,
@@ -56,16 +56,11 @@ from rocke.instances.common.moe_fused_mega_fp8 import (
     moe_fused_mega_fp8_grid,
     moe_fused_mega_fp8_signature,
 )
-from rocke.numeric.fp8 import (
-    fp8e4m3_decode_table,
-    fp8e4m3_round,
-    fp8e4m3fnuz_decode_table,
-    fp8e4m3fnuz_round,
-)
 from rocke.tests.engines import available_engines, lower_with_engine
 from rocke.tests.fp8_gemm_checks import (
     EXACT_OPERAND_VALUES,
     GEMM_TOLERANCE,
+    fp8_host_codec,
     mfma_operand_bytes,
 )
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
@@ -364,10 +359,8 @@ def _reference(case: _MoeCase, tile_m: int, arch: str) -> np.ndarray:
     block's rows (amax floored at ``AMAX_FLOOR``), in f32 as the kernel does;
     down with that scale and the down weight scale; then ``Y[token] += weight
     * out`` for the block's real rows."""
-    if fp8_element_format("fp8e4m3", arch) == FP8_E4M3_FNUZ:
-        fp8_values, fp8_round = fp8e4m3fnuz_decode_table(), fp8e4m3fnuz_round
-    else:
-        fp8_values, fp8_round = fp8e4m3_decode_table(), fp8e4m3_round
+    codec = fp8_host_codec(fp8_element_format("fp8e4m3", arch))
+    fp8_values, fp8_round = codec.decode_table(), codec.round_to_codes
     fp8_max = np.float32(quant_max_abs("fp8e4m3", arch=arch))
     y = np.zeros((case.tokens, _HIDDEN))
     for block, expert in enumerate(case.block_expert):

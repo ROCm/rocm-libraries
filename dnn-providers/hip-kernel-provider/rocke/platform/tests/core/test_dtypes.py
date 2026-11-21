@@ -37,15 +37,15 @@ from rocke.helpers.mma_io import storage_ir_type
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import llvm_f32_literal
 from rocke.helpers.compile import compile_kernel
-from rocke.helpers.fp8_encoding import BF8_E5M2_FNUZ, FP8_E4M3_FNUZ, fp8_element_format
+from rocke.helpers.fp8_encoding import fp8_element_format
 from rocke.helpers.spec import sig_param
-from rocke.numeric import fp8
 from rocke.tests.engines import (
     ENGINES,
     available_engines,
     instance_llvm_from_all_engines,
     lower_with_engine,
 )
+from rocke.tests.fp8_gemm_checks import Fp8HostCodec, fp8_host_codec
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 from rocke.helpers.quant import (
     quant_ir_type,
@@ -594,16 +594,9 @@ def test_quant_instances_refuse_an_out_dtype_the_target_cannot_write(
         assert str(native_error.value).endswith(message)
 
 
-def _decode_table(qdtype: str, arch: str) -> np.ndarray:
-    """The f32 value of every code of ``qdtype`` in ``arch``'s encoding."""
-    fnuz = fp8_element_format(qdtype, arch) in (FP8_E4M3_FNUZ, BF8_E5M2_FNUZ)
-    tables = {
-        ("fp8e4m3", False): fp8.fp8e4m3_decode_table,
-        ("fp8e4m3", True): fp8.fp8e4m3fnuz_decode_table,
-        ("bf8e5m2", False): fp8.bf8e5m2_decode_table,
-        ("bf8e5m2", True): fp8.bf8e5m2fnuz_decode_table,
-    }
-    return tables[(qdtype, fnuz)]()
+def _host_codec(qdtype: str, arch: str) -> Fp8HostCodec:
+    """The host codec of ``qdtype`` in ``arch``'s encoding."""
+    return fp8_host_codec(fp8_element_format(qdtype, arch))
 
 
 def _run_one_lane_per_value(kernel, arch: str, values: np.ndarray) -> np.ndarray:
@@ -630,7 +623,7 @@ def _bound_and_step(qdtype: str, arch: str) -> tuple[float, float]:
     bound = quant_max_abs(qdtype, arch=arch)
     if qdtype == "i8":
         return bound, 1.0
-    table = _decode_table(qdtype, arch)
+    table = _host_codec(qdtype, arch).decode_table()
     magnitudes = np.unique(np.abs(table[np.isfinite(table)]))
     return bound, float(magnitudes[-1] - magnitudes[-2])
 
@@ -653,7 +646,7 @@ def test_fp8_conversion_does_not_saturate_on_gpu(qdtype):
         assert codes[:4].tolist() == [0x7C, 0xFC, 0x7C, 0xFC]
         assert (codes[4] & 0x7F) > 0x7C
     else:
-        assert np.isnan(_decode_table(qdtype, arch)[codes]).all(), codes
+        assert np.isnan(_host_codec(qdtype, arch).decode_table()[codes]).all(), codes
 
 
 @pytest.mark.parametrize("qdtype", ["fp8e4m3", "bf8e5m2", "i8"])
@@ -696,7 +689,7 @@ def test_quantize_scalar_f32_saturates_and_keeps_nan_on_gpu(qdtype):
     if qdtype == "i8":
         got = codes.view(np.int8).astype(np.float32)
     else:
-        got = _decode_table(qdtype, arch)[codes]
+        got = _host_codec(qdtype, arch).decode_table()[codes]
     np.testing.assert_array_equal(got, expected, err_msg=f"{qdtype} on {arch}")
 
 
@@ -713,8 +706,7 @@ def test_smoothquant_fp8_output_is_exact_and_reaches_the_bound_on_gpu(vec):
     )
 
     arch = current_device_arch_in(_QUANT_ARCHS, subject="smoothquant fp8")
-    fnuz = fp8_element_format("fp8e4m3", arch) is FP8_E4M3_FNUZ
-    round_to_codes = fp8.fp8e4m3fnuz_round if fnuz else fp8.fp8e4m3_round
+    codec = _host_codec("fp8e4m3", arch)
     spec = SmoothQuantSpec(
         n_per_block=512, dtype="f16", out_dtype="fp8e4m3", block_size=128, vec=vec
     )
@@ -734,9 +726,9 @@ def test_smoothquant_fp8_output_is_exact_and_reaches_the_bound_on_gpu(vec):
     # multiply an f32 multiply, so the host computes the same f32 values.
     inverse = np.float32(1.0) / yscale
     np.testing.assert_array_equal(
-        codes, round_to_codes(x.astype(np.float32) * inverse[:, None])
+        codes, codec.round_to_codes(x.astype(np.float32) * inverse[:, None])
     )
-    got = _decode_table("fp8e4m3", arch)[codes]
+    got = codec.decode_table()[codes]
     np.testing.assert_array_equal(
         np.abs(got).max(axis=1), np.full(rows, quant_max_abs("fp8e4m3", arch=arch))
     )
