@@ -3081,35 +3081,38 @@ TEST(TestConvIgemmSplitPlan, FlexTailSplitSplitsTheRowTilesPastTheWholeRounds)
     EXPECT_EQ(explicitPlan.partialElems, explicitPlan.outElems);
 }
 
-TEST(TestConvIgemmCatalog, FlexWideRegisterTileDeclinesGridsOfFewerTilesThanUnits)
+TEST(TestConvIgemmCatalog, FlexWideRegisterTileRunsUnsplitOnGridsOfFewerTilesThanUnits)
 {
-    // 320 row tiles of one 256-wide column tile: served on 304 and 320 units, declined on 400.
-    auto wide = dense(32, 48, {5, 64, 256}, {3, 3, 3}, {1, 1, 1}, true);
+    // 200 row tiles of one 256-wide column tile over 432 k-steps (512 channels): on 200 units
+    // the default plan does not split and is served (its no-split twin, the same plan, is not);
+    // on 400 the default plan splits and declines, and the no-split twin is served.
+    auto wide = dense(512, 48, {5, 40, 256}, {3, 3, 3}, {1, 1, 1}, true);
     wide.n = 1;
     wide.dataType = DataType::HALF;
     const auto pack = packFor(ConvDirection::FORWARD);
     int checked = 0;
     for(const auto& kernel : catalog(ConvDirection::FORWARD))
     {
+        const auto policy = kernel.getIntMetadata("split_policy");
         if(kernel.getIntMetadata("flex") == 0 || kernel.getIntMetadata("bn") != 256
-           || kernel.getStringMetadata("atom") != "mfma16_f16"
-           || kernel.getIntMetadata("split_policy") != 0)
+           || kernel.getStringMetadata("atom") != "mfma16_f16" || policy > 1)
         {
             continue;
         }
         ++checked;
-        for(const auto& [units, served] :
-            std::initializer_list<std::pair<int, bool>>{{304, true}, {320, true}, {400, false}})
+        for(const auto& [units, filled] :
+            std::initializer_list<std::pair<int, bool>>{{200, true}, {400, false}})
         {
             SCOPED_TRACE(units);
             const GraphFixture fixture(buildGraph(specFor(wide, ConvDirection::FORWARD)),
                                        deviceOf("gfx942:sramecc+:xnack-", units));
             const auto bound = matchesGraph(pack, fixture.context());
             ASSERT_TRUE(bound.has_value());
-            EXPECT_EQ(matchesKernel(pack, fixture.context(), kernel, *bound), served);
+            EXPECT_EQ(matchesKernel(pack, fixture.context(), kernel, *bound),
+                      policy == 0 ? filled : !filled);
         }
     }
-    EXPECT_EQ(checked, 1);
+    EXPECT_EQ(checked, 2);
 }
 
 TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOtherKnob)
