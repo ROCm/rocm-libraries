@@ -109,12 +109,12 @@ rtol = 0.25
 
     ASSERT_NE(policy.testSettings, nullptr);
     EXPECT_EQ(policy.testSettings, config.testSettings());
-    const auto fwd
-        = policy.testSettings->convToleranceCoefficients(ConvToleranceDirection::FWD, "float");
+    const auto fwd = policy.testSettings->convToleranceCoefficients(
+        ConvToleranceDirection::FWD, "float", "gfx942");
     ASSERT_TRUE(fwd.summationOrder.has_value());
     EXPECT_DOUBLE_EQ(*fwd.summationOrder, 7.5);
-    const auto wrw
-        = policy.testSettings->convToleranceCoefficients(ConvToleranceDirection::WRW, "half");
+    const auto wrw = policy.testSettings->convToleranceCoefficients(
+        ConvToleranceDirection::WRW, "half", "gfx942");
     ASSERT_TRUE(wrw.lambda.has_value());
     EXPECT_DOUBLE_EQ(*wrw.lambda, 21.0);
     const auto entry = policy.testSettings->findToleranceOverride("Suite.SomeCase");

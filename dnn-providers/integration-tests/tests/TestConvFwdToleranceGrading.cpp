@@ -387,6 +387,8 @@ protected:
     std::optional<TestSettings> _settings;
     std::unique_ptr<TestConfig> _engineConfig;
     const TestSettings* _policySettings = nullptr;
+    /// The device the harness policy says it runs on (the raw gcnArchName).
+    std::string _arch = "gfx942:sramecc+:xnack-";
 
     void SetUp() override
     {
@@ -479,6 +481,7 @@ protected:
 
         auto policy = testing_support::hostPolicy(VerificationMode::AUTO);
         policy.testSettings = _policySettings;
+        policy.arch = _arch;
         IntegrationBundleVerificationHarness harness(_mocks.dependencies(std::move(policy)));
         harness.setBundle(loadBundle(spec), "conv-tolerance-test-bundle");
         prepare(harness.inputFillRecipes());
@@ -1438,6 +1441,84 @@ TEST_F(TestConvFwdToleranceGradingFixture, EngineLambdaIsPricedOnTheMeansOfTheIn
     };
     expectReported(grade(backwardSpec(Direction::DGRAD, true), K_FAR_OFF, K_REFERENCE, positive),
                    expected);
+}
+
+// An arch table of an engine file grades the outputs of the devices it names, in place of the
+// table of the output type, and no other device's.
+namespace
+{
+
+constexpr const char* K_ARCH_TABLES_TOML = R"([meta]
+version = 1
+
+[conv_dgrad_tolerance.half]
+lambda = 20.0
+
+[conv_dgrad_tolerance.half.gfx90a]
+lambda = 46.0
+
+[conv_wrw_tolerance.half]
+lambda = 13.0
+lambda_per_quartic_root_k = 2.5
+
+[conv_wrw_tolerance.half.gfx90a]
+lambda = 35.0
+lambda_per_quartic_root_k = 2.0
+)";
+
+} // namespace
+
+TEST_F(TestConvFwdToleranceGradingFixture, ArchTableOfTheDeviceChangesTheBandOfEachDirection)
+{
+    useTomlSettings(K_ARCH_TABLES_TOML);
+    _arch = "gfx90a:sramecc+:xnack-";
+    const auto dgrad = dgradTolerance<half>(coefficientsOf(std::nullopt, 46.0));
+    const auto wrw = wrwTolerance<half>(coefficientsOf(std::nullopt, 35.0, 2.0));
+    expectApart(dgrad, dgradTolerance<half>(coefficientsOf(std::nullopt, 20.0)));
+    expectApart(wrw, wrwTolerance<half>(coefficientsOf(std::nullopt, 13.0, 2.5)));
+    expectReported(grade(backwardSpec(Direction::DGRAD, true), K_FAR_OFF, K_REFERENCE), dgrad);
+    expectReported(grade(backwardSpec(Direction::WRW, true), K_FAR_OFF, K_REFERENCE), wrw);
+}
+
+TEST_F(TestConvFwdToleranceGradingFixture, ArchTableOfAnotherDeviceLeavesTheTypeTableInForce)
+{
+    useTomlSettings(K_ARCH_TABLES_TOML);
+    _arch = "gfx942:sramecc+:xnack-";
+    expectReported(grade(backwardSpec(Direction::DGRAD, true), K_FAR_OFF, K_REFERENCE),
+                   dgradTolerance<half>(coefficientsOf(std::nullopt, 20.0)));
+    expectReported(grade(backwardSpec(Direction::WRW, true), K_FAR_OFF, K_REFERENCE),
+                   wrwTolerance<half>(coefficientsOf(std::nullopt, 13.0, 2.5)));
+}
+
+// The arch table replaces the type table whole: with no key of its own it is the SDK's values.
+TEST_F(TestConvFwdToleranceGradingFixture, ArchTableDoesNotInheritTheTypeTableCoefficients)
+{
+    useTomlSettings(R"([meta]
+version = 1
+
+[conv_wrw_tolerance.half]
+lambda = 13.0
+lambda_per_quartic_root_k = 2.5
+
+[conv_wrw_tolerance.half.gfx90a]
+lambda = 35.0
+)");
+    _arch = "gfx90a:sramecc+:xnack-";
+    const auto own = wrwTolerance<half>(coefficientsOf(std::nullopt, 35.0));
+    expectApart(own, wrwTolerance<half>(coefficientsOf(std::nullopt, 35.0, 2.5)));
+    expectReported(grade(backwardSpec(Direction::WRW, true), K_FAR_OFF, K_REFERENCE), own);
+}
+
+// An arch table of a type and direction touches no other: the half arch table leaves the float
+// and bfloat16 outputs of the same direction on the SDK's values.
+TEST_F(TestConvFwdToleranceGradingFixture, ArchTableOfOneTypeLeavesTheOtherTypesAlone)
+{
+    useTomlSettings(K_ARCH_TABLES_TOML);
+    _arch = "gfx90a:sramecc+:xnack-";
+    expectReported(grade(backwardSpec(Direction::DGRAD, false), K_FAR_OFF, K_REFERENCE),
+                   dgradTolerance<bfloat16>());
+    expectReported(grade(backwardSpec(Direction::DGRAD, false, true), K_FAR_OFF, K_REFERENCE),
+                   dgradTolerance<float>());
 }
 
 // NOLINTEND(readability-identifier-naming)

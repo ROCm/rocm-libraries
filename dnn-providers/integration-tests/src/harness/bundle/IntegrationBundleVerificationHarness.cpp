@@ -77,12 +77,14 @@ const char* modeName(VerificationMode mode)
 
 // The dynamic tolerance of one convolution output, with the coefficients the engine's settings
 // file sets for the direction of the scale's convolution, the output type
-// ([conv_<direction>_tolerance.<type>]); the SDK's values when there is no settings file, or the
-// file sets none for them. Nullopt when the output type is not modeled.
+// and the device's architecture ([conv_<direction>_tolerance.<type>], or its table for `arch`, the
+// device's raw gcnArchName); the SDK's values when there is no settings file, or the file sets
+// none for them. Nullopt when the output type is not modeled.
 std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
     convToleranceFor(const tolerance::ConvErrorScale& scale,
                      hipdnn_flatbuffers_sdk::data_objects::DataType outputType,
-                     const TestSettings* settings)
+                     const TestSettings* settings,
+                     const std::string& arch)
 {
     namespace sdk = hipdnn_test_sdk::utilities::conv;
     using hipdnn_flatbuffers_sdk::data_objects::DataType;
@@ -125,7 +127,7 @@ std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance>
         },
         scale);
     return tolerance::convOutputTolerance(
-        scale, outputType, settings->convToleranceCoefficients(direction, typeName));
+        scale, outputType, settings->convToleranceCoefficients(direction, typeName, arch));
 }
 
 } // namespace
@@ -1659,7 +1661,8 @@ VerificationOutcome
             }
             if(convScale->second.has_value())
             {
-                dynamic = convToleranceFor(*convScale->second, dataType, _deps.policy.testSettings);
+                dynamic = convToleranceFor(
+                    *convScale->second, dataType, _deps.policy.testSettings, _deps.policy.arch);
             }
         }
         if(dynamic.has_value())

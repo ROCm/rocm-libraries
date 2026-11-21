@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
@@ -119,6 +120,11 @@ struct ValidatorOverride
 //   lambda                    = 40.0
 //   lambda_per_quartic_root_k = 1.5
 //
+//   # A table of the same keys named by an architecture applies to the devices that
+//   # architecture matches, instead of the table above it
+//   [conv_wrw_tolerance.half.gfx90a]
+//   lambda                    = 60.0
+//
 //   [conv_fwd_tolerance.float]
 //   summation_order = 9.0
 //
@@ -135,10 +141,18 @@ struct ValidatorOverride
 //   - 'lambda_per_quartic_root_k' is added to 'lambda' per K^(1/4), for kernels that split a
 //     longer reduction into more parts. A finite number, not negative, and only together with
 //     'lambda'.
-// An output type other than float, half or bfloat16, a key other than these three, a key of the
-// wrong type or value, 'summation_order' outside the float sub-table, and 'lambda_per_quartic_root_k'
-// without 'lambda' are load errors. A matching [[tolerance_overrides]] entry still replaces the
-// dynamic tolerance as a whole. Only the bundle harness reads these tables.
+// A table named by an architecture, nested under an output type's table, holds the same keys
+// for the devices whose raw gcnArchName contains that name (the match of 'archs' in
+// [[test_skips]]: "gfx90a" matches "gfx90a:sramecc+:xnack-"). It replaces the coefficients of
+// the output type's table whole: a key it leaves unset is the SDK's value, not the output
+// type's. A device that no arch table matches takes the output type's table. A device that two
+// arch tables of one output type match is an error naming both, raised when the tolerance is
+// looked up, since the device is not known before. No table nests under an arch table.
+// An output type other than float, half or bfloat16, a key other than these three that is not an
+// arch table, a key of the wrong type or value, 'summation_order' outside the float sub-table,
+// and 'lambda_per_quartic_root_k' without 'lambda' are load errors. A matching
+// [[tolerance_overrides]] entry still replaces the dynamic tolerance as a whole. Only the bundle
+// harness reads these tables.
 //
 // A top-level key other than meta, tolerance_overrides, validator_overrides, test_skips,
 // conv_fwd_tolerance, conv_dgrad_tolerance and conv_wrw_tolerance is a load error, so a misspelt
@@ -346,11 +360,14 @@ public:
     }
 
     // The coefficients of the dynamic tolerance of a convolution of `direction` whose output is
-    // of `outputType` ("float", "half" or "bfloat16") that this engine's file sets; every one
-    // unset, which keeps the default of the harness, for another type or when it sets none.
-    hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients
-        convToleranceCoefficients(ConvToleranceDirection direction,
-                                  std::string_view outputType) const
+    // of `outputType` ("float", "half" or "bfloat16") on a device whose raw gcnArchName is `arch`
+    // (e.g. "gfx942:sramecc+:xnack-") that this engine's file sets; every one unset, which keeps
+    // the default of the harness, for another type or when it sets none. The table of an
+    // architecture that `arch` contains replaces the output type's own table whole. Throws when
+    // two arch tables of the output type both match `arch`: a file cannot be checked for that
+    // before the device is known.
+    hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients convToleranceCoefficients(
+        ConvToleranceDirection direction, std::string_view outputType, std::string_view arch) const
     {
         const auto typeIt
             = std::find(K_CONV_TOLERANCE_TYPES.begin(), K_CONV_TOLERANCE_TYPES.end(), outputType);
@@ -358,8 +375,31 @@ public:
         {
             return {};
         }
-        return _convTolerance[static_cast<size_t>(direction)]
-                             [static_cast<size_t>(typeIt - K_CONV_TOLERANCE_TYPES.begin())];
+        const auto& table
+            = _convTolerance[static_cast<size_t>(direction)]
+                            [static_cast<size_t>(typeIt - K_CONV_TOLERANCE_TYPES.begin())];
+        const std::pair<std::string, hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients>*
+            matched
+            = nullptr;
+        for(const auto& entry : table.archTables)
+        {
+            if(!hipdnn_test_sdk::utilities::archMatches(
+                   arch, entry.first, hipdnn_test_sdk::utilities::ArchMatchMode::SUBSTRING))
+            {
+                continue;
+            }
+            if(matched != nullptr)
+            {
+                const std::string prefix
+                    = "[" + std::string(K_CONV_TOLERANCE_TABLES[static_cast<size_t>(direction)])
+                      + "." + std::string(outputType) + ".";
+                throw std::runtime_error("TestSettings: " + prefix + matched->first + "] and "
+                                         + prefix + entry.first + "] both match the device arch '"
+                                         + std::string(arch) + "'; make the arch names exclusive");
+            }
+            matched = &entry;
+        }
+        return matched != nullptr ? matched->second : table.coefficients;
     }
 
     size_t skipEntryCount() const
@@ -573,11 +613,85 @@ private:
         return parsed;
     }
 
+    // The keys of one table of coefficients: [conv_<direction>_tolerance.<output type>], or a
+    // table of one architecture under it. Only the keys of ConvToleranceCoefficients exist,
+    // 'summation_order' for float only; anything else is a load error, so that a coefficient for
+    // a term the harness does not read cannot sit in a file unnoticed. A table-valued key that is
+    // not one of those keys is an arch table: it is handed to `archTables` when the caller takes
+    // them, and an error when it does not (no table nests under an arch table).
+    static hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients
+        parseConvCoefficients(const toml::table& table,
+                              const std::string& where,
+                              bool isFloat,
+                              std::vector<std::pair<std::string, const toml::table*>>* archTables)
+    {
+        hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients parsed;
+        for(const auto& [key, value] : table)
+        {
+            const std::string keyName(key.str());
+            const bool isCoefficient = keyName == "summation_order" || keyName == "lambda"
+                                       || keyName == "lambda_per_quartic_root_k";
+            if(!isCoefficient && value.is_table())
+            {
+                if(archTables == nullptr)
+                {
+                    throw std::runtime_error(where + " has a nested table '" + keyName
+                                             + "': a table named by an arch holds coefficients "
+                                               "only");
+                }
+                if(keyName.empty())
+                {
+                    throw std::runtime_error(where + " has an arch table with an empty name");
+                }
+                archTables->emplace_back(keyName, value.as_table());
+                continue;
+            }
+            if(!isCoefficient)
+            {
+                throw std::runtime_error(where + " has unknown key '" + keyName
+                                         + "' (expected 'summation_order', 'lambda', "
+                                           "'lambda_per_quartic_root_k' or a table named by an "
+                                           "arch)");
+            }
+            const auto number = value.value<double>();
+            if(!number.has_value())
+            {
+                throw std::runtime_error(where + " '" + keyName + "' must be a number");
+            }
+            if(keyName == "summation_order")
+            {
+                if(!isFloat)
+                {
+                    throw std::runtime_error(where
+                                             + " 'summation_order' is for float outputs only");
+                }
+                if(!std::isfinite(*number) || !(*number > 0.0))
+                {
+                    throw std::runtime_error(where
+                                             + " 'summation_order' must be finite and positive");
+                }
+                parsed.summationOrder = number;
+                continue;
+            }
+            if(!std::isfinite(*number) || *number < 0.0)
+            {
+                throw std::runtime_error(where + " '" + keyName
+                                         + "' must be finite and not negative");
+            }
+            (keyName == "lambda" ? parsed.lambda : parsed.lambdaPerQuarticRootK) = number;
+        }
+        if(parsed.lambdaPerQuarticRootK.has_value() && !parsed.lambda.has_value())
+        {
+            throw std::runtime_error(
+                where + " 'lambda_per_quartic_root_k' needs 'lambda': it adds to it");
+        }
+        return parsed;
+    }
+
     // [conv_<direction>_tolerance.<output type>] sets the coefficients of the dynamic tolerance
-    // of a convolution of that direction whose output is of that type. Only the three output
-    // types and the keys of ConvToleranceCoefficients exist, 'summation_order' for float only;
-    // anything else is a load error, so that a coefficient for a type or a term the harness does
-    // not read cannot sit in a file unnoticed.
+    // of a convolution of that direction whose output is of that type, and the arch tables under
+    // it those of the devices of that architecture. Only the three output types exist; anything
+    // else is a load error.
     void parseConvTolerance(const toml::node& node, ConvToleranceDirection direction)
     {
         const std::string_view tableName = K_CONV_TOLERANCE_TABLES[static_cast<size_t>(direction)];
@@ -606,54 +720,22 @@ private:
                 throw std::runtime_error(where + " is not a table");
             }
 
-            hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients parsed;
-            for(const auto& [key, value] : *typeTable)
+            const bool isFloat = *typeIt == "float";
+            std::vector<std::pair<std::string, const toml::table*>> archTables;
+            ConvToleranceTable parsed;
+            parsed.coefficients = parseConvCoefficients(*typeTable, where, isFloat, &archTables);
+            for(const auto& [arch, archTable] : archTables)
             {
-                const std::string keyName(key.str());
-                if(keyName != "summation_order" && keyName != "lambda"
-                   && keyName != "lambda_per_quartic_root_k")
-                {
-                    throw std::runtime_error(where + " has unknown key '" + keyName
-                                             + "' (expected 'summation_order', 'lambda' or "
-                                               "'lambda_per_quartic_root_k')");
-                }
-                const auto number = value.value<double>();
-                if(!number.has_value())
-                {
-                    throw std::runtime_error(where + " '" + keyName + "' must be a number");
-                }
-                if(keyName == "summation_order")
-                {
-                    if(*typeIt != "float")
-                    {
-                        throw std::runtime_error(where
-                                                 + " 'summation_order' is for float outputs only");
-                    }
-                    if(!std::isfinite(*number) || !(*number > 0.0))
-                    {
-                        throw std::runtime_error(where
-                                                 + " 'summation_order' must be finite and "
-                                                   "positive");
-                    }
-                    parsed.summationOrder = number;
-                    continue;
-                }
-                if(!std::isfinite(*number) || *number < 0.0)
-                {
-                    throw std::runtime_error(where + " '" + keyName
-                                             + "' must be finite and not negative");
-                }
-                (keyName == "lambda" ? parsed.lambda : parsed.lambdaPerQuarticRootK) = number;
-            }
-            if(parsed.lambdaPerQuarticRootK.has_value() && !parsed.lambda.has_value())
-            {
-                throw std::runtime_error(where
-                                         + " 'lambda_per_quartic_root_k' needs 'lambda': it adds "
-                                           "to it");
+                parsed.archTables.emplace_back(
+                    arch,
+                    parseConvCoefficients(*archTable,
+                                          where.substr(0, where.size() - 1) + "." + arch + "]",
+                                          isFloat,
+                                          nullptr));
             }
             _convTolerance[static_cast<size_t>(direction)]
                           [static_cast<size_t>(typeIt - K_CONV_TOLERANCE_TYPES.begin())]
-                = parsed;
+                = std::move(parsed);
         }
     }
 
@@ -690,8 +772,17 @@ private:
     std::vector<OverrideEntry> _overrides;
     std::vector<ValidatorEntry> _validatorOverrides;
     std::vector<SkipEntry> _skips;
-    std::array<std::array<hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients,
-                          K_CONV_TOLERANCE_TYPES.size()>,
+    // One [conv_<direction>_tolerance.<output type>] table: its own coefficients, and the
+    // coefficients of each arch table under it by the arch name.
+    struct ConvToleranceTable
+    {
+        hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients coefficients;
+        std::vector<
+            std::pair<std::string, hipdnn_test_sdk::utilities::conv::ConvToleranceCoefficients>>
+            archTables;
+    };
+
+    std::array<std::array<ConvToleranceTable, K_CONV_TOLERANCE_TYPES.size()>,
                K_CONV_TOLERANCE_TABLES.size()>
         _convTolerance{};
 };

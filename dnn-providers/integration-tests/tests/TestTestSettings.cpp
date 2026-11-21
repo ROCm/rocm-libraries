@@ -1082,6 +1082,8 @@ constexpr std::array<ConvToleranceDirection, 3> CONV_DIRECTIONS
 constexpr std::array<const char*, 3> CONV_TABLES
     = {"conv_fwd_tolerance", "conv_dgrad_tolerance", "conv_wrw_tolerance"};
 constexpr std::array<const char*, 3> CONV_TYPES = {"float", "half", "bfloat16"};
+// A device that no arch table names.
+constexpr const char* NO_ARCH = "";
 
 // The text of the error a settings file with this body is rejected with; fails the test when it
 // loads.
@@ -1113,7 +1115,7 @@ version = 1
     {
         for(const char* type : CONV_TYPES)
         {
-            const auto c = settings.convToleranceCoefficients(direction, type);
+            const auto c = settings.convToleranceCoefficients(direction, type, NO_ARCH);
             EXPECT_FALSE(c.summationOrder.has_value()) << type;
             EXPECT_FALSE(c.lambda.has_value()) << type;
             EXPECT_FALSE(c.lambdaPerQuarticRootK.has_value()) << type;
@@ -1132,7 +1134,8 @@ version = 1
 summation_order = 9.5
 )");
     const TestSettings settings(file.path());
-    const auto fwd = settings.convToleranceCoefficients(ConvToleranceDirection::FWD, "float");
+    const auto fwd
+        = settings.convToleranceCoefficients(ConvToleranceDirection::FWD, "float", NO_ARCH);
     ASSERT_TRUE(fwd.summationOrder.has_value());
     EXPECT_DOUBLE_EQ(*fwd.summationOrder, 9.5);
     EXPECT_FALSE(fwd.lambda.has_value());
@@ -1140,13 +1143,13 @@ summation_order = 9.5
     // Nothing is set for another type or another direction.
     for(const char* type : {"half", "bfloat16"})
     {
-        EXPECT_FALSE(settings.convToleranceCoefficients(ConvToleranceDirection::FWD, type)
+        EXPECT_FALSE(settings.convToleranceCoefficients(ConvToleranceDirection::FWD, type, NO_ARCH)
                          .summationOrder.has_value());
     }
     for(const auto direction : {ConvToleranceDirection::DGRAD, ConvToleranceDirection::WRW})
     {
-        EXPECT_FALSE(
-            settings.convToleranceCoefficients(direction, "float").summationOrder.has_value());
+        EXPECT_FALSE(settings.convToleranceCoefficients(direction, "float", NO_ARCH)
+                         .summationOrder.has_value());
     }
 }
 
@@ -1177,7 +1180,7 @@ TEST(TestSettingsParser, EveryDirectionAndTypeKeepsItsOwnCoefficients)
     {
         for(const char* type : CONV_TYPES)
         {
-            const auto c = settings.convToleranceCoefficients(direction, type);
+            const auto c = settings.convToleranceCoefficients(direction, type, NO_ARCH);
             if(std::string(type) == "float")
             {
                 ASSERT_TRUE(c.summationOrder.has_value()) << type;
@@ -1205,12 +1208,13 @@ version = 1
 lambda = 20.0
 )");
     const TestSettings settings(file.path());
-    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half")
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", NO_ARCH)
                     .lambda.has_value());
     for(const char* other : {"bfloat16", "float", "double"})
     {
-        EXPECT_FALSE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, other)
-                         .lambda.has_value())
+        EXPECT_FALSE(
+            settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, other, NO_ARCH)
+                .lambda.has_value())
             << other;
     }
 }
@@ -1227,7 +1231,8 @@ lambda = 3
 lambda_per_quartic_root_k = 2
 )");
     const TestSettings settings(file.path());
-    const auto c = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "float");
+    const auto c
+        = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "float", NO_ARCH);
     ASSERT_TRUE(c.summationOrder.has_value());
     EXPECT_DOUBLE_EQ(*c.summationOrder, 8.0);
     ASSERT_TRUE(c.lambda.has_value());
@@ -1248,7 +1253,8 @@ lambda = 0.0
 lambda_per_quartic_root_k = 0.0
 )");
     const TestSettings settings(file.path());
-    const auto c = settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "bfloat16");
+    const auto c
+        = settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "bfloat16", NO_ARCH);
     ASSERT_TRUE(c.lambda.has_value());
     EXPECT_DOUBLE_EQ(*c.lambda, 0.0);
     ASSERT_TRUE(c.lambdaPerQuarticRootK.has_value());
@@ -1435,12 +1441,279 @@ lambda_per_quartic_root_k = 1.0
     EXPECT_EQ(settings.toleranceOverrideCount(), 1u);
     EXPECT_EQ(settings.validatorOverrideCount(), 1u);
     EXPECT_EQ(settings.skipEntryCount(), 1u);
-    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::FWD, "float")
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::FWD, "float", NO_ARCH)
                     .summationOrder.has_value());
-    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half")
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", NO_ARCH)
                     .lambda.has_value());
-    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16")
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16", NO_ARCH)
                     .lambda.has_value());
+}
+
+// ---------------------------------------------------------------------------
+// [conv_<direction>_tolerance.<type>.<arch>]: the coefficients of one architecture
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+constexpr const char* GFX942 = "gfx942:sramecc+:xnack-";
+constexpr const char* GFX90A = "gfx90a:sramecc+:xnack-";
+
+} // namespace
+
+TEST(TestSettingsParser, AnArchTableAppliesToTheDevicesItNamesAndNoOther)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_wrw_tolerance.half]
+lambda = 10.0
+
+[conv_wrw_tolerance.half.gfx90a]
+lambda = 40.0
+lambda_per_quartic_root_k = 2.0
+)");
+    const TestSettings settings(file.path());
+    const auto onGfx90a
+        = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", GFX90A);
+    ASSERT_TRUE(onGfx90a.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*onGfx90a.lambda, 40.0);
+    ASSERT_TRUE(onGfx90a.lambdaPerQuarticRootK.has_value());
+    EXPECT_DOUBLE_EQ(*onGfx90a.lambdaPerQuarticRootK, 2.0);
+
+    for(const char* other : {GFX942, "", "gfx1100"})
+    {
+        const auto c
+            = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", other);
+        ASSERT_TRUE(c.lambda.has_value()) << other;
+        EXPECT_DOUBLE_EQ(*c.lambda, 10.0) << other;
+        EXPECT_FALSE(c.lambdaPerQuarticRootK.has_value()) << other;
+    }
+}
+
+// The arch table is the whole of the coefficients of its device: a key it leaves unset is the
+// SDK's value there, not the output type table's.
+TEST(TestSettingsParser, AnArchTableReplacesTheTypeTableWholeAndDoesNotMergeWithIt)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_dgrad_tolerance.float]
+summation_order = 9.0
+lambda = 10.0
+lambda_per_quartic_root_k = 3.0
+
+[conv_dgrad_tolerance.float.gfx90a]
+lambda = 20.0
+
+[conv_wrw_tolerance.half]
+lambda = 10.0
+lambda_per_quartic_root_k = 3.0
+
+[conv_wrw_tolerance.half.gfx90a]
+)");
+    const TestSettings settings(file.path());
+
+    const auto dgrad
+        = settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "float", GFX90A);
+    EXPECT_FALSE(dgrad.summationOrder.has_value());
+    ASSERT_TRUE(dgrad.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*dgrad.lambda, 20.0);
+    EXPECT_FALSE(dgrad.lambdaPerQuarticRootK.has_value());
+
+    // An arch table that sets nothing is the SDK's values on that device.
+    const auto wrw
+        = settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", GFX90A);
+    EXPECT_FALSE(wrw.summationOrder.has_value());
+    EXPECT_FALSE(wrw.lambda.has_value());
+    EXPECT_FALSE(wrw.lambdaPerQuarticRootK.has_value());
+
+    // The other devices keep the type table whole.
+    const auto other
+        = settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "float", GFX942);
+    ASSERT_TRUE(other.summationOrder.has_value());
+    EXPECT_DOUBLE_EQ(*other.summationOrder, 9.0);
+    ASSERT_TRUE(other.lambda.has_value());
+    EXPECT_DOUBLE_EQ(*other.lambda, 10.0);
+    ASSERT_TRUE(other.lambdaPerQuarticRootK.has_value());
+    EXPECT_DOUBLE_EQ(*other.lambdaPerQuarticRootK, 3.0);
+}
+
+// A type table may hold only arch tables: the other devices then have no coefficients of it.
+TEST(TestSettingsParser, ATypeTableOfArchTablesOnlySetsNothingOnOtherDevices)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_dgrad_tolerance.half.gfx90a]
+lambda = 46.0
+)");
+    const TestSettings settings(file.path());
+    EXPECT_TRUE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", GFX90A)
+                    .lambda.has_value());
+    EXPECT_FALSE(settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", GFX942)
+                     .lambda.has_value());
+}
+
+// Nine type tables, each with an arch table of its own value: every direction and type reads its
+// own. Catches an arch table kept under the wrong direction or type.
+TEST(TestSettingsParser, EveryDirectionAndTypeKeepsItsOwnArchTable)
+{
+    std::string body;
+    double next = 1.0;
+    for(const auto* table : CONV_TABLES)
+    {
+        for(const char* type : CONV_TYPES)
+        {
+            body += std::string("[") + table + "." + type
+                    + ".gfx90a]\nlambda = " + std::to_string(next++) + "\n\n";
+        }
+    }
+    const TempTomlFile file("[meta]\nversion = 1\n\n" + body);
+    const TestSettings settings(file.path());
+
+    double expected = 1.0;
+    for(const auto direction : CONV_DIRECTIONS)
+    {
+        for(const char* type : CONV_TYPES)
+        {
+            const auto c = settings.convToleranceCoefficients(direction, type, GFX90A);
+            ASSERT_TRUE(c.lambda.has_value()) << type;
+            EXPECT_DOUBLE_EQ(*c.lambda, expected++) << type;
+            EXPECT_FALSE(
+                settings.convToleranceCoefficients(direction, type, GFX942).lambda.has_value())
+                << type;
+        }
+    }
+}
+
+TEST(TestSettingsParser, AFloatArchTableMayCarryASummationOrder)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_fwd_tolerance.float.gfx942]
+summation_order = 12.0
+)");
+    const TestSettings settings(file.path());
+    const auto c = settings.convToleranceCoefficients(ConvToleranceDirection::FWD, "float", GFX942);
+    ASSERT_TRUE(c.summationOrder.has_value());
+    EXPECT_DOUBLE_EQ(*c.summationOrder, 12.0);
+}
+
+// The arch name is matched as a substring of the raw gcnArchName, as 'archs' of [[test_skips]]
+// is: a family prefix names every device of the family.
+TEST(TestSettingsParser, AnArchTableNameIsMatchedAsASubstringOfTheRawArchName)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_wrw_tolerance.bfloat16.gfx9]
+lambda = 5.0
+)");
+    const TestSettings settings(file.path());
+    for(const char* arch : {GFX942, GFX90A})
+    {
+        EXPECT_TRUE(
+            settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16", arch)
+                .lambda.has_value())
+            << arch;
+    }
+    EXPECT_FALSE(
+        settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16", "gfx1100")
+            .lambda.has_value());
+}
+
+// Two arch tables of one output type that both match the device cannot be ordered: the lookup
+// that finds out names both.
+TEST(TestSettingsParser, TwoArchTablesThatBothMatchTheDeviceAreAnErrorNamingBoth)
+{
+    const TempTomlFile file(R"(
+[meta]
+version = 1
+
+[conv_wrw_tolerance.half.gfx90a]
+lambda = 40.0
+
+[conv_wrw_tolerance.half.gfx90]
+lambda = 30.0
+
+[conv_wrw_tolerance.bfloat16.gfx90a]
+lambda = 4.0
+
+[conv_dgrad_tolerance.half.gfx90]
+lambda = 3.0
+)");
+    const TestSettings settings(file.path());
+    try
+    {
+        static_cast<void>(
+            settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", GFX90A));
+        ADD_FAILURE() << "two matching arch tables did not throw";
+    }
+    catch(const std::runtime_error& e)
+    {
+        const std::string message = e.what();
+        EXPECT_NE(message.find("conv_wrw_tolerance.half.gfx90a]"), std::string::npos) << message;
+        EXPECT_NE(message.find("conv_wrw_tolerance.half.gfx90]"), std::string::npos) << message;
+    }
+    // Only the device both match is an error: a device one of them matches, an output type with
+    // one matching table, and another direction are not.
+    EXPECT_NO_THROW(static_cast<void>(
+        settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "half", GFX942)));
+    EXPECT_NO_THROW(static_cast<void>(
+        settings.convToleranceCoefficients(ConvToleranceDirection::WRW, "bfloat16", GFX90A)));
+    EXPECT_NO_THROW(static_cast<void>(
+        settings.convToleranceCoefficients(ConvToleranceDirection::DGRAD, "half", GFX90A)));
+}
+
+TEST(TestSettingsParser, RejectsAnArchTableWithAnInvalidCoefficientNamingIt)
+{
+    for(const auto* table : CONV_TABLES)
+    {
+        const std::string name = std::string(table) + ".half.gfx90a";
+        const std::vector<std::string> bad = {
+            "[" + name + "]\nlambda = -1.0\n",
+            "[" + name + "]\nlambda = inf\n",
+            "[" + name + "]\nlambda = \"9\"\n",
+            "[" + name + "]\nlambda_per_quartic_root_k = 1.0\n",
+            "[" + name + "]\nlambda = 1.0\nlambda_per_quartic_root_k = -1.0\n",
+            "[" + name + "]\nsummation_order = 2.0\n",
+            "[" + name + "]\npartial_result = 12.0\n",
+            "[" + std::string(table) + ".float.gfx90a]\nsummation_order = 0.0\n",
+        };
+        for(const auto& text : bad)
+        {
+            const auto message = loadErrorOf(text);
+            EXPECT_NE(message.find(std::string(table)), std::string::npos)
+                << text << ": " << message;
+            EXPECT_NE(message.find("gfx90a"), std::string::npos) << text << ": " << message;
+        }
+    }
+}
+
+// No table nests under an arch table: the arch is the last level.
+TEST(TestSettingsParser, RejectsATableNestedUnderAnArchTable)
+{
+    for(const auto* table : CONV_TABLES)
+    {
+        const std::string name = std::string(table) + ".half.gfx90a";
+        const auto message
+            = loadErrorOf("[" + name + "]\nlambda = 1.0\n\n[" + name + ".gfx90a]\nlambda = 2.0\n");
+        EXPECT_NE(message.find(name), std::string::npos) << message;
+        EXPECT_NE(message.find("nested"), std::string::npos) << message;
+    }
+}
+
+TEST(TestSettingsParser, RejectsAnArchTableWithAnEmptyName)
+{
+    const auto message = loadErrorOf("[conv_wrw_tolerance.half.\"\"]\nlambda = 1.0\n");
+    EXPECT_NE(message.find("conv_wrw_tolerance.half"), std::string::npos) << message;
 }
 
 // NOLINTEND(readability-identifier-naming)
