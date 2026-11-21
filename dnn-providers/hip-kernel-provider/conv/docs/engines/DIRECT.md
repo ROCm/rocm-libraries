@@ -20,7 +20,7 @@ SPDX-License-Identifier:  MIT
   - NCHW 16-bit 3x3 usually goes to `CONV_WINOGRAD`;
   - anything strided or grouped, and dilations the `rows` configs do not fix (DeepLab's 6-36), go to `CONV_IGEMM`.
 - **Precision:** fp32 accumulation of exact products, rounded once at the store (split-C sums fp32 partials in a fixed order). Deterministic. No numerical note on the exact engines; the TF32 siblings report `TENSOR_CORE`.
-- **Instances:** 1556 exact configs, 778 per direction: 250 halo-tile MMA, 196 2-D and 3-D `rows` (70 of them channels-first `cf`, 30 dilated), 288 `rows` line tiles, 44 FMA (the floor on every architecture); and 18 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
+- **Instances:** 1560 exact configs, 780 per direction: 252 halo-tile MMA, 196 2-D and 3-D `rows` (70 of them channels-first `cf`, 30 dilated), 288 `rows` line tiles, 44 FMA (the floor on every architecture); and 18 three-bf16 per direction in the TF32 siblings. Each matrix-core config ships only to the architecture groups whose autotuned sweeps it won (`archs`).
 - **vs MIOpen:** usage-weighted speedup on the subset graphs where K2 is our fastest engine: 1.49x gfx950, 1.23x gfx942, 1.22x gfx90a, 1.03x gfx908, 2.16x gfx906, 2.80x gfx1201, 3.88x gfx1100. MIOpen ran in search mode.
 
 ## Why it exists
@@ -158,6 +158,7 @@ Measured with autotune (fresh cache), our engines only, against MIOpen in search
   - Wan VAE 3x3x3 bf16 (fwd 0.54-0.85x of MIOpen's time, bwd 0.36-0.47x on gfx90a-gfx950);
   - SD/SDXL/Flux VAE and UNet NHWC 3x3 on CDNA2/3 and RDNA;
   - nnU-Net fp32 NCHW 3-D on RDNA (50-100x, against MIOpen's naive kernels).
+  - nnU-Net fp32 3x3x3 K = 32 layers on gfx942: the 256 x 32 tile at 8-channel chunks and the streaming twin of its 16-channel form, 1.02x forward on MI325X (1.00-1.04x per layer; 34 fp32 3-D layers, all engines, autotuned, two interleaved rounds, none repeatably slower).
   - `rows` measured 1.28x over the halo tile on gfx950 (Flux c256 768²), and its gfx90a ping-pong tiles 1.04-1.12x over the halo tile from 256 channels.
 - **Weak:**
   - gfx950's largest-map VAE bf16 layers against `ConvHipConv` (384²-1024², c256-c512, 4-8 images, 1.01-1.03x);
