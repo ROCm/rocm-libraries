@@ -998,7 +998,10 @@ kernel, the `lambda` needed at a headroom of 1:
 Winograd and the split-K assembly kernels are not conforming: they are MIOpen's
 allowance, 12 for half (1.48 times Winograd's 8.09). The SDK's forward half
 `lambda` is 3: 1.5 times 1.98, the largest need of a conforming solver, the
-same factor that 12 has over Winograd's need.
+same factor that 12 has over Winograd's need. The gfx950 AOT conv-forward
+engine (`hipkernel:Gfx950ConvFwdAot`), which sets no allowance, passes the same
+346 cases at 3 as at 12 on an MI355X (gfx950), every conv-forward bundle case it
+accepts.
 
 ### The cases the SDK bound failed
 
@@ -1352,27 +1355,30 @@ sum is not detected either; a missing batch sample or row of `dy` still is.
 
 ### Harness runs, backward
 
-The bundle harness with the MIOpen engine on an MI308X (gfx942), every level,
-three input seeds (the bundles' own, one of the validation seeds and one new
-seed), the classes `X3` and `F20` left out. These runs used the previous
-constants (backward data 13, 12 and 6, backward weights 15, 22 + 1.5 `K^(1/4)`
-and 13 + 0.5 `K^(1/4)`, for float, half and bfloat16); the validation at the
-constants of this document, with the SDK's defaults and MIOpen's file on both
-architectures, is pending:
+The bundle harness with the MIOpen engine at the constants of this document (the
+SDK's defaults and MIOpen's file), every level, the conv-dgrad test-plan bundles
+and the backward-weights bundles derived from them together with every conv
+bundle in the tree, two input seeds (the bundles' own and one not used in the
+calibration), the classes `X3` and `F20` left out:
 
-| Bundles | Direction | Cases run (3 seeds) | Passed | Failed |
+| GPU | Direction | Cases run (2 seeds) | Passed | Failed |
 |---|---|---|---|---|
-| test plans | backward data | 7,632 | 7,367 | 265 |
-| test plans | backward weights | 8,049 | 7,815 | 234 |
-| in the tree (`*_Convolution*`) | all | 1,280 | 1,280 | 0 |
+| MI300-series (gfx942) | backward data | 5,088 | 4,915 | 173 |
+| MI300-series (gfx942) | backward weights | 5,366 | 5,211 | 155 |
+| MI250 (gfx90a) | backward data | 5,088 | 4,937 | 151 |
+| MI250 (gfx90a) | backward weights | 5,366 | 5,176 | 190 |
 
 Every backward failure is an output MIOpen computes wrongly, the same cases on
-every seed: the classes `F15`, `F16plane`, `F16chan` and `F16fast` (values of
-1e4 to 1e38, infinities, NaNs, wrong signs or doubled values), and two
-`F21large` backward-weights outputs that overflow to infinity where the
-reference is just under the largest value of the type. With the earlier flat
-half `lambda` of 36 one more output failed, on one seed: the `K` = 1.6
-million case of "Which backward solvers need lambda".
+both seeds: the classes `F15`, `F16plane`, `F16chan` and `F16fast` (values of
+1e4 to 1e38, infinities, NaNs, wrong signs or doubled values), `F21large` and
+`F21tiny` outputs that overflow or underflow, and on gfx90a the float
+backward-weights cases of the multipass Winograd and asm igemm solvers and
+bfloat16 backward-weights outputs of the asm igemm solver on NCHW 3x3 shapes
+that are off by 0.7 to 27 on outputs of 2 to 53 (see "Calibration: backward
+data and backward weights"). No correct output fails. The forward outputs in the
+same runs are graded as before this change: the failures there are graphs the
+engine does not execute and one 3D float case graded by a `[[tolerance_overrides]]`
+entry of MIOpen's file, not by the dynamic tolerance.
 
 ### When an engine needs more
 
