@@ -65,15 +65,18 @@ This will result in an executable `build/bin/tile_example_gemm_basic` & `build/b
 `C[t*B+b, d*H+h] = A[t,b,:] * W[:,d,h]` (BF16, FP32 accumulation) followed by
 `Y[h,b,t,d] = C[t,b,d,h]`, at T=768, B=512, K=384, D=256, H=8.
 
-The kernel consumes the weight reordered once to `Wp[k,h,d]` (1.5 MiB, `prepermute_weight`).
-Each 128x256 output tile then covers one head and 256 contiguous `d` at a fixed `b`, so it is a
-plain strided window of `Y` and the stock `CShuffleEpilogue` stores it. Tiles are ordered with
-`GemmSpatiallyLocalTilePartitioner`, as in the stock GEMM. No intermediate tensor is written.
+The example is a thin user of the library kernel `ck_tile::GemmEPermuteKernel`
+(`include/ck_tile/ops/gemm/kernel/gemm_e_permute_kernel.hpp`). It consumes the weight reordered
+once to `Wp[k,h,d]` (1.5 MiB, `prepermute_weight`), so `C[t*B+b, h*D+d]` is stored through the
+`[T, B, H, D]` view of `Y` with strides `(D, T*D, B*T*D, 1)`. The stock CompV3 pipeline,
+`CShuffleEpilogue` and `GemmSpatiallyLocalTilePartitioner` are used unchanged, and
+`IsSupportedArgument` checks the view (ragged T and B are supported). No intermediate tensor is
+written.
 
 ```sh
 cmake --build . --target tile_example_gemm_permute
-./bin/tile_example_gemm_permute               # bit-exact checks at four shapes
-./bin/tile_example_gemm_permute --benchmark   # also time the trace shape
+./bin/tile_example_gemm_permute               # bit-exact checks at three small shapes
+./bin/tile_example_gemm_permute --benchmark   # also check and time the trace shape
 ```
 
 The driver compares every output bit of both paths with `reference_gemm_gpu` followed by an
