@@ -61,7 +61,7 @@ using miopen::ai::lgbm::pcfg::PickConfig;
 using miopen::ai::lgbm::pcfg::RankedConfigs;
 using miopen::ai::lgbm::pcfg::ScorePickForTest;
 
-class CPU_LgbmPcfgPicker_NONE : public ::testing::Test
+class CPU_LgbmPcfgPicker_NONE : public ::testing::TestWithParam<int>
 {
 protected:
     const LgbmPcfgMetadata& meta = LgbmPcfgMetadata::Get();
@@ -81,7 +81,7 @@ protected:
 //   - is deterministic (same inputs -> same order on a second call).
 // This exercises the metadata load, per-solver predict dispatch, feature-row
 // assembly, and the stable argsort -- without any external reference.
-TEST_F(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
+TEST_P(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
 {
     int solvers_checked = 0;
     int buckets_checked = 0;
@@ -150,7 +150,7 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, RanksRealCatalogCandidatesDeterministically)
 // A gfx_code solver encodes the live gfx_id as its index in the model's shipped
 // vocab. Every arch the catalog has buckets for must be in that vocab; a missing
 // one would silently be scored as the unknown-arch (-1) category.
-TEST_F(CPU_LgbmPcfgPicker_NONE, GfxVocabCoversEveryBucketArch)
+TEST_P(CPU_LgbmPcfgPicker_NONE, GfxVocabCoversEveryBucketArch)
 {
     int gfx_solvers = 0;
     for(const auto& solver : meta.SolverNames())
@@ -181,7 +181,7 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, GfxVocabCoversEveryBucketArch)
 // bucket, get the same gfx_code and therefore the same ranking as on gfx1250; an arch outside
 // the catalog must still find no bucket. The solver is one whose model has a gfx_code feature
 // and a gfx1250 bucket, so BucketKey and GfxCode are both exercised.
-TEST_F(CPU_LgbmPcfgPicker_NONE, StrictArchSharesBaseArchBucketAndPick)
+TEST_P(CPU_LgbmPcfgPicker_NONE, StrictArchSharesBaseArchBucketAndPick)
 {
     using miopen::conv::Direction;
     const std::string solver = "ConvHipImplicitGemmGroupFwdXdlops";
@@ -287,7 +287,7 @@ protected:
     }
 };
 
-TEST_F(GPU_LgbmPcfgPickerStrictArch_FP16, PickConfigMatchesBaseArch)
+TEST_P(GPU_LgbmPcfgPickerStrictArch_FP16, PickConfigMatchesBaseArch)
 {
     std::unique_ptr<MockHandle> base, strict, unseen, unseen_strict, gfx950;
     try
@@ -338,12 +338,14 @@ TEST_F(GPU_LgbmPcfgPickerStrictArch_FP16, PickConfigMatchesBaseArch)
     }
 }
 
+using CPU_LgbmPcfgForest_NONE = ::testing::TestWithParam<int>;
+
 // Golden-vector parity for the per-solver pcfg models: the forest walker must
 // reproduce LightGBM's raw score for every committed (features -> expected)
 // vector, across all 11 solver models. The fixture includes random+NaN rows so
 // the numeric missing_type paths are exercised. Ground truth is produced by the
 // LightGBM Python API from the exact models shipped in the tree.
-TEST(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
+TEST_P(CPU_LgbmPcfgForest_NONE, MatchesGoldenVectors)
 {
     const auto& meta = LgbmPcfgMetadata::Get();
     if(!meta.IsReady())
@@ -467,11 +469,13 @@ bool Parse(const SectionBytes& s, miopen::ai::lgbm::pcfg::SolverModel& model)
 // Catalog with no templates, no candidates and no buckets.
 void EmptyCatalog(SectionBytes& s) { s.Varint(0).Varint(0).Varint(0).U8(1); }
 
+using CPU_LgbmPcfgMetadata_NONE = ::testing::TestWithParam<int>;
+
 // A well-formed 2-arg section: four candidates "a0".."a3" (descriptor template
 // "a<slot>", the slot taken from arg column 1), and one bucket "k" listing them
 // in reverse. Proves the hand-built layout is one the parser accepts, so the
 // rejections below are due to the bound and not to a malformed fixture.
-TEST(CPU_LgbmPcfgMetadata_NONE, ParsesWellFormedSection)
+TEST_P(CPU_LgbmPcfgMetadata_NONE, ParsesWellFormedSection)
 {
     auto s = SectionPrefix(2, kNumBaseProbFeatures + 2);
     s.Varint(4).Varint(1);                                    // 4 candidates, 1 template
@@ -502,7 +506,7 @@ TEST(CPU_LgbmPcfgMetadata_NONE, ParsesWellFormedSection)
 
 // Every section of the shipped bundle must still parse, with the schema the
 // header check enforces.
-TEST_F(CPU_LgbmPcfgPicker_NONE, ShippedSectionsParse)
+TEST_P(CPU_LgbmPcfgPicker_NONE, ShippedSectionsParse)
 {
     const auto names = meta.SolverNames();
     ASSERT_FALSE(names.empty());
@@ -521,7 +525,7 @@ TEST_F(CPU_LgbmPcfgPicker_NONE, ShippedSectionsParse)
 // header, before any column is allocated. 4096 is the case from review: 65,536
 // candidates and 4,096 constant arg columns take 8 KiB of input but would expand
 // to 2 GiB of columns and another 2 GiB of candidate args.
-TEST(CPU_LgbmPcfgMetadata_NONE, RejectsOversizedArgCount)
+TEST_P(CPU_LgbmPcfgMetadata_NONE, RejectsOversizedArgCount)
 {
     constexpr int kArgs = 4096;
     auto s              = SectionPrefix(kArgs, kNumBaseProbFeatures + kArgs);
@@ -535,7 +539,7 @@ TEST(CPU_LgbmPcfgMetadata_NONE, RejectsOversizedArgCount)
     EXPECT_FALSE(Parse(s, model));
 }
 
-TEST(CPU_LgbmPcfgMetadata_NONE, RejectsInconsistentHeader)
+TEST_P(CPU_LgbmPcfgMetadata_NONE, RejectsInconsistentHeader)
 {
     miopen::ai::lgbm::pcfg::SolverModel model;
 
@@ -557,7 +561,7 @@ TEST(CPU_LgbmPcfgMetadata_NONE, RejectsInconsistentHeader)
 // The largest arg_count the format allows (255) still must not decode past the
 // section's memory budget: 65,536 candidates by 255 constant columns is 133 MB of
 // int64 columns plus 133 MB of double args, from 510 bytes of columns.
-TEST(CPU_LgbmPcfgMetadata_NONE, RejectsColumnsOverDecodedBudget)
+TEST_P(CPU_LgbmPcfgMetadata_NONE, RejectsColumnsOverDecodedBudget)
 {
     constexpr int kArgs = 255;
     auto s              = SectionPrefix(kArgs, kNumBaseProbFeatures + kArgs);
@@ -573,7 +577,7 @@ TEST(CPU_LgbmPcfgMetadata_NONE, RejectsColumnsOverDecodedBudget)
 // A string stored as "share the previous string's whole prefix, add nothing"
 // costs two bytes however long the prefix is. 2,000 templates of 100,000 bytes
 // are 200 MB decoded from about 104 KB of input.
-TEST(CPU_LgbmPcfgMetadata_NONE, RejectsSharedPrefixStringsOverDecodedBudget)
+TEST_P(CPU_LgbmPcfgMetadata_NONE, RejectsSharedPrefixStringsOverDecodedBudget)
 {
     constexpr std::size_t kLen       = 100000;
     constexpr std::uint64_t kStrings = 2000;
@@ -592,7 +596,7 @@ TEST(CPU_LgbmPcfgMetadata_NONE, RejectsSharedPrefixStringsOverDecodedBudget)
 
 // 200 bucket entries that all copy one 1 MiB descriptor are 200 MB, from a
 // 25-byte index.
-TEST(CPU_LgbmPcfgMetadata_NONE, RejectsBucketEntriesOverDecodedBudget)
+TEST_P(CPU_LgbmPcfgMetadata_NONE, RejectsBucketEntriesOverDecodedBudget)
 {
     constexpr std::size_t kLen = 1u << 20;
     auto s                     = SectionPrefix(0, kNumBaseProbFeatures);
@@ -604,9 +608,11 @@ TEST(CPU_LgbmPcfgMetadata_NONE, RejectsBucketEntriesOverDecodedBudget)
     EXPECT_FALSE(Parse(s, model));
 }
 
+using CPU_LgbmPcfgHoldOut_NONE = ::testing::TestWithParam<int>;
+
 // Pins which (solver, arch, direction) combinations the picker holds out, whether or not
 // lgbm_pcfg.bin has buckets for them. ConvHipConv is held out on gfx1250 in every direction.
-TEST(CPU_LgbmPcfgHoldOut_NONE, HeldOutOfPicker)
+TEST_P(CPU_LgbmPcfgHoldOut_NONE, HeldOutOfPicker)
 {
     using miopen::conv::Direction;
     const std::string hipconv = "ConvHipConv";
@@ -621,9 +627,11 @@ TEST(CPU_LgbmPcfgHoldOut_NONE, HeldOutOfPicker)
     }
 }
 
+using CPU_LgbmPcfgDefaultMargin_NONE = ::testing::TestWithParam<int>;
+
 // Pins which (solver, arch, direction) combinations only use a pick that beats the default
 // config by a score margin: ConvHipConv on gfx950 backward weights.
-TEST(CPU_LgbmPcfgDefaultMargin_NONE, DefaultMargin)
+TEST_P(CPU_LgbmPcfgDefaultMargin_NONE, DefaultMargin)
 {
     using miopen::conv::Direction;
     const std::string hipconv = "ConvHipConv";
@@ -640,7 +648,7 @@ TEST(CPU_LgbmPcfgDefaultMargin_NONE, DefaultMargin)
 }
 
 // Only candidates scoring above the default's score plus the margin are kept, in ranked order.
-TEST(CPU_LgbmPcfgDefaultMargin_NONE, KeepAboveDefaultMargin)
+TEST_P(CPU_LgbmPcfgDefaultMargin_NONE, KeepAboveDefaultMargin)
 {
     const RankedConfigs ranked{{"a", "b", "def", "c"}, {3.0, 2.0, 1.0, -1.0}};
 
@@ -652,6 +660,13 @@ TEST(CPU_LgbmPcfgDefaultMargin_NONE, KeepAboveDefaultMargin)
     // A default that is not among the candidates abstains.
     EXPECT_EQ(KeepAboveDefaultMargin(ranked, "missing", 0.5), std::vector<std::string>{});
 }
+
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgPicker_NONE, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Full, GPU_LgbmPcfgPickerStrictArch_FP16, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgForest_NONE, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgMetadata_NONE, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgHoldOut_NONE, ::testing::Values(0));
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_LgbmPcfgDefaultMargin_NONE, ::testing::Values(0));
 
 } // namespace
 

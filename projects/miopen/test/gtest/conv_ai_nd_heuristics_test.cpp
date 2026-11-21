@@ -895,17 +895,19 @@ std::string ConvNDParamName(const ::testing::TestParamInfo<ConvNDParams>& info)
 }
 
 // Instantiate tests for both 2D and 3D
-INSTANTIATE_TEST_SUITE_P(Full,
+INSTANTIATE_TEST_SUITE_P(Standard,
                          GPU_ConvNDAIHeuristics_FP32,
                          ::testing::ValuesIn(GenerateConvNDParams()),
                          ConvNDParamName);
+
+using CPU_ConvAiEngineeredConvFeatures_NONE = ::testing::TestWithParam<int>;
 
 // Golden vectors for the derived-feature block shared by the TunaNet (ExtractTunaNetNDFeatures)
 // and candidate-selection input encoders via common::EngineeredConvFeatures. Pins the shared math
 // so a hasty change on either path is caught. Uses C_in != C_out and all three directions so the
 // direction-dependent GEMM (M, N, K) assignment is fully exercised (C_in == C_out would hide it).
 // Pure CPU math -- no model files or device required.
-TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
+TEST_P(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
 {
     // N=2, C_in=64, C_out=128, 56x56, 3x3, g=1, num_cu=304. Only the GEMM-dimension features
     // (indices 1..6) differ between directions; the rest are direction-independent.
@@ -997,12 +999,16 @@ TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvAiEngineeredConvFeatures_NONE, ::testing::Values(0));
+
+using CPU_ConvAiEngineeredConv3dFeatures_NONE = ::testing::TestWithParam<int>;
+
 // 3D counterpart of CPU_ConvAiEngineeredConvFeatures_NONE.Golden. Pins the full 19-element derived
 // vector (18 shared features + the appended log1p(D_in)) for all three directions, so the 3D
 // depth folding (D into the volume terms) and the direction-dependent GEMM (M, N, K) assignment
 // are both exercised -- not just Forward. Uses C_in != C_out and D_in != D_out != H so a swapped
 // or dropped dimension is caught. Pure CPU math -- no model files or device required.
-TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
+TEST_P(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
 {
     // N=2, C_in=64, C_out=128, 16x16 -> 14x14, D 8 -> 6, K 3x3x3, g=1, num_cu=304. Only the
     // GEMM-dimension features (indices 1..6) differ between directions; the rest, including the
@@ -1105,6 +1111,10 @@ TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
     }
 }
 
+INSTANTIATE_TEST_SUITE_P(Quick, CPU_ConvAiEngineeredConv3dFeatures_NONE, ::testing::Values(0));
+
+using GPU_ConvAIModelLoad_FP32 = ::testing::TestWithParam<int>;
+
 // Every bundled fdeep model file must be loadable by the deployed frugally-deep. This fails
 // loudly and directly if a model is exported in a format the linked fdeep cannot parse (e.g. a
 // Keras 3 export against a Keras 2-era fdeep). Without this, such a breakage only surfaces
@@ -1115,7 +1125,7 @@ TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
 // identify the device. An arch that ships no bundled models (e.g. gfx1250) is skipped only when
 // the system db holds no models at all; models present for other archs (a multi-arch install, a
 // dev build tree) are still loaded.
-TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
+TEST_P(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
 {
     const auto db = GetSystemDbPath();
 
@@ -1157,6 +1167,8 @@ TEST(GPU_ConvAIModelLoad_FP32, BundledFdeepModelsLoad)
     EXPECT_TRUE(failures.empty()) << "frugally-deep failed to load " << failures.size() << " of "
                                   << models.size() << " bundled model(s):" << oss.str();
 }
+
+INSTANTIATE_TEST_SUITE_P(Standard, GPU_ConvAIModelLoad_FP32, ::testing::Values(0));
 
 } // namespace
 
