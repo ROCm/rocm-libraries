@@ -351,6 +351,8 @@ set(ROCSPARSE_UNIT_TEST_DEVICE_SOURCES
   unit_test_internal_conversion_grid_clamp.cpp
   # Default CSR SpMV algorithm selection (adaptive vs nnz-split).
   unit_test_internal_level2_csrmv_default_dispatch.cpp
+  # CSR nnz-split SpMV on every granularity and launch layout [AISPARSE-1099].
+  unit_test_internal_level2_csrmv_nnzsplit.cpp
 )
 
 if(BUILD_WITH_SPSORT)
