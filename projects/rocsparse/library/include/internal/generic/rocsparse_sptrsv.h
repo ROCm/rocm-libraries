@@ -100,11 +100,14 @@ rocsparse_status rocsparse_sptrsv_buffer_size(rocsparse_handle            handle
 *  Performing the above operation requires two stages, the stage \ref rocsparse_sptrsv_stage_analysis and the stage \ref rocsparse_sptrsv_stage_compute.
 *  The stage \ref rocsparse_sptrsv_stage_analysis is required to perform the stage \ref rocsparse_sptrsv_stage_compute and only need to be called once for a given sparse matrix \f$op(A)\f$, while the stage \ref rocsparse_sptrsv_stage_compute can be repeatedly used with different \f$x\f$ and \f$y\f$ vectors.
 *
-*  For a CSC matrix without transpose, \p rocsparse_sptrsv solves directly on the columns of the
-*  matrix. Once an unknown is computed, its column contributes to the unknowns that
-*  depend on it. No transposed structure is built, and the analysis requires a single pass over the
-*  matrix. Atomic additions are used, so the results are not bitwise reproducible. The analysis is
-*  kept in the SpTRSV descriptor regardless of the analysis policy.
+*  \p rocsparse_sptrsv supports the following algorithms, selected with \ref rocsparse_sptrsv_input_alg:
+*
+*  <table>
+*  <tr><th>Algorithm                                  <th>Deterministic  <th>Notes
+*  <tr><td>rocsparse_sptrsv_alg_default</td>         <td>Yes</td>        <td>For a CSC matrix without transpose or a CSR matrix with transpose or conjugate transpose, the analysis builds the transposed structure and every solve gathers the matrix values. </td>
+*  <tr><td>rocsparse_sptrsv_alg_limited_memory</td>  <td>No</td>         <td>For a CSC matrix without transpose or a CSR matrix with transpose or conjugate transpose, the transposed structure is not built: once an unknown is computed, its column of \f$op(A)\f$ updates the unknowns that depend on it, and the analysis requires a single pass over the matrix. Atomic additions are used, so the results are not bitwise reproducible. The analysis is kept in the SpTRSV descriptor regardless of the analysis policy. Other formats and operations use \ref rocsparse_sptrsv_alg_default. </td>
+*  </table>
+*
 *
 *  \p rocsparse_sptrsv supports the following
 *  data types for \f$op(A)\f$, \f$x\f$, \f$y\f$, and scalar \f$\alpha\f$:

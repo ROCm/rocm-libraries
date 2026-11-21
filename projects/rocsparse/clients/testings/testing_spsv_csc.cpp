@@ -100,6 +100,13 @@ void testing_spsv_csc_bad_arg(const Arguments& arg)
 template <typename I, typename J, typename T>
 void testing_spsv_csc(const Arguments& arg)
 {
+#ifndef ROCSPARSE_WITH_SPTRSV_CSC
+    if(arg.spsv_alg != rocsparse_spsv_alg_default)
+    {
+        return;
+    }
+#endif
+
     J                     M           = arg.M;
     J                     N           = arg.N;
     rocsparse_operation   trans_A     = arg.transA;
@@ -410,7 +417,7 @@ static void testing_spsv_csc_in_place_arrowhead(const Arguments& arg)
 
     const T                   alpha = static_cast<T>(1);
     const rocsparse_operation trans = rocsparse_operation_none;
-    const rocsparse_spsv_alg  alg   = rocsparse_spsv_alg_default;
+    const rocsparse_spsv_alg  alg   = arg.spsv_alg;
     CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(rocsparse_spsv(handle,
@@ -440,6 +447,13 @@ static void testing_spsv_csc_in_place_arrowhead(const Arguments& arg)
 
 void testing_spsv_csc_extra(const Arguments& arg)
 {
+#ifndef ROCSPARSE_WITH_SPTRSV_CSC
+    if(arg.spsv_alg != rocsparse_spsv_alg_default)
+    {
+        return;
+    }
+#endif
+
     testing_spsv_csc_in_place_arrowhead<float>(arg);
     testing_spsv_csc_in_place_arrowhead<double>(arg);
 }

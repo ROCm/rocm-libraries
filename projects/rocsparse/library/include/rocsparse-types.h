@@ -873,6 +873,10 @@ typedef enum rocsparse_spmv_alg_
 typedef enum rocsparse_spsv_alg_
 {
     rocsparse_spsv_alg_default = 0, /**< Default SpSV algorithm for the given format. */
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+    rocsparse_spsv_alg_limited_memory
+    = 1, /**< SpSV algorithm with limited memory usage for CSC matrices without transpose and CSR matrices with (conjugate) transpose. Not bitwise reproducible. */
+#endif
 } rocsparse_spsv_alg;
 
 /*! \ingroup types_module
@@ -1070,6 +1074,10 @@ typedef enum rocsparse_singularity_
 typedef enum rocsparse_sptrsv_alg_
 {
     rocsparse_sptrsv_alg_default = 0, /**< Default SpTRSV algorithm for the given format. */
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+    rocsparse_sptrsv_alg_limited_memory
+    = 1, /**< SpTRSV algorithm with limited memory usage for CSC matrices without transpose and CSR matrices with (conjugate) transpose. Not bitwise reproducible. */
+#endif
 } rocsparse_sptrsv_alg;
 
 /*! \ingroup types_module

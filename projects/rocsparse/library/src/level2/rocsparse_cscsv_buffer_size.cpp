@@ -82,12 +82,13 @@ rocsparse_status rocsparse::cscsv_checkarg_matrix_properties(rocsparse_const_spm
 rocsparse_status rocsparse::cscsv_analysis_buffer_size(rocsparse_handle            handle,
                                                        rocsparse_operation         trans,
                                                        rocsparse_const_spmat_descr A,
-                                                       size_t* buffer_size_in_bytes)
+                                                       size_t* buffer_size_in_bytes,
+                                                       bool    limited_memory)
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
 #if defined(ROCSPARSE_WITH_SPTRSV_CSC)
-    if(trans == rocsparse_operation_none)
+    if(rocsparse::cscsv_use_limited_memory(trans, limited_memory))
     {
         buffer_size_in_bytes[0] = 0;
         if(A->cols > 0)
@@ -114,12 +115,13 @@ rocsparse_status rocsparse::cscsv_solve_buffer_size(rocsparse_handle            
                                                     rocsparse_const_spmat_descr A,
                                                     rocsparse_const_dnvec_descr x,
                                                     rocsparse_const_dnvec_descr y,
-                                                    size_t* buffer_size_in_bytes)
+                                                    size_t* buffer_size_in_bytes,
+                                                    bool    limited_memory)
 {
     ROCSPARSE_ROUTINE_TRACE;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_checkarg_matrix_properties(A));
 #if defined(ROCSPARSE_WITH_SPTRSV_CSC)
-    if(trans == rocsparse_operation_none)
+    if(rocsparse::cscsv_use_limited_memory(trans, limited_memory))
     {
         buffer_size_in_bytes[0] = rocsparse::cscsv_solve_buffer_layout_t(
                                       A->cols, y->batch_count, A->row_type, A->data_type)

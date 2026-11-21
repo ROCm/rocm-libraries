@@ -124,8 +124,13 @@ DEF(rocsparse_spmv_alg,
     rocsparse_spmv_alg_csr_lrb,
     rocsparse_spmv_alg_csr_nnzsplit);
 
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+DEF(rocsparse_spsv_alg, rocsparse_spsv_alg_default, rocsparse_spsv_alg_limited_memory);
+DEF(rocsparse_sptrsv_alg, rocsparse_sptrsv_alg_default, rocsparse_sptrsv_alg_limited_memory);
+#else
 DEF(rocsparse_spsv_alg, rocsparse_spsv_alg_default);
 DEF(rocsparse_sptrsv_alg, rocsparse_sptrsv_alg_default);
+#endif
 
 DEF(rocsparse_spitsv_alg, rocsparse_spitsv_alg_default);
 
@@ -447,6 +452,9 @@ bool rocsparse_spsv_alg_from_name(rocsparse_spsv_alg value, const char* name)
         switch(v)
         {
             CASE(rocsparse_spsv_alg_default);
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+            CASE(rocsparse_spsv_alg_limited_memory);
+#endif
         }
     }
     return false;
@@ -459,6 +467,9 @@ bool rocsparse_sptrsv_alg_from_name(rocsparse_sptrsv_alg value, const char* name
         switch(v)
         {
             CASE(rocsparse_sptrsv_alg_default);
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+            CASE(rocsparse_sptrsv_alg_limited_memory);
+#endif
         }
     }
     return false;

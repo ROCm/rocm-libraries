@@ -54,7 +54,8 @@ namespace rocsparse
                                                J*                   zero_pivot,
                                                rocsparse_index_base idx_base,
                                                rocsparse_fill_mode  fill_mode,
-                                               rocsparse_diag_type  diag_type)
+                                               rocsparse_diag_type  diag_type,
+                                               bool                 conj)
     {
         const bool lower     = (fill_mode == rocsparse_fill_mode_lower);
         const J    col       = task_col[t];
@@ -70,7 +71,7 @@ namespace rocsparse
             const I d = csc_diag_ind[col];
             if(d >= 0)
             {
-                T diag = csc_val[d];
+                T diag = conj ? rocsparse::conj(csc_val[d]) : csc_val[d];
                 if(diag == static_cast<T>(0))
                 {
                     if(owner && lid == 0)
@@ -90,7 +91,8 @@ namespace rocsparse
         {
             const int64_t k = static_cast<int64_t>(kbeg) + lid + i * NUM_LANES;
             rows[i]         = (k < col_end) ? csc_row_ind[k] - idx_base : col;
-            vals[i]         = (k < col_end) ? csc_val[k] : static_cast<T>(0);
+            vals[i]         = (k < col_end) ? (conj ? rocsparse::conj(csc_val[k]) : csc_val[k])
+                                            : static_cast<T>(0);
             deps[i]         = lower ? (rows[i] > col) : (rows[i] < col);
         }
 
@@ -169,7 +171,8 @@ namespace rocsparse
                                                  J*                   zero_pivot,
                                                  rocsparse_index_base idx_base,
                                                  rocsparse_fill_mode  fill_mode,
-                                                 rocsparse_diag_type  diag_type)
+                                                 rocsparse_diag_type  diag_type,
+                                                 bool                 conj)
     {
         __shared__ int32_t block_id;
 
@@ -212,7 +215,8 @@ namespace rocsparse
                                                                   zero_pivot,
                                                                   idx_base,
                                                                   fill_mode,
-                                                                  diag_type);
+                                                                  diag_type,
+                                                                  conj);
             }
 
             if(!clamped)

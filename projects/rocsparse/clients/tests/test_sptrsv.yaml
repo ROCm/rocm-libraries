@@ -184,7 +184,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2,4]
 
 - name: sptrsv
@@ -198,8 +198,8 @@ Tests:
   diag: *all_rocsparse_diag_type
   uplo: *all_rocsparse_fill_mode
   baseA: [rocsparse_index_base_zero]
-  apol: *all_rocsparse_analysis_policy
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  apol: [rocsparse_analysis_policy_reuse]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
@@ -234,12 +234,13 @@ Tests:
   M_N: *M_N_csr_range_checkin
   alpha_alphai: *alpha_csr_range_checkin
   transA: [rocsparse_operation_none]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower, rocsparse_fill_mode_upper]
   solve_mode: [rocsparse_solve_mode_diagonal]
   diagonal_modifier: [rocsparse_diagonal_modifier_none, rocsparse_diagonal_modifier_absolute]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
-  apol: [rocsparse_analysis_policy_reuse, rocsparse_analysis_policy_force]
+  apol: [rocsparse_analysis_policy_reuse]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   formatA: [rocsparse_format_csc]
@@ -263,7 +264,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   filename: [nos5,
              nos7]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [3,17]
   batch_count_A: [1]
 
@@ -280,7 +281,7 @@ Tests:
 #  TODO rocsparse_diag_type_unit
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_one]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
@@ -307,7 +308,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_triangular]
   filename: [nos5]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2, 4]
   batch_count_A: [0, 1]
 
@@ -324,7 +325,7 @@ Tests:
 # TODO rocsparse_diag_type_unit
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_triangular]
@@ -367,7 +368,7 @@ Tests:
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
   graph_test: true
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
 - name: sptrsv_graph_test
@@ -381,7 +382,7 @@ Tests:
   diag: *all_rocsparse_diag_type
   uplo: *all_rocsparse_fill_mode
   baseA: *all_rocsparse_index_base
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
@@ -522,7 +523,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [mc2depi]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [4]
   batch_count_A: [1]
 
@@ -537,10 +538,10 @@ Tests:
   N: 1
   alpha_alphai: *alpha_csr_range_checkin
   transA: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_unit]
+  diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
@@ -637,7 +638,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_triangular]
   filename: [rma10,
              nos5]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2, 3, 4, 17, 25]
   batch_count_A: [0, 1]
 
@@ -654,7 +655,7 @@ Tests:
 # TODO rocsparse_diag_type_unit
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_triangular]
@@ -681,7 +682,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   filename: [mplate,
              mc2depi]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [4, 5, 8]
   batch_count_A: [0, 1]
 
@@ -694,10 +695,10 @@ Tests:
   N: 1
   alpha_alphai: *alpha_csr_range_checkin
   transA: [rocsparse_operation_none]
-  diag: [rocsparse_diag_type_unit]
+  diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
@@ -741,7 +742,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
 - name: sptrsv
@@ -755,7 +756,7 @@ Tests:
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general]
@@ -776,7 +777,7 @@ Tests:
   sptrsv_alg: [rocsparse_sptrsv_alg_default]
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2]
 
 - name: sptrsv
@@ -790,7 +791,7 @@ Tests:
   diag: [rocsparse_diag_type_unit]
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_random]
   matrix_type: [rocsparse_matrix_type_general, rocsparse_matrix_type_triangular]
@@ -836,7 +837,7 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
   filename: [Chevron4]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [2, 3]
   batch_count_A: [0, 1]
 
@@ -852,7 +853,7 @@ Tests:
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_zero]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
@@ -1031,7 +1032,7 @@ Tests:
   matrix_type: [rocsparse_matrix_type_general]
   filename: [nos5,
              nos7]
-  formatA: [rocsparse_format_csr]
+  formatA: [rocsparse_format_csr, rocsparse_format_csc]
   batch_count: [3,4,17,96, 256, 1024]
   batch_count_A: [1]
 
@@ -1047,7 +1048,7 @@ Tests:
   diag: [rocsparse_diag_type_non_unit]
   uplo: [rocsparse_fill_mode_lower]
   baseA: [rocsparse_index_base_one]
-  sptrsv_alg: [rocsparse_sptrsv_alg_default]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
   skip_reproducibility: true
   matrix: [rocsparse_matrix_file_rocalution]
   matrix_type: [rocsparse_matrix_type_general]
@@ -1057,3 +1058,21 @@ Tests:
   batch_count: [3,4,17,96, 256, 1024]
   batch_count_A: [1]
 
+- name: sptrsv
+  category: pre_checkin
+  function: sptrsv
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
+  M_N: *M_N_csr_range_checkin
+  alpha_alphai: *alpha_csr_range_checkin
+  transA: [rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  diag: *all_rocsparse_diag_type
+  uplo: *all_rocsparse_fill_mode
+  baseA: [rocsparse_index_base_zero]
+  apol: [rocsparse_analysis_policy_reuse]
+  sptrsv_alg: [rocsparse_sptrsv_alg_limited_memory]
+  skip_reproducibility: true
+  matrix: [rocsparse_matrix_random]
+  matrix_type: [rocsparse_matrix_type_general]
+  formatA: [rocsparse_format_csr]
+  batch_count: [2,4]

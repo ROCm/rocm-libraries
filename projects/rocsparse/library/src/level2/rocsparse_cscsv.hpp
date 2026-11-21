@@ -40,6 +40,48 @@ namespace rocsparse
                                                    : rocsparse_operation_none;
     }
 
+    // Whether the limited-memory version is used for a CSC matrix without transpose. It does not
+    // build the transposed matrix: once an unknown is computed, its column of the matrix updates
+    // the unknowns that depend on it. Otherwise, the transposed CSR system is solved.
+    static inline bool cscsv_use_limited_memory(rocsparse_operation trans, bool limited_memory)
+    {
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+        return limited_memory && trans == rocsparse_operation_none;
+#else
+        return false;
+#endif
+    }
+
+    // A CSR matrix with transpose is the CSC matrix without transpose that shares its arrays (see
+    // build_csc_from_csr), and with conjugate transpose the same with conjugated values, so it can
+    // use the limited-memory version too.
+    static inline bool csrsv_use_limited_memory(rocsparse_operation trans, bool limited_memory)
+    {
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+        return limited_memory && trans != rocsparse_operation_none;
+#else
+        return false;
+#endif
+    }
+
+    static inline bool is_limited_memory(rocsparse_sptrsv_alg alg)
+    {
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+        return alg == rocsparse_sptrsv_alg_limited_memory;
+#else
+        return false;
+#endif
+    }
+
+    static inline bool is_limited_memory(rocsparse_spsv_alg alg)
+    {
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+        return alg == rocsparse_spsv_alg_limited_memory;
+#else
+        return false;
+#endif
+    }
+
     // Square, general or triangular, sorted: the CSC solve without transpose does not go
     // through the csrsv checks.
     rocsparse_status cscsv_checkarg_matrix_properties(rocsparse_const_spmat_descr A);
@@ -65,24 +107,27 @@ namespace rocsparse
         size_t m_sum_size{};
     };
 
-    // CSC triangular solve. Without transpose, the system is solved on the columns of the matrix
-    // (when rocSPARSE is built with BUILD_WITH_SPTRSV_CSC); the other operations solve the
-    // transposed CSR system.
+    // CSC triangular solve, with the limited-memory version if
+    // cscsv_use_limited_memory(trans, limited_memory). conj conjugates the matrix values in the
+    // limited-memory version (CSR matrix with conjugate transpose, see build_csc_from_csr).
     rocsparse_status cscsv_analysis_buffer_size(rocsparse_handle            handle,
                                                 rocsparse_operation         trans,
                                                 rocsparse_const_spmat_descr A,
-                                                size_t*                     buffer_size_in_bytes);
+                                                size_t*                     buffer_size_in_bytes,
+                                                bool                        limited_memory);
 
     bool cscsv_is_analyzed(rocsparse_cscsv_info        info,
                            rocsparse_operation         trans,
-                           rocsparse_const_spmat_descr A);
+                           rocsparse_const_spmat_descr A,
+                           bool                        limited_memory);
 
     rocsparse_status cscsv_solve_buffer_size(rocsparse_handle            handle,
                                              rocsparse_operation         trans,
                                              rocsparse_const_spmat_descr A,
                                              rocsparse_const_dnvec_descr x,
                                              rocsparse_const_dnvec_descr y,
-                                             size_t*                     buffer_size_in_bytes);
+                                             size_t*                     buffer_size_in_bytes,
+                                             bool                        limited_memory);
 
     rocsparse_status cscsv_analysis(rocsparse_handle            handle,
                                     rocsparse_operation         trans,
@@ -91,7 +136,8 @@ namespace rocsparse
                                     rocsparse_solve_policy      solve_policy,
                                     rocsparse_cscsv_info        info,
                                     size_t                      buffer_size_in_bytes,
-                                    void*                       buffer);
+                                    void*                       buffer,
+                                    bool                        limited_memory);
 
     rocsparse_status cscsv_solve(rocsparse_handle            handle,
                                  rocsparse_operation         trans,
@@ -104,7 +150,9 @@ namespace rocsparse
                                  rocsparse_solve_policy      solve_policy,
                                  rocsparse_cscsv_info        info,
                                  size_t                      buffer_size_in_bytes,
-                                 void*                       buffer);
+                                 void*                       buffer,
+                                 bool                        limited_memory,
+                                 bool                        conj);
 
     rocsparse_status cscsv_diagonal_solve(rocsparse_handle            handle,
                                           rocsparse_operation         trans,
@@ -113,7 +161,9 @@ namespace rocsparse
                                           rocsparse_const_spmat_descr A,
                                           rocsparse_const_dnvec_descr x,
                                           rocsparse_dnvec_descr       y,
-                                          rocsparse_cscsv_info        info);
+                                          rocsparse_cscsv_info        info,
+                                          bool                        limited_memory,
+                                          bool                        conj);
 
     // Each batch instance starts from the structural zero pivot of the analysis, or from
     // no pivot if the diagonal is unit.

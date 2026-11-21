@@ -47,6 +47,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spsv_alg value_)
     switch(value_)
     {
         CASE(rocsparse_spsv_alg_default);
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+        CASE(rocsparse_spsv_alg_limited_memory);
+#endif
 #undef CASE
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
@@ -75,6 +78,9 @@ bool rocsparse::enum_utils::is_invalid(rocsparse_spsv_alg value_)
     switch(value_)
     {
     case rocsparse_spsv_alg_default:
+#if defined(ROCSPARSE_WITH_SPTRSV_CSC)
+    case rocsparse_spsv_alg_limited_memory:
+#endif
     {
         return false;
     }
@@ -111,7 +117,24 @@ namespace rocsparse
                                  void*                       temp_buffer)
     {
         ROCSPARSE_ROUTINE_TRACE;
-        const rocsparse_format format = mat->format;
+        rocsparse_format format = mat->format;
+
+        // A CSR matrix with (conjugate) transpose is solved as the CSC matrix without transpose
+        // that shares its arrays, with conjugated values.
+        const bool             limited_memory = rocsparse::is_limited_memory(alg);
+        bool                   conj           = false;
+        _rocsparse_mat_descr   descr_csc;
+        _rocsparse_spmat_descr mat_csc;
+        if(format == rocsparse_format_csr
+           && rocsparse::csrsv_use_limited_memory(trans, limited_memory))
+        {
+            rocsparse::build_csc_from_csr(*mat, mat_csc, descr_csc);
+            conj   = (trans == rocsparse_operation_conjugate_transpose);
+            trans  = rocsparse_operation_none;
+            mat    = &mat_csc;
+            format = rocsparse_format_csc;
+        }
+
         switch(format)
         {
         case rocsparse_format_csc:
@@ -122,10 +145,10 @@ namespace rocsparse
             {
                 size_t buffer_size_analysis = std::numeric_limits<size_t>::max();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_analysis_buffer_size(
-                    handle, trans, mat, &buffer_size_analysis));
+                    handle, trans, mat, &buffer_size_analysis, limited_memory));
                 size_t buffer_size_solve = std::numeric_limits<size_t>::max();
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscsv_solve_buffer_size(
-                    handle, trans, mat, x, y, &buffer_size_solve));
+                    handle, trans, mat, x, y, &buffer_size_solve, limited_memory));
                 *buffer_size = rocsparse::max(buffer_size_analysis, buffer_size_solve);
                 *buffer_size = rocsparse::max(static_cast<size_t>(4), *buffer_size);
                 return rocsparse_status_success;
@@ -138,7 +161,7 @@ namespace rocsparse
                 // yet, instead of relying on the descriptor-wide mat->analysed flag.
                 // The size of temp_buffer is not passed to these stages, so it is not checked.
                 rocsparse_cscsv_info cscsv_info = mat->info->get_cscsv_info();
-                if(!rocsparse::cscsv_is_analyzed(cscsv_info, trans, mat))
+                if(!rocsparse::cscsv_is_analyzed(cscsv_info, trans, mat, limited_memory))
                 {
                     RETURN_IF_ROCSPARSE_ERROR(
                         (rocsparse::cscsv_analysis(handle,
@@ -148,7 +171,8 @@ namespace rocsparse
                                                    rocsparse_solve_policy_auto,
                                                    cscsv_info,
                                                    std::numeric_limits<size_t>::max(),
-                                                   temp_buffer)));
+                                                   temp_buffer,
+                                                   limited_memory)));
                 }
 
                 return rocsparse_status_success;
@@ -167,7 +191,9 @@ namespace rocsparse
                                                                  rocsparse_solve_policy_auto,
                                                                  mat->info->get_cscsv_info(),
                                                                  std::numeric_limits<size_t>::max(),
-                                                                 temp_buffer));
+                                                                 temp_buffer,
+                                                                 limited_memory,
+                                                                 conj));
                 return rocsparse_status_success;
             }
             }
