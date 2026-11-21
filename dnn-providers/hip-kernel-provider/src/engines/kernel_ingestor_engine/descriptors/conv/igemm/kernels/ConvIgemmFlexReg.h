@@ -7,31 +7,34 @@
 // HIPRTC-compatible.
 //
 // GEMM and steps as in ConvIgemmFlex.h: rows m are 256 flattened output positions, columns BN
-// output channels of one group, a step is one 128-byte slice of reduction channels (64 16-bit,
-// 32 fp32) at one filter tap, slices outer and taps (t, r, s) inner.
+// output channels of one group, a step is one KB-byte slice of reduction channels at one filter
+// tap, slices outer and taps (t, r, s) inner. KB is 128 (64 16-bit or 32 fp32 channels), or 64 on
+// the 16-bit 256 x 256 tile, whose 64 MMAs a wave a step read a third fewer operand bytes.
 //
-// One LDS stage: X (256 rows) and W (BN rows) of 128-byte rows, eight 16-byte granules a row,
-// granule g of row r at slot g ^ (r % 8): a fragment read of 16 consecutive rows covers the
-// banks once, and a thread's stored granule is one aligned 16-byte write. The next step's tile is
-// prefetched in registers (16-byte buffer loads, four X and BN / 64 W granules a thread) one step
-// ahead, so a load has a whole step to land.
+// One LDS stage: X (256 rows) and W (BN rows) of KB-byte rows, GR = KB / 16 granules of 16 bytes
+// a row, granule g of row r at slot g ^ key(r) (r % 8, or (r / 2) % 4 for four granules a row): a
+// fragment read of 16 consecutive rows covers the banks once, and a thread's stored granule is one
+// aligned 16-byte write. The next step's tile is prefetched in registers (16-byte buffer loads)
+// one step ahead, so a load has a whole step to land.
 //
 // Waves: two groups of four, the BN / 2-channel halves of the block; a group's four waves split
 // the 256 positions, so a wave owns 64 positions x BN / 2 channels (the square wave tile reads
 // the fewest LDS bytes a step: 64 X and 64 W rows). A step is four phases,
 // each ended by a barrier, and the second group runs one phase behind the first:
-//   [mem A]     every fragment read of the step (two 64-byte halves of the slice);
+//   [mem A]     every fragment read of the step;
 //   [compute A] the first half's MMAs at raised priority;
 //   [mem B]     the group's share of the next step's tile from registers into the stage (the
 //               other group has finished its reads of this step one phase earlier), then the
-//               loads of the step after next;
-//   [compute B] the second half's MMAs.
+//               loads of the step after next (forward: their offsets);
+//   [compute B] the second half's MMAs; forward issues the step after next's loads here, one
+//               per five MMAs, which kept [mem B] short and measured 1.03-1.09x on MI300A.
 // So on every SIMD one wave multiplies while the other reads or writes LDS.
 //
 // A 16-byte granule holds GE = 16 / sizeof(T) consecutive channels; lane group f (lane / 16)
-// reads granule 4 h + f of half h, and each of its GE / KPL MMAs takes KPL of those channels in
-// both operands (the reduction's order inside a slice is the same for both, so the sum is the
-// convolution's).
+// reads granule 4 h + f of granule group h (two groups a 128-byte row, one a 64-byte row), and
+// each of its GE / KPL MMAs takes KPL of those channels in both operands (the reduction's order
+// inside a slice is the same for both, so the sum is the convolution's). The two compute phases
+// take one granule group each, or, with one group, half of each granule's MMAs.
 //
 // Split-K (a.splits > 1): as the flex tile, split z runs a contiguous range of the steps and
 // writes fp32 partials that ConvIgemmReduce adds in split order. A launch of the trailing row
@@ -46,7 +49,7 @@
 // 32 lanes of one wave, so a dword store covers the 32 banks once.
 #pragma once
 
-template <class T, class Atom, int DIR, int BN, int WD = 0>
+template <class T, class Atom, int DIR, int BN, int WD = 0, int KB = 128>
 __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CONV_EPI_FN_PARAM)
 {
     constexpr int WAVE = 64, DIM = 16;
@@ -54,7 +57,9 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     constexpr int THREADS = 512;
     constexpr int ES = static_cast<int>(sizeof(T));
     constexpr int GE = 16 / ES; // elements a granule
-    constexpr int GR = 8; // granules a row (128 bytes)
+    constexpr int GR = KB / 16; // granules a row (KB bytes: 8 or 4)
+    constexpr int NH = GR / 4; // granule groups of the four lane groups a row
+    constexpr int RPP = THREADS / GR; // rows a pass of the block's granule loads
     constexpr int KS = GR * GE; // reduction channels a step
     constexpr int NG = BM * GR, NGW = BN * GR; // granules of the X and W tiles
     constexpr int XL = NG / THREADS, WL = NGW / THREADS; // granules a thread: X, W
@@ -71,13 +76,21 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     typedef typename Atom::frag Frag;
     static_assert(Atom::WAVE == WAVE && GE % Atom::KPL == 0 && 4 * Atom::KPL == Atom::KA,
                   "16-row atoms, KPL elements a lane group");
-    static_assert((BN == 256 || BN == 128) && XL == 4 && WL >= 1, "tile");
+    static_assert((BN == 256 || BN == 128) && (GR == 8 || GR == 4) && XL >= 1 && WL >= 1
+                      && (!DIRECT || GR == 8),
+                  "tile");
     static_assert(static_cast<int>(sizeof(Frag)) == Atom::KPL * ES, "fragment of KPL elements");
     static_assert(!DIRECT || (KQ == 32 && (KQ * (BN / GE)) % THREADS == 0 && WU >= 1),
                   "direct-filter units: a column granule's 32 dwords on 32 lanes");
 
     __shared__ Raw16 sx[NG];
     __shared__ Raw16 sw[NGW];
+    // The slot key of row r: granule g of row r sits at slot g ^ key(r), so the 16-byte reads of
+    // 16 consecutive rows by one lane group cover the banks once.
+    auto key = [](int r) __attribute__((always_inline))
+    {
+        return GR == 8 ? r % 8 : (r >> 1) % 4;
+    };
 
     K1Gather gather;
     K1TapMap map;
@@ -166,13 +179,13 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     const __amdgpu_buffer_rsrc_t xr = k1Rsrc(
         src + blockBase, (a.n - firstImage) * imageElems * static_cast<long long>(sizeof(T)));
     const int rowT = tid / GR;
-    const int gran = ((tid % GR) ^ (rowT % 8)) * GE; // the thread's granule, in elements
+    const int gran = ((tid % GR) ^ key(rowT)) * GE; // the thread's granule, in elements
     int xOff[XL]; // the row's element offset at tap 0 (relative to the buffer base)
     unsigned xMask[XL]; // in-image taps: bits 0..9 depth, 10..19 height, 20..29 width
 #pragma unroll
     for(int i = 0; i < XL; ++i)
     {
-        const long long m = m0 + rowT + 64 * i;
+        const long long m = m0 + rowT + RPP * i;
         xOff[i] = 0;
         xMask[i] = 0;
         if(m < gather.rows)
@@ -237,7 +250,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
 #pragma unroll
         for(int i = 0; i < WL; ++i)
         {
-            const int n = n0 + rowT + 64 * i;
+            const int n = n0 + rowT + RPP * i;
             wOk[i] = n < ncols;
             wOff[i] = static_cast<int>(wGroupBase + (wOk[i] ? n * wRowStride : 0));
         }
@@ -390,15 +403,62 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     const int xRow0 = wx * WM + fr16, wRow0 = grp * WN + fr16;
     auto at = [&](int r, int hf) __attribute__((always_inline))
     {
-        return r * GR + ((4 * hf + fg) ^ (r % 8));
+        return r * GR + ((4 * hf + fg) ^ key(r));
     };
-    Raw16 xf[2][FM], wf[2][FN];
-    // The MMAs of half hf: each granule pair (W, X) gives MPG MMAs of KPL channels.
-    auto mmas = [&](int hf) __attribute__((always_inline))
+    Raw16 xf[NH][FM], wf[NH][FN];
+    // Forward spreads the loads of the step after next over [compute B]: their offsets in
+    // [mem B], then one load per PSF MMAs (backward data issues them in [mem B]).
+    constexpr bool SPREAD = DIR == K1_FORWARD;
+    constexpr int PSF = 5;
+    unsigned off[XL + WL];
+    auto offsets = [&]() __attribute__((always_inline))
+    {
+        const bool cok = (cur.v < vEnd) & (cur.c0 + gran < red);
+        const int xDelta
+            = ((cur.qt * gather.step[0] * gather.in[1] + cur.qr * gather.step[1]) * gather.in[2]
+               + cur.qs * gather.step[2])
+                  * gather.chans
+              + cur.c0;
+        const unsigned bits = (1u << cur.qt) | (1u << (10 + cur.qr)) | (1u << (20 + cur.qs));
+#pragma unroll
+        for(int i = 0; i < XL; ++i)
+        {
+            const bool ok = cok & ((xMask[i] & bits) == bits);
+            off[i] = ok ? static_cast<unsigned>((xOff[i] + xDelta + gran) * ES) : K1_OUT_OF_RANGE;
+        }
+        const int ft = map.first[0] + cur.qt * map.step[0];
+        const int fr = map.first[1] + cur.qr * map.step[1];
+        const int fs = map.first[2] + cur.qs * map.step[2];
+        const int tap = (ft * a.fr + fr) * a.fs + fs;
+        const int wDelta = static_cast<int>(tap * wTapStride) + cur.c0;
+#pragma unroll
+        for(int i = 0; i < WL; ++i)
+        {
+            const bool ok = cok & wOk[i];
+            off[XL + i]
+                = ok ? static_cast<unsigned>((wOff[i] + wDelta + gran) * ES) : K1_OUT_OF_RANGE;
+        }
+        advance();
+    };
+    auto issue = [&](int q) __attribute__((always_inline))
+    {
+        if(q < XL)
+            rx[q] = k1BufferLoad<Raw16>(xr, off[q]);
+        else
+            rw[q - XL] = k1BufferLoad<Raw16>(wr, off[q]);
+    };
+    // The MMAs of compute phase p: granule group p (two groups a row) or the p-th half of each
+    // granule's MPG MMAs (one group); each granule pair (W, X) gives MMAs of KPL channels. With
+    // loads, one per PSF MMAs.
+    auto mmas = [&](int p, bool loads) __attribute__((always_inline))
     {
         __builtin_amdgcn_s_setprio(1);
+        const int hf = NH == 2 ? p : 0;
+        constexpr int EN = NH == 2 ? MPG : MPG / 2;
+        const int e0 = NH == 2 ? 0 : p * EN;
+        int n = 0, q = 0;
 #pragma unroll
-        for(int e = 0; e < MPG; ++e)
+        for(int e = e0; e < e0 + EN; ++e)
 #pragma unroll
             for(int j = 0; j < FN; ++j)
             {
@@ -414,8 +474,20 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
                                      reinterpret_cast<const char*>(&xf[hf][i]) + e * Atom::KPL * ES,
                                      sizeof(Frag));
                     acc[i][j] = Atom::mma(wv, xv, acc[i][j]);
+                    if(loads && ++n % PSF == 0 && q < XL + WL)
+                    {
+                        __builtin_amdgcn_sched_barrier(0);
+                        issue(q++);
+                        __builtin_amdgcn_sched_barrier(0);
+                    }
                 }
             }
+        if(loads)
+        {
+#pragma unroll
+            for(; q < XL + WL; ++q)
+                issue(q);
+        }
         __builtin_amdgcn_sched_barrier(0);
         __builtin_amdgcn_s_setprio(0);
     };
@@ -434,7 +506,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     {
         // [mem A]
 #pragma unroll
-        for(int hf = 0; hf < 2; ++hf)
+        for(int hf = 0; hf < NH; ++hf)
         {
 #pragma unroll
             for(int i = 0; i < FM; ++i)
@@ -446,17 +518,20 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         __builtin_amdgcn_s_waitcnt(0xC07F); // lgkmcnt(0)
         k1FlexBarrier();
         // [compute A]
-        mmas(0);
+        mmas(0, false);
         k1FlexBarrier();
-        // [mem B]: the next step's tile (loaded one step ago) into the stage, then the loads of
-        // the step after next, so the compute phases issue only MMAs.
+        // [mem B]: the next step's tile (loaded one step ago) into the stage, then the loads of the
+        // step after next (forward: their offsets).
         __builtin_amdgcn_s_waitcnt(0x0F70); // vmcnt(0)
         store();
-        load();
+        if constexpr(SPREAD)
+            offsets();
+        else
+            load();
         __builtin_amdgcn_s_waitcnt(0xC07F); // lgkmcnt(0)
         k1FlexBarrier();
-        // [compute B]: the second half.
-        mmas(1);
+        // [compute B]: the second half (forward: with the loads of the step after next).
+        mmas(1, SPREAD);
         k1FlexBarrier();
     }
     if(grp == 0)

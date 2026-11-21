@@ -1457,9 +1457,10 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.flex = kernel.metadata.count("flex") != 0 ? kernel.getIntMetadata("flex") : 0;
     // The flex tile: 256 positions x 256, 192 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2
     // waves, 64-channel k-steps, 8-wide vectors, XCD order; any split policy; every other variant
-    // knob off. The register-staged form (16x16x16 / 16x16x4 atoms, gfx942): one 64 KiB-class LDS
-    // stage, BN 128, 128-byte reduction steps (64 16-bit or 32 fp32 channels, 16-byte vectors),
-    // and backward data may read the graph's filter in place (wdirect).
+    // knob off. The register-staged form (16x16x16 / 16x16x4 atoms, gfx942): one LDS stage, BN
+    // 128 on 128-byte reduction steps (64 16-bit or 32 fp32 channels) or, 16-bit, BN 256 on
+    // 64-byte steps; 16-byte vectors; backward data may read the graph's filter in place
+    // (wdirect, BN 128).
     const bool flexReg
         = tile.atom == "mfma16_f16" || tile.atom == "mfma16_bf16" || tile.atom == "mfma16_f32";
     const int64_t flexElem = tile.atom == "mfma16_f32" ? 4 : 2;
@@ -1467,11 +1468,13 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
        && (tile.flex != 1
            || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16" && !flexReg)
            || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 192 && tile.bn != 128)
-           || (flexReg && tile.bn != 128) || tile.bk != 128 / flexElem || tile.wm != 4
-           || tile.wn != 2 || tile.vec != 16 / flexElem || tile.stages != 1 || tile.xcd != 1
-           || tile.halo != 0 || (tile.wdirect != 0 && !flexReg) || tile.pack != 0 || tile.cf != 0
-           || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0
-           || tile.cfx != 0))
+           || (flexReg && tile.bn == 128   ? tile.bk != 128 / flexElem
+               : flexReg && tile.bn == 256 ? tile.bk != 32 || flexElem != 2 || tile.wdirect != 0
+                                           : flexReg || tile.bk != 128 / flexElem)
+           || tile.wm != 4 || tile.wn != 2 || tile.vec != 16 / flexElem || tile.stages != 1
+           || tile.xcd != 1 || tile.halo != 0 || (tile.wdirect != 0 && !flexReg) || tile.pack != 0
+           || tile.cf != 0 || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0
+           || tile.patch != 0 || tile.cfx != 0))
     {
         return std::nullopt;
     }
@@ -1555,7 +1558,8 @@ int64_t residentBlocksFor(const Tile& tile,
                           const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
 {
     // The flex tile runs one block a CU: the LDS-DMA form's two activation and three filter
-    // stages fill a gfx950 CU's LDS, the register-staged form's 48 KiB stage a gfx942 one's.
+    // stages fill a gfx950 CU's LDS, the register-staged form's stage (48 or 32 KiB) and
+    // registers a gfx942 one's.
     if(tile.flex != 0)
     {
         return 1;

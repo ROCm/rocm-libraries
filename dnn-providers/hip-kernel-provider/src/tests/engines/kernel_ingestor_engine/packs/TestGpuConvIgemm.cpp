@@ -3055,12 +3055,15 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOthe
             }
             SCOPED_TRACE(kernel.name);
             // The LDS-DMA form (16x16x32 atoms) is gfx950's, the register-staged form gfx942's:
-            // 128-byte k-steps either way.
+            // 128-byte k-steps, or 64-byte ones on the register-staged 16-bit forward 256-wide
+            // tile.
             const bool dma = kernel.getStringMetadata("atom").rfind("mfma16x32_", 0) == 0;
             const bool fp32 = kernel.getStringMetadata("dtype") == "FLOAT";
+            const bool wideReg = !dma && kernel.getIntMetadata("bn") == 256;
             EXPECT_EQ(kernel.getIntMetadata("flex"), 1);
             EXPECT_EQ(kernel.getIntMetadata("bm"), 256);
-            EXPECT_EQ(kernel.getIntMetadata("bk"), fp32 ? 32 : 64);
+            EXPECT_EQ(kernel.getIntMetadata("bk"), wideReg || fp32 ? 32 : 64);
+            EXPECT_TRUE(!wideReg || (!fp32 && direction == ConvDirection::FORWARD));
             EXPECT_EQ(kernel.getIntMetadata("xcd"), 1);
             // The register-staged form's backward data may read the graph's filter in place.
             const bool direct = kernel.getIntMetadata("wdirect") != 0;
@@ -3079,7 +3082,7 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOthe
                 std::initializer_list<std::pair<const char*, int64_t>>{{"flex", 2},
                                                                        {"bm", 128},
                                                                        {"bn", 64},
-                                                                       {"bk", 32},
+                                                                       {"bk", 16},
                                                                        {"wm", 2},
                                                                        {"wn", 4},
                                                                        {"vec", 4},
