@@ -350,11 +350,13 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
         constexpr auto lse_acc_spans = decltype(lse_acc)::get_distributed_spans();
         sweep_tile_span(lse_acc_spans[I0], [&](auto idx0) {
             constexpr auto i_idx = make_tuple(idx0);
+            // log2 on the transcendental unit: l is 0 (a fully masked row, -inf) or normal
+            const auto log2_l = __builtin_amdgcn_logf(l[i_idx]);
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS ||
                          BiasEnum == BlockAttentionBiasEnum::ALIBI || kHasLogitsSoftCap)
-                lse_acc(i_idx) = m[i_idx] / C_LOG2E + log(l[i_idx]);
+                lse_acc(i_idx) = (m[i_idx] + log2_l) * static_cast<float>(1.0 / C_LOG2E);
             else
-                lse_acc(i_idx) = m[i_idx] * scale_s / C_LOG2E + log(l[i_idx]);
+                lse_acc(i_idx) = (m[i_idx] * scale_s + log2_l) * static_cast<float>(1.0 / C_LOG2E);
         });
 
         store_tile(lse_acc_dram_window, lse_acc);
@@ -963,12 +965,28 @@ struct BlockFmhaPipelineQRKSVSTdmPingPong : BlockFmhaPipelineQRKSVSTdm<Problem_,
                 StoreLse(lse_acc_dram_window_tmp, m_lse, l, scale_s);
         }
 
-        Base::CorrectQuantizedMass(l, l_quant, o_acc);
-        NormalizeO(o_acc, l);
-        if constexpr(kVScaleOnOacc)
-            tile_elementwise_inout([v_descale](auto& x) { x *= v_descale; }, o_acc);
+        if constexpr(kQuantized && kVScaleOnOacc)
+        {
+            // CorrectQuantizedMass, NormalizeO and v_descale in one factor per row:
+            // O * (l / l_quant) / l * v_descale = O * v_descale / l_quant
+            constexpr auto o_spans = decltype(o_acc)::get_distributed_spans();
+            sweep_tile_span(o_spans[I0], [&](auto idx0) {
+                constexpr auto i_idx = make_tuple(idx0);
+                const float f =
+                    l_quant[i_idx] == 0.f ? 0.f : v_descale * __builtin_amdgcn_rcpf(l_quant[i_idx]);
+                sweep_tile_span(o_spans[I1],
+                                [&](auto idx1) { o_acc(make_tuple(idx0, idx1)) *= f; });
+            });
+        }
         else
-            ignore = v_descale;
+        {
+            Base::CorrectQuantizedMass(l, l_quant, o_acc);
+            NormalizeO(o_acc, l);
+            if constexpr(kVScaleOnOacc)
+                tile_elementwise_inout([v_descale](auto& x) { x *= v_descale; }, o_acc);
+            else
+                ignore = v_descale;
+        }
         return o_acc;
     }
 
