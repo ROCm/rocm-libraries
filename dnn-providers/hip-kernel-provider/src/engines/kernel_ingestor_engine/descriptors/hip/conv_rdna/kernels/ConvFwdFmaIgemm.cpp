@@ -303,7 +303,7 @@ extern "C" __global__ void __launch_bounds__(BLOCK_SIZE)
     for(int j = 0; j < MICRO_N; ++j)
     {
         const int k = k0 + tn + j * (TILE_N / MICRO_N);
-        bv[j] = k < Kg ? to_float(bias[static_cast<long>(g) * Kg + k]) : 0.f;
+        bv[j] = k < Kg ? to_float(bias[static_cast<long long>(g) * Kg + k]) : 0.f;
     }
 #endif
 
