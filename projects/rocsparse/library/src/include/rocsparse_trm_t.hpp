@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -99,6 +99,10 @@ namespace rocsparse
         void clear_bsrilu0_info();
         void clear_bsric0_info();
         void clear_ellsv_info();
+
+        // True when trm is an analysis held by bsric0, bsrilu0 or bsrsm, the
+        // routines whose analysis bsrsv reuse borrows.
+        bool holds_bsrsv_donor(const rocsparse::trm_info_t* trm) const;
 
     public:
         trm_t() = default;

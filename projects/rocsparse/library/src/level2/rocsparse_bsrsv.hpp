@@ -28,24 +28,65 @@
 
 namespace rocsparse
 {
+    struct trm_info_t;
+
     // Threads per block of every bsrsv solve launch.
     static constexpr uint32_t bsrsv_solve_block_size = 128;
 
-    template <typename T>
+    // Writes the analysis and the zero pivot into bsrsv_info. When bsrsv_info is
+    // the bsrsv container of info, reuse may borrow the bsric0, bsrilu0 or bsrsm
+    // analysis held by info. Any other bsrsv_info gets an analysis of its own,
+    // because only the containers of info are told when that analysis is freed.
+    template <typename T, typename I, typename J>
     rocsparse_status bsrsv_analysis_template(rocsparse_handle          handle,
                                              rocsparse_direction       dir,
                                              rocsparse_operation       trans,
-                                             rocsparse_int             mb,
-                                             rocsparse_int             nnzb,
+                                             J                         mb,
+                                             I                         nnzb,
                                              const rocsparse_mat_descr descr,
                                              const T*                  bsr_val,
-                                             const rocsparse_int*      bsr_row_ptr,
-                                             const rocsparse_int*      bsr_col_ind,
+                                             const I*                  bsr_row_ptr,
+                                             const J*                  bsr_col_ind,
                                              rocsparse_int             block_dim,
                                              rocsparse_mat_info        info,
+                                             rocsparse_bsrsv_info      bsrsv_info,
                                              rocsparse_analysis_policy analysis,
                                              rocsparse_solve_policy    solve,
                                              void*                     temp_buffer);
+
+    template <typename T, typename I, typename J>
+    rocsparse_status bsrsv_buffer_size_template(rocsparse_handle          handle,
+                                                rocsparse_direction       dir,
+                                                rocsparse_operation       trans,
+                                                J                         mb,
+                                                I                         nnzb,
+                                                const rocsparse_mat_descr descr,
+                                                const T*                  bsr_val,
+                                                const I*                  bsr_row_ptr,
+                                                const J*                  bsr_col_ind,
+                                                rocsparse_int             block_dim,
+                                                rocsparse_mat_info        info,
+                                                size_t*                   buffer_size);
+
+    template <typename T, typename I, typename J>
+    rocsparse_status bsrsv_solve_core(rocsparse_handle          handle,
+                                      rocsparse_direction       dir,
+                                      rocsparse_operation       trans,
+                                      J                         mb,
+                                      I                         nnzb,
+                                      const T*                  alpha,
+                                      const rocsparse_mat_descr descr,
+                                      const T*                  bsr_val,
+                                      const I*                  bsr_row_ptr,
+                                      const J*                  bsr_col_ind,
+                                      rocsparse_int             block_dim,
+                                      trm_info_t*               trm_info,
+                                      rocsparse_indextype       zero_pivot_indextype,
+                                      J*                        zero_pivot,
+                                      const T*                  x,
+                                      T*                        y,
+                                      rocsparse_solve_policy    policy,
+                                      void*                     temp_buffer);
 
     template <typename T>
     rocsparse_status bsrsv_solve_template(rocsparse_handle          handle,

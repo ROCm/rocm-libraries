@@ -134,6 +134,7 @@ public:
     void                   set_bsrsv_info(rocsparse_operation    operation,
                                           rocsparse_fill_mode    fill_mode,
                                           rocsparse::trm_info_t* trm_info);
+    bool                   holds_bsrsv_donor(const rocsparse::trm_info_t* trm) const;
 
     rocsparse_bsrsm_info   get_bsrsm_info();
     rocsparse::trm_info_t* get_bsrsm_info(rocsparse_operation operation,

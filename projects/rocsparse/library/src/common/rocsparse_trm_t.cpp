@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -211,6 +211,25 @@ void rocsparse::trm_t::clear_ellsv_info()
 {
     this->uncouple(this->m_ellsv_info.get());
     this->destroy_ellsv_info();
+}
+
+bool rocsparse::trm_t::holds_bsrsv_donor(const rocsparse::trm_info_t* trm) const
+{
+    if(trm == nullptr)
+    {
+        return false;
+    }
+
+    const rocsparse::trm_data_t* donors[]
+        = {this->m_bsric0_info.get(), this->m_bsrilu0_info.get(), this->m_bsrsm_info.get()};
+    for(const rocsparse::trm_data_t* donor : donors)
+    {
+        if(donor != nullptr && donor->holds(trm))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)

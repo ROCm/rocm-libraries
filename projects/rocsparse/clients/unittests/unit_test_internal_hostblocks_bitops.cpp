@@ -39,6 +39,7 @@
 #include "rocsparse_utility.hpp" // clz
 
 #include <gtest/gtest.h>
+#include <limits>
 
 // clz(n) returns the 1-based position of the most-significant set bit
 // (floor(log2(n)) + 1) for n > 0, and 0 for n == 0. This identity holds for
@@ -64,6 +65,34 @@ TEST(internal_hostblocks_bitops, clz)
     // Highest bit representable without touching the sign bit of a 32-bit
     // rocsparse_int (bit 30).
     EXPECT_EQ(rocsparse::clz(static_cast<rocsparse_int>(1) << 30), 31);
+}
+
+// A 64-bit size takes the 64-bit clz instead of being narrowed to
+// rocsparse_int, which would keep only its low bits (100 for 2^32 + 100).
+TEST(internal_hostblocks_bitops, clz_int64)
+{
+    const int64_t i32max = std::numeric_limits<int32_t>::max();
+    EXPECT_EQ(rocsparse::clz(static_cast<int64_t>(0)), 0);
+    EXPECT_EQ(rocsparse::clz(static_cast<int64_t>(100)), 7);
+    EXPECT_EQ(rocsparse::clz(i32max), 31);
+    EXPECT_EQ(rocsparse::clz(i32max + 1), 32);
+    EXPECT_EQ(rocsparse::clz((static_cast<int64_t>(1) << 32) - 1), 32);
+    EXPECT_EQ(rocsparse::clz((static_cast<int64_t>(1) << 32) + 100), 33);
+    EXPECT_EQ(rocsparse::clz(static_cast<int64_t>(1) << 40), 41);
+    EXPECT_EQ(rocsparse::clz(std::numeric_limits<int64_t>::max()), 63);
+}
+
+// The analysis sorts take their end bit from the row count, capped at the
+// width of the key.
+TEST(internal_hostblocks_bitops, radix_end_bit)
+{
+    const int64_t past_u32 = (static_cast<int64_t>(1) << 32) + 100;
+    EXPECT_EQ(rocsparse::radix_end_bit<int32_t>(0), 0u);
+    EXPECT_EQ(rocsparse::radix_end_bit<int32_t>(100), 7u);
+    EXPECT_EQ(rocsparse::radix_end_bit<int32_t>(std::numeric_limits<int32_t>::max()), 31u);
+    EXPECT_EQ(rocsparse::radix_end_bit<int32_t>(past_u32), 32u);
+    EXPECT_EQ(rocsparse::radix_end_bit<int64_t>(past_u32), 33u);
+    EXPECT_EQ(rocsparse::radix_end_bit<int64_t>(static_cast<int64_t>(1) << 40), 41u);
 }
 
 // fnp2(x) rounds x up to the next power of two. Powers of two map to

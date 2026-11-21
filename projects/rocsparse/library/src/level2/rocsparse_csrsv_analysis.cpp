@@ -50,7 +50,7 @@ rocsparse_status sort2(rocsparse_handle handle,
 {
     size_t                                        rocprim_size;
     uint32_t                                      startbit = 0;
-    uint32_t                                      endbit   = rocsparse::clz(m);
+    uint32_t                                      endbit   = rocsparse::radix_end_bit<int32_t>(m);
     rocsparse::primitives::double_buffer<int32_t> keys(done_array, workspace2);
     rocsparse::primitives::double_buffer<J>       vals(workspace, row_map);
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<int32_t, J>(
@@ -81,7 +81,7 @@ rocsparse_status sort(rocsparse_handle     handle,
                       void**               p_sorted_col_ind)
 {
     uint32_t startbit = 0;
-    uint32_t endbit   = rocsparse::clz(m);
+    uint32_t endbit   = rocsparse::radix_end_bit<J>(m);
     size_t   rocprim_size;
 
     RETURN_IF_ROCSPARSE_ERROR((rocsparse::primitives::radix_sort_pairs_buffer_size<J, I>(
