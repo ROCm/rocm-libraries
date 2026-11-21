@@ -195,7 +195,8 @@ TIMING_HIERARCHY = {
                         "pre_solution_mx_side_cache_hit": {},
                         "pre_solution_mx_side_host_regenerate": {},
                         "pre_solution_mx_side_swizzle_rebuild": {},
-                        # Older logs counted GPU-only rebuilds as regeneration.
+                        # Older logs used swizzle or counted GPU-only rebuilds as regeneration.
+                        "pre_solution_mx_side_swizzle": {},
                         "pre_solution_mx_side_regenerate": {},
                     },
                     # These run for every gated solution; the suffix says whether the MX data

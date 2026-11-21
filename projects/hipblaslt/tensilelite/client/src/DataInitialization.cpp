@@ -1938,8 +1938,9 @@ namespace TensileLite
             ++m_inputEpoch;
             // Always drive mxDataGenerator for MX sides so data and scales stay
             // coordinated. initializeMXData also produces the arch-appropriate
-            // swizzled scale into gpuInput.valid (when m_mxScaleLayout selects
-            // one), so copySwizzledToGPUBuffer just forwards it; otherwise the
+            // swizzled scale on the GPU (gfx950: gpuMXSwizzled; gfx1250:
+            // gpuInput.valid) when m_mxScaleLayout selects one, so
+            // copySwizzledToGPUBuffer just forwards it; otherwise the
             // canonical scale (cpuInput.valid) is uploaded via the normal path.
             bool useMXGenerator = isMXProblem(problem);
             if(useMXGenerator)
@@ -2191,7 +2192,7 @@ namespace TensileLite
                 }
             };
 
-            // Reset preswizzle flags; they will be set below if gpuInput.valid is populated.
+            // Reset preswizzle flags; they will be set below if a swizzled scale is on the GPU.
             m_mxPreswizzledA = false;
             m_mxPreswizzledB = false;
 
@@ -2261,9 +2262,9 @@ namespace TensileLite
                           "mx-data-generator=0 supports only Float8/BFloat8/Float4 MX data, got "
                           + TensileLite::ToString(dataDesc.dataType()));
 
-                  // Distinguish cached inputs, canonical host regeneration, and a GPU-only
-                  // scale swizzle rebuild. The
-                  // problem-level calls (no solution yet) are covered by cpu_data_init.
+                  // Distinguish cached inputs, canonical host regeneration, and GPU-only
+                  // scale swizzle rebuilding. Problem-level calls (no solution yet) are
+                  // covered by cpu_data_init.
                   struct SideOutcome
                   {
                       const char*             name = nullptr;
@@ -2305,28 +2306,93 @@ namespace TensileLite
                       return;
                   }
 
-                  auto const cachedSwizzled = m_mxSwizzledDescriptor.find(scaleTensorEnum);
-                  bool const hasMatchingSwizzledScale
-                      = swizzleLayout != MXScaleLayout::None
-                        && cachedSwizzled != m_mxSwizzledDescriptor.end()
-                        && cachedSwizzled->second == scaleDesc;
-
                   // A canonical-only upload means gpuInput.valid no longer holds a
                   // trustworthy swizzled scale for this tensor, so clear the cache tag
                   // before any later reuse decision observes stale metadata.
                   if(swizzleLayout == MXScaleLayout::None)
                       m_mxSwizzledDescriptor.erase(scaleTensorEnum);
 
-                  // gfx950 can skip regeneration only when the descriptor is unchanged
-                  // and any required preswizzled copy is already known to match this
-                  // scale descriptor. When that cache hit happens, remember that
-                  // gpuInput.valid already contains the solution-ready layout.
-                  if(m_mxScaleLayout == MXScaleLayout::GFX950 && descriptorsUnchanged
-                     && (swizzleLayout == MXScaleLayout::None || hasMatchingSwizzledScale))
+                  auto const grid = mxScaleGridGFX950(rows,
+                                                      cols,
+                                                      abFromInitArray ? rows : stride,
+                                                      transposed,
+                                                      isMatrixA ? mxBlock : 1,
+                                                      isMatrixA ? 1 : mxBlock,
+                                                      isMatrixA);
+
+                  // Element-size-aware byte stride: FP4 (0.5), FP6 (0.75), FP8 (1.0).
+                  size_t dataBatchStrideBytes  = 0;
+                  size_t scaleBatchStrideBytes = 0;
+                  if(batchCount > 1)
                   {
-                      if(hasMatchingSwizzledScale)
-                          *preswizzledFlag = true;
-                      sideOutcome.name = "pre_solution_mx_side_cache_hit";
+                      dataBatchStrideBytes
+                          = multiplyElementSize(dataDesc.strides()[2], dataDesc.elementBytes());
+                      scaleBatchStrideBytes = scaleDesc.strides()[scaleDesc.sizes().size() - 1];
+                  }
+
+                  // gfx950: the GFX950-swizzled scale is a permutation of the compact
+                  // canonical scale kept from the generation, built and uploaded to
+                  // gpuMXSwizzled once per generated scale. It is sized and laid out as the
+                  // upload of the generator's GFX950 output used to be: per batch, the
+                  // swizzle's first batch-stride bytes (with a padded leading dimension the
+                  // generator's scale covers more rows than one batch stride holds).
+                  auto useGFX950SwizzledScale = [&]() {
+                      // GFX950 2D has no defined in-device layout yet.
+                      if(std::max<size_t>(
+                             1, isMatrixA ? problem.mxBlockFreeA() : problem.mxBlockFreeB())
+                         > 1)
+                          throw std::runtime_error(
+                              "MXScaleFormat pre-swizzle is not supported with "
+                              "MXBlockFree > 1 except GFX1250 InMemorySwizzle.");
+                      if(pristineScale.mxSwizzledScale.empty())
+                      {
+                          // Kept by the generation for these descriptors.
+                          if(pristineScale.mxCompactScale.size() != grid.elements * batchCount)
+                              throw std::logic_error(
+                                  "initializeMXData: no compact canonical scale for "
+                                  + scaleDesc.getName() + " to build its GFX950 swizzle from");
+                          size_t const eltSize
+                              = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
+                          size_t const swizzledElems
+                              = DGen::preSwizzleScalesGFX950PaddedSize(grid.mnExtent, grid.kBlocks);
+                          size_t const logicalKBlocks
+                              = (static_cast<size_t>(kIsRows ? rows : cols) + mxBlock - 1)
+                                / mxBlock;
+                          size_t const gpuScaleElems = std::max(
+                              scaleDesc.totalAllocatedElements(),
+                              DGen::preSwizzleScalesGFX950PaddedSize(
+                                  static_cast<size_t>(kIsRows ? cols : rows), logicalKBlocks)
+                                  * batchCount);
+                          size_t const gpuScaleBytes = gpuScaleElems * eltSize;
+                          size_t const batchSlotBytes
+                              = batchCount > 1 ? scaleBatchStrideBytes : gpuScaleBytes;
+
+                          pristineScale.mxSwizzledScale.assign(gpuScaleBytes, 0);
+                          for(size_t b = 0; b < batchCount; b++)
+                          {
+                              auto const compact
+                                  = pristineScale.mxCompactScale.begin() + b * grid.elements;
+                              std::vector<uint8_t> const swizzled = swizzleScaleGFX950(
+                                  std::vector<uint8_t>(compact, compact + grid.elements), grid);
+                              std::copy_n(swizzled.begin(),
+                                          std::min(swizzledElems, batchSlotBytes),
+                                          pristineScale.mxSwizzledScale.begin()
+                                              + b * scaleBatchStrideBytes);
+                          }
+                      }
+                      *preswizzledFlag = true;
+                      return uploadMXSwizzledToGPU(scaleDesc, pristineScale);
+                  };
+
+                  // gfx950 never regenerates for an unchanged descriptor: the data and the
+                  // canonical scale are the problem's, and a swizzled scale is derived from
+                  // them without changing the host inputs (no epoch bump).
+                  if(m_mxScaleLayout == MXScaleLayout::GFX950 && descriptorsUnchanged)
+                  {
+                      bool const swizzled = swizzleLayout == MXScaleLayout::GFX950
+                                            && useGFX950SwizzledScale();
+                      sideOutcome.name = swizzled ? "pre_solution_mx_side_swizzle_rebuild"
+                                                  : "pre_solution_mx_side_cache_hit";
                       return;
                   }
 
@@ -2338,16 +2404,6 @@ namespace TensileLite
                       pristineData.initDescriptor[0] = dataDesc;
                   if(pristineScale.initDescriptor.size() == 1)
                       pristineScale.initDescriptor[0] = scaleDesc;
-
-                  // Element-size-aware byte stride: FP4 (0.5), FP6 (0.75), FP8 (1.0).
-                  size_t dataBatchStrideBytes  = 0;
-                  size_t scaleBatchStrideBytes = 0;
-                  if(batchCount > 1)
-                  {
-                      dataBatchStrideBytes
-                          = multiplyElementSize(dataDesc.strides()[2], dataDesc.elementBytes());
-                      scaleBatchStrideBytes = scaleDesc.strides()[scaleDesc.sizes().size() - 1];
-                  }
 
                   auto dataInitMode  = m_vdata[dataTensorEnum].init;
                   auto scaleInitMode = m_vdata[scaleTensorEnum].init;
@@ -2386,12 +2442,31 @@ namespace TensileLite
                   bool const   unsignedExponentScale
                       = (scaleDesc.dataType() == rocisa::DataType::E8);
 
-                  // generateMXInput always emits one scale per (free element,
-                  // K-block), which is larger than the tiled scale tensor, so it
-                  // cannot write straight into scalePtr.
-                  std::vector<uint8_t> mxFreeStaging;
-                  if(mxBlockFree > 1 && !descriptorsUnchanged)
-                      mxFreeStaging.assign(compactFree * compactKBlocks * scaleElemSize, 0x00);
+                  // gfx950 keeps the compact canonical scale for the GFX950-swizzled one
+                  // (the GFX950 swizzle is not defined for MXBlockFree > 1).
+                  bool const keepCompactScale
+                      = m_mxScaleLayout == MXScaleLayout::GFX950 && mxBlockFree == 1;
+                  pristineScale.mxCompactScale.assign(
+                      keepCompactScale ? grid.elements * batchCount : 0, 0);
+                  pristineScale.mxSwizzledScale.clear();
+                  pristineScale.gpuMXSwizzledCurrent = false;
+
+                  // The generator sizes its output from stride * cols, including the
+                  // final column's padding. Descriptor storage ends at the last logical
+                  // element. Stage padded data and scales before copying their bounded
+                  // prefixes; free-dimension scaling also needs the untiled scales staged.
+                  bool const           stageData  = stride != rows;
+                  bool const           stageScale = stageData || mxBlockFree > 1;
+                  std::vector<uint8_t> generatedData;
+                  std::vector<uint8_t> generatedScale;
+                  if(!descriptorsUnchanged && !abFromInitArray)
+                  {
+                      if(stageData)
+                          generatedData.resize(
+                              multiplyElementSize(stride * cols, dataDesc.elementBytes()));
+                      if(stageScale)
+                          generatedScale.resize(grid.elements * scaleElemSize);
+                  }
 
                   if(abFromInitArray && mxBlockFree > 1)
                       throw std::runtime_error(
@@ -2429,6 +2504,12 @@ namespace TensileLite
                           auto* scalePtr = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
                                            + b * scaleBatchStrideBytes;
                           std::memcpy(scalePtr, natural.data(), naturalBytes);
+                          // InitArray scales describe the logical matrix independently of
+                          // the data's leading dimension, so their grid excludes data padding.
+                          if(keepCompactScale)
+                              std::copy_n(natural.data(),
+                                          grid.elements,
+                                          pristineScale.mxCompactScale.begin() + b * grid.elements);
                           if(kFast)
                               restrideMXScaleBufferKFast(
                                   scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
@@ -2446,10 +2527,11 @@ namespace TensileLite
                                           + b * dataBatchStrideBytes;
                           auto* scalePtr = static_cast<uint8_t*>(pristineScale.cpuInput.valid.get())
                                            + b * scaleBatchStrideBytes;
-                          auto* genScalePtr = (mxBlockFree > 1) ? mxFreeStaging.data() : scalePtr;
+                          auto* genDataPtr  = stageData ? generatedData.data() : dataPtr;
+                          auto* genScalePtr = stageScale ? generatedScale.data() : scalePtr;
                           generateMXInput(hipDataT,
                                           hipScaleT,
-                                          dataPtr,
+                                          genDataPtr,
                                           genScalePtr,
                                           rows,
                                           cols,
@@ -2465,6 +2547,21 @@ namespace TensileLite
                                           initModeToMXMethod(scaleInitMode),
                                           /*seedIndex=*/0,
                                           /*returnReference=*/false);
+                          if(stageData)
+                          {
+                              size_t const batchElements
+                                  = cols == 0 ? 0 : (cols - 1) * stride + rows;
+                              std::memcpy(
+                                  dataPtr,
+                                  genDataPtr,
+                                  multiplyElementSize(batchElements, dataDesc.elementBytes()));
+                          }
+                          if(keepCompactScale)
+                              std::copy_n(genScalePtr,
+                                          grid.elements,
+                                          pristineScale.mxCompactScale.begin() + b * grid.elements);
+                          if(stageScale && mxBlockFree == 1)
+                              std::memcpy(scalePtr, genScalePtr, naturalBytes);
                           // Collapse the free dimension before restriding: restride
                           // fixes K-block padding, which is the orthogonal axis.
                           if(mxBlockFree > 1)
@@ -2485,32 +2582,24 @@ namespace TensileLite
                       }
                   }
 
-                  // When the kernel needs a swizzled scale, build it in gpuInput.valid
-                  // by applying generateMXInput's swizzle to the canonical scale
-                  // (generation is seeded, so this matches regenerating with the
-                  // layout); the cpuInput.valid copy stays canonical for the CPU
-                  // reference.
-                  if(swizzleLayout != MXScaleLayout::None && pristineScale.gpuInput.valid)
+                  // When the kernel needs a swizzled scale: gfx950's is permuted from the
+                  // compact canonical scale kept above and uploaded to gpuMXSwizzled; gfx1250's
+                  // is populated into gpuInput.valid. cpuInput.valid stays canonical for the
+                  // CPU reference.
+                  if(swizzleLayout == MXScaleLayout::GFX950)
                   {
-                      // GFX950 2D has no defined in-device layout yet. gfx1250 2D
-                      // is the 1D dimk permute on the compressed (tiledFree ×
+                      useGFX950SwizzledScale();
+                  }
+                  else if(swizzleLayout == MXScaleLayout::GFX1250 && pristineScale.gpuInput.valid)
+                  {
+                      // gfx1250 2D is the 1D dimk permute on the compressed (tiledFree ×
                       // K/MXBlock) tensor, which TDM already consumes.
-                      if(mxBlockFree > 1 && swizzleLayout != MXScaleLayout::GFX1250)
-                          throw std::runtime_error(
-                              "MXScaleFormat pre-swizzle is not supported with "
-                              "MXBlockFree > 1 except GFX1250 InMemorySwizzle.");
-
                       size_t const eltSize
                           = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
                       size_t const canonicalScaleElems = scaleDesc.totalAllocatedElements();
 
-                      // Both swizzles pad, so the staging buffer holds the padded
+                      // The swizzle pads, so the staging buffer holds the padded
                       // result rather than the canonical size.
-                      size_t const kExtentSw  = static_cast<size_t>(kIsRows ? rows : cols);
-                      size_t const mnExtentSw = static_cast<size_t>(kIsRows ? cols : rows);
-                      size_t const kBlocksSw
-                          = (mxBlock > 0) ? (kExtentSw + mxBlock - 1) / mxBlock : 0;
-
                       // gfx1250 dimk pads the fast dim up to dimk = 128/mxBlock.
                       // 1xK: slow = data free dim, fast = K/MXBlock.
                       // 2D: same permute on the compressed free dim.
@@ -2533,15 +2622,7 @@ namespace TensileLite
                       }
 
                       size_t swizzledScaleElems = canonicalScaleElems;
-                      if(swizzleLayout == MXScaleLayout::GFX950)
-                      {
-                          size_t const padded
-                              = DGen::preSwizzleScalesGFX950PaddedSize(mnExtentSw, kBlocksSw)
-                                * batchCount;
-                          if(padded > swizzledScaleElems)
-                              swizzledScaleElems = padded;
-                      }
-                      else if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
+                      if(mxBlock > 0)
                       {
                           size_t const dimk = 128u / static_cast<size_t>(mxBlock);
                           size_t const paddedFast
@@ -2605,7 +2686,7 @@ namespace TensileLite
                                       paddedKBlocks,
                                       scaleElemSize);
                                   auto const swizzled = swizzleNaturalMXScale(
-                                      natural, swizzleLayout, rows, cols, mxBlock, kIsRows);
+                                      natural, swizzleLayout, rows, cols, mxBlock);
                                   std::memcpy(gpuScaleBuf.data() + b * scaleBatchStrideBytes,
                                               swizzled.data(),
                                               swizzled.size());
@@ -2962,7 +3043,7 @@ namespace TensileLite
                         else if(kind == hipMemcpyDeviceToDevice)
                             ptr = copyBadInputBuffers(desc,
                                                       p.gpuInput.current.get(),
-                                                      p.gpuInput.valid.get(),
+                                                      gpuValidSource(i, p),
                                                       p.gpuInput.bad.get(),
                                                       p.maxElements,
                                                       kind);
@@ -3021,7 +3102,7 @@ namespace TensileLite
                         else if(kind == hipMemcpyDeviceToDevice)
                             ptr = copyNaNInputBuffers(desc,
                                                       p.gpuInput.current.get(),
-                                                      p.gpuInput.valid.get(),
+                                                      gpuValidSource(i, p),
                                                       p.maxElements,
                                                       kind,
                                                       swizzlePadding);
@@ -3067,7 +3148,7 @@ namespace TensileLite
                         else if(kind == hipMemcpyDeviceToDevice)
                             ptr = copyInputBuffers(desc,
                                                    p.gpuInput.current.get(),
-                                                   p.gpuInput.valid.get(),
+                                                   gpuValidSource(i, p),
                                                    elements,
                                                    kind);
                         if(ptr == nullptr)
@@ -3252,7 +3333,62 @@ namespace TensileLite
 
             p.gpuValidEpoch    = m_inputEpoch;
             p.gpuValidElements = elements;
+            if(m_verifyUploadSkip)
+                ++p.gpuValidUploadCount;
             return ptr;
+        }
+
+        bool DataInitialization::uploadMXSwizzledToGPU(TensorDescriptor const& scaleDesc,
+                                                       PristineUnit&           p)
+        {
+            size_t const bytes = p.mxSwizzledScale.size();
+            if(p.gpuMXSwizzledCurrent)
+            {
+                if(m_verifyUploadSkip)
+                {
+                    std::vector<uint8_t> onGPU(bytes);
+                    HIP_CHECK_EXC(hipMemcpy(
+                        onGPU.data(), p.gpuMXSwizzled.get(), bytes, hipMemcpyDeviceToHost));
+                    if(onGPU != p.mxSwizzledScale)
+                    {
+                        p.gpuMXSwizzledCurrent = false;
+                        throw std::runtime_error(
+                            "Stale GPU input " + scaleDesc.getName()
+                            + " (GFX950-swizzled scale): DataInitialization skipped its upload "
+                              "because the GPU copy is tagged as current, but it differs from "
+                              "the host data. A writer of gpuMXSwizzled or of the swizzled host "
+                              "scale does not update the tag.");
+                    }
+                    ++m_verifiedUploadSkips;
+                }
+                return false;
+            }
+
+            // As large as gpuInput.valid: the input copies read maxElements from either.
+            size_t const allocBytes = multiplyElementSize(
+                p.maxElements, DataTypeInfo::Get(scaleDesc.dataType()).elementSize);
+            if(bytes > allocBytes)
+                throw std::runtime_error("GFX950-swizzled scale " + scaleDesc.getName()
+                                         + " is larger than its allocation");
+            if(!p.gpuMXSwizzled)
+            {
+                p.gpuMXSwizzled = allocNewGPUBuffer<void>(scaleDesc.getName().c_str(), allocBytes);
+                HIP_CHECK_EXC(hipMemset(p.gpuMXSwizzled.get(), 0, allocBytes));
+            }
+            HIP_CHECK_EXC(hipMemcpy(
+                p.gpuMXSwizzled.get(), p.mxSwizzledScale.data(), bytes, hipMemcpyHostToDevice));
+            p.gpuMXSwizzledCurrent = true;
+            if(m_verifyUploadSkip)
+                ++p.gpuMXSwizzledUploadCount;
+            return true;
+        }
+
+        void* DataInitialization::gpuValidSource(size_t i, PristineUnit& p) const
+        {
+            bool const swizzled
+                = (i == ContractionProblemGemm::TENSOR::MXSA && m_mxPreswizzledA)
+                  || (i == ContractionProblemGemm::TENSOR::MXSB && m_mxPreswizzledB);
+            return swizzled && p.gpuMXSwizzled ? p.gpuMXSwizzled.get() : p.gpuInput.valid.get();
         }
 
         void DataInitialization::copySwizzledToGPUBuffer(ContractionProblemGemm const& problem)
@@ -3371,12 +3507,12 @@ namespace TensileLite
                 }
                 else if(needMXSwizzle)
                 {
-                    // initializeMXData populates gpuInput.valid with the swizzled
-                    // scale when arch + geometry allow; the picked solution can
-                    // additionally request the canonical layout via
-                    // problemType.mxScaleFormat == 0 (NoSwizzle), in which case
-                    // we upload cpuInput.valid as-is even if a swizzled copy is
-                    // available. Sentinel -1 means "no solution selected yet"
+                    // initializeMXData puts the swizzled scale on the GPU (gfx950:
+                    // gpuMXSwizzled; gfx1250: gpuInput.valid) when arch + geometry
+                    // allow; the picked solution can additionally request the
+                    // canonical layout via problemType.mxScaleFormat == 0 (NoSwizzle),
+                    // in which case we upload cpuInput.valid as-is even if a swizzled
+                    // copy is available. Sentinel -1 means "no solution selected yet"
                     // (first prepareGPUInputs call per problem) and falls
                     // through to preswizzledAlready / canonical handling.
                     bool const isMXSA            = (i == ContractionProblemGemm::TENSOR::MXSA);
@@ -3390,22 +3526,24 @@ namespace TensileLite
                     {
                         // The selected kernel explicitly wants canonical scales, so
                         // uploading cpuInput.valid must also invalidate any prior
-                        // "gpuInput.valid is swizzled" cache state for this tensor,
-                        // including the MFMA K that lets preSolution skip re-init.
+                        // "gpuInput.valid is swizzled" cache state for this tensor, and
+                        // the input copies must read gpuInput.valid. Also forget the MFMA K
+                        // that lets preSolution skip re-init.
                         m_mxSwizzledDescriptor.erase(i);
-                        if(isMXSA)
-                            m_mxPreswizzledA = false;
-                        if(isMXSB)
-                            m_mxPreswizzledB = false;
+                        (isMXSA ? m_mxPreswizzledA : m_mxPreswizzledB) = false;
                         m_mxPreswizzleMiK = -1;
                         ptr = uploadValidToGPU(desc, p, p.maxElements);
                     }
                     else if(preswizzledAlready)
                     {
-                        ptr = p.gpuInput.valid.get();
+                        // Same-MI-K solutions can skip initializeMXData. Verify (or repair)
+                        // their selected separate upload here before any device copy uses it.
+                        if(p.gpuMXSwizzled)
+                            uploadMXSwizzledToGPU(desc, p);
+                        ptr = gpuValidSource(i, p);
                     }
                     else if(auto mxIt = m_mxSwizzledDescriptor.find(i);
-                            (m_mxScaleLayout == MXScaleLayout::GFX1250 || m_mxScaleLayout == MXScaleLayout::GFX950)
+                            m_mxScaleLayout == MXScaleLayout::GFX1250
                             && mxIt != m_mxSwizzledDescriptor.end() && mxIt->second == desc)
                     {
                         // Already swizzled, and initOneMXSide kept the source bytes
@@ -3423,12 +3561,13 @@ namespace TensileLite
 
                         // Fallback K-dimension swizzle for the case where
                         // initializeMXData did NOT pre-produce a swizzled
-                        // scale into gpuInput.valid (e.g. m_mxScaleLayout is
-                        // None on this arch but the kernel still requests a
-                        // swizzled scale format). gfx950 is excluded by the
-                        // branches above. Batch dim (if present) goes at the
-                        // front; pad/reshape/permute operate natively on N-D
-                        // so all batches are processed at once.
+                        // scale (e.g. m_mxScaleLayout is None on this arch but
+                        // the kernel still requests a swizzled scale format;
+                        // on gfx950: no solution selected yet, or a solution
+                        // whose geometry does not take the GFX950 layout).
+                        // Batch dim (if present) goes at the front;
+                        // pad/reshape/permute operate natively on N-D so all
+                        // batches are processed at once.
                         using Tensor = Tensor::Manipulation::Tensor;
                         size_t batch = desc.sizes().size() > 2 ? desc.sizes()[2] : 1;
 

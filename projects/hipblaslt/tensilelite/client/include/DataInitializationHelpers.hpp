@@ -6,7 +6,7 @@
 
 #include "DataInitialization.hpp"
 #include <mxDataGen.hpp>                          // hipDataType, generateMXInput
-#include <mxDataGenerator/PreSwizzle.hpp>         // DGen::preSwizzleScalesGFX950 / GFX1250
+#include <mxDataGenerator/PreSwizzle.hpp>         // DGen::preSwizzleScalesGFX1250
 #include <mxDataGenerator/dataTypeInfo.hpp>       // DGen::toFloat / toFloatPacked
 #include <mxDataGenerator/ocp_e2m1_mxfp4.hpp>     // DGen::ocp_e2m1_mxfp4
 #include <mxDataGenerator/ocp_e2m3_mxfp6.hpp>     // DGen::ocp_e2m3_mxfp6
@@ -188,8 +188,8 @@ namespace TensileLite
             //  naturalMXScaleFromCanonical : inverse of restrideMXScaleBufferKFast.
             //                Recovers the scales generateMXInput emits for one
             //                batch (unpadded, pre-swizzle) from the canonical copy.
-            //  swizzleNaturalMXScale : the swizzle generateMXInput applies to
-            //                those scales for `layout`; rows/cols are the data
+            //  swizzleNaturalMXScale : the gfx1250 swizzle generateMXInput applies to
+            //                those scales; rows/cols are the data
             //                tensor's sizes()[0] / sizes()[1].
             // ----------------------------------------------------------------
             inline std::vector<uint8_t> naturalMXScaleFromCanonical(uint8_t const* canonical,
@@ -219,36 +219,8 @@ namespace TensileLite
                                                               MXScaleLayout               layout,
                                                               size_t                      rows,
                                                               size_t                      cols,
-                                                              size_t                      mxBlock,
-                                                              bool                        kIsRows)
+                                                              size_t                      mxBlock)
             {
-                if(layout == MXScaleLayout::GFX950)
-                {
-                    size_t const kExtent = kIsRows ? rows : cols;
-                    size_t const kBlocks = mxBlock > 0 ? (kExtent + mxBlock - 1) / mxBlock : 0;
-                    if(!kIsRows && mxBlock > 0 && kExtent % mxBlock != 0)
-                        throw std::runtime_error(
-                            "GFX950 scales with K along the columns require K to be a multiple of "
-                            + std::to_string(mxBlock) + ", got " + std::to_string(kExtent));
-                    size_t const mnExtent = (kBlocks > 0 && natural.size() % kBlocks == 0)
-                                                ? natural.size() / kBlocks
-                                                : (kIsRows ? cols : rows);
-                    if(mnExtent * kBlocks != natural.size())
-                        throw std::runtime_error("GFX950 scales do not form an MN by K block grid: "
-                                                 + std::to_string(mnExtent) + " x "
-                                                 + std::to_string(kBlocks) + " covers "
-                                                 + std::to_string(mnExtent * kBlocks) + " of "
-                                                 + std::to_string(natural.size()) + " scales");
-                    if(kIsRows)
-                        return DGen::preSwizzleScalesGFX950(natural, {mnExtent, kBlocks});
-                    // The swizzle reads [MN][K block]; a free-dim contiguous operand's
-                    // natural scales are [K block][MN].
-                    std::vector<uint8_t> mnMajor(natural.size());
-                    for(size_t kb = 0; kb < kBlocks; ++kb)
-                        for(size_t mn = 0; mn < mnExtent; ++mn)
-                            mnMajor[mn * kBlocks + kb] = natural[kb * mnExtent + mn];
-                    return DGen::preSwizzleScalesGFX950(mnMajor, {mnExtent, kBlocks});
-                }
                 if(layout == MXScaleLayout::GFX1250 && mxBlock > 0)
                     return DGen::preSwizzleScalesGFX1250(
                         natural, cols, (rows + mxBlock - 1) / mxBlock, mxBlock);
