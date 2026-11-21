@@ -235,11 +235,12 @@ struct heuristic_defaults_t {
 };
 
 /**
- * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type) on gfx1151: constants of
+ * @brief W4A16 (int4 A dequantized to a bf16/fp16 MI type) on gfx1150 and gfx1151: constants of
  *        the latency model and of the Stream-K launch grid, fit on hipBLASLt kernel times.
  *
- * The constants describe the kernels.  What depends on the device is read from hardware_t
- * (CUs, SIMDs per CU, MALL) and from the kernel's CUOccupancy.
+ * The two architectures run the same kernels on the same ISA, so every constant that describes
+ * the kernels is the same on both.  What differs is read from hardware_t (CUs, SIMDs per CU,
+ * MALL) and from the kernel's CUOccupancy.
  */
 struct w4a16_params_t {
   // --- Tile latency model ---
@@ -280,6 +281,7 @@ inline bool is_w4a16(const problem_t& problem, const hardware_t& hardware) {
   if (problem.a_dtype != data_type_t::Int4) return false;
   if (problem.mi_dtype != data_type_t::BFloat16 && problem.mi_dtype != data_type_t::Half) return false;
   switch (hardware.arch) {
+    case hardware_t::architecture_t::gfx1150:
     case hardware_t::architecture_t::gfx1151:
       return true;
     default:

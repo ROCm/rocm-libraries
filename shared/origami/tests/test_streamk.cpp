@@ -590,3 +590,34 @@ TEST_CASE("Origami streamk: W4A16 on gfx1151 runs data parallel when its last wa
   REQUIRE(grid(3072, 64, 32, 32, 8) == 192);
   REQUIRE(grid(24576, 32, 32, 32, 8) == 768);
 }
+
+TEST_CASE("Origami streamk: W4A16 on gfx1150 follows gfx1151's rules, without sharing tiles",
+          "[streamk][grid][w4a16]") {
+  auto grid = [&](origami::hardware_t::architecture_t arch, size_t m, size_t n, size_t mt_m,
+                  size_t mt_n, int waves) {
+    auto hw   = make_hardware(950);
+    hw.arch   = arch;
+    auto p    = make_problem(m, n, 4096);
+    p.a_dtype = origami::data_type_t::Int4;
+    p.num_cus = 16;
+    auto c    = make_config(mt_m, mt_n, 64);
+    c.workspace_size            = std::numeric_limits<size_t>::max() / 2;
+    c.workspace_size_per_elem_c = 4;
+    c.tensile().wave_group_m    = waves / 2;
+    c.tensile().wave_group_n    = 2;
+    return origami::streamk::select_grid_size(p, hw, c, origami::grid_selection_t::k_split_aware);
+  };
+  const auto gfx1150 = origami::hardware_t::architecture_t::gfx1150;
+  const auto gfx1151 = origami::hardware_t::architecture_t::gfx1151;
+
+  // 40 tiles on 16 CUs (2.5 per CU): with a MALL (gfx1151) they are shared over one
+  // workgroup per CU; without one (gfx1150) the fixup of the shared tiles costs more than
+  // data parallel's last wave.
+  REQUIRE(grid(gfx1151, 2560, 128, 64, 128, 8) == 16);
+  REQUIRE(grid(gfx1150, 2560, 128, 64, 128, 8) == 40);
+  // 8 tiles of 8-wave workgroups (half the CUs): both split their K over all the CUs.
+  REQUIRE(grid(gfx1151, 512, 128, 64, 128, 8) == 16);
+  REQUIRE(grid(gfx1150, 512, 128, 64, 128, 8) == 16);
+  // 16-wave workgroups fill a CU on both: data parallel.
+  REQUIRE(grid(gfx1150, 512, 128, 64, 128, 16) == 8);
+}

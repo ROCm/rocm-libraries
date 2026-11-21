@@ -148,10 +148,11 @@ A custom kernel skips code generation, so nothing derives its `CUOccupancy`
 Prediction library. A logic entry that uses a custom kernel can declare it:
 a positive `CUOccupancy` there is kept on any architecture. Without one, gfx9
 kernels get it computed from the resources their `.s` declares, and other
-kernels keep `-1`, which the host treats as 1. The gfx1151 W4A16 kernels
-declare the workgroups per WGP that the resources of their `.s` allow (VGPR
-file of the SIMD, LDS pool, waves per SIMD), and every logic entry of a
-kernel must declare the same value.
+kernels keep `-1`, which the host treats as 1. The gfx1151 and gfx1150 W4A16
+kernels declare the workgroups per WGP that the resources of their `.s` allow
+on that architecture (VGPR file of the SIMD, LDS pool, waves per SIMD; gfx1150
+has a smaller VGPR file than gfx1151, so the same kernel has a lower occupancy
+there), and every logic entry of a kernel must declare the same value.
 
 ## Adding a new external kernel
 
