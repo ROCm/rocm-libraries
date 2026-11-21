@@ -46,6 +46,9 @@ void add_benchmarks(primbench::executor& executor)
     BENCHMARK_TYPE(rocprim::half)
     BENCHMARK_TYPE(rocprim::int128_t)
     BENCHMARK_TYPE(rocprim::uint128_t)
+    BENCHMARK_TYPE(double2)
+    BENCHMARK_TYPE(float4)
+    BENCHMARK_TYPE(int4)
 }
 
 int main(int argc, char* argv[])

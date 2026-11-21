@@ -426,7 +426,7 @@ public:
 
     template<typename... Args>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto tail_segmented_reduce(Args... args)
+    auto tail_segmented_reduce(Args&&... args)
     {
         dispatch{}([](auto impl, auto&&... args)
                    { impl.tail_segmented_reduce(std::forward<decltype(args)>(args)...); },
@@ -435,10 +435,10 @@ public:
 
     template<typename... Args>
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    auto head_segmented_reduce(Args... args)
+    auto head_segmented_reduce(Args&&... args)
     {
         dispatch{}([](auto impl, auto&&... args)
-                   { impl.tail_segmented_reduce(std::forward<decltype(args)>(args)...); },
+                   { impl.head_segmented_reduce(std::forward<decltype(args)>(args)...); },
                    std::forward<Args>(args)...);
     }
 };
