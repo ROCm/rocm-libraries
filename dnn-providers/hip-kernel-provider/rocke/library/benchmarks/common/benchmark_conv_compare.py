@@ -287,6 +287,8 @@ def _build_mode_args(args) -> list[str]:
 def _build_implicit_only_args(args) -> list[str]:
     """Args that apply only to implicit-GEMM and must not be forwarded to direct-conv."""
     a: list[str] = []
+    if args.addr64:
+        a += ["--addr64"]
     if args.sample is not None:
         a += ["--sample", str(args.sample)]
     if args.seed != 0:
@@ -685,6 +687,19 @@ def main() -> int:
         help=(
             "randomly sample FRAC of the candidate combinations before sweeping "
             "(e.g. 0.1 for ~10%%). Forwarded to implicit-GEMM only."
+        ),
+    )
+    implicit_grp.add_argument(
+        "--addr64",
+        action="store_true",
+        dest="addr64",
+        help=(
+            "large-tensor forward-addressing (addr64) kernels -- fwd only. "
+            "Forwarded to benchmark_implicit_gemm_conv.py, where it only "
+            "affects that script's own --compile-all (it has no effect here "
+            "unless that script is later run with --compile-all too). "
+            "Forwarded to implicit-GEMM only -- direct conv has no addr64 "
+            "variant."
         ),
     )
     implicit_grp.add_argument(

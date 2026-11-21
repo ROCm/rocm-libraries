@@ -166,6 +166,11 @@ class KernelIdentity:
     dy_halo_kouter_pad: int = 0
     num_load_waves: int = 0
     cshuffle_no_alias: bool = False
+    # Large-tensor forward addressing (64-bit tile origin + i32 per-lane
+    # delta, no magic division on the M decode). Left out of the
+    # hash while False, like prefetch_addr, so identities that predate the
+    # field keep their hash and their cache entries.
+    addr64: bool = False
     # ---- capability: bounds which problems this binary can serve ----
     is_3d: bool = False
     is_pointwise: bool = False
@@ -255,6 +260,8 @@ class KernelIdentity:
             del fields["prefetch_addr"]
         if not fields["prefetch_global_regs"]:
             del fields["prefetch_global_regs"]
+        if not fields["addr64"]:
+            del fields["addr64"]
         if not fields["uniform_k_decode"]:
             del fields["uniform_k_decode"]
         if not fields["patch"]:

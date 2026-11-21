@@ -88,6 +88,7 @@ def _enumerate_chunk(
     llvm_flavor: str,
     geometries: Sequence[tuple],
     streamk: Tuple[Sequence[str], Sequence[str]] = ((), ()),
+    addr64: bool = False,
 ) -> Tuple[int, List[Tuple[str, BuildJob]]]:
     """Walk one direction over ``geometries``.
 
@@ -95,10 +96,14 @@ def _enumerate_chunk(
     valid and first-seen within the chunk, in generator order. Duplicates
     across chunks are resolved by the caller, which merges the chunks in order
     and so keeps the same first occurrence a single serial walk would.
+
+    ``addr64`` (fwd-only; see ``kernels.conv.aot_jobs._direction_jobs``) is
+    only forwarded for ``direction == "fwd"`` -- wgrad/dgrad do not accept it.
     """
     out: List[Tuple[str, BuildJob]] = []
     seen = set()
     n_raw = 0
+    extra = {"addr64": True} if addr64 and direction == "fwd" else {}
     for job in _direction_jobs(
         direction,
         arch,
@@ -110,6 +115,7 @@ def _enumerate_chunk(
         llvm_flavor=llvm_flavor,
         streamk_modes=streamk[0],
         streamk_reductions=streamk[1],
+        **extra,
     ):
         n_raw += 1
         key = job.identity.stable_hash()
@@ -139,6 +145,7 @@ def _enumerate_worker(payload):
         validate,
         flavor,
         streamk,
+        addr64,
         lo,
         hi,
     ) = payload
@@ -161,6 +168,7 @@ def _enumerate_worker(payload):
         flavor,
         geos[lo:hi],
         streamk,
+        addr64=addr64,
     )
 
 
@@ -197,11 +205,17 @@ def enumerate_jobs(
     log_every_s: float = 5.0,
     streamk_modes: Sequence[str] = (),
     streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
+    addr64: bool = False,
 ) -> List[BuildJob]:
     """All buildable jobs for the requested directions, deduped by identity.
 
     ``streamk_modes`` (empty by default) adds the opt-in wgrad stream-K
     kernels for those launch modes x ``streamk_reductions``.
+
+    ``addr64`` (default ``False``, so every existing cache build is
+    unaffected) additionally includes the large-tensor forward-addressing
+    subset (fwd-only; see ``kernels.conv.aot_jobs._fwd_addr64_jobs``) for
+    every geometry it accepts.
 
     With ``validate=True`` (the default) each candidate is run through its
     direction's spec validator first, so the returned list is what will
@@ -240,6 +254,7 @@ def enumerate_jobs(
                 validate,
                 flavor,
                 streamk,
+                addr64,
             )
             + (n_geos * i // n_chunks, n_geos * (i + 1) // n_chunks)
             for i in range(n_chunks)
@@ -255,6 +270,7 @@ def enumerate_jobs(
             streamk_modes=streamk_modes,
             streamk_reductions=streamk_reductions,
             llvm_flavor=flavor,
+            addr64=addr64,
         )
         log(f"  {total} candidates to check with {jobs} process(es)")
 
@@ -299,6 +315,7 @@ def enumerate_jobs(
                     flavor,
                     geos[lo:hi],
                     streamk,
+                    addr64=addr64,
                 ),
             )
     else:
@@ -495,11 +512,15 @@ def compile_all(
     log=print,
     streamk_modes: Sequence[str] = (),
     streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
+    addr64: bool = False,
 ) -> int:
     """Populate ``cache`` with every implicit-GEMM variant for ``arch``/``dtype``.
 
     ``streamk_modes`` opts the wgrad stream-K kernels in (see
     :data:`CACHE_WGRAD_STREAMK_MODES`).
+
+    ``addr64`` (default ``False``) opts the large-tensor forward-addressing
+    kernels in (fwd-only; see ``enumerate_jobs``).
 
     Compilation is embarrassingly parallel and dominated by LLVM, so it fans
     out over processes; ``jobs`` defaults to one but the caller normally passes
@@ -521,6 +542,7 @@ def compile_all(
             log=log,
             streamk_modes=streamk_modes,
             streamk_reductions=streamk_reductions,
+            addr64=addr64,
         ),
         build=kernel_for_job,
         arch=arch,

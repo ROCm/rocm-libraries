@@ -40,9 +40,11 @@ from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     EmbedDynamic,
     PadDynamic,
+    UnmergeAddr64,
     UnmergeMagicDynamic,
     embed_dynamic,
     pad_dynamic,
+    unmerge_addr64,
     unmerge_magic_dynamic,
 )
 
@@ -94,6 +96,13 @@ def _evaluate(ops, env):
             r = (a[0] * a[1]) & MASK32
         elif n == "arith.umul_hi_i32":
             r = (a[0] * a[1]) >> 32
+        elif n == "arith.div":
+            # i32/i64 div lowers to sdiv/srem (see UNSIGNED_INTEGER_DTYPES in
+            # core/ir.py); every operand modeled here is non-negative, so the
+            # Python // / % below agree with the signed and unsigned forms.
+            r = (_to_signed(a[0]) // _to_signed(a[1])) & MASK32
+        elif n == "arith.mod":
+            r = (_to_signed(a[0]) % _to_signed(a[1])) & MASK32
         elif n == "arith.lshr":
             r = a[0] >> a[1]
         elif n == "arith.and":
@@ -455,6 +464,92 @@ class TestUnmergeMagicDynamic:
     def test_triple_count_mismatch_rejected(self):
         with pytest.raises(ValueError, match="len\\(lowers\\)-1 magic triples"):
             UnmergeMagicDynamic("m", ("a", "b", "c"), [(1, 0, 1)])
+
+
+# ---------------------------------------------------------------------------
+# UnmergeAddr64
+# ---------------------------------------------------------------------------
+
+
+class TestUnmergeAddr64:
+    """addr64 counterpart of TestUnmergeMagicDynamic: no magic numbers, the
+    upper coord is the per-lane delta ``d`` rather than the raw ``m``.
+    """
+
+    def _build(self):
+        b = _builder()
+        d, n0, h0, w0, hdim, wdim = _params(b, "d", "n0", "h0", "w0", "Hdim", "Wdim")
+        t = unmerge_addr64(
+            "d", ("n", "h", "w"), origin_coords=[n0, h0, w0], dims_i32=[hdim, wdim]
+        )
+        start = len(b.kernel.body.ops)
+        out = t.apply(b, {"d": CoordVar("d", d)})
+        return b, (d, n0, h0, w0, hdim, wdim), out, _new_ops(b, start)
+
+    def test_adds_delta_to_innermost_origin_coord_first(self):
+        _, (d, n0, h0, w0, hdim, wdim), out, ops = self._build()
+        adds = [op for op in ops if op.name == "arith.add"]
+        divs = [op for op in ops if op.name == "arith.div"]
+        mods = [op for op in ops if op.name == "arith.mod"]
+        assert len(adds) == 3 and len(divs) == 2 and len(mods) == 2
+        # w = (w0 + d) % Wdim; carry = (w0 + d) / Wdim, peeled first.
+        assert adds[0].operands == [w0, d]
+        assert divs[0].operands[1] is wdim and mods[0].operands[1] is wdim
+        assert out["w"].value is mods[0].results[0]
+        # h = (h0 + carry) % Hdim; carry2 = (h0 + carry) / Hdim.
+        assert adds[1].operands[0] is h0
+        assert divs[1].operands[1] is hdim and mods[1].operands[1] is hdim
+        assert out["h"].value is mods[1].results[0]
+        # n = n0 + carry2.
+        assert adds[2].operands[0] is n0
+        assert out["n"].value is adds[2].results[0]
+
+    @pytest.mark.parametrize("dims", [(3, 5), (7, 1), (64, 56), (255, 17)])
+    def test_evaluates_like_reference_decode(self, dims):
+        _, (d, n0, h0, w0, hdim, wdim), out, ops = self._build()
+        Hd, Wd = dims
+        for n0v in (0, 2):
+            for h0v in (0, Hd - 1):
+                for w0v in (0, Wd - 1):
+                    for dv in (0, 1, Hd * Wd, 3 * Hd * Wd + 1):
+                        env = {
+                            id(d): dv,
+                            id(n0): n0v,
+                            id(h0): h0v,
+                            id(w0): w0v,
+                            id(hdim): Hd,
+                            id(wdim): Wd,
+                        }
+                        _evaluate(ops, env)
+                        # Reference: absolute m = (n0*Hd+h0)*Wd+w0 + d, then
+                        # ordinary divmod decode -- must agree exactly.
+                        m = (n0v * Hd + h0v) * Wd + w0v + dv
+                        want_w = m % Wd
+                        want_h = (m // Wd) % Hd
+                        want_n = m // (Wd * Hd)
+                        assert env[id(out["w"].value)] == want_w
+                        assert env[id(out["h"].value)] == want_h
+                        assert env[id(out["n"].value)] == want_n
+
+    def test_validity_propagates_to_every_lower(self):
+        b = _builder()
+        d, n0, h0, w0, hdim, wdim = _params(b, "d", "n0", "h0", "w0", "Hdim", "Wdim")
+        in_valid = b.cmp_lt(d, hdim)
+        t = unmerge_addr64(
+            "d", ("n", "h", "w"), origin_coords=[n0, h0, w0], dims_i32=[hdim, wdim]
+        )
+        out = t.apply(b, {"d": CoordVar("d", d, in_valid)})
+        assert out["n"].valid is in_valid
+        assert out["h"].valid is in_valid
+        assert out["w"].valid is in_valid
+
+    def test_origin_coords_count_mismatch_rejected(self):
+        with pytest.raises(ValueError, match="len\\(lowers\\) == len\\(origin_coords\\)"):
+            UnmergeAddr64("d", ("n", "h", "w"), [1, 2], [3])
+
+    def test_dims_count_mismatch_rejected(self):
+        with pytest.raises(ValueError, match="len\\(lowers\\)-1 dims"):
+            UnmergeAddr64("d", ("n", "h", "w"), [1, 2, 3], [4])
 
 
 # ---------------------------------------------------------------------------

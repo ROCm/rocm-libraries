@@ -47,7 +47,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Union
 
-from ..core.ir import IRBuilder, Value
+from ..core.ir import I64, IRBuilder, Value
 from .atoms import MfmaAtom, WmmaAtom
 
 
@@ -80,6 +80,13 @@ class WarpGrid:
     block_m_off: Optional[Value] = None
     block_n_off: Optional[Value] = None
     block_k_off: Optional[Value] = None
+    # i64 tile-origin companion of ``block_m_off`` -- the large-tensor
+    # (addr64) forward-addressing variant.
+    # ``block_m_off`` multiplies the M-axis block id by ``tile_m`` in
+    # i32, which is exactly the product addr64 exists to avoid overflowing;
+    # this field is the same product computed in i64 instead, populated only
+    # when ``bind(..., m_origin_i64=True)``. None for every existing caller.
+    block_m_off_i64: Optional[Value] = None
 
     # ---- compile-time derived ----
 
@@ -198,6 +205,7 @@ class WarpGrid:
         block_m_axis: str = "y",
         block_n_axis: str = "x",
         block_k_axis: Optional[str] = None,
+        m_origin_i64: bool = False,
     ) -> "WarpGrid":
         """Emit the lane/warp/tid SSA into kernel `b` and return a new
         `WarpGrid` with the runtime values populated.
@@ -211,6 +219,11 @@ class WarpGrid:
 
         `block_k_axis` optionally specifies a split-K axis. If `None`,
         `block_k_off = 0` (no split-K).
+
+        `m_origin_i64` additionally populates `block_m_off_i64` -- the same
+        `block_id * tile_m` product as `block_m_off`, computed in i64
+        instead of i32 (see the field's docstring). Default `False` leaves
+        every existing caller's emitted IR byte-for-byte unchanged.
         """
         if block_m_axis == block_n_axis:
             raise ValueError(
@@ -249,12 +262,18 @@ class WarpGrid:
             "y": b.block_id_y,
             "z": b.block_id_z,
         }
-        block_m_off = b.mul(block_axes[block_m_axis](), c_tile_m)
+        m_axis_id = block_axes[block_m_axis]()
+        block_m_off = b.mul(m_axis_id, c_tile_m)
         block_n_off = b.mul(block_axes[block_n_axis](), c_tile_n)
         if block_k_axis is None:
             block_k_off = b.const_i32(0)
         else:
             block_k_off = b.mul(block_axes[block_k_axis](), c_tile_k)
+        block_m_off_i64 = (
+            b.mul(b.zext(m_axis_id, I64), b.const_i64(self.tile_m))
+            if m_origin_i64
+            else None
+        )
 
         return WarpGrid(
             tile_m=self.tile_m,
@@ -276,6 +295,7 @@ class WarpGrid:
             block_m_off=block_m_off,
             block_n_off=block_n_off,
             block_k_off=block_k_off,
+            block_m_off_i64=block_m_off_i64,
         )
 
     # ---- convenience accessors (assertions vs unbound) ----

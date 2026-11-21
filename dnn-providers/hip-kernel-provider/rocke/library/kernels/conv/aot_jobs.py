@@ -1012,12 +1012,17 @@ def _fwd_jobs(
     *,
     geometries: Optional[Sequence[tuple]] = None,
     llvm_flavor: Optional[str] = None,
+    addr64: bool = False,
 ) -> Iterator[BuildJob]:
     """Every forward implicit-GEMM variant worth caching for this arch/dtype.
 
     ``geometries`` restricts the walk to a slice of :func:`_geometries` (the
     parallel enumeration hands each worker one); ``llvm_flavor`` pins the
     identity's flavor (see :func:`_job_flavor`).
+
+    ``addr64`` (default ``False``, so every existing cache build is
+    unaffected) additionally yields the large-tensor forward-addressing
+    subset from :func:`_fwd_addr64_jobs` for each geometry it accepts.
     """
     da, db, dd = dtype_triple(dtype)
     flavor = _job_flavor(llvm_flavor)
@@ -1080,15 +1085,8 @@ def _fwd_jobs(
                     spec_kwargs=cfg,
                     caps=caps,
                 )
-        yield from _fwd_merged_jobs(
-            arch,
-            da,
-            db,
-            dd,
-            flavor,
-            wave_size,
-            (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
-        )
+        geometry = (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom)
+        yield from _fwd_merged_jobs(arch, da, db, dd, flavor, wave_size, geometry)
         if _fwd_split_target(arch):
             yield from _fwd_split_jobs(
                 arch,
@@ -1097,8 +1095,12 @@ def _fwd_jobs(
                 dd,
                 flavor,
                 wave_size,
-                (tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom),
+                geometry,
                 cluster=_fwd_split_cluster_target(target, flavor),
+            )
+        if addr64:
+            yield from _fwd_addr64_jobs(
+                arch, da, db, dd, flavor, wave_size, geometry, mma_family
             )
 
 
@@ -1335,6 +1337,72 @@ def _fwd_merged_jobs(
             spec_kwargs=cfg,
             caps=dict(grouped=True, group_merge=gm),
         )
+
+
+def _fwd_addr64_geometry(geometry: tuple, mma_family: str) -> bool:
+    """Whether an addr64 (large-tensor forward addressing) kernel is built
+    for ``geometry``: Phase 1 slice A's scope only -- MFMA, pipeline "mem"
+    (the only pipeline this slice has been numerically verified against).
+    Deliberately a config subset, not a full product over the existing
+    axes, so this never doubles the catalog.
+    """
+    _tm, _tn, _tk, _wm, _wn, _wt, pipeline, _epilogue, _atom = geometry
+    return mma_family == "mma" and pipeline == "mem"
+
+
+def _fwd_addr64_jobs(
+    arch: str,
+    da: str,
+    db: str,
+    dd: str,
+    flavor: str,
+    wave_size: int,
+    geometry: tuple,
+    mma_family: str,
+) -> Iterator[BuildJob]:
+    """addr64 forward kernels for one geometry: non-grouped, no unroll_k/
+    async_dma, scalar vector widths -- exactly the configuration
+    ``test_conv_addr64_kernel.py`` verifies on real hardware. Nothing is
+    built for a geometry :func:`_fwd_addr64_geometry` excludes.
+    """
+    tile_m, tile_n, tile_k, warp_m, warp_n, wt, pipeline, epilogue, atom = geometry
+    if not _fwd_addr64_geometry(geometry, mma_family):
+        return
+    cfg = dict(
+        tile_m=tile_m,
+        tile_n=tile_n,
+        tile_k=tile_k,
+        warp_m=warp_m,
+        warp_n=warp_n,
+        warp_tile_m=wt,
+        warp_tile_n=wt,
+        warp_tile_k=atom.k,
+        pipeline=pipeline,
+        epilogue=epilogue,
+        wave_size=wave_size,
+        vector_size_a=1,
+        vector_size_b=1,
+        vector_size_c=1,
+        unroll_k=False,
+        async_dma=False,
+        addr64=True,
+    )
+    yield BuildJob(
+        identity=KernelIdentity(
+            arch=arch,
+            direction="fwd",
+            algorithm="implicit_gemm",
+            llvm_flavor=flavor,
+            dtype_a=da,
+            dtype_b=db,
+            dtype_d=dd,
+            grouped=False,
+            **cfg,
+        ),
+        direction="fwd",
+        spec_kwargs=cfg,
+        caps=dict(grouped=False),
+    )
 
 
 def _async_chunks(cfg: dict, dtypes, caps: dict, arch: str) -> dict:
@@ -2200,6 +2268,7 @@ def count_jobs(
     streamk_modes: Sequence[str] = (),
     streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
     llvm_flavor: Optional[str] = None,
+    addr64: bool = False,
 ) -> int:
     """Raw candidate count ``kernel_sweep.enumerate_jobs`` walks, before
     dedup/validation.
@@ -2240,6 +2309,8 @@ def count_jobs(
                     total += len(_fwd_split_vecs(geo[8])) ** 2
                 if fwd_cluster and _fwd_split_cluster_geometry(geo):
                     total += len(CACHE_FWD_SPLIT_K_CLUSTER_DEGREES)
+                if addr64 and _fwd_addr64_geometry(geo, mma_family):
+                    total += 1
             elif direction == "wgrad":
                 in_cover = _wgrad_wmma_cover(mma_family, geo)
                 if geo[7] != "default" and not in_cover:
@@ -2306,12 +2377,17 @@ def _direction_jobs(
     *,
     streamk_modes: Sequence[str] = (),
     streamk_reductions: Sequence[str] = CACHE_WGRAD_STREAMK_REDUCTIONS,
+    addr64: bool = False,
     **kw,
 ) -> Iterator[BuildJob]:
+    if addr64 and direction != "fwd":
+        raise ValueError(
+            f"addr64 is a forward-only variant (got direction={direction!r})"
+        )
     wave_size = target.wave_size
     mma_family = "wmma" if wave_size == 32 else "mma"
     if direction == "fwd":
-        return _fwd_jobs(arch, dtype, wave_size, mma_family, target, **kw)
+        return _fwd_jobs(arch, dtype, wave_size, mma_family, target, addr64=addr64, **kw)
     if direction == "wgrad":
         return _wgrad_jobs(
             arch,

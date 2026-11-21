@@ -762,6 +762,58 @@ class TestHelpers(unittest.TestCase):
         self.assertEqual(bound.tid.type.name, "i32")
         self.assertEqual(bound.lane.type.name, "i32")
         self.assertEqual(bound.warp_m_idx.type.name, "i32")
+        self.assertIsNone(bound.block_m_off_i64)
+
+    def test_warp_grid_default_bind_is_byte_identical_with_m_origin_i64_false(self):
+        """m_origin_i64 defaults to False and must not perturb existing IR."""
+        grid = WarpGrid(
+            tile_m=128,
+            tile_n=128,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+        b1 = IRBuilder("a")
+        grid.bind(b1)
+        b2 = IRBuilder("a")
+        grid.bind(b2, m_origin_i64=False)
+        ops1 = [(op.name, op.attrs) for op in b1.kernel.body.ops]
+        ops2 = [(op.name, op.attrs) for op in b2.kernel.body.ops]
+        self.assertEqual(ops1, ops2)
+
+    def test_warp_grid_m_origin_i64_widens_the_same_block_id(self):
+        """block_m_off_i64 is block_m_off's product, in i64, from the same
+        block-id read (plan section 3 item 1: addr64's tile origin must not
+        re-derive the M-axis block id via a second, possibly divergent
+        read)."""
+        b = IRBuilder("check_grid_addr64")
+        grid = WarpGrid(
+            tile_m=128,
+            tile_n=128,
+            tile_k=32,
+            warp_m=2,
+            warp_n=2,
+            warp_tile_m=32,
+            warp_tile_n=32,
+            warp_tile_k=16,
+        )
+        bound = grid.bind(b, m_origin_i64=True)
+        self.assertIsNotNone(bound.block_m_off_i64)
+        self.assertEqual(bound.block_m_off_i64.type.name, "i64")
+        # Both block_m_off (i32) and block_m_off_i64 multiply the same
+        # gpu.block_id op's result -- not two independent block-id reads.
+        mul_ops = [op for op in b.kernel.body.ops if op.name == "arith.mul"]
+        i32_mul = next(op for op in mul_ops if op.result is bound.block_m_off)
+        i64_mul = next(op for op in mul_ops if op.result is bound.block_m_off_i64)
+        zext_op = next(
+            op for op in b.kernel.body.ops if op.result is i64_mul.operands[0]
+        )
+        self.assertEqual(zext_op.name, "arith.zext")
+        self.assertIs(zext_op.operands[0], i32_mul.operands[0])
+        self.assertEqual(i64_mul.operands[1].op.attrs["value"], 128)
 
     def test_coalesced_loader_choose_vec(self):
         # 128x32 tile = 4096 halves, 256 threads: vec=8 -> 512 vecs ≥ 256 ✓
@@ -8738,6 +8790,78 @@ class TestCShuffleEpilogueSmoke(unittest.TestCase):
         self.assertIn("addrspace(3)", ll)
         # s_barrier between LDS write and read.
         self.assertIn("@llvm.amdgcn.s.barrier", ll)
+
+
+@arch_specific(("gfx950",), reason=_LABEL_ONLY)
+class TestEpilogueAddr64Origin(unittest.TestCase):
+    """``m_origin_i64`` on ``DirectEpilogue.store`` / ``CShuffleEpilogue.store``:
+    the large-tensor (``addr64``) tile-origin path (plan section 3). Confirms
+    the default (``None``) path is untouched and the opt-in path emits the
+    expected i64 zext/add/icmp bounds check with no reference to
+    ``grid.block_m_off`` in the local delta.
+    """
+
+    arch = "gfx950"
+
+    _TILE = dict(
+        tile_m=128,
+        tile_n=128,
+        tile_k=32,
+        warp_m=2,
+        warp_n=2,
+        warp_k=1,
+        warp_tile_m=32,
+        warp_tile_n=32,
+        warp_tile_k=16,
+    )
+
+    def _build(self, *, m_origin_i64: bool, direct: bool):
+        from rocke.helpers import CShuffleEpilogue
+        from rocke.helpers.epilogues import DirectEpilogue
+
+        b = IRBuilder(f"epi_addr64_{'origin' if m_origin_i64 else 'default'}")
+        D = b.param("D", PtrType(F16, "global"))
+        M = b.param("M", I64 if m_origin_i64 else I32)
+        N = b.param("N", I32)
+
+        atom = mfma_atom("f16", 32, 32, 16)
+        grid = WarpGrid(**self._TILE).bind(b, m_origin_i64=m_origin_i64)
+        n_accs = grid.mfmas_per_warp_m * grid.mfmas_per_warp_n
+        accs = [b.zero_vec_f32(atom.c_per_lane) for _ in range(n_accs)]
+        d_rsrc = b.buffer_rsrc(D, b.mul(M, b.mul(N, b.const_i32(4))))
+
+        def addr_fn(b_, m_val, n_val):
+            return b_.add(b_.mul(m_val, N), n_val), None
+
+        origin_kw = {"m_origin_i64": grid.block_m_off_i64} if m_origin_i64 else {}
+        if direct:
+            DirectEpilogue(atom=atom, grid=grid).store(
+                b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc, bounds=(M, N), **origin_kw
+            )
+        else:
+            epi = CShuffleEpilogue.from_grid(atom=atom, grid=grid, out_dtype="fp16")
+            epi.store(
+                b, accs=accs, addr_fn=addr_fn, d_rsrc=d_rsrc, bounds=(M, N), **origin_kw
+            )
+        return lower_kernel_to_llvm(b.kernel, arch=self.arch)
+
+    def test_direct_default_has_no_i64_bounds_arithmetic(self):
+        ll = self._build(m_origin_i64=False, direct=True)
+        self.assertNotIn("icmp slt i64", ll)
+
+    def test_direct_addr64_emits_i64_origin_add_and_compare(self):
+        ll = self._build(m_origin_i64=True, direct=True)
+        self.assertIn("zext i32", ll)
+        self.assertIn("icmp slt i64", ll)
+
+    def test_cshuffle_default_has_no_i64_bounds_arithmetic(self):
+        ll = self._build(m_origin_i64=False, direct=False)
+        self.assertNotIn("icmp slt i64", ll)
+
+    def test_cshuffle_addr64_emits_i64_origin_add_and_compare(self):
+        ll = self._build(m_origin_i64=True, direct=False)
+        self.assertIn("zext i32", ll)
+        self.assertIn("icmp slt i64", ll)
 
 
 if __name__ == "__main__":
