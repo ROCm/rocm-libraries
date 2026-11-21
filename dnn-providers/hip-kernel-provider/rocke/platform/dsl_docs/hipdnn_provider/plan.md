@@ -376,9 +376,7 @@ non-trivial kernel.
 **Shape:** the bake-off shape from
 `dnn-providers/hip-kernel-provider/rocke/library/builders/common/bake_off_implicit_gemm.py`
 — `N=8, H=W=56, C=64, K=64, Y=X=3, stride=1, pad=1, dilation=1`, FP16,
-NHWC. This is the smallest shape we know already compiles cleanly; the
-example documents `248 TFLOPS per-launch / 280 TFLOPS graph 5×200` on
-MI300X (`bake_off_implicit_gemm.py:70–71`).
+NHWC. This is the smallest shape we know already compiles cleanly.
 
 **DSL compile cost:** documented as "typically <150 ms wall" for this
 kernel (`bake_off_implicit_gemm.py:16–17`). Tolerable for an
@@ -828,7 +826,7 @@ All entries are committed code or in-tree documentation.
 - DSL compile entry: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/helpers/compile.py`
 - DSL instances: `dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/instances/`
 - DSL conv builder used for M1: `dnn-providers/hip-kernel-provider/rocke/library/kernels/common/conv_implicit_gemm.py`
-- DSL conv example (shape + perf numbers cited in §4): `dnn-providers/hip-kernel-provider/rocke/library/builders/common/bake_off_implicit_gemm.py`
+- DSL conv example (shape cited in §4): `dnn-providers/hip-kernel-provider/rocke/library/builders/common/bake_off_implicit_gemm.py`
 - Existing DSL C++ launcher (HSACO load + launch): `projects/composablekernel/example/ck_tile/dsl/common/launcher.cpp`
 - Plugin SDK developer guide: `projects/hipdnn/docs/PluginDevelopment.md`
 - RFC 0002 (Plugin SDK design): `projects/hipdnn/docs/rfcs/0002_PluginSdkDesign.md`

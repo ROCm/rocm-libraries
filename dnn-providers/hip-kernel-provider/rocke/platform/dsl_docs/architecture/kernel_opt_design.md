@@ -3,7 +3,7 @@
 **Status**: design proposal — implementation lives in rocke repo, not here.
 **Target repo**: `rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/`
 **Target shape (benchmark)**: `d64_b32_h64kv8_q1000_k1035_ns284_tq8192_sw0_sc0_sinks1_bfloat16`
-**Target hardware**: gfx950 (MI350X), gfx942 (MI300X) as secondary.
+**Target hardware**: gfx950, gfx942 as secondary.
 
 ## 1. Goal
 
@@ -32,14 +32,10 @@ Today they are mutually exclusive (validator
 From the experiment's out-of-tree HSACO structural diff and cohort re-bench
 (see §11):
 
-| variant                | target shape | cohort geomean ratio vs stock |
-|------------------------|------------:|------------------------------:|
-| Triton                 | 0.405 ms    | 0.71 (1.41× faster)           |
-| rocke stock (16×16)   | 0.924 ms    | 1.00                           |
-| rocke R1 (BMW=32)     | 0.946 ms    | 0.67× (49% slower)             |
-| rocke R1 (BMW=16)     | 0.866 ms    | 0.76× (24% slower)             |
-| rocke R4 (no sinks)   | 0.566 ms    | 0.97× geomean (3.5% faster, 39% target) |
-| rocke R1+R4 (target)  | TBD         | TBD                             |
+- R1 alone with the 16×16 atom (BMW=16 or 32) is a net loss on the cohort.
+- R4 alone is faster on the target shape, but it has an open correctness bug
+  with sinks (§5), so its timings are not a result.
+- R1+R4 is unmeasured.
 
 R1 alone with the 16×16 atom is structurally a net loss: it removes 32
 `ds_write_b16`/iter but replaces them with **288** register-class permutes
@@ -50,8 +46,8 @@ each PV MFMA.
 R4 alone shifts to the 32×32×16 atom (whose C-out lane layout is *natively*
 the A-in lane layout for the next chained MFMA), but in the current rocke
 code path it still feeds PV with a P that was staged for the 16×16 emit
-contract. Net K-loop instruction count must be measured (see §6) but R4 alone
-gives only +3.5% geomean on the cohort, suggesting structural overhead
+contract. Net K-loop instruction count must be measured (see §6); R4 alone
+gives only a small gain on the cohort, suggesting structural overhead
 remains.
 
 Combining R1+R4 should give the Triton-style kernel: 32×32 atom + P kept in
@@ -163,9 +159,9 @@ Three things change in rocke:
 
 ## 5. Pre-requisite: fix R4 sinks-wiring bug
 
-Currently the out-of-tree R4 sinks validator, run on the target shape, gives `max_abs_diff = 0.0625` with `mean = 5.3e-5` against
-the 16×16 reference. This is too localized to be a generic atom bug — it's a
-sink-row offset.
+Currently the out-of-tree R4 sinks validator, run on the target shape, gives
+`max_abs_diff = 0.0625` with `mean = 5.3e-5` against the 16×16 reference. This
+is too localized to be a generic atom bug — it's a sink-row offset.
 
 **Hypothesis**: the sinks m_init code at `attention_tiled_2d.py:1080-1093`
 iterates `REGS_PER_LANE` slots and applies the sink contribution to slot 0
@@ -206,7 +202,7 @@ existing `triton + rocke_stock` baseline. This is required to:
    justified and the measured count gives the upper bound on what R1+R4
    removes.
 3. Measure R4 VGPR/AGPR count to predict R1+R4 register pressure (target:
-   stay below the 256-VGPR boundary that drops MI350X occupancy).
+   stay below the 256-VGPR boundary that drops gfx950 occupancy).
 
 **Capture**: dump the R4 HSACO on the target shape with the experiment's
 out-of-tree dump harness, with the R4 patch from its out-of-tree cohort driver
@@ -272,7 +268,7 @@ HSACO three-way compare R1+R4 vs Triton vs stock should show:
 - `head_size ∉ {64, 128}`: existing selector gate.
 - 1D unified attention (`backend="default"`): different kernel.
 - AITER / vLLM integration: this is purely a rocke kernel-emit change.
-- MI300X (gfx942): primary target is gfx950; gfx942 should work
+- gfx942: primary target is gfx950; gfx942 should work
   structurally but needs separate perf validation.
 
 ## 10. Suggested sequencing
@@ -290,11 +286,10 @@ HSACO three-way compare R1+R4 vs Triton vs stock should show:
 | 9    | 3-way HSACO confirm (§7.3)                          | step 7            | this repo     |
 | 10   | Promote validator gate (default-on for bf16 long-prefill) | step 8 + 9   | rocke repo   |
 
-Step 5 is a real decision point — if R4-with-fixed-sinks already gives
-+20% cohort geomean, R1+R4 may be unnecessary (or a tail optimization).
-The current R4 number (3.5% cohort geomean) is depressed by the sinks
-shapes falling back; the sinks-fixed number could be significantly higher
-without R1.
+Step 5 is a real decision point — if R4-with-fixed-sinks already meets the
+§7.2 cohort criterion, R1+R4 may be unnecessary (or a tail optimization).
+The current R4 cohort gain is small and depressed by the sinks shapes falling
+back; the sinks-fixed gain could be significantly higher without R1.
 
 ## 11. References
 

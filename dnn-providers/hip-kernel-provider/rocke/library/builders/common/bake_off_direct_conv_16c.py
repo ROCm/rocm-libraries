@@ -103,8 +103,8 @@ def main() -> int:
         stride=1,
     )
     # Empirical policy:
-    #   groups=16 -> block_groups=4 + K32 fold + wide vec epilogue: ~210 TFLOPS.
-    #   groups=32 -> block_groups=8 is better for per-launch throughput (~103 TFLOPS).
+    #   groups=16 -> block_groups=4 + K32 fold + wide vec epilogue.
+    #   groups=32 -> block_groups=8 is better for per-launch throughput.
     block_groups = 4 if args.groups <= 16 else 8
     # K32 fold is a gfx950 (CDNA4) wide-atom optimization and the intended
     # fast path. It is ENABLED by default (use ``--no-fold-k32`` for the

@@ -877,7 +877,7 @@ variant per shape + bucket; writes a JSON to `--output-json`, default
 
 ```bash
 export AITER_PATH=<path/to/aiter>
-PYTHONPATH="python:${AITER_PATH}" python \
+PYTHONPATH="python:../library:${AITER_PATH}" python \
   ../library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_live.py \
   --shapes <path/to/unified_attention_shapes.jsonl> --variants prod combo fallback
 ```
@@ -889,7 +889,7 @@ CSV; the joined file is emitted to the path given by `--combined-csv`:
 
 ```bash
 export AITER_PATH=<path/to/aiter>
-PYTHONPATH="python:${AITER_PATH}" python \
+PYTHONPATH="python:../library:${AITER_PATH}" python \
   ../library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_traces.py \
   --shapes <path/to/unified_attention_shapes.jsonl> \
   --combined-csv prefill2d_bf16_triton_ckdsl_perf.csv
