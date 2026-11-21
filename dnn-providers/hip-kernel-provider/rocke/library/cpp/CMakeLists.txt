@@ -39,12 +39,15 @@ set_target_properties(rocke_library_core PROPERTIES
   EXPORT_NAME rocke_library
   ARCHIVE_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:rocke_core>"
   POSITION_INDEPENDENT_CODE ON)
-# Same export set as rocke_core (platform/CMakeLists.txt writes ckcTargets).
-install(TARGETS rocke_library_core
-        EXPORT ckcTargets
-        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# Same export set as rocke_core (platform/CMakeLists.txt writes ckcTargets), and
+# gated on the same option: both targets must be installed together or not at all.
+if(ROCKE_INSTALL_DEVELOPMENT)
+  install(TARGETS rocke_library_core
+          EXPORT ckcTargets
+          ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/include/"
+          DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
 
 # A family header must not shadow an engine header of the same name: both
 # trees resolve through the rocke/ prefix.
