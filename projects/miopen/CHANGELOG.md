@@ -169,6 +169,9 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
   split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
   between builds.
+* [Conv] Creating a convolution or GEMM descriptor no longer draws from `std::random_device`. On
+  CPUs where `RDSEED` often reports no entropy available, each draw cost tens of microseconds, so
+  applications that create a convolution descriptor per call paid it on every convolution.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
