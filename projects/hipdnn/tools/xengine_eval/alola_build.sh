@@ -99,6 +99,10 @@ grep -E "DVC output|not served|left out|dormant" "$work/$arch/configure.log" || 
 echo "== build (-j $jobs)"
 # ALL, not single targets: descriptor staging rides the ALL target.
 cmake --build "$build" -j "$jobs"
+# cmake --install only adds and overwrites: a descriptor folder renamed since the last build
+# (a new UED id) would stay installed beside its successor, and two copies of one model id
+# make the loader refuse both. Install into an empty prefix.
+rm -rf "$prefix"
 cmake --install "$build"
 
 plugins=$(dirname "$(find "$prefix" -name 'libhip_kernel_provider*.so' -path '*hipdnn_plugins/engines*' | head -1)")
