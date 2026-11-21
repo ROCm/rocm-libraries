@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2016-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2016-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,7 @@
 #include "device_strided_batch_matrix.hpp"
 #include "device_strided_batch_vector.hpp"
 #include "device_vector.hpp"
+#include "flush.hpp"
 #include "hipblas_init.hpp"
 #include "hipblas_matrix.hpp"
 #include "hipblas_test.hpp"
