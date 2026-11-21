@@ -35,7 +35,16 @@ def _load_check_module():
 
 check = _load_check_module()
 QUICK, STANDARD = check.CI_TIERS
-SPLIT_COMMAND = ["python", "-m", "pytest", "-p", check.SHARD_PLUGIN, "tests"]
+SPLIT_COMMAND = [
+    "python",
+    "-m",
+    "pytest",
+    "-p",
+    "rocke.tests.ctest_shard",
+    check.ACTIVATION_FLAG,
+    "tests",
+]
+SPLIT_RUNNER_COMMAND = ["python", "tests/run_golden.py", check.ACTIVATION_FLAG]
 WHOLE_COMMAND = ["python", "tests/run_golden.py"]
 
 
@@ -69,6 +78,7 @@ def test_registered_entries_reads_labels_and_sharding_of_rocke_entries() -> None
         [
             _test("rocke_pytest_core", ["quick", "standard"], SPLIT_COMMAND),
             _test("rocke_golden_static", ["quick"], WHOLE_COMMAND),
+            _test("rocke_golden_split", ["standard"], SPLIT_RUNNER_COMMAND),
             _test("hip_kernel_provider_tests", ["quick"], WHOLE_COMMAND),
         ]
     )
@@ -77,7 +87,16 @@ def test_registered_entries_reads_labels_and_sharding_of_rocke_entries() -> None
             "rocke_pytest_core", frozenset({"quick", "standard"}), True
         ),
         check.RegisteredEntry("rocke_golden_static", frozenset({"quick"}), False),
+        check.RegisteredEntry("rocke_golden_split", frozenset({"standard"}), True),
     ]
+
+
+def test_the_plugin_without_the_gtest_flag_does_not_split() -> None:
+    # Without the flag the plugin reads only ROCKE_TEST_SHARD, which CI does not
+    # set, so the entry runs whole on every shard.
+    plugin_only = ["python", "-m", "pytest", "-p", "rocke.tests.ctest_shard", "t"]
+    [entry] = check.registered_entries([_test("rocke_x", ["standard"], plugin_only)])
+    assert not entry.splits_across_shards
 
 
 def test_registered_entries_refuses_an_entry_listed_without_its_command() -> None:
@@ -157,10 +176,11 @@ def test_excluded_and_unmeasured_entries_do_not_count() -> None:
 
 
 # Lines in the form a CI job log shows `ctest -V` output: a timestamp, then the
-# CTest line. Entry 7 loads the shard plugin and ran its 1/4 share here.
+# CTest line. Entry 7 takes its shard from the gtest variables and ran its 1/4
+# share here.
 _SHARD_LOG = """\
 2026-11-17T11:50:01.3Z 7: Test command: /venv/bin/python "-m" "pytest" "-p" \
-"rocke.tests.ctest_shard" "./tests/core"
+"rocke.tests.ctest_shard" "--rocke-shard-from-gtest-env" "./tests/core"
 2026-11-17T11:50:02.0Z 7: rocke-ctest-shard: 3/4 (GTEST_SHARD_INDEX=3, \
 GTEST_TOTAL_SHARDS=4)
 2026-11-17T11:50:35.2Z  10/40 Test   #7: rocke_pytest_core ............   Passed   30.50 sec

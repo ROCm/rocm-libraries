@@ -6,8 +6,10 @@
 CI runs each test tier as a fixed number of shards inside a 30-minute step, and
 rocKE shares that step with the rest of the provider, so each tier gives rocKE a
 time budget per shard (``CI_TIERS``). Every shard starts every entry of its tier:
-an entry that loads the ``rocke.tests.ctest_shard`` plugin runs only its share of
-items, any other entry runs whole on every shard.
+an entry whose command takes its shard from the gtest variables
+(``rocke.tests.ci_shard.ACTIVATION_FLAG``: the ``rocke.tests.ctest_shard``
+pytest plugin's entries and the golden runners) runs only its share, any other
+entry runs whole on every shard.
 
 The check combines two inputs. The time each ``rocke_*`` entry costs when run
 whole, per operating system, comes from ``entry_times.json`` beside this file,
@@ -69,6 +71,7 @@ _SOURCE_PACKAGE_ROOT = Path(__file__).resolve().parents[1] / "platform" / "pytho
 if _SOURCE_PACKAGE_ROOT.is_dir() and str(_SOURCE_PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(_SOURCE_PACKAGE_ROOT))
 
+from rocke.tests.ci_shard import ACTIVATION_FLAG
 from rocke.tests.ctest_listing import list_ctest_entries
 
 __all__ = [
@@ -90,7 +93,6 @@ ENTRY_TIMES_PATH = Path(__file__).with_name("entry_times.json")
 
 # Only rocKE's entries count against rocKE's share of a shard.
 ROCKE_ENTRY_PREFIX = "rocke_"
-SHARD_PLUGIN = "rocke.tests.ctest_shard"
 # CI selects a tier with `-L '^<tier>$' -LE ex_gpu`.
 EXCLUDED_LABEL = "ex_gpu"
 STEP_LIMIT_SECONDS = 1800.0
@@ -222,7 +224,7 @@ def registered_entries(tests: Iterable[Mapping]) -> list[RegisteredEntry]:
             RegisteredEntry(
                 name=name,
                 labels=frozenset(properties.get("LABELS", ())),
-                splits_across_shards=SHARD_PLUGIN in test["command"],
+                splits_across_shards=ACTIVATION_FLAG in test["command"],
             )
         )
     return entries
@@ -327,7 +329,7 @@ def _whole_seconds_in_log(text: str) -> dict[str, float]:
     split, shard_count, seconds = set(), {}, {}
     for line in text.splitlines():
         if match := _COMMAND.search(line):
-            if SHARD_PLUGIN in match.group(2):
+            if ACTIVATION_FLAG in match.group(2):
                 split.add(match.group(1))
         elif match := _SHARD.search(line):
             shard_count[match.group(1)] = int(match.group(2))
