@@ -663,10 +663,11 @@ endif()
 # Heuristics of engines that bind their L1 models by declared UUID
 # ============================================================================
 # The ASM SDPA engine (AITER) binds its L1 models by a UUID declared in provider code
-# (RFC 0019 §4.1), so the models have no pack and must be delivered into the production
-# tree directly, each engine under its own folder. Declared ahead of descriptor-packaging
-# because the production pack wipes that tree and stages these files itself
-# (HIPKERNELPROVIDER_PRODUCT_STAGE_FILES); a separate copy would be deleted on repack.
+# (RFC 0019 §11.4, Open Question 7), so the models have no pack and must be delivered into
+# the production tree directly, each engine under its own folder. Declared ahead of
+# descriptor-packaging because the production pack wipes that tree and stages these files
+# itself (HIPKERNELPROVIDER_PRODUCT_STAGE_FILES); a separate copy would be deleted on
+# repack.
 #
 # HIPKERNELPROVIDER_DECLARED_MODEL_ENGINES names each such engine's folder; for each,
 # HIPKERNELPROVIDER_<folder>_DESCRIPTOR_SOURCE_DIR is its source tree and
