@@ -53,8 +53,8 @@ BenchmarkProblems:
     - TDMIterateMode: [0]
     - TDMSplit: [false]
     - LDSTrInst: [true]
-    - ScheduleIterAlg: [0, 4]
-    - InitCIterWmma: [0, 1]
+    - ScheduleIterAlg: [0]
+    - InitCIterWmma: [0]
     - ClusterDim: [[2, 2]]
     - ClusterLocalRead: [0]
     - GlobalSplitU: [-1]
@@ -67,8 +67,6 @@ BenchmarkProblems:
     - SourceSwap: [false]
     - Groups:
       - - MatrixInstruction: [16, 16, 128, 1, 1, 1, 4, 4, 1]
-        - MatrixInstruction: [16, 16, 128, 1, 1, 2, 2, 2, 2]
-        - MatrixInstruction: [16, 16, 128, 1, 1, 4, 1, 1, 4]
     BenchmarkFinalParameters:
     - ProblemSizes:
       - Exact: [1024, 1024, 1, 1024]

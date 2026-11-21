@@ -11,14 +11,17 @@ from config_harness import assert_assembles, emit_kernels_from_config
 
 pytestmark = pytest.mark.unit
 _CONFIG = Path(__file__).resolve().parents[1] / "common/gemm/gfx1250/cluster_entry_handoff.yaml"
+_CONFIGS = [_CONFIG, *sorted(_CONFIG.parent.glob("cluster_entry_handoff_part*.yaml"))]
 _LAYOUTS = {(1, 4), (2, 2), (4, 1)}
 
 
 @pytest.fixture(scope="module")
 def kernels():
-    results = emit_kernels_from_config(
-        _CONFIG, limit=12, arch="gfx1250", canonical=False, expected_fork_count=12,
-    )
+    results = []
+    for config in _CONFIGS:
+        results.extend(emit_kernels_from_config(
+            config, limit=1, arch="gfx1250", canonical=False, expected_fork_count=1,
+        ))
     assert len(results) == 12
     indexed = {}
     for name, source, error in results:
@@ -114,11 +117,12 @@ def test_nonpersistent_cluster_entry_reuses_prefetch_join(tmp_path, sia, depth_u
 @pytest.mark.parametrize("arch, skipped", [
     ("gfx942", True), ("gfx1250", False), ("gfx1250-strict", False),
 ])
-def test_cluster_regression_arch_selection(monkeypatch, arch, skipped):
-    common = _CONFIG.parents[2]
+@pytest.mark.parametrize("config", _CONFIGS, ids=lambda path: path.stem)
+def test_cluster_regression_arch_selection(monkeypatch, arch, skipped, config):
+    common = config.parents[2]
     monkeypatch.syspath_prepend(str(common))
     from config_helpers import configMarks
-    marks = configMarks(str(_CONFIG),
+    marks = configMarks(str(config),
                         str(common.parent), [arch])
     assert any(mark.name == "skip" for mark in marks) == skipped
     assert any(mark.name == "common" for mark in marks)
