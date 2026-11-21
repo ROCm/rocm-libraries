@@ -60,6 +60,7 @@ constexpr int64_t Y_UID = 3;
 struct GraphSpec
 {
     data_objects::DataType dtype = data_objects::DataType::FLOAT;
+    data_objects::DataType computeType = data_objects::DataType::FLOAT;
     bool channelsLast = false;
     int64_t n = 2;
     int64_t c = 32;
@@ -142,7 +143,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     nodes.push_back(
         data_objects::CreateNodeDirect(builder,
                                        "conv_fwd",
-                                       spec.dtype,
+                                       spec.computeType,
                                        data_objects::NodeAttributes::ConvolutionFwdAttributes,
                                        attributes.Union()));
 
@@ -282,6 +283,11 @@ TEST(TestHipConvFwdDw2dRdnaGraphMatcher, AcceptsDepthwise2dAnd1d)
 
 TEST(TestHipConvFwdDw2dRdnaGraphMatcher, RefusesWhatItCannotServe)
 {
+    GraphSpec halfCompute;
+    halfCompute.dtype = data_objects::DataType::HALF;
+    halfCompute.computeType = data_objects::DataType::HALF;
+    EXPECT_FALSE(matches(halfCompute)) << "half compute type";
+
     GraphSpec dense;
     dense.groups = 1;
     EXPECT_FALSE(matches(dense)) << "non-depthwise";
