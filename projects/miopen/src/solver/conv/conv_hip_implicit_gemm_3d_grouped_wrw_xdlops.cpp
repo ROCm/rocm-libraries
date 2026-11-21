@@ -424,4 +424,3 @@ ConvSolution ConvHipImplicitGemm3DGroupWrwXdlops::GetSolution(
 } // namespace conv
 } // namespace solver
 } // namespace miopen
-
