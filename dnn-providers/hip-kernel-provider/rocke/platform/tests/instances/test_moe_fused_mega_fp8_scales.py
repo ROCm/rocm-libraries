@@ -28,13 +28,12 @@ Checks:
   indices are affine in the workgroup ids, so more than one workgroup along
   each axis shows a wrong tile base); and the per-output factors of a lane
   come from one packed ``<4 x float>`` multiply.
-* On a gfx950 GPU, the whole kernel (gate and up, SiLU, the dynamic fp8
-  requantization of the hidden activation, down and the weighted reduce into
-  Y), with A scales that differ from row to row within every MFMA tile,
-  matches a float reference within the runbook GEMM tolerance. gfx942 is not
-  enabled: the check has not run green there, and the kernel requantizes the
-  hidden activation to the OCP e4m3 bound (448), above the largest value of
-  the e4m3 FNUZ format gfx942 converts to (240).
+* On a gfx942 or gfx950 GPU, the whole kernel (gate and up, SiLU, the
+  dynamic fp8 requantization of the hidden activation, down and the weighted
+  reduce into Y), with A scales that differ from row to row within every MFMA
+  tile, matches a float reference within the runbook GEMM tolerance. The
+  reference requantizes the hidden activation to the e4m3 encoding the target
+  converts to (FNUZ on gfx942, OCP on gfx950), scaled to its largest value.
 """
 
 from __future__ import annotations
@@ -47,16 +46,22 @@ import pytest
 from rocke.core.backend import import_engine
 from rocke.dispatch.families.moe import MoeRequest, dispatch_moe
 from rocke.helpers import compile_kernel
+from rocke.helpers.fp8_encoding import FP8_E4M3_FNUZ, fp8_element_format
+from rocke.helpers.quant import quant_max_abs
 from rocke.instances.common.moe_fused_mega_fp8 import (
     AMAX_FLOOR,
-    FP8_MAX,
     GROUP_K,
     FusedMegaKernelSpecFp8,
     build_moe_fused_mega_gemm_fp8,
     moe_fused_mega_fp8_grid,
     moe_fused_mega_fp8_signature,
 )
-from rocke.numeric.fp8 import fp8e4m3_decode_table, fp8e4m3_round
+from rocke.numeric.fp8 import (
+    fp8e4m3_decode_table,
+    fp8e4m3_round,
+    fp8e4m3fnuz_decode_table,
+    fp8e4m3fnuz_round,
+)
 from rocke.tests.engines import available_engines, lower_with_engine
 from rocke.tests.fp8_gemm_checks import (
     EXACT_OPERAND_VALUES,
@@ -66,10 +71,7 @@ from rocke.tests.fp8_gemm_checks import (
 from rocke.tests.gpu import current_device_arch_in, launch_with_buffers
 from rocke.tests.llvm_ir import KernelIR
 
-_HOST_ARCHS = ("gfx942", "gfx950")
-# Enable gfx942 once the GPU check has run green there (see the module
-# docstring).
-_GPU_ARCHS = ("gfx950",)
+_ARCHS = ("gfx942", "gfx950")
 
 # The smallest shape the shipped specs tile: one 256-wide intermediate tile
 # and one 256-wide hidden output tile, two 128-wide groups along each.
@@ -174,7 +176,7 @@ class _KernelIR(KernelIR):
         return sorted(found)
 
 
-@pytest.mark.parametrize("arch", _HOST_ARCHS)
+@pytest.mark.parametrize("arch", _ARCHS)
 def test_each_stage1_output_is_scaled_with_its_own_row(arch):
     """Every gate and up output is scaled, in every hidden group, with the A
     scale of the row it is stored to and the weight scale of its column.
@@ -261,7 +263,7 @@ def gpu_arch():
     """The current GPU's arch if this check is enabled for it; skip
     otherwise, or fail when ``ROCKE_REQUIRE_<ARCH>=1`` names an arch the GPU
     is not."""
-    return current_device_arch_in(_GPU_ARCHS, subject="the fp8 fused-MoE kernel")
+    return current_device_arch_in(_ARCHS, subject="the fp8 fused-MoE kernel")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -354,15 +356,19 @@ def _grouped_matmul(
     return out
 
 
-def _reference(case: _MoeCase, tile_m: int) -> np.ndarray:
-    """``Y`` as the kernel defines it, per ``tile_m``-row block of one expert:
-    gate and up with each row's own A scale; ``h = silu(gate) * up``; ``h``
-    requantized to e4m3 with one scale per 128-wide intermediate group,
-    ``amax / FP8_MAX`` over the block's rows (amax floored at
-    ``AMAX_FLOOR``), in f32 as the kernel does; down with that scale and the
-    down weight scale; then ``Y[token] += weight * out`` for the block's real
-    rows."""
-    fp8_values = fp8e4m3_decode_table()
+def _reference(case: _MoeCase, tile_m: int, arch: str) -> np.ndarray:
+    """``Y`` as the kernel defines it on ``arch``, per ``tile_m``-row block of
+    one expert: gate and up with each row's own A scale; ``h = silu(gate) *
+    up``; ``h`` requantized to the e4m3 encoding ``arch`` converts to, with one
+    scale per 128-wide intermediate group, ``amax / largest value`` over the
+    block's rows (amax floored at ``AMAX_FLOOR``), in f32 as the kernel does;
+    down with that scale and the down weight scale; then ``Y[token] += weight
+    * out`` for the block's real rows."""
+    if fp8_element_format("fp8e4m3", arch) == FP8_E4M3_FNUZ:
+        fp8_values, fp8_round = fp8e4m3fnuz_decode_table(), fp8e4m3fnuz_round
+    else:
+        fp8_values, fp8_round = fp8e4m3_decode_table(), fp8e4m3_round
+    fp8_max = np.float32(quant_max_abs("fp8e4m3", arch=arch))
     y = np.zeros((case.tokens, _HIDDEN))
     for block, expert in enumerate(case.block_expert):
         rows = slice(block * tile_m, (block + 1) * tile_m)
@@ -375,8 +381,8 @@ def _reference(case: _MoeCase, tile_m: int) -> np.ndarray:
         amax = np.maximum(
             np.abs(hidden_groups).max(axis=(0, 2)), np.float32(AMAX_FLOOR)
         )
-        h_scale = amax * (np.float32(1.0) / np.float32(FP8_MAX))
-        codes = fp8e4m3_round(hidden_groups * (np.float32(1.0) / h_scale)[:, None])
+        h_scale = amax * (np.float32(1.0) / fp8_max)
+        codes = fp8_round(hidden_groups * (np.float32(1.0) / h_scale)[:, None])
         h_q = fp8_values[codes].reshape(tile_m, -1).astype(np.float64)
         h_scale_rows = np.broadcast_to(
             h_scale.astype(np.float64), (tile_m, h_scale.size)
@@ -450,7 +456,7 @@ def test_row_scales_on_gpu(gpu_arch):
     spec = _shipped_spec(gpu_arch)
     case = _routed_case(spec.tile_m, tokens=_TOKENS, experts=_EXPERTS, seed=3128)
     got = _run_on_gpu(gpu_arch, spec, case)
-    want = _reference(case, spec.tile_m)
+    want = _reference(case, spec.tile_m, gpu_arch)
     assert np.isfinite(got).all()
     error = np.abs(got - want).max()
     assert error <= GEMM_TOLERANCE * np.abs(want).max(), error

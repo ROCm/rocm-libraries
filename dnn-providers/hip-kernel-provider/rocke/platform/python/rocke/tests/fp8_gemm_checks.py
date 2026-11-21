@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from ..helpers.mx_scale import BF8_E5M2_FNUZ, FP8_E4M3_FNUZ
+from ..helpers.fp8_encoding import BF8_E5M2_FNUZ, FP8_E4M3_FNUZ
 from ..instances.common.mx_gemm import mx_gemm_element_format
 from ..numeric.fp8 import bf8e5m2_encode, fp8e4m3_encode
 
