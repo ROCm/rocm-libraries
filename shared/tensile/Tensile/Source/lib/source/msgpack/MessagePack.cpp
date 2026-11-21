@@ -28,6 +28,8 @@
 
 #include <Tensile/msgpack/Loading.hpp>
 
+#include <Tensile/LongPath.hpp>
+
 #include <fstream>
 
 namespace Tensile
@@ -76,7 +78,7 @@ namespace Tensile
         msgpack::object_handle result;
         try
         {
-            std::ifstream in(filename, std::ios::in | std::ios::binary);
+            std::ifstream in(longPathSafe(filename), std::ios::in | std::ios::binary);
             if(!in.is_open())
             {
                 if(Debug::Instance().printDataInit())

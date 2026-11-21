@@ -32,6 +32,8 @@ if( BUILD_WITH_TENSILE )
       # use of tensile based functions (gemm)
       atomics_mode_gtest.cpp
       get_solutions_gtest.cpp
+      # Tensile library loading from paths past the Windows MAX_PATH limit
+      long_path_gtest.cpp
 
   )
 endif()

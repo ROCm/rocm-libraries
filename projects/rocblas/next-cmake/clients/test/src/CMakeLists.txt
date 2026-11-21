@@ -8,7 +8,8 @@ if(ROCBLAS_ENABLE_TENSILE)
     rocblas-test
     PRIVATE "${_CMAKE_CURRENT_SOURCE_DIR}/../multiheaded_gtest.cpp"
             "${_CMAKE_CURRENT_SOURCE_DIR}/../atomics_mode_gtest.cpp"
-            "${_CMAKE_CURRENT_SOURCE_DIR}/../get_solutions_gtest.cpp")
+            "${_CMAKE_CURRENT_SOURCE_DIR}/../get_solutions_gtest.cpp"
+            "${_CMAKE_CURRENT_SOURCE_DIR}/../long_path_gtest.cpp")
 endif()
 
 target_sources(
