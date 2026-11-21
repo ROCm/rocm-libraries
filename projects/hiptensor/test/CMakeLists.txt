@@ -528,6 +528,7 @@ set(_HIPTENSOR_DEVICE_TESTS
   "bilinear_contraction_with_unary_ops_test|NONE"
   "scale_contraction_with_unary_ops_test|NONE"
   "elementwise_output_strides_test|NONE"
+  "elementwise_trinary_op_order_test|NONE"
   "rank2_elementwise_permute_test|02_elementwise/permutation/rank2_test_params.yaml"
   "rank3_elementwise_permute_test|02_elementwise/permutation/rank3_test_params.yaml"
   "rank4_elementwise_permute_test|02_elementwise/permutation/rank4_test_params.yaml"
