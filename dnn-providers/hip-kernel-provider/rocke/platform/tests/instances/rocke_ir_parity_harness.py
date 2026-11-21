@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import contextlib
+from collections.abc import Callable
 from pathlib import Path
 
 from rocke.core.ir_golden import (
@@ -2442,8 +2443,10 @@ def run(
     *,
     flavor: str,
     shards: set[str] | None = None,
+    owns_case: Callable[[str], bool] | None = None,
 ):
-    """Lower every case (or only those in ``shards``) at ``flavor``."""
+    """Lower every case (or only those in ``shards``, and only those whose id
+    ``owns_case`` accepts) at ``flavor``."""
     return run_golden_cases(
         cases(),
         flavor,
@@ -2451,6 +2454,7 @@ def run(
         shards=shards,
         ir_dir=ir_dir,
         ir_name=safe,
+        owns_case=owns_case,
     )
 
 
@@ -2473,13 +2477,24 @@ def write_golden(golden_dir: Path, shards: set[str] | None = None) -> dict:
     return doc
 
 
-def check_golden(golden_path: Path, flavor: str | None = None) -> list[str]:
+def check_golden(
+    golden_path: Path,
+    flavor: str | None = None,
+    owns_case: Callable[[str], bool] | None = None,
+) -> list[str]:
     """Compare a fresh run against the golden sub-doc(s). Empty list == OK.
 
     With no ``flavor``, every flavor in :data:`GOLDEN_FLAVORS` is checked, not
-    just the one this host autodetects; see :func:`rocke.core.ir_golden.check_golden`.
+    just the one this host autodetects. With ``owns_case``, only the cases
+    whose id it accepts are lowered and compared; see
+    :func:`rocke.core.ir_golden.check_golden`.
     """
-    return _check_golden(golden_path, lambda fl: run(flavor=fl), flavor)
+    return _check_golden(
+        golden_path,
+        lambda fl: run(flavor=fl, owns_case=owns_case),
+        flavor,
+        owns_case,
+    )
 
 
 def main():

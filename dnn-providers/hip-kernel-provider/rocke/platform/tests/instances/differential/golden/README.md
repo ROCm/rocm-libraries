@@ -39,9 +39,14 @@ python3 run_diff.py --mode ir --canonical --python-only --check-golden
 every flavor (the flavor is an argument to lowering). Both commands must print `GOLDEN OK`
 (exit 0). A config whose hash changed or is gone fails (`GOLDEN MISMATCH`), and so does a
 config with output and no blessed hash (`GOLDEN UNBLESSED`), since no check covers it until
-it is blessed; each prints the re-record command for its families. CI runs exactly these
-from the installed test tree, as the quick-tier CTest entries `rocke_differential_golden_ll`
-and `rocke_differential_golden_canonical`.
+it is blessed; each prints the re-record command for its families.
+
+CI runs these from the installed test tree as the CTest entries
+`rocke_differential_golden_ll` and `rocke_differential_golden_canonical`, with
+`--rocke-shard-from-gtest-env`: each CI shard checks only the families it owns under the
+`rocke.tests.ci_shard` rule (the pytest entries' rule), from `GTEST_SHARD_INDEX` and
+`GTEST_TOTAL_SHARDS`, so the shards of one run check every family once. Without those
+variables (or `ROCKE_TEST_SHARD`) the flag checks every family.
 
 `GOLDEN OK` answers *"does output match the blessed hashes"* and nothing else; it is not the
 parity verdict. The byte-identity gate (`tools/check_byte_identity.py`, or `run_diff.py`

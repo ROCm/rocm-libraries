@@ -117,6 +117,7 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
     compare,
 )
 from rocke.core.golden_file import rerecord_hint
+from rocke.tests.ci_shard import ACTIVATION_FLAG, Shard, current_shard, header_line
 
 # The differential golden's name in the golden index, printed in its re-record
 # command (which re-records both golden files, every mode and flavor).
@@ -1229,11 +1230,25 @@ def _main():
         "Python reference hashes, and the flavor is a lowering argument, so "
         "any host can record or check every flavor this way.",
     )
+    ap.add_argument(
+        ACTIVATION_FLAG,
+        dest="shard_from_gtest_env",
+        action="store_true",
+        help="with --python-only --check-golden: check only the families of this "
+        "CI shard, from ROCKE_TEST_SHARD or else GTEST_SHARD_INDEX and "
+        "GTEST_TOTAL_SHARDS (rocke.tests.ci_shard); without either, every family",
+    )
     args = ap.parse_args()
     if args.record_golden and args.check_golden:
         ap.error("--record-golden and --check-golden are exclusive")
     if args.python_only and not (args.record_golden or args.check_golden):
         ap.error("--python-only only runs the golden record / check")
+    if args.shard_from_gtest_env and not (args.python_only and args.check_golden):
+        ap.error(f"{ACTIVATION_FLAG} needs --python-only --check-golden")
+    try:
+        shard = current_shard(from_gtest=True) if args.shard_from_gtest_env else None
+    except ValueError as error:
+        ap.error(f"rocke-ctest-shard: {error}")
 
     global PY_REF_ROOT, SHIM_DIR
     if args.pyroot:
@@ -1275,15 +1290,21 @@ def _main():
             # empty the section. A typo in --only must not do either.
             print(f"\nNO_FAMILIES: {GATE_FAIL['NO_FAMILIES']}")
             return 1
+        run_fams = fams
+        if args.shard_from_gtest_env:
+            print(header_line(shard))
+        if shard is not None:
+            print(shard.split_line(name for name, _ in fams))
+            run_fams = [(name, d) for name, d in fams if shard.owns(name)]
         status = 0
         for requested in flavors:
             flavor = pin_llvm_flavor(requested)
             print(
-                f"mode={args.mode}  flavor={flavor}  families={len(fams)}  "
+                f"mode={args.mode}  flavor={flavor}  families={len(run_fams)}  "
                 f"jobs={jobs}  python-only"
             )
             cur, errors = python_reference_families(
-                fams, args.mode, args.canonical, jobs
+                run_fams, args.mode, args.canonical, jobs
             )
             if errors:
                 print("\n=== PYTHON REFERENCE FAILURES ===")
@@ -1294,7 +1315,7 @@ def _main():
                 )
                 status = 1
                 continue
-            status |= _golden_step(args, kind, flavor, cur, scope, [], fams)
+            status |= _golden_step(args, kind, flavor, cur, scope, [], fams, shard)
         return status
 
     # A golden is per flavor, so its runs always pin one; a plain parity run
@@ -1406,9 +1427,11 @@ def _misrouted_families(kind, flavor, fams) -> list[str]:
     return sorted(found)
 
 
-def _golden_step(args, kind, flavor, cur, scope, failures, fams):
+def _golden_step(args, kind, flavor, cur, scope, failures, fams, shard=None):
     """Record `cur` into the golden, or check it against the golden, one
-    golden file at a time."""
+    golden file at a time. `fams` are the families the run selected; with a
+    `shard`, `cur` holds only the families that shard owns, and only those are
+    checked."""
     files = _golden_files(args, fams)
     if args.check_golden and len(files) > 1:
         sections = {
@@ -1419,7 +1442,8 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams):
             print("\nGOLDEN CONFLICT: blessed in two golden files: " + ", ".join(twice))
             return 1
     if args.check_golden and not _explicit_golden_file(args):
-        misrouted = _misrouted_families(kind, flavor, fams)
+        owned = [f for f in fams if shard is None or shard.owns(f[0])]
+        misrouted = _misrouted_families(kind, flavor, owned)
         if misrouted:
             print("\nGOLDEN MISROUTED: blessed outside their golden file:")
             for line in misrouted:
@@ -1428,13 +1452,29 @@ def _golden_step(args, kind, flavor, cur, scope, failures, fams):
     status = 0
     for golden_file, names in files.items():
         file_scope = None if scope is None else [f for f in scope if f in names]
-        if file_scope == []:
-            continue
         file_cur = {f: v for f, v in cur.items() if f in names}
+        if shard is not None:
+            file_scope = _shard_scope(shard, golden_file, file_cur, file_scope)
+        if file_scope == []:
+            if shard is not None:
+                print(f"\nno family of {golden_file} falls in this shard")
+            continue
         status |= _golden_step_file(
             args, kind, flavor, golden_file, file_cur, file_scope, failures
         )
     return status
+
+
+def _shard_scope(
+    shard: Shard, golden_file: Path, cur: dict, scope: list[str] | None
+) -> list[str]:
+    """The families of `golden_file` a sharded check compares: those `shard`
+    owns among `scope`, or, with no `scope`, among every family the file names
+    or the run produced. The shards of one run thus split exactly what an
+    unsharded check compares."""
+    if scope is None:
+        scope = GoldenStore.load(golden_file).families() | set(cur)
+    return sorted(family for family in scope if shard.owns(family))
 
 
 def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):

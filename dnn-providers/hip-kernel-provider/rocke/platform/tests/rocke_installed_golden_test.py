@@ -15,11 +15,17 @@ the ``rocke`` package, the ``rocke_ir_parity_harness`` module, and the golden
 shard directory under ``golden/``. It fixes up ``sys.path`` before importing anything, so
 RockCI can execute it from a staged test artifact:
 
-  python rocke_installed_golden.py
+  python rocke_installed_golden.py [--rocke-shard-from-gtest-env]
+
+With ``--rocke-shard-from-gtest-env`` it checks only the cases of its CI shard
+(``rocke.tests.ci_shard``: ``ROCKE_TEST_SHARD``, else ``GTEST_SHARD_INDEX`` and
+``GTEST_TOTAL_SHARDS``); each case falls in exactly one shard, so the shards of
+one run together check every case. Without either variable it checks them all.
 """
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
@@ -89,19 +95,46 @@ def _find_golden() -> Path:
     )
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     _add_installed_python_paths()
 
-    from rocke.core.ir_golden import drift_hint
+    from rocke.core.ir_golden import drift_hint, golden_case_ids, load_golden
+    from rocke.tests.ci_shard import ACTIVATION_FLAG, current_shard, header_line
     from rocke_ir_parity_harness import (
         GOLDEN_FLAVORS,
         GOLDEN_NAME,
+        cases,
         check_golden,
     )
 
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        ACTIVATION_FLAG,
+        dest="shard_from_gtest_env",
+        action="store_true",
+        help="check only this CI shard's cases",
+    )
+    arguments = parser.parse_args(argv)
+    try:
+        shard = (
+            current_shard(from_gtest=True) if arguments.shard_from_gtest_env else None
+        )
+    except ValueError as error:
+        parser.error(f"rocke-ctest-shard: {error}")
+
     golden = _find_golden()
     flavors = ", ".join(GOLDEN_FLAVORS)
-    drift = check_golden(golden)
+    owns_case = None
+    if arguments.shard_from_gtest_env:
+        print(header_line(shard))
+    if shard is not None:
+        # A case only the golden still names is checked (reported missing) by
+        # the shard that owns its id, like every other case.
+        case_ids = {case["case_id"] for case in cases()}
+        case_ids |= golden_case_ids(load_golden(golden))
+        print(shard.split_line(case_ids))
+        owns_case = shard.owns
+    drift = check_golden(golden, owns_case=owns_case)
     if drift:
         print(f"rocKE installed golden gate: FAIL ({flavors})\n  " + "\n  ".join(drift))
         print(drift_hint(GOLDEN_NAME, drift))

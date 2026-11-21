@@ -208,6 +208,13 @@ def test_a_family_without_its_fingerprint_is_stale():
     assert store.stale_fingerprints() == ["conv", "gone"]
 
 
+def test_families_names_every_section_and_the_fingerprints():
+    store = _store()
+    store.ir_canonical["canon_only"] = {"0": "c"}
+    store.recorded_fingerprints = {"gone": "x"}
+    assert store.families() == {"conv", "gemm", "canon_only", "gone"}
+
+
 def test_a_malformed_fingerprint_section_is_refused(tmp_path):
     golden = _write(
         tmp_path / "g.json", '{"schema": 2, "ll": {}, "fingerprint": {"conv": "x"}}'

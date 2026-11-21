@@ -193,6 +193,10 @@ class GoldenStore:
             if self.recorded_fingerprints.get(family) != computed.get(family)
         )
 
+    def families(self) -> set[str]:
+        """Every family the file names: in any section or the fingerprints."""
+        return set(self.fingerprints()) | set(self.recorded_fingerprints)
+
     # ---- sections ---------------------------------------------------------
 
     def section(self, kind: str, flavor: str | None) -> FamilyShas:

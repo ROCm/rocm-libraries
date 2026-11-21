@@ -38,6 +38,7 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent / "differential"))
 
 import run_diff  # noqa: E402 -- after sys.path shim
+from rocke.tests import ci_shard
 
 
 class TestGoldenRouting(unittest.TestCase):
@@ -234,6 +235,104 @@ class TestGoldenRoutingGates(GoldenGateTree):
         ):
             section = run_diff.GoldenStore.load(path).section(run_diff.LL, "llvm23")
             self.assertEqual(section, expected)
+
+
+class TestShardedGoldenCheck(GoldenGateTree):
+    """A golden check with the gtest shard flag checks only its CI shard's
+    families: the shards of one run check every family exactly once."""
+
+    SHARDS = 4
+
+    def setUp(self):
+        super().setUp()
+        # Enough families that every one of the four shards owns some.
+        for index in range(12):
+            name = f"plat{index}"
+            (self.parity / f"{name}_emit.py").write_text("")
+            self.current[name] = {"0": f"{name}-0"}
+        self.ran: list[set[str]] = []
+
+    def main(self, step, *extra, shard=None):
+        """main() under a clean environment holding only the gtest pair for
+        ``shard`` (none when ``shard`` is None); records the families run."""
+        cleared = {name: "" for name in ci_shard.CHILD_ENV_EXCLUDED}
+        if shard is not None:
+            cleared[ci_shard.GTEST_INDEX_ENV] = str(shard)
+            cleared[ci_shard.GTEST_TOTAL_ENV] = str(self.SHARDS)
+        with mock.patch.dict(os.environ, cleared):
+            return super().main(step, *extra)
+
+    def reference_families(self, fams, *rest):
+        self.ran.append({name for name, _ in fams})
+        return super().reference_families(fams, *rest)
+
+    def bless_all(self):
+        self.bless(
+            self.golden, {n: v for n, v in self.current.items() if n != "libfam"}
+        )
+        self.bless(self.lib_golden, {"libfam": self.current["libfam"]})
+
+    def owner(self, family):
+        [owner] = [
+            index
+            for index in range(self.SHARDS)
+            if ci_shard.Shard(f"{index}/{self.SHARDS}").owns(family)
+        ]
+        return owner
+
+    def test_the_shards_of_a_run_check_each_family_once(self):
+        self.bless_all()
+        for index in range(self.SHARDS):
+            code, out = self.main(
+                "--check-golden", ci_shard.ACTIVATION_FLAG, shard=index
+            )
+            self.assertEqual(code, 0, out)
+            self.assertIn(f"rocke-ctest-shard: {index}/{self.SHARDS} (GTEST", out)
+        self.assertTrue(all(self.ran), self.ran)
+        self.assertEqual(set().union(*self.ran), set(self.current))
+        self.assertEqual(sum(map(len, self.ran)), len(self.current))
+
+    def test_a_drift_fails_only_the_shard_that_owns_its_family(self):
+        self.bless_all()
+        self.current["plat3"] = {"0": "drifted"}
+        failed = [
+            index
+            for index in range(self.SHARDS)
+            if self.main("--check-golden", ci_shard.ACTIVATION_FLAG, shard=index)[0]
+        ]
+        self.assertEqual(failed, [self.owner("plat3")])
+
+    def test_a_blessed_family_without_an_emitter_is_missing_in_one_shard(self):
+        self.bless_all()
+        store = run_diff.GoldenStore.load(self.golden)
+        store.record(run_diff.LL, "llvm23", {"gone": {"0": "g0"}}, families=["gone"])
+        store.save(self.golden)
+        outcomes = [
+            self.main("--check-golden", ci_shard.ACTIVATION_FLAG, shard=index)
+            for index in range(self.SHARDS)
+        ]
+        missing = [index for index, (_, out) in enumerate(outcomes) if "gone[0]" in out]
+        self.assertEqual(missing, [self.owner("gone")])
+        self.assertEqual(outcomes[self.owner("gone")][0], 1)
+
+    def test_without_the_shard_variables_the_flag_checks_every_family(self):
+        self.bless_all()
+        code, out = self.main("--check-golden", ci_shard.ACTIVATION_FLAG)
+        self.assertEqual(code, 0, out)
+        self.assertIn("rocke-ctest-shard: off", out)
+        self.assertEqual(self.ran, [set(self.current)])
+
+    def test_the_shard_variables_alone_do_not_shard_a_check(self):
+        self.bless_all()
+        code, out = self.main("--check-golden", shard=1)
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.ran, [set(self.current)])
+
+    def test_the_flag_is_refused_outside_a_python_only_check(self):
+        refused = self.assertRaises(SystemExit)
+        with refused, contextlib.redirect_stderr(io.StringIO()):
+            self.main("--record-golden", ci_shard.ACTIVATION_FLAG, shard=0)
+        self.assertEqual(refused.exception.code, 2)
 
 
 class TestUnblessedConfigs(GoldenGateTree):

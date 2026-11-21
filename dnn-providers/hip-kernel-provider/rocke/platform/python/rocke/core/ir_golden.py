@@ -64,6 +64,7 @@ __all__ = [
     "compare",
     "drift_families",
     "drift_hint",
+    "golden_case_ids",
     "golden_document",
     "golden_main",
     "golden_shard",
@@ -250,10 +251,33 @@ def check_golden_flavors(golden_path: Path) -> list[str]:
     return _flavor_set_errors(doc)
 
 
+def golden_case_ids(doc: Mapping[str, Any]) -> set[str]:
+    """Every case id a loaded golden holds, in any flavor or section."""
+    return {
+        cid
+        for sub in doc.get("flavors", {}).values()
+        for section in _SECTIONS
+        for cid in sub.get(section, {})
+    }
+
+
+def _cases_owned(
+    sub: Mapping[str, Any], owns_case: Callable[[str], bool]
+) -> dict[str, Any]:
+    """``sub`` with only the cases ``owns_case`` accepts, in every section."""
+    return {
+        section: {
+            cid: rec for cid, rec in sub.get(section, {}).items() if owns_case(cid)
+        }
+        for section in _SECTIONS
+    }
+
+
 def check_golden(
     golden_path: Path,
     run: Callable[[str], Mapping[str, Any]],
     flavor: str | None = None,
+    owns_case: Callable[[str], bool] | None = None,
 ) -> list[str]:
     """Compare fresh runs against a golden's flavor sub-documents.
 
@@ -261,9 +285,12 @@ def check_golden(
     in the golden's shape. With no ``flavor``, the golden's flavor documents
     are checked first (see :func:`check_golden_flavors`) and then every entry
     of :data:`GOLDEN_FLAVORS` is compared. With a ``flavor``, only that
-    flavor is compared. Drift strings are prefixed with the flavor when more
-    than one is checked. ``golden_path`` may be a file or a shard directory
-    (see :func:`load_golden`). Empty list == OK.
+    flavor is compared. With ``owns_case``, only the case ids it accepts are
+    compared, on both sides, so checks whose predicates split the case ids
+    between them together compare what one check without it does. Drift
+    strings are prefixed with the flavor when more than one is checked.
+    ``golden_path`` may be a file or a shard directory (see
+    :func:`load_golden`). Empty list == OK.
     """
     try:
         doc = load_golden(golden_path)
@@ -287,7 +314,11 @@ def check_golden(
             )
             continue
         prefix = "" if len(wanted) == 1 else f"[{fl}] "
-        errors.extend(prefix + e for e in compare(base, run(fl)))
+        current = run(fl)
+        if owns_case is not None:
+            base = _cases_owned(base, owns_case)
+            current = _cases_owned(current, owns_case)
+        errors.extend(prefix + e for e in compare(base, current))
     return errors
 
 
@@ -328,8 +359,10 @@ def run_golden_cases(
     shards: set[str] | None = None,
     ir_dir: Path | None = None,
     ir_name: Callable[[str], str] | None = None,
+    owns_case: Callable[[str], bool] | None = None,
 ) -> dict[str, Any]:
-    """Lower every case (or only those in ``shards``) at ``flavor``.
+    """Lower every case (or only those in ``shards``, and only those whose id
+    ``owns_case`` accepts) at ``flavor``.
 
     Returns one flavor's golden sub-document: ``cases`` maps each case id to
     its record, and a case that raises is recorded under
@@ -346,6 +379,8 @@ def run_golden_cases(
     for case in cases:
         cid = case["case_id"]
         if shards is not None and golden_shard(cid) not in shards:
+            continue
+        if owns_case is not None and not owns_case(cid):
             continue
         try:
             rec, llvm = lower(case, flavor)
