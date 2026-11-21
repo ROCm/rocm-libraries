@@ -1394,8 +1394,12 @@ TEST(TestSettingsParser, RejectsATopLevelKeyThatIsNoTable)
         "[conv_dgrad_toleranc.half]\nlambda = 9.0\n",
         "[conv_wrw_tolerance_half]\nlambda = 9.0\n",
         "[[tolerance_override]]\nfilters = [\"*\"]\natol = 1.0\nrtol = 1.0\n",
-        "[[validator_override]]\nfilters = [\"*\"]\ntensors = [\"*\"]\nvalidator = "
-        "\"rms\"\nrms_threshold = 1e-4\n",
+        R"([[validator_override]]
+filters = ["*"]
+tensors = ["*"]
+validator = "rms"
+rms_threshold = 1e-4
+)",
         "[[test_skip]]\nfilters = [\"*\"]\nreason = \"x\"\n",
     };
     for(const auto& text : bad)
