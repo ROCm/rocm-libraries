@@ -59,6 +59,26 @@ make tile_example_gemm_tdm_data_cache_prefetch_staged -j`nproc`
 ```
 This will result in an executable `build/bin/tile_example_gemm_basic` & `build/bin/tile_example_gemm_universal`
 
+### BF16 GEMM with a permuted output store (gfx950)
+
+`tile_example_gemm_permute` computes `A[t,b,k] * W[k,d,h]` (summed over `k`) and writes
+`Y[h,b,t,d]` directly. It splits the dense GEMM column as `n = d * H + h`, accumulates in
+FP32, then uses the mainloop's LDS to regroup rounded BF16 values into 16-byte stores.
+There is no global intermediate and no change to library dispatch.
+
+Configure with `GPU_TARGETS=gfx950`, CK examples enabled, and the rocBLAS development package
+available for the reference. From the CK build directory:
+
+```sh
+cmake --build . --target tile_example_gemm_permute
+./bin/tile_example_gemm_permute               # one row and a partial second time tile
+./bin/tile_example_gemm_permute --benchmark   # also check and time a larger synthetic case
+```
+
+The driver compares every output bit with a dense rocBLAS GEMM followed by a separate layout copy
+and checks output guards. The benchmark reports both medians; eliminating the copy does not
+guarantee a speedup.
+
 ## example
 ```
 args:
