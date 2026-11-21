@@ -176,6 +176,18 @@ namespace Tensile
                 std::lock_guard<std::mutex> lock(*solutionsGuard);
                 if(hardware == nullptr)
                 {
+                    // Preloaded at deserialization time, before any hardware is known. Still
+                    // record the code object file wherever it does not depend on the hardware:
+                    // solutions in this library can also be reached by index (problem override
+                    // files, explicit solution indices) without passing through
+                    // findBestSolution/findAllSolutions, which would otherwise set it, and
+                    // their code object would never be loaded.
+                    for(auto& i : mLibrary->solutions)
+                    {
+                        auto coFile = getCodeObjectFileName(std::string(), *i.second);
+                        if(!coFile.empty())
+                            i.second->codeObjectFilename = coFile;
+                    }
                     masterSolutions->insert(mLibrary->solutions.begin(), mLibrary->solutions.end());
                 }
                 else
@@ -199,11 +211,16 @@ namespace Tensile
         std::string getCodeObjectFileName(Hardware const&   hardware,
                                           MySolution const& solution) const
         {
+            return getCodeObjectFileName(hardware.archName(), solution);
+        }
+
+        // Returns an empty string if the name depends on the architecture and arch is empty.
+        std::string getCodeObjectFileName(std::string arch, MySolution const& solution) const
+        {
             std::string coFileDependency = filePrefix;
 
             if(solution.isSourceKernel())
             {
-                std::string arch = hardware.archName();
                 //Remove xnack information if present
                 auto pos = arch.find(":");
                 if(pos != std::string::npos)
@@ -214,6 +231,8 @@ namespace Tensile
                     // Idempotent: producer may already have suffixed the
                     // filePrefix with "_<arch>" (per-arch fallback routing).
                     // Don't double-append.
+                    if(arch.empty())
+                        return std::string();
                     const std::string archSuffix = std::string("_") + arch;
                     if(coFileDependency.size() < archSuffix.size()
                        || coFileDependency.compare(coFileDependency.size() - archSuffix.size(),
