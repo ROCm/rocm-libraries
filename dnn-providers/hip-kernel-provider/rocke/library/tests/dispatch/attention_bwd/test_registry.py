@@ -297,7 +297,21 @@ def test_ranker_reads_the_tables_it_is_given(monkeypatch):
 def test_ranker_general_and_unified_tables():
     """A request of a tuned general key ranks the general family as tuned;
     a unified request of a tuned page tile ranks the unified family."""
+    # No registered arch ships an empty general table today; this allowlist
+    # is the only way a future arch module can skip the ranker check below,
+    # so the skip cannot silently reappear for an arch whose table work is
+    # simply unfinished.
+    _ARCHES_WITH_NO_GENERAL_TABLE: frozenset[str] = frozenset()
+    for arch in ("gfx1151", "gfx1201"):
+        assert routing.ARCH_TUNING[arch].GENERAL_TUNED_TABLE, (
+            f"{arch} is expected to ship general entries; if it is ever "
+            "intentionally table-empty, add it to "
+            "_ARCHES_WITH_NO_GENERAL_TABLE instead of skipping silently"
+        )
     for arch, mod in sorted(routing.ARCH_TUNING.items()):
+        if not mod.GENERAL_TUNED_TABLE:
+            assert arch in _ARCHES_WITH_NO_GENERAL_TABLE
+            continue
         key = next(iter(mod.GENERAL_TUNED_TABLE))
         prob = next(
             r
