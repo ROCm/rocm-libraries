@@ -41,7 +41,10 @@ hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t s
     attr[0].val.clusterDim.z = 1;
     cfg.attrs                = attr;
     cfg.numAttrs             = 1;
-    return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
+    if constexpr(kNumSplits == 16)
+        return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry16<K>, kargs);
+    else
+        return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
 }
 
 template <bool kWaveSplit, bool kGroups, index_t... Ns>
@@ -63,7 +66,7 @@ inline hipError_t launch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                          const ck_tile::FmhaDecodePaged5dConfig& c,
                          hipStream_t stream)
 {
-    const auto seq = std::make_integer_sequence<index_t, 15>{};
+    const auto seq = std::make_integer_sequence<index_t, 16>{};
     if(c.num_groups > 1)
         return c.wave_split ? dispatch<true, true>(h, c.num_splits, stream, seq)
                             : dispatch<false, true>(h, c.num_splits, stream, seq);
@@ -133,8 +136,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     if(c.pages_per_split > 0 || c.splits > 0)
     {
         const index_t total = (span + cfg.pages_per_split - 1) / cfg.pages_per_split;
-        cfg.num_groups      = (total + 14) / 15;
-        cfg.num_splits      = (total + cfg.num_groups - 1) / cfg.num_groups;
+        cfg.num_groups      = (total + 15) / 16;
+        cfg.num_splits      = cfg.num_groups > 1 ? 16 : total;
     }
     res.config = cfg;
 
