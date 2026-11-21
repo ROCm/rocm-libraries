@@ -69,7 +69,7 @@ def test_rejects_non_numeric_scalar(dtype):
 @pytest.mark.parametrize("dtype", ["fp4", "fp6", "bf6", "e8m0", "e5m3", "tf32"])
 def test_logical_types_use_storage_barriers(dtype):
     from rocke.core.ir import dtype_to_ir_type
-    from rocke.helpers.mma_io import storage_ir_type
+    from rocke.core.ir_storage import storage_ir_type
 
     logical = dtype_to_ir_type(dtype)
     b = IRBuilder("logical_barrier")

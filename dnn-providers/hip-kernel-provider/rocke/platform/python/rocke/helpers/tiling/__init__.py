@@ -71,7 +71,12 @@ from .emit import (
 )
 from .encoding import WarpDistributionEncoding
 from .fragments import Fragment, TileDesc, fragment_length, make_fragment
-from .layouts import make_tile_desc
+from .layouts import (
+    make_matrix_fragment_desc,
+    make_mma_accumulator_desc,
+    make_mma_scale_desc,
+    make_tile_desc,
+)
 from .scheduling import InstrClass, derive_sched_group_counts
 from .mma import (
     TileMma,
@@ -145,6 +150,9 @@ __all__ = [
     "TileDesc",
     "Fragment",
     "fragment_length",
+    "make_matrix_fragment_desc",
+    "make_mma_accumulator_desc",
+    "make_mma_scale_desc",
     "load_mma_traits",
     "MmaTraits",
     "MmaTraitsCatalog",

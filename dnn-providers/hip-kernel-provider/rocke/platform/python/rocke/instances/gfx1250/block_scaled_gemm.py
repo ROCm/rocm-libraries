@@ -21,14 +21,28 @@ from ...core.ir import (
     F32,
     I8,
     I32,
+    I64,
     IRBuilder,
     KernelDef,
     PtrType,
     Type,
     VectorType,
+    dtype_to_ir_type,
 )
-from ...helpers.mma_io import load_matrix_fragment, pack_fragment_bits, storage_ir_type
-from ...core.storage import BitPacking
+from ...core.ir_storage import storage_ir_type
+from ...helpers.mma_operand import prepare_scaled_mma_operand
+from ...helpers.tiling import (
+    Fragment,
+    load_fragment,
+    make_matrix_fragment_desc,
+    make_mma_accumulator_desc,
+    make_mma_scale_desc,
+    make_tensor_desc,
+    make_tile_desc,
+    make_window,
+    store_fragment,
+)
+from ...core.storage import BitPacking, FragmentPacking, MatrixFragmentLayout
 from ...helpers.spec import (
     SignatureBuilder,
     ceil_div_grid,
@@ -400,6 +414,31 @@ def build_block_scaled_gemm(
     scale_op = gfx1250_scaled_wmma(op_id)
     frag_words = atom.a_frag_len if atom is not None else _ACC
     a_frag_ty = VectorType(I32, frag_words)
+    descriptor_atom = (
+        atom if atom is not None else ArchTarget.from_gfx(arch).mma.by_op_id(op_id)
+    )
+    if descriptor_atom is None:
+        raise ValueError(f"missing matrix operand contract: {op_id}")
+    result_desc = make_mma_accumulator_desc(descriptor_atom, target=arch, result=True)
+    if native_scale:
+        a_layout, b_layout = scale_op.matrix_layout("a"), scale_op.matrix_layout("b")
+    else:
+        a_layout = MatrixFragmentLayout(
+            FragmentPacking(BitPacking(8), 32, 32, 8), 32, 2, 16
+        )
+        b_layout = a_layout
+    a_desc, b_desc = make_matrix_fragment_desc(a_layout), make_matrix_fragment_desc(
+        b_layout
+    )
+    a_tensor = make_tensor_desc(
+        (spec.M, spec.K), (spec.K, 1), dtype_to_ir_type(spec.dtype_a)
+    )
+    b_tensor = make_tensor_desc(
+        (spec.N, spec.K), (spec.K, 1), dtype_to_ir_type(spec.dtype_b)
+    )
+    c_tensor = make_tensor_desc(
+        (spec.M, spec.N), (spec.N, 1), dtype_to_ir_type(spec.dtype_c)
+    )
 
     groups = spec.K // spec.block_k
     steps_per_group = spec.block_k // _WMMA_K
@@ -426,15 +465,11 @@ def build_block_scaled_gemm(
         tensor_scale = ir.fmul(a_tensor_scale, b_tensor_scale)
 
     cK = ir.const_i32(spec.K)
-    cN = ir.const_i32(spec.N)
     c16 = ir.const_i32(_BLOCK_M)
     c32 = ir.const_i32(_WAVE)
 
     lane = ir.mod(ir.thread_id_x(), c32)
     frag = ir.mod(lane, c16)  # lane%16: A row / B col / output col
-    half = ir.div(lane, c16)  # lane//16: K-half (operands) + row-block (acc)
-    if not native_scale:
-        half_k = ir.mul(half, ir.const_i32(_HALF_K))  # (l//16)*32 K offset within step
 
     m0 = ir.mul(ir.block_id_y(), c16)
     n0 = ir.mul(ir.block_id_x(), c16)
@@ -488,104 +523,127 @@ def build_block_scaled_gemm(
                 ir.global_ptr_add(ptr, ir.add(base, ir.const_i32(k_bytes)))
             )
 
-    def _load_frag(ptr, base, storage_ty, k0, dtype, operand):
-        if not native_scale:
-            off0 = ir.add(ir.add(base, ir.const_i32(k0)), half_k)
-            off1 = ir.add(off0, ir.const_i32(16))
-            lo = ir.global_load_vN(ptr, off0, storage_ty, 16, align=16)
-            hi = ir.global_load_vN(ptr, off1, storage_ty, 16, align=16)
-            return ir.bitcast(ir.vec_concat(lo, hi), a_frag_ty)
+    operands = {"a": (a_tensor, a_desc, m0), "b": (b_tensor, b_desc, n0)}
 
-        return load_matrix_fragment(
-            ir,
-            ptr,
-            base,
-            half,
-            k0,
-            dtype=dtype,
-            layout=scale_op.matrix_layout(operand),
-            # K is a multiple of 128, so every packed row is 16-byte aligned.
-            alignment_bytes=16,
+    def _load_frag(ptr, k0, operand):
+        tensor, desc, origin = operands[operand]
+        fragment = load_fragment(
+            ir, ptr, make_window(tensor, (origin, k0)), desc, lane, alignment_bytes=16
+        )
+        return (
+            prepare_scaled_mma_operand(ir, atom, operand, fragment)
+            if native_scale
+            else ir.bitcast(fragment.value, a_frag_ty)
         )
 
-    def _pack_strided_scales(ptr, call_idx, *, for_b):
-        assert scale_op is not None and atom is not None
-        layout = atom.b_scale_layout() if for_b else atom.a_scale_layout()
-        packing = scale_op.scale_packing("b" if for_b else "a")
-        scale_groups = spec.K // spec.block_k
+    if native_scale:
+        scale_desc = make_mma_scale_desc(atom, target=arch)
+        scale_count = scale_desc.register_count
+        scale_a, scale_b = spec.resolved_scale_dtypes()
+        a_scales = make_tensor_desc(
+            (spec.M, groups), (groups, 1), dtype_to_ir_type(scale_a)
+        )
+        b_scales = make_tensor_desc(
+            (spec.N, groups), (1, spec.N), dtype_to_ir_type(scale_b)
+        )
+    else:
+        # Legacy scales act in the epilogue, not as native MMA operands.
+        # Keep A's per-lane rows and broadcast B's column across half-waves.
+        rows, cols = result_desc.shape
+        rows_per_lane = result_desc.register_count
+        wave = descriptor_atom.wave_size
+        a_scale_desc = make_tile_desc(
+            shape=(rows, 1),
+            thread_dist=(rows // rows_per_lane, 1),
+            thread_tile=(rows_per_lane, 1),
+            thread_broadcast=(1, cols),
+            wave_size=wave,
+        )
+        b_scale_desc = make_tile_desc(
+            shape=(cols, 1),
+            thread_dist=(cols, 1),
+            thread_broadcast=wave // cols,
+            wave_size=wave,
+        )
+        a_scales = make_tensor_desc((spec.M, groups), (groups, 1), scale_ty)
+        b_scales = make_tensor_desc((spec.N, groups), (1, spec.N), scale_ty)
 
-        def _load_bits(j):
-            coord0, coord1 = layout.coord(ir, lane, j)
-            group_offset = ir.const_i32(call_idx * (atom.k // spec.block_k))
-            if for_b:
-                group = ir.add(group_offset, coord0)
-                col = ir.add(n0, coord1)
-                idx = ir.add(ir.mul(group, cN), col)
-            else:
-                row = ir.add(m0, coord0)
-                group = ir.add(group_offset, coord1)
-                idx = ir.add(ir.mul(row, ir.const_i32(scale_groups)), group)
-            return ir.global_load(ptr, idx, I8, align=1)
-
-        return pack_fragment_bits(ir, _load_bits, packing.fragment)[0]
+    def _load_scale_word(ptr, call_idx, *, for_b):
+        tensor, origin = (b_scales, n0) if for_b else (a_scales, m0)
+        fragment = load_fragment(
+            ir,
+            ptr,
+            make_window(tensor, (origin, call_idx * scale_count)),
+            scale_desc,
+            lane,
+            alignment_bytes=4,
+        )
+        return ir.bitcast(fragment.value, I64 if scale_count == 8 else I32)
 
     if native_scale:
         acc = ir.zero_vec_f32(_ACC)
         for step in range(spec.K // _WMMA_SCALE_K):
             k0 = step * _WMMA_SCALE_K
             _prefetch_step(k0 + _WMMA_SCALE_K)
-            a_frag = _load_frag(A, a_base, a_ty, k0, spec.dtype_a, "a")
-            b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b, "b")
-            a_scale = _pack_strided_scales(AScale, step, for_b=False)
-            b_scale = _pack_strided_scales(BScale, step, for_b=True)
+            a_frag = _load_frag(A, k0, "a")
+            b_frag = _load_frag(B, k0, "b")
+            a_scale = _load_scale_word(AScale, step, for_b=False)
+            b_scale = _load_scale_word(BScale, step, for_b=True)
             acc = ir.mma(op_id, a_frag, b_frag, acc, a_scale, b_scale)
-
-        out_col = ir.add(n0, frag)
-        row_base = ir.add(m0, ir.mul(half, ir.const_i32(_ACC)))
-        for i in range(_ACC):
-            out_row = ir.add(row_base, ir.const_i32(i))
-            idx = ir.add(ir.mul(out_row, cN), out_col)
-            value = ir.vec_extract(acc, i)
-            if spec.tensor_scale:
-                value = ir.fmul(value, tensor_scale)
+        if spec.tensor_scale:
+            scaled = []
+            for i in range(_ACC):
+                value = ir.fmul(ir.vec_extract(acc, i), tensor_scale)
                 # Preserve FP32 rounding before the BF16/FP16 conversion.
-                value = ir.optimization_barrier(value)
-            ir.global_store(C, idx, ir.cast_f32_to(value, c_ty), align=2)
+                scaled.append(ir.optimization_barrier(value))
+            acc = ir.vec_pack(scaled, F32)
+        store_fragment(
+            ir,
+            C,
+            make_window(c_tensor, (m0, n0)),
+            Fragment(result_desc, F32, acc),
+            lane,
+            alignment_bytes=16,
+        )
         return ir.kernel
 
-    # Per-lane f32 output accumulators (8 column-distributed slots).
+    # Preserve the software post-scale accumulation order for every K group.
     outer = [ir.const_f32(0.0) for _ in range(_ACC)]
-
     for kg in range(groups):
         acc = ir.zero_vec_f32(_ACC)
         for step in range(steps_per_group):
             k0 = kg * spec.block_k + step * _WMMA_K
             _prefetch_step(k0 + _WMMA_K)
-            a_frag = _load_frag(A, a_base, a_ty, k0, spec.dtype_a, "a")
-            b_frag = _load_frag(B, b_base, b_ty, k0, spec.dtype_b, "b")
+            a_frag = _load_frag(A, k0, "a")
+            b_frag = _load_frag(B, k0, "b")
             acc = ir.mma(op_id, a_frag, b_frag, acc)
-
-        # b_scale[kg, n] (col = n0 + frag), shared across this lane's 8 slots.
-        b_scale_off = ir.add(ir.mul(ir.const_i32(kg), cN), b_row)
-        b_scale = _as_f32(ir, ir.global_load(BScale, b_scale_off, scale_ty, align=4))
-
+        sb = load_fragment(
+            ir,
+            BScale,
+            make_window(b_scales, (n0, kg)),
+            b_scale_desc,
+            lane,
+            alignment_bytes=4,
+        )
+        b_scale = _as_f32(ir, ir.vec_extract(sb.value, 0))
+        sa = load_fragment(
+            ir,
+            AScale,
+            make_window(a_scales, (m0, kg)),
+            a_scale_desc,
+            lane,
+            alignment_bytes=4,
+        )
         for i in range(_ACC):
-            out_row = ir.add(
-                m0, ir.add(ir.mul(half, ir.const_i32(_ACC)), ir.const_i32(i))
-            )
-            a_scale_off = ir.add(
-                ir.mul(out_row, ir.const_i32(groups)), ir.const_i32(kg)
-            )
-            a_scale = _as_f32(
-                ir, ir.global_load(AScale, a_scale_off, scale_ty, align=4)
-            )
+            a_scale = _as_f32(ir, ir.vec_extract(sa.value, i))
             ab = ir.fmul(a_scale, b_scale)
             outer[i] = ir.fadd(outer[i], ir.fmul(ir.vec_extract(acc, i), ab))
-
-    out_col = ir.add(n0, frag)
-    row_base = ir.add(m0, ir.mul(half, ir.const_i32(_ACC)))
-    for i in range(_ACC):
-        out_row = ir.add(row_base, ir.const_i32(i))
-        idx = ir.add(ir.mul(out_row, cN), out_col)
-        ir.global_store(C, idx, ir.cast_f32_to(outer[i], c_ty), align=2)
+    store_fragment(
+        ir,
+        C,
+        make_window(c_tensor, (m0, n0)),
+        Fragment(result_desc, F32, ir.vec_pack(outer, F32)),
+        lane,
+        alignment_bytes=16,
+    )
     return ir.kernel

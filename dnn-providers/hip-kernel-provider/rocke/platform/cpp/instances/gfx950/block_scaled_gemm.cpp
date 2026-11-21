@@ -7,8 +7,10 @@
 
 #include "rocke/dtypes.h"
 #include "rocke/error_boundary.hpp"
-#include "rocke/helper_rocke.helpers.mma_io.h"
+#include "rocke/helper_rocke.helpers.mma_operand.h"
+#include "rocke/helper_rocke.helpers.tiling.h"
 #include "rocke/instance_gfx950_block_scaled_gemm.h"
+#include "rocke/ir_storage.h"
 #include "rocke/mfma_scale_internal.h"
 
 rocke_gfx950_block_scaled_gemm_spec_t rocke_gfx950_block_scaled_gemm_spec_default(void)
@@ -90,54 +92,81 @@ rocke_kernel_def_t* rocke_build_gfx950_block_scaled_gemm_new(
         for(const char* n : {"M", "N", "K"})
             rocke_b_param(b, n, rocke_i32(), NULL);
         auto* c32 = rocke_b_const_i32(b, 32);
-        auto* cN = rocke_b_const_i32(b, s->N);
         auto* tid = rocke_b_thread_id_x(b);
         auto* c64 = rocke_b_const_i32(b, 64);
         auto* lane = rocke_b_mod(b, tid, c64);
-        auto* row = rocke_b_mod(b, lane, c32);
-        auto* half = rocke_b_div(b, lane, c32);
         auto* m0 = rocke_b_mul(b, rocke_b_block_id_y(b), c32);
         auto* n0 = rocke_b_mul(b, rocke_b_block_id_x(b), c32);
-        auto* ar = rocke_b_add(b, m0, row);
-        auto* br = rocke_b_add(b, n0, row);
-        auto* abase = rocke_b_mul(
-            b, ar, rocke_b_const_i32(b, (int64_t)s->K * rocke_dtype_info(da)->encoded_bits / 8));
-        auto* bbase = rocke_b_mul(
-            b, br, rocke_b_const_i32(b, (int64_t)s->K * rocke_dtype_info(db)->encoded_bits / 8));
-        auto* acc = rocke_b_zero_vec_f32(b, 16);
         auto al = rocke_mfma_matrix_layout(da), bl = rocke_mfma_matrix_layout(db);
+        rocke_tiling_tile_desc_t a_desc, b_desc, result_desc, scale_desc;
+        if(rocke_h_make_matrix_fragment_desc(b, &a_desc, &al) != ROCKE_OK
+           || rocke_h_make_matrix_fragment_desc(b, &b_desc, &bl) != ROCKE_OK
+           || rocke_h_make_mma_accumulator_desc(
+                  b, &result_desc, atom, rocke_arch_target_from_gfx(arch), true)
+                  != ROCKE_OK)
+            return NULL;
+        rocke_tiling_tensor_desc_t a_tensor, b_tensor, a_scales, b_scales, c_tensor;
+        const int groups = s->K / 32;
+        int a_lengths[] = {s->M, s->K}, b_lengths[] = {s->N, s->K}, matrix_strides[] = {s->K, 1};
+        int as_lengths[] = {s->M, groups}, bs_lengths[] = {s->N, groups};
+        int as_strides[] = {groups, 1}, bs_strides[] = {1, s->N};
+        int c_lengths[] = {s->M, s->N}, c_strides[] = {s->N, 1};
+        if(rocke_h_make_tensor_desc(
+               b, &a_tensor, a_lengths, matrix_strides, 2, rocke_dtype_to_ir_type(da))
+               != ROCKE_OK
+           || rocke_h_make_tensor_desc(
+                  b, &b_tensor, b_lengths, matrix_strides, 2, rocke_dtype_to_ir_type(db))
+                  != ROCKE_OK
+           || rocke_h_make_tensor_desc(
+                  b, &a_scales, as_lengths, as_strides, 2, rocke_dtype_to_ir_type("e8m0"))
+                  != ROCKE_OK
+           || rocke_h_make_tensor_desc(
+                  b, &b_scales, bs_lengths, bs_strides, 2, rocke_dtype_to_ir_type("e8m0"))
+                  != ROCKE_OK
+           || rocke_h_make_mma_scale_desc(b, &scale_desc, atom, rocke_arch_target_from_gfx(arch))
+                  != ROCKE_OK
+           || rocke_h_make_tensor_desc(
+                  b, &c_tensor, c_lengths, c_strides, 2, rocke_dtype_to_ir_type(dc))
+                  != ROCKE_OK)
+            return NULL;
+        auto* acc = rocke_b_zero_vec_f32(b, 16);
         for(int step = 0; step < s->K / 64; ++step)
         {
-            auto* a = rocke_h_load_matrix_fragment(
-                b, params[0], abase, half, step * 64, da, &al, rocke_i32(), 16);
-            auto* bb = rocke_h_load_matrix_fragment(
-                b, params[1], bbase, half, step * 64, db, &bl, rocke_i32(), 16);
-            auto* group = rocke_b_add(b, rocke_b_const_i32(b, step * 2), half);
-            auto* ai = rocke_b_add(b, rocke_b_mul(b, ar, rocke_b_const_i32(b, s->K / 32)), group);
-            auto* bi = rocke_b_add(b, rocke_b_mul(b, group, cN), br);
-            auto* sa = rocke_b_zext(
-                b, rocke_b_global_load(b, params[2], ai, rocke_i8(), 1), rocke_i32());
-            auto* sb = rocke_b_zext(
-                b, rocke_b_global_load(b, params[3], bi, rocke_i8(), 1), rocke_i32());
+            rocke_tiling_index_t a_origin[] = {{m0, 0}, {NULL, step * 64}};
+            rocke_tiling_index_t b_origin[] = {{n0, 0}, {NULL, step * 64}};
+            rocke_tiling_index_t as_origin[] = {{m0, 0}, {NULL, step * 2}};
+            rocke_tiling_index_t bs_origin[] = {{n0, 0}, {NULL, step * 2}};
+            rocke_tiling_window_t aw, bw, asw, bsw;
+            rocke_tiling_fragment_t af, bf, saf, sbf;
+            if(rocke_h_make_window(b, &aw, &a_tensor, a_origin, 2, NULL, NULL) != ROCKE_OK
+               || rocke_h_make_window(b, &bw, &b_tensor, b_origin, 2, NULL, NULL) != ROCKE_OK
+               || rocke_h_load_fragment(b, &af, params[0], &aw, &a_desc, lane, 16, false)
+                      != ROCKE_OK
+               || rocke_h_load_fragment(b, &bf, params[1], &bw, &b_desc, lane, 16, false)
+                      != ROCKE_OK)
+                return NULL;
+            auto* a = rocke_h_prepare_scaled_mma_operand(b, atom, "a", &af);
+            auto* bb = rocke_h_prepare_scaled_mma_operand(b, atom, "b", &bf);
+            if(!a || !bb
+               || rocke_h_make_window(b, &asw, &a_scales, as_origin, 2, NULL, NULL) != ROCKE_OK
+               || rocke_h_make_window(b, &bsw, &b_scales, bs_origin, 2, NULL, NULL) != ROCKE_OK
+               || rocke_h_load_fragment(b, &saf, params[2], &asw, &scale_desc, lane, 1, false)
+                      != ROCKE_OK
+               || rocke_h_load_fragment(b, &sbf, params[3], &bsw, &scale_desc, lane, 1, false)
+                      != ROCKE_OK)
+                return NULL;
+            auto* sa = rocke_b_zext(b, rocke_b_vec_extract(b, saf.value, 0), rocke_i32());
+            auto* sb = rocke_b_zext(b, rocke_b_vec_extract(b, sbf.value, 0), rocke_i32());
             rocke_value_t* scales[] = {sa, sb};
             acc = rocke_b_mma(b, id, a, bb, acc, scales, 2);
         }
-        for(int slot = 0; slot < 16; ++slot)
-        {
-            rocke_value_t *r, *c;
-            rocke_layout_map_coord(atom->dst.layout, b, lane, slot, &r, &c);
-            auto* rr = rocke_b_add(b, m0, r);
-            auto* offset = rocke_b_mul(b, rr, cN);
-            auto* cc = rocke_b_add(b, n0, c);
-            auto* index = rocke_b_add(b, offset, cc);
-            rocke_b_global_store(b,
-                                 params[4],
-                                 index,
-                                 rocke_b_cast_f32_to(b,
-                                                     rocke_b_vec_extract(b, acc, slot),
-                                                     rocke_storage_ir_type(dc)),
-                                 2);
-        }
+        rocke_tiling_index_t c_origin[] = {{m0, 0}, {n0, 0}};
+        rocke_tiling_window_t cw;
+        rocke_tiling_fragment_t result;
+        if(rocke_h_make_window(b, &cw, &c_tensor, c_origin, 2, NULL, NULL) != ROCKE_OK
+           || rocke_h_make_fragment(b, &result, &result_desc, rocke_f32(), acc) != ROCKE_OK
+           || rocke_h_store_fragment(b, params[4], &cw, &result, lane, 16, false) != ROCKE_OK)
+            return NULL;
         return b->status == ROCKE_OK ? b->kernel : NULL;
     });
 }

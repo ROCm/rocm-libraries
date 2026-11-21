@@ -12,6 +12,7 @@ import pytest
 
 from rocke.core.arch import ArchTarget
 from rocke.core.backend import resolve_backend
+from rocke.core.ir import I8
 from rocke.core.lower_hip import lower_kernel_to_hip
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.examples.gfx1250.gemm.block_scaled_gemm_verify import (
@@ -175,7 +176,9 @@ def test_fp4_catalog_signature_and_lowering(path, scale_type):
     kernel = build_block_scaled_gemm(spec)
     llvm = lower_kernel_to_llvm(kernel, arch="gfx1250", llvm_flavor="llvm23")
     call = next(
-        l for l in llvm.splitlines() if "call <8 x float> @llvm.amdgcn.wmma.scale" in l
+        line
+        for line in llvm.splitlines()
+        if "call <8 x float> @llvm.amdgcn.wmma.scale" in line
     )
     assert call.count("i32 4, <16 x i32>") == 2
     assert call.count(f", {scale_type} %") == 2
@@ -240,54 +243,94 @@ def test_fp4e2m1_alias_preserves_packed_contract(path, a_dtype, b_dtype):
         np.testing.assert_array_equal(actual, expected)
 
 
-@pytest.mark.parametrize("path,count", [("wmma_scale", 4), ("wmma_scale16", 8)])
-@pytest.mark.parametrize("dtype", ["fp8", "fp4"])
-def test_scale_operands_pack_consecutive_k_groups_low_byte_first(path, count, dtype):
-    # Evaluate only the integer dependency graph of each MMA scale operand.
-    # Distinct rows/columns and high-bit bytes expose stride, order, and zext errors.
-    spec = replace(fp4_spec(path, 256), dtype_a=dtype, dtype_b=dtype)
-    kernel = build_block_scaled_gemm(spec)
-    producers = {v.name: op for op in kernel.body.ops for v in op.results}
-    groups = spec.K // spec.block_k
-    a = np.arange(spec.M * groups, dtype=np.uint8).reshape(spec.M, groups)
-    b = (np.arange(groups * spec.N, dtype=np.uint8) + 129).reshape(groups, spec.N)
+def _scale_byte(role, offset):
+    # Address-sensitive bytes with distinct A/B patterns and high bits set.
+    return (offset * 37 + (11 if role == "A_scale" else 73)) % 256
+
+
+def _evaluate_scale_word(value, *, lane, tile, loads):
+    """Evaluate a scale operand's SSA dependencies and record absolute byte reads."""
     binary = {
         "arith.add": operator.add,
         "arith.mul": operator.mul,
         "arith.mod": operator.mod,
         "arith.div": operator.floordiv,
-        "arith.shl": operator.lshift,
-        "arith.or": operator.or_,
     }
-    for lane in (0, 7, 16, 31):
 
-        def evaluate(value):
-            if value.name == "%A_scale":
-                return a.ravel()
-            if value.name == "%B_scale":
-                return b.ravel()
-            op = producers[value.name]
-            if op.name == "arith.constant":
-                return op.attrs["value"]
-            if op.name == "gpu.thread_id":
-                return lane
-            if op.name == "gpu.block_id":
-                return 0
-            args = [evaluate(v) for v in op.operands]
-            if op.name == "memref.global_load_typed":
-                return int(args[0][args[1]])
-            if op.name == "arith.zext":
-                return args[0]
-            return binary[op.name](*args)
+    values = {}
 
-        calls = [op for op in kernel.body.ops if op.name == "tile.mma"]
-        assert len(calls) == 2
-        for step, call in enumerate(calls):
-            start = step * count
-            stop = start + count
-            expected_a = int.from_bytes(a[lane % 16, start:stop].tobytes(), "little")
-            expected_b = int.from_bytes(b[start:stop, lane % 16].tobytes(), "little")
-            assert evaluate(call.operands[3]) == expected_a
-            assert evaluate(call.operands[4]) == expected_b
-            assert call.operands[3].type.name == f"i{count * 8}"
-            assert call.operands[4].type.name == f"i{count * 8}"
+    def evaluate(value):
+        # An SSA vector load can feed several extracts but only reads once.
+        if value.name not in values:
+            values[value.name] = evaluate_uncached(value)
+        return values[value.name]
+
+    def evaluate_uncached(value):
+        if value.name in ("%A_scale", "%B_scale"):
+            return value.name[1:], 0
+        op = value.op
+        if op.name == "arith.constant":
+            return op.attrs["value"]
+        if op.name == "arith.constant_vec":
+            return (int(op.attrs["fill"]),) * op.attrs["vec"]
+        if op.name == "gpu.thread_id":
+            return lane
+        if op.name == "gpu.block_id":
+            return tile[0 if op.attrs["axis"] == "x" else 1]
+        args = [evaluate(v) for v in op.operands]
+        if op.name == "arith.sext":
+            return args[0]  # Evaluated addresses are already signed Python ints.
+        if op.name == "tile.global_ptr_add":
+            role, base = args[0]
+            return role, base + args[1]
+        if op.name in ("memref.global_load_typed", "memref.global_load_vN"):
+            role, base = args[0]
+            # E8M0 storage elements are single bytes, including vector lanes.
+            scalar = op.name == "memref.global_load_typed"
+            elem = value.type if scalar else value.type.elem
+            assert elem == I8
+            start = base + args[1]
+            offsets = range(start, start + (1 if scalar else value.type.count))
+            loads.extend((role, offset) for offset in offsets)
+            encoded = tuple(_scale_byte(role, offset) for offset in offsets)
+            return encoded[0] if scalar else encoded
+        if op.name == "vector.extract":
+            return args[0][op.attrs["index"]]
+        if op.name == "vector.insert":
+            index = op.attrs["index"]
+            return args[0][:index] + (args[1],) + args[0][index + 1 :]
+        if op.name == "arith.bitcast":
+            return int.from_bytes(bytes(args[0]), "little")
+        assert op.name in binary, op.name
+        return binary[op.name](*args)
+
+    return evaluate(value)
+
+
+@pytest.mark.parametrize("path,count", [("wmma_scale", 4), ("wmma_scale16", 8)])
+@pytest.mark.parametrize("dtype", ["fp8", "bf8", "fp4"])
+def test_scale_operands_pack_consecutive_k_groups_low_byte_first(path, count, dtype):
+    spec = replace(fp4_spec(path, 256), dtype_a=dtype, dtype_b=dtype)
+    kernel = build_block_scaled_gemm(spec)
+    calls = [op for op in kernel.body.ops if op.name == "tile.mma"]
+    assert len(calls) == 2
+    groups = spec.K // spec.block_k
+    for x, y in ((0, 0), (2, 1)):
+        for lane in range(32):
+            row, col = 16 * y + lane % 16, 16 * x + lane % 16
+            for step, call in enumerate(calls):
+                k_groups = range(step * count, (step + 1) * count)
+                for role, value, offsets in (
+                    ("A_scale", call.operands[3], [row * groups + g for g in k_groups]),
+                    ("B_scale", call.operands[4], [g * spec.N + col for g in k_groups]),
+                ):
+                    expected = int.from_bytes(
+                        bytes(_scale_byte(role, offset) for offset in offsets), "little"
+                    )
+                    loads = []
+                    actual = _evaluate_scale_word(
+                        value, lane=lane, tile=(x, y), loads=loads
+                    )
+                    assert value.type.name == f"i{count * 8}"
+                    assert loads == [(role, offset) for offset in offsets]
+                    assert actual == expected

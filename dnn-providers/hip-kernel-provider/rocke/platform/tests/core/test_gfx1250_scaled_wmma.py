@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 from dataclasses import replace
 from itertools import product
@@ -419,9 +420,9 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                         lower_kernel_to_hip(kernel, arch="gfx942")
 
     def test_native_block_scaled_gemm_uses_packed_e8m0_in_instruction(self):
-        for matrix_path, block_k, scale_ty, fragment_load, load_count in (
-            ("wmma_scale", 32, "i32", "load <4 x i32>", 8),
-            ("wmma_scale16", 16, "i64", "load <4 x i32>", 8),
+        for matrix_path, block_k, scale_ty in (
+            ("wmma_scale", 32, "i32"),
+            ("wmma_scale16", 16, "i64"),
         ):
             with self.subTest(matrix_path=matrix_path):
                 spec = BlockScaledGemmSpec(
@@ -445,21 +446,14 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                 intrinsic_family = "wmma.scale16" if block_k == 16 else "wmma.scale"
                 self.assertIn(f"llvm.amdgcn.{intrinsic_family}.", ll)
                 self.assertIn(f", {scale_ty} %", ll)
-                self.assertEqual(ll.count(fragment_load), load_count)
+                # The matrix loads still move eight 16-byte packets; tiling
+                # uses the tensor's byte storage type rather than i32 words.
+                self.assertEqual(ll.count("load <16 x i8>"), 8)
                 self.assertNotIn("fmul float", ll)
 
-    def test_native_block_scaled_gemm_hip_zero_extends_e8m0_bytes(self):
-        cases = (
-            ("wmma_scale", 32, "(int)(uint8_t)", 8, r" int zx\d+ = \(int\)\w+;"),
-            (
-                "wmma_scale16",
-                16,
-                "(int64_t)(uint8_t)",
-                16,
-                r" int64_t zx\d+ = \(int64_t\)\w+;",
-            ),
-        )
-        for matrix_path, block_k, unsigned_cast, count, direct_signed in cases:
+    def test_native_block_scaled_gemm_hip_bitcasts_e8m0_bytes(self):
+        cases = (("wmma_scale", 32, "int"), ("wmma_scale16", 16, "int64_t"))
+        for matrix_path, block_k, carrier in cases:
             with self.subTest(matrix_path=matrix_path):
                 spec = BlockScaledGemmSpec(
                     name="native_mx_hip",
@@ -471,12 +465,20 @@ class TestGfx1250ScaledWmma(unittest.TestCase):
                     matrix_path=matrix_path,
                 )
                 hip = lower_kernel_to_hip(build_block_scaled_gemm(spec), arch="gfx1250")
-                self.assertEqual(hip.count(unsigned_cast), count)
-                self.assertNotRegex(hip, direct_signed)
-
-        scale_bytes = [0x80, 0xFF, 0x00, 0x01]
-        packed = sum(byte << (8 * index) for index, byte in enumerate(scale_bytes))
-        self.assertEqual(packed, 0x0100FF80)
+                # Both scale words are copied bit-for-bit from byte vectors
+                # into the intrinsic's carrier type, with no signed conversion.
+                words = re.findall(
+                    rf"\b{carrier} (bc\d+); __builtin_memcpy\(&\1, &vi\d+, sizeof\({carrier}\)\);",
+                    hip,
+                )
+                self.assertEqual(len(words), 2)
+                call = next(
+                    line
+                    for line in hip.splitlines()
+                    if "__builtin_amdgcn_wmma_scale" in line
+                )
+                for word in words:
+                    self.assertIn(f", {word},", call)
 
     def test_native_slice_rejects_unsupported_contracts(self):
         bad_dtype = BlockScaledGemmSpec(

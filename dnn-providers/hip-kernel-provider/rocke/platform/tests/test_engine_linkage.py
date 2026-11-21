@@ -368,6 +368,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             f"{test_ctest_rel}tests/portable_ir/rocke_portable_ir_provenance.txt"
         ),
         "ROCKE_STORAGE_TEST": native_artifact("rocke_storage"),
+        "ROCKE_FRAGMENT_IO_TEST": native_artifact("rocke_fragment_io"),
         "ROCKE_IR_TYPES_TEST": native_artifact("rocke_ir_types"),
         "ROCKE_NONTEMPORAL_HIP_TEST": native_artifact("rocke_nontemporal_hip"),
         "ROCKE_UNSIGNED_INT_OPS_CLI": native_artifact("rocke_unsigned_int_ops"),
@@ -399,6 +400,20 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         else:
             ctest_env["ROCM_PATH"] = str(rocm_path)
         tests = list_installed_ctests(ctest_dir, env=ctest_env)
+        moe = next(t for t in tests if t["name"] == "rocke_gfx950_grouped_moe_hip")
+        assert moe["command"][1:] == [
+            "-u",
+            f"{test_ctest_rel}tests/instances/run_gfx950_grouped_moe_hip.py",
+        ]
+        moe_props = {p["name"]: p["value"] for p in moe["properties"]}
+        assert moe_props["SKIP_RETURN_CODE"] == 77
+        assert moe_props["RUN_SERIAL"] is True
+        assert moe_props["TIMEOUT"] == 300.0
+        moe_env = environment_for(tests, moe["name"])
+        expected_moe = {"PYTHONPATH"}
+        if sys.platform.startswith("linux") and rocm_path:
+            expected_moe |= {"PATH", "HIP_DEVICE_LIB_PATH"}
+        assert set(moe_env) == expected_moe
         pair = next(
             test
             for test in tests
@@ -720,6 +735,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
             future_part,
             *tiling_entries,
             "rocke_library_gpu_pytest",
+            "rocke_gfx950_grouped_moe_hip",
             "rocke_ctest_shard_pytest",
             "rocke_library_gdn_pytest",
             "rocke_library_conv_fwd_aot_packaging_pytest",
@@ -734,6 +750,9 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     assert library_gpu_labels
     assert labels.get("rocke_tiling_gpu_pytest") == library_gpu_labels
     assert labels.get("rocke_tiling_visualization_pytest") == {"comprehensive", "full"}
+    moe_labels = labels["rocke_gfx950_grouped_moe_hip"]
+    assert {"comprehensive", "full", "gpu"} <= moe_labels
+    assert not {"quick", "standard", "ffm-quick", "ffm-full"} & moe_labels
     standard_entries = [
         "rocke_ctest_shard_pytest",
         "rocke_library_gdn_pytest",

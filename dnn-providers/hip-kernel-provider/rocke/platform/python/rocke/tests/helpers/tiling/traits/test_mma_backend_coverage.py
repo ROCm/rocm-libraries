@@ -16,7 +16,7 @@ How a pair is measured:
    twins of its operands. No candidate: ``no_backend_op``.
 2. Each candidate is lowered alone, fed the operand form the tiling layer feeds: the row's logical
    elements per lane (``fragment_length`` of its encodings), as
-   ``helpers/mma_io.mma_operand_ir_type`` spells them. Two exceptions take their counts or form from
+   ``core.mma_operand.mma_operand_ir_type`` spells them. Two exceptions take their counts or form from
    the op: a multi-block row, which the encoder does not lay out, and gfx950's scaled MFMA, which
    takes A and B only as register words. The lowered module's matrix intrinsic is read with
    ``tools/check_mma_catalog.intrinsic_base_name``.
@@ -57,7 +57,7 @@ from rocke.core.arch.mfma_scale import gfx950_scaled_mfma, matrix_layout
 from rocke.core.dtypes import dtype_info
 from rocke.core.ir import I32, IRBuilder, PtrType, VectorType, dtype_to_ir_type
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
-from rocke.helpers.mma_io import mma_operand_ir_type
+from rocke.core.mma_operand import mma_operand_ir_type
 from rocke.helpers.tiling.fragments import fragment_length
 from rocke.helpers.tiling.mma.warp_encoding import (
     a_warp_encoding,

@@ -21,6 +21,7 @@ from .arch.target import integer_mma_op_ids
 from .arch.wmma_scale import gfx1250_scaled_wmma
 from .dtypes import dtype_info
 from .ir import (
+    I1,
     BF16,
     F16,
     I64,
@@ -52,12 +53,14 @@ from .ir import (
     _refuse_unsigned_operands,
     _sync_attr,
     _trap_op_error,
+    align_attr,
     claimed_align,
     dpp_ctrl_attr,
     element_type,
     dpp_xor_ctrl,
     gpu_check_word_symbol,
     require_streaming_arch,
+    type_bytes,
 )
 from .mfma import validate_mfma
 from .wmma import validate_scaled_wmma_sources, validate_unscaled_wmma
@@ -337,6 +340,46 @@ __device__ extern "C" void _llvm_amdgcn_raw_ptr_buffer_load_lds(
 
 def _name(v: Value) -> str:
     return v.name[1:] if v.name.startswith("%") else v.name
+
+
+def _has_typed_access_base(ptr: Value, elem: Type) -> bool:
+    # global_ptr_add emits a const char* even when the IR result retains the
+    # base's pointee type. Addition on that C++ value counts bytes, not elems.
+    if ptr.op is not None and ptr.op.name == "tile.global_ptr_add":
+        return False
+    return not isinstance(ptr.type, PtrType) or ptr.type.pointee == elem
+
+
+def _global_access_address(
+    ptr: Value, idx: Value, elem: Type, *, store: bool = False
+) -> str:
+    """Match LLVM's GEP in access-element units, independent of pointer type."""
+    if _has_typed_access_base(ptr, elem):
+        return f"{_name(ptr)} + {_name(idx)}"
+    return _global_byte_address(ptr, idx, _type_to_hip(elem), store=store)
+
+
+def _global_byte_address(ptr: Value, idx: Value, cpp_t: str, *, store: bool) -> str:
+    base = f"reinterpret_cast<const unsigned char*>({_name(ptr)})"
+    if store:
+        # A store is writable by contract; the byte-rebase emitter encodes its
+        # result as const char* even when the original tensor is writable.
+        base = f"const_cast<unsigned char*>({base})"
+    return f"{base} + (int64_t){_name(idx)} * (int64_t)sizeof({cpp_t})"
+
+
+def _global_atomic_address(
+    ptr: Value, idx: Value, elem: Type, *, store: bool = True, subscript: bool = False
+) -> str:
+    """Form a builtin's typed pointer, after indexing in scalar element units."""
+    if _has_typed_access_base(ptr, elem):
+        if subscript:
+            return f"&{_name(ptr)}[{_name(idx)}]"
+        return f"{_name(ptr)} + {_name(idx)}"
+    cpp_t = _type_to_hip(elem)
+    address = _global_access_address(ptr, idx, elem, store=store)
+    qualifier = "" if store else "const "
+    return f"reinterpret_cast<{qualifier}{cpp_t}*>({address})"
 
 
 # Vector-load/store element type -> ext_vector_type prefix (see the _ROCKE_VEC
@@ -760,12 +803,10 @@ class _Lowerer:
         op.attrs.setdefault("_shape", list(st.shape))
 
     def _op_memref_global_load(self, op: Op) -> None:
-        ptr, idx = op.operands
-        self._emit(f"fp16 {_name(op.result)} = {_name(ptr)}[{_name(idx)}];")
+        self._emit_scalar_global_load(op, default_align=2)
 
     def _op_memref_global_store(self, op: Op) -> None:
-        ptr, idx, val = op.operands
-        self._emit(f"{_name(ptr)}[{_name(idx)}] = {_name(val)};")
+        self._emit_scalar_global_store(op, default_align=2)
 
     def _op_memref_global_load_vN(self, op: Op) -> None:
         ptr, idx = op.operands
@@ -773,7 +814,9 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_load_vN")
         byte_count = vec * (dtype_info(elem_name).encoded_bits // 8)
-        align = claimed_align(op, vec, element_type(op.result.type))
+        elem = element_type(op.result.type)
+        align = claimed_align(op, vec, elem)
+        address = _global_access_address(ptr, idx, elem)
         nontemporal = _nontemporal(op)
         if nontemporal:
             require_streaming_arch(op.name, self.arch.gfx)
@@ -789,11 +832,10 @@ class _Lowerer:
             self._emit(
                 f"{prefix}{vec} {_name(op.result)}; "
                 f"__builtin_memcpy(&{_name(op.result)}, "
-                f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
-                f"{byte_count});"
+                f"__builtin_assume_aligned({address}, {align}), {byte_count});"
             )
             return
-        src = f"reinterpret_cast<const {prefix}{vec}*>({_name(ptr)} + {_name(idx)})"
+        src = f"reinterpret_cast<const {prefix}{vec}*>({address})"
         if nontemporal:
             self._emit(
                 f"{prefix}{vec} {_name(op.result)} = __builtin_nontemporal_load({src});"
@@ -2279,9 +2321,29 @@ class _Lowerer:
     # -------------------- memref: typed loads / stores / atomics --------------------
 
     def _op_memref_global_load_typed(self, op: Op) -> None:
+        self._emit_scalar_global_load(op, default_align=1)
+
+    def _emit_scalar_global_load(self, op: Op, *, default_align: int) -> None:
         ptr, idx = op.operands
-        cpp_t = _type_to_hip(op.result.type)
-        self._emit(f"{cpp_t} {_name(op.result)} = {_name(ptr)}[{_name(idx)}];")
+        elem = op.result.type
+        cpp_t = _type_to_hip(elem)
+        name = _name(op.result)
+        align = align_attr(op) or default_align
+        if elem == I1:
+            # LLVM i1 occupies a byte in memory, but only its low bit is the
+            # value. Do not copy an arbitrary byte into a C++ bool object.
+            address = _global_byte_address(ptr, idx, "unsigned char", store=False)
+            self._emit(f"bool {name} = (*({address}) & 1u) != 0;")
+            return
+        size = type_bytes(elem)
+        if _has_typed_access_base(ptr, elem) and align >= size:
+            self._emit(f"{cpp_t} {name} = {_name(ptr)}[{_name(idx)}];")
+            return
+        address = _global_byte_address(ptr, idx, cpp_t, store=False)
+        self._emit(
+            f"{cpp_t} {name}; __builtin_memcpy(&{name}, "
+            f"__builtin_assume_aligned({address}, {align}), {size});"
+        )
 
     def _op_memref_global_atomic_add(self, op: Op) -> None:
         """Lower ``global_atomic_add`` via HIP's ``atomicAdd``.
@@ -2294,8 +2356,8 @@ class _Lowerer:
         ptr, idx, val = op.operands
         cpp_t = _type_to_hip(val.type)
         self._emit(
-            f"{cpp_t} {_name(op.result)} = atomicAdd(&{_name(ptr)}[{_name(idx)}], "
-            f"{_name(val)});"
+            f"{cpp_t} {_name(op.result)} = atomicAdd("
+            f"{_global_atomic_address(ptr, idx, val.type, subscript=True)}, {_name(val)});"
         )
 
     def _op_memref_fence(self, op: Op) -> None:
@@ -2313,7 +2375,8 @@ class _Lowerer:
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         ordering = _sync_attr(op, "ordering", _FLAG_STORE_ORDERINGS)
         self._emit(
-            f"__hip_atomic_store(&{_name(ptr)}[{_name(idx)}], {_name(val)}, "
+            f"__hip_atomic_store({_global_atomic_address(ptr, idx, I32, subscript=True)}, "
+            f"{_name(val)}, "
             f"{_HIP_ATOMIC_ORDER[ordering]}, {_HIP_MEMORY_SCOPE[scope]});"
         )
 
@@ -2322,7 +2385,9 @@ class _Lowerer:
         ptr, idx, expect = op.operands
         scope = _sync_attr(op, "scope", _FENCE_SCOPES)
         self._emit(
-            f"while (__hip_atomic_load(&{_name(ptr)}[{_name(idx)}], __ATOMIC_ACQUIRE, "
+            f"while (__hip_atomic_load("
+            f"{_global_atomic_address(ptr, idx, I32, store=False, subscript=True)}, "
+            f"__ATOMIC_ACQUIRE, "
             f"{_HIP_MEMORY_SCOPE[scope]}) != {_name(expect)}) {{}}"
         )
 
@@ -2334,12 +2399,7 @@ class _Lowerer:
         intrinsic. The input is a ``bf16x2`` and the result is the
         pre-add value at the slot.
         """
-        ptr, idx, val = op.operands
-        self._emit(
-            f"bf16x2 {_name(op.result)} = "
-            f"__builtin_amdgcn_global_atomic_fadd_v2bf16("
-            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
-        )
+        self._emit_packed_global_atomic_add(op, BF16, "bf16x2", "v2bf16")
 
     def _op_memref_global_atomic_add_pk_f16(self, op: Op) -> None:
         """Lower the packed-fp16 atomic add via the AMDGPU builtin.
@@ -2349,11 +2409,23 @@ class _Lowerer:
         intrinsic (gfx940+). The input is a ``half2`` and the result is
         the pre-add value at the slot.
         """
+        self._emit_packed_global_atomic_add(op, F16, "half2", "v2f16")
+
+    def _emit_packed_global_atomic_add(
+        self, op: Op, elem: Type, vector: str, builtin_suffix: str
+    ) -> None:
         ptr, idx, val = op.operands
+        name = _name(op.result)
+        # The index is in scalar halfwords; the transaction itself requires a
+        # four-byte-aligned pair. Clang takes the builtin's alignment from the
+        # pointee type, even when the address has an assume_aligned attribute.
         self._emit(
-            f"half2 {_name(op.result)} = "
-            f"__builtin_amdgcn_global_atomic_fadd_v2f16("
-            f"{_name(ptr)} + {_name(idx)}, {_name(val)});"
+            f"typedef {_type_to_hip(elem)} {name}_aligned __attribute__((aligned(4)));"
+        )
+        address = _global_atomic_address(ptr, idx, elem)
+        self._emit(
+            f"{vector} {name} = __builtin_amdgcn_global_atomic_fadd_{builtin_suffix}("
+            f"reinterpret_cast<{name}_aligned*>({address}), {_name(val)});"
         )
 
     def _op_tile_register_p_from_qk_c(self, op: Op) -> None:
@@ -2415,8 +2487,27 @@ class _Lowerer:
         )
 
     def _op_memref_global_store_typed(self, op: Op) -> None:
+        self._emit_scalar_global_store(op, default_align=1)
+
+    def _emit_scalar_global_store(self, op: Op, *, default_align: int) -> None:
         ptr, idx, val = op.operands
-        self._emit(f"{_name(ptr)}[{_name(idx)}] = {_name(val)};")
+        elem = val.type
+        if op.name == "memref.global_store" and elem != F16:
+            raise ValueError("memref.global_store: expected an f16 value")
+        align = align_attr(op) or default_align
+        if elem == I1:
+            address = _global_byte_address(ptr, idx, "unsigned char", store=True)
+            self._emit(f"*({address}) = (unsigned char){_name(val)};")
+            return
+        size = type_bytes(elem)
+        if _has_typed_access_base(ptr, elem) and align >= size:
+            self._emit(f"{_name(ptr)}[{_name(idx)}] = {_name(val)};")
+            return
+        address = _global_byte_address(ptr, idx, _type_to_hip(elem), store=True)
+        self._emit(
+            f"__builtin_memcpy(__builtin_assume_aligned({address}, {align}), "
+            f"&{_name(val)}, {size});"
+        )
 
     def _op_memref_global_store_vN(self, op: Op) -> None:
         ptr, idx, val = op.operands
@@ -2424,7 +2515,9 @@ class _Lowerer:
         elem_name = op.attrs.get("elem_type", "f16")
         prefix = _vec_prefix(elem_name, "global_store_vN")
         byte_count = n * (dtype_info(elem_name).encoded_bits // 8)
-        align = claimed_align(op, n, element_type(val.type))
+        elem = element_type(val.type)
+        align = claimed_align(op, n, elem)
+        address = _global_access_address(ptr, idx, elem, store=True)
         nontemporal = _nontemporal(op)
         if nontemporal:
             require_streaming_arch(op.name, self.arch.gfx)
@@ -2437,11 +2530,10 @@ class _Lowerer:
                 )
             self._emit(
                 f"__builtin_memcpy("
-                f"__builtin_assume_aligned({_name(ptr)} + {_name(idx)}, {align}), "
-                f"&{_name(val)}, {byte_count});"
+                f"__builtin_assume_aligned({address}, {align}), &{_name(val)}, {byte_count});"
             )
             return
-        dst = f"reinterpret_cast<{prefix}{n}*>({_name(ptr)} + {_name(idx)})"
+        dst = f"reinterpret_cast<{prefix}{n}*>({address})"
         if nontemporal:
             self._emit(f"__builtin_nontemporal_store({_name(val)}, {dst});")
             return
@@ -2449,7 +2541,7 @@ class _Lowerer:
 
     def _op_memref_global_atomic_add_f32(self, op: Op) -> None:
         ptr, idx, val = op.operands
-        self._emit(f"atomicAdd({_name(ptr)} + {_name(idx)}, {_name(val)});")
+        self._emit(f"atomicAdd({_global_atomic_address(ptr, idx, F32)}, {_name(val)});")
 
     # -------------------- tile: LDS vector load / store --------------------
 

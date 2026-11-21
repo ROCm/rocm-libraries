@@ -11,10 +11,10 @@
  * `align`, to the caller's value or that same natural alignment, so the
  * lowering cases parse serialized IR. They mirror
  * tests/core/test_global_access_alignment.py and the HIP refusals of
- * tests/core/test_mma_io.py and tests/core/test_tf32.py, whose C++ halves
- * otherwise run only where the pybind engine is built. The scalar global loads
- * and stores check a given `align` with the same rule when they are built and
- * read it with that rule when they are lowered; with `align` 0 they record
+ * tests/helpers/test_fragment_compat.py and tests/core/test_tf32.py, whose C++
+ * halves otherwise run only where the pybind engine is built. The scalar global
+ * loads and stores check a given `align` with the same rule when they are built
+ * and read it with that rule when they are lowered; with `align` 0 they record
  * their own default, as the Python builders do when it is omitted.
  */
 
@@ -234,6 +234,141 @@ int test_a_hip_vector_access_without_align_claims_its_natural_alignment()
     CHECK(three.status == ROCKE_OK);
     CHECK(contains(three.text, "__builtin_memcpy(&v, __builtin_assume_aligned(p + c0, 4), 12);"));
     CHECK(contains(three.text, "__builtin_memcpy(__builtin_assume_aligned(p + c0, 4), &v, 12);"));
+    return 0;
+}
+
+/* The element type of the access determines the scale, not the pointer's
+ * element type. Also check the byte-copy path for a weakly aligned access. */
+int test_hip_word_access_through_byte_pointers()
+{
+    const Lowering result = lower_hip(R"(ckdsl.ir v1
+kernel @word_copy {
+  params {
+    %src : ptr<i8,global>
+    %dst : ptr<i8,global>
+    %si : i64
+    %di : i32
+  }
+  region @entry {
+    %v : vec<i32x4> = memref.global_load_vN ( %src, %si ) { align = i:16, elem_type = s:"i32", vec = i:4 }
+    memref.global_store_vN ( %dst, %di, %v ) { align = i:1, elem_type = s:"i32", vec = i:4 }
+    %word : i32 = memref.global_load_typed ( %src, %si ) { align = i:1, elem_type = s:"i32" }
+    memref.global_store_typed ( %dst, %di, %word ) { align = i:1, elem_type = s:"i32" }
+    cf.return (  )
+  }
+}
+)");
+    CHECK(result.status == ROCKE_OK);
+    const std::string src = "reinterpret_cast<const unsigned char*>(src) + "
+                            "(int64_t)si * (int64_t)sizeof(int)";
+    const std::string dst
+        = "const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(dst))"
+          " + (int64_t)di * (int64_t)sizeof(int)";
+    CHECK(contains(result.text, "*reinterpret_cast<const i32x4*>(" + src + ")"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(" + dst + ", 1), &v, 16);"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(&word, __builtin_assume_aligned(" + src + ", 1), 4);"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(" + dst + ", 1), &word, 4);"));
+    return 0;
+}
+
+/* Grouped MoE computes the expert rebase in bytes and indexes weights within
+ * that expert in halfwords. Cover both storage types in the C API test. */
+int test_hip_rebased_moe_weights_use_halfword_indices()
+{
+    for(const std::string elem : {"f16", "bf16"})
+    {
+        const std::string ir
+            = "ckdsl.ir v1\n"
+              "kernel @grouped_moe_weights {\n"
+              "  params {\n"
+              "    %weights : ptr<"
+              + elem
+              + ",global>\n"
+                "    %tile_offset : i32\n"
+                "  }\n"
+                "  region @entry {\n"
+                "    %expert_bytes : i64 = arith.constant (  ) { ity = s:\"i64\", value = i:256 }\n"
+                "    %base : ptr<"
+              + elem
+              + ",global> = tile.global_ptr_add ( %weights, %expert_bytes ) {  }\n"
+                "    %v : vec<"
+              + elem
+              + "x4> = memref.global_load_vN ( %base, %tile_offset ) "
+                "{ align = i:2, elem_type = s:\""
+              + elem
+              + "\", vec = i:4 }\n"
+                "    cf.return (  )\n"
+                "  }\n"
+                "}\n";
+        const Lowering result = lower_hip(ir);
+        CHECK(result.status == ROCKE_OK);
+        CHECK(contains(result.text,
+                       "const char* base = (const char*)weights + (int64_t)expert_bytes;"));
+        const std::string cpp_t = elem == "f16" ? "fp16" : "bf16";
+        CHECK(contains(result.text,
+                       "__builtin_memcpy(&v, __builtin_assume_aligned(reinterpret_cast<const "
+                       "unsigned char*>(base)"
+                       " + (int64_t)tile_offset * (int64_t)sizeof("
+                           + cpp_t + "), 2), 8);"));
+    }
+    return 0;
+}
+
+int test_hip_scalar_memory_accesses()
+{
+    const Lowering result = lower_hip(R"(ckdsl.ir v1
+kernel @scalar_accesses {
+  params {
+    %p : ptr<f16,global>
+    %q : ptr<i1,global>
+    %i : i32
+    %bytes : i64
+  }
+  region @entry {
+    %weak : f16 = memref.global_load_typed ( %p, %i ) { align = i:1, elem_type = s:"f16" }
+    memref.global_store_typed ( %p, %i, %weak ) { align = i:1, elem_type = s:"f16" }
+    %aligned : f16 = memref.global_load_typed ( %p, %i ) { align = i:2, elem_type = s:"f16" }
+    memref.global_store_typed ( %p, %i, %aligned ) { align = i:2, elem_type = s:"f16" }
+    %half_base : ptr<f16,global> = tile.global_ptr_add ( %p, %bytes ) {  }
+    %legacy : f16 = memref.global_load ( %half_base, %i ) {  }
+    memref.global_store ( %half_base, %i, %legacy ) { elem_type = s:"f16" }
+    memref.global_store ( %half_base, %i, %weak ) { align = i:1, elem_type = s:"f16" }
+    %bool_base : ptr<i1,global> = tile.global_ptr_add ( %q, %bytes ) {  }
+    %bit : i1 = memref.global_load_typed ( %bool_base, %i ) { elem_type = s:"i1" }
+    memref.global_store_typed ( %bool_base, %i, %bit ) { elem_type = s:"i1" }
+    cf.return (  )
+  }
+}
+)");
+    CHECK(result.status == ROCKE_OK);
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(&weak, __builtin_assume_aligned(reinterpret_cast<const "
+                   "unsigned char*>(p) + (int64_t)i * (int64_t)sizeof(fp16), 1), 2);"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(const_cast<unsigned char*>("
+                   "reinterpret_cast<const unsigned char*>(p)) + (int64_t)i * "
+                   "(int64_t)sizeof(fp16), 1), &weak, 2);"));
+    CHECK(contains(result.text, "fp16 aligned = p[i];"));
+    CHECK(contains(result.text, "p[i] = aligned;"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(&legacy, __builtin_assume_aligned(reinterpret_cast<const "
+                   "unsigned char*>(half_base) + (int64_t)i * (int64_t)sizeof(fp16), 2), 2);"));
+    const std::string half_dst
+        = "const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(half_base))"
+          " + (int64_t)i * (int64_t)sizeof(fp16)";
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(" + half_dst + ", 2), &legacy, 2);"));
+    CHECK(contains(result.text,
+                   "__builtin_memcpy(__builtin_assume_aligned(" + half_dst + ", 1), &weak, 2);"));
+    CHECK(contains(result.text,
+                   "bool bit = (*(reinterpret_cast<const unsigned char*>(bool_base) + "
+                   "(int64_t)i * (int64_t)sizeof(unsigned char)) & 1u) != 0;"));
+    CHECK(contains(result.text,
+                   "*(const_cast<unsigned char*>(reinterpret_cast<const unsigned char*>(bool_base))"
+                   " + (int64_t)i * (int64_t)sizeof(unsigned char)) = (unsigned char)bit;"));
     return 0;
 }
 
@@ -681,6 +816,8 @@ int main()
 {
     if(test_an_llvm_vector_access_without_align_claims_its_natural_alignment()
        || test_a_hip_vector_access_without_align_claims_its_natural_alignment()
+       || test_hip_word_access_through_byte_pointers()
+       || test_hip_rebased_moe_weights_use_halfword_indices() || test_hip_scalar_memory_accesses()
        || test_a_sub_byte_vector_store_without_align_is_refused()
        || test_an_llvm_vector_load_refuses_an_invalid_align()
        || test_the_hip_lowering_refuses_an_invalid_align()

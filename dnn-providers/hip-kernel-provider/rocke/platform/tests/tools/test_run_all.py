@@ -48,6 +48,10 @@ def test_runner_passes_registered_fixture_to_both_backends(
     executable = tmp_path / "Debug" / filename
     executable.parent.mkdir()
     executable.touch()
+    fragment_io = executable.with_name(
+        filename.replace("rocke_storage", "rocke_fragment_io")
+    )
+    fragment_io.touch()
     ir_types = tmp_path / "Debug" / "rocke_ir_types"
     ir_types.touch()
     nontemporal = tmp_path / "Debug" / "rocke_nontemporal_hip"
@@ -82,6 +86,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
         listing = {
             "tests": [
                 {"name": "rocke_storage", "command": [str(executable)]},
+                {"name": "rocke_fragment_io", "command": [str(fragment_io)]},
                 {"name": "rocke_ir_types", "command": [str(ir_types)]},
                 {"name": "rocke_nontemporal_hip", "command": [str(nontemporal)]},
                 {
@@ -126,6 +131,7 @@ def test_runner_passes_registered_fixture_to_both_backends(
     ]
     assert len(children) == 3  # default pytest, extension import probe, both pytest
     assert all(env["ROCKE_STORAGE_TEST"] == str(selected) for _, env in children)
+    assert all(env["ROCKE_FRAGMENT_IO_TEST"] == str(fragment_io) for _, env in children)
     assert all(env["ROCKE_IR_TYPES_TEST"] == str(ir_types) for _, env in children)
     assert all(
         env["ROCKE_NONTEMPORAL_HIP_TEST"] == str(nontemporal) for _, env in children
@@ -377,7 +383,11 @@ def test_source_script_alone_does_not_claim_the_native_suite_is_ready(
                 {
                     "name": "rocke_arch_domain_reproducibility",
                     "command": [runner.sys.executable, "generator.py", "--check"],
-                }
+                },
+                {
+                    "name": "rocke_gfx950_grouped_moe_hip",
+                    "command": [runner.sys.executable, "run_gfx950_grouped_moe_hip.py"],
+                },
             ]
         }
         return subprocess.CompletedProcess(command, 0, stdout=json.dumps(listing))
@@ -649,7 +659,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         "enable_testing()\n"
         'add_custom_target(rocke_core COMMAND "${CMAKE_COMMAND}" -E touch core.ready)\n'
         'get_filename_component(tool_suffix "${CMAKE_COMMAND}" LAST_EXT)\n'
-        "foreach(name rocke_storage rocke_ir_types rocke_nontemporal_hip\n"
+        "foreach(name rocke_storage rocke_fragment_io rocke_ir_types rocke_nontemporal_hip\n"
         "             rocke_unsigned_int_ops rocke_arch_target_identity rocke_buffer_rsrc_hip\n"
         "             rocke_intexpr\n"
         "             rocke_param_facts\n"
@@ -679,6 +689,7 @@ def test_fresh_build_prepares_entire_ctest_suite(
         monkeypatch.setenv("ROCKE_STORAGE_TEST", str(executable))
     env = runner.native_pytest_env(build, "Release")
     assert Path(env["ROCKE_STORAGE_TEST"]).is_file()
+    assert Path(env["ROCKE_FRAGMENT_IO_TEST"]).is_file()
     assert Path(env["ROCKE_IR_TYPES_TEST"]).is_file()
     assert Path(env["ROCKE_NONTEMPORAL_HIP_TEST"]).is_file()
     assert Path(env["ROCKE_UNSIGNED_INT_OPS_CLI"]).is_file()

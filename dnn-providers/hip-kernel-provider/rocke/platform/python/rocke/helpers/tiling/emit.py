@@ -22,7 +22,7 @@ import math
 from typing import Any, Callable
 
 from ...core.dtypes import dtype_info
-from ...core.ir import I8, Type, VectorType
+from ...core.ir import I8, I32, I64, Type, VectorType
 from ...core.passes import constant_int
 from ...core.storage import (
     element_bytes,
@@ -32,7 +32,14 @@ from ...core.storage import (
     storage_group,
     storage_to_elements,
 )
-from ..mma_io import storage_element_type, storage_vector_type
+from ...core.ir_storage import storage_element_type, storage_vector_type
+from .transport import load_storage_chunks
+from .global_address import (
+    can_rebase_global,
+    split_window,
+    byte_address,
+    storage_displacement,
+)
 from .descriptors import TensorDesc, TensorWindow
 from .encoding import WarpDistributionEncoding
 from .fragments import Fragment, TileDesc, storage_slots
@@ -54,6 +61,23 @@ def _unit_bytes(dtype: Any) -> int:
     vector (:func:`rocke.core.storage.storage_dtype`). Also the access's natural alignment.
     """
     return element_bytes(storage_dtype(dtype.name))
+
+
+def _check_alignment_bytes(alignment_bytes: int | None, ptr: Any) -> None:
+    """Validate a caller-guaranteed global base alignment before emitting IR."""
+    if alignment_bytes is None:
+        return
+    if isinstance(alignment_bytes, bool) or not isinstance(alignment_bytes, int):
+        raise TypeError("alignment_bytes must be an integer")
+    if alignment_bytes <= 0 or alignment_bytes & (alignment_bytes - 1):
+        raise ValueError("alignment_bytes must be a positive power of two")
+    if _is_lds(ptr):
+        raise ValueError("alignment_bytes applies to global fragment transport only")
+
+
+def _cap_alignment(derived: int, alignment_bytes: int | None) -> int:
+    """Cap a layout-derived alignment by the supplied global base guarantee."""
+    return derived if alignment_bytes is None else min(derived, alignment_bytes)
 
 
 def _unit_index(b: Any, element_index: Any, dtype: Any) -> Any:
@@ -210,6 +234,10 @@ def _check_tile_rank(verb: str, window: TensorWindow, tile_desc: TileDesc) -> No
             f"{verb}: the tile has rank {tile_rank} but the window has rank {window_rank} -- a "
             f"rank-t tile covers the window's last t axes, so t <= r"
         )
+    if any(
+        length is None for length in window.tensor.lengths[window_rank - tile_rank :]
+    ):
+        raise ValueError("unknown tensor lengths are supported on leading axes only")
 
 
 def _check_leading_bounds(verb: str, window: TensorWindow, tile_desc: TileDesc) -> None:
@@ -373,7 +401,6 @@ def _register_index(
     tile_desc: TileDesc,
     base_index: Any,
     register: int,
-    dtype: Any,
 ) -> Any:
     """The register's storage-unit index: the lane base index (already in storage units, see
     :func:`_unit_index`) plus the register's compile-time coordinate offset linearized by the tensor
@@ -381,14 +408,7 @@ def _register_index(
     the backend vectorizer can merge; it is bit-exact with :func:`_address` of the register's
     positions by linearity. For every byte-or-wider dtype a unit is an element."""
     deltas = _register_coord_offsets(tile_desc.layout, register)
-    lead = _leading_rank(window, len(deltas))
-    offset = elements_to_storage(
-        dtype.name,
-        sum(
-            delta * window.tensor.strides[lead + axis]
-            for axis, delta in enumerate(deltas)
-        ),
-    )
+    offset = storage_displacement(window, tile_desc, deltas)
     return base_index if offset == 0 else b.add(base_index, b.const_i32(offset))
 
 
@@ -709,6 +729,45 @@ def _packed_access_units(
     raise AssertionError("a whole-word group always divides a checked packed run")
 
 
+def _bundle_global_units(
+    tile_desc: TileDesc,
+    window: TensorWindow,
+    dtype: Any,
+    units: int,
+    alignment_bytes: int | None,
+) -> int:
+    """Pair complete three-word groups when a stated global contract proves the run.
+
+    A 24-byte run is emitted as 16+8 byte pieces by the shared transport policy,
+    rather than two three-word tuples that may need register copies at an MMA.
+    Default/partial accesses keep their existing granularity.
+    """
+    if alignment_bytes is None or not is_register_packed(dtype.name):
+        return units
+    group, group_words = storage_group(dtype.name)
+    paired_words = 2 * group_words
+    if group_words != 3 or not _tile_in_bounds(tile_desc, window):
+        return units
+    run = _register_run(tile_desc, window)
+    if run is None:
+        return units
+    axis, length = run
+    origin = constant_int(window.origin[axis])
+    if (
+        origin is None
+        or origin % (2 * group)
+        or elements_to_storage(dtype.name, length) % paired_words
+    ):
+        return units
+    if any(
+        elements_to_storage(dtype.name, stride) % paired_words
+        for other, stride in enumerate(window.tensor.strides)
+        if other != axis
+    ):
+        return units
+    return paired_words
+
+
 def _access_align(units: int, dtype: Any) -> int:
     """The alignment (bytes) an access of `units` storage units claims: the access size when it is a
     power of two, else the largest power of two dividing it (a 3-word access claims one word).
@@ -858,7 +917,7 @@ def _lds_index(
     element's swizzled address does not depend on the rank of the tile that reaches it.
     """
     if not lds_swizzle:
-        return _register_index(b, window, tile_desc, base_index, register, dtype)
+        return _register_index(b, window, tile_desc, base_index, register)
     coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
     lead = _leading_rank(window, len(coords))
     leading = [_as_value(b, window.origin[axis]) for axis in range(lead)]
@@ -966,6 +1025,7 @@ def load_fragment(
     coherency: int = 0,
     lds_swizzle: bool | Callable[[Any, list], list] = False,
     packed_runs_aligned: bool = False,
+    alignment_bytes: int | None = None,
 ) -> Fragment:
     """Generic per-lane load: memory (`ptr` + `window`) -> `Fragment`, driven by `tile_desc.layout`.
 
@@ -983,6 +1043,9 @@ def load_fragment(
     the tensor -- its storage element, with room for its span (refused otherwise); LDS loads are
     unclipped.
     `pad` default `0`; a non-zero `constant(value)` fill is reserved. `coherency` reserved.
+    `alignment_bytes` optionally states the guaranteed alignment at the passed global pointer;
+    every load caps its layout-derived alignment to that guarantee. Omitted preserves the existing
+    layout-alignment contract. LDS rejects this argument; its allocation/layout own alignment.
 
     A rank-t tile covers the window's last t axes (t <= the window's rank, refused otherwise); each
     leading axis is read at its origin.
@@ -995,6 +1058,7 @@ def load_fragment(
     unmasked, both without an error. ``packed_runs_aligned=True`` with any other dtype raises
     ``ValueError``: its runtime origins and bounds are already safe.
     """
+    _check_alignment_bytes(alignment_bytes, ptr)
     _check_packed_runs_aligned_applies("load_fragment", window, packed_runs_aligned)
     _check_tile_rank("load_fragment", window, tile_desc)
     _check_leading_bounds("load_fragment", window, tile_desc)
@@ -1018,6 +1082,7 @@ def load_fragment(
             verb="load_fragment",
             packed_runs_aligned=packed_runs_aligned,
         )
+        vw = _bundle_global_units(tile_desc, window, dtype, vw, alignment_bytes)
     step = storage_to_elements(dtype.name, vw)
     storage = storage_vector_type(dtype, tile_desc.register_count)
     unit = storage.elem
@@ -1035,21 +1100,52 @@ def load_fragment(
             slots = storage_slots(dtype, tile_desc.register_count, register, step)
             value = move_registers_into(b, value, loaded, enumerate(slots))
         return Fragment(tile_desc, dtype, value)
-    align = _unit_bytes(dtype)
+    align = _cap_alignment(_unit_bytes(dtype), alignment_bytes)
+    rebased = None
+    constant_origin = 0
+    if can_rebase_global(
+        ptr, window, tile_desc, alignment_bytes, _tile_in_bounds(tile_desc, window)
+    ):
+        runtime_window, constant_origin = split_window(window)
+        coords = emit_tensor_coordinates(b, tile_desc.layout, thread, 0)
+        positions = _positions(b, runtime_window, coords)
+        rebased = b.global_ptr_add(
+            ptr, b.sext(byte_address(b, runtime_window, positions), I64)
+        )
     zero: Any = None  # the pad scalar, emitted lazily on the first clipped access
     for register in range(0, tile_desc.register_count, step):
-        coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
-        positions = _positions(b, window, coords)
-        address = _unit_index(b, _address(b, window, positions), dtype)
+        if rebased is not None:
+            delta = _register_coord_offsets(tile_desc.layout, register)
+            address = b.const_i32(
+                storage_displacement(window, tile_desc, delta, constant_origin)
+            )
+            load_ptr = rebased
+            mask = None
+        else:
+            coords = emit_tensor_coordinates(b, tile_desc.layout, thread, register)
+            positions = _positions(b, window, coords)
+            address = _unit_index(b, _address(b, window, positions), dtype)
+            load_ptr = ptr
+            mask = _clip_mask(b, window, positions, tile_desc.shape)
         slots = storage_slots(dtype, tile_desc.register_count, register, step)
         # A wide access is only chosen for a tile that cannot overhang, so it never needs a mask; a
         # packed whole-word group may, and is masked as a unit (its bound is whole groups).
-        mask = _clip_mask(b, window, positions, tile_desc.shape)
         if mask is None and vw > 1:
             # Contiguous stride-1 run -> single vectorised global load (global_load_dwordxN).
-            loaded = b.global_load_vN(
-                ptr, address, unit, vw, align=_access_align(vw, dtype)
+            pieces = load_storage_chunks(
+                b,
+                load_ptr,
+                address,
+                unit,
+                vw,
+                alignment_bytes=_cap_alignment(
+                    _access_align(vw, dtype), alignment_bytes
+                ),
+                word_vectors=unit == I32,
             )
+            loaded = pieces[0]
+            for piece in pieces[1:]:
+                loaded = b.vec_concat(loaded, piece)
             value = move_registers_into(b, value, loaded, enumerate(slots))
             continue
         if mask is not None:
@@ -1065,10 +1161,10 @@ def load_fragment(
         for i, slot in enumerate(slots):
             unit_address = address if i == 0 else b.add(address, b.const_i32(i))
             if mask is None:
-                loaded = b.global_load(ptr, unit_address, unit, align=align)
+                loaded = b.global_load(load_ptr, unit_address, unit, align=align)
             else:
                 loaded = b.masked_global_load(
-                    ptr, unit_address, mask, zero, unit, align=align
+                    load_ptr, unit_address, mask, zero, unit, align=align
                 )
             value = b.vec_insert(value, loaded, slot)
     return Fragment(tile_desc, dtype, value)
@@ -1100,6 +1196,7 @@ def store_fragment(
     coherency: int = 0,
     lds_swizzle: bool | Callable[[Any, list], list] = False,
     packed_runs_aligned: bool = False,
+    alignment_bytes: int | None = None,
 ) -> None:
     """Generic per-lane store: `Fragment` -> memory (`ptr` + `window`), casting the fragment
     dtype to ``window.tensor.dtype`` only along the honest path (identity or f32->{f16,bf16}).
@@ -1117,12 +1214,13 @@ def store_fragment(
     A register run headed for LDS is gathered into one vector element by element, each cast on its
     way out, so it is not a pure register move.
     """
+    _check_alignment_bytes(alignment_bytes, ptr)
     _check_packed_runs_aligned_applies("store_fragment", window, packed_runs_aligned)
     _check_tile_rank("store_fragment", window, fragment.tile_desc)
     _check_leading_bounds("store_fragment", window, fragment.tile_desc)
     tile_desc = fragment.tile_desc
     out_dtype = window.tensor.dtype
-    align = _unit_bytes(out_dtype)
+    align = _cap_alignment(_unit_bytes(out_dtype), alignment_bytes)
     lds = _is_lds(ptr)
     # Wide LDS stores when the innermost register run is contiguous (ds_write_b{32,64,128}); the
     # global store stays scalar (the C epilogue is one-shot + may clip/cast): one element, or one
@@ -1196,7 +1294,7 @@ def store_fragment(
     base_index = _unit_index(b, base_index, out_dtype)
     for register in range(0, tile_desc.register_count, step):
         positions = _register_positions(b, tile_desc, base_positions, register)
-        address = _register_index(b, window, tile_desc, base_index, register, out_dtype)
+        address = _register_index(b, window, tile_desc, base_index, register)
         slots = storage_slots(fragment.dtype, tile_desc.register_count, register, step)
         units = [_stored_unit(b, fragment, slot, out_dtype) for slot in slots]
         mask = _clip_mask(b, window, positions, tile_desc.shape)

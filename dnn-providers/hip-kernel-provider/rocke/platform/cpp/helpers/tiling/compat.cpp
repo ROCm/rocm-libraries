@@ -1,24 +1,14 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Descriptor-driven transport. Mirrors helpers/mma_io.py in emission order. */
-#include "rocke/helper_rocke.helpers.mma_io.h"
+/* Compatibility raw-chunk adapter. Mirrors helpers/tiling/compat.py. */
+#include "rocke/tiling_compat.h"
 
 #include <limits.h>
-#include <string.h>
 
+#include "rocke/dtypes.h"
 #include "rocke/error_boundary.hpp"
-
-const rocke_type_t* rocke_storage_ir_type(const char* dtype)
-{
-    const rocke_dtype_info_t* info = rocke_dtype_info(dtype);
-    if(!info)
-        return NULL;
-    if(strcmp(info->name, "tf32") == 0)
-        return rocke_i32();
-    if(info->encoded_bits % 8 || strcmp(info->name, "e8m0") == 0 || strcmp(info->name, "e5m3") == 0)
-        return rocke_i8();
-    return rocke_dtype_to_ir_type(info->name);
-}
+#include "rocke/ir_storage.h"
+#include "rocke/tiling_transport_internal.h"
 
 static uint64_t gcd(uint64_t a, uint64_t b)
 {
@@ -113,35 +103,21 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
                 rocke_b_add(
                     b, step_base, rocke_b_const_i32(b, j * layout->lane_groups * chunk_units)),
                 lane_chunk);
-            uint64_t remaining = chunk_units, consumed = 0;
-            const int max_width = unit_bytes == 4 ? 8 : 16;
-            while(remaining)
-            {
-                int width = 1;
-                while(width < max_width && uint64_t(width * 2) <= remaining)
-                    width *= 2;
-                if(word_loads)
-                    width = remaining / 4 < 4 ? int(remaining / 4) : 4;
-                auto* at
-                    = consumed ? rocke_b_add(b, offset, rocke_b_const_i32(b, consumed)) : offset;
-                int load_align = gcd(alignment, consumed * unit_bytes);
-                // Form the byte address before loading words; preserve signed i32 offsets.
-                auto* load_ptr
-                    = word_loads ? rocke_b_global_ptr_add(b, ptr, rocke_b_sext(b, at, rocke_i64()))
-                                 : ptr;
-                auto* load_at = word_loads ? rocke_b_const_i32(b, 0) : at;
-                auto* value
-                    = width == 1
-                          ? rocke_b_vector_splat(
-                                b,
-                                rocke_b_global_load(b, load_ptr, load_at, load_type, load_align),
-                                1)
-                          : rocke_b_global_load_vN(
-                                b, load_ptr, load_at, load_type, width, load_align);
-                chunks[num_chunks++] = value;
-                consumed += width * load_step;
-                remaining -= width * load_step;
-            }
+            int piece_count;
+            if(rocke_h_load_storage_chunks(b,
+                                           ptr,
+                                           offset,
+                                           load_type,
+                                           int(chunk_units / load_step),
+                                           alignment,
+                                           word_loads,
+                                           false,
+                                           chunks + num_chunks,
+                                           size_t(payload_bits / (8 * unit_bytes)) - num_chunks,
+                                           &piece_count)
+               != ROCKE_OK)
+                return NULL;
+            num_chunks += piece_count;
         }
         auto* payload = chunks[0];
         for(int i = 1; i < num_chunks; ++i)
@@ -153,76 +129,5 @@ rocke_value_t* rocke_h_load_matrix_fragment(rocke_ir_builder_t* b,
             payload = rocke_b_vec_concat(
                 b, payload, rocke_b_vector_splat(b, rocke_b_const_i32(b, 0), padding));
         return payload;
-    });
-}
-
-rocke_status_t rocke_h_pack_fragment_bits(rocke_ir_builder_t* b,
-                                          rocke_load_bits_fn load_bits,
-                                          void* ctx,
-                                          const rocke_fragment_packing_t* fragment,
-                                          rocke_value_t** words,
-                                          size_t word_count)
-{
-    return ckc::guard_status(b, [&]() -> rocke_status_t {
-        if(!rocke_i_live(b))
-            return ROCKE_ERR_VALUE;
-        rocke_fragment_packing_t checked;
-        if(!fragment || !load_bits || !words
-           || !rocke_fragment_packing_init(&checked,
-                                           &fragment->packing,
-                                           fragment->count,
-                                           fragment->carrier_bits,
-                                           fragment->carrier_count)
-           || word_count != fragment->carrier_count || fragment->count > INT_MAX)
-            ckc::raise_status(ROCKE_ERR_VALUE, "invalid pattern packing arguments");
-        const auto& f = *fragment;
-        if(f.carrier_bits != 32 && f.carrier_bits != 64)
-            ckc::raise_status(ROCKE_ERR_VALUE,
-                              "IR pattern packing currently requires i32 or i64 carriers");
-        if(f.packing.element_bits > 32)
-            ckc::raise_status(ROCKE_ERR_VALUE,
-                              "IR pattern packing supports encoded fields of at most 32 bits");
-        const auto* word_type = f.carrier_bits == 64 ? rocke_i64() : rocke_i32();
-        auto constant = [&](uint64_t value) {
-            return f.carrier_bits == 64 ? rocke_b_const_i64(b, int64_t(value))
-                                        : rocke_b_const_i32(b, int32_t(value));
-        };
-        for(size_t j = 0; j < word_count; ++j)
-            words[j] = constant(0);
-        for(uint64_t j = 0; j < f.count; ++j)
-        {
-            auto* pattern = load_bits(b, (int)j, ctx);
-            if(!pattern
-               || (!rocke_type_eq(pattern->type, rocke_i8())
-                   && !rocke_type_eq(pattern->type, rocke_i16())
-                   && !rocke_type_eq(pattern->type, rocke_i32())
-                   && !rocke_type_eq(pattern->type, rocke_i64())))
-                ckc::raise_status(ROCKE_ERR_VALUE,
-                                  "pattern packing requires unsigned patterns in integer carriers");
-            const int bits = rocke_dtype_info(pattern->type->name)->encoded_bits;
-            if(bits < f.packing.element_bits)
-                ckc::raise_status(ROCKE_ERR_VALUE, "pattern carrier is smaller than encoded width");
-            if(bits < f.carrier_bits)
-                pattern = rocke_b_zext(b, pattern, word_type);
-            else if(bits > f.carrier_bits)
-                ckc::raise_status(ROCKE_ERR_VALUE, "pattern carrier is wider than output carrier");
-            uint64_t start = j * f.packing.slot_bits;
-            int remaining = f.packing.element_bits, consumed = 0;
-            while(remaining)
-            {
-                const uint64_t word = start / f.carrier_bits;
-                const int shift = start % f.carrier_bits;
-                const int take
-                    = remaining < f.carrier_bits - shift ? remaining : f.carrier_bits - shift;
-                auto* part = consumed ? rocke_b_lshr(b, pattern, constant(consumed)) : pattern;
-                if(take < remaining)
-                    part = rocke_b_land(b, part, constant((uint64_t(1) << take) - 1));
-                words[word] = rocke_b_lor(b, words[word], rocke_b_shl(b, part, constant(shift)));
-                start += take;
-                consumed += take;
-                remaining -= take;
-            }
-        }
-        return ROCKE_OK;
     });
 }
