@@ -11,7 +11,8 @@ the same reason, instead of crashing.
   refuse it as Python does rather than emit gfx950 MFMA for gfx942.
 * gfx942 2D i64 K/V addressing without whole pages per copy: i64 has no
   whole-cache loader, so both engines refuse rather than emit copies that
-  straddle pages.
+  straddle pages. The pre-loop refuses copies that cross pages; the cfvst V
+  loader, inside the KV loop, refuses a load call that spans pages.
 """
 
 from __future__ import annotations
@@ -90,6 +91,30 @@ def test_gfx942_2d_i64_refuses_copies_that_straddle_pages_like_python():
         **{**_PROBLEM, "head_size": 96},
     )
     with pytest.raises(ValueError, match="whole pages per tile and per copy") as py_err:
+        build_gfx942_2d(spec, arch="gfx942")
+    with pytest.raises(Exception) as cpp_err:
+        rocke_engine.gfx942_attention_tiled_2d_lower_llvm(
+            dataclasses.asdict(spec), "gfx942"
+        )
+    assert str(py_err.value) in str(cpp_err.value)
+
+
+def test_gfx942_2d_i64_cfvst_refuses_calls_that_span_pages_like_python():
+    # 8-token pages with whole pages per copy, so the pre-loop accepts the
+    # spec and the cfvst loader refuses its 16-token load calls.
+    spec = Gfx942Spec2D(
+        num_query_heads=32,
+        num_kv_heads=8,
+        num_warps=4,
+        block_m_per_warp=32,
+        tile_size=64,
+        use_mfma_32x32x8=True,
+        use_transposed_qk_32x32=True,
+        use_conflict_free_v_store=True,
+        use_i64_kv_addr=True,
+        **{**_PROBLEM, "head_size": 64, "block_size": 8},
+    )
+    with pytest.raises(ValueError, match="within one page") as py_err:
         build_gfx942_2d(spec, arch="gfx942")
     with pytest.raises(Exception) as cpp_err:
         rocke_engine.gfx942_attention_tiled_2d_lower_llvm(
