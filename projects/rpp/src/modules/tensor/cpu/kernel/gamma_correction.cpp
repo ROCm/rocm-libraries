@@ -157,15 +157,12 @@ RppStatus gamma_correction_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescP
 }
 
 // Helper function for f32->f32 gamma_correction processing
+// Computes pow(value, gamma) directly on the full-precision pixel instead of quantizing through
+// a truncated 8-bit LUT (which loses precision F32 can otherwise represent exactly).
 inline void gamma_correction_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr srcDescPtr,
                                                Rpp32f* dstPtrImage, RpptDescPtr dstDescPtr,
                                                Rpp32f gamma, RpptROI roi,
                                                RppLayoutParams layoutParams, Rpp32u intraThreads) {
-    Rpp32f gammaLUT[256];
-    for (int i = 0; i < 256; i++) {
-        gammaLUT[i] = (Rpp32f)pow((((Rpp32f)i) * ONE_OVER_255), gamma);
-    }
-
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
     Rpp32f *srcPtrChannel, *dstPtrChannel;
@@ -192,9 +189,9 @@ inline void gamma_correction_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr 
 
             int vectorLoopCount = 0;
             for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                *dstPtrTempR = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[0] * 255))];
-                *dstPtrTempG = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[1] * 255))];
-                *dstPtrTempB = gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[2] * 255))];
+                *dstPtrTempR = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[0], gamma));
+                *dstPtrTempG = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[1], gamma));
+                *dstPtrTempB = RPPPIXELCHECKF32((Rpp32f)pow(srcPtrTemp[2], gamma));
 
                 srcPtrTemp += 3;
                 dstPtrTempR++;
@@ -223,9 +220,9 @@ inline void gamma_correction_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr 
 
             int vectorLoopCount = 0;
             for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                dstPtrTemp[0] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempR * 255))];
-                dstPtrTemp[1] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempG * 255))];
-                dstPtrTemp[2] = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempB * 255))];
+                dstPtrTemp[0] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempR, gamma));
+                dstPtrTemp[1] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempG, gamma));
+                dstPtrTemp[2] = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTempB, gamma));
 
                 srcPtrTempR++;
                 srcPtrTempG++;
@@ -250,7 +247,7 @@ inline void gamma_correction_f32_f32_host_impl(Rpp32f* srcPtrImage, RpptDescPtr 
 
                 int vectorLoopCount = 0;
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp = gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTemp * 255))];
+                    *dstPtrTemp = RPPPIXELCHECKF32((Rpp32f)pow(*srcPtrTemp, gamma));
 
                     srcPtrTemp++;
                     dstPtrTemp++;
@@ -291,15 +288,12 @@ RppStatus gamma_correction_f32_f32_host_tensor(Rpp32f* srcPtr, RpptDescPtr srcDe
 }
 
 // Helper function for f16->f16 gamma_correction processing
+// Computes pow(value, gamma) directly on the full-precision pixel instead of quantizing through
+// a truncated 8-bit LUT (which loses precision F16 can otherwise represent exactly).
 inline void gamma_correction_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr srcDescPtr,
                                                Rpp16f* dstPtrImage, RpptDescPtr dstDescPtr,
                                                Rpp32f gamma, RpptROI roi,
                                                RppLayoutParams layoutParams, Rpp32u intraThreads) {
-    Rpp32f gammaLUT[256];
-    for (int i = 0; i < 256; i++) {
-        gammaLUT[i] = (Rpp32f)pow((((Rpp32f)i) * ONE_OVER_255), gamma);
-    }
-
     Rpp32u bufferLength = roi.xywhROI.roiWidth * layoutParams.bufferMultiplier;
 
     Rpp16f *srcPtrChannel, *dstPtrChannel;
@@ -326,9 +320,9 @@ inline void gamma_correction_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr 
 
             int vectorLoopCount = 0;
             for (; vectorLoopCount < bufferLength; vectorLoopCount += 3) {
-                *dstPtrTempR = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[0] * 255))];
-                *dstPtrTempG = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[1] * 255))];
-                *dstPtrTempB = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(srcPtrTemp[2] * 255))];
+                *dstPtrTempR = (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[0], gamma));
+                *dstPtrTempG = (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[1], gamma));
+                *dstPtrTempB = (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)srcPtrTemp[2], gamma));
 
                 srcPtrTemp += 3;
                 dstPtrTempR++;
@@ -357,9 +351,12 @@ inline void gamma_correction_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr 
 
             int vectorLoopCount = 0;
             for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                dstPtrTemp[0] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempR * 255))];
-                dstPtrTemp[1] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempG * 255))];
-                dstPtrTemp[2] = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTempB * 255))];
+                dstPtrTemp[0] =
+                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempR), gamma));
+                dstPtrTemp[1] =
+                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempG), gamma));
+                dstPtrTemp[2] =
+                    (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTempB), gamma));
 
                 srcPtrTempR++;
                 srcPtrTempG++;
@@ -384,7 +381,8 @@ inline void gamma_correction_f16_f16_host_impl(Rpp16f* srcPtrImage, RpptDescPtr 
 
                 int vectorLoopCount = 0;
                 for (; vectorLoopCount < bufferLength; vectorLoopCount++) {
-                    *dstPtrTemp = (Rpp16f)gammaLUT[(int)(RPPPIXELCHECK(*srcPtrTemp * 255))];
+                    *dstPtrTemp =
+                        (Rpp16f)RPPPIXELCHECKF32((Rpp32f)pow((Rpp32f)(*srcPtrTemp), gamma));
 
                     srcPtrTemp++;
                     dstPtrTemp++;
