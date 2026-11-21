@@ -59,11 +59,13 @@ struct FmhaDecodePaged5dConfig
 
 // A range that fits one cluster (at most 15 splits: the cluster size is a 4-bit compile-time
 // field) takes as many splits as it allows, each a whole number of 64-token steps, but at least 16
-// pages per split once the grid would exceed about 640 workgroups. A longer range takes several
-// clusters (groups, merged by the last split to finish a row block): the shortest of 8, 12 or 16
-// pages per split that keeps at most 192 splits per (batch, kv head) and 512 workgroups, or else
-// the wave-split layout (whose waves run their own pages without per-step barriers) with about
-// 384 workgroups.
+// pages per split once the grid would exceed about 640 workgroups. Up to 960 pages, one cluster
+// of the wave-split layout (whose waves run their own pages without per-step barriers) while
+// the grid stays within 512 workgroups, and above 512 pages has at least 64 of them (fewer
+// lose to the parallelism of several clusters). A longer range takes several clusters (groups,
+// merged by the last split to finish a row block): the shortest of 8, 12 or 16 pages per split that
+// keeps at most 192 splits per (batch, kv head) and 512 workgroups, or else the wave-split layout
+// with about 384 workgroups.
 CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(index_t batch,
                                                                 index_t nhead_k,
                                                                 index_t max_seqlen_k,
@@ -87,6 +89,10 @@ CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(index_t batch,
             pps = std::max<index_t>(pps, 16);
         return make(pps, false);
     }
+    const index_t wave_pps = round_up(ceil_div(span, 15), 16);
+    const index_t wave_wgs = heads * ceil_div(span, wave_pps);
+    if(span <= 15 * 64 && wave_wgs <= 512 && (span <= 512 || wave_wgs >= 64))
+        return make(wave_pps, true);
     for(index_t pps : {8, 12, 16})
         if(ceil_div(span, pps) <= 192 && heads * ceil_div(span, pps) <= 512)
             return make(pps, false);
@@ -402,49 +408,18 @@ struct FmhaDecodePaged5dKernel
             return (t * kNumWaves + w) * kWavePages + q;
         };
         const auto issue = [&](index_t t) {
-            const index_t st = t % kStages;
-            if constexpr(kWaveSplit)
-            {
-                // one TDM gather each for K and V; a page past the split repeats the last one
-                // (its V is zeroed once it lands)
-                int32_t rows[kWavePages];
-                for(index_t q = 0; q < kWavePages; ++q)
-                {
-                    const index_t idx = min(page_idx(t, q), pend - 1 - pg0);
-                    const int32_t blk = __builtin_amdgcn_readlane(
-                        (idx >> 5) == cur_chunk ? bt_cur : bt_next, idx & 31);
-                    rows[q] = blk * a.nhead_k + g;
-                }
-                tdm_pages(a.k, kbuf(st, 0), rows);
-                tdm_pages(a.v, vbuf(st, 0), rows);
-                return;
-            }
+            // one TDM gather each for K and V; a page past the split repeats the last one (its V
+            // is zeroed once it lands)
+            int32_t rows[kWavePages];
             for(index_t q = 0; q < kWavePages; ++q)
             {
-                // a page past the split copies the last one (its V is zeroed once it lands): every
-                // step issues the same number of copies, which the asynccnt waits count on
                 const index_t idx = min(page_idx(t, q), pend - 1 - pg0);
-                uint8_t* kd       = kbuf(st, q);
-                uint8_t* vd       = vbuf(st, q);
                 const int32_t blk =
                     __builtin_amdgcn_readlane((idx >> 5) == cur_chunk ? bt_cur : bt_next, idx & 31);
-                const long_index_t base =
-                    (static_cast<long_index_t>(blk) * a.nhead_k + g) * kPageBytes;
-                for(index_t i = 0; i < 4; ++i)
-                {
-                    const index_t off = (i * 32 + l) * 16;
-                    __builtin_amdgcn_global_load_async_to_lds_b128(
-                        to_global(ptr_as<v4i>(a.k + base + off)),
-                        to_lds(ptr_as<v4i>(kd + off)),
-                        0,
-                        0);
-                    __builtin_amdgcn_global_load_async_to_lds_b128(
-                        to_global(ptr_as<v4i>(a.v + base + off)),
-                        to_lds(ptr_as<v4i>(vd + off)),
-                        0,
-                        0);
-                }
+                rows[q] = blk * a.nhead_k + g;
             }
+            tdm_pages(a.k, kbuf(t % kStages, 0), rows);
+            tdm_pages(a.v, vbuf(t % kStages, 0), rows);
         };
         index_t issued = min(steps, kStages);
         for(index_t t = 0; t < issued; ++t)
@@ -469,19 +444,13 @@ struct FmhaDecodePaged5dKernel
 
         // step t's copies of this wave are in LDS; zero the V bytes of tokens past the context
         const auto land = [&](index_t t) {
-            if constexpr(kWaveSplit)
-            {
-                if(issued > t + 1)
-                    __builtin_amdgcn_s_wait_tensorcnt(2);
-                else
-                    __builtin_amdgcn_s_wait_tensorcnt(0);
-            }
-            else if(issued > t + 2)
-                __builtin_amdgcn_s_wait_asynccnt(16 * kWavePages);
+            // two gathers per step
+            if(issued > t + 2)
+                __builtin_amdgcn_s_wait_tensorcnt(4);
             else if(issued > t + 1)
-                __builtin_amdgcn_s_wait_asynccnt(8 * kWavePages);
+                __builtin_amdgcn_s_wait_tensorcnt(2);
             else
-                __builtin_amdgcn_s_wait_asynccnt(0);
+                __builtin_amdgcn_s_wait_tensorcnt(0);
             for(index_t q = 0; q < kWavePages; ++q)
             {
                 const index_t pg    = pg0 + page_idx(t, q);
