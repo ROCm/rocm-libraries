@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import numpy as np
 import numpy.typing as npt
-
 from rocke.numeric.bf16 import bf16_to_f32, f32_to_bf16
 from rocke.numeric.sdpa_reference import sdpa_reference
 

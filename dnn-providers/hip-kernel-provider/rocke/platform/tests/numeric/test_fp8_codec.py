@@ -281,14 +281,18 @@ def test_largest_value_is_the_largest_finite_code(encoding, decode_table):
         (
             "fp8e4m3",
             "gfx90a",
-            "fp8_element_format failed - arch='gfx90a', expected one of "
-            "('gfx942', 'gfx950', 'gfx1250')",
+            (
+                "fp8_element_format failed - arch='gfx90a', expected one of "
+                "('gfx942', 'gfx950', 'gfx1250')"
+            ),
         ),
         (
             "i8",
             "gfx950",
-            "fp8_element_format failed - dtype='i8', expected one of "
-            "('bf8e5m2', 'fp8e4m3')",
+            (
+                "fp8_element_format failed - dtype='i8', expected one of "
+                "('bf8e5m2', 'fp8e4m3')"
+            ),
         ),
     ],
 )

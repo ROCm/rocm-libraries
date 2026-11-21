@@ -29,7 +29,6 @@ import dataclasses
 import re
 
 import pytest
-
 from kernels.gfx942.attention_tiled_2d import (
     UnifiedAttention2DTiledSpec,
     build_unified_attention_2d_tiled,

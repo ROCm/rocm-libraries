@@ -57,7 +57,7 @@ _LIB_ROOT = str(Path(__file__).resolve().parent.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
-from rocke.core.golden_file import rerecord_hint  # noqa: E402
+from rocke.core.golden_file import rerecord_hint
 from rocke.core.ir_golden import (  # noqa: E402 -- library root pinned above
     GOLDEN_FLAVORS,
     check_golden_flavors,

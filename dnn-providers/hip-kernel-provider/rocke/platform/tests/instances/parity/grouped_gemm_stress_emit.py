@@ -7,18 +7,18 @@
 # and prints _native_lower(arch='gfx950') of build_grouped_gemm.
 import sys
 
+from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
 from rocke.instances.common.grouped_gemm import (
     GroupedGemmSpec,
     build_grouped_gemm,
 )
-from rocke.instances.common.gemm_universal import TileSpec, TraitSpec
 
 try:
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
-from rocke.core.ir_serialize import serialize
 from _emit_common import MODES, target_ir
+from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
 # Each entry: (name, dtype, TileSpec kwargs, TraitSpec kwargs)

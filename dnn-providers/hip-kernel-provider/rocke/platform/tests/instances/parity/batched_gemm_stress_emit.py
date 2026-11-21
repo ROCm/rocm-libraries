@@ -24,8 +24,8 @@ try:
     from rocke.core.lower_llvm import _lower_kernel_to_llvm_python as _native_lower
 except ImportError:  # pragma: no cover - older reference tree
     from rocke import lower_kernel_to_llvm as _native_lower
-from rocke.core.ir_serialize import serialize
 from _emit_common import MODES, target_ir
+from rocke.core.ir_serialize import serialize
 from rocke.core.verify import verify
 
 

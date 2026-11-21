@@ -42,7 +42,7 @@ for _module_root in (_HERE, ROCKE / "platform" / "python"):
     if _module_root.is_dir() and str(_module_root) not in sys.path:
         sys.path.insert(0, str(_module_root))
 
-from golden_index import (  # noqa: E402 -- path bootstrap above
+from golden_index import (
     DOCUMENT,
     GOLDEN_DIR_NAMES,
     GOLDENS,
@@ -51,7 +51,7 @@ from golden_index import (  # noqa: E402 -- path bootstrap above
     Golden,
     golden_named,
 )
-from rocke.core.golden_file import rerecord_hint, verify_fingerprint  # noqa: E402
+from rocke.core.golden_file import rerecord_hint, verify_fingerprint
 
 __all__ = ["TreeLayout", "golden_problems", "main"]
 

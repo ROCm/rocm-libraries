@@ -27,7 +27,6 @@ import math
 
 import numpy as np
 import pytest
-
 from dispatch.attention.gfx942_unified import GFX942_TUNING_VARIANTS
 from dispatch.attention.unified_rules import canonicalize_tuning_spec
 from kernels.common.attention_unified import UnifiedAttentionProblem

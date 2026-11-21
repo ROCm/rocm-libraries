@@ -39,7 +39,7 @@ for _path in (str(_LIBRARY), str(_PLATFORM_PYTHON)):
     if _path not in sys.path:
         sys.path.insert(0, _path)
 
-from rocke.core.golden_file import rerecord_hint  # noqa: E402
+from rocke.core.golden_file import rerecord_hint
 from rocke.core.ir_golden import (  # noqa: E402
     GOLDEN_ALIASES,
     GOLDEN_FLAVORS,

@@ -116,7 +116,7 @@ from golden_store import (  # noqa: E402 -- HERE bootstrap above
     GoldenStore,
     compare,
 )
-from rocke.core.golden_file import rerecord_hint  # noqa: E402 -- PYROOT bootstrap
+from rocke.core.golden_file import rerecord_hint
 
 # The differential golden's name in the golden index, printed in its re-record
 # command (which re-records both golden files, every mode and flavor).

@@ -26,8 +26,8 @@ from golden_store import (  # noqa: E402 -- after the sys.path line above
     GoldenStore,
     compare,
 )
-from rocke.core.golden_file import fingerprint  # noqa: E402
-from rocke.tests.git_merge import merges_cleanly  # noqa: E402
+from rocke.core.golden_file import fingerprint
+from rocke.tests.git_merge import merges_cleanly
 
 
 def _write(path: Path, text: str) -> Path:

@@ -50,7 +50,7 @@ import pytest
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
 from test_portable_ir import _env, _online_lib, _replay_cli, _run  # noqa: E402
-from rocke.portable_ir.drivers.roll_hsaco_parity import alpha_norm  # noqa: E402
+from rocke.portable_ir.drivers.roll_hsaco_parity import alpha_norm
 from rocke.tests.arch_marks import COVERED_ARCHES  # noqa: E402
 from rocke.tests.subprocess_launcher import rocke_python_command  # noqa: E402
 

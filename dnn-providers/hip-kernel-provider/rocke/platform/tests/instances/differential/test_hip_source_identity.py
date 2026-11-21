@@ -42,7 +42,6 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
-
 from rocke.tests.engines import (
     REFUSAL_ERROR_TYPES,
     HipRefusal,
@@ -54,7 +53,7 @@ from rocke.tests.engines import (
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 
-import run_diff  # noqa: E402 -- the differential harness is not a package
+import run_diff
 
 # Emitters that build no kernel, so they have no target-ir output.
 NO_KERNEL_FAMILIES = {

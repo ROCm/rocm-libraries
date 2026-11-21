@@ -53,7 +53,7 @@ _LIB_ROOT = str(_TESTS.parent)
 if sys.path and sys.path[0] != _LIB_ROOT:
     sys.path.insert(0, _LIB_ROOT)
 
-from rocke.core.golden_file import (  # noqa: E402 -- library root pinned above
+from rocke.core.golden_file import (
     FINGERPRINT_KEY,
     rerecord_hint,
     stamp_fingerprint,
