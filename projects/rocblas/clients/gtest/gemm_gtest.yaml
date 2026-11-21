@@ -3814,6 +3814,21 @@ Tests:
   outofplace: [ false, true ]
   os_flags: LINUX
 
+# llama.cpp #31111: Tensile maps the column tiles of C to grid y, which HIP limits to
+# maxGridSize[1] = 65535 workgroups. On gfx1200 the columns past 65536 tiles were never
+# written: N = 2^21 + 16 is 65537 tiles of 32 columns there. use_hipblaslt: 0 keeps the
+# Tensile backend on archs that default to hipBLASLt.
+- name: gemm_ex_large_n_grid_y
+  category: nightly
+  function:
+    - gemm_ex: *hpa_half_in_single_out_precision
+  arguments:
+    - { transA: T, transB: N, M: 16, N: 2097168, K: 32, lda: 32, ldb: 32, ldc: 16, ldd: 16 }
+  alpha: 1
+  beta: [ 0, 1 ]
+  outofplace: [ false, true ]
+  use_hipblaslt: 0
+
 # ROCM-30989: skinny ZGEMM with huge K. transA=C makes k the unit-stride index of
 # both A and B, so no 32-bit element offset can overflow and k must not be chunked.
 # Chunking it produced 26372 launches of a k=71 GEMM.

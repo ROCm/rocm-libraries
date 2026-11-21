@@ -631,6 +631,75 @@ namespace
         return inputs;
     }
 
+    /**********************************************************************************
+     * Get the kernels of a Tensile solution, split along n when the grid would       *
+     * exceed HIP's y limit (maxGridSize[1], 65535 workgroups). Tensile maps the      *
+     * column tiles of C to grid y and launches with hipExtModuleLaunchKernel,        *
+     * which does not check that limit. On gfx12 the workgroup ID in y is 16 bits,    *
+     * so the tiles past 65536 reran the first tiles and the columns past them were   *
+     * never written. Each part is a column range of C solved with the same solution. *
+     *********************************************************************************/
+    template <typename Ti, typename To, typename Tc>
+    rocblas_status getTensileKernels(const RocblasContractionProblem<Ti, To, Tc>& prob,
+                                     const Tensile::ContractionProblem&           tensile_prob,
+                                     const Tensile::ContractionSolution&          solution,
+                                     const Tensile::Hardware&                     hardware,
+                                     const hipDeviceProp_t&                       deviceProp,
+                                     std::vector<Tensile::KernelInvocation>&      kernels)
+    {
+        auto max_grid_y = [](const std::vector<Tensile::KernelInvocation>& ks) {
+            size_t grid_y = 0;
+            for(const auto& kernel : ks)
+                grid_y = std::max(grid_y, size_t(kernel.numWorkGroups.y));
+            return grid_y;
+        };
+
+        kernels = solution.solve(tensile_prob, GetTensileInputs(prob), hardware);
+
+        const size_t grid_y_limit = deviceProp.maxGridSize[1];
+        const size_t grid_y       = max_grid_y(kernels);
+        if(grid_y <= grid_y_limit)
+            return rocblas_status_success;
+
+        // grid y is the number of column tiles times a factor such as GlobalSplitU
+        const size_t tile_n         = solution.sizeMapping.macroTile.y;
+        const size_t tiles          = (prob.n + tile_n - 1) / tile_n;
+        const size_t factor         = (grid_y + tiles - 1) / tiles;
+        const size_t tiles_per_part = grid_y_limit / factor;
+        if(!tiles_per_part)
+            return rocblas_status_not_implemented;
+        const size_t parts  = (tiles + tiles_per_part - 1) / tiles_per_part;
+        const size_t n_part = (tiles + parts - 1) / parts * tile_n;
+
+        kernels.clear();
+        for(size_t n_base = 0; n_base < prob.n; n_base += n_part)
+        {
+            auto part = prob;
+            part.n    = std::min(prob.n - n_base, n_part);
+            part.buffer_offset_b += n_base
+                                    * (prob.trans_b == rocblas_operation_none ? prob.col_stride_b
+                                                                              : prob.row_stride_b);
+            part.buffer_offset_c += n_base * prob.col_stride_c;
+            part.buffer_offset_d += n_base * prob.col_stride_d;
+
+            // the GSU workspace was allocated for the whole problem, and the math op
+            // may have fallen back from XF32 to FP32 when the solution was selected
+            auto tensile_part = ConstructTensileProblem(part);
+            tensile_part.setWorkspaceSize(tensile_prob.workspaceSize());
+            tensile_part.setF32XdlMathOp(tensile_prob.f32XdlMathOp());
+            if(!solution.canSolve(tensile_part, hardware))
+                return rocblas_status_not_implemented;
+
+            auto part_kernels = solution.solve(tensile_part, GetTensileInputs(part), hardware);
+            if(max_grid_y(part_kernels) > grid_y_limit)
+                return rocblas_status_not_implemented;
+
+            kernels.insert(kernels.end(), part_kernels.begin(), part_kernels.end());
+        }
+
+        return rocblas_status_success;
+    }
+
     inline rocblas_int map_index_rocblas_to_tensile(rocblas_int idx)
     {
         // need to ensure tensile indices not so large as to already be into sign bit
@@ -1643,17 +1712,20 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                         {
                             if(!(prob.flags & rocblas_gemm_flags_check_solution_index))
                             {
-                                hipError_t hip_status = adapter.launchKernels(
-                                    solution->solve(
-                                        tensile_prob, GetTensileInputs(prob), *hardware),
-                                    handle->get_stream(),
-                                    handle->startEvent,
-                                    handle->stopEvent);
-                                if(hip_status != hipSuccess)
-                                    status = rocblas_internal_convert_hip_to_rocblas_status(
-                                        hip_status);
-                                else
-                                    status = rocblas_status_success;
+                                std::vector<Tensile::KernelInvocation> kernels;
+                                status = getTensileKernels(
+                                    prob, tensile_prob, *solution, *hardware, *deviceProp, kernels);
+                                if(status == rocblas_status_success)
+                                {
+                                    hipError_t hip_status
+                                        = adapter.launchKernels(kernels,
+                                                                handle->get_stream(),
+                                                                handle->startEvent,
+                                                                handle->stopEvent);
+                                    if(hip_status != hipSuccess)
+                                        status = rocblas_internal_convert_hip_to_rocblas_status(
+                                            hip_status);
+                                }
                             }
                             else
                             {
