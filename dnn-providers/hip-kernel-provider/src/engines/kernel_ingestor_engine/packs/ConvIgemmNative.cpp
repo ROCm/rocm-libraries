@@ -1064,6 +1064,23 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
         static_cast<unsigned int>(x), static_cast<unsigned int>(y), static_cast<unsigned int>(z)};
 }
 
+long long flexTailSplitCost(long long rowTiles,
+                            long long rowWidth,
+                            long long kSteps,
+                            long long units,
+                            const FlexTailSplit& split,
+                            long long splitCost)
+{
+    const long long tiles = rowTiles * rowWidth;
+    if(split.splits <= 1)
+    {
+        return divUp(tiles, units) * kSteps;
+    }
+    const long long tail = (rowTiles - split.splitRowTile) * rowWidth;
+    return divUp(split.splitRowTile * rowWidth, units) * kSteps
+           + divUp(tail * split.splits, units) * (divUp(kSteps, split.splits) + splitCost);
+}
+
 FlexTailSplit flexTailSplit(long long rowTiles,
                             long long rowWidth,
                             long long kSteps,
@@ -1101,6 +1118,32 @@ FlexTailSplit flexTailSplit(long long rowTiles,
         consider(full);
     }
     consider(0);
+    return best;
+}
+
+FlexStreamSplit
+    flexStreamSplit(long long tiles, long long kSteps, long long units, long long splitCost)
+{
+    FlexStreamSplit best;
+    if(tiles < 1 || kSteps < 1 || tiles >= units || tiles * kSteps < 2 * units)
+    {
+        return best;
+    }
+    const long long total = tiles * kSteps;
+    // The block whose range holds pair p.
+    const auto blockOf = [&](long long p) { return ((p + 1) * units - 1) / total; };
+    for(long long t = 0; t < tiles; ++t)
+    {
+        best.slots = std::max(best.slots, blockOf((t + 1) * kSteps - 1) - blockOf(t * kSteps) + 1);
+    }
+    long long longest = 0;
+    for(long long b = 0; b < units; ++b)
+    {
+        const long long start = b * total / units, end = (b + 1) * total / units;
+        const long long reached = (end - 1) / kSteps - start / kSteps + 1;
+        longest = std::max(longest, end - start + splitCost + (reached - 1) * splitCost / 2);
+    }
+    best.cost = longest;
     return best;
 }
 
@@ -1232,6 +1275,13 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     }
     long long splits = 1;
     long long splitRowTile = 0;
+    // The stream split: the register-staged flex tile's forward grids of one group and fewer
+    // tiles than units, when it beats the tail split's rounds.
+    FlexStreamSplit stream;
+    if(flex == 2 && forward && a.groups == 1 && problem.phases == 1)
+    {
+        stream = flexStreamSplit(tiles, iterations, wanted, flexSplitCost(flex));
+    }
     if(flex != 0)
     {
         // One launch of the whole grid (rows within one dispatch) for the tail split.
@@ -1245,6 +1295,21 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                                          flexSplitCost(flex));
         splits = split.splits;
         splitRowTile = split.splitRowTile;
+        const long long tailCost
+            = flexTailSplitCost(grid->x, rowWidth, iterations, wanted, split, flexSplitCost(flex));
+        if(stream.slots > 1 && stream.cost < tailCost
+           && stream.slots * plan.outElems * static_cast<long long>(sizeof(float))
+                  <= MAX_PARTIAL_BYTES)
+        {
+            plan.streamUnits = wanted;
+            plan.splits = static_cast<int>(stream.slots);
+            plan.partialElems = plan.outElems;
+            plan.partialOffset = alignUp(problem.workspaceBytes);
+            plan.workspaceBytes
+                = plan.partialOffset
+                  + static_cast<size_t>(stream.slots * plan.outElems) * sizeof(float);
+            return plan;
+        }
     }
     else if(underFilled)
     {
@@ -1827,7 +1892,8 @@ bool kernelMatches(const MatchContext& context,
                                                      tile->splitPolicy,
                                                      resident,
                                                      flexForm(*tile));
-        if((chosen.splits == automatic.splits && chosen.splitRowTile == automatic.splitRowTile)
+        if((chosen.splits == automatic.splits && chosen.splitRowTile == automatic.splitRowTile
+            && chosen.streamUnits == automatic.streamUnits)
            || (tile->splitPolicy >= 2 && chosen.splits != tile->splitPolicy))
         {
             return false;
@@ -2176,7 +2242,12 @@ public:
         conv.setBlockSize(threads, 1, 1);
         conv.setGridSize(static_cast<unsigned int>(launchTiles), grid->y, gridZ);
         std::optional<IngestorKernelCode> convTail;
-        if(plan.splitRowTile > 0)
+        if(plan.streamUnits > 0)
+        {
+            // The stream split: one launch of streamUnits blocks.
+            conv.setGridSize(static_cast<unsigned int>(plan.streamUnits), 1, 1);
+        }
+        else if(plan.splitRowTile > 0)
         {
             // The tail split: the leading row tiles unsplit, then the rest split (convTail).
             conv.setGridSize(static_cast<unsigned int>(plan.splitRowTile), grid->y, grid->z);
@@ -2401,7 +2472,14 @@ public:
             }
         };
         args.partialTile = 0;
-        if(plan.splitRowTile > 0)
+        args.streamUnits = 0;
+        if(plan.streamUnits > 0)
+        {
+            args.tileBase = 0;
+            args.streamUnits = static_cast<int>(plan.streamUnits);
+            launchConv(dispatch.convForStream(stream));
+        }
+        else if(plan.splitRowTile > 0)
         {
             // The tail split: the leading row tiles unsplit, then the rest split into partials
             // of their rows only.
