@@ -673,6 +673,15 @@ EXTRA_TILES = {
     # -> after; MIOpen): deeplab c256 k1024 128^2 0.38 -> 0.23 ms (0.38), c2048 k256 65^2 0.44
     # -> 0.22 (0.38), resnext c1024 n128 16^2 0.71 -> 0.22 (0.16).
     ("mfma32x16", ("1x1r0",)): [(256, 128, 4, 2, 32), (128, 128, 2, 2, 64)],
+    # The 32 x 32 atoms (64 KiB of LDS on gfx908-gfx942) on the same output rows, the widest
+    # tiles that fit, measured on MI325X (fp16, K3 alone, best config before -> after): deeplab
+    # c512 k2048 128^2 3.29 -> 2.76 ms, c1024 k2048 6.60 -> 5.40, resnext c1024 n128 14^2 0.32 ->
+    # 0.26.
+    ("mfma32_", ("1x1r0",)): [
+        (128, 128, 4, 2, 32),
+        (256, 64, 4, 2, 32),
+        (128, 64, 4, 2, 64),
+    ],
     # Packed rows, measured (fp16, n128): gfx950 resnet50 c512 7^2 / 14^2 s2, inception c288
     # 35^2 s2; gfx1201 the same and resnet50 c256 14^2 (its 128 x 32 tile at 64 positions ran
     # within 1% of the 64 x 64 one: not shipped); gfx11 (gfx1101) the WMMA tiles again, 2.4x.
