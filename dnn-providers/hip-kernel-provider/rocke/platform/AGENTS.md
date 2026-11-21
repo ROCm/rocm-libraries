@@ -62,9 +62,8 @@ govern what you commit and how you describe it.
   comments and commit messages remain qualitative because measured claims there become
   stale and are difficult to review in context.
 - **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
-  other products/software. Do not make unsupported marketing, general superiority,
-- **No legal claims or unsupported marketing claims.** Never make legal claims about AMD or
   other products/software. Do not make unsupported marketing, general superiority, performance,
+  availability, or roadmap claims. Scoped technical comparisons that satisfy the evidence
   rule above are permitted; marketing language is not. **Protect AMD.**
 - **No internal links** (Jira/Confluence/Perforce) in committed/public artifacts;
   external Git issue links are OK.
@@ -370,6 +369,8 @@ invariants.
   `dsl_docs/architecture/authoring_model.md`.
 - For optimization work, follow
   `dsl_docs/optimization/runbook_compliance.md`.
+- For numerics questions (NaN, infinity, saturation, fp8 encodings,
+  conversions), use the dispatch table in `dsl_docs/numerics/README.md`.
 - If upstream work reveals a new optimization skill, lever, or reusable tactic,
   add it to the optimization skills docs under `dsl_docs/optimization/`.
 - Document every new optimization as a case-study analysis in the example folder
