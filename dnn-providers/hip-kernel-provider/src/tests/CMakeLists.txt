@@ -907,11 +907,11 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
     endif()
 
     # Every engine-prediction (L1) model the product shard ships, whatever its engine, must
-    # load and record the selector revision this build computes: GenericEngine otherwise
-    # refuses it at runtime with one log line and ranks the engine without an estimate. One
-    # entry per architecture whose product shard ships an engine binding an L1 for it, since
-    # each shard binds its own models; a shard that ships none (or ships nothing, as the
-    # packer's skipped architectures do) gets no entry.
+    # load, pass the runtime's acceptance and record the selector revision this build
+    # computes: GenericEngine otherwise refuses it at runtime with one log line and ranks the
+    # engine without an estimate. One entry per architecture whose product shard ships an
+    # engine binding an L1 for it, since each shard binds its own models; a shard that ships
+    # none (or ships nothing, as the packer's skipped architectures do) gets no entry.
     hkp_product_engine_prediction_arches(_hkp_engine_prediction_arches)
     if(_hkp_engine_prediction_arches)
         hkp_register_census_tests(
@@ -920,8 +920,9 @@ if(HIPDNN_ENABLE_KERNEL_INGESTOR)
             ARCHES ${_hkp_engine_prediction_arches}
             SUITES TestShippedEnginePredictors
             EXPECTED_CASES
-                EveryBoundEnginePredictorForThisArchLoads
-                EveryServedEnginePredictorMatchesThisBuildsSelector
+                EveryServedEnginePredictorLoadsAndMatchesThisBuild
+                EveryServedEnginePredictorPassesTheRuntimeAcceptance
+                EveryServedSdpaForwardPredictorEstimatesItsRepresentativeGraphs
         )
     else()
         message(STATUS
