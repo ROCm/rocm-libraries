@@ -45,21 +45,26 @@ class TestNormDispatch(unittest.TestCase):
         with self.assertRaises(ValueError):
             dispatch_norm(_rms(4, 4096, "gfx000"))
 
-    def test_picks_largest_blocksize_then_widest_vec(self):
-        # cols=4096: b1024*v4=4096 divides; b1024*v8=8192 does not.
+    def test_picks_widest_vec_then_sweet_spot_blocksize(self):
+        # cols=4096: block_size=256 at vec=8 is legal (256*8=2048 divides
+        # 4096) and is the real measured sweet spot -- see norm.py's module
+        # docstring for the cross-shape measurements that replaced the old
+        # "largest block_size first" rule (which picked block_size=1024 here
+        # and measured slower on every shape checked).
         for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_norm(_rms(4096, 4096, arch))
-                self.assertEqual(r.spec.block_size, 1024)
-                self.assertEqual(r.spec.vec, 4)
+                self.assertEqual(r.spec.block_size, 256)
+                self.assertEqual(r.spec.vec, 8)
                 self.assertEqual(r.candidate.algorithm, "rmsnorm")
 
-    def test_widest_vec_when_divisible(self):
-        # cols=8192: b1024*v8=8192 divides -> widest vec wins.
+    def test_widest_vec_wins_within_sweet_spot_blocksize(self):
+        # cols=8192: block_size=256, vec=8 (256*8=2048 divides 8192) remains
+        # the pick; vec=8 is preferred within any legal block_size.
         for arch in COVERED_ARCHES:
             with self.subTest(arch=arch):
                 r = dispatch_norm(_rms(4096, 8192, arch))
-                self.assertEqual((r.spec.block_size, r.spec.vec), (1024, 8))
+                self.assertEqual((r.spec.block_size, r.spec.vec), (256, 8))
 
     def test_layernorm_kind_selects_layernorm_candidate(self):
         for arch in COVERED_ARCHES:

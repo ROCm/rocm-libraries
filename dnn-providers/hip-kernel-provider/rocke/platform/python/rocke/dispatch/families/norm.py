@@ -22,8 +22,24 @@ by the per-arch LDS / thread checks the instance validators already encode.
 Selection: a request carries ``(rows, cols)``. ``cols`` is the per-row width
 ``N``; ``n_per_block`` is fixed to ``cols`` (one CTA spans the whole row). The
 candidate set is the cross product of block_size and vec; ``auto`` picks the
-highest-priority (largest block_size, then widest vec) candidate whose
-``is_valid_spec`` accepts the request on the target arch.
+highest-priority candidate whose ``is_valid_spec`` accepts the request on the
+target arch.
+
+Priority order (see :data:`_VEC_PRIORITY` / :data:`_BLOCK_SIZE_PRIORITY`):
+widest ``vec`` first, then ``block_size`` in sweet-spot order
+``256, 128, 512, 64, 1024``. This replaced a "largest block_size first, then
+widest vec" rule that measured worse on every one of 8 representative
+shapes checked (both kinds, both dtypes, rows/cols from 256x256 to
+4096x8192): a full-occupancy CTA (``block_size=1024``) consistently loses to
+a narrower one, because the extra LDS a bigger block's Welford buffers need
+lowers the number of CTAs resident per CU. ``block_size=256``/``128`` won or
+tied-within-noise everywhere tested; the previous rule's own pick
+(``block_size=1024`` or the largest legal size) was never the fastest
+candidate measured and was up to ~1.48x slower (rows=2048, cols=1024, f16:
+``b512_v2`` vs ``b64_v8``). ``block_size=64`` alone is not a safe
+replacement either -- it was ~7.7% slower than ``b256_v8`` at
+rows=4096, cols=8192 -- hence the explicit sweet-spot order rather than
+"smallest first".
 """
 
 from __future__ import annotations
@@ -53,6 +69,13 @@ NORM_ABI_VERSION = "hipkg-norm2d/v1"
 _BLOCK_SIZES = (1024, 512, 256, 128, 64)
 _VECS = (8, 4, 2)
 _KINDS = ("rmsnorm", "layernorm")
+
+# Static selection priority: lower wins. Vec dominates (wider vector loads
+# consistently measured faster or tied); within a vec tier, block_size is
+# ordered by measured sweet spot rather than monotonically by size -- see the
+# module docstring for the measurements this replaced.
+_VEC_PRIORITY = {8: 0, 4: 1, 2: 2}
+_BLOCK_SIZE_PRIORITY = {256: 0, 128: 1, 512: 2, 64: 3, 1024: 4}
 
 
 @dataclass(frozen=True)
@@ -208,21 +231,25 @@ def _grid(spec, req: OperatorRequest) -> Tuple[int, int, int]:
     return (int(req.rows), 1, 1)
 
 
+def _candidate_priority(*, block_size: int, vec: int) -> int:
+    """Lower wins. Vec tier dominates; see module docstring for the
+    measurements behind this order and :data:`_VEC_PRIORITY` /
+    :data:`_BLOCK_SIZE_PRIORITY` for the tables."""
+    return _VEC_PRIORITY[vec] * 10 + _BLOCK_SIZE_PRIORITY[block_size]
+
+
 def _build_registry() -> CandidateRegistry:
     reg = CandidateRegistry(
         _FAMILY, dim_vocabulary=NORM_DIM_VOCABULARY, require_build=True
     )
-    # Priority order = largest block_size first, then widest vec, so the
-    # highest-throughput candidate that the arch accepts wins under ``auto``.
     cands = []
-    prio = 10
     for bs in _BLOCK_SIZES:
         for v in _VECS:
+            prio = _candidate_priority(block_size=bs, vec=v)
             for kind in _KINDS:
                 cands.append(
                     _make_candidate(kind=kind, block_size=bs, vec=v, priority=prio)
                 )
-            prio += 1
     reg.extend(cands)
     return reg
 

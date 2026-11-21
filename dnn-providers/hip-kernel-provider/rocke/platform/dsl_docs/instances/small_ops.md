@@ -390,6 +390,173 @@ Pass 2:
 
 RMSNorm removes the mean and beta path from LayerNorm, so it has less arithmetic and less metadata.
 
+## BatchNorm2D
+
+File:
+
+```text
+instances/batchnorm2d.py
+```
+
+Main symbols:
+
+- `BatchNorm2DSpec`
+- `build_batchnorm2d`
+- `batchnorm2d_grid`
+- `batchnorm2d_signature`
+
+Contract:
+
+```text
+X: [N, C, H, W]   (NCHW)
+gamma: [C]
+beta: [C]
+Y: [N, C, H, W]
+running_mean: [C]  (f32, read in inference, read-modify-write in training)
+running_var:  [C]  (f32, read in inference, read-modify-write in training)
+optional mean: [C]      (training only)
+optional invstd: [C]    (training only)
+```
+
+Own dispatch family (`dispatch/families/batchnorm.py`), not a third `kind` in
+`dispatch/families/norm.py`: LayerNorm2D/RMSNorm2D reduce *within one row*
+(one CTA per row, grid `(rows, 1, 1)`). BatchNorm2D reduces *across* `N*H*W`
+*per channel* — one CTA per channel, grid `(C, 1, 1)`. Grafting that onto
+`norm.py` would mean diverging its row-shaped `dims()`/`_grid()` for one kind,
+which is sharing the file, not the abstraction.
+
+**Layout: NCHW, not NHWC** (conv/pooling's convention elsewhere in this repo).
+With one CTA per channel sweeping all of that channel's `N*H*W` elements,
+NCHW puts each `(n, c)` slice's `H*W` elements contiguously in memory —
+exactly what the row-sweep helper wants for coalesced vector-wide loads. In
+NHWC those elements are strided by `C`, which would force scalar/gather loads
+for a single-channel CTA. This is a deliberate deviation, called out here so
+it isn't mistaken for an oversight.
+
+Algorithm (`training=True`):
+
+```text
+Pass 1 (N-loop of per-sample row sweeps):
+1. For each n in range(N): sweep the (n, c) row's H*W elements into the
+   SAME per-thread sum / sumsq accumulators every other n also feeds.
+2. block_lds_reduce (Welford merge) across the workgroup once, after the
+   N-loop, with count = N*H*W / block_size:
+   mean = sum / (N*H*W)
+   variance = Welford-combined M2 / (N*H*W)
+   inv_std = rsqrt(variance + epsilon)
+3. Update running stats (EMA): running = (1 - momentum) * running + momentum * batch_stat
+4. Optionally store mean and invstd.
+
+Pass 2 (N-loop of per-sample row writes):
+5. For each n in range(N): y = (x - mean) * inv_std * gamma + beta
+6. Pack to output dtype, store Y.
+```
+
+`training=False` (inference) skips the reduction entirely: no LDS, no sync —
+`mean`/`inv_std` are read directly from `running_mean`/`running_var`, and the
+kernel degenerates to the elementwise pass-2 affine transform only. Gamma and
+Beta are per-channel scalars (constant for the whole CTA in both modes), so
+they're loaded once per kernel invocation rather than once per swept chunk
+(contrast LayerNorm2D's per-column Gamma/Beta, which vary along the row).
+
+No new reduction or sweep helper was needed: there is no cross-CTA reduction
+primitive in this codebase (every existing block reduction is intra-CTA), so
+"one CTA owns all of a channel's data" sidesteps ever needing one — the
+per-sample sweep is just the existing row-sweep helper, called once per `n`
+into shared accumulators.
+
+**`channels_per_block` (default-off grid lever).** `BatchNorm2DSpec.channels_per_block`
+(default `1`, byte-identical emission when `1`) groups `channels_per_block`
+channels into one CTA, processed sequentially with the full block of threads
+on each in turn (not a thread-split): the per-channel Welford LDS buffers are
+reused across channels, with an explicit barrier between a channel's final
+LDS read and the next channel's first LDS write (training mode only — there
+is no LDS at all in inference mode). Grid becomes `(C // channels_per_block,
+1, 1)`. This exists to amortize launch overhead for shapes whose grid is
+otherwise very small; measured against the two shapes it targeted
+(`n16c256h16w16`, `n16c256h32w32`) on gfx950, every `channels_per_block>1`
+value measured *slower* than `1`, so the dispatcher's `auto` selection never
+picks it (lowest priority of the axis; reachable by pinning `spec_id`, e.g.
+`batchnorm_b64_v4_cpb4`). Correct and GPU-numeric-verified infrastructure
+that did not pan out for its target shapes — left registered as a lever in
+case a different shape regime benefits.
+
+**`n_groups` (default-off, inference-only thread-decomposition lever).**
+`BatchNorm2DSpec.n_groups` (default `1`, byte-identical emission when `1`)
+splits one CTA's `block_size` threads into `n_groups` sub-groups of
+`block_size // n_groups` threads each, where each sub-group sweeps a
+*different* `N` sample's `H*W` row concurrently instead of every thread
+sweeping the same row one sample at a time:
+
+```text
+hw_threads = block_size // n_groups
+lidihw = tid / hw_threads            (which sub-group / which sample slot)
+tid_within_row = tid % hw_threads     (lane's position within its sub-group's row)
+
+for og in range(N // n_groups):
+    n = og * n_groups + lidihw       (runtime value -- depends on lidihw)
+    y[n, c, :, :] = (x[n, c, :, :] - mean) * inv_std * gamma + beta
+    # swept by `hw_threads` lanes (tid_within_row), not the full `block_size`
+```
+
+This mirrors MIOpen's spatial-batchnorm thread mapping (`chwid`/`lidihw`/`nid`
+in `forward_spatial.cpp`), where threads are split across both the spatial
+and batch dimensions simultaneously, instead of this family's original
+Python-unrolled `for n in range(N)` N-loop that runs the full `block_size`
+against one row at a time — the fix for shapes whose `H*W` is small enough
+that it structurally caps `block_size` well below what the hardware can
+usefully run.
+
+Rejected for `training=True` by `is_valid_spec`: threading cached Welford
+partials across the sub-group boundary needs a different, not-yet-built
+reduction strategy, so this lever only reaches the elementwise inference
+path (same no-LDS, no-sync pass-2-only code shape as `training=False` with
+`n_groups=1`, just a different thread decomposition). Composes with
+`channels_per_block`: each of the CPB channels a CTA owns runs the full
+`n_groups` decomposition in turn. Dispatch-wired the same way as
+`channels_per_block` (new candidate axis, `n_groups=1` kept as the
+default/auto-selected priority, `>1` reachable by pinning `spec_id`, e.g.
+`batchnorm_b256_v4_ng4`). Byte-identity- and GPU-numeric-verified. Staged
+GPU measurement on gfx950 found no win on the shape it was built to target
+(`n16c256h16w16`, inference) — every candidate lands at the measurement
+floor — but a real ~1.27x win once `N` is large enough to give each thread
+sub-group multiple outer-loop iterations to amortize over (`n64c256h16w16`).
+See `platform/python/rocke/instances/SUPPORT_MATRIX.md` for the full table.
+
+**`fast_reduce` (default-off, training-only reduction-shape lever).**
+`BatchNorm2DSpec.fast_reduce` (default `False`, byte-identical emission when
+`False`) replaces the training-path block reduction
+(`welford_block_reduce_stable`: a flat `block_size`-wide LDS halving tree
+over the `(mean, M2, count)` triple -- 9 barriers / 3 LDS buffers for
+`block_size=256`) with a wave-shuffle-first reduction
+(`welford_block_reduce_stable_wave_prologue`, `helpers/reduction.py`):
+
+```text
+# stage 1: butterfly-shuffle merge inside each wavefront -- no LDS, no sync
+for k in range(log2(wave_size)):
+    (mean, m2, count) = welford_merge((mean, m2, count), warp_shuffle_xor(..., 1<<k))
+
+# stage 2 (only when block_size > wave_size): small cross-warp LDS merge
+lane0_of_each_warp writes (mean, m2, count) -> lds[warp]   (one sync)
+every lane redundantly folds the num_warps lds slots in registers
+```
+
+This mirrors MIOpen's `shfl_interleaved_reduction_welford` +
+`lds_reduce2_welford` spatial-batchnorm reduction shape, and reuses the same
+butterfly-shuffle trick `block_lds_reduce_with_wave_prologue` already applies
+to a single combine value, generalised to the Welford triple's non-additive
+pairwise merge (`_welford_merge_pair`, shared by both the shuffle stage and
+the small cross-warp LDS tree). Rejected for `training=False` by
+`is_valid_spec`: inference does no reduction at all, so there is nothing for
+this lever to speed up. Dispatch-wired the same way as `channels_per_block`/
+`n_groups` (new candidate axis, `fast_reduce=False` kept as the
+default/auto-selected priority, `True` reachable by pinning `spec_id`, e.g.
+`batchnorm_b128_v2_fr`). Byte-identity- and GPU-numeric-verified. Staged GPU
+measurement on gfx950 found a reproducible win on every training shape
+tested -- unlike `channels_per_block`/`n_groups`, this is not a
+shape-specific lever: it never regressed on any shape tried. See
+`platform/python/rocke/instances/SUPPORT_MATRIX.md` for the full table.
+
 ## Transpose2D
 
 File:
