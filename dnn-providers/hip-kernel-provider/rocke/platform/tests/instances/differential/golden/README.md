@@ -28,7 +28,7 @@ fails on a family whose fingerprint no longer matches its hashes.
 
 ```bash
 cd tests/instances/differential
-python3 run_diff.py --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23,llvm24
+python3 run_diff.py --mode ll --python-only --check-golden --flavor all
 python3 run_diff.py --mode ir --canonical --python-only --check-golden
 ```
 

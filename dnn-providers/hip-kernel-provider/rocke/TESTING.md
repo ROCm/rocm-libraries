@@ -582,7 +582,7 @@ Generator and compiler-probe units remain source-only in
 `platform/tests/tools/test_arch_domain_artifact.py`. Column-structure and
 support-policy checks live together in
 `platform/tests/tools/test_arch_domain_support.py`, which runs in both source
-pytest and the installed `rocke_pytest_runtime_tools` entry in the provider's quick
+pytest and the installed `rocke_pytest_runtime_tools` entry in the provider's standard
 PR CI tier, using the staged generator in installed artifacts. They read every
 column from the imported package, validate its records and filename/flavor
 agreement, match its architecture list to the wired architectures, and require
@@ -673,7 +673,7 @@ work to quick/standard pre-merge and post-merge runs;
 [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which CI jobs run
 comprehensive and full today. Fast
 counted/resource files remain source-runner coverage rather than expanding the
-existing quick attention CTest. The compiler gate preserves the
+existing attention CTest. The compiler gate preserves the
 existing resource-table qualification:
 LLVM 22 with the reference ROCm 7.2 comgr. Its register thresholds and final-ISA
 expectations are calibrated to that toolchain; LLVM 23 and LLVM 24 remain valid
@@ -977,13 +977,14 @@ which CI jobs run these tiers today; say in the pull request where an installed
 entry placed there runs.
 Do not move a test there to make room.
 
-**Until existing entries are re-tiered.** Most installed entries are listed
-under quick today: every `rocke_pytest_<part>`, `rocke_tiling_pytest`,
-`rocke_tiling_gpu_pytest` and most library entries. A new file under
-`platform/tests`, under the tiling tests, or under
+**Where a new file lands.** The one list of quick entries is the `quick`
+category of `ROCKE_ENGINE_test_categories_external.yaml`, whose header states
+the quick-tier rule. The platform pytest parts (`rocke_pytest_<part>`), the
+tiling entries and the library unit, IR and GPU numeric suites start at
+standard. A new file under `platform/tests`, under the tiling tests, or under
 `library/tests/dispatch/attention/` or `library/tests/sdpa/` joins one of them
 with no edit if it is installed and its entry's filters select it, so it runs in
-quick. The `rocke_pytest_<part>` entries deselect `integration`-marked tests,
+standard. The `rocke_pytest_<part>` entries deselect `integration`-marked tests,
 which run only in `tests/run_all.py`; tiling `visualization/` tests that use no
 GPU fixture run in the comprehensive `rocke_tiling_visualization_pytest`, which
 no CI job runs today; and only the golden check of
@@ -992,20 +993,26 @@ runs only in `tests/run_all.py`.
 `rocke_library_attention_pytest` and `rocke_library_sdpa_pytest` collect the two
 library directories whole. Another library file runs once it is added to an
 entry's file list.
-Such a test may stay in a quick entry only if each item is within Q2 and the
-change adds at most Q3 to quick. Otherwise register a standard entry, modeled on
-`rocke_ctest_shard_pytest` in `platform/CMakeLists.txt`:
+A test that needs an entry of its own, such as one that starts child pytest or
+CTest processes, gets a standard entry modeled on `rocke_ctest_shard_pytest` in
+`platform/CMakeLists.txt`:
 
 - start its command as [§5.0.2](#502-ci-shards-and-rocke-item-sharding) requires;
 - list it under `python-standard` in `ROCKE_ENGINE_test_categories_external.yaml`,
   which gives it the labels of standard and every later tier; choose a name
-  that no quick pattern matches (`rocke_pytest_*`, `*_reference_unit_pytest`,
-  `*_gpu_gfx<target>_pytest`), or quick runs it too;
-- keep its files out of the quick entries: for `platform/tests`, `list(APPEND)`
+  that no quick pattern matches (`*_reference_unit_pytest`,
+  `*_gpu_gfx<target>_pytest`), or quick runs it too, and leave the
+  `rocke_pytest_` prefix to the platform parts;
+- keep its files out of the shared entries: for `platform/tests`, `list(APPEND)`
   the file to `_ROCKE_PLATFORM_PYTEST_IGNORE_<part>`; for the two library
   directories, add an `--ignore` for the file to its entry in
   `library/tests/ctest_lists.cmake`. The tiling entries split only by directory
-  and the `gpu` marker, so moving a tiling file out of quick needs a CMake change.
+  and the `gpu` marker, so moving a tiling file to its own entry needs a CMake
+  change.
+
+A quick addition, one that the list above admits, goes in its own entry under
+the `quick` category; each of its items stays within Q2, and the change adds at
+most Q3 to quick.
 
 **Place a test so that sharding can split it.**
 
@@ -1044,7 +1051,7 @@ log.
 
 | Test | Placement |
 |---|---|
-| A typed refusal of an invalid spec of a shipped family, well under a second | The family's existing entry; a core contract within Q2, so quick is right. |
+| A typed refusal of an invalid spec of a shipped family, well under a second | The family's existing entry, which runs in standard. |
 | An IR check of every tile of a family, tens of seconds in total | One case per tile, in a standard entry; never quick. |
 | A test that starts child pytest or CTest processes | Its own standard entry, as `rocke_ctest_shard_pytest`. |
 | Anti-example: an AOT packaging entry registered as plain `python -m pytest`, listed in quick, with items of up to a minute or more | It runs whole on every CI shard and in every quick run. Start it with `_ROCKE_INSTALLED_PYTEST`, split the heavy items, tier it standard. |
@@ -1196,22 +1203,19 @@ and run in four entries of their own:
 
 | Entry | Runs | Tier | CI jobs that run it |
 |---|---|---|---|
-| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | every TheRock job that builds rocKE |
-| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | every TheRock job that builds rocKE |
+| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | standard | the standard runs of `therock-multi-arch-ci.yml` |
+| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | standard | the standard runs of `therock-multi-arch-ci.yml` |
 | `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | none today |
 | `rocke_tiling_backend_width_pytest` | `check_backend_access_width.py`, a compile check outside discovery (section 5.0.1) | standard | a TheRock job that runs the standard tier |
 
 The tree's `conftest.py` says which tests carry the `gpu` marker.
-`ROCKE_ENGINE_test_categories_external.yaml` lists both quick tiling entries
-under quick, the backend width entry under standard and the visualization entry
-under comprehensive;
-[§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which labels that gives
-each entry and which CI jobs run each tier. A quick entry that the YAML matches,
-as both quick tiling entries are, carries every tier's label, so every TheRock
-job that builds rocKE runs it. No CI job runs the comprehensive visualization
-entry today, and `tests/run_all.py` does not run the visualization tests (it
-collects `platform/tests`). Run them before merging a change to the
-visualization package, from `platform/`:
+`ROCKE_ENGINE_test_categories_external.yaml` lists the three standard tiling
+entries under its standard categories and the visualization entry under
+comprehensive; [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which
+labels that gives each entry and which CI jobs run each tier. No CI job runs the
+comprehensive visualization entry today, and `tests/run_all.py` does not run the
+visualization tests (it collects `platform/tests`). Run them before merging a
+change to the visualization package, from `platform/`:
 
 ```bash
 PYTHONPATH=$(pwd)/python python -m pytest python/rocke/tests/helpers/tiling/visualization -q
@@ -1417,7 +1421,7 @@ Read coverage from the emitter configs ([`platform/tests/README.md`](platform/te
 
 | # | Gap | Impact | Target |
 |---|---|---|---|
-| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but external tier selection does not currently enroll DSA and source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
+| G6 | **Partially enrolled `library/` behavioral pytest** | Installed CTest registers explicit attention, convolution, DSA, MLA, GDN, reference-contract, and GPU cohorts, but source tests outside the explicit CMake selections remain ungated; registration or adding a file under `library/tests/` does not establish CI coverage; the GDN/KDA host entry `rocke_library_gdn_pytest` is not registered on Windows (a slow case in `test_gdn_decode_fused.py`), so Windows runs no GDN/KDA decode host pytest (the KDA chunkwise IR hashes stay covered by `rocke_golden_static`); the TF32 conv build-and-lower matrices and comgr ISA checks (`rocke_library_conv_tf32_lowering_pytest`) are not registered on Windows either, to fit the Windows shard time, so Windows runs only the representative TF32 builds in `rocke_library_conv_tf32_pytest`; on Windows, `rocke_library_attention_cpu_pytest` leaves out the gfx942 dense prefill host tests and their IR golden; the GDN/KDA GPU numeric files skip on the Windows GPU lanes, which lack gfx950/gfx942 devices | Audit registered-but-unselected entries and unregistered files; enroll each in an owned CTest tier or document why it remains manual |
 | G7 | **Orphaned `platform/python` pytest** (heuristics, benchmark) | `platform/tests/in_tree` runs the `benchmark/perf/tests` files in the `rocke_pytest_*` parts. `heuristics/tests` runs in no lane: it needs `pandas`, `sklearn` and `lightgbm`, which the CI images do not install. `test_wavescope_pmc.py` runs in no lane: its 30 s subprocess limit is unreliable on a loaded host, and the CI install lacks the `dsl_docs` script that it needs. Other `platform/python` test directories also run in no lane | Install the heuristics packages in CI, then list `rocke.heuristics.tests` in `test_in_tree_suites.py`; enroll the remaining directories |
 | G9 | **Legacy discovered pytest contains resource-bound work** | The affordable runner now excludes the largest marked matrices from execution and isolates selected files, but collection still imports and parameterizes every discovered module; additional unmarked structural/compiler cohorts remain in the default lane | Move each remaining resource-bound cohort behind a named structural/compiler CTest, then remove its transitional `exhaustive` marker |
 | G10 | **No CI job runs the byte-identity gate** ([§4.3](#43-do-the-two-implementations-agree-the-migration-gate)) | Only `tests/run_all.py` runs `tools/check_byte_identity.py`; no CTest entry or workflow does. The installed tree has no `rocke_engine` binding, so the C++-engine cases of the installed IR tests skip. A pull request whose author skipped the developer gate can merge with the two engines emitting different IR | Run the gate in pull-request CI (tracked in AICK-2301) and on each merge to develop (tracked in AICK-2929) |
