@@ -30,6 +30,7 @@ from .Activation import ActivationType
 from . import Hardware
 from . import Properties
 from .Common import state, state_key_ordering, IsaInfo
+from .Common.Constants import CLUSTER_AID_MAPPING_XCC_COUNT
 from .Common.Architectures import gfxToIsa
 from .Common.DataType import DataType
 from .Common.GlobalParameters import internalParameters
@@ -1250,8 +1251,10 @@ class Solution:
         if 'CUCount' not in d:
             d['CUCount'] = None
 
+        xccCount = CLUSTER_AID_MAPPING_XCC_COUNT if d.get('ClusterAIDMapping', -1) != -1 else None
         rv.hardwarePredicate = Hardware.HardwarePredicate.FromHardware(
-            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName
+            d['ISA'], d['CUCount'], d.get('DeviceNames', None), logicFile=srcName,
+            xccCount=xccCount
         )
         return rv
 

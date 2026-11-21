@@ -101,6 +101,12 @@ namespace TensileLite
                                                                     analyticalProp,
                                                                     pciChipId));
             }
+#if HIP_VERSION_MAJOR >= 7
+            int numXccs = 0;
+            if(hipDeviceGetAttribute(&numXccs, hipDeviceAttributeNumberOfXccs, deviceId)
+               == hipSuccess)
+                xccCount = numXccs;
+#endif
         }
 
         std::string HipAMDGPU::archName() const
