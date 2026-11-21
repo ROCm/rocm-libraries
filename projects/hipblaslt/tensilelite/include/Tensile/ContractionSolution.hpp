@@ -881,6 +881,9 @@ namespace TensileLite
         bool                 clusterLaunchGridFits(Problem const&  problem,
                                                    Hardware const& hardware) const;
         origami::reduction_t getSKReduction(Problem const& problem, Hardware const& hardware) const;
+        // A handwritten kernel that completes parallel reduction; see
+        // origami::config_t::prefer_parallel_split.
+        bool                 customPrefersParallelSplit() const;
         size_t               getSKGrid(Problem const&       problem,
                                        Hardware const&      hardware,
                                        size_t               tiles,

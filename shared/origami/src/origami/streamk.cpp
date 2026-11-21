@@ -159,7 +159,9 @@ reduction_t select_reduction(const problem_t& problem,
       // For problems with large k and low number of tiles, use parallel reduction
       // TODO Benchmark to check if limits are correct
       constexpr int MinItersForParallel = 64;
-      const int MaxTilesForParallel     = cu_count / 4;
+      // Parallel can beat tree, so prefer_parallel_split raises the tile
+      // bound from cu_count / 4 to cu_count.
+      const size_t MaxTilesForParallel = config.prefer_parallel_split ? cu_count : cu_count / 4;
       if (iters_per_tile >= MinItersForParallel && tiles <= MaxTilesForParallel)
         reduction_strategy = reduction_t::parallel;
     }
@@ -427,8 +429,25 @@ size_t grid_k_split_aware(const problem_t& problem,
       // Find max splitting factor to ensure each CU has a minimum number of iterations to do
       const size_t maxSplitsForIters = iters_per_tile / MinItersPerCU;
 
-      const size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
-      sk_grid                = tiles * maxSplits;
+      size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
+
+      // With prefer_parallel_split, above cu_count / 4 tiles: a parallel split
+      // has no spin-wait, so its grid may exceed the CUs. Take the smallest F
+      // that best fills the last of at most two waves.
+      if (config.prefer_parallel_split && cu_budget == 0 && tiles > cu_count / 4) {
+        // grid / (waves * cu_count) is proportional to the inverse of the time,
+        // so larger is better; ties keep the smallest F.
+        auto wave_fill = [&](size_t f) {
+          const size_t grid  = tiles * f;
+          const size_t waves = (grid + cu_count - 1) / cu_count;
+          return static_cast<double>(grid) / static_cast<double>(waves * cu_count);
+        };
+        const size_t splitCap = std::min(2 * cu_count / tiles, maxSplitsForIters);
+        maxSplits             = 1;
+        for (size_t f = 2; f <= splitCap; ++f)
+          if (wave_fill(f) > wave_fill(maxSplits) + 1e-9) maxSplits = f;
+      }
+      sk_grid = tiles * maxSplits;
     } else {
       const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
       for (size_t frac : tile_fractions) {

@@ -622,6 +622,22 @@ struct config_t {
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
+  /// Parallel reduction can be faster than tree, but origami limits it to
+  /// tiles <= CU count / 4. This lifts that limit for a kernel that completes
+  /// parallel reduction. Read only by grid_selection_t::k_split_aware:
+  /// - select_reduction: parallel for any tiles < CU count with at least 64
+  ///   iterations per tile.
+  /// - select_grid_size with reduction_strategy == parallel, no CU cap
+  ///   (problem.num_cus) and tiles > CU count / 4: the smallest split F, at
+  ///   most two waves of tiles * F workgroups, that best fills the last wave.
+  ///   At or below CU count / 4 tiles, or under a CU cap, the grid is unchanged.
+  /// Independent of uniform summation order. Under it a handwritten tree split
+  /// is limited to F | iters_per_tile, which often blocks tree above
+  /// CU count / 4 tiles.
+  /// Like occupancy and workspace_size it is a launch-policy input, not part
+  /// of the kernel's identity, so operator== and hash() leave it out.
+  bool prefer_parallel_split = false;
+
   /// Prediction mode for latency estimation.
   prediction_modes_t prediction_mode = prediction_modes_t::estimation;
 

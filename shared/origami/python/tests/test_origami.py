@@ -6,7 +6,7 @@
 import pytest
 import origami
 import csv
-from helpers import create_config_list
+from helpers import HARDWARE, create_config_list
 
 
 @pytest.mark.integration
@@ -219,6 +219,28 @@ def test_select_reduction(hardware):
         problem, hardware, config, origami.grid_selection_t.analytical
     )
     assert reduction is not None
+
+
+def test_prefer_parallel_split_widens_parallel():
+    """prefer_parallel_split admits parallel above CU count / 4 tiles."""
+    hw = HARDWARE["gfx1250"]  # 256 CUs
+    problem = origami.problem_t()
+    problem.size = origami.dim3_t(128, 128 * 128, 64 * 1025)  # 128 tiles
+    problem.batch = 1
+
+    config = origami.config_t()
+    config.mt = origami.dim3_t(128, 128, 64)
+    config.workspace_size = 2**40
+    config.workspace_size_per_elem_c = 4
+    assert config.prefer_parallel_split is False
+
+    algo = origami.grid_selection_t.k_split_aware
+    assert origami.select_reduction(problem, hw, config, algo) == origami.reduction_t.Tree
+
+    config.prefer_parallel_split = True
+    config.reduction_strategy = origami.select_reduction(problem, hw, config, algo)
+    assert config.reduction_strategy == origami.reduction_t.Parallel
+    assert origami.select_grid_size(problem, hw, config, algo) == 128 * 2
 
 
 @pytest.mark.integration
