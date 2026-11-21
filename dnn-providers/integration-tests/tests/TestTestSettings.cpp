@@ -1394,8 +1394,8 @@ TEST(TestSettingsParser, RejectsATopLevelKeyThatIsNoTable)
         "[conv_dgrad_toleranc.half]\nlambda = 9.0\n",
         "[conv_wrw_tolerance_half]\nlambda = 9.0\n",
         "[[tolerance_override]]\nfilters = [\"*\"]\natol = 1.0\nrtol = 1.0\n",
-        "[[validator_override]]\nfilters = [\"*\"]\ntensors = [\"*\"]\nvalidator = \"rms\"\n"
-        "rms_threshold = 1e-4\n",
+        "[[validator_override]]\nfilters = [\"*\"]\ntensors = [\"*\"]\nvalidator = "
+        "\"rms\"\nrms_threshold = 1e-4\n",
         "[[test_skip]]\nfilters = [\"*\"]\nreason = \"x\"\n",
     };
     for(const auto& text : bad)
@@ -1703,8 +1703,12 @@ TEST(TestSettingsParser, RejectsATableNestedUnderAnArchTable)
     for(const auto* table : CONV_TABLES)
     {
         const std::string name = std::string(table) + ".half.gfx90a";
-        const auto message
-            = loadErrorOf("[" + name + "]\nlambda = 1.0\n\n[" + name + ".gfx90a]\nlambda = 2.0\n");
+        std::string toml = "[";
+        toml.append(name)
+            .append("]\nlambda = 1.0\n\n[")
+            .append(name)
+            .append(".gfx90a]\nlambda = 2.0\n");
+        const auto message = loadErrorOf(toml);
         EXPECT_NE(message.find(name), std::string::npos) << message;
         EXPECT_NE(message.find("nested"), std::string::npos) << message;
     }

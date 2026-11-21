@@ -1886,23 +1886,31 @@ struct Allowances
     double c;
 };
 
+// lambda per direction: forward, backward data, backward weights.
+constexpr double byDirection(ConvDirection direction, double fprop, double dgrad, double wrw)
+{
+    if(direction == ConvDirection::FPROP)
+    {
+        return fprop;
+    }
+    return direction == ConvDirection::WRW ? wrw : dgrad;
+}
+
 template <typename Case>
 constexpr Allowances calibratedAllowances()
 {
     using T = typename Case::OutputType;
-    constexpr bool IS_WRW = Case::DIRECTION == ConvDirection::WRW;
-    constexpr bool IS_FPROP = Case::DIRECTION == ConvDirection::FPROP;
     if constexpr(std::is_same_v<T, float>)
     {
-        return {IS_FPROP ? 0.0 : IS_WRW ? 5.0 : 13.0, 4.0};
+        return {byDirection(Case::DIRECTION, 0.0, 13.0, 5.0), 4.0};
     }
     else if constexpr(std::is_same_v<T, half>)
     {
-        return {IS_FPROP ? 3.0 : IS_WRW ? 11.0 : 6.0, 1.0};
+        return {byDirection(Case::DIRECTION, 3.0, 6.0, 11.0), 1.0};
     }
     else
     {
-        return {IS_FPROP ? 0.0 : IS_WRW ? 9.0 : 3.0, 1.0};
+        return {byDirection(Case::DIRECTION, 0.0, 3.0, 9.0), 1.0};
     }
 }
 
@@ -2137,7 +2145,7 @@ TYPED_TEST(ConvOutputMeanToleranceFixture, MeansOfTheInputsDoNotChangeTheSdkAllo
 // The summation-order term of atol, c * sqrt(K) * u32 * sigma0, and the minimum, which the
 // engine's lambda term is added to.
 template <typename Case>
-double atolWithoutLambda(double c, uint64_t k, double sigma0)
+static double atolWithoutLambda(double c, uint64_t k, double sigma0)
 {
     using T = typename Case::OutputType;
     return c * std::sqrt(static_cast<double>(k)) * std::ldexp(1.0, -24) * sigma0

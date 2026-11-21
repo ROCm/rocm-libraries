@@ -390,12 +390,22 @@ public:
             }
             if(matched != nullptr)
             {
-                const std::string prefix
-                    = "[" + std::string(K_CONV_TOLERANCE_TABLES[static_cast<size_t>(direction)])
-                      + "." + std::string(outputType) + ".";
-                throw std::runtime_error("TestSettings: " + prefix + matched->first + "] and "
-                                         + prefix + entry.first + "] both match the device arch '"
-                                         + std::string(arch) + "'; make the arch names exclusive");
+                std::string message = "TestSettings: [";
+                message.append(K_CONV_TOLERANCE_TABLES[static_cast<size_t>(direction)])
+                    .append(".")
+                    .append(outputType)
+                    .append(".")
+                    .append(matched->first)
+                    .append("] and [")
+                    .append(K_CONV_TOLERANCE_TABLES[static_cast<size_t>(direction)])
+                    .append(".")
+                    .append(outputType)
+                    .append(".")
+                    .append(entry.first)
+                    .append("] both match the device arch '")
+                    .append(arch)
+                    .append("'; make the arch names exclusive");
+                throw std::runtime_error(message);
             }
             matched = &entry;
         }
@@ -635,9 +645,11 @@ private:
             {
                 if(archTables == nullptr)
                 {
-                    throw std::runtime_error(where + " has a nested table '" + keyName
-                                             + "': a table named by an arch holds coefficients "
-                                               "only");
+                    throw std::runtime_error(
+                        std::string(where)
+                            .append(" has a nested table '")
+                            .append(keyName)
+                            .append("': a table named by an arch holds coefficients only"));
                 }
                 if(keyName.empty())
                 {
@@ -648,15 +660,18 @@ private:
             }
             if(!isCoefficient)
             {
-                throw std::runtime_error(where + " has unknown key '" + keyName
-                                         + "' (expected 'summation_order', 'lambda', "
-                                           "'lambda_per_quartic_root_k' or a table named by an "
-                                           "arch)");
+                throw std::runtime_error(std::string(where)
+                                             .append(" has unknown key '")
+                                             .append(keyName)
+                                             .append("' (expected 'summation_order', 'lambda', "
+                                                     "'lambda_per_quartic_root_k' or a table "
+                                                     "named by an arch)"));
             }
             const auto number = value.value<double>();
             if(!number.has_value())
             {
-                throw std::runtime_error(where + " '" + keyName + "' must be a number");
+                throw std::runtime_error(
+                    std::string(where).append(" '").append(keyName).append("' must be a number"));
             }
             if(keyName == "summation_order")
             {
@@ -675,8 +690,8 @@ private:
             }
             if(!std::isfinite(*number) || *number < 0.0)
             {
-                throw std::runtime_error(where + " '" + keyName
-                                         + "' must be finite and not negative");
+                throw std::runtime_error(std::string(where).append(" '").append(keyName).append(
+                    "' must be finite and not negative"));
             }
             (keyName == "lambda" ? parsed.lambda : parsed.lambdaPerQuarticRootK) = number;
         }
