@@ -44,6 +44,17 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
   build. The native `score` symbol is the fallback, reached when no model loads, which in
   practice means a build whose `model.bin` was never pulled. The two do not always agree,
   and the knob suite's cold cases pin where they differ.
+- **An engine estimate (L1) beside the rankers.** The UED also binds `predict_engine` for
+  gfx950: the trained `tflops` model `d91b2ab8-19b3-424a-9eee-3cce9b4a1a6f`, installed under
+  `heuristics/4b3a0123-578f-4e9c-a965-b010a18ff107/predict_engine/gfx950/tflops/`
+  (`heuristic.uhd.json` in git, `model.bin` in DVC). It estimates the engine's TFLOPS on a
+  graph, measured under the L2's pick, so engine selection can compare this engine with the
+  others. It records the selector revision of the build it was trained on, and that
+  revision digests the rankers and the rocKE code objects compiled at pack time: whenever
+  the L2, the KDP, rocKE's code objects or the compiler (COMGR) that packs them changes,
+  retrain the L1 with the UHD pipeline (`uhd-engine-build`, role `predict_engine`) on a
+  build of the new source. Until then the runtime refuses it (the engine reports no
+  estimate) and the `TestShippedEnginePredictors` census fails.
 - **The native symbol reads the problem.** `preferredTile()` picks a tile from head size,
   mask and `seqlen_q`, and candidates are ranked by closeness to it, with the historical
   ascending `(block_m, block_n)` order as the tie-break. It is no longer a fixed
@@ -52,6 +63,7 @@ builder `build_attention_dense`). Engine: `hipkernel:Gfx950AttentionDense`.
 - **Regenerating the KDP now has a UHD consequence.** `engine.trained_catalog_sha256`
   fingerprints the catalog the trained models were measured against, so any kernel added,
   removed or renamed invalidates it and the generator's gate fails until the models are
-  retrained and the fingerprint updated. Make the retain/retrain/drop choice explicitly
-  (see the `hipdnn-ingestor-engine` RUNBOOK, "Trained heuristics survive regeneration
-  only by intent") rather than regenerating past it.
+  retrained and the fingerprint updated. Retrain the L1 after the L2s, against the new
+  build, as above. Make the retain/retrain/drop choice explicitly (see the
+  `hipdnn-ingestor-engine` RUNBOOK, "Trained heuristics survive regeneration only by
+  intent") rather than regenerating past it.

@@ -57,7 +57,24 @@ agree.
   catalog they were trained on (`engine.trained_catalog_sha256`). `tests/test_trained_rankers.py` in the IngestorGenerator fails
   when the shipped KDP no longer matches: any kernel added, removed, renamed or changed needs a
   retrain (the skill's `generate.md`), then the new ids and
-  `tools/catalog_fingerprint.py <this bundle>/artifacts/<pack>.kdp.json` in both configs.
+  `tools/catalog_fingerprint.py <this bundle>/artifacts/<pack>.kdp.json` in both configs, and
+  then the L1 below, retrained on a build of the new catalog.
+
+## Engine estimate (L1)
+
+The UED also binds `predict_engine` for gfx950: the trained `tflops` model
+`3a81fea5-ec9e-41f3-b085-d3c0dc820dc4`, under
+`heuristics/14daee8f-98ca-491f-9497-c8ad4e7eefac/predict_engine/gfx950/tflops/`
+(`heuristic.uhd.json` in git, `model.bin` in DVC, `model.bin.dvc`). It estimates the engine's
+TFLOPS on a graph, measured under the L2's pick, so engine selection can compare this engine
+with the others; both configs bind it (`engine.heuristics.predict_engine`).
+
+It records the selector revision of the build it was trained on, and that revision digests
+the rankers and the rocKE code objects compiled at pack time. So whenever the L2, the KDP,
+rocKE's code objects or the compiler (COMGR) that packs them changes, retrain it with the UHD
+pipeline (`uhd-engine-build`, role `predict_engine`) on a build of the new source. Until then
+the runtime refuses it (the engine reports no estimate) and the `TestShippedEnginePredictors`
+census fails.
 
 ## Files
 
