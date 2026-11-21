@@ -1,0 +1,84 @@
+# Integration test configuration for hipkernel:hip_conv_fwd_bias_act_fma_igemm_rdna
+# Filters use GTest-style globs: * matches any sequence of characters
+
+[meta]
+version = 1
+
+# The engine serves conv_fprop -> ADD(bias) -> activation on the gfx11 and gfx12 RDNA targets:
+# the convolutions of hipkernel:hip_conv_fwd_fma_igemm_rdna, a bias of one value per output
+# channel in the data dtype, virtual intermediates, and the activations RELU_FWD (clips and
+# slope), SIGMOID_FWD, TANH_FWD, ELU_FWD, GELU_FWD, GELU_APPROX_TANH_FWD, SWISH_FWD,
+# SOFTPLUS_FWD and IDENTITY in fp32 compute. It declines anything else, and the harness skips a
+# declined case.
+#
+# No arch [[test_skips]] entry: the engine's pack ships only for RDNA targets, so another device
+# declines through the ordinary path (see hipkernel_hip_conv_fwd_fma_igemm_rdna.toml).
+
+# -- Test Skips --
+# Reference gap, not an engine defect: neither the GPU nor the CPU reference implements the ADD
+# with the bias as its first operand and a 16-bit bias node, so the case is unverifiable. The
+# same entry as MIOPEN_ENGINE.toml. Temporary: remove when the reference fix (ALMIOPEN-3227)
+# lands.
+[[test_skips]]
+filters = ["*_ConvolutionFwdPointwise_Variant2.*_f25first_*"]
+reason  = "conv -> bias -> activation with the bias as the add's first operand: neither the GPU nor the CPU reference implements that operand order with a 16-bit bias node, so the case is unverifiable; reference gap tracked in ALMIOPEN-3227"
+
+# -- Tolerance Overrides --
+# The fp32 conv-forward classes of hipkernel_hip_conv_fwd_fma_igemm_rdna.toml (MIOPEN_ENGINE.toml's,
+# plus s10), for the same reason: this engine and the GPU reference accumulate a long fp32
+# reduction in different orders, so the absolute error grows with the accumulation length
+# (C / groups x filter volume) and the default 1e-5 atol falls below it for outputs near zero.
+# Each class keeps rtol at the 1e-5 default. Temporary, like those classes: removed when the
+# dynamic conv-fwd tolerance (ROCm/rocm-libraries#15481) grades fp32 conv forward.
+[[tolerance_overrides]]
+filters = ["*_ConvolutionFwdPointwise_*.*_3d_*_fp32_*"]
+atol = 5e-5
+rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.l*_fp32_*",
+    "*_ConvolutionFwd*.m*_fp32_*",
+    "*_ConvolutionFwd*.h*_fp32_*",
+    "*_ConvolutionFwd*.x*_fp32_*",
+    "*_ConvolutionFwd*.s31_*_fp32_*",
+    "*_ConvolutionFwd*.s59_*_fp32_*",
+    "*_ConvolutionFwd*.r029_*_fp32_*",
+    "*_ConvolutionFwd*.r061_*_fp32_*",
+    "*_ConvolutionFwd*.r065_*_fp32_*",
+    "*_ConvolutionFwd*.r121_*_fp32_*",
+    "*_ConvolutionFwd*.r122_*_fp32_*",
+]
+atol = 1e-4
+rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.a*_fp32_*",
+    "*_ConvolutionFwd*.l10_*_fp32_*",
+    "*_ConvolutionFwd*.l30_*_fp32_*",
+    "*_ConvolutionFwd*.l36_*_fp32_*",
+    "*_ConvolutionFwd*.l40_*_fp32_*",
+    "*_ConvolutionFwd*.l41_*_fp32_*",
+    "*_ConvolutionFwd*.l43_*_fp32_*",
+    "*_ConvolutionFwd*.r028_*_fp32_*",
+    "*_ConvolutionFwd*.r083_*_fp32_*",
+    "*_ConvolutionFwd*.r119_*_fp32_*",
+    "*_ConvolutionFwd*.r131_*_fp32_*",
+    "*_ConvolutionFwd*.s10_*_fp32_*",
+]
+atol = 5e-4
+rtol = 1e-5
+
+[[tolerance_overrides]]
+filters = [
+    "*_ConvolutionFwd*.s19_*_fp32_*",
+    "*_ConvolutionFwd*.l19_*_fp32_*",
+    "*_ConvolutionFwd*.x4_*_fp32_*",
+    "*_ConvolutionFwd*.s45_*_fp32_*",
+    "*_ConvolutionFwd*.l45_*_fp32_*",
+    "*_ConvolutionFwd*.r066_*_fp32_*",
+    "*_ConvolutionFwd*.r067_*_fp32_*",
+]
+atol = 2e-2
+rtol = 1e-5
