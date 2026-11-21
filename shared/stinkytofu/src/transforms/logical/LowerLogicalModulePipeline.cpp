@@ -30,6 +30,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <string>
+#include <unordered_map>
 
 #include "stinkytofu/bindings/python/LogicalModule.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
@@ -38,6 +40,7 @@
 #include "stinkytofu/core/Types.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/hardware/ToolchainCaps.hpp"
+#include "stinkytofu/ir/asm/AsmSetSymbolMap.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
@@ -47,14 +50,132 @@
 
 namespace stinkytofu {
 
+namespace {
+
+// gfx1250 logical-IR migration (Step B): asm-layer port of rocisa's
+// removeDuplicateAssignment (rocisa/src/pass/graph.cpp). On the native path that
+// pass runs on the rocisa tree inside rocIsaPass, before toStinkyTofuModule; a
+// mixed-tree logical leaf is converted from rocisa eagerly at build time, before
+// rocIsaPass, so its s_mov_b32 opcodes never see that dedup and a redundant move
+// survives into the leaf. Re-running the identical algorithm here, over the whole
+// asm function once operands are concrete (after resolveSymbolicOperands above),
+// drops exactly those leftover leaf duplicates. It is idempotent on code rocisa
+// already deduplicated (native parts), so a kernel with no logical leaves is left
+// byte-identical.
+//
+// Faithful transcription of rocisa's per-sgpr-lane tracking, linearised:
+//   * a branch / call / label / s_wait resets every lane (value becomes unknown);
+//   * s_mov_b32 s[i], V -> if lane i already holds V, drop the move (replacing it
+//     with the same " (dup assign opt.)" comment line rocisa leaves when the move
+//     carried a comment); either way lane i now holds V, and (as in rocisa) the
+//     source lane of a reg-to-reg move is recorded as holding its own value;
+//   * any other instruction that writes an sgpr invalidates those lanes.
+// s_mov_b64 and every non-s_mov_b32 opcode are plain writers here, exactly as
+// rocisa classifies them (only SMovB32 is the dedup-eligible kind).
+void removeDuplicateSgprAssignment(Function& func) {
+    // Value last written into each sgpr lane by an s_mov_b32; absent == unknown.
+    std::unordered_map<uint32_t, StinkyRegister> assignValue;
+
+    auto invalidateLanes = [&](const StinkyRegister& r) {
+        if (!r.isRegister() || r.reg.type != RegType::S) return;
+        for (uint32_t k = 0; k < r.reg.num; ++k) assignValue.erase(r.reg.idx + k);
+    };
+
+    for (BasicBlock& bb : func) {
+        for (auto it = bb.begin(); it != bb.end();) {
+            auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+            // Directives (.set / textblock / .if) carry no sgpr dataflow, matching
+            // rocisa, which records neither in its graph.
+            if (inst == nullptr) {
+                ++it;
+                continue;
+            }
+
+            // rocisa's Reset kind: control transfer and wait barriers clear every
+            // tracked lane. (Call is added over rocisa's set purely as a safe
+            // superset -- it only ever drops a would-be removal, never adds one.)
+            if (isBranch(*inst) || isCall(*inst) || isLabel(*inst) || isWaitCnt(*inst)) {
+                assignValue.clear();
+                ++it;
+                continue;
+            }
+
+            if (inst->getUnifiedOpcode() == GFX::s_mov_b32 && inst->getNumDestRegs() >= 1 &&
+                inst->getNumSrcRegs() >= 1) {
+                // Copy operands out before any erase below invalidates `inst`.
+                const StinkyRegister dst = inst->getDestReg(0);
+                const StinkyRegister src = inst->getSrcReg(0);
+                bool erased = false;
+
+                if (dst.isRegister() && dst.reg.type == RegType::S) {
+                    const uint32_t lane = dst.reg.idx;
+                    const auto held = assignValue.find(lane);
+                    if (held != assignValue.end() && held->second == src) {
+                        // Lane already holds this exact value: drop the duplicate move.
+                        const CommentData* c = inst->getModifier<CommentData>();
+                        if (c != nullptr && !c->comment.empty()) {
+                            AsmDirective* dir = IRBase::createIR<AsmDirective>();
+                            dir->kind = AsmDirectiveKind::TEXTBLOCK;
+                            // Byte-for-byte the rocisa slash50(comment + " (dup assign opt.)").
+                            dir->value = std::string(50, ' ') + " // " + c->comment +
+                                         " (dup assign opt.)" + "\n";
+                            bb.insertIR(it, dir);
+                        }
+                        it = bb.eraseIR(it);
+                        erased = true;
+                    }
+                    assignValue[lane] = src;
+                }
+                // rocisa records the source lane of a reg-to-reg move as holding
+                // its own value too; mirror it for exactness.
+                if (src.isRegister() && src.reg.type == RegType::S)
+                    for (uint32_t k = 0; k < src.reg.num; ++k) assignValue[src.reg.idx + k] = src;
+
+                if (!erased) ++it;
+                continue;
+            }
+
+            // Any other instruction writing an sgpr makes those lanes unknown.
+            for (const StinkyRegister& d : inst->getDestRegs()) invalidateLanes(d);
+            ++it;
+        }
+    }
+}
+
+}  // namespace
+
 void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config,
-                                const AsmCapsConfig& caps) {
+                                const AsmCapsConfig& caps, bool removeDupAssign) {
     PassManager pm;
     pm.setGemmTileConfig(config);
     pm.setAsmCapsConfig(caps);
     pm.addPass(createCompositeInstructionLoweringPass());
     pm.addPass(createToStinkyAsmPass());
     pm.run(func);
+
+    // gfx1250 logical-IR migration (Step A): now that ToStinkyAsmPass has lowered
+    // the function to asm-form StinkyInstructions, resolve symbolic SGPR operand
+    // names to their physical `.set` index -- the logical-layer counterpart of
+    // rocisa's convertTextVariablesToRegisters, which runs on the rocisa tree
+    // before toStinkyTofuModule on the native path. A mixed-tree logical leaf is
+    // converted from rocisa eagerly at build time -- before that rocisa pass --
+    // so its named SGPR operands still carry the unresolved placeholder index and
+    // would otherwise emit as s[sgprName] instead of sN. Scoped to that
+    // placeholder (resolveUnresolvedSentinel), so native operands (already
+    // resolved) and real virtual registers are untouched: for a kernel with no
+    // logical leaves this changes nothing, keeping the native path byte-identical.
+    std::vector<SymbolicOperandFix> symbolicFixes;
+    resolveSymbolicOperands(func, symbolicFixes, /*resolveUnresolvedSentinel=*/true);
+
+    // gfx1250 logical-IR migration (Step B): with operands now concrete, drop the
+    // duplicate s_mov_b32 assignments a logical leaf carried in (the rocisa dedup
+    // pass could not see into the leaf). No-op on code rocisa already deduplicated,
+    // so a leaf-free kernel stays byte-identical. Runs after resolveSymbolicOperands
+    // so value comparisons see resolved indices, mirroring rocisa's pass order
+    // (convertTextVariablesToRegisters before removeDuplicateAssignment). Gated on
+    // removeDupAssign so a kernel where rocisa skips its own dedup (ActivationType
+    // =="all") is not deduplicated here either.
+    if (removeDupAssign) removeDuplicateSgprAssignment(func);
 }
 
 namespace {
@@ -334,7 +455,8 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
         const GemmTileConfig loweringConfig = configFromOptions(arch, moduleOptions);
         const AsmCapsConfig loweringCaps = capsFromOptions(arch, moduleOptions);
         for (Function* function : asmModule->getFunctions()) {
-            runLogicalLoweringPipeline(*function, loweringConfig, loweringCaps);
+            runLogicalLoweringPipeline(*function, loweringConfig, loweringCaps,
+                                       moduleOptions.RemoveDupAssign);
         }
     }
 

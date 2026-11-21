@@ -150,7 +150,11 @@ void collectAsmSetSymbolInfo(const Function& func,
 
 /// Walks the function in emission order, tracking `.set` bindings as they come
 /// into force, and rewrites each symbolically-named operand's index to match.
-size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& fixes) {
+size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& fixes,
+                               bool resolveUnresolvedSentinel) {
+    // The all-ones placeholder a rocisa regIdx == -1 widens to (static_cast<uint32_t>(-1)).
+    // Distinct from a real virtual register, which carries kVirtualBit over a small index.
+    static constexpr uint32_t kUnresolvedSentinelIdx = 0xFFFFFFFFu;
     std::unordered_map<std::string, std::string> raw;
     std::unordered_map<std::string, int64_t> live;
     bool liveIsStale = true;
@@ -181,8 +185,17 @@ size_t resolveSymbolicOperands(Function& func, std::vector<SymbolicOperandFix>& 
             auto materialise = [&](bool isDest, size_t operand) {
                 const StinkyRegister& reg = isDest ? instruction->getDestRegs()[operand]
                                                    : instruction->getSrcRegs()[operand];
-                // Virtual registers are not yet indices, so a name cannot contradict them.
-                if (!reg.isRegister() || reg.isVirtualReg() || !reg.hasSymbolicName()) return;
+                if (!reg.isRegister() || !reg.hasSymbolicName()) return;
+                if (resolveUnresolvedSentinel) {
+                    // Migration mode: resolve only the all-ones placeholder left by an
+                    // eagerly-converted logical leaf (rocisa regIdx == -1). Native operands
+                    // already carry a resolved index and real virtual registers carry a
+                    // small low-bit index, so neither matches and both are left untouched.
+                    if (reg.reg.idx != kUnresolvedSentinelIdx) return;
+                } else {
+                    // Virtual registers are not yet indices, so a name cannot contradict them.
+                    if (reg.isVirtualReg()) return;
+                }
                 refreshLive();
                 // Read before the write below, which lands in `reg`.
                 const std::string symbol = reg.getSymbolicName();

@@ -7679,6 +7679,12 @@ class KernelWriter(PersistentKernelState, StreamKKernelState, metaclass=abc.ABCM
                                 or not globalParameters.get("DisableSTWaitCnt", True))
       # Set StinkyTofu module options
       stinky_module_options = {"OptLevel": stinky_opt_level,
+                               # gfx1250 logical-IR migration: forward the same removeDupAssign
+                               # verdict rocIsaPass uses (above) so StinkyTofu's Step-B dedup of
+                               # leaf-carried duplicate s_mov_b32 runs exactly when the native
+                               # rocisa removeDuplicateAssignment would, and is skipped in lockstep
+                               # for ActivationType=="all".
+                               "RemoveDupAssign": bool(ripo.removeDupAssign),
                                # rocisa native tree -> logical IR -> ToStinkyAsmPass.
                                # import rocisa stays the native module; only this
                                # conversion target changes.

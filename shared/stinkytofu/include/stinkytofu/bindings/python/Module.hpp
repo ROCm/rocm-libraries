@@ -154,7 +154,11 @@
     X(ClusterBarrierRule3SignalLeadCycles, int, -1)                                                \
     X(ReduceClusterBarrierPerLoop, int, -1)                                                        \
     X(TensorLoadWmmaSpace, int, -1) /* <0 unset; 0 = off; >0 = WMMA windows of exclusive space */  \
-    X(TensorLoadDsLoadGapCycles, int, -1) /* <0 unset; 0 = off; >0 = extra gap cycles */
+    X(TensorLoadDsLoadGapCycles, int, -1) /* <0 unset; 0 = off; >0 = extra gap cycles */           \
+    /* gfx1250 logical-IR migration: mirror rocIsaPassOption::removeDupAssign (true     */         \
+    /* except ActivationType=="all") so the Step-B dedup of leaf-carried duplicate      */         \
+    /* s_mov_b32 runs exactly when rocisa's own removeDuplicateAssignment would.        */         \
+    X(RemoveDupAssign, bool, true)
 
 namespace stinkytofu {
 /**

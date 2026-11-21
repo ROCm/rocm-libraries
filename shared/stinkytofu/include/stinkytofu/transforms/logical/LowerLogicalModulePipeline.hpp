@@ -61,8 +61,14 @@ struct GemmTileConfig;
  *               in another VGPR MSB bank needs its own encoding offset. Leaving
  *               this defaulted keeps the pre-MSB behaviour (no re-encoding).
  */
+/// @param removeDupAssign When true (rocisa's default; false only for
+///        ActivationType=="all"), run the Step-B logical-IR-migration dedup of
+///        duplicate s_mov_b32 assignments carried in by logical leaves. Mirrors
+///        rocIsaPassOption::removeDupAssign so the logical path matches the
+///        native rocisa path kernel-for-kernel.
 STINKYTOFU_EXPORT void runLogicalLoweringPipeline(Function& func, const GemmTileConfig& config,
-                                                  const AsmCapsConfig& caps = {});
+                                                  const AsmCapsConfig& caps = {},
+                                                  bool removeDupAssign = true);
 
 /**
  * @brief One-shot helper: build a StinkyAsmModule from a Python-side
