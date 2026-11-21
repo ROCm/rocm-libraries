@@ -73,6 +73,7 @@ Documentation for rocSPARSE is available at
   The following routines share the fixed analysis, but their numeric factorization or solve kernels are still subject to the 32-bit work-item grid limit: `rocsparse_Xcsrilu0` and `rocsparse_Xcsric0`; `rocsparse_spilu0` and `rocsparse_spic0` (CSR format); and `rocsparse_spildlt0`. `rocsparse_Xcsrsm`, `rocsparse_spsm`, and `rocsparse_sptrsm` (CSR, CSC, and COO formats) keep one workgroup per row in their solve and still return `rocsparse_status_invalid_size` above `(2^32 - 1) / blockDim.x` rows, where `blockDim.x` is between 64 and 1024 depending on the number of right-hand sides.
 
   For BSR routines, the row counts above refer to block rows.
+* Fixed `rocsparse_spmm` silently computing only the first batch when a BSR matrix is used with batched matrix descriptors. Batched computation is not supported for the BSR format, and `rocsparse_spmm` now returns `rocsparse_status_not_implemented` at every stage in that case instead of `rocsparse_status_success`.
 
 ### Upcoming changes
 * Deprecated the `rocsparse_sddmm_alg_dense` enum value. It will be removed in a future release, along with its rocBLAS dependency. Use `rocsparse_sddmm_alg_default` instead.

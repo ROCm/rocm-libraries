@@ -950,6 +950,13 @@ try
     }
     }
 
+    if(mat_A->format == rocsparse_format_bsr)
+    {
+        ROCSPARSE_CHECKARG(4, mat_A, mat_A->batch_count != 1, rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(5, mat_B, mat_B->batch_count != 1, rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(7, mat_C, mat_C->batch_count != 1, rocsparse_status_not_implemented);
+    }
+
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::spmm(handle,
                                               trans_A,
                                               trans_B,
