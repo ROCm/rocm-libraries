@@ -131,6 +131,19 @@ test_categories:
       - "rocke_tiled_attention_entry_guards"
       - "rocke_gfx942_attention_tiled_2d_hbm_knobs"
       - "rocke_unified_attention_scalar_lower_to_llvm"
+      - "rocke_tf32"
+      - "rocke_storage"
+      - "rocke_dtypes"
+      - "rocke_mma_catalog_lookup"
+      - "rocke_arch_domain_refusal"
+      - "rocke_nontemporal_hip"
+      - "rocke_loop_carried_descriptor"
+      - "rocke_tanh_lowering"
+      - "rocke_barrier_fence"
+      - "rocke_xf32_bf16x3_lowering"
+      - "rocke_f64_lowering"
+      - "rocke_flavor_datalayout_ssot"
+      - "rocke_moe_fused_mega_spec_guards"
       # Registered only in the build tree: they read engine sources the
       # installed test artifact does not carry (see
       # rocke/platform/tests/cmake/CoreTests.cmake).
@@ -144,6 +157,7 @@ test_categories:
       # Not registered on Windows (see rocke/platform/CMakeLists.txt).
       - "rocke_hip_source_identity"
       - "rocke_hip_lowering_parity"
+      - "rocke_library_dsa_pytest"
       - "rocke_library_conv_pytest"
       - "rocke_library_conv_ir_pytest"
       - "rocke_library_conv_tf32_pytest"

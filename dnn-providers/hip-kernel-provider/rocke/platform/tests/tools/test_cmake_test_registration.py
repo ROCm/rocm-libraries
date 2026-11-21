@@ -58,26 +58,6 @@ def test_orchestrator_contract_rejects_inactive_extra_or_inline_registration(mut
 
 
 _ADD_TEST_NAME_RE = re.compile(r"\badd_test\s*\(\s*NAME\s+(\w+)", re.IGNORECASE)
-# Registered before the tier lists were checked and not yet in any of them, so
-# TheRock CI does not run them. List each once it has passed in the installed
-# test tree, then delete it here; never add a name.
-_UNLISTED_BEFORE_THIS_CHECK = frozenset(
-    {
-        "rocke_arch_domain_refusal",
-        "rocke_barrier_fence",
-        "rocke_dtypes",
-        "rocke_f64_lowering",
-        "rocke_flavor_datalayout_ssot",
-        "rocke_loop_carried_descriptor",
-        "rocke_mma_catalog_lookup",
-        "rocke_moe_fused_mega_spec_guards",
-        "rocke_nontemporal_hip",
-        "rocke_storage",
-        "rocke_tanh_lowering",
-        "rocke_tf32",
-        "rocke_xf32_bf16x3_lowering",
-    }
-)
 
 
 def test_every_registered_cpp_test_is_in_a_provider_tier():
@@ -104,7 +84,5 @@ def test_every_registered_cpp_test_is_in_a_provider_tier():
         for name in registered
         if any(re.fullmatch(pattern, name) for pattern in patterns)
     }
-    untiered = sorted(registered - tiered - _UNLISTED_BEFORE_THIS_CHECK)
+    untiered = sorted(registered - tiered)
     assert not untiered, f"{categories.name} lists no tier for {untiered}"
-    stale = sorted(_UNLISTED_BEFORE_THIS_CHECK - (registered - tiered))
-    assert not stale, f"tiered or removed, drop from the exceptions: {stale}"
