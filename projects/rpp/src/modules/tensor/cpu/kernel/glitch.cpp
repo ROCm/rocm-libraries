@@ -35,20 +35,17 @@ inline void compute_src_loc(int row, int col, Rpp32s* locArray, RpptDescPtr srcD
     xB = col + rgbOffsets[batchCount].b.x;
     yB = row + rgbOffsets[batchCount].b.y;
 
-    if (xR >= roi.xywhROI.roiWidth || xR < roi.xywhROI.xy.x || yR >= roi.xywhROI.roiHeight ||
-        yR < roi.xywhROI.xy.y) {
+    if (xR >= roi.xywhROI.roiWidth || xR < 0 || yR >= roi.xywhROI.roiHeight || yR < 0) {
         xR = col;
         yR = row;
     }
 
-    if (xG >= roi.xywhROI.roiWidth || xG < roi.xywhROI.xy.x || yG >= roi.xywhROI.roiHeight ||
-        yG < roi.xywhROI.xy.y) {
+    if (xG >= roi.xywhROI.roiWidth || xG < 0 || yG >= roi.xywhROI.roiHeight || yG < 0) {
         xG = col;
         yG = row;
     }
 
-    if (xB >= roi.xywhROI.roiWidth || xB < roi.xywhROI.xy.x || yB >= roi.xywhROI.roiHeight ||
-        yB < roi.xywhROI.xy.y) {
+    if (xB >= roi.xywhROI.roiWidth || xB < 0 || yB >= roi.xywhROI.roiHeight || yB < 0) {
         xB = col;
         yB = row;
     }
