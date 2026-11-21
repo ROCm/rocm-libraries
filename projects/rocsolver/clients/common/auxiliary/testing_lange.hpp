@@ -98,11 +98,27 @@ void lange_initData(const rocblas_handle handle,
                     const I lda,
                     Sd& dnorms,
                     Th& hA,
-                    Sh& hnorms)
+                    Sh& hnorms,
+                    const rocblas_int singular)
 {
     if(CPU)
     {
         rocblas_init<T>(hA, true);
+
+        // singular = 1: one NaN entry (NaN + 0i for complex types), so the norm is NaN
+        // singular = 2: one infinite entry (Inf + Inf i for complex types), so the norm is infinity
+        T& entry = hA[0][m / 2 + (n / 2) * lda];
+        const S nan = std::numeric_limits<S>::quiet_NaN();
+        const S inf = std::numeric_limits<S>::infinity();
+        if(singular == 1)
+            entry = T(nan);
+        else if(singular == 2)
+        {
+            if constexpr(rocblas_is_complex<T>)
+                entry = T(inf, inf);
+            else
+                entry = T(inf);
+        }
     }
 
     if(GPU)
@@ -123,14 +139,16 @@ void lange_getError(const rocblas_handle handle,
                     Th& hA,
                     Sh& hnorms,
                     Sh& hnorms_res,
-                    double* max_err)
+                    double* max_err,
+                    const rocblas_int singular)
 {
     // Workspace for CPU lange (max needed is for 1-norm or infinity-norm)
     size_t size_work = std::max(m, n);
     std::vector<S> work(size_work);
 
     // initialize data
-    lange_initData<true, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms);
+    lange_initData<true, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+                                        singular);
 
     // execute computations
     // GPU lapack
@@ -141,9 +159,22 @@ void lange_getError(const rocblas_handle handle,
     char norm = rocsolver2char_norm_type(norm_type);
     hnorms[0][0] = cpu_lange<T, S>(norm, m, n, hA[0], lda, work.data());
 
-    // error is ||hnorms - hnorms_res|| / ||hnorms||
-    // using absolute value since we only have a single scalar
-    *max_err = std::abs(hnorms[0][0] - hnorms_res[0][0]) / std::abs(hnorms[0][0]);
+    if(singular == 1)
+    {
+        // a NaN entry must give a NaN norm, as in LAPACK
+        *max_err = std::isnan(hnorms_res[0][0]) ? 0 : std::numeric_limits<double>::infinity();
+    }
+    else if(singular == 2)
+    {
+        // an infinite entry must give an infinite norm, as in LAPACK
+        *max_err = std::isinf(hnorms_res[0][0]) ? 0 : std::numeric_limits<double>::infinity();
+    }
+    else
+    {
+        // error is ||hnorms - hnorms_res|| / ||hnorms||
+        // using absolute value since we only have a single scalar
+        *max_err = std::abs(hnorms[0][0] - hnorms_res[0][0]) / std::abs(hnorms[0][0]);
+    }
 }
 
 template <typename T, typename I, typename S, typename Td, typename Sd, typename Th, typename Sh>
@@ -161,14 +192,16 @@ void lange_getPerfData(const rocblas_handle handle,
                        const rocblas_int hot_calls,
                        const int profile,
                        const bool profile_kernels,
-                       const bool perf)
+                       const bool perf,
+                       const rocblas_int singular)
 {
     // Workspace for CPU lange
     size_t size_work = std::max(m, n);
     std::vector<S> work(size_work);
 
     // only init CPU data once as it is not overwritten
-    lange_initData<true, false, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms);
+    lange_initData<true, false, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+                                         singular);
 
     if(!perf)
     {
@@ -182,7 +215,8 @@ void lange_getPerfData(const rocblas_handle handle,
     // cold calls
     for(int iter = 0; iter < 2; iter++)
     {
-        lange_initData<false, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms);
+        lange_initData<false, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+                                             singular);
 
         CHECK_ROCBLAS_ERROR(rocsolver_lange(handle, norm_type, m, n, dA.data(), lda, dnorms.data()));
     }
@@ -204,7 +238,8 @@ void lange_getPerfData(const rocblas_handle handle,
 
     for(int iter = 0; iter < hot_calls; iter++)
     {
-        lange_initData<false, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms);
+        lange_initData<false, true, T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
+                                             singular);
 
         timer.start(stream);
         rocsolver_lange(handle, norm_type, m, n, dA.data(), lda, dnorms.data());
@@ -299,14 +334,14 @@ void testing_lange(Arguments& argus)
     // check computations
     if(argus.unit_check || argus.norm_check)
         lange_getError<T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms, hnorms_res,
-                                &max_error);
+                                &max_error, argus.singular);
 
     // collect performance data
     if(argus.timing && hot_calls > 0)
     {
         lange_getPerfData<T, I, S>(handle, norm_type, m, n, dA, lda, dnorms, hA, hnorms,
                                    &gpu_time_used, &cpu_time_used, hot_calls, argus.profile,
-                                   argus.profile_kernels, argus.perf);
+                                   argus.profile_kernels, argus.perf, argus.singular);
     }
 
     // validate results for rocsolver-test
