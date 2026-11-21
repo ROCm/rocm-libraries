@@ -731,6 +731,13 @@ void rocke_gfx942_attn2d_emit_pv_bucket(rocke_gfx942_attn2d_build_ctx_t* ctx,
         }
         /* GROUPED_KV2 keeps V single-buffered: yield cur_buf, else nxt_buf. */
         yields[y++] = ctx->GROUPED_KV2 ? in->cur_buf : in->nxt_buf;
+        if(rocke_gfx942_attn2d_page_prefetch(ctx))
+        {
+            for(int i = 0; i < ctx->N_BLOCKS_PER_TILE; ++i)
+                yields[y++] = ctx->page_next[i];
+            for(int i = 0; i < ctx->N_BLOCKS_PER_TILE; ++i)
+                yields[y++] = ctx->page_after_next[i];
+        }
 
         /* mirror into ctx->out_carry for the driver, then emit. */
         for(int i = 0; i < y; ++i)
@@ -796,13 +803,25 @@ rocke_for_t rocke_gfx942_attn2d_drive_kv_loop(rocke_gfx942_attn2d_build_ctx_t* c
             ctx->m_cur[r] = iv[2 * r];
             ctx->l_cur[r] = iv[2 * r + 1];
         }
-        int num_accs = ctx->iter_args_count - ml - 1; /* trailing buf carry */
+        const bool page_prefetch = rocke_gfx942_attn2d_page_prefetch(ctx);
+        const int n_pages = page_prefetch ? ctx->N_BLOCKS_PER_TILE : 0;
+        /* After the accs: the buf carry, then the carried page ids. */
+        int num_accs = ctx->iter_args_count - ml - 1 - 2 * n_pages;
         for(int i = 0; i < num_accs; ++i)
         {
             ctx->acc_cur[i] = iv[ml + i];
         }
-        /* trailing cur_buf carry (carry[ml + num_accs]). */
+        /* cur_buf carry (carry[ml + num_accs]). */
         ctx->cur_buf = iv[ml + num_accs];
+        if(page_prefetch)
+        {
+            for(int i = 0; i < n_pages; ++i)
+            {
+                ctx->page_cur[i] = iv[ml + num_accs + 1 + i];
+                ctx->page_next[i] = iv[ml + num_accs + 1 + n_pages + i];
+            }
+            ctx->page_cur_tile = kvloop.iv;
+        }
     }
 
     rocke_gfx942_attn2d_emit_kv_body(ctx);
