@@ -175,6 +175,9 @@ namespace TensileLite
                                     .half_plr             = solution->sizeMapping.HalfPLR,
                                     .multicast = solution->sizeMapping.Multicast != 0,
                                     .adaptive_gemm = solution->sizeMapping.adaptiveGemm,
+                                    .persistent = solution->sizeMapping.isPersistent(),
+                                    .stream_k_spatial_cluster
+                                    = solution->usesStreamKSpatialCluster(),
                                 },
                             };
 
