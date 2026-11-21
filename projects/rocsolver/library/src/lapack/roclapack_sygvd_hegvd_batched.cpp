@@ -30,41 +30,49 @@
 
 ROCSOLVER_BEGIN_NAMESPACE
 
-template <typename T, typename S, typename U>
+template <typename T, typename I, typename S, typename U>
 rocblas_status rocsolver_sygvd_hegvd_batched_impl(rocblas_handle handle,
                                                   const rocblas_eform itype,
                                                   const rocblas_evect evect,
                                                   const rocblas_fill uplo,
-                                                  const rocblas_int n,
-                                                  U A,
-                                                  const rocblas_int lda,
-                                                  U B,
-                                                  const rocblas_int ldb,
-                                                  S* D,
+                                                  const I n,
+                                                  U A_arg,
+                                                  const I lda,
+                                                  U B_arg,
+                                                  const I ldb,
+                                                  S* D_arg,
                                                   const rocblas_stride strideD,
-                                                  S* E,
+                                                  S* E_arg,
                                                   const rocblas_stride strideE,
-                                                  rocblas_int* info,
-                                                  const rocblas_int batch_count)
+                                                  I* info_arg,
+                                                  const I batch_count_arg)
 try
 {
     const char* name = (!rocblas_is_complex<T> ? "sygvd_batched" : "hegvd_batched");
     ROCSOLVER_ENTER_TOP(name, "--itype", itype, "--evect", evect, "--uplo", uplo, "-n", n, "--lda",
                         lda, "--ldb", ldb, "--strideD", strideD, "--strideE", strideE,
-                        "--batch_count", batch_count);
+                        "--batch_count", batch_count_arg);
 
     if(!handle)
         return rocblas_status_invalid_handle;
+    {
+        auto const A = A_arg;
+        auto const B = B_arg;
+        auto const D = D_arg;
+        auto const E = E_arg;
+        auto const info = info_arg;
+        auto const batch_count = batch_count_arg;
 
-    // argument checking
-    rocblas_status st = rocsolver_sygvd_hegvd_argCheck(handle, itype, evect, uplo, n, lda, ldb, A,
-                                                       B, D, E, info, batch_count);
-    if(st != rocblas_status_continue)
-        return st;
+        // argument checking
+        rocblas_status st = rocsolver_sygvd_hegvd_argCheck(handle, itype, evect, uplo, n, lda, ldb,
+                                                           A, B, D, E, info, batch_count);
+        if(st != rocblas_status_continue)
+            return st;
+    }
 
     // working with unshifted arrays
-    rocblas_int shiftA = 0;
-    rocblas_int shiftB = 0;
+    rocblas_stride shiftA = 0;
+    rocblas_stride shiftB = 0;
 
     // batched execution
     rocblas_stride strideA = 0;
@@ -84,10 +92,17 @@ try
     size_t size_iinfo;
     // 2-stage workspace sizes
     size_t size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st;
-    rocsolver_sygvd_hegvd_getMemorySize<true, false, T, S>(
-        handle, itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
-        &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tau, &size_pivots_workArr,
-        &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &size_iinfo, &optim_mem);
+
+    I const nsweep = ceildiv(batch_count_arg, MAX_BATCH_COUNT);
+    I const bid_inc = (nsweep == 0) ? 0 : ceildiv(batch_count_arg, nsweep);
+
+    {
+        auto const batch_count = bid_inc;
+        rocsolver_sygvd_hegvd_getMemorySize<true, false, T, S>(
+            handle, itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
+            &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tau, &size_pivots_workArr,
+            &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &size_iinfo, &optim_mem);
+    }
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(
@@ -122,12 +137,31 @@ try
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
-    return rocsolver_sygvd_hegvd_template<true, false, T>(
-        handle, itype, evect, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, D, strideD,
-        E, strideE, info, batch_count, (T*)scalars, work1, work2, work3, work4, (S*)tmpz,
-        (rocblas_int*)splits, (T*)tau, pivots_workArr, (T*)Aband, (T*)he2hb_work, (T*)V_hb2st,
-        (T*)tau_hb2st, (rocblas_int*)iinfo, optim_mem);
+    for(I isweep = 0; isweep < nsweep; isweep++)
+    {
+        I const bid = isweep * bid_inc;
+        I const batch_count = std::min(batch_count_arg - bid, bid_inc);
+
+        auto const A = (A_arg == nullptr) ? nullptr : A_arg + bid;
+        auto const B = (B_arg == nullptr) ? nullptr : B_arg + bid;
+        auto const D = (D_arg == nullptr) ? nullptr : D_arg + bid * strideD;
+        auto const E = (E_arg == nullptr) ? nullptr : E_arg + bid * strideE;
+
+        auto const info = (info_arg == nullptr) ? nullptr : info_arg + bid;
+
+        // execution
+        auto const istat = rocsolver_sygvd_hegvd_template<true, false, T>(
+            handle, itype, evect, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, D,
+            strideD, E, strideE, info, batch_count, (T*)scalars, work1, work2, work3, work4,
+            (S*)tmpz, (I*)splits, (T*)tau, pivots_workArr, (T*)Aband, (T*)he2hb_work, (T*)V_hb2st,
+            (T*)tau_hb2st, (I*)iinfo, optim_mem);
+        if(istat != rocblas_status_success)
+        {
+            return (istat);
+        }
+    } // end for (isweep)
+
+    return (rocblas_status_success);
 }
 catch(...)
 {
