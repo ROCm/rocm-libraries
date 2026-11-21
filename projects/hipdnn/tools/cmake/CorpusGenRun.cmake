@@ -105,6 +105,34 @@ if(NOT CLI_ARGS MATCHES "--count," AND CLI_ARGS MATCHES "--operation,([^,]+)")
     endif()
 endif()
 
+# EXPECTED_COMBINATIONS (optional, `<total>:<not explored>`): the manifest reports the
+# categorical combinations the --operation's search held and left unexplored, under
+# reports.categorical_combinations.
+if(EXPECTED_COMBINATIONS)
+    if(NOT CLI_ARGS MATCHES "--operation,([^,]+)")
+        message(FATAL_ERROR "EXPECTED_COMBINATIONS needs an --operation to look its report up under")
+    endif()
+    set(combinationOperation "${CMAKE_MATCH_1}")
+    string(REPLACE ":" ";" expectedCombinations "${EXPECTED_COMBINATIONS}")
+    list(GET expectedCombinations 0 expectedTotal)
+    list(GET expectedCombinations 1 expectedNotExplored)
+    foreach(key IN ITEMS total not_explored)
+        string(JSON reported ERROR_VARIABLE combinationError
+               GET "${manifest}" reports categorical_combinations "${combinationOperation}" "${key}")
+        if(combinationError)
+            message(FATAL_ERROR "reports.categorical_combinations.${combinationOperation}.${key} is "
+                                "missing: ${combinationError}")
+        endif()
+        set(reportedFor_${key} "${reported}")
+    endforeach()
+    if(NOT reportedFor_total EQUAL expectedTotal
+       OR NOT reportedFor_not_explored EQUAL expectedNotExplored)
+        message(FATAL_ERROR "the manifest reports ${reportedFor_total} categorical combinations "
+                            "with ${reportedFor_not_explored} not explored, expected "
+                            "${expectedTotal} with ${expectedNotExplored}")
+    endif()
+endif()
+
 # EXPECTED_FORMS (optional, comma-separated labels): the corpus carries a `form` facet column of
 # its own right after `grouping` in manifest.csv, holding exactly these labels, and the run
 # reports each as a form quota (`form:<label>`, in reports.regime_quota of the --operation)

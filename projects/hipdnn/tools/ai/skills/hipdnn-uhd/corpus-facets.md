@@ -67,8 +67,12 @@ that can hold a problem (the excluded pairings above do not take a share). The S
 the common configuration (the `plain` form, BSHD, `1/sqrt(head_dim)`, no window) at about half
 of each facet; `--form-floor` tops each other form up to its count regardless. Because the
 product of sdpa_fwd's facets (6912 combinations) is past the 1024 bound, the forward explores a
-scattered sample of the combinations that can hold a problem, every declared value present, and
-`manifest.json` reports the combinations not explored.
+scattered sample of the combinations that can hold a problem, every declared value present.
+A `--keep` on an enum or bool facet narrows the combinations before that bound applies, so the
+sample is of the combinations the keep admits (a keep that leaves 8 of the 6912 explores all
+8). `manifest.json` reports the count under `reports.categorical_combinations.<operation>`:
+`total` is the product the keeps admit and `not_explored` how many of them the bound left out
+(0 when none); the run prints the same count on stderr.
 
 ## 3. Pack coverage (`--kdp-root`)
 

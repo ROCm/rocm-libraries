@@ -456,7 +456,8 @@ inline RegimeSearchResult exploreRegime(const OperationMetadata& metadata,
             totalCombinations,
             [&metadata](const ProblemPoint& candidate) {
                 return !detail::excludedByCategoricals(metadata, candidate);
-            }))
+            },
+            request.keep))
     {
         bool matches = true;
         for(const auto& [name, value] : focus.categoricalPins)

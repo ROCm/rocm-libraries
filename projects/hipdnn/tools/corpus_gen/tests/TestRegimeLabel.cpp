@@ -454,6 +454,44 @@ INSTANTIATE_TEST_SUITE_P(SdpaDeclarations,
                          TestShippedValueWeights,
                          ::testing::Values("sdpa_fwd", "sdpa_bwd"));
 
+TEST(TestRegimeFocus, AFocusedSearchUnderAKeepSpendsItsLanesOnTheCombinationsTheKeepAdmits)
+{
+    // The forward's 6912 combinations are past the bound of 1024, and a sample drawn before the
+    // keep leaves a few of the 6 combinations the keep admits that can hold a problem, or none.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    std::string error;
+    const auto focus = compileRegimeFocus(metadata, "decode_short_mha", error);
+    ASSERT_TRUE(focus.has_value()) << error;
+    ExplorationRequest request;
+    request.budgetPerCombination = 600;
+    request.budgetGrowthLimit = 4;
+    request.pointsPerCombination = 20;
+    request.seed = 3;
+    request.keep = {{"form", "plain"},
+                    {"layout", "bshd"},
+                    {"scale", "inv_sqrt_d"},
+                    {"window", "none"},
+                    {"dtype", "fp16"}};
+    const ProblemOracle admitsKept
+        = [&request](const ProblemPoint& point) { return keeps(request.keep, point); };
+
+    const auto found = exploreRegime(metadata, *focus, request, 240, admitsKept, {}, {});
+
+    ASSERT_GE(found.problems.size(), 240U);
+    std::set<std::string> combinations;
+    for(const auto& point : found.problems)
+    {
+        EXPECT_EQ(regimeLabel(metadata, point), "decode_short_mha");
+        combinations.insert(std::get<std::string>(point.at("alignment")) + "/"
+                            + asText(point.at("is_causal")) + "/"
+                            + asText(point.at("generate_stats")));
+    }
+    // Every combination of is_causal, alignment and generate_stats the declaration allows at
+    // seqlen_q = 1: a causal bottom-right mask is a different problem from top-left, a
+    // non-causal one has a single alignment.
+    EXPECT_EQ(combinations.size(), 6U);
+}
+
 TEST(TestRegimeFocus, EveryRegimeDrawsItsOwnLanesInItsOwnOrder)
 {
     // Lane order comes from tie keys; with only the seed in them every regime would try the same

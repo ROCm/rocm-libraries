@@ -232,7 +232,9 @@ void printHelp(const char* program)
         << "  --sweep-share <f>\n"
         << "  --keep q.<p>=<v>       Keep only problems with this facet. Repeatable:\n"
         << "                         different parameters conjoin, the same parameter\n"
-        << "                         repeated widens it (q.head_dim=64 q.head_dim=128)\n"
+        << "                         repeated widens it (q.head_dim=64 q.head_dim=128).\n"
+        << "                         A clause on an enum or bool narrows the categorical\n"
+        << "                         combinations before the search's bound applies\n"
         << "  --exclude-corpus <m>   manifest.json whose graphs must not recur (repeatable)\n"
         << "  --regime-quota <r>=<n> At least n problems in regime r, as manifest.csv\n"
         << "                         labels it (decode_short_mha); every operation.\n"
@@ -568,6 +570,15 @@ void addDeclaredWeights(nlohmann::json& report,
     }
 }
 
+/// Adds @p report to the manifest's @p reports under @p key, unless no operation contributed.
+void addReport(nlohmann::json& reports, const char* key, const nlohmann::json& report)
+{
+    if(!report.empty())
+    {
+        reports[key] = report;
+    }
+}
+
 int runGenerator(const std::vector<std::string>& args)
 {
     Options options;
@@ -687,9 +698,13 @@ int runGenerator(const std::vector<std::string>& args)
             declaredParameters.push_back(parameter.name);
         }
     }
-    std::vector<hipdnn_corpus_gen::KeepClause> keep;
+    // Parsed into the exploration request: the clauses on an enum or bool parameter narrow the
+    // categorical combinations ahead of the search's bound, and every clause still filters
+    // points in the search's oracle.
+    const auto& keep = options.exploration.keep;
     std::string keepError;
-    if(!hipdnn_corpus_gen::parseKeepClauses(options.keep, declaredParameters, keep, keepError))
+    if(!hipdnn_corpus_gen::parseKeepClauses(
+           options.keep, declaredParameters, options.exploration.keep, keepError))
     {
         std::cerr << keepError << "\n";
         return 1;
@@ -1150,6 +1165,9 @@ int runGenerator(const std::vector<std::string>& args)
     /// Per operation: each numeric parameter's served extent, and the extremes taken.
     nlohmann::json servedExtent = nlohmann::json::object();
     nlohmann::json anchoredShare = nlohmann::json::object();
+    /// Per operation, the categorical combinations --keep leaves and how many the search's bound
+    /// left unexplored.
+    nlohmann::json categoricalCombinations = nlohmann::json::object();
     /// Per operation, the declared value weights of each weighted categorical parameter.
     nlohmann::json categoricalWeights = nlohmann::json::object();
     bool searchFoundMore = false;
@@ -1330,6 +1348,9 @@ int runGenerator(const std::vector<std::string>& args)
                 {"explored", static_cast<int64_t>(result.corpus.problems().size())},
                 {"share", result.corpus.anchoredShare()},
                 {"anchor_scaling", request.anchorScaling}};
+            categoricalCombinations[result.operation] = nlohmann::json{
+                {"total", static_cast<int64_t>(result.corpus.categoricalTotal)},
+                {"not_explored", static_cast<int64_t>(result.corpus.categoricalNotExplored)}};
         }
         else
         {
@@ -1754,22 +1775,11 @@ int runGenerator(const std::vector<std::string>& args)
             manifest.reports["also_engines"] = options.alsoEngineNames;
         }
         manifest.reports["excluded"] = static_cast<int64_t>(heldOutIds.size());
-        if(!quotaReports.empty())
-        {
-            manifest.reports["regime_quota"] = quotaReports;
-        }
-        if(!servedExtent.empty())
-        {
-            manifest.reports["served_extent"] = servedExtent;
-        }
-        if(!anchoredShare.empty())
-        {
-            manifest.reports["anchored_share"] = anchoredShare;
-        }
-        if(!categoricalWeights.empty())
-        {
-            manifest.reports["categorical_weights"] = categoricalWeights;
-        }
+        addReport(manifest.reports, "regime_quota", quotaReports);
+        addReport(manifest.reports, "served_extent", servedExtent);
+        addReport(manifest.reports, "anchored_share", anchoredShare);
+        addReport(manifest.reports, "categorical_combinations", categoricalCombinations);
+        addReport(manifest.reports, "categorical_weights", categoricalWeights);
         if(options.count > 0 && total < requested && !shortfall.empty())
         {
             manifest.reports["shortfall"] = shortfall;

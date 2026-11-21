@@ -811,6 +811,147 @@ TEST(TestProblemSpace, EveryShippedSdpaCombinationIsExploredAndNoDeclaredValueIs
     }
 }
 
+namespace
+{
+
+/// The facets a narrow `--keep` names on the shipped forward: one value of each of form, layout,
+/// scale, window and dtype, which leaves is_causal x alignment x generate_stats (8 combinations,
+/// 6 of them able to hold a problem) of the 6912.
+std::vector<KeepClause> narrowSdpaFwdKeeps()
+{
+    return {{"form", "plain"},
+            {"layout", "bshd"},
+            {"scale", "inv_sqrt_d"},
+            {"window", "none"},
+            {"dtype", "fp16"}};
+}
+
+/// What the tool's search admits for a keep: only the points the clauses keep.
+ProblemOracle admitsOnlyWhatKeepKeeps(const std::vector<KeepClause>& keep)
+{
+    return [&keep](const ProblemPoint& point) { return keeps(keep, point); };
+}
+
+} // namespace
+
+TEST(TestProblemSpace, AKeepOnACategoricalAxisNarrowsTheCombinationsBeforeTheBoundApplies)
+{
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    const auto narrow = narrowSdpaFwdKeeps();
+
+    size_t total = 0;
+    auto combinations = detail::categoricalCombinations(
+        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, narrow);
+    EXPECT_EQ(total, 8U);
+    ASSERT_EQ(combinations.size(), 8U) << "the bound is 1024, so every admitted one is explored";
+    for(const auto& combination : combinations)
+    {
+        EXPECT_TRUE(keeps(narrow, combination)) << detail::describe(combination);
+    }
+
+    // The same parameter repeated widens its axis, as it widens the filter on points.
+    auto widened = narrow;
+    widened.push_back({"form", "padded"});
+    combinations = detail::categoricalCombinations(
+        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, widened);
+    EXPECT_EQ(total, 16U);
+    EXPECT_EQ(combinations.size(), 16U);
+
+    // A clause on a numeric parameter leaves the categorical product alone; the oracle applies it.
+    combinations
+        = detail::categoricalCombinations(metadata.parameters, 0, total, {}, {{"head_dim", "64"}});
+    EXPECT_EQ(total, 6912U);
+
+    // A value the declaration does not hold admits nothing, and says so with a total of 0 rather
+    // than sampling combinations that every point would then fail.
+    combinations = detail::categoricalCombinations(
+        metadata.parameters, ExplorationRequest{}.maxCombinations, total, {}, {{"form", "nope"}});
+    EXPECT_EQ(total, 0U);
+    EXPECT_TRUE(combinations.empty());
+}
+
+TEST(TestProblemSpace, EveryCombinationAShippedSdpaKeepAdmitsProducesProblemsPastTheBound)
+{
+    // The product is 6912, past the bound of 1024, and a sample of it drawn before the keep held
+    // 16 problems from one combination of the 6 that can hold one.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    ExplorationRequest request;
+    request.keep = narrowSdpaFwdKeeps();
+    request.pointsPerCombination = 8;
+    request.budgetPerCombination = 2000;
+
+    const auto corpus
+        = exploreProblemSpace(metadata, request, admitsOnlyWhatKeepKeeps(request.keep));
+
+    EXPECT_EQ(corpus.categoricalTotal, 8U);
+    EXPECT_EQ(corpus.categoricalNotExplored, 0U);
+    size_t live = 0;
+    std::set<bool> causal;
+    for(const auto& combination : corpus.combinations)
+    {
+        if(detail::excludedByCategoricals(metadata, combination.categorical))
+        {
+            EXPECT_TRUE(combination.problems.empty()) << detail::describe(combination.categorical);
+            continue;
+        }
+        ++live;
+        EXPECT_FALSE(combination.problems.empty()) << detail::describe(combination.categorical);
+        causal.insert(std::get<bool>(combination.categorical.at("is_causal")));
+    }
+    EXPECT_EQ(live, 6U);
+    EXPECT_EQ(causal, (std::set<bool>{false, true})) << "both masks are explored";
+
+    // Narrowing by one more clause keeps exploring what is left rather than going empty.
+    request.keep.push_back({"is_causal", "true"});
+    const auto causalOnly
+        = exploreProblemSpace(metadata, request, admitsOnlyWhatKeepKeeps(request.keep));
+    EXPECT_EQ(causalOnly.categoricalTotal, 4U);
+    EXPECT_GE(causalOnly.problems().size(), 4U * 4U);
+    size_t withProblems = 0;
+    for(const auto& combination : causalOnly.combinations)
+    {
+        withProblems += combination.problems.empty() ? 0 : 1;
+    }
+    EXPECT_EQ(withProblems, 4U);
+    for(const auto& point : causalOnly.problems())
+    {
+        EXPECT_TRUE(std::get<bool>(point.at("is_causal")));
+    }
+}
+
+TEST(TestProblemSpace, AKeepEveryDeclaredConstraintEmptiesExploresNothingRatherThanFailing)
+{
+    // The ragged form is declared only with bshd, so no combination of these two keeps can hold a
+    // problem; the bound is low enough that the sample walks the product and finds none.
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    ExplorationRequest request;
+    request.keep = {{"form", "ragged"}, {"layout", "bhsd"}};
+    request.maxCombinations = 4;
+
+    const auto corpus
+        = exploreProblemSpace(metadata, request, admitsOnlyWhatKeepKeeps(request.keep));
+
+    EXPECT_TRUE(corpus.problems().empty());
+    EXPECT_EQ(corpus.categoricalTotal, 288U);
+}
+
+TEST(TestProblemSpace, TheCombinationsTheBoundLeavesOutAreCountedAgainstTheKeptProduct)
+{
+    const auto metadata = test::shippedOperation("sdpa_fwd");
+    ExplorationRequest request;
+    request.keep = narrowSdpaFwdKeeps();
+    request.maxCombinations = 4;
+    request.pointsPerCombination = 2;
+    request.budgetPerCombination = 500;
+
+    const auto corpus
+        = exploreProblemSpace(metadata, request, admitsOnlyWhatKeepKeeps(request.keep));
+
+    EXPECT_EQ(corpus.categoricalTotal, 8U) << "the keep's product, not the declared 6912";
+    EXPECT_GT(corpus.categoricalNotExplored, 0U);
+    EXPECT_EQ(corpus.categoricalTotal - corpus.categoricalNotExplored, corpus.combinations.size());
+}
+
 /// The shipped attention declarations, whose constraints the forward and the backward share.
 class TestShippedSdpaConstraints : public ::testing::TestWithParam<std::string>
 {

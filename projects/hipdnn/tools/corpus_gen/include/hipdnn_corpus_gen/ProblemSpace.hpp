@@ -6,6 +6,7 @@
 #include <hipdnn_corpus_gen/ArgumentResolver.hpp>
 #include <hipdnn_corpus_gen/FeasibleShapeSet.hpp>
 #include <hipdnn_corpus_gen/OperationMetadata.hpp>
+#include <hipdnn_corpus_gen/PointFilter.hpp>
 #include <hipdnn_corpus_gen/WorkloadSampling.hpp>
 
 #include <algorithm>
@@ -82,6 +83,12 @@ struct ExplorationRequest
     /// Largest number of categorical combinations to explore; reported when it binds.
     size_t maxCombinations = 1024;
 
+    /// The caller's `--keep` clauses. Those on an enum or bool parameter narrow its axis before
+    /// the combinations are counted and sampled, so @ref maxCombinations bounds the combinations
+    /// a keep admits and not the full product; clauses on a numeric parameter do not apply here,
+    /// since the caller's oracle filters them point by point.
+    std::vector<KeepClause> keep;
+
     /// Oracle calls first spent probing a combination with no admitted archetype. If the probe
     /// finds nothing, the combination is declined without spending @ref budgetPerCombination.
     int64_t probeBudget = 2000;
@@ -150,6 +157,12 @@ struct ProblemCorpus
     /// Combinations and skeleton points not explored because a cap bound, with explanations.
     std::vector<std::string> skippedCombinations;
 
+    /// The categorical combinations the declaration holds (the product of each enum's and bool's
+    /// values the request's `keep` clauses admit), and how many of them
+    /// ExplorationRequest::maxCombinations left unexplored.
+    size_t categoricalTotal = 0;
+    size_t categoricalNotExplored = 0;
+
     /// Candidates a declared constraint refused and admitted. An over-strong constraint empties
     /// the corpus, which would otherwise look like an engine that serves nothing.
     int64_t constraintRejections = 0;
@@ -193,8 +206,9 @@ struct ProblemCorpus
 namespace detail
 {
 
-/// The cross product of every categorical parameter's declared values, at most @p limit of it
-/// plus whatever keeps every declared value present; @p total receives the full size.
+/// The cross product of every categorical parameter's declared values that @p keep admits, at
+/// most @p limit of it plus whatever keeps every admitted value present; @p total receives the
+/// full size of the admitted product, 0 when @p keep admits no value of some parameter.
 ///
 /// Past the limit the product is sampled, not cut to a prefix (a prefix keeps only the first
 /// values of the earliest parameters), and each value the sample missed gets a combination of
@@ -205,11 +219,16 @@ namespace detail
 /// local_4096 one). @p live, when given, says which combinations can hold a problem (see
 /// excludedByCategoricals): only those are sampled, so the limit is spent on combinations that
 /// count. Declaration order keeps the result reproducible.
+///
+/// @p keep narrows each axis to the values it admits (admitsValue) before anything is counted,
+/// so the limit and the per-value cover are spent on combinations the caller can keep rather
+/// than on a sample the caller then discards.
 inline std::vector<ProblemPoint>
     categoricalCombinations(const std::vector<Parameter>& parameters,
                             size_t limit,
                             size_t& total,
-                            const std::function<bool(const ProblemPoint&)>& live = {})
+                            const std::function<bool(const ProblemPoint&)>& live = {},
+                            const std::vector<KeepClause>& keep = {})
 {
     std::vector<std::pair<std::string, std::vector<ParameterValue>>> axes;
     total = 1;
@@ -219,6 +238,17 @@ inline std::vector<ProblemPoint>
         if(values.empty())
         {
             continue;
+        }
+        values.erase(std::remove_if(values.begin(),
+                                    values.end(),
+                                    [&](const ParameterValue& value) {
+                                        return !admitsValue(keep, parameter.name, value);
+                                    }),
+                     values.end());
+        if(values.empty())
+        {
+            total = 0;
+            return {};
         }
         total = total > std::numeric_limits<size_t>::max() / values.size()
                     ? std::numeric_limits<size_t>::max()
@@ -301,7 +331,9 @@ inline std::vector<ProblemPoint>
                     found = true;
                 }
             }
-            if(!found)
+            // With no combination at all (a keep that every constraint empties) there is none to
+            // swap the value into.
+            if(!found && !combinations.empty())
             {
                 auto point = combinations.front();
                 point[name] = value;
@@ -957,10 +989,13 @@ inline ProblemCorpus exploreProblemSpace(const OperationMetadata& metadata,
         totalCombinations,
         [&metadata](const ProblemPoint& combination) {
             return !detail::excludedByCategoricals(metadata, combination);
-        });
+        },
+        request.keep);
 
+    corpus.categoricalTotal = totalCombinations;
     if(totalCombinations > combinations.size())
     {
+        corpus.categoricalNotExplored = totalCombinations - combinations.size();
         corpus.skippedCombinations.push_back(
             std::to_string(totalCombinations - combinations.size()) + " of "
             + std::to_string(totalCombinations)
