@@ -1,0 +1,526 @@
+{
+  "version": "1.0",
+  "id": "bf09f487-0a49-48b3-9cfe-d0b49ef883c6",
+  "name": "hipkernel:hip_conv_dgrad_dw_rdna",
+  "matchers": [
+    "ccae4b0c-6ec0-4530-9d09-2a40a64ac7b9"
+  ],
+  "engine": "c5003daa-525f-4ecd-b3a1-428ba76f797f",
+  "dispatch": "b0245cef-5e7c-41b5-829b-0e4faf183e40",
+  "provenance": {
+    "specialization_contract": {
+      "schema_version": 1,
+      "consumers": [
+        {
+          "engine_id": "c5003daa-525f-4ecd-b3a1-428ba76f797f",
+          "kmd_id": "ec27a0ce-e4f7-4349-9992-3a26fba8c522",
+          "metadata_fields": [],
+          "matcher_only_fields": [
+            "kernel_family",
+            "variant",
+            "dtype",
+            "layout",
+            "filter_w",
+            "stride"
+          ],
+          "bindings": {},
+          "vocabulary": {}
+        }
+      ]
+    }
+  },
+  "kernelDescriptors": [
+    {
+      "version": "1.0",
+      "id": "2bc4b270-8e7b-4ea4-a358-64c568f01a0a",
+      "name": "hip_conv_dgrad_dw_rdna.f32_ncl_k12_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 0,
+            "DW_K": 12,
+            "DW_S": 2,
+            "DW_TW": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 12,
+        "stride": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "d141ca03-0ad7-4edd-8c27-8ed1cf5b9797",
+      "name": "hip_conv_dgrad_dw_rdna.f32_ncl_k29_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 0,
+            "DW_K": 29,
+            "DW_S": 2,
+            "DW_TW": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 29,
+        "stride": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a3a84687-e129-4bf5-b2d0-635115d73a4f",
+      "name": "hip_conv_dgrad_dw_rdna.f32_ncl_k43_s3",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 0,
+            "DW_K": 43,
+            "DW_S": 3,
+            "DW_TW": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 43,
+        "stride": 3
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "897c52d4-4591-4907-adef-4f669287cf15",
+      "name": "hip_conv_dgrad_dw_rdna.f32_ncl_k7_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 0,
+            "DW_K": 7,
+            "DW_S": 1,
+            "DW_TW": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 7,
+        "stride": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "2d827a1c-18f0-4eac-af73-abb0af3c527d",
+      "name": "hip_conv_dgrad_dw_rdna.f32_ncx_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 0,
+            "DW_CHANNELS_LAST": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "generic",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 0,
+        "stride": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "1e3eb31a-8b59-4232-a32b-ec26fd63e195",
+      "name": "hip_conv_dgrad_dw_rdna.f32_nxc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 0,
+            "DW_CHANNELS_LAST": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "generic",
+        "dtype": "FLOAT",
+        "layout": "CHANNELS_LAST",
+        "filter_w": 0,
+        "stride": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "f1f5c526-0309-46b6-b050-95d91dfb347c",
+      "name": "hip_conv_dgrad_dw_rdna.f16_ncl_k12_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 1,
+            "DW_K": 12,
+            "DW_S": 2,
+            "DW_TW": 2
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 12,
+        "stride": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "87c67195-0224-4ef2-aad8-19679098b3f7",
+      "name": "hip_conv_dgrad_dw_rdna.f16_ncl_k29_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 1,
+            "DW_K": 29,
+            "DW_S": 2,
+            "DW_TW": 2
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 29,
+        "stride": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "9881daab-1ff0-45ff-b92b-8147cd1edd85",
+      "name": "hip_conv_dgrad_dw_rdna.f16_ncl_k43_s3",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 1,
+            "DW_K": 43,
+            "DW_S": 3,
+            "DW_TW": 2
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 43,
+        "stride": 3
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6d5ab89d-2314-42fb-826f-ff84319b72b6",
+      "name": "hip_conv_dgrad_dw_rdna.f16_ncl_k7_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 1,
+            "DW_K": 7,
+            "DW_S": 1,
+            "DW_TW": 2
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 7,
+        "stride": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "99b7aa4a-bab9-4e53-839e-81aa4fb1f20a",
+      "name": "hip_conv_dgrad_dw_rdna.f16_ncx_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 1,
+            "DW_CHANNELS_LAST": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "generic",
+        "dtype": "HALF",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 0,
+        "stride": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "fe282a24-80b4-490e-a484-58ae49ae0b58",
+      "name": "hip_conv_dgrad_dw_rdna.f16_nxc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 1,
+            "DW_CHANNELS_LAST": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "generic",
+        "dtype": "HALF",
+        "layout": "CHANNELS_LAST",
+        "filter_w": 0,
+        "stride": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "a03b60c0-718a-4917-abb6-097bb5f28f85",
+      "name": "hip_conv_dgrad_dw_rdna.bf16_ncl_k12_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 2,
+            "DW_K": 12,
+            "DW_S": 2,
+            "DW_TW": 2
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 12,
+        "stride": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "126a7b6e-07f1-4fe7-a7ea-ccb3fa19a6a3",
+      "name": "hip_conv_dgrad_dw_rdna.bf16_ncl_k29_s2",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 2,
+            "DW_K": 29,
+            "DW_S": 2,
+            "DW_TW": 2
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 29,
+        "stride": 2
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "471d010a-5b65-48e9-8d4e-ac64e9a5e090",
+      "name": "hip_conv_dgrad_dw_rdna.bf16_ncl_k43_s3",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 2,
+            "DW_K": 43,
+            "DW_S": 3,
+            "DW_TW": 2
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 43,
+        "stride": 3
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "6bef0309-7a7c-4abe-9776-816d2704e12c",
+      "name": "hip_conv_dgrad_dw_rdna.bf16_ncl_k7_s1",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise1d",
+        "build": {
+          "defines": {
+            "DW_DTYPE": 2,
+            "DW_K": 7,
+            "DW_S": 1,
+            "DW_TW": 2
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "specialized",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 7,
+        "stride": 1
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "827290c9-f0ef-49de-8f56-6989531a2838",
+      "name": "hip_conv_dgrad_dw_rdna.bf16_ncx_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 2,
+            "DW_CHANNELS_LAST": 0
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "generic",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_FIRST",
+        "filter_w": 0,
+        "stride": 0
+      },
+      "priority": 0
+    },
+    {
+      "version": "1.0",
+      "id": "ed0d5a7d-dd9c-4735-a5af-c2b58827c659",
+      "name": "hip_conv_dgrad_dw_rdna.bf16_nxc_generic",
+      "kernel_source": {
+        "kind": "hip",
+        "source": "kernels/ConvDgradDepthwise.cpp",
+        "entry": "ConvDgradDepthwise",
+        "build": {
+          "defines": {
+            "DW_GENERIC": 1,
+            "DW_DTYPE": 2,
+            "DW_CHANNELS_LAST": 1
+          }
+        }
+      },
+      "metadata": {
+        "kernel_family": "dgrad_dw_direct",
+        "variant": "generic",
+        "dtype": "BFLOAT16",
+        "layout": "CHANNELS_LAST",
+        "filter_w": 0,
+        "stride": 0
+      },
+      "priority": 0
+    }
+  ],
+  "arch": [
+    "gfx1100",
+    "gfx1101",
+    "gfx1102",
+    "gfx1103",
+    "gfx1150",
+    "gfx1151",
+    "gfx1152",
+    "gfx1153",
+    "gfx1200",
+    "gfx1201"
+  ]
+}
