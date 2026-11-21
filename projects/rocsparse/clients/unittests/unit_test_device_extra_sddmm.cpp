@@ -513,6 +513,31 @@ TEST_F(ExtraSddmm, scalars_and_empty_pattern)
     }
 }
 
+// One-based C: the kernels have to remove the index base from the sampled
+// column (CSR), row (CSC) or both (COO, ELL) before reading the dense operands.
+// The inner dimension selects the kernel variant, so a few of them are run.
+TEST_F(ExtraSddmm, index_base_one)
+{
+    uint64_t seed = 1100;
+    for(SddmmFmt f : all_fmts)
+        for(int64_t k : {3, 8, 17})
+            for(bool device : {false, true})
+            {
+                SddmmCase c;
+                c.fmt    = f;
+                c.k      = k;
+                c.device = device;
+                c.base   = rocsparse_index_base_one;
+                c.seed   = seed++;
+                run_sddmm<float, int32_t, int32_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+                run_sddmm<rocsparse_double_complex, int64_t, int64_t>(handle, c);
+                if(HasFatalFailure())
+                    return;
+            }
+}
+
 TEST_F(ExtraSddmm, dense_algorithm_without_blas)
 {
     const int64_t dims[][2] = {{9, 8}, {16, 16}, {1, 1}, {33, 31}, {64, 20}};

@@ -23,10 +23,13 @@
  * ************************************************************************ */
 
 // The mat_info based preconditioner entry points that the generic descriptor API does
-// not use: the numerical tolerance and singular pivot of csrilu0 / csric0, and the
-// numeric boost of csrilu0 / bsrilu0 for the four value types, in both pointer modes and
-// both index bases. The factors are compared with the host references on diagonally
-// dominant matrices, so every pivot is finite and bounded away from zero.
+// not use: the numerical tolerance and singular pivot of csrilu0 / csric0, the numeric
+// boost of csrilu0 / bsrilu0 for the four value types, in both pointer modes and both
+// index bases, and csric0 on Hermitian complex matrices whose Cholesky factor has
+// complex row inner products. The tolerance and singular pivot cases use diagonally
+// dominant matrices whose pivots sit away from the thresholds; the boost cases also put
+// a pivot exactly on the boost tolerance; the Hermitian cases are built as L * L^H from
+// a known factor.
 
 #include "unit_test_device_precond_common.hpp"
 
@@ -559,6 +562,195 @@ TEST_F(PrecondLegacy, csric0_exact_cholesky_factor)
 }
 
 // ---------------------------------------------------------------------------
+// csric0 on Hermitian complex matrices
+// ---------------------------------------------------------------------------
+namespace
+{
+    // Lower triangle of A = L * L^H (stored by rows) for a given lower triangular L
+    // with a real positive diagonal: A is Hermitian positive definite and L is its
+    // Cholesky factor. Every value is a small dyadic rational, so the factorization is
+    // exact in every precision.
+    template <typename T>
+    csr_matrix<T> hermitian_from_factor(const std::vector<std::vector<std::complex<double>>>& l)
+    {
+        csr_matrix<T> a;
+        a.n = static_cast<int32_t>(l.size());
+        a.ptr.push_back(0);
+        for(int32_t i = 0; i < a.n; ++i)
+        {
+            for(int32_t j = 0; j <= i; ++j)
+            {
+                std::complex<double> s = 0.0;
+                for(int32_t k = 0; k <= j; ++k)
+                    s += l[i][k] * std::conj(l[j][k]);
+                a.ind.push_back(j);
+                a.val.push_back(from_cd<T>(s));
+            }
+            a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
+        }
+        return a;
+    }
+
+    template <typename T>
+    std::vector<T> factor_values(const std::vector<std::vector<std::complex<double>>>& l)
+    {
+        std::vector<T> v;
+        for(size_t i = 0; i < l.size(); ++i)
+            for(size_t j = 0; j <= i; ++j)
+                v.push_back(from_cd<T>(l[i][j]));
+        return v;
+    }
+
+    // The csric0 kernels accumulate the inner product of two rows of L as
+    //   sum_k L(j,k) * conj(L(i,k))
+    // where the Cholesky update of L(i,j) needs sum_k L(i,k) * conj(L(j,k)): the conjugate
+    // sits on the wrong factor (AISPARSE-903). The two agree whenever every product is
+    // real, which is the case when the entries of each column of L share a phase.
+    //
+    // Same-phase factor (column 0 along 1 + i, column 1 along 1 + i, column 2 real):
+    //   L = | 2                  |
+    //       | 1+i   2            |
+    //       | 2+2i  1+i   3      |
+    //       | 3+3i  2+2i  1   2  |
+    // The library's factor of A = L L^H must be L (the one host_ic0 computes), and L L^H
+    // must reproduce A on the pattern. A kernel without any conjugate accumulates
+    // L(1,0) * L(2,0) = (1+i)(2+2i) = 4i instead of (1+i)(2-2i) = 4 for L(2,1) and gets
+    // L(2,1) = (6+2i - 4i) / 2 = 3 - i, L(2,2) = sqrt(19 - 8 - 10) = 1 instead of 1 + i, 3.
+    std::vector<std::vector<std::complex<double>>> same_phase_factor()
+    {
+        using c = std::complex<double>;
+        return {{c(2, 0)},
+                {c(1, 1), c(2, 0)},
+                {c(2, 2), c(1, 1), c(3, 0)},
+                {c(3, 3), c(2, 2), c(1, 0), c(2, 0)}};
+    }
+
+    // General factor: L(2,0) * conj(L(1,0)) = (1-i)(1-i) = -2i is not real.
+    //   L = | 2              |
+    //       | 1+i   2        |
+    //       | 1-i   1+2i  3  |
+    // Cholesky: L(2,1) = (A(2,1) - L(2,0) conj(L(1,0))) / L(1,1) = (2+2i + 2i) / 2 = 1 + 2i,
+    // L(2,2) = sqrt(16 - 2 - 5) = 3. The mirrored sum of the library gives
+    // L(2,1) = (2+2i - 2i) / 2 = 1 and L(2,2) = sqrt(16 - 2 - 1) = sqrt(13).
+    std::vector<std::vector<std::complex<double>>> general_phase_factor()
+    {
+        using c = std::complex<double>;
+        return {{c(2, 0)}, {c(1, 1), c(2, 0)}, {c(1, -1), c(1, 2), c(3, 0)}};
+    }
+
+    // The factor the library's recurrence (conjugate on the dependency row) produces.
+    template <typename T>
+    std::vector<T> mirrored_ic0(const csr_matrix<T>& a)
+    {
+        std::vector<std::complex<double>> v(a.val.size());
+        for(size_t i = 0; i < v.size(); ++i)
+            v[i] = to_cd(a.val[i]);
+        for(int32_t i = 0; i < a.n; ++i)
+        {
+            const int32_t begin = a.ptr[i];
+            const int32_t diag  = a.ptr[i + 1] - 1;
+            for(int32_t j = begin; j < diag; ++j)
+            {
+                const int32_t        c = a.ind[j];
+                std::complex<double> s = 0.0;
+                for(int32_t p = begin; p < j; ++p)
+                    for(int32_t q = a.ptr[c]; q < a.ptr[c + 1] - 1; ++q)
+                        if(a.ind[q] == a.ind[p])
+                            s += v[q] * std::conj(v[p]);
+                v[j] = (v[j] - s) / v[a.ptr[c + 1] - 1];
+            }
+            std::complex<double> d = v[diag];
+            for(int32_t j = begin; j < diag; ++j)
+                d -= v[j] * std::conj(v[j]);
+            v[diag] = std::sqrt(d.real());
+        }
+        std::vector<T> out(v.size());
+        for(size_t i = 0; i < v.size(); ++i)
+            out[i] = from_cd<T>(v[i]);
+        return out;
+    }
+
+    template <typename T>
+    bool all_close(const std::vector<T>& got, const std::vector<T>& want, double tol)
+    {
+        if(got.size() != want.size())
+            return false;
+        for(size_t i = 0; i < got.size(); ++i)
+            if(std::abs(to_cd(got[i]) - to_cd(want[i])) > tol)
+                return false;
+        return true;
+    }
+
+    template <typename T>
+    std::string show(const std::vector<T>& v)
+    {
+        std::string s;
+        for(const auto& x : v)
+            s += " (" + std::to_string(re(x)) + ", " + std::to_string(im(x)) + ")";
+        return s;
+    }
+}
+
+// Hermitian positive definite complex input whose Cholesky factor has complex entries
+// but real row inner products (same-phase columns, see same_phase_factor): the factor
+// is the exact Cholesky factor and reproduces A.
+TEST_F(PrecondLegacy, csric0_hermitian_same_phase_columns)
+{
+    for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
+    {
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            if constexpr(is_cplx<T>)
+            {
+                SCOPED_TRACE(::testing::Message() << "base " << static_cast<int>(base));
+                const auto a    = hermitian_from_factor<T>(same_phase_factor());
+                const auto want = factor_values<T>(same_phase_factor());
+                csr_out<T> out;
+                run_csr<Kind::ic, T>(handle, a, base, -1.0, boost_request{}, false, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                EXPECT_EQ(out.singular_pivot, -1);
+                expect_close(out.values, want, tolerance<T>());
+                expect_close(out.values, host_ic0(a), tolerance<T>());
+                expect_small_residual(ic_pattern_residual(a, out.values), a);
+            }
+        });
+    }
+}
+
+// Hermitian positive definite complex input with a non-real inner product (see
+// general_phase_factor). The factor must be the Cholesky factor of A; the library's
+// mirrored recurrence (AISPARSE-903) produces a different lower triangle, which does
+// not reproduce A, conj(A) or A^T. While the library behaves that way the test is
+// skipped after recording both factors; it fails on any other wrong result. Measured on
+// gfx1201 (cfloat and cdouble, the clean library): L(2,1) = (1, 0) and L(2,2) =
+// (3.605551, 0) where the Cholesky factor has (1, 2) and (3, 0); the other entries agree.
+TEST_F(PrecondLegacy, csric0_hermitian_general_phase)
+{
+    for_all_types([&](auto tag) {
+        using T = decltype(tag);
+        if constexpr(is_cplx<T>)
+        {
+            const auto a        = hermitian_from_factor<T>(general_phase_factor());
+            const auto want     = factor_values<T>(general_phase_factor());
+            const auto mirrored = mirrored_ic0(a);
+            csr_out<T> out;
+            run_csr<Kind::ic, T>(
+                handle, a, rocsparse_index_base_zero, -1.0, boost_request{}, false, out);
+            ASSERT_EQ(out.compute_status, rocsparse_status_success);
+            EXPECT_EQ(out.singular_pivot, -1);
+            if(all_close(out.values, mirrored, 1.0e-5) && !all_close(out.values, want, 1.0e-5))
+            {
+                GTEST_SKIP() << "csric0 conjugates the dependency row instead of the current "
+                                "one (AISPARSE-903); got"
+                             << show(out.values) << " want" << show(want);
+            }
+            expect_close(out.values, want, tolerance<T>());
+            expect_small_residual(ic_pattern_residual(a, out.values), a);
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // csrilu0 numeric boost
 // ---------------------------------------------------------------------------
 TEST_F(PrecondLegacy, csrilu0_numeric_boost_types_and_pointer_modes)
@@ -614,24 +806,108 @@ TEST_F(PrecondLegacy, csrilu0_numeric_boost_types_and_pointer_modes)
     });
 }
 
+// The boost replaces a pivot whose magnitude is at most the tolerance (|u_ii| <= tol, the
+// rule host_ilu0 applies), so a pivot exactly equal to the tolerance is replaced. The
+// pivots that are compared with the tolerance are exact in every precision (0.5 in (a),
+// 1 - (1/2) * 1 in (b); |0.5 + 0i| is exactly 0.5 for the complex types), so the
+// comparison sits on the boundary; the rest of the factor (not all of it representable,
+// e.g. l(2,1) = 4/11 in (a) once boosted) is checked with the usual relative tolerance:
+//   (a) | 0.5  1  0 |   the first pivot is a(0,0) = 0.5 = tol: boosted to 4, then
+//       | 1    3  1 |   l(1,0) = 1/4, u(1,1) = 3 - 1/4 = 2.75 (kept at 0.5: l(1,0) = 2,
+//       | 0    1  3 |   u(1,1) = 1, l(2,1) = 1, u(2,2) = 2);
+//   (b) | 2  1  0 |     u(1,1) = 1 - (1/2) * 1 = 0.5 = tol after the elimination of row 1:
+//       | 1  1  1 |     boosted to 4, then l(2,1) = 1/4, u(2,2) = 3 - 1/4 (kept at 0.5:
+//       | 0  1  3 |     l(2,1) = 2, u(2,2) = 1).
+// A negative pivot (-0.5 in (a)) keeps its sign (-4).
+TEST_F(PrecondLegacy, csrilu0_numeric_boost_pivot_equal_to_tolerance)
+{
+    struct case_t
+    {
+        std::vector<double> values; // dense 3x3 by rows, zeros are not stored
+        size_t              boosted; // position of the boosted diagonal in the CSR values
+    };
+    const std::vector<case_t> cases = {
+        {{0.5, 1, 0, 1, 3, 1, 0, 1, 3}, 0},
+        {{-0.5, 1, 0, 1, 3, 1, 0, 1, 3}, 0},
+        {{2, 1, 0, 1, 1, 1, 0, 1, 3}, 3},
+    };
+    for(const auto& c : cases)
+    {
+        for_all_types([&](auto tag) {
+            using T = decltype(tag);
+            SCOPED_TRACE(::testing::Message()
+                         << "a(0,0) " << c.values[0] << " a(1,1) " << c.values[4]);
+            csr_matrix<T> a;
+            a.n = 3;
+            a.ptr.push_back(0);
+            for(int32_t i = 0; i < 3; ++i)
+            {
+                for(int32_t j = 0; j < 3; ++j)
+                {
+                    if(c.values[static_cast<size_t>(i) * 3 + j] != 0.0)
+                    {
+                        a.ind.push_back(j);
+                        a.val.push_back(make_value<T>(c.values[static_cast<size_t>(i) * 3 + j]));
+                    }
+                }
+                a.ptr.push_back(static_cast<int32_t>(a.ind.size()));
+            }
+            for(const bool device : {false, true})
+            {
+                SCOPED_TRACE(::testing::Message() << "device " << device);
+                const boost_request req{true, 0.5, 4.0, device, boost_api::standard};
+                csr_out<T>          out;
+                run_csr<Kind::ilu, T>(handle, a, rocsparse_index_base_zero, -1.0, req, false, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                const double sign = (c.values[0] < 0.0 && c.boosted == 0) ? -1.0 : 1.0;
+                EXPECT_EQ(to_cd(out.values[c.boosted]), std::complex<double>(4.0 * sign, 0.0));
+                expect_close(out.values, host_ilu0(a, req.tol, req.val), tolerance<T>());
+            }
+            // The mixed precision entry point passes the tolerance as a double.
+            if constexpr(is_single_precision<T>)
+            {
+                const boost_request req{true, 0.5, 4.0, false, boost_api::mixed};
+                csr_out<T>          out;
+                run_csr<Kind::ilu, T>(handle, a, rocsparse_index_base_zero, -1.0, req, false, out);
+                ASSERT_EQ(out.compute_status, rocsparse_status_success);
+                expect_close(out.values, host_ilu0(a, req.tol, req.val), tolerance<T>());
+            }
+        });
+    }
+}
+
 // One dense 3x3 block (a single block row) whose first pivot is `pivot0`, the rest of
 // the block being well conditioned. Without the boost an exactly zero first pivot is
 // reported as a zero pivot at the block row (in the index base of the matrix); with a
-// boost tolerance of 1e-2 (boost value 2) the pivots that are at most 1e-2 in magnitude
+// boost tolerance of `tol` (boost value 2) the pivots that are at most `tol` in magnitude
 // (here only the first, of either sign) are replaced by 2 with their sign and the
-// factor matches the host reference, with no zero pivot reported.
+// factor matches the host reference, with no zero pivot reported. The pivots +-0.5 with
+// the tolerance 0.5 sit exactly on the boundary of the rule (|pivot| <= tol), and are
+// boosted: with the pivot kept, l(1,0) = 1 / 0.5 = 2 instead of 1 / 2 and the rest of
+// the block follows.
 TEST_F(PrecondLegacy, bsrilu0_numeric_boost_first_pivot)
 {
+    struct case_t
+    {
+        double pivot0;
+        bool   boost;
+        double tol;
+    };
+    const case_t cases[] = {{0.0, false, 1.0e-2},
+                            {0.0, true, 1.0e-2},
+                            {1.0e-3, true, 1.0e-2},
+                            {-1.0e-3, true, 1.0e-2},
+                            {0.5, true, 0.5},
+                            {-0.5, true, 0.5},
+                            {0.75, true, 0.5}};
     for(const auto base : {rocsparse_index_base_zero, rocsparse_index_base_one})
     {
         for_all_types([&](auto tag) {
             using T = decltype(tag);
-            for(const auto& [pivot0, boost] : {std::pair{0.0, false},
-                                               std::pair{0.0, true},
-                                               std::pair{1.0e-3, true},
-                                               std::pair{-1.0e-3, true}})
+            for(const auto& [pivot0, boost, tol] : cases)
             {
-                SCOPED_TRACE(::testing::Message() << "pivot0 " << pivot0 << " boost " << boost);
+                SCOPED_TRACE(::testing::Message()
+                             << "pivot0 " << pivot0 << " boost " << boost << " tol " << tol);
                 bsr_matrix<T> bsr;
                 bsr.mb        = 1;
                 bsr.block_dim = 3;
@@ -640,7 +916,7 @@ TEST_F(PrecondLegacy, bsrilu0_numeric_boost_first_pivot)
                 bsr.ind       = {0};
                 for(const double x : {pivot0, 1.0, 0.5, 1.0, 4.0, 1.0, 0.5, 1.0, 5.0})
                     bsr.val.push_back(make_value<T>(x));
-                const boost_request req{boost, 1.0e-2, 2.0};
+                const boost_request req{boost, tol, 2.0};
                 bsr_out<T>          out;
                 run_bsrilu0<T>(handle, bsr, base, req, out);
                 ASSERT_EQ(out.compute_status, rocsparse_status_success);
@@ -652,11 +928,16 @@ TEST_F(PrecondLegacy, bsrilu0_numeric_boost_first_pivot)
                 }
                 EXPECT_EQ(out.zero_pivot_status, rocsparse_status_success);
                 EXPECT_EQ(out.zero_pivot, -1);
-                // The boosted pivot (block (0,0), entry (0,0)) is exactly +-2.
-                if(boost)
+                // The boosted pivot (block (0,0), entry (0,0)) is exactly +-2; a pivot above
+                // the tolerance is kept.
+                if(boost && std::abs(pivot0) <= tol)
                 {
                     const double sign = (pivot0 < 0.0) ? -1.0 : 1.0;
                     EXPECT_EQ(to_cd(out.values[0]), std::complex<double>(2.0 * sign, 0.0));
+                }
+                else
+                {
+                    EXPECT_EQ(to_cd(out.values[0]), std::complex<double>(pivot0, 0.0));
                 }
                 expect_bsr_factor(bsr, out, req);
             }

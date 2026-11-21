@@ -25,7 +25,9 @@
 //
 // Generic spmm with a blocked ELL matrix that has no stored blocks (the
 // product is zero, so C = beta * C), with a blocked ELL matrix built by
-// dense_to_sparse, and with formats spmm does not support.
+// dense_to_sparse, with a hand-built complex matrix under every operation of
+// B (the conjugate transpose has to conjugate B), and with formats spmm does
+// not support.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -276,6 +278,140 @@ TEST_F(ExtraBell, dense_to_sparse_blocked_ell_used_by_spmm)
         if(HasFatalFailure())
             return;
     }
+}
+
+namespace
+{
+    // Hand-built Blocked-ELL matrix (cuSPARSE layout: block column indices
+    // row-major per block row, values row-major per block row with the blocks
+    // of a block row side by side) times a dense B under every operation of B.
+    // Complex values, so a conjugate transpose of B differs from a transpose.
+    template <typename T, typename I>
+    void run_bell_ops(rocsparse_handle     handle,
+                      rocsparse_operation  opB,
+                      rocsparse_order      order_B,
+                      rocsparse_order      order_C,
+                      rocsparse_index_base base,
+                      bool                 device)
+    {
+        SCOPED_TRACE("opB=" + std::to_string(static_cast<int>(opB))
+                     + " order_B=" + std::to_string(static_cast<int>(order_B))
+                     + " order_C=" + std::to_string(static_cast<int>(order_C))
+                     + " base=" + std::to_string(static_cast<int>(base))
+                     + " device=" + std::to_string(device));
+        const rocsparse_datatype dt = rocsparse_ut::dt_of<T>();
+        const int64_t            bd = 2, mb = 3, kb = 3, ellw = 2, n = 5;
+        const int64_t            m = mb * bd, k = kb * bd, ell_cols = ellw * bd;
+        // Block columns of every block row, -1 marks an unused (padded) slot.
+        const int64_t blocks[3][2] = {{0, 2}, {1, -1}, {2, 0}};
+
+        Rng                  rng(29);
+        Dense                A(m, k);
+        std::vector<int64_t> ind(static_cast<size_t>(mb * ellw), -1);
+        std::vector<cplx>    val(static_cast<size_t>(m * ell_cols), cplx(0.0, 0.0));
+        for(int64_t br = 0; br < mb; ++br)
+            for(int64_t ei = 0; ei < ellw; ++ei)
+            {
+                const int64_t bc = blocks[br][ei];
+                if(bc < 0)
+                    continue;
+                ind[static_cast<size_t>(br * ellw + ei)] = bc;
+                for(int64_t r = 0; r < bd; ++r)
+                    for(int64_t c = 0; c < bd; ++c)
+                    {
+                        const cplx v = round_to<T>(rand_val<T>(rng));
+                        val[static_cast<size_t>((br * bd + r) * ell_cols + ei * bd + c)] = v;
+                        A.at(br * bd + r, bc * bd + c)                                   = v;
+                    }
+            }
+        const Dense   Bl  = random_dense<T>(k, n, rng);
+        const Dense   Bs  = apply_op(Bl, opB);
+        const Dense   C0  = random_dense<T>(m, n, rng);
+        const int64_t ldb = min_ld(Bs, order_B) + 1;
+        const int64_t ldc = min_ld(C0, order_C) + 2;
+
+        // up_idx adds the base, so the -1 padding slot becomes base - 1 as the
+        // library expects for a one-based matrix.
+        DevBuf<I> dind = up_idx<I>(ind, static_cast<int64_t>(base));
+        DevBuf<T> dval = up_val<T>(val);
+        DevBuf<T> dB   = up_raw<T>(store_dense<T>(Bs, order_B, ldb));
+        DevBuf<T> dC   = up_raw<T>(store_dense<T>(C0, order_C, ldc));
+        ASSERT_TRUE(dind.ptr && dval.ptr && dB.ptr && dC.ptr);
+
+        SpmatH sp;
+        ASSERT_EQ(rocsparse_create_bell_descr(&sp.p,
+                                              m,
+                                              k,
+                                              rocsparse_direction_row,
+                                              bd,
+                                              ell_cols,
+                                              dind.ptr,
+                                              dval.ptr,
+                                              rocsparse_ut::it_of<I>(),
+                                              base,
+                                              dt),
+                  rocsparse_status_success);
+        DnmatH mB, mC;
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&mB.p, Bs.rows, Bs.cols, ldb, dB.ptr, dt, order_B),
+                  rocsparse_status_success);
+        ASSERT_EQ(rocsparse_create_dnmat_descr(&mC.p, m, n, ldc, dC.ptr, dt, order_C),
+                  rocsparse_status_success);
+
+        Scalar<T>        alpha(cplx(2.0, -1.0), device);
+        Scalar<T>        beta(cplx(-1.0, 0.5), device);
+        PointerModeGuard mode(handle, mode_of(device));
+
+        size_t bsz  = 0;
+        auto   spmm = [&](rocsparse_spmm_stage stage, void* buffer) {
+            return rocsparse_spmm(handle,
+                                  rocsparse_operation_none,
+                                  opB,
+                                  alpha.get(),
+                                  sp.p,
+                                  mB.p,
+                                  beta.get(),
+                                  mC.p,
+                                  dt,
+                                  rocsparse_spmm_alg_bell,
+                                  stage,
+                                  &bsz,
+                                  buffer);
+        };
+        ASSERT_EQ(spmm(rocsparse_spmm_stage_buffer_size, nullptr), rocsparse_status_success);
+        DevBuf<char> buffer(bsz > 0 ? bsz : 1);
+        ASSERT_TRUE(buffer.ptr);
+        for(rocsparse_spmm_stage stage :
+            {rocsparse_spmm_stage_preprocess, rocsparse_spmm_stage_compute})
+            ASSERT_EQ(spmm(stage, buffer.ptr), rocsparse_status_success);
+        ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
+
+        const Dense want = axpby(to_c<T>(alpha.h), matmul(A, Bl), to_c<T>(beta.h), C0);
+        expect_dense_equal<T>(dC.host(), want, order_C, ldc, "C");
+        expect_dense_equal<T>(dB.host(), Bs, order_B, ldb, "B");
+    }
+}
+
+// Every operation of a complex B (the conjugate transpose has to conjugate B),
+// both storage orders of B and C, both index bases and both scalar modes.
+TEST_F(ExtraBell, complex_B_operations)
+{
+    const rocsparse_operation ops[]    = {rocsparse_operation_none,
+                                          rocsparse_operation_transpose,
+                                          rocsparse_operation_conjugate_transpose};
+    const rocsparse_order     orders[] = {rocsparse_order_column, rocsparse_order_row};
+    for(rocsparse_operation opB : ops)
+        for(rocsparse_order oB : orders)
+            for(rocsparse_order oC : orders)
+            {
+                run_bell_ops<rocsparse_float_complex, int32_t>(
+                    handle, opB, oB, oC, rocsparse_index_base_zero, false);
+                if(HasFatalFailure())
+                    return;
+                run_bell_ops<rocsparse_double_complex, int64_t>(
+                    handle, opB, oB, oC, rocsparse_index_base_one, true);
+                if(HasFatalFailure())
+                    return;
+            }
 }
 
 TEST_F(ExtraBell, unsupported_formats_are_rejected)

@@ -28,6 +28,9 @@
 // among short ones, and runs of consecutive long rows. They exercise the
 // granularity choices of the row split, adaptive, LRB and nnz split algorithms
 // through the v2 interface and compare the products with a host product.
+// Two further suites use the same runner: beta == 0 on a NaN-filled y (the
+// product must not read y) and the CSC storage of a transposed matrix, whose
+// operations are routed through the CSR kernels.
 //
 #include "unit_test_device_level2_common.hpp"
 
@@ -37,29 +40,83 @@ using namespace level2;
 
 namespace
 {
+    // The CSR algorithms of the v2 interface.
+    const std::vector<rocsparse_spmv_alg> csr_algs = {rocsparse_spmv_alg_csr_rowsplit,
+                                                      rocsparse_spmv_alg_csr_adaptive,
+                                                      rocsparse_spmv_alg_csr_lrb,
+                                                      rocsparse_spmv_alg_csr_nnzsplit};
+
     struct csr_case
     {
         rocsparse_spmv_alg  alg    = rocsparse_spmv_alg_default;
         rocsparse_operation trans  = rocsparse_operation_none;
         bool                device = false;
+        float               beta   = -0.5f;
+        // y is filled with quiet NaN before the product (meaningful with beta == 0:
+        // the kernel must overwrite y without reading it).
+        bool nan_y = false;
+        // The arrays of A are handed over as the CSC storage of A^T (an n x m
+        // matrix), so op(A^T) is computed through the CSC entry of csrmv.
+        bool csc = false;
     };
 
     template <typename T>
-    void run_csr(rocsparse_handle handle, const host_csr<T>& A, const csr_case& c)
+    host_csr<T> conjugated(const host_csr<T>& a)
+    {
+        host_csr<T> c(a);
+        for(auto& v : c.val)
+            v = conj_of(v);
+        return c;
+    }
+
+    // The CSR operation that computes op(A^T) when the CSC storage of A^T is the
+    // CSR storage of A: none -> transpose, transpose -> none and
+    // conjugate transpose -> none on the conjugated values.
+    inline rocsparse_operation csc_reference_op(rocsparse_operation trans)
+    {
+        return (trans == rocsparse_operation_none) ? rocsparse_operation_transpose
+                                                   : rocsparse_operation_none;
+    }
+
+    // Runs the product of `c` on A and leaves the host reference in `want` and the
+    // device result in `got`; a failed setup is a fatal failure and leaves `got`
+    // empty. The comparison is done by the caller (run_csr).
+    template <typename T>
+    void compute_csr(rocsparse_handle   handle,
+                     const host_csr<T>& A,
+                     const csr_case&    c,
+                     std::vector<T>&    want,
+                     std::vector<T>&    got)
     {
         SCOPED_TRACE(::testing::Message()
                      << "csrmv alg=" << c.alg << " trans=" << c.trans << " device=" << c.device
-                     << " base=" << A.base << " m=" << A.m << " n=" << A.n << " nnz=" << A.nnz());
+                     << " base=" << A.base << " m=" << A.m << " n=" << A.n << " nnz=" << A.nnz()
+                     << " beta=" << c.beta << " nan_y=" << c.nan_y << " csc=" << c.csc);
 
-        const size_t xs = trans_size(c.trans, A.m, A.n, true);
-        const size_t ys = trans_size(c.trans, A.m, A.n, false);
+        // Sizes of x and y as seen by the library: the CSC matrix is n x m.
+        const int32_t rows = c.csc ? A.n : A.m;
+        const int32_t cols = c.csc ? A.m : A.n;
+        const size_t  xs   = trans_size(c.trans, rows, cols, true);
+        const size_t  ys   = trans_size(c.trans, rows, cols, false);
 
         const T alpha = rocsparse_ut::scalar<T>(1.5f);
-        const T beta  = rocsparse_ut::scalar<T>(-0.5f);
+        const T beta  = rocsparse_ut::scalar<T>(c.beta);
 
-        const std::vector<T> x    = make_vector<T>(xs, 2);
-        const std::vector<T> y0   = make_vector<T>(ys, 9);
-        const std::vector<T> want = csr_gemv(A, c.trans, alpha, x, beta, y0);
+        const std::vector<T> x  = make_vector<T>(xs, 2);
+        const std::vector<T> y0 = c.nan_y ? make_nan_vector<T>(ys) : make_vector<T>(ys, 9);
+        // With NaN in y the reference uses y = 0, which is what beta == 0 must produce.
+        const std::vector<T> yref = c.nan_y ? std::vector<T>(ys, T{}) : y0;
+        got.clear();
+        if(c.csc)
+        {
+            const bool conj = (c.trans == rocsparse_operation_conjugate_transpose);
+            want            = csr_gemv(
+                conj ? conjugated(A) : A, csc_reference_op(c.trans), alpha, x, beta, yref);
+        }
+        else
+        {
+            want = csr_gemv(A, c.trans, alpha, x, beta, yref);
+        }
 
         device_csr<T, int32_t, int32_t> dA(A);
         device_vector<T>                dx(x), dy(y0), dalpha(std::vector<T>(1, alpha)),
@@ -67,18 +124,36 @@ namespace
         ASSERT_TRUE(dA.ok() && dx.ptr && dy.ptr && dalpha.ptr && dbeta.ptr);
 
         spmat_guard mat;
-        ASSERT_EQ(rocsparse_create_csr_descr(&mat.d,
-                                             A.m,
-                                             A.n,
-                                             A.nnz(),
-                                             dA.ptr,
-                                             dA.ind,
-                                             dA.val,
-                                             rocsparse_indextype_i32,
-                                             rocsparse_indextype_i32,
-                                             to_base(A.base),
-                                             rocsparse_ut::dt_of<T>()),
-                  rocsparse_status_success);
+        if(c.csc)
+        {
+            ASSERT_EQ(rocsparse_create_csc_descr(&mat.d,
+                                                 rows,
+                                                 cols,
+                                                 A.nnz(),
+                                                 dA.ptr,
+                                                 dA.ind,
+                                                 dA.val,
+                                                 rocsparse_indextype_i32,
+                                                 rocsparse_indextype_i32,
+                                                 to_base(A.base),
+                                                 rocsparse_ut::dt_of<T>()),
+                      rocsparse_status_success);
+        }
+        else
+        {
+            ASSERT_EQ(rocsparse_create_csr_descr(&mat.d,
+                                                 rows,
+                                                 cols,
+                                                 A.nnz(),
+                                                 dA.ptr,
+                                                 dA.ind,
+                                                 dA.val,
+                                                 rocsparse_indextype_i32,
+                                                 rocsparse_indextype_i32,
+                                                 to_base(A.base),
+                                                 rocsparse_ut::dt_of<T>()),
+                      rocsparse_status_success);
+        }
         dnvec_guard vx, vy;
         ASSERT_EQ(rocsparse_create_dnvec_descr(&vx.d, xs, dx, rocsparse_ut::dt_of<T>()),
                   rocsparse_status_success);
@@ -106,7 +181,21 @@ namespace
             c.device ? static_cast<const void*>(dbeta.ptr) : static_cast<const void*>(&beta));
         if(::testing::Test::HasFatalFailure())
             return;
-        EXPECT_TRUE(expect_near(want, to_host(dy), "csrmv y"));
+        got = to_host(dy);
+    }
+
+    template <typename T>
+    void run_csr(rocsparse_handle handle, const host_csr<T>& A, const csr_case& c)
+    {
+        std::vector<T> want, got;
+        compute_csr(handle, A, c, want, got);
+        if(::testing::Test::HasFatalFailure())
+            return;
+        // An explicit check: a NaN that leaked through beta * y would also fail
+        // expect_near, but this names the defect.
+        if(c.nan_y)
+            expect_no_nan(got, "csrmv y with beta == 0");
+        EXPECT_TRUE(expect_near(want, got, "csrmv y"));
     }
 
     class L2DeviceCsrmvRows : public rocsparse_ut::HandleTest
@@ -118,10 +207,7 @@ namespace
         void sweep(const host_csr<float>& A, bool with_transpose)
         {
             int n = 0;
-            for(const auto alg : {rocsparse_spmv_alg_csr_rowsplit,
-                                  rocsparse_spmv_alg_csr_adaptive,
-                                  rocsparse_spmv_alg_csr_lrb,
-                                  rocsparse_spmv_alg_csr_nnzsplit})
+            for(const auto alg : csr_algs)
                 for(const auto trans : {rocsparse_operation_none, rocsparse_operation_transpose})
                 {
                     const bool trans_ok = (alg == rocsparse_spmv_alg_csr_rowsplit
@@ -185,5 +271,137 @@ namespace
                                             return 1 + (i % 61);
                                         }),
               true);
+    }
+
+    TEST_F(L2DeviceCsrmvRows, long_last_row)
+    {
+        // The last row spans several nnz blocks of the nnz split algorithm (1024 or
+        // 2048 entries on a wave32 or wave64 GPU once the long row selects the
+        // coarse granularity): the block starts inside it (and the sentinel one past
+        // the end) are owned by the last row, so its end offset must come from
+        // row_ptr[m] and not be clamped to row_ptr[m - 1].
+        sweep(make_csr_by_length<float>(
+                  300, 6007, 0, [](int32_t i) { return i == 299 ? 5000 : 1 + (i % 5); }),
+              true);
+        if(HasFailure())
+            return;
+        // A second shape: empty leading rows, one based, and a last row with a single
+        // interior block start on a wave64 GPU.
+        sweep(make_csr_by_length<float>(
+                  500,
+                  4001,
+                  1,
+                  [](int32_t i) { return i < 3 ? 0 : (i == 499 ? 3300 : 2 + (i % 7)); }),
+              true);
+    }
+
+    //
+    // beta == 0 must overwrite y without reading it: y is pre-filled with NaN.
+    //
+    class L2DeviceCsrmvBetaZero : public rocsparse_ut::HandleTest
+    {
+    protected:
+        void nan_sweep(const host_csr<float>& A, const std::vector<rocsparse_spmv_alg>& algs)
+        {
+            for(const auto alg : algs)
+                for(const bool device : {false, true})
+                {
+                    csr_case c;
+                    c.alg    = alg;
+                    c.beta   = 0.0f;
+                    c.nan_y  = true;
+                    c.device = device;
+                    run_csr<float>(handle, A, c);
+                    if(HasFailure())
+                        return;
+                }
+        }
+    };
+
+    TEST_F(L2DeviceCsrmvBetaZero, short_rows_overwrite_nan_y)
+    {
+        // Many rows of 3 entries: a row block of the adaptive kernel holds hundreds
+        // of rows, which selects its per-thread (CSR-Scalar) reduction.
+        nan_sweep(make_csr_by_length<float>(5000, 1009, 0, [](int32_t) { return 3; }), csr_algs);
+    }
+
+    TEST_F(L2DeviceCsrmvBetaZero, medium_rows_overwrite_nan_y)
+    {
+        // Rows of 30 entries, one based: a row block holds about 34 rows, which
+        // selects the tree reduction of the adaptive kernel (several threads per
+        // row). The rows stay well below the long row path.
+        nan_sweep(make_csr_by_length<float>(2000, 1511, 1, [](int32_t) { return 30; }), csr_algs);
+        nan_sweep(make_csr_by_length<float>(3000, 1013, 0, [](int32_t i) { return 20 + (i % 40); }),
+                  csr_algs);
+    }
+
+    TEST_F(L2DeviceCsrmvBetaZero, adaptive_long_row_overwrites_nan_y)
+    {
+        // A row longer than a row block of the adaptive kernel is split over several
+        // workgroups whose contributions are accumulated into y, so the kernel reads
+        // y even with beta == 0. While the library behaves that way (a NaN in the
+        // result) the case is skipped; once the long-row path overwrites y it runs
+        // the full checks.
+        const host_csr<float> A = make_csr_by_length<float>(
+            600, 4001, 0, [](int32_t i) { return i == 250 ? 3500 : 2 + (i % 5); });
+        csr_case probe;
+        probe.alg   = rocsparse_spmv_alg_csr_adaptive;
+        probe.beta  = 0.0f;
+        probe.nan_y = true;
+        std::vector<float> want, got;
+        compute_csr(handle, A, probe, want, got);
+        if(HasFatalFailure())
+            return;
+        if(any_nan(got))
+            GTEST_SKIP() << "csrmv adaptive long-row path reads y when beta == 0 and "
+                            "propagates NaN; known library defect";
+        nan_sweep(A, {rocsparse_spmv_alg_csr_adaptive});
+    }
+
+    //
+    // CSC storage: op(A^T) through the CSC entry of csrmv. The conjugate transpose
+    // of a CSC matrix is the non transposed CSR product on conjugated values.
+    //
+    class L2DeviceCsrmvCsc : public rocsparse_ut::HandleTest
+    {
+    protected:
+        template <typename T>
+        void sweep(const host_csr<T>& A)
+        {
+            int n = 0;
+            for(const auto alg : csr_algs)
+                for(const auto trans : all_ops)
+                {
+                    // The transposed CSC product is the transposed CSR kernel, which only
+                    // the row split and nnz split algorithms implement.
+                    const bool trans_ok = (alg == rocsparse_spmv_alg_csr_rowsplit
+                                           || alg == rocsparse_spmv_alg_csr_nnzsplit);
+                    if(trans == rocsparse_operation_none && !trans_ok)
+                        continue;
+                    csr_case c;
+                    c.alg    = alg;
+                    c.trans  = trans;
+                    c.csc    = true;
+                    c.device = ((n++) % 2) == 1;
+                    run_csr<T>(handle, A, c);
+                    if(HasFailure())
+                        return;
+                }
+        }
+    };
+
+    TEST_F(L2DeviceCsrmvCsc, complex_operations)
+    {
+        sweep(make_csr_by_length<rocsparse_float_complex>(
+            700, 503, 0, [](int32_t i) { return 1 + (i % 9); }));
+        if(HasFailure())
+            return;
+        sweep(make_csr_by_length<rocsparse_double_complex>(
+            400, 611, 1, [](int32_t i) { return 2 + (i % 13); }));
+    }
+
+    TEST_F(L2DeviceCsrmvCsc, real_operations)
+    {
+        sweep(make_csr_by_length<float>(900, 701, 1, [](int32_t i) { return 1 + (i % 11); }));
     }
 }

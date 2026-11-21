@@ -22,11 +22,13 @@
  *
  * ************************************************************************ */
 
-// Pentadiagonal interleaved-batch solve. The complex QR kernel used to update
-// row m - 4 unconditionally. For the smallest accepted order, m == 3, that row
-// is index -batch_stride, so the kernel wrote one value before x. Each array
-// passed to the solve is preceded by a sentinel prefix of batch_stride entries
-// so that write stays inside the allocation and is observable.
+// Pentadiagonal interleaved-batch solve (gpsv_interleaved_batch): the write-before-x
+// regression of the complex QR kernel, and the sign of the real Householder reflector.
+//
+// The complex QR kernel used to update row m - 4 unconditionally. For the smallest
+// accepted order, m == 3, that row is index -batch_stride, so the kernel wrote one
+// value before x. Each array passed to the solve is preceded by a sentinel prefix of
+// batch_stride entries so that write stays inside the allocation and is observable.
 
 #include "unit_test_device_precond_common.hpp"
 
@@ -62,15 +64,16 @@ namespace
     };
 
     // Diagonally dominant pentadiagonal system. `offdiag` false keeps only the
-    // main diagonal. Imaginary parts are zero for real types.
+    // main diagonal. Imaginary parts are zero for real types. `diag` (when not zero)
+    // replaces the main diagonal 4 + 0.25 * batch.
     template <typename T>
-    band_t make_band(int32_t m, int32_t batch, bool offdiag)
+    band_t make_band(int32_t m, int32_t batch, bool offdiag, double diag = 0.0)
     {
         band_t a;
         a.m = m;
         a.ds.resize(m);
         a.dl.resize(m);
-        a.d.assign(m, 4.0 + 0.25 * batch);
+        a.d.assign(m, diag != 0.0 ? diag : 4.0 + 0.25 * batch);
         a.du.resize(m);
         a.dw.resize(m);
         a.ds_i.resize(m);
@@ -150,6 +153,7 @@ namespace
                     << what << " padding row " << row << " batch " << b;
     }
 
+    // `diag` (when not zero) is the main diagonal of every system, see make_band.
     template <typename T>
     void run_case(rocsparse_handle               handle,
                   rocsparse_gpsv_interleaved_alg alg,
@@ -157,13 +161,15 @@ namespace
                   int32_t                        batch_count,
                   int32_t                        batch_stride,
                   bool                           offdiag,
-                  bool                           check_solution)
+                  bool                           check_solution,
+                  double                         diag = 0.0)
     {
         SCOPED_TRACE(std::string(is_cplx<T> ? (is_single_precision<T> ? "c" : "z")
                                             : (is_single_precision<T> ? "s" : "d"))
                      + " alg=" + std::to_string(static_cast<int>(alg)) + " m=" + std::to_string(m)
                      + " batch=" + std::to_string(batch_count) + " stride="
-                     + std::to_string(batch_stride) + (offdiag ? " pentadiagonal" : " diagonal"));
+                     + std::to_string(batch_stride) + (offdiag ? " pentadiagonal" : " diagonal")
+                     + (diag != 0.0 ? " diag=" + std::to_string(diag) : ""));
 
         band_t layout;
         layout.m            = m;
@@ -178,7 +184,7 @@ namespace
 
         for(int32_t b = 0; b < batch_count; ++b)
         {
-            const band_t   band = make_band<T>(m, b, offdiag);
+            const band_t   band = make_band<T>(m, b, offdiag, diag);
             std::vector<T> x, rhs;
             rhs_and_solution<T>(band, x, rhs);
             want[b] = x;
@@ -271,4 +277,30 @@ TEST_F(PrecondPentadiagonal, order3_does_not_write_before_x)
         if constexpr(!is_cplx<T>)
             run_case<T>(handle, rocsparse_gpsv_interleaved_alg_default, 3, 1, 1, false, true);
     });
+}
+
+// The Householder kernel of the real precisions reflects the column (d_i, dl_i+1, ds_i+2)
+// onto -sign(d_i) * |column| e_1, i.e. the first component of the reflector is
+//   a_ii = d_i + sign(d_i) * sqrt(d_i^2 + dl_i+1^2 + ds_i+2^2),
+// the sign that adds the two terms. The other sign cancels, and cancels completely once
+// the off-diagonal part is below the rounding of d_i^2: for d_i = 2^13 (float) the sum
+// 2^26 + 0.29 rounds to 2^26 (ulp 8), its square root is exactly 2^13 and the cancelling
+// choice gives a_ii = 2^13 - 2^13 = 0, so dividing the reflector by a_ii produces infinite
+// and then NaN entries. The stable choice gives a_ii = 2^14 and an accurate solve of a
+// system that is almost diagonal. In double, d_i = 2^27 plays the same role (2^54 + 0.29
+// rounds to 2^54, ulp 4).
+TEST_F(PrecondPentadiagonal, householder_reflector_sign_avoids_cancellation)
+{
+    const double diag_f = 8192.0; // 2^13: 2^26 + 0.29 rounds to 2^26 in float
+    const double diag_d = 134217728.0; // 2^27: 2^54 + 0.29 rounds to 2^54 in double
+    // The dispatcher ignores `alg` for the real types (both take the Householder
+    // kernel); both values are passed so the test survives a dispatcher that honours it.
+    for(const auto alg :
+        {rocsparse_gpsv_interleaved_alg_default, rocsparse_gpsv_interleaved_alg_qr})
+    {
+        run_case<float>(handle, alg, 3, 1, 1, true, true, diag_f);
+        run_case<float>(handle, alg, 7, 3, 4, true, true, diag_f);
+        run_case<double>(handle, alg, 3, 1, 1, true, true, diag_d);
+        run_case<double>(handle, alg, 7, 3, 4, true, true, diag_d);
+    }
 }

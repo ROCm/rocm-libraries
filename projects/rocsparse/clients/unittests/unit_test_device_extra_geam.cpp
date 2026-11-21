@@ -24,8 +24,9 @@
 
 //
 // Addition of sparse matrices (rocsparse_?csrgeam, rocsparse_spgeam): empty
-// operands (no rows, no columns, no non-zeros) and missing output arrays. Every successful call is
-// checked against the expected (empty or small) result.
+// operands (no rows, no columns, no non-zeros), missing output arrays, and rows that
+// fill whole chunks of the csrgeam fill kernel. Every successful call is checked
+// against the expected (empty or small) result.
 //
 #include "unit_test_extra_common.hpp"
 
@@ -41,39 +42,32 @@ namespace
     {
     };
 
-    // CSR arrays of an m x n matrix without entries, plus a (possibly
-    // non-empty) matrix when `entries` is set.
+    // C = alpha * A + beta * B through rocsparse_csrgeam_nnz and rocsparse_?csrgeam, checked
+    // against the host reference bsr_geam. A and B are zero based, C has the base base_C.
+    // The output arrays start filled with sentinels, so an entry the kernel does not place
+    // shows. With check_missing_outputs the compute call is repeated with a null value
+    // array and a null column array, which are rejected as soon as C has entries.
     template <typename T>
-    struct LegacyOperand
+    void run_legacy_geam(rocsparse_handle handle,
+                         const Csr&       A,
+                         const Csr&       B,
+                         cplx             alpha_c,
+                         cplx             beta_c,
+                         int              base_C,
+                         bool             check_missing_outputs)
     {
-        Csr                   h;
-        DevBuf<rocsparse_int> ptr, ind;
-        DevBuf<T>             val;
-        void                  build(int64_t m, int64_t n, bool entries, Rng& rng)
-        {
-            h   = entries ? random_csr<T>(m, n, 3, rng)
-                          : csr_with_row_lengths<T>(m, n, std::vector<int64_t>(m, 0), rng);
-            ptr = up_idx<rocsparse_int>(h.ptr);
-            ind = up_idx<rocsparse_int>(h.col);
-            val = up_val<T>(h.val);
-        }
-    };
+        const int64_t m = A.m, n = A.n;
+        ASSERT_EQ(B.m, m);
+        ASSERT_EQ(B.n, n);
+        DevBuf<rocsparse_int> pA = up_idx<rocsparse_int>(A.ptr), iA = up_idx<rocsparse_int>(A.col);
+        DevBuf<rocsparse_int> pB = up_idx<rocsparse_int>(B.ptr), iB = up_idx<rocsparse_int>(B.col);
+        DevBuf<T>             vA = up_val<T>(A.val), vB = up_val<T>(B.val);
+        ASSERT_TRUE(pA.ptr && iA.ptr && vA.ptr && pB.ptr && iB.ptr && vB.ptr);
 
-    template <typename T>
-    void legacy_geam(rocsparse_handle handle, int64_t m, int64_t n, bool a_entries, bool b_entries)
-    {
-        SCOPED_TRACE("m=" + std::to_string(m) + " n=" + std::to_string(n)
-                     + " a=" + std::to_string(a_entries) + " b=" + std::to_string(b_entries));
-        Rng              rng(static_cast<uint64_t>(m * 17 + n) + 1);
-        LegacyOperand<T> A, B;
-        A.build(m, n, a_entries, rng);
-        B.build(m, n, b_entries, rng);
-        ASSERT_TRUE(A.ptr.ptr && A.ind.ptr && A.val.ptr && B.ptr.ptr && B.ind.ptr && B.val.ptr);
-
-        MatDescrH        dA, dB, dC;
+        MatDescrH        dA, dB, dC(base_C ? rocsparse_index_base_one : rocsparse_index_base_zero);
         PointerModeGuard mode(handle, rocsparse_pointer_mode_host);
-        const T          alpha = from_c<T>(cplx(2.0, 0.0));
-        const T          beta  = from_c<T>(cplx(-1.0, 0.0));
+        const T          alpha = from_c<T>(alpha_c);
+        const T          beta  = from_c<T>(beta_c);
 
         DevBuf<rocsparse_int> ptrC(std::vector<rocsparse_int>(static_cast<size_t>(m) + 1, -7));
         ASSERT_TRUE(ptrC.ptr);
@@ -82,26 +76,24 @@ namespace
                                         static_cast<rocsparse_int>(m),
                                         static_cast<rocsparse_int>(n),
                                         dA.d,
-                                        static_cast<rocsparse_int>(A.h.nnz()),
-                                        A.ptr.ptr,
-                                        A.ind.ptr,
+                                        static_cast<rocsparse_int>(A.nnz()),
+                                        pA.ptr,
+                                        iA.ptr,
                                         dB.d,
-                                        static_cast<rocsparse_int>(B.h.nnz()),
-                                        B.ptr.ptr,
-                                        B.ind.ptr,
+                                        static_cast<rocsparse_int>(B.nnz()),
+                                        pB.ptr,
+                                        iB.ptr,
                                         dC.d,
                                         ptrC.ptr,
                                         &nnz_C),
                   rocsparse_status_success);
 
         // Expected result.
-        const Bsr want
-            = bsr_geam(to_c<T>(alpha), bsr_from_csr(A.h), to_c<T>(beta), bsr_from_csr(B.h));
+        const Bsr want = bsr_geam(to_c<T>(alpha), bsr_from_csr(A), to_c<T>(beta), bsr_from_csr(B));
         ASSERT_EQ(nnz_C, want.nnzb());
         if(m > 0)
         {
-            const auto hp = ptrC.host();
-            expect_idx_equal<rocsparse_int>(hp, want.ptr, 0, "C row_ptr");
+            expect_idx_equal<rocsparse_int>(ptrC.host(), want.ptr, base_C, "C row_ptr");
         }
 
         const T               sentinel = from_c<T>(cplx(-77.0, 0.0));
@@ -110,33 +102,35 @@ namespace
         DevBuf<T> valC(std::vector<T>(static_cast<size_t>(std::max<int64_t>(nnz_C, 1)), sentinel));
         ASSERT_TRUE(indC.ptr && valC.ptr);
 
-        ASSERT_EQ(Api<T>::csrgeam(handle,
-                                  static_cast<rocsparse_int>(m),
-                                  static_cast<rocsparse_int>(n),
-                                  &alpha,
-                                  dA.d,
-                                  static_cast<rocsparse_int>(A.h.nnz()),
-                                  static_cast<const T*>(A.val.ptr),
-                                  static_cast<const rocsparse_int*>(A.ptr.ptr),
-                                  static_cast<const rocsparse_int*>(A.ind.ptr),
-                                  &beta,
-                                  dB.d,
-                                  static_cast<rocsparse_int>(B.h.nnz()),
-                                  static_cast<const T*>(B.val.ptr),
-                                  static_cast<const rocsparse_int*>(B.ptr.ptr),
-                                  static_cast<const rocsparse_int*>(B.ind.ptr),
-                                  dC.d,
-                                  valC.ptr,
-                                  static_cast<const rocsparse_int*>(ptrC.ptr),
-                                  indC.ptr),
-                  rocsparse_status_success);
+        const auto geam = [&](T* val_C, rocsparse_int* col_ind_C) {
+            return Api<T>::csrgeam(handle,
+                                   static_cast<rocsparse_int>(m),
+                                   static_cast<rocsparse_int>(n),
+                                   &alpha,
+                                   dA.d,
+                                   static_cast<rocsparse_int>(A.nnz()),
+                                   static_cast<const T*>(vA.ptr),
+                                   static_cast<const rocsparse_int*>(pA.ptr),
+                                   static_cast<const rocsparse_int*>(iA.ptr),
+                                   &beta,
+                                   dB.d,
+                                   static_cast<rocsparse_int>(B.nnz()),
+                                   static_cast<const T*>(vB.ptr),
+                                   static_cast<const rocsparse_int*>(pB.ptr),
+                                   static_cast<const rocsparse_int*>(iB.ptr),
+                                   dC.d,
+                                   val_C,
+                                   static_cast<const rocsparse_int*>(ptrC.ptr),
+                                   col_ind_C);
+        };
+        ASSERT_EQ(geam(valC.ptr, indC.ptr), rocsparse_status_success);
         ASSERT_EQ(hipDeviceSynchronize(), hipSuccess);
         if(nnz_C > 0)
         {
             std::vector<rocsparse_int> hc = indC.host();
             std::vector<T>             hv = valC.host();
-            sort_rows(ptrC.host(), 0, hc, hv);
-            expect_idx_equal<rocsparse_int>(hc, want.col, 0, "C col_ind");
+            sort_rows(ptrC.host(), base_C, hc, hv);
+            expect_idx_equal<rocsparse_int>(hc, want.col, base_C, "C col_ind");
             expect_vec_equal<T>(hv, want.val, "C val");
         }
         else
@@ -147,49 +141,30 @@ namespace
         }
 
         // The output arrays are required as soon as C has entries.
-        if(nnz_C > 0)
+        if(check_missing_outputs && nnz_C > 0)
         {
-            EXPECT_EQ(Api<T>::csrgeam(handle,
-                                      static_cast<rocsparse_int>(m),
-                                      static_cast<rocsparse_int>(n),
-                                      &alpha,
-                                      dA.d,
-                                      static_cast<rocsparse_int>(A.h.nnz()),
-                                      static_cast<const T*>(A.val.ptr),
-                                      static_cast<const rocsparse_int*>(A.ptr.ptr),
-                                      static_cast<const rocsparse_int*>(A.ind.ptr),
-                                      &beta,
-                                      dB.d,
-                                      static_cast<rocsparse_int>(B.h.nnz()),
-                                      static_cast<const T*>(B.val.ptr),
-                                      static_cast<const rocsparse_int*>(B.ptr.ptr),
-                                      static_cast<const rocsparse_int*>(B.ind.ptr),
-                                      dC.d,
-                                      static_cast<T*>(nullptr),
-                                      static_cast<const rocsparse_int*>(ptrC.ptr),
-                                      indC.ptr),
-                      rocsparse_status_invalid_pointer);
-            EXPECT_EQ(Api<T>::csrgeam(handle,
-                                      static_cast<rocsparse_int>(m),
-                                      static_cast<rocsparse_int>(n),
-                                      &alpha,
-                                      dA.d,
-                                      static_cast<rocsparse_int>(A.h.nnz()),
-                                      static_cast<const T*>(A.val.ptr),
-                                      static_cast<const rocsparse_int*>(A.ptr.ptr),
-                                      static_cast<const rocsparse_int*>(A.ind.ptr),
-                                      &beta,
-                                      dB.d,
-                                      static_cast<rocsparse_int>(B.h.nnz()),
-                                      static_cast<const T*>(B.val.ptr),
-                                      static_cast<const rocsparse_int*>(B.ptr.ptr),
-                                      static_cast<const rocsparse_int*>(B.ind.ptr),
-                                      dC.d,
-                                      valC.ptr,
-                                      static_cast<const rocsparse_int*>(ptrC.ptr),
-                                      static_cast<rocsparse_int*>(nullptr)),
-                      rocsparse_status_invalid_pointer);
+            EXPECT_EQ(geam(nullptr, indC.ptr), rocsparse_status_invalid_pointer);
+            EXPECT_EQ(geam(valC.ptr, nullptr), rocsparse_status_invalid_pointer);
         }
+    }
+
+    // An m x n matrix without entries, or a random one when `entries` is set.
+    template <typename T>
+    Csr legacy_operand(int64_t m, int64_t n, bool entries, Rng& rng)
+    {
+        return entries ? random_csr<T>(m, n, 3, rng)
+                       : csr_with_row_lengths<T>(m, n, std::vector<int64_t>(m, 0), rng);
+    }
+
+    template <typename T>
+    void legacy_geam(rocsparse_handle handle, int64_t m, int64_t n, bool a_entries, bool b_entries)
+    {
+        SCOPED_TRACE("m=" + std::to_string(m) + " n=" + std::to_string(n)
+                     + " a=" + std::to_string(a_entries) + " b=" + std::to_string(b_entries));
+        Rng       rng(static_cast<uint64_t>(m * 17 + n) + 1);
+        const Csr A = legacy_operand<T>(m, n, a_entries, rng);
+        const Csr B = legacy_operand<T>(m, n, b_entries, rng);
+        run_legacy_geam<T>(handle, A, B, cplx(2.0, 0.0), cplx(-1.0, 0.0), 0, true);
     }
 }
 
@@ -212,6 +187,75 @@ TEST_F(ExtraGeam, legacy_csrgeam_empty_and_missing_outputs)
         if(HasFatalFailure())
             return;
         legacy_geam<rocsparse_double_complex>(handle, c.m, c.n, c.a, c.b);
+        if(HasFatalFailure())
+            return;
+    }
+}
+
+namespace
+{
+    // CSR matrix with the given (zero based, sorted) columns in each row and the value
+    // scale * (column + 1) at every entry.
+    Csr csr_from_rows(int64_t n, const std::vector<std::vector<int64_t>>& rows, double scale)
+    {
+        Csr A;
+        A.m = static_cast<int64_t>(rows.size());
+        A.n = n;
+        A.ptr.push_back(0);
+        for(const auto& r : rows)
+        {
+            for(int64_t j : r)
+            {
+                A.col.push_back(j);
+                A.val.push_back(cplx(scale * static_cast<double>(j + 1), 0.0));
+            }
+            A.ptr.push_back(static_cast<int64_t>(A.col.size()));
+        }
+        return A;
+    }
+
+    // C = alpha * A + beta * B on rows whose union of columns fills whole chunks of the fill
+    // kernel. The kernel processes a row per wavefront and a chunk of WFSIZE consecutive
+    // columns at a time (WFSIZE is the device's wavefront size: 32 on gfx1201, 64 on gfx9):
+    // it marks the columns of the chunk in a per-lane table and places them with a ballot,
+    // so the lanes above 32 only exist in the 64-lane kernel. Every chunk starts at the
+    // row's first column not yet placed. With n = 64, rows 0 to 2 are one full 64-chunk or
+    // two full 32-chunks; row 3 puts two entries past lane 32 of a 64-chunk that starts at
+    // column 5, or spreads over two sparse 32-chunks; row 4 (columns 30 to 63) is a full
+    // 32-chunk plus two entries, or the lower 34 lanes of a 64-chunk. A kernel built for the
+    // other wavefront size misplaces the lanes above 32 of rows 0 to 2.
+    template <typename T>
+    void full_chunk_geam(rocsparse_handle handle, int base_C)
+    {
+        SCOPED_TRACE(std::string("full chunk base_C=") + std::to_string(base_C));
+        const int64_t        n = 64;
+        std::vector<int64_t> all(n), even, odd, low, high;
+        for(int64_t j = 0; j < n; ++j)
+        {
+            all[static_cast<size_t>(j)] = j;
+            (j % 2 ? odd : even).push_back(j);
+            if(j < 40)
+                low.push_back(j);
+            if(j >= 30)
+                high.push_back(j);
+        }
+        // Row 0: all columns from A alone. Row 1: A and B interleave. Row 2: A and B
+        // overlap on [30, 40). Row 3: two sparse entries past lane 32 of a chunk that
+        // starts at column 5. Row 4: B alone, the upper half of the columns.
+        const Csr A = csr_from_rows(n, {all, even, low, {5, 50}, {}}, 1.0);
+        const Csr B = csr_from_rows(n, {{}, odd, high, {50, 60}, high}, -0.5);
+        run_legacy_geam<T>(handle, A, B, cplx(2.0, 0.0), cplx(3.0, 0.0), base_C, false);
+    }
+}
+
+TEST_F(ExtraGeam, legacy_csrgeam_full_wavefront_chunk)
+{
+    for(int base_C : {0, 1})
+    {
+        full_chunk_geam<float>(handle, base_C);
+        if(HasFatalFailure())
+            return;
+        full_chunk_geam<double>(handle, base_C);
         if(HasFatalFailure())
             return;
     }

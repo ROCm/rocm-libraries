@@ -803,6 +803,44 @@ namespace level2
         return scalar_of<T>(re, (re != neutral && re != 0.0f) ? 0.25f : 0.0f);
     }
 
+    // ----- NaN probes -------------------------------------------------------
+    // A vector of quiet NaN (real and imaginary parts for a complex type). Used as
+    // the initial y of a product with beta == 0, which is documented to overwrite y
+    // without reading it: any NaN left in the result shows that y was read.
+    using rocsparse_ut::has_nan;
+    using rocsparse_ut::nan_of;
+
+    template <typename T>
+    inline std::vector<T> make_nan_vector(size_t n)
+    {
+        return std::vector<T>(n, nan_of<T>());
+    }
+
+    template <typename T>
+    inline bool any_nan(const std::vector<T>& v)
+    {
+        return std::any_of(v.begin(), v.end(), [](const T& x) { return has_nan(x); });
+    }
+
+    // Fails when any element is NaN; reports the count and the first position.
+    template <typename T>
+    inline void expect_no_nan(const std::vector<T>& got, const char* what)
+    {
+        size_t bad   = 0;
+        size_t first = 0;
+        for(size_t i = 0; i < got.size(); ++i)
+        {
+            if(has_nan(got[i]))
+            {
+                if(bad == 0)
+                    first = i;
+                ++bad;
+            }
+        }
+        if(bad > 0)
+            ADD_FAILURE() << what << ": " << bad << " NaN results, first at " << first;
+    }
+
     // The operations of the products.
     const rocsparse_operation all_ops[] = {rocsparse_operation_none,
                                            rocsparse_operation_transpose,
