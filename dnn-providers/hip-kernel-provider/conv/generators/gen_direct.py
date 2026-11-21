@@ -773,6 +773,28 @@ for s_, d in LINE_GEOMETRIES:
                 RW(f"mfma16_{e}", f, 8, 4, 2, 2, 2, 16, 8, **L),
             ],
         )
+        # Narrow channels-first line tiles: 32-wide output blocks on gfx950 (HiFi-GAN 32-channel
+        # layers 1.24-1.27x over the 64-wide tile, forward).
+        add(
+            dt,
+            ["gfx950"],
+            [
+                RW(f"mfma16x32_{e}", f, 8, 1, 1, 2, 2, 32, 8, epi=0, cf=1, bpu=2, **L),
+                RW(f"mfma16x32_{e}", f, 8, 1, 2, 2, 2, 32, 8, epi=0, cf=1, **L),
+            ],
+        )
+        # MI325X narrow channels-first line tiles (32- and 64-wide output blocks): HiFi-GAN's
+        # 32- to 64-channel stacks otherwise run 128-wide blocks, three quarters idle on K = 32
+        # (forward 1.15x over the corpus's 228 one-row layers, CONV_DIRECT alone).
+        add(
+            dt,
+            ["gfx942"],
+            [
+                RW(f"mfma16_{e}", f, 8, 1, 1, 2, 2, 16, 8, epi=0, cf=1, bpu=2, **L),
+                RW(f"mfma16_{e}", f, 8, 2, 1, 2, 2, 16, 8, epi=0, cf=1, bpu=2, **L),
+                RW(f"mfma16_{e}", f, 8, 2, 2, 2, 2, 16, 8, epi=0, cf=1, **L),
+            ],
+        )
     add("FLOAT", ["gfx950"], [RW("mfma16_f32", f, 8, 2, 2, 2, 2, 16, 4, epi=0, **L)])
     add(
         "FLOAT",
