@@ -1932,7 +1932,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | No CI lane runs TSAN yet, and there is no UBSAN at all | Low | High if hit | None. Thread-safety bugs would be found downstream | AIHPBLAS-5035 |
 | Multi-GPU tests cover one feature, fused GEMM plus all-to-all, on two gfx950 GPUs | Low | High if hit | Math CI's `precheckin` runs the `*multi_gpu*` cases on pull requests | AIHPBLAS-4625 |
 | Three parallel enum-to-string tables can drift | Low | Medium | None automated | AIHPBLAS-3558 |
-| The Python bindings lanes compile and test against an installed hipBLASLt (a pinned TheRock nightly), so changes to its declarations or behavior reach these tests only after the pinned version is bumped. New status and enum values are still caught on the PR that adds them | Medium | Medium | The lanes run when the public headers change, and the bindings' status and enum checks read the PR's own headers | AIHPBLAS-5268 |
+| The Python bindings lanes compile and test against an installed hipBLASLt (a pinned TheRock nightly), so changes to its declarations or behavior reach these tests only after the pinned version is bumped. New status values are still caught on the PR that adds them | Medium | Medium | The lanes run when the public headers change, and the bindings' status check reads the PR's own hipblas-common.h | AIHPBLAS-5268 |
 
 ## Owners and Review Cadence
 

@@ -74,8 +74,8 @@ COMPONENTS = {
         ".github/scripts/run_rocjitsu_hipblaslt_gemm_race_checks.sh",
         ".github/workflows/component-ci-hipblaslt-rocjitsu-scripts.yml",
     ],
-    # The opt-in Python bindings. The public headers are here on purpose: an enum
-    # added to them re-runs the bindings' coverage test on the PR that adds it.
+    # The opt-in Python bindings. The status test reads hipblas-common.h from
+    # the checkout, so a new status is checked on the PR that adds it.
     "hipblaslt_python": [
         "projects/hipblaslt/python/**",
         "projects/hipblaslt/library/include/hipblaslt/**",
