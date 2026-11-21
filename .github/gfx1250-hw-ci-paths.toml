@@ -1,0 +1,37 @@
+# Paths that decide what the gfx1250 HW job (gfx1250_hipblaslt_tensilelite_test.yml)
+# runs for a pull request. Read by .github/scripts/configure_gfx1250_hw_ci.py.
+#
+# Pattern syntax: fnmatch glob patterns (*, ?, [abc]), as in skip-ci-config.toml.
+# `*` also matches `/`, so "projects/hipblaslt/*" covers the whole tree.
+
+version = 1
+
+# The job runs if any changed file matches `run` and none of `ignore`.
+run = [
+    "projects/hipblaslt/*",
+    "shared/origami/*",
+    "shared/stinkytofu/*",
+    "shared/mxdatagenerator/*",
+    "cmake/*",
+    ".github/workflows/gfx1250_hipblaslt_tensilelite_test.yml",
+    # therock-ref: a bump runs the job, so a compiler change shows up as the SDK warning.
+    ".github/actions/ci-env/action.yml",
+    ".github/scripts/configure_gfx1250_hw_ci.py",
+    ".github/scripts/gfx1250_blas_tests.py",
+    ".github/scripts/scrub_test_log.py",
+    ".github/gfx1250-hw-ci-paths.toml",
+]
+
+ignore = [
+    "docs/*",
+    "*/docs/*",
+    "*.md",
+    "*.rst",
+]
+
+# TensileLite's tests build and test only tensilelite/. When every file that runs the
+# job matches one of these, the job runs the hipBLASLt tests and skips TensileLite's.
+hipblaslt_only = [
+    "projects/hipblaslt/library/*",
+    "projects/hipblaslt/clients/*",
+]
