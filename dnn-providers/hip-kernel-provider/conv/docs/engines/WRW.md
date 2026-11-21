@@ -19,7 +19,7 @@ SPDX-License-Identifier:  MIT
   - NCHW 1x1 fp16 on gfx942 / gfx90a, where MIOpen rounds per image;
   - hifigan 1x16 stride-8 on gfx950.
 - **Precision:** fp32 accumulation. Split partials are fp32 and summed in a fixed order; dW is rounded once. Deterministic, no atomics, no numerical note (`CONV_WRW_TF32` reports `TENSOR_CORE`).
-- **Instances:** 8,302 configs, 884 of them three-bf16, in per-dtype, per-arch-group packs (`cdna`, `cdnapk`, `gfx950` (3-wide filters) / `gfx950b` (other widths), `direct`, `rdna11`, `rdna12`, `fma`, `fmardna`, `fma906`/`fma906b`, `generic`, `genericfma`, `x3*`), each under the repository's 500 KB file cap. Two tiers: specialized (geometry compile-time) and generic (`loop 8`, runtime geometry).
+- **Instances:** 8,298 configs, 884 of them three-bf16, in per-dtype, per-arch-group packs (`cdna`, `cdnapk`, `gfx950` (3-wide filters) / `gfx950b` (other widths), `direct`, `rdna11`, `rdna12`, `fma`, `fmardna`, `fma906`/`fma906b`, `generic`, `genericfma`, `x3*`), each under the repository's 500 KB file cap. Two tiers: specialized (geometry compile-time) and generic (`loop 8`, runtime geometry).
 - **vs MIOpen:** usage-weighted speedup on the subset graphs where K3 is our fastest engine: 1.67x gfx950, 1.43x gfx942, 1.33x gfx90a, 1.79x gfx908, 4.50x gfx1201, 17.95x gfx1100. MIOpen ran in search mode.
 
 ## Why it exists
