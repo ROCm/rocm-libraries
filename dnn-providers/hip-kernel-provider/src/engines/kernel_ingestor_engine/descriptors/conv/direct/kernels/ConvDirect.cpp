@@ -19,7 +19,9 @@
 //   CONV_DIRECT_XPF     1 (halo tile, BL 0): weight fragments prefetched across channel chunks,
 //                       ring sets skipped by scalar branches, 16-bit halo rows padded by 8 bytes
 //                       (default 0)
-//   CONV_DIRECT_DIL     filter dilation of the 2-D rows kernels (default 1)
+//   CONV_DIRECT_RUN     halo tile, ring 0, channels-last: run tiles of BM consecutive pixels of
+//                       a strip of the output (K2Block::initRun), the stage CONV_DIRECT_RUN
+//                       pixels (default 0: th x tw tiles)
 //   CONV_DIRECT_LINE    1: 2-D rows on one-row images and 1 x S filters, the row as one halo
 //                       line (default 0)
 
@@ -41,6 +43,9 @@
 #endif
 #ifndef CONV_DIRECT_DIL
 #define CONV_DIRECT_DIL 1
+#endif
+#ifndef CONV_DIRECT_RUN
+#define CONV_DIRECT_RUN 0
 #endif
 #ifndef CONV_DIRECT_LINE
 #define CONV_DIRECT_LINE 0
@@ -151,11 +156,13 @@ extern "C" __global__ void __launch_bounds__(CONV_DIRECT_BLOCK) ConvDirect(K2Arg
               CONV_DIRECT_BL,
               CONV_DIRECT_TO,
               CONV_DIRECT_SPLIT,
-              CONV_DIRECT_CF ? k2CfHaloMax(CONV_DIRECT_BM, CONV_DIRECT_R, CONV_DIRECT_S)
-                             : k2HaloMax(CONV_DIRECT_BM, CONV_DIRECT_R, CONV_DIRECT_S),
+              CONV_DIRECT_CF    ? k2CfHaloMax(CONV_DIRECT_BM, CONV_DIRECT_R, CONV_DIRECT_S)
+              : CONV_DIRECT_RUN ? CONV_DIRECT_RUN
+                                : k2HaloMax(CONV_DIRECT_BM, CONV_DIRECT_R, CONV_DIRECT_S),
               CONV_DIRECT_CF,
               2,
-              CONV_DIRECT_XPF>(a CONV_EPI_ARG);
+              CONV_DIRECT_XPF,
+              CONV_DIRECT_RUN>(a CONV_EPI_ARG);
 #endif
 }
 

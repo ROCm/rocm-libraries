@@ -952,6 +952,11 @@ std::vector<FlexCase> flexCases()
     cases.push_back({"Ndhwc3x3x3OddDepthRaggedChannels", odd, true});
     cases.push_back(
         {"Ndhwc3x3x3NoPadding", dense(64, 64, {7, 6, 9}, {3, 3, 3}, {0, 0, 0}, true), true});
+    // Backward data of an unpadded layer over three images: the box configs' classes of border
+    // and interior pixels span the images, and most 256-row tiles mix classes.
+    auto boxes = dense(40, 72, {8, 6, 7}, {3, 3, 3}, {0, 0, 0}, true);
+    boxes.n = 3;
+    cases.push_back({"Ndhwc3x3x3NoPaddingThreeImages", boxes, true});
     auto depthStride = dense(40, 48, {9, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
     depthStride.stride = {2, 1, 1};
     cases.push_back({"Ndhwc3x3x3DepthStride2", depthStride, false});
@@ -2988,6 +2993,50 @@ TEST(TestConvIgemmSplitPlan, FlexLdsDmaFormTakesTheTailSplitAtItsSplitCost)
     EXPECT_EQ(rowsPlan.splitRowTile, 256);
     EXPECT_GT(rowsPlan.splits, 1);
     EXPECT_EQ(rowsPlan.partialElems, rowsPlan.outElems - 256LL * 256 * 256);
+}
+
+TEST(TestConvIgemmBox, BackwardDataRowsGroupByTheTapsThatReachThem)
+{
+    // dx small 3-D from an unpadded 3x3x3 layer: per axis the first and second coordinates,
+    // the interior, and the last two; the interior first.
+    auto shape = dense(64, 64, {34, 18, 18}, {3, 3, 3}, {0, 0, 0}, true);
+    shape.n = 1;
+    const auto box = conv_igemm::boxArgsFor(parsedProblem(shape, ConvDirection::BACKWARD_DATA));
+    ASSERT_TRUE(box.has_value());
+    const std::array<int, 3> extent{34, 18, 18};
+    for(size_t ax = 0; ax < extent.size(); ++ax)
+    {
+        const int last = extent[ax] - 1;
+        ASSERT_EQ(box->runs[ax], 5);
+        EXPECT_EQ(box->begin[ax][0], 2);
+        EXPECT_EQ(box->size[ax][0], last - 3);
+        EXPECT_EQ(box->lo[ax][0], 0);
+        EXPECT_EQ(box->hi[ax][0], 2);
+        // The border runs in coordinate order, each reaching the taps whose dy row exists.
+        const std::array<std::array<int, 3>, 4> border{
+            {{0, 0, 0}, {1, 0, 1}, {last - 1, 1, 2}, {last, 2, 2}}};
+        for(size_t j = 0; j < border.size(); ++j)
+        {
+            EXPECT_EQ(box->begin[ax][j + 1], border[j][0]);
+            EXPECT_EQ(box->size[ax][j + 1], 1);
+            EXPECT_EQ(box->lo[ax][j + 1], border[j][1]);
+            EXPECT_EQ(box->hi[ax][j + 1], border[j][2]);
+        }
+    }
+    // Forward, strided and grouped problems have no box order.
+    EXPECT_FALSE(conv_igemm::boxArgsFor(parsedProblem(shape, ConvDirection::FORWARD)).has_value());
+    auto strided = shape;
+    strided.stride = {2, 2, 2};
+    EXPECT_FALSE(
+        conv_igemm::boxArgsFor(parsedProblem(strided, ConvDirection::BACKWARD_DATA)).has_value());
+    auto grouped = shape;
+    grouped.groups = 2;
+    EXPECT_FALSE(
+        conv_igemm::boxArgsFor(parsedProblem(grouped, ConvDirection::BACKWARD_DATA)).has_value());
+    // More than five runs on an axis: a 7-tap filter over an unpadded layer.
+    auto wide = dense(16, 16, {3, 9, 20}, {1, 1, 7}, {0, 0, 0}, true);
+    EXPECT_FALSE(
+        conv_igemm::boxArgsFor(parsedProblem(wide, ConvDirection::BACKWARD_DATA)).has_value());
 }
 
 TEST(TestConvIgemmSplitPlan, FlexTailSplitSplitsTheRowTilesPastTheWholeRounds)

@@ -55,6 +55,24 @@ struct K1Args
     int partialTile;
 };
 
+/// Box-ordered rows of the register-staged flex tile (CONV_IGEMM_BOX, backward data at unit
+/// stride and dilation, one group): per spatial axis the dx coordinates fall into runs that reach
+/// the same range [lo, hi] of the gather's taps (a 3-tap axis: the two first coordinates, the
+/// interior, the two last). The rows run class by class (d run, h run, w run nested, in the
+/// order of the tables, the interior first), then image, then the box's (d, h, w); a block's
+/// steps cover only the union of the tap ranges of the classes its rows belong to, so no
+/// multiply-add reads a tap a whole class cannot reach.
+#define K1_BOX_RUNS 5
+struct K1BoxArgs
+{
+    int runs[3]; ///< runs per axis (1 to K1_BOX_RUNS)
+    int begin[3][K1_BOX_RUNS]; ///< a run's first dx coordinate
+    int size[3][K1_BOX_RUNS]; ///< a run's coordinates
+    int lo[3][K1_BOX_RUNS]; ///< a run's first gather tap
+    int hi[3][K1_BOX_RUNS]; ///< a run's last gather tap
+    int padding0;
+};
+
 /// Adds the splits' fp32 partials in split order into the output's element type.
 struct K1ReduceArgs
 {

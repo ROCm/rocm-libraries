@@ -537,6 +537,7 @@ struct ConfigFields
     int64_t dil = 1;
     int64_t line = 0;
     int64_t bpu = 1;
+    int64_t run = 0; ///< written only when set
 };
 
 /// A gfx950 rows config: 2 x 2 x 2 waves of 8 rows x 16 columns x 64 channels, 64-channel chunks.
@@ -624,6 +625,10 @@ hipdnn_plugin_sdk::ingestor::KernelDefinition kernelOf(const ConfigFields& f,
     if(f.xpf != 0)
     {
         kernel.metadata["xpf"] = f.xpf;
+    }
+    if(f.run != 0)
+    {
+        kernel.metadata["run"] = f.run;
     }
     return kernel;
 }
@@ -1301,6 +1306,83 @@ std::optional<conv_direct::Plan> planOf(const ConvShape& shape,
         return std::nullopt;
     }
     return conv_direct::planFor(*problem, *config, cus, xcds);
+}
+
+ConfigFields runFields(int64_t run)
+{
+    ConfigFields f;
+    f.kd = 3;
+    f.ring = 0;
+    f.bn = 128;
+    f.bc = 16;
+    f.xpf = 1;
+    f.run = run;
+    return f;
+}
+
+TEST(TestConvDirectKernelMatch, RunTilesTakeRegisterPathNonRingHaloTiles)
+{
+    auto shape = filterShape({3, 3, 3}, {1, 1, 1});
+    shape.input = {5, 6, 7};
+    EXPECT_TRUE(admits(runFields(256), "gfx942", shape));
+    // Each field one at a time: the knob's range, ring, LDS weights, channels-first, other kinds.
+    const std::vector<std::pair<std::string, std::function<void(ConfigFields&)>>> mutations{
+        {"negative", [](ConfigFields& g) { g.run = -1; }},
+        {"ring", [](ConfigFields& g) { g.ring = 1; }},
+        {"bl", [](ConfigFields& g) { g.bl = 1; }},
+        {"cf", [](ConfigFields& g) { g.cf = 1; }},
+    };
+    for(const auto& [name, mutate] : mutations)
+    {
+        auto g = runFields(256);
+        mutate(g);
+        EXPECT_FALSE(admits(g, "gfx942", shape)) << name;
+    }
+    auto rows = rowsFields();
+    rows.run = 256;
+    EXPECT_FALSE(admits(rows, "gfx950"));
+    auto fma = fmaFields(8);
+    fma.run = 256;
+    EXPECT_FALSE(admits(fma, "gfx942"));
+}
+
+std::optional<conv_direct::Plan>
+    planOfDirection(const ConvShape& shape, const ConfigFields& fields, ConvDirection direction)
+{
+    const auto problem = parse(specFor(shape, direction));
+    const auto config = conv_direct::configOf(kernelOf(fields, "HALF"));
+    if(!problem.has_value() || !config.has_value())
+    {
+        return std::nullopt;
+    }
+    return conv_direct::planFor(*problem, *config, 228, 6);
+}
+
+TEST(TestConvDirectPlan, RunTilesCoverStripsOfTheOutputRowsOverPlanes)
+{
+    // Backward data of an unpadded layer, dx 6 x 9 x 130: strips whose stage fits, 9 rows a
+    // plane (the output's), each strip's planes x rows x columns in runs of 128 pixels.
+    auto shape = filterShape({3, 3, 3}, {0, 0, 0});
+    shape.dataType = DataType::HALF;
+    shape.channelsLast = true;
+    shape.input = {6, 9, 130};
+    const auto bwd = planOfDirection(shape, runFields(256), ConvDirection::BACKWARD_DATA);
+    ASSERT_TRUE(bwd.has_value());
+    EXPECT_EQ(bwd->args.th, 9);
+    EXPECT_LE(k2RunHalo(128, 3, 3, bwd->args.tw), 256);
+    EXPECT_EQ(bwd->args.tilesH, (130 + bwd->args.tw - 1) / bwd->args.tw);
+    EXPECT_EQ(bwd->args.tilesW, (6 * 9 * bwd->args.tw + 127) / 128);
+    EXPECT_EQ(bwd->args.tilesD, 1);
+    EXPECT_EQ(bwd->grid[0], static_cast<unsigned>(bwd->args.tilesW * bwd->args.tilesH * shape.n));
+    // "Same" padding: a plane takes one virtual row past the output's (a filter row's reach past
+    // the last row must read the padding, not the next plane).
+    auto same = shape;
+    same.prePadding = same.postPadding = {1, 1, 1};
+    const auto padded = planOfDirection(same, runFields(256), ConvDirection::FORWARD);
+    ASSERT_TRUE(padded.has_value());
+    EXPECT_EQ(padded->args.th, 10);
+    // A stage too small for any strip declines.
+    EXPECT_FALSE(planOfDirection(shape, runFields(100), ConvDirection::BACKWARD_DATA).has_value());
 }
 
 TEST(TestConvDirectPlan, HaloTilesTakeXcdRunsOfTwoBlocksAComputeUnit)

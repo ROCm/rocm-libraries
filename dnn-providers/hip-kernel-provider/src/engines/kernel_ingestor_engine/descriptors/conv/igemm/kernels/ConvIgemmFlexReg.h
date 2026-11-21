@@ -49,8 +49,72 @@
 // 32 lanes of one wave, so a dword store covers the 32 banks once.
 #pragma once
 
-template <class T, class Atom, int DIR, int BN, int WD = 0, int KB = 128>
-__device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CONV_EPI_FN_PARAM)
+// Box-ordered rows (BOX 1): row m's dx pixel. The rows run class by class (K1BoxArgs), then
+// image, then the class box's (d, h, w); cls gets the class's run per axis.
+struct K1BoxPos
+{
+    long long pix; // linear dx pixel (n, d, h, w)
+    int img, d, h, w;
+};
+__device__ inline K1BoxPos k1BoxDecode(
+    const K1BoxArgs& box, long long m, int images, int dd, int hh, int ww, int (&cls)[3])
+{
+    long long rem = m;
+    long long unit = static_cast<long long>(images) * hh * ww; // rows a d coordinate
+    int j0 = 0;
+#pragma unroll
+    for(int j = 0; j < K1_BOX_RUNS - 1; ++j)
+    {
+        const long long rows = unit * box.size[0][j0];
+        if(j0 + 1 < box.runs[0] && rem >= rows)
+        {
+            rem -= rows;
+            ++j0;
+        }
+    }
+    unit = static_cast<long long>(images) * box.size[0][j0] * ww; // rows an h coordinate
+    int j1 = 0;
+#pragma unroll
+    for(int j = 0; j < K1_BOX_RUNS - 1; ++j)
+    {
+        const long long rows = unit * box.size[1][j1];
+        if(j1 + 1 < box.runs[1] && rem >= rows)
+        {
+            rem -= rows;
+            ++j1;
+        }
+    }
+    unit = static_cast<long long>(images) * box.size[0][j0] * box.size[1][j1]; // a w coordinate
+    int j2 = 0;
+#pragma unroll
+    for(int j = 0; j < K1_BOX_RUNS - 1; ++j)
+    {
+        const long long rows = unit * box.size[2][j2];
+        if(j2 + 1 < box.runs[2] && rem >= rows)
+        {
+            rem -= rows;
+            ++j2;
+        }
+    }
+    cls[0] = j0;
+    cls[1] = j1;
+    cls[2] = j2;
+    const int sd = box.size[0][j0], sh = box.size[1][j1], sw = box.size[2][j2];
+    const long long boxPix = static_cast<long long>(sd) * sh * sw;
+    K1BoxPos p;
+    p.img = static_cast<int>(rem / boxPix);
+    int r = static_cast<int>(rem - p.img * boxPix);
+    p.w = box.begin[2][j2] + r % sw;
+    r /= sw;
+    p.h = box.begin[1][j1] + r % sh;
+    p.d = box.begin[0][j0] + r / sh;
+    p.pix = ((static_cast<long long>(p.img) * dd + p.d) * hh + p.h) * ww + p.w;
+    return p;
+}
+
+template <class T, class Atom, int DIR, int BN, int WD = 0, int KB = 128, int BOX = 0>
+__device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CONV_EPI_FN_PARAM,
+                                                             const K1BoxArgs* box = nullptr)
 {
     constexpr int WAVE = 64, DIM = 16;
     constexpr int BM = 256;
@@ -114,9 +178,50 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     const int wave = __builtin_amdgcn_readfirstlane(tid / WAVE);
     const int grp = wave / 4, wx = wave % 4;
 
-    // Steps over the depth and height taps that reach the input for some row of the tile.
+    // Steps over the depth and height taps that reach the input for some row of the tile (box
+    // order: the union of the tap ranges of the classes the tile's rows belong to, along every
+    // axis; widths s0..s1).
     const int taps2 = gather.taps[2];
     int q0 = 0, q1 = gather.taps[0], r0 = 0, r1 = gather.taps[1];
+    int s0 = 0, s1 = taps2;
+    static_assert(BOX == 0 || DIR == K1_BACKWARD_DATA, "box rows: backward data");
+    if constexpr(BOX != 0)
+    {
+        const long long last = (m0 + BM < gather.rows ? m0 + BM : gather.rows) - 1;
+        int cf[3], cl[3];
+        k1BoxDecode(*box, m0, a.n, gather.out[0], gather.out[1], gather.out[2], cf);
+        k1BoxDecode(*box, last, a.n, gather.out[0], gather.out[1], gather.out[2], cl);
+        int lo[3], hi[3];
+#pragma unroll
+        for(int ax = 0; ax < 3; ++ax)
+        {
+            // Classes between the first and last row's along this axis: the runs from the
+            // first's to the last's where the outer axes' runs agree, every run otherwise.
+            bool same = true;
+#pragma unroll
+            for(int o = 0; o < ax; ++o)
+                same = same && cf[o] == cl[o];
+            const int jf = same ? cf[ax] : 0, jl = same ? cl[ax] : box->runs[ax] - 1;
+            lo[ax] = gather.taps[ax];
+            hi[ax] = -1;
+#pragma unroll
+            for(int j = 0; j < K1_BOX_RUNS; ++j)
+            {
+                if(j >= jf && j <= jl)
+                {
+                    lo[ax] = box->lo[ax][j] < lo[ax] ? box->lo[ax][j] : lo[ax];
+                    hi[ax] = box->hi[ax][j] > hi[ax] ? box->hi[ax][j] : hi[ax];
+                }
+            }
+        }
+        q0 = __builtin_amdgcn_readfirstlane(lo[0]);
+        q1 = __builtin_amdgcn_readfirstlane(hi[0] + 1);
+        r0 = __builtin_amdgcn_readfirstlane(lo[1]);
+        r1 = __builtin_amdgcn_readfirstlane(hi[1] + 1);
+        s0 = __builtin_amdgcn_readfirstlane(lo[2]);
+        s1 = __builtin_amdgcn_readfirstlane(hi[2] + 1);
+    }
+    else
     {
         const long long last = (m0 + BM < gather.rows ? m0 + BM : gather.rows) - 1;
         const K1Pos plane = static_cast<K1Pos>(gather.out[1]) * gather.out[2];
@@ -159,7 +264,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         r1 = __builtin_amdgcn_readfirstlane(r1);
     }
     const int taps0 = gather.taps[0], taps1 = gather.taps[1];
-    const int nTaps = (q1 - q0) * (r1 - r0) * taps2;
+    const int nTaps = (q1 - q0) * (r1 - r0) * (BOX != 0 ? s1 - s0 : taps2);
     const int total = nTaps * ((red + KS - 1) / KS);
     auto bound = [&](int z) __attribute__((always_inline))
     {
@@ -174,7 +279,8 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     const K1Pos spatial = static_cast<K1Pos>(gather.out[0]) * gather.out[1] * gather.out[2];
     const long long imageElems
         = static_cast<long long>(gather.in[0]) * gather.in[1] * gather.in[2] * gather.chans;
-    const long long firstImage = m0 / spatial;
+    // Box rows come from any image: the buffer starts at the first.
+    const long long firstImage = BOX != 0 ? 0 : m0 / spatial;
     const long long blockBase = firstImage * imageElems;
     const __amdgpu_buffer_rsrc_t xr = k1Rsrc(
         src + blockBase, (a.n - firstImage) * imageElems * static_cast<long long>(sizeof(T)));
@@ -190,12 +296,27 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         xMask[i] = 0;
         if(m < gather.rows)
         {
-            const long long img = m / spatial;
-            K1Pos rest = static_cast<K1Pos>(m - img * spatial);
-            const int ow = static_cast<int>(rest % gather.out[2]);
-            rest /= gather.out[2];
-            const int oh = static_cast<int>(rest % gather.out[1]);
-            const int od = static_cast<int>(rest / gather.out[1]);
+            long long img;
+            int od, oh, ow;
+            if constexpr(BOX != 0)
+            {
+                int cls[3];
+                const K1BoxPos p
+                    = k1BoxDecode(*box, m, a.n, gather.out[0], gather.out[1], gather.out[2], cls);
+                img = p.img;
+                od = p.d;
+                oh = p.h;
+                ow = p.w;
+            }
+            else
+            {
+                img = m / spatial;
+                K1Pos rest = static_cast<K1Pos>(m - img * spatial);
+                ow = static_cast<int>(rest % gather.out[2]);
+                rest /= gather.out[2];
+                oh = static_cast<int>(rest % gather.out[1]);
+                od = static_cast<int>(rest / gather.out[1]);
+            }
             const int d = od * gather.stride[0] - gather.pad[0];
             const int h = oh * gather.stride[1] - gather.pad[1];
             const int w = ow * gather.stride[2] - gather.pad[2];
@@ -268,8 +389,16 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         const int sl = v / nTaps;
         int tap = v - sl * nTaps;
         c.c0 = sl * KS;
-        c.qs = tap % taps2;
-        tap /= taps2;
+        if constexpr(BOX != 0)
+        {
+            c.qs = s0 + tap % (s1 - s0);
+            tap /= s1 - s0;
+        }
+        else
+        {
+            c.qs = tap % taps2;
+            tap /= taps2;
+        }
         c.qr = r0 + tap % (r1 - r0);
         c.qt = q0 + tap / (r1 - r0);
         return c;
@@ -277,17 +406,37 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     Cursor cur = cursorAt(vFirst);
     auto advance = [&]() __attribute__((always_inline))
     {
-        ++cur.v;
-        if(++cur.qs == taps2)
+        if constexpr(BOX != 0)
         {
-            cur.qs = 0;
-            if(++cur.qr == r1)
+            ++cur.v;
+            if(++cur.qs == s1)
             {
-                cur.qr = r0;
-                if(++cur.qt == q1)
+                cur.qs = s0;
+                if(++cur.qr == r1)
                 {
-                    cur.qt = q0;
-                    cur.c0 += KS;
+                    cur.qr = r0;
+                    if(++cur.qt == q1)
+                    {
+                        cur.qt = q0;
+                        cur.c0 += KS;
+                    }
+                }
+            }
+        }
+        else
+        {
+            ++cur.v;
+            if(++cur.qs == taps2)
+            {
+                cur.qs = 0;
+                if(++cur.qr == r1)
+                {
+                    cur.qr = r0;
+                    if(++cur.qt == q1)
+                    {
+                        cur.qt = q0;
+                        cur.c0 += KS;
+                    }
                 }
             }
         }
@@ -553,12 +702,19 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
             const long long m = m0 + wx * WM + i * DIM + fr16;
             if(m >= gather.rows)
                 continue;
+            // Box rows: the partials are indexed by dx pixel, as the output (no tail split).
+            long long pm = m - static_cast<long long>(a.partialTile) * BM;
+            if constexpr(BOX != 0)
+            {
+                int cls[3];
+                pm = k1BoxDecode(*box, m, a.n, gather.out[0], gather.out[1], gather.out[2], cls)
+                         .pix;
+            }
 #pragma unroll
             for(int j = 0; j < FN; ++j)
             {
                 const int n = nl + j * DIM;
-                float* o = partial + (m - static_cast<long long>(a.partialTile) * BM) * outChans
-                           + chanBase + n;
+                float* o = partial + pm * outChans + chanBase + n;
                 if(vec && n + 3 < ncols)
                     *reinterpret_cast<typename Atom::acc*>(o) = acc[i][j];
                 else
@@ -589,6 +745,12 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         const long long m = m0 + wx * WM + i * DIM + fr16;
         if(m >= gather.rows)
             continue;
+        long long pm = m;
+        if constexpr(BOX != 0)
+        {
+            int cls[3];
+            pm = k1BoxDecode(*box, m, a.n, gather.out[0], gather.out[1], gather.out[2], cls).pix;
+        }
 #pragma unroll
         for(int j = 0; j < FN; ++j)
         {
@@ -601,7 +763,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
 #else
                 o[e] = K1Elem<T>::store(acc[i][j][e]);
 #endif
-            T* y = out + m * outChans + chanBase + n;
+            T* y = out + pm * outChans + chanBase + n;
             if(vec && n + 3 < ncols)
                 *reinterpret_cast<v4*>(y) = o;
             else
