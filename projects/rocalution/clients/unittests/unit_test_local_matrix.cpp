@@ -4800,6 +4800,83 @@ TEST(local_matrix_moves, an_analysed_matrix_is_analysed_again_after_moves)
     });
 }
 
+namespace
+{
+    template <typename T>
+    void destroy_after_async_moves(const Csr<T>& ref)
+    {
+        auto to_accelerator = make_local_matrix(Backend::Host, ref);
+        to_accelerator->MoveToAcceleratorAsync();
+        to_accelerator.reset();
+
+        auto to_host = make_local_matrix(Backend::Accelerator, ref);
+        to_host->MoveToHostAsync();
+        to_host.reset();
+    }
+}
+
+TEST(local_matrix_moves, a_matrix_can_be_destroyed_after_an_async_move_without_sync)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        destroy_after_async_moves(banded<T>());
+    });
+}
+
+// Only LeakSanitizer shows a leak, at the exit of the child. The child stops rocALUTION
+// first, as LeakSanitizer can hang at the exit of a process whose HIP backend still runs.
+TEST(local_matrix_moves, a_matrix_destroyed_after_an_async_move_without_sync_frees_both_objects)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+#ifndef __SANITIZE_ADDRESS__
+    GTEST_SKIP() << "only an ASAN build shows whether the destructor frees both backend objects";
+#endif
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        expect_in_child(
+            [&] {
+                destroy_after_async_moves(ref);
+                rocalution::stop_rocalution();
+            },
+            120);
+    });
+}
+
+TEST(local_matrix_moves, clear_during_an_async_move_leaves_the_matrix_empty)
+{
+    REQUIRE_BACKEND(Backend::Accelerator);
+    for_each_type<RealTypes>([&](auto type) {
+        using T = typename decltype(type)::type;
+
+        const Csr<T> ref = banded<T>();
+        for(Backend from : {Backend::Host, Backend::Accelerator})
+        {
+            SCOPED_TRACE(backend_name(from));
+            const Backend to = from == Backend::Host ? Backend::Accelerator : Backend::Host;
+
+            auto A = make_local_matrix(from, ref);
+            if(to == Backend::Host)
+            {
+                A->MoveToHostAsync();
+            }
+            else
+            {
+                A->MoveToAcceleratorAsync();
+            }
+            A->Clear();
+            A->Sync();
+            EXPECT_EQ(A->GetM(), 0);
+            EXPECT_EQ(A->GetN(), 0);
+            EXPECT_EQ(A->GetNnz(), 0);
+            EXPECT_EQ(location_of(*A), backend_name(to));
+        }
+    });
+}
+
 INSTANTIATE_TEST_SUITE_P(formats,
                          local_matrix_formats,
                          testing::Combine(testing::Values(Backend::Host, Backend::Accelerator),

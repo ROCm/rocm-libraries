@@ -186,6 +186,12 @@ namespace rocalution
     {
         log_debug(this, "LocalVector::Clear()");
 
+        // A pending *Async() transfer still reads or writes the data
+        if(this->asyncf_ == true)
+        {
+            this->Sync();
+        }
+
         this->vector_->Clear();
     }
 
