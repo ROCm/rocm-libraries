@@ -66,8 +66,10 @@ TEST_P(DecodePaged5d, MatchesReference)
 {
     if(ck_tile::get_device_name() != "gfx1250")
         GTEST_SKIP() << "gfx1250 only";
-    const auto r = fmha_decode_paged5d::run(GetParam().c, true);
+    // one timed launch: also replays a captured graph and compares its output
+    const auto r = fmha_decode_paged5d::run(GetParam().c, true, 0, 1);
     ASSERT_TRUE(r.error.empty()) << r.error;
+    EXPECT_TRUE(r.graph_same) << "graph replay output differs from a stream launch";
     EXPECT_TRUE(r.valid) << "max abs err " << r.max_err << " (max |ref| " << r.max_ref << "), cos "
                          << r.cosine << ", splits " << r.config.num_splits << ", pages/split "
                          << r.config.pages_per_split << (r.config.wave_split ? ", wave" : ", coop");

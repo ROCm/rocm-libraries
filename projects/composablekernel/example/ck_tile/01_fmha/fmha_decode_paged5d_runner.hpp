@@ -41,10 +41,7 @@ hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t s
     attr[0].val.clusterDim.z = 1;
     cfg.attrs                = attr;
     cfg.numAttrs             = 1;
-    if constexpr(kNumSplits == 16)
-        return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry16<K>, kargs);
-    else
-        return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
+    return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
 }
 
 template <bool kWaveSplit, bool kGroups, index_t... Ns>
@@ -66,7 +63,7 @@ inline hipError_t launch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                          const ck_tile::FmhaDecodePaged5dConfig& c,
                          hipStream_t stream)
 {
-    const auto seq = std::make_integer_sequence<index_t, 16>{};
+    const auto seq = std::make_integer_sequence<index_t, 15>{};
     if(c.num_groups > 1)
         return c.wave_split ? dispatch<true, true>(h, c.num_splits, stream, seq)
                             : dispatch<false, true>(h, c.num_splits, stream, seq);
@@ -103,6 +100,7 @@ struct Result
     double max_err = 0, max_ref = 0, cosine = 0;
     ck_tile::FmhaDecodePaged5dConfig config{};
     float us_stream = 0, us_graph = 0; // set only when timed
+    bool graph_same = true;            // graph replay wrote the output of a stream launch
     std::string error;
 };
 
@@ -136,8 +134,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     if(c.pages_per_split > 0 || c.splits > 0)
     {
         const index_t total = (span + cfg.pages_per_split - 1) / cfg.pages_per_split;
-        cfg.num_groups      = (total + 15) / 16;
-        cfg.num_splits      = cfg.num_groups > 1 ? 16 : total;
+        cfg.num_groups      = (total + 14) / 15;
+        cfg.num_splits      = (total + cfg.num_groups - 1) / cfg.num_groups;
     }
     res.config = cfg;
 
@@ -228,6 +226,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         scale_s};
 
     hipStream_t stream;
+    HIP_CHECK_ERROR(hipDeviceSynchronize()); // the fills above, before a non-blocking stream
     HIP_CHECK_ERROR(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     HIP_CHECK_ERROR(launch(args, cfg, stream));
     HIP_CHECK_ERROR(hipStreamSynchronize(stream));
@@ -318,8 +317,19 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
             HIP_CHECK_ERROR(launch(args, cfg, stream));
         HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph));
         HIP_CHECK_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-        HIP_CHECK_ERROR(hipGraphLaunch(graph_exec, stream));
-        HIP_CHECK_ERROR(hipStreamSynchronize(stream));
+        {
+            std::vector<uint16_t> ref_out(q.size()), graph_out(q.size());
+            o_buf.FromDevice(ref_out.data());
+            // stale partials of the stream launches must not be able to stand in
+            HIP_CHECK_ERROR(
+                hipMemsetAsync(o_buf.GetDeviceBuffer(), 0xff, o_buf.GetBufferSize(), stream));
+            HIP_CHECK_ERROR(
+                hipMemsetAsync(ws_buf.GetDeviceBuffer(), 0xff, ws_buf.GetBufferSize(), stream));
+            HIP_CHECK_ERROR(hipGraphLaunch(graph_exec, stream));
+            HIP_CHECK_ERROR(hipStreamSynchronize(stream));
+            o_buf.FromDevice(graph_out.data());
+            res.graph_same = ref_out == graph_out;
+        }
         float best = 1e30f;
         for(int r = 0; r < 5; ++r)
         {

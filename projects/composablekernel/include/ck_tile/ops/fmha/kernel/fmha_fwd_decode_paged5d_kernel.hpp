@@ -57,15 +57,15 @@ struct FmhaDecodePaged5dConfig
     index_t num_groups = 1;
 };
 
-// Up to 240 pages, one cluster of the cooperative layout with as many splits as a 4-page step
-// each allows (at most 15), but at least 16 pages per split once the grid would exceed about 640
-// workgroups. Up to 1024 pages, one cluster of 16 wave-split workgroups (whose waves run their own
-// pages without per-step barriers) while the grid stays within 512 workgroups, and above 512
-// pages has at least 64 of them (fewer lose to the parallelism of several clusters). A longer
-// range takes several clusters of 16 (groups, merged by the last split to finish a row block):
-// the shortest of 8, 12 or 16 pages per split that keeps at most 192 splits per (batch, kv head)
-// and 512 workgroups, or else the wave-split layout with about 384 workgroups. With 16 splits a
-// cluster's merge takes one row of 16 per split.
+// A range that fits one cluster (at most 15 splits: the cluster size is a 4-bit compile-time
+// field) takes as many splits as it allows, each a whole number of 64-token steps, but at least 16
+// pages per split once the grid would exceed about 640 workgroups. Up to 960 pages, one cluster
+// of the wave-split layout (whose waves run their own pages without per-step barriers) while
+// the grid stays within 512 workgroups, and above 512 pages has at least 64 of them (fewer
+// lose to the parallelism of several clusters). A longer range takes several clusters (groups,
+// merged by the last split to finish a row block): the shortest of 8, 12 or 16 pages per split that
+// keeps at most 192 splits per (batch, kv head) and 512 workgroups, or else the wave-split layout
+// with about 384 workgroups.
 CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(index_t batch,
                                                                 index_t nhead_k,
                                                                 index_t max_seqlen_k,
@@ -77,11 +77,10 @@ CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(index_t batch,
     const auto round_up     = [](index_t x, index_t m) { return (x + m - 1) / m * m; };
     const auto ceil_div     = [](index_t x, index_t y) { return (x + y - 1) / y; };
     const index_t heads     = batch * nhead_k;
-    // several groups take 16 splits each; the kernel spreads the range over all of them
-    const auto make = [&](index_t pps, bool wave_split) {
+    const auto make         = [&](index_t pps, bool wave_split) {
         const index_t total  = ceil_div(span, pps);
-        const index_t groups = ceil_div(total, 16);
-        return FmhaDecodePaged5dConfig{groups > 1 ? 16 : total, pps, wave_split, groups};
+        const index_t groups = ceil_div(total, 15);
+        return FmhaDecodePaged5dConfig{ceil_div(total, groups), pps, wave_split, groups};
     };
     if(span <= 15 * 16)
     {
@@ -90,9 +89,9 @@ CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(index_t batch,
             pps = std::max<index_t>(pps, 16);
         return make(pps, false);
     }
-    const index_t wave_pps = round_up(ceil_div(span, 16), 16);
+    const index_t wave_pps = round_up(ceil_div(span, 15), 16);
     const index_t wave_wgs = heads * ceil_div(span, wave_pps);
-    if(span <= 16 * 64 && wave_wgs <= 512 && (span <= 512 || wave_wgs >= 64))
+    if(span <= 15 * 64 && wave_wgs <= 512 && (span <= 512 || wave_wgs >= 64))
         return make(wave_pps, true);
     for(index_t pps : {8, 12, 16})
         if(ceil_div(span, pps) <= 192 && heads * ceil_div(span, pps) <= 512)
@@ -116,7 +115,7 @@ CK_TILE_HOST size_t fmha_decode_paged5d_workspace_bytes(index_t batch,
 // one per (batch, kv head, row block) for any configuration
 CK_TILE_HOST size_t fmha_decode_paged5d_num_counters(index_t batch, index_t nhead_k)
 {
-    return static_cast<size_t>(batch) * nhead_k * 16;
+    return static_cast<size_t>(batch) * nhead_k * 15;
 }
 
 template <bool kWaveSplit_, index_t kNumSplits_, bool kGroups_ = false>
@@ -135,7 +134,7 @@ struct FmhaDecodePaged5dKernel
     // pages per wave per step: one (cooperative) or four (wave split)
     static constexpr index_t kWavePages = kWaveSplit ? 4 : 1;
     static constexpr index_t kStages    = kWaveSplit ? 2 : 3;
-    static_assert(1 <= kNumSplits && kNumSplits <= 16);
+    static_assert(1 <= kNumSplits && kNumSplits <= 15);
 
     struct Kargs
     {
@@ -325,8 +324,8 @@ struct FmhaDecodePaged5dKernel
         const index_t w = __builtin_amdgcn_readfirstlane(threadIdx.x) / 32;
         const index_t n = l % 16, h = l / 16;
         // groups of kNumSplits along x, one cluster each
-        const index_t gi = kGroups ? __builtin_amdgcn_cluster_id_x() : 0;
-        const index_t s  = kGroups ? __builtin_amdgcn_cluster_workgroup_id_x() : blockIdx.x;
+        const index_t gi = kGroups ? blockIdx.x / kNumSplits : 0;
+        const index_t s  = kGroups ? blockIdx.x % kNumSplits : blockIdx.x;
         const index_t g = blockIdx.y, b = blockIdx.z;
         const index_t sg  = gi * kNumSplits + s; // split index within the (batch, kv head)
         const index_t gqa = a.gqa;
@@ -911,19 +910,12 @@ struct FmhaDecodePaged5dKernel
 };
 
 // The cluster size is a compile-time attribute of the entry, so the workgroup ids come from the
-// trap temporaries without reading IB_STS2 (which waits for the kernel argument loads). The
-// attribute takes at most 15; 16 is set at launch only (fmha_decode_paged5d_entry16).
+// trap temporaries without reading IB_STS2 (which waits for the kernel argument loads). It also
+// survives HIP stream capture, which drops a cluster size given only as a launch attribute.
 template <typename Kernel>
 __global__ __launch_bounds__(Kernel::kBlockSize)
     __attribute__((cluster_dims(Kernel::kNumSplits, 1, 1))) void fmha_decode_paged5d_entry(
         typename Kernel::Kargs kargs)
-{
-    Kernel{}(kargs);
-}
-
-template <typename Kernel>
-__global__
-__launch_bounds__(Kernel::kBlockSize) void fmha_decode_paged5d_entry16(typename Kernel::Kargs kargs)
 {
     Kernel{}(kargs);
 }

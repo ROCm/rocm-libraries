@@ -67,5 +67,7 @@ int main(int argc, char* argv[])
                 r.us_stream,
                 r.us_graph,
                 validate ? (r.valid ? ", valid:y" : ", valid:n") : "");
-    return !validate || r.valid ? 0 : 1;
+    if(!r.graph_same)
+        std::printf("graph replay output differs from a stream launch\n");
+    return (!validate || r.valid) && r.graph_same ? 0 : 1;
 }
