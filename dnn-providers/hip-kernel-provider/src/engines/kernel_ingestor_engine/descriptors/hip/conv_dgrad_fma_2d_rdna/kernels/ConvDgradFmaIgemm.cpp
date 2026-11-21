@@ -7,7 +7,7 @@
 // on plain FMA (no WMMA / MFMA), so it runs on every RDNA target including the ones without
 // matrix instructions. The tiling, LDS double buffering and register tiles follow the forward
 // kernel of hip/conv_rdna/ (ConvFwdFmaIgemm.cpp). The kernel is 3D; 2D problems run with
-// depth 1.
+// depth 1. hip/conv_dgrad_fma_3d_rdna/ builds its variants from this file too.
 //
 // Stride decomposition: dx position (di, hi, wi) is written di = qd * sd + rd and alike, and the
 // taps that reach it are the z with (rd + pd - z * dd) divisible by sd (and alike for y, x),

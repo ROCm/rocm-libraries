@@ -63,6 +63,10 @@ void resetHipConvFwdFmaIgemmRdnaModuleCache();
 void registerHipConvDgradFma2dRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
 void resetHipConvDgradFma2dRdnaModuleCache();
 
+/// @see packs/HipConvDgradFma3dRdnaNative.cpp
+void registerHipConvDgradFma3dRdnaSymbols(hipdnn_plugin_sdk::ingestor::SymbolScope<Handle>& scope);
+void resetHipConvDgradFma3dRdnaModuleCache();
+
 /// The engine name gfx950_attention_dense.ued.json declares. The pack table, the pack's
 /// own log lines and the descriptor census (which looks the loaded set up by this name)
 /// all read it here, so a rename that misses the descriptor fails the census.

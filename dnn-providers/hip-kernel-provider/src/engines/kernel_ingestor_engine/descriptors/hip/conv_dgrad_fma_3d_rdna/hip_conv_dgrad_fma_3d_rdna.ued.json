@@ -1,0 +1,13 @@
+{
+  "version": "1.0",
+  "id": "1f33f891-09bc-44a7-bd08-04eccb84a988",
+  "name": "hipkernel:hip_conv_dgrad_fma_3d_rdna",
+  "sdk_version": "1.0.0",
+  "graph_match": {
+    "native": "hipkernel.hip_conv_dgrad_fma_3d_rdna.graph_match"
+  },
+  "metadata": "e6884457-e0ac-4de2-bb03-2b57402666c5",
+  "sort_kernel_catalog": {
+    "default": "c5280c28-00d0-4b48-b9af-1f5a29b85e58"
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "version": "1.0",
+  "id": "3822c4c3-61e9-4a52-a0ef-165747703467",
+  "name": "hip_conv_dgrad_fma_3d_rdna dispatch",
+  "dispatch_symbol": "hipkernel.hip_conv_dgrad_fma_3d_rdna.dispatch"
+}
