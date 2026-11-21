@@ -317,6 +317,32 @@ static bool kernelServesHeadCounts(const std::string& archId,
            || q.dims()->Get(1) == k.dims()->Get(1);
 }
 
+// The gfx942 fp8 causal forward kernel (fwd_hd128_fp8_causal.co, AITER v0.1.29; observed
+// on the MI300 object, the MI308 object shares the row) computes every Q tile after the
+// first wrongly: O off by up to about 0.5, or NaN, and a wrong LSE, with no error. One-tile
+// launches and the fp8 no-mask kernel are correct. Upstream AITER issue #7593 (open);
+// ALMIOPEN-3392. Keyed on the dispatched row, so a top-left causal graph fwdKernelMaskType
+// maps onto it is covered, and in group mode S_q is the maximum length. Every fp8 causal
+// row is held to it (AITER's gfx950 fp8 causal objects had a causal defect before
+// b0adff0d16): lift it for a row only once a fixed object is vendored and the
+// Fp8CausalQTiles integration cases pass on it with this check removed.
+static bool kernelServesQTiles(const fmha_v3_fwdConfig& row,
+                               const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& q)
+{
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static const char* HIP_KERNEL_LOG_PREFIX = "[SdpaFwdPlanBuilder::isApplicable] ";
+
+    const int64_t seqLenQ = q.dims()->Get(SDPA_SEQ_AXIS);
+    HIP_KERNEL_RETURN_FALSE_IF(
+        row.dtype == "fp8bf16" && row.mask != static_cast<int>(plan_utils::MaskType::NO_MASK)
+            && seqLenQ > static_cast<int64_t>(row.ts_qo),
+        "fp8 causal forward kernel " + row.knl_name
+            + " computes every Q tile after the first wrongly (AITER issue #7593); S_q must "
+              "be at most one Q tile of "
+            + std::to_string(row.ts_qo) + " rows (Actual S_q: " + std::to_string(seqLenQ) + ")");
+    return true;
+}
+
 static bool isMi308Device(hipStream_t stream)
 {
     // Seeded, not left indeterminate: a concrete stream's hipStreamGetDevice query can
@@ -937,6 +963,11 @@ Rejection SdpaFwdPlanBuilder::checkFwdApplicability(
                          "gfx950 bf16 head dim 256 kernels do not support GQA/MQA (q heads: "
                              + std::to_string(qTensor->dims()->Get(1))
                              + ", kv heads: " + std::to_string(kTensor->dims()->Get(1)) + ")");
+
+    if(!kernelServesQTiles(cfg_fmha_fwd.at(key), *qTensor))
+    {
+        return false;
+    }
 
     // Q/K/V byte strides and the Ts product are scaled by the resolved input
     // size, which the datatype checks above have narrowed to bf16 or fp8bf16.
