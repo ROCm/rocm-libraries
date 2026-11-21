@@ -356,13 +356,13 @@ for dt in ("HALF", "BFLOAT16"):
     )
     # gfx942 3x3x3 run tiles (backward data of unpadded layers, whose 130-, 66- and 34-wide
     # outputs the th x tw tiles fit with 6-16% of their pixel slots idle): the register-path
-    # halo tiles over strips of the output, a block 128 consecutive pixels of a strip's rows over
-    # the planes, a 256-pixel stage (strips up to 34 columns).
+    # halo tiles over 16-column strips of the output, a block 128 consecutive pixels of a
+    # strip's rows over the planes, a 264-pixel stage (a 2-column last strip's runs).
     add(
         dt,
         ["gfx942"],
         [
-            M(f"mfma16_{e}", F333, 128, bn, 16, wm, wn, 8, ring=0, xpf=1, run=256)
+            M(f"mfma16_{e}", F333, 128, bn, 16, wm, wn, 8, ring=0, xpf=1, run=264)
             for bn, wm, wn in ((128, 2, 2), (64, 2, 2), (128, 1, 4), (256, 1, 8))
         ]
         + [
@@ -378,14 +378,8 @@ for dt in ("HALF", "BFLOAT16"):
                 ring=0,
                 split=1,
                 xpf=1,
-                run=256,
+                run=264,
             )
-        ]
-        # 256-pixel runs (a 352-pixel stage) of 128 x 32 wave tiles: one weight fragment serves
-        # 128 pixels a wave, for 64- and 128-channel outputs.
-        + [
-            M(f"mfma16_{e}", F333, 256, bn, 16, 2, wn, 8, ring=0, xpf=1, run=352)
-            for bn, wn in ((64, 2), (128, 4))
         ],
     )
     # Packed channels-first activations in place on the dword-DMA parts (gather transpose in

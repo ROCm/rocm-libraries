@@ -41,16 +41,16 @@ for each channel chunk (bc channels):
 store acc (via an LDS strip, 16-byte rows)
 ```
 
-**Run tiles (`run`).** Widths that are not whole tiles waste pixel slots in a th x tw tile: the 130-, 66- and 34-wide outputs of backward data over unpadded 3-D layers leave 6-16% of a 128-pixel tile idle. A run config cuts the output into strips of Ws columns; a block owns BM consecutive pixels of one strip's raster of rows over the planes, so its pixels may span rows and planes and no slot idles where Ws divides the width:
+**Run tiles (`run`).** Widths that are not whole tiles waste pixel slots in a th x tw tile: the 130-, 66- and 34-wide outputs of backward data over unpadded 3-D layers leave 6-16% of a 128-pixel tile idle. A run config cuts the output into strips of 16 columns (the last one the columns left over); a block owns BM consecutive pixels of one strip's raster of rows over the planes, so its pixels may span rows and planes and no slot idles:
 
 ```
 for each depth tap, then each channel chunk (bc channels):
-    stage the rows the run covers plus R-1, each Ws+S-1 wide, of the tap's input planes
+    stage the rows the run covers plus R-1, each strip width + S-1, of the tap's input planes
     for each tap (r, s):  acc += staged rows shifted by (r, s)  x  W[tap]
 store acc (each pixel at its plane, row and column)
 ```
 
-A plane has Hv virtual rows, at least the output's and enough that a filter row reaching past a plane's last row reads the input's zero padding on both readings (max(out, in + max(leading pad, trailing pad))). The halo matches a 2-D tile's (about 190-210 pixels for 128-pixel runs). The planner picks Ws by the 2-D tiles' cost among the strips whose stage fits the config's `run` (the stage's pixels: 256 for 128-pixel runs, 352 for 256). Run configs stage per depth tap (`ring 0`) and read weights by register (`bl 0`), channels-last.
+A 128-pixel run of a 16-wide strip is 8 whole rows, so its halo is the 8 x 16 tile's and every 16-lane fragment reads one staged row (one pass over the LDS banks). A plane has Hv virtual rows, at least the output's and enough that a filter row reaching past a plane's last row reads the input's zero padding on both readings (max(out, in + max(leading pad, trailing pad))). `run` is the stage's pixels (264: a 2-column last strip's 64-row runs); a strip whose stage would outgrow it declines. Run configs stage per depth tap (`ring 0`) and read weights by register (`bl 0`), channels-last.
 
 3-D has two modes, both configs:
 - **ring** streams each input plane once into KD rotating accumulator sets; the plane loop is unrolled by KD, so set indices are compile-time.
@@ -105,7 +105,7 @@ Weight fragments come straight from global memory (L1/L2-resident), prefetched a
   - the channel vector divides the reduction channels;
   - the formatted weights stay under 2^31 elements and bytes, and the grid fits one dispatch.
 - **Planner.**
-  - Halo tile: picks `tw`, then the largest `th` whose halo fits the compile-time LDS bound, minimizing padded pixel slots plus halo loads. Run tiles: the strip width the same way (slots plus half the halo, `runTileFor`), among the strips whose stage fits. Depth is split until there are 4 (ring) or 8 blocks per dispatch unit (`DeviceUnits.hpp`: CUs on gfx9, WGPs on gfx10+).
+  - Halo tile: picks `tw`, then the largest `th` whose halo fits the compile-time LDS bound, minimizing padded pixel slots plus halo loads. Run tiles: 16-column strips and the columns left over (`runTileFor`), each strip's raster in runs of BM. Depth is split until there are 4 (ring) or 8 blocks per dispatch unit (`DeviceUnits.hpp`: CUs on gfx9, WGPs on gfx10+).
   - Split-C, halo tile: only below 2 blocks per unit, with at least 2 chunks per split and at most 16 splits. A grid that needs no split declines the split config; its split-0 twin runs the same tile in one launch.
   - `rows` tiles are fixed, and the grid is min(tiles, bpu x units): `bpu` blocks resident per unit (1 to 3, each with its own halo stages, all within the device's LDS), so one block's chunk DMA, transposes and barriers overlap another's MMAs. A line tile is wp pw x 16 wq columns of the row. Rows split-C runs only where the tiles leave three quarters of the units idle: it measured 1.4x on n1 c640 64², but 0.7-0.9x at 128-250 tiles.
   - gfx950 16-bit rows tiles smaller than 16 x 32 x 128 decline past 8 persistent rounds, where the large tile is ahead. Tiles compare by the output channels they compute (on K < 128 the reference tile's columns past K are idle, so a tile as wide as K is not smaller), and bpu resident blocks as one bpu times larger tile.
