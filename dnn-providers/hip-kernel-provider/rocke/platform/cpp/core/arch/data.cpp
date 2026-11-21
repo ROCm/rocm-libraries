@@ -5624,6 +5624,9 @@ static const rocke_ati_gemm_caps_t k_gemm_gfx1250 = {
     .wmma_cshuffle = true,
     .cshuffle_lds_aliased = true,
 };
+static const rocke_ati_gemm_caps_t k_gemm_gfx950 = {
+    .cshuffle_lds_aliased = true,
+};
 
 const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx11-generic", &k_target_gfx11_generic, NULL, &k_gemm_rdna},
@@ -5643,7 +5646,7 @@ const rocke_ati_arch_row_t rocke_ati_arch_registry[] = {
     {"gfx908", &k_target_gfx908},
     {"gfx90a", &k_target_gfx90a},
     {"gfx942", &k_target_gfx942},
-    {"gfx950", &k_target_gfx950},
+    {"gfx950", &k_target_gfx950, NULL, &k_gemm_gfx950},
     {NULL, NULL}, /* terminator */
 };
 

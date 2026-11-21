@@ -121,6 +121,9 @@
       "wave_size": 64,
       "lds_capacity_bytes": 163840,
       "vmcnt_bits": 6,
+      "gemm": {
+        "cshuffle_lds_aliased": true
+      },
       "memory": {
         "has_async_lds": true,
         "async_lds_max_dwords": 4,
