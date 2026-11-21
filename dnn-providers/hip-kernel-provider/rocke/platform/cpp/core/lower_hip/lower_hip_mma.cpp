@@ -1651,11 +1651,19 @@ static rocke_status_t rocke_h_op_vector_max(rocke_h_lowerer_t* lw, const rocke_o
     return h_vec_minmax(lw, op, ">");
 }
 
-/* def _op_vector_cmp(self, op): per-lane comparison via pred attr. */
+/* def _op_vector_cmp(self, op): per-lane comparison via pred attr, checked by
+ * the IR rule first (rocke_i_vector_cmp_error). */
 static rocke_status_t rocke_h_op_vector_cmp(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     const rocke_value_t* a = op->operands[0];
     const rocke_value_t* b = op->operands[1];
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t cmp_status
+        = rocke_i_vector_cmp_error(&op->attrs, a->type, b->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
+    {
+        return rocke_h_fail(lw, cmp_status, "%s", cmp_buf);
+    }
     const rocke_value_t* r = h_res(op);
     const char* res_t = rocke_h_type_to_hip(lw, r->type);
     const char* nice = rocke_h_name(lw, r);
@@ -1800,11 +1808,18 @@ static rocke_status_t rocke_h_op_cf_return(rocke_h_lowerer_t* lw, const rocke_op
 }
 
 /* def _op_scf_if(self, op):
+ *     error = _scf_if_error(op)
+ *     if error is not None: raise ValueError(error)
  *     self._emit(f"if({_name(cond)}) {{")
  *     push; lower_region(op.regions[0]); pop
  *     self._emit("}") */
 static rocke_status_t rocke_h_op_scf_if(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
+    char if_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_if_error(op, if_error, sizeof if_error))
+    {
+        return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", if_error);
+    }
     const rocke_value_t* cond = op->operands[0];
     rocke_h_emitf(lw, "if(%s) {", rocke_h_name(lw, cond));
     rocke_h_push_indent(lw);
@@ -1939,9 +1954,10 @@ static rocke_status_t rocke_h_op_scf_for(rocke_h_lowerer_t* lw, const rocke_op_t
     }
     {
         char loop_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
+        const rocke_status_t status = rocke_i_scf_for_error(op, loop_error, sizeof loop_error);
+        if(status != ROCKE_OK)
         {
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", loop_error);
+            return rocke_h_fail(lw, status, "%s", loop_error);
         }
     }
     rocke_attr_get_int(&op->attrs, "num_iter_args", &num_iter);

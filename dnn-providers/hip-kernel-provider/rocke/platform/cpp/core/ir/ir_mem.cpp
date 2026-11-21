@@ -13,6 +13,7 @@
 
 #include <string.h>
 
+#include "rocke/error.hpp"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
 
@@ -913,29 +914,32 @@ void rocke_b_global_atomic_add_f32(rocke_ir_builder_t* b,
 
 /* ===================== vector.* element-wise family ===================== */
 
-/* IRBuilder.vector_binary: matching vector operands -> a->type. The signed
- * ops (smax, smin) refuse an unsigned element type. */
+/* IRBuilder.vector_binary: two vectors of one type -> a->type. A first operand
+ * that is not a vector is a TypeError (rocke_i_vector_operand_error). The signed
+ * ops (smax, smin) refuse an unsigned element type, and the bitwise ops and
+ * shifts (rocke_i_is_integer_element_op) one that is not an integer or i1
+ * (TypeError); then a second operand of another type is a TypeError
+ * (rocke_i_refuse_operand_types). The rules every binary op shares are
+ * rocke_i_binop's, which builds the op. */
 static rocke_value_t* rocke_i_vector_binary(rocke_ir_builder_t* b,
                                             rocke_opcode_t opcode,
                                             rocke_value_t* a,
                                             rocke_value_t* c,
                                             const char* hint)
 {
-    rocke_value_t* ops[2];
     if(!rocke_i_live(b))
         return NULL;
     if(!a || !c)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "vector_binary: null operand");
-    if(!rocke_i_is_vector(a->type, NULL, -1) || !rocke_type_eq(a->type, c->type))
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "vector_binary expects matching vector operands");
+    char vector_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_vector_operand_error(
+           rocke_opcode_name(opcode), a->type, vector_error, sizeof vector_error))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", vector_error);
     if(opcode == ROCKE_OP_VECTOR_SMAX)
         rocke_i_refuse_unsigned("vector_smax", a->type, NULL);
     if(opcode == ROCKE_OP_VECTOR_SMIN)
         rocke_i_refuse_unsigned("vector_smin", a->type, NULL);
-    ops[0] = a;
-    ops[1] = c;
-    return rocke_i_op1(b, opcode, ops, 2, a->type, NULL, hint);
+    return rocke_i_binop(b, opcode, a, c, hint);
 }
 
 rocke_value_t* rocke_b_vector_add(rocke_ir_builder_t* b, rocke_value_t* a, rocke_value_t* c)
@@ -987,13 +991,14 @@ rocke_value_t*
         return NULL;
     if(!a || !c || !d)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "vector_fma: null operand");
-    if(!rocke_i_is_vector(a->type, NULL, -1) || !rocke_type_eq(a->type, c->type)
-       || !rocke_type_eq(a->type, d->type))
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "vector_fma expects three matching vector operands");
+    /* Python IRBuilder.vector_fma: a vector first operand, then one type. */
+    char vector_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_vector_operand_error("vector.fma", a->type, vector_error, sizeof vector_error))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", vector_error);
     ops[0] = a;
     ops[1] = c;
     ops[2] = d;
+    rocke_i_refuse_operand_types(b, "vector.fma", ops, 3);
     return rocke_i_op1(b, ROCKE_OP_VECTOR_FMA, ops, 3, a->type, NULL, "vfma");
 }
 
@@ -1075,9 +1080,9 @@ rocke_value_t*
         return NULL;
     if(!a || !c || !pred)
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "vector_cmp: null operand/pred");
-    if(!rocke_i_is_vector(a->type, NULL, -1) || !rocke_type_eq(a->type, c->type))
-        return (rocke_value_t*)rocke_i_set_err(
-            b, ROCKE_ERR_VALUE, "vector_cmp expects matching vector operands");
+    char vector_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_vector_operand_error("vector.cmp", a->type, vector_error, sizeof vector_error))
+        return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_TYPE, "%s", vector_error);
     vt = rocke_vector_type(b, rocke_i1(), rocke_i_count_of(a->type));
     if(!vt)
         return NULL;
@@ -1085,6 +1090,12 @@ rocke_value_t*
     ops[1] = c;
     attr = rocke_i_attrs(b);
     rocke_attr_set_str(b, &attr, "pred", pred);
+    /* Python IRBuilder.vector_cmp: refuse what ir._vector_cmp_error refuses. */
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t cmp_status
+        = rocke_i_vector_cmp_error(&attr, a->type, c->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
+        return (rocke_value_t*)rocke_i_set_err(b, cmp_status, "%s", cmp_buf);
     /* result_name_hint = "vcmp_{pred}" */
     i = 0;
     hint[i++] = 'v';

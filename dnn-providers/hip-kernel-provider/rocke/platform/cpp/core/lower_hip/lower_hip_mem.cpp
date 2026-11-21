@@ -182,7 +182,17 @@ static rocke_status_t _op_tile_smem_store(rocke_h_lowerer_t* lw, const rocke_op_
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "smem store before smem_alloc was lowered");
     }
     idx_str = mem_idx_join(lw, &op->operands[1], op->num_operands - 2);
-    rocke_h_emitf(lw, "%s[%s] = %s;", storage, idx_str, rocke_h_name(lw, value));
+    /* A one-lane vector (from smem_store_vN with n=1, say) is stored as its one
+     * element, as the LLVM lowering's <1 x T> store does; HIP has no implicit
+     * conversion from a vector to its element, so read lane 0. */
+    const bool one_lane_vector
+        = value->type && value->type->kind == ROCKE_TYPE_VECTOR && value->type->count == 1;
+    rocke_h_emitf(lw,
+                  "%s[%s] = %s%s;",
+                  storage,
+                  idx_str,
+                  rocke_h_name(lw, value),
+                  one_lane_vector ? "[0]" : "");
     return lw->status;
 }
 
@@ -199,6 +209,13 @@ static rocke_status_t _op_tile_smem_store_vN(rocke_h_lowerer_t* lw, const rocke_
     if(op->num_operands < 2)
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.smem_store_vN: too few operands");
+    }
+    {
+        char lanes_error[ROCKE_ERR_MSG_CAP];
+        if(const char* error = rocke_i_smem_store_vN_op_error(op, lanes_error, sizeof lanes_error))
+        {
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
+        }
     }
     smem = op->operands[0];
     value = op->operands[op->num_operands - 1];
@@ -234,6 +251,15 @@ static rocke_status_t _op_tile_smem_store_vN_f32(rocke_h_lowerer_t* lw, const ro
     if(op->num_operands < 2)
     {
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "tile.smem_store_vN_f32: too few operands");
+    }
+    {
+        char contract_error[ROCKE_ERR_MSG_CAP];
+        const rocke_status_t contract_status
+            = rocke_i_smem_store_vN_f32_op_error(op, contract_error, sizeof contract_error);
+        if(contract_status != ROCKE_OK)
+        {
+            return rocke_h_fail(lw, contract_status, "%s", contract_error);
+        }
     }
     smem = op->operands[0];
     value = op->operands[op->num_operands - 1];

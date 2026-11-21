@@ -331,13 +331,20 @@ const char* rocke_h_require_unsigned_int_type(rocke_h_lowerer_t* lw,
         }
         if(used < sizeof names)
             snprintf(names + used, sizeof names - used, ")");
+        char what[ROCKE_ERR_MSG_CAP];
+        char expected[ROCKE_ERR_MSG_CAP];
+        char message[ROCKE_ERR_MSG_CAP];
+        snprintf(what, sizeof what, "HIP lowering of %s", op_name);
+        snprintf(expected, sizeof expected, "an integer type, one of %s", names);
         rocke_h_fail(lw,
                      ROCKE_ERR_TYPE,
-                     "HIP lowering of %s failed - element type='%s', expected an integer "
-                     "type, one of %s",
-                     op_name,
-                     ir_type_name ? ir_type_name : "(null)",
-                     names);
+                     "%s",
+                     rocke_i_type_name_message(what,
+                                               "element type",
+                                               ir_type_name ? ir_type_name : "(null)",
+                                               expected,
+                                               message,
+                                               sizeof message));
     }
     return spelling;
 }
@@ -929,6 +936,11 @@ rocke_status_t rocke_h_lower_op(rocke_h_lowerer_t* lw, const rocke_op_t* op)
     const char* tf32_error = rocke_tf32_op_error(op);
     if(tf32_error)
         return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
+    char operand_error[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t operand_status
+        = rocke_i_operand_rules_error(op, operand_error, sizeof operand_error);
+    if(operand_status != ROCKE_OK)
+        return rocke_h_fail(lw, operand_status, "%s", operand_error);
     fn = rocke_h_dispatch(op->opcode);
     if(!fn)
     {

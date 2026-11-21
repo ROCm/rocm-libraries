@@ -25,15 +25,20 @@ from .ir import (
     F16,
     I64,
     F32,
+    I1,
     I32,
     _FENCE_ORDERINGS,
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
     F64,
+    _fcmp_error,
     _int_add_wrap_error,
-    _int_cmp_pred_error,
+    _int_cmp_error,
+    _operand_rules_error,
     _scf_for_error,
+    _scf_if_error,
+    _vector_cmp_error,
     KernelDef,
     Op,
     PtrType,
@@ -48,9 +53,12 @@ from .ir import (
     _gpu_check_failed_op_error,
     _if_else_yields,
     _ldexp_op_error,
+    _smem_store_vN_op_error,
+    _smem_store_vN_f32_op_error,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
     _sync_attr,
+    _type_name_message,
     _trap_op_error,
     claimed_align,
     dpp_ctrl_attr,
@@ -202,7 +210,7 @@ def _hip_unsigned_int_type(op_name: str, type_name: str) -> str:
     message wherever it is met (the C++ engine's twin is
     ``rocke_h_require_unsigned_int_type``). The ``nuw`` add and the ``ult``
     compare check their IR rule first (``_int_add_wrap_error``,
-    ``_int_cmp_pred_error``: i32 or i64 operands), so for them this lookup
+    ``_int_cmp_error``: i32 or i64 operands), so for them this lookup
     cannot fail. ``arith.zext`` reads the table itself: its vector source is
     valid IR that the HIP lowering has not implemented, and it refuses it as
     such.
@@ -211,8 +219,12 @@ def _hip_unsigned_int_type(op_name: str, type_name: str) -> str:
         return _HIP_UNSIGNED_INT_TYPE[type_name]
     except KeyError:
         raise TypeError(
-            f"HIP lowering of {op_name} failed - element type={type_name!r}, "
-            f"expected an integer type, one of {tuple(_HIP_UNSIGNED_INT_TYPE)}"
+            _type_name_message(
+                f"HIP lowering of {op_name}",
+                "element type",
+                type_name,
+                f"an integer type, one of {tuple(_HIP_UNSIGNED_INT_TYPE)}",
+            )
         ) from None
 
 
@@ -552,6 +564,9 @@ class _Lowerer:
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
+        operand_error = _operand_rules_error(op)
+        if operand_error is not None:
+            raise operand_error
         if op.name.startswith("tile.") and gfx1250_scaled_wmma(op.name) is not None:
             self._emit_wmma_gfx1250_scaled(op)
             return
@@ -604,7 +619,7 @@ class _Lowerer:
         )
 
     def _op_arith_add(self, op: Op) -> None:
-        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        wrap_error = _int_add_wrap_error(op.attrs, op.operands[0].type.name)
         if wrap_error:
             raise ValueError(wrap_error)
         wrap = op.attrs.get("wrap", "nsw")
@@ -641,10 +656,10 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
-        pred_error = _int_cmp_pred_error(op.attrs.get("pred"), a.type.name)
-        if pred_error:
-            raise ValueError(pred_error)
-        pred = op.attrs.get("pred", "lt")
+        refusal = _int_cmp_error(op.attrs, a.type, b.type)
+        if refusal:
+            raise refusal
+        pred = op.attrs["pred"]
         if pred == "ult":
             unsigned = _hip_unsigned_int_type(op.name, a.type.name)
             self._emit(
@@ -802,6 +817,9 @@ class _Lowerer:
         self._emit(f"{prefix}{vec} {_name(op.result)} = *{src};")
 
     def _op_tile_smem_store_vN(self, op: Op) -> None:
+        lanes_error = _smem_store_vN_op_error(op)
+        if lanes_error:
+            raise ValueError(lanes_error)
         smem = op.operands[0]
         value = op.operands[-1]
         indices = op.operands[1:-1]
@@ -824,7 +842,14 @@ class _Lowerer:
         if storage is None:
             raise RuntimeError("smem store before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
-        self._emit(f"{storage}[{idx_str}] = {_name(value)};")
+        stored = _name(value)
+        if isinstance(value.type, VectorType) and value.type.count == 1:
+            # A one-lane vector (from smem_store_vN with n=1, say) is stored
+            # as its one element, as the LLVM lowering's <1 x T> store does;
+            # HIP has no implicit conversion from a vector to its element, so
+            # read lane 0.
+            stored += "[0]"
+        self._emit(f"{storage}[{idx_str}] = {stored};")
 
     def _op_tile_smem_load_v4(self, op: Op) -> None:
         smem, row, col = op.operands
@@ -1866,8 +1891,11 @@ class _Lowerer:
         )
 
     def _op_arith_fcmp(self, op: Op) -> None:
-        pred = op.attrs["pred"]
         a, b = op.operands
+        refusal = _fcmp_error(op.attrs, a.type, b.type)
+        if refusal:
+            raise refusal
+        pred = op.attrs["pred"]
         # IEEE ordered predicates: ``a OP b`` evaluates to true only when
         # neither operand is NaN AND the relation holds. Ordered comparisons
         # ``< <= > >= == !=`` in C++ on float types return false when either
@@ -2245,9 +2273,14 @@ class _Lowerer:
     # -------------------- arith: bitwise / int helpers --------------------
 
     def _op_arith_not(self, op: Op) -> None:
-        # ``arith.not`` is bitwise-NOT. For i1 inputs this is logical-not.
+        # ``arith.not`` is bitwise-NOT, which on an i1 is logical NOT. An i1 is
+        # a C++ ``bool``, where ``~`` promotes to int (``~true`` is -2, still
+        # true), so an i1 takes ``!``.
         (v,) = op.operands
-        self._emit(f"{_type_to_hip(op.result.type)} {_name(op.result)} = ~{_name(v)};")
+        negate = "!" if op.result.type == I1 else "~"
+        self._emit(
+            f"{_type_to_hip(op.result.type)} {_name(op.result)} = {negate}{_name(v)};"
+        )
 
     def _op_arith_xor(self, op: Op) -> None:
         self._binary(op, "^")
@@ -2482,6 +2515,9 @@ class _Lowerer:
         # so we always emit the ``f32xN`` vector store (the prologue
         # provides ``f32x1``). For n>1 the reinterpret-cast lets the
         # backend coalesce into ``ds_write_b{64,128}``.
+        refusal = _smem_store_vN_f32_op_error(op)
+        if refusal:
+            raise refusal
         smem = op.operands[0]
         value = op.operands[-1]
         indices = op.operands[1:-1]
@@ -2939,6 +2975,9 @@ class _Lowerer:
 
     def _op_vector_cmp(self, op: Op) -> None:
         a, bb = op.operands
+        refusal = _vector_cmp_error(op.attrs, a.type, bb.type)
+        if refusal:
+            raise refusal
         pred = op.attrs.get("pred", "lt")
         cmap = {"lt": "<", "le": "<=", "gt": ">", "ge": ">=", "eq": "==", "ne": "!="}
         n = op.result.type.count if isinstance(op.result.type, VectorType) else 1
@@ -3014,9 +3053,9 @@ class _Lowerer:
     # -------------------- control flow --------------------
 
     def _op_scf_for(self, op: Op) -> None:
-        error = _scf_for_error(op)
-        if error is not None:
-            raise ValueError(error)
+        refusal = _scf_for_error(op)
+        if refusal is not None:
+            raise refusal
         num_iter = op.attrs.get("num_iter_args", 0)
         lower = op.operands[0]
         upper = op.operands[1]
@@ -3071,6 +3110,9 @@ class _Lowerer:
             self._emit(f"{m['name'][1:]} = {_name(v)};")
 
     def _op_scf_if(self, op: Op) -> None:
+        error = _scf_if_error(op)
+        if error is not None:
+            raise ValueError(error)
         (cond,) = op.operands
         self._emit(f"if({_name(cond)}) {{")
         self._push_indent()

@@ -46,8 +46,13 @@ from .ir import (
     _FENCE_SCOPES,
     _FLAG_STORE_ORDERINGS,
     _ORPHAN_YIELD_ERROR,
+    _fcmp_error,
     _int_add_wrap_error,
+    _int_cmp_error,
+    _operand_rules_error,
     _scf_for_error,
+    _scf_if_error,
+    _vector_cmp_error,
     BF16,
     F32,
     F16,
@@ -69,9 +74,11 @@ from .ir import (
     _global_ptr_offset_op_error,
     _global_ptr_to_i64_op_error,
     _gpu_check_failed_op_error,
-    _if_else_yields,
+    _if_else_error,
     _is_unsigned,
     _ldexp_op_error,
+    _smem_store_vN_op_error,
+    _smem_store_vN_f32_op_error,
     _refuse_malformed_control_flow,
     _refuse_non_u8_source,
     _refuse_unsigned_operands,
@@ -89,7 +96,6 @@ from .ir import (
     smem_vector_access_align,
     split_loc,
     type_bytes,
-    vector_access_align,
 )
 from .mma_operand import (
     MmaOperandRole,
@@ -1411,9 +1417,9 @@ def _lds_natural_align(op: Op) -> int | None:
     """The natural alignment of ``op``'s LDS access, before the pool cap."""
     name = op.name
     if name == "tile.smem_store":
-        # One store of the whole value, which may be a vector: smem_store_vN
-        # routes n=1 here whatever the value's type. n=1 is the scalar store
-        # and records no align, so a vector stored whole promises nothing about
+        # One store of the whole value: a scalar or a one-lane vector from
+        # smem_store_vN(n=1), or any vector in serialized IR.
+        # It records no align, so a vector stored whole promises nothing about
         # its index beyond element alignment, which is all it claims.
         return type_bytes(element_type(op.operands[-1].type))
     if name == "tile.smem_store_vN":
@@ -1427,8 +1433,8 @@ def _lds_natural_align(op: Op) -> int | None:
         return smem_vector_access_align(
             op.operands[0].type, int(op.attrs["vec"]), element_type(op.result.type)
         )
-    if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32"):
-        return vector_access_align(int(op.attrs["vec"]), F32)
+    if name in ("tile.smem_store_vN_f32", "tile.smem_load_vN_f32") and op.operands:
+        return smem_vector_access_align(op.operands[0].type, int(op.attrs["vec"]), F32)
     if name == "tile.smem_load_v4":
         # One scalar load per element.
         return type_bytes(element_type(op.result.type))
@@ -2561,6 +2567,9 @@ class _Lowerer:
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
+        operand_error = _operand_rules_error(op)
+        if operand_error is not None:
+            raise operand_error
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no LLVM lowering for op {op.name!r}")
@@ -2618,7 +2627,7 @@ class _Lowerer:
         self._binop(op, llvm_op + flag)
 
     def _op_arith_add(self, op: Op) -> None:
-        wrap_error = _int_add_wrap_error(op.attrs.get("wrap"), op.operands[0].type.name)
+        wrap_error = _int_add_wrap_error(op.attrs, op.operands[0].type.name)
         if wrap_error:
             raise ValueError(wrap_error)
         # An explicit no-unsigned-wrap add; otherwise the type's default
@@ -2775,15 +2784,21 @@ class _Lowerer:
 
     def _op_arith_cmp(self, op: Op) -> None:
         a, b = op.operands
-        pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
+        refusal = _int_cmp_error(op.attrs, a.type, b.type)
+        if refusal:
+            raise refusal
+        pred = _icmp_predicate(op.attrs["pred"], a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
         )
 
     def _op_arith_fcmp(self, op: Op) -> None:
-        pred = op.attrs.get("pred", "olt")
         a, b = op.operands
+        refusal = _fcmp_error(op.attrs, a.type, b.type)
+        if refusal:
+            raise refusal
+        pred = op.attrs["pred"]
         self._current().emit(
             f"  {op.result.name} = fcmp {pred} {_llvm_type(a.type)} "
             f"{self._operand(a)}, {self._operand(b)}"
@@ -3886,6 +3901,9 @@ class _Lowerer:
         The AMDGPU backend turns naturally-aligned payloads into
         ds_write_b{16,32,64,128} based on total byte width.
         """
+        lanes_error = _smem_store_vN_op_error(op)
+        if lanes_error:
+            raise ValueError(lanes_error)
         smem = op.operands[0]
         indices = op.operands[1:-1]
         value = op.operands[-1]
@@ -6667,6 +6685,9 @@ class _Lowerer:
     # ----- f32 LDS ops (cshuffle epilogue) -----
 
     def _op_tile_smem_store_vN_f32(self, op: Op) -> None:
+        refusal = _smem_store_vN_f32_op_error(op)
+        if refusal:
+            raise refusal
         smem = op.operands[0]
         indices = op.operands[1:-1]
         value = op.operands[-1]
@@ -6910,6 +6931,9 @@ class _Lowerer:
 
     def _op_vector_cmp(self, op: Op) -> None:
         a, b = op.operands
+        refusal = _vector_cmp_error(op.attrs, a.type, b.type)
+        if refusal:
+            raise refusal
         pred = _icmp_predicate(op.attrs.get("pred", "lt"), a.type)
         self._current().emit(
             f"  {op.result.name} = icmp {pred} {_llvm_type(a.type)} "
@@ -7094,9 +7118,9 @@ class _Lowerer:
         unrolled (straight-line) or normal (loop) lowering. Both first refuse
         a loop the loop rule (:func:`_scf_for_error`) refuses.
         """
-        error = _scf_for_error(op)
-        if error is not None:
-            raise ValueError(error)
+        refusal = _scf_for_error(op)
+        if refusal is not None:
+            raise refusal
         unroll = op.attrs.get("unroll", False)
         lower, upper, step = op.operands[:3]
 
@@ -7369,6 +7393,9 @@ class _Lowerer:
             )
 
     def _op_scf_if(self, op: Op) -> None:
+        error = _scf_if_error(op)
+        if error is not None:
+            raise ValueError(error)
         (cond,) = op.operands
         then_region = op.regions[0]
         cur = self._current()
@@ -7419,7 +7446,9 @@ class _Lowerer:
         """
         # Refuse a malformed if/else, or a branch that does not yield the
         # results, before reading the op or emitting.
-        _if_else_yields(op)
+        refusal = _if_else_error(op)
+        if refusal is not None:
+            raise refusal
         (cond,) = op.operands
         then_region = op.regions[0]
         else_region = op.regions[1]

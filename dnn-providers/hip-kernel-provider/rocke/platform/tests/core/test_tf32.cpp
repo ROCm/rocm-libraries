@@ -8,6 +8,7 @@
 
 #include "rocke/error.hpp"
 #include "rocke/instance_tf32_mma_probe.h"
+#include "rocke/ir_internal.h"
 #include "rocke/ir_serialize.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
@@ -218,8 +219,23 @@ static int test_invalid_tf32_ops_rejected()
             rocke_b_vector_reduce_max(&b, v);
             break;
         case 4:
-            rocke_b_vector_cmp(&b, "lt", v, v);
+        {
+            /* rocke_b_vector_cmp refuses non-integer lanes, so the compare is
+             * written past it, as hand-assembled IR can reach the parser and
+             * the lowerings; there the TF32 rule, checked before any op rule,
+             * refuses it first. */
+            rocke_value_t* operands[2] = {v, v};
+            rocke_attr_map_t attrs = rocke_i_attrs(&b);
+            rocke_attr_set_str(&b, &attrs, "pred", "lt");
+            rocke_i_op1(&b,
+                        ROCKE_OP_VECTOR_CMP,
+                        operands,
+                        2,
+                        rocke_vector_type(&b, rocke_i1(), 2),
+                        &attrs,
+                        "vcmp_lt");
             break;
+        }
         case 5:
             rocke_b_vector_trunc(&b, v, rocke_tf32());
             break;

@@ -13,10 +13,10 @@
         },
         "conv/gfx1151/n2h16c32k32r1": {
           "arch": "gfx1151",
-          "bytes": 24470,
+          "bytes": 24408,
           "family": "conv",
           "kernel_name": "irhash_conv_1151_b_N2H16W16C32_K32Y1X1_t32x32x16_w2x1_a16x16x16_mem_cshuffle",
-          "sha256": "a08b4f8c2bd69fedfdc20733eb324c7dc226cdeb8708b8760018679ebee6976f",
+          "sha256": "c621e8af7b10098c646731bd44f937958246ba5f48f6517a0c0d6f3827bd1fcd",
           "status": "ok"
         },
         "conv/gfx1201/n1h8c16k32r3": {
@@ -205,10 +205,10 @@
         },
         "conv/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 16233,
+          "bytes": 16203,
           "family": "conv",
           "kernel_name": "irhash_conv_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "facb456041107e6d0f17b07ea74742a55039a2e648556fdc03a7fc9ceb64c63a",
+          "sha256": "b487630b09182ae8c7c6dc3f553a541a6bf880c9bc953c3cb8dcebeaa2d21592",
           "status": "ok"
         }
       },
@@ -231,10 +231,10 @@
         },
         "conv/gfx1151/n2h16c32k32r1": {
           "arch": "gfx1151",
-          "bytes": 24609,
+          "bytes": 24547,
           "family": "conv",
           "kernel_name": "irhash_conv_1151_b_N2H16W16C32_K32Y1X1_t32x32x16_w2x1_a16x16x16_mem_cshuffle",
-          "sha256": "1645d0beeb26817d6aa24206e728493b165f4d2523b77f43c0c1ae69b7aab851",
+          "sha256": "52b41b77ae16a5fdb2dcbe07cefbfc938a359db3becf7f68d71d7ae51a96cc4e",
           "status": "ok"
         },
         "conv/gfx1201/n1h8c16k32r3": {
@@ -423,10 +423,10 @@
         },
         "conv/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 16370,
+          "bytes": 16340,
           "family": "conv",
           "kernel_name": "irhash_conv_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "ec0e73f65e1335d154885671fe3a5986119dcd64429bb4e4df8bfc51f864b750",
+          "sha256": "440ff2ec9fed28f25d96e3d5a5a0731fc7b1518123990e579f57f86c3e02e680",
           "status": "ok"
         }
       },
@@ -449,10 +449,10 @@
         },
         "conv/gfx1151/n2h16c32k32r1": {
           "arch": "gfx1151",
-          "bytes": 24673,
+          "bytes": 24611,
           "family": "conv",
           "kernel_name": "irhash_conv_1151_b_N2H16W16C32_K32Y1X1_t32x32x16_w2x1_a16x16x16_mem_cshuffle",
-          "sha256": "fd2304695def823ec762c1ed8e11955681ff3c500470b978d1885b49e2580394",
+          "sha256": "dd877bcfe2bd077299ed81405e15c17c88e113b6761ebf930f722a960e6c1567",
           "status": "ok"
         },
         "conv/gfx1201/n1h8c16k32r3": {
@@ -649,10 +649,10 @@
         },
         "conv/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 16434,
+          "bytes": 16404,
           "family": "conv",
           "kernel_name": "irhash_conv_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "4e9e59b7afcefdfb3769f725bef9c30dd100002d49bb2e4d359282ce37d217e0",
+          "sha256": "1cbc5a0c10e5858774962240857ef990e71d0f042c3281c117308bf8ae959391",
           "status": "ok"
         }
       },
@@ -670,10 +670,10 @@
         },
         "conv/gfx1151/n2h16c32k32r1": {
           "arch": "gfx1151",
-          "bytes": 24673,
+          "bytes": 24611,
           "family": "conv",
           "kernel_name": "irhash_conv_1151_b_N2H16W16C32_K32Y1X1_t32x32x16_w2x1_a16x16x16_mem_cshuffle",
-          "sha256": "fd2304695def823ec762c1ed8e11955681ff3c500470b978d1885b49e2580394",
+          "sha256": "dd877bcfe2bd077299ed81405e15c17c88e113b6761ebf930f722a960e6c1567",
           "status": "ok"
         },
         "conv/gfx1201/n1h8c16k32r3": {
@@ -870,10 +870,10 @@
         },
         "conv/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 16434,
+          "bytes": 16404,
           "family": "conv",
           "kernel_name": "irhash_conv_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "4e9e59b7afcefdfb3769f725bef9c30dd100002d49bb2e4d359282ce37d217e0",
+          "sha256": "1cbc5a0c10e5858774962240857ef990e71d0f042c3281c117308bf8ae959391",
           "status": "ok"
         }
       },

@@ -328,12 +328,21 @@ static void _op_vector_lshr(rocke_lower_t* L, const rocke_op_t* op)
     rocke_ll_vector_binop(L, op, "lshr");
 }
 
-/* Python _op_vector_cmp: packed icmp with a pred map. */
+/* Python _op_vector_cmp: packed icmp with a pred map; the op is checked by
+ * the IR rule first (rocke_i_vector_cmp_error). */
 static void _op_vector_cmp(rocke_lower_t* L, const rocke_op_t* op)
 {
     const rocke_value_t* res = ll_result(op);
     if(!rocke_ll_live(L) || !res || op->num_operands < 2)
     {
+        return;
+    }
+    char cmp_buf[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t cmp_status = rocke_i_vector_cmp_error(
+        &op->attrs, op->operands[0]->type, op->operands[1]->type, cmp_buf, sizeof cmp_buf);
+    if(cmp_status != ROCKE_OK)
+    {
+        rocke_ll_fail(L, cmp_status, "%s", cmp_buf);
         return;
     }
     const char* pred = rocke_attr_get_str(&op->attrs, "pred");
@@ -2283,9 +2292,10 @@ static void _op_scf_for(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
     char loop_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
+    const rocke_status_t loop_status = rocke_i_scf_for_error(op, loop_error, sizeof loop_error);
+    if(loop_status != ROCKE_OK)
     {
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", loop_error);
+        rocke_ll_fail(L, loop_status, "%s", loop_error);
     }
     if(op->num_operands < 3)
     {
@@ -2432,11 +2442,19 @@ static void _op_tile_exec_or(rocke_lower_t* L, const rocke_op_t* op)
  *     for i, line in enumerate(cur.lines):
  *         cur.lines[i] = line.replace("%IF_END", f"%{end_blk.label}")
  *
- * Note: the Python scf.if lowers ONLY regions[0]; there is no else region. */
+ * The scf.if has exactly one condition and one region, its then region
+ * (rocke_i_scf_if_error), checked before either is read; there is no else
+ * region. */
 static void _op_scf_if(rocke_lower_t* L, const rocke_op_t* op)
 {
-    if(!rocke_ll_live(L) || op->num_operands < 1 || op->num_regions < 1)
+    if(!rocke_ll_live(L))
     {
+        return;
+    }
+    char if_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_scf_if_error(op, if_error, sizeof if_error))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", if_error);
         return;
     }
     const rocke_value_t* cond = op->operands[0];

@@ -77,7 +77,7 @@ class TestSchedulePolicyBasic:
 
 def _make_loader_and_builder():
     """Return (b, loader, rsrc, tid, smem) for a 64x32 tile, 256 threads."""
-    from rocke.core.ir import IRBuilder, F16, PtrType
+    from rocke.core.ir import IRBuilder, F16, I32, PtrType
     from rocke.helpers.loads import CoalescedTileLoader
 
     b = IRBuilder("split_load_test")
@@ -88,7 +88,7 @@ def _make_loader_and_builder():
     )
     rsrc_ptr = b.param("rsrc", PtrType(F16, "global"))
     rsrc = b.buffer_rsrc(rsrc_ptr, b.const_i32(1024 * 1024))
-    tid = b.param("tid", None)
+    tid = b.param("tid", I32)
     smem = b.smem_alloc(F16, [loader.tile_rows, loader.tile_cols], name_hint="tile")
     return b, loader, rsrc, tid, smem
 
@@ -151,7 +151,7 @@ class TestCoalescedTileLoaderSplit:
     def test_split_load_sequence_matches_fused_load(self):
         """load_global + store_lds must emit the same types (and count) of
         buffer_load_vN and smem_store_vN as the monolithic load()."""
-        from rocke.core.ir import IRBuilder, F16, PtrType
+        from rocke.core.ir import IRBuilder, F16, I32, PtrType
         from rocke.helpers.loads import CoalescedTileLoader
 
         loader = CoalescedTileLoader.from_tile(
@@ -163,7 +163,7 @@ class TestCoalescedTileLoaderSplit:
             b.kernel.attrs["max_workgroup_size"] = 256
             rsrc_ptr = b.param("rsrc", PtrType(F16, "global"))
             rsrc = b.buffer_rsrc(rsrc_ptr, b.const_i32(1024 * 1024))
-            tid = b.param("tid", None)
+            tid = b.param("tid", I32)
             smem = b.smem_alloc(
                 F16, [loader.tile_rows, loader.tile_cols], name_hint="tile"
             )
@@ -197,7 +197,7 @@ class TestCoalescedTileLoaderSplit:
         assert split_stores == fused_stores
 
     def test_load_global_raises_without_rsrc_when_use_buffer_rsrc(self):
-        from rocke.core.ir import IRBuilder, F16
+        from rocke.core.ir import IRBuilder, F16, I32
         from rocke.helpers.loads import CoalescedTileLoader
 
         b = IRBuilder("err_test")
@@ -205,7 +205,7 @@ class TestCoalescedTileLoaderSplit:
         loader = CoalescedTileLoader.from_tile(
             tile_rows=64, tile_cols=32, block_size=256, max_vec=4
         )
-        tid = b.param("tid", None)
+        tid = b.param("tid", I32)
 
         with pytest.raises(ValueError, match="use_buffer_rsrc=True requires rsrc"):
             loader.load_global(

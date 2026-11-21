@@ -237,10 +237,10 @@
         },
         "conv_wgrad/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 17326,
+          "bytes": 17296,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "5a924ee7b491c4053b68971e362838428b87589680b652cc059377a1341db21a",
+          "sha256": "c83da3a827324cd183625a52f6c888ed493e39deba12b26191cf4bbef135b961",
           "status": "ok"
         }
       },
@@ -482,10 +482,10 @@
         },
         "conv_wgrad/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 17461,
+          "bytes": 17431,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "6e97899e4d3496ae9003b5979e83fc3a15d3bf924f37a4204bf5d110f95fa7d1",
+          "sha256": "ae07dc8bdce9b5379a3d574d965aef13c177093718d86c8e130bb1b00fddccc7",
           "status": "ok"
         }
       },
@@ -727,10 +727,10 @@
         },
         "conv_wgrad/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 17525,
+          "bytes": 17495,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "fc87c187f829c5ddd306638c0b1973ced1a168f2ebaf8fb51370bee296237332",
+          "sha256": "55e65e827f6481719d6ed2896d4b694e463b30c74c86f739a305a3b75b77cc16",
           "status": "ok"
         }
       },
@@ -972,10 +972,10 @@
         },
         "conv_wgrad/gfx950/n2h16c32k32r1": {
           "arch": "gfx950",
-          "bytes": 17525,
+          "bytes": 17495,
           "family": "conv_wgrad",
           "kernel_name": "irhash_wgrad_950_b_N2H16W16C32_K32Y1X1_t64x32x16_w2x2_a16x16x16_mem_cshuffle",
-          "sha256": "fc87c187f829c5ddd306638c0b1973ced1a168f2ebaf8fb51370bee296237332",
+          "sha256": "55e65e827f6481719d6ed2896d4b694e463b30c74c86f739a305a3b75b77cc16",
           "status": "ok"
         }
       },

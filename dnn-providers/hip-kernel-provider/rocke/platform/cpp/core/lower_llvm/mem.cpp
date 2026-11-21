@@ -78,9 +78,9 @@ static int64_t ll_lds_natural_align(const rocke_op_t* op)
     {
     case ROCKE_OP_TILE_SMEM_STORE:
     {
-        /* One store of the whole value, which may be a vector: smem_store_vN
-         * routes n=1 here whatever the value's type. n=1 is the scalar store
-         * and records no align, so a vector stored whole promises nothing about
+        /* One store of the whole value: a scalar or a one-lane vector from
+         * smem_store_vN(n=1), or any vector in serialized IR.
+         * It records no align, so a vector stored whole promises nothing about
          * its index beyond element alignment, which is all it claims. */
         return rocke_i_type_bytes(rocke_i_elem_of(op->operands[op->num_operands - 1]->type));
     }
@@ -102,7 +102,12 @@ static int64_t ll_lds_natural_align(const rocke_op_t* op)
                                                 rocke_i_elem_of(op->results[0]->type));
     case ROCKE_OP_TILE_SMEM_STORE_VN_F32:
     case ROCKE_OP_TILE_SMEM_LOAD_VN_F32:
-        return rocke_i_vector_access_align(ll_attr_int(op, "vec", 0), rocke_f32());
+        if(op->num_operands == 0)
+        {
+            return 0;
+        }
+        return rocke_i_smem_vector_access_align(
+            op->operands[0]->type, ll_attr_int(op, "vec", 0), rocke_f32());
     case ROCKE_OP_TILE_SMEM_LOAD_V4:
         /* One scalar load per element. */
         return rocke_i_type_bytes(rocke_i_elem_of(op->results[0]->type));
@@ -692,6 +697,12 @@ static void op_tile_lds_atomic_add(rocke_lower_t* L, const rocke_op_t* op)
 
 static void op_tile_smem_store_vN(rocke_lower_t* L, const rocke_op_t* op)
 {
+    char lanes_error[ROCKE_ERR_MSG_CAP];
+    if(const char* error = rocke_i_smem_store_vN_op_error(op, lanes_error, sizeof lanes_error))
+    {
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+        return;
+    }
     const rocke_value_t* smem = op->operands[0];
     const rocke_value_t* value = op->operands[op->num_operands - 1];
     int64_t vec = ll_attr_int(op, "vec", 0);
@@ -862,6 +873,14 @@ static void op_tile_smem_store_distributed(rocke_lower_t* L, const rocke_op_t* o
 
 static void op_tile_smem_store_vN_f32(rocke_lower_t* L, const rocke_op_t* op)
 {
+    char contract_error[ROCKE_ERR_MSG_CAP];
+    const rocke_status_t contract_status
+        = rocke_i_smem_store_vN_f32_op_error(op, contract_error, sizeof contract_error);
+    if(contract_status != ROCKE_OK)
+    {
+        rocke_ll_fail(L, contract_status, "%s", contract_error);
+        return;
+    }
     const rocke_value_t* smem = op->operands[0];
     const rocke_value_t* value = op->operands[op->num_operands - 1];
     int64_t vec = ll_attr_int(op, "vec", 0);

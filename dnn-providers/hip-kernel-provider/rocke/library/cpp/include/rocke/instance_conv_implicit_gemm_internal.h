@@ -311,9 +311,6 @@ typedef struct rocke_conv_build_ctx
      * Distinct from k_out_group_base above, which the A/B loaders use --
      * Python builds a second one next to the D descriptor, before the K-loop. */
     rocke_value_t* d_k_out_group_base;
-    /* Pointwise d_addr validity: Python emits a single const_i32(1) next to
-     * the D descriptor and reuses it for every store. */
-    rocke_value_t* ir_always_valid_d;
     /* Pointwise D row pitch: p_kpg ungrouped (== K), p_K grouped, where a
      * group's kpg columns sit at g*kpg (d_k_out_group_base) in a row of K. */
     rocke_value_t* ir_d_pitch_pw;
@@ -853,7 +850,6 @@ void rocke_conv_emit_direct_epilogue(rocke_ir_builder_t* b,
                                      const rocke_warp_grid_t* grid,
                                      rocke_value_t* d_rsrc,
                                      rocke_value_t* ir_d_pitch_pw,
-                                     rocke_value_t* always_valid_d,
                                      const rocke_tensor_descriptor_t* D_desc,
                                      rocke_value_t* k_out_group_base,
                                      rocke_value_t* slab_base,
@@ -890,7 +886,6 @@ void rocke_conv_emit_cshuffle_epilogue(rocke_ir_builder_t* b,
                                        const rocke_warp_grid_t* grid,
                                        rocke_value_t* d_rsrc,
                                        rocke_value_t* ir_d_pitch_pw,
-                                       rocke_value_t* always_valid_d,
                                        const rocke_mmaop_t* op,
                                        const rocke_tensor_descriptor_t* D_desc,
                                        rocke_value_t* k_out_group_base,

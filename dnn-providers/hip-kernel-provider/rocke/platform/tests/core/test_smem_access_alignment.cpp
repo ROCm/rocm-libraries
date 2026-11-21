@@ -11,12 +11,21 @@
  * (which compares the two engines byte for byte only where the pybind engine
  * is built): the kernels are built with the C builders and lowered by the C++
  * engine, and each case pins the segment offset and the claim the Python test
- * pins for the same kernel.
+ * pins for the same kernel. A vector store also claims a width: the builder,
+ * the verifier and the LLVM and HIP lowerings refuse a stored value without
+ * that many lanes. The f32
+ * epilogue store refuses a value that does not hold f32, and smem_store_f16 a
+ * value that does not hold f16; both refuse a value with no type first.
  */
 
+#include "rocke/error.hpp"
 #include "rocke/ir.h"
+#include "rocke/ir_internal.h"
 #include "rocke/ir_serialize.h"
+#include "rocke/lower_hip.h"
 #include "rocke/lower_llvm.h"
+#include "rocke/strbuf.h"
+#include "rocke/verify.h"
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -48,14 +57,14 @@ struct Lowering
     std::string error;
 };
 
-/* Lower the kernel `builder` holds for gfx942 at llvm20, then free the builder. */
-Lowering lower_and_free(rocke_ir_builder_t* builder)
+/* Lower the kernel `builder` holds for gfx942 at llvm20. The builder stays the
+ * caller's. */
+Lowering lower_to_llvm(rocke_ir_builder_t* builder)
 {
     Lowering lowering{ROCKE_ERR_VALUE, "", ""};
     if(!rocke_ir_builder_ok(builder))
     {
         lowering.error = "the builder refused the kernel";
-        rocke_ir_builder_free(builder);
         return lowering;
     }
     char* llvm_text = NULL;
@@ -68,6 +77,13 @@ Lowering lower_and_free(rocke_ir_builder_t* builder)
         std::free(llvm_text);
     }
     lowering.error = err;
+    return lowering;
+}
+
+/* lower_to_llvm, then free the builder. */
+Lowering lower_and_free(rocke_ir_builder_t* builder)
+{
+    const Lowering lowering = lower_to_llvm(builder);
     rocke_ir_builder_free(builder);
     return lowering;
 }
@@ -247,32 +263,56 @@ int test_store_alignment_not_an_integer_is_refused()
 }
 
 /* A one-element f16 buffer, then an f32 buffer written at element 1 by one
- * smem_store_vN(..., n=1) of a <lanes x float> value, which goes through the
- * whole-value tile.smem_store. The scalar store records no align, so a vector
- * stored whole claims only its 4-byte element, whatever its width, and its
- * segment stays at byte 4. Mirrors
- * test_a_whole_value_store_claims_element_alignment. */
+ * whole-value tile.smem_store of a <lanes x float> value. smem_store_vN
+ * refuses a vector whose lanes are not its n, so the kernel is serialized IR,
+ * as hand-written IR may still carry it. Mirrors _f16_then_one_f32_vector_store
+ * in the Python test. */
+std::string f16_then_one_f32_vector_store(int lanes)
+{
+    const std::string lane_count = std::to_string(lanes);
+    const std::string vector = "vec<f32x" + lane_count + ">";
+    return "ckdsl.ir v1\n"
+           "kernel @lds_align_f16_one_f32x"
+           + lane_count
+           + " {\n"
+             "  params {\n"
+             "    %out : ptr<f32,global>\n"
+             "  }\n"
+             "  region @entry {\n"
+             "    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n"
+             "    %h2 : smem<f16, [1]> = tile.smem_alloc (  )\n"
+             "    %f3 : smem<f32, [12]> = tile.smem_alloc (  )\n"
+             "    %c4 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }\n"
+             "    %t5 : f16 = arith.trunc_f32_to_f16 ( %c4 )\n"
+             "    tile.smem_store ( %h2, %c1, %t5 ) { elem_type = s:\"f16\", rank = i:1 }\n"
+             "    %v6 : "
+           + vector
+           + " = memref.global_load_vN ( %out, %c1 ) { align = i:4, elem_type = s:\"f32\", "
+             "vec = i:"
+           + lane_count
+           + " }\n"
+             "    %c7 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:1 }\n"
+             "    tile.smem_store ( %f3, %c7, %v6 ) { elem_type = s:\""
+           + vector
+           + "\", rank = i:1 }\n"
+             "    tile.smem_store ( %h2, %c1, %t5 ) { elem_type = s:\"f16\", rank = i:1 }\n"
+             "    cf.return (  )\n"
+             "  }\n"
+             "}\n";
+}
+
+/* The scalar store records no align, so a vector stored whole claims only its
+ * 4-byte element, whatever its width, and its segment stays at byte 4.
+ * Mirrors test_a_whole_value_store_claims_element_alignment. */
 int test_a_whole_value_store_claims_element_alignment()
 {
     for(const int lanes : {3, 4})
     {
         rocke_ir_builder_t b;
-        CHECK(rocke_ir_builder_init(&b, "lds_align_f16_one_f32_vector") == ROCKE_OK);
-        rocke_value_t* out
-            = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
-        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
-        const int half_shape[] = {1};
-        const int float_shape[] = {12};
-        rocke_value_t* half_buf = rocke_b_smem_alloc(&b, rocke_f16(), half_shape, 1, "h");
-        rocke_value_t* float_buf = rocke_b_smem_alloc(&b, rocke_f32(), float_shape, 1, "f");
-        rocke_value_t* half_value = rocke_b_trunc_f32_to_f16(&b, rocke_b_const_f32(&b, 1.0));
-        rocke_value_t* const at_zero[] = {zero};
-        rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, half_value);
-        rocke_value_t* vector = rocke_b_global_load_vN(&b, out, zero, rocke_f32(), lanes, 4);
-        rocke_value_t* const at_one[] = {rocke_b_const_i32(&b, 1)};
-        rocke_b_smem_store_vN(&b, float_buf, at_one, 1, vector, 1);
-        rocke_b_smem_store_f16(&b, half_buf, at_zero, 1, half_value);
-        rocke_b_ret(&b);
+        CHECK(rocke_ir_builder_init(&b, "parsed") == ROCKE_OK);
+        rocke_kernel_def_t* kernel = NULL;
+        CHECK(rocke_ir_parse(f16_then_one_f32_vector_store(lanes).c_str(), &b, &kernel)
+              == ROCKE_OK);
         const Lowering lowering = lower_and_free(&b);
         CHECK(lowering.status == ROCKE_OK);
         CHECK(segment_offsets(lowering.text) == std::vector<int>({4}));
@@ -463,6 +503,506 @@ int test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts()
     return 0;
 }
 
+/* An f32 tile whose rows are 6 elements, read and written 4 wide by the f32
+ * epilogue ops: row 1 starts 24 bytes in, so both accesses claim only the 8
+ * bytes every row start guarantees (gcd(4, 6) = 2 elements). Mirrors the
+ * Python test of the same name in test_smem_access_alignment.py. */
+int test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_align_padded_f32_rows") == ROCKE_OK);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int tile_shape[] = {2, 6};
+    rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f32(), tile_shape, 2, "t");
+    rocke_value_t* const row_zero[] = {zero, zero};
+    rocke_value_t* row = rocke_b_smem_load_vN_f32(&b, tile, row_zero, 2, 4);
+    rocke_value_t* const row_one[] = {rocke_b_const_i32(&b, 1), zero};
+    rocke_b_smem_store_vN_f32(&b, tile, row_one, 2, row, 4);
+    rocke_b_ret(&b);
+    const Lowering lowering = lower_and_free(&b);
+    CHECK(lowering.status == ROCKE_OK);
+    CHECK(every_lds_access_claims(lowering.text, "= load <4 x float>, ptr addrspace(3)", 8));
+    CHECK(every_lds_access_claims(lowering.text, "store <4 x float> %", 8));
+    return 0;
+}
+
+/* True when `build`, a call to one C builder on `builder`, is refused with
+ * `status` and exactly `message`, and adds no op to the kernel. */
+template <typename Build>
+bool builder_refuses(rocke_ir_builder_t* builder,
+                     Build build,
+                     rocke_status_t status,
+                     const char* message)
+{
+    const int ops_before = builder->kernel->body->num_ops;
+    bool refused = false;
+    try
+    {
+        build();
+    }
+    catch(const ckc::Error& error)
+    {
+        refused = error.code() == status && std::strcmp(error.what(), message) == 0;
+    }
+    return refused && builder->kernel->body->num_ops == ops_before;
+}
+
+/* Lower `kernel`, which `builder` holds, to HIP for gfx942: the status, and
+ * the HIP source or the refusal message. The builder stays the caller's. */
+Lowering lower_to_hip(rocke_ir_builder_t* builder, rocke_kernel_def_t* kernel)
+{
+    Lowering lowering{ROCKE_ERR_VALUE, "", ""};
+    rocke_strbuf_t out;
+    rocke_strbuf_init(&out, 0);
+    rocke_lower_hip_opts_t opts{};
+    opts.arch = kArch;
+    lowering.status = rocke_lower_kernel_to_hip(builder, kernel, &opts, &out);
+    lowering.text = lowering.status == ROCKE_OK ? rocke_strbuf_cstr(&out) : "";
+    const char* error = rocke_ir_builder_error(builder);
+    lowering.error = error ? error : "";
+    rocke_strbuf_free(&out);
+    return lowering;
+}
+
+/* Parse the serialized kernel `text` into a fresh builder and lower it to HIP
+ * for gfx942 (lower_to_hip). A parse failure is reported as such. */
+Lowering lower_serialized_to_hip(const std::string& text)
+{
+    Lowering lowering{ROCKE_ERR_VALUE, "", "the kernel did not parse"};
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "parsed_for_hip") != ROCKE_OK)
+        return lowering;
+    rocke_kernel_def_t* kernel = NULL;
+    if(rocke_ir_parse(text.c_str(), &b, &kernel) == ROCKE_OK)
+        lowering = lower_to_hip(&b, kernel);
+    rocke_ir_builder_free(&b);
+    return lowering;
+}
+
+/* True when the serialized kernel `text` parses, the verifier reports exactly
+ * `message` for it, and the LLVM and HIP lowerings refuse it with `status` and
+ * the same text, emitting nothing. */
+bool serialized_kernel_is_refused(const std::string& text,
+                                  rocke_status_t status,
+                                  const char* message)
+{
+    rocke_ir_builder_t b;
+    if(rocke_ir_builder_init(&b, "parsed") != ROCKE_OK)
+        return false;
+    rocke_kernel_def_t* kernel = NULL;
+    if(rocke_ir_parse(text.c_str(), &b, &kernel) != ROCKE_OK)
+    {
+        rocke_ir_builder_free(&b);
+        return false;
+    }
+    rocke_diag_t* diags = NULL;
+    size_t num_diags = 0;
+    const bool verified = rocke_verify(kernel, &diags, &num_diags) == ROCKE_OK;
+    const bool reported = verified && num_diags == 1 && std::strcmp(diags[0].message, message) == 0;
+    rocke_diags_free(diags, num_diags);
+    const Lowering lowering = lower_and_free(&b);
+    const Lowering hip = lower_serialized_to_hip(text);
+    return reported && lowering.status == status && lowering.text.empty()
+           && lowering.error == message && hip.status == status && hip.text.empty()
+           && hip.error == message;
+}
+
+/* The lowerings store the value as an n-element vector, so smem_store_vN
+ * refuses a value of any other lane count (a scalar has one) with
+ * ROCKE_ERR_VALUE and adds no op; for n = 1 that includes a wider vector, which
+ * is no longer stored whole. Mirrors
+ * test_a_store_whose_value_lanes_differ_from_n_is_refused. */
+int test_a_store_whose_value_lanes_differ_from_n_is_refused()
+{
+    const struct
+    {
+        int lanes;
+        int n;
+        const char* message;
+    } cases[] = {
+        {4, 2, "smem_store_vN failed - lanes=4, expected n=2"},
+        {4, 8, "smem_store_vN failed - lanes=4, expected n=8"},
+        {2, 4, "smem_store_vN failed - lanes=2, expected n=4"},
+        {4, 1, "smem_store_vN failed - lanes=4, expected n=1"},
+        {3, 1, "smem_store_vN failed - lanes=3, expected n=1"},
+        {1, 4, "smem_store_vN failed - lanes=1, expected n=4"},
+    };
+    for(const auto& test_case : cases)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "lds_store_lanes") == ROCKE_OK);
+        rocke_value_t* out
+            = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+        const int float_shape[] = {16};
+        rocke_value_t* float_buf = rocke_b_smem_alloc(&b, rocke_f32(), float_shape, 1, "f");
+        rocke_value_t* value
+            = test_case.lanes == 1
+                  ? rocke_b_global_load(&b, out, zero, rocke_f32(), 4)
+                  : rocke_b_global_load_vN(&b, out, zero, rocke_f32(), test_case.lanes, 4);
+        CHECK(rocke_ir_builder_ok(&b));
+        rocke_value_t* const at_zero[] = {zero};
+        const bool refused = builder_refuses(
+            &b,
+            [&] { rocke_b_smem_store_vN(&b, float_buf, at_zero, 1, value, test_case.n); },
+            ROCKE_ERR_VALUE,
+            test_case.message);
+        rocke_ir_builder_free(&b);
+        CHECK(refused);
+    }
+    return 0;
+}
+
+/* n = 1 takes a one-lane vector as it takes a scalar: one element. The
+ * verifier accepts it, the LLVM lowering stores it as <1 x float>, and the HIP
+ * lowering stores its lane 0, since C++ converts no vector to its element
+ * implicitly. Mirrors test_a_one_lane_vector_is_a_one_element_store, which
+ * also holds the two engines' texts equal;
+ * test_the_hip_source_of_a_one_lane_vector_store_compiles compiles the HIP
+ * source. */
+int test_a_one_lane_vector_is_a_one_element_store()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_store_f32x1") == ROCKE_OK);
+    rocke_value_t* out = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int float_shape[] = {16};
+    rocke_value_t* float_buf = rocke_b_smem_alloc(&b, rocke_f32(), float_shape, 1, "f");
+    rocke_value_t* one_lane
+        = rocke_b_vector_splat(&b, rocke_b_global_load(&b, out, zero, rocke_f32(), 4), 1);
+    rocke_value_t* const at_zero[] = {zero};
+    rocke_b_smem_store_vN(&b, float_buf, at_zero, 1, one_lane, 1);
+    rocke_b_ret(&b);
+    CHECK(rocke_ir_builder_ok(&b));
+    rocke_diag_t* diags = NULL;
+    size_t num_diags = 0;
+    CHECK(rocke_verify(b.kernel, &diags, &num_diags) == ROCKE_OK);
+    rocke_diags_free(diags, num_diags);
+    /* The HIP source names a value without its leading '%'. */
+    const std::string lane_zero_of_one_lane = std::string(one_lane->name + 1) + "[0];";
+    const Lowering lowering = lower_to_llvm(&b);
+    const Lowering hip = lower_to_hip(&b, b.kernel);
+    rocke_ir_builder_free(&b);
+    CHECK(num_diags == 0);
+    CHECK(lowering.status == ROCKE_OK);
+    CHECK(every_lds_access_claims(lowering.text, "store <1 x float> %", 4));
+    CHECK(hip.status == ROCKE_OK);
+    CHECK(lines_with(hip.text, "_storage[c1] = " + lane_zero_of_one_lane).size() == 1);
+    return 0;
+}
+
+/* Serialized IR reaches the verifier and the lowerings without passing the
+ * builder: the verifier reports, and the LLVM and HIP lowerings refuse with
+ * ROCKE_ERR_VALUE, a tile.smem_store_vN whose value does not have `vec` lanes
+ * (a scalar has one). Mirrors
+ * test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused. */
+int test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused()
+{
+    const struct
+    {
+        const char* value_line;
+        int vec;
+        const char* message;
+    } cases[] = {
+        {"%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+         "{ align = i:4, elem_type = s:\"f32\", vec = i:4 }",
+         2,
+         "tile.smem_store_vN failed - lanes=4, expected vec=2"},
+        {"%v3 : f32 = arith.constant (  ) { ity = s:\"f32\", value = f:1.0 }",
+         4,
+         "tile.smem_store_vN failed - lanes=1, expected vec=4"},
+    };
+    for(const auto& test_case : cases)
+    {
+        const std::string text
+            = std::string("ckdsl.ir v1\n"
+                          "kernel @lds_store_lanes {\n"
+                          "  params {\n"
+                          "    %out : ptr<f32,global>\n"
+                          "  }\n"
+                          "  region @entry {\n"
+                          "    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n"
+                          "    %buf2 : smem<f32, [16]> = tile.smem_alloc (  )\n"
+                          "    ")
+              + test_case.value_line
+              + "\n"
+                "    tile.smem_store_vN ( %buf2, %c1, %v3 ) { align = i:4, elem_type = "
+                "s:\"f32\", rank = i:1, vec = i:"
+              + std::to_string(test_case.vec)
+              + " }\n"
+                "    cf.return (  )\n"
+                "  }\n"
+                "}\n";
+        CHECK(serialized_kernel_is_refused(text, ROCKE_ERR_VALUE, test_case.message));
+    }
+    return 0;
+}
+
+/* smem_store_vN_f32 stores its value as an n-element f32 vector (a scalar for
+ * n = 1), so it refuses a value of another lane count as smem_store_vN does.
+ * Mirrors test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused. */
+int test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused()
+{
+    const struct
+    {
+        int lanes;
+        int n;
+        const char* message;
+    } cases[] = {
+        {4, 2, "smem_store_vN_f32 failed - lanes=4, expected n=2"},
+        {2, 4, "smem_store_vN_f32 failed - lanes=2, expected n=4"},
+        {4, 1, "smem_store_vN_f32 failed - lanes=4, expected n=1"},
+        {1, 4, "smem_store_vN_f32 failed - lanes=1, expected n=4"},
+    };
+    for(const auto& test_case : cases)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "lds_store_f32_epilogue_lanes") == ROCKE_OK);
+        rocke_value_t* out
+            = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f32(), "global"), NULL);
+        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+        const int tile_shape[] = {16};
+        rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f32(), tile_shape, 1, "f");
+        rocke_value_t* value
+            = test_case.lanes == 1
+                  ? rocke_b_global_load(&b, out, zero, rocke_f32(), 4)
+                  : rocke_b_global_load_vN(&b, out, zero, rocke_f32(), test_case.lanes, 4);
+        CHECK(rocke_ir_builder_ok(&b));
+        rocke_value_t* const at_zero[] = {zero};
+        const bool refused = builder_refuses(
+            &b,
+            [&] { rocke_b_smem_store_vN_f32(&b, tile, at_zero, 1, value, test_case.n); },
+            ROCKE_ERR_VALUE,
+            test_case.message);
+        rocke_ir_builder_free(&b);
+        CHECK(refused);
+    }
+    return 0;
+}
+
+/* smem_store_vN_f32 emits an f32 store, so it refuses a value of any other
+ * element type. Mirrors
+ * test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused. */
+int test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_store_f32_epilogue_f16_value") == ROCKE_OK);
+    rocke_value_t* out = rocke_b_param(&b, "out", rocke_ptr_type(&b, rocke_f16(), "global"), NULL);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int tile_shape[] = {16};
+    rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f32(), tile_shape, 1, "f");
+    rocke_value_t* value = rocke_b_global_load_vN(&b, out, zero, rocke_f16(), 4, 2);
+    CHECK(rocke_ir_builder_ok(&b));
+    rocke_value_t* const at_zero[] = {zero};
+    const bool refused = builder_refuses(
+        &b,
+        [&] { rocke_b_smem_store_vN_f32(&b, tile, at_zero, 1, value, 4); },
+        ROCKE_ERR_TYPE,
+        "smem_store_vN_f32 failed - value element type='f16', expected f32");
+    rocke_ir_builder_free(&b);
+    CHECK(refused);
+    return 0;
+}
+
+/* smem_store_f16 records an f16 store, so it refuses a value of any other
+ * element type. Mirrors test_an_f16_store_of_a_value_not_holding_f16_is_refused. */
+int test_an_f16_store_of_a_value_not_holding_f16_is_refused()
+{
+    const struct
+    {
+        const rocke_type_t* value_elem;
+        const char* message;
+    } cases[] = {
+        {rocke_f32(), "smem_store_f16 failed - value element type='f32', expected f16"},
+        {rocke_bf16(), "smem_store_f16 failed - value element type='bf16', expected f16"},
+    };
+    for(const auto& test_case : cases)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "lds_store_f16_value") == ROCKE_OK);
+        rocke_value_t* out
+            = rocke_b_param(&b, "out", rocke_ptr_type(&b, test_case.value_elem, "global"), NULL);
+        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+        const int tile_shape[] = {16};
+        rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f16(), tile_shape, 1, "h");
+        rocke_value_t* value = rocke_b_global_load(&b, out, zero, test_case.value_elem, 2);
+        CHECK(rocke_ir_builder_ok(&b));
+        rocke_value_t* const at_zero[] = {zero};
+        const bool refused = builder_refuses(
+            &b,
+            [&] { rocke_b_smem_store_f16(&b, tile, at_zero, 1, value); },
+            ROCKE_ERR_TYPE,
+            test_case.message);
+        rocke_ir_builder_free(&b);
+        CHECK(refused);
+    }
+    return 0;
+}
+
+/* A raw value (rocke_i_value_named given no type) has no type:
+ * smem_store_f16 and smem_store_vN_f32 refuse it with ROCKE_ERR_TYPE naming its
+ * operand, with the operand rule's text, before they read its element type, and
+ * add no op. Mirrors test_a_store_of_a_value_with_no_type_is_refused. */
+int test_a_store_of_a_value_with_no_type_is_refused()
+{
+    using Store
+        = void (*)(rocke_ir_builder_t*, rocke_value_t*, rocke_value_t* const*, rocke_value_t*);
+    const struct
+    {
+        const char* name;
+        const rocke_type_t* tile_element;
+        Store store;
+    } cases[] = {
+        {"smem_store_f16",
+         rocke_f16(),
+         [](rocke_ir_builder_t* b,
+            rocke_value_t* tile,
+            rocke_value_t* const* at,
+            rocke_value_t* value) { rocke_b_smem_store_f16(b, tile, at, 1, value); }},
+        {"smem_store_vN_f32",
+         rocke_f32(),
+         [](rocke_ir_builder_t* b,
+            rocke_value_t* tile,
+            rocke_value_t* const* at,
+            rocke_value_t* value) { rocke_b_smem_store_vN_f32(b, tile, at, 1, value, 1); }},
+    };
+    for(const auto& test_case : cases)
+    {
+        rocke_ir_builder_t b;
+        CHECK(rocke_ir_builder_init(&b, "lds_store_untyped_value") == ROCKE_OK);
+        rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+        const int tile_shape[] = {16};
+        rocke_value_t* tile = rocke_b_smem_alloc(&b, test_case.tile_element, tile_shape, 1, "t");
+        rocke_value_t* untyped = rocke_i_value_named(&b, "%untyped", nullptr);
+        CHECK(rocke_ir_builder_ok(&b));
+        rocke_value_t* const at_zero[] = {zero};
+        const std::string message
+            = std::string(test_case.name) + " operand 2 failed - type=None, expected an IR type";
+        const bool refused = builder_refuses(
+            &b,
+            [&] { test_case.store(&b, tile, at_zero, untyped); },
+            ROCKE_ERR_TYPE,
+            message.c_str());
+        rocke_ir_builder_free(&b);
+        CHECK(refused);
+    }
+    return 0;
+}
+
+/* IR edited past the builder can store a value with no type, which serialized
+ * IR cannot spell: the verifier reports it, and the LLVM and HIP lowerings
+ * refuse it with ROCKE_ERR_TYPE and the builder's text naming the op, before
+ * they read its element type. Mirrors
+ * test_an_f32_epilogue_store_of_a_value_with_no_type_is_refused_past_the_builder. */
+int test_an_f32_epilogue_store_of_a_value_with_no_type_is_refused_past_the_builder()
+{
+    const char* message
+        = "tile.smem_store_vN_f32 operand 2 failed - type=None, expected an IR type";
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_store_f32_epilogue_untyped_value") == ROCKE_OK);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int tile_shape[] = {16};
+    rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f32(), tile_shape, 1, "f");
+    rocke_value_t* const at_zero[] = {zero};
+    rocke_b_smem_store_vN_f32(&b, tile, at_zero, 1, rocke_b_const_f32(&b, 1.0f), 1);
+    CHECK(rocke_ir_builder_ok(&b));
+    rocke_op_t* store = b.kernel->body->ops[b.kernel->body->num_ops - 1];
+    CHECK(store->opcode == ROCKE_OP_TILE_SMEM_STORE_VN_F32);
+    store->operands[store->num_operands - 1] = rocke_i_value_named(&b, "%untyped", nullptr);
+    rocke_b_ret(&b);
+    rocke_diag_t* diags = NULL;
+    size_t num_diags = 0;
+    CHECK(rocke_verify(b.kernel, &diags, &num_diags) == ROCKE_OK);
+    bool reported = false;
+    for(size_t i = 0; i < num_diags; ++i)
+        reported = reported || std::strcmp(diags[i].message, message) == 0;
+    rocke_diags_free(diags, num_diags);
+    /* LLVM first: a refused HIP lowering leaves its error on the builder. */
+    const Lowering lowering = lower_to_llvm(&b);
+    const Lowering hip = lower_to_hip(&b, b.kernel);
+    rocke_ir_builder_free(&b);
+    CHECK(reported);
+    CHECK(lowering.status == ROCKE_ERR_TYPE && lowering.text.empty() && lowering.error == message);
+    CHECK(hip.status == ROCKE_ERR_TYPE && hip.text.empty() && hip.error == message);
+    return 0;
+}
+
+/* Serialized IR reaches the verifier and the lowerings without passing the
+ * builder: the verifier reports, and the LLVM and HIP lowerings refuse, an f32
+ * epilogue store whose value does not hold f32 (ROCKE_ERR_TYPE) or does not
+ * have `vec` lanes (ROCKE_ERR_VALUE). Mirrors
+ * test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused. */
+int test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused()
+{
+    const struct
+    {
+        const char* value_line;
+        int vec;
+        rocke_status_t status;
+        const char* message;
+    } cases[] = {
+        {"%v3 : vec<f16x4> = memref.global_load_vN ( %outh, %c1 ) "
+         "{ align = i:2, elem_type = s:\"f16\", vec = i:4 }",
+         4,
+         ROCKE_ERR_TYPE,
+         "tile.smem_store_vN_f32 failed - value element type='f16', expected f32"},
+        {"%v3 : vec<f32x4> = memref.global_load_vN ( %out, %c1 ) "
+         "{ align = i:4, elem_type = s:\"f32\", vec = i:4 }",
+         2,
+         ROCKE_ERR_VALUE,
+         "tile.smem_store_vN_f32 failed - lanes=4, expected vec=2"},
+    };
+    for(const auto& test_case : cases)
+    {
+        const std::string text
+            = std::string("ckdsl.ir v1\n"
+                          "kernel @lds_f32_epilogue_contract {\n"
+                          "  params {\n"
+                          "    %out : ptr<f32,global>\n"
+                          "    %outh : ptr<f16,global>\n"
+                          "  }\n"
+                          "  region @entry {\n"
+                          "    %c1 : i32 = arith.constant (  ) { ity = s:\"i32\", value = i:0 }\n"
+                          "    %buf2 : smem<f32, [16]> = tile.smem_alloc (  )\n"
+                          "    ")
+              + test_case.value_line
+              + "\n"
+                "    tile.smem_store_vN_f32 ( %buf2, %c1, %v3 ) { elem_type = s:\"f32\", "
+                "rank = i:1, vec = i:"
+              + std::to_string(test_case.vec)
+              + " }\n"
+                "    cf.return (  )\n"
+                "  }\n"
+                "}\n";
+        CHECK(serialized_kernel_is_refused(text, test_case.status, test_case.message));
+    }
+    return 0;
+}
+
+/* An f16 tile whose rows are 12 halves (24 bytes), read and written 4 f32 wide
+ * (16 bytes) by the f32 epilogue ops, as a kernel that reuses an f16 LDS ring
+ * to stage f32 values does: row 1 starts 24 bytes in, so both accesses claim
+ * only the 8 bytes every row start guarantees (gcd(16, 24)). Mirrors
+ * test_an_f32_epilogue_access_bounds_its_claim_by_the_rows_of_any_tile. */
+int test_an_f32_epilogue_access_bounds_its_claim_by_the_rows_of_any_tile()
+{
+    rocke_ir_builder_t b;
+    CHECK(rocke_ir_builder_init(&b, "lds_align_f32_epilogue_f16_rows") == ROCKE_OK);
+    rocke_value_t* zero = rocke_b_const_i32(&b, 0);
+    const int tile_shape[] = {2, 12};
+    rocke_value_t* tile = rocke_b_smem_alloc(&b, rocke_f16(), tile_shape, 2, "t");
+    rocke_value_t* const row_zero[] = {zero, zero};
+    rocke_value_t* row = rocke_b_smem_load_vN_f32(&b, tile, row_zero, 2, 4);
+    rocke_value_t* const row_one[] = {rocke_b_const_i32(&b, 1), zero};
+    rocke_b_smem_store_vN_f32(&b, tile, row_one, 2, row, 4);
+    rocke_b_ret(&b);
+    const Lowering lowering = lower_and_free(&b);
+    CHECK(lowering.status == ROCKE_OK);
+    CHECK(every_lds_access_claims(lowering.text, "= load <4 x float>, ptr addrspace(3)", 8));
+    CHECK(every_lds_access_claims(lowering.text, "store <4 x float> %", 8));
+    return 0;
+}
+
 } // namespace
 
 int main()
@@ -477,7 +1017,18 @@ int main()
        || test_a_distributed_store_claims_its_element_width()
        || test_an_eight_byte_element_segment_is_aligned_to_its_width()
        || test_eight_wide_fp8_load_claims_eight_bytes()
-       || test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts())
+       || test_a_padded_tile_bounds_the_vector_claim_by_its_row_starts()
+       || test_a_padded_tile_bounds_the_f32_epilogue_claims_by_its_row_starts()
+       || test_a_store_whose_value_lanes_differ_from_n_is_refused()
+       || test_a_one_lane_vector_is_a_one_element_store()
+       || test_a_serialized_store_whose_value_lanes_differ_from_vec_is_refused()
+       || test_an_f32_epilogue_store_whose_value_lanes_differ_from_n_is_refused()
+       || test_an_f32_epilogue_store_of_a_value_not_holding_f32_is_refused()
+       || test_an_f16_store_of_a_value_not_holding_f16_is_refused()
+       || test_a_store_of_a_value_with_no_type_is_refused()
+       || test_an_f32_epilogue_store_of_a_value_with_no_type_is_refused_past_the_builder()
+       || test_a_serialized_f32_epilogue_store_breaking_its_contract_is_refused()
+       || test_an_f32_epilogue_access_bounds_its_claim_by_the_rows_of_any_tile())
     {
         std::fprintf(stderr, "LDS alignment contract failed\n");
         return 1;

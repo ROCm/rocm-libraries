@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/ir_internal.h"
 #include "rocke/passes.h"
 #include "rocke/vec.h"
 
@@ -530,6 +531,12 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
     /* Every foldable op takes 1..3 operands; a different arity cannot be one. */
     if(op->num_operands < 1 || op->num_operands > 3)
         return false;
+    /* An op that breaks an operand rule (a binary op or compare without two
+     * operands and one result, say, or with operands of two types) is left for
+     * the verifier and the lowerings to refuse, not folded. */
+    char operand_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_i_operand_rules_error(op, operand_error, sizeof operand_error) != ROCKE_OK)
+        return false;
     /* Python: ints = [_const_int(v) for v in op.operands]; if any None -> skip */
     for(i = 0; i < op->num_operands; i++)
     {
@@ -604,9 +611,17 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
         int64_t a, bc;
         if(op->num_operands != 2)
             return false;
+        /* A compare the IR rule refuses (an absent or unknown pred, say) is left
+         * for the verifier and the lowerings to refuse, not folded. */
+        char cmp_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_cmp_error(&op->attrs,
+                             op->operands[0]->type,
+                             op->operands[1]->type,
+                             cmp_error,
+                             sizeof cmp_error)
+           != ROCKE_OK)
+            return false;
         pred = rocke_attr_get_str(&op->attrs, "pred");
-        if(pred == NULL)
-            pred = "lt"; /* op.attrs.get("pred", "lt") */
         a = ints[0];
         bc = ints[1];
         if(strcmp(pred, "ult") == 0)
@@ -630,7 +645,7 @@ static bool try_fold(const rocke_op_t* op, int64_t* out)
         else if(strcmp(pred, "ne") == 0)
             *out = (a != bc);
         else
-            return false; /* Python would KeyError; conservatively skip fold */
+            return false; /* not reached: rocke_i_cmp_error admits only these */
         return true;
     }
     case ROCKE_OP_ARITH_SELECT:

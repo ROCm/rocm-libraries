@@ -572,8 +572,14 @@ rocke_value_t* rocke_i_binop(rocke_ir_builder_t* b,
 #endif
         return (rocke_value_t*)rocke_i_set_err(b, ROCKE_ERR_VALUE, "binop: NULL operand");
     }
+    const char* op_name = rocke_opcode_name(opcode);
+    if(rocke_i_is_integer_element_op(opcode))
+    {
+        rocke_i_refuse_non_integer(op_name, a->type);
+    }
     operands[0] = a;
     operands[1] = bb;
+    rocke_i_refuse_operand_types(b, op_name, operands, 2);
     return rocke_i_op1(b, opcode, operands, 2, a->type, NULL, result_name_hint);
 }
 

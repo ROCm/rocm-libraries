@@ -307,8 +307,14 @@ static const unsigned_case k_unsigned_cases[] = {
          rocke_value_t* i = rocke_b_const_i32(b, 1);
          return rocke_b_umax(b, i, i);
      },
-     ROCKE_ERR_VALUE,
-     "umax expects two operands of one unsigned integer type, got i32 and i32"},
+     ROCKE_ERR_TYPE,
+     "arith.umax failed - operand type='i32', expected an unsigned integer scalar"},
+    {"umax_of_vector",
+     [](rocke_ir_builder_t* b, rocke_value_t* x, rocke_value_t* y) {
+         return rocke_b_umax(b, rocke_b_vector_splat(b, x, 4), rocke_b_vector_splat(b, y, 4));
+     },
+     ROCKE_ERR_TYPE,
+     "arith.umax failed - operand type='vec<u8x4>', expected an unsigned integer scalar"},
     {"uitofp_f32_of_i32",
      [](rocke_ir_builder_t* b, rocke_value_t*, rocke_value_t*) {
          return rocke_b_uitofp_f32(b, rocke_b_const_i32(b, 1));
