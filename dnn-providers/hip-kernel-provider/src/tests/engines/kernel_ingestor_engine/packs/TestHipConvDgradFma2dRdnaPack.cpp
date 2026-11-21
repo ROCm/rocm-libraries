@@ -61,6 +61,7 @@ constexpr int64_t DX_UID = 3;
 struct GraphSpec
 {
     data_objects::DataType dtype = data_objects::DataType::FLOAT;
+    data_objects::DataType computeType = data_objects::DataType::FLOAT;
     bool channelsLast = false;
     bool forward = false;
     int64_t n = 2;
@@ -148,7 +149,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         nodes.push_back(
             data_objects::CreateNodeDirect(builder,
                                            "conv_fwd",
-                                           spec.dtype,
+                                           spec.computeType,
                                            data_objects::NodeAttributes::ConvolutionFwdAttributes,
                                            attributes.Union()));
     }
@@ -167,7 +168,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         nodes.push_back(
             data_objects::CreateNodeDirect(builder,
                                            "conv_dgrad",
-                                           spec.dtype,
+                                           spec.computeType,
                                            data_objects::NodeAttributes::ConvolutionBwdAttributes,
                                            attributes.Union()));
     }
@@ -292,6 +293,11 @@ TEST(TestHipConvDgradFma2dRdnaGraphMatcher, AcceptsTwoDimensionalDgrad)
 
 TEST(TestHipConvDgradFma2dRdnaGraphMatcher, RefusesWhatItCannotServe)
 {
+    GraphSpec halfCompute;
+    halfCompute.dtype = data_objects::DataType::HALF;
+    halfCompute.computeType = data_objects::DataType::HALF;
+    EXPECT_FALSE(matches(halfCompute)) << "half compute type";
+
     GraphSpec depthwise;
     depthwise.groups = 64;
     depthwise.k = 64;

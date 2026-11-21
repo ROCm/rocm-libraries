@@ -228,7 +228,10 @@ std::optional<MatchedConv> matchConv(const MatchContext& context)
         return std::nullopt;
     }
     const auto& node = context.graph.getNodeWrapper(0);
-    if(node.attributesType() != data_objects::NodeAttributes::ConvolutionBwdAttributes)
+    // The kernel accumulates in fp32, so a graph that asks for another compute type (half,
+    // int32, double) is declined rather than computed at a different precision.
+    if(node.attributesType() != data_objects::NodeAttributes::ConvolutionBwdAttributes
+       || node.computeDataType() != data_objects::DataType::FLOAT)
     {
         return std::nullopt;
     }
