@@ -13,6 +13,7 @@ that equality is pinned here on both engines.
 import unittest
 
 from rocke.core.arch import ArchTarget, MmaEmulationRecipe, known_arches
+from rocke.tests.arch_marks import arch_specific
 
 EMULATED = {
     "mfma_f32_16x16x32_xf32": ("mfma_f32_16x16x32_bf16", (16, 16, 32)),
@@ -25,6 +26,10 @@ def _ops(gfx="gfx950"):
 
 
 class TestShippedRows(unittest.TestCase):
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_both_rows_are_present_on_gfx950(self):
         ops = _ops()
         for op_id, (_, shape) in EMULATED.items():
@@ -34,6 +39,10 @@ class TestShippedRows(unittest.TestCase):
                 self.assertEqual((op.m, op.n, op.k), shape)
                 self.assertEqual(op.family, "mma")
 
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_rows_are_bf16x3_emulation_over_the_named_physical_atom(self):
         ops = _ops()
         for op_id, (physical, _) in EMULATED.items():
@@ -43,6 +52,10 @@ class TestShippedRows(unittest.TestCase):
                 self.assertEqual(op.emulation.recipe, MmaEmulationRecipe.BF16X3)
                 self.assertEqual(op.emulation.physical_op_id, physical)
 
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_fragment_metadata_equals_the_physical_atom(self):
         """The one way these rows can be wrong and still load."""
         ops = _ops()
@@ -57,6 +70,10 @@ class TestShippedRows(unittest.TestCase):
                 self.assertEqual(emulated.b_layout(), real.b_layout())
                 self.assertEqual(emulated.c_layout(), real.c_layout())
 
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_the_physical_atom_is_itself_native(self):
         """No chains: an emulated atom must expand into real hardware in one hop."""
         ops = _ops()
@@ -64,6 +81,10 @@ class TestShippedRows(unittest.TestCase):
             with self.subTest(physical=physical):
                 self.assertTrue(ops[physical].is_native)
 
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_rows_accumulate_in_fp32_and_are_unscaled(self):
         ops = _ops()
         for op_id in EMULATED:
@@ -75,12 +96,20 @@ class TestShippedRows(unittest.TestCase):
 
 
 class TestSelection(unittest.TestCase):
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_tf32_queries_reach_both_rows_on_gfx950(self):
         got = ArchTarget.from_gfx("gfx950").mma.enumerate(
             family="mma", a_dtype="tf32", b_dtype="tf32", c_dtype="fp32"
         )
         self.assertEqual({op.op_id for op in got}, set(EMULATED))
 
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_largest_k_picks_the_16x16_row(self):
         catalog = ArchTarget.from_gfx("gfx950").mma
         shape = {
@@ -128,6 +157,10 @@ class TestSelection(unittest.TestCase):
                 with self.subTest(gfx=gfx, mn=mn):
                     self.assertEqual(len(kinds), 1, f"{gfx} mixes native and emulated")
 
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_fp32_selection_on_gfx950_is_untouched(self):
         """The rows must not leak into the native fp32 MFMA path."""
         got = ArchTarget.from_gfx("gfx950").mma.enumerate(
@@ -138,6 +171,10 @@ class TestSelection(unittest.TestCase):
             {"mfma_f32_16x16x4_f32", "mfma_f32_32x32x2_f32"},
         )
 
+    @arch_specific(
+        ("gfx950",),
+        reason="xf32 bf16x3 emulation rows exist on gfx950 only; gfx942 uses native xf32 MFMA",
+    )
     def test_bf16_selection_on_gfx950_is_untouched(self):
         got = ArchTarget.from_gfx("gfx950").mma.enumerate(
             family="mma", a_dtype="bf16", b_dtype="bf16", c_dtype="fp32"
