@@ -599,5 +599,6 @@ BenchmarkProblems:
           - Exact: [720, 432, 1, 256] # DU128: 2 iterations
           - Exact: [576, 208, 1, 736] # DU256: 2 iterations + tail
           - Exact: [576, 208, 1, 512] # DU256: 2 iterations
+          - Exact: [720, 432, 1, 96]  # K < DepthU
         - ActivationArgs:
           - [Enum: none]

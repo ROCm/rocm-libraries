@@ -52,7 +52,7 @@ from .ir import BranchInstruction, BufferLoadB128, BufferLoadB32, \
   FlatStoreD16B16, FlatStoreD16HIB16, GlobalReadInstruction, MXMFMAInstruction, MFMAInstruction, MUBUFReadInstruction, \
   MacroInstruction, SAShiftRightI32, SAbsI32, SAddCU32, SAddI32, SAddU32, SAddU64, SAndB32, \
   SAndB64, SAndN2B32, SAtomicDec, SAtomicInc, SBarrier, SBfmB32, SBfmB64, SBitcmp1B32, SBranch, SCBranchSCC0, \
-  SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCSelectB32, SCSelectB64, SCmpEQI32, \
+  SCBranchSCC1, SCBranchVCCNZ, SCBranchVCCZ, SCMovB32, SCMovB64, SCSelectB32, SCSelectB64, SCmpEQI32, \
   SCmpEQU32, SCmpEQU64, SCmpGeI32, SCmpGeU32, SCmpGtI32, SCmpGtU32, SCmpKEQU32, \
   SCmpKGeU32, SCmpKGtU32, SCmpKLGU32, SCmpLeI32, SCmpLeU32, SCmpLgU32, SCmpLtU32, SCmpLtI32, \
   SEndpgm, SFf1B32, SGetRegB32, SFlbitI32B32, SLShiftLeft2AddU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, \
@@ -218,6 +218,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import List, Mapping, NamedTuple, Optional, Tuple, Union
 
+import contextlib
 import os
 
 # The states.overflowedResources codes judgeRegisterBudget reaches, and so the
@@ -547,7 +548,7 @@ class KernelWriterAssembly(KernelWriter):
       return False
     return (numComp - 1) * (numMxKGroups // numComp) > 1
 
-  def tailFoldingShrinkTdmKDim(self, kernel, tPA, tPB) -> Module:
+  def tailFoldingShrinkTdmKDim(self, kernel, tPA, tPB, kStep=None) -> Module:
     """Shrink a descriptor set's K dim by the k-tile its address just advanced.
 
     TDM clamps the partial last k-tile at K only if the K dim, measured from the
@@ -560,6 +561,8 @@ class KernelWriterAssembly(KernelWriter):
     fields = [tdmKDimField(kernel, tc) for tc in (tcA, tcB)]
     assert None not in fields and fields[0][0] == fields[1][0], \
       "%s/%s do not keep K in one field: %s" % (tcA, tcB, fields)
+    if not kernel["ReuseAcrossPersistent"]:
+      return self._tailFoldingShrinkTdmKDim32(kernel, tPA, tPB, fields, module, kStep)
     assert self.rapResidentKTiles(kernel) * kernel["DepthU"] < (1 << 16), \
       "the TDM K dim's high half is not zero"
     dword = fields[0][0]
@@ -583,6 +586,101 @@ class KernelWriterAssembly(KernelWriter):
                                comment="RAP: a borrow means this wave's K ran out"))
         module.add(SAndB32(dst=sgpr(group1), src0=sgpr(group1), src1=sgpr(tmpSgprRes.idx),
                            comment="RAP: clamp the K dim at zero"))
+    return module
+
+  def tailFoldGsu(self, kernel) -> bool:
+    """The kernel carries runtime GSU (GSUSumIdx / GSU args): GlobalSplitU > 0 or -1."""
+    return kernel["GlobalSplitU"] > 0 or kernel["GlobalSplitU"] == -1
+
+  def tailFoldLate(self, kernel) -> bool:
+    """Runtime tail folding decided after the first TDM issue (DU > 64: fold needs K >= DU, so no split's
+    zero-iteration test changes; with GSU the extra k-tile goes to its owner split only). StaggerU kernels
+    decide before the loop count is used: StaggerUIter and the wrap step come from the folded count."""
+    return kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"] and kernel["DepthU"] > 64 \
+      and not self.states.staggerUCode
+
+  def tailFoldDecisionLate(self, kernel) -> Module:
+    """After the first TDM issue (hidden under its latency): decide, then the split owning the folded
+    k-tile takes one more iteration (its index is floor(K/DU) % GSU = the GSU remainder; 0 without GSU)."""
+    mod = Module("TailFoldDecisionLate")
+    lc = self.loopCounterName(kernel, self.states.unrollIdx)
+    with self.allocTmpSgpr(3, tag="tailFoldDecisionLate") as tmp:
+      # TailFoldOn / TailFoldStep are already 0 (set with the loop count)
+      mod.add(self.tailFoldDecision(kernel, "SizesSum+%u" % self.states.unrollIdx, tmp.idx, init=False))
+      add = sgpr("TailFoldOn")
+      if self.tailFoldGsu(kernel):
+        mod.add(SCmpEQU32(src0=sgpr("GSUSumIdx"), src1=sgpr("GSUSumIdx+1"), comment="TailFolding: owner split ? (GSUSumIdx == floor(K/DU) % GSU)"))
+        mod.add(SCSelectB32(dst=sgpr(tmp.idx), src0=sgpr("TailFoldOn"), src1=0, comment="TailFolding: extra = owner ? fold : 0"))
+        add = sgpr(tmp.idx)
+      mod.add(SAddU32(dst=sgpr(lc), src0=sgpr(lc), src1=add, comment="TailFolding: loop count += extra"))
+      mod.add(SAddU32(dst=sgpr("OrigLoopCounter"), src0=sgpr("OrigLoopCounter"), src1=add, comment="TailFolding: saved loop count += extra"))
+    return mod
+
+  def tailFoldDecision(self, kernel, kSgpr, tmp, init=True) -> Module:
+    """Runtime tail folding: TailFoldOn = 1 folds the partial last k-tile into the unroll loop, else the tail loop runs.
+    fold = (r >= 2) && (DU <= 64 || K >= 3*DU || (K >= DU && r > DU/4)), r = K & (DU-1): the global K decides, so every
+    GSU split agrees. GSUC == 1 with GSU > 1 (contiguous K blocks: one more k-tile would move every block) keeps the tail loop.
+    TailFoldStep (64-bit K dim field step) = fold ? GSU * DU : 0 (GSU = 1 without runtime GSU)."""
+    du = kernel["DepthU"]; on = sgpr("TailFoldOn"); r, t, g = sgpr(tmp), sgpr(tmp + 1), sgpr(tmp + 2)
+    gsu = self.tailFoldGsu(kernel)
+    mod = Module("TailFoldDecision")
+    rule = "fold = (r >= 2) && (K >= 3*DU || (K >= DU && r > DU/4))" if du > 64 else "fold = (r >= 2) (DU <= 64)"
+    if gsu:
+      rule += " && !(GSUC && GSU > 1)"
+    decided = Label(self.labels.getNameInc("TailFoldDecided"), "")
+    if init:
+      mod.add(SMovB32(dst=on, src=0, comment="TailFolding: fold = 0"))
+      mod.add(SMovB64(dst=sgpr("TailFoldStep", 2), src=0, comment="TailFolding: K dim step = 0"))
+    mod.add(SAndB32(dst=r, src0=sgpr(kSgpr), src1=du - 1, comment="TailFolding: r = K & (DU-1); rule: %s, DU = %u" % (rule, du)))
+    mod.add(SCBranchSCC0(labelName=decided.getLabelName(), comment="TailFolding: r == 0, no fold"))
+    if du > 64:
+      mod.add(SCmpGtU32(src0=r, src1=du // 4, comment="TailFolding: r > DU/4 ?"))
+      mod.add(SCSelectB32(dst=t, src0=1, src1=3, comment="TailFolding: t = (r > DU/4) ? 1 : 3"))
+      mod.add(SLShiftLeftB32(dst=t, shiftHex=hex(int(log2(du))), src=t, comment="TailFolding: t = (r > DU/4) ? DU : 3*DU"))
+      mod.add(SCmpGeU32(src0=sgpr(kSgpr), src1=t, comment="TailFolding: K >= t ?"))
+      mod.add(SCSelectB32(dst=on, src0=1, src1=0, comment="TailFolding: fold = (K >= t)"))
+      mod.add(SCmpLtU32(src0=r, src1=2, comment="TailFolding: r < 2 ?"))
+      mod.add(SCSelectB32(dst=on, src0=0, src1=on, comment="TailFolding: fold = (K >= t) && (r >= 2)"))
+    else:
+      mod.add(SCmpGeU32(src0=r, src1=2, comment="TailFolding: r >= 2 ?"))
+      mod.add(SCSelectB32(dst=on, src0=1, src1=0, comment="TailFolding: fold = (r >= 2)"))
+    if gsu:
+      mod.add(SAndB32(dst=g, src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="TailFolding: g = GSU"))
+      mod.add(SAndB32(dst=t, src0=sgpr("GSU"), src1=hex(0x8000), comment="TailFolding: GSUC ?"))
+      mod.add(SCSelectB32(dst=t, src0=g, src1=1, comment="TailFolding: t = GSUC ? GSU : 1"))
+      mod.add(SCmpGtU32(src0=t, src1=1, comment="TailFolding: GSUC && GSU > 1 ?"))
+      mod.add(SCSelectB32(dst=on, src0=0, src1=on, comment="TailFolding: fold = fold && !(GSUC && GSU > 1)"))
+    fields = [tdmKDimField(kernel, tc) for tc in ("A", "B")]
+    if not (fields[0][1] == fields[1][1] == du):
+      raise RuntimeError("runtime tail folding: the A/B K dim step must be DepthU")
+    mod.add(SCmpEQU32(src0=on, src1=0, comment="TailFolding: fold ?"))
+    mod.add(SCBranchSCC1(labelName=decided.getLabelName(), comment="TailFolding: no fold, K dim step stays 0"))
+    if gsu:
+      mod.add(SMovB32(dst=sgpr("TailFoldStep"), src=g, comment="TailFolding: K dim step = GSU k-tiles"))
+    else:
+      mod.add(SMovB32(dst=sgpr("TailFoldStep"), src=1, comment="TailFolding: K dim step = 1 k-tile"))
+    mod.add(SLShiftLeftB64(dst=sgpr("TailFoldStep", 2), shiftHex=hex(16 + int(log2(du))), src=sgpr("TailFoldStep", 2),
+                           comment="TailFolding: K dim step = k-tiles * DU, in the field's high half"))
+    mod.add(decided)
+    return mod
+
+  def _tailFoldingShrinkTdmKDim32(self, kernel, tPA, tPB, fields, module, kStep=None) -> Module:
+    """TailFolding: K dim -= the k-tile the address just advanced, as a 32-bit field (low half in
+    the dword's high half, high half in the next dword's low half). It only goes below zero after
+    the last k-tile has been issued, when no TDM load reads the descriptor any more."""
+    tcA, tcB = tPA["tensorChar"], tPB["tensorChar"]
+    dword = fields[0][0]
+    group1 = "tdm%sGroup1" % self._tdmPairedParityOrder(kernel, tPA, tPB)[0]["tensorChar"]
+    lo, hi = sgpr("%s+%u" % (group1, dword)), sgpr("%s+%u" % (group1, dword + 1))
+    if fields[0][1] == fields[1][1]:
+      step = fields[0][1]
+      # runtime tail folding: TailFoldStep = fold ? step : 0 (no fold -> the K dim stays as without folding)
+      stepLo, stepHi = (sgpr("TailFoldStep"), sgpr("TailFoldStep+1")) if kStep is None else kStep
+      what = "fold ? step : 0" if kStep is None else "fold ? (wrapIter ? -(splitIters-1)*step : step) : 0"
+      module.add(SSubU32(dst=lo, src0=lo, src1=stepLo, comment="TailFolding: K dim -= %s (low half)" % what))
+      module.add(SSubBU32(dst=hi, src0=hi, src1=stepHi, comment="TailFolding: K dim -= %s (high half)" % what))
+    else:
+      raise RuntimeError("runtime tail folding: %s/%s step K differently" % (tcA, tcB))
     return module
 
   def rapNullTdmDescriptorForEvenWaves(self, kernel, groupSgprName) -> Module:
@@ -1442,9 +1540,17 @@ class KernelWriterAssembly(KernelWriter):
         gl2Tensors.append("Metadata")
       for tc in gl2Tensors:
         module.add(self.defineSgpr(f"GL2PrefetchInc{tc}", numGL2IncSgpr, numGL2IncSgpr))
+      if kernel.get("_TailFolding", False) and self.tailFoldingGL2Clamp(kernel):
+        module.add(self.defineSgpr("GL2FoldThreshold", 1))
       if GL2PrefetchLoad.useSAddr(kernel):
         for tc in gl2Tensors:
           module.add(self.defineSgpr(f"GL2PrefetchBase{tc}", 2, 2))
+
+    if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+      module.add(self.defineSgpr("TailFoldOn", 1))
+      module.add(self.defineSgpr("TailFoldStep", 2, 2))
+      if self.states.staggerUCode:
+        module.add(self.defineSgpr("TailFoldWrapK", 2, 2))
 
     if self.sgprPool.size() > self.states.regCaps["MaxSgpr"]:
       print ("warning: Number of defined SGPRS (%d) overflowed max SGPRS (%d)." \
@@ -7864,6 +7970,22 @@ class KernelWriterAssembly(KernelWriter):
                 comment="Compute actual stagger start for this tile"))
       module.add(SLShiftLeftB32(dst=sgpr("StaggerUIter"), src=sgpr("StaggerUIter"), \
                 shiftHex=sgpr(staggerUStrideShift), comment="shift by StaggerUStride"))
+      if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+        # wrapping from this split's last k-tile back to its first: K dim += (splitIters - 1) * step
+        t = tmpSgpr
+        wrapDone = Label(self.labels.getNameInc("TailFoldWrapDone"), "")
+        module.add(SMovB64(dst=sgpr("TailFoldWrapK", 2), src=0, comment="TailFolding: wrap K step = 0"))
+        module.add(SCmpEQU32(src0=sgpr("TailFoldOn"), src1=0, comment="TailFolding: fold ?"))
+        module.add(SCBranchSCC1(labelName=wrapDone.getLabelName(), comment="TailFolding: no fold, wrap K step stays 0"))
+        module.add(SSubU32(dst=sgpr(t + 2), src0=sgpr("OrigLoopCounter"), src1=1, comment="TailFolding: splitIters - 1"))
+        module.add(SCMovB32(dst=sgpr(t + 2), src=0, comment="TailFolding: (no iteration)"))
+        module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr("TailFoldWrapK"), sgpr("TailFoldWrapK+1"), sgpr(t + 2), sgpr("TailFoldStep"),
+                                                       comment="TailFolding: (splitIters - 1) * step"))
+        module.add(SMulI32(dst=sgpr(t + 3), src0=sgpr(t + 2), src1=sgpr("TailFoldStep+1"), comment="TailFolding: (step high)"))
+        module.add(SAddU32(dst=sgpr("TailFoldWrapK+1"), src0=sgpr("TailFoldWrapK+1"), src1=sgpr(t + 3), comment="TailFolding: (high)"))
+        module.add(SSubU32(dst=sgpr("TailFoldWrapK"), src0=0, src1=sgpr("TailFoldWrapK"), comment="TailFolding: wrap K step = -(splitIters - 1) * step"))
+        module.add(SSubBU32(dst=sgpr("TailFoldWrapK+1"), src0=0, src1=sgpr("TailFoldWrapK+1"), comment="TailFolding: (high)"))
+        module.add(wrapDone)
 
     if isPersistent(kernel):
       processingComponent = Component.TileProcessingStrategy.find(self)
@@ -8053,6 +8175,24 @@ class KernelWriterAssembly(KernelWriter):
               src1=sgpr(offsetSgpr), comment=f"TDM addr += {commentTag} offset (lo)"))
     imod.add(SAddCU32(dst=sgpr(f"{tdmGroup0}+3"), src0=sgpr(f"{tdmGroup0}+3"), \
               src1=sgpr(offsetSgpr+1), comment=f"TDM addr += {commentTag} offset (hi)"))
+    if tdmGroupName is None and tc in ("A", "B") and commentTag == "stagger" \
+        and kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+      # the split starts StaggerUIter steps into its k-tiles: its K dim starts that much shorter
+      field = tdmKDimField(kernel, tc)
+      if field is None:
+        raise RuntimeError("runtime tail folding: %s keeps K in no single descriptor field" % tc)
+      lo, hi = sgpr("tdm%sGroup1+%u" % (tc, field[0])), sgpr("tdm%sGroup1+%u" % (tc, field[0] + 1))
+      startDone = Label(self.labels.getNameInc("TailFoldStaggerStartDone"), "")
+      imod.add(SCmpEQU32(src0=sgpr("TailFoldOn"), src1=0, comment="TailFolding: fold ?"))
+      imod.add(SCBranchSCC1(labelName=startDone.getLabelName(), comment="TailFolding: no fold, K dim unchanged"))
+      with self.allocTmpSgpr(3, 2, tag="tailFoldStaggerStart") as t:
+        imod.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(t.idx), sgpr(t.idx + 1), sgpr("StaggerUIter"), sgpr("TailFoldStep"),
+                                                     comment="TailFolding: stagger start = StaggerUIter * step"))
+        imod.add(SMulI32(dst=sgpr(t.idx + 2), src0=sgpr("StaggerUIter"), src1=sgpr("TailFoldStep+1"), comment="TailFolding: (step high)"))
+        imod.add(SAddU32(dst=sgpr(t.idx + 1), src0=sgpr(t.idx + 1), src1=sgpr(t.idx + 2), comment="TailFolding: stagger start (high)"))
+        imod.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim -= stagger start (low half)"))
+        imod.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim -= stagger start (high half)"))
+      imod.add(startDone)
 
     if skipLabel is not None:
       imod.add(skipLabel)
@@ -9147,6 +9287,14 @@ class KernelWriterAssembly(KernelWriter):
       divisor = kernel["DepthU"]
 
       module.add(scalarStaticDivideAndRemainder(qReg=quotient, rReg=-1, dReg=dividend, divisor=divisor, tmpSgprRes=tmpSgprInfo, doRemainder=False))
+      if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+          if self.tailFoldLate(kernel):
+            # DU > 64 folds only when K >= DU (the loop runs either way): decided after the first TDM issue.
+            module.add(SMovB32(dst=sgpr("TailFoldOn"), src=0, comment="TailFolding: fold = 0 until decided after the first TDM issue"))
+            module.add(SMovB64(dst=sgpr("TailFoldStep", 2), src=0, comment="TailFolding: K dim step = 0 until decided"))
+          else:
+            module.add(self.tailFoldDecision(kernel, dividend, tmpSgprInfo.idx))
+            module.add(SAddU32(dst=sgpr(quotient), src0=sgpr(quotient), src1=sgpr("TailFoldOn"), comment="TailFolding: loop count += fold"))
       if self.states.tailloopInNll:
           maxUnit = self.states.tailloopInNllmaxUnit
           sgprSizesSum = sgpr("SizesSum+%u" % self.states.unrollIdx)
@@ -13355,6 +13503,10 @@ class KernelWriterAssembly(KernelWriter):
                 kernel["ProblemType"]["IndicesSummation"][self.states.unrollIdx]]
             module.add(scalarStaticDivideAndRemainder(tmpSgpr, tmpSgpr+1, "SizesSum+%u"%self.states.unrollIdx, \
                       kernel["DepthU"], ContinuousRegister(tmpSgpr+2, 2), 2))
+            if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]:
+              # a folded tail runs in the unroll loop: no tail loop, the NLL is the last k-tile
+              module.add(SCmpEQU32(src0=sgpr("TailFoldOn"), src1=1, comment="TailFolding: fold ?"))
+              module.add(SCMovB32(dst=sgpr(tmpSgpr+1), src=0, comment="TailFolding: OptNLL when fold or K & (DU-1) == 0"))
             module.add(SCmpEQU32(src0=sgpr(tmpSgpr+1), src1=0, comment="numIter%s == 0"%loopChar ))
             if placeHolder == None:
               if isLongBranch:
@@ -25447,6 +25599,27 @@ class KernelWriterAssembly(KernelWriter):
     # Multi-wave TDMSplit recomputes the LDS/global split increments transiently at
     # point of use (see _tdmSplitMultiWaveInc); nothing is initialized here.
 
+    if kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"] and self.tailFoldGsu(kernel) \
+        and tc in ("A", "B") and tc not in tdmStashedMembers(kernel):
+      # runtime tail folding with GSU (GSUC == 0): this split starts at k-tile GSUSumIdx, so its K dim
+      # starts at K - GSUSumIdx * DU (GSUC == 1 with GSU > 1 never folds; a smaller K dim there only
+      # stays >= what that split still reads)
+      field = tdmKDimField(kernel, tc)
+      if field is None:
+        raise RuntimeError("runtime tail folding: %s keeps K in no single descriptor field" % tc)
+      lo, hi = sgpr("%s+%u" % (descSgprName(1), field[0])), sgpr("%s+%u" % (descSgprName(1), field[0] + 1))
+      splitDone = Label(self.labels.getNameInc("TailFoldSplitKDone"), "")
+      with self.allocTmpSgpr(2, 2, tag="tailFoldSplitKDim") as t:
+        mod.add(SAndB32(dst=sgpr(t.idx), src0=sgpr("SizesSum+%u" % self.states.unrollIdx), src1=du - 1, comment="TailFolding: r = K & (DU-1)"))
+        mod.add(SCBranchSCC0(labelName=splitDone.getLabelName(), comment="TailFolding: r == 0, no fold, K dim unchanged"))
+        mod.add(SMovB32(dst=sgpr(t.idx), src=sgpr("GSUSumIdx"), comment="TailFolding: split start k-tile = GSUSumIdx"))
+        mod.add(SMovB32(dst=sgpr(t.idx + 1), src=0, comment="TailFolding: (high)"))
+        mod.add(SLShiftLeftB64(dst=sgpr(t.idx, 2), shiftHex=hex(16 + int(log2(du))), src=sgpr(t.idx, 2),
+                               comment="TailFolding: split start = GSUSumIdx * DU, in the K dim field"))
+        mod.add(SSubU32(dst=lo, src0=lo, src1=sgpr(t.idx), comment="TailFolding: K dim = K - split start (low half)"))
+        mod.add(SSubBU32(dst=hi, src0=hi, src1=sgpr(t.idx + 1), comment="TailFolding: K dim = K - split start (high half)"))
+      mod.add(splitDone)
+
     return mod
 
   def _tdmMulticastMask(self, kernel, tc):
@@ -26569,7 +26742,9 @@ class KernelWriterAssembly(KernelWriter):
       return mod
 
     elif loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode:
-      with self.allocTmpSgpr(2 if hoistedWrapUSel else 4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo:
+      tfStagger = kernel.get("_TailFolding", False) and not kernel["ReuseAcrossPersistent"]
+      with self.allocTmpSgpr(2 if hoistedWrapUSel else 4, tag="tdmIncrementABWaveSperated_tmpSgprInfo") as tmpSgprInfo, \
+           (self.allocTmpSgpr(2, 2, tag="tailFoldStaggerStep") if tfStagger else contextlib.nullcontext()) as kStep:
         incTmpLo = tmpSgprInfo.idx
         incTmpHi = tmpSgprInfo.idx + 1
 
@@ -26602,13 +26777,23 @@ class KernelWriterAssembly(KernelWriter):
                 comment="select WrapU or normal inc (lo)"))
         mod.add(SCSelectB32(dst=sgpr(incTmpHi), src0=wrapHi, src1=0, \
                 comment="select WrapU or normal inc (hi)"))
+        if tfStagger:
+          # the wrap goes back from this split's last k-tile to its first: K dim += (splitIters-1)*step
+          mod.add(SCSelectB32(dst=sgpr(kStep.idx), src0=sgpr("TailFoldWrapK"), src1=sgpr("TailFoldStep"),
+                              comment="TailFolding: K dim step = wrapIter ? -(splitIters-1)*step : step (low)"))
+          mod.add(SCSelectB32(dst=sgpr(kStep.idx + 1), src0=sgpr("TailFoldWrapK+1"), src1=sgpr("TailFoldStep+1"),
+                              comment="TailFolding: K dim step = wrapIter ? -(splitIters-1)*step : step (high)"))
 
         mod.add(SAddU64(dst=sgpr(f"{tdmGroup0}+2", 2), src0=sgpr(f"{tdmGroup0}+2", 2), \
                 src1=sgpr(incTmpLo, 2), comment="TDM addr += inc (with wrap, 64-bit)"))
+        if tfStagger:
+          mod.add(self.tailFoldingShrinkTdmKDim(kernel, tPA, tPB, (sgpr(kStep.idx), sgpr(kStep.idx + 1))))
     else:
       mod.add(comp.incrementGlobalAddr(self, tdmGroup0, incSgprName))
 
-    if kernel.get("_TailFolding", False):
+    # (runtime tail folding with StaggerU shrinks the K dim in the stagger step above)
+    if kernel.get("_TailFolding", False) and not (loopIdx is not None and loopIdx == self.states.unrollIdx and self.states.staggerUCode
+                                                  and not kernel["ReuseAcrossPersistent"]):
       mod.add(self.tailFoldingShrinkTdmKDim(kernel, tPA, tPB))
 
     if kernel["TDMSplit"] and not (("MXS" in tcA) or ("MXS" in tcB)):

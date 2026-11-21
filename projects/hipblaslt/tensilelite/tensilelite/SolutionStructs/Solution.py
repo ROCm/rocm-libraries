@@ -58,7 +58,8 @@ from ..Components.DecouplePGR import pgrLevelsForTensors, ldsBlocksForPgrLevel, 
 from ..Components.TDMFuse import TDM_FUSE_GROUPING, TDM_SCALE_TENSORS, tdmBothTensors, \
                                        tdmGroupingName, tdmKDimTrackable, tdmLiveScales, \
                                        tdmPairOnEveryWave, \
-                                       tdmPapRejectReason, tdmWavePartition, tdmWaveSeparated
+                                       tdmPapRejectReason, tdmSeparateABDescriptors, tdmWavePartition, \
+                                       tdmWaveSeparated
 from ..Common.TypeValidationErrors import ConfigTypeError
 from ..CustomKernels import isCustomKernelConfig, supportsUserSgprKernargPreload, validateCustomPersistentArgs
 from ..SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
@@ -4432,6 +4433,25 @@ class Solution(collections.abc.Mapping):
     if (state["enableTDMA"] or state["enableTDMB"]) and state["1LDSBuffer"]:
       reject(state, printRejectionReason, "1LDSBuffer must be 0 for TDM")
       return
+
+    # Runtime tail folding: a kernel with a possible K tail folds it into the unroll loop when the
+    # run-time K makes it pay (KernelWriterAssembly.tailFoldDecision); the tail loop stays as the
+    # fallback. Only kernels whose structure allows it carry _TailFolding (like RAP, which folds on
+    # its own); any other kernel keeps the tail loop -- this never rejects a kernel.
+    if not state.get("_TailFolding", False) and not state["ReuseAcrossPersistent"] and not state["NoTailLoop"]:
+      du = state["DepthU"]
+      unsupported = (
+        not (state["enableTDMA"] and state["enableTDMB"])          # the K dim lives in the TDM descriptor
+        or state["PrefetchGlobalRead"] != 2
+        or isPersistent(state)                                     # DataParallel / StreamK tiles start mid-K
+        or du & (du - 1) != 0
+        or not tdmWaveSeparated(state) or tdmSeparateABDescriptors(state) or tdmPairOnEveryWave(state, "A", "B")
+        or not tdmKDimTrackable(state)                             # TDMIterateMode
+        or state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"] or state["ProblemType"]["Sparse"]
+        or state.get("TDMSplit", 0) or state["DirectToVgprA"] or state["DirectToVgprB"]
+        or state.get("UseSubtileImpl", False))
+      if not unsupported:
+        state["_TailFolding"] = True
 
   @staticmethod
   def rapMaxResidentKTiles(state, problemType, isa, isaInfoMap, packedC0, packedC1):
