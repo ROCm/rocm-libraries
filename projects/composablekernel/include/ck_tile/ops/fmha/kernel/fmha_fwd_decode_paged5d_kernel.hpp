@@ -108,6 +108,7 @@ struct FmhaDecodePaged5dKernel
         float* ws_ml;
         index_t nhead_q;
         index_t nhead_k;
+        index_t gqa; // nhead_q / nhead_k, so the kernel does not divide
         index_t max_blocks_per_seq;
         index_t window;
         index_t pages_per_split;
@@ -130,6 +131,7 @@ struct FmhaDecodePaged5dKernel
                 ws == nullptr ? nullptr : reinterpret_cast<float*>(ws + rows * kHdim * 2),
                 h.nhead_q,
                 h.nhead_k,
+                h.nhead_q / h.nhead_k,
                 h.max_blocks_per_seq,
                 h.window,
                 h.pages_per_split,
@@ -217,7 +219,7 @@ struct FmhaDecodePaged5dKernel
         const index_t w = __builtin_amdgcn_readfirstlane(threadIdx.x) / 32;
         const index_t n = l % 16, h = l / 16;
         const index_t s = blockIdx.x, g = blockIdx.y, b = blockIdx.z;
-        const index_t gqa = a.nhead_q / a.nhead_k;
+        const index_t gqa = a.gqa;
 
         const index_t ctx = a.seqlen_k[b];
         const index_t lo  = a.window > 0 ? max(0, ctx - a.window) : 0;
