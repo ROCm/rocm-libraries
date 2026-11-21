@@ -4632,6 +4632,50 @@ struct MIOPEN_INTERNALS_EXPORT ConvDirectDepthwiseFwd2D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
+/// Backward-data 1D convolution with groups == 1 (the forward of a ConvTranspose1d) as an implicit
+/// GEMM on FMA instructions, fp32 / fp16 / bf16 with fp32 accumulation, for RDNA.
+struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmFmaBwdData1d final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvHipImplicitGemmFmaBwdData1d>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    size_t GetWorkspaceSize(const ExecutionContext&,
+                            const miopen::conv::ProblemDescription&) const override;
+    bool MayNeedWorkspace() const override { return true; }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
+/// ConvHipImplicitGemmFmaBwdData1d for fp16 / bf16 without a workspace: the 16-bit weights are read
+/// in place, so it still applies when the caller provides less workspace than the fp32 weights
+/// need.
+struct MIOPEN_INTERNALS_EXPORT ConvHipImplicitGemmFmaBwdData1dNoWorkspace final : ConvSolver
+{
+    const std::string& SolverDbId() const override
+    {
+        return GetSolverDbId<ConvHipImplicitGemmFmaBwdData1dNoWorkspace>();
+    }
+
+    bool IsApplicable(const ExecutionContext&,
+                      const miopen::conv::ProblemDescription&) const override;
+    bool IsDynamic() const override { return true; }
+    float GetWti(const ExecutionContext&, const miopen::conv::ProblemDescription&) const override
+    {
+        return 0.02f;
+    }
+    ConvSolution GetSolution(const ExecutionContext&,
+                             const miopen::conv::ProblemDescription&) const override;
+};
+
 /// Placeholder forward 3D depthwise convolution (FP16/BF16, default/NCDHW layout); stub kernel.
 struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
 {
