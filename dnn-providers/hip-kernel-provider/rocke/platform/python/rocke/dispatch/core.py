@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, is_dataclass, replace
 from typing import (
     Any,
     Callable,
+    Hashable,
     Iterable,
     Mapping,
     Protocol,
@@ -701,6 +702,11 @@ class CandidateRegistry:
     ``algorithm`` / ``spec_id`` request fields or by priority for ``auto``.
     """
 
+    RESULT_CACHE_CAPACITY = 1024
+    """How many results :meth:`cached_dispatch` keeps per registry. A miss on a
+    full cache empties it, so a caller that never repeats a request cannot grow
+    it."""
+
     def __init__(
         self,
         family: str,
@@ -734,6 +740,7 @@ class CandidateRegistry:
         self.require_torch_binding = require_torch_binding
         """Whether this family refuses candidates that cannot bind torch tensors."""
         self._candidates = {}
+        self._results: dict[Any, DispatchResult] = {}
 
     def register(self, candidate: KernelCandidate) -> None:
         if candidate.name in self._candidates:
@@ -747,6 +754,8 @@ class CandidateRegistry:
         self._validate_binding(candidate)
         self._validate_torch_binding(candidate)
         self._candidates[candidate.name] = candidate
+        # A new candidate can outrank the winner of any request already served.
+        self._results.clear()
 
     def _validate_build(self, candidate: KernelCandidate) -> None:
         if self.require_build and candidate.build is None:
@@ -1127,6 +1136,55 @@ class CandidateRegistry:
                 reasons.append(f"{candidate.name}: {why}")
         joined = "; ".join(reasons) if reasons else "no candidates registered"
         raise ValueError(f"no candidate supports request: {joined}")
+
+    def cached_dispatch(
+        self,
+        request: OperatorRequest,
+        dispatch: Callable[[Any, Ranker | None], DispatchResult],
+        *,
+        ranker: Ranker | None = None,
+        context: Hashable = None,
+    ) -> DispatchResult:
+        """``dispatch(request, ranker)``, computed once per equal request.
+
+        The seam a family's production ``dispatch_<family>`` runs its selection
+        through, so that repeating a request does not run every candidate's
+        predicate, build the spec and hash it again. ``dispatch`` is the
+        family's own selection over this registry: :meth:`select`, then
+        ``select_spec``, the kernel id and the result.
+
+        A result is reused only where it cannot differ from a fresh one:
+
+        * the key is ``(dispatch, context, request)``. ``context`` carries what
+          the family's selection reads besides the request and this registry
+          (an environment override, say). A family whose selection reads
+          something it cannot put there -- a device query -- must not go
+          through this method;
+        * with a ``ranker`` nothing is looked up or stored: a ranker is caller
+          policy, and two rankers cannot be compared;
+        * a request (or ``context``) that does not hash is dispatched directly;
+        * a ``dispatch`` that raises stores nothing, so a refusal is derived
+          again, with its reasons, on every call;
+        * :meth:`register` drops every stored result.
+
+        Equal requests get the same :class:`DispatchResult` object, whose
+        ``request`` is the first of them. The result and everything it holds
+        (``spec``, the ``signature`` dicts) are shared and must be treated as
+        read-only.
+        """
+        if ranker is not None:
+            return dispatch(request, ranker)
+        key = (dispatch, context, request)
+        try:
+            result = self._results.get(key)
+        except TypeError:
+            return dispatch(request, None)
+        if result is None:
+            result = dispatch(request, None)
+            if len(self._results) >= self.RESULT_CACHE_CAPACITY:
+                self._results.clear()
+            self._results[key] = result
+        return result
 
     def extend(self, candidates: Iterable[KernelCandidate]) -> None:
         for candidate in candidates:

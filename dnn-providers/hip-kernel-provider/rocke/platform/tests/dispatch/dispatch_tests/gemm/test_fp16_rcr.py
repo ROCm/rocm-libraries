@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from rocke.core.lower_llvm import lower_kernel_to_llvm
 from rocke.dispatch import (
@@ -15,7 +16,7 @@ from rocke.dispatch import (
     gemm_fp16_sweep_space,
     registered_gemm_fp16_combos,
 )
-from rocke.dispatch.gemm import build_kernel
+from rocke.dispatch.gemm import build_kernel, fp16_rcr
 from rocke.dispatch.gemm.support import (
     gemm_config_supported,
     request_shape_supported,
@@ -72,6 +73,34 @@ class TestGemmFp16Dispatch(unittest.TestCase):
                 b = dispatch_gemm_fp16(req).kernel_id
                 self.assertEqual(a, b)
                 self.assertEqual(a.cache_key, b.cache_key)
+
+    def test_repeated_request_reuses_the_selection(self):
+        def identity_ranker(_req, supported):
+            return supported
+
+        for arch in COVERED_ARCHES:
+            with self.subTest(arch=arch):
+                with mock.patch.object(
+                    fp16_rcr,
+                    "gemm_config_supported",
+                    wraps=fp16_rcr.gemm_config_supported,
+                ) as predicate:
+                    first = dispatch_gemm_fp16(
+                        GemmRequest(M=2048, N=1024, K=512, arch=arch)
+                    )
+                    predicate.reset_mock()
+                    again = dispatch_gemm_fp16(
+                        GemmRequest(M=2048, N=1024, K=512, arch=arch)
+                    )
+                    predicate.assert_not_called()
+                    # A ranker takes the full selection path every time.
+                    fresh = dispatch_gemm_fp16(
+                        GemmRequest(M=2048, N=1024, K=512, arch=arch),
+                        ranker=identity_ranker,
+                    )
+                    predicate.assert_called()
+                self.assertEqual(again, first)
+                self.assertEqual(fresh, first)
 
     def test_rejects_unsupported_dtype_and_layout(self):
         # dtype and layout are declared coverage, so the capability prefilter

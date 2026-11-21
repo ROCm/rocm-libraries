@@ -276,8 +276,7 @@ def dispatch_norm_all(req: NormRequest) -> Tuple[DispatchResult, ...]:
     return NORM_REGISTRY.dispatch_all(req, kernel_id=_kernel_id)
 
 
-def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:
-    """Select a registered norm2d candidate for ``req``."""
+def _dispatch(req: NormRequest, ranker: Ranker | None) -> DispatchResult:
     candidate = NORM_REGISTRY.select(req, ranker=ranker)
     spec = candidate.select_spec(req)
     kid = _kernel_id(req, candidate, spec)
@@ -297,3 +296,13 @@ def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> Dispatch
             f"request_hash={kid.request_hash}",
         ),
     )
+
+
+def dispatch_norm(req: NormRequest, *, ranker: Ranker | None = None) -> DispatchResult:
+    """Select a registered norm2d candidate for ``req``.
+
+    An equal request dispatched again without a ``ranker`` gets the stored
+    result (:meth:`CandidateRegistry.cached_dispatch`); the selection reads
+    nothing but the request and the registry.
+    """
+    return NORM_REGISTRY.cached_dispatch(req, _dispatch, ranker=ranker)

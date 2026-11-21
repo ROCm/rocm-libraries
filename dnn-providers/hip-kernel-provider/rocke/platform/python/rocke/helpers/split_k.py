@@ -148,6 +148,17 @@ def _parse_env_override(env: dict) -> tuple[str, int | None]:
     return "force", n
 
 
+def split_k_env_override() -> str | None:
+    """The ``ROCKE_GEMM_SPLIT_K`` value :func:`select_split_k` reads from the
+    process environment, or None when it is unset.
+
+    A store of selections that went through :func:`select_split_k` keys on this
+    beside the request, so a changed override is never answered with a result
+    chosen under the previous one.
+    """
+    return os.environ.get(_ENV_FLAG)
+
+
 def select_split_k(
     *,
     M: int,
