@@ -85,16 +85,17 @@ function(hkp_asm_sdpa_fwd_revision _out_revision _engine_dir)
     endforeach()
     list(APPEND _inputs ${_kernels})
 
+    # The one spelling of the prefix: the build compiles the whole revision into
+    # AsmSdpaEngine.cpp, and the dump records it.
+    set(_prefix "hip-kernel-provider/asm-sdpa-fwd/")
     # Keyed by relative path: the same kernel name exists under both MI300/ and MI308/.
     set(_manifest "")
     if(_arg_MANIFEST)
-        # The engine's registered name and the prefix of AsmSdpaEngine.cpp's
-        # SELECTOR_REVISION.
-        set(_manifest MANIFEST "${_arg_MANIFEST}" ENGINE ASM_SDPA_ENGINE
-                      PREFIX "hip-kernel-provider/asm-sdpa-fwd/")
+        # The engine's registered name.
+        set(_manifest MANIFEST "${_arg_MANIFEST}" ENGINE ASM_SDPA_ENGINE PREFIX "${_prefix}")
     endif()
-    hkp_source_digest(_revision "${_engine_dir}" ${_manifest} ${_inputs})
-    set(${_out_revision} "${_revision}" PARENT_SCOPE)
+    hkp_source_digest(_digest "${_engine_dir}" ${_manifest} ${_inputs})
+    set(${_out_revision} "${_prefix}${_digest}" PARENT_SCOPE)
     if(_arg_CONFIGURE_DEPENDS)
         # The calling directory's property: a function runs in its caller's directory.
         set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${_inputs})

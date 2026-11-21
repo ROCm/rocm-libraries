@@ -34,16 +34,15 @@ namespace asm_sdpa_engine
 namespace
 {
 
-/// `<provider>/asm-sdpa-fwd/<digest>`: a configure-time digest of everything that decides
-/// which forward kernel runs and how (see AsmSdpaSelectorRevision.cmake). A deployed L1
+/// `<provider>/asm-sdpa-fwd/<digest>`, computed at configure time over everything that
+/// decides which forward kernel runs and how (AsmSdpaSelectorRevision.cmake). A deployed L1
 /// model must record this exact string as `trained_against.selector_revision` (RFC 0019
-/// §4.1) or the loader refuses it.
+/// §4.1, §8.1) or the loader refuses it.
 #ifndef HKP_ASM_SDPA_FWD_REVISION
-// Without a digest, report a revision no shipped model can match.
+// Without the recipe, report a revision no shipped model can match.
 #define HKP_ASM_SDPA_FWD_REVISION "undetermined"
 #endif
-constexpr const char* SELECTOR_REVISION
-    = "hip-kernel-provider/asm-sdpa-fwd/" HKP_ASM_SDPA_FWD_REVISION;
+constexpr const char* SELECTOR_REVISION = HKP_ASM_SDPA_FWD_REVISION;
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// Resolves AsmSdpaEngine::L1_MODEL_IDS through the provider's descriptor catalog. Never
