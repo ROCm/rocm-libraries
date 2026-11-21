@@ -32,7 +32,7 @@ Use `compile_kernel(...)` from a kernel-author script when:
 
 Existing callers choose targets before calling this module:
 
-  - ``examples/common/bake_off_direct_conv_4c.py`` forwards ``--isa`` as
+  - ``library/builders/common/bake_off_direct_conv_4c.py`` forwards ``--isa`` as
     ``isa=`` when present; otherwise it forwards ``--arch`` (default ``gfx950``).
   - ``benchmark/gemm/fp16_rcr_sweep.py`` starts with ``--arch`` or
     ``GemmSweepConfig.arch``, carries it through dispatch records, then passes

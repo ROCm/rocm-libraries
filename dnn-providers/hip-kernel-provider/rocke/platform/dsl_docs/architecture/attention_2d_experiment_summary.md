@@ -180,8 +180,8 @@ Action:
 Experimental files:
 
 ```text
-instances/attention_tiled_2d_fastkv_regp.py
-examples/gfx950/attention/benchmark_prefill2d_fastkv_regp.py
+library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py
+library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_fastkv_regp.py
 ```
 
 Goal: test whether R4 benefits from the fast paged-KV descriptor plus

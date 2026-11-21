@@ -35,7 +35,7 @@ DSL's tile / transform-DAG abstractions:
   (``naive`` + ``unmerge`` + ``pass_through``). This is the CK Tile
   ``transform_tensor_descriptor`` algebra: the kernel author writes
   *which* coords feed *which* coords, the descriptor emits the SSA.
-  See :doc:`/architecture/TRANSFORM_DAG` for the formalism.
+  See ``dsl_docs/architecture/transform_dag.md`` for the formalism.
 
 * Global loads / stores go through
   :class:`rocke.helpers.tensor_view.TensorView`'s ``load_vec_at`` /

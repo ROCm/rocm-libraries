@@ -1593,9 +1593,8 @@ def build_unified_attention_reduce_tiled(
     # The reduce CTA is a single wave64. The original kernel had all 64
     # lanes redundantly walk the full ``NUM_SEG`` segment list twice
     # (pass 1 max, pass 2 expsum) and a third time inside pass 3 — a
-    # 64x-redundant, serially-dependent chain of global loads that was
-    # the flat ~21 us floor on decode shapes (constant in KV length,
-    # per an out-of-tree split-KV analysis). Instead
+    # 64x-redundant, serially-dependent chain of global loads that set
+    # a flat, KV-length-independent floor on decode shapes. Instead
     # each lane now owns the strided segment subset ``{tid, tid+64,
     # ...}``: it loads each ``(seg_max, seg_l)`` pair exactly once, and
     # a 64-lane XOR butterfly folds the per-lane partials. This cuts the

@@ -5307,11 +5307,9 @@ class IRBuilder:
         each 16-lane row-group (the standard MFMA-16x16x32 softmax
         reduction pattern), prefer :meth:`ds_swizzle_xor` which uses the
         FFT-mode swizzle and is one LDS instruction vs ds_bpermute's
-        2 instructions (vgpr address compute + ds_bpermute). Measured on
-        the long-prefill ``bf16 n=16 q=1000 k=1050`` workload: ds_swizzle
-        cut the inner-loop ds-unit ops from 64 → 16 and shaved 30+ µs
-        per call (the ISA op-by-op comparison is in out-of-tree
-        unified-attention results notes).
+        2 instructions (vgpr address compute + ds_bpermute). On the
+        long-prefill ``bf16 n=16 q=1000 k=1050`` workload, ds_swizzle
+        cuts the inner-loop ds-unit ops from 64 to 16.
         """
         if addr.type.name != "i32" or data.type.name != "i32":
             raise ValueError("ds_bpermute requires i32 addr + i32 data")

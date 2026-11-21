@@ -186,14 +186,14 @@ Python-only family (the C++-engine statement and waiver: `dsl_docs/instances/att
 | `library/dispatch/attention_bwd/` | `tuning_common.py` (knob registry, `backward_spec_legality`, `BWD_KNOWN_WRONG_KNOBS`), `dense_tuning.py`, `unified_tuning.py` (unified axes, `unified_spec_legality`), `gfx942_tuning.py`, `gfx950_tuning.py`, `tuned_tables.py`, `routing.py` (`plan_attention_bwd`, `routed_policy`, `attention_bwd_declaration`), `registry.py` (`ATTENTION_BWD_REGISTRY`, `attention_bwd_ranker`, `dispatch_attention_bwd`, `run_attention_bwd`). |
 | `library/benchmarks/common/attention_bwd_sweep.py`, `attention_bwd_bench.py`, `attention_bwd_compile.py`, `attention_bwd_rocke_arm.py`, `attention_bwd_unified_bench.py`, `attention_bwd_census.json` | Funnel sweep, paired timing harness, compile cache and crash isolation, rocKE arm, unified bench, shape census (no measurements). |
 | `library/tests/test_attention_bwd_ir_golden.py`, `library/tests/golden/attention_bwd_ir_sha256.json`; `library/tests/parity/barrier_fence_emit.py` | Backward IR golden hashes; the barrier-fence parity emitter. |
+| `library/builders/common/bake_off_implicit_gemm.py` | Implicit-GEMM conv generator + manifest (used by `08_bake_off_implicit_gemm`). |
+| `library/builders/common/bake_off_direct_conv_16c.py` | Direct grouped 16c generator (`09_bake_off_direct_conv_16c`). |
+| `library/builders/common/bake_off_direct_conv_4c.py` | Direct grouped 4c generator (`10_bake_off_direct_conv_4c`). |
 
 ## `examples/`
 
 | Path | Purpose |
 |---------------------------------------------------|--------------------------------------------------------------------|
-| `examples/common/bake_off_implicit_gemm.py` | Implicit-GEMM conv generator + manifest (used by `08_bake_off_implicit_gemm`). |
-| `examples/common/bake_off_direct_conv_16c.py` | Direct grouped 16c generator (`09_bake_off_direct_conv_16c`). |
-| `examples/common/bake_off_direct_conv_4c.py` | Direct grouped 4c generator (`10_bake_off_direct_conv_4c`). |
 | `examples/common/distribution_reduce_demo.py` | 1D distribution-driven reduce demo. |
 | `examples/common/distribution_2d_add_demo.py` | 2D distribution-driven add demo. |
 | `examples/common/ck_tile_parity.py` | Small-op parity harness vs torch reference. |

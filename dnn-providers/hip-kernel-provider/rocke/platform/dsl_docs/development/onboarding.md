@@ -863,7 +863,8 @@ done
 ```
 Expected: each run prints `max_abs_diff` ~3e-5 (well under the 2e-2 tol) and
 `-> PASS`. For *performance* scaling, use the dedicated attention parity /
-benchmark harness in `examples/gfx950/attention/` (see `examples/index.md`),
+benchmark harnesses in `library/builders/gfx950/attention/` and
+`library/benchmarks/gfx950/attention/` (see `examples/index.md`),
 which routes both backends through one HIP-event timer.
 
 **Analysis:**

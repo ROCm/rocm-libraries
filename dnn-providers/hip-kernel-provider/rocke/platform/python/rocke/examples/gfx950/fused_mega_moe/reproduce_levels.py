@@ -574,8 +574,8 @@ LEVELS = [
         tile_m=16,
         grid_mode="snapshot_native",
         note="K128 pre-DTLA snapshot (the production K128+no-DTLA flag "
-        "combo does not compile; documented snapshot fallback in "
-        "docs/REPRO_PLAN Sec.2/Sec.4). This curated snapshot carries its "
+        "combo does not compile, so this level falls back to the "
+        "snapshot). This curated snapshot carries its "
         "own persistent-XCD ABI (num_cta/total_tiles/grid_x), so it "
         "launches on its native grid (de-padded buffers)",
     ),

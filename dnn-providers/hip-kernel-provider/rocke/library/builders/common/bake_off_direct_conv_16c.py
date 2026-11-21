@@ -14,13 +14,6 @@ Algorithm:
   - 3-accumulator circular pipeline along H
   - Per output row: 9 MFMAs (R*S)
 
-Reference numbers from the direct-conv vs implicit-GEMM bake-off study
-(not in the tree):
-  CK Tile streaming direct-conv (`v2_16c_*`):
-    groups=8:  ~155 TFLOPS
-    groups=16: ~250 TFLOPS
-    groups=32: ~254 TFLOPS
-
 This DSL emission uses K32 folding plus a wide vector direct epilogue
 to land in the high-performance band for this shape on gfx950.
 """

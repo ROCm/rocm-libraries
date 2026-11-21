@@ -6254,8 +6254,7 @@ class _Lowerer:
         intrinsic makes the OOB clamp fire per-element so trailing
         loads return the correct value.
 
-        Bit-fixes ``img2col vec_k=1`` and ``pooling vec=1 avg`` (the
-        P10 patch in PROPOSALS_PLAN).
+        Bit-fixes ``img2col vec_k=1`` and ``pooling vec=1 avg``.
         """
         rsrc, voffset, soffset = op.operands
         self._need("raw.ptr.buffer.load.i16")
