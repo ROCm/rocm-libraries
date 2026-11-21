@@ -1023,14 +1023,15 @@ namespace
                                 msg << "\n  " << file_name.path().string();
                         }
 #endif
-                        // msg << "\nTensile unavailable for GPU architecture '" << processor
-                        //     << "'; GEMM will use hipBLASLt or source kernels.";
-                        // print_tensile_init_warning(msg, processor);
-                        //
-                        // std::lock_guard<std::mutex> lock(m_libraryMapMutex);
-                        // return m_libraryMap[processor];
-                        rocblas_cerr << msg.str() << std::endl;
-                        rocblas_abort();
+                        msg << "\nTensile unavailable for GPU architecture '" << processor
+                            << "'; GEMM will use hipBLASLt or source kernels.";
+                        print_tensile_init_warning(msg, processor);
+
+                        std::lock_guard<std::mutex> lock(m_libraryMapMutex);
+                        return m_libraryMap[processor];
+
+                        //rocblas_cerr << msg.str() << std::endl;
+                        //rocblas_abort();
                     }
                 }
             }
