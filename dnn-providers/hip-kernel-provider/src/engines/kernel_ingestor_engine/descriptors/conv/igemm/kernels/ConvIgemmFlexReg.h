@@ -49,6 +49,13 @@
 // 32 lanes of one wave, so a dword store covers the 32 banks once.
 #pragma once
 
+// A compile-time flag for the flex tile's lambdas.
+template <bool V>
+struct K1Flag
+{
+    static constexpr bool value = V;
+};
+
 template <class T, class Atom, int DIR, int BN, int WD = 0, int KB = 128>
 __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CONV_EPI_FN_PARAM)
 {
@@ -439,6 +446,12 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     // Forward spreads the loads of the step after next over [compute B]: their offsets in
     // [mem B], then one load per PSF MMAs (backward data issues them in [mem B]).
     constexpr bool SPREAD = DIR == K1_FORWARD;
+    // Blocks of splits of four or fewer, or of at least 32 k-steps, spread the loads (1.03-1.11x
+    // on MI300A's and MI325X's 3-D and UNet layers, deep splits of 60-120 steps a block among
+    // them). Short blocks of deep splits (under 32 steps over few tiles) issue them in [mem B],
+    // where their latency has more of a step to hide: the spread measured 0.94-0.96x there
+    // (7-10 splits of 18-26 steps).
+    const bool spread = SPREAD && (splits <= 4 || vEnd - vFirst >= 32);
     constexpr int PSF = 5;
     unsigned off[XL + WL];
     auto offsets = [&]() __attribute__((always_inline))
@@ -506,8 +519,9 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     // The MMAs of compute phase p: granule group p (two groups a row) or the p-th half of each
     // granule's MPG MMAs (one group); each granule pair (W, X) gives MMAs of KPL channels. With
     // loads, one per PSF MMAs.
-    auto mmas = [&](int p, bool loads) __attribute__((always_inline))
+    auto mmas = [&](int p, auto LOADS) __attribute__((always_inline))
     {
+        constexpr bool loads = decltype(LOADS)::value;
         __builtin_amdgcn_s_setprio(1);
         const int hf = NH == 2 ? p : 0;
         constexpr int EN = NH == 2 ? MPG : MPG / 2;
@@ -538,7 +552,7 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
                     }
                 }
             }
-        if(loads)
+        if constexpr(loads)
         {
 #pragma unroll
             for(; q < XL + WL; ++q)
@@ -574,20 +588,31 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
         __builtin_amdgcn_s_waitcnt(0xC07F); // lgkmcnt(0)
         k1FlexBarrier();
         // [compute A]
-        mmas(0, false);
+        mmas(0, K1Flag<false>{});
         k1FlexBarrier();
         // [mem B]: the next step's tile (loaded one step ago) into the stage, then the loads of the
         // step after next (forward: their offsets).
         __builtin_amdgcn_s_waitcnt(0x0F70); // vmcnt(0)
         store();
         if constexpr(SPREAD)
+        {
             offsets();
+            if(!spread)
+            {
+#pragma unroll
+                for(int q = 0; q < XL + WL; ++q)
+                    issue(q);
+            }
+        }
         else
             load();
         __builtin_amdgcn_s_waitcnt(0xC07F); // lgkmcnt(0)
         k1FlexBarrier();
-        // [compute B]: the second half (forward: with the loads of the step after next).
-        mmas(1, SPREAD);
+        // [compute B]: the second half (spread: with the loads of the step after next).
+        if(spread)
+            mmas(1, K1Flag<true>{});
+        else
+            mmas(1, K1Flag<false>{});
         k1FlexBarrier();
     }
     if(grp == 0)
