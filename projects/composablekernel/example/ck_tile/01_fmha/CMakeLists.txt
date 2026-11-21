@@ -365,6 +365,13 @@ target_link_libraries(${EXAMPLE_FMHA_BWD} ${FMHA_BWD_INSTANCES})
 target_include_directories(${EXAMPLE_FMHA_BWD} PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 set_property(TARGET ${EXAMPLE_FMHA_BWD} PROPERTY HIP_ARCHITECTURES ${INST_TARGETS})
 
+# gfx1250 fp8 decode over the sglang SHUFFLE 5D paged KV cache; self-contained, no codegen
+if("gfx1250" IN_LIST INST_TARGETS)
+  set(EXAMPLE_FMHA_DECODE_PAGED5D "tile_example_fmha_decode_paged5d")
+  add_executable(${EXAMPLE_FMHA_DECODE_PAGED5D} EXCLUDE_FROM_ALL example_fmha_decode_paged5d.cpp)
+  set_property(TARGET ${EXAMPLE_FMHA_DECODE_PAGED5D} PROPERTY HIP_ARCHITECTURES gfx1250)
+endif()
+
 # TODO: we have to turn off this global prop, otherwise the progress bar generated
 # by cmake will print too many files, execvp: /bin/sh: Argument list too long
 # however, this property may affect global
