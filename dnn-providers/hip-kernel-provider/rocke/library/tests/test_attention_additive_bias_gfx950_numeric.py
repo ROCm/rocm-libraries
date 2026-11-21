@@ -36,6 +36,8 @@ import pytest
 
 from kernels import UnifiedAttentionProblem, run_unified_attention_torch
 
+from _gpu_gate import requires_gpu
+
 try:
     import torch
 
@@ -47,17 +49,7 @@ except ImportError:
 requires_torch = pytest.mark.skipif(not _HAS_TORCH, reason="ROCm torch required")
 
 
-def _gpu_ready():
-    """True only on a gfx950 box with ROCm torch (gate on ``gcnArchName``)."""
-    if not _HAS_TORCH or not torch.cuda.is_available():
-        return False
-    arch = torch.cuda.get_device_properties(0).gcnArchName.lower()
-    return "gfx950" in arch
-
-
-requires_gfx950_gpu = pytest.mark.skipif(
-    not _gpu_ready(), reason="needs a gfx950 GPU with ROCm torch"
-)
+requires_gfx950_gpu = requires_gpu("gfx950")
 
 _TORCH_DT = {"fp16": "float16", "bf16": "bfloat16"}
 _TOL = {"fp16": 2e-2, "bf16": 4e-2}

@@ -318,6 +318,7 @@ typedef struct rocke_gfx950_attention_tiled_3d_build_ctx
     rocke_value_t* zero_soff; /* const_i32(0)                              */
     rocke_value_t* seq_base; /* seq_idx * bt_stride_p                     */
     rocke_value_t* seq_pages; /* cdiv(seq_len, BS): live pages (page-id guard)  */
+    rocke_value_t* lane_tok; /* page-id loader: the lane's row within a copy */
     /* Per-lane byte offset within a page (PAGE_IDS), indexed by the call's
      * swizzle phase / tokens_per_call (only [0] without KV_SWZ). The phase
      * count is HD * HD / 4096 <= 16 (HD <= 256). */

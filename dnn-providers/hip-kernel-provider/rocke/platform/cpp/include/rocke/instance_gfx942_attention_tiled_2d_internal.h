@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                     */
 #include "rocke/helper_rocke.helpers.attention.h" /* binary_search / softmax reduces     */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_paged_kv_copies_internal.h" /* rocke_kv_page_copies_t */
 #include "rocke/instance_gfx942_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -286,7 +287,11 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_tensor_descriptor_t* q_desc; /* output/query [token,head,dim]   */
     rocke_tensor_descriptor_t* kv_desc; /* paged K/V byte descriptor       */
     rocke_value_t* seq_base; /* to_sgpr_u32(seq_idx*bt_stride)  */
-    rocke_value_t* block_table_max_idx; /* to_sgpr_u32(num_seqs*bt_stride) */
+    rocke_value_t* block_table_max_idx; /* to_sgpr_u32(seq_base + ceil(seq_len/BS)) */
+    /* bf16/fp16 loaders addressing copies by page (Python page_copies,
+     * PAGE_COPIES; set up in emit_preloop). */
+    rocke_kv_page_copies_t page_copies;
+    bool PAGE_COPIES;
     rocke_value_t* kv_block_bytes_c_v; /* one-block bound: kv_stride_blk_b_v, or its const */
     rocke_value_t* kv_stride_tok_b_v; /* num_kv_p*HD*KV_BYTES */
     rocke_value_t* kv_stride_blk_b_v; /* kv_stride_tok_b_v*BS */

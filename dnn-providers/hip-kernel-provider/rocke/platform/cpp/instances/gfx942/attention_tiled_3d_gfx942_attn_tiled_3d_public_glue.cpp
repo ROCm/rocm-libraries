@@ -746,6 +746,17 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
         }
     }
     out->fp8_chunks_per_thread = out->fp8_total_chunks / out->THREADS;
+    if(out->KV_FP8 && out->fp8_chunks_per_thread > ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS)
+    {
+        rocke_i_set_err(b,
+                        ROCKE_ERR_VALUE,
+                        "fp8 loader: %d chunks per thread, at most %d (T=%d, HD=%d)",
+                        out->fp8_chunks_per_thread,
+                        ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS,
+                        out->T,
+                        out->HD);
+        return false;
+    }
 
     /* WIDE_KV = use_wide_kv_load && !KV_FP8 && WIDE_OK (line 703). */
     out->WIDE_KV = spec->use_wide_kv_load && !out->KV_FP8 && out->WIDE_OK;

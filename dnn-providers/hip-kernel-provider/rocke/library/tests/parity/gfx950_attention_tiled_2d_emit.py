@@ -1072,8 +1072,7 @@ _CONFIGS = {
         use_qblock_reverse=True,
     ),
     # cfg68: bf16 D64/b16 GQA-4 multi-batch: the shipping spec, whose one K/V copy per
-    # tile (32 tokens) spans two pages, so the bf16 loaders keep the paged-KV
-    # descriptor. Every other bf16/fp16 case takes the per-page copy offsets.
+    # tile (32 tokens) spans two pages, so each wave's page comes from the wave.
     68: dict(
         head_size=64,
         block_size=16,
@@ -1096,8 +1095,7 @@ _CONFIGS = {
         use_mfma32_skip_legacy_qreg=True,
         use_transposed_mask_limit=True,
     ),
-    # cfg69/70: page copies at the 16-page prefetch bound (page ids carried)
-    # and past it (page ids read in place).
+    # cfg69/70: page copies over 16 and 18 pages per tile (page ids read in place).
     69: dict(
         head_size=64,
         block_size=16,
@@ -1130,7 +1128,7 @@ _CONFIGS = {
     ),
     # cfg71: bf16 D192/b16 one warp, the spec dispatch picks for short D192
     # prefill. One copy is 512 halves, 2 2/3 rows, so it is not a whole number
-    # of tokens and the bf16 loaders must keep the paged-KV descriptor.
+    # of tokens and each lane's position in its page is split per copy.
     71: dict(
         head_size=192,
         block_size=16,
@@ -1163,7 +1161,6 @@ _CONFIGS[67] = {**_CONFIGS[5], "use_alibi": True, "emit_lse": True}
 _CONFIGS[72] = {**_CONFIGS[64], "lse_layout": "head_major"}
 _CONFIGS[73] = {**_CONFIGS[65], "lse_layout": "head_major"}
 _CONFIGS[74] = {**_CONFIGS[66], "lse_layout": "head_major"}
-
 # --- idx75-76: fp8 K in LDS on each 32x32 QK path.
 # fp8 KV cache kept as raw fp8 in K_lds (use_fp8_mfma_qk) on the
 # non-transposed 32x32 QK path: K is read as fp8 and dequantized with
@@ -1186,6 +1183,31 @@ _CONFIGS[75] = dict(
 # The same fp8 K in LDS on the transposed 32x32 QK path, which reads K through
 # the same shared reader.
 _CONFIGS[76] = {**_CONFIGS[75], "use_transposed_qk_32x32": True}
+
+# --- idx77-81: K/V page copies (i64 page base, pages from the wave, one
+# 64-token page per tile).
+# i64 K/V, two pages per tile, one page per copy (page copies, i64 page base).
+_CONFIGS[77] = dict(
+    head_size=128,
+    block_size=16,
+    num_query_heads=32,
+    num_kv_heads=8,
+    dtype="bf16",
+    use_sinks=False,
+    sliding_window=0,
+    has_softcap=False,
+    tile_size=32,
+    use_i64_kv_addr=True,
+)
+# cfg71 with i64 K/V (mid-row copies, i64 page base).
+_CONFIGS[78] = {**_CONFIGS[71], "use_i64_kv_addr": True}
+# i64 K/V with each wave's page from the wave: whole-row copies spanning pages
+# (cfg68) and mid-row copies (cfg59).
+_CONFIGS[79] = {**_CONFIGS[68], "use_i64_kv_addr": True}
+_CONFIGS[80] = {**_CONFIGS[59], "use_i64_kv_addr": True}
+# cfg48 with one 64-token page per tile: the page base stays in soffset
+# without prefetching (grouped KV2 carries no page ids).
+_CONFIGS[81] = {**_CONFIGS[48], "block_size": 64}
 
 
 def _spec(idx: int) -> UnifiedAttention2DTiledSpec:

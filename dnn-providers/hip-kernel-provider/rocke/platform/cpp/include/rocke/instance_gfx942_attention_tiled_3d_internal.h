@@ -12,7 +12,7 @@
  *   plus the closured load issuers threaded inside the body:
  *     _issue_k_load / _issue_v_load        lines 604-632   (1-DWORD async DMA)
  *     _issue_wide_load                     lines 645-658   (opt b128 sync feed)
- *     _issue_fp8_dequant_loads             lines 669-701   (fp8 -> dtype -> LDS)
+ *     _fp8_chunk_offsets .. _zero_fp8_v_rows_past_sequence   (fp8 -> dtype -> LDS)
  *     _issue_k / _issue_v                  lines 705-719   (dispatch by KV mode)
  *
  * WHY THIS HEADER EXISTS.
@@ -22,7 +22,7 @@
  *   constants / LDS allocs / paged-KV descriptor, (c) closes over a pile of
  *   geometry + the K/V LDS bases + the paged-KV descriptor inside FOUR nested
  *   load-issuer closures (_issue_k_load / _issue_wide_load /
- *   _issue_fp8_dequant_loads + the _issue_k/_issue_v dispatchers) and the
+ *   the fp8 K/V helpers + the _issue_k/_issue_v dispatchers) and the
  *   per-N _strided_v_b_operand closure, (d) runs the online-softmax scf.for over
  *   [tile_start, tile_end) threading those closures, and (e) emits the early-out
  *   zero-fill block + the guarded segment-workspace epilogue.
@@ -57,6 +57,9 @@
  */
 #ifndef ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_INTERNAL_H
 #define ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_INTERNAL_H
+
+/* Bound of fp8_chunks_per_thread: the fp8 loader keeps a tile's loads in arrays of this size. */
+#define ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS 64
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -451,12 +454,34 @@ void rocke_gfx942_attention_tiled_3d_issue_wide_load(
     rocke_value_t* kv_tile_idx,
     rocke_value_t* buf_idx,
     rocke_value_t* page_id); /* 645-658 */
-/* _issue_fp8_dequant_loads(..., lds_token): is_value selects K/V + scale.      */
-void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
+/* fp8 K/V, split so the KV loop can place each part: _fp8_chunk_offsets (incl.
+ * the page lookup), _issue_fp8_loads, _store_fp8_dequant (is_value selects
+ * K/V + scale), _zero_fp8_v_rows_past_sequence. Arrays hold
+ * fp8_chunks_per_thread (<= ROCKE_GFX942_ATTN_3D_FP8_MAX_CHUNKS) entries.      */
+void rocke_gfx942_attention_tiled_3d_fp8_chunk_offsets(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* kv_tile_idx,
+    rocke_value_t** voff,
+    rocke_value_t** row,
+    rocke_value_t** col);
+void rocke_gfx942_attention_tiled_3d_issue_fp8_loads(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
     bool is_value,
-    rocke_value_t* kv_tile_idx,
-    rocke_value_t* buf_idx); /* 669-701 */
+    rocke_value_t* const* voff,
+    rocke_value_t** loaded);
+void rocke_gfx942_attention_tiled_3d_store_fp8_dequant(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    bool is_value,
+    rocke_value_t* const* loaded,
+    rocke_value_t* const* loaded_row,
+    rocke_value_t* const* loaded_col,
+    rocke_value_t* buf_idx);
+void rocke_gfx942_attention_tiled_3d_zero_fp8_v_rows_past_sequence(
+    rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
+    rocke_value_t* const* row,
+    rocke_value_t* const* col,
+    rocke_value_t* buf_idx,
+    rocke_value_t* kv_tile_idx);
 void rocke_gfx942_attention_tiled_3d_issue_k(rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
                                              rocke_value_t* tile_idx,
                                              rocke_value_t* buf_idx,
