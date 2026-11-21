@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,6 +28,7 @@
 #include "rocblas.h"
 #include "rocblas_math.hpp"
 #include "rocblas_random.hpp"
+#include <algorithm>
 #include <cinttypes>
 #include <iostream>
 #ifdef _OPENMP
@@ -94,6 +95,8 @@ void rocblas_init_matrix_alternating_sign(rocblas_check_matrix_type matrix_type,
                                           rocblas_stride            stride      = 0,
                                           int64_t                   batch_count = 1)
 {
+    rocblas_parallel_fill_seeder seeder;
+
     if(matrix_type == rocblas_client_general_matrix)
     {
         for(size_t b = 0; b < batch_count; b++)
@@ -101,11 +104,14 @@ void rocblas_init_matrix_alternating_sign(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < M; ++i)
+            {
+                seeder.reseed_thread_rng(b, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value                  = rand_gen();
                     A[i + j * lda + b * stride] = (i ^ j) & 1 ? T(value) : T(negate(value));
                 }
+            }
     }
     else if(matrix_type == rocblas_client_triangular_matrix)
     {
@@ -114,12 +120,15 @@ void rocblas_init_matrix_alternating_sign(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < M; ++i)
+            {
+                seeder.reseed_thread_rng(b, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value
                         = uplo == 'U' ? (j >= i ? rand_gen() : 0) : (j <= i ? rand_gen() : 0);
                     A[i + j * lda + b * stride] = (i ^ j) & 1 ? T(value) : T(negate(value));
                 }
+            }
     }
     else
     {
@@ -134,6 +143,8 @@ void rocblas_init_matrix_alternating_sign(rocblas_check_matrix_type matrix_type,
                                           T                         rand_gen(),
                                           U&                        hA)
 {
+    rocblas_parallel_fill_seeder seeder;
+
     for(int64_t batch_index = 0; batch_index < hA.batch_count(); ++batch_index)
     {
         auto* A   = hA[batch_index];
@@ -147,11 +158,14 @@ void rocblas_init_matrix_alternating_sign(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < M; ++i)
+            {
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value     = rand_gen();
                     A[i + j * lda] = (i ^ j) & 1 ? T(value) : T(negate(value));
                 }
+            }
         }
         else if(matrix_type == rocblas_client_triangular_matrix)
         {
@@ -159,12 +173,15 @@ void rocblas_init_matrix_alternating_sign(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < M; ++i)
+            {
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value
                         = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
                     A[i + j * lda] = (i ^ j) & 1 ? T(value) : T(negate(value));
                 }
+            }
         }
         else
         {
@@ -181,13 +198,21 @@ void rocblas_init_vector_alternating_sign(T rand_gen(), T* x, int64_t N, int64_t
     if(incx < 0)
         x -= (N - 1) * incx;
 
+    rocblas_parallel_fill_seeder seeder;
+    int64_t blocks = (N + rocblas_fill_block_size - 1) / rocblas_fill_block_size;
+
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-    for(int64_t j = 0; j < N; ++j)
+    for(int64_t block = 0; block < blocks; ++block)
     {
-        auto value  = rand_gen();
-        x[j * incx] = j & 1 ? T(value) : T(negate(value));
+        seeder.reseed_thread_rng(0, block);
+        int64_t end = std::min(N, (block + 1) * rocblas_fill_block_size);
+        for(int64_t j = block * rocblas_fill_block_size; j < end; ++j)
+        {
+            auto value  = rand_gen();
+            x[j * incx] = j & 1 ? T(value) : T(negate(value));
+        }
     }
 }
 
@@ -206,6 +231,8 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
                          rocblas_stride            stride      = 0,
                          int64_t                   batch_count = 1)
 {
+    rocblas_parallel_fill_seeder seeder;
+
     if(matrix_type == rocblas_client_general_matrix)
     {
         for(size_t b = 0; b < batch_count; b++)
@@ -213,8 +240,11 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < M; ++i)
+            {
+                seeder.reseed_thread_rng(b, i);
                 for(size_t j = 0; j < N; ++j)
                     A[i + j * lda + b * stride] = rand_gen();
+            }
     }
     else if(matrix_type == rocblas_client_hermitian_matrix)
     {
@@ -223,6 +253,8 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < N; ++i)
+            {
+                seeder.reseed_thread_rng(b, i);
                 for(size_t j = 0; j <= i; ++j)
                 {
                     auto value = rand_gen();
@@ -244,6 +276,7 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
                         A[b * stride + i + j * lda] = conjugate(value);
                     }
                 }
+            }
     }
     else if(matrix_type == rocblas_client_symmetric_matrix)
     {
@@ -252,6 +285,8 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < N; ++i)
+            {
+                seeder.reseed_thread_rng(b, i);
                 for(size_t j = 0; j <= i; ++j)
                 {
                     auto value = rand_gen();
@@ -273,6 +308,7 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
                         A[b * stride + i + j * lda] = value;
                     }
                 }
+            }
     }
     else if(matrix_type == rocblas_client_triangular_matrix)
     {
@@ -281,12 +317,15 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < M; ++i)
+            {
+                seeder.reseed_thread_rng(b, i);
                 for(size_t j = 0; j < N; ++j)
                 {
                     auto value
                         = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
                     A[i + j * lda + b * stride] = value;
                 }
+            }
     }
 
     /*An n x n triangle matrix with random entries has a condition number that grows exponentially with n ("Condition numbers of random triangular matrices" D. Viswanath and L.N.Trefethen).
@@ -300,12 +339,15 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
         for(size_t i = 0; i < M; ++i)
+        {
+            seeder.reseed_thread_rng(0, i);
             for(size_t j = 0; j < N; ++j)
             {
                 auto value
                     = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
                 A[i + j * lda] = value;
             }
+        }
 
         const T multiplier = T(
             1.01); // Multiplying factor to slightly increase the base value of (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) dominant diagonal element. If tests fail and it seems that there are numerical stability problems, try increasing multiplier, it should decrease the condition number of the matrix and thereby avoid numerical stability issues.
@@ -370,6 +412,8 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
                          T                         rand_gen(),
                          U&                        hA)
 {
+    rocblas_parallel_fill_seeder seeder;
+
     for(int64_t batch_index = 0; batch_index < hA.batch_count(); ++batch_index)
     {
         auto*   A   = hA[batch_index];
@@ -382,8 +426,11 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t j = 0; j < N; ++j)
+            {
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                     A[i + j * lda] = rand_gen();
+            }
         }
         else if(matrix_type == rocblas_client_hermitian_matrix)
         {
@@ -391,6 +438,8 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < N; ++i)
+            {
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j <= i; ++j)
                 {
                     auto value = rand_gen();
@@ -412,6 +461,7 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
                         A[i + j * lda] = conjugate(value);
                     }
                 }
+            }
         }
         else if(matrix_type == rocblas_client_symmetric_matrix)
         {
@@ -419,6 +469,8 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t i = 0; i < N; ++i)
+            {
+                seeder.reseed_thread_rng(batch_index, i);
                 for(size_t j = 0; j <= i; ++j)
                 {
                     auto value = rand_gen();
@@ -440,6 +492,7 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
                         A[i + j * lda] = value;
                     }
                 }
+            }
         }
         else if(matrix_type == rocblas_client_triangular_matrix)
         {
@@ -447,12 +500,15 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t j = 0; j < N; ++j)
+            {
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                 {
                     auto value
                         = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
                     A[i + j * lda] = value;
                 }
+            }
         }
         else if(matrix_type == rocblas_client_diagonally_dominant_triangular_matrix)
         {
@@ -465,12 +521,15 @@ void rocblas_init_matrix(rocblas_check_matrix_type matrix_type,
 #pragma omp parallel for
 #endif
             for(size_t j = 0; j < N; ++j)
+            {
+                seeder.reseed_thread_rng(batch_index, j);
                 for(size_t i = 0; i < M; ++i)
                 {
                     auto value
                         = uplo == 'U' ? (j >= i ? rand_gen() : T(0)) : (j <= i ? rand_gen() : T(0));
                     A[i + j * lda] = value;
                 }
+            }
 
             const T multiplier = T(
                 1.01); // Multiplying factor to slightly increase the base value of (abs_sum_off_diagonal_row + abs_sum_off_diagonal_col) dominant diagonal element. If tests fail and it seems that there are numerical stability problems, try increasing multiplier, it should decrease the condition number of the matrix and thereby avoid numerical stability issues.
@@ -539,11 +598,19 @@ void rocblas_init_vector(T rand_gen(), T* x, int64_t N, int64_t incx)
     if(incx < 0)
         x -= (N - 1) * incx;
 
+    rocblas_parallel_fill_seeder seeder;
+    int64_t blocks = (N + rocblas_fill_block_size - 1) / rocblas_fill_block_size;
+
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
-    for(int64_t j = 0; j < N; ++j)
-        x[j * incx] = rand_gen();
+    for(int64_t block = 0; block < blocks; ++block)
+    {
+        seeder.reseed_thread_rng(0, block);
+        int64_t end = std::min(N, (block + 1) * rocblas_fill_block_size);
+        for(int64_t j = block * rocblas_fill_block_size; j < end; ++j)
+            x[j * incx] = rand_gen();
+    }
 }
 
 /* ============================================================================================ */
@@ -784,11 +851,17 @@ void rocblas_init_vector_trig(T* x, int64_t N, rocblas_stride incx, bool seedRes
 template <typename T>
 void rocblas_init(T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_t batch_count = 1)
 {
+    rocblas_parallel_fill_seeder seeder;
+
     for(size_t i_batch = 0; i_batch < batch_count; i_batch++)
     {
         size_t b_idx = i_batch * stride;
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
         for(size_t j = 0; j < N; ++j)
         {
+            seeder.reseed_thread_rng(i_batch, j);
             size_t col_idx = b_idx + j * lda;
             if(M > 4)
                 random_run_generator<T>(A + col_idx, M);
@@ -799,6 +872,13 @@ void rocblas_init(T* A, size_t M, size_t N, size_t lda, size_t stride = 0, size_
             }
         }
     }
+}
+
+// Initialize one element with a value from the calling thread's random sequence
+template <typename T>
+inline void rocblas_init_one(T* A)
+{
+    *A = random_generator<T>();
 }
 
 // Initialize matrices with random values

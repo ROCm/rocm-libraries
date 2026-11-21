@@ -1,6 +1,6 @@
 /* ************************************************************************
  *
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -263,14 +263,14 @@ inline void regular_to_banded(
         // fill in bottom with random data to ensure we aren't using it.
         // for !upper, fill in bottom right triangle as well.
         for(int i = min1; i <= max1; i++)
-            rocblas_init<T>(AB + j * ldab + i, 1, 1, 1);
+            rocblas_init_one(AB + j * ldab + i);
 
         // for upper, fill in top left triangle with random data to ensure
         // we aren't using it.
         if(upper)
         {
             for(int i = 0; i < m; i++)
-                rocblas_init<T>(AB + j * ldab + i, 1, 1, 1);
+                rocblas_init_one(AB + j * ldab + i);
         }
     }
 }
@@ -286,11 +286,14 @@ inline void regular_to_banded(bool upper, const T& h_A, T& h_AB, rocblas_int k)
     size_t      ldab = h_AB.lda();
     rocblas_int n    = h_AB.n();
 
+    rocblas_parallel_fill_seeder seeder;
+
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
     for(rocblas_int batch_index = 0; batch_index < h_A.batch_count(); ++batch_index)
     {
+        seeder.reseed_thread_rng(batch_index, 0);
         auto* A  = h_A[batch_index];
         auto* AB = h_AB[batch_index];
 
@@ -311,14 +314,14 @@ inline void regular_to_banded(bool upper, const T& h_A, T& h_AB, rocblas_int k)
             // fill in bottom with random data to ensure we aren't using it.
             // for !upper, fill in bottom right triangle as well.
             for(int i = min1; i <= max1; i++)
-                rocblas_init(AB + j * ldab + i, 1, 1, 1);
+                rocblas_init_one(AB + j * ldab + i);
 
             // for upper, fill in top left triangle with random data to ensure
             // we aren't using it.
             if(upper)
             {
                 for(int i = 0; i < m; i++)
-                    rocblas_init(AB + j * ldab + i, 1, 1, 1);
+                    rocblas_init_one(AB + j * ldab + i);
             }
         }
     }
@@ -467,7 +470,7 @@ void make_unit_diagonal(rocblas_fill uplo, T* hA, size_t lda, int64_t N)
     // randomly initialize diagonal to ensure we aren't using it's values for tests.
     for(int64_t i = 0; i < N; i++)
     {
-        rocblas_init<T>(hA + i * size_t(lda) + i, 1, 1, 1);
+        rocblas_init_one(hA + i * size_t(lda) + i);
     }
 }
 
@@ -480,11 +483,14 @@ void make_unit_diagonal(rocblas_fill uplo, T& h_A)
     rocblas_int N   = h_A.n();
     size_t      lda = h_A.lda();
 
+    rocblas_parallel_fill_seeder seeder;
+
 #ifdef _OPENMP
 #pragma omp parallel for
 #endif
     for(rocblas_int batch_index = 0; batch_index < h_A.batch_count(); ++batch_index)
     {
+        seeder.reseed_thread_rng(batch_index, 0);
         auto* A = h_A[batch_index];
 
         if(uplo == rocblas_fill_lower)
@@ -508,7 +514,7 @@ void make_unit_diagonal(rocblas_fill uplo, T& h_A)
         // randomly initalize diagonal to ensure we aren't using it's values for tests.
         for(int i = 0; i < N; i++)
         {
-            rocblas_init(A + i * lda + i, 1, 1, 1);
+            rocblas_init_one(A + i * lda + i);
         }
     }
 }
