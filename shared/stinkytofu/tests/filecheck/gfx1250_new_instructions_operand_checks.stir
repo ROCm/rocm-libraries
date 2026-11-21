@@ -58,3 +58,94 @@ st.func @tensor_store_group2_must_be_4_sgprs() {
 ^entry:
   "st.tensor_store_from_lds"(s[0:3], s[4:11], s[12:13], s[16:19]) { issueCycles = 1, latencyCycles = 1 }
 }
+
+#--- global_load_async_to_lds_*: the LDS address is a VGPR, saddr is an SGPR pair, and
+#--- with saddr "off" vaddr is a 64-bit address
+# CHECK: "st.global_load_async_to_lds_b32"(s0, v1, s[2:3])
+# CHECK: operand src[0] has register type 's', expected 'v'
+st.func @async_load_lds_address_must_be_vgpr() {
+^entry:
+  "st.global_load_async_to_lds_b32"(s0, v1, s[2:3]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+# CHECK: "st.global_load_async_to_lds_b128"(v0, v2, s4)
+# CHECK: operand src[2] has register width 1, expected 2
+st.func @async_load_saddr_must_be_sgpr_pair() {
+^entry:
+  "st.global_load_async_to_lds_b128"(v0, v2, s4) { issueCycles = 1, latencyCycles = 1 }
+}
+
+# CHECK: "st.global_load_async_to_lds_b32"(v0, v2, off)
+# CHECK: operand src[1] has register width 1, expected 2
+st.func @async_load_saddr_off_needs_64bit_vaddr() {
+^entry:
+  "st.global_load_async_to_lds_b32"(v0, v2, off) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- global_prefetch_b8: with saddr "off", vaddr is a 64-bit address
+# CHECK: "st.global_prefetch_b8"(v0, off)
+# CHECK: operand src[0] has register width 1, expected 2
+st.func @prefetch_saddr_off_needs_64bit_vaddr() {
+^entry:
+  "st.global_prefetch_b8"(v0, off) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- global_store_b8: the data is a VGPR
+# CHECK: "st.global_store_b8"(v0, s1, s[2:3])
+# CHECK: operand src[1] has register type 's', expected 'v'
+st.func @store_b8_data_must_be_vgpr() {
+^entry:
+  "st.global_store_b8"(v0, s1, s[2:3]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- v_min_u64: the sources are 64-bit
+# CHECK: "st.v_min_u64"(v2, v[4:5])
+# CHECK: operand src[0] has register width 1, expected 2
+st.func @min_u64_sources_are_64bit() {
+^entry:
+  v[0:1] = "st.v_min_u64"(v2, v[4:5]) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- s_ctz_i32_b32 and s_sub_co_ci_u32 take scalar operands
+# CHECK: "st.s_ctz_i32_b32"(v1)
+# CHECK: operand src[0] has register type 'v', expected 's'
+st.func @ctz_source_must_be_scalar() {
+^entry:
+  s0 = "st.s_ctz_i32_b32"(v1) { issueCycles = 1, latencyCycles = 2 }
+}
+
+# CHECK: v0 = "st.s_ctz_i32_b32"(s1)
+# CHECK: operand dest[0] has register type 'v', expected 's'
+st.func @ctz_destination_must_be_scalar() {
+^entry:
+  v0 = "st.s_ctz_i32_b32"(s1) { issueCycles = 1, latencyCycles = 2 }
+}
+
+# CHECK: "st.s_sub_co_ci_u32"(s1, v2)
+# CHECK: operand src[1] has register type 'v', expected 's'
+st.func @sub_co_ci_source_must_be_scalar() {
+^entry:
+  s0 = "st.s_sub_co_ci_u32"(s1, v2) { issueCycles = 1, latencyCycles = 2 }
+}
+
+#--- v_max_u32 and v_min_u32 write a VGPR and take two sources
+# CHECK: s0 = "st.v_max_u32"(v1, v2)
+# CHECK: operand dest[0] has register type 's', expected 'v'
+st.func @max_u32_destination_must_be_vgpr() {
+^entry:
+  s0 = "st.v_max_u32"(v1, v2) { issueCycles = 1, latencyCycles = 1 }
+}
+
+# CHECK: Instruction 'v_min_u32' missing operand src[1]
+st.func @min_u32_takes_two_sources() {
+^entry:
+  v0 = "st.v_min_u32"(v1) { issueCycles = 1, latencyCycles = 1 }
+}
+
+#--- ds_load_u16_d16 reads its destination, so it must also be a source
+# CHECK: Read-write operand validation failed
+# CHECK: Instruction 'ds_load_u16_d16' has read-write field
+st.func @load_u16_d16_destination_is_read() {
+^entry:
+  v0 = "st.ds_load_u16_d16"(v1) { issueCycles = 1, latencyCycles = 1 }
+}

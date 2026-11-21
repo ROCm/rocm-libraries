@@ -117,8 +117,9 @@ static const CounterPolicy& defaultCounterPolicy(CounterKind c) {
         {[](const StinkyInstruction& i) { return isTensorLoad(i); },
          [](const StinkyInstruction& i) { return true; }, CounterOrder::InOrder},
 
-        // CK_Async: global_store_async_from_lds_*; drains via the LDS WAR
-        // anti-dep scan (scanAsyncAntiDeps), not via SSA consumers.
+        // CK_Async: global_store_async_from_lds_* and global_load_async_to_lds_*;
+        // drains via the LDS WAR anti-dep scan (scanAsyncAntiDeps), and for loads
+        // also via SSA consumers of the LDS<token> dest.
         {[](const StinkyInstruction& i) { return isAsyncMemOp(i); },
          [](const StinkyInstruction&) { return true; }, CounterOrder::InOrder},
     };
@@ -200,7 +201,7 @@ bool hasUntaggedTensorAnchor(BasicBlock& bb) {
 }
 
 bool isLdsWriterAnchor(const StinkyInstruction& inst) {
-    return isTensorLoad(inst) || isDSWrite(inst);
+    return isTensorLoad(inst) || isDSWrite(inst) || isGlobalLoadAsyncToLds(inst);
 }
 
 bool isOnSamePipeline(const StinkyInstruction& a, const StinkyInstruction& b) {
@@ -250,6 +251,18 @@ int PerPredQueue::countFrom(StinkyInstruction* op) const {
     auto it = std::find(ops.begin(), ops.end(), op);
     if (it == ops.end()) return 0;
     return static_cast<int>(std::distance(it, ops.end()));
+}
+
+int PerPredQueue::countFromAsync(StinkyInstruction* op) const {
+    if (saturatedOps.find(op) != saturatedOps.end()) return static_cast<int>(kMaxInFlight);
+    auto it = std::find(ops.begin(), ops.end(), op);
+    if (it == ops.end()) return 0;
+    const bool wantLoad = isGlobalLoadAsyncToLds(*op);
+    int n = 0;
+    for (auto cur = it; cur != ops.end(); ++cur) {
+        if (isGlobalLoadAsyncToLds(**cur) == wantLoad) ++n;
+    }
+    return n;
 }
 
 void DataflowState::clear() {
@@ -399,7 +412,7 @@ DataflowState WaitDataflow::mergeFromPredecessors(
             if (c == CK_Count) continue;
             // Pred has one collapsed queue per counter.
             for (const auto& q : predState.queues[c]) {
-                int n = q.countFrom(src);
+                int n = (c == CK_Async) ? q.countFromAsync(src) : q.countFrom(src);
                 if (n > 0) {
                     recordWait(c, waitToDrain(c, n));
                     break;
@@ -770,7 +783,7 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
         if (!rawNeedsWait[c](*inst)) continue;
 
         for (const auto& q : state.queues[c]) {
-            int n = q.countFrom(src);
+            int n = (c == CK_Async) ? q.countFromAsync(src) : q.countFrom(src);
             if (n > 0) tightenRequired(c, waitToDrain(c, n));
         }
     }
@@ -846,15 +859,13 @@ void computeRequiredWaits(StinkyInstruction* inst, DataflowState& state,
     // still reading must drain asynccnt first.
     auto scanAsyncAntiDeps = [&](const std::vector<int>& anchorTokens) {
         for (const auto& q : state.queues[CK_Async]) {
-            const int qsize = static_cast<int>(q.ops.size());
-            for (int idx = 0; idx < qsize; ++idx) {
-                StinkyInstruction* op = q.ops[idx];
+            for (StinkyInstruction* op : q.ops) {
                 if (op == inst) continue;
                 auto* opTokens = op->getModifier<MemTokenData>();
                 bool overlap =
                     (opTokens == nullptr) || hasTokenOverlap(opTokens->tokens, anchorTokens);
                 if (!overlap) continue;
-                tightenRequired(CK_Async, waitToDrain(CK_Async, qsize - idx));
+                tightenRequired(CK_Async, waitToDrain(CK_Async, q.countFromAsync(op)));
             }
         }
     };
@@ -918,7 +929,7 @@ int phiCurrentQueueWait(StinkyInstruction* phi, CounterKind c, const DataflowSta
         }
         if (classifyMemOp(*src) != c) continue;
         for (const auto& q : state.queues[c]) {
-            int n = q.countFrom(src);
+            int n = (c == CK_Async) ? q.countFromAsync(src) : q.countFrom(src);
             if (n > 0) tighten(waitToDrain(c, n));
         }
     }
