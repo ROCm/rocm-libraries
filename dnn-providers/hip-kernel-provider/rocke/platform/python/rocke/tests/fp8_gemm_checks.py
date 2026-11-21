@@ -1,15 +1,22 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Test helper: what the GPU checks of the fp8 / bf8 GEMM kernels share.
+"""Test helper: what the GPU checks of the fp8 / bf8 GEMM kernels share, and
+the fp8 / bf8 host codec every test uses.
 
 A GPU check of a scaled fp8 / bf8 GEMM fills its operands with numbers the
 arch's MFMA reads exactly, so the reference is computed on the values the
 device sees, and accepts the kernel's output within the runbook's GEMM
 tolerance. :data:`GEMM_TOLERANCE`, :data:`EXACT_OPERAND_VALUES` and
 :func:`mfma_operand_bytes` are those three facts, kept here so the checks
-cannot drift apart. :func:`fp8_host_codec` is the one map from an element
-format to the host codec that decodes and rounds its codes.
+cannot drift apart.
+
+:func:`fp8_host_codec` is the home of the fp8 / bf8 host codec for all tests,
+GEMM or not: the one map from an element format (as
+:func:`~rocke.helpers.fp8_encoding.fp8_element_format` gives it for a dtype on
+an arch) to the codec that decodes and rounds its codes. A test that needs to
+decode or round device fp8 / bf8 codes takes the codec from here rather than
+choosing between the FNUZ and OCP codecs itself.
 """
 
 from __future__ import annotations
