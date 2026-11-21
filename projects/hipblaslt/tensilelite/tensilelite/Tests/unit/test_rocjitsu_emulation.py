@@ -3,7 +3,7 @@
 
 """rocjitsu launcher and pytest plugin (Tests/emulation), with real pytest runs.
 
-A fake ``mirage`` runs the wrapped command directly, so these need no emulator.
+A fake ``rocjitsu`` runs the wrapped command directly, so these need no emulator.
 """
 
 import importlib.util
@@ -34,12 +34,12 @@ linux_only = pytest.mark.skipif(sys.platform != "linux", reason="Linux process s
 
 @pytest.fixture
 def rocm(tmp_path):
-    """A ROCm tree with a pass-through mirage and a gfx1250 device config."""
+    """A ROCm tree with a pass-through rocjitsu and a gfx1250 device config."""
     root = tmp_path / "rocm"
-    mirage = root / "bin" / "mirage"
-    mirage.parent.mkdir(parents=True)
-    mirage.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n')
-    mirage.chmod(0o755)
+    rocjitsu = root / "bin" / "rocjitsu"
+    rocjitsu.parent.mkdir(parents=True)
+    rocjitsu.write_text('#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n')
+    rocjitsu.chmod(0o755)
     configs = root / "share" / "rocjitsu" / "configs"
     configs.mkdir(parents=True)
     device = dict(simd_count=1024, simd_per_cu=4)
@@ -68,8 +68,17 @@ def run(tmp_path, rocm, source, *, extra=(), timeout=20, workers=0, env=()):
     ]
     if workers:
         command += ["-p", "xdist.plugin", "-n", str(workers)]
+    # A CI job's own install, shard and summary settings must not leak in.
+    ci_names = (
+        "THEROCK_BIN_DIR",
+        "SHARD_INDEX",
+        "TOTAL_SHARDS",
+        "GITHUB_STEP_SUMMARY",
+        "PYTEST_NUM_WORKERS",
+        "PYTEST_TEST_TIMEOUT",
+    )
     run_env = {
-        **os.environ,
+        **{name: value for name, value in os.environ.items() if name not in ci_names},
         "ROCM_PATH": str(rocm),
         "AMDGPU_TARGETS": "gfx1250",
         "ROCJITSU_REPORT_DIR": str(reports),
@@ -112,6 +121,43 @@ def test_teardown(cleanup): pass
     assert (progress["selected"], progress["finished"]) == (5, 5)
     assert (progress["passed"], progress["failed"], progress["skipped"]) == (1, 2, 2)
     assert "failed: " in result.stdout
+
+
+@linux_only
+def test_job_summary_lists_tests_that_did_not_pass(tmp_path, rocm):
+    summary = tmp_path / "summary.md"
+    summary.write_text("earlier step\n")
+    result, execution, progress = run(
+        tmp_path,
+        rocm,
+        "def test_pass(): pass\ndef test_fail(): assert False\n",
+        env={"GITHUB_STEP_SUMMARY": str(summary)},
+    )
+    assert result.returncode == 1
+    text = summary.read_text()
+    assert text.startswith("earlier step\n### rocjitsu gfx1250 shard 1/1: failed\n")
+    assert "| 2 | 1 | 1 | 0 | 0 | 0 |" in text
+    assert "Failed:\n- `" in text and "::test_fail`" in text
+    assert "test_pass" not in text
+
+
+def test_not_passed_separates_timeouts():
+    def test(outcome, detail=None):
+        return dict(outcome=outcome, phases=dict(call=dict(detail=detail)))
+
+    progress = dict(
+        tests={
+            "a": test("passed"),
+            "b": test("failed", "E   AssertionError"),
+            "c": test("failed", "E   Failed: Timeout (>7200.0s) from pytest-timeout."),
+            "d": test("incomplete"),
+        }
+    )
+    assert launcher.not_passed(progress) == {
+        "failed": ["b"],
+        "timed out": ["c"],
+        "incomplete": ["d"],
+    }
 
 
 @linux_only
@@ -293,6 +339,37 @@ def test_split_cpus(cores, expected):
 
 
 @pytest.mark.parametrize(
+    "cores, gib, expected", [(96, 64, (6, 16)), (96, 512, (16, 6)), (32, 8, (1, 32))]
+)
+def test_split_cpus_fits_memory(cores, gib, expected):
+    assert launcher.split_cpus(cores, gib * 2**30) == expected
+
+
+@pytest.mark.parametrize(
+    "files, expected",
+    [
+        ({"cpu.max": "3200000 100000\n", "memory.max": "68719476736\n"}, (32, 64 * 2**30)),
+        ({"cpu.max": "max 100000\n", "memory.max": "max\n"}, (None, None)),
+        (
+            {
+                "cpu/cpu.cfs_quota_us": "1600000\n",
+                "cpu/cpu.cfs_period_us": "100000\n",
+                "memory/memory.limit_in_bytes": "9223372036854771712\n",
+            },
+            (16, None),
+        ),
+        ({"cpu/cpu.cfs_quota_us": "-1\n", "cpu/cpu.cfs_period_us": "100000\n"}, (None, None)),
+        ({}, (None, None)),
+    ],
+)
+def test_cgroup_limits(tmp_path, files, expected):
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    assert launcher.cgroup_limits(tmp_path) == expected
+
+
+@pytest.mark.parametrize(
     "env, target",
     [
         ({"AMDGPU_TARGETS": "gfx1250"}, "gfx1250"),
@@ -324,14 +401,14 @@ def test_emulation_setup(tmp_path, rocm):
     prefix, run_env = launcher.emulation_setup(env, 96, tmp_path / "reports")
     config = json.loads((tmp_path / "reports" / "rocjitsu-config.json").read_text())
     assert (config["cpu_thread_budget"], config["num_threads"]) == (6, 1)
-    assert prefix[:5] == [str(rocm / "bin" / "mirage"), "run", "--profile", "mi450x", "--in-process"]
-    assert prefix[-1] == "--"
+    run_config = str(tmp_path / "reports" / "rocjitsu-config.json")
+    assert prefix == [str(rocm / "bin" / "rocjitsu"), "--config", run_config, "--"]
     assert run_env["CU"] == "256"
     assert (run_env["PYTEST_NUM_WORKERS"], run_env["OMP_THREAD_LIMIT"]) == ("16", "6")
     assert run_env["PYTEST_TEST_TIMEOUT"] == "7200"
     assert run_env["ROCJITSU_STALL_DUMP_AFTER"] == "6900"
     assert run_env["PYTHONPATH"] == f"{EMULATION.resolve()}{os.pathsep}/keep"
-    runtime = Path(run_env["MIRAGE_RUNTIME"])
+    runtime = Path(run_env["ROCJITSU_RUNTIME_DIR"])
     assert runtime.is_dir() and runtime.stat().st_mode & 0o777 == 0o700
 
 
@@ -349,9 +426,9 @@ def test_emulation_setup_keeps_overrides(tmp_path, rocm):
 
 
 @linux_only
-def test_emulation_setup_requires_mirage(tmp_path, rocm):
-    (rocm / "bin" / "mirage").unlink()
-    with pytest.raises(SystemExit, match="mirage"):
+def test_emulation_setup_requires_rocjitsu(tmp_path, rocm):
+    (rocm / "bin" / "rocjitsu").unlink()
+    with pytest.raises(SystemExit, match="rocjitsu"):
         launcher.emulation_setup({"ROCM_PATH": str(rocm), "AMDGPU_TARGETS": "gfx1250"}, 8, tmp_path)
 
 
