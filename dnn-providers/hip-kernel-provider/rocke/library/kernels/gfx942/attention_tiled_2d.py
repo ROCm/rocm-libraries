@@ -75,6 +75,7 @@ from rocke.helpers.attention import (
     warp_xor_reduce_sum,
     warp_xor_reduce_sum_32lane,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
@@ -1544,11 +1545,10 @@ def build_unified_attention_2d_tiled(
     # deposit stays lane-contiguous, so the [T, HD] K_lds / V_lds layout
     # (and the strided-V B-operand math that depends on it) is unchanged.
     #
-    # There is no catalog field for this today: ``memory.buffer_load_max_dwords``
-    # describes the *register* vector buffer-load width (4 on both gfx942 and
-    # gfx950) and does NOT capture the narrower load-*to-LDS* limit, so we
-    # encode the gfx942-specific value here rather than touching core/arch/.
-    ASYNC_LDS_MAX_DWORDS = 1
+    # The width comes from the attention capability table (the catalog's
+    # ``async_lds_max_dwords``), not ``memory.buffer_load_max_dwords``: that is
+    # the *register* vector buffer-load width (4 on both gfx942 and gfx950).
+    ASYNC_LDS_MAX_DWORDS = attn_arch_caps("gfx942").max_lds_dma_dwords
     ASYNC_LDS_MAX_BYTES_PER_LANE = ASYNC_LDS_MAX_DWORDS * 4
     BLOCK_M_PER_WARP = spec.block_m_per_warp
     # Number of stacked MFMA-M=16 atoms per warp's M dimension. For
@@ -2490,12 +2490,8 @@ def build_unified_attention_2d_tiled(
         # dwords in {1, 3, 4}; on CDNA3 only 1 (4 bytes/lane) legalises for
         # the load-*to-LDS* form, so the candidate list is clamped here.
         tile_bytes = T * HD  # 1 byte per fp8 element
-        fp8_dword_candidates = [
-            (d, by)
-            for (d, by) in [(4, 16), (3, 12), (1, 4)]
-            if d <= ASYNC_LDS_MAX_DWORDS
-        ]
-        for dwords_try, bytes_per_lane in fp8_dword_candidates:
+        for dwords_try in sorted(attn_arch_caps("gfx942").lds_dma_dwords, reverse=True):
+            bytes_per_lane = dwords_try * 4
             payload = THREADS * bytes_per_lane
             if tile_bytes >= payload and tile_bytes % payload == 0:
                 K_FP8_DWORDS = dwords_try

@@ -75,6 +75,7 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
@@ -82,11 +83,20 @@ from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
 MFMA_M = 16
 MFMA_N = 16
 # Async K/V feed: the segment kernel is one wave64 CTA, and each lane's
-# buffer_load ... lds moves 4 DWORDs (8 halves), so one async call stages
-# 64 * 8 halves. Every call is one outstanding vmcnt event; the gfx950
-# s_waitcnt vmcnt field is 6 bits.
+# buffer_load ... lds moves the widest gfx950 LDS-DMA width (from the attention
+# capability table: 4 DWORDs, 8 halves), so one async call stages 64 * 8
+# halves. Every call is one outstanding vmcnt event; the gfx950 s_waitcnt
+# vmcnt field is 6 bits.
 SEGMENT_THREADS = 64
-KV_HALVES_PER_LANE = 8
+KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords
+# The KV swizzle (one lane payload = one 16-byte chunk, tid * 8 halves) is
+# written for 4-dword lanes.
+if KV_DMA_DWORDS != 4:
+    raise RuntimeError(
+        "gfx950 tiled 3D attention lane addressing assumes a 4-dword LDS-DMA "
+        f"width; the capability table gives {KV_DMA_DWORDS}"
+    )
+KV_HALVES_PER_LANE = KV_DMA_DWORDS * 2
 KV_HALVES_PER_CALL = SEGMENT_THREADS * KV_HALVES_PER_LANE
 MAX_VMCNT = (1 << 6) - 1
 
@@ -1012,7 +1022,7 @@ def build_unified_attention_3d_tiled(
                 soff = b.mul(page_ids[blk], kv_stride_blk_b)
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                call_rsrc, dst, voff, soff, 4, coherency=KV_CACHE_BITS
+                call_rsrc, dst, voff, soff, KV_DMA_DWORDS, coherency=KV_CACHE_BITS
             )
 
     def _issue_strided_tile(
@@ -1028,7 +1038,7 @@ def build_unified_attention_3d_tiled(
             )
             dst = b.smem_ptr_add(buf_base, b.const_i64(call * bytes_per_call))
             b.async_buffer_load_lds_addr(
-                src_rsrc, dst, voff, zero_soff, 4, coherency=KV_CACHE_BITS
+                src_rsrc, dst, voff, zero_soff, KV_DMA_DWORDS, coherency=KV_CACHE_BITS
             )
 
     # FP8 K/V cache: sync dequant loader. See attention_tiled_2d.py for the

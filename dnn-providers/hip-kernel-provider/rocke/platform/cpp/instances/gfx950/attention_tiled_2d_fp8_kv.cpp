@@ -51,6 +51,7 @@
  *   the dead ones.
  */
 
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 #include "rocke/ir.h"
@@ -61,7 +62,8 @@
  *  The fp8 K/V loader scalars are computed in the Python prologue but are not
  *  carried as ctx fields. They are pure functions of ctx geometry ints, so we
  *  recompute them here exactly as the prologue does. Mirrors:
- *    fp8_dword_candidates  [(4,16),(3,12),(1,4)] clamped to ASYNC_LDS_MAX_DWORDS
+ *    the gfx950 LDS-DMA widths of the attention capability table, widest
+ *    first, clamped to ASYNC_LDS_MAX_DWORDS (bytes_per_lane = 4 * dwords)
  *    pick first (dwords,bytes_per_lane) s.t. tile_bytes % (THREADS*bpl)==0
  *  This is the K_FP8_DWORDS / K_BYTES_PER_LANE pick reused by the FP8 async
  *  loader (FP8_DWORDS_PER_LANE = K_FP8_DWORDS, FP8_BYTES_PER_LANE =
@@ -81,8 +83,7 @@ typedef struct
 static rocke_attn2d_fp8_dma_t rocke_attn2d_fp8_dma_pick(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
     rocke_attn2d_fp8_dma_t out;
-    static const int cand_d[3] = {4, 3, 1};
-    static const int cand_by[3] = {16, 12, 4};
+    rocke_attn_arch_caps_t caps;
     int tile_bytes = ctx->T * ctx->HD; /* 1 byte per fp8 element */
     int i;
 
@@ -93,18 +94,24 @@ static rocke_attn2d_fp8_dma_t rocke_attn2d_fp8_dma_pick(const rocke_gfx950_attn2
     out.calls_per_tile = 0;
     out.valid = false;
 
-    for(i = 0; i < 3; ++i)
+    if(!rocke_attn_arch_caps("gfx950", &caps, NULL, 0))
     {
+        return out;
+    }
+    for(i = caps.n_lds_dma_dwords - 1; i >= 0; --i)
+    {
+        const int dwords = caps.lds_dma_dwords[i];
+        const int bytes_per_lane = 4 * dwords;
         int payload;
-        if(cand_d[i] > ctx->ASYNC_LDS_MAX_DWORDS)
+        if(dwords > ctx->ASYNC_LDS_MAX_DWORDS)
         {
             continue;
         }
-        payload = ctx->THREADS * cand_by[i];
+        payload = ctx->THREADS * bytes_per_lane;
         if(payload > 0 && tile_bytes >= payload && (tile_bytes % payload) == 0)
         {
-            out.dwords = cand_d[i];
-            out.bytes_per_lane = cand_by[i];
+            out.dwords = dwords;
+            out.bytes_per_lane = bytes_per_lane;
             out.elems_per_call = payload;
             out.bytes_per_call = payload;
             out.calls_per_tile = tile_bytes / payload;

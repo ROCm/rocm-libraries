@@ -51,6 +51,7 @@
 #include <string.h> /* memset */
 
 #include "rocke/arena.h" /* rocke_arena_calloc */
+#include "rocke/helper_rocke.helpers.attention_arch_caps.h"
 #include "rocke/instance_gfx950_attention_tiled_2d_internal.h"
 
 /* ==========================================================================
@@ -58,14 +59,21 @@
  *
  * The Python build prologue computes these once and the loader closures capture
  * them. In C they are pure functions of ctx geometry, recomputed where used. The
- * gfx950 bf16 path pins dwords=4 (16 bytes/lane) and KV_HALVES_PER_CALL=THREADS*8
- * (8 halves/lane) as literals -- mirror that, not the ASYNC_LDS_MAX_* fields.
+ * gfx950 bf16 path uses KV_DMA_DWORDS, the widest gfx950 LDS-DMA width from the
+ * attention capability table (4 dwords = 16 bytes/lane, 8 halves/lane), as
+ * Python does -- not the ASYNC_LDS_MAX_* fields.
  * ========================================================================== */
 
-/* KV_HALVES_PER_CALL = THREADS * 8 (Python 1413). */
+/* KV_DMA_DWORDS = attn_arch_caps("gfx950").max_lds_dma_dwords. */
+static int rocke__kv_dma_dwords(void)
+{
+    return rocke_attn_max_lds_dma_dwords("gfx950");
+}
+
+/* KV_HALVES_PER_CALL = THREADS * KV_DMA_DWORDS * 2 (Python 1413). */
 static int rocke__kv_halves_per_call(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    return ctx->THREADS * 8;
+    return ctx->THREADS * rocke__kv_dma_dwords() * 2;
 }
 
 /* kv_calls_per_tile = (T * HD) // KV_HALVES_PER_CALL (Python 1415). */
@@ -86,10 +94,10 @@ static int rocke__bytes_per_buf(const rocke_gfx950_attn2d_build_ctx_t* ctx)
     return ctx->T * ctx->HD * 2;
 }
 
-/* WAVE_BYTES = WAVE * 16 (dwords=4 -> 16 bytes/lane) (Python 1473). */
+/* WAVE_BYTES = WAVE * KV_DMA_DWORDS * 4 (16 bytes/lane) (Python 1473). */
 static int rocke__wave_bytes(const rocke_gfx950_attn2d_build_ctx_t* ctx)
 {
-    return ctx->WAVE * 16;
+    return ctx->WAVE * rocke__kv_dma_dwords() * 4;
 }
 
 /* kv_block_bytes_c = kv_stride_blk_b (one-block buffer bound). Python derives
@@ -638,8 +646,9 @@ void rocke_gfx950_attn2d_issue_k_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
         /* k_dst = K_wave_base + call*bytes_per_call (1682). */
         rocke_value_t* k_dst = rocke_b_smem_ptr_add(
             b, K_wave_base, rocke_b_const_i64(b, (int64_t)call * bytes_per_call));
-        /* CACHE_STREAM (SLC): one-shot streaming load; dwords=4 (1687-1689). */
-        rocke_b_async_buffer_load_lds_addr(b, k_rsrc, k_dst, voff, soff, 4, ROCKE_CACHE_STREAM);
+        /* CACHE_STREAM (SLC): one-shot streaming load; KV_DMA_DWORDS (1687-1689). */
+        rocke_b_async_buffer_load_lds_addr(
+            b, k_rsrc, k_dst, voff, soff, rocke__kv_dma_dwords(), ROCKE_CACHE_STREAM);
     }
 }
 
@@ -725,8 +734,9 @@ void rocke_gfx950_attn2d_issue_v_load_runtime(rocke_gfx950_attn2d_build_ctx_t* c
         /* v_dst = V_wave_base + call*bytes_per_call (1733). */
         rocke_value_t* v_dst = rocke_b_smem_ptr_add(
             b, V_wave_base, rocke_b_const_i64(b, (int64_t)call * bytes_per_call));
-        /* CACHE_STREAM (SLC): V consumed once per iter; dwords=4 (1737-1739). */
-        rocke_b_async_buffer_load_lds_addr(b, v_rsrc, v_dst, voff, soff, 4, ROCKE_CACHE_STREAM);
+        /* CACHE_STREAM (SLC): V consumed once per iter; KV_DMA_DWORDS (1737-1739). */
+        rocke_b_async_buffer_load_lds_addr(
+            b, v_rsrc, v_dst, voff, soff, rocke__kv_dma_dwords(), ROCKE_CACHE_STREAM);
     }
 }
 

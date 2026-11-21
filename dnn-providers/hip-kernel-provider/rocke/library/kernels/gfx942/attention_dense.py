@@ -194,6 +194,7 @@ from rocke.core.ir import (
     I64,
 )
 from rocke.helpers.attention import mfma_32x32x8_for_dtype
+from rocke.helpers.attention_arch_caps import attn_arch_caps
 
 # Shared problem/geometry fields live in an architecture-neutral module.
 from kernels.common.attention_dense_decode import (
@@ -815,11 +816,21 @@ def gfx942_kernel_name(spec: AttentionDenseSpec) -> str:
 _SUPPORTED_DTYPES = ("bf16", "fp16")
 _SUPPORTED_HEAD_SIZES = (64, 128)
 
-# Elements moved into LDS by ONE async-DMA instruction: 64 lanes x dwords=1 (4 B)
-# / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel emits
-# (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
+# Per-lane width of every K/V async-DMA instruction: the widest gfx942 has
+# (1 dword), from the attention capability table.
+_DMA_DWORDS = attn_arch_caps("gfx942").max_lds_dma_dwords
+# The per-lane LDS addresses (lane * 2 halves) are written for 1-dword lanes.
+if _DMA_DWORDS != 1:
+    raise RuntimeError(
+        "gfx942 dense attention lane addressing assumes a 1-dword LDS-DMA width; "
+        f"the capability table gives {_DMA_DWORDS}"
+    )
+
+# Elements moved into LDS by ONE async-DMA instruction: 64 lanes x _DMA_DWORDS
+# (4 B) / 2 B per element. wave64 and a 2-byte dtype are the only cases this kernel
+# emits (supports_attention_dense gates dtype to bf16/fp16); an fp8 extension must
 # re-derive this or the row stride and the LDS budget go wrong together.
-_DMA_ELEMS_PER_INSTR = 64 * 4 // 2  # = 128
+_DMA_ELEMS_PER_INSTR = 64 * _DMA_DWORDS * 4 // 2  # = 128
 
 
 def _rows_per_instr(head_size: int) -> int:
@@ -1948,7 +1959,11 @@ def _build_attention_dense_single_buffer(
                         kv_row = gkey
                     voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
                     b.async_buffer_load_lds_addr(
-                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                        rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        _DMA_DWORDS,
                     )
             else:
                 lanes_per_row = D // 2
@@ -1985,7 +2000,11 @@ def _build_attention_dense_single_buffer(
                         gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                     voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                     b.async_buffer_load_lds_addr(
-                        rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
+                        rsrc,
+                        row_base,
+                        b.mul(voff, b.const_i32(2)),
+                        zero_soff,
+                        _DMA_DWORDS,
                     )
 
         def load_tile(tile_idx):

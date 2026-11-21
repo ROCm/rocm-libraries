@@ -11,6 +11,7 @@ from ..dtypes import normalize_dtype
 from .target import (  # noqa: F401
     ArchTarget,
     GemmCapabilities,
+    LDS_DMA_ENCODED_DWORDS,
     LayoutMap,
     MemoryCapabilities,
     MmaCatalog,
@@ -41,6 +42,7 @@ from .target import (  # noqa: F401
 __all__ = [
     "ArchTarget",
     "GemmCapabilities",
+    "LDS_DMA_ENCODED_DWORDS",
     "LayoutMap",
     "MemoryCapabilities",
     "MmaCatalog",
