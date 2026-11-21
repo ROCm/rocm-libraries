@@ -60,7 +60,7 @@ def _native_dump(inputs):
     digest = hashlib.sha256(lines.encode()).hexdigest()[:16]
     return {
         "engine": ENGINE,
-        "selector_revision": f"hip-kernel-provider/asm-sdpa-fwd/{digest}",
+        "selector_revision": f"hip-kernel-provider/asm-sdpa/{digest}",
         "selector": description,
     }
 

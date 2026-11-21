@@ -35,16 +35,15 @@ namespace asm_sdpa_engine
 namespace
 {
 
-/// `<provider>/asm-sdpa-fwd/<digest>`: a configure-time digest of everything that decides
-/// which forward kernel runs and how (see AsmSdpaSelectorRevision.cmake). A deployed L1
-/// model must record this exact string as `trained_against.selector_revision` (RFC 0019
-/// §4.1) or the loader refuses it.
-#ifndef HKP_ASM_SDPA_FWD_REVISION
+/// `<provider>/asm-sdpa/<digest>`: a configure-time digest of everything that decides
+/// which forward or backward kernel runs and how (see AsmSdpaSelectorRevision.cmake). A
+/// deployed L1 model must record this exact string as `trained_against.selector_revision`
+/// (RFC 0019 §4.1) or the loader refuses it.
+#ifndef HKP_ASM_SDPA_REVISION
 // Without a digest, report a revision no shipped model can match.
-#define HKP_ASM_SDPA_FWD_REVISION "undetermined"
+#define HKP_ASM_SDPA_REVISION "undetermined"
 #endif
-constexpr const char* SELECTOR_REVISION
-    = "hip-kernel-provider/asm-sdpa-fwd/" HKP_ASM_SDPA_FWD_REVISION;
+constexpr const char* SELECTOR_REVISION = "hip-kernel-provider/asm-sdpa/" HKP_ASM_SDPA_REVISION;
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 /// Resolves AsmSdpaEngine::L1_MODEL_IDS through the provider's descriptor catalog. Never
@@ -183,6 +182,13 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     try
     {
+        // The models were trained on graphs the builders serve; any other graph is outside
+        // what they describe, so it gets no estimate rather than an extrapolated one.
+        if(findApplicablePlanBuilder(handle, graph) == nullptr)
+        {
+            result.reason = "ASM SDPA serves no plan for this graph";
+            return result;
+        }
         const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
         const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
         return _l1Models.predict(id(),

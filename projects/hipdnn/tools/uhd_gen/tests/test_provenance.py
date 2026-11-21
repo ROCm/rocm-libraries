@@ -228,7 +228,7 @@ def test_a_stale_selector_revision_is_refused_rather_than_scored():
 
 
 def test_feature_semantics_absent_means_revision_1_and_a_mismatch_names_both():
-    shipped = {"selector_revision": "hip-kernel-provider/asm-sdpa-fwd/b162a5ffd743c21d"}
+    shipped = {"selector_revision": "hip-kernel-provider/asm-sdpa/b162a5ffd743c21d"}
     require_feature_semantics(shipped, 1)
     require_feature_semantics(None, 1)
     with pytest.raises(ProvenanceError, match=r"revision 1\b.*revision 2\b"):

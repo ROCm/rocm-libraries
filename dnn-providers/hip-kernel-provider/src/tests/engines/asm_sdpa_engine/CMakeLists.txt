@@ -46,8 +46,8 @@ endif()
 # ============================================================================
 # The selector revision is a configure-time digest, so its recipe can only be run against
 # other trees here. TestAsmSdpaSelectorRevision asserts that LF and CRLF copies of the
-# engine tree agree with the built revision, and that each forward input moves it while
-# backward-only and doc changes do not. Backward kernels are left out of the copied tree.
+# engine tree agree with the built revision, and that each forward or backward input moves
+# it while doc and engine-class changes do not.
 set(_hkp_asm_engine_dir "${CMAKE_CURRENT_SOURCE_DIR}/../../../engines/asm_sdpa_engine")
 cmake_path(NORMAL_PATH _hkp_asm_engine_dir)
 include("${_hkp_asm_engine_dir}/AsmSdpaSelectorRevision.cmake")
@@ -60,7 +60,7 @@ file(REMOVE_RECURSE "${CMAKE_CURRENT_BINARY_DIR}/selector_revision")
 set(_hkp_at "@")
 file(GLOB_RECURSE _hkp_asm_files RELATIVE "${_hkp_asm_engine_dir}" "${_hkp_asm_engine_dir}/*")
 foreach(_rel IN LISTS _hkp_asm_files)
-    if(_rel MATCHES "^asm/asm_kernels/[^/]+/fmha_v3_bwd/" OR _rel MATCHES "^descriptors/")
+    if(_rel MATCHES "^descriptors/")
         continue()
     endif()
     if(_rel MATCHES "\\.co$")
@@ -79,8 +79,8 @@ foreach(_rel IN LISTS _hkp_asm_files)
              NEWLINE_STYLE CRLF)
     endif()
 endforeach()
-hkp_asm_sdpa_fwd_revision(_hkp_asm_rev_lf "${_hkp_asm_lf}")
-hkp_asm_sdpa_fwd_revision(_hkp_asm_rev_crlf "${_hkp_asm_crlf}")
+hkp_asm_sdpa_revision(_hkp_asm_rev_lf "${_hkp_asm_lf}")
+hkp_asm_sdpa_revision(_hkp_asm_rev_crlf "${_hkp_asm_crlf}")
 
 set(_hkp_asm_probe_rows "")
 # Applies <change> to <rel> in the LF tree, records the revision, and restores the file.
@@ -97,7 +97,7 @@ function(_hkp_asm_revision_probe _change _rel _must_expire)
         file(MAKE_DIRECTORY "${_dir}")
         file(WRITE "${_path}" "probe\n")
     endif()
-    hkp_asm_sdpa_fwd_revision(_probed "${_hkp_asm_lf}")
+    hkp_asm_sdpa_revision(_probed "${_hkp_asm_lf}")
     if(_change STREQUAL "EDIT")
         file(RENAME "${_saved}" "${_path}")
     else()
@@ -109,26 +109,32 @@ function(_hkp_asm_revision_probe _change _rel _must_expire)
         "${_hkp_asm_probe_rows}    Probe{\"${_label}\", \"${_probed}\", ${_must_expire}},\n"
         PARENT_SCOPE)
 endfunction()
-# Forward selection inputs.
-_hkp_asm_revision_probe(EDIT asm/asm_kernels/codegen.py true)
-_hkp_asm_revision_probe(EDIT asm/asm_kernels/gfx942/fmha_v3_fwd/fmha_fwd.csv true)
-_hkp_asm_revision_probe(EDIT plans/SdpaPlanUtils.hpp true)
-_hkp_asm_revision_probe(EDIT plans/SdpaFwdPlanBuilder.cpp true)
-_hkp_asm_revision_probe(EDIT plans/SdpaFwdPlan.cpp true)
-_hkp_asm_revision_probe(EDIT plans/SdpaFwdArgsBuilder.hpp true)
-_hkp_asm_revision_probe(EDIT asm/SdpaFwdKernelArgs.hpp true)
-# A new forward kernel or arch directory is an inventory change.
+# Every selection input of either direction.
+foreach(_source IN ITEMS
+        asm/asm_kernels/codegen.py
+        plans/SdpaFwdPlanBuilder.cpp plans/SdpaFwdPlanBuilder.hpp
+        plans/SdpaBwdPlanBuilder.cpp plans/SdpaBwdPlanBuilder.hpp
+        plans/SdpaPlanUtils.hpp
+        plans/SdpaFwdPlan.cpp plans/SdpaFwdPlan.hpp plans/SdpaFwdParams.hpp
+        plans/SdpaFwdLaunchParams.hpp
+        plans/SdpaBwdPlan.cpp plans/SdpaBwdPlan.hpp plans/SdpaBwdParams.hpp
+        plans/SdpaBwdLaunchParams.hpp
+        plans/SdpaFwdArgsBuilder.hpp plans/SdpaBwdArgsBuilder.hpp
+        asm/SdpaFwdKernelArgs.hpp asm/SdpaBwdKernelArgs.hpp asm/SgprPadding.hpp
+        asm/asm_kernels/gfx942/fmha_v3_fwd/fmha_fwd.csv)
+    _hkp_asm_revision_probe(EDIT ${_source} true)
+endforeach()
+# A new kernel or arch directory, in either direction, is an inventory change.
 _hkp_asm_revision_probe(ADD asm/asm_kernels/gfx950/fmha_v3_fwd/fwd_probe.co true)
 _hkp_asm_revision_probe(ADD asm/asm_kernels/gfx_probe/fmha_v3_fwd/fmha_fwd.csv true)
-# Backward-only and provenance changes cannot move a forward throughput number.
-_hkp_asm_revision_probe(EDIT plans/SdpaBwdPlanBuilder.cpp false)
-_hkp_asm_revision_probe(EDIT plans/SdpaBwdPlan.cpp false)
-_hkp_asm_revision_probe(ADD asm/asm_kernels/gfx942/fmha_v3_bwd/bwd_probe.co false)
-_hkp_asm_revision_probe(ADD asm/asm_kernels/gfx942/fmha_v3_bwd/fmha_bwd.csv false)
+_hkp_asm_revision_probe(ADD asm/asm_kernels/gfx942/fmha_v3_bwd/bwd_probe.co true)
+_hkp_asm_revision_probe(ADD asm/asm_kernels/gfx_probe/fmha_v3_bwd/fmha_bwd.csv true)
+# Provenance and docs cannot move a throughput number.
 _hkp_asm_revision_probe(EDIT asm/asm_kernels/gfx942/fmha_v3_fwd/SOURCE.md false)
+_hkp_asm_revision_probe(EDIT asm/asm_kernels/gfx942/fmha_v3_bwd/SOURCE.md false)
 _hkp_asm_revision_probe(EDIT asm/asm_kernels/README.md false)
 # The engine class reports details, binds L1 models and dispatches to a plan builder; the
-# builders, not it, choose the forward kernel.
+# builders, not it, choose the kernel.
 _hkp_asm_revision_probe(EDIT AsmSdpaEngine.cpp false)
 _hkp_asm_revision_probe(EDIT AsmSdpaEngine.hpp false)
 

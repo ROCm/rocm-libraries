@@ -257,11 +257,11 @@ TEST(TestAsmSdpaEngineDeclaration, DeclaredModelIdsAreDistinctWellFormedUuids)
 }
 
 /// A model whose recorded revision mismatches is refused, so the revision must track the
-/// forward kernels and selection sources, not the provider release.
-TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheForwardSurfaceAndNotTheRelease)
+/// forward and backward kernels and selection sources, not the provider release.
+TEST(TestAsmSdpaEngineDeclaration, TheSelectorRevisionNamesTheKernelSurfaceAndNotTheRelease)
 {
     const std::string revision = AsmSdpaEngine::selectorRevision();
-    const std::string prefix = "hip-kernel-provider/asm-sdpa-fwd/";
+    const std::string prefix = "hip-kernel-provider/asm-sdpa/";
     ASSERT_EQ(revision.rfind(prefix, 0), 0u) << revision;
 
     // "undetermined" here means the CMake wiring that computes the digest was dropped.
@@ -283,7 +283,7 @@ TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComp
 {
     EXPECT_TRUE(hip_kernel_provider::shipped_model_gate::shippedL1ModelsBindThisBuild(
         AsmSdpaEngine::engineName(),
-        "asm_sdpa_fwd",
+        "asm_sdpa",
         shipped_models::MODELS,
         HKP_SELECTOR_DUMP_DIR,
         AsmSdpaEngine::L1_MODEL_IDS,
@@ -347,7 +347,7 @@ TEST_F(TestAsmSdpaEngine, UnregisteredMetricIsABadRequest)
 
 namespace fixtures = selector_revision_fixtures;
 
-constexpr std::string_view SELECTOR_REVISION_PREFIX = "hip-kernel-provider/asm-sdpa-fwd/";
+constexpr std::string_view SELECTOR_REVISION_PREFIX = "hip-kernel-provider/asm-sdpa/";
 
 /// The digest part of the revision this build reports.
 std::string_view builtDigest()
@@ -381,15 +381,15 @@ TEST(TestAsmSdpaSelectorRevision, CrlfAndLfCheckoutsReportTheBuiltRevision)
     EXPECT_EQ(builtDigest(), std::string_view(fixtures::REVISION_LF));
 }
 
-/// Each forward selection input must move the revision; everything else must not.
-TEST(TestAsmSdpaSelectorRevision, MovesForEveryForwardSelectionInputAndNothingElse)
+/// Each forward or backward selection input must move the revision; everything else must not.
+TEST(TestAsmSdpaSelectorRevision, MovesForEverySelectionInputAndNothingElse)
 {
     const std::string_view base(fixtures::REVISION_LF);
     for(const auto& probe : fixtures::PROBES)
     {
         EXPECT_EQ(std::string_view(probe.revision) != base, probe.mustExpire)
             << probe.change << (probe.mustExpire ? " must" : " must not")
-            << " change the forward selector revision";
+            << " change the selector revision";
     }
 }
 
@@ -419,6 +419,25 @@ TEST_F(TestAsmSdpaEngine, GetDetailsReportsKnobsOfApplicableBuilderOnly)
     ASSERT_EQ(engineDetails.knobCount(), 1u);
     EXPECT_EQ(engineDetails.getKnobByName("serving").knobId(), "serving");
 }
+
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+/// The models describe graphs the builders serve; a graph no builder serves gets no estimate
+/// instead of an extrapolated one, before any device or model is consulted.
+TEST_F(TestAsmSdpaEngine, GetPredictionDeclinesAGraphNoBuilderServes)
+{
+    auto declining = std::make_unique<::testing::NiceMock<MockPlanBuilder>>();
+    ON_CALL(*declining, isApplicable).WillByDefault(::testing::Return(false));
+    AsmSdpaEngine engine;
+    engine.addPlanBuilder(std::move(declining));
+
+    const hipdnn_test_sdk::utilities::MockGraph graph;
+    const EngineConfigWrapper config(nullptr, 0);
+    const auto prediction
+        = engine.getPrediction(_handle, graph, config, HIPDNN_ENGINE_PREDICTION_ENGINE, true);
+    EXPECT_EQ(prediction.status, PredictionStatus::UNAVAILABLE);
+    EXPECT_EQ(prediction.reason, "ASM SDPA serves no plan for this graph");
+}
+#endif // HIPDNN_ENABLE_KERNEL_INGESTOR
 
 TEST_F(TestAsmSdpaEngine, InitializeExecutionContextBuildsPlanWithConfiguredSettings)
 {
