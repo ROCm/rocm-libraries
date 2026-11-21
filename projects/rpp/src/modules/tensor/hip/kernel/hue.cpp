@@ -22,6 +22,8 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 
+#include <type_traits>
+
 #include "hip_tensor_executors.hpp"
 #include "rpp_hip_math.hpp"
 #include "rpp_hip_rgb_hsv_conversion.hpp"
@@ -55,6 +57,25 @@ __device__ void hue_8rgb_hip_compute(d_float24* pix_f24, float* hueParam) {
     hue_1rgb_hip_compute(&(pix_f24->f1[7]), &(pix_f24->f1[15]), &(pix_f24->f1[23]), hueParam);
 }
 
+// Per-dtype dispatch: rgb_to_hsv_hip/hsv_to_rgb_hip expect non-negative "true intensity" pixel
+// values (as U8/F16/F32 already are). I8 stores that intensity shifted by -128, so it must be
+// shifted back to [0, 255] before the HSV math and restored afterward, exactly like
+// color_twist_hip_compute(schar*, ...) does for the same math in color_twist.cpp.
+template <typename T>
+__device__ __forceinline__ void hue_hip_compute(T* srcPtr, d_float24* pix_f24, float* hueParam) {
+    hue_8rgb_hip_compute(pix_f24, hueParam);
+}
+
+template <>
+__device__ __forceinline__ void hue_hip_compute(schar* srcPtr, d_float24* pix_f24,
+                                                float* hueParam) {
+    float4 i8Offset_f4 = FLOAT4_128;
+    rpp_hip_math_add24_const(pix_f24, pix_f24, i8Offset_f4);
+    hue_8rgb_hip_compute(pix_f24, hueParam);
+    rpp_hip_pixel_check_0to255(pix_f24);
+    rpp_hip_math_subtract24_const(pix_f24, pix_f24, i8Offset_f4);
+}
+
 template <typename T>
 __global__ void hue_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, uint2 dstStridesNH,
                                    float* hueTensor, RpptROIPtr roiTensorPtrSrc) {
@@ -78,8 +99,11 @@ __global__ void hue_pkd_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPtr, uin
     d_float24 pix_f24;
 
     rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx, &pix_f24);
-    hue_8rgb_hip_compute(&pix_f24, &hueParam);
-    rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &pix_f24);
+    hue_hip_compute(srcPtr, &pix_f24, &hueParam);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &pix_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &pix_f24);
 }
 
 template <typename T>
@@ -106,8 +130,12 @@ __global__ void hue_pln_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstPtr, ui
     d_float24 pix_f24;
 
     rpp_hip_load24_pln3_and_unpack_to_float24_pln3(srcPtr + srcIdx, srcStridesNCH.y, &pix_f24);
-    hue_8rgb_hip_compute(&pix_f24, &hueParam);
-    rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &pix_f24);
+    hue_hip_compute(srcPtr, &pix_f24, &hueParam);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &pix_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &pix_f24);
 }
 
 template <typename T>
@@ -134,8 +162,12 @@ __global__ void hue_pkd3_pln3_hip_tensor(T* srcPtr, uint2 srcStridesNH, T* dstPt
     d_float24 pix_f24;
 
     rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx, &pix_f24);
-    hue_8rgb_hip_compute(&pix_f24, &hueParam);
-    rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &pix_f24);
+    hue_hip_compute(srcPtr, &pix_f24, &hueParam);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pln3<RoundToNearest>(dstPtr + dstIdx, dstStridesNCH.y,
+                                                                   &pix_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pln3(dstPtr + dstIdx, dstStridesNCH.y, &pix_f24);
 }
 
 template <typename T>
@@ -162,8 +194,11 @@ __global__ void hue_pln3_pkd3_hip_tensor(T* srcPtr, uint3 srcStridesNCH, T* dstP
     d_float24 pix_f24;
 
     rpp_hip_load24_pln3_and_unpack_to_float24_pln3(srcPtr + srcIdx, srcStridesNCH.y, &pix_f24);
-    hue_8rgb_hip_compute(&pix_f24, &hueParam);
-    rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &pix_f24);
+    hue_hip_compute(srcPtr, &pix_f24, &hueParam);
+    if constexpr (std::is_same<T, Rpp8s>::value)
+        rpp_hip_pack_float24_pln3_and_store24_pkd3<RoundToNearest>(dstPtr + dstIdx, &pix_f24);
+    else
+        rpp_hip_pack_float24_pln3_and_store24_pkd3(dstPtr + dstIdx, &pix_f24);
 }
 
 template <typename T>
