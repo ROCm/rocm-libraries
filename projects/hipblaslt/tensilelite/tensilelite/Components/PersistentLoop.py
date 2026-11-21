@@ -138,6 +138,20 @@ class PersistentKernelState:
       return bool(kernel.get("_PrefetchAcrossPersistentEnabled",
                              kernel.get("PrefetchAcrossPersistent", 0)))
 
+    def persistentBackEdgeSyncsLds(self, kernel):
+      """Whether re-entering the persistent loop must first drain and sync LDS reads.
+
+      The next tile's preloop DirectToLds loads write LDS that a slower wave can
+      still be reading in this tile's tail (lookahead ds_reads nothing consumes
+      stay in flight into the store). The classic preloop syncs right before its
+      first DirectToLds load (globalReadDo, nextTilePrefetch); the Subtile preloop
+      does not, so its back edge does instead. PAP issues the next tile's loads
+      behind its own barrier.
+      """
+      return bool(kernel.get("UseSubtileImpl")) and isPersistent(kernel) \
+          and bool(kernel["DirectToLdsA"] or kernel["DirectToLdsB"]) \
+          and not self.isPrefetchAcrossPersistentEnabled(kernel)
+
     # ReuseAcrossPersistent has no predicate of its own: emitters read
     # kernel["ReuseAcrossPersistent"] the way they read kernel["HalfPLR"]. Every
     # precondition RAP has is a reject in Solution.assignDerivedParameters -- or,

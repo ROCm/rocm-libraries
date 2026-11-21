@@ -20,6 +20,7 @@ from tensilelite.Components.Subtile.Kernel import (
 )
 from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacementStrategy,
+    HalfDisjointPlanRefused,
     LogicalScheduler,
     MFMATileRange,
     Pass,
@@ -30,10 +31,13 @@ from tensilelite.Components.Subtile.LogicalScheduler import (
     GRPlacement,
     Dep,
     WaitGRCounts,
+    WaitGROp,
+    WaitLROp,
+    SyncOp,
     fmt_mt,
 )
 from unittest.mock import MagicMock
-from rocisa.code import Module
+from rocisa.code import Module, TextBlock
 
 
 def makeTileInfo(tc, kernel):
@@ -4900,3 +4904,3611 @@ class TestInitCMakeOpWiring:
         # Last MFMA should NOT have reuse (no successor)
         assert not mfmas[-1].reuseA
         assert not mfmas[-1].reuseB
+
+
+def _rank_emitter(cfg):
+    from types import SimpleNamespace
+    from tensilelite.Components.Subtile.InstructionEmitter import InstructionEmitter
+
+    emitter = object.__new__(InstructionEmitter)
+    emitter.config = cfg
+    emitter.writer = SimpleNamespace(states=SimpleNamespace(asmCaps={}))
+    return emitter
+
+
+def _rank_placement(cfg, tensor, tile_id, partition, mt_iteration):
+    gran = {
+        "A": cfg.lrA, "B": cfg.lrB,
+        "SA": cfg.lrSA, "SB": cfg.lrSB,
+    }[tensor]
+    return LRPlacement(
+        tensor=tensor,
+        mtIteration=mt_iteration,
+        tiles=MFMATileRange(0, 1, tile_id, tile_id + gran.mn),
+        subIterK_slot=0,
+        partition=partition,
+        targetPartition=(partition + 1) % cfg.numPartitions,
+    )
+
+
+class TestUniformEpochLoadCohorts:
+    """Uniform epoch cohorts are sized in buffer loads, not in atoms.
+
+    An atom is never split, so a cohort closes on the first atom that
+    reaches the configured load count.
+    """
+
+    @staticmethod
+    def _cfg_6x8(loads):
+        return SchedulerConfig(
+            numMFMATilesM=6, numMFMATilesN=8, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(2, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(6, 2), grSB=ReadGranularity(8, 2),
+            partitionSizeM=4, partitionSizeN=4,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            uniformPgrEpoch=True, scaleReuse=2, grLoadsPerAtom=loads,
+        )
+
+    @staticmethod
+    def _epoch_grs(parts):
+        return [
+            [(gr.tensor, gr.tiles.tileId_start, gr.tiles.tileId_end)
+             for slot in slots for gr in slot.grs
+             if gr.mtIteration == 2 and gr.tensor in ("A", "B")]
+            for slots in parts
+        ]
+
+    def test_one_load_atoms_keep_five_atom_cohorts(self):
+        cfg = self._cfg_6x8({})
+        assert cfg.uniform_epoch_cohorts(["A"] * 6 + ["B"] * 4) == \
+            [0] * 5 + [1] * 5
+
+    def test_two_load_atoms_round_up_to_six_loads(self):
+        cfg = self._cfg_6x8({"A": 2})
+        assert cfg.uniform_epoch_cohorts(["A"] * 6 + ["B"] * 4) == \
+            [0, 0, 0, 1, 1, 1, 2, 2, 2, 2]
+
+    def test_cap_closes_a_cohort_before_it_overflows(self):
+        cfg = self._cfg_6x8({"A": 2})
+        assert cfg.uniform_epoch_cohorts(["A"] * 6, cap=4) == \
+            [0, 0, 1, 1, 2, 2]
+
+    def test_cap_below_one_atom_still_places_the_atom(self):
+        cfg = self._cfg_6x8({"A": 2})
+        assert cfg.uniform_epoch_cohorts(["A"] * 2, cap=1) == [0, 1]
+
+    def test_one_load_atoms_place_the_epoch_unchanged(self):
+        parts = LogicalScheduler(self._cfg_6x8({})).build(stop_after=Pass.GR)
+        assert self._epoch_grs(parts) == [
+            [("A", 0, 5)],
+            [("A", 5, 6), ("B", 0, 8)],
+            [],
+            [],
+        ]
+
+    def test_two_load_atoms_spread_the_epoch_over_three_partitions(self):
+        parts = LogicalScheduler(
+            self._cfg_6x8({"A": 2})).build(stop_after=Pass.GR)
+        assert self._epoch_grs(parts) == [
+            [("A", 0, 3)],
+            [("A", 3, 6)],
+            [("B", 0, 8)],
+            [],
+        ]
+
+    def test_partition_zero_hoists_only_its_own_cohort(self):
+        def hoisted(loads):
+            parts = LogicalScheduler(
+                self._cfg_6x8(loads)).build(stop_after=Pass.GR)
+            return [
+                (lr.tensor, lr.tiles.tileId_start, lr.tiles.tileId_end)
+                for slot in parts[0] for lr in slot.lrs
+                if getattr(lr, "mustPrecedeP0Overwrite", False)
+            ]
+
+        assert hoisted({}) == [("A", 4, 5)]
+        assert hoisted({"A": 2}) == []
+
+
+class TestHalfDisjointLds:
+    """Each half loads only the tiles the other half reads.
+
+    Partitions 0..P/2-1 are the first half. A tile read by the wrap
+    prefetch loads in the first half, and a tile read in the first half
+    loads in the second, as do the scales the first half reads. One wait
+    and barrier open each half.
+    """
+
+    @staticmethod
+    def _cfg(m, n, grB, grSA, half_disjoint=True, size_m=None, size_n=None):
+        return SchedulerConfig(
+            numMFMATilesM=m, numMFMATilesN=n, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(grB, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(grSA, 2), grSB=ReadGranularity(n, 2),
+            partitionSizeM=size_m or m // 2, partitionSizeN=size_n or n // 2,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            uniformPgrEpoch=True, scaleReuse=2,
+            halfDisjointLds=half_disjoint,
+        )
+
+    @staticmethod
+    def _grs(parts):
+        return [
+            [(gr.tensor, gr.tiles.tileId_start, gr.tiles.tileId_end)
+             for slot in slots for gr in slot.grs]
+            for slots in parts
+        ]
+
+    @staticmethod
+    def _counts(op):
+        return [(c.A, c.B, c.SA, c.SB) for c in op.wait_gr_counts_by_unroll]
+
+    def test_8x8_loads_each_tile_opposite_its_read(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        parts = s.build(stop_after=Pass.GR)
+        assert s._halfLoadHalf == {
+            **{("A", t): 0 for t in range(4)}, **{("A", t): 1 for t in range(4, 8)},
+            **{("B", t): 0 for t in range(4)}, **{("B", t): 1 for t in range(4, 8)},
+        }
+        assert self._grs(parts) == [
+            [("A", 0, 4)],
+            [("B", 0, 4)],
+            [("SA", 0, 8), ("SB", 0, 8), ("A", 4, 7)],
+            [("A", 7, 8), ("B", 4, 8)],
+        ]
+        assert not any(
+            lr.mustPrecedeP0Overwrite for slots in parts
+            for slot in slots for lr in slot.lrs)
+
+    def test_4x8_two_tile_b_atoms(self):
+        s = LogicalScheduler(self._cfg(4, 8, grB=2, grSA=4))
+        parts = s.build(stop_after=Pass.GR)
+        assert self._grs(parts) == [
+            [("A", 0, 2)],
+            [("B", 0, 4)],
+            [("SA", 0, 4), ("SB", 0, 8), ("A", 2, 3)],
+            [("A", 3, 4), ("B", 4, 8)],
+        ]
+
+    def test_each_half_opens_with_one_wait_and_barrier(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        parts = s.build(stop_after=Pass.REMOVE_DEPS)
+        waits = []
+        for pi, slots in enumerate(parts):
+            for slot in slots:
+                for placement in list(slot.lrs) + list(slot.grs):
+                    for op in placement.preOps:
+                        if isinstance(op, WaitGROp):
+                            waits.append((pi, op))
+                        elif isinstance(op, SyncOp) or (
+                                isinstance(op, WaitLROp) and op.has_sync):
+                            assert placement.preOps[0].__class__ is WaitGROp
+        assert [pi for pi, _ in waits] == [0, 2]
+        assert self._counts(waits[0][1]) == [(8, 8, 0, 0), (8, 8, 1, 1)]
+        assert self._counts(waits[1][1]) == [(8, 8, 0, 0), (8, 8, 1, 1)]
+        assert all(not op.has_sync and op.adjustVmcnt for _, op in waits)
+
+    def test_preloop_issues_first_half_tiles_first(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        s.build()
+        order = [(gr.tensor, gr.tiles.tileId_start)
+                 for gr in s._make_preloop_mt1_grs()]
+        halves = [0 if t in ("SA", "SB") else s._halfLoadHalf[(t, pos)]
+                  for t, pos in order]
+        assert halves == sorted(halves)
+        assert sorted(order[halves.index(1):]) == sorted(
+            [("A", t) for t in range(4, 8)] + [("B", t) for t in range(4, 8)])
+
+    def test_full_pipeline_emits(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        assert s.build() is not None
+        s.build_ngll()
+        s.build_nll()
+
+    @staticmethod
+    def _alloc_late_scales(s):
+        from types import SimpleNamespace
+        from rocisa.enum import RegisterType
+        from rocisa.register import RegisterPool
+        s.vgprTilesSA = [[200 + i] for i in range(s.tile_peaks['SA'])]
+        s.vgprTilesSB = [[220 + i] for i in range(s.tile_peaks['SB'])]
+        # 241 + 4 staging VGPRs stay inside the 248 block, so staging fits.
+        pool = RegisterPool(0, RegisterType.Vgpr, False)
+        pool.checkOut(241)
+        s._alloc_late_scale_prefetch(SimpleNamespace(vgprPool=pool))
+        return pool.size()
+
+    def test_late_scales_read_directly(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8))
+        s.build()
+        assert s.halfDisjoint
+        assert s._late_scale_groups()
+        assert self._alloc_late_scales(s) == 241
+        assert s._lateScaleExtra == {}
+        assert s._lateScaleExtraTiles == []
+        assert s._lateScalePrefetch == []
+
+    def test_flag_off_keeps_late_scale_staging(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8, half_disjoint=False))
+        s.build()
+        assert not s.halfDisjoint
+        assert self._alloc_late_scales(s) == 245
+        assert sorted(s._lateScaleExtra) == [202, 203, 222, 223]
+        assert sorted(s._lateScaleExtra.values()) == [241, 242, 243, 244]
+
+    def test_flag_off_keeps_uniform_epoch(self):
+        s = LogicalScheduler(self._cfg(8, 8, grB=1, grSA=8, half_disjoint=False))
+        parts = s.build(stop_after=Pass.GR)
+        assert not s.halfDisjoint
+        assert any(lr.mustPrecedeP0Overwrite for lr in parts[0][0].lrs)
+
+    def test_read_in_second_half_is_refused(self):
+        # Four partitions along N: partition 2 reads partition 3's B in the
+        # second half of its own iteration, so no load half exists for it.
+        s = LogicalScheduler(self._cfg(2, 8, grB=1, grSA=2, size_m=2, size_n=2))
+        with pytest.raises(HalfDisjointPlanRefused, match="outside one half"):
+            s.build(stop_after=Pass.LR)
+
+    def test_refused_gate_names_the_missing_terms(self):
+        cfg = self._cfg(8, 8, grB=1, grSA=8)
+        cfg.uniformPgrEpoch = False
+        with pytest.raises(HalfDisjointPlanRefused, match="config lacks uniformPgrEpoch$"):
+            LogicalScheduler(cfg).build(stop_after=Pass.LR)
+
+    def test_flag_off_keeps_a_refused_layout_on_the_uniform_epoch(self):
+        s = LogicalScheduler(self._cfg(2, 8, grB=1, grSA=2, size_m=2, size_n=2,
+                                       half_disjoint=False))
+        s.build(stop_after=Pass.LR)
+        assert not s.halfDisjoint
+
+    def test_non_dual_period_schedule_is_not_gated(self):
+        # Same geometry with a single scale period and no partition prefetch:
+        # halfDisjointLds stays off, as Kernel.mainLoop leaves it for every
+        # kernel that is not dual-period MXFP8.
+        cfg = SchedulerConfig(
+            numMFMATilesM=2, numMFMATilesN=8, numSubIterK=2,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(2, 2), grSB=ReadGranularity(8, 2),
+            partitionSizeM=2, partitionSizeN=2, pgr=2)
+        s = LogicalScheduler(cfg)
+        assert not cfg.halfDisjointLds
+        assert s.build() is not None
+        assert not s.halfDisjoint
+
+
+class TestHalfDisjointBalance:
+    """Even an even-split half-disjoint body by reading late wrap A tiles in partition 0.
+
+    A wrap tile loads in the first half and an own tile in the second, so with more wrap
+    tiles the first half carries more loads and fewer reads. Moving the last k wrap A tiles
+    to partition 0 moves k loads to the second half and their reads to the first.
+    """
+
+    @staticmethod
+    def _plan(**kw):
+        from tensilelite.Components.Subtile.LogicalScheduler import planHalfDisjointBalance
+        args = dict(firstHalfMfmas=40, secondHalfMfmas=40, wrapTiles=10, ownTiles=8,
+                    wrapA=(0, 4), partitionZeroB=6, grAmn=1, lrAmn=1,
+                    wrapLoads=10, ownLoads=8, loadsPerATile=1)
+        args.update(kw)
+        return planHalfDisjointBalance(**args)
+
+    @staticmethod
+    def _lrs(parts):
+        return [
+            [(lr.tensor, lr.mtIteration, lr.tiles.tileId_start, lr.tiles.tileId_end,
+              lr.targetPartition, lr.balancedCurrentCell)
+             for slot in slots for lr in slot.lrs if lr.tensor in ("A", "B")]
+            for slots in parts
+        ]
+
+    def test_plan_moves_the_last_wrap_tiles(self):
+        assert self._plan() == (3, 4)
+        assert self._plan(wrapTiles=12, ownTiles=8, wrapLoads=12, wrapA=(0, 4),
+                          partitionZeroB=8) == (2, 4)
+
+    @pytest.mark.parametrize("kw", [
+        dict(firstHalfMfmas=48, secondHalfMfmas=32),
+        dict(wrapTiles=8, wrapLoads=8),
+        dict(wrapTiles=9, wrapLoads=9),
+        dict(ownTiles=12, ownLoads=12),
+    ])
+    def test_plan_needs_an_even_split_and_a_wrap_surplus(self, kw):
+        assert self._plan(**kw) is None
+
+    def test_plan_skips_short_halves(self):
+        from tensilelite.Components.Subtile.LogicalScheduler import BALANCE_MIN_HALF_MFMAS
+        n = BALANCE_MIN_HALF_MFMAS
+        assert self._plan(firstHalfMfmas=n - 4, secondHalfMfmas=n - 4) is None
+        assert self._plan(firstHalfMfmas=n, secondHalfMfmas=n) == (3, 4)
+
+    def test_plan_keeps_loads_from_overshooting(self):
+        # One A tile costs two loads: 7/6 would become 5/8.
+        assert self._plan(wrapLoads=7, ownLoads=6, loadsPerATile=2) is None
+        assert self._plan(wrapLoads=8, ownLoads=4, loadsPerATile=2) == (3, 4)
+
+    def test_plan_keeps_the_first_use_lead(self):
+        # Tile 1 feeds partition-0 MFMA 1 * 2 = 2 < BALANCE_MIN_LEAD_MFMAS.
+        assert self._plan(wrapA=(0, 2), partitionZeroB=2) is None
+        assert self._plan(wrapA=(3, 4)) is None
+
+    def test_plan_keeps_atoms_whole(self):
+        assert self._plan(grAmn=2) is None
+        assert self._plan(lrAmn=2) is None
+        assert self._plan(wrapTiles=12, wrapLoads=12, grAmn=2) == (2, 4)
+
+    def test_8x10_reads_a3_in_partition_zero(self):
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
+        parts = s.build(stop_after=Pass.LR)
+        assert s.halfDisjoint
+        assert self._lrs(parts) == [
+            [("A", 0, 3, 4, 0, True), ("B", 0, 6, 10, 1, False)],
+            [("A", 0, 4, 8, 2, False)],
+            [],
+            [("A", 1, 0, 3, 0, False), ("B", 1, 0, 6, 0, False)],
+        ]
+        first = sorted(k for k, h in s._halfLoadHalf.items() if h == 0)
+        assert first == [("A", t) for t in range(3)] + [("B", t) for t in range(6)]
+        assert len(s._halfLoadHalf) - len(first) == 9
+
+    def test_even_tile_counts_stay_unbalanced(self):
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 8, grB=1, grSA=8))
+        parts = s.build(stop_after=Pass.LR)
+        assert not any(flag for row in self._lrs(parts) for *_, flag in row)
+
+    def test_flag_off_leaves_the_wrap_prefetch(self):
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(
+            8, 10, grB=1, grSA=8, size_n=6, half_disjoint=False))
+        parts = s.build(stop_after=Pass.LR)
+        assert not any(flag for row in self._lrs(parts) for *_, flag in row)
+
+    def test_8x10_full_pipeline_emits(self):
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
+        assert s.build() is not None
+        assert s.halfDisjoint
+        s.build_ngll()
+        s.build_nll()
+
+    @staticmethod
+    def _unbalanced_8x10(monkeypatch):
+        """8x10 LR layout before balancing, with the load plan stubbed out."""
+        monkeypatch.setattr(LogicalScheduler, "_plan_half_disjoint_loads",
+                            lambda self, parts: {})
+        monkeypatch.setattr(LogicalScheduler, "_balance_half_disjoint_reads",
+                            lambda self, parts: None)
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
+        return s, s.build(stop_after=Pass.LR)
+
+    def test_refused_plan_after_balancing_is_rejected(self, monkeypatch):
+        monkeypatch.setattr(LogicalScheduler, "_plan_half_disjoint_loads",
+                            lambda self, parts: None)
+        s = LogicalScheduler(TestHalfDisjointLds._cfg(8, 10, grB=1, grSA=8, size_n=6))
+        with pytest.raises(HalfDisjointPlanRefused, match="outside one half"):
+            s.build(stop_after=Pass.LR)
+        assert s._balancedRead is not None
+
+    def test_unbalance_restores_a_wrap_read_outside_the_last_partition(self, monkeypatch):
+        s, parts = self._unbalanced_8x10(monkeypatch)
+        monkeypatch.undo()
+        wrap = next(lr for slot in parts[-1] for lr in slot.lrs
+                    if lr.tensor == "A" and lr.mtIteration == 1)
+        donor = next(pi for pi in range(len(parts) // 2, len(parts) - 1) if parts[pi])
+        for slot in parts[-1]:
+            slot.lrs[:] = [lr for lr in slot.lrs if lr is not wrap]
+        parts[donor][0].lrs.append(wrap)
+        before = self._lrs(parts)
+        s._balance_half_disjoint_reads(parts)
+        assert s._balancedRead is not None and s._balancedRead[0] is wrap
+        assert self._lrs(parts) != before
+        s._unbalance_half_disjoint_reads(parts)
+        assert self._lrs(parts) == before
+        assert s._balancedRead is None
+
+
+class TestDeferBalancedCurrentCellWait:
+    """Balanced current-cell reads leave the partition-0 prefix and wait at their consumer."""
+
+    @staticmethod
+    def _parts():
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import DSLoadB128, MXMFMAInstruction, SBarrier, SWaitCnt
+
+        def mfma(a, comment):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(a, 8), b=vgpr(84, 8),
+                mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+        def read(dst, src, comment):
+            return DSLoadB128(dst=vgpr(dst, 4), src=vgpr(src),
+                              ds=DSModifiers(offset=0), comment=comment)
+
+        def drain(comment):
+            return SWaitCnt(dscnt=0, comment=comment)
+
+        return mfma, read, drain, SBarrier, SWaitCnt
+
+    def _body(self, other_prefix_read=False):
+        from rocisa.code import Module
+        mfma, read, drain, SBarrier, SWaitCnt = self._parts()
+        balanced = [read(108, 2, "A tile 3 low"), read(112, 4, "A tile 3 high")]
+        body = [drain("head drain"), SWaitCnt(vlcnt=18, comment="top vmcnt"),
+                SBarrier(comment="top barrier")] + balanced
+        if other_prefix_read:
+            body.append(read(200, 7, "B current"))
+        body += [drain("prefix drain"), mfma(20, "M0")]
+        for n in range(1, 10):
+            if n in (2, 3, 6):
+                body.append(read(40 + 4 * n, 7, f"next {n}"))
+            body.append(mfma(108 if n == 8 else 20, f"M{n}"))
+        module = Module("MAINLOOP")
+        for inst in body:
+            module.add(inst)
+        return module, balanced
+
+    def test_barrier_returns_behind_m0_and_reads_spread(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        module, balanced = self._body()
+        assert deferBalancedCurrentCellWait(module, balanced)
+        assert _labels(module) == [
+            "head drain", "M0", "top vmcnt", "top barrier", "M1", "next 2", "M2",
+            "A tile 3 low", "next 3", "M3",
+            "A tile 3 high", "M4",
+            "M5", "next 6", "M6", "M7", "Wait for balanced current-cell LR", "M8", "M9"]
+        wait = [x for x in module.flatitems()
+                if getattr(x, "comment", "") == "Wait for balanced current-cell LR"]
+        assert wait[0].dscnt == 1
+
+    def test_drain_stays_for_other_prefix_reads(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        module, balanced = self._body(other_prefix_read=True)
+        assert deferBalancedCurrentCellWait(module, balanced)
+        labels = _labels(module)
+        assert labels[:6] == ["head drain", "top vmcnt", "top barrier", "B current",
+                              "prefix drain", "M0"]
+        assert labels.index("Wait for balanced current-cell LR") == labels.index("M8") - 1
+        assert labels.index("A tile 3 low") > labels.index("M1")
+
+    @pytest.mark.parametrize("kind", ["load", "m0"])
+    def test_barrier_stays_ahead_of_a_prefix_load_or_m0_write(self, kind):
+        from rocisa.code import Module
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        module, balanced = self._body()
+        items = list(module.flatitems())
+        extra = (BufferLoadB128(dst=vgpr(240, 4), vaddr=vgpr(1), saddr=sgpr(1),
+                                soffset=0, comment="prefix load")
+                 if kind == "load" else SMovB32(dst=mgpr(0), src=0, comment="prefix m0"))
+        items.insert(_labels(module).index("prefix drain"), extra)
+        rebuilt = Module("MAINLOOP")
+        for inst in items:
+            rebuilt.add(inst)
+        before = _labels(rebuilt)
+        assert not deferBalancedCurrentCellWait(rebuilt, balanced)
+        assert _labels(rebuilt) == before
+
+    def test_unlisted_reads_are_a_no_op(self):
+        from rocisa.code import Module
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        mfma, read, drain, SBarrier, SWaitCnt = self._parts()
+        module = Module("MAINLOOP")
+        for inst in [SBarrier(comment="b"), read(108, 2, "plain; balanced current-cell"),
+                     drain("d"), mfma(108, "M0")]:
+            module.add(inst)
+        before = _labels(module)
+        assert not deferBalancedCurrentCellWait(module, [])
+        assert _labels(module) == before
+
+    def test_reads_stay_ahead_of_an_address_write(self):
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            deferBalancedCurrentCellWait)
+        module, balanced = self._body()
+        items = list(module.flatitems())
+        swap = VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap A")
+        at = _labels(module).index("M1")
+        items.insert(at, swap)
+        rebuilt = Module("MAINLOOP")
+        for inst in items:
+            rebuilt.add(inst)
+        assert deferBalancedCurrentCellWait(rebuilt, balanced)
+        labels = _labels(rebuilt)
+        assert labels.index("A tile 3 low") < labels.index("swap A")
+
+
+class TestFirstConsumerRank:
+    """The emit-identity rank is the MFMA ordinal of the next consumer.
+
+    It is relative to the end of the producer partition and does not depend
+    on a macrotile size. Kernels that are not on the partition-prefetch path
+    stay unranked.
+    """
+
+    @staticmethod
+    def _cfg_8x8():
+        return SchedulerConfig(
+            numMFMATilesM=8, numMFMATilesN=8, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(8, 2), grSB=ReadGranularity(8, 2),
+            partitionSizeM=4, partitionSizeN=4,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            scaleReuse=2,
+        )
+
+    @pytest.mark.parametrize(
+        "partition,mt_iteration,tensor,tile_id,expected",
+        [
+            (0, 0, "SA", 0, 0),
+            (0, 0, "B", 5, 1),
+            (0, 0, "SA", 2, 8),
+            (0, 0, "SB", 2, 18),
+            (2, 1, "A", 0, 16),
+            (3, 1, "B", 3, 3),
+            (0, 2, "A", 0, 112),
+        ],
+    )
+    def test_rank_uses_partition_geometry(
+            self, partition, mt_iteration, tensor, tile_id, expected):
+        cfg = self._cfg_8x8()
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(
+            cfg, tensor, tile_id, partition, mt_iteration)
+        assert emitter._first_consumer_rank(placement, tile_id) == expected
+
+    def test_rank_supports_non_square_partition_grid(self):
+        cfg = SchedulerConfig(
+            numMFMATilesM=8, numMFMATilesN=4, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 1), lrSB=ReadGranularity(2, 1),
+            grSA=ReadGranularity(8, 2), grSB=ReadGranularity(4, 2),
+            partitionSizeM=4, partitionSizeN=2,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            scaleReuse=2,
+        )
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(cfg, "SA", 2, 0, 0)
+        # Partition 1 is 4x2. A2 is first consumed after A0/A1 (four MFMAs).
+        assert emitter._first_consumer_rank(placement, 2) == 4
+
+    def test_rank_is_absent_without_partition_prefetch(self):
+        cfg = SchedulerConfig(
+            numMFMATilesM=4, numMFMATilesN=4, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(1, 1), grB=ReadGranularity(1, 1),
+            pgr=2, plr=1,
+        )
+        emitter = _rank_emitter(cfg)
+        placement = LRPlacement(
+            tensor="A", mtIteration=0,
+            tiles=MFMATileRange(0, 1, 0, 1),
+            subIterK_slot=0, partition=0, targetPartition=0)
+        assert emitter._first_consumer_rank(placement, 0) is None
+
+    def test_local_read_group_metadata_repeats_the_rank(self):
+        cfg = self._cfg_8x8()
+        emitter = _rank_emitter(cfg)
+        placement = _rank_placement(cfg, "A", 0, 0, 0)
+        meta = emitter._local_read_group_metadata(["r0", "r1"], placement, 0)
+        assert meta == [(0, 2), (0, 2)]
+
+
+class TestPartitionZeroIssueOrder:
+    """Partition-zero issue order follows the first-consumer rank.
+
+    The helpers leave a path alone when the rank is missing, which is how
+    schedules outside the dual-period epoch stay in their original order.
+    """
+
+    @staticmethod
+    def _read(comment):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(
+            dst=vgpr(8, 4), src=vgpr(1),
+            ds=DSModifiers(offset=0), comment=comment)
+
+    def test_local_reads_issue_in_consumer_order(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderLocalReadsByFirstConsumer,
+            _splitAfterFirstConsumerCohort,
+        )
+        late = self._read("late")
+        early = self._read("early")
+        same = self._read("same")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[late], instructionMetadata=[(5, 1)]),
+            EmittedModule(moduleId=1, instructions=[early, same],
+                          instructionMetadata=[(1, 2), (1, 2)]),
+        ]
+        ordered = _orderLocalReadsByFirstConsumer(
+            [(0, late), (1, early), (1, same)], modules)
+        assert [inst.comment for _, inst in ordered] == ["early", "same", "late"]
+        first, rest = _splitAfterFirstConsumerCohort(ordered, modules)
+        assert [inst.comment for _, inst in first] == ["early", "same"]
+        assert [inst.comment for _, inst in rest] == ["late"]
+
+    def test_missing_rank_keeps_the_original_read_order(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderLocalReadsByFirstConsumer,
+        )
+        read = self._read("unread")
+        modules = [EmittedModule(moduleId=0, instructions=[read], instructionMetadata=[])]
+        assert _orderLocalReadsByFirstConsumer([(0, read)], modules) is None
+
+    def test_global_read_bundles_sort_and_keep_their_tail(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _orderGlobalReadBundlesByFirstConsumer,
+        )
+        late = [self._read("late-m0"), self._read("late-load")]
+        early = [self._read("early-m0"), self._read("early-load")]
+        tail = self._read("srd")
+        modules = [
+            EmittedModule(
+                moduleId=0, instructions=late,
+                instructionMetadata=[(4, 2), (4, 2)],
+                source=GRPlacement(
+                    tensor="A", mtIteration=1, tiles=MFMATileRange(0, 1, 0, 1),
+                    subIterK_slot=0)),
+            EmittedModule(
+                moduleId=1, instructions=early,
+                instructionMetadata=[(1, 2), (1, 2)],
+                source=GRPlacement(
+                    tensor="B", mtIteration=1, tiles=MFMATileRange(0, 1, 0, 1),
+                    subIterK_slot=0)),
+            EmittedModule(
+                moduleId=2, instructions=[tail],
+                source=type("Inc", (), {"kind": "gr_inc"})()),
+        ]
+        ordered = _orderGlobalReadBundlesByFirstConsumer(
+            [[(0, late[0]), (0, late[1])],
+             [(1, early[0]), (1, early[1]), (2, tail)]],
+            modules)
+        assert [inst.comment for _, inst in ordered] == [
+            "early-m0", "early-load", "late-m0", "late-load", "srd"]
+
+    def test_current_cell_reads_stay_ahead_of_the_wait(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _splitPartitionZeroPrefetch,
+        )
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+
+        def lr(tensor, target):
+            return LRPlacement(
+                tensor=tensor, mtIteration=0,
+                tiles=MFMATileRange(0, 1, 0, 1),
+                subIterK_slot=0, partition=0, targetPartition=target)
+
+        scale = self._read("SA tile 0")
+        current = self._read("A current")
+        prefetch = self._read("A next")
+        wait = SWaitCnt(dscnt=-1, comment="Wait for LR to complete")
+        barrier = SBarrier(comment="Barrier")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[scale], source=lr("SA", 0),
+                          instructionMetadata=[(0, 1)]),
+            EmittedModule(moduleId=1, instructions=[current], source=lr("A", 0),
+                          instructionMetadata=[(0, 1)]),
+            EmittedModule(moduleId=2, instructions=[prefetch], source=lr("A", 1),
+                          instructionMetadata=[(1, 1)]),
+            EmittedModule(moduleId=3, instructions=[wait], source=WaitLROp()),
+            EmittedModule(moduleId=4, instructions=[barrier], source=SyncOp()),
+        ]
+        split = _splitPartitionZeroPrefetch([list(range(5))], modules)
+        assert split is not None
+        _order, prefix, payload_order, payload, _sync = split
+        assert [inst.comment for _, inst in prefix] == [
+            "SA tile 0", "A current", "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert wait.dscnt == 0
+        assert payload_order == [2]
+        assert [inst.comment for _, inst in payload] == ["A next"]
+
+        retained = _splitPartitionZeroPrefetch(
+            [list(range(5))], modules, retainAllLocalReads=True)
+        assert [inst.comment for _, inst in retained[1]] == [
+            "SA tile 0", "A current", "A next",
+            "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert retained[2] == []
+
+    def test_hoisted_overwrite_reads_stay_ahead_of_the_wait(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _splitPartitionZeroPrefetch,
+        )
+        from tensilelite.Components.Subtile.LogicalScheduler import SyncOp, WaitLROp
+
+        def lr(tensor, target, protect=False):
+            placement = LRPlacement(
+                tensor=tensor, mtIteration=0,
+                tiles=MFMATileRange(0, 1, 2, 4),
+                subIterK_slot=0, partition=0, targetPartition=target)
+            placement.mustPrecedeP0Overwrite = protect
+            return placement
+
+        hoisted = self._read("A tile 3")
+        prefetch = self._read("A later")
+        wait = SWaitCnt(dscnt=-1, comment="Wait for LR to complete")
+        barrier = SBarrier(comment="Barrier")
+        modules = [
+            EmittedModule(moduleId=0, instructions=[hoisted], source=lr("A", 1, True),
+                          instructionMetadata=[(2, 1)]),
+            EmittedModule(moduleId=1, instructions=[prefetch], source=lr("A", 1),
+                          instructionMetadata=[(4, 1)]),
+            EmittedModule(moduleId=2, instructions=[wait], source=WaitLROp()),
+            EmittedModule(moduleId=3, instructions=[barrier], source=SyncOp()),
+        ]
+        split = _splitPartitionZeroPrefetch([list(range(4))], modules)
+        assert split is not None
+        _order, prefix, payload_order, payload, _sync = split
+        assert [inst.comment for _, inst in prefix] == [
+            "A tile 3", "Wait for current-cell LR before p0 MFMA", "Barrier"]
+        assert payload_order == [1]
+        assert [inst.comment for _, inst in payload] == ["A later"]
+
+    def test_overwrite_reads_move_to_the_previous_k_when_vgprs_are_free(self):
+        """A mustPrecede ds_read leaves the prefix once its dest is dead.
+
+        The previous copy has to have flipped the LDS pointer, and four
+        MFMAs have to have issued after the last reader. The first copy
+        is also seeded after the preloop barrier. A dest that is still
+        live stays in front of the entry wait.
+        """
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            DSLoadB128, MXMFMAInstruction, SBarrier, SWaitCnt, VXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _p0OverwriteReadIds,
+            clearPartitionZeroOverwriteMarks,
+            guardExitOverwriteReread,
+            relocatePartitionZeroOverwriteReads,
+        )
+
+        def mfma(start, comment):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(start, 8), b=vgpr(84, 8),
+                mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+        def other_read(comment):
+            return DSLoadB128(
+                dst=vgpr(20, 4), src=vgpr(7),
+                ds=DSModifiers(offset=0), comment=comment)
+
+        def overwrite(dst, comment):
+            return DSLoadB128(
+                dst=vgpr(dst, 4), src=vgpr(2 if dst == 52 else 4),
+                ds=DSModifiers(offset=8192), comment=comment)
+
+        def tail():
+            body = [
+                VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap A"),
+                VXorB32(dst=vgpr(4), src0=vgpr(4), src1=vgpr(5), comment="swap A high"),
+                mfma(52, "last use"),
+            ]
+            for index in range(4):
+                body.append(mfma(60, f"gap {index}"))
+            body.append(other_read("pack 0"))
+            body.append(other_read("pack 1"))
+            body.append(mfma(60, "cover 0"))
+            body.append(other_read("pack 2"))
+            body.append(other_read("pack 3"))
+            body.append(mfma(60, "cover 1"))
+            return body
+
+        def marked_prefix(tag):
+            low = overwrite(52, f"{tag} low")
+            high = overwrite(56, f"{tag} high")
+            _p0OverwriteReadIds.add(id(low))
+            _p0OverwriteReadIds.add(id(high))
+            return [low, high, SWaitCnt(kmcnt=0, comment=f"{tag} wait"), mfma(20, f"{tag} mfma")]
+
+        clearPartitionZeroOverwriteMarks()
+        c0 = Module("C0")
+        for inst in marked_prefix("c0") + tail():
+            c0.add(inst)
+        c1 = Module("C1")
+        for inst in marked_prefix("c1") + tail():
+            c1.add(inst)
+        preloop = Module("PRELOOP")
+        preloop.add(SBarrier(comment="Barrier"))
+        preloop.add(other_read("preloop A0"))
+
+        moved = relocatePartitionZeroOverwriteReads([c0, c1], preloop, gap=4)
+        assert moved == set(range(52, 60))
+
+        def comments(module):
+            return [getattr(inst, "comment", "") for inst in module.flatitems()]
+
+        c0_comments = comments(c0)
+        c1_comments = comments(c1)
+        assert c0_comments[0] == "c0 wait"
+        assert c1_comments[0] == "c1 wait"
+        assert "c1 low; issued in the previous K iteration" in c0_comments
+        assert "c0 high; issued in the previous K iteration" in c1_comments
+        assert c0_comments.index("c1 low; issued in the previous K iteration") > c0_comments.index("gap 3")
+        assert c0_comments.index("c1 low; issued in the previous K iteration") > c0_comments.index("swap A high")
+        pre_comments = comments(preloop)
+        assert pre_comments[:3] == [
+            "Barrier", "c0 low; issued in the preloop", "c0 high; issued in the preloop"]
+
+        exit_path = Module("NGLL")
+        exit_path.add(overwrite(52, "ngll low"))
+        exit_path.add(overwrite(56, "ngll high"))
+        exit_path.add(mfma(20, "ngll mfma"))
+        guardExitOverwriteReread(exit_path, moved)
+        assert comments(exit_path)[0] == (
+            "retire the prior-iteration overwrite read before re-reading it")
+
+        clearPartitionZeroOverwriteMarks()
+        live = Module("LIVE")
+        held = overwrite(52, "still live")
+        _p0OverwriteReadIds.add(id(held))
+        live.add(held)
+        live.add(SWaitCnt(kmcnt=0, comment="live wait"))
+        live.add(mfma(20, "live mfma"))
+        # The previous copy still reads v[52:55] and has only one MFMA after that.
+        still = Module("STILL")
+        still.add(VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap late"))
+        still.add(mfma(52, "holds the vgpr"))
+        still.add(mfma(60, "only one later"))
+        fresh = Module("PRELOOP2")
+        fresh.add(SBarrier(comment="Barrier"))
+        stayed = relocatePartitionZeroOverwriteReads([live, still], fresh, gap=4)
+        assert stayed == set()
+        assert comments(live)[0] == "still live"
+        assert comments(fresh) == ["Barrier"]
+
+    def test_reads_across_a_wait_require_the_mxfp8_exception(self):
+        from rocisa.instruction import SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+
+        placer = _SlotPlacer(intervals=6, numModules=1, pathOrders=[])
+        read = self._read("across")
+        wait = SWaitCnt(dscnt=0)
+
+        legacy = _SchedulingRules(totalSlots=placer.totalSlots)
+        legacy.earliestWaitCntPos = 3
+        legacy.lastDsReadPos = 4
+        assert not legacy.minGapDsReadBeforeWait(placer, 4, read)
+        assert not legacy.minGapDsReadToWait(placer, 3, wait)
+
+        mxfp8 = _SchedulingRules(
+            totalSlots=placer.totalSlots, allowReadsAcrossWait=True)
+        mxfp8.earliestWaitCntPos = 3
+        mxfp8.lastDsReadPos = 4
+        assert mxfp8.minGapDsReadBeforeWait(placer, 4, read)
+        assert mxfp8.minGapDsReadToWait(placer, 3, wait)
+
+    def test_mxfp8_followers_use_five_slots(self):
+        from rocisa.container import sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _MXFP8_FOLLOWER_SLOTS, _SchedulingRules, _SlotPlacer)
+
+        placer = _SlotPlacer(
+            intervals=2, numModules=1, pathOrders=[],
+            slotsPerInterval=_MXFP8_FOLLOWER_SLOTS, maxPerSlot=1,
+            dataDsReadCap=(2, 3))
+        rules = _SchedulingRules(totalSlots=placer.totalSlots)
+        read = self._read("r")
+        valu = VMovB32(dst=vgpr(1), src=vgpr(2))
+        assert placer.totalSlots == 10
+        assert not rules.noDsReadOrValuInFirstSlot(placer, 0, read)
+        assert not rules.noDsReadOrValuInFirstSlot(placer, 0, valu)
+        assert rules.noDsReadOrValuInFirstSlot(placer, 1, read)
+        assert rules.oneDsReadPerInterval(placer, 1, read)
+        placer._placed[1].append((0, read))
+        assert rules.oneDsReadPerInterval(placer, 2, read)
+        placer._placed[2].append((0, read))
+        assert not rules.oneDsReadPerInterval(placer, 3, read)
+        load = BufferLoadB128(
+            dst=vgpr(8, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="dtl")
+        assert rules.oneDtlLoadPerInterval(placer, 3, load)
+        placer._placed[3].append((0, load))
+        assert not rules.oneDtlLoadPerInterval(placer, 4, load)
+
+        legacy = _SlotPlacer(intervals=1, numModules=1, pathOrders=[])
+        legacy_rules = _SchedulingRules(totalSlots=legacy.totalSlots)
+        assert legacy.totalSlots == 2 and legacy.dataDsReadCap is None
+        assert legacy_rules.oneDsReadPerInterval(legacy, 0, read)
+        legacy._placed[0].append((0, read))
+        assert not legacy_rules.oneDsReadPerInterval(legacy, 1, read)
+
+    def test_direct_to_lds_bundle_uses_the_latest_shadow(self):
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _MXFP8_FOLLOWER_SLOTS, _SchedulingRules, _SlotPlacer,
+            _rightAlignM0AndVmem)
+
+        def bundle(tag):
+            setup = SMovB32(dst=mgpr(0), src=0, comment=f"m0-{tag}")
+            load = BufferLoadB128(
+                dst=vgpr(8, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+                comment=f"gr-{tag}")
+            return setup, load
+
+        def positions(placer):
+            found = {}
+            for pos, slot in enumerate(placer._placed):
+                for _mid, inst in slot:
+                    found[inst.comment] = pos
+            return found
+
+        width = _MXFP8_FOLLOWER_SLOTS
+        rules = _SchedulingRules(totalSlots=3 * width)
+        placer = _SlotPlacer(
+            intervals=3, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            maxInstructionsPerInterval=width)
+        setup, load = bundle(0)
+        placer.place(0, (0, setup))
+        placer.place(1, (0, load))
+        _rightAlignM0AndVmem(placer)
+        found = positions(placer)
+        assert found["m0-0"] == 2 * width
+        assert found["gr-0"] == 2 * width + 1
+
+        blocked = _SlotPlacer(
+            intervals=3, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            maxInstructionsPerInterval=width)
+        setup, load = bundle(1)
+        blocked.place(0, (0, setup))
+        blocked.place(1, (0, load))
+        blocked.place(2 * width, (0, SBarrier(comment="stop")))
+        _rightAlignM0AndVmem(blocked)
+        found = positions(blocked)
+        assert found["m0-1"] == width
+        assert found["gr-1"] == width + 1
+        assert found["stop"] == 2 * width
+
+    def test_short_c1_tail_spills_scale_refresh_into_c0(self):
+        """A short final partition keeps a full shadow and spills the rest.
+
+        The spill issues in the next C0, before that VGPR is read and
+        before the scale-pointer swap.
+        """
+        from rocisa.code import Module, TextBlock
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import DSLoadB32, MXMFMAInstruction, SBarrier, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            appendC1ScaleShadowReads, spillC0ScaleRefreshes)
+
+        def mfma(sa=18, sb=84):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(sa), mxsb=vgpr(sb), comment="scaled")
+
+        def entry(register, tensor, last_use, first_use=0):
+            return {
+                "canonicalVgpr": register,
+                "tensor": tensor,
+                "readTemplate": DSLoadB32(
+                    dst=vgpr(register), src=vgpr(1),
+                    ds=DSModifiers(offset=0),
+                    comment=f"{tensor} MT=n tile=0 K=0"),
+                "firstC0Mfma": first_use,
+                "lastC1Mfma": last_use,
+            }
+
+        def items(module):
+            return list(module.flatitems())
+
+        held = Module("C1")
+        for index in range(10):
+            held.add(mfma())
+            if index == 6:
+                held.add(SBarrier(comment="final barrier"))
+        placed = appendC1ScaleShadowReads(held, [entry(18, "SA", 0)], 4)
+        assert placed == ([], 10)
+        held_items = items(held)
+        refresh_at = next(
+            index for index, inst in enumerate(held_items)
+            if "prior C1 shadow" in (getattr(inst, "comment", "") or ""))
+        target = sum(
+            1 for inst in held_items[:refresh_at]
+            if isinstance(inst, MXMFMAInstruction)) - 1
+        assert target - 0 + 1 >= 9
+
+        short = Module("C1-short")
+        for index in range(4):
+            short.add(mfma())
+            if index == 2:
+                short.add(SBarrier(comment="final barrier"))
+        missed = appendC1ScaleShadowReads(short, [entry(18, "SA", 0)], 2)
+        assert missed is not None and missed[0]
+
+        c0 = Module("C0")
+        c0.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        c0.add(mfma())
+        c0.add(TextBlock("// swap MXSA LR\n"))
+        assert spillC0ScaleRefreshes(c0, missed[0], 16)
+        spilled = items(c0)
+
+        def comment_at(needle):
+            return next(
+                index for index, inst in enumerate(spilled)
+                if needle in " ".join(
+                    getattr(inst, attr, "") or ""
+                    for attr in ("comment", "text", "name"))
+            )
+
+        refresh_at = comment_at("next C0 prologue")
+        wait_at = comment_at("Wait for current-cell LR")
+        use_at = next(
+            index for index, inst in enumerate(spilled)
+            if isinstance(inst, MXMFMAInstruction))
+        swap_at = comment_at("swap MXSA LR")
+        assert refresh_at < wait_at < use_at < swap_at
+
+    def test_right_align_places_m0_and_vmem_from_the_back(self):
+        import shutil
+        from rocisa import rocIsa
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32, SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SlotPlacer, _rightAlignM0AndVmem)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        dtl = MUBUFModifiers(offen=True, lds=True)
+        extra = SAddU32(
+            dst=mgpr(0), src0=sgpr(20), src1=2048, comment="m0-extra")
+        setups = [
+            SAddU32(
+                dst=mgpr(0), src0=sgpr(20), src1=offset,
+                comment=f"m0-{index}")
+            for index, offset in enumerate((4096, 6144))
+        ]
+        loads = [
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(0), saddr=sgpr(24, 4),
+                soffset=0, mubuf=dtl, comment=f"gr-{index}")
+            for index in range(2)
+        ]
+        barrier = SBarrier(comment="stop")
+        placer = _SlotPlacer(
+            4, 1, [[0]], slotsPerInterval=5, maxPerSlot=1,
+            maxInstructionsPerInterval=5)
+        placer._placed[0] = [(0, extra)]
+        placer._placed[1] = [(0, setups[0])]
+        placer._placed[2] = [(0, loads[0])]
+        placer._placed[3] = [(0, setups[1])]
+        placer._placed[4] = [(0, loads[1])]
+        placer._placed[18] = [(0, barrier)]
+
+        _rightAlignM0AndVmem(placer)
+
+        located = {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+        assert [located[name] for name in (
+            "m0-extra", "m0-0", "gr-0", "m0-1", "gr-1", "stop"
+        )] == [9, 10, 11, 15, 16, 18]
+        assert located["m0-0"] % 5 == 0
+        assert located["gr-0"] == located["m0-0"] + 1
+        assert located["m0-1"] % 5 == 0
+        assert located["gr-1"] == located["m0-1"] + 1
+
+    def test_right_align_keeps_gr_address_updates_with_their_loads(self):
+        import shutil
+        from rocisa import rocIsa
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import (
+            BufferLoadB128, SAddCU32, SAddU32, SBarrier, SXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SlotPlacer, _rightAlignM0AndVmem)
+
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+        dtl = MUBUFModifiers(offen=True, lds=True)
+        setups = [
+            SAddU32(
+                dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=offset,
+                comment=f"m0-{index}")
+            for index, offset in enumerate((0, 2048))
+        ]
+        loads = [
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(0), saddr=sgpr("SrdA", 4),
+                soffset=0, mubuf=dtl, comment=f"gr-{index}")
+            for index in range(2)
+        ]
+        address = [
+            SAddU32(
+                dst=sgpr("SrdB"), src0=sgpr("SrdB"), src1=128,
+                comment="srd"),
+            SAddCU32(
+                dst=sgpr("SrdB+1"), src0=sgpr("SrdB+1"), src1=0,
+                comment="carry"),
+            SXorB32(
+                dst=sgpr("LocalWriteBaseAddrB"),
+                src0=sgpr("LocalWriteBaseAddrB"), src1=sgpr("SwapB"),
+                comment="swap"),
+        ]
+        barrier = SBarrier(comment="stop")
+        placer = _SlotPlacer(
+            4, 1, [[0]], slotsPerInterval=5, maxPerSlot=1,
+            maxInstructionsPerInterval=5)
+        placed = [setups[0], loads[0], *address, setups[1], loads[1]]
+        for slot, inst in enumerate(placed):
+            placer._placed[slot] = [(0, inst)]
+        placer._placed[18] = [(0, barrier)]
+
+        _rightAlignM0AndVmem(placer)
+
+        located = {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+        assert [located[name] for name in (
+            "m0-0", "gr-0", "srd", "carry", "swap", "m0-1", "gr-1", "stop"
+        )] == [10, 11, 12, 13, 14, 15, 16, 18]
+
+    def test_right_align_uses_an_empty_slot0_and_slot4(self):
+        from rocisa.container import DSModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, DSLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer, _rightAlignM0AndVmem)
+
+        width = 5
+        rules = _SchedulingRules(totalSlots=3 * width)
+        placer = _SlotPlacer(
+            intervals=3, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+                rules.oneDsReadPerInterval,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            dataDsReadCap=(2, 3),
+            maxInstructionsPerInterval=width)
+        setup = SMovB32(dst=mgpr(0), src=0, comment="m0-0")
+        load = BufferLoadB128(
+            dst=vgpr(4, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="gr-0")
+        read = DSLoadB128(
+            dst=vgpr(20, 4), src=vgpr(2),
+            ds=DSModifiers(offset=0), comment="ds")
+        # Slot 0 and slot 4 of the second shadow are empty. The ds_read
+        # in slot 1 has to move down so the bundle can take slots 0 and 1.
+        placer.place(0, (0, setup))
+        placer.place(1, (0, load))
+        placer.place(width + 1, (0, read))
+        placer.place(width + 2, (0, SMovB32(dst=sgpr(3), src=0, comment="mid-a")))
+        placer.place(width + 3, (0, SMovB32(dst=sgpr(4), src=0, comment="mid-b")))
+        placer.place(2 * width, (0, SBarrier(comment="stop")))
+
+        _rightAlignM0AndVmem(placer)
+
+        located = {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+        assert located["m0-0"] == width
+        assert located["gr-0"] == width + 1
+        assert located["ds"] == width + 2
+        assert located["mid-a"] == width + 3
+        assert located["mid-b"] == width + 4
+        assert located["stop"] == 2 * width
+
+    def _end_slot_placer(self, intervals=4):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+        width = 5
+        rules = _SchedulingRules(totalSlots=intervals * width)
+        return _SlotPlacer(
+            intervals=intervals, numModules=1, pathOrders=[],
+            validators=[
+                rules.oneDtlLoadPerInterval,
+                rules.noDsReadOrValuInFirstSlot,
+            ],
+            slotsPerInterval=width, maxPerSlot=1,
+            maxInstructionsPerInterval=width)
+
+    @staticmethod
+    def _located(placer):
+        return {
+            item[1].comment: pos
+            for pos, slot in enumerate(placer._placed)
+            for item in slot
+        }
+
+    def test_right_align_end_slot_moves_the_stream_ahead_of_the_forward_pass(self):
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _rightAlignM0AndVmem)
+
+        placer = self._end_slot_placer()
+        placer.place(2, (0, SBarrier(comment="stop")))
+        placer.place(15, (0, SMovB32(dst=mgpr(0), src=0, comment="m0")))
+        placer.place(16, (0, BufferLoadB128(
+            dst=vgpr(4, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="gr")))
+
+        assert _rightAlignM0AndVmem(placer, endSlot=10)
+        located = self._located(placer)
+        assert (located["stop"], located["m0"], located["gr"]) == (2, 5, 6)
+
+    def test_right_align_end_slot_reports_a_stream_that_cannot_fit(self):
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SBarrier, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _rightAlignM0AndVmem)
+
+        placer = self._end_slot_placer()
+        placer.place(12, (0, SBarrier(comment="stop")))
+        placer.place(15, (0, SMovB32(dst=mgpr(0), src=0, comment="m0")))
+        placer.place(16, (0, BufferLoadB128(
+            dst=vgpr(4, 4), vaddr=vgpr(1), saddr=sgpr(1), soffset=0,
+            comment="gr")))
+
+        assert not _rightAlignM0AndVmem(placer, endSlot=10)
+
+    def test_right_align_end_slot_keeps_a_carry_next_to_its_producer(self):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddCU32, SAddU32, SXorB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _rightAlignM0AndVmem)
+
+        self._gfx950()
+        placer = self._end_slot_placer()
+        placer.place(8, (0, SXorB32(
+            dst=sgpr("LocalReadAddrA"), src0=sgpr("LocalReadAddrA"),
+            src1=sgpr("SwapA"), comment="swap lr")))
+        placer.place(15, (0, SAddU32(
+            dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128, comment="srd")))
+        placer.place(16, (0, SAddCU32(
+            dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
+            comment="carry")))
+
+        assert not _rightAlignM0AndVmem(placer, endSlot=10)
+
+        aligned = self._end_slot_placer()
+        aligned.place(8, (0, SXorB32(
+            dst=sgpr("LocalReadAddrA"), src0=sgpr("LocalReadAddrA"),
+            src1=sgpr("SwapA"), comment="swap lr")))
+        aligned.place(15, (0, SAddU32(
+            dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128, comment="srd")))
+        aligned.place(16, (0, SAddCU32(
+            dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
+            comment="carry")))
+        assert _rightAlignM0AndVmem(aligned, endSlot=8)
+        located = self._located(aligned)
+        assert located["carry"] == located["srd"] + 1 < located["swap lr"]
+
+    def test_named_sgpr_spans_overlap_by_name(self):
+        from rocisa.container import sgpr
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _registerSpan, _spansOverlap)
+
+        srd = _registerSpan(sgpr("SrdA", 4))
+        assert _spansOverlap(srd, _registerSpan(sgpr("SrdA", 4)))
+        assert _spansOverlap(
+            _registerSpan(sgpr("LocalWriteBaseAddrA")),
+            _registerSpan(sgpr("LocalWriteBaseAddrA")))
+        assert _spansOverlap(srd, _registerSpan(sgpr("SrdA+1")))
+        assert _spansOverlap(_registerSpan(sgpr("SrdA+1")), srd)
+        assert not _spansOverlap(srd, _registerSpan(sgpr("SrdB", 4)))
+        assert not _spansOverlap(
+            _registerSpan(sgpr("LocalWriteBaseAddrA")),
+            _registerSpan(sgpr("LocalWriteBaseAddrB")))
+
+    @pytest.mark.parametrize("reader", ["m0", "load"])
+    def test_right_align_end_slot_keeps_a_bundle_behind_a_named_sgpr_write(
+            self, reader):
+        from rocisa.container import mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32, SMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _rightAlignM0AndVmem)
+
+        self._gfx950()
+        placer = self._end_slot_placer()
+        placer.place(7, (0, SMovB32(
+            dst=sgpr("OffsetA"), src=0, comment="write")))
+        placer.place(15, (0, SAddU32(
+            dst=mgpr(0),
+            src0=sgpr("OffsetA" if reader == "m0" else "LocalWriteBaseAddrA"),
+            src1=0, comment="m0")))
+        placer.place(16, (0, BufferLoadB128(
+            dst=vgpr(4, 4), vaddr=vgpr(1), saddr=sgpr("SrdA", 4),
+            soffset=sgpr("OffsetA") if reader == "load" else 0,
+            comment="gr")))
+
+        assert not _rightAlignM0AndVmem(placer, endSlot=10)
+        located = self._located(placer)
+        assert located["write"] < min(located["m0"], located["gr"])
+
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    def test_overwrite_barrier_slides_to_the_first_store(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, DSLoadB128, MXMFMAInstruction, SAddU32, SBarrier,
+            SWaitCnt, VXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _slideOverwriteBarriersToVmem)
+
+        self._gfx950()
+        dtl = MUBUFModifiers(offen=True, lds=True)
+
+        def mfma(comment):
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(8, 8), b=vgpr(84, 8),
+                mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+        def bread(tile):
+            return DSLoadB128(
+                dst=vgpr(20, 4), src=vgpr(7),
+                ds=DSModifiers(offset=0),
+                comment=f"B MT=n tile={tile} K=0 read=0")
+
+        body = Module()
+        body.add(SWaitCnt(dscnt=0, comment="drain"))
+        body.add(mfma("m0"))
+        body.add(bread(4))
+        body.add(SBarrier(comment="barrier"))
+        body.add(mfma("m1"))
+        body.add(bread(5))
+        body.add(VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="scale"))
+        body.add(SAddU32(
+            dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=0,
+            comment="m0-setup"))
+        body.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(0), saddr=sgpr("SrdA", 4),
+            soffset=0, mubuf=dtl, comment="A MT=n+2 tile=0 K=0 i=0"))
+
+        _slideOverwriteBarriersToVmem(body)
+
+        assert [inst.comment for inst in body.items()] == [
+            "drain", "m0", "B MT=n tile=4 K=0 read=0",
+            "m1", "B MT=n tile=5 K=0 read=0", "scale",
+            "barrier", "m0-setup", "A MT=n+2 tile=0 K=0 i=0",
+        ]
+
+    def test_publish_barrier_stays_on_the_vmcnt(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import (
+            BufferLoadB128, DSLoadB128, MXMFMAInstruction, SAddU32, SBarrier,
+            SWaitCnt, VXorB32)
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _slideOverwriteBarriersToVmem)
+
+        self._gfx950()
+        body = Module()
+        body.add(SWaitCnt(vlcnt=15, comment="vmcnt"))
+        body.add(MXMFMAInstruction(
+            instType=InstType.INST_F32, accType=InstType.INST_F32,
+            variant=[16, 16, 128], acc=vgpr(0, 4),
+            a=vgpr(8, 8), b=vgpr(84, 8),
+            mxsa=vgpr(17), mxsb=vgpr(18), comment="mfma"))
+        body.add(SBarrier(comment="barrier"))
+        body.add(VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="xor"))
+        body.add(DSLoadB128(
+            dst=vgpr(20, 4), src=vgpr(7), ds=DSModifiers(offset=0),
+            comment="A MT=n+1 tile=0 K=0 read=0"))
+        body.add(SAddU32(
+            dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrB"), src1=0,
+            comment="m0-setup"))
+        body.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(0), saddr=sgpr("SrdB", 4), soffset=0,
+            mubuf=MUBUFModifiers(offen=True, lds=True),
+            comment="B MT=n+2 tile=5 K=0 i=0"))
+
+        _slideOverwriteBarriersToVmem(body)
+
+        assert [inst.comment for inst in body.items()] == [
+            "vmcnt", "mfma", "barrier", "xor",
+            "A MT=n+1 tile=0 K=0 read=0", "m0-setup",
+            "B MT=n+2 tile=5 K=0 i=0",
+        ]
+
+    def test_same_tensor_read_blocks_the_barrier_slide(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, DSLoadB128, SAddU32, SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _slideOverwriteBarriersToVmem)
+
+        self._gfx950()
+        body = Module()
+        body.add(SBarrier(comment="barrier"))
+        body.add(DSLoadB128(
+            dst=vgpr(20, 4), src=vgpr(7), ds=DSModifiers(offset=0),
+            comment="A MT=n tile=6 K=0 read=0"))
+        body.add(SAddU32(
+            dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=0,
+            comment="m0-setup"))
+        body.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(0), saddr=sgpr("SrdA", 4), soffset=0,
+            mubuf=MUBUFModifiers(offen=True, lds=True),
+            comment="A MT=n+2 tile=6 K=0 i=0"))
+
+        _slideOverwriteBarriersToVmem(body)
+
+        assert [inst.comment for inst in body.items()][0] == "barrier"
+
+    def test_dominated_lgkmcnt_is_dropped(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            dropDominatedLgkmWaits)
+
+        self._gfx950()
+        inner = Module()
+        inner.add(SWaitCnt(dscnt=0, comment="first"))
+        inner.add(DSLoadB128(
+            dst=vgpr(20, 4), src=vgpr(7), ds=DSModifiers(offset=0),
+            comment="B MT=n tile=4 K=0 read=0"))
+        inner.add(SWaitCnt(dscnt=0, comment="second"))
+        outer = Module()
+        outer.add(inner)
+        outer.add(SWaitCnt(dscnt=0, comment="third"))
+        outer.add(SWaitCnt(dscnt=2, comment="partial"))
+        outer.add(SWaitCnt(dscnt=0, comment="after-partial"))
+        both = SWaitCnt(dscnt=0, vlcnt=4, comment="lgkm-and-vm")
+        outer.add(both)
+
+        dropDominatedLgkmWaits(outer)
+
+        assert [inst.comment for inst in outer.flatitems()] == [
+            "first", "B MT=n tile=4 K=0 read=0", "second",
+            "partial", "after-partial", "lgkm-and-vm",
+        ]
+        assert both.dscnt == -1
+        assert both.vlcnt == 4
+
+    @staticmethod
+    def _read(comment):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(dst=vgpr(20, 4), src=vgpr(7), ds=DSModifiers(offset=0),
+                          comment=comment)
+
+    def test_exit_region_drops_a_wait_that_retires_nothing(self):
+        from types import SimpleNamespace
+        from rocisa.code import Label, Module
+        from rocisa.instruction import SWaitCnt
+
+        self._gfx950()
+        main = Module("MAINLOOP_C0")
+        main.add(SWaitCnt(dscnt=0, comment="main-drain"))
+        main.add(SWaitCnt(dscnt=0, comment="main-dominated"))
+        exitC0 = Module("NGLL_C0")
+        exitC0.add(Label("ExitC0", ""))
+        exitC0.add(SWaitCnt(dscnt=0, comment="at-entry"))
+        exitC0.add(self._read("A MT=n tile=4 K=0 read=0"))
+        exitC0.add(SWaitCnt(dscnt=0, comment="retires-read"))
+        exitC0.add(SWaitCnt(dscnt=0, comment="retires-nothing"))
+        both = SWaitCnt(dscnt=0, vlcnt=2, comment="lgkm-and-vm")
+        exitC0.add(both)
+        outer = Module()
+        outer.add(main)
+        outer.add(exitC0)
+        scheduler = SimpleNamespace(
+            config=SimpleNamespace(uniformPgrEpoch=True, dualPeriodScale=True),
+            _regionLabels={"MAINLOOP_C0", "NGLL_C0"})
+
+        LogicalScheduler._dropExitDominatedLgkmWaits(scheduler, outer)
+
+        assert [inst.comment for inst in main.flatitems()] == [
+            "main-drain", "main-dominated"]
+        assert [getattr(inst, "comment", "") for inst in exitC0.flatitems()][1:] == [
+            "at-entry", "A MT=n tile=4 K=0 read=0", "retires-read", "lgkm-and-vm"]
+        assert both.dscnt == -1 and both.vlcnt == 2
+
+    def test_dominated_wait_at_a_join_stays(self):
+        from rocisa.code import Label, Module
+        from rocisa.instruction import SCBranchSCC1, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            dropDominatedLgkmWaits)
+
+        self._gfx950()
+        join = Label("Join", "")
+        region = Module("NLL_C0")
+        region.add(self._read("A MT=n tile=4 K=0 read=0"))
+        region.add(SCBranchSCC1(labelName=join.getLabelName(), comment="read-in-flight"))
+        region.add(SWaitCnt(dscnt=0, comment="fallthrough-drain"))
+        region.add(SWaitCnt(dscnt=0, comment="dominated"))
+        region.add(join)
+        region.add(SWaitCnt(dscnt=0, comment="at-join"))
+        region.add(SCBranchSCC1(labelName=join.getLabelName(), comment="branch"))
+        region.add(SWaitCnt(dscnt=0, comment="after-branch"))
+
+        dropDominatedLgkmWaits(region)
+
+        assert [getattr(inst, "comment", "") for inst in region.flatitems()
+                if isinstance(inst, SWaitCnt)] == [
+            "fallthrough-drain", "at-join", "after-branch"]
+
+    def test_relaxed_fence_that_retires_nothing_is_dropped(self):
+        from rocisa.code import Label, Module
+        from rocisa.container import mgpr, sgpr, vgpr, MUBUFModifiers
+        from rocisa.instruction import BufferLoadB128, SAddU32, SWaitCnt
+        from tensilelite.Components.Subtile import InstructionScheduler
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            clearPartitionZeroOverwriteMarks, dropRelaxedFencesThatRetireNothing)
+
+        self._gfx950()
+
+        def fence(count, comment):
+            wait = SWaitCnt(dscnt=count, comment=comment)
+            InstructionScheduler._relaxedFenceIds.add(id(wait))
+            return wait
+
+        body = Module("MAINLOOP_C0")
+        body.add(fence(1, "at-entry"))
+        body.add(SWaitCnt(dscnt=0, comment="drain"))
+        body.add(self._read("A MT=n+1 tile=0 K=0 read=0"))
+        body.add(self._read("A MT=n+1 tile=0 K=0 read=1"))
+        body.add(fence(2, "retires-nothing"))
+        body.add(self._read("A MT=n+1 tile=1 K=0 read=0"))
+        body.add(self._read("A MT=n+1 tile=1 K=0 read=1"))
+        body.add(self._read("A MT=n+1 tile=2 K=0 read=0"))
+        body.add(fence(2, "real"))
+        body.add(SWaitCnt(dscnt=0, comment="drain-again"))
+        body.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrB"), src1=0,
+                         comment="m0"))
+        body.add(fence(4, "m0-wait-state"))
+        body.add(BufferLoadB128(
+            dst=None, vaddr=vgpr(0), saddr=sgpr("SrdB", 4), soffset=0,
+            mubuf=MUBUFModifiers(offen=True, lds=True), comment="load"))
+        body.add(Label("Join", ""))
+        body.add(fence(4, "after-label"))
+        unmarked = SWaitCnt(dscnt=0, comment="drain-unmarked")
+        body.add(unmarked)
+        body.add(SWaitCnt(dscnt=3, comment="not-relaxed"))
+
+        try:
+            dropRelaxedFencesThatRetireNothing([body])
+        finally:
+            clearPartitionZeroOverwriteMarks()
+
+        assert [inst.comment for inst in body.flatitems()
+                if isinstance(inst, SWaitCnt)] == [
+            "at-entry", "drain", "real", "drain-again", "m0-wait-state",
+            "after-label", "drain-unmarked", "not-relaxed"]
+
+
+class TestUniformEpochOverwriteSync:
+    """Each uniform-epoch A/B load waits out the reads of the LDS it overwrites."""
+
+    @staticmethod
+    def _cfg(m, n, grA, grSA, grSB, pm, pn, loads):
+        return SchedulerConfig(
+            numMFMATilesM=m, numMFMATilesN=n, numSubIterK=1,
+            lrA=ReadGranularity(1, 1), lrB=ReadGranularity(1, 1),
+            grA=ReadGranularity(*grA), grB=ReadGranularity(1, 1),
+            lrSA=ReadGranularity(2, 2), lrSB=ReadGranularity(2, 2),
+            grSA=ReadGranularity(*grSA), grSB=ReadGranularity(*grSB),
+            partitionSizeM=pm, partitionSizeN=pn,
+            pgr=2, plr=0, doubleBufferTensors=("A", "B"),
+            prefetchNextPartition=True, partitionOrder="n-major",
+            uniformPgrEpoch=True, uniformEpochVmemCohortSize=5,
+            halfDisjointLds=False, scaleReuse=2, grLoadsPerAtom=loads,
+        )
+
+    @staticmethod
+    def _epoch_syncs(parts):
+        return [
+            [(gr.tensor, gr.tiles.tileId_start, gr.tiles.tileId_end,
+              any(isinstance(op, WaitLROp) and op.has_sync for op in gr.preOps))
+             for slot in slots for gr in slot.grs
+             if gr.mtIteration == 2 and gr.tensor in ("A", "B")]
+            for slots in parts
+        ]
+
+    # MIWT 4x14 MIWG 2x2 (library sol 30) and MIWT 8x6 MIWG 1x4 (sol 58):
+    # partition 1 has no reads of its own, so its sync cannot cover the
+    # partition-0 reads that partition 2's loads overwrite.
+    def test_sol30_partition_two_loads_keep_their_overwrite_sync(self):
+        cfg = self._cfg(4, 14, (1, 1), (4, 2), (14, 2), 2, 8, {"A": 1, "B": 1})
+        parts = LogicalScheduler(cfg).build(stop_after=Pass.REMOVE_DEPS)
+        assert self._epoch_syncs(parts) == [
+            [("A", 0, 4, True), ("B", 0, 1, True)],
+            [("B", 1, 6, False)],
+            [("B", 6, 11, True)],
+            [("B", 11, 14, False)],
+        ]
+
+    def test_sol58_partition_two_loads_keep_their_overwrite_sync(self):
+        cfg = self._cfg(8, 6, (2, 1), (8, 2), (6, 2), 4, 4, {"A": 1, "B": 2})
+        parts = LogicalScheduler(cfg).build(stop_after=Pass.REMOVE_DEPS)
+        assert self._epoch_syncs(parts) == [
+            [("A", 0, 8, True), ("B", 0, 1, True)],
+            [("B", 1, 4, False)],
+            [("B", 4, 6, True)],
+            [],
+        ]
+
+    @staticmethod
+    def _gfx950():
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    def _check(self, c0, c1):
+        """Run checkMainLoopLdsOverwrites on two bodies of (op, mt, tile) or instructions."""
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, DSLoadB128
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            checkMainLoopLdsOverwrites)
+
+        self._gfx950()
+        origins, bodies = {}, []
+        for name, items in (("MAINLOOP_C0", c0), ("MAINLOOP_C1", c1)):
+            body = Module(name)
+            for item in items:
+                if not isinstance(item, tuple):
+                    body.add(item)
+                    continue
+                op, mt, tile, home = (item + (name,))[:4]
+                if op == "lr":
+                    inst = DSLoadB128(dst=vgpr(20, 4), src=vgpr(7),
+                                      ds=DSModifiers(offset=0), comment="read")
+                else:
+                    inst = BufferLoadB128(
+                        dst=None, vaddr=vgpr(0), saddr=sgpr("SrdB", 4), soffset=0,
+                        mubuf=MUBUFModifiers(offen=True, lds=True), comment="load")
+                origins[id(inst)] = (home, op, "B", mt, MFMATileRange(0, 1, tile, tile + 1))
+                body.add(inst)
+            bodies.append((name, body))
+        checkMainLoopLdsOverwrites(bodies, origins)
+
+    @staticmethod
+    def _wait(count=0):
+        from rocisa.instruction import SWaitCnt
+        return SWaitCnt(dscnt=count, comment="wait")
+
+    @staticmethod
+    def _barrier():
+        from rocisa.instruction import SBarrier
+        return SBarrier(comment="barrier")
+
+    def test_load_behind_a_retiring_wait_and_barrier_passes(self):
+        self._check([("lr", 0, 9), self._wait(), self._barrier(), ("gr", 2, 9)],
+                    [("lr", 0, 9), self._wait(), self._barrier(), ("gr", 2, 9)])
+
+    def test_partial_wait_counts_younger_reads(self):
+        self._check(
+            [("lr", 0, 9), ("lr", 0, 3), self._wait(1), self._barrier(), ("gr", 2, 9)],
+            [])
+        with pytest.raises(RuntimeError, match="has not retired"):
+            self._check(
+                [("lr", 0, 9), ("lr", 0, 3), self._wait(2), self._barrier(), ("gr", 2, 9)],
+                [])
+
+    def test_barrier_without_a_wait_raises(self):
+        with pytest.raises(RuntimeError, match="has not retired"):
+            self._check([("lr", 0, 9), self._barrier(), ("gr", 2, 9)], [])
+
+    def test_read_after_the_overwrite_raises(self):
+        with pytest.raises(RuntimeError, match="still reads after it"):
+            self._check([self._wait(), self._barrier(), ("gr", 2, 9), ("lr", 0, 9)], [])
+
+    def test_back_edge_read_needs_the_next_body_barrier(self):
+        # C1 reads its MT n+1, which C0 of the next iteration overwrites.
+        with pytest.raises(RuntimeError, match="in MAINLOOP_C1"):
+            self._check([("gr", 2, 9), self._wait(), self._barrier()], [("lr", 1, 9)])
+        self._check([self._wait(), self._barrier(), ("gr", 2, 9)], [("lr", 1, 9)])
+
+    def test_read_moved_into_the_previous_body_reads_the_next_mt(self):
+        # A C0 read of MT n hoisted to the end of C1 still guards C0's load.
+        with pytest.raises(RuntimeError, match="has not retired"):
+            self._check([("gr", 2, 9)], [("lr", 0, 9, "MAINLOOP_C0")])
+        self._check([self._wait(), self._barrier(), ("gr", 2, 9)],
+                    [("lr", 0, 9, "MAINLOOP_C0")])
+
+
+class TestUniformEpochBodyPasses:
+    """Post-passes of a uniform-epoch dual-period body, on hand-built bodies."""
+
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _mfma(comment):
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction
+        return MXMFMAInstruction(
+            instType=InstType.INST_F32, accType=InstType.INST_F32,
+            variant=[16, 16, 128], acc=vgpr(200, 4), a=vgpr(8, 8), b=vgpr(84, 8),
+            mxsa=vgpr(17), mxsb=vgpr(18), comment=comment)
+
+    @staticmethod
+    def _m0(comment):
+        from rocisa.container import mgpr, sgpr
+        from rocisa.instruction import SAddU32
+        return SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=0,
+                       comment=comment)
+
+    @staticmethod
+    def _load(comment):
+        from rocisa.container import MUBUFModifiers, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128
+        return BufferLoadB128(dst=None, vaddr=vgpr(1), saddr=sgpr("SrdA", 4), soffset=0,
+                              mubuf=MUBUFModifiers(offen=True, lds=True), comment=comment)
+
+    @staticmethod
+    def _salu(comment):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddU32
+        return SAddU32(dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128, comment=comment)
+
+    @staticmethod
+    def _body(*items):
+        from rocisa.code import Module
+        body = Module()
+        for item in items:
+            body.add(item)
+        return body
+
+    def test_barrier_moves_up_into_an_empty_gap(self):
+        from rocisa.instruction import SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import barrierAloneInGap
+
+        self._gfx950()
+        body = self._body(self._mfma("M0"), self._mfma("M1"), self._salu("srd"),
+                          self._mfma("M2"), self._m0("m0"), SBarrier(comment="barrier"),
+                          self._load("load"), self._mfma("M3"))
+
+        barrierAloneInGap(body)
+
+        assert [inst.comment for inst in body.items()] == [
+            "M0", "barrier", "M1", "srd", "M2", "m0", "load", "M3"]
+
+    def test_barrier_between_m0_and_its_load_stays_when_the_gap_ahead_is_full(self):
+        from rocisa.instruction import SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import barrierAloneInGap
+
+        self._gfx950()
+        full = [self._salu(f"s{i}") for i in range(5)]
+        body = self._body(self._mfma("M0"), self._mfma("M1"), *full, self._mfma("M2"),
+                          self._m0("m0"), SBarrier(comment="barrier"), self._load("load"),
+                          self._mfma("M3"))
+        before = [inst.comment for inst in body.items()]
+
+        barrierAloneInGap(body)
+
+        assert [inst.comment for inst in body.items()] == before
+
+    def test_valu_behind_a_waiting_barrier_moves_back(self):
+        from rocisa.container import vgpr
+        from rocisa.instruction import SBarrier, SWaitCnt, VXorB32
+        from tensilelite.Components.Subtile.InstructionScheduler import barrierAloneInGap
+
+        self._gfx950()
+        body = self._body(self._mfma("M0"), self._salu("srd"), self._mfma("M1"),
+                          SWaitCnt(vlcnt=0, comment="vmcnt"), self._mfma("M2"),
+                          SBarrier(comment="barrier"),
+                          VXorB32(dst=vgpr(2), src0=vgpr(2), src1=vgpr(3), comment="swap"),
+                          self._mfma("M3"))
+
+        barrierAloneInGap(body)
+
+        assert [inst.comment for inst in body.items()] == [
+            "M0", "srd", "swap", "M1", "vmcnt", "M2", "barrier", "M3"]
+
+
+class TestLateScalePrefetch:
+    """Staging VGPRs for scales that partition zero does not consume."""
+
+    def test_prefetch_stays_inside_the_rounded_block(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            scale_prefetch_fits)
+        assert scale_prefetch_fits(249, 4)
+        assert scale_prefetch_fits(250, 6)
+        assert scale_prefetch_fits(252, 4)
+        assert not scale_prefetch_fits(253, 4)
+        assert not scale_prefetch_fits(256, 1)
+        assert not scale_prefetch_fits(249, 0)
+
+    def test_prefetch_plan_retargets_the_staging_register(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            selectLateScalePrefetch)
+
+        template = DSLoadB32(
+            dst=vgpr(19), src=vgpr(1), ds=DSModifiers(offset=512),
+            comment="SA MT=n tile=4 K=0")
+        deferred = [{
+            "canonicalVgpr": 19,
+            "tensor": "SA",
+            "readTemplate": template,
+            "firstC0Mfma": 16,
+            "lastC1Mfma": 63,
+        }]
+        plan = selectLateScalePrefetch(deferred, {19: 252}, {19: 4})
+        assert len(plan) == 1
+        assert plan[0]["extraVgpr"] == 252
+        assert plan[0]["readTemplate"].dst.regIdx == 252
+        assert plan[0]["canonicalRead"].dst.regIdx == 19
+        assert template.dst.regIdx == 19
+        assert plan[0]["minShadow"] == 4
+        early = dict(deferred[0])
+        early["firstC0Mfma"] = 4
+        assert selectLateScalePrefetch(
+            [early], {19: 252}, {19: 4}) == []
+        assert selectLateScalePrefetch(deferred, {}, {19: 4}) == []
+
+    def test_copy_waits_for_the_source_window(self):
+        from rocisa.code import Module
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction, SWaitCnt, VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            insertPrefetchedScaleCopies)
+
+        def mfma():
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(19), mxsb=vgpr(151), comment="scaled")
+
+        schedule = Module("C0")
+        schedule.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        for _ in range(20):
+            schedule.add(mfma())
+            schedule.add(VMovB32(dst=vgpr(1), src=vgpr(2), comment="keep"))
+        assert insertPrefetchedScaleCopies(schedule, [{
+            "canonicalVgpr": 19,
+            "extraVgpr": 252,
+            "tensor": "SA",
+            "firstC0Mfma": 16,
+            "minShadow": 4,
+        }]) == []
+        items = list(schedule.flatitems())
+        copy_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, VMovB32)
+            and getattr(inst, "comment", "").startswith("copy prefetched"))
+        issued = sum(
+            isinstance(inst, MXMFMAInstruction) for inst in items[:copy_at])
+        assert issued == 5
+        assert any(
+            isinstance(inst, MXMFMAInstruction)
+            and inst.mxsa.regIdx == 19
+            for inst in items[copy_at:])
+
+    def test_empty_window_keeps_the_c0_read(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import DSLoadB32, MXMFMAInstruction, SWaitCnt
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            insertPrefetchedScaleCopies, restoreCanonicalScaleReads)
+
+        def mfma():
+            return MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(4), b=vgpr(5),
+                mxsa=vgpr(19), mxsb=vgpr(151), comment="scaled")
+
+        schedule = Module("C0")
+        schedule.add(SWaitCnt(
+            dscnt=0, comment="Wait for current-cell LR before p0 MFMA"))
+        for _ in range(8):
+            schedule.add(mfma())
+        move = {
+            "canonicalVgpr": 19,
+            "extraVgpr": 252,
+            "tensor": "SA",
+            "firstC0Mfma": 8,
+            "minShadow": 4,
+            "canonicalRead": DSLoadB32(
+                dst=vgpr(19), src=vgpr(1), ds=DSModifiers(offset=512),
+                comment="SA MT=n tile=4 K=0"),
+        }
+        assert insertPrefetchedScaleCopies(schedule, [move]) == [move]
+        assert not any(
+            getattr(inst, "comment", "").startswith("copy prefetched")
+            for inst in schedule.flatitems())
+        restoreCanonicalScaleReads(schedule, [move])
+        items = list(schedule.flatitems())
+        read_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, DSLoadB32))
+        wait_at = next(
+            index for index, inst in enumerate(items)
+            if isinstance(inst, SWaitCnt) and getattr(inst, "dscnt", -1) == 0)
+        assert read_at < wait_at
+        assert "keep C0 scale read" in items[read_at].comment
+
+
+class TestC1ScaleShadowReads:
+    """Where appendC1ScaleShadowReads puts the next C0's entry scales."""
+
+    MFMAS = 24
+    BARRIER = 12
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _entry(register, tensor, lastUse, firstUse):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32
+        return {
+            "canonicalVgpr": register,
+            "tensor": tensor,
+            "readTemplate": DSLoadB32(
+                dst=vgpr(register), src=vgpr(12), ds=DSModifiers(offset=0),
+                comment=f"{tensor} v{register}"),
+            "firstC0Mfma": firstUse,
+            "lastC1Mfma": lastUse,
+        }
+
+    def _place(self, entries, reads=(), loads=(), waits=()):
+        """Body gap of each refresh, in issue order, and the unplaced entries.
+
+        Gap i follows MFMA i; the barrier opens the second half at gap 12,
+        and the last gap is the back edge."""
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import (
+            BufferLoadB128, DSLoadB128, MXMFMAInstruction, SAddU32, SBarrier,
+            SWaitCnt)
+        from rocisa.enum import InstType
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            appendC1ScaleShadowReads)
+        body = Module("C1")
+        for index in range(self.MFMAS):
+            body.add(MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(84, 8),
+                b=vgpr(180, 8), mxsa=vgpr(17), mxsb=vgpr(246)))
+            if index == self.BARRIER:
+                body.add(SWaitCnt(vlcnt=2, comment="vmcnt"))
+                body.add(SBarrier(comment="barrier"))
+            if index in waits:
+                body.add(SWaitCnt(dscnt=0, comment="drain"))
+            if index in loads:
+                body.add(SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"),
+                                 src1=0, comment="m0"))
+                body.add(BufferLoadB128(
+                    dst=None, vaddr=vgpr(1), saddr=sgpr("SrdA", 4), soffset=0,
+                    mubuf=MUBUFModifiers(offen=True, lds=True), comment="load"))
+            for _ in range(reads.count(index)):
+                body.add(DSLoadB128(dst=vgpr(100, 4), src=vgpr(7),
+                                    ds=DSModifiers(offset=0), comment="data"))
+        placed = appendC1ScaleShadowReads(
+            body, entries, self.MFMAS - self.BARRIER)
+        assert placed is not None
+        gap, where = -1, []
+        for inst in body.flatitems():
+            if isinstance(inst, MXMFMAInstruction):
+                gap += 1
+            elif "prior C1 shadow" in (getattr(inst, "comment", "") or ""):
+                where.append((gap, inst.comment.split(";")[0]))
+        return where, placed[0]
+
+    def test_each_refresh_takes_its_war_floor(self):
+        entries = [self._entry(17, "SA", 5, 0), self._entry(18, "SA", 7, 4),
+                   self._entry(246, "SB", 10, 0)]
+        where, left = self._place(entries)
+        assert not left
+        # Floor = last C1 reader + 9 - 1: the write is the ninth issue.
+        assert sorted(where) == [(13, "SA v17"), (15, "SA v18"), (18, "SB v246")]
+        for gap, name in where:
+            last = next(e["lastC1Mfma"] for e in entries
+                        if name.endswith(f"v{e['canonicalVgpr']}"))
+            assert gap - last >= 8
+        # Every refresh is in C1, ahead of the next C0's head wait and use.
+        assert all(gap < self.MFMAS for gap, _ in where)
+
+    def test_refreshes_go_in_first_c0_use_order(self):
+        # Both floors reach gap 13, which has room for one more read. The
+        # SB scale is consumed by C0 M0 and wins it, though its last C1
+        # reader is later.
+        where, _left = self._place(
+            [self._entry(17, "SA", 4, 4), self._entry(246, "SB", 5, 0)],
+            reads=[13])
+        assert where == [(13, "SB v246"), (14, "SA v17")]
+
+    def test_refresh_avoids_loads_and_the_back_edge(self):
+        # Gaps 16..19 issue loads, so the read past its floor takes 20.
+        where, _left = self._place(
+            [self._entry(17, "SA", 8, 0)], loads=[16, 17, 18, 19])
+        assert where == [(20, "SA v17")]
+        # Past gap 20 only load gaps are left before the back edge (23):
+        # the read shares one of them instead.
+        where, _left = self._place(
+            [self._entry(17, "SA", 13, 0)], loads=[21, 22])
+        assert where == [(21, "SA v17")]
+        where, _left = self._place([self._entry(17, "SA", 13, 0)])
+        assert where == [(21, "SA v17")]
+
+    def test_refresh_keeps_clear_of_the_next_drain(self):
+        # A drain at gap 18 retires a read issued in 15..17 a few MFMAs
+        # later, so the read follows that drain instead.
+        where, _left = self._place([self._entry(17, "SA", 7, 0)], waits=[18])
+        assert where == [(18, "SA v17")]
+        where, _left = self._place([self._entry(17, "SA", 6, 0)], waits=[18])
+        assert where == [(14, "SA v17")]
+
+    def test_refresh_stays_out_of_the_barrier_gap(self):
+        where, _left = self._place([self._entry(17, "SA", 0, 0)])
+        assert where == [(13, "SA v17")]
+
+
+class TestHalfDisjointCell:
+    """Placement inside one partition cell of a half-disjoint MXFP8 body."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _mfmas(count):
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction
+        return [
+            MXMFMAInstruction(
+                instType=InstType.INST_F32, accType=InstType.INST_F32,
+                variant=[16, 16, 128], acc=vgpr(0, 4),
+                a=vgpr(84, 8), b=vgpr(180, 8),
+                mxsa=vgpr(17), mxsb=vgpr(246), comment=f"M{index}")
+            for index in range(count)
+        ]
+
+    @staticmethod
+    def _opener():
+        from rocisa.instruction import SBarrier, SWaitCnt
+        return [
+            (WaitGROp(), [SWaitCnt(vlcnt=2, comment="vmcnt")]),
+            (WaitLROp(), [SWaitCnt(dscnt=0, comment="drain")]),
+            (SyncOp(), [SBarrier(comment="barrier")]),
+        ]
+
+    @staticmethod
+    def _data_read(tile):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        source = LRPlacement(
+            tensor="B", mtIteration=0, tiles=MFMATileRange(0, 1, tile, tile + 1),
+            subIterK_slot=0, partition=0, targetPartition=1)
+        return (source, [DSLoadB128(
+            dst=vgpr(212 + 8 * tile, 4), src=vgpr(7),
+            ds=DSModifiers(offset=2048 * tile),
+            comment=f"B MT=n tile={tile} K=0 read=0")])
+
+    @staticmethod
+    def _load(tile):
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32
+        source = GRPlacement(
+            tensor="A", mtIteration=2, tiles=MFMATileRange(0, 1, tile, tile + 1),
+            subIterK_slot=0)
+        return (source, [
+            SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"),
+                    src1=2048 * tile, comment=f"m0 {tile}"),
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(1), saddr=sgpr("SrdA", 4), soffset=0,
+                mubuf=MUBUFModifiers(offen=True, lds=True),
+                comment=f"A MT=n+2 tile={tile} K=0 i=0"),
+        ])
+
+    @staticmethod
+    def _schedule(paths, mfmas, preMfma=(), writeFloor=None, scaleShadows=None,
+                  mfmaBase=0):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _scheduleHalfDisjointCell)
+        modules, orders = [], []
+        for chain in list(preMfma) + list(paths):
+            order = []
+            for source, insts in chain:
+                order.append(len(modules))
+                modules.append(EmittedModule(
+                    moduleId=len(modules), instructions=list(insts), source=source))
+            orders.append(order)
+        pre = orders[:len(preMfma)]
+        return _scheduleHalfDisjointCell(
+            modules, orders[len(preMfma):], pre, mfmas, 4, writeFloor or {},
+            mfmaBase, scaleShadows)
+
+    @staticmethod
+    def _gaps(module):
+        """Comments before MFMA 0, then the comments in each MFMA gap."""
+        from rocisa.instruction import MXMFMAInstruction
+        gaps = [[]]
+        for inst in module.flatitems():
+            if isinstance(inst, MXMFMAInstruction):
+                gaps.append([])
+            else:
+                gaps[-1].append(getattr(inst, "comment", ""))
+        return gaps[0], gaps[1:]
+
+    def test_late_scale_read_follows_the_barrier_and_its_floor(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32, VXorB32
+        from tensilelite.Components.Subtile.LogicalScheduler import LRIncOp
+        late = LRPlacement(
+            tensor="SA", mtIteration=0, tiles=MFMATileRange(0, 1, 8, 10),
+            subIterK_slot=0, partition=0, targetPartition=1)
+        path = self._opener() + [
+            self._data_read(4), self._data_read(5),
+            (late, [DSLoadB32(dst=vgpr(245), src=vgpr(12),
+                              ds=DSModifiers(offset=1024),
+                              comment="SA MT=n tile=8 K=0")]),
+            (LRIncOp(tensor="SA"), [VXorB32(
+                dst=vgpr(12), src0=vgpr(12), src1=vgpr(13),
+                comment="swap MXSA LR")]),
+        ]
+        scheduled = self._schedule(
+            [path], self._mfmas(8), writeFloor={245: 4})
+        _prefix, gaps = self._gaps(scheduled)
+        where = {c: i for i, gap in enumerate(gaps) for c in gap}
+        assert where["barrier"] < where["SA MT=n tile=8 K=0"]
+        # Gap i follows MFMA i, so MFMA 4 has issued before the write.
+        assert where["SA MT=n tile=8 K=0"] >= 4
+        assert where["SA MT=n tile=8 K=0"] <= where["swap MXSA LR"]
+        flat = [c for gap in gaps for c in gap]
+        assert flat.index("SA MT=n tile=8 K=0") < flat.index("swap MXSA LR")
+
+    def test_late_scale_reads_must_precede_the_second_half(self):
+        from rocisa.code import Module
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32, SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            lateScaleReadsPrecedeSecondHalf)
+
+        def body(lateAfterOpener):
+            mfmas = self._mfmas(4)
+            module = Module()
+            module.add(mfmas[0])
+            module.add(SBarrier(comment="first half"))
+            read = DSLoadB32(dst=vgpr(245), src=vgpr(12),
+                             ds=DSModifiers(offset=1024), comment="SA MT=n tile=8 K=0")
+            if not lateAfterOpener:
+                module.add(read)
+            module.add(mfmas[1])
+            module.add(mfmas[2])
+            module.add(SBarrier(comment="second half"))
+            if lateAfterOpener:
+                module.add(read)
+            module.add(mfmas[3])
+            return module
+
+        assert lateScaleReadsPrecedeSecondHalf(body(False), {245}, 2)
+        assert not lateScaleReadsPrecedeSecondHalf(body(True), {245}, 2)
+        assert not lateScaleReadsPrecedeSecondHalf(body(False), {245, 249}, 2)
+
+    def test_barrier_keeps_its_mfma_gap(self):
+        path = self._opener() + [self._data_read(4), self._data_read(5)]
+        scheduled = self._schedule(
+            [path, [self._load(0)], [self._load(1)]], self._mfmas(8))
+        _prefix, gaps = self._gaps(scheduled)
+        assert gaps[0] == ["vmcnt", "drain", "barrier"]
+        where = {c: i for i, gap in enumerate(gaps) for c in gap}
+        assert where["B MT=n tile=4 K=0 read=0"] == 1
+        assert where["B MT=n tile=5 K=0 read=0"] == 1
+        assert where["A MT=n+2 tile=0 K=0 i=0"] >= 1
+
+    def test_short_cell_shares_the_barrier_gap(self):
+        path = self._opener() + [self._data_read(4), self._data_read(5)]
+        scheduled = self._schedule([path], self._mfmas(3))
+        _prefix, gaps = self._gaps(scheduled)
+        assert gaps[0] == [
+            "vmcnt", "drain", "barrier",
+            "B MT=n tile=4 K=0 read=0", "B MT=n tile=5 K=0 read=0"]
+
+    def test_barrier_a_cell_read_needs_stays_ahead_of_mfma_0(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32, SWaitCnt
+        scale = LRPlacement(
+            tensor="SA", mtIteration=0, tiles=MFMATileRange(0, 1, 0, 2),
+            subIterK_slot=0, partition=0, targetPartition=0)
+        pre = self._opener() + [
+            (scale, [DSLoadB32(dst=vgpr(17), src=vgpr(12),
+                               ds=DSModifiers(offset=0), comment="SA MT=n tile=0 K=0")]),
+            (WaitLROp(), [SWaitCnt(dscnt=0, comment="cell wait")]),
+        ]
+        scheduled = self._schedule(
+            [[self._data_read(4), self._data_read(5)]], self._mfmas(8), preMfma=[pre])
+        prefix, gaps = self._gaps(scheduled)
+        assert prefix == [
+            "vmcnt", "drain", "barrier", "SA MT=n tile=0 K=0", "cell wait"]
+        assert gaps[0] == ["B MT=n tile=4 K=0 read=0", "B MT=n tile=5 K=0 read=0"]
+
+    @staticmethod
+    def _swap(comment="swap B LR"):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        from tensilelite.Components.Subtile.LogicalScheduler import LRIncOp
+        return (LRIncOp(tensor="B"), [VXorB32(
+            dst=vgpr(9), src0=vgpr(9), src1=vgpr(10), comment=comment)])
+
+    @staticmethod
+    def _leader_placer():
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _SchedulingRules, _SlotPlacer)
+        rules = _SchedulingRules(totalSlots=15)
+        return _SlotPlacer(
+            3, 2, [[0], [1]],
+            validators=[rules.noDsReadOrValuInFirstSlot],
+            preferences=[rules.valuNeedsLeader],
+            slotsPerInterval=5, maxPerSlot=1)
+
+    def test_valu_skips_an_interval_without_a_leader(self):
+        from rocisa.container import sgpr, vgpr
+        from rocisa.instruction import SAddU32, VXorB32
+        placer = self._leader_placer()
+        placer.place(7, (0, SAddU32(dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128)))
+        placer.placePath(
+            [(1, VXorB32(dst=vgpr(9), src0=vgpr(9), src1=vgpr(10)))], startLimit=0)
+        assert placer._firstPos[1] == 8
+
+    def test_valu_without_any_leader_keeps_its_first_legal_slot(self):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        placer = self._leader_placer()
+        placer.placePath(
+            [(1, VXorB32(dst=vgpr(9), src0=vgpr(9), src1=vgpr(10)))], startLimit=0)
+        assert placer._firstPos[1] == 1
+
+    def test_independent_read_leads_a_valu_placed_first(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            keepValuBehindLeader)
+        path = self._opener() + [self._swap(), self._data_read(4)]
+        scheduled = keepValuBehindLeader(self._schedule([path], self._mfmas(8)))
+        _prefix, gaps = self._gaps(scheduled)
+        swap = next(i for i, gap in enumerate(gaps) if "swap B LR" in gap)
+        assert gaps[swap] == ["B MT=n tile=4 K=0 read=0", "swap B LR"]
+
+    def test_valu_stays_ahead_of_a_read_of_its_result(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            keepValuBehindLeader)
+        dependent = (LRPlacement(
+            tensor="B", mtIteration=0, tiles=MFMATileRange(0, 1, 6, 7),
+            subIterK_slot=0, partition=0, targetPartition=1), [DSLoadB128(
+                dst=vgpr(240, 4), src=vgpr(9), ds=DSModifiers(offset=0),
+                comment="B MT=n tile=6 K=0 read=0")])
+        path = self._opener() + [self._swap(), dependent]
+        scheduled = keepValuBehindLeader(self._schedule([path], self._mfmas(8)))
+        flat = [c for gap in self._gaps(scheduled)[1] for c in gap]
+        assert flat.index("swap B LR") < flat.index("B MT=n tile=6 K=0 read=0")
+
+    def test_valu_never_shares_a_gap_with_a_direct_to_lds_request(self):
+        path = self._opener() + [
+            self._data_read(4), self._data_read(5), self._swap()]
+        scheduled = self._schedule(
+            [path] + [[self._load(t)] for t in range(4)], self._mfmas(6))
+        _prefix, gaps = self._gaps(scheduled)
+        swap = next(i for i, gap in enumerate(gaps) if "swap B LR" in gap)
+        assert not any(c.startswith(("m0 ", "A MT=n+2")) for c in gaps[swap])
+        assert gaps[swap][0] != "swap B LR"
+
+    def _load_runs(self, bundles, intervals):
+        scheduled = self._schedule(
+            [[self._load(t)] for t in range(bundles)], self._mfmas(intervals + 1))
+        _prefix, gaps = self._gaps(scheduled)
+        loads = [sum(c.startswith("A MT=n+2") for c in gap) for gap in gaps]
+        runs, run = [], 0
+        for count in loads:
+            run = run + 1 if count else 0
+            runs.append(run)
+        return loads, max(runs)
+
+    def test_dense_cell_caps_load_runs_at_five_gaps(self):
+        for bundles, intervals in ((6, 7), (10, 12), (11, 13)):
+            loads, longest = self._load_runs(bundles, intervals)
+            assert sum(loads) == bundles
+            assert max(loads) == 1, (bundles, intervals, loads)
+            assert longest <= 5, (bundles, intervals, loads)
+
+    def test_cell_too_dense_for_the_cap_keeps_one_load_per_gap(self):
+        loads, longest = self._load_runs(6, 6)
+        assert loads[:6] == [1] * 6
+        assert longest == 6
+
+    def _reads_and_loads(self, reads, bundles, intervals, scaleShadows=None,
+                         mfmaBase=0):
+        """Reads per gap, loads per gap, and the load tiles in gap order."""
+        path = self._opener() + [self._data_read(4 + t) for t in range(reads)]
+        scheduled = self._schedule(
+            [path] + [[self._load(t)] for t in range(bundles)],
+            self._mfmas(intervals + 1), scaleShadows=scaleShadows,
+            mfmaBase=mfmaBase)
+        _prefix, gaps = self._gaps(scheduled)
+        gaps = gaps[:intervals]
+        readCount = [sum(c.startswith("B MT=n tile=") for c in gap) for gap in gaps]
+        loadCount = [sum(c.startswith("A MT=n+2") for c in gap) for gap in gaps]
+        order = [c for gap in gaps for c in gap if c.startswith("A MT=n+2")]
+        assert order == [f"A MT=n+2 tile={t} K=0 i=0" for t in range(bundles)]
+        assert all(any(c == f"m0 {t}" for c in gaps[i])
+                   for t in range(bundles)
+                   for i, gap in enumerate(gaps)
+                   if f"A MT=n+2 tile={t} K=0 i=0" in gap)
+        return readCount, loadCount
+
+    @staticmethod
+    def _longest_run(loadCount):
+        run = longest = 0
+        for count in loadCount:
+            run = run + 1 if count else 0
+            longest = max(longest, run)
+        return longest
+
+    def test_loads_take_the_gaps_the_reads_left_free(self):
+        reads, loads = self._reads_and_loads(reads=6, bundles=3, intervals=11)
+        assert reads[1:4] == [2, 2, 2]
+        assert max(loads) == 1 and sum(loads) == 3
+        assert not any(r and l for r, l in zip(reads, loads)), (reads, loads)
+        # Spread over the free gaps 4..10, not packed behind the reads.
+        assert [i for i, l in enumerate(loads) if l] == [4, 6, 8]
+
+    def test_too_few_free_gaps_share_the_fewest_reads(self):
+        reads, loads = self._reads_and_loads(reads=5, bundles=4, intervals=7)
+        assert reads[1:4] == [2, 2, 1]
+        assert max(loads) == 1 and sum(loads) == 4
+        beside = [r for r, l in zip(reads, loads) if l and r]
+        assert beside == [1], (reads, loads)
+
+    def test_dense_cell_shares_only_the_gaps_it_must(self):
+        reads, loads = self._reads_and_loads(reads=5, bundles=5, intervals=7)
+        assert max(loads) == 1 and sum(loads) == 5
+        beside = sorted(r for r, l in zip(reads, loads) if l and r)
+        assert beside == [1, 2], (reads, loads)
+        assert self._longest_run(loads) <= 5
+
+    def test_free_gaps_behind_the_reads_keep_the_run_cap(self):
+        reads, loads = self._reads_and_loads(reads=4, bundles=7, intervals=11)
+        assert max(loads) == 1 and sum(loads) == 7
+        assert not any(r and l for r, l in zip(reads, loads)), (reads, loads)
+        assert self._longest_run(loads) <= 5, loads
+
+    def test_scale_refresh_gaps_stay_free_of_loads(self):
+        _reads, loads = self._reads_and_loads(reads=4, bundles=3, intervals=9)
+        taken = [i for i, load in enumerate(loads) if load]
+        assert taken[1] <= 5, loads
+        # The cell starts at body MFMA 40. The refresh floor is the gap of
+        # the second load: last reader + 9 - 1.
+        floor = taken[1]
+        shadows = [TestC1ScaleShadowReads._entry(17, "SA", 40 + floor - 8, 0),
+                   TestC1ScaleShadowReads._entry(18, "SA", 60, 4)]
+        reads, loads = self._reads_and_loads(
+            reads=4, bundles=3, intervals=9, scaleShadows=shadows, mfmaBase=40)
+        assert sum(loads) == 3 and not loads[floor], (floor, loads)
+        assert not any(r and l for r, l in zip(reads, loads)), (reads, loads)
+        # The first is reserved here; the second is past this cell.
+        assert [entry["canonicalVgpr"] for entry in shadows] == [18]
+
+    def test_valu_without_a_legal_slot_is_still_emitted(self):
+        path = self._opener() + [self._swap()]
+        scheduled = self._schedule([path, [self._load(0)]], self._mfmas(2))
+        _prefix, gaps = self._gaps(scheduled)
+        assert [c for gap in gaps for c in gap].count("swap B LR") == 1
+
+
+class TestHalfDisjointHalf:
+    """All partition cells of one half-disjoint half scheduled together."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    _mfmas = staticmethod(TestHalfDisjointCell._mfmas)
+    _opener = staticmethod(TestHalfDisjointCell._opener)
+    _data_read = staticmethod(TestHalfDisjointCell._data_read)
+    _load = staticmethod(TestHalfDisjointCell._load)
+    _gaps = staticmethod(TestHalfDisjointCell._gaps)
+
+    @staticmethod
+    def _cell(paths, mfmas, preMfma=()):
+        modules, orders = [], []
+        for chain in list(preMfma) + list(paths):
+            order = []
+            for source, insts in chain:
+                order.append(len(modules))
+                modules.append(EmittedModule(
+                    moduleId=len(modules), instructions=list(insts), source=source))
+            orders.append(order)
+        return modules, orders[len(preMfma):], orders[:len(preMfma)], mfmas
+
+    @staticmethod
+    def _fence(name):
+        from rocisa.instruction import SWaitCnt
+        return [(WaitLROp(), [SWaitCnt(dscnt=0, comment=name)])]
+
+    @staticmethod
+    def _marker(text):
+        from rocisa.code import Module
+        marker = Module()
+        marker.addComment0(text)
+        return marker.items()[0]
+
+    def _half(self, cells, scaleShadows=None, crossCellReads=False):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _scheduleHalfDisjointHalf)
+        return _scheduleHalfDisjointHalf(
+            cells, 4, {}, 0, scaleShadows,
+            [self._marker(f"cell {c}") for c in range(1, len(cells))],
+            crossCellReads)
+
+    @staticmethod
+    def _read_into(register, comment):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(dst=vgpr(register, 4), src=vgpr(7),
+                          ds=DSModifiers(offset=0), comment=comment)
+
+    def _twoCells(self, reads, loads, mfmas=8):
+        """Cell 0 opens the half; cell 1 starts behind its own read fence."""
+        first = self._cell(
+            [self._opener() + [self._data_read(t) for t in range(reads)],
+             [self._load(t) for t in range(loads)]],
+            self._mfmas(mfmas))
+        second = self._cell(
+            [[self._data_read(8 + t) for t in range(reads)],
+             [self._load(8 + t) for t in range(loads)]],
+            self._mfmas(mfmas), preMfma=[self._fence("fence 1")])
+        return [first, second]
+
+    def test_plan_gives_each_memory_op_its_own_gap(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _halfMemoryPlan)
+        eligible = list(range(1, 15))
+        reads, loads = _halfMemoryPlan(
+            eligible, [(list(range(1, 4)), 2), (list(range(8, 11)), 2)], 4)
+        flat = [gap for group in reads for gap in group] + loads
+        assert len(set(flat)) == len(flat) == 8
+        assert reads == [[1, 2], [8, 9]]
+        assert all(b - a >= 2 for a, b in zip(loads, loads[1:]))
+
+    def test_plan_doubles_reads_only_to_meet_a_deadline(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _halfMemoryPlan)
+        reads, loads = _halfMemoryPlan(list(range(1, 9)), [([1, 2], 3)], 2)
+        assert sorted(reads[0]) == [1, 1, 2]
+        assert not set(loads) & {1, 2}
+        assert _halfMemoryPlan(list(range(1, 9)), [([1], 3)], 0) is None
+        # More memory ops than gaps: the reads double up, the loads stay alone.
+        reads, loads = _halfMemoryPlan([1, 2, 3], [([1, 2, 3], 2)], 2)
+        assert len(set(loads)) == 2 and len(set(reads[0])) == 1
+        assert not set(loads) & set(reads[0])
+        assert _halfMemoryPlan([1, 2, 3], [([1, 2, 3], 3)], 1) is None
+
+    def test_half_too_dense_for_one_load_a_gap_is_left_to_its_cells(self):
+        assert self._half(self._twoCells(reads=2, loads=6, mfmas=3)) is None
+        assert self._half(self._twoCells(reads=2, loads=6, mfmas=3),
+                          crossCellReads=True) is None
+        assert self._half(self._twoCells(reads=2, loads=2)) is not None
+
+    def test_even_load_pacing_keeps_loads_out_of_the_tail(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _halfMemoryPlan)
+        eligible = list(range(10))
+        groups = [(list(range(5)), 4), (eligible, 2)]
+        _reads, late = _halfMemoryPlan(eligible, groups, 3)
+        assert min(late) >= 5
+        reads, loads = _halfMemoryPlan(eligible, groups, 3, evenLoads=True)
+        assert min(loads) < 5 and max(loads) - min(loads) >= 6
+        assert len(reads[0]) == 4 and max(reads[0]) <= 4
+        assert not set(loads) & {g for group in reads for g in group}
+        # Even pacing that would miss a deadline falls back to the reads' leftovers.
+        tight = [(list(range(5)), 7), (eligible, 2)]
+        assert (_halfMemoryPlan(eligible, tight, 3, evenLoads=True)
+                == _halfMemoryPlan(eligible, tight, 3))
+
+    def test_half_spreads_reads_and_loads_one_per_gap(self):
+        scheduled = self._half(self._twoCells(reads=2, loads=2))
+        assert scheduled is not None
+        _prefix, gaps = self._gaps(scheduled)
+        assert len(gaps) == 16
+        memory = [
+            sum(c.startswith(("B MT=n tile", "A MT=n+2")) for c in gap)
+            for gap in gaps]
+        assert max(memory) == 1
+        loadGaps = [i for i, gap in enumerate(gaps)
+                    if any(c.startswith("A MT=n+2") for c in gap)]
+        assert len(loadGaps) == 4
+        assert all(b - a >= 2 for a, b in zip(loadGaps, loadGaps[1:]))
+        assert any(g < 7 for g in loadGaps) and any(g > 7 for g in loadGaps)
+
+    def test_half_leaves_the_scale_refresh_gap_to_the_refresh(self):
+        # Without the refresh the cross-cell plan puts a load in gap 10,
+        # the WAR floor of a scale last read by MFMA 2.
+        for crossCellReads in (False, True):
+            shadows = [TestC1ScaleShadowReads._entry(17, "SA", 2, 0)]
+            scheduled = self._half(self._twoCells(reads=2, loads=2),
+                                   scaleShadows=shadows,
+                                   crossCellReads=crossCellReads)
+            assert scheduled is not None
+            _prefix, gaps = self._gaps(scheduled)
+            assert not any(c.startswith(("B MT=n tile", "A MT=n+2")) for c in gaps[10])
+            assert sum(c.startswith("A MT=n+2") for gap in gaps for c in gap) == 4
+            assert not shadows
+
+    def test_dense_half_reserves_a_refresh_gap_only_with_one_to_spare(self):
+        memory = lambda gap: [c for c in gap if c.startswith(("B MT=n tile", "A MT=n+2"))]
+        for crossCellReads in (False, True):
+            # Two loads and two reads a cell leave the half gaps to spare:
+            # the refresh keeps gap 1, its WAR floor.
+            shadows = [TestC1ScaleShadowReads._entry(17, "SA", -8, 0)]
+            sparse = self._half(self._twoCells(reads=2, loads=2), scaleShadows=shadows,
+                                crossCellReads=crossCellReads)
+            _prefix, gaps = self._gaps(sparse)
+            assert not memory(gaps[1]) and not shadows
+            # Five loads and four reads a cell have none: the refresh takes
+            # the fence gap of cell 1, which no load can take, and the reads
+            # and loads keep the plan they have without it.
+            dense = lambda shadows: self._gaps(self._half(
+                self._twoCells(reads=4, loads=5), scaleShadows=shadows,
+                crossCellReads=crossCellReads))[1]
+            shadows = [TestC1ScaleShadowReads._entry(17, "SA", -8, 0)]
+            assert list(map(memory, dense(shadows))) == list(map(memory, dense(None)))
+            assert not shadows
+            # Past the fence every gap could take a load, so the refresh
+            # keeps its floor, gap 10, rather than share a gap with a load.
+            shadows = [TestC1ScaleShadowReads._entry(17, "SA", 2, 0)]
+            gaps = dense(shadows)
+            assert not memory(gaps[10]) and not shadows
+            assert sum(c.startswith("A MT=n+2") for gap in gaps for c in gap) == 10
+
+    def test_later_cell_fence_stays_alone_before_its_first_mfma(self):
+        scheduled = self._half(self._twoCells(reads=2, loads=2))
+        _prefix, gaps = self._gaps(scheduled)
+        assert [c for c in gaps[7] if c] == ["fence 1"]
+        where = {c: i for i, gap in enumerate(gaps) for c in gap}
+        # Reads stay in their own cell, minGap MFMAs ahead of the next fence.
+        for tile in range(2):
+            assert 1 <= where[f"B MT=n tile={tile} K=0 read=0"] <= 7 - 4
+            assert 8 <= where[f"B MT=n tile={8 + tile} K=0 read=0"]
+        text = str(scheduled)
+        assert text.index("cell 1") < text.index("fence 1")
+
+    def test_dense_half_keeps_each_cells_reads(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _scheduleHalfDisjointCell)
+        cells = self._twoCells(reads=6, loads=2, mfmas=6)
+        scheduled = self._half(cells)
+        assert scheduled is not None
+        _prefix, gaps = self._gaps(scheduled)
+        alone = _scheduleHalfDisjointCell(*self._twoCells(6, 2, 6)[0], 4, {}, 0)
+        _p, aloneGaps = self._gaps(alone)
+        reads = lambda gs: [[c for c in g if c.startswith("B MT=n tile")] for g in gs]
+        assert reads(gaps)[:5] == reads(aloneGaps)[:5]
+        assert sum(map(len, reads(gaps)[:5])) == 6
+
+    def test_issue_excess_follows_the_measured_weights(self):
+        from rocisa.instruction import SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _issueExcess)
+        load = self._load(0)[1]
+        read = self._data_read(0)[1]
+        assert _issueExcess([load + read]) == 0
+        # Two reads beside a load cost one cycle more than one.
+        assert _issueExcess([load + read + read]) == 1
+        # A load beside a barrier: 33 cycles of issue and the fence penalty.
+        assert _issueExcess([[SBarrier()] + load]) == 5 + 20
+        # The sixth load in a row stalls.
+        assert _issueExcess([load] * 5) == 0
+        assert _issueExcess([load] * 6) == 23
+
+    def test_half_is_kept_only_when_no_costlier_than_its_cells(self, monkeypatch):
+        import tensilelite.Components.Subtile.InstructionScheduler as IS
+        cells = self._twoCells(reads=6, loads=3, mfmas=6)
+        emittedLists, orders = [], {}
+        for modules, paths, preMfma, mfmas in cells:
+            emitted = modules + [EmittedModule(
+                moduleId=len(modules), instructions=list(mfmas), source=None)]
+            orders[id(emitted)] = (len(modules), paths, preMfma)
+            emittedLists.append(emitted)
+        monkeypatch.setattr(
+            IS, "extractPathsFromBeforeDeps", lambda emitted: orders[id(emitted)])
+        markers = [self._marker("cell 1")]
+        joint = self._half(self._twoCells(reads=6, loads=3, mfmas=6))
+        cellwise = IS.Module()
+        for c, cell in enumerate(self._twoCells(reads=6, loads=3, mfmas=6)):
+            if c:
+                cellwise.add(self._marker("cell 1"))
+            cellwise.add(IS._scheduleHalfDisjointCell(*cell, 4, {}, 6 * c))
+        chosen = IS.instructionScheduleHalf(emittedLists, 4, {}, 0, None, markers)
+        costs = [IS._issueExcess(IS._moduleGaps(m)) for m in (joint, cellwise, chosen)]
+        assert costs[2] <= min(costs[:2]), costs
+        assert str(chosen).count("A MT=n+2") == 6
+
+    def test_issue_excess_charges_the_measured_stalls(self):
+        from rocisa.instruction import SBarrier
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _issueExcess)
+        load = self._load(0)[1]
+        read = self._data_read(0)[1]
+        assert _issueExcess([load, read, load + read]) == 0
+        # A load beside a barrier pays 20 on top of the 33 issue cycles.
+        assert _issueExcess([[SBarrier()] + load]) == 20 + (17 + 16 - 28)
+        assert _issueExcess([load] * 5) == 0
+        assert _issueExcess([load] * 6) == 23
+        assert _issueExcess([load + read * 2]) == 1
+
+    def test_half_costs_no_more_than_its_cells_alone(self, monkeypatch):
+        from rocisa.code import Module
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        for reads, loads, mfmas in ((2, 2, 8), (6, 2, 6), (6, 4, 4)):
+            def emittedLists():
+                lists = []
+                for modules, paths, preMfma, cellMfmas in self._twoCells(
+                        reads, loads, mfmas):
+                    holder = EmittedModule(
+                        moduleId=len(modules), instructions=list(cellMfmas))
+                    lists.append((modules + [holder], paths, preMfma))
+                return lists
+            cells = emittedLists()
+            shapes = {id(c[0]): (len(c[0]) - 1, c[1], c[2]) for c in cells}
+            monkeypatch.setattr(
+                IS, "extractPathsFromBeforeDeps", lambda em: shapes[id(em)])
+            markers = [self._marker("cell 1")]
+            half = IS.instructionScheduleHalf(
+                [c[0] for c in cells], 4, {}, 0, None, markers)
+            alone = Module()
+            for c, (modules, paths, preMfma) in enumerate(emittedLists()):
+                alone.add(IS._scheduleHalfDisjointCell(
+                    modules[:-1], paths, preMfma, modules[-1].instructions,
+                    4, {}, c * mfmas))
+            cost = lambda m: IS._issueExcess(IS._moduleGaps(m))
+            assert cost(half) <= cost(alone), (reads, loads, mfmas)
+
+    def test_cross_cell_floor_follows_the_last_reader_ahead_of_the_cell(self):
+        from rocisa.container import vgpr
+        from rocisa.enum import InstType
+        from rocisa.instruction import MXMFMAInstruction
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _crossCellReadFloors)
+        mfmas = self._mfmas(8)
+        mfmas[2] = MXMFMAInstruction(
+            instType=InstType.INST_F32, accType=InstType.INST_F32,
+            variant=[16, 16, 128], acc=vgpr(0, 4), a=vgpr(84, 8),
+            b=vgpr(300, 8), mxsa=vgpr(17), mxsb=vgpr(246), comment="M2")
+        free = (None, self._read_into(212, "free"))
+        afterTwo = (None, self._read_into(300, "after M2"))
+        assert _crossCellReadFloors([free, afterTwo], mfmas, 4, 8, 1) == [1, 3]
+        assert _crossCellReadFloors([afterTwo, free], mfmas, 4, 8, 1) == [3, 3]
+        # Its own cell reads it, or it is a scale: it stays in its cell.
+        ownCell = (None, self._read_into(84, "own cell"))
+        scale = (None, self._read_into(212, "SA tile=0"))
+        assert _crossCellReadFloors([ownCell], mfmas, 4, 8, 1) == [4]
+        assert _crossCellReadFloors([scale], mfmas, 4, 8, 1) == [4]
+
+    def test_cross_cell_reads_take_earlier_gaps_ahead_of_the_fence(self):
+        scheduled = self._half(self._twoCells(reads=2, loads=1), crossCellReads=True)
+        assert scheduled is not None
+        _prefix, gaps = self._gaps(scheduled)
+        where = {c: i for i, gap in enumerate(gaps) for c in gap}
+        moved = [tile for tile in (8, 9)
+                 if where[f"B MT=n tile={tile} K=0 read=0"] < 7]
+        assert moved
+        assert all(where[f"B MT=n tile={t} K=0 read=0"] <= 7 - 4 for t in moved)
+        # The fence lets the moved reads stay in flight.
+        fence = next(inst for inst in scheduled.flatitems()
+                     if getattr(inst, "comment", "") == "fence 1")
+        assert fence.dscnt == len(moved)
+
+    def test_relaxed_fence_owes_only_the_earlier_cells(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _relaxCrossedFences)
+        def run(cells):
+            fence = self._fence("fence")[0][1][0]
+            sequence = [(i, self._read_into(212, f"r{i}")) for i in range(len(cells))]
+            cellOf = dict(enumerate(cells))
+            sequence.append(("f", fence))
+            _relaxCrossedFences(sequence, cellOf, {id(fence): 1})
+            return fence.dscnt
+        assert run([0, 1, 1]) == 2
+        assert run([0, 1, 0]) == 0
+        assert run([0, 0]) == 0
+
+    def test_half_with_a_second_opener_is_left_to_the_cells(self):
+        cells = self._twoCells(reads=2, loads=2)
+        second = self._cell(
+            [self._opener() + [self._data_read(8)]], self._mfmas(8))
+        assert self._half([cells[0], second]) is None
+
+    def test_order_check_rejects_an_inversion_through_a_register(self):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VMovB32
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _halfCellOrderSafe)
+        write = VMovB32(dst=vgpr(1), src=vgpr(2))
+        read = VMovB32(dst=vgpr(3), src=vgpr(1))
+        other = VMovB32(dst=vgpr(4), src=vgpr(5))
+        modules = [EmittedModule(moduleId=i, instructions=[inst], source=None)
+                   for i, inst in enumerate((write, read, other))]
+        cellOf = {0: 0, 1: 1, 2: 1}
+        assert _halfCellOrderSafe([(2, other), (0, write), (1, read)],
+                                  cellOf, [[0], [1], [2]], modules)
+        assert not _halfCellOrderSafe([(1, read), (0, write), (2, other)],
+                                      cellOf, [[0], [1], [2]], modules)
+
+
+class TestKeepValuBehindLeader:
+    """The body pass keeps VALUs behind a leader and out of request gaps."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _xor(reg, comment):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        return VXorB32(dst=vgpr(reg), src0=vgpr(reg), src1=vgpr(reg + 1),
+                       comment=comment)
+
+    @staticmethod
+    def _read(addr, comment="R"):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        return DSLoadB128(dst=vgpr(212, 4), src=vgpr(addr),
+                          ds=DSModifiers(offset=0), comment=comment)
+
+    @staticmethod
+    def _request(vaddr=1, lds=True):
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32
+        return [
+            SAddU32(dst=mgpr(0), src0=sgpr("LocalWriteBaseAddrA"), src1=0,
+                    comment="m0"),
+            BufferLoadB128(
+                dst=None if lds else vgpr(40, 4), vaddr=vgpr(vaddr),
+                saddr=sgpr("SrdA", 4), soffset=0,
+                mubuf=MUBUFModifiers(offen=True, lds=lds), comment="L"),
+        ]
+
+    @staticmethod
+    def _body(*gaps):
+        """MFMA, then each gap's instructions and the next MFMA."""
+        from rocisa.code import Module
+        mfmas = TestHalfDisjointCell._mfmas(len(gaps) + 1)
+        module = Module()
+        cell = Module()
+        cell.add(mfmas[0])
+        for gap, mfma in zip(gaps, mfmas[1:]):
+            for inst in gap:
+                cell.add(inst)
+            cell.add(mfma)
+        module.add(cell)
+        return module
+
+    @staticmethod
+    def _run(module):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            keepValuBehindLeader)
+        return TestHalfDisjointCell._gaps(keepValuBehindLeader(module))[1]
+
+    def test_valu_moves_back_behind_the_previous_gap_leader(self):
+        gaps = self._run(self._body([self._read(7)], [self._xor(9, "V")]))
+        assert gaps[:2] == [["R", "V"], []]
+
+    def test_valu_moves_out_of_a_request_gap(self):
+        gaps = self._run(self._body(
+            [self._read(7)], [self._request()[0], self._xor(9, "V"),
+                              self._request()[1]]))
+        assert gaps[:2] == [["R", "V"], ["m0", "L"]]
+
+    def test_valu_never_crosses_an_instruction_it_feeds(self):
+        gaps = self._run(self._body(
+            [self._read(7)], self._request(vaddr=9), [self._xor(9, "V")]))
+        assert gaps[2] == ["V"]
+
+    def test_valu_never_crosses_a_load_of_its_source(self):
+        gaps = self._run(self._body(
+            [self._read(7)], self._request(lds=False), [self._xor(39, "V")]))
+        assert gaps[2] == ["V"]
+
+    def test_valu_never_crosses_a_local_read_wait(self):
+        from rocisa.instruction import SWaitCnt
+        gaps = self._run(self._body(
+            [self._read(7)],
+            [SWaitCnt(dscnt=0, comment="drain")] + self._request(),
+            [self._xor(9, "V")]))
+        assert gaps[2] == ["V"]
+
+    def test_drain_gap_takes_no_valu(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        gaps = self._run(self._body(
+            [SWaitCnt(dscnt=0, comment="drain")],
+            [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")],
+            self._request(), [], [self._xor(20, "V2"), self._xor(22, "V4")]))
+        assert gaps[0] == ["drain"]
+        assert gaps[4] == ["V2", "V4"]
+
+    def test_read_pointer_swap_crosses_the_drain_behind_its_read(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        gaps = self._run(self._body(
+            [self._read(20, "R")], [],
+            [SWaitCnt(dscnt=0, comment="drain")],
+            [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")],
+            [self._xor(20, "V")]))
+        assert gaps[0] == ["R", "V"]
+        assert gaps[2] == ["drain"]
+        assert gaps[4] == []
+
+    def test_swap_of_a_returned_register_stays_behind_the_drain(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB32, SWaitCnt
+        read = DSLoadB32(dst=vgpr(20), src=vgpr(20), ds=DSModifiers(offset=0),
+                         comment="R")
+        gaps = self._run(self._body(
+            [read], [SWaitCnt(dscnt=0, comment="drain"), self._xor(20, "V")]))
+        assert gaps[1] == ["drain", "V"]
+
+    def test_vmcnt_stays_a_fence_when_a_load_writes_vgprs(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        gaps = self._run(self._body(
+            [SWaitCnt(dscnt=0, comment="drain")],
+            [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")],
+            self._request(lds=False), [self._xor(20, "V2")]))
+        assert gaps[3] == ["V2"]
+
+    def test_full_gap_takes_no_valu(self):
+        gaps = self._run(self._body(
+            [self._read(7, f"R{i}") for i in range(5)], [self._xor(9, "V")]))
+        assert gaps[1] == ["V"]
+
+    def test_salu_and_its_carry_lead_the_valu(self):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddCU32, SAddU32
+        gaps = self._run(self._body([
+            self._xor(9, "V"),
+            SAddU32(dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=128, comment="add"),
+            SAddCU32(dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
+                     comment="carry")]))
+        assert gaps[0] == ["add", "carry", "V"]
+
+
+class TestIssueSaluFirst:
+    """Each MFMA gap issues SALU, then m0 and its load, then reads, then VALU."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _run(module):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            issueSaluFirst)
+        return TestHalfDisjointCell._gaps(issueSaluFirst(module))[1]
+
+    @staticmethod
+    def _add(comment, src1=128):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddU32
+        return SAddU32(dst=sgpr("SrdA"), src0=sgpr("SrdA"), src1=src1,
+                       comment=comment)
+
+    @staticmethod
+    def _carry(comment="carry"):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddCU32
+        return SAddCU32(dst=sgpr("SrdA+1"), src0=sgpr("SrdA+1"), src1=0,
+                        comment=comment)
+
+    def test_m0_and_its_load_lead_the_reads_of_a_cell_gap(self):
+        cell = TestHalfDisjointCell
+        path = cell._opener() + [cell._data_read(t) for t in range(4, 8)]
+        gaps = self._run(cell._schedule([path, [cell._load(0)]], cell._mfmas(4)))
+        assert gaps[1] == ["m0 0", "A MT=n+2 tile=0 K=0 i=0",
+                           "B MT=n tile=4 K=0 read=0", "B MT=n tile=5 K=0 read=0"]
+
+    def test_classes_issue_salu_load_read_valu(self):
+        valu = TestKeepValuBehindLeader._xor(20, "V")
+        read = TestKeepValuBehindLeader._read(7)
+        m0, load = TestKeepValuBehindLeader._request()
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [valu, read, m0, self._add("S"), load]))
+        assert gaps[0] == ["S", "m0", "L", "R", "V"]
+
+    def test_scc_pair_stays_adjacent_ahead_of_a_read(self):
+        read = TestKeepValuBehindLeader._read(7)
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read, self._add("add"), self._carry()]))
+        assert gaps[0] == ["add", "carry", "R"]
+
+    def test_scc_pair_closes_up_around_a_read(self):
+        read = TestKeepValuBehindLeader._read(7)
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [self._add("add"), read, self._carry()]))
+        assert gaps[0] == ["add", "carry", "R"]
+
+    def test_compare_stays_right_before_its_branch(self):
+        from rocisa.code import Module
+        from rocisa.container import sgpr
+        from rocisa.instruction import SCBranchSCC0, SCmpEQU32, SSubU32
+        read = TestKeepValuBehindLeader._read(7)
+        sub = SSubU32(dst=sgpr("LoopCounterL"), src0=sgpr("LoopCounterL"),
+                      src1=1, comment="dec")
+        cmp = SCmpEQU32(src0=sgpr("LoopCounterL"), src1=2, comment="cmp")
+        branch = SCBranchSCC0(labelName="label_LoopBeginL", comment="branch")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read, sub, self._add("add"), cmp, branch]))
+        assert gaps[0] == ["dec", "add", "R", "cmp", "branch"]
+
+    def test_wait_stays_before_what_it_guards(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        read = TestKeepValuBehindLeader._read(7)
+        m0, load = TestKeepValuBehindLeader._request()
+        gaps = self._run(TestKeepValuBehindLeader._body([
+            read, SWaitCnt(dscnt=0, comment="drain"),
+            SBarrier(comment="barrier"), self._add("S"), m0, load]))
+        assert gaps[0] == ["R", "drain", "barrier", "S", "m0", "L"]
+
+    def test_salu_stays_behind_a_read_of_its_result(self):
+        from rocisa.container import DSModifiers, sgpr, vgpr
+        from rocisa.instruction import DSLoadB32, VReadfirstlaneB32
+        first = VReadfirstlaneB32(dst=sgpr("SrdA"), src=vgpr(20), comment="V")
+        read = DSLoadB32(dst=vgpr(20), src=vgpr(7), ds=DSModifiers(offset=0),
+                         comment="R")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read, first, self._add("S")]))
+        assert gaps[0] == ["R", "V", "S"]
+
+    def test_m0_stays_with_a_load_behind_the_valu_of_its_address(self):
+        valu = TestKeepValuBehindLeader._xor(1, "V")
+        m0, load = TestKeepValuBehindLeader._request(vaddr=1)
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [self._add("S"), valu, m0, load]))
+        assert gaps[0] == ["S", "V", "m0", "L"]
+
+
+class TestSpaceM0WritesFromLdsLoads:
+    """Each m0 write gets one issue slot before the load that reads it."""
+
+    NOP = "m0 write -> direct-to-LDS load"
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _run(module):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            spaceM0WritesFromLdsLoads)
+        return TestHalfDisjointCell._gaps(spaceM0WritesFromLdsLoads(module))[1]
+
+    @staticmethod
+    def _pair(tag, vaddr=1):
+        m0, load = TestKeepValuBehindLeader._request(vaddr=vaddr)
+        m0.comment, load.comment = f"m0 {tag}", f"L {tag}"
+        return [m0, load]
+
+    @staticmethod
+    def _swap(tensor="A"):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SXorB32
+        base = f"LocalWriteBaseAddr{tensor}"
+        return SXorB32(dst=sgpr(base), src0=sgpr(base), src1=sgpr(f"Swap{tensor}"),
+                       comment="swap")
+
+    def test_m0_moves_up_across_one_mfma(self):
+        read = TestKeepValuBehindLeader._read(7)
+        gaps = self._run(TestKeepValuBehindLeader._body([read], self._pair("a")))
+        assert gaps[:2] == [["m0 a", "R"], ["L a"]]
+
+    def test_m0_never_crosses_two_mfmas(self):
+        valu = TestKeepValuBehindLeader._xor(20, "V")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [valu], [], self._pair("a")))
+        assert gaps[:3] == [["V"], ["m0 a"], ["L a"]]
+
+    def test_m0_stays_behind_an_earlier_lds_load(self):
+        read = TestKeepValuBehindLeader._read(7)
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read], self._pair("a"), self._pair("b")))
+        assert gaps[:3] == [["m0 a", "R"], ["L a", "m0 b"], ["L b"]]
+
+    def test_m0_behind_its_base_swap_takes_a_filler(self):
+        valu = TestKeepValuBehindLeader._xor(20, "V")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            [self._swap()] + self._pair("a") + [valu]))
+        assert gaps[1] == ["swap", "m0 a", "V", "L a"]
+
+    def test_m0_behind_its_base_swap_takes_a_nop(self):
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)], [self._swap()] + self._pair("a")))
+        assert gaps[1] == ["swap", "m0 a", self.NOP, "L a"]
+
+    def test_filler_never_writes_the_load_address(self):
+        valu = TestKeepValuBehindLeader._xor(1, "V")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            [self._swap()] + self._pair("a", vaddr=1) + [valu]))
+        assert gaps[1] == ["swap", "m0 a", self.NOP, "L a", "V"]
+
+    def test_m0_never_splits_an_scc_pair(self):
+        salu = TestIssueSaluFirst
+        read = TestKeepValuBehindLeader._read
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [read(7, "R0")], [salu._add("add"), salu._carry(), read(9), *self._pair("a")]))
+        assert gaps[1] == ["add", "carry", "m0 a", "R", "L a"]
+
+    def test_m0_right_behind_an_scc_pair_takes_a_nop(self):
+        salu = TestIssueSaluFirst
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            [salu._add("add"), salu._carry(), *self._pair("a")]))
+        assert gaps[1] == ["add", "carry", "m0 a", self.NOP, "L a"]
+
+    def test_scale_m0_move_crosses_an_scc_pair(self):
+        from rocisa.container import mgpr, sgpr
+        from rocisa.instruction import SMovB32
+        salu = TestIssueSaluFirst
+        m0, load = self._pair("s")
+        move = SMovB32(dst=mgpr(0), src=sgpr("LocalWriteBaseAddrMXSA"),
+                       comment="m0 s")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [self._swap("MXSA")], [salu._add("add"), salu._carry(), move, load]))
+        assert gaps[:2] == [["swap", "m0 s"], ["add", "carry", "L s"]]
+
+    def test_two_pairs_in_one_gap(self):
+        valu = TestKeepValuBehindLeader._xor(20, "V")
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            self._pair("a") + self._pair("b") + [valu]))
+        assert gaps[:2] == [["m0 a", "R"], ["L a", "m0 b", "V", "L b"]]
+
+    def test_two_pairs_in_one_gap_without_filler(self):
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            self._pair("a") + self._pair("b")))
+        assert gaps[:2] == [["m0 a", "R"], ["L a", "m0 b", self.NOP, "L b"]]
+
+    def test_m0_stays_behind_a_wait(self):
+        from rocisa.instruction import SWaitCnt
+        gaps = self._run(TestKeepValuBehindLeader._body(
+            [TestKeepValuBehindLeader._read(7)],
+            [SWaitCnt(dscnt=0, comment="drain")] + self._pair("a")))
+        assert gaps[1] == ["drain", "m0 a", self.NOP, "L a"]
+
+
+class TestSpaceMainLoopM0Writes:
+    """Main-loop m0 writes take the slot that keeps their MFMA gap fullest
+    within budget, else the emptiest, moving SRD steps and base swaps."""
+
+    NOP = TestSpaceM0WritesFromLdsLoads.NOP
+    SGPRS = {"SrdA": 40, "LocalWriteBaseAddrA": 48, "SwapA": 49}
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @classmethod
+    def _run(cls, *gaps, outside=6):
+        """One-body loop with outside instructions around its back edge."""
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            spaceMainLoopM0Writes)
+        body = TestKeepValuBehindLeader._body(*gaps)
+        spaceMainLoopM0Writes([body], [outside], cls.SGPRS)
+        return TestHalfDisjointCell._gaps(body)[1]
+
+    @staticmethod
+    def _reads(tag, count):
+        read = TestKeepValuBehindLeader._read
+        return [read(7, f"{tag}{i}") for i in range(count)]
+
+    def test_m0_climbs_mfmas_across_a_wait_and_barrier(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        gaps = self._run(
+            self._reads("R", 1), self._reads("F", 5),
+            [SWaitCnt(dscnt=0, comment="drain"), SBarrier(comment="barrier"),
+             *self._reads("G", 3)],
+            TestSpaceM0WritesFromLdsLoads._pair("a"))
+        assert gaps[:4] == [["m0 a", "R0"], ["F0", "F1", "F2", "F3", "F4"],
+                            ["drain", "barrier", "G0", "G1", "G2"], ["L a"]]
+
+    def test_m0_stays_with_a_nop_below_full_gaps(self):
+        gaps = self._run(self._reads("F", 5), self._reads("G", 5),
+                         TestSpaceM0WritesFromLdsLoads._pair("a"))
+        assert gaps[2] == ["m0 a", self.NOP, "L a"]
+
+    @pytest.mark.parametrize("above, hoisted", [(5, True), (6, True), (7, False)])
+    def test_crowded_m0_takes_the_emptier_of_stay_and_hoist(self, above, hoisted):
+        gaps = self._run(self._reads("F", above),
+                         TestSpaceM0WritesFromLdsLoads._pair("a") + self._reads("R", 4),
+                         outside=8)
+        if hoisted:
+            assert gaps[:2] == [["m0 a"] + [f"F{i}" for i in range(above)],
+                                ["L a", "R0", "R1", "R2", "R3"]]
+        else:
+            assert gaps[1] == ["m0 a", self.NOP, "L a", "R0", "R1", "R2", "R3"]
+
+    @pytest.mark.parametrize("above, hoisted", [(4, True), (5, False)])
+    def test_tie_goes_toward_the_load(self, above, hoisted):
+        gaps = self._run(self._reads("F", above),
+                         self._reads("R", 4) + TestSpaceM0WritesFromLdsLoads._pair("a"))
+        if hoisted:
+            assert gaps[:2] == [["m0 a"] + [f"F{i}" for i in range(above)],
+                                ["R0", "R1", "R2", "R3", "L a"]]
+        else:
+            assert gaps[1] == ["m0 a", "R0", "R1", "R2", "R3", "L a"]
+
+    def test_m0_rises_to_its_base_writer_but_never_into_a_carry_pair(self):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SMovB32
+        salu = TestIssueSaluFirst
+        base = SMovB32(dst=sgpr("LocalWriteBaseAddrA"), src=sgpr("SwapA"), comment="set")
+        gaps = self._run(
+            self._reads("F", 5),
+            [*self._reads("R", 1), salu._add("add"), base, salu._carry(),
+             *self._reads("S", 2), *TestSpaceM0WritesFromLdsLoads._pair("a")],
+            outside=8)
+        assert gaps[1] == ["R0", "add", "set", "carry", "m0 a", "S0", "S1", "L a"]
+
+    def test_m0_crosses_a_carry_pair_but_never_lands_inside_it(self):
+        salu = TestIssueSaluFirst
+        gaps = self._run(
+            [salu._add("add")],
+            [salu._carry(), *self._reads("R", 3), *TestSpaceM0WritesFromLdsLoads._pair("a")],
+            outside=8)
+        assert gaps[:2] == [["m0 a", "add"], ["carry", "R0", "R1", "R2", "L a"]]
+
+    def test_carry_pair_splits_across_an_mfma(self):
+        salu = TestIssueSaluFirst
+        gaps = self._run(self._reads("R", 1),
+                         self._reads("F", 4) + [salu._add("add"), salu._carry()],
+                         outside=3)
+        assert gaps[:2] == [["add", "R0"], ["F0", "F1", "F2", "F3", "carry"]]
+
+    def test_blocking_swap_moves_up_to_free_its_m0(self):
+        swap = TestSpaceM0WritesFromLdsLoads._swap()
+        gaps = self._run(
+            self._reads("R", 1),
+            self._reads("F", 3) + [swap, *TestSpaceM0WritesFromLdsLoads._pair("a")])
+        assert gaps[:2] == [["swap", "m0 a", "R0"], ["F0", "F1", "F2", "L a"]]
+
+    def test_loads_reads_and_waits_never_move(self):
+        from rocisa.instruction import SBarrier, SWaitCnt
+        crowded = [SWaitCnt(dscnt=0, comment="drain"), SBarrier(comment="barrier"),
+                   *self._reads("R", 2), TestKeepValuBehindLeader._request(lds=False)[1],
+                   *self._reads("S", 2)]
+        gaps = self._run([], crowded, [], outside=0)
+        assert gaps[:3] == [[], ["drain", "barrier", "R0", "R1", "L", "S0", "S1"], []]
+
+    def test_swap_stays_unless_moving_it_relieves_a_gap(self):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SMovB32
+        swap = TestSpaceM0WritesFromLdsLoads._swap()
+        m0, load = TestSpaceM0WritesFromLdsLoads._pair("a")
+        base = SMovB32(dst=sgpr("LocalWriteBaseAddrA"), src=sgpr("SwapA"), comment="set")
+        gaps = self._run([base], self._reads("F", 5), [swap, m0, load], outside=0)
+        assert gaps[:3] == [["set"], ["F0", "F1", "F2", "F3", "F4"],
+                            ["swap", "m0 a", self.NOP, "L a"]]
+
+    def test_two_body_loop_counts_the_back_edge_junction(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            spaceMainLoopM0Writes)
+        bodies = [TestKeepValuBehindLeader._body(
+            self._reads(f"R{b}", 1), TestSpaceM0WritesFromLdsLoads._pair(f"a{b}"))
+            for b in range(2)]
+        spaceMainLoopM0Writes(bodies, [0, 5], self.SGPRS)
+        first, second = (TestHalfDisjointCell._gaps(body) for body in bodies)
+        assert first == ([], [["m0 a0", "R00"], ["L a0"], []])
+        assert second == (["m0 a1"], [["R10"], ["L a1"], []])
+
+
+class TestReadInOpeningBarrierGap:
+    """The first barrier's gap takes the body's next ds_read when it can."""
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _run(*gaps, scale=()):
+        """Every ds_read is a data read except those named in scale."""
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _isDsRead, readInOpeningBarrierGap)
+        body = TestKeepValuBehindLeader._body(*gaps)
+        data = [inst for inst in body.flatitems()
+                if _isDsRead(inst) and inst.comment not in scale]
+        body = readInOpeningBarrierGap(body, data)
+        return [[inst.comment for inst in gap]
+                for gap in TestHalfDisjointClumping._gaps(body)]
+
+    @staticmethod
+    def _opener():
+        from rocisa.instruction import SBarrier, SWaitCnt
+        return [SWaitCnt(vlcnt=2, comment="vmcnt"), SBarrier(comment="barrier")]
+
+    def test_first_read_moves_into_the_empty_barrier_gap(self):
+        salu = TestIssueSaluFirst
+        gaps = self._run(self._opener(), [salu._add("add"), salu._carry(),
+                                          TestKeepValuBehindLeader._read(7)])
+        assert gaps[:2] == [["vmcnt", "barrier", "R"], ["add", "carry"]]
+
+    def test_scale_read_stays(self):
+        read = TestKeepValuBehindLeader._read
+        gaps = self._run(self._opener(), [read(7, "S")], [read(9, "R")], scale=("S",))
+        assert gaps[:3] == [["vmcnt", "barrier"], ["S"], ["R"]]
+
+    def test_only_one_read_moves(self):
+        read = TestKeepValuBehindLeader._read
+        gaps = self._run(self._opener(), [read(7, "R1")], [read(9, "R2")])
+        assert gaps[:3] == [["vmcnt", "barrier", "R1"], [], ["R2"]]
+
+    def test_gap_with_a_read_stays(self):
+        read = TestKeepValuBehindLeader._read
+        gaps = self._run(self._opener() + [read(7, "R1")], [read(9, "R2")])
+        assert gaps[:2] == [["vmcnt", "barrier", "R1"], ["R2"]]
+
+    def test_read_never_crosses_an_lgkm_wait(self):
+        from rocisa.instruction import SWaitCnt
+        gaps = self._run(self._opener(), [SWaitCnt(dscnt=0, comment="drain")],
+                         [TestKeepValuBehindLeader._read(7)])
+        assert gaps[:3] == [["vmcnt", "barrier"], ["drain"], ["R"]]
+
+    def test_read_never_crosses_the_write_of_its_address(self):
+        gaps = self._run(self._opener(), [TestKeepValuBehindLeader._xor(7, "V"),
+                                          TestKeepValuBehindLeader._read(7)])
+        assert gaps[:2] == [["vmcnt", "barrier"], ["V", "R"]]
+
+    def test_read_never_overwrites_an_operand_of_an_earlier_mfma(self):
+        from rocisa.container import DSModifiers, vgpr
+        from rocisa.instruction import DSLoadB128
+        read = DSLoadB128(dst=vgpr(180, 4), src=vgpr(7),
+                          ds=DSModifiers(offset=0), comment="R")
+        gaps = self._run(self._opener(), [read])
+        assert gaps[:2] == [["vmcnt", "barrier"], ["R"]]
+
+    def test_body_without_a_barrier_stays(self):
+        gaps = self._run([], [TestKeepValuBehindLeader._read(7)])
+        assert gaps[:2] == [[], ["R"]]
+
+
+class TestHalfDisjointClumping:
+    """Clumping properties of a two-half half-disjoint body.
+
+    The first half has two cells with A/B address updates ahead of their
+    first loads and the scale address updates behind the last one; the
+    second half opens behind the pre-barrier drain with a read-pointer
+    swap. The halves are scheduled and post-processed as the main loop is.
+    """
+
+    _GAP_BUDGET = 28
+
+    @pytest.fixture(autouse=True)
+    def _gfx950(self):
+        import shutil
+        from rocisa import rocIsa
+        ri = rocIsa.getInstance()
+        asm = shutil.which("amdclang++") or "/usr/bin/amdclang++"
+        ri.init((9, 5, 0), asm)
+        ri.setKernel((9, 5, 0), 64)
+
+    @staticmethod
+    def _comment(text):
+        marker = Module()
+        marker.addComment0(text)
+        return marker.items()[0]
+
+    @classmethod
+    def _grInc(cls, tensor, comments):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SAddCU32, SAddU32, SXorB32
+        from tensilelite.Components.Subtile.LogicalScheduler import GRIncOp
+        insts = [
+            SAddU32(dst=sgpr(f"Srd{tensor}"), src0=sgpr(f"Srd{tensor}"),
+                    src1=128, comment=f"{tensor} srd"),
+            SAddCU32(dst=sgpr(f"Srd{tensor}+1"), src0=sgpr(f"Srd{tensor}+1"),
+                     src1=0, comment=f"{tensor} carry"),
+            cls._comment(f"swap {tensor} GR m0 offsets"),
+            SXorB32(dst=sgpr(f"LocalWriteBaseAddr{tensor}"),
+                    src0=sgpr(f"LocalWriteBaseAddr{tensor}"),
+                    src1=sgpr(f"Swap{tensor}"), comment=f"{tensor} lw swap"),
+        ]
+        return (GRIncOp(tensor=tensor), insts if comments else [
+            inst for inst in insts if not isinstance(inst, TextBlock)])
+
+    @classmethod
+    def _scaleInc(cls, tensor, comments):
+        from rocisa.container import sgpr
+        from rocisa.instruction import SSubU32
+        source, insts = cls._grInc(tensor, comments)
+        shrink = SSubU32(dst=sgpr(f"Srd{tensor}+2"), src0=sgpr(f"Srd{tensor}+2"),
+                         src1=256, comment=f"{tensor} shrink")
+        head = [cls._comment(f"scale SRD update {tensor}")] if comments else []
+        return (source, head + insts[:2] + [shrink] + insts[2:])
+
+    @staticmethod
+    def _dtl(tensor, tile):
+        from rocisa.container import MUBUFModifiers, mgpr, sgpr, vgpr
+        from rocisa.instruction import BufferLoadB128, SAddU32
+        source = GRPlacement(
+            tensor=tensor, mtIteration=2, tiles=MFMATileRange(0, 1, tile, tile + 1),
+            subIterK_slot=0)
+        return (source, [
+            SAddU32(dst=mgpr(0), src0=sgpr(f"LocalWriteBaseAddr{tensor}"),
+                    src1=2048 * tile, comment=f"m0 {tensor}{tile}"),
+            BufferLoadB128(
+                dst=None, vaddr=vgpr(1), saddr=sgpr(f"Srd{tensor}", 4), soffset=0,
+                mubuf=MUBUFModifiers(offen=True, lds=True),
+                comment=f"{tensor} MT=n+2 tile={tile}"),
+        ])
+
+    @staticmethod
+    def _swap(register):
+        from rocisa.container import vgpr
+        from rocisa.instruction import VXorB32
+        from tensilelite.Components.Subtile.LogicalScheduler import LRIncOp
+        return (LRIncOp(tensor="B"), [VXorB32(
+            dst=vgpr(register), src0=vgpr(register), src1=vgpr(register + 1),
+            comment=f"swap v{register}")])
+
+    @staticmethod
+    def _opener(name):
+        """The drain ahead of the half's first MFMA, and its VMEM wait and barrier."""
+        from rocisa.instruction import SBarrier, SWaitCnt
+        return ([(WaitLROp(), [SWaitCnt(dscnt=0, comment=f"{name} drain")])],
+                [(WaitGROp(), [SWaitCnt(vlcnt=2, comment="vmcnt")]),
+                 (SyncOp(), [SBarrier(comment="barrier")])])
+
+    def _firstHalf(self, comments=True):
+        half = TestHalfDisjointHalf
+        drain, opener = self._opener("head")
+        first = half._cell(
+            [opener + [half._data_read(t) for t in range(3)],
+             [self._grInc("A", comments), self._dtl("A", 0), self._dtl("A", 1),
+              self._grInc("B", comments), self._dtl("B", 0)]],
+            half._mfmas(12), preMfma=[drain])
+        second = half._cell(
+            [[half._data_read(8 + t) for t in range(3)],
+             [self._dtl("B", 1), self._scaleInc("MXSA", comments),
+              self._scaleInc("MXSB", comments)]],
+            half._mfmas(12), preMfma=[half._fence("fence 1")])
+        return [first, second]
+
+    def _secondHalf(self):
+        cell = TestHalfDisjointCell
+        drain, opener = self._opener("pre-barrier")
+        path = opener + [self._swap(7)] + [cell._data_read(4 + t) for t in range(4)]
+        return cell._schedule([path], cell._mfmas(12), preMfma=[drain])
+
+    def _scheduledFirstHalf(self, comments=True):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            _scheduleHalfDisjointHalf)
+        return _scheduleHalfDisjointHalf(
+            self._firstHalf(comments), 4, {}, 0, None,
+            [TestHalfDisjointHalf._marker("cell 1")], True)
+
+    def _body(self):
+        from tensilelite.Components.Subtile.InstructionScheduler import (
+            issueSaluFirst, keepValuBehindLeader)
+        first = self._scheduledFirstHalf()
+        assert first is not None
+        body = Module()
+        body.add(first)
+        body.add(self._secondHalf())
+        issueSaluFirst(body)
+        keepValuBehindLeader(body)
+        return body
+
+    @staticmethod
+    def _gaps(module):
+        """Each MFMA gap's instructions, comments left out."""
+        from rocisa.instruction import MXMFMAInstruction
+        gaps = []
+        for inst in module.flatitems():
+            if isinstance(inst, MXMFMAInstruction):
+                gaps.append([])
+            elif gaps and not isinstance(inst, TextBlock):
+                gaps[-1].append(inst)
+        return gaps
+
+    @staticmethod
+    def _kinds(gap):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        out = []
+        for inst in gap:
+            if IS._isBarrier(inst):
+                out.append("B")
+            elif IS._isWaitCnt(inst):
+                out.append("W")
+            elif IS._isBufferLoad(inst):
+                out.append("L")
+            elif IS._isM0Update(inst):
+                out.append("m")
+            elif IS._isDsRead(inst):
+                out.append("R")
+            elif IS._isVALU(inst):
+                out.append("V")
+            elif IS._isScalarAlu(inst):
+                out.append("S")
+            else:
+                out.append("?")
+        return "".join(out)
+
+    def _halves(self, gaps):
+        """(gap indices of each half after its barrier gap)."""
+        barriers = [i for i, g in enumerate(gaps) if "B" in self._kinds(g)]
+        edges = barriers + [len(gaps)]
+        return [range(a + 1, b) for a, b in zip(edges, edges[1:])]
+
+    def _clumped(self, gaps, clump):
+        """Gaps clump() accepts in a half that still has an empty gap."""
+        return [i for half in self._halves(gaps)
+                if any(not gaps[j] for j in half)
+                for i in half if clump(self._kinds(gaps[i]))]
+
+    def test_no_valu_issues_behind_a_wait_or_barrier(self):
+        for i, gap in enumerate(self._gaps(self._body())):
+            kinds = self._kinds(gap)
+            for j, k in enumerate(kinds):
+                assert k != "V" or not any(x in "WB" for x in kinds[:j]), (i, kinds)
+
+    def test_every_valu_issues_inside_its_mfma_interval(self):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        for i, gap in enumerate(self._gaps(self._body())):
+            kinds = self._kinds(gap)
+            for j, k in enumerate(kinds):
+                if k != "V":
+                    continue
+                assert not any(x in "WB" for x in kinds[:j]), (i, kinds)
+                assert IS._issueExcess([gap[:j + 1]]) == 0, (i, kinds)
+
+    def test_valu_opens_a_gap_only_under_budget(self):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        for i, gap in enumerate(self._gaps(self._body())):
+            if self._kinds(gap).startswith("V"):
+                assert IS._issueExcess([gap]) == 0, (i, self._kinds(gap))
+
+    def test_no_salu_shares_a_load_gap_while_the_half_has_an_empty_gap(self):
+        gaps = self._gaps(self._body())
+        assert not self._clumped(gaps, lambda k: "S" in k and "L" in k), [
+            self._kinds(g) for g in gaps]
+
+    def test_no_gap_takes_three_salu_while_the_half_has_an_empty_gap(self):
+        gaps = self._gaps(self._body())
+        assert not self._clumped(
+            gaps, lambda k: k.count("S") + k.count("m") >= 3), [self._kinds(g) for g in gaps]
+
+    def test_no_half_with_an_empty_gap_has_a_clumped_gap(self):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        gaps = self._gaps(self._body())
+        clumped = self._clumped(gaps, lambda k: (
+            ("S" in k and "L" in k) or k.count("S") + k.count("m") >= 3
+            or ("V" in k and any(x in "WB" for x in k[:k.index("V")]))))
+        clumped += [i for half in self._halves(gaps) if any(not gaps[j] for j in half)
+                    for i in half if IS._issueExcess([gaps[i]]) > 0]
+        assert not clumped, [self._kinds(g) for g in gaps]
+
+    def test_load_run_and_order_stay(self):
+        gaps = self._gaps(self._body())
+        loads = [g for g in gaps if "L" in self._kinds(g)]
+        assert all(self._kinds(g).count("L") == 1 for g in loads)
+        order = [inst.comment for g in gaps for inst in g if "MT=n+2" in inst.comment]
+        assert order == ["A MT=n+2 tile=0", "A MT=n+2 tile=1", "B MT=n+2 tile=0",
+                         "B MT=n+2 tile=1"]
+        run = longest = 0
+        for g in gaps:
+            run = run + 1 if "L" in self._kinds(g) else 0
+            longest = max(longest, run)
+        assert longest <= 5
+
+    def test_body_keeps_the_mfma_cadence(self):
+        from tensilelite.Components.Subtile import InstructionScheduler as IS
+        assert IS._issueExcess(IS._moduleGaps(self._body())) == 0
+
+    def test_comments_take_no_slot(self):
+        def code(comments):
+            scheduled = self._scheduledFirstHalf(comments)
+            return [[inst.comment for inst in g] for g in self._gaps(scheduled)]
+        assert code(True) == code(False)

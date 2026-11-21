@@ -174,12 +174,13 @@ class WorkAssignment(Component):
         cluster = persistentSpatialCluster(kernel) and kernel.get("ClusterBarrier", True)
         # Hybrid calls the concrete assignment's closeLoop. Debug bypasses the queue.
         queue = self.kernel["WorkAssignment"] == "DynamicWorkQueue" and not debug
-        if not (tdm or epilogue or cluster or queue):
+        dtl = writer.persistentBackEdgeSyncsLds(kernel)
+        if not (tdm or epilogue or cluster or queue or dtl):
             return always, beforeReentry
 
         # Preserve the epilogue's exit fence; it also covers re-entry.
         fence = always if epilogue else beforeReentry
-        if tdm or epilogue or cluster:
+        if tdm or epilogue or cluster or dtl:
             # DS-only: disjoint PAP tensor loads need not complete at this boundary.
             fence.add(SWaitCnt(dscnt=0, comment="finish LDS reads before next persistent tile"))
         barrier = SBarrier(comment="hand epilogue LDS back to persistent compute" if epilogue

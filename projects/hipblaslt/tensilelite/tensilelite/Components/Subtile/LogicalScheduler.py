@@ -204,6 +204,51 @@ class MFMATileRange:
         return f"[{self.tileId_start}-{self.tileId_end - 1}]"
 
 
+class HalfDisjointPlanRefused(RuntimeError):
+    """A halfDisjointLds schedule has no half-disjoint load plan.
+
+    Kernel.mainLoop skips the partition candidate, and rejects the kernel when
+    no candidate is left.
+    """
+
+
+BALANCE_MIN_LEAD_MFMAS = 6
+BALANCE_MIN_HALF_MFMAS = 28
+
+
+def planHalfDisjointBalance(firstHalfMfmas, secondHalfMfmas, wrapTiles, ownTiles,
+                            wrapA, partitionZeroB, grAmn, lrAmn,
+                            wrapLoads, ownLoads, loadsPerATile):
+    """A tiles [ts, te) to move from the wrap prefetch to partition 0, or None.
+
+    Each moved tile shifts its loads from the first half to the second and its reads the other
+    way, so only an even MFMA split can balance both; k = (wrapTiles - ownTiles) // 2 tiles
+    then even the reads (to within one tile).  The move must also leave the first-half and
+    second-half load counts (wrapLoads, ownLoads; loadsPerATile per moved tile) strictly
+    closer, since A and B tiles need not cost the same number of buffer loads.  The last k
+    wrap A tiles move, and the range must keep the A load and read atoms whole and leave
+    every moved tile at least BALANCE_MIN_LEAD_MFMAS partition-0 MFMAs before its first use
+    (tile j feeds MFMA j * partitionZeroB).  Halves shorter than BALANCE_MIN_HALF_MFMAS are
+    left alone: the move adds issue work to the barrier gap, which only pays off when the
+    long load stream of a long half is what stalls.
+    """
+    if firstHalfMfmas != secondHalfMfmas or firstHalfMfmas < BALANCE_MIN_HALF_MFMAS:
+        return None
+    k = (wrapTiles - ownTiles) // 2
+    if k <= 0:
+        return None
+    shifted = k * loadsPerATile
+    if abs(wrapLoads - ownLoads - 2 * shifted) >= abs(wrapLoads - ownLoads):
+        return None
+    start, end = wrapA
+    ts = end - k
+    if ts <= start or (ts - start) * partitionZeroB < BALANCE_MIN_LEAD_MFMAS:
+        return None
+    if (ts - start) % grAmn or (ts - start) % lrAmn or k % grAmn or k % lrAmn:
+        return None
+    return ts, end
+
+
 # ── Config ──────────────────────────────────────────────────
 
 @dataclass
@@ -286,6 +331,21 @@ class SchedulerConfig:
     # scale cadence.  The preloop correspondingly seeds a complete n+1 A/B
     # epoch so the first steady-state wrap has a producer.
     uniformPgrEpoch: bool = False
+    # Buffer loads that close a non-frontier uniform epoch cohort and the
+    # partition-zero overwrite cohort.  Atoms are not split, so a cohort ends
+    # on the first whole atom that reaches this many loads.  A non-frontier
+    # cohort also holds no more loads than the smallest non-frontier
+    # partition has MFMAs.
+    uniformEpochVmemCohortSize: int = 5
+    # Split each uniform-epoch K iteration into two halves of the partition
+    # sequence.  A tile's direct-to-LDS load goes in the half that does not
+    # read it, and one VMEM wait and barrier open each half.  Every A/B tile
+    # must be read in a single half: place_LRs raises HalfDisjointPlanRefused
+    # for any other schedule.  Off, the body keeps the uniform epoch cohorts.
+    halfDisjointLds: bool = False
+    # Buffer loads one GR atom issues, per tensor.  A tensor missing here
+    # issues one load per atom.
+    grLoadsPerAtom: Dict[str, int] = field(default_factory=dict)
     # Physical traversal of the 2-D partition grid.  "m-major" preserves the
     # legacy order (M varies fastest).  "n-major" visits the 2x2 grid as
     # c00,c01,c10,c11 (N varies fastest).
@@ -400,6 +460,8 @@ class SchedulerConfig:
                 "uniformPgrEpoch currently requires PrefetchGlobalRead=2"
             assert self.prefetchNextPartition, \
                 "uniformPgrEpoch requires partition-directed prefetch"
+        assert self.uniformEpochVmemCohortSize >= 1, \
+            "uniformEpochVmemCohortSize must be >= 1"
 
         assert self.scaleReuse >= 1, f"scaleReuse must be >= 1, got {self.scaleReuse}"
         # Dual-period MXFP8: the scale epoch (256 K) spans scaleReuse data
@@ -457,18 +519,6 @@ class SchedulerConfig:
         self._prefixN = self._build_prefix(self._partitionSizesN)
         assert self.partitionOrder in ("m-major", "n-major"), \
             f"partitionOrder must be m-major or n-major, got {self.partitionOrder}"
-        if self.uniformPgrEpoch:
-            # The derived cohort exists to make the epoch span the slots
-            # without saturating the last one.  State that as the contract so
-            # a future change to either side has to keep it.  Needs the
-            # partition sizes, hence its position here.
-            slots = self.numPartitions * self.numSubIterK
-            atoms = self.uniformEpochVmemAtoms
-            cohort = self.uniformEpochVmemCohortSize
-            assert cohort >= 1, "uniform epoch cohort must be >= 1"
-            assert (atoms - 1) // cohort <= slots - 1, \
-                (f"uniform epoch cohort {cohort} overflows the last of "
-                 f"{slots} slots with {atoms} atoms")
 
         # plr=-1 auto-derives from pgr (legacy: 0 when pgr==0, else 1).
         if self.plr == -1:
@@ -559,45 +609,32 @@ class SchedulerConfig:
     def numPartitions(self) -> int:
         return self.numPartitionsM * self.numPartitionsN
 
-    @property
-    def uniformEpochVmemAtoms(self) -> int:
-        """Atomic VMEM requests one uniform epoch issues.
-
-        A and B contribute one request per `gr*.mn` tiles; the two scale
-        tensors contribute one each, since a scale dword covers the whole
-        epoch.  This is the closed form of what _distribute_grs explodes the
-        epoch's GR entries into.
-        """
-        atoms = (-(-self.numMFMATilesM // self.grA.mn)
-                 + -(-self.numMFMATilesN // self.grB.mn))
-        return atoms + (2 if self.hasScale else 0)
-
-    @property
-    def uniformEpochVmemCohortSize(self) -> int:
-        """Atomic A/B VMEM requests per non-frontier cohort.
-
-        _distribute_grs sends atom i to slot `i // cohort`, so the epoch
-        spans every slot exactly when the cohort is the atom count divided
-        over the slots.  A larger cohort leaves late slots empty and piles
-        the epoch into the early ones; a smaller one overflows the last slot,
-        because the slot index saturates.
-
-        The same width selects the partition-zero overwrite cohort, so it
-        also decides how many current-epoch local reads get hoisted ahead of
-        the first future write -- and hoisted reads serialize against the
-        MFMAs they were previously interleaved with.  Deriving the width
-        rather than fixing it keeps that hoist no larger than the overwrite
-        it has to protect.
-        """
-        slots = self.numPartitions * self.numSubIterK
-        return max(1, -(-self.uniformEpochVmemAtoms // slots))
-
     def partition_coords(self, pi: int) -> Tuple[int, int]:
         """Return (M-partition, N-partition) in configured execution order."""
         assert 0 <= pi < self.numPartitions
         if self.partitionOrder == "n-major":
             return pi // self.numPartitionsN, pi % self.numPartitionsN
         return pi % self.numPartitionsM, pi // self.numPartitionsM
+
+    def uniform_epoch_cohorts(self, tensors, cap=None) -> List[int]:
+        """Return the uniform-epoch cohort of each atom, given each atom's tensor.
+
+        A cohort closes on the first atom that brings it to
+        uniformEpochVmemCohortSize loads, or before an atom that would take
+        it past cap loads.  A cohort always holds at least one atom.
+        """
+        cohorts = []
+        cohort = 0
+        loads = 0
+        for tensor in tensors:
+            weight = max(1, int(self.grLoadsPerAtom.get(tensor, 1)))
+            if loads and (loads >= self.uniformEpochVmemCohortSize
+                          or (cap is not None and loads + weight > cap)):
+                cohort += 1
+                loads = 0
+            cohorts.append(cohort)
+            loads += weight
+        return cohorts
 
     @staticmethod
     def get_partition_candidates(tileInfoA, tileInfoB) -> list:
@@ -662,6 +699,7 @@ class LRPlacement(Emittable):
     partition: int = 0         # which partition this LR belongs to
     targetPartition: int = 0   # partition that consumes the loaded operands
     mustPrecedeP0Overwrite: bool = False  # hoisted read protecting p0 future write
+    balancedCurrentCell: bool = False  # half-disjoint balance: wrap tile read in its own first half
     deps: List['Dep'] = field(default_factory=list)      # populated by annotate_deps()
     preOps: List['BaseOp'] = field(default_factory=list)     # populated by remove_cross_deps()
     postOps: List['BaseOp'] = field(default_factory=list)    # populated by insert_gr_lr_inc()
@@ -940,6 +978,9 @@ class EmittedModule:
     """
     moduleId: int = -1
     instructions: list = field(default_factory=list)
+    # Optional per-instruction scheduler metadata populated by the concrete
+    # emitter. Entries stay aligned with ``instructions``.
+    instructionMetadata: list = field(default_factory=list)
     before: Optional[int] = None   # moduleId that must complete before this module
     source: Optional[Emittable] = None
 
@@ -993,6 +1034,28 @@ class LogicalScheduler:
         self._tail_freed_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
                                                      'SA': set(), 'SB': set()}
         self._kernel = None
+        # Scale VGPRs are only known after population. The plan stays empty
+        # until emit, and stays empty for every schedule that is not the
+        # gfx950 dual-period uniform epoch.
+        self._scaleShadowPlan = None
+        self._mainloopC0Schedule = None
+        # The labels _emitLoop has emitted a region module under.
+        self._regionLabels = set()
+        # id of each main-loop LR/GR instruction -> (label, kind, tensor,
+        # mtIteration, tiles) of its placement, for checkMainLoopLdsOverwrites.
+        self._mainLoopOrigins = {}
+        # The A/B ds_reads emitted into _mainloopC0Schedule.
+        self._mainloopC0DataReads = []
+        # (tensor, atom tile start) -> half its GR issues in, or None when the
+        # body keeps the uniform epoch cohorts.  Set by place_LRs.
+        self._halfLoadHalf: Optional[Dict[Tuple[str, int], int]] = None
+        # (wrap LR, its tiles before balancing, inserted partition-0 LR) while
+        # _balance_half_disjoint_reads has moved tiles; None otherwise.
+        self._balancedRead: Optional[Tuple['LRPlacement', 'MFMATileRange', 'LRPlacement']] = None
+
+    @property
+    def halfDisjoint(self) -> bool:
+        return self._halfLoadHalf is not None
 
     # ── Place LRs ─────────────────────────────────────────
 
@@ -1007,6 +1070,137 @@ class LogicalScheduler:
         piM, piN = cfg.partition_coords(pi)
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
+
+    def _first_half_mfmas(self) -> int:
+        """MFMAs one body issues in partitions [0, P/2)."""
+        cfg = self.config
+        total = 0
+        for pi in range(cfg.numPartitions // 2):
+            tiles = self._partition_tile_range(pi)
+            total += ((tiles['A'][1] - tiles['A'][0])
+                      * (tiles['B'][1] - tiles['B'][0])
+                      * cfg.numSubIterK)
+        return total
+
+    @staticmethod
+    def _flatEmittedInstructions(emitted_3d):
+        """Yield concrete instructions from a populated emitted schedule."""
+        for partition in emitted_3d:
+            for em_list in partition:
+                for emitted in em_list:
+                    for inst in emitted.instructions:
+                        if isinstance(inst, Module):
+                            yield from inst.flatitems()
+                        else:
+                            yield inst
+
+    def _prepareScaleShadowPlan(self):
+        """Derive the C0-entry scales that move to the preloop and C1 tail."""
+        if self._scaleShadowPlan is not None:
+            return self._scaleShadowPlan
+
+        cfg = self.config
+        first = self._partition_tile_range(0)
+        candidate = (
+            tuple(self._kernel.get("ISA", (9, 5, 0))) == (9, 5, 0)
+            and cfg.dualPeriodScale
+            and cfg.scaleReuse == 2
+            and cfg.pgr == 2
+            and cfg.prefetchNextPartition
+            and cfg.uniformPgrEpoch
+            and cfg.uniformEpochVmemCohortSize == 5
+            and cfg.numSubIterK == 1
+            and cfg.numPartitionsM > 1
+            and cfg.numPartitionsN > 1
+            and first['A'][0] == 0
+            and first['B'][0] == 0
+            and (first['A'][1] - first['A'][0]) % cfg.lrSA.mn == 0
+            and (first['B'][1] - first['B'][0]) % cfg.lrSB.mn == 0
+            and cfg.lrSA.mn == 2
+            and cfg.lrSB.mn == 2
+            and self.unroll_factor == 2
+        )
+        if not candidate:
+            self._scaleShadowPlan = []
+            self._lateScalePrefetch = []
+            return self._scaleShadowPlan
+
+        from .InstructionScheduler import (
+            selectLateScalePrefetch, selectScaleShadowPlan)
+
+        firstPartitionMfmas = (
+            (first['A'][1] - first['A'][0])
+            * (first['B'][1] - first['B'][0])
+            * cfg.numSubIterK
+        )
+        plan = selectScaleShadowPlan(
+            list(self._flatEmittedInstructions(
+                self._emitted_per_unroll[0])),
+            list(self._flatEmittedInstructions(
+                self._emitted_per_unroll[1])),
+            firstPartitionMfmas,
+            (
+                (first['A'][1] - first['A'][0]) // cfg.lrSA.mn,
+                (first['B'][1] - first['B'][0]) // cfg.lrSB.mn,
+            ),
+        )
+        expectedReads = (
+            (first['A'][1] - first['A'][0]) // cfg.lrSA.mn
+            + (first['B'][1] - first['B'][0]) // cfg.lrSB.mn
+        )
+        assert plan and len(plan["entry"]) == expectedReads, \
+            "supported scale-shadow topology did not cover C0 P0 scales"
+        self._scaleShadowPlan = plan
+        self._lateScalePrefetch = selectLateScalePrefetch(
+            plan.get("deferred", []),
+            getattr(self, "_lateScaleExtra", {}),
+            plan.get("writeFloor", {}))
+        return plan
+
+    @staticmethod
+    def _makeScaleShadowSeed(plan):
+        """Build the preloop reads that initialize C0-entry scale VGPRs."""
+        module = Module("Preloop C0-entry scale seed")
+        module.addComment0(
+            "Seed ScaleA/ScaleB reads needed by C0 partition zero")
+        for entry in plan:
+            read = copy.deepcopy(entry["readTemplate"])
+            staged = entry.get("extraVgpr")
+            if staged is None:
+                read.comment = (
+                    "preloop seed for C0 entry scale; "
+                    f"{entry['tensor']} canonical=v{entry['canonicalVgpr']}"
+                )
+            else:
+                read.comment = (
+                    "preloop seed for staged next-epoch scale; "
+                    f"{entry['tensor']} staged=v{staged} "
+                    f"canonical=v{entry['canonicalVgpr']}"
+                )
+            module.add(read)
+        return module
+
+    @classmethod
+    def _insertScaleShadowSeed(cls, preloop, plan):
+        """Insert entry scales before the NLL/NGLL preloop dispatch."""
+        items = list(preloop.flatitems())
+        nllBranch = next(
+            (
+                index for index, inst in enumerate(items)
+                if getattr(inst, "comment", "") == "skip to NLL"
+                or getattr(inst, "comment", "") == "skip to NLL (long)"
+            ),
+            None,
+        )
+        assert nllBranch is not None and nllBranch > 0, \
+            "scale shadowing could not find the preloop NLL dispatch"
+        compare = items[nllBranch - 1]
+        assert getattr(compare, "comment", "") == "LoopCounter LE 1?", \
+            "scale shadowing found an unexpected preloop NLL dispatch shape"
+        seed = list(cls._makeScaleShadowSeed(plan).flatitems())
+        items[nllBranch - 1:nllBranch - 1] = seed
+        preloop.setItems(items)
+        return preloop
 
     @pipeline_pass(Pass.LR)
     def place_LRs(self) -> LogicalSchedule:
@@ -1025,6 +1219,7 @@ class LogicalScheduler:
           placed so far across partitions. Skips redundant K-prefetch when
           the same data was already loaded by an earlier partition.
         """
+        self._balancedRead = None
         if self.config.plr == 0 and not self.config.prefetchNextPartition:
             return self._place_LRs_PLR0()
 
@@ -1072,11 +1267,163 @@ class LogicalScheduler:
         if cfg.dualPeriodScale:
             self._place_scale_LRs_epoch(partitions)
 
-        if cfg.uniformPgrEpoch:
+        self._balance_half_disjoint_reads(partitions)
+        self._halfLoadHalf = self._plan_half_disjoint_loads(partitions)
+        if self._halfLoadHalf is None:
+            if cfg.halfDisjointLds:
+                failures = self._half_disjoint_gate_failures()
+                raise HalfDisjointPlanRefused(
+                    "half-disjoint plan refused: "
+                    + ("config lacks " + ", ".join(failures) if failures else
+                       f"partitions {cfg.partitionSizesM}x{cfg.partitionSizesN} "
+                       f"({cfg.partitionOrder}) read an A/B tile outside one half"))
+            self._unbalance_half_disjoint_reads(partitions)
+        if cfg.uniformPgrEpoch and self._halfLoadHalf is None:
             self._move_uniform_epoch_p0_overwrite_reads(partitions)
 
         self._partitions = partitions
         return partitions
+
+    def _half_disjoint_gate_failures(self) -> List[str]:
+        """The config terms that rule the half-disjoint plan out before any layout check."""
+        cfg = self.config
+        numP = cfg.numPartitions
+        terms = (
+            ("halfDisjointLds", cfg.halfDisjointLds),
+            ("uniformPgrEpoch", cfg.uniformPgrEpoch),
+            ("dualPeriodScale", cfg.dualPeriodScale),
+            (f"numSubIterK == 1 (got {cfg.numSubIterK})", cfg.numSubIterK == 1),
+            (f"an even partition count >= 2 (got {numP})", numP >= 2 and numP % 2 == 0),
+            ("SPREAD GR placement", cfg.grPlacement == GRPlacementStrategy.SPREAD),
+            ("single-DU data", not self._is_multi_du()),
+        )
+        return [name for name, ok in terms if not ok]
+
+    def _balance_half_disjoint_reads(self, partitions):
+        """Read late partition-0 A tiles in their own first half instead of the wrap prefetch.
+
+        On the half-disjoint path a tile's load and its read sit in opposite halves: a tile the
+        previous iteration's wrap prefetch reads (second half) loads in the first half, one read
+        in its own first half loads in the second.  The first half therefore issues one load per
+        wrap tile and the second one per own tile, whatever the MFMA split.  With an even split
+        and more wrap tiles than own ones, moving k = (wrap - own) // 2 A tiles from the wrap
+        prefetch to a read in partition 0 itself evens both: k loads move to the second half and
+        2 * k reads per tile to the first.  The read stays legal there: its LDS data has been
+        visible since the previous mid barrier, its registers are free after the previous
+        iteration's last reader, and its overwriting load now issues after the mid barrier.
+        Only A tiles with at least BALANCE_MIN_LEAD_MFMAS partition-0 MFMAs ahead of their first
+        use move (partition MFMAs run A-outer, so A tile j of the partition first feeds MFMA
+        j * nB).
+        """
+        cfg = self.config
+        numP = cfg.numPartitions
+        if self._half_disjoint_gate_failures():
+            return
+        half = numP // 2
+        ranges = [self._partition_tile_range(pi) for pi in range(numP)]
+        mfmas = [(r['A'][1] - r['A'][0]) * (r['B'][1] - r['B'][0]) for r in ranges]
+        perTile = {t: max(1, int(cfg.grLoadsPerAtom.get(t, 1))) / g.mn
+                   for t, g in (('A', cfg.grA), ('B', cfg.grB))}
+        wrapTiles, ownTiles, wrapLoads, ownLoads, wrapA = 0, 0, 0, 0, None
+        for pi, slots in enumerate(partitions):
+            for slot in slots:
+                for lr in slot.lrs:
+                    if lr.tensor not in ('A', 'B'):
+                        continue
+                    n = lr.tiles.tileId_end - lr.tiles.tileId_start
+                    if lr.mtIteration == 1 and pi >= half:
+                        wrapTiles += n
+                        wrapLoads += n * perTile[lr.tensor]
+                        if lr.tensor == 'A':
+                            wrapA = lr
+                    elif lr.mtIteration == 0 and pi < half and lr.targetPartition != pi:
+                        ownTiles += n
+                        ownLoads += n * perTile[lr.tensor]
+                    else:
+                        return
+        if wrapA is None:
+            return
+        moved = planHalfDisjointBalance(
+            sum(mfmas[:half]), sum(mfmas[half:]), wrapTiles, ownTiles,
+            (wrapA.tiles.tileId_start, wrapA.tiles.tileId_end),
+            ranges[0]['B'][1] - ranges[0]['B'][0], cfg.grA.mn, cfg.lrA.mn,
+            wrapLoads, ownLoads, perTile['A'])
+        if moved is None:
+            return
+        ts, te = moved
+        k = wrapA.tiles
+        wrapA.tiles = MFMATileRange(k.subIterK_start, k.subIterK_end, k.tileId_start, ts)
+        balanced = LRPlacement(
+            tensor='A', mtIteration=0,
+            tiles=MFMATileRange(k.subIterK_start, k.subIterK_end, ts, te),
+            subIterK_slot=0, partition=0, targetPartition=0, balancedCurrentCell=True)
+        partitions[0][0].lrs.insert(0, balanced)
+        self._balancedRead = (wrapA, k, balanced)
+
+    def _unbalance_half_disjoint_reads(self, partitions):
+        """Undo _balance_half_disjoint_reads when the half-disjoint plan is not taken.
+
+        Restores the exact wrap LR that was shortened, wherever in the second half it sits.
+        """
+        if self._balancedRead is None:
+            return
+        wrapA, origTiles, balanced = self._balancedRead
+        lrs = partitions[0][0].lrs
+        idx = next((i for i, lr in enumerate(lrs) if lr is balanced), None)
+        assert idx is not None, "balanced partition-0 read missing at unbalance"
+        del lrs[idx]
+        wrapA.tiles = origTiles
+        self._balancedRead = None
+
+    def _plan_half_disjoint_loads(self, partitions):
+        """Return the load half of every A/B GR atom, or None.
+
+        Partitions [0, P/2) are the first half and the rest the second.  A
+        tile read only by the previous iteration's wrap prefetch, in the
+        second half, loads in the first half.  A tile read only in the first
+        half of its own iteration loads in the second.  Either way the read
+        and the overwrite sit in different halves, and the load is three
+        half barriers ahead of the next read of the tile.
+
+        Any other read, a current-cell A/B read, an atom covering tiles of
+        both kinds, or a tensor whose first load does not start at tile zero
+        (where its SRD advance sits) returns None.
+        """
+        cfg = self.config
+        numP = cfg.numPartitions
+        if self._half_disjoint_gate_failures():
+            return None
+        half = numP // 2
+        readHalf = {}
+        for pi, slots in enumerate(partitions):
+            for slot in slots:
+                for lr in slot.lrs:
+                    if lr.tensor not in ('A', 'B'):
+                        continue
+                    if (lr.mtIteration == 0 and pi < half
+                            and (lr.targetPartition != pi or lr.balancedCurrentCell)):
+                        loadHalf = 1
+                    elif lr.mtIteration == 1 and pi >= half:
+                        loadHalf = 0
+                    else:
+                        return None
+                    for tile in lr.tiles.tileId_list:
+                        if readHalf.setdefault((lr.tensor, tile), loadHalf) != loadHalf:
+                            return None
+
+        plan = {}
+        for tensor, gran, numTiles in (('A', cfg.grA, cfg.numMFMATilesM),
+                                       ('B', cfg.grB, cfg.numMFMATilesN)):
+            for start in range(0, numTiles, gran.mn):
+                halves = {readHalf.get((tensor, tile))
+                          for tile in range(start, min(start + gran.mn, numTiles))}
+                if len(halves) != 1 or None in halves:
+                    return None
+                plan[(tensor, start)] = halves.pop()
+            if plan[(tensor, 0)] != min(
+                    h for (t, _), h in plan.items() if t == tensor):
+                return None
+        return plan
 
     def _move_uniform_epoch_p0_overwrite_reads(self, partitions):
         """Make the first future-write cohort legal in partition zero.
@@ -1095,17 +1442,17 @@ class LogicalScheduler:
         if len(partitions) < 2:
             return
 
-        first_atoms = []
-        cohortSize = cfg.uniformEpochVmemCohortSize
+        epoch_atoms = []
         for tensor, gran, num_tiles in (
                 ('A', cfg.grA, cfg.numMFMATilesM),
                 ('B', cfg.grB, cfg.numMFMATilesN)):
             for tile in range(0, num_tiles, gran.mn):
-                first_atoms.append((tensor, tile, tile + gran.mn))
-                if len(first_atoms) == cohortSize:
-                    break
-            if len(first_atoms) == cohortSize:
-                break
+                epoch_atoms.append((tensor, tile, tile + gran.mn))
+        # Uncapped, so this is never smaller than the cohort _distribute_grs
+        # puts in partition zero.
+        cohorts = cfg.uniform_epoch_cohorts([atom[0] for atom in epoch_atoms])
+        first_atoms = [
+            atom for atom, cohort in zip(epoch_atoms, cohorts) if cohort == 0]
 
         selected = {}
         for tensor, tile_start, tile_end in first_atoms:
@@ -2058,17 +2405,22 @@ class LogicalScheduler:
         total_weight = weight_prefix[-1]
         slot_boundaries = [p * nAtoms for p in weight_prefix[1:]]
 
+        uniform_cohorts = None
+        if cfg.uniformPgrEpoch and cfg.grPlacement != GRPlacementStrategy.BUNCHED:
+            # Each non-frontier cohort is sized in loads and capped by the
+            # smallest non-frontier partition.  The frontier receives the
+            # remainder immediately before its epoch wait.
+            cap = (min(mfma_per_partition[s // numK] for s in dist_slots[:-1])
+                   if len(dist_slots) > 1 else None)
+            uniform_cohorts = cfg.uniform_epoch_cohorts(
+                [atom[0] for atom in atoms], cap=cap)
+
         for i, (tensor, mt_val, ts, te, ks, ke, last) in enumerate(atoms):
             if cfg.grPlacement == GRPlacementStrategy.BUNCHED:
                 # TDM: pin every GR atom to partition 0, subIterK 0.
                 rel = 0
-            elif cfg.uniformPgrEpoch:
-                # Bound each non-frontier cohort by the configured size.  The
-                # frontier receives the remainder immediately before its epoch
-                # wait.  Do not shrink the chunk to a small partition's MFMA
-                # count; that moves the scale request across the wait.
-                nonfrontier_chunk = cfg.uniformEpochVmemCohortSize
-                rel = min(i // nonfrontier_chunk, len(dist_slots) - 1)
+            elif uniform_cohorts is not None:
+                rel = min(uniform_cohorts[i], len(dist_slots) - 1)
             else:
                 rel = min(bisect_left(slot_boundaries, i * total_weight + 1),
                           len(dist_slots) - 1) if nAtoms else 0
@@ -2135,6 +2487,65 @@ class LogicalScheduler:
                         partition=pi,
                         unrollId=uid))
 
+    def _distribute_grs_half_disjoint(self, gr_list, unrollId=0):
+        """Place each GR atom in its planned half.
+
+        Scale atoms lead the second half: they overwrite the scale buffer
+        the first half reads.  A half's atoms then spread over its
+        partitions by MFMA count, in buffer loads, keeping the epoch's
+        tensor and tile order.  Consecutive atoms in one partition remerge.
+        """
+        cfg = self.config
+        numP = cfg.numPartitions
+        half = numP // 2
+        mfmas = []
+        for pi in range(numP):
+            piM, piN = cfg.partition_coords(pi)
+            mfmas.append(cfg.partitionSizesM[piM] * cfg.partitionSizesN[piN])
+
+        streams = {0: [], 1: []}
+        for tensor, mt_val, t_start, t_end, k_start, k_end, gr_gran in gr_list:
+            for pos in range(t_start, t_end, gr_gran.mn):
+                atom = (tensor, mt_val, pos, pos + gr_gran.mn, k_start, k_end)
+                if tensor in ('SA', 'SB'):
+                    streams[1].insert(
+                        sum(a[0] in ('SA', 'SB') for a in streams[1]), atom)
+                else:
+                    streams[self._halfLoadHalf[(tensor, pos)]].append(atom)
+
+        for h, parts in ((0, range(half)), (1, range(half, numP))):
+            atoms = streams[h]
+            weights = [max(1, int(cfg.grLoadsPerAtom.get(a[0], 1)))
+                       for a in atoms]
+            totalLoads = sum(weights)
+            totalMfmas = sum(mfmas[pi] for pi in parts)
+            bounds = []
+            acc = 0
+            for pi in parts:
+                acc += mfmas[pi]
+                bounds.append(acc)
+            issued = 0
+            for atom, weight in zip(atoms, weights):
+                center = (2 * issued + weight) * totalMfmas
+                rel = next(i for i, b in enumerate(bounds)
+                           if center < 2 * b * totalLoads or i == len(bounds) - 1)
+                issued += weight
+                pi = parts[rel]
+                tensor, mt_val, ts, te, ks, ke = atom
+                grs = self._partitions[pi][0].grs_by_unroll.setdefault(unrollId, [])
+                prev = grs[-1] if grs else None
+                if (prev is not None and prev.tensor == tensor
+                        and prev.mtIteration == mt_val
+                        and prev.tiles.subIterK_start == ks
+                        and prev.tiles.subIterK_end == ke
+                        and prev.tiles.tileId_end == ts):
+                    prev.tiles = MFMATileRange(ks, ke, prev.tiles.tileId_start, te)
+                    continue
+                grs.append(GRPlacement(
+                    tensor=tensor, mtIteration=mt_val,
+                    tiles=MFMATileRange(ks, ke, ts, te),
+                    subIterK_slot=0, partition=pi, unrollId=unrollId))
+
     @pipeline_pass(Pass.GR)
     def place_GRs(self) -> PartitionSchedule:
         """Place Global Reads by iterating MFMAs across partitions.
@@ -2182,6 +2593,8 @@ class LogicalScheduler:
             if uid > 0 and last_uid_slot is not None:
                 self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid,
                                       allowed_slots=[last_uid_slot])
+            elif self.halfDisjoint:
+                self._distribute_grs_half_disjoint(gr_list, unrollId=uid)
             elif uniform_slots is not None:
                 self._distribute_grs(
                     gr_list, gr_slot_bounds, unrollId=uid,
@@ -2542,6 +2955,8 @@ class LogicalScheduler:
         # Step 2 & 3: for each GR with LR dep, walk backward (with
         # wrap-around) to find the previous sync slot providing a last LR
         # for this tensor.
+        uniform = self.config.uniformPgrEpoch and not self.halfDisjoint
+        cleared = []
         for i in range(n):
             _, _, grs_to_check = sync_slots[i]
             for gr in grs_to_check:
@@ -2568,7 +2983,51 @@ class LogicalScheduler:
                         break
 
                 if prev_eo is not None and prev_eo >= cur_eo:
+                    if uniform:
+                        cleared.append((i, gr, dep))
                     gr.deps.clear()
+
+        if cleared:
+            self._restore_uncovered_lr_deps(sync_slots, cleared, _dep_exec_order)
+
+    @staticmethod
+    def _restore_uncovered_lr_deps(sync_slots, cleared, exec_order):
+        """Give back each cleared GR→LR dep that no remaining sync covers.
+
+        Uniform epoch only: its LR waits lose their barriers, so a slot is
+        known to drain and sync only while one of its GRs keeps an LR dep.
+        A dep cleared against a slot that lost all of its own is still
+        open. A cleared dep stays cleared only when an earlier live
+        slot (wrapping into the previous iteration) guarantees an LR of
+        that tensor at or past it. Restoring makes a slot live, so repeat
+        until nothing changes.
+        """
+        n = len(sync_slots)
+        changed = True
+        while changed:
+            changed = False
+            live = [any(gr.deps for gr in grs) for _, _, grs in sync_slots]
+            for i, gr, dep in cleared:
+                if gr.deps:
+                    continue
+                cur_eo = exec_order(dep)
+                covered = False
+                for j in range(1, n + 1):
+                    idx = (i - j) % n
+                    wrapped = j > i
+                    if not live[idx] or (
+                            not wrapped and sync_slots[idx][0] == sync_slots[i][0]):
+                        continue
+                    eo = sync_slots[idx][1].get(dep.ref.tensor)
+                    if eo is not None and wrapped:
+                        eo = (eo[0] - 1, eo[1], eo[2])
+                    if eo is not None and eo >= cur_eo:
+                        covered = True
+                        break
+                if not covered:
+                    gr.deps.append(dep)
+                    live[i] = True
+                    changed = True
 
 
     # ── Remove cross-subIterK deps ─────────────────────────
@@ -2960,8 +3419,78 @@ class LogicalScheduler:
                         for d in same + cross)
                     gr.preOps = [WaitLROp(has_sync=True)] if has_lr_dep else []
 
-        if self.config.uniformPgrEpoch:
+        if self.halfDisjoint:
+            self._apply_half_disjoint_sync()
+        elif self.config.uniformPgrEpoch:
             self._apply_uniform_epoch_wait()
+
+    def _half_loads(self, body: int, h: int) -> WaitGRCounts:
+        """GR atoms one half of unroll body ``body`` issues."""
+        cfg = self.config
+        half = cfg.numPartitions // 2
+        parts = range(half) if h == 0 else range(half, cfg.numPartitions)
+        counts = WaitGRCounts()
+        for pi in parts:
+            for slot in self._partitions[pi]:
+                for gr in slot.grs:
+                    if gr.tensor in ('SA', 'SB') and body > 0:
+                        continue
+                    setattr(counts, gr.tensor,
+                            getattr(counts, gr.tensor) + self._count_gr_atoms(gr))
+        return counts
+
+    def _apply_half_disjoint_sync(self):
+        """Open each half with one VMEM wait, local-read drain, and barrier.
+
+        No load writes a tile its own half reads, so the per-request
+        read-before-overwrite barriers and per-read VMEM waits go.  The wait
+        opening a half leaves the previous two halves' loads in flight;
+        every older load wrote a tile this half reads.  Dual-period scale
+        requests exist only in body 0, so each body keeps its own count.
+        """
+        cfg = self.config
+        half = cfg.numPartitions // 2
+        for partition_slots in self._partitions:
+            for slot in partition_slots:
+                for lr in slot.lrs:
+                    lr.preOps = [op for op in lr.preOps
+                                 if not isinstance(op, WaitGROp)]
+                    lr.deps = [d for d in lr.deps
+                               if not isinstance(d.ref, GRPlacement)]
+                for gr in slot.grs:
+                    gr.preOps = [op for op in gr.preOps
+                                 if not isinstance(op, (WaitLROp, SyncOp))]
+                    gr.deps = [d for d in gr.deps
+                               if not isinstance(d.ref, LRPlacement)]
+
+        def _sum(a, b):
+            return WaitGRCounts(**{t: getattr(a, t) + getattr(b, t)
+                                   for t in ('A', 'B', 'SA', 'SB')})
+
+        num_bodies = cfg.scaleReuse
+        for h, opener in ((0, 0), (1, half)):
+            by_unroll = []
+            for body in range(num_bodies):
+                prev = (body - 1) % num_bodies
+                if h == 0:
+                    by_unroll.append(_sum(self._half_loads(prev, 0),
+                                          self._half_loads(prev, 1)))
+                else:
+                    by_unroll.append(_sum(self._half_loads(prev, 1),
+                                          self._half_loads(body, 0)))
+            slot = self._partitions[opener][0]
+            if slot.lrs:
+                target = slot.lrs[0]
+            elif slot.grs:
+                target = min(slot.grs, key=self._gr_sort_key)
+            else:
+                target = slot.mfma
+            target.preOps[0:0] = [
+                WaitGROp(wait_gr_counts=by_unroll[0],
+                         wait_gr_counts_by_unroll=tuple(by_unroll),
+                         has_sync=False, adjustVmcnt=True),
+                WaitLROp(has_sync=True),
+            ]
 
     def _apply_uniform_epoch_wait(self):
         """Replace per-partition VMEM waits with one complete-epoch frontier.
@@ -4425,7 +4954,36 @@ class LogicalScheduler:
                             partition=pi,
                             unrollId=uid,
                         ))
+        if self.halfDisjoint:
+            result = self._order_preloop_mt1_by_half(result)
         return result
+
+    def _order_preloop_mt1_by_half(self, grs: List[GRPlacement]) -> List[GRPlacement]:
+        """Issue the first half's n+1 atoms, then the second half's.
+
+        C0's second-half barrier leaves the youngest second-half load count
+        of the preloop in flight, while C0's wrap reads need the first-half
+        tiles of n+1.  Scales stay with the first half.
+        """
+        first, second = [], []
+        for gr in grs:
+            if gr.tensor in ('SA', 'SB'):
+                first.append(gr)
+                continue
+            gran = self._gr_granularity(gr.tensor)
+            for pos in range(gr.tiles.tileId_start, gr.tiles.tileId_end, gran.mn):
+                atom = GRPlacement(
+                    tensor=gr.tensor, mtIteration=gr.mtIteration,
+                    tiles=MFMATileRange(gr.tiles.subIterK_start,
+                                        gr.tiles.subIterK_end,
+                                        pos, pos + gran.mn),
+                    subIterK_slot=gr.subIterK_slot,
+                    partition=gr.partition, unrollId=gr.unrollId)
+                if self._halfLoadHalf[(gr.tensor, pos)] == 0:
+                    first.append(atom)
+                else:
+                    second.append(atom)
+        return first + second
 
     def _make_preloop_mt1_grs_uid(self, uid: int) -> List[GRPlacement]:
         """Create MT1 GRs for a single uid in the PGR=2 preloop.
@@ -4972,8 +5530,25 @@ class LogicalScheduler:
         for interleaving. When schedule=False, emits instructions sequentially.
         """
         from .InstructionScheduler import (
+            appendC1ScaleShadowReads,
+            barrierAloneInGap,
+            deferBalancedCurrentCellWait,
+            dropEntryScaleReads,
+            guardExitOverwriteReread,
+            insertPrefetchedScaleCopies,
             instructionSchedule,
+            instructionScheduleHalf,
+            issueSaluFirst,
+            keepValuBehindLeader,
+            lateScaleReadsPrecedeSecondHalf,
+            readInOpeningBarrierGap,
+            placeLateScalePrefetchSpills,
+            restoreCanonicalScaleReads,
+            dropDominatedLgkmWaits,
             relaxWaitGrForOutstandingStores,
+            retireScaleLoadsBeforeShadowReads,
+            spillC0ScaleRefreshes,
+            _isDsRead,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
@@ -4990,6 +5565,7 @@ class LogicalScheduler:
                               else _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT)
 
         module = Module(label)
+        self._regionLabels.add(label)
         module.addComment0(f"{label} start")
         use_pap_preloop_skip = (
             label == "PRELOOP"
@@ -5006,6 +5582,69 @@ class LogicalScheduler:
         # holding it longer would keep the store's source registers live across more
         # of the loop for no extra cover.
         pendingDrain = None
+        write_floor = {}
+        body_mfma_base = 0
+        if schedule and label == "MAINLOOP_C0" and self._scaleShadowPlan:
+            # Entry scales are preloop-seeded. Drop those rereads before
+            # placement so data reads can take the early shadows, and hand
+            # the placer the C1-derived overwrite floor for what remains.
+            emitted_3d = copy.deepcopy(emitted_3d)
+            dropEntryScaleReads(
+                emitted_3d,
+                {
+                    entry["canonicalVgpr"]
+                    for entry in self._scaleShadowPlan["entry"]
+                } | {
+                    entry["canonicalVgpr"]
+                    for entry in getattr(self, "_lateScalePrefetch", [])
+                })
+            write_floor = self._scaleShadowPlan.get("writeFloor", {})
+        # Memory partitions split the copy's MFMAs evenly, independent of the
+        # compute partition sizes. Partition pi's VMEM stream ends at the end
+        # of memory partition pi.
+        copy_mfmas = None
+        if (schedule and label.startswith("MAINLOOP")
+                and self.config.uniformPgrEpoch
+                and self.config.dualPeriodScale
+                and self.config.numSubIterK == 1
+                and not self.halfDisjoint):
+            copy_mfmas = sum(
+                len(em.instructions)
+                for partition_emitted in emitted_3d
+                for em_list in partition_emitted
+                for em in em_list
+                if em.opType == "mfma")
+        if schedule and label.startswith("MAINLOOP"):
+            self._mainLoopOrigins.update(
+                (id(inst), (label, em.opType, em.source.tensor,
+                            em.source.mtIteration, em.source.tiles))
+                for partition_emitted in emitted_3d
+                for em_list in partition_emitted
+                for em in em_list if em.opType in ("lr", "gr")
+                for inst in em.instructions)
+        # A half-disjoint main loop schedules all cells of a half with more
+        # than one partition together, so its loads and reads share the
+        # half's MFMA gaps.
+        half_cells = {}
+        if (schedule and self.halfDisjoint and label.startswith("MAINLOOP")
+                and injectAfterPartition is None and injectBeforeSlot is None):
+            numP = len(emitted_3d)
+            for half in (range(numP // 2), range(numP // 2, numP)):
+                cells = [(pi, k) for pi in half
+                         for k in range(len(emitted_3d[pi]))]
+                if len(half) > 1 and all(
+                        any(em.opType == "mfma" for em in emitted_3d[pi][k])
+                        for pi, k in cells):
+                    for cell in cells:
+                        half_cells[cell] = cells
+        # appendC1ScaleShadowReads refreshes the C0 entry scales in the C1
+        # tail, the second half of a half-disjoint body. Its cells keep the
+        # gaps those reads take free of loads.
+        numP = self.config.numPartitions
+        shadow_tail = range(numP // 2 if self.halfDisjoint else numP - 1, numP)
+        shadow_entries = None
+        if self._scaleShadowPlan and label == "MAINLOOP_C1":
+            shadow_entries = list(self._scaleShadowPlan["entry"])
         for pi, partition_emitted in enumerate(emitted_3d):
             # Partition 0 has no inbound drain, so it used to write straight into
             # the loop module and could not be woven into. Its own stage is the one
@@ -5014,6 +5653,9 @@ class LogicalScheduler:
             _ownModule = pendingDrain is not None or injectAfterPartition is not None
             partModule = Module(f"{label}_part{pi}") if _ownModule else module
             for k, em_list in enumerate(partition_emitted):
+                half_group = half_cells.get((pi, k))
+                if half_group is not None and half_group[0] != (pi, k):
+                    continue
                 partModule.addComment0(f"partition={pi} subIterK={k}")
                 if injectBeforeSlot is not None:
                     _pre = injectBeforeSlot.get((pi, k))
@@ -5022,10 +5664,49 @@ class LogicalScheduler:
                 has_mfma = any(em.opType == 'mfma' for em in em_list)
 
                 if schedule and em_list and has_mfma:
+                    current_mfmas = sum(
+                        len(em.instructions)
+                        for em in em_list
+                        if em.opType == "mfma")
+                    vmem_boundary = None
+                    if copy_mfmas:
+                        vmem_boundary = (
+                            (pi + 1) * copy_mfmas // len(emitted_3d)
+                            - body_mfma_base)
+                    if half_group is not None:
+                        markers = Module()
+                        for gpi, gk in half_group[1:]:
+                            markers.addComment0(f"partition={gpi} subIterK={gk}")
+                        group_lists = [emitted_3d[gpi][gk] for gpi, gk in half_group]
+                        partModule.add(instructionScheduleHalf(
+                            group_lists,
+                            minGapDsReadToWait=minGapDsReadToWait,
+                            earliestWriteShadow=write_floor,
+                            mfmaBase=body_mfma_base,
+                            scaleShadows=(
+                                shadow_entries if pi in shadow_tail else None),
+                            cellComments=markers.items()))
+                        body_mfma_base += sum(
+                            len(em.instructions)
+                            for group_list in group_lists
+                            for em in group_list if em.opType == "mfma")
+                        continue
                     scheduled = instructionSchedule(
                         em_list,
                         multiDU=self._is_multi_du(),
-                        minGapDsReadToWait=minGapDsReadToWait)
+                        minGapDsReadToWait=minGapDsReadToWait,
+                        partitionPrefetch=self.config.prefetchNextPartition,
+                        uniformPgrEpoch=self.config.uniformPgrEpoch,
+                        earliestWriteShadow=write_floor,
+                        mfmaBase=body_mfma_base,
+                        retainAllLocalReads=(
+                            self.config.numPartitionsM == 1
+                            or self.config.numPartitionsN == 1),
+                        vmemBoundary=vmem_boundary,
+                        halfDisjoint=self.halfDisjoint,
+                        scaleShadows=(
+                            shadow_entries if pi in shadow_tail else None))
+                    body_mfma_base += current_mfmas
                     partModule.add(scheduled)
                 else:
                     for em in em_list:
@@ -5096,6 +5777,68 @@ class LogicalScheduler:
                             module.add(staged)
             if selfCover is not None:
                 module.add(selfCover)
+        if self._scaleShadowPlan and label == "MAINLOOP_C1":
+            # A half-disjoint body's last barrier opens its second half.
+            finalPartitionMfmas = 0
+            for pi in shadow_tail:
+                final = self._partition_tile_range(pi)
+                finalPartitionMfmas += (
+                    (final['A'][1] - final['A'][0])
+                    * (final['B'][1] - final['B'][0])
+                    * self.config.numSubIterK
+                )
+            placed = appendC1ScaleShadowReads(
+                module,
+                self._scaleShadowPlan["entry"],
+                finalPartitionMfmas)
+            assert placed is not None, \
+                "scale shadowing could not place C1 tail refreshes"
+            leftovers, c1Mfmas = placed
+            if leftovers:
+                assert spillC0ScaleRefreshes(
+                    self._mainloopC0Schedule, leftovers, c1Mfmas), \
+                    "scale shadowing could not spill C1 tail refreshes"
+            prefetch = getattr(self, "_lateScalePrefetch", [])
+            if prefetch:
+                # A scale with no legal staging shadow keeps the C0 read
+                # that was dropped for the prefetch. The kernel still builds.
+                staged = appendC1ScaleShadowReads(
+                    module, prefetch, finalPartitionMfmas,
+                    ignoreSourceWar=True)
+                if staged is None:
+                    restoreCanonicalScaleReads(
+                        self._mainloopC0Schedule, prefetch)
+                else:
+                    stagedLeft, _c1Mfmas = staged
+                    stageable = list(prefetch)
+                    if stagedLeft:
+                        unspilled = placeLateScalePrefetchSpills(
+                            self._mainloopC0Schedule, stagedLeft)
+                        if unspilled:
+                            restoreCanonicalScaleReads(
+                                self._mainloopC0Schedule, unspilled)
+                            skipped = {
+                                entry["canonicalVgpr"] for entry in unspilled}
+                            stageable = [
+                                entry for entry in stageable
+                                if entry["canonicalVgpr"] not in skipped]
+                    uncopied = insertPrefetchedScaleCopies(
+                        self._mainloopC0Schedule, stageable)
+                    if uncopied:
+                        restoreCanonicalScaleReads(
+                            self._mainloopC0Schedule, uncopied)
+        if self._scaleShadowPlan and label == "NGLL_C0":
+            # C0 leaves the current scale epoch in the entry VGPRs. NGLL
+            # still consumes that epoch. NLL is the next epoch, and its
+            # opening wait retires these reads before its first scaled MFMA.
+            for entry in self._scaleShadowPlan["entry"]:
+                read = copy.deepcopy(entry["readTemplate"])
+                read.comment = (
+                    f"{getattr(read, 'comment', '')}; "
+                    "load next scale epoch for NLL after NGLL; "
+                    f"{entry['tensor']} canonical=v{entry['canonicalVgpr']}"
+                )
+                module.add(read)
         if use_pap_preloop_skip and skipping_first_gr_group and not first_gr_group_done:
             module.add(pap_merge_label)
             module.add(SMovB32(dst=sgpr("PersistentPrefetchState"), src=0,
@@ -5105,6 +5848,10 @@ class LogicalScheduler:
         # so this is the first point at which the D stores and the wait_gr counts
         # are visible together.
         module = relaxWaitGrForOutstandingStores(module)
+        if (self._scaleShadowPlan and label == "MAINLOOP_C1"
+                and self.config.dualPeriodScale
+                and self._mainloopC0Schedule is not None):
+            retireScaleLoadsBeforeShadowReads(self._mainloopC0Schedule, module)
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
@@ -5121,6 +5868,70 @@ class LogicalScheduler:
         # that sync); the wait is appended at the end to hide its cross-CU latency.
         from .ClusterBarrier import insertClusterBarrier
         module = insertClusterBarrier(module, writer, kernel)
+
+        def lr_reads(selected):
+            return [inst
+                    for partition_emitted in emitted_3d
+                    for em_list in partition_emitted
+                    for em in em_list
+                    if em.opType == "lr" and selected(em.source)
+                    for inst in em.instructions if _isDsRead(inst)]
+
+        def is_data_lr(lr):
+            return lr.tensor in ("A", "B")
+
+        if label == "MAINLOOP_C0":
+            self._mainloopC0Schedule = module
+            self._mainloopC0DataReads = lr_reads(is_data_lr)
+            if self._scaleShadowPlan and self.halfDisjoint:
+                assert lateScaleReadsPrecedeSecondHalf(
+                    module,
+                    {entry["canonicalVgpr"]
+                     for entry in self._scaleShadowPlan["deferred"]},
+                    self._first_half_mfmas()), \
+                    "a late C0 scale read is not ahead of the second-half barrier"
+        if label.startswith("NGLL") or label.startswith("NLL"):
+            module = guardExitOverwriteReread(
+                module, getattr(self, "_earlyOverwriteVgprs", ()))
+        # The deferral removes a drain and moves reads behind it, so it runs
+        # before dropDominatedLgkmWaits proves drops against the final order.
+        if self.halfDisjoint and label.startswith("MAINLOOP"):
+            balanced_reads = lr_reads(lambda lr: lr.balancedCurrentCell)
+            # The deferral skips the barrier gap and the gap after it, then keeps
+            # each read minGapDsReadToWait MFMAs ahead of its consumer. Dual-period
+            # is gfx950-only, where the gap is 4.
+            assert not balanced_reads or BALANCE_MIN_LEAD_MFMAS >= minGapDsReadToWait + 2, \
+                "BALANCE_MIN_LEAD_MFMAS leaves no gap for a balanced read"
+            # planHalfDisjointBalance only pays off once the reads leave the
+            # partition-0 prefix; kept there they are slower than no balance.
+            if balanced_reads and not deferBalancedCurrentCellWait(
+                    module, balanced_reads, minGapDsReadToWait):
+                raise RuntimeError(
+                    f"{label}: the balanced current-cell reads could not leave "
+                    "partition 0's prefix (deferBalancedCurrentCellWait refused)")
+        if (label.startswith("MAINLOOP")
+                and self.config.uniformPgrEpoch
+                and self.config.dualPeriodScale):
+            dropDominatedLgkmWaits(module)
+        if (label == "MAINLOOP_C1" and not self.halfDisjoint
+                and self.config.uniformPgrEpoch and self.config.dualPeriodScale
+                and self._mainloopC0Schedule is not None):
+            # C1 still places scale refreshes in C0, so C0 is final only here.
+            barrierAloneInGap(self._mainloopC0Schedule)
+            barrierAloneInGap(module)
+        if self.halfDisjoint and label.startswith("MAINLOOP"):
+            barrier_gap_reads = (label == "MAINLOOP_C1" and self.config.dualPeriodScale
+                                 and self._mainloopC0Schedule is not None)
+            # The moved read can leave a VALU leading its old gap, so the
+            # VALU-leader pass sees each body after the move.
+            if barrier_gap_reads:
+                readInOpeningBarrierGap(module, lr_reads(is_data_lr))
+            issueSaluFirst(module)
+            keepValuBehindLeader(module)
+            # C1 still places scale refreshes in C0, so C0 is final only here.
+            if barrier_gap_reads:
+                readInOpeningBarrierGap(self._mainloopC0Schedule, self._mainloopC0DataReads)
+                keepValuBehindLeader(self._mainloopC0Schedule)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
@@ -6693,8 +7504,18 @@ class LogicalScheduler:
                 before=None,
                 source=None))
 
-        module.add(self._emitLoop(writer, kernel, "PRELOOP",
-                                  preloop_emitted, schedule=False))
+        preloop = self._emitLoop(writer, kernel, "PRELOOP",
+                                 preloop_emitted, schedule=False)
+        if self._scaleShadowPlan:
+            # Seed before the short-loop dispatch so mainloop, NLL, and NGLL
+            # entries all reach their first scaled MFMA with initialized data.
+            self._insertScaleShadowSeed(
+                preloop, self._scaleShadowPlan["entry"])
+            if getattr(self, "_lateScalePrefetch", None):
+                self._insertScaleShadowSeed(
+                    preloop, self._lateScalePrefetch)
+        self._preloopSchedule = preloop
+        module.add(preloop)
         return module
 
     def _emitMainloopPhase(self, writer, kernel, plsin, isGfx1250, exitLabels):
@@ -6724,24 +7545,20 @@ class LogicalScheduler:
             from rocisa.container import mgpr
             from rocisa.instruction import SMovB32 as _SMovB32
             from rocisa.instruction import STtraceData as _STtraceData
+        bodies = []
+        setups = []
+        branches = []
         for ui in range(uf):
-            if emitTraceMarker:
-                # Mainloop iteration marker for SQTT / trace decoder: write
-                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
-                # only uses low 8 bits, so M0 wrap past 256 is fine.
-                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
-                                    comment="trace: M0 = LoopCounterL"))
-                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
-            loopBody = self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
-                                      self._emitted_per_unroll[ui])
+            bodies.append(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
+                                         self._emitted_per_unroll[ui]))
             # dec + compare that produce the SCC the loop-control branch reads.
-            setupInsts = [
+            setups.append([
                 SSubU32(dst=sgpr("LoopCounterL"),
                         src0=sgpr("LoopCounterL"), src1=1,
                         comment=f"dec counterL (copy {ui})"),
                 SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
                           comment=f"counterL == {exitValue}? (copy {ui} exit)"),
-            ]
+            ])
             if ui < uf - 1:
                 if plsin:
                     branch = writer.longBranchScc1(
@@ -6755,7 +7572,28 @@ class LogicalScheduler:
                 branch = SCBranchSCC0(
                     labelName=loopBegin.getLabelName(),
                     comment="restart mainloop")
-            _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist=isGfx1250)
+            branches.append(branch)
+        # Both copies exist, so a mustPrecede read whose VGPRs are free can
+        # move into the other copy's tail. The preloop covers the first C0.
+        from .InstructionScheduler import (
+            relocatePartitionZeroOverwriteReads,
+            _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT,
+            _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
+        )
+        sourceGap = (_MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250
+                     if isGfx1250 else _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT)
+        self._earlyOverwriteVgprs = relocatePartitionZeroOverwriteReads(
+            bodies, getattr(self, "_preloopSchedule", None), sourceGap)
+        for ui in range(uf):
+            if emitTraceMarker:
+                # Mainloop iteration marker for SQTT / trace decoder: write
+                # LoopCounterL into M0 then emit it via s_ttracedata. Decoder
+                # only uses low 8 bits, so M0 wrap past 256 is fine.
+                module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
+                                    comment="trace: M0 = LoopCounterL"))
+                module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
+            _emitBodySetupBranch(
+                module, bodies[ui], setups[ui], branches[ui], hoist=isGfx1250)
         return module
 
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
@@ -6782,8 +7620,15 @@ class LogicalScheduler:
         assert self._emitter is not None, \
             "populate_instructions() must be called first"
 
+        from .InstructionScheduler import clearPartitionZeroOverwriteMarks
+        clearPartitionZeroOverwriteMarks()
+        self._earlyOverwriteVgprs = ()
+        self._preloopSchedule = None
+        self._mainLoopOrigins = {}
+
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
+        self._prepareScaleShadowPlan()
 
         # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
         # MFMA, so hoist the per-copy dec+compare above the body's last MFMA.
@@ -6863,8 +7708,9 @@ class LogicalScheduler:
         module.add(self._emitPreloopPhase(writer, kernel, plsin, endLabel))
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
-        module.add(self._emitMainloopPhase(writer, kernel, plsin,
-                                           isGfx1250, exitLabels))
+        mainloop = self._emitMainloopPhase(writer, kernel, plsin,
+                                           isGfx1250, exitLabels)
+        module.add(mainloop)
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
@@ -6972,8 +7818,110 @@ class LogicalScheduler:
                                        comment="skip other exit paths"))
 
         module.add(endLabel)
+        self._spaceRegionM0Writes(writer, module, mainloop)
+        if self.halfDisjoint:
+            from .InstructionScheduler import dropRelaxedFencesThatRetireNothing
+            dropRelaxedFencesThatRetireNothing(self._mainLoopBodies(mainloop))
+        clearPartitionZeroOverwriteMarks()
+        self._dropExitDominatedLgkmWaits(module)
+        if self.config.uniformPgrEpoch and not self.halfDisjoint:
+            from .InstructionScheduler import checkMainLoopLdsOverwrites
+            checkMainLoopLdsOverwrites(
+                [(body.name, body) for body in self._mainLoopBodies(mainloop)],
+                self._mainLoopOrigins)
+        self._mainLoopOrigins = {}
 
         return module
+
+    def _mainLoopBodies(self, mainloop):
+        """The MAINLOOP_C* region modules of mainloop, in emit order."""
+        from .InstructionScheduler import _isCodeModule
+        bodies = []
+
+        def walk(container):
+            for item in container.items():
+                if not _isCodeModule(item):
+                    continue
+                if (getattr(item, "name", "").startswith("MAINLOOP_C")
+                        and item.name in self._regionLabels):
+                    bodies.append(item)
+                else:
+                    walk(item)
+
+        walk(mainloop)
+        return bodies
+
+    def _dropExitDominatedLgkmWaits(self, module):
+        """Run dropDominatedLgkmWaits on every exit and tail region of module.
+
+        The main-loop bodies run it in _emitLoop. Each region starts with
+        nothing proven, so a wait right after a region's entry label stays.
+        """
+        from .InstructionScheduler import _isCodeModule, dropDominatedLgkmWaits
+        if not (self.config.uniformPgrEpoch and self.config.dualPeriodScale):
+            return
+
+        def walk(container):
+            for item in container.items():
+                if not _isCodeModule(item):
+                    continue
+                name = getattr(item, "name", None)
+                if name in self._regionLabels:
+                    if not name.startswith(("MAINLOOP", "PRELOOP")):
+                        dropDominatedLgkmWaits(item)
+                else:
+                    walk(item)
+
+        walk(module)
+
+    def _spaceRegionM0Writes(self, writer, module, mainloop=None):
+        """Space the m0 writes of every region in module from their loads.
+
+        Runs once the region order is final: C1 still edits C0, and the
+        bodies, exits and tail are woven after their own emission. The
+        main loop's copies are spaced together, by gap population
+        (spaceMainLoopM0Writes); every other region is spaced on its own.
+        gfx9 only.
+        """
+        from rocisa.code import Label
+        from .InstructionScheduler import (
+            _isCodeModule, _isComment, spaceM0WritesFromLdsLoads, spaceMainLoopM0Writes)
+        version = getattr(writer.states, "version", None)
+        if not (isinstance(version, (tuple, list)) and tuple(version[:1]) == (9,)):
+            return
+        if mainloop is not None:
+            bodies, outside, lead = [], [], [0]
+
+            def parts(container):
+                for item in container.items():
+                    if _isCodeModule(item):
+                        if (getattr(item, "name", "").startswith("MAINLOOP_C")
+                                and item.name in self._regionLabels):
+                            bodies.append(item)
+                            outside.append(0)
+                        else:
+                            parts(item)
+                    elif not (_isComment(item) or isinstance(item, Label)):
+                        if outside:
+                            outside[-1] += 1
+                        else:
+                            lead[0] += 1
+
+            parts(mainloop)
+            if bodies:
+                outside[-1] += lead[0]
+                spaceMainLoopM0Writes(bodies, outside, getattr(writer, "sgprs", None))
+
+        def walk(container):
+            for item in container.items():
+                if not _isCodeModule(item):
+                    continue
+                if getattr(item, "name", None) in self._regionLabels:
+                    spaceM0WritesFromLdsLoads(item)
+                else:
+                    walk(item)
+
+        walk(module)
 
     def emitTailLoop(self, writer, kernel):
         """Emit the tail loop body only (no counter setup, no skip branch).
@@ -7007,6 +7955,8 @@ class LogicalScheduler:
                                   schedule=False))
         for inst in self._emitter.emit_mask_k_done():
             module.add(inst)
+        self._spaceRegionM0Writes(writer, module)
+        self._dropExitDominatedLgkmWaits(module)
         return module
 
     # ── VGPR tile allocation ──────────────────────────────
@@ -7051,6 +8001,78 @@ class LogicalScheduler:
                 totals.append(_total_for(self._tail_own_peaks))
         return max(totals)
 
+    def _late_scale_groups(self):
+        """Scale groups whose first consumer is outside partition zero.
+
+        Partition zero's groups are refreshed in place. The rest are still
+        sources of the last C1 MFMAs, so the next epoch needs its own VGPR.
+        """
+        cfg = self.config
+        if not cfg.dualPeriodScale or not cfg.hasScale:
+            return []
+        if cfg.numPartitions < 2:
+            return []
+        first = self._partition_tile_range(0)
+        if first['A'][0] != 0 or first['B'][0] != 0:
+            return []
+        groups = []
+        for tensor, gran, num_tiles, side in (
+                ('SA', cfg.lrSA, cfg.numMFMATilesM, 'A'),
+                ('SB', cfg.lrSB, cfg.numMFMATilesN, 'B')):
+            if gran is None:
+                continue
+            start, end = first[side]
+            covered = set(range(start, end, gran.mn))
+            for group in range(0, num_tiles, gran.mn):
+                if group not in covered:
+                    groups.append((tensor, group))
+        return groups
+
+    def _canonical_scale_vgpr(self, tensor, group):
+        tiles = self.vgprTilesSA if tensor == 'SA' else self.vgprTilesSB
+        for partition in self._partitions:
+            for slot in partition:
+                for lr in slot.lrs:
+                    if lr.tensor != tensor:
+                        continue
+                    for tile_map in lr.vgpr_tile_map:
+                        if group not in tile_map:
+                            continue
+                        return next(iter(tiles[tile_map[group]]))
+        return None
+
+    def _alloc_late_scale_prefetch(self, writer):
+        """Check out staging VGPRs for late scales when occupancy holds.
+
+        The checkout is the pool's next register, not a hardcoded index in
+        the accumulator pad. It is taken only when the padded count stays
+        in the same 8-register block the accumulators already start on.
+
+        A half-disjoint body loads its scales after the barrier that opens
+        C0's second half, so C0's first half reads the late scales straight
+        into their canonical VGPRs and needs no staging.
+        """
+        from .InstructionScheduler import scale_prefetch_fits
+
+        self._lateScaleExtra = {}
+        self._lateScaleExtraTiles = []
+        self._lateScalePrefetch = []
+        if self.halfDisjoint:
+            return
+        pairs = []
+        for tensor, group in self._late_scale_groups():
+            canonical = self._canonical_scale_vgpr(tensor, group)
+            if canonical is None:
+                self._lateScaleExtra = {}
+                return
+            pairs.append(canonical)
+        if not scale_prefetch_fits(writer.vgprPool.size(), len(pairs)):
+            return
+        for canonical in pairs:
+            tile = _checkout_tile(writer.vgprPool, 1, "lateScalePrefetch")
+            self._lateScaleExtraTiles.append(tile)
+            self._lateScaleExtra[canonical] = next(iter(tile))
+
     def allocVgprTiles(self, writer, tileInfoA, tileInfoB,
                        scaleTileInfoA=None, scaleTileInfoB=None):
         """Allocate physical VGPR tiles based on assign_vgpr_tiles() peaks.
@@ -7089,6 +8111,8 @@ class LogicalScheduler:
             self.vgprTilesSA = []
             self.vgprTilesSB = []
 
+        self._alloc_late_scale_prefetch(writer)
+
         # Stash tile-info so _realloc_tail_tiles_flat can reallocate the
         # tail's flat tile set without the caller plumbing them in again.
         self._alloc_tile_info = {
@@ -7111,6 +8135,10 @@ class LogicalScheduler:
         _dealloc_tiles(self.vgprTilesB,  self._tail_freed_tile_ids['B'])
         _dealloc_tiles(self.vgprTilesSA, self._tail_freed_tile_ids['SA'])
         _dealloc_tiles(self.vgprTilesSB, self._tail_freed_tile_ids['SB'])
+        for tile in getattr(self, "_lateScaleExtraTiles", []):
+            _checkin_tile(tile)
+        self._lateScaleExtraTiles = []
+        self._lateScaleExtra = {}
         self.vgprTilesA = []
         self.vgprTilesB = []
         self.vgprTilesSA = []
