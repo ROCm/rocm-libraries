@@ -438,4 +438,11 @@
     #endif
 #endif
 
+// CDNA5 and RDNA4 split waitcnt.
+#if defined(ROCPRIM_TARGET_CDNA5) || defined(ROCPRIM_TARGET_RDNA4)
+    #define ROCPRIM_SPLIT_WAITCNT 1
+#else
+    #define ROCPRIM_SPLIT_WAITCNT 0
+#endif
+
 #endif // ROCPRIM_CONFIG_HPP_
