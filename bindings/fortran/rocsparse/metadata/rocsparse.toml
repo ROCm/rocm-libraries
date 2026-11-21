@@ -1,0 +1,229 @@
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+#
+# What the rocsparse C headers cannot express, beyond the defaults the generator
+# derives from them: one table per C function, and a key with braces names
+# several. A _64 or _spt variant without a table takes its base's. See "Fixing a
+# binding" in the generator README; `gen.sh --explain <function>` shows what
+# applies.
+
+format = 1
+# scalar-pointer-mode:
+#   A *_buffer_size routine classifies the alpha/beta/threshold its compute twin
+#   classifies, so the size query takes the same _typed arguments.
+# nullable:
+#   Arguments documented as nullable. The module procedures take them OPTIONAL and
+#   pass c_null_ptr when absent (an OPTIONAL dummy in a bind(C) interface needs F2018).
+
+["rocsparse_{dnmat_copy_data,dnmat_transpose,dnvec_descr_create_scalar,spmat_scale,spmv_clear_extra,spmv_set_extra}"]
+p_error = "nullable"
+
+["rocsparse_{spgeam,spgeam_get_output,spmv_set_input}"]
+error = "nullable"
+
+["rocsparse_{spic0,spildlt0,spilu0,spsort,sptrsm,sptrsv}"]
+p_error = "nullable"
+
+["rocsparse_{spic0,spildlt0,spilu0,spsort,sptrsm,sptrsv}_buffer_size"]
+p_error = "nullable"
+
+["rocsparse_{spic0,spildlt0,spilu0,sptrsm,sptrsv}_get_output"]
+p_error = "nullable"
+
+["rocsparse_{spgeam,spic0,spildlt0,spilu0,spsort,sptrsm,sptrsv}_set_input"]
+p_error = "nullable"
+
+["rocsparse_{handle,spic0_descr,spildlt0_descr,spilu0_descr,spsort_descr,sptrsv_descr}_{create,destroy}"]
+p_error = "nullable"
+
+[rocsparse_bsrgeam_nnzb]
+nnzb_C = "scalar-pointer-mode"
+
+[rocsparse_bsrgemm_nnzb]
+nnzb_C = "scalar-pointer-mode"
+
+[rocsparse_bsric0_zero_pivot]
+position = "scalar-pointer-mode"
+
+["rocsparse_{s,d,c,z,dc,ds}bsrilu0_numeric_boost"]
+boost_tol = ["scalar-pointer-mode", "nullable"]
+boost_val = ["scalar-pointer-mode", "nullable"]
+
+[rocsparse_bsrilu0_zero_pivot]
+position = "scalar-pointer-mode"
+
+[rocsparse_bsrsm_zero_pivot]
+position = "scalar-pointer-mode"
+
+[rocsparse_bsrsv_zero_pivot]
+position = "scalar-pointer-mode"
+
+["rocsparse_{s,d,c,z}check_matrix_coo"]
+data_status = "scalar-host"
+
+["rocsparse_{s,d,c,z}check_matrix_csc"]
+data_status = "scalar-host"
+
+["rocsparse_{s,d,c,z}check_matrix_csr"]
+data_status = "scalar-host"
+
+["rocsparse_{s,d,c,z}check_matrix_ell"]
+data_status = "scalar-host"
+
+["rocsparse_{s,d,c,z}check_matrix_gebsc"]
+data_status = "scalar-host"
+
+["rocsparse_{s,d,c,z}check_matrix_gebsr"]
+data_status = "scalar-host"
+
+[rocsparse_check_matrix_hyb]
+data_status = "scalar-host"
+
+[rocsparse_check_spmat]
+data_status = "scalar-host"
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_csr2bsr_nnz]
+bsr_nnz = "scalar-pointer-mode"
+
+[rocsparse_csr2ell_width]
+ell_width = "scalar-pointer-mode"
+
+[rocsparse_csr2gebsr_nnz]
+bsr_nnz_devhost = "scalar-pointer-mode"
+
+["rocsparse_{s,d,c,z}csrcolor"]
+fraction_to_color = "scalar-host"
+ncolors = "scalar-host"
+reordering = "devptr"
+
+[rocsparse_csrgeam_nnz]
+nnz_C = "scalar-pointer-mode"
+
+[rocsparse_csrgemm_nnz]
+nnz_C = "scalar-pointer-mode"
+
+[rocsparse_csric0_get_tolerance]
+tolerance = "scalar-host"
+
+[rocsparse_csric0_singular_pivot]
+position = "scalar-pointer-mode"
+
+[rocsparse_csric0_zero_pivot]
+position = "scalar-pointer-mode"
+
+[rocsparse_csrilu0_get_tolerance]
+tolerance = "scalar-host"
+
+["rocsparse_{s,d,c,z,dc,ds}csrilu0_numeric_boost"]
+boost_tol = ["scalar-pointer-mode", "nullable"]
+boost_val = ["scalar-pointer-mode", "nullable"]
+
+[rocsparse_csrilu0_singular_pivot]
+position = "scalar-pointer-mode"
+
+[rocsparse_csrilu0_zero_pivot]
+position = "scalar-pointer-mode"
+
+["rocsparse_{s,d,c,z}csritsv_solve"]
+host_nmaxiter = "scalar-host"
+
+["rocsparse_{s,d,c,z}csritsv_solve_ex"]
+host_nmaxiter = "scalar-host"
+
+[rocsparse_csritsv_zero_pivot]
+position = "scalar-pointer-mode"
+
+[rocsparse_csrsm_zero_pivot]
+position = "scalar-pointer-mode"
+
+[rocsparse_csrsv_zero_pivot]
+position = "scalar-pointer-mode"
+
+[rocsparse_dense_to_sparse]
+buffer_size = ["scalar-host", "nullable"]
+
+["rocsparse_{c,z}dotci"]
+result = "scalar-pointer-mode"
+
+["rocsparse_{s,d,c,z}doti"]
+result = "scalar-pointer-mode"
+
+[rocsparse_ell2csr_nnz]
+csr_nnz = "scalar-pointer-mode"
+
+[rocsparse_extract_nnz]
+nnz = "scalar-host"
+
+[rocsparse_gebsr2gebsr_nnz]
+nnz_total_dev_host_ptr = "scalar-pointer-mode"
+
+["rocsparse_{s,d,c,z}nnz"]
+nnz_total_dev_host_ptr = "scalar-pointer-mode"
+
+["rocsparse_{s,d,c,z}nnz_compress"]
+nnz_C = "scalar-pointer-mode"
+
+["rocsparse_{s,d}prune_csr2csr"]
+threshold = "scalar-pointer-mode"
+
+["rocsparse_{s,d}prune_csr2csr_buffer_size"]
+threshold = "scalar-pointer-mode"
+
+["rocsparse_{s,d}prune_csr2csr_nnz"]
+threshold = "scalar-pointer-mode"
+nnz_total_dev_host_ptr = "scalar-pointer-mode"
+
+["rocsparse_{s,d}prune_csr2csr_nnz_by_percentage"]
+nnz_total_dev_host_ptr = "scalar-pointer-mode"
+
+["rocsparse_{s,d}prune_dense2csr"]
+threshold = "scalar-pointer-mode"
+
+["rocsparse_{s,d}prune_dense2csr_buffer_size"]
+threshold = "scalar-pointer-mode"
+
+["rocsparse_{s,d}prune_dense2csr_nnz"]
+threshold = "scalar-pointer-mode"
+nnz_total_dev_host_ptr = "scalar-pointer-mode"
+
+["rocsparse_{s,d}prune_dense2csr_nnz_by_percentage"]
+nnz_total_dev_host_ptr = "scalar-pointer-mode"
+
+["rocsparse_{s,d}roti"]
+c = "scalar-pointer-mode"
+s = "scalar-pointer-mode"
+
+[rocsparse_sparse_to_dense]
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_spgeam_buffer_size]
+error = "nullable"
+
+[rocsparse_spgemm]
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_spitsv]
+host_nmaxiter = "scalar-host"
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_spmm]
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_spmv]
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_spsm]
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_spsv]
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_spvv]
+buffer_size = ["scalar-host", "nullable"]
+
+[rocsparse_v2_spmv]
+error = "nullable"
+
+[rocsparse_v2_spmv_buffer_size]
+error = "nullable"
