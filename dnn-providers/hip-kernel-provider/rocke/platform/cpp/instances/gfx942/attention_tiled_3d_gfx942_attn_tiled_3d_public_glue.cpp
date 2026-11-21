@@ -34,11 +34,12 @@
  * (instances/common/attention_arch.py) admits two families: the gfx950 wide-K +
  * ds_read_tr path and the gfx942 narrow 16x16x16 strided-V path. The C arch
  * surface (rocke/helper_rocke.core.arch.h) exposes op_for_shape but not the
- * memory.has_ds_read_tr predicate, so the wide-K admission is reproduced via the
- * catalogued 16x16x32 f16 atom only (the canonical wide-K marker). On gfx942 the
- * relevant branch is the narrow path (gfx942 in {_NARROW_TILED_2D_ARCHES} AND
- * the 16x16x16 f16+bf16 atoms present), which IS fully reproducible here. The
- * fallback reason strings mirror the Python text byte-for-byte.
+ * memory.has_ds_read_tr predicate, so the wide-K admission is reproduced via
+ * the catalogued 16x16x32 f16 atom only (the canonical wide-K marker). On
+ * gfx942 the relevant branch is the narrow path (gfx942 in
+ * {_NARROW_TILED_2D_ARCHES} AND the 16x16x16 f16+bf16 atoms present), which IS
+ * fully reproducible here. The fallback reason strings mirror the Python text
+ * byte-for-byte.
  */
 #include <math.h>
 #include <stdio.h>
@@ -109,8 +110,8 @@ static bool rocke_attn3d_narrow_k_available(const rocke_archtarget_t* t)
 }
 
 /* True iff the target catalog has the wide-K 16x16x32 f16 atom
- * (_wide_k_mfma_available, the queryable half; the ds_read_tr cross-check is not
- * exposed by the C arch surface -- see the ARCH GATE NOTE above). */
+ * (_wide_k_mfma_available, the queryable half; the ds_read_tr cross-check is
+ * not exposed by the C arch surface -- see the ARCH GATE NOTE above). */
 static bool rocke_attn3d_wide_k_available(const rocke_archtarget_t* t)
 {
     return rocke_archtarget_op_for_shape(t, "mma", "f16", "f16", "fp32", 16, 16, 32, nullptr)
@@ -192,7 +193,7 @@ bool rocke_unified_attention_3d_tiled_spec_validate(
         return false;
     }
     /* The swizzle XORs a row's 16-byte chunk index with row % chunks, which
-     * stays inside the row only for a power-of-two chunk count. */
+   * stays inside the row only for a power-of-two chunk count. */
     {
         const int chunks = s->head_size / 8;
         if(s->use_kv_lds_swizzle && (chunks & (chunks - 1)) != 0)
@@ -246,7 +247,8 @@ int rocke_unified_attention_3d_tiled_spec_tile_size(
     {
         return -1;
     }
-    return s->has_tile_size_override ? s->tile_size_override : s->block_size;
+    return s->has_tile_size_override ? s->tile_size_override
+                                     : (s->block_size == 1 ? 32 : s->block_size);
 }
 
 const rocke_type_t*
@@ -282,25 +284,26 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     const rocke_unified_attention_3d_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn3d_tiled_gfx942", d.., b.., h..kv.., seg..,
-     *   dtype, kv<...> if kv_storage_dtype else "", "fnuz" if kv_storage_dtype
-     *   else "", "sinks" if use_sinks else "",
-     *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
-     *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
-     *   "wkv" if use_wide_kv_load else "",
-     *   "dg" if use_decode_grid else "",
-     *   "kvcp<policy>" if kv_cache_policy != "all" else "",
-     *   "kvswz" if use_kv_lds_swizzle else "",
-     *   "wpid" if use_wave_page_id_load else "")
-     *
-     * The whole thing is a positional parts list (NOT flags=...): empty parts
-     * are skipped by kernel_name_join. We materialise each part string and feed
-     * the non-empty ones in source order. */
+   *   dtype, kv<...> if kv_storage_dtype else "", "fnuz" if kv_storage_dtype
+   *   else "", "sinks" if use_sinks else "",
+   *   "sw<sw>" if sw>0 else "", "softcap" if has_softcap else "",
+   *   "alibi" if use_alibi else "", "qqb" if use_qq_bias else "",
+   *   "wkv" if use_wide_kv_load else "",
+   *   "dg" if use_decode_grid else "",
+   *   "kvcp<policy>" if kv_cache_policy != "all" else "",
+   *   "kvswz" if use_kv_lds_swizzle else "",
+   *   "wpid" if use_wave_page_id_load else "")
+   *
+   * The whole thing is a positional parts list (NOT flags=...): empty parts
+   * are skipped by kernel_name_join. We materialise each part string and feed
+   * the non-empty ones in source order. */
     char d_part[32];
     char b_part[32];
     char h_part[64];
     char seg_part[32];
     char kv_part[32];
     char sw_part[32];
+    char tile_part[32];
     char kvcp_part[32];
     const char* parts[24];
     size_t np = 0;
@@ -333,7 +336,7 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
         snprintf(kv_part, sizeof(kv_part), "kv%s", s->kv_storage_dtype);
         parts[np++] = kv_part;
         /* Python emits "fnuz" under the *same* condition as the kv part, not
-         * under a format test, so it is tagged here rather than separately. */
+     * under a format test, so it is tagged here rather than separately. */
         parts[np++] = "fnuz";
     }
     if(s->use_sinks)
@@ -362,6 +365,15 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     {
         parts[np++] = "wkv";
     }
+    if(rocke_unified_attention_3d_tiled_spec_tile_size(s) != s->block_size)
+    {
+        snprintf(tile_part,
+                 sizeof(tile_part),
+                 "t%d",
+                 rocke_unified_attention_3d_tiled_spec_tile_size(s));
+        parts[np++] = tile_part;
+    }
+
     if(s->use_decode_grid)
     {
         parts[np++] = "dg";
@@ -381,7 +393,8 @@ int rocke_unified_attention_3d_tiled_spec_kernel_name(
     }
 
     /* kernel_name_join takes prefix + parts; we pass everything as parts with a
-     * "" prefix so the join is identical (empty prefix is skipped). */
+   * "" prefix so the join is identical (empty prefix is skipped). */
+
     st = rocke_kernel_name_join("", parts, np, NULL, NULL, 0, buf, cap, &out_len);
     if(st != ROCKE_OK)
     {
@@ -418,7 +431,7 @@ int rocke_unified_attention_reduce_tiled_spec_kernel_name(
     const rocke_unified_attention_reduce_tiled_spec_t* s, char* buf, size_t cap)
 {
     /* kernel_name_join("rocke_uattn_reduce_tiled_gfx942", d<HD>, seg<NUM_SEG>,
-     *   dtype[, "lse"]); the head count is a kernarg. */
+   *   dtype[, "lse"]); the head count is a kernarg. */
     char d_part[32];
     char seg_part[32];
     const char* parts[8];
@@ -500,7 +513,7 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
     if(rocke_attn3d_wide_k_available(target))
     {
         /* gfx950 wide-K + ds_read_tr path (ds_read_tr not queryable in C; the
-         * wide-K marker is taken as admission, see ARCH GATE NOTE). */
+     * wide-K marker is taken as admission, see ARCH GATE NOTE). */
         arch_ok = true;
     }
     else if(rocke_attn3d_streq(eff_arch, "gfx942") && rocke_attn3d_narrow_k_available(target))
@@ -547,13 +560,18 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
         ATTN3D_REASON(reason_buf);
         return false;
     }
-    if(block_size != 16 && block_size != 32 && block_size != 64)
+    if(block_size != 1 && block_size != 16 && block_size != 32 && block_size != 64)
     {
         snprintf(reason_buf,
                  sizeof(reason_buf),
-                 "tiled 3D kernel only supports block_size in {16,32,64} (got %d)",
+                 "tiled 3D kernel only supports block_size in {1,16,32,64} (got %d)",
                  block_size);
         ATTN3D_REASON(reason_buf);
+        return false;
+    }
+    if(block_size == 1 && (use_fp8 || kv_storage_dtype != NULL))
+    {
+        ATTN3D_REASON("one-token pages require fp16/bf16 KV storage");
         return false;
     }
     if(kv_storage_dtype != NULL && !rocke_attn3d_streq(kv_storage_dtype, "fp8e4m3"))
@@ -588,7 +606,7 @@ bool rocke_gfx942_attention_tiled_3d_supports(int head_size,
         return false;
     }
     /* A num_queries_per_kv that does not divide BLOCK_M=16 is supported: see
-     * supports_tiled_3d in the Python twin. */
+   * supports_tiled_3d in the Python twin. */
     ATTN3D_REASON("supported");
     return true;
 #undef ATTN3D_REASON
@@ -751,7 +769,8 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     out->WIDE_KV = spec->use_wide_kv_load && !out->KV_FP8 && out->WIDE_OK;
     out->DECODE_GRID = spec->use_decode_grid;
     {
-        /* KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy) (validated). */
+        /* KV_CACHE_BITS = cache_policy_from_name(spec.kv_cache_policy) (validated).
+     */
         rocke_cache_policy_t bits = ROCKE_CACHE_ALL;
         (void)rocke_cache_policy_from_name(spec->kv_cache_policy, &bits);
         out->KV_CACHE_BITS = (int)bits;
@@ -767,7 +786,7 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
     out->bm1_div_nqk = nqk > 0 ? (out->BLOCK_M - 1) / nqk : -1;
 
     /* T != BS path requires BS % T == 0 (line 582). */
-    if(out->T != out->BS)
+    if(out->T < out->BS)
     {
         if(out->T == 0 || out->BS % out->T != 0)
         {
@@ -902,9 +921,9 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
     }
 
     /* _C16_DIST = make_static_tile_distribution(
-     *                 make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16()))
-     * (Python lines 74-76). The C accumulator layout is dtype/arch independent,
-     * so the f16 atom drives it for both segment and reduce ctx. */
+   *                 make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16()))
+   * (Python lines 74-76). The C accumulator layout is dtype/arch independent,
+   * so the f16 atom drives it for both segment and reduce ctx. */
     c_atom = rocke_mfma_atom("f16", 16, 16, 16);
     if(c_atom == NULL)
     {
@@ -940,7 +959,8 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
 static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
                                                 const rocke_unified_attention_3d_tiled_spec_t* spec,
                                                 const char* arch,
-                                                bool strided_kv)
+                                                bool strided_kv,
+                                                bool metadata_containment)
 {
     return ckc::guard_builder(b, [&]() -> rocke_kernel_def_t* {
         rocke_gfx942_attention_tiled_3d_build_ctx_t ctx;
@@ -963,10 +983,10 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
         if(strided_kv
            && (spec->kv_storage_dtype != NULL || spec->use_i64_kv_addr || spec->use_wide_kv_load))
         {
-            rocke_i_set_err(
-                b,
-                ROCKE_ERR_VALUE,
-                "strided KV requires fp16/bf16 async loads without paged i64 addressing");
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "strided KV requires fp16/bf16 async loads without paged "
+                            "i64 addressing");
             return NULL;
         }
         if(strided_kv && spec->use_wave_page_id_load)
@@ -975,17 +995,78 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
             return NULL;
         }
 
+        if(metadata_containment
+           && (strided_kv || !spec->use_decode_grid || spec->use_i64_kv_addr
+               || spec->kv_storage_dtype != NULL || spec->use_wide_kv_load
+               || spec->use_wave_page_id_load || spec->num_seqs <= 0 || spec->sliding_window < 0
+               || !rocke_bounds_geometry(spec->head_size,
+                                         spec->num_query_heads,
+                                         spec->num_kv_heads,
+                                         spec->num_segments,
+                                         spec->dtype,
+                                         arch,
+                                         "gfx942")))
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "bounded decode requires paged T32 async decode grid");
+            return NULL;
+        }
+        if(metadata_containment
+           && spec->num_seqs > 0x7FFF0000
+                                   / ((int64_t)spec->num_query_heads * spec->head_size
+                                      * spec->num_segments * 4))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "bounded decode workspace geometry exceeds i32");
+            return NULL;
+        }
+        const int tile = rocke_unified_attention_3d_tiled_spec_tile_size(spec);
+        if(metadata_containment && tile != 32)
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "bounded decode requires tile 32");
+            return NULL;
+        }
+        if(metadata_containment
+           && !rocke_bounds_validate_segment_lds(b, arch, spec->head_size, tile))
+            return NULL;
+        if((spec->block_size != 1 && spec->block_size != 16 && spec->block_size != 32
+            && spec->block_size != 64)
+           || (tile != 16 && tile != 32 && tile != 64))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "tiled decode requires page size 1/16/32/64 and tile size 16/32/64");
+            return NULL;
+        }
+        const rocke_attention_kv_loader_kind_t loader_kind
+            = rocke_gfx942_resolve_attention_kv_loader(strided_kv, spec->block_size, tile);
+        if(loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER
+           && (tile != 32 || spec->kv_storage_dtype != NULL || spec->use_i64_kv_addr
+               || spec->use_wide_kv_load))
+        {
+            rocke_i_set_err(b,
+                            ROCKE_ERR_VALUE,
+                            "paged gather requires tile 32 and fp16/bf16 bounded async loads");
+            return NULL;
+        }
+
+        if(loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER && spec->use_wave_page_id_load)
+        {
+            rocke_i_set_err(
+                b, ROCKE_ERR_VALUE, "paged gather does not support use_wave_page_id_load");
+            return NULL;
+        }
+
         /* Name the kernel from spec.kernel_name() (Python b = IRBuilder(
-         * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
+     * spec.kernel_name())). The C entry reuses a caller-supplied builder. */
         if(b->kernel != NULL)
         {
             char name[256];
             if(rocke_unified_attention_3d_tiled_spec_kernel_name(spec, name, sizeof(name)) < 0)
             {
-                rocke_i_set_err(
-                    b,
-                    ROCKE_ERR_VALUE,
-                    "build_unified_attention_3d_tiled_gfx942: kernel_name encode failed");
+                rocke_i_set_err(b,
+                                ROCKE_ERR_VALUE,
+                                "build_unified_attention_3d_tiled_gfx942: kernel_name "
+                                "encode failed");
                 return NULL;
             }
             if(strided_kv)
@@ -997,6 +1078,18 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
                     return NULL;
                 }
                 memcpy(name + len, "_stridedkv", sizeof("_stridedkv"));
+            }
+            if((metadata_containment || loader_kind == ROCKE_ATTN_KV_PAGED_TOKEN_GATHER)
+               && !rocke_paged_append_identity(name,
+                                               sizeof(name),
+                                               spec->num_query_heads,
+                                               spec->num_kv_heads,
+                                               metadata_containment,
+                                               metadata_containment ? spec->sliding_window : -1,
+                                               false))
+            {
+                rocke_i_set_err(b, ROCKE_ERR_VALUE, "paged metadata kernel name too long");
+                return NULL;
             }
             b->kernel->name = rocke_arena_strdup(&b->arena, name);
             if(b->kernel->name == NULL)
@@ -1012,7 +1105,9 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
             return NULL;
         }
 
+        ctx.metadata_containment = metadata_containment;
         ctx.strided_kv = strided_kv;
+        ctx.kv_loader_kind = loader_kind;
 
         /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 276). */
         if(b->kernel != NULL)
@@ -1026,15 +1121,15 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
         }
 
         /* ---- phase functions in Python execution order ----
-         * declare params (281-329) -> prologue (331-483, which emits the early
-         * seg_start_tile_pos>=seq_len zero-fill via emit_early_zero_fill in order)
-         * -> Q->LDS (437-467) -> loop init + first K load (508-536, 721-724) ->
-         * online-softmax scf.for (726-912) -> segment-workspace epilogue (914-967).
-         */
+     * declare params (281-329) -> prologue (331-483, which emits the early
+     * seg_start_tile_pos>=seq_len zero-fill via emit_early_zero_fill in order)
+     * -> Q->LDS (437-467) -> loop init + first K load (508-536, 721-724) ->
+     * online-softmax scf.for (726-912) -> segment-workspace epilogue (914-967).
+     */
         rocke_gfx942_attention_tiled_3d_declare_params(&ctx);
-        /* emit_prologue already emits the early zero-fill AND the Q->LDS feed inline
-         * (matching the single Python build function); calling emit_q_to_lds again
-         * here would duplicate the Q->LDS loop. */
+        /* emit_prologue already emits the early zero-fill AND the Q->LDS feed
+     * inline (matching the single Python build function); calling emit_q_to_lds
+     * again here would duplicate the Q->LDS loop. */
         rocke_gfx942_attention_tiled_3d_emit_prologue(&ctx);
         rocke_gfx942_attention_tiled_3d_emit_loop_init(&ctx);
         rocke_gfx942_attention_tiled_3d_emit_softmax_loop(&ctx);
@@ -1051,22 +1146,23 @@ static rocke_kernel_def_t* build_segment_gfx942(rocke_ir_builder_t* b,
 rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_gfx942(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
 {
-    return build_segment_gfx942(b, spec, arch, false);
+    return build_segment_gfx942(b, spec, arch, false, false);
 }
 
 rocke_kernel_def_t* rocke_build_unified_attention_3d_tiled_strided_gfx942(
     rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
 {
-    return build_segment_gfx942(b, spec, arch, true);
+    return build_segment_gfx942(b, spec, arch, true, false);
 }
 
 /* ===================================================================== *
  *  PUBLIC build entry -- reduce kernel (lines 1002-1133)
  * ===================================================================== */
-rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
-    rocke_ir_builder_t* b,
-    const rocke_unified_attention_reduce_tiled_spec_t* spec,
-    const char* arch)
+static rocke_kernel_def_t*
+    build_reduce_gfx942(rocke_ir_builder_t* b,
+                        const rocke_unified_attention_reduce_tiled_spec_t* spec,
+                        const char* arch,
+                        bool metadata_containment)
 {
     rocke_gfx942_attention_tiled_3d_build_ctx_t ctx;
 
@@ -1085,6 +1181,19 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
         return NULL;
     }
 
+    if(metadata_containment
+       && !rocke_bounds_geometry(spec->head_size,
+                                 spec->num_query_heads,
+                                 spec->num_kv_heads,
+                                 spec->num_segments,
+                                 spec->dtype,
+                                 arch,
+                                 "gfx942"))
+    {
+        rocke_i_set_err(b, ROCKE_ERR_VALUE, "bounded decode has invalid reducer geometry");
+        return NULL;
+    }
+
     if(b->kernel != NULL)
     {
         char name[256];
@@ -1092,6 +1201,18 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
         {
             rocke_i_set_err(
                 b, ROCKE_ERR_VALUE, "attn_reduce_tiled_gfx942: kernel_name encode failed");
+            return NULL;
+        }
+        if(metadata_containment
+           && !rocke_paged_append_identity(name,
+                                           sizeof(name),
+                                           spec->num_query_heads,
+                                           spec->num_kv_heads,
+                                           true,
+                                           -1,
+                                           spec->emit_lse))
+        {
+            rocke_i_set_err(b, ROCKE_ERR_VALUE, "paged metadata kernel name too long");
             return NULL;
         }
         b->kernel->name = rocke_arena_strdup(&b->arena, name);
@@ -1108,6 +1229,8 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
         return NULL;
     }
 
+    ctx.metadata_containment = metadata_containment;
+
     /* b.kernel.attrs["max_workgroup_size"] = THREADS (line 1018). */
     if(b->kernel != NULL)
     {
@@ -1119,8 +1242,8 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
     }
 
     /* ---- reduce phase functions in Python execution order ----
-     * declare + prologue (1022-1058) -> pass1 max (1060-1083) -> pass2 combine
-     * (1085-1104) -> pass3 normalize (1106-1131). */
+   * declare + prologue (1022-1058) -> pass1 max (1060-1083) -> pass2 combine
+   * (1085-1104) -> pass3 normalize (1106-1131). */
     rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(&ctx);
     rocke_gfx942_attention_tiled_3d_reduce_max_pass(&ctx);
     rocke_gfx942_attention_tiled_3d_reduce_combine_pass(&ctx);
@@ -1136,6 +1259,26 @@ rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
 /* ===================================================================== *
  *  build -> lower-to-.ll convenience (own/free internal IRBuilder)
  * ===================================================================== */
+
+rocke_kernel_def_t* rocke_build_unified_attention_reduce_tiled_gfx942(
+    rocke_ir_builder_t* b,
+    const rocke_unified_attention_reduce_tiled_spec_t* spec,
+    const char* arch)
+{
+    return build_reduce_gfx942(b, spec, arch, false);
+}
+extern "C" rocke_kernel_def_t* rocke_build_paged_decode_bounded_v1_gfx942(
+    rocke_ir_builder_t* b, const rocke_unified_attention_3d_tiled_spec_t* spec, const char* arch)
+{
+    return build_segment_gfx942(b, spec, arch, false, true);
+}
+extern "C" rocke_kernel_def_t* rocke_build_paged_decode_reduce_bounded_v1_gfx942(
+    rocke_ir_builder_t* b,
+    const rocke_unified_attention_reduce_tiled_spec_t* spec,
+    const char* arch)
+{
+    return build_reduce_gfx942(b, spec, arch, true);
+}
 rocke_status_t rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
     const rocke_unified_attention_3d_tiled_spec_t* spec,
     const char* arch,
@@ -1160,7 +1303,7 @@ rocke_status_t rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
     }
 
     /* The name carries the GQA ratio: refuse a head pair it cannot be formed
-     * for with the validator's reason, not the encoder's. */
+   * for with the validator's reason, not the encoder's. */
     if(!rocke_attention_check_head_counts(spec->num_query_heads, spec->num_kv_heads, err, err_cap))
         return ROCKE_ERR_VALUE;
     if(rocke_unified_attention_3d_tiled_spec_kernel_name(spec, name, sizeof(name)) < 0)

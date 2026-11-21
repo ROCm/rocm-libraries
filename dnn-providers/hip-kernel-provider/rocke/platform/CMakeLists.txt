@@ -468,6 +468,13 @@ if(ROCKE_INSTALL_TESTS)
               "golden gate will fail on its library-kernel cases")
     endif()
 
+    # A declared native lane must carry the matching extension in the test
+    # artifact (the default site-packages install is outside its capture).
+    if(ROCKE_BUILD_PYBIND)
+      install(FILES "$<TARGET_FILE:rocke_engine>"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/native")
+    endif()
+
     # Keep the LDS skill CLI under tests/ so TheRock's test artifact includes it.
     install(PROGRAMS
             "${CMAKE_CURRENT_SOURCE_DIR}/dsl_docs/optimization/utilities/skills/lds-bank-conflict-expert/scripts/predict.py"
@@ -596,8 +603,12 @@ if(ROCKE_INSTALL_TESTS)
     # rather than executing the .py directly, so they work on Windows where
     # shebangs are not supported. The CI test environment activates a venv with
     # requirements-test.txt before running ctest.
+    set(_rocke_smoke_native_arg "")
+    if(ROCKE_BUILD_PYBIND)
+      set(_rocke_smoke_native_arg " --check-pybind")
+    endif()
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
+           "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\"${_rocke_smoke_native_arg})\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 

@@ -45,8 +45,8 @@
  * ============================================================ */
 static rocke_value_t** s_seg_sv = NULL; /* sv      per lane slot              */
 static rocke_value_t** s_seg_in_rng = NULL; /* in_rng  per lane slot (NULL=None)  */
-static rocke_value_t** s_seg_sv_safe = NULL; /* sv_safe per lane slot              */
-static rocke_value_t** s_seg_max = NULL; /* seg_max_cache per lane slot        */
+static rocke_value_t** s_seg_sv_safe = NULL; /* sv_safe per lane slot */
+static rocke_value_t** s_seg_max = NULL; /* seg_max_cache per lane slot     */
 static rocke_value_t** s_seg_l = NULL; /* seg_l_cache   per lane slot        */
 static int s_seg_slots = 0; /* SEG_PER_LANE captured by pass 1    */
 
@@ -124,8 +124,8 @@ static rocke_value_t* rocke__red_out_offset(rocke_gfx942_attention_tiled_3d_buil
  * the kernel attrs (max_workgroup_size, optional waves_per_eu) the Python body
  * sets at lines 1018-1020. The heavy lifting (HD/NUM_SEG/NUM_QH/dtype/THREADS/
  * HALFS_PER_THREAD/SEG_PER_LANE + the HALFS_PER_THREAD*THREADS == HD assert) is
- * done by the peer rocke_gfx942_attn_tiled_3d_reduce_config_from_spec; this just
- * threads it into the ctx and stamps the kernel attrs.
+ * done by the peer rocke_gfx942_attn_tiled_3d_reduce_config_from_spec; this
+ * just threads it into the ctx and stamps the kernel attrs.
  * ============================================================ */
 void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx)
@@ -188,6 +188,11 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     ctx->red_seq_lens
         = rocke_b_param(b, "seq_lens_ptr", rocke_ptr_type(b, rocke_i32(), "global"), &opts);
     ctx->red_num_qh_p = rocke_b_param(b, "num_query_heads", rocke_i32(), NULL);
+    if(ctx->metadata_containment)
+    {
+        ctx->bounds.status = rocke_bounds_ptr_param(b, "metadata_status_ptr", true);
+        ctx->num_seqs_p = rocke_b_param(b, "num_seqs", rocke_i32(), NULL);
+    }
 
     /* lse_ptr : ptr<f32, global>, noalias, writeonly, align=4 (emit_lse only) */
     ctx->red_lse = NULL;
@@ -209,6 +214,32 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     ctx->tid = rocke_b_thread_id_x(b);
 
     /* ---- SSA constants (lines 1036-1037) ---- */
+    if(ctx->metadata_containment)
+    {
+        rocke_value_t* t1 = rocke_b_cmp_ge(b, ctx->q_token, ctx->num_seqs_p);
+        rocke_value_t* t2 = rocke_b_const_i32(b, ctx->cfg.NUM_QH);
+        rocke_value_t* t3 = rocke_b_cmp_ge(b, ctx->q_head, t2);
+        rocke_value_t* t4 = rocke_b_lor(b, t1, t3);
+        {
+            rocke_if_t g5 = rocke_b_scf_if(b, t4);
+            rocke_b_region_enter(b, g5.then_region);
+            rocke_b_ret(b);
+            rocke_b_region_leave(b);
+        }
+    }
+    if(ctx->metadata_containment)
+        rocke_bounds_reject(b,
+                            ctx->bounds.status,
+                            ctx->q_token,
+                            ctx->q_head,
+                            ctx->tid,
+                            ctx->out,
+                            ctx->cfg.dtype,
+                            ctx->cfg.HD,
+                            ctx->cfg.NUM_QH,
+                            ctx->cfg.NUM_KV,
+                            ctx->cfg.NUM_SEG,
+                            ctx->red_lse);
     ctx->neg_inf = rocke_b_const_f32(b, -INFINITY);
     ctx->zero_f = rocke_b_const_f32(b, 0.0);
 
@@ -243,7 +274,7 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
     }
 
     /* ---- base_ml = ml_desc_red.offset(token=q_token, head=q_head, seg=0) ----
-     * (line 1055) */
+   * (line 1055) */
     zero_i32 = rocke_b_const_i32(b, 0);
     ctx->base_ml = rocke__red_ml_offset(ctx, ctx->q_token, ctx->q_head, zero_i32);
 
@@ -269,9 +300,8 @@ void rocke_gfx942_attention_tiled_3d_reduce_declare_and_prologue(
  *       if in_rng is not None:
  *           ms = select(in_rng, ms, neg_inf)
  *           ls = select(in_rng, ls, zero_f)
- *       ms = select(fcmp("ogt", ls, zero_f), ms, neg_inf)   # empty segment -> -inf
- *       cache (sv, in_rng, sv_safe), ms, ls
- *       local_max = fmax(local_max, ms)
+ *       ms = select(fcmp("ogt", ls, zero_f), ms, neg_inf)   # empty segment ->
+ * -inf cache (sv, in_rng, sv_safe), ms, ls local_max = fmax(local_max, ms)
  *   overall_max = _wave64_reduce_max(local_max)
  * ============================================================ */
 void rocke_gfx942_attention_tiled_3d_reduce_max_pass(
@@ -340,9 +370,9 @@ void rocke_gfx942_attention_tiled_3d_reduce_max_pass(
         }
 
         /* A segment whose tiles were all masked for this row stores max=0 with
-         * sum=0. Its max carries no mass, so it must not set overall_max (it
-         * would underflow every real segment's factor) nor get a factor in
-         * pass 2: treat it as -inf. fcmp is emitted before select, as in Python. */
+     * sum=0. Its max carries no mass, so it must not set overall_max (it
+     * would underflow every real segment's factor) nor get a factor in
+     * pass 2: treat it as -inf. fcmp is emitted before select, as in Python. */
         has_mass = rocke_b_fcmp(b, "ogt", ls, ctx->zero_f);
         ms = rocke_b_select(b, has_mass, ms, ctx->neg_inf);
 
@@ -446,14 +476,12 @@ void rocke_gfx942_attention_tiled_3d_reduce_combine_pass(
  *
  *   for li in range(HALFS_PER_THREAD):
  *       d = add(mul(const_i32(li), const_i32(THREADS)), tid)
- *       acc_loop = scf_for_iter(0, NUM_SEG, 1, [("ac{li}", zero_f)], iv_name="s_acc{li}")
- *       with acc_loop as (sv, (ac,)):
- *           factor = smem_load_vN_f32(factor_lds, sv, n=1)
- *           factor_s = vec_extract(factor, 0)
- *           idx_acc, _ = seg_acc_desc_red.offset(token=q_token, head=q_head, seg=sv, dim=d)
- *           ov = global_load_f32(seg_out, idx_acc)
- *           scf_yield(fadd(ac, fmul(ov, factor_s)))
- *       scalar_out_f32 = fmul(acc_loop.results[0], inv_l)
+ *       acc_loop = scf_for_iter(0, NUM_SEG, 1, [("ac{li}", zero_f)],
+ * iv_name="s_acc{li}") with acc_loop as (sv, (ac,)): factor =
+ * smem_load_vN_f32(factor_lds, sv, n=1) factor_s = vec_extract(factor, 0)
+ *           idx_acc, _ = seg_acc_desc_red.offset(token=q_token, head=q_head,
+ * seg=sv, dim=d) ov = global_load_f32(seg_out, idx_acc) scf_yield(fadd(ac,
+ * fmul(ov, factor_s))) scalar_out_f32 = fmul(acc_loop.results[0], inv_l)
  *       scalar_out = cast_f32_to(scalar_out_f32, dtype)
  *       out_idx, _ = out_desc_red.offset(token=q_token, head=q_head, dim=d)
  *       global_store(out, out_idx, scalar_out, align=2)
@@ -492,7 +520,7 @@ void rocke_gfx942_attention_tiled_3d_reduce_normalize_pass(
         iter_args[0].init = ctx->zero_f;
 
         /* Bind lb / ub / step in Python order: C++ argument evaluation order is
-         * unspecified, and each const_i32 appends an SSA value. */
+     * unspecified, and each const_i32 appends an SSA value. */
         {
             rocke_value_t* acc_lb = rocke_b_const_i32(b, 0);
             rocke_value_t* acc_ub = rocke_b_const_i32(b, NUM_SEG);
@@ -535,10 +563,10 @@ void rocke_gfx942_attention_tiled_3d_reduce_normalize_pass(
     }
 
     /* emit_lse: every lane holds the same butterfly-reduced overall_max/expsum,
-     * so lane 0 writes. overall_max is in log2 units; lse_store converts to
-     * natural log and writes -inf for a row with no mass (sum 0); a NaN sum
-     * keeps NaN, as O does (!(l == 0), never l > 0). One builder call per
-     * statement, in Python order. */
+   * so lane 0 writes. overall_max is in log2 units; lse_store converts to
+   * natural log and writes -inf for a row with no mass (sum 0); a NaN sum
+   * keeps NaN, as O does (!(l == 0), never l > 0). One builder call per
+   * statement, in Python order. */
     if(ctx->reduce_spec != NULL && ctx->reduce_spec->emit_lse)
     {
         rocke_value_t* c0 = rocke_b_const_i32(b, 0);

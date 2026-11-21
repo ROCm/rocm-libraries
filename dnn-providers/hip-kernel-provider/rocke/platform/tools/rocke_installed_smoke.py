@@ -26,6 +26,7 @@ def _add_installed_python_paths() -> None:
         Path("lib64") / pyver / "site-packages",
         Path("lib") / "python" / "site-packages",
         Path("python"),
+        Path("tests") / "native",
     )
     # The script may be installed at <prefix>/bin/ (standalone) or nested under a
     # provider test subdir such as <prefix>/bin/<provider>/. Probe a bounded set
@@ -78,11 +79,11 @@ def _build_smoke_kernel():
 
 def _smoke_python_engine() -> tuple[str, str]:
     from rocke.core.ir_serialize import serialize
-    from rocke.core.lower_llvm import lower_kernel_to_llvm
+    from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
 
     kernel = _build_smoke_kernel()
     ir_text = serialize(kernel)
-    ll_text = lower_kernel_to_llvm(kernel, arch="gfx950")
+    ll_text = _lower_kernel_to_llvm_python(kernel, arch="gfx950")
     if "rocke_install_smoke" not in ll_text:
         raise RuntimeError("Python engine smoke did not lower the expected kernel")
     return ir_text, ll_text

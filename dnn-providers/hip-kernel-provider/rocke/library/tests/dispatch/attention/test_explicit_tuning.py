@@ -11,16 +11,17 @@ from itertools import islice
 from unittest import mock
 
 import kernels.common.attention_unified as au
+from dispatch.attention import (
+    AttentionRequest,
+    attention_candidates,
+    dispatch_attention,
+)
 from dispatch.attention.tuning_specs import (
     ExplicitAttention2DConfig,
     ExplicitAttention3DConfig,
     make_explicit_attention_2d_spec,
     make_explicit_attention_3d_specs,
-)
-from dispatch.attention import (
-    AttentionRequest,
-    attention_candidates,
-    dispatch_attention,
+    resolve_tile_policy,
 )
 from rocke import lower_kernel_to_llvm
 
@@ -58,6 +59,95 @@ def _request(arch="gfx950", **kw):
 
 
 class TestExplicitAttentionBuilders(unittest.TestCase):
+    def test_page_one_explicit_small_tiles_reject(self):
+        problem = _problem(total_q=1, max_seqlen_q=1, block_size=1)
+        for arch in ("gfx942", "gfx950"):
+            for token in ("1x", " 1X ", "2x", "4x", "8x"):
+                with (
+                    self.subTest(arch=arch, token=token),
+                    self.assertRaisesRegex(ValueError, "unsupported tile_size"),
+                ):
+                    make_explicit_attention_3d_specs(
+                        problem,
+                        ExplicitAttention3DConfig(num_segments=8, tile_policy=token),
+                        arch=arch,
+                    )
+            with self.assertRaisesRegex(ValueError, "unsupported tile_size=1"):
+                make_explicit_attention_3d_specs(
+                    problem, ExplicitAttention3DConfig(num_segments=8), arch=arch
+                )
+
+    def test_full_page_explicit_tiles_preserve_default_identity(self):
+        for arch in ("gfx942", "gfx950"):
+            for page in (16, 32, 64):
+                with self.subTest(arch=arch, page=page):
+                    segment, _ = make_explicit_attention_3d_specs(
+                        _problem(total_q=1, max_seqlen_q=1, block_size=page),
+                        ExplicitAttention3DConfig(num_segments=8),
+                        arch=arch,
+                    )
+                    self.assertEqual(segment.tile_size, page)
+                    self.assertIsNone(segment.tile_size_override)
+
+    def test_normalized_3d_tile_policies_preserve_geometry(self):
+        for arch in ("gfx942", "gfx950"):
+            for page in (1, 16, 32, 64):
+                problem = _problem(total_q=1, max_seqlen_q=1, block_size=page)
+                expected = make_explicit_attention_3d_specs(
+                    problem,
+                    ExplicitAttention3DConfig(num_segments=8, tile_policy="32"),
+                    arch=arch,
+                )
+                for token in ("32", " 32 ", "\t32\n"):
+                    with self.subTest(arch=arch, page=page, token=token):
+                        actual = make_explicit_attention_3d_specs(
+                            problem,
+                            ExplicitAttention3DConfig(
+                                num_segments=8, tile_policy=token
+                            ),
+                            arch=arch,
+                        )
+                        self.assertEqual(actual, expected)
+                        self.assertEqual(actual[0].tile_size, 32)
+
+    def test_tile_policy_vocabularies_and_legacy_resolution(self):
+        from builders.common import attention_tuning_builder as compat
+        from dispatch.attention import tuning_specs as tuning
+
+        self.assertIn("32", tuning.TILE_POLICIES_3D)
+        self.assertNotIn("32", tuning.TILE_POLICIES)
+        self.assertEqual(compat.TILE_POLICIES_3D, tuning.TILE_POLICIES_3D)
+        for token, expected in (
+            (" HALF ", 32),
+            (" 1X ", 64),
+            ("2x", 128),
+            ("4x", 256),
+            ("8x", 512),
+            (" 64 ", 64),
+            ("128", 128),
+        ):
+            for path in ("2d", "3d"):
+                with self.subTest(token=token, path=path):
+                    self.assertEqual(
+                        resolve_tile_policy(64, token, path=path), expected
+                    )
+        with self.assertRaisesRegex(ValueError, "tile_policy"):
+            resolve_tile_policy(64, "32")
+        with self.assertRaisesRegex(ValueError, "multiple"):
+            resolve_tile_policy(128, "64", path="3d")
+        with self.assertRaisesRegex(ValueError, "path"):
+            resolve_tile_policy(64, "32", path="unknown")
+        with self.assertRaisesRegex(ValueError, "32"):
+            resolve_tile_policy(64, "invalid", path="3d")
+        with self.assertRaisesRegex(ValueError, "tile_policy"):
+            make_explicit_attention_2d_spec(
+                _problem(block_size=64),
+                ExplicitAttention2DConfig(
+                    num_warps=2, block_m_per_warp=16, tile_policy="32"
+                ),
+                arch="gfx950",
+            )
+
     def test_2d_builder_does_not_call_policy_helpers(self):
         with (
             mock.patch.object(

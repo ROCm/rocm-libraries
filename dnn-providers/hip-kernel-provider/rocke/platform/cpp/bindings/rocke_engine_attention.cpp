@@ -3,14 +3,14 @@
 /*
  * bindings/rocke_engine_attention.cpp -- attention-family bindings for the
  * rocke_engine module. Kept in its own translation unit because the attention
- * instance headers share a set of struct tags (rocke_fmha_*, the tiled 2d/3d spec
- * tags) that are re-used across several headers; isolating them here keeps the
- * GEMM/conv translation unit's include surface clean.
+ * instance headers share a set of struct tags (rocke_fmha_*, the tiled 2d/3d
+ * spec tags) that are re-used across several headers; isolating them here keeps
+ * the GEMM/conv translation unit's include surface clean.
  *
- * register_attention(m) is called from the main module file. Each family mirrors
- * its tests/parity/<fam>_emit.c make_spec/make_cfg + build + lower exactly, so
- * for the same spec dict the binding output is byte-identical to the standalone
- * emitter.
+ * register_attention(m) is called from the main module file. Each family
+ * mirrors its tests/parity/<fam>_emit.c make_spec/make_cfg + build + lower
+ * exactly, so for the same spec dict the binding output is byte-identical to
+ * the standalone emitter.
  *
  * Families that emit two kernels per config (the tiled-3d segment+reduce pair
  * and splitkv-decode segment+reduce) concatenate the two .ll texts in the same
@@ -33,6 +33,7 @@
 
 extern "C" {
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
+#include "rocke/instance_attention_paged_decode_bounded.h"
 #include "rocke/instance_attention_unified.h"
 #include "rocke/instance_fmha_appendkv.h"
 #include "rocke/instance_fmha_bwd.h"
@@ -174,8 +175,8 @@ rocke_fmha_mask_mode_t mask_of(const py::dict& d, const char* key)
     return ROCKE_FMHA_MASK_NONE;
 }
 
-/* Build a rocke_fmha_common_spec_t from common sub-keys of the dict. The shape is
- * taken from head_size/num_query_heads/num_kv_heads (+ optional
+/* Build a rocke_fmha_common_spec_t from common sub-keys of the dict. The shape
+ * is taken from head_size/num_query_heads/num_kv_heads (+ optional
  * block_size_q/block_size_k for the shape_make form). */
 rocke_fmha_common_spec_t common_of(const py::dict& d, Store& st)
 {
@@ -549,11 +550,12 @@ std::vector<std::string> hg_verify(const py::dict& d, const std::string& arch)
 /* Build the jenga / vsa sparse-attention kernel into a caller-owned context so
  * the binding holds the FmhaKernelBuilder and can apply the documented teardown
  * (rocke_fmha_kernel_builder_free) on every exit path. The public
- * rocke_build_{jenga,vsa}_sparse_attention entries own an internal builder that the
- * binding has no handle to; replicating the engine's own prologue/stage/emit
- * sequence here (identical order, byte-identical IR) keeps that builder reachable
- * so it is reclaimed instead of leaked. Exactly one of jenga_ctx / vsa_ctx is
- * populated; *is_vsa selects which one's kb the caller must free. */
+ * rocke_build_{jenga,vsa}_sparse_attention entries own an internal builder that
+ * the binding has no handle to; replicating the engine's own
+ * prologue/stage/emit sequence here (identical order, byte-identical IR) keeps
+ * that builder reachable so it is reclaimed instead of leaked. Exactly one of
+ * jenga_ctx / vsa_ctx is populated; *is_vsa selects which one's kb the caller
+ * must free. */
 rocke_kernel_def_t* sparse_build(const py::dict& d,
                                  Store& st,
                                  const char* arch,
@@ -604,8 +606,8 @@ rocke_kernel_def_t* sparse_build(const py::dict& d,
         return nullptr;
     return k;
 }
-/* Free whichever context's FmhaKernelBuilder was populated by sparse_build. Safe
- * to call on the failure path: rocke_fmha_kernel_builder_free tolerates a
+/* Free whichever context's FmhaKernelBuilder was populated by sparse_build.
+ * Safe to call on the failure path: rocke_fmha_kernel_builder_free tolerates a
  * partially-initialised (zeroed) builder. */
 void sparse_free(rocke_jenga_sparse_ctx_t* jenga_ctx, rocke_vsa_sparse_ctx_t* vsa_ctx, bool is_vsa)
 {
@@ -854,9 +856,9 @@ rocke_attention_tiled_2d_spec_t t2d_build(const py::dict& d, Store& st)
     s.emit_lse = a_bool(d, "emit_lse", s.emit_lse);
     s.lse_head_major = t2d_lse_head_major(d);
     /* Every other field the C struct shares with the Python spec. A field left
-     * out here silently keeps its C default, so the native builder would build
-     * a different kernel (e.g. gfx942 x8 transposed specs fail validation
-     * without use_mfma_32x32x8). */
+   * out here silently keeps its C default, so the native builder would build
+   * a different kernel (e.g. gfx942 x8 transposed specs fail validation
+   * without use_mfma_32x32x8). */
     s.use_mfma_32x32x8 = a_bool(d, "use_mfma_32x32x8", s.use_mfma_32x32x8);
     s.use_q_major_grid = a_bool(d, "use_q_major_grid", s.use_q_major_grid);
     s.use_transposed_half_local_pv
@@ -1136,8 +1138,66 @@ std::vector<std::string> fkv_verify(const py::dict& d, const std::string& arch)
 
 /* ===================== gfx942 / gfx950 tiled-3d ======================== */
 
+void t3d_check_types(const py::dict& d)
+{
+    for(const char* key : {"emit_lse", "reduce_emit_lse"})
+    {
+        if(d.contains(key) && !py::isinstance<py::bool_>(d[key]))
+            throw py::value_error(std::string(key) + " must be a bool");
+    }
+    // This adapter accepts partial dictionaries: missing/None retains defaults.
+    // Check supplied values before casts erase the caller's Python type.
+    for(const char* key : {"head_size",
+                           "block_size",
+                           "num_query_heads",
+                           "num_kv_heads",
+                           "num_segments",
+                           "sliding_window",
+                           "num_seqs",
+                           "waves_per_eu",
+                           "tile_size_override",
+                           "right_bound"})
+    {
+        if(d.contains(key) && !d[key].is_none()
+           && (!py::isinstance<py::int_>(d[key]) || py::isinstance<py::bool_>(d[key])))
+            throw py::value_error(std::string(key) + " must be an integer excluding bool");
+    }
+    for(const char* key : {"use_sinks",
+                           "has_softcap",
+                           "use_alibi",
+                           "use_qq_bias",
+                           "use_invariant_hoist",
+                           "use_wide_kv_load",
+                           "use_i64_kv_addr",
+                           "use_decode_grid",
+                           "use_kv_lds_swizzle",
+                           "use_wave_page_id_load",
+                           "metadata_containment",
+                           "use_additive_bias",
+                           "causal_top_left"})
+    {
+        if(d.contains(key) && !d[key].is_none() && !py::isinstance<py::bool_>(d[key]))
+            throw py::value_error(std::string(key) + " must be a bool");
+    }
+    for(const char* key : {"dtype", "kv_storage_dtype", "kv_layout", "kv_cache_policy"})
+    {
+        if(d.contains(key) && !d[key].is_none() && !py::isinstance<py::str>(d[key]))
+            throw py::value_error(std::string(key) + " must be a string");
+    }
+    if(a_bool(d, "metadata_containment", false))
+    {
+        std::string layout = "paged";
+        a_str(d, "kv_layout", layout);
+        if(layout != "paged" || a_bool(d, "use_additive_bias", false)
+           || a_bool(d, "causal_top_left", false) || a_int(d, "right_bound", 0) != 0)
+            throw py::value_error("bounded decode requires paged bottom-right causal alignment "
+                                  "without additive bias");
+    }
+}
+
 rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
 {
+    t3d_check_types(d);
     rocke_unified_attention_3d_tiled_spec_t s = rocke_unified_attention_3d_tiled_spec_default();
     s.head_size = a_int(d, "head_size", s.head_size);
     s.block_size = a_int(d, "block_size", s.block_size);
@@ -1179,10 +1239,17 @@ rocke_unified_attention_3d_tiled_spec_t t3d_build(const py::dict& d, Store& st)
 
 bool t3d_strided(const py::dict& d)
 {
+    if(a_bool(d, "metadata_containment", false)
+       && (a_bool(d, "use_additive_bias", false) || a_bool(d, "causal_top_left", false)
+           || a_int(d, "right_bound", 0) != 0))
+        throw py::value_error("bounded decode requires bottom-right causal "
+                              "alignment without additive bias");
     std::string layout = "paged";
     a_str(d, "kv_layout", layout);
     if(layout != "paged" && layout != "strided")
         throw py::value_error("kv_layout must be 'paged' or 'strided'");
+    if(layout == "strided" && a_bool(d, "metadata_containment", false))
+        throw py::value_error("bounded decode requires paged KV");
     return layout == "strided";
 }
 
@@ -1196,7 +1263,7 @@ static std::string t3d942_segment_ll(const py::dict& d,
     char* ll = nullptr;
     char err[ROCKE_ERR_MSG_CAP];
     err[0] = '\0';
-    if(!t3d_strided(d))
+    if(!t3d_strided(d) && !a_bool(d, "metadata_containment", false))
     {
         rocke_status_t status = rocke_build_unified_attention_3d_tiled_gfx942_lower_to_llvm(
             &s, target, resolve_python_llvm_flavor(), &ll, err, sizeof err);
@@ -1204,7 +1271,10 @@ static std::string t3d942_segment_ll(const py::dict& d,
     }
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
-    rocke_kernel_def_t* k = rocke_build_unified_attention_3d_tiled_strided_gfx942(&b, &s, target);
+    rocke_kernel_def_t* k
+        = (a_bool(d, "metadata_containment", false)
+               ? rocke_build_paged_decode_bounded_v1_gfx942
+               : rocke_build_unified_attention_3d_tiled_strided_gfx942)(&b, &s, target);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string message = rocke_ir_builder_error(&b);
@@ -1216,6 +1286,32 @@ static std::string t3d942_segment_ll(const py::dict& d,
         k, resolve_python_llvm_flavor(), target, &ll, err, sizeof err);
     guard.reset();
     return take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
+}
+
+static std::string t3d_reduce_ll(const rocke_unified_attention_reduce_tiled_spec_t& spec,
+                                 const char* arch,
+                                 bool bounded)
+{
+    rocke_ir_builder_t b;
+    rocke_ir_builder_init(&b, "attention_tiled_3d_reduce");
+    auto build = strcmp(arch, "gfx942") == 0
+                     ? (bounded ? rocke_build_paged_decode_reduce_bounded_v1_gfx942
+                                : rocke_build_unified_attention_reduce_tiled_gfx942)
+                     : (bounded ? rocke_build_paged_decode_reduce_bounded_v1_gfx950
+                                : rocke_build_unified_attention_reduce_tiled_gfx950);
+    rocke_kernel_def_t* kernel = build(&b, &spec, arch);
+    if(!kernel || !rocke_ir_builder_ok(&b))
+    {
+        std::string message = rocke_ir_builder_error(&b);
+        rocke_ir_builder_free(&b);
+        throw std::runtime_error(message);
+    }
+    auto guard = rocke_bindings::own_builder(&b, rocke_ir_builder_free);
+    char* ll = nullptr;
+    char err[ROCKE_ERR_MSG_CAP] = {};
+    auto status = rocke_lower_kernel_to_llvm_ex(
+        kernel, resolve_python_llvm_flavor(), arch, &ll, err, sizeof err);
+    return take_ll(status, ll, err, "rocke_engine.tiled_3d_reduce_lower_llvm");
 }
 
 std::string t3d942_lower(const py::dict& d, const std::string& arch)
@@ -1234,14 +1330,10 @@ std::string t3d942_lower(const py::dict& d, const std::string& arch)
     r.num_segments = s.num_segments;
     r.has_waves_per_eu = s.has_waves_per_eu;
     r.waves_per_eu = s.waves_per_eu;
-    /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them). */
+    /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them).
+   */
     r.emit_lse = a_bool(d, "reduce_emit_lse", s.emit_lse);
-    char* ll = nullptr;
-    char err[ROCKE_ERR_MSG_CAP];
-    err[0] = '\0';
-    rocke_status_t status = rocke_build_unified_attention_reduce_tiled_gfx942_lower_to_llvm(
-        &r, target, resolve_python_llvm_flavor(), &ll, err, sizeof err);
-    out += take_ll(status, ll, err, "rocke_engine.gfx942_attention_tiled_3d_lower_llvm");
+    out += t3d_reduce_ll(r, target, a_bool(d, "metadata_containment", false));
     return out;
 }
 std::string t3d942_serialize(const py::dict& d, const std::string& arch)
@@ -1255,8 +1347,9 @@ std::string t3d942_serialize(const py::dict& d, const std::string& arch)
     rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     rocke_ir_builder_init(&b, kname);
     rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
-                          : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
+        = (a_bool(d, "metadata_containment", false) ? rocke_build_paged_decode_bounded_v1_gfx942
+           : t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
+                            : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1279,8 +1372,9 @@ std::vector<std::string> t3d942_verify(const py::dict& d, const std::string& arc
     rocke_unified_attention_3d_tiled_spec_kernel_name(&s, kname, sizeof kname);
     rocke_ir_builder_init(&b, kname);
     rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
-                          : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
+        = (a_bool(d, "metadata_containment", false) ? rocke_build_paged_decode_bounded_v1_gfx942
+           : t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx942
+                            : rocke_build_unified_attention_3d_tiled_gfx942)(&b, &s, arch.c_str());
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1291,6 +1385,29 @@ std::vector<std::string> t3d942_verify(const py::dict& d, const std::string& arc
     std::vector<std::string> out = ver_kernel(k);
     rocke_ir_builder_free(&b);
     return out;
+}
+
+std::string bounded_reduce_lower(const py::dict& d, const std::string& arch)
+{
+    require_arch(arch);
+    if(arch != "gfx942" && arch != "gfx950")
+        throw py::value_error("paged decode reducer requires gfx942/gfx950");
+    t3d_check_types(d);
+    Store st;
+    rocke_unified_attention_reduce_tiled_spec_t r
+        = rocke_unified_attention_reduce_tiled_spec_default();
+    r.head_size = a_int(d, "head_size", 0);
+    r.num_query_heads = a_int(d, "num_query_heads", 0);
+    r.num_kv_heads = a_int(d, "num_kv_heads", 0);
+    r.num_segments = a_int(d, "num_segments", 0);
+    r.has_waves_per_eu = d.contains("waves_per_eu") && !d["waves_per_eu"].is_none();
+    if(r.has_waves_per_eu)
+        r.waves_per_eu = a_int(d, "waves_per_eu", 0);
+    r.emit_lse = a_bool(d, "reduce_emit_lse", a_bool(d, "emit_lse", false));
+    std::string dtype;
+    if(a_str(d, "dtype", dtype))
+        r.dtype = st.keep(dtype);
+    return t3d_reduce_ll(r, arch.c_str(), a_bool(d, "metadata_containment", false));
 }
 
 /* gfx950 3d: emitter lowers segment then reduce, concatenated. */
@@ -1306,8 +1423,9 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
         rocke_kernel_def_t* k
-            = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                              : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+            = (a_bool(d, "metadata_containment", false) ? rocke_build_paged_decode_bounded_v1_gfx950
+               : t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
+                                : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
         if(!k || !rocke_ir_builder_ok(&b))
         {
             std::string m = std::string("gfx950_attention_tiled_3d segment build failed: ")
@@ -1335,11 +1453,15 @@ std::string t3d950_lower(const py::dict& d, const std::string& arch)
         r.num_segments = s.num_segments;
         r.has_waves_per_eu = s.has_waves_per_eu;
         r.waves_per_eu = s.waves_per_eu;
-        /* reduce_emit_lse defaults to the segment's emit_lse (production pairs them). */
+        /* reduce_emit_lse defaults to the segment's emit_lse (production pairs
+     * them). */
         r.emit_lse = a_bool(d, "reduce_emit_lse", s.emit_lse);
         rocke_ir_builder_t b;
         rocke_ir_builder_init(&b, "attention_tiled_3d_reduce");
-        rocke_kernel_def_t* k = rocke_build_unified_attention_reduce_tiled_gfx950(&b, &r, a);
+        rocke_kernel_def_t* k
+            = (a_bool(d, "metadata_containment", false)
+                   ? rocke_build_paged_decode_reduce_bounded_v1_gfx950
+                   : rocke_build_unified_attention_reduce_tiled_gfx950)(&b, &r, a);
         if(!k || !rocke_ir_builder_ok(&b))
         {
             std::string m = std::string("gfx950_attention_tiled_3d reduce build failed: ")
@@ -1367,8 +1489,9 @@ std::string t3d950_serialize(const py::dict& d, const std::string& arch)
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
     rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                          : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+        = (a_bool(d, "metadata_containment", false) ? rocke_build_paged_decode_bounded_v1_gfx950
+           : t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
+                            : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1389,8 +1512,9 @@ std::vector<std::string> t3d950_verify(const py::dict& d, const std::string& arc
     rocke_ir_builder_t b;
     rocke_ir_builder_init(&b, "attention_tiled_3d_segment");
     rocke_kernel_def_t* k
-        = (t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
-                          : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
+        = (a_bool(d, "metadata_containment", false) ? rocke_build_paged_decode_bounded_v1_gfx950
+           : t3d_strided(d) ? rocke_build_unified_attention_3d_tiled_strided_gfx950
+                            : rocke_build_unified_attention_3d_tiled_gfx950)(&b, &s, a);
     if(!k || !rocke_ir_builder_ok(&b))
     {
         std::string m
@@ -1501,7 +1625,8 @@ py::dict attn_tiled_spec_from_problem(const py::dict& d, const std::string& arch
     const char* a = arch.c_str();
     rocke_attention_tiled_2d_spec_t spec = rocke_unified_attn_tiled_spec_from_problem(&p, a);
     /* Run the LDS-budget resolver (mirrors the Python _resolve_lds_budget call
-     * that attention_unified._tiled_spec_from_problem makes after building the spec). */
+   * that attention_unified._tiled_spec_from_problem makes after building the
+   * spec). */
     char reason[256] = {};
     rocke_unified_attn_set_resolved_arch(a);
     rocke_unified_attn_resolve_lds_budget(&spec, reason, sizeof(reason));
@@ -1521,6 +1646,7 @@ void register_attention(py::module_& m)
     reg3(m, "gfx942_attention_tiled_2d", &t942_lower, &t942_serialize, &t942_verify);
     reg3(m, "gfx950_attention_tiled_2d", &t950_lower, &t950_serialize, &t950_verify);
     reg3(m, "gfx950_attention_tiled_2d_fastkv_regp", &fkv_lower, &fkv_serialize, &fkv_verify);
+    m.def("paged_decode_reduce_lower_llvm", &bounded_reduce_lower);
     reg3(m, "gfx942_attention_tiled_3d", &t3d942_lower, &t3d942_serialize, &t3d942_verify);
     reg3(m, "gfx950_attention_tiled_3d", &t3d950_lower, &t3d950_serialize, &t3d950_verify);
 

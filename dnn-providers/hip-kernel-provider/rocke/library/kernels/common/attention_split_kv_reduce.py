@@ -38,8 +38,11 @@ def split_kv_reduce_spec(reduce_type, segment, *, emit_lse: bool = False):
     problem's (the output the caller asked for), not the segment's, so the caller
     passes it. It is forwarded unless it is ``False``, so a reduce type without the
     field builds as before when LSE is off, and the reduce type still validates any
-    other value.
+    other value. The containment marker follows the segment when enabled.
     """
+    containment = getattr(segment, "metadata_containment", False)
+    if type(containment) is not bool:
+        raise ValueError("metadata_containment must be a bool")
     return reduce_type(
         head_size=segment.head_size,
         num_query_heads=segment.num_query_heads,
@@ -47,6 +50,7 @@ def split_kv_reduce_spec(reduce_type, segment, *, emit_lse: bool = False):
         dtype=segment.dtype,
         num_segments=segment.num_segments,
         waves_per_eu=segment.waves_per_eu,
+        **({"metadata_containment": True} if containment else {}),
         **({} if emit_lse is False else {"emit_lse": emit_lse}),
     )
 

@@ -8,30 +8,31 @@
  *   build_unified_attention_3d_tiled       lines 234-969  (segment kernel)
  *   build_unified_attention_reduce_tiled   lines 1002-1133 (reduce kernel)
  *   _mfma_16x16_c_row(b, lane, reg)        lines 79-88     (C-accum row decode)
- *   _strided_v_b_operand(k_iter, ...)      lines 886-896   (PV B reconstruction)
- *   plus the closured load issuers threaded inside the body:
+ *   _strided_v_b_operand(k_iter, ...)      lines 886-896   (PV B
+ * reconstruction) plus the closured load issuers threaded inside the body:
  *     _issue_k_load / _issue_v_load        lines 604-632   (1-DWORD async DMA)
  *     _issue_wide_load                     lines 645-658   (opt b128 sync feed)
- *     _issue_fp8_dequant_loads             lines 669-701   (fp8 -> dtype -> LDS)
- *     _issue_k / _issue_v                  lines 705-719   (dispatch by KV mode)
+ *     _issue_fp8_dequant_loads             lines 669-701   (fp8 -> dtype ->
+ * LDS) _issue_k / _issue_v                  lines 705-719   (dispatch by KV
+ * mode)
  *
  * WHY THIS HEADER EXISTS.
  *   build_unified_attention_3d_tiled is one long body that (a) declares ~16
- *   params in a load-bearing spec-dependent order, (b) computes a prologue stack
- *   of grid ids / binary-search seq-idx / cu_q bounds / kv geometry / SSA
+ *   params in a load-bearing spec-dependent order, (b) computes a prologue
+ * stack of grid ids / binary-search seq-idx / cu_q bounds / kv geometry / SSA
  *   constants / LDS allocs / paged-KV descriptor, (c) closes over a pile of
  *   geometry + the K/V LDS bases + the paged-KV descriptor inside FOUR nested
  *   load-issuer closures (_issue_k_load / _issue_wide_load /
  *   _issue_fp8_dequant_loads + the _issue_k/_issue_v dispatchers) and the
- *   per-N _strided_v_b_operand closure, (d) runs the online-softmax scf.for over
- *   [tile_start, tile_end) threading those closures, and (e) emits the early-out
- *   zero-fill block + the guarded segment-workspace epilogue.
+ *   per-N _strided_v_b_operand closure, (d) runs the online-softmax scf.for
+ * over [tile_start, tile_end) threading those closures, and (e) emits the
+ * early-out zero-fill block + the guarded segment-workspace epilogue.
  *
  *   In C there is no closure capture. The faithful port turns each Python
  *   closure / phase into a free function taking a POINTER to one shared context
- *   struct, rocke_gfx942_attention_tiled_3d_build_ctx_t, which holds EXACTLY the
- *   set of compile-time geometry + SSA Values + descriptors + LDS handles those
- *   closures and the loop body share. The glue driver zero-inits a ctx,
+ *   struct, rocke_gfx942_attention_tiled_3d_build_ctx_t, which holds EXACTLY
+ * the set of compile-time geometry + SSA Values + descriptors + LDS handles
+ * those closures and the loop body share. The glue driver zero-inits a ctx,
  *   populates spec/config + ABI params + prologue in Python order, then calls
  *   the phase functions in Python execution order. The reduce kernel is small
  *   and self-contained; it reuses the same ctx (its own field subset) so the
@@ -45,15 +46,15 @@
  *   this header. A genuinely missing value is a header design bug to fix once,
  *   deliberately, not patch per-phase.
  *
- *   Naming: ctx fields mirror the Python local names 1:1 (Python `cu_q_start` ->
- *   `ctx->cu_q_start`; Python `qk_scale` -> `ctx->qk_scale`). The all-caps
+ *   Naming: ctx fields mirror the Python local names 1:1 (Python `cu_q_start`
+ * -> `ctx->cu_q_start`; Python `qk_scale` -> `ctx->qk_scale`). The all-caps
  *   compile-time config constants keep their Python ALL-CAPS names. Phase
  *   functions mirror the Python closure / build-fn names with the
  *   `rocke_gfx942_attention_tiled_3d_` prefix.
  *
- * THIS HEADER EMITS NO IR AND DECLARES NO PUBLIC API. It is included only by the
- * instance_gfx942_attention_tiled_3d_*.c translation units. Public callers use
- * rocke/instance_gfx942_attention_tiled_3d.h.
+ * THIS HEADER EMITS NO IR AND DECLARES NO PUBLIC API. It is included only by
+ * the instance_gfx942_attention_tiled_3d_*.c translation units. Public callers
+ * use rocke/instance_gfx942_attention_tiled_3d.h.
  */
 #ifndef ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_INTERNAL_H
 #define ROCKE_INSTANCE_GFX942_ATTENTION_TILED_3D_INTERNAL_H
@@ -65,6 +66,8 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                  */
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t          */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t          */
+#include "rocke/instance_attention_kv_loader_internal.h"
+#include "rocke/instance_attention_paged_bounds_internal.h"
 #include "rocke/instance_attention_strided_kv_internal.h"
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/ir.h"
@@ -82,7 +85,7 @@ extern "C" {
  * ============================================================ */
 typedef enum rocke_gfx942_attn_tiled_3d_kind
 {
-    ROCKE_GFX942_ATTN_TILED_3D_SEGMENT = 0, /* build_unified_attention_3d_tiled     */
+    ROCKE_GFX942_ATTN_TILED_3D_SEGMENT = 0, /* build_unified_attention_3d_tiled */
     ROCKE_GFX942_ATTN_TILED_3D_REDUCE /* build_unified_attention_reduce_tiled */
 } rocke_gfx942_attn_tiled_3d_kind_t;
 
@@ -140,12 +143,14 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     int fp8_total_chunks; /* (T*HD)//8 */
     int fp8_chunks_per_thread; /* fp8_total_chunks // THREADS */
     bool WIDE_KV; /* use_wide_kv_load && !KV_FP8 && WIDE_OK */
-    int KV_CACHE_BITS; /* cache_policy_from_name(spec.kv_cache_policy): the async K/V copies */
+    int KV_CACHE_BITS; /* cache_policy_from_name(spec.kv_cache_policy): the async
+                        K/V copies */
     bool KV_SWZ; /* spec.use_kv_lds_swizzle                              */
     int KV_CHUNKS_PER_ROW; /* HD / 8: 16-byte chunks per K/V LDS row        */
     bool WAVE_PAGE_ID_LOAD; /* spec.use_wave_page_id_load (64-page id window) */
     int TILES_PER_PAGE; /* BS / T (tiles never straddle pages)               */
-    bool KV_STREAM; /* kv_cache_policy == "stream": the wide K/V loads are non-temporal */
+    bool KV_STREAM; /* kv_cache_policy == "stream": the wide K/V loads are
+                         non-temporal */
     bool DECODE_GRID; /* spec.use_decode_grid (seq_idx = block_id_x, no search) */
 
     /* Q -> LDS feed (lines 438-439) */
@@ -154,7 +159,7 @@ typedef struct rocke_gfx942_attn_tiled_3d_config
     int bm1_div_nqk; /* (BLOCK_M-1)//NQK */
 
     const rocke_type_t* dtype; /* F16 / BF16                                 */
-    const rocke_type_t* kv_io_dtype; /* FP8E4M3 if KV_FP8 else dtype               */
+    const rocke_type_t* kv_io_dtype; /* FP8E4M3 if KV_FP8 else dtype */
 
     /* ---- reduce kernel (lines 1013-1057) ---- */
     int HALFS_PER_THREAD; /* HD // THREADS */
@@ -173,7 +178,8 @@ bool rocke_gfx942_attn_tiled_3d_config_from_spec(
 
 /* Fill *out from the reduce spec (HD/NUM_SEG/NUM_QH/dtype/THREADS/
  * HALFS_PER_THREAD/SEG_PER_LANE). arch is accepted but ignored (arch-neutral).
- * Asserts HALFS_PER_THREAD*THREADS == HD (line 1015). Returns true on success. */
+ * Asserts HALFS_PER_THREAD*THREADS == HD (line 1015). Returns true on success.
+ */
 bool rocke_gfx942_attn_tiled_3d_reduce_config_from_spec(
     rocke_ir_builder_t* b,
     const rocke_unified_attention_reduce_tiled_spec_t* spec,
@@ -187,35 +193,38 @@ bool rocke_gfx942_attn_tiled_3d_reduce_config_from_spec(
  * ===================================================================== */
 typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
 {
+    bool metadata_containment;
+    rocke_paged_bounds_t bounds;
     bool strided_kv;
+    rocke_attention_kv_loader_kind_t kv_loader_kind;
     rocke_strided_kv_params_t k_strides;
     rocke_strided_kv_params_t v_strides;
     /* ---------- inputs / configuration ---------- */
     rocke_ir_builder_t* b; /* the IRBuilder (Python `b`)           */
-    rocke_gfx942_attn_tiled_3d_kind_t kind; /* segment or reduce                    */
+    rocke_gfx942_attn_tiled_3d_kind_t kind; /* segment or reduce              */
     const rocke_unified_attention_3d_tiled_spec_t* spec; /* segment spec     */
     const rocke_unified_attention_reduce_tiled_spec_t* reduce_spec; /* reduce spec  */
-    rocke_gfx942_attn_tiled_3d_config_t cfg; /* derived compile-time config          */
+    rocke_gfx942_attn_tiled_3d_config_t cfg; /* derived compile-time config */
     rocke_kernel_def_t* kernel; /* == b->kernel; returned by the driver */
 
     /* C-accumulator warp distribution for the 16x16x16 atom (_C16_DIST, line 74).
-     * Built once (make_static_tile_distribution of make_c_warp_dstr_encoding(
-     * MfmaAtom.f16_16x16x16())); read by _mfma_16x16_c_row. */
+   * Built once (make_static_tile_distribution of make_c_warp_dstr_encoding(
+   * MfmaAtom.f16_16x16x16())); read by _mfma_16x16_c_row. */
     const rocke_tile_distribution_t* C16_DIST;
 
     /* ========================= SEGMENT KERNEL ========================= */
 
     /* ---------- params (lines 281-329, load-bearing order) ---------- */
-    rocke_value_t* segm_output_ptr; /* F32* writeonly                              */
+    rocke_value_t* segm_output_ptr; /* F32* writeonly */
     rocke_value_t* segm_max_ptr; /* F32* writeonly                              */
-    rocke_value_t* segm_expsum_ptr; /* F32* writeonly                              */
+    rocke_value_t* segm_expsum_ptr; /* F32* writeonly */
     rocke_value_t* query; /* dtype* readonly                             */
     rocke_value_t* key; /* kv_io_dtype* readonly                       */
     rocke_value_t* value; /* kv_io_dtype* readonly                       */
     rocke_value_t* sinks; /* dtype* readonly                             */
     rocke_value_t* block_tables; /* I32* readonly                               */
     rocke_value_t* seq_lens; /* I32* readonly                               */
-    rocke_value_t* alibi_slopes_ptr; /* F32* readonly                              */
+    rocke_value_t* alibi_slopes_ptr; /* F32* readonly */
     rocke_value_t* qq_bias_ptr; /* F32* readonly                              */
     rocke_value_t* cu_q; /* I32* readonly (query_start_len_ptr)        */
     rocke_value_t* scale_p; /* F32 scale                                   */
@@ -224,14 +233,14 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* softcap_p; /* F32 softcap                                 */
     rocke_value_t* num_seqs_p; /* I32 num_seqs                                */
     rocke_value_t* bt_stride_p; /* I32 block_table_stride                      */
-    rocke_value_t* qq_bias_stride0_p; /* I32 qq_bias_stride_0                        */
+    rocke_value_t* qq_bias_stride0_p; /* I32 qq_bias_stride_0 */
     /* RUNTIME_KERNARG_FIELDS params, in declaration order. */
     rocke_value_t* num_qh_p; /* I32 num_query_heads                         */
     rocke_value_t* num_kv_p; /* I32 num_kv_heads                            */
     rocke_value_t* sliding_window_p; /* I32 sliding_window                    */
 
     /* ---------- grid ids + thread (lines 331-334) ---------- */
-    rocke_value_t* q_block_global_idx; /* block_id_x()                              */
+    rocke_value_t* q_block_global_idx; /* block_id_x() */
     rocke_value_t* kv_head_idx; /* block_id_y()                              */
     rocke_value_t* seg_idx; /* block_id_z()                              */
     rocke_value_t* tid; /* thread_id_x()                             */
@@ -240,14 +249,14 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* seq_idx; /* binary_search_seq_idx(...)                */
     rocke_value_t* cu_q_start; /* cu_q[seq_idx]                             */
     rocke_value_t* cu_q_stop; /* cu_q[seq_idx+1]                           */
-    rocke_value_t* cur_batch_q_len; /* cu_q_stop - cu_q_start                    */
-    rocke_value_t* q_block_start_idx; /* cu_q_start//BLOCK_Q + seq_idx             */
-    rocke_value_t* q_block_local_idx; /* q_block_global_idx - q_block_start_idx    */
+    rocke_value_t* cur_batch_q_len; /* cu_q_stop - cu_q_start   */
+    rocke_value_t* q_block_start_idx; /* cu_q_start//BLOCK_Q + seq_idx */
+    rocke_value_t* q_block_local_idx; /* q_block_global_idx - q_block_start_idx */
     rocke_value_t* seq_len; /* seq_lens[seq_idx]                         */
     rocke_value_t* context_len; /* seq_len - cur_batch_q_len                 */
     rocke_value_t* qb_start_pos; /* q_block_local_idx * BLOCK_Q               */
     rocke_value_t* tps; /* tiles_per_segment = cdiv(seq_len,NUM_SEG*T)*/
-    rocke_value_t* seg_start_tile_pos; /* seg_idx*tps*T                            */
+    rocke_value_t* seg_start_tile_pos; /* seg_idx*tps*T */
 
     /* ---------- per-segment tile range (lines 470-477) ---------- */
     rocke_value_t* max_seq_prefix_len; /* min(context_len+qb_start_pos+bm1+1, seq_len)*/
@@ -272,7 +281,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_tensor_descriptor_t* ml_desc; /* segm_ml (token, head, seg)          */
     rocke_tensor_descriptor_t* seg_acc_desc; /* segm_output (token, head, seg, dim)  */
     rocke_tensor_descriptor_t* q_desc; /* Q (token, head, dim)                 */
-    rocke_tensor_descriptor_t* kv_base_desc; /* _kv_base byte-stride paged base      */
+    rocke_tensor_descriptor_t* kv_base_desc; /* _kv_base byte-stride paged base */
     rocke_tensor_descriptor_t* paged_kv_desc; /* T==BS or BS%T==0 transformed form    */
 
     /* ---------- LDS allocations (lines 424-427) ---------- */
@@ -295,13 +304,13 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     /* ---------- wave page-id window (WAVE_PAGE_ID_LOAD) ---------- */
     rocke_value_t* seq_pages; /* cdiv(seq_len, BS)                         */
     rocke_value_t* seg_first_page; /* _tile_page(tile_start)                    */
-    rocke_value_t* first_page_id_window; /* the first 64-page id window          */
+    rocke_value_t* first_page_id_window; /* the first 64-page id window */
     rocke_value_t* first_page_id; /* tile_start's page id                      */
 
     /* ---------- online-softmax loop init carry ---------- *
-     * The QK MFMA computes S^T = K Q^T: lane l owns query row l % 16, so the
-     * online softmax keeps one (m, l) per lane. acc_inits: PV_N_TILES entries
-     * (fixed cap: the legal max, HD=256 -> PV_N_TILES = 16). cur_buf_init = 0. */
+   * The QK MFMA computes S^T = K Q^T: lane l owns query row l % 16, so the
+   * online softmax keeps one (m, l) per lane. acc_inits: PV_N_TILES entries
+   * (fixed cap: the legal max, HD=256 -> PV_N_TILES = 16). cur_buf_init = 0. */
     rocke_value_t* m_init;
     rocke_value_t* acc_inits[16]; /* PV_N_TILES <= 16                          */
     rocke_value_t* cur_buf_init; /* const_i32(0)                              */
@@ -336,7 +345,7 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
 
     /* ---------- reduce descriptors (lines 1039-1053) ---------- */
     rocke_tensor_descriptor_t* ml_desc_red; /* segm_ml                         */
-    rocke_tensor_descriptor_t* seg_acc_desc_red; /* segm_output                     */
+    rocke_tensor_descriptor_t* seg_acc_desc_red; /* segm_output */
     rocke_tensor_descriptor_t* out_desc_red; /* out (token, head, dim)          */
 
     /* ---------- reduce state (lines 1055-1102) ---------- */
@@ -444,14 +453,15 @@ void rocke_gfx942_attention_tiled_3d_issue_v_load(rocke_gfx942_attention_tiled_3
                                                   rocke_value_t* kv_tile_idx,
                                                   rocke_value_t* buf_idx,
                                                   rocke_value_t* page_id); /* lines 619-632 */
-/* _issue_wide_load(src, lds, ...): is_value selects src/lds (false=K, true=V). */
+/* _issue_wide_load(src, lds, ...): is_value selects src/lds (false=K, true=V).
+ */
 void rocke_gfx942_attention_tiled_3d_issue_wide_load(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
     bool is_value,
     rocke_value_t* kv_tile_idx,
     rocke_value_t* buf_idx,
     rocke_value_t* page_id); /* 645-658 */
-/* _issue_fp8_dequant_loads(..., lds_token): is_value selects K/V + scale.      */
+/* _issue_fp8_dequant_loads(..., lds_token): is_value selects K/V + scale. */
 void rocke_gfx942_attention_tiled_3d_issue_fp8_dequant_loads(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx,
     bool is_value,
@@ -478,8 +488,9 @@ void rocke_gfx942_attention_tiled_3d_declare_params(
 /* Prologue (lines 331-483): grid ids, binary-search seq_idx, cu_q bounds /
  * geometry, the early qb_start_pos>=q_len return guard, tps / descriptors / SSA
  * constants / qk_scale / lane decode / per-segment tile range. Fills the
- * corresponding ctx fields. (The seg_start_tile_pos>=seq_len zero-fill early-out
- * is emitted by rocke_..._emit_early_zero_fill below, called from here in order.) */
+ * corresponding ctx fields. (The seg_start_tile_pos>=seq_len zero-fill
+ * early-out is emitted by rocke_..._emit_early_zero_fill below, called from
+ * here in order.) */
 void rocke_gfx942_attention_tiled_3d_emit_prologue(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx);
 
@@ -495,7 +506,8 @@ void rocke_gfx942_attention_tiled_3d_emit_q_to_lds(
 
 /* Build the loop-carry init: the sinks-conditioned per-lane m_init, acc_inits
  * and cur_buf_init (+ the first page-id window and page id under
- * WAVE_PAGE_ID_LOAD). Also issues the first K load (_issue_k(tile_start, 0)). */
+ * WAVE_PAGE_ID_LOAD). Also issues the first K load (_issue_k(tile_start, 0)).
+ */
 void rocke_gfx942_attention_tiled_3d_emit_loop_init(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx);
 

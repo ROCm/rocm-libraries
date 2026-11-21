@@ -39,10 +39,17 @@ _TESTROOT = Path(__file__).resolve().parent
 if str(_TESTROOT) not in sys.path:
     sys.path.append(str(_TESTROOT))
 
+# Native installed lanes stage the extension beside the captured test assets.
+_NATIVE_ROOT = _LIBROOT.parent / "native"
+if _NATIVE_ROOT.is_dir():
+    sys.path.insert(0, str(_NATIVE_ROOT))
+
 # pytest rewrites asserts only in test modules and conftest files. Every
 # operation's pinned GPU tests come from this helper, so register it before a
 # test module imports it; otherwise a failed assert shows none of its values.
-pytest.register_assert_rewrite("reference_common.pinned_tests")
+pytest.register_assert_rewrite(
+    "reference_common.pinned_tests", "tests._paged_decode_support"
+)
 
 
 def pytest_addoption(parser):

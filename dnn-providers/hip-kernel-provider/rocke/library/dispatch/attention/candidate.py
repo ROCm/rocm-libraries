@@ -90,6 +90,7 @@ def make_tuning_candidate(variant: AttentionGeometryVariant) -> KernelCandidate:
                 spec.arch,
                 spec.kernel_spec.dtype,
                 kv_dtype=spec.kernel_spec.kv_storage_dtype,
+                metadata_containment=spec.kernel_spec.metadata_containment,
             )
             return segment
         return _tiled_2d_signature(
