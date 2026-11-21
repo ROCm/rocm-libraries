@@ -421,7 +421,7 @@ RppStatus spatter_u8_u8_host_tensor(Rpp8u* srcPtr, RpptDescPtr srcDescPtr, Rpp8u
         // Spatter without fused output-layout toggle (NCHW -> NCHW)
         else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                  (dstDescPtr->layout == RpptLayout::NCHW)) {
-            alignedLength = (bufferLength & ~15) - 16;
+            alignedLength = bufferLength & ~15;
 
             Rpp8u *srcPtrRow, *dstPtrRow;
             Rpp32f *spatterMaskPtrRow, *spatterMaskInvPtrRow;
@@ -1621,7 +1621,7 @@ RppStatus spatter_i8_i8_host_tensor(Rpp8s* srcPtr, RpptDescPtr srcDescPtr, Rpp8s
         // Spatter without fused output-layout toggle (NCHW -> NCHW)
         else if ((srcDescPtr->layout == RpptLayout::NCHW) &&
                  (dstDescPtr->layout == RpptLayout::NCHW)) {
-            alignedLength = (bufferLength & ~15) - 16;
+            alignedLength = bufferLength & ~15;
 
             Rpp8s *srcPtrRow, *dstPtrRow;
             Rpp32f *spatterMaskPtrRow, *spatterMaskInvPtrRow;
