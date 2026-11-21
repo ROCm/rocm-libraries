@@ -6,6 +6,8 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
 ## MIOpen 3.6.3 for ROCm 10.3.0
 
 ### Resolved Issues
+* [Conv] Fixed an out-of-bounds shared-memory read in the CK depthwise forward and backward-data
+  solvers (`ConvDepthwiseFwd2D`, `ConvDepthwiseBwdData2D`); LDS grows by up to 640 B for some instances.
 * [MultiMarginLoss] Fixed incorrect results and HIP kernel launch failures on Windows caused by
   packing the `p` argument as a 32-bit `long` instead of the kernel's 64-bit integer.
 * [Reduce] Fixed `miopenReduceTensor` returning inf, NaN or imprecise results above 1024 reduced
@@ -85,6 +87,12 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   workspace `miopenFindSolutions` allocates when no workspace is preallocated, so it can now
   return GEMM solutions for dilated problems. When free memory cannot be read, no dilated GEMM
   workspace is reported.
+* [Conv] Fixed the default kernel pick on gfx950 for FP16 and BF16 3D forward convolutions with
+  input depth of at least 3 and input width of at least 256 (for example Wan VAE layers). A
+  hard-coded rule in `ConvHipImplicitGemm3DGroupFwdXdlops` returned one fixed CK instance for
+  these problems ahead of the AI heuristic, and Composable Kernel now accepts that instance for
+  larger problems. The gfx950 rule is removed, so these problems use the AI heuristic. gfx942 is
+  unchanged.
 
 ### Added
 * [Build] ROCm builds now enable `MIOPEN_ENABLE_HIPDNN_WRAPPER` by default. MIOpen is built as a
@@ -115,7 +123,7 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   implicit-GEMM solvers (2D and 3D; forward, backward-data, backward-weights) are refreshed on
   current tuning data. Set `MIOPEN_DEBUG_AI_DISABLE_PRECOMPUTED_CONFIG_EMB=1` to disable the table
   and revert to the non-AI heuristic; set `MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE=0`
-  to skip the pre-existing 3D forward large-tensor hard-coded override and use the AI heuristic.
+  to skip the pre-existing gfx942 3D forward hard-coded kernel picks and use the AI heuristic.
 * [Conv] Refreshed the 2D and 3D TunaNet solver-selection heuristics for gfx942 and gfx950 to
   support the current solver set (including `ConvHipConv`, depthwise, and Winograd variants) and
   improve top-1 accuracy and time-regret across all four architecture/dimension combinations.

@@ -53,6 +53,7 @@ namespace hip_kernel_provider::kernel_ingestor_engine::flydsl_sdpa_bwd_native
 namespace bwd = flydsl_sdpa_bwd;
 
 using bwd::detail::INT32_LIMIT;
+using bwd::detail::launchAxisFits;
 
 /// The largest y or z extent of a launch grid; the same limit as `GRID_YZ_LIMIT` in
 /// FlydslSdpaAiwNative.cpp.
@@ -621,7 +622,7 @@ inline ReduceGrid reduceGridOf(const bwd::SdpaBwdProblem& problem, int64_t vecto
         failBadParam("the dBias reduce launch overflows int64");
     }
     const int64_t gridX = (*items + REDUCE_THREADS - 1) / REDUCE_THREADS;
-    if(gridX > INT32_LIMIT || *planes > GRID_YZ_LIMIT)
+    if(gridX > INT32_LIMIT || !launchAxisFits(gridX, REDUCE_THREADS) || *planes > GRID_YZ_LIMIT)
     {
         failBadParam("the dBias reduce launch grid exceeds its limits");
     }
@@ -975,7 +976,7 @@ inline std::optional<TailzeroGrid> tailzeroGridOf(const bwd::SdpaBwdProblem& pro
     }
     const int64_t items = std::max({*dq, *dk, *dv});
     const int64_t gridX = (items + TAILZERO_THREADS - 1) / TAILZERO_THREADS;
-    if(gridX > INT32_LIMIT || *planes > GRID_YZ_LIMIT)
+    if(gridX > INT32_LIMIT || !launchAxisFits(gridX, TAILZERO_THREADS) || *planes > GRID_YZ_LIMIT)
     {
         return std::nullopt;
     }
