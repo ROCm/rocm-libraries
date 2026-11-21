@@ -71,6 +71,7 @@
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t                     */
 #include "rocke/helper_rocke.helpers.attention.h" /* binary_search / softmax reduces     */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t             */
+#include "rocke/instance_attention_tiled_common_internal.h" /* TiledLaneMap */
 #include "rocke/instance_gfx942_attention_tiled_2d.h" /* spec_t + config_t (via helper hdr) */
 #include "rocke/ir.h"
 
@@ -369,6 +370,49 @@ typedef struct rocke_gfx942_attn2d_build_ctx
     rocke_value_t* l_zero[ROCKE_GFX942_ATTN2D_MAX_REGS_PER_LANE];
 } rocke_gfx942_attn2d_build_ctx_t;
 
+/* Fill the shared TiledLaneMap view of this ctx (pointer copies, no IR). The
+ * lane_* fields stay NULL until the prologue caches them. */
+static inline rocke_attn_tiled_lane_map_t
+    rocke_gfx942_attn2d_lane_map(const rocke_gfx942_attn2d_build_ctx_t* ctx)
+{
+    rocke_attn_tiled_lane_map_t lm;
+    lm.b = ctx->b;
+    lm.lane = ctx->lane;
+    lm.lane_rg = ctx->lane_rg_v;
+    lm.lane_col = ctx->lane_col_v;
+    lm.lane_col_div4 = ctx->lane_col_div4_v;
+    lm.lane_col_mod4 = ctx->lane_col_mod4_v;
+    lm.lane_rg_is0 = ctx->lane_rg_is0_v;
+    lm.lane_rg_is1 = ctx->lane_rg_is1_v;
+    lm.lane_rg_is2 = ctx->lane_rg_is2_v;
+    lm.dtype = ctx->dtype;
+    lm.use_mfma_32x32 = ctx->USE_MFMA_32X32;
+    lm.transposed_qk_32x32 = ctx->TRANSPOSED_QK_32X32;
+    return lm;
+}
+
+/* Fill the shared Fp8KvSyncLoader view of this ctx (pointer copies, no IR). */
+static inline rocke_attn_tiled_fp8_kv_loader_t
+    rocke_gfx942_attn2d_fp8_kv_loader(const rocke_gfx942_attn2d_build_ctx_t* ctx)
+{
+    rocke_attn_tiled_fp8_kv_loader_t ld;
+    ld.b = ctx->b;
+    ld.T = ctx->T;
+    ld.HD = ctx->HD;
+    ld.THREADS = ctx->THREADS;
+    ld.tid = ctx->tid;
+    ld.key = ctx->key;
+    ld.value = ctx->value;
+    ld.k_scale = ctx->k_scale_p;
+    ld.v_scale = ctx->v_scale_p;
+    ld.k_lds = ctx->K_lds;
+    ld.v_lds = ctx->V_lds;
+    ld.kv_head_idx = ctx->kv_head_idx;
+    ld.kv_desc = ctx->kv_desc;
+    ld.dtype = ctx->dtype;
+    return ld;
+}
+
 /* ===================================================================== *
  *  DRIVER-INTERNAL ctx population (the build prologue, lines 1104-1912).
  *
@@ -524,9 +568,12 @@ void rocke_gfx942_attn2d_dequant_fp8_lds_to_bf16(rocke_gfx942_attn2d_build_ctx_t
                                                  rocke_value_t* dst,
                                                  rocke_value_t* scale,
                                                  rocke_value_t* buf_idx);
+/* Python _issue_fp8_dequant_loads(kv_tile_idx, buf_idx, lds_token). is_v selects
+ * the "V" slab (value src + v_scale + V_lds); false selects "K". */
 void rocke_gfx942_attn2d_issue_fp8_dequant_loads(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                                  rocke_value_t* kv_tile_idx,
-                                                 rocke_value_t* buf_idx);
+                                                 rocke_value_t* buf_idx,
+                                                 bool is_v);
 void rocke_gfx942_attn2d_issue_k_fp8_mfma_async(rocke_gfx942_attn2d_build_ctx_t* ctx,
                                                 rocke_value_t* kv_tile_idx,
                                                 rocke_value_t* buf_idx);

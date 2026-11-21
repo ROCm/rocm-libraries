@@ -31,26 +31,31 @@ See the gfx950 module docstring for the split-KV grid / workspace layout.
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass
 from typing import ClassVar, Optional, Tuple
 
-from kernels.common._fmha_common import check_head_counts, gqa_ratio
+from kernels.common._fmha_common import check_head_counts
 from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
     strided_kv_resource,
 )
+from kernels.common._attention_tiled_shared import (
+    KvLdsSwizzle,
+    ReduceTiledSpecMixin,
+    Tiled3DSpecMixin,
+    load_page_id_window,
+    mfma_16x16_c_row,
+)
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
-from kernels.common._spec_checks import require_bool
 from kernels.common.attention_split_kv_reduce import (
     split_kv_reduce_spec,
     tiled_reduce_unsupported_reason,
 )
 
 from rocke.core.ir import (
-    BF16,
     CACHE_POLICY_NAMES,
-    F16,
     F32,
     FP8E4M3,
     I32,
@@ -59,11 +64,9 @@ from rocke.core.ir import (
     KernelDef,
     PtrType,
     TemporalHint,
-    Type,
     Value,
     cache_policy_from_name,
 )
-from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
@@ -73,7 +76,6 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
-from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
     embed,
@@ -85,30 +87,8 @@ MFMA_M = 16
 MFMA_N = 16
 
 
-# CK-Tile C-accumulator warp distribution for the 16x16x16 MFMA atom (identical
-# to the gfx950 file; the C layout is dtype- and arch-independent so the f16
-# atom drives it for both fp16 and bf16). This segment kernel is single-warp
-# (lane == tid); the per-lane ``<4 x f32>`` accumulator row decode is
-# ``row = (lane // 16) * 4 + reg`` expressed through ``calculate_x``.
-_C16_DIST = make_static_tile_distribution(
-    make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
-)
-
-
-def _mfma_16x16_c_row(b, lane, reg: int):
-    """MFMA-local output row for a ``16x16`` C element ``reg`` (0..3)."""
-    if not (0 <= reg < 4):
-        raise ValueError(f"mfma_16x16 reg must be 0..3, got {reg}")
-    m_blk = b.div(lane, b.const_i32(16))
-    n = b.mod(lane, b.const_i32(16))
-    row, _col = _C16_DIST.calculate_x(
-        b, ys=[b.const_i32(0), b.const_i32(reg)], ps=[[m_blk, n]]
-    )
-    return row
-
-
 @dataclass(frozen=True)
-class UnifiedAttention3DTiledSpec:
+class UnifiedAttention3DTiledSpec(Tiled3DSpecMixin):
     """Spec for the split-KV 3D segment kernel (gfx942 narrow-atom variant).
 
     Field-compatible with the gfx950 ``UnifiedAttention3DTiledSpec`` so the
@@ -240,18 +220,6 @@ class UnifiedAttention3DTiledSpec:
             raise ValueError("use_wave_page_id_load needs paged fp16/bf16 KV")
 
     @property
-    def num_queries_per_kv(self) -> int:
-        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
-
-    @property
-    def block_m(self) -> int:
-        return 16
-
-    @property
-    def block_q(self) -> int:
-        return self.block_m // self.num_queries_per_kv
-
-    @property
     def tile_size(self) -> int:
         return (
             self.tile_size_override
@@ -268,10 +236,6 @@ class UnifiedAttention3DTiledSpec:
         """The GQA ratio the kernel bakes (the head counts are kernargs), so a
         catalog can bind it as a method like ``resolved_tile_size_override``."""
         return self.num_queries_per_kv
-
-    @property
-    def dtype_ir(self) -> Type:
-        return F16 if self.dtype == "fp16" else BF16
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -556,7 +520,7 @@ def build_unified_attention_3d_tiled(
         zero_local = b.const_f32(0.0)
         lane_writes_ml_e = b.cmp_eq(b.mod(tid, b.const_i32(16)), b.const_i32(0))
         for reg in range(4):
-            row = _mfma_16x16_c_row(b, tid, reg)
+            row = mfma_16x16_c_row(b, tid, reg)
             qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
             qh_r = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
@@ -574,7 +538,7 @@ def build_unified_attention_3d_tiled(
         lane_col_e = b.mod(tid, b.const_i32(16))
         for n in range(PV_N_TILES):
             for reg in range(4):
-                row = _mfma_16x16_c_row(b, tid, reg)
+                row = mfma_16x16_c_row(b, tid, reg)
                 col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col_e)
                 qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
                 qh_r = b.add(
@@ -883,27 +847,10 @@ def build_unified_attention_3d_tiled(
     WIDE_OK = wide_kv_load_fits(T, HD)
     wide_chunks_per_thread = (T * HD) // (THREADS * WIDE_ELEMS) if WIDE_OK else 0
 
-    def _kv_col(row: Value, col: Value) -> Value:
-        # LDS column of K/V element (row, col): its 16-byte chunk is permuted
-        # by the row under the swizzle.
-        if not KV_SWZ:
-            return col
-        chunk = b.xor(
-            b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(KV_CHUNKS_PER_ROW))
-        )
-        return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
-
-    def _kv_src_linear(linear_half: Value) -> Value:
-        # The async copies write LDS in lane order, so under the swizzle each
-        # lane fetches the element its LDS position holds (_kv_col is its own
-        # inverse).
-        if not KV_SWZ:
-            return linear_half
-        row = b.div(linear_half, b.const_i32(HD))
-        return b.add(
-            b.mul(row, b.const_i32(HD)),
-            _kv_col(row, b.mod(linear_half, b.const_i32(HD))),
-        )
+    # K/V LDS chunk swizzle; shared with the other arch's tiled 3D kernel.
+    kv_swz = KvLdsSwizzle(b=b, hd=HD, swizzle=KV_SWZ, chunks_per_row=KV_CHUNKS_PER_ROW)
+    _kv_col = kv_swz.col
+    _kv_src_linear = kv_swz.src_linear
 
     WAVE_PAGE_ID_LOAD = spec.use_wave_page_id_load
     if WAVE_PAGE_ID_LOAD:
@@ -1041,18 +988,17 @@ def build_unified_attention_3d_tiled(
         seq_pages = b.div(b.add(seq_len, b.const_i32(BS - 1)), b.const_i32(BS))
         seg_first_page = _tile_page(tile_start)
 
-        def _load_page_id_window(rel_page: Value) -> Value:
-            # Lane l: the id of the segment's page rel_page + l (0 past the
-            # sequence's last page: never used).
-            pg = b.add(b.add(seg_first_page, rel_page), tid)
-            return b.masked_global_load(
-                block_tables,
-                b.add(seq_base, pg),
-                b.cmp_lt(pg, seq_pages),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
+        # Lane l: the id of the segment's page rel_page + l (0 past the
+        # sequence's last page: never used).
+        _load_page_id_window = functools.partial(
+            load_page_id_window,
+            b,
+            tid=tid,
+            block_tables=block_tables,
+            seq_base=seq_base,
+            seq_pages=seq_pages,
+            seg_first_page=seg_first_page,
+        )
 
         def _window_tile_page_id(page_id_window: Value, kv_tile_idx: Value) -> Value:
             lane = b.mod(
@@ -1332,7 +1278,7 @@ def build_unified_attention_3d_tiled(
 
 
 @dataclass(frozen=True)
-class UnifiedAttentionReduceTiledSpec:
+class UnifiedAttentionReduceTiledSpec(ReduceTiledSpecMixin):
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
@@ -1345,15 +1291,6 @@ class UnifiedAttentionReduceTiledSpec:
     num_segments: int
     waves_per_eu: Optional[int] = None
     emit_lse: bool = emit_lse_field()
-
-    def __post_init__(self) -> None:
-        require_bool("emit_lse", self.emit_lse)
-        if self.num_segments < 1:
-            raise ValueError("num_segments must be >= 1")
-
-    @property
-    def dtype_ir(self) -> Type:
-        return F16 if self.dtype == "fp16" else BF16
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join

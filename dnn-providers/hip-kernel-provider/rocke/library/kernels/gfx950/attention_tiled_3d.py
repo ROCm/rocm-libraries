@@ -27,10 +27,11 @@ This module re-uses every MFMA / async DMA / softmax helper from the
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional, Tuple
 
-from kernels.common._fmha_common import check_head_counts, gqa_ratio
+from kernels.common._fmha_common import check_head_counts
 from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
@@ -39,6 +40,13 @@ from kernels.common._attention_strided_kv import (
     declare_strided_kv_params,
     strided_kv_offset,
     strided_kv_resource,
+)
+from kernels.common._attention_tiled_shared import (
+    KvLdsSwizzle,
+    ReduceTiledSpecMixin,
+    Tiled3DSpecMixin,
+    load_page_id_window,
+    mfma_16x16_c_row,
 )
 from kernels.common._lse_store import emit_lse_field, reduce_lse_store
 from kernels.common._spec_checks import require_bool
@@ -50,9 +58,7 @@ from kernels.common.attention_split_kv_reduce import (
 )
 
 from rocke.core.ir import (
-    BF16,
     CACHE_POLICY_NAMES,
-    F16,
     F32,
     FP8E4M3,
     I32,
@@ -60,11 +66,9 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
-    Type,
     Value,
     cache_policy_from_name,
 )
-from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2 as _apply_softcap,
     binary_search_seq_idx as _binary_search_seq_idx_helper,
@@ -75,7 +79,6 @@ from rocke.helpers.attention import (
     wave64_reduce_max as _wave64_reduce_max,
     wave64_reduce_sum as _wave64_reduce_sum,
 )
-from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import DynamicTensorDescriptor, indirect, unmerge
 
@@ -91,42 +94,8 @@ KV_HALVES_PER_CALL = SEGMENT_THREADS * KV_HALVES_PER_LANE
 MAX_VMCNT = (1 << 6) - 1
 
 
-# CK-Tile C-accumulator warp distribution for the 16x16x16 MFMA atom. This
-# segment kernel is single-warp (lane == tid), and every accumulator output
-# row decode it does is the same ``row = (lane // 16) * 4 + reg`` mapping that
-# CK Tile's ``CWarpDstrEncoding`` (``warp_gemm_attribute_mfma.hpp``) expresses
-# as a ``tile_distribution_encoding``: for one wavefront the lane splits as
-# ``(m_blk, n) = (lane // 16, lane % 16)`` and the per-lane ``<4 x f32>``
-# accumulator slot ``reg`` is the inner M Y dim (``kCM1PerLane = 4``), so
-# ``calculate_x`` returns ``row = m_blk * 4 + reg`` (and ``col = n``). Driving
-# the row decode through ``calculate_x`` replaces the open-coded ``mul``/``add``
-# lane math with the tile-distribution algebra (Phase-C adoption; the C layout
-# is dtype-independent so the f16 atom drives it for fp16 and bf16).
-_C16_DIST = make_static_tile_distribution(
-    make_c_warp_dstr_encoding(MfmaAtom.f16_16x16x16())
-)
-
-
-def _mfma_16x16_c_row(b, lane, reg: int):
-    """MFMA-local output row for a ``16x16`` C element ``reg`` (0..3).
-
-    Drives CK Tile's C-warp ``TileDistribution.calculate_x`` instead of the
-    hand-rolled ``row = (lane // 16) * 4 + reg`` lane arithmetic. The 16x16 C
-    layout has a single inner M Y dim of length 4 (``kCM0PerLane = 1``), so the
-    outer Y is always 0 and ``reg`` is the inner Y.
-    """
-    if not (0 <= reg < 4):
-        raise ValueError(f"mfma_16x16 reg must be 0..3, got {reg}")
-    m_blk = b.div(lane, b.const_i32(16))
-    n = b.mod(lane, b.const_i32(16))
-    row, _col = _C16_DIST.calculate_x(
-        b, ys=[b.const_i32(0), b.const_i32(reg)], ps=[[m_blk, n]]
-    )
-    return row
-
-
 @dataclass(frozen=True)
-class UnifiedAttention3DTiledSpec:
+class UnifiedAttention3DTiledSpec(Tiled3DSpecMixin):
     """Spec for the split-KV 3D segment kernel.
 
     Mirrors :class:`UnifiedAttention2DTiledSpec` and adds the segment-count
@@ -323,18 +292,6 @@ class UnifiedAttention3DTiledSpec:
             )
 
     @property
-    def num_queries_per_kv(self) -> int:
-        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
-
-    @property
-    def block_m(self) -> int:
-        return 16
-
-    @property
-    def block_q(self) -> int:
-        return self.block_m // self.num_queries_per_kv
-
-    @property
     def tile_size(self) -> int:
         if self.tile_size_override is not None:
             return self.tile_size_override
@@ -343,10 +300,6 @@ class UnifiedAttention3DTiledSpec:
     @property
     def n_blocks_per_tile(self) -> int:
         return self.tile_size // self.block_size
-
-    @property
-    def dtype_ir(self) -> Type:
-        return F16 if self.dtype == "fp16" else BF16
 
     def mask_type(self) -> int:
         """The band as one ``AttentionMaskType`` value, by the mapping
@@ -675,7 +628,7 @@ def build_unified_attention_3d_tiled(
         zero_local = b.const_f32(0.0)
         lane_writes_ml_e = b.cmp_eq(b.mod(tid, b.const_i32(16)), b.const_i32(0))
         for reg in range(4):
-            row = _mfma_16x16_c_row(b, tid, reg)
+            row = mfma_16x16_c_row(b, tid, reg)
             qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
             qh_r = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(row, b.const_i32(NQK))
@@ -695,7 +648,7 @@ def build_unified_attention_3d_tiled(
         lane_col_e = b.mod(tid, b.const_i32(16))
         for n in range(PV_N_TILES):
             for reg in range(4):
-                row = _mfma_16x16_c_row(b, tid, reg)
+                row = mfma_16x16_c_row(b, tid, reg)
                 col = b.add(b.mul(b.const_i32(n), b.const_i32(16)), lane_col_e)
                 qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
                 qh_r = b.add(
@@ -940,27 +893,10 @@ def build_unified_attention_3d_tiled(
         if I64_KV_ADDR:
             kv_stride_blk_i64 = b.zext(kv_stride_blk_b, I64)
 
-    def _kv_col(row: Value, col: Value) -> Value:
-        # LDS column of K/V element (row, col): its 16-byte chunk is permuted
-        # by the row under the swizzle.
-        if not KV_SWZ:
-            return col
-        chunk = b.xor(
-            b.div(col, b.const_i32(8)), b.mod(row, b.const_i32(KV_CHUNKS_PER_ROW))
-        )
-        return b.add(b.mul(chunk, b.const_i32(8)), b.mod(col, b.const_i32(8)))
-
-    def _kv_src_linear(linear_half: Value) -> Value:
-        # The async copies write LDS in lane order, so under the swizzle each
-        # lane fetches the element its LDS position holds (_kv_col is its own
-        # inverse).
-        if not KV_SWZ:
-            return linear_half
-        row = b.div(linear_half, b.const_i32(HD))
-        return b.add(
-            b.mul(row, b.const_i32(HD)),
-            _kv_col(row, b.mod(linear_half, b.const_i32(HD))),
-        )
+    # K/V LDS chunk swizzle; shared with the other arch's tiled 3D kernel.
+    kv_swz = KvLdsSwizzle(b=b, hd=HD, swizzle=KV_SWZ, chunks_per_row=KV_CHUNKS_PER_ROW)
+    _kv_col = kv_swz.col
+    _kv_src_linear = kv_swz.src_linear
 
     def _tile_page_ids(kv_tile_idx: Value) -> list:
         # A tile starts below seq_len, so its first page is always live.
@@ -1136,18 +1072,17 @@ def build_unified_attention_3d_tiled(
         assert 64 % N_BLOCKS_PER_TILE == 0
         seg_first_page = b.mul(tile_start, b.const_i32(N_BLOCKS_PER_TILE))
 
-        def _load_page_id_window(rel_page: Value) -> Value:
-            # Lane l: the id of the segment's page rel_page + l (0 past the
-            # sequence's last page: never used, see _window_tile_ids).
-            pg = b.add(b.add(seg_first_page, rel_page), tid)
-            return b.masked_global_load(
-                block_tables,
-                b.add(seq_base, pg),
-                b.cmp_lt(pg, seq_pages),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
+        # Lane l: the id of the segment's page rel_page + l (0 past the
+        # sequence's last page: never used).
+        _load_page_id_window = functools.partial(
+            load_page_id_window,
+            b,
+            tid=tid,
+            block_tables=block_tables,
+            seq_base=seq_base,
+            seq_pages=seq_pages,
+            seg_first_page=seg_first_page,
+        )
 
         def _window_tile_ids(page_id_window: Value, kv_tile_idx: Value) -> list:
             first_blk = b.mul(kv_tile_idx, b.const_i32(N_BLOCKS_PER_TILE))
@@ -1460,7 +1395,7 @@ def build_unified_attention_3d_tiled(
 
 
 @dataclass(frozen=True)
-class UnifiedAttentionReduceTiledSpec:
+class UnifiedAttentionReduceTiledSpec(ReduceTiledSpecMixin):
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
@@ -1475,15 +1410,6 @@ class UnifiedAttentionReduceTiledSpec:
     # the LLVM backend's heuristic.
     waves_per_eu: Optional[int] = None
     emit_lse: bool = emit_lse_field()
-
-    def __post_init__(self) -> None:
-        require_bool("emit_lse", self.emit_lse)
-        if self.num_segments < 1:
-            raise ValueError("num_segments must be >= 1")
-
-    @property
-    def dtype_ir(self) -> Type:
-        return F16 if self.dtype == "fp16" else BF16
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join

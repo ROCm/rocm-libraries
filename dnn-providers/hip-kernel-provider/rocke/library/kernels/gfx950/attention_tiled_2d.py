@@ -39,10 +39,11 @@ Correctness contract (validated against `aiter.op_tests.triton_tests.attention`
 
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field
 from typing import ClassVar, Optional, Tuple
 
-from kernels.common._fmha_common import check_head_counts, gqa_ratio
+from kernels.common._fmha_common import check_head_counts
 from kernels.common._attention_additive_bias import (
     add_additive_bias,
     declare_additive_bias_params,
@@ -55,11 +56,19 @@ from kernels.common._lse_store import (
 )
 from kernels.common._spec_checks import require_bool
 from kernels.common.attention_mask_type import band_mask_type
+from kernels.common._attention_tiled_shared import (
+    AccLayout,
+    Fp8KvSyncLoader,
+    Tiled2DSpecMixin,
+    TiledLaneMap,
+    dequant_fp8_lds_to_bf16,
+    fast_paged_kv_blocks,
+    mfma_32x32_c_col,
+    mfma_32x32_c_row,
+)
 
 from rocke.core.ir import (
-    BF16,
     CACHE_STREAM,
-    F16,
     F32,
     FP8E4M3,
     I32,
@@ -67,10 +76,8 @@ from rocke.core.ir import (
     IRBuilder,
     KernelDef,
     PtrType,
-    Type,
     Value,
 )
-from rocke.helpers.atoms import MfmaAtom, make_c_warp_dstr_encoding
 from rocke.helpers.attention import (
     apply_softcap_log2,
     binary_search_seq_idx,
@@ -85,7 +92,6 @@ from rocke.helpers.attention import (
     warp_xor_reduce_sum,
     warp_xor_reduce_sum_32lane,
 )
-from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
 from rocke.helpers.transforms import (
     DynamicTensorDescriptor,
@@ -106,59 +112,6 @@ _ASYNC_DMA_WAVE_SLAB_BYTES = 64 * 16
 _KQ_PAD_SLAB_HALVES = _ASYNC_DMA_WAVE_SLAB_BYTES // 2
 
 
-# CK-Tile C-accumulator warp distribution for the 32x32x16 MFMA atom. The
-# hand-rolled ``mfma_32x32x16_c_row/col`` lane arithmetic (in
-# ``helpers/attention.py``) is exactly the ``calculate_x`` of CK Tile's
-# ``CWarpDstrEncoding`` (``warp_gemm_attribute_mfma.hpp``): for one wavefront
-# the lane splits as ``(m_blk, n) = (lane // 32, lane % 32)`` and the per-lane
-# ``<16 x f32>`` accumulator slot ``i`` splits row-major over the two M Y dims
-# ``(kCM0PerLane, kCM1PerLane) = (4, 4)``. The distribution's ``calculate_x``
-# then yields ``row = (i // 4) * 8 + m_blk * 4 + (i % 4)`` and ``col = n`` --
-# the same mapping the scalar helpers produce, but emitted by the tile-
-# distribution algebra instead of open-coded ``div``/``mul``/``add`` (Phase-C
-# "adopt the vocabulary" adoption; the C layout is dtype-independent so the
-# f16 atom drives it for both fp16 and bf16). The 3D tiled kernel still imports
-# the scalar helpers from ``helpers/attention.py`` directly; this distribution-
-# driven form is local to the 2D kernel.
-_C32_DIST = make_static_tile_distribution(
-    make_c_warp_dstr_encoding(MfmaAtom.f16_32x32x16())
-)
-
-
-def _mfma_32x32_c_row(b, lane, elem_idx: int):
-    """MFMA-local output row for a ``32x32x16`` C element ``elem_idx`` (0..15).
-
-    Drives CK Tile's C-warp ``TileDistribution.calculate_x`` instead of the
-    hand-rolled ``row = (i//4)*8 + (lane//32)*4 + (i%4)`` lane arithmetic.
-    """
-    if not (0 <= elem_idx < 16):
-        raise ValueError(f"mfma_32x32x16 elem_idx must be 0..15, got {elem_idx}")
-    m_blk = b.div(lane, b.const_i32(32))
-    n = b.mod(lane, b.const_i32(32))
-    y0 = b.const_i32(elem_idx // 4)
-    y1 = b.const_i32(elem_idx % 4)
-    row, _col = _C32_DIST.calculate_x(b, ys=[y0, y1], ps=[[m_blk, n]])
-    return row
-
-
-def _mfma_32x32_c_col(b, lane, n_tile32: int = 0):
-    """MFMA-local output col for ``32x32x16`` C elements in N-tile ``n_tile32``.
-
-    The per-lane column is the N coordinate of CK Tile's C-warp distribution
-    (``lane % 32``); ``n_tile32 * 32`` is the 32-column tile base added on top.
-    Every per-lane accumulator slot shares this column, so the element index
-    does not enter the formula.
-    """
-    m_blk = b.div(lane, b.const_i32(32))
-    n = b.mod(lane, b.const_i32(32))
-    _row, col = _C32_DIST.calculate_x(
-        b, ys=[b.const_i32(0), b.const_i32(0)], ps=[[m_blk, n]]
-    )
-    if n_tile32 == 0:
-        return col
-    return b.add(b.const_i32(n_tile32 * 32), col)
-
-
 # Backwards-compatible aliases. The 3D tiled kernel currently imports these
 # from this module; once that import is removed in a follow-up these aliases
 # can go away too. Promoted helpers live in ``rocke.helpers.attention``.
@@ -174,7 +127,7 @@ _warp_xor_reduce_sum_32lane = warp_xor_reduce_sum_32lane
 
 
 @dataclass(frozen=True)
-class UnifiedAttention2DTiledSpec:
+class UnifiedAttention2DTiledSpec(Tiled2DSpecMixin):
     # Problem fields this body reads as trailing i32 kernargs instead of baking
     # them, in ABI order. The launch signature, the argument pack and the cache
     # key read the same tuple (``_runtime_kernarg_fields``).
@@ -915,14 +868,6 @@ class UnifiedAttention2DTiledSpec:
                 )
 
     @property
-    def num_queries_per_kv(self) -> int:
-        return gqa_ratio(self.num_query_heads, self.num_kv_heads)
-
-    @property
-    def block_m(self) -> int:
-        return self.block_m_per_warp * self.num_warps
-
-    @property
     def regs_per_lane(self) -> int:
         """Number of accumulator register slots per lane per N-tile.
 
@@ -939,20 +884,6 @@ class UnifiedAttention2DTiledSpec:
         if self.use_mfma_32x32:
             return 16
         return self.block_m_per_warp // 4  # 4 for M=16, 8 for M=32
-
-    @property
-    def block_q(self) -> int:
-        return self.block_m // self.num_queries_per_kv
-
-    @property
-    def tile_size_eff(self) -> int:
-        """Effective per-iter KV-tile size in tokens."""
-        return self.tile_size if self.tile_size is not None else self.block_size
-
-    @property
-    def n_blocks_per_tile(self) -> int:
-        """How many paged-KV cache blocks one kernel iter consumes."""
-        return self.tile_size_eff // self.block_size
 
     @property
     def fp8_k_in_lds(self) -> bool:
@@ -1016,10 +947,6 @@ class UnifiedAttention2DTiledSpec:
         if not self.use_kq_lds_pad or self.kq_lds_pad_off_reason is not None:
             return 0
         return self._kq_pad_whole_slab_rows
-
-    @property
-    def dtype_ir(self) -> Type:
-        return F16 if self.dtype == "fp16" else BF16
 
     def mask_type(self) -> int:
         """The band as one ``AttentionMaskType`` value
@@ -1937,94 +1864,25 @@ def build_unified_attention_2d_tiled(
     lane_rg_is1 = b.cmp_eq(lane_rg, b.const_i32(1))
     lane_rg_is2 = b.cmp_eq(lane_rg, b.const_i32(2))
 
-    # ---- Per-lane row map ----
-    # For ``block_m_per_warp=16`` the lane owns 4 row slots within one
-    # 16-row atom (rows ``lane_rg*4 + r`` for ``r in 0..3``). For
-    # ``block_m_per_warp=32`` the lane owns 8 row slots across 2
-    # stacked atoms: reg ``r`` maps to ``(atom_idx, in_atom) =
-    # (r // 4, r % 4)`` and the in-warp row is
-    # ``atom_idx * 16 + lane_rg * 4 + in_atom``.
-    def _in_warp_row(r: int) -> Value:
-        atom_idx = r // 4
-        in_atom = r % 4
-        return b.add(
-            b.mul(lane_rg, b.const_i32(4)),
-            b.const_i32(atom_idx * 16 + in_atom),
-        )
-
-    def _state_row(r: int) -> Value:
-        """Row represented by softmax state slot ``r`` in the active layout."""
-        if USE_MFMA_32X32 and not TRANSPOSED_QK_32X32:
-            return _mfma_32x32_c_row(b, lane, r)
-        return _in_warp_row(r)
-
-    def _bit2(v: Value, bit: int) -> Value:
-        return b.land(b.lshr(v, b.const_i32(bit)), b.const_i32(1))
-
-    def _select_lane_rg(v0: Value, v1: Value, v2: Value, v3: Value) -> Value:
-        return b.select(
-            lane_rg_is0, v0, b.select(lane_rg_is1, v1, b.select(lane_rg_is2, v2, v3))
-        )
-
-    def _permute_p_c_to_a16(p_regs_f32: list[Value]) -> list[Value]:
-        """Convert one 16-col P tile from 16x16 MFMA-C regs to PV-A regs.
-
-        Current production geometry (not the 32x32 migration) has QK C
-        indexed by lane fields ``(A=lane/16, B=(lane%16)/4, C=lane%4)``
-        and per-lane register ``R``:
-
-            P[row=A*4+R, col=B*4+C]
-
-        PV's A operand wants:
-
-            P[row=B*4+C, col=A*4+R]
-
-        so the transform is ``(A,B,C,R) -> (B,A,R,C)``. This is the same
-        register-P idea CK Tile uses to avoid an LDS bridge between two
-        GEMMs. Two bit-level transposes swap ``C`` with ``R`` inside a
-        lane quad; then lane-field swaps exchange ``A`` and ``B``.
-        """
-
-        vals = p_regs_f32
-        for bit in (0, 1):
-            lane_bit = _bit2(lane_col_mod4, bit)
-            reg_bit = 1 << bit  # 1 or 2: intra-quad -> dpp (quad_perm), no ds_swizzle
-            old = vals
-            vals = []
-            for reg in range(4):
-                partner = b.warp_shuffle_xor_dpp(old[reg ^ reg_bit], reg_bit)
-                same_bit = b.cmp_eq(lane_bit, b.const_i32((reg >> bit) & 1))
-                vals.append(b.select(same_bit, old[reg], partner))
-
-        for bit, lane_xor in ((0, 20), (1, 40)):
-            a_bit = _bit2(lane_rg, bit)
-            b_bit = _bit2(lane_col_div4, bit)
-            swap = b.cmp_ne(a_bit, b_bit)
-            vals = [b.select(swap, b.warp_shuffle_xor(v, lane_xor), v) for v in vals]
-        return vals
-
-    def _pack_p_a16(p_regs_f32: list[Value]) -> Value:
-        return b.vec_pack(
-            [b.cast_f32_to(v, dtype) for v in _permute_p_c_to_a16(p_regs_f32)], dtype
-        )
-
-    def _pack_p_a32(p_regs0_f32: list[Value], p_regs1_f32: list[Value]) -> Value:
-        vals0 = _permute_p_c_to_a16(p_regs0_f32)
-        vals1 = _permute_p_c_to_a16(p_regs1_f32)
-        lo: list[Value] = []
-        hi: list[Value] = []
-        for j in range(4):
-            v0 = vals0[j]
-            v1 = vals1[j]
-            v0_x16 = b.warp_shuffle_xor(v0, 16)
-            v0_x32 = b.warp_shuffle_xor(v0, 32)
-            v0_x48 = b.warp_shuffle_xor(v0, 48)
-            v1_x16 = b.warp_shuffle_xor(v1, 16)
-            v1_x32 = b.warp_shuffle_xor(v1, 32)
-            v1_x48 = b.warp_shuffle_xor(v1, 48)
-            lo.append(_select_lane_rg(v0, v0_x48, v1_x32, v1_x16))
-            hi.append(_select_lane_rg(v0_x16, v0_x32, v1_x48, v1))
-        return b.vec_pack([b.cast_f32_to(v, dtype) for v in (lo + hi)], dtype)
+    # ---- Per-lane row map and register-P helpers ----
+    # Shared with the other arch's tiled 2D kernel; see TiledLaneMap.
+    lanes = TiledLaneMap(
+        b=b,
+        lane=lane,
+        lane_rg=lane_rg,
+        lane_col_div4=lane_col_div4,
+        lane_col_mod4=lane_col_mod4,
+        lane_rg_is0=lane_rg_is0,
+        lane_rg_is1=lane_rg_is1,
+        lane_rg_is2=lane_rg_is2,
+        dtype=dtype,
+        use_mfma_32x32=USE_MFMA_32X32,
+        transposed_qk_32x32=TRANSPOSED_QK_32X32,
+    )
+    _in_warp_row = lanes.in_warp_row
+    _state_row = lanes.state_row
+    _pack_p_a16 = lanes.pack_p_a16
+    _pack_p_a32 = lanes.pack_p_a32
 
     if USE_SINKS:
         m_inits = []
@@ -2060,8 +1918,8 @@ def build_unified_attention_2d_tiled(
     acc_zero = b.zero_vec_f32(16) if USE_MFMA_32X32 else b.zero_vec_f32(4)
     acc_inits = [acc_zero for _ in range(ACC_N_TILES * ACC_M_ATOMS)]
 
-    def _acc_idx(n: int, atom: int) -> int:
-        return n * ACC_M_ATOMS + atom
+    acc_layout = AccLayout(ACC_M_ATOMS)
+    _acc_idx = acc_layout.idx
 
     iter_args = []
     for r in range(SOFTMAX_STATE_SLOTS):
@@ -2267,28 +2125,13 @@ def build_unified_attention_2d_tiled(
             2,
         )
 
-        def _fast_paged_kv_blocks(kv_tile_idx: Value) -> tuple[Value, Value]:
-            logical_block0 = b.mul(kv_tile_idx, b.const_i32(2))
-            logical_block1 = b.add(logical_block0, b.const_i32(1))
-            idx0 = b.add(seq_base, logical_block0)
-            idx1 = b.add(seq_base, logical_block1)
-            block0 = b.masked_global_load(
-                block_tables,
-                idx0,
-                b.cmp_lt(idx0, block_table_max_idx),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
-            block1 = b.masked_global_load(
-                block_tables,
-                idx1,
-                b.cmp_lt(idx1, block_table_max_idx),
-                b.const_i32(0),
-                dtype=I32,
-                align=4,
-            )
-            return b.to_sgpr_u32(block0), b.to_sgpr_u32(block1)
+        _fast_paged_kv_blocks = functools.partial(
+            fast_paged_kv_blocks,
+            b,
+            block_tables=block_tables,
+            seq_base=seq_base,
+            block_table_max_idx=block_table_max_idx,
+        )
 
         def _fast_paged_kv_voff(call: int, block0: Value, block1: Value):
             # Each call covers one full block. ``physical`` is uniform.
@@ -2675,43 +2518,16 @@ def build_unified_attention_2d_tiled(
         fp8_dequant_chunks_per_thread = fp8_dequant_total_chunks // THREADS
         fp8_cols_per_row = HD // fp8_dequant_elems_per_chunk
 
-        def _dequant_fp8_lds_to_bf16(
-            buf_idx: Value, scale: Value, fp8_lds, bf16_lds, bf16_buf: Value
-        ) -> None:
-            """LDS->LDS dequant: fp8 -> f32 * scale -> bf16.
-
-            `buf_idx` selects the fp8 source buffer (for K, the active
-            double-buffer slot; for V, always 0).
-            `bf16_buf` selects the bf16 destination buffer (for K, always
-            0 since FP8 path single-buffers the bf16 K_lds; for V, 0).
-            """
-            for c in range(fp8_dequant_chunks_per_thread):
-                chunk_id = b.add(b.mul(b.const_i32(c), b.const_i32(THREADS)), tid)
-                row = b.div(chunk_id, b.const_i32(fp8_cols_per_row))
-                col = b.mul(
-                    b.mod(chunk_id, b.const_i32(fp8_cols_per_row)),
-                    b.const_i32(fp8_dequant_elems_per_chunk),
-                )
-                fp8_vec = b.smem_load_vN(
-                    fp8_lds,
-                    buf_idx,
-                    row,
-                    col,
-                    dtype=FP8E4M3,
-                    n=fp8_dequant_elems_per_chunk,
-                )
-                dequanted = []
-                for i in range(fp8_dequant_elems_per_chunk):
-                    fp8_v = b.vec_extract(fp8_vec, i)
-                    f32_v = b.fmul(b.cvt_fp8_to_f32(fp8_v), scale)
-                    dequanted.append(b.cast_f32_to(f32_v, dtype))
-                packed = b.vec_pack(dequanted, dtype)
-                b.smem_store_vN(
-                    bf16_lds,
-                    [bf16_buf, row, col],
-                    packed,
-                    fp8_dequant_elems_per_chunk,
-                )
+        _dequant_fp8_lds_to_bf16 = functools.partial(
+            dequant_fp8_lds_to_bf16,
+            b,
+            tid=tid,
+            threads=THREADS,
+            dtype=dtype,
+            elems_per_chunk=fp8_dequant_elems_per_chunk,
+            chunks_per_thread=fp8_dequant_chunks_per_thread,
+            cols_per_row=fp8_cols_per_row,
+        )
 
     # ---------------- FP8 K/V cache: sync dequant loader (round 1, kept as fallback) ----------------
     # Each thread loads one byte per fp8 element from HBM, dequantises
@@ -2734,127 +2550,28 @@ def build_unified_attention_2d_tiled(
         )
     fp8_chunks_per_thread = fp8_total_chunks // THREADS if KV_FP8 else 0
 
-    def _issue_fp8_dequant_loads(
-        kv_tile_idx: Value, buf_idx: Value, lds_token: str
-    ) -> None:
-        """Sync per-thread fp8 -> f32 -> *scale -> bf16/fp16 -> LDS.
-
-        ``lds_token`` is either ``"K"`` or ``"V"``; selects the LDS slab
-        and the per-tensor scale parameter.
-
-        Per-chunk serial structure: each iteration issues one VMEM load,
-        does the dequant chain, then publishes to LDS. The AMDGPU
-        compiler's instruction scheduler interleaves the back-to-back
-        chunks' loads, dequant, and stores.
-
-        Cvt chain: uses ``cvt_pk_f32_fp8x4`` (lowers to two packed
-        ``v_cvt_pk_f32_fp8`` instructions per 4 fp8 inputs) instead of
-        the per-element ``cvt_fp8_to_f32`` (which the compiler does NOT
-        fuse into the packed variant on its own — ISA inspection of the
-        round-1 sync loader showed 48 separate ``v_cvt_f32_fp8_e32``
-        instructions instead of 24 ``v_cvt_pk_f32_fp8`` for the same
-        kernel). The packed primitive matches AITER's ``to_float_fp8x4``
-        helper in ``csrc/include/attention_common.cuh`` which is what
-        AITER's production paged-attention FP8 K/V path uses.
-
-        For each ``fp8_elems_per_chunk = 8``-fp8 chunk we issue two
-        packed cvts (4 fp8 each) — 4 ``v_cvt_pk_f32_fp8`` total per
-        chunk vs the previous 8 scalar ``v_cvt_f32_fp8`` (50% fewer
-        cvt-class instructions).
-        """
-        scale = k_scale_p if lds_token == "K" else v_scale_p
-        lds = K_lds if lds_token == "K" else V_lds
-        src = key if lds_token == "K" else value
-        assert fp8_elems_per_chunk == 8, (
-            f"FP8 dequant loader expects 8-elem chunks (got "
-            f"{fp8_elems_per_chunk}); the packed-cvt path needs the chunk "
-            f"to split cleanly into 2× <4 x fp8> sub-chunks."
+    if KV_FP8:
+        # Shared with the other arch's tiled 2D kernel; see Fp8KvSyncLoader.
+        fp8_kv = Fp8KvSyncLoader(
+            b=b,
+            hd=HD,
+            threads=THREADS,
+            tid=tid,
+            key=key,
+            value=value,
+            k_scale=k_scale_p,
+            v_scale=v_scale_p,
+            k_lds=K_lds,
+            v_lds=V_lds,
+            kv_head_idx=kv_head_idx,
+            paged_kv_desc=paged_kv_desc,
+            dtype=dtype,
+            i64_kv_addr=I64_KV_ADDR,
+            elems_per_chunk=fp8_elems_per_chunk,
+            chunks_per_thread=fp8_chunks_per_thread,
         )
-        for call in range(fp8_chunks_per_thread):
-            chunk_id = b.add(
-                b.mul(b.const_i32(call), b.const_i32(THREADS)),
-                tid,
-            )
-            row = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
-            col = b.mul(
-                b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
-                b.const_i32(fp8_elems_per_chunk),
-            )
-            linear_half_first = b.add(
-                b.mul(row, b.const_i32(HD)),
-                col,
-            )
-            if I64_KV_ADDR:
-                # Flat per-lane global load: full i64 byte/element offset so
-                # the per-thread physical_block * stride cannot overflow the
-                # cache addressing for paged caches > 2 GiB.
-                voff, _ = paged_kv_desc.offset_i64(
-                    b,
-                    "physical_block",
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half_first,
-                    kv_head=kv_head_idx,
-                )
-            else:
-                voff, _ = paged_kv_desc.offset(
-                    b,
-                    tile_idx=kv_tile_idx,
-                    linear_half=linear_half_first,
-                    kv_head=kv_head_idx,
-                )
-            fp8_vec = b.global_load_vN(
-                src, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
-            )
-            # Split <8 x fp8> into 2x <4 x fp8> via extract+pack so we
-            # can apply the packed cvt (the LLVM backend collapses the
-            # extract+pack chain back into a bitcast-equivalent shuffle
-            # once it sees the cvt.pk.f32.fp8 operand is whole-i32).
-            lo_quad = b.vec_pack(
-                [b.vec_extract(fp8_vec, i) for i in range(4)],
-                FP8E4M3,
-            )
-            hi_quad = b.vec_pack(
-                [b.vec_extract(fp8_vec, i) for i in range(4, 8)],
-                FP8E4M3,
-            )
-            # CORRECTNESS: ``v_cvt_scalef32_pk_f32_fp8`` interprets its
-            # ``scale`` operand as an E8M0 microscaling factor (only the
-            # f32 exponent bits matter, mantissa is discarded). For
-            # arbitrary per-tensor scales like ``k_scale = max_abs/448 ≈
-            # 0.011`` the hardware silently rounds to the nearest
-            # power-of-two (0.0078 instead of 0.011), giving outputs
-            # ~0.71x of expected. Power-of-two scales happen to work
-            # bit-correctly by coincidence, which is why the original
-            # bench-driven "win" measurement looked correct on shapes
-            # whose extracted ``k_scale`` rounded toward the right
-            # exponent.
-            #
-            # The correct sequence is unfused: ``cvt_pk_f32_fp8`` (no
-            # scaling) followed by a regular ``v_pk_mul`` against the
-            # f32 scale. We pay ~4 extra packed muls per inner-loop
-            # iter; that's the cost of being correct for non-pow2
-            # scales. A future fast path can detect pow2 scales and
-            # opt into the fused intrinsic, but the production trace
-            # has only non-pow2 scales.
-            lo_f32x4 = b.cvt_pk_f32_fp8x4(lo_quad)
-            hi_f32x4 = b.cvt_pk_f32_fp8x4(hi_quad)
-            lo_scaled = []
-            hi_scaled = []
-            for i in range(4):
-                lo_scaled.append(b.fmul(b.vec_extract(lo_f32x4, i), scale))
-                hi_scaled.append(b.fmul(b.vec_extract(hi_f32x4, i), scale))
-            lo_f32x4 = b.vec_pack(lo_scaled, F32)
-            hi_f32x4 = b.vec_pack(hi_scaled, F32)
-            dequanted = []
-            for i in range(4):
-                dequanted.append(b.cast_f32_to(b.vec_extract(lo_f32x4, i), dtype))
-            for i in range(4):
-                dequanted.append(b.cast_f32_to(b.vec_extract(hi_f32x4, i), dtype))
-            packed = b.vec_pack(dequanted, dtype)
-            b.smem_store_vN(lds, [buf_idx, row, col], packed, fp8_elems_per_chunk)
-        # Caller is expected to issue a `b.sync()` (LDS visibility) when
-        # appropriate. The sync loader has no in-flight async work, so the
-        # consumer side only needs the LDS barrier, not VMEM waitcnt.
+        _issue_fp8_dequant_loads = fp8_kv.issue_dequant_loads
+        _issue_v_fp8_mfma_stripe = fp8_kv.issue_v_mfma_stripe
 
     def _issue_k_fp8_mfma_async(kv_tile_idx: Value, buf_idx: Value) -> None:
         """fp8-K-LDS path: async DMA raw fp8 K bytes into fp8 K_lds.
@@ -2947,47 +2664,6 @@ def build_unified_attention_2d_tiled(
                 zero_soff,
                 K_FP8_DWORDS,
                 coherency=CACHE_STREAM,
-            )
-
-    def _issue_v_fp8_mfma_stripe(kv_tile_idx: Value) -> None:
-        """Load raw fp8 V and store it into V_lds as
-        [V_BUFS=1, N_STRIPES=HD/16, T, 16].
-
-        Each thread loads 8 contiguous fp8 values from V[token, col..col+7]
-        in HBM, then writes them as one 8-byte LDS vec store into the
-        owning stripe at V_lds[0, col/16, token, col%16].
-
-        Because our chunk size is exactly 8 fp8 (= half a 16-byte stripe
-        row), col%16 is always 0 or 8 — both 8-byte-aligned, so the LDS
-        vec store stays b64 and there is no scalar-byte regression.
-        """
-        for call in range(fp8_chunks_per_thread):
-            chunk_id = b.add(
-                b.mul(b.const_i32(call), b.const_i32(THREADS)),
-                tid,
-            )
-            token = b.div(chunk_id, b.const_i32(HD // fp8_elems_per_chunk))
-            col = b.mul(
-                b.mod(chunk_id, b.const_i32(HD // fp8_elems_per_chunk)),
-                b.const_i32(fp8_elems_per_chunk),
-            )
-            linear_first = b.add(b.mul(token, b.const_i32(HD)), col)
-            voff, _ = paged_kv_desc.offset(
-                b,
-                tile_idx=kv_tile_idx,
-                linear_half=linear_first,
-                kv_head=kv_head_idx,
-            )
-            fp8_vec = b.global_load_vN(
-                value, voff, FP8E4M3, n=fp8_elems_per_chunk, align=fp8_elems_per_chunk
-            )
-            stripe_idx = b.div(col, b.const_i32(16))
-            col_in_stripe = b.mod(col, b.const_i32(16))
-            b.smem_store_vN(
-                V_lds,
-                [b.const_i32(0), stripe_idx, token, col_in_stripe],
-                fp8_vec,
-                fp8_elems_per_chunk,
             )
 
     def _issue_k(tile_idx: Value, buf_idx: Value) -> None:
@@ -3321,7 +2997,7 @@ def build_unified_attention_2d_tiled(
     hoist_causal_lim = []
     for reg in range(REGS_PER_LANE):
         if USE_MFMA_32X32:
-            row = b.add(wave_row_base, _mfma_32x32_c_row(b, lane, reg))
+            row = b.add(wave_row_base, mfma_32x32_c_row(b, lane, reg))
         else:
             row = b.add(wave_row_base, _in_warp_row(reg))
         qp_r = b.add(qb_start_pos, b.div(row, b.const_i32(NQK)))
@@ -3355,7 +3031,7 @@ def build_unified_attention_2d_tiled(
         hoist_alibi = None
 
     if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_INVARIANT_HOIST:
-        st_q_row = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
+        st_q_row = b.add(wave_row_base, mfma_32x32_c_col(b, lane, 0))
         st_qp = b.add(qb_start_pos, b.div(st_q_row, b.const_i32(NQK)))
         st_qh = b.add(
             b.mul(kv_head_idx, b.const_i32(NQK)), b.mod(st_q_row, b.const_i32(NQK))
@@ -3419,8 +3095,7 @@ def build_unified_attention_2d_tiled(
         ]
 
         # acc_vals is flat indexed by (n * M_ATOMS_PER_WARP + atom).
-        def _acc_get(n: int, atom: int) -> Value:
-            return acc_vals[n * ACC_M_ATOMS + atom]
+        _acc_get = acc_layout.getter(acc_vals)
 
         cur_buf = carry[ml_count + ACC_N_TILES * ACC_M_ATOMS]
         if PAGE_PREFETCH:
@@ -3467,7 +3142,7 @@ def build_unified_attention_2d_tiled(
             tile_off_g1 = None
 
         if USE_MFMA_32X32 and TRANSPOSED_QK_32X32 and TRANSPOSED_MASK_ONCE:
-            st_q_row_iter = b.add(wave_row_base, _mfma_32x32_c_col(b, lane, 0))
+            st_q_row_iter = b.add(wave_row_base, mfma_32x32_c_col(b, lane, 0))
             st_qp_iter = b.add(qb_start_pos, b.div(st_q_row_iter, b.const_i32(NQK)))
             st_qh_iter = b.add(
                 b.mul(kv_head_idx, b.const_i32(NQK)),
@@ -3760,7 +3435,7 @@ def build_unified_attention_2d_tiled(
                         # as the hoisted versions above; matches AITER
                         # ``unified_attention.py:317``.
                         q_row_t_alibi = b.add(
-                            wave_row_base, _mfma_32x32_c_col(b, lane, 0)
+                            wave_row_base, mfma_32x32_c_col(b, lane, 0)
                         )
                         qh_t_alibi = b.add(
                             b.mul(kv_head_idx, b.const_i32(NQK)),
@@ -3801,7 +3476,7 @@ def build_unified_attention_2d_tiled(
                             else:
                                 k_local = b.add(
                                     b.const_i32(n * 32),
-                                    _mfma_32x32_c_row(b, lane, reg),
+                                    mfma_32x32_c_row(b, lane, reg),
                                 )
                                 if TRANSPOSED_INVARIANT_HOIST:
                                     qp_r = st_qp
@@ -3813,7 +3488,7 @@ def build_unified_attention_2d_tiled(
                                     causal_lim = st_causal_lim_iter
                                 else:
                                     q_row_t = b.add(
-                                        wave_row_base, _mfma_32x32_c_col(b, lane, 0)
+                                        wave_row_base, mfma_32x32_c_col(b, lane, 0)
                                     )
                                     qp_r = b.add(
                                         qb_start_pos, b.div(q_row_t, b.const_i32(NQK))
@@ -4064,7 +3739,7 @@ def build_unified_attention_2d_tiled(
                 row_ok = hoist_row_ok[reg]
                 causal_lim = hoist_causal_lim[reg]
                 for n in range(QK_N_TILES):
-                    col_abs = b.add(tile_off, _mfma_32x32_c_col(b, lane, n))
+                    col_abs = b.add(tile_off, mfma_32x32_c_col(b, lane, n))
                     causal_ok = _upper_ok(col_abs, causal_lim)
                     in_prefix = b.cmp_lt(col_abs, max_seq_prefix_len)
                     m_ok = _band_row_mask(row_ok, causal_ok, in_prefix)
@@ -4124,7 +3799,7 @@ def build_unified_attention_2d_tiled(
                 sum_p = zero_f
                 for n in range(QK_N_TILES):
                     p = b.exp2(b.fsub(s_local[(reg, n)], m_new[reg]))
-                    col = _mfma_32x32_c_col(b, lane, n)
+                    col = mfma_32x32_c_col(b, lane, n)
                     b.smem_store_vN(P_lds, [row, col], b.cast_f32_to(p, dtype), 1)
                     sum_p = b.fadd(sum_p, p)
                 l_local.append(_warp_xor_reduce_sum_32lane(b, sum_p))
@@ -4789,8 +4464,7 @@ def build_unified_attention_2d_tiled(
         for atom in range(ACC_M_ATOMS)
     ]
 
-    def _acc_final_get(n: int, atom: int) -> Value:
-        return acc_final[n * ACC_M_ATOMS + atom]
+    _acc_final_get = acc_layout.getter(acc_final)
 
     # Per-row reciprocal of L (computed once, reused across stripes). Only an
     # exact-zero L marks a keyless row (stored as 0); a NaN L stays NaN in O.
@@ -4855,7 +4529,7 @@ def build_unified_attention_2d_tiled(
                 acc32 = _acc_final_get(n, 0)
                 for reg in range(REGS_PER_LANE):
                     out_col_t = b.add(
-                        b.const_i32(n * 32), _mfma_32x32_c_row(b, lane, reg)
+                        b.const_i32(n * 32), mfma_32x32_c_row(b, lane, reg)
                     )
                     v = b.vec_extract(acc32, reg)
                     normalized = b.fmul(v, inv_l_t)
@@ -4903,7 +4577,7 @@ def build_unified_attention_2d_tiled(
             dim=b.const_i32(0),
         )
         if spec.emit_lse:
-            # State slot reg's row is wave_row_base + _mfma_32x32_c_row(lane, reg)
+            # State slot reg's row is wave_row_base + mfma_32x32_c_row(lane, reg)
             # (= hoist_row[reg]); all 32 lanes of a half agree, lane_col32 == 0
             # (lanes 0 and 32) writes.
             lse_writer32 = b.cmp_eq(lane_col32, b.const_i32(0))
@@ -4928,7 +4602,7 @@ def build_unified_attention_2d_tiled(
         for n in range(ACC_N_TILES):
             acc32 = _acc_final_get(n, 0)
             for reg in range(REGS_PER_LANE):
-                row = b.add(wave_row_base, _mfma_32x32_c_row(b, lane, reg))
+                row = b.add(wave_row_base, mfma_32x32_c_row(b, lane, reg))
                 col_in_stripe = lane_col32
                 v = b.vec_extract(acc32, reg)
                 normalized = b.fmul(v, rcp_l[reg])

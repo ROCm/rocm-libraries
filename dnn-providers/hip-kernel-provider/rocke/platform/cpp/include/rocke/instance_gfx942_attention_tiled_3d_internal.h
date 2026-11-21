@@ -66,6 +66,7 @@
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t          */
 #include "rocke/helper_rocke.helpers.transforms.h" /* rocke_tensor_descriptor_t          */
 #include "rocke/instance_attention_strided_kv_internal.h"
+#include "rocke/instance_attention_tiled_common_internal.h" /* KvLdsSwizzle */
 #include "rocke/instance_gfx942_attention_tiled_3d.h"
 #include "rocke/ir.h"
 /* The five "new helper" symbols this kernel threads (already ported). */
@@ -347,6 +348,18 @@ typedef struct rocke_gfx942_attention_tiled_3d_build_ctx
     rocke_value_t* inv_l; /* safe reciprocal of overall_expsum         */
 } rocke_gfx942_attention_tiled_3d_build_ctx_t;
 
+/* Fill the shared KvLdsSwizzle view of this ctx (no IR). */
+static inline rocke_attn_tiled_kv_swizzle_t rocke_gfx942_attention_tiled_3d_kv_swizzle(
+    const rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx)
+{
+    rocke_attn_tiled_kv_swizzle_t s;
+    s.b = ctx->b;
+    s.HD = ctx->cfg.HD;
+    s.swizzle = ctx->cfg.KV_SWZ;
+    s.chunks_per_row = ctx->cfg.KV_CHUNKS_PER_ROW;
+    return s;
+}
+
 /* ============================================================ *
  * Shared host-side helper (no IR)
  * ============================================================ */
@@ -370,7 +383,8 @@ bool rocke_gfx942_attention_tiled_3d_ctx_init(
 /* _mfma_16x16_c_row(b, lane, reg) (lines 79-88): MFMA-local output row for a
  * 16x16 C element reg (0..3). Drives ctx->C16_DIST.calculate_x with
  * ys=[0, reg], ps=[[lane//16, lane%16]] and returns the row X-coord. reg
- * outside 0..3 is a Python ValueError -> sticky error + NULL. */
+ * outside 0..3 is a Python ValueError -> ckc::Error (ROCKE_ERR_VALUE), recorded
+ * on b by the segment build's ckc::guard_builder boundary. */
 rocke_value_t* rocke_gfx942_attention_tiled_3d_mfma_16x16_c_row(
     rocke_gfx942_attention_tiled_3d_build_ctx_t* ctx, rocke_value_t* lane, int reg);
 

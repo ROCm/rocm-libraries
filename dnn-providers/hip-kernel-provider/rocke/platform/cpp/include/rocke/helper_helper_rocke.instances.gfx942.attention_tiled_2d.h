@@ -15,8 +15,6 @@
  *                                                 + rocke_attention_tiled_2d_spec_validate()
  *   (config constants derived in build_*)       rocke_unified_attention_2d_tiled_config_from_spec
  *   build_unified_attention_2d_tiled            rocke_build_unified_attention_2d_tiled_scalar
- *   _mfma_32x32_c_row(b, lane, elem_idx)        rocke__mfma_32x32_c_row
- *   _mfma_32x32_c_col(b, lane, n_tile32)        rocke__mfma_32x32_c_col
  *
  * The two ``_mfma_32x32_c_*`` helpers reproduce the Python builder-call
  * sequence byte-faithfully (same ops, same order, same operands), routing the
@@ -57,6 +55,7 @@
 
 #include "rocke/helper_rocke.helpers.atoms.h" /* rocke_mfma_atom_t, rocke_make_c_warp_dstr_encoding  */
 #include "rocke/helper_rocke.helpers.distribution.h" /* rocke_tile_distribution_t, calculate_x            */
+#include "rocke/instance_attention_tiled_common_internal.h" /* rocke__mfma_32x32_c_*, c32_dist_reset */
 #include "rocke/ir.h" /* rocke_ir_builder_t, rocke_value_t, rocke_kernel_def_t */
 
 #ifdef __cplusplus
@@ -290,29 +289,6 @@ bool rocke_unified_attention_2d_tiled_config_from_spec(
  * tiled-2D surface today; the faithful body port is a follow-on. */
 rocke_kernel_def_t* rocke_build_unified_attention_2d_tiled_scalar(
     rocke_ir_builder_t* b, const rocke_attention_tiled_2d_spec_t* spec, const char* arch);
-
-/* ----------------------------------------------------- 32x32 C helpers *
- *
- * _mfma_32x32_c_row(b, lane, elem_idx): MFMA-local output row for a 32x32x16 C
- * element ``elem_idx`` (0..15). Drives CK Tile's C-warp distribution
- * (_C32_DIST.calculate_x) with ys=[elem_idx//4, elem_idx%4], ps=[[lane//32,
- * lane%32]] and returns the row X-coord. ``elem_idx`` outside 0..15 is a Python
- * ValueError: the builder records ROCKE_ERR_VALUE and the call returns NULL. */
-rocke_value_t* rocke__mfma_32x32_c_row(rocke_ir_builder_t* b, rocke_value_t* lane, int elem_idx);
-
-/* _mfma_32x32_c_col(b, lane, n_tile32=0): MFMA-local output col for 32x32x16 C
- * elements in N-tile ``n_tile32``. Drives _C32_DIST.calculate_x with ys=[0,0],
- * ps=[[lane//32, lane%32]] and returns the col X-coord; when n_tile32 != 0,
- * ``n_tile32*32`` is added on top. Returns NULL on a builder error. */
-rocke_value_t* rocke__mfma_32x32_c_col(rocke_ir_builder_t* b, rocke_value_t* lane, int n_tile32);
-
-/* Re-entrancy reset for the lazily-built _C32_DIST cache. The cache holds a
- * tile distribution arena-allocated off a build's IRBuilder; that builder is
- * freed at the end of the build, so the cached pointer dangles. Call this at the
- * start of every tiled-attention build entry (gfx942 + gfx950) so a fresh build
- * rebuilds the distribution against its own arena instead of reading freed
- * memory. Safe to call when nothing is cached (no-op). */
-void rocke_attn2d_c32_dist_reset(void);
 
 #ifdef __cplusplus
 }
