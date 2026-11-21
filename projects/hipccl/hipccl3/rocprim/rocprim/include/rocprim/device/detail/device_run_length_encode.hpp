@@ -233,7 +233,9 @@ public:
     }
 };
 
-template<typename WarpExchangeOffsetType,
+template<typename OffsetType,
+         typename CountType,
+         typename WarpExchangeOffsetType,
          typename WarpExchangeCountType,
          unsigned int BlockSize,
          unsigned int ItemsPerThread,
@@ -250,11 +252,11 @@ struct scatter_helper
     void scatter(const OffsetCountPairType (&offsets_and_counts)[ItemsPerThread],
                  OffsetsOutputIterator offsets_output,
                  CountsOutputIterator  counts_output,
-                 size_t                block_num_runs_aggregate,
-                 size_t                block_num_runs_exclusive_in_global,
-                 size_t                warp_num_runs_aggregate,
-                 size_t                warp_num_runs_exclusive_in_block,
-                 const size_t (&thread_num_runs_exclusive_in_warp)[ItemsPerThread],
+                 OffsetType            block_num_runs_aggregate,
+                 OffsetType            block_num_runs_exclusive_in_global,
+                 OffsetType            warp_num_runs_aggregate,
+                 OffsetType            warp_num_runs_exclusive_in_block,
+                 const OffsetType (&thread_num_runs_exclusive_in_warp)[ItemsPerThread],
                  offsets_storage_type& offsets_storage,
                  counts_storage_type&  counts_storage)
     {
@@ -268,9 +270,9 @@ struct scatter_helper
                 {
                     if(thread_num_runs_exclusive_in_warp[i] < warp_num_runs_aggregate)
                     {
-                        size_t item_offset = block_num_runs_exclusive_in_global
-                                             + warp_num_runs_exclusive_in_block
-                                             + thread_num_runs_exclusive_in_warp[i];
+                        OffsetType item_offset = block_num_runs_exclusive_in_global
+                                                 + warp_num_runs_exclusive_in_block
+                                                 + thread_num_runs_exclusive_in_warp[i];
 
                         // Scatter offset
                         offsets_output[item_offset] = ::rocprim::get<0>(offsets_and_counts[i]);
@@ -287,8 +289,8 @@ struct scatter_helper
         }
         else // Two-phase scatter
         {
-            using offset_type = unsigned int;
-            using count_type  = unsigned int;
+            using offset_type = OffsetType;
+            using count_type  = CountType;
 
             unsigned int lane_id = ::rocprim::detail::logical_lane_id<WarpSize>();
 
@@ -322,9 +324,9 @@ struct scatter_helper
             {
                 if((i * WarpSize) + lane_id < warp_num_runs_aggregate)
                 {
-                    size_t item_offset = block_num_runs_exclusive_in_global
-                                         + warp_num_runs_exclusive_in_block + (i * WarpSize)
-                                         + lane_id;
+                    OffsetType item_offset = block_num_runs_exclusive_in_global
+                                             + warp_num_runs_exclusive_in_block + (i * WarpSize)
+                                             + lane_id;
 
                     // Scatter offset
                     offsets_output[item_offset] = run_offsets[i];
@@ -458,7 +460,9 @@ private:
     using warp_exchange_counts_type
         = custom_warp_exchange<CountType, ItemsPerThread, /*logical_*/ warp_size, TargetWaveSize>;
     // Helper class for scattering offsets and counts.
-    using warp_scatter_type = run_length_encode::scatter_helper<warp_exchange_offsets_type,
+    using warp_scatter_type = run_length_encode::scatter_helper<OffsetType,
+                                                                CountType,
+                                                                warp_exchange_offsets_type,
                                                                 warp_exchange_counts_type,
                                                                 BlockSize,
                                                                 ItemsPerThread,
@@ -507,7 +511,7 @@ public:
                                      storage_type&        storage)
     {
         static constexpr unsigned int items_per_block = BlockSize * ItemsPerThread;
-        const std::size_t             block_offset    = block_id * items_per_block;
+        const OffsetType              block_offset    = OffsetType{block_id} * items_per_block;
 
         // First and last blocks
         const bool is_first_block = block_id == 0;
@@ -622,12 +626,12 @@ public:
         OffsetCountPairType reduction;
 
         // Number of non-trivial run starts in previous threads from this warp
-        size_t thread_num_runs_exclusive_in_warp[ItemsPerThread];
+        OffsetType thread_num_runs_exclusive_in_warp[ItemsPerThread];
 
-        size_t block_num_runs_aggregate;
-        size_t block_num_runs_exclusive_in_global;
-        size_t warp_num_runs_aggregate;
-        size_t warp_num_runs_exclusive_in_block;
+        OffsetType block_num_runs_aggregate;
+        OffsetType block_num_runs_exclusive_in_global;
+        OffsetType warp_num_runs_aggregate;
+        OffsetType warp_num_runs_exclusive_in_block;
 
         if(is_first_block)
         {
@@ -869,8 +873,8 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     static constexpr unsigned int         items_per_block   = block_size * items_per_thread;
 
     using input_type  = ::rocprim::detail::value_type_t<InputIterator>;
-    using offset_type = unsigned int;
-    using count_type  = unsigned int;
+    using offset_type = ::rocprim::tuple_element_t<0, OffsetCountPairType>;
+    using count_type  = ::rocprim::tuple_element_t<1, OffsetCountPairType>;
 
     using block_processor = block_helper<input_type,
                                          offset_type,
