@@ -111,6 +111,28 @@ _DISABLE_CASES = [
     ("spills, no large tile", dict(MIWaveTile=[10, 8])),
     ("store overflows VGPR",  dict(MIWaveTile=[4, 16])),
     ("MX skew overflows SGPR", dict(MIWaveTile=[2, 16])),
+    # fp8 operand fragments are twice fp4's for the same MI shape, so the
+    # deeper unroll runs out of registers where fp4 does not.
+    ("fp8 at DepthU 256",     dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   DepthU=256)),
+    # Plain fp8 is a shipped type and takes a different register peak than the
+    # scaled one: MT128x384 reaches 276 VGPRs, which judgeRegisterBudget
+    # refuses outright. Scales on one side only is equally unmeasured.
+    ("fp8 without block scales",
+                              dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8"),
+                                                "MXBlockA": 0, "MXBlockB": 0},
+                                   MIWaveTile=[4, 12])),
+    ("fp8 scaled on A only",  dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8"),
+                                                "MXBlockB": 0})),
+    # Eight waves halve the per-thread unified VGPR budget to exactly the 256
+    # arch cap, and MIWaveTile [8,4] spends 128 of it on accumulators, so the
+    # fused store's arch registers put the kernel over the occupancy limit.
+    ("fp8 at eight waves",    dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   MIWaveTile=[8, 4], NumThreads=512)),
 ]
 
 
@@ -136,6 +158,24 @@ _STILL_ELIGIBLE_CASES = [
                                            ProblemType={"MXBlockA": 0, "MXBlockB": 0})),
     # Only the atomic StreamK reduction is excluded.
     ("StreamK without atomics", dict(StreamK=3, StreamKAtomic=0)),
+    # The depth hold is fp8-only and one-sided: it must not reach fp4 at any
+    # depth, and it must not disable fp8 at the depth it was measured on.
+    ("fp4 at DepthU 256",     dict(DepthU=256)),
+    ("fp8 at DepthU 128",     dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   DepthU=128)),
+    # Both fp8 holds are one-sided in the same way the depth hold is: the wave
+    # budget binds at eight waves and not at four, and neither reaches fp4,
+    # whose shipped scope includes tiles this would otherwise withdraw.
+    ("fp8 at four waves",     dict(ProblemType={"DataTypeA": DataType("float8"),
+                                                "DataTypeB": DataType("float8")},
+                                   MIWaveTile=[8, 4], NumThreads=256)),
+    ("fp4 at eight waves",    dict(MIWaveTile=[8, 4], NumThreads=512)),
+    # The scale requirement is fp8's alone. fp4 reaches the subtile path
+    # block-scaled, so asking it of fp4 would be free -- and wrong: the one
+    # unscaled-fp4 case the gate already relies on is MX skew above.
+    ("fp4 without block scales",
+                              dict(ProblemType={"MXBlockA": 0, "MXBlockB": 0})),
 ]
 
 
@@ -166,6 +206,22 @@ def test_subsumed_arms():
     # with no NLL is disabled whichever one runs.
     assert resolve(PrefetchGlobalRead=0) is False
     assert resolve(PostLoopStoreInNll=True, PrefetchGlobalRead=0) is False
+
+
+def test_depth_hold_tolerates_a_state_with_no_depth():
+    """The gate is driven with states that carry no ``DepthU`` at all.
+
+    Every other arm reads only keys the baseline above provides, which is why
+    the depth hold is the first one able to raise rather than answer. It did:
+    reading ``state["DepthU"]`` threw ``KeyError`` for any config whose operand
+    types already failed, because that is exactly when the short-circuit in
+    front of it stops shielding the read.
+
+    An unknown depth is not a reason to hold, so these stay eligible.
+    """
+    assert resolve() is True
+    assert resolve(ProblemType={"DataTypeA": DataType("float8"),
+                                "DataTypeB": DataType("float8")}) is True
 
 
 def test_absent_key_is_defaulted_then_gated():
