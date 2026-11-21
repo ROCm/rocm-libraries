@@ -4414,6 +4414,13 @@ struct ConvWinogradNHWCTransposingBase : TransposingSolver<Derived,
     using InvokeParams = miopen::conv::TransposeConvInvokeParams;
     using Base         = TransposingSolver<Derived, SolverBase, Problem, InvokeParams, Inner>;
 
+    /// A transposing wrapper is as dynamic as the solver it wraps. The transpose kernels take the
+    /// tensor sizes as run-time arguments, and the transpose buffers are part of the workspace that
+    /// GetWorkspaceSize() reports, as for any other solver that needs workspace. A non-dynamic
+    /// wrapper would be dropped from the Find that runs on a find-db miss in the default
+    /// (dynamic hybrid) find mode, and from immediate mode, although the inner solver is not.
+    bool IsDynamic() const override { return Inner{}.IsDynamic(); }
+
     /// Convert from API params to TransposeConvInvokeParams.
     /// The API passes DataInvokeParams for Fwd/Bwd and WrWInvokeParams for WrW.
     static InvokeParams ConvertFromApiParams(const AnyInvokeParams& any_params)
