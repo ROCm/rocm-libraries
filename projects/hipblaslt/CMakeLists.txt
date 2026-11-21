@@ -47,7 +47,11 @@ set(hipblaslt_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(hipblaslt_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 set(hipblaslt_VERSION_TWEAK "${PROJECT_VERSION_TWEAK}")
 
-set(hipblaslt_SOVERSION "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+# The SONAME (libhipblaslt.so.<major>) is independent of the product version.
+# Bump it only for an ABI break; binaries linked against libhipblaslt.so.1
+# stop loading when the major number changes.
+set(HIPBLASLT_SOVERSION "1.5")
+set(hipblaslt_SOVERSION "${HIPBLASLT_SOVERSION}")
 
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     if(WIN32)
@@ -749,6 +753,9 @@ if(_hipblaslt_export_targets)
             STATIC_DEPENDS ${_hipblaslt_static_depends}
             INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt-package-config.cmake"
             NAMESPACE roc::
+            # The SONAME guards the ABI, so a request for an older version
+            # (e.g. rocBLAS's find_package(hipblaslt 1.2.2)) is satisfied.
+            COMPATIBILITY AnyNewerVersion
         )
     endblock()
 endif()
