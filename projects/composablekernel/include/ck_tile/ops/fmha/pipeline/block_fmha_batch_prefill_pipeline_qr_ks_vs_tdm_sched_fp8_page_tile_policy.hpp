@@ -465,7 +465,7 @@ struct FmhaBatchPrefillFp8PageTileM128Softmax
         if constexpr(N == 1)
             return v[number<0>{}];
         else if constexpr(N == 2)
-            return __builtin_elementwise_max(v[number<0>{}], v[number<1>{}]);
+            return __builtin_elementwise_maxnum(v[number<0>{}], v[number<1>{}]);
         else
         {
             constexpr index_t kTriples = N / 3;
@@ -473,8 +473,8 @@ struct FmhaBatchPrefillFp8PageTileM128Softmax
             array<ScorePair, kTriples + kRest> next{};
             static_for<0, kTriples, 1>{}([&](auto i) {
                 constexpr index_t k = 3 * decltype(i)::value;
-                next(i)             = __builtin_elementwise_max(
-                    __builtin_elementwise_max(v[number<k>{}], v[number<k + 1>{}]),
+                next(i)             = __builtin_elementwise_maxnum(
+                    __builtin_elementwise_maxnum(v[number<k>{}], v[number<k + 1>{}]),
                     v[number<k + 2>{}]);
             });
             static_for<0, kRest, 1>{}([&](auto i) {

@@ -143,7 +143,7 @@ struct BlockFmhaBatchPrefillPipelineQRKSVSTdmSchedPageTilePolicy
         if constexpr(Base::Options::kRowMaxMaximum)
             return __builtin_elementwise_maximum(x, y);
 #endif
-        return __builtin_elementwise_max(x, y);
+        return __builtin_elementwise_maxnum(x, y);
     }
 
     // Max of N pairs by max3 levels, lane by lane.
