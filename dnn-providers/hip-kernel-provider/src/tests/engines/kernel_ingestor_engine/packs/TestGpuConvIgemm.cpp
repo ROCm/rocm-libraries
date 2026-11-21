@@ -3004,17 +3004,18 @@ TEST(TestConvIgemmBox, BackwardDataRowsGroupByTheTapsThatReachThem)
     const auto box = conv_igemm::boxArgsFor(parsedProblem(shape, ConvDirection::BACKWARD_DATA));
     ASSERT_TRUE(box.has_value());
     const std::array<int, 3> extent{34, 18, 18};
-    for(int ax = 0; ax < 3; ++ax)
+    for(size_t ax = 0; ax < extent.size(); ++ax)
     {
+        const int last = extent[ax] - 1;
         ASSERT_EQ(box->runs[ax], 5);
         EXPECT_EQ(box->begin[ax][0], 2);
-        EXPECT_EQ(box->size[ax][0], extent[ax] - 4);
+        EXPECT_EQ(box->size[ax][0], last - 3);
         EXPECT_EQ(box->lo[ax][0], 0);
         EXPECT_EQ(box->hi[ax][0], 2);
         // The border runs in coordinate order, each reaching the taps whose dy row exists.
         const std::array<std::array<int, 3>, 4> border{
-            {{0, 0, 0}, {1, 0, 1}, {extent[ax] - 2, 1, 2}, {extent[ax] - 1, 2, 2}}};
-        for(int j = 0; j < 4; ++j)
+            {{0, 0, 0}, {1, 0, 1}, {last - 1, 1, 2}, {last, 2, 2}}};
+        for(size_t j = 0; j < border.size(); ++j)
         {
             EXPECT_EQ(box->begin[ax][j + 1], border[j][0]);
             EXPECT_EQ(box->size[ax][j + 1], 1);
