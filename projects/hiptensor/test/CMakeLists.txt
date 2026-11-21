@@ -487,6 +487,7 @@ set(_HIPTENSOR_HOST_TESTS
   hiptensor_options_test
   logger_test
   reduction_cpu_impl_test
+  tensor_descriptor_test
   util_test
   yaml_test
 )
