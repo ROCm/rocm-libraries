@@ -2901,8 +2901,8 @@ class Solution(collections.abc.Mapping):
         # resumes. Keep rejecting axes whose borrowed-state contract is not
         # audited below.
         # HalfPLR + PAP is decided in the HalfPLR block (HalfPLR forces
-        # SuppressNoLoadLoop after this guard). Accepted only for
-        # StreamK==3 and StreamKForceDPOnly==1.
+        # SuppressNoLoadLoop after this guard). Accepted for static
+        # DataParallel and static StreamK.
         if not isPersistent(state):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent requires a persistent TileProcessingStrategy")
         if not state["BufferLoad"]:
@@ -7920,10 +7920,9 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
-      if state.get("PrefetchAcrossPersistent", 0):
-        if not isPersistentDataParallel(state):
-          reject(state, printRejectionReason, "HalfPLR + PrefetchAcrossPersistent requires DataParallel/StaticGrid")
-          return
+      state["ExpandPointerSwap"] = False
+      # TDM PAP already requires StaticGrid above. Its shared HalfPLR
+      # handoff supports both full-K tiles and StreamK's local K ranges.
       # The subtile main loop ignores SuppressNoLoadLoop, which HalfPLR forces;
       # the HalfPLR tail fixup lives only in the legacy calculateLoopNumIter path.
       if state["UseSubtileImpl"]:
