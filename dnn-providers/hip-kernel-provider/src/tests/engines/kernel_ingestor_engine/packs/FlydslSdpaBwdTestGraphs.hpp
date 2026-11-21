@@ -32,6 +32,7 @@
 #include <hipdnn_plugin_sdk/ingestor/MatchContext.hpp>
 
 #include "engines/kernel_ingestor_engine/packs/FlydslSdpaBwdCommon.hpp"
+#include "engines/kernel_ingestor_engine/packs/IngestorPackTestSupport.hpp"
 
 /**
  * @file FlydslSdpaBwdTestGraphs.hpp
@@ -732,15 +733,6 @@ inline void expectBadParam(const std::function<void()>& action)
         return;
     }
     FAIL() << "expected a BAD_PARAM exception";
-}
-
-/// A metadata field of type @p T, or nullptr when absent or of another type.
-template <typename T>
-const T* tryGetMetadataField(const hipdnn_plugin_sdk::ingestor::MetadataValues& values,
-                             const char* field)
-{
-    const auto it = values.find(std::string(field));
-    return it == values.end() ? nullptr : std::get_if<T>(&it->second);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
