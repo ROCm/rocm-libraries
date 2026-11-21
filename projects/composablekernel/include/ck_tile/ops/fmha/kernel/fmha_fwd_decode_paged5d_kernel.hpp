@@ -360,6 +360,8 @@ struct FmhaDecodePaged5dKernel
         };
         int32_t bt_cur = load_bt(0), bt_next = load_bt(1);
         index_t cur_chunk = 0;
+        // the descales go out with the prologue loads instead of after the Q quantization
+        const float kds = *a.k_descale, vd = *a.v_descale;
         // loads return in order: the block ids, which the first copies wait for, go out first
         __builtin_amdgcn_sched_barrier(0);
 
@@ -424,6 +426,7 @@ struct FmhaDecodePaged5dKernel
         index_t issued = min(steps, kStages);
         for(index_t t = 0; t < issued; ++t)
             issue(t);
+        asm volatile("" ::"s"(kds), "s"(vd));
 
         float qmax = 1e-20f;
         for(index_t i = 0; i < 64; ++i)
@@ -439,8 +442,7 @@ struct FmhaDecodePaged5dKernel
                 qv[4 * j + 2] * qinv, qv[4 * j + 3] * qinv, x, true);
         }
         // column n of S^T in log2 units
-        const float scl = qmax / 448.f * *a.k_descale * a.scale_s * 1.4426950408889634f;
-        const float vd  = *a.v_descale;
+        const float scl = qmax / 448.f * kds * a.scale_s * 1.4426950408889634f;
 
         // step t's copies of this wave are in LDS; zero the V bytes of tokens past the context
         const auto land = [&](index_t t) {
