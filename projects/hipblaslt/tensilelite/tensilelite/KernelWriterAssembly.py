@@ -14855,19 +14855,10 @@ class KernelWriterAssembly(KernelWriter):
     if tc == "Metadata" and kernel["enableTDMMetadata"]:
       comp: TensorDataMoverLoad = TensorDataMoverLoad.find(self)
       comp.setMemToken([self.states.ldsTensorTokenIdx])
-      if self.isTdmWaveSeparated(kernel):
-        skipMetadataLabel = Label(self.labels.getNameInc("TdmMetadataSkipOddWave"), "")
-        guardedLoad = Module("tdmMetadataWSGuardedLoad")
-        self._emitTdmWaveParitySCCAuto(guardedLoad, kernel, comment="metadata WaveSeparated: check wave parity (odd -> skip load)",
-                                      tmpTag="tdmMetadataIssueParity")
-        guardedLoad.add(SCBranchSCC1(labelName=skipMetadataLabel.getLabelName(), comment="odd wave: skip metadata load"))
-        guardedLoad.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
-                                       tensor=self.tdmLoadModifiers(kernel, tc)))
-        guardedLoad.add(skipMetadataLabel)
-        imod.add(guardedLoad)
-      else:
-        imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
-                                tensor=self.tdmLoadModifiers(kernel, tc)))
+      # Wave-separated: odd waves hold a NULL descriptor (initTDMDescriptor), so the load
+      # is issued unconditionally on every wave and moves nothing on the odd ones.
+      imod.add(comp.issueLoad("tdmMetadataGroup0", "tdmMetadataGroup1", None, None,
+                              tensor=self.tdmLoadModifiers(kernel, tc)))
       return imod 
 
     if tc == "B" and kernel["enableTDMB"]:
@@ -25126,6 +25117,17 @@ class KernelWriterAssembly(KernelWriter):
                                  descSgprName=descSgprName,
                                  strideRefName=strideRefName,
                                  remainRowsSgpr=remainRowsSgpr)
+
+    if waveSepMetadata:
+      # Only even waves carry metadata (see the numComp / partition assert above), so
+      # odd waves get a NULL descriptor (Group0 count = 0: no memory is copied, no
+      # atomic_barrier sent). Every wave then issues the same tensor_load_to_lds and the
+      # per-load wave-parity branch is gone. initOperands wrote Group0+0 as plain 1, so
+      # clearing the dword only changes count. SCC is consumed right after the compare.
+      self._emitTdmWaveParitySCCAuto(mod, kernel, comment="metadata WaveSeparated: odd wave carries no metadata",
+                                     tmpTag="tdmMetadataNullParity")
+      mod.add(SCMovB32(dst=sgpr(f"{descSgprName(0)}+0"), src=0,
+                       comment="odd wave: NULL metadata descriptor (count = 0)"))
 
     return mod
 
