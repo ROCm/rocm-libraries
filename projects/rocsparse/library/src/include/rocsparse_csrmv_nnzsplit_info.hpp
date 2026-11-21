@@ -55,7 +55,9 @@ public:
     _rocsparse_csrmv_nnzsplit_info(const _rocsparse_csrmv_nnzsplit_info&) = delete;
     _rocsparse_csrmv_nnzsplit_info& operator=(const _rocsparse_csrmv_nnzsplit_info&) = delete;
 
-    // Does not free the id buffer: clear() must be called before end of life.
+    // Frees the id buffer and only warns. clear() throws on a failed free.
+    ~_rocsparse_csrmv_nnzsplit_info();
+
     void clear();
 
     rocsparse_status allocate(size_t              size,

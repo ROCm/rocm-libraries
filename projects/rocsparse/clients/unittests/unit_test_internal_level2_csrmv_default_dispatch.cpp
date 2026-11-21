@@ -796,9 +796,8 @@ TEST_F(CsrmvDefaultDispatch, conjugate_transposed_csc_default_uses_the_csr_rule)
 }
 
 // The selection is stored for the operation that was analysed. A transposed
-// compute on the same descriptor uses rowsplit, which does not check the
-// analysed pointers, so it succeeds after a repoint where a reused nnz-split
-// analysis would return invalid_pointer.
+// compute on the same descriptor uses rowsplit, also after a repoint, which
+// leaves no analysis to reuse.
 TEST_F(CsrmvDefaultDispatch, preprocess_none_then_compute_transpose)
 {
     Options o;
@@ -811,16 +810,18 @@ TEST_F(CsrmvDefaultDispatch, preprocess_none_then_compute_transpose)
         handle, alternating(), o));
 }
 
-// nnz-split compute checks the analysed pointers, as adaptive compute does.
-TEST_F(CsrmvDefaultDispatch, switched_default_rejects_changed_pointers)
+// rocsparse_csr_set_pointers marks the analysis stale, so the compute that
+// follows it without a new preprocessing falls back to a kernel that needs
+// none and the result is still correct.
+TEST_F(CsrmvDefaultDispatch, switched_default_after_set_pointers_without_preprocess)
 {
     Options o;
     o.repoint = true;
-    EXPECT_EQ(run_f32(handle, scattered_gap(), o).compute_status, rocsparse_status_invalid_pointer);
-    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_invalid_pointer);
+    EXPECT_EQ(run_f32(handle, scattered_gap(), o).compute_status, rocsparse_status_success);
+    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_success);
     o.alg         = rocsparse_spmv_alg_csr_nnzsplit;
     o.compute_alg = o.alg;
-    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_invalid_pointer);
+    EXPECT_EQ(run_f32(handle, populated(), o).compute_status, rocsparse_status_success);
 }
 
 // An nnz-split analysis has no row blocks for an adaptive compute to launch.

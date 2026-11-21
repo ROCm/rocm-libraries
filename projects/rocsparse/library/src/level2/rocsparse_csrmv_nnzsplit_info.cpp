@@ -26,12 +26,27 @@
 #include "rocsparse_control.hpp"
 #include "rocsparse_utility.hpp"
 
+_rocsparse_csrmv_nnzsplit_info::~_rocsparse_csrmv_nnzsplit_info()
+{
+    // clear() already freed the buffer and reset the pointer in the normal path.
+    if(this->id_buffer == nullptr)
+    {
+        return;
+    }
+
+    // hipFree of a hipMallocAsync buffer needs a device synchronize, as in the adaptive
+    // info. Warn only: this runs from a destructor, including when clear() could not free.
+    WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
+    WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->id_buffer));
+    this->id_buffer = nullptr;
+}
+
 void _rocsparse_csrmv_nnzsplit_info::clear()
 {
     WARNING_IF_HIP_ERROR(hipDeviceSynchronize());
 
+    // Reset the pointer once it is freed so the destructor does not free it again.
     THROW_IF_HIP_ERROR(rocsparse_hipFree(this->id_buffer));
-
     this->id_buffer              = nullptr;
     this->size                   = 0;
     this->use_starting_block_ids = false;

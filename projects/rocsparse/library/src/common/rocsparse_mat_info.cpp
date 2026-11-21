@@ -324,6 +324,62 @@ void _rocsparse_mat_info::set_coomv_info(rocsparse_coomv_info value)
     this->coomv_info = value;
 }
 
+void _rocsparse_mat_info::clear_spmv_info()
+{
+    if(this->csrmv_info != nullptr)
+    {
+        delete this->csrmv_info;
+        this->csrmv_info = nullptr;
+    }
+
+    if(this->bsrmv_info != nullptr)
+    {
+        delete this->bsrmv_info;
+        this->bsrmv_info = nullptr;
+    }
+
+    if(this->coomv_info != nullptr)
+    {
+        delete this->coomv_info;
+        this->coomv_info = nullptr;
+    }
+}
+
+bool _rocsparse_mat_info::is_spmv_info_current(uint64_t pattern_stamp) const
+{
+    return this->m_spmv_stamp == pattern_stamp;
+}
+
+rocsparse_status _rocsparse_mat_info::clear_spmv_info_if_stale(hipStream_t stream,
+                                                               uint64_t    pattern_stamp)
+{
+    if(this->m_spmv_stamp == pattern_stamp)
+    {
+        return rocsparse_status_success;
+    }
+
+    // Freeing the csrmv and bsrmv info synchronizes the device, and so can the
+    // analysis that replaces a COO info (the atomic algorithm copies to the host).
+    // Both are illegal while the stream is being captured. The stale info is kept,
+    // so that a call outside the capture can still free it.
+    if(this->csrmv_info != nullptr || this->bsrmv_info != nullptr || this->coomv_info != nullptr)
+    {
+        hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
+        RETURN_IF_HIP_ERROR(hipStreamIsCapturing(stream, &capture_status));
+        if(capture_status != hipStreamCaptureStatusNone)
+        {
+            RETURN_WITH_MESSAGE_IF_ROCSPARSE_ERROR(
+                rocsparse_status_invalid_value,
+                "the SpMV analysis of the arrays replaced by rocsparse_*_set_pointers cannot be "
+                "freed while the stream is being captured");
+        }
+    }
+
+    this->clear_spmv_info();
+    this->m_spmv_stamp = pattern_stamp;
+    return rocsparse_status_success;
+}
+
 void _rocsparse_mat_info::set_sorted_coo2csr_info(rocsparse::sorted_coo2csr_info_t* value)
 {
     this->m_sorted_coo2csr_info = value;
@@ -361,23 +417,7 @@ _rocsparse_mat_info::~_rocsparse_mat_info()
     //
     // TRM_INFO data are automatically destroyed.
     //
-    if(this->csrmv_info != nullptr)
-    {
-        delete this->csrmv_info;
-        this->csrmv_info = nullptr;
-    }
-
-    if(this->bsrmv_info != nullptr)
-    {
-        delete this->bsrmv_info;
-        this->bsrmv_info = nullptr;
-    }
-
-    if(this->coomv_info != nullptr)
-    {
-        delete this->coomv_info;
-        this->coomv_info = nullptr;
-    }
+    this->clear_spmv_info();
 
     rocsparse::sorted_coo2csr_info_t* sorted_coo2csr_info = this->get_sorted_coo2csr_info();
     if(sorted_coo2csr_info != nullptr)

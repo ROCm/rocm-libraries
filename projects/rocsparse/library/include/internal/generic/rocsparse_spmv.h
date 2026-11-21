@@ -59,7 +59,10 @@ extern "C" {
 *  and sparse matrix format, this will perform analysis on the sparsity pattern of \f$op(A)\f$. Finally, complete the operation
 *  by calling \p rocsparse_spmv with the stage parmeter set to \ref rocsparse_spmv_stage_compute. The buffer size, buffer allocation, and
 *  preprocess stages only need to be called once for a given sparse matrix \f$op(A)\f$, while the computation stage can be repeatedly used
-*  with different \f$x\f$ and \f$y\f$ vectors. After all calls to \p rocsparse_spmv are complete, the temporary buffer can be deallocated.
+*  with different \f$x\f$ and \f$y\f$ vectors. After the arrays of the sparse matrix are replaced with \ref rocsparse_csr_set_pointers, \ref rocsparse_csc_set_pointers, \ref rocsparse_coo_set_pointers, or
+*  \ref rocsparse_bsr_set_pointers, call the buffer size and preprocess stages again to analyze the new arrays; a computation stage without them still computes the product, with an algorithm that does not need preprocessing.
+*  That preprocess stage frees the CSR, CSC, BSR or COO analysis of the previous arrays, which synchronizes the device. While the stream of \p handle
+*  is being captured into a graph, it returns \ref rocsparse_status_invalid_value instead and frees nothing; run it again outside the capture. After all calls to \p rocsparse_spmv are complete, the temporary buffer can be deallocated.
 *
 *  \p rocsparse_spmv supports multiple different algorithms. These algorithms have different trade-offs depending on the sparsity
 *  pattern of the matrix, whether or not the results need to be deterministic, and how many times the sparse-vector product will
@@ -182,7 +185,7 @@ extern "C" {
 *  \retval      rocsparse_status_invalid_handle the library context \p handle was not initialized.
 *  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat, \p x, \p beta, \p y, or
 *               \p buffer_size pointer is invalid.
-*  \retval      rocsparse_status_invalid_value the value of \p trans, \p compute_type, \p alg, or \p stage is incorrect.
+*  \retval      rocsparse_status_invalid_value the value of \p trans, \p compute_type, \p alg, or \p stage is incorrect, or the preprocess stage would free the analysis of arrays replaced with \ref rocsparse_csr_set_pointers, \ref rocsparse_csc_set_pointers, \ref rocsparse_coo_set_pointers, or \ref rocsparse_bsr_set_pointers while the stream of \p handle is being captured.
 *  \retval      rocsparse_status_not_implemented \p compute_type or \p alg is
 *               currently not supported.
 *

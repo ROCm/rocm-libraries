@@ -27,9 +27,30 @@
 #include "rocsparse-types.h"
 #include "rocsparse_line_nnz_profile.hpp"
 
+#include <atomic>
+#include <cstdint>
+
+namespace rocsparse
+{
+    // A value that has not been returned before.
+    inline uint64_t next_spmat_pattern_stamp()
+    {
+        static std::atomic<uint64_t> counter{0};
+        return ++counter;
+    }
+}
+
 struct _rocsparse_spmat_descr
 {
     bool init{};
+
+    // Identifies the arrays the descriptor points to, not their sparsity pattern:
+    // new for each descriptor and after each rocsparse_coo_set_pointers,
+    // rocsparse_csr_set_pointers, rocsparse_csc_set_pointers and
+    // rocsparse_bsr_set_pointers. The ELL, BELL and COO_AOS setters keep it,
+    // since SpMV keeps no analysis for these formats. SpMV analyses record it
+    // to detect that they are stale.
+    uint64_t pattern_stamp{rocsparse::next_spmat_pattern_stamp()};
 
     // Cached structural summary of the matrix's line lengths (rows for CSR,
     // columns for CSC) - an objective property of the sparsity pattern with no

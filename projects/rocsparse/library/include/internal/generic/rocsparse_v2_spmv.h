@@ -98,7 +98,10 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  of the symbolic information of \f$op(A)\f$. The second stage is \ref rocsparse_v2_spmv_stage_compute, which corresponds to the actual calculation.
 *  The size of the buffer required for each stage is determined by calling the routine \ref rocsparse_v2_spmv_buffer_size.
 *  The stage \ref rocsparse_v2_spmv_stage_analysis only needs to be called once for a given sparse matrix \f$op(A)\f$, while the computation stage can be repeatedly used
-*  with different \f$x\f$ and \f$y\f$ vectors.
+*  with different \f$x\f$ and \f$y\f$ vectors. A \p rocsparse_spmv_descr can be analyzed only once. If it holds an analysis of the arrays of a CSR, CSC or BSR
+*  sparse matrix descriptor, the analysis and computation stages return \ref rocsparse_status_invalid_value after these arrays are replaced with \ref rocsparse_csr_set_pointers,
+*  \ref rocsparse_csc_set_pointers or \ref rocsparse_bsr_set_pointers, also when the same pointers are passed after their contents changed, and when they are called
+*  with a sparse matrix descriptor other than the analyzed one. Create and analyze a new \p rocsparse_spmv_descr in these cases.
 *
 *  \note The stage \ref rocsparse_v2_spmv_stage_analysis is mandatory. An error will be returned if that stage was not executed before the stage \ref rocsparse_v2_spmv_stage_compute.
 *
@@ -223,7 +226,7 @@ rocsparse_status rocsparse_v2_spmv_buffer_size(rocsparse_handle            handl
 *  \retval      rocsparse_status_invalid_handle the library context \p handle was not initialized.
 *  \retval      rocsparse_status_invalid_pointer \p alpha, \p mat, \p x, \p beta, \p y, or
 *               \p buffer pointer is invalid.
-*  \retval      rocsparse_status_invalid_value the value of \p stage is invalid.
+*  \retval      rocsparse_status_invalid_value the value of \p stage is invalid, or \p stage is \ref rocsparse_v2_spmv_stage_analysis or \ref rocsparse_v2_spmv_stage_compute and \p spmv_descr holds a CSR, CSC or BSR analysis of another sparse matrix descriptor, or of arrays that were replaced with \ref rocsparse_csr_set_pointers, \ref rocsparse_csc_set_pointers or \ref rocsparse_bsr_set_pointers.
 *  \retval      rocsparse_status_not_implemented if \p alg is not supported or if the mixed precision configuration is not supported.
 *
 *  \par Example

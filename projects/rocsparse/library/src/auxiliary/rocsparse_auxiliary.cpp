@@ -4018,6 +4018,18 @@ catch(...)
 }
 // LCOV_EXCL_STOP
 
+namespace
+{
+    // The line profile and the SpMV analysis describe the arrays that the
+    // descriptor is leaving. Nothing is freed here: this must not synchronize
+    // the device, which another stream may be capturing.
+    void discard_pattern_analysis(rocsparse_spmat_descr descr)
+    {
+        descr->line_profile.known = false;
+        descr->pattern_stamp      = rocsparse::next_spmat_pattern_stamp();
+    }
+}
+
 /********************************************************************************
  * \brief rocsparse_coo_set_pointers sets the sparse COO matrix data pointers.
  *******************************************************************************/
@@ -4034,6 +4046,8 @@ try
     ROCSPARSE_CHECKARG_POINTER(1, coo_row_ind);
     ROCSPARSE_CHECKARG_POINTER(2, coo_col_ind);
     ROCSPARSE_CHECKARG_POINTER(3, coo_val);
+
+    discard_pattern_analysis(descr);
 
     descr->row_data = coo_row_ind;
     descr->col_data = coo_col_ind;
@@ -4101,9 +4115,7 @@ try
     ROCSPARSE_CHECKARG(
         3, csr_val, descr->nnz > 0 && csr_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // The row pointer is being reassigned, so the cached line-length profile
-    // (used by the default SpMM/SpMV algorithm selection) is now stale.
-    descr->line_profile.known = false;
+    discard_pattern_analysis(descr);
 
     descr->row_data = csr_row_ptr;
     descr->col_data = csr_col_ind;
@@ -4142,9 +4154,7 @@ try
     ROCSPARSE_CHECKARG(
         3, csc_val, descr->nnz > 0 && csc_val == nullptr, rocsparse_status_invalid_pointer);
 
-    // The column pointer is being reassigned, so the cached line-length profile
-    // (used by the default SpMM/SpMV algorithm selection) is now stale.
-    descr->line_profile.known = false;
+    discard_pattern_analysis(descr);
 
     descr->row_data = csc_row_ind;
     descr->col_data = csc_col_ptr;
@@ -4209,6 +4219,8 @@ try
         2, bsr_col_ind, descr->nnz > 0 && bsr_col_ind == nullptr, rocsparse_status_invalid_pointer);
     ROCSPARSE_CHECKARG(
         3, bsr_val, descr->nnz > 0 && bsr_val == nullptr, rocsparse_status_invalid_pointer);
+
+    discard_pattern_analysis(descr);
 
     descr->row_data = bsr_row_ptr;
     descr->col_data = bsr_col_ind;
