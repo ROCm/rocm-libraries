@@ -50,6 +50,18 @@ namespace rocsparse
      * \brief convert hipError_t to rocsparse_status
      ******************************************************************************/
     rocsparse_status get_rocsparse_status_for_hip_status(hipError_t status);
+
+    /*******************************************************************************
+     * \brief log a hip error and return the matching rocsparse_status.
+     * The message is "[prefix, ][throwing exception due to ]hip error detected: ...".
+     * Kept out of line so the *_IF_HIP_ERROR macros expand to a compare and a call.
+     ******************************************************************************/
+    rocsparse_status hip_error_message(hipError_t  status,
+                                       const char* prefix,
+                                       bool        throwing,
+                                       const char* function,
+                                       const char* file,
+                                       int         line) noexcept;
 }
 
 //
@@ -61,70 +73,46 @@ namespace rocsparse
         const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                \
         if(TMP_STATUS_FOR_CHECK != hipSuccess)                                           \
         {                                                                                \
-            std::stringstream s;                                                         \
-            s << "hip error detected: code '" << TMP_STATUS_FOR_CHECK << "', name '"     \
-              << hipGetErrorName(TMP_STATUS_FOR_CHECK) << "', description '"             \
-              << hipGetErrorString(TMP_STATUS_FOR_CHECK) << "'";                         \
-            ROCSPARSE_ERROR_MESSAGE(                                                     \
-                rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK),    \
-                s.str().c_str());                                                        \
-            return rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK); \
+            return rocsparse::hip_error_message(                                         \
+                TMP_STATUS_FOR_CHECK, nullptr, false, __FUNCTION__, __FILE__, __LINE__); \
         }                                                                                \
     } while(false)
 
-#define RETURN_WITH_MESSAGE_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK, MESSAGE)                   \
-    do                                                                                      \
-    {                                                                                       \
-        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                   \
-        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                              \
-        {                                                                                   \
-            std::stringstream s;                                                            \
-            s << (MESSAGE) << ", hip error detected: code '" << TMP_STATUS_FOR_CHECK        \
-              << "', name '" << hipGetErrorName(TMP_STATUS_FOR_CHECK) << "', description '" \
-              << hipGetErrorString(TMP_STATUS_FOR_CHECK) << "'";                            \
-            ROCSPARSE_ERROR_MESSAGE(                                                        \
-                rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK),       \
-                s.str().c_str());                                                           \
-            return rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK);    \
-        }                                                                                   \
+#define RETURN_WITH_MESSAGE_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK, MESSAGE)                  \
+    do                                                                                     \
+    {                                                                                      \
+        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                  \
+        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                             \
+        {                                                                                  \
+            return rocsparse::hip_error_message(                                           \
+                TMP_STATUS_FOR_CHECK, (MESSAGE), false, __FUNCTION__, __FILE__, __LINE__); \
+        }                                                                                  \
     } while(false)
 
 //
 //
 //
 
-#define THROW_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                                              \
-    do                                                                                          \
-    {                                                                                           \
-        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                       \
-        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                                  \
-        {                                                                                       \
-            std::stringstream s;                                                                \
-            s << "throwing exception due to hip error detected: code '" << TMP_STATUS_FOR_CHECK \
-              << "', name '" << hipGetErrorName(TMP_STATUS_FOR_CHECK) << "', description '"     \
-              << hipGetErrorString(TMP_STATUS_FOR_CHECK) << "'";                                \
-            ROCSPARSE_ERROR_MESSAGE(                                                            \
-                rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK),           \
-                s.str().c_str());                                                               \
-            throw rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK);         \
-        }                                                                                       \
+#define THROW_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                                      \
+    do                                                                                  \
+    {                                                                                   \
+        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);               \
+        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                          \
+        {                                                                               \
+            throw rocsparse::hip_error_message(                                         \
+                TMP_STATUS_FOR_CHECK, nullptr, true, __FUNCTION__, __FILE__, __LINE__); \
+        }                                                                               \
     } while(false)
 
-#define THROW_WITH_MESSAGE_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK, MESSAGE)                      \
-    do                                                                                        \
-    {                                                                                         \
-        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                     \
-        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                                \
-        {                                                                                     \
-            std::stringstream s;                                                              \
-            s << (MESSAGE) << ", throwing exception due to hip error detected: code '"        \
-              << TMP_STATUS_FOR_CHECK << "', name '" << hipGetErrorName(TMP_STATUS_FOR_CHECK) \
-              << "', description '" << hipGetErrorString(TMP_STATUS_FOR_CHECK) << "'";        \
-            ROCSPARSE_ERROR_MESSAGE(                                                          \
-                rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK),         \
-                s.str().c_str());                                                             \
-            throw rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK);       \
-        }                                                                                     \
+#define THROW_WITH_MESSAGE_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK, MESSAGE)                  \
+    do                                                                                    \
+    {                                                                                     \
+        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                 \
+        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                            \
+        {                                                                                 \
+            throw rocsparse::hip_error_message(                                           \
+                TMP_STATUS_FOR_CHECK, (MESSAGE), true, __FUNCTION__, __FILE__, __LINE__); \
+        }                                                                                 \
     } while(false)
 
 //
@@ -140,38 +128,28 @@ namespace rocsparse
         }                                                                 \
     } while(false)
 
-#define FORWARD_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                                  \
-    do                                                                                \
-    {                                                                                 \
-        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);             \
-        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                        \
-        {                                                                             \
-            std::stringstream s;                                                      \
-            s << "hip error detected: code '" << TMP_STATUS_FOR_CHECK << "', name '"  \
-              << hipGetErrorName(TMP_STATUS_FOR_CHECK) << "', description '"          \
-              << hipGetErrorString(TMP_STATUS_FOR_CHECK) << "'";                      \
-            ROCSPARSE_ERROR_MESSAGE(                                                  \
-                rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK), \
-                s.str().c_str());                                                     \
-            return TMP_STATUS_FOR_CHECK;                                              \
-        }                                                                             \
+#define FORWARD_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                                     \
+    do                                                                                   \
+    {                                                                                    \
+        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                \
+        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                           \
+        {                                                                                \
+            rocsparse::hip_error_message(                                                \
+                TMP_STATUS_FOR_CHECK, nullptr, false, __FUNCTION__, __FILE__, __LINE__); \
+            return TMP_STATUS_FOR_CHECK;                                                 \
+        }                                                                                \
     } while(false)
 
-#define FORWARD_WITH_MESSAGE_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK, MESSAGE)                  \
-    do                                                                                      \
-    {                                                                                       \
-        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                   \
-        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                              \
-        {                                                                                   \
-            std::stringstream s;                                                            \
-            s << (MESSAGE) << ", hip error detected: code '" << TMP_STATUS_FOR_CHECK        \
-              << "', name '" << hipGetErrorName(TMP_STATUS_FOR_CHECK) << "', description '" \
-              << hipGetErrorString(TMP_STATUS_FOR_CHECK) << "'";                            \
-            ROCSPARSE_ERROR_MESSAGE(                                                        \
-                rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK),       \
-                s.str().c_str());                                                           \
-            return TMP_STATUS_FOR_CHECK;                                                    \
-        }                                                                                   \
+#define FORWARD_WITH_MESSAGE_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK, MESSAGE)                 \
+    do                                                                                     \
+    {                                                                                      \
+        const hipError_t TMP_STATUS_FOR_CHECK = (INPUT_STATUS_FOR_CHECK);                  \
+        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                             \
+        {                                                                                  \
+            rocsparse::hip_error_message(                                                  \
+                TMP_STATUS_FOR_CHECK, (MESSAGE), false, __FUNCTION__, __FILE__, __LINE__); \
+            return TMP_STATUS_FOR_CHECK;                                                   \
+        }                                                                                  \
     } while(false)
 
 //
@@ -269,34 +247,34 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
     delete[] p;
 }
 
-#define THROW_IF_HIPLAUNCHKERNELGGL_ERROR(K, G, T, M, S, ...)                                  \
-    do                                                                                         \
-    {                                                                                          \
-        if(false == rocsparse_debug_variables.get_debug_kernel_launch())                       \
-        {                                                                                      \
-            rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                \
-        }                                                                                      \
-        else                                                                                   \
-        {                                                                                      \
-            THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL"); \
-            rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                \
-            THROW_IF_HIP_ERROR(hipGetLastError());                                             \
-        }                                                                                      \
+#define THROW_IF_HIPLAUNCHKERNELGGL_ERROR(K, G, T, M, S, ...)                                     \
+    do                                                                                            \
+    {                                                                                             \
+        const bool TMP_DEBUG_KERNEL_LAUNCH = rocsparse_debug_variables.get_debug_kernel_launch(); \
+        if(TMP_DEBUG_KERNEL_LAUNCH)                                                               \
+        {                                                                                         \
+            THROW_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");    \
+        }                                                                                         \
+        rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                       \
+        if(TMP_DEBUG_KERNEL_LAUNCH)                                                               \
+        {                                                                                         \
+            THROW_IF_HIP_ERROR(hipGetLastError());                                                \
+        }                                                                                         \
     } while(false)
 
-#define RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(K, G, T, M, S, ...)                                  \
-    do                                                                                          \
-    {                                                                                           \
-        if(false == rocsparse_debug_variables.get_debug_kernel_launch())                        \
-        {                                                                                       \
-            rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                 \
-        }                                                                                       \
-        else                                                                                    \
-        {                                                                                       \
-            RETURN_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL"); \
-            rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                 \
-            RETURN_IF_HIP_ERROR(hipGetLastError());                                             \
-        }                                                                                       \
+#define RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(K, G, T, M, S, ...)                                    \
+    do                                                                                            \
+    {                                                                                             \
+        const bool TMP_DEBUG_KERNEL_LAUNCH = rocsparse_debug_variables.get_debug_kernel_launch(); \
+        if(TMP_DEBUG_KERNEL_LAUNCH)                                                               \
+        {                                                                                         \
+            RETURN_WITH_MESSAGE_IF_HIP_ERROR(hipGetLastError(), "prior to hipLaunchKernelGGL");   \
+        }                                                                                         \
+        rocsparse_hipLaunchKernelGGL((K), (G), (T), (M), (S), __VA_ARGS__);                       \
+        if(TMP_DEBUG_KERNEL_LAUNCH)                                                               \
+        {                                                                                         \
+            RETURN_IF_HIP_ERROR(hipGetLastError());                                               \
+        }                                                                                         \
     } while(false)
 
 #define RETURN_ROCSPARSE_ERROR_IF(STATUS, INPUT_STATUS_FOR_CHECK)     \
@@ -309,19 +287,14 @@ inline void dprint(I size_, const T* v, const char* name_ = nullptr, I short_siz
         }                                                             \
     } while(false)
 
-#define PRINT_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                                    \
-    {                                                                                 \
-        hipError_t TMP_STATUS_FOR_CHECK = INPUT_STATUS_FOR_CHECK;                     \
-        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                        \
-        {                                                                             \
-            std::stringstream s;                                                      \
-            s << "hip error detected: code '" << TMP_STATUS_FOR_CHECK << "', name '"  \
-              << hipGetErrorName(TMP_STATUS_FOR_CHECK) << "', description '"          \
-              << hipGetErrorString(TMP_STATUS_FOR_CHECK) << "'";                      \
-            ROCSPARSE_ERROR_MESSAGE(                                                  \
-                rocsparse::get_rocsparse_status_for_hip_status(TMP_STATUS_FOR_CHECK), \
-                s.str().c_str());                                                     \
-        }                                                                             \
+#define PRINT_IF_HIP_ERROR(INPUT_STATUS_FOR_CHECK)                                       \
+    {                                                                                    \
+        hipError_t TMP_STATUS_FOR_CHECK = INPUT_STATUS_FOR_CHECK;                        \
+        if(TMP_STATUS_FOR_CHECK != hipSuccess)                                           \
+        {                                                                                \
+            rocsparse::hip_error_message(                                                \
+                TMP_STATUS_FOR_CHECK, nullptr, false, __FUNCTION__, __FILE__, __LINE__); \
+        }                                                                                \
     }
 
 #define PRINT_IF_ROCSPARSE_ERROR(INPUT_STATUS_FOR_CHECK, MESSAGE)         \
