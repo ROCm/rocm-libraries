@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -311,9 +312,28 @@ SHIPPED = FLYDSL.parent / "src/engines/kernel_ingestor_engine/descriptors/FlyDSL
 # The reads that turn a name a graph may leave unbound into a value: the first argument of
 # each is read guarded.
 GUARDS = ("value_or_default", "present")
-# Read by every SDPA model and set by only some graphs: unguarded, a graph without them
-# makes the estimate unavailable.
-ALWAYS_GUARDED = ("$graph.nodes[0].attn_scale_value", "$graph.nodes[0].generate_stats")
+# Per family: the folder filter, the names read by every model of the family and set by only
+# some of its graphs (unguarded, a graph without them makes the estimate unavailable), and
+# the pattern of the names a backward model reads bare on purpose. The backward graph has no
+# ``generate_stats`` attribute (it takes the forward pass's stats as an input), so it is not
+# listed for it. A backward model reads its required tensors bare as plain features and also
+# inside guarded derived features, so a guard there says nothing about whether the name can
+# be unbound. ``flops`` is read bare too: a graph whose work is not counted has no tflops to
+# estimate, so the estimate is meant to be unavailable for it.
+SDPA_FAMILIES = {
+    "forward": (
+        lambda folder: not folder.startswith("sdpa_bwd"),
+        ("$graph.nodes[0].attn_scale_value", "$graph.nodes[0].generate_stats"),
+        None,
+    ),
+    "backward": (
+        lambda folder: folder.startswith("sdpa_bwd"),
+        ("$graph.nodes[0].attn_scale_value",),
+        re.compile(
+            r"\$graph\.(flops|nodes\[0\]\.(flops|(q|k|v|o|do|dq|dk|dv|stats)\..+))"
+        ),
+    ),
+}
 
 
 def _reads(expression, guarded: bool, out: list[tuple[str, bool]]) -> None:
@@ -333,11 +353,12 @@ def _reads(expression, guarded: bool, out: list[tuple[str, bool]]) -> None:
                 _reads(args, guarded, out)
 
 
-def _shipped_sdpa_reads() -> dict[str, list[tuple[str, bool]]]:
-    """The reads of every installed SDPA forward model, keyed by its path in the tree."""
+def _shipped_sdpa_reads(in_family) -> dict[str, list[tuple[str, bool]]]:
+    """The reads of every installed SDPA model whose folder ``in_family`` accepts, keyed by
+    its path in the tree."""
     reads = {}
     for path in sorted(SHIPPED.glob("sdpa_*/heuristics/**/heuristic.uhd.json")):
-        if path.relative_to(SHIPPED).parts[0].startswith("sdpa_bwd"):
+        if not in_family(path.relative_to(SHIPPED).parts[0]):
             continue
         out: list[tuple[str, bool]] = []
         _reads(
@@ -349,18 +370,31 @@ def _shipped_sdpa_reads() -> dict[str, list[tuple[str, bool]]]:
     return reads
 
 
-def test_every_shipped_sdpa_model_guards_what_any_sdpa_model_guards() -> None:
-    """A name some SDPA graphs leave unbound must be read through a guard by every model.
+@pytest.mark.parametrize("family", SDPA_FAMILIES)
+def test_every_shipped_sdpa_model_guards_what_any_sdpa_model_guards(
+    family: str,
+) -> None:
+    """A name some graphs of an SDPA family leave unbound must be read through a guard by
+    every model of that family.
 
-    One model's guard shows the name can be unbound on an SDPA forward graph; a sibling
+    One model's guard shows the name can be unbound on a graph of the family; a sibling
     reading it bare reports UNAVAILABLE for every graph that leaves it unbound, which no
-    other check sees (the generator, ``--check`` and the census all pass). Holds across the
-    whole SDPA forward family, so an engine with a single model is held to its siblings.
+    other check sees (the generator, ``--check`` and the census all pass). The forward
+    models (every ``sdpa_*`` folder but ``sdpa_bwd_*``) and the backward models (the split
+    estimates, the merged estimate and the merged ranker under ``sdpa_bwd_*``) are held
+    separately: the two families guard different sets of names, and a backward model reads
+    its required tensors (q, k, v, o, do, dq, dk, dv, stats) bare, as every backward graph
+    binds them, and ``flops`` bare, because a graph whose work is not counted has no tflops
+    to estimate; those are not held to the rule. An engine with a single model is held to
+    its siblings.
     """
-    reads = _shipped_sdpa_reads()
-    assert reads, f"no installed SDPA model under {SHIPPED}"
+    in_family, always_guarded, always_bound = SDPA_FAMILIES[family]
+    reads = _shipped_sdpa_reads(in_family)
+    assert reads, f"no installed SDPA {family} model under {SHIPPED}"
     guarded = {name for model in reads.values() for name, wrapped in model if wrapped}
-    guarded.update(ALWAYS_GUARDED)
+    guarded.update(always_guarded)
+    if always_bound:
+        guarded = {name for name in guarded if not always_bound.fullmatch(name)}
     bare = sorted(
         f"{path}: {name}"
         for path, model in reads.items()
