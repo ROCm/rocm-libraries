@@ -376,6 +376,36 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
             wOff[i] = static_cast<int>(wGroupBase + (wOk[i] ? n * wRowStride : 0));
         }
     }
+    // Forward, whole slices (the reduction channels a multiple of KS) and rows that reach the
+    // input at every tap the steps visit: a load's byte offset is a per-row base plus the step's
+    // uniform delta, no masks (rows past the output and columns past the channels start past the
+    // buffer, so their loads read zeros; loads past the last step read data no MMA uses).
+    constexpr bool FASTOFF = DIR == K1_FORWARD && !DIRECT;
+    constexpr unsigned FAR = 0x80000000u; // past any buffer the 32-bit offsets address
+    unsigned xB[FASTOFF ? XL : 1], wB[FASTOFF ? WL : 1];
+    bool fast = false;
+    if constexpr(FASTOFF)
+    {
+        unsigned visited = 0;
+        for(int q = q0; q < q1; ++q)
+            visited |= 1u << q;
+        for(int q = r0; q < r1; ++q)
+            visited |= 1u << (10 + q);
+        for(int q = 0; q < taps2; ++q)
+            visited |= 1u << (20 + q);
+        bool laneFast = red % KS == 0;
+#pragma unroll
+        for(int i = 0; i < XL; ++i)
+        {
+            const bool live = m0 + rowT + RPP * i < gather.rows;
+            laneFast = laneFast && (!live || (xMask[i] & visited) == visited);
+            xB[i] = live ? static_cast<unsigned>((xOff[i] + gran) * ES) : FAR;
+        }
+#pragma unroll
+        for(int i = 0; i < WL; ++i)
+            wB[i] = wOk[i] ? static_cast<unsigned>((wOff[i] + gran) * ES) : FAR;
+        fast = __builtin_amdgcn_ballot_w64(!laneFast) == 0;
+    }
 
     // The load cursor: the step the next tile load fetches (taps qt, qr, qs; slice c0).
     struct Cursor
@@ -562,6 +592,32 @@ __device__ __attribute__((always_inline)) void k1ConvFlexReg(const K1Args& a CON
     unsigned off[XL + WL];
     auto offsets = [&]() __attribute__((always_inline))
     {
+        if constexpr(FASTOFF)
+        {
+            if(fast)
+            {
+                const int xDeltaB
+                    = (((cur.qt * gather.step[0] * gather.in[1] + cur.qr * gather.step[1])
+                            * gather.in[2]
+                        + cur.qs * gather.step[2])
+                           * gather.chans
+                       + cur.c0)
+                      * ES;
+                const int ft = map.first[0] + cur.qt * map.step[0];
+                const int fr = map.first[1] + cur.qr * map.step[1];
+                const int fs = map.first[2] + cur.qs * map.step[2];
+                const int wDeltaB
+                    = (static_cast<int>(((ft * a.fr + fr) * a.fs + fs) * wTapStride) + cur.c0) * ES;
+#pragma unroll
+                for(int i = 0; i < XL; ++i)
+                    off[i] = xB[i] + static_cast<unsigned>(xDeltaB);
+#pragma unroll
+                for(int i = 0; i < WL; ++i)
+                    off[XL + i] = wB[i] + static_cast<unsigned>(wDeltaB);
+                advance();
+                return;
+            }
+        }
         const bool cok = (cur.v < vEnd) & (cur.c0 + gran < red);
         const int xDelta
             = ((cur.qt * gather.step[0] * gather.in[1] + cur.qr * gather.step[1]) * gather.in[2]
