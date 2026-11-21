@@ -70,13 +70,14 @@ namespace TensileLite
                 iot::mapRequired(io, "sizeMapping", s.sizeMapping);
                 iot::mapOptional(io, "customKernel", s.customKernel);
                 iot::mapRequired(io, "internalArgsSupport", s.internalArgsSupport);
+                iot::mapRequired(io, "problemType", s.problemType);
                 // Read path only: this throws, and a throw out of a trait on the
                 // write path leaves the output half-built and bypasses the error
                 // list that finish() reports through. Re-encoding a solution that
                 // already loaded must not fail for a reason unrelated to encoding.
+                // Runs last because it reads problemType.
                 if(!iot::outputting(io))
                     s.validatePersistentLoopArgs();
-                iot::mapRequired(io, "problemType", s.problemType);
             }
 
             const static bool flow = false;
@@ -98,6 +99,30 @@ namespace TensileLite
                 iot::mapOptional(io, "workspaceSizePerElemBias", s.workspaceSizePerElemBias);
                 iot::mapOptional(io, "generated", s.generated);
                 iot::mapOptional(io, "uniformSummationOrder", s.uniformSummationOrder);
+                // Sequence traits fill by index, so an explicit empty list would
+                // otherwise keep the default element.
+                if(!iot::outputting(io) && iot::hasKey(io, "streamKReductions"))
+                    s.streamKReductions.clear();
+                iot::mapOptional(io, "streamKReductions", s.streamKReductions);
+                iot::mapOptional(io, "postKernels", s.postKernels);
+            }
+
+            const static bool flow = false;
+        };
+
+        template <typename IO>
+        struct MappingTraits<CustomPostKernel, IO>
+        {
+            using iot = IOTraits<IO>;
+            static void mapping(IO& io, CustomPostKernel& s)
+            {
+                iot::mapRequired(io, "kind", s.kind);
+                iot::mapOptional(io, "version", s.version);
+                iot::mapRequired(io, "name", s.name);
+                iot::mapOptional(io, "args", s.args);
+                iot::mapOptional(io, "threads", s.threads);
+                iot::mapOptional(io, "grid", s.grid);
+                iot::mapOptional(io, "bands", s.bands);
             }
 
             const static bool flow = false;
