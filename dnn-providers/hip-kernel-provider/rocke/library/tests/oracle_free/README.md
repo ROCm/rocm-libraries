@@ -1,12 +1,13 @@
 # Oracle-free attention tests
 
 This suite launches the shipped dense attention kernels and checks them without
-a complete attention oracle. It has two lanes:
+a complete attention oracle. It has three lanes:
 
 | Lane | Checks | Verdict |
 |---|---|---|
 | Uniform probabilities ([Exposures](#exposures) to [Scope](#scope)) | masked attention on zero Q | every stored bit equals a closed form |
 | [Key-permutation relation](#key-permutation-relation) | unmasked attention on nonuniform scores | two launches agree within a derived bound |
+| [Value-shift relation](#value-shift-relation) | unmasked attention on nonuniform scores | two launches differ by the shift of V, within a derived tolerance |
 
 The uniform-probability lane sets Q to zero. Zero Q makes every legal score
 equal, so the softmax row for query `q` is uniform over its legal key set
@@ -446,15 +447,300 @@ rational bound, and applies the artifact checks of `_permutation_path.py` to the
 lowered quick kernels of every compiler lane and to edited copies that each
 check must reject.
 
+## Value-shift relation
+
+The attention weights of a row sum to one. Adding one vector `c` to every value
+token therefore adds `c` to every output row:
+
+`O(Q, K, V + 1 c^T) = O(Q, K, V) + 1 c^T`.
+
+This lane launches the subject on `V` and on `V + c` with the same Q and K and
+judges the residual `E = O(V + c) - O(V) - c` element by element. There is no
+expected output, no closed form and no reference: the tolerance follows from
+the kernel's arithmetic path and the launched values, and its last term from
+the stored bits themselves.
+
+The shift is `c_d = (1/2, -1/4, 1/8, -1/2)[d mod 4]`: alternating signs, three
+magnitudes, every component nonzero and exact in both subject dtypes.
+
+The relation holds under any mask whose rows are all non-empty, but the
+tolerance is derived for the unmasked path only. The gfx942 dense kernel serves
+unmasked attention only at `seqlen_q == seqlen_k` with whole tiles, so the
+cases are square.
+
+### Inputs
+
+| Tensor | Values |
+|---|---|
+| Q, K | pseudo-random multiples of 1/8 in `[-3, 3]`, bell-shaped |
+| V | pseudo-random `+1` or `-1` |
+
+The values come from an explicit integer hash of the element index, not from a
+library random stream, and are exact in FP16 and BF16. Two attention profiles
+use them:
+
+| Profile | Change to Q and K | Effect |
+|---|---|---|
+| `moderate` | none | every row spreads its probability over many keys |
+| `concentrated` | Q is replaced by its magnitude and key token 70 is 2.0 in every dimension | that key holds nearly all of every row's probability; in FP16 most other weights reach the probability cast as subnormals |
+
+The lattice keeps every score finite and far above the kernel's initial running
+maximum. The largest score of a row then has weight `exp2(0)`, which bounds the
+normalizer away from zero. `require_finite_scores` refuses Q or K off the
+lattice.
+
+The tolerance has no term for a rounded input transformation, so the follow-up
+tensor must be the exact sum. `shifted_value_bits` forms `V + c` in FP64,
+checks that the sum is exact there and in FP32, and encodes it with
+`encode_bits`, which refuses a value the dtype cannot hold. With V in
+`{+1, -1}` the shifted values are `3/2, -1/2, 3/4, -5/4, 9/8, -7/8, 1/2, -3/2`.
+The contract rechecks the launched bytes: the follow-up bits must decode to
+`V + c` exactly.
+
+### Tolerance
+
+Both launches read the same Q and K, so they compute the same weights
+`p_k = exp2(s_k - m)`, the same rescales and the same normalizer `l`. Key `k`
+reaches the output with the coefficient `P_k = cast(p_k) A_k / l`, where `A_k`
+is the product of the rescales after its tile. The residual is
+
+`E_d = c_d (sum_k P_k - 1) + accumulation and store errors of both launches`,
+
+and the tolerance bounds each part:
+
+| Term | Source | Size at the quick shape |
+|---|---|---|
+| Row sum, times `\|c_d\|` | the accumulator multiplies V by the weight rounded to the subject dtype, while the normalizer sums the unrounded weight; plus the FP32 normalizer and its reciprocal | `5.27e-4` (FP16), `3.94e-3` (BF16) |
+| Accumulation, once per launch | `Sk / 8` MFMA calls and one rescale per key tile | `3.1e-5` of the column's largest `\|V\|` |
+| Store, once per stored value | the conversion of `acc / l` to the subject dtype, with or without an FP32 product in between | half the gap of the stored value to its neighbour away from zero, plus one FP32 unit |
+
+The errors of the exponential and of its argument do not enter. Numerator and
+normalizer use the same computed weights, so a weight that is wrong in both
+cancels in `sum_k P_k`.
+
+The row-sum and accumulation terms are functions of the dtype, the key count,
+the number of key tiles a query row visits in the kernel under test, and the
+largest `|V|` of each column in each launch. `value_shift_bound` evaluates them
+as exact rationals, and each float the verdict uses is the first one not below
+its rational. They read no output and are not fitted to any measurement.
+
+The store term is read from the stored bits (`store_allowance`). A value
+rounded to nearest lies within half a gap of what it was rounded from, whatever
+that was, so the term is a property of the format's grid at the stored value,
+not of a correct answer. It holds for a faulty kernel as well: a wrong store is
+still the rounding of something, and the defect shows in the other terms. A
+defect that moves an output changes its own store term by at most one binade
+step, which is the resolution of the dtype there. An input-only store term
+would charge every element the half-gap of the largest admissible output. At
+the quick shape that alone is about three quarters of the tolerance of a
+column with `|c_d| = 1/2`, whatever the size of the stored value.
+
+The tolerance that does not read the outputs is kept as a diagnostic
+(`apriori`). At the quick shape, in the columns with `|c_d| = 1/2`, it is
+`1.32e-3` in FP16 and `9.86e-3` in BF16.
+
+The bound is derived for a key count that is a multiple of the eight products
+of an MFMA call, `(keys + key_tiles) * 2^-23 < 1`, and a normalizer error below
+one, which keeps the computed normalizer positive. `value_shift_bound` refuses
+anything else, and `value_shift_contract` refuses a column whose tolerance is
+not below the shift it must resolve.
+
+The tolerance holds for every single-pass dense variant, whatever its tile,
+grid, persistence or scheduling knobs, under these assumptions about the
+executed path:
+
+- FP32 addition, multiplication and the reciprocal return one of the two FP32
+  neighbours of their exact result;
+- each MFMA call returns its accumulator plus its eight products with an error
+  of at most eight FP32 units of the summed magnitudes of those nine terms;
+- the probability cast and the output store round to nearest even and keep the
+  subnormals of the subject dtype;
+- no NaN or infinity enters the path;
+- the kernel is deterministic: two launches on identical bytes store identical
+  bits;
+- the normalizer sums uncast weights, the accumulator consumes cast ones, and
+  both are rescaled by the same `alpha` per key tile;
+- nothing computed from V reaches a score, a weight, a rescale, the
+  normalizer, a branch condition or an address.
+
+The last two are checked on the lowered kernel, on the CPU and again before
+every launch. The path is the one the key-permutation bound is derived for, so
+the checks of `_permutation_path.py` are reused: they classify every
+floating-point instruction of the LLVM IR against the path and trace the MFMA
+operands to the stored tensors. `_value_shift_path.py` adds a trace of
+everything computed from V: `v_ptr` may be read only by the fills of its LDS
+region, that region only as the value operand of the PV calls, and their
+results only by the accumulator, its rescale, the reciprocal product and the
+store. An instruction, an operand or a V-derived
+value outside that fails with "re-derive the tolerance"; the tolerance is never
+widened to absorb it. The trace follows LDS regions as a whole. Which row of
+its region a fill writes is index arithmetic and is not traced.
+
+Determinism is checked by the replay launch. The other items are assumptions
+about the hardware and the compiler. Of the compiled code object this suite
+reads only the floating-point mode; how each instruction rounds is not checked
+here.
+
+The uncast-normalizer item is a property of this kernel, not a requirement of
+attention. With it the weights the kernel applies do not sum to one exactly: a
+row sum is off by up to `2^-(p+1)`, which is the largest part of the row-sum
+term. The verdict accepts that, and the path check requires it: a kernel that
+summed the cast weights would be more accurate and would fail the check until
+the tolerance is re-derived for it. So that the accepted behaviour stays a
+measured number, every run is also reported against the tolerance of such a
+kernel, whose row-sum term is `3.1e-5` in both dtypes (the
+`against a normalizer over cast weights` diagnostic below).
+
+### Scope checked before a launch
+
+The lane establishes the following for the kernel under test before it launches
+anything, and fails, never skips, when one is missing:
+
+- The resolved spec is the unmasked single-pass dense kernel. The subject
+  adapter refuses the same specs as for the uniform lane (split-KV, sinks, LSE,
+  ragged, bottom-right, paged, varlen) and additionally requires the resolved
+  spec to be unmasked.
+- The kernel is compiled as the launcher compiles it, and the path checks above
+  run on the LLVM IR of that artifact, not on an earlier build. The adapter
+  repeats the launcher's compile call; a CPU contract fails when the two calls
+  differ.
+- The number of key tiles a query row visits is taken from that IR: one KV loop
+  over `seqlen_kv / block_n` whole tiles, with no mask and no early exit.
+- The kernel descriptor of the code object selects round-to-nearest-even and
+  keeps subnormals.
+- Q and K are on the lattice, V is finite, and the follow-up bits are `V + c`
+  exactly.
+
+The lane prints the SHA-256 of the code object and the compiler that produced
+it. Evidence gathered on one code object does not carry over to another digest.
+
+### Policy
+
+Each of these is a hard violation:
+
+- a stored value in either output is not finite (`invalid`); the output is
+  prefilled with quiet NaN, so an unwritten coordinate counts;
+- a stored magnitude exceeds the largest output the launched values admit
+  (`magnitude`); an error both launches share would otherwise cancel;
+- `|E_d|` exceeds its tolerance at any coordinate (`residual`);
+- the replay of the base launch differs from it in any stored bit.
+
+The lane also prints diagnostics. None of them is a verdict:
+
+| Diagnostic | Meaning |
+|---|---|
+| `rho_max` | largest residual over its tolerance, with its coordinate, residual and tolerance; also per (batch, query head) and per `d mod 4`, the period of the shift and of the FP16 store forms |
+| `eta_hat` | `E_d / c_d` at that coordinate, the apparent row-sum error, with its allowance `tau_d / \|c_d\|` |
+| `eta_row`, `s_row` | largest per-row median of `E_d / c_d`, and largest distance of a column from its row's median; a row-sum defect moves the median, a column defect the spread |
+| `rms`, `mean` | root-mean-square and mean signed residual |
+| `apriori rho_max`, `tau/apriori` | largest residual over the tolerance that reads no output, and the mean of the applied tolerance over that one |
+| `against a normalizer over cast weights` | largest residual over the tolerance of a kernel whose normalizer sums the cast weights, and the number of elements beyond it; a nonzero count is the uncast normalizer of the shipped kernel showing, not a failure |
+
+`E_d` is a difference of stored values and an exact shift, so it is a multiple
+of the grid spacing of the stored values. Two store roundings of full size and
+equal sign give one spacing, which is the sum of the two store terms. In the
+columns with `|c_d| = 1/8`, where the other terms are smallest, such an element
+sits near `0.8` of its tolerance. A ratio of that size is explained only for an
+element whose residual is exactly one spacing.
+
+### Mutations
+
+Two more launches apply a wrong shift while the analyzer keeps expecting `c`:
+
+| Mutation | Applied shift |
+|---|---|
+| `omit_second_half` | `c` in the first `D / 2` columns, zero in the rest |
+| `rescale_second_half` | `c` in the first `D / 2` columns, `c / 2` in the rest |
+
+The mutated tensor is a legitimate input, so the pair obeys the relation with
+the applied shift, and its residual against `c` is the missing shift plus an
+error inside the tolerance. A wrong shift counts as rejected
+(`shift_mutation_failures`) only when all of these hold:
+
+- every value of the launch is finite and inside its guard: a faulty launch
+  does not stand in for a rejection;
+- no residual is beyond its tolerance in the first `D / 2` columns, which
+  carry `c`;
+- every residual is beyond its tolerance in each column whose missing shift is
+  more than twice the tolerance that reads no output. At the quick shape that
+  is every column of the second half.
+
+The shift has period four, so the correct launch cannot tell an output column
+from the one `D / 2` further on. The wrong shifts can: a kernel that exchanged
+the halves would put the residuals in the first one.
+
+A normalization mutation is applied on the host to the real outputs: both
+stored outputs are scaled by `1 + eta` and converted again, for
+`eta = 2^-2, ..., 2^-12`. The mutation acts after the kernel's own conversion.
+Above a threshold derived from the tolerance (`output_scale_threshold`:
+`7.2e-3` in FP16, `5.6e-2` in BF16 at the quick shape) a passing pair is
+certain to be rejected, and the test fails when it is not. Below the threshold
+the outcome is printed, together with the smallest scale of the unbroken
+rejected run.
+
+When the correct shift fails as well, the message of an unrejected mutation
+reports its violations as the diagnosis.
+
+### What the relation cannot see
+
+- Anything both launches share cancels: scores, the scale, the running maximum,
+  the exponential, KV-head routing, and a mask that is wrong but renormalized.
+  A fixed error added to both outputs is seen only by the magnitude guard. The
+  uniform-probability lane and the pinned SDPA lane cover those.
+- A joint permutation of the keys and values, and a pairing of scores with the
+  wrong values that leaves the row sum at one.
+- A row-sum defect below the tolerance. Sensitivity depends on the dtype and on
+  the attention profile, and no single claim covers them. One extra equal key
+  in the normalizer of a 256-key row changes the row sum by `1/257`. At the
+  largest shift that moves the residual by `1.9e-3`: above the FP16 tolerance
+  that reads no output but below twice it, so its rejection is not certain,
+  and below the BF16 one. On the concentrated profile a defect on a single
+  non-dominant key is below both.
+- The fixture's V has one significant bit and its shifted values at most four,
+  so a precision defect on general value operands does not show.
+
+### Cases
+
+| Arch | Dtype | Profile | Case |
+|---|---|---|---|
+| gfx942 | FP16 | moderate | `B1,Sq256,Sk256,H8/2,D64`, unmasked |
+| gfx942 | FP16 | concentrated | `B1,Sq256,Sk256,H8/2,D64`, unmasked |
+| gfx942 | BF16 | moderate | `B1,Sq256,Sk256,H8/2,D64`, unmasked |
+| gfx942 | BF16 | concentrated | `B1,Sq256,Sk256,H8/2,D64`, unmasked |
+
+Each case is five launches: the base inputs, their replay, the shifted values
+and the two shift mutations. The two profiles of a dtype launch one code
+object. `VALUE_SHIFT_SUBJECT_CASES` in `_dense_subject.py` lists the
+`(arch, case)` pairs, and the skip and failure semantics are those of the
+uniform lane: only a device of another architecture skips.
+
+The CPU contracts in `test_value_shift_contracts.py` exercise the analyzer on
+an FP32 model of the kernel's single-pass online softmax. The modeled shift
+stays inside the tolerance, on the fixture, on rows with a late maximum, and
+with weights that are wrong in the normalizer and the accumulator alike. The
+modeled wrong shifts and the output scales above the threshold are rejected.
+Normalization defects of the model (a key omitted from or repeated in the
+normalizer, a key omitted from the accumulator, the accumulator scaled or
+rescaled apart from the normalizer, the weights of one tile changed in the
+accumulator only) are rejected wherever the tolerance decides, and reported
+otherwise. The model lives only in those contracts.
+
+The same file pins the tolerance's constants against the derived expressions,
+requires the vectorized analyzer to agree with a scalar specification on every
+field, and applies the artifact checks of `_value_shift_path.py` to the lowered
+quick kernels of every compiler lane and to edited copies that each check must
+reject.
+
 ## Oracle prohibition
 
 Verdicts may use only deterministic profile construction, independent legal-key
 arithmetic, exact rational rounding, a tolerance derived from the kernel's
-arithmetic path and input statistics, and diagnostic reductions. They must not
-call Torch SDPA, rocKE numeric references, SDPA reference helpers, or a
+arithmetic path and input statistics (in the value-shift lane also from the
+stored bits, for its store term), and diagnostic reductions. They must not call
+Torch SDPA, rocKE numeric references, SDPA reference helpers, or a
 pinned-reference bundle. A CPU source contract checks the suite for those
-dependencies. The kernel model in the key-permutation contracts takes part in no
-GPU verdict.
+dependencies. The kernel models in the key-permutation and value-shift
+contracts take part in no GPU verdict.
 
 The whole suite is Torch-free, and CPU contracts enforce it in two ways:
 
@@ -474,15 +760,18 @@ From the `rocke/library` directory (NumPy and pytest only; Torch is not needed):
 ```bash
 # CPU contracts: rounding, encoding, mutations, policy, vectorized-versus-scalar
 # analyzer agreement, proof scope, adapter ABI, Torch-free and oracle-free
-# source policy; then the key-permutation maps, inputs, bound and analyzer.
+# source policy; then the key-permutation maps, inputs, bound and analyzer; then
+# the value-shift inputs, tolerance, analyzer and path checks.
 python -m pytest tests/oracle_free/test_contracts.py \
-  tests/oracle_free/test_permutation_contracts.py -vv
+  tests/oracle_free/test_permutation_contracts.py \
+  tests/oracle_free/test_value_shift_contracts.py -vv
 
-# Uniform-probability and key-permutation production launches on a visible
-# gfx942 device.
+# Uniform-probability, key-permutation and value-shift production launches on a
+# visible gfx942 device.
 HIP_VISIBLE_DEVICES=0 python -m pytest \
   tests/oracle_free/test_analytical_dense.py \
-  tests/oracle_free/test_permutation_dense.py -vv -rs
+  tests/oracle_free/test_permutation_dense.py \
+  tests/oracle_free/test_value_shift_dense.py -vv -rs
 ```
 
 From the installed `bin/hip_kernel_provider` directory, the GPU launches and the
