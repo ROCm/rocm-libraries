@@ -399,7 +399,6 @@ bool rocke_moe_smoothquant_is_valid_spec(const rocke_moe_smoothquant_spec_t* spe
                                          size_t reason_cap)
 {
     const rocke_arch_target_t* target;
-    const char* out_dtype;
     long bytes_lds;
 
     if(reason != NULL && reason_cap > 0)
@@ -426,54 +425,10 @@ bool rocke_moe_smoothquant_is_valid_spec(const rocke_moe_smoothquant_spec_t* spe
         return false;
     }
 
-    /* out_dtype not in ("i8","fp8e4m3","bf8e5m2"): canonical names only, no
-     * aliases, as in Python. */
-    out_dtype = spec->out_dtype;
-    if(out_dtype == NULL
-       || (strcmp(out_dtype, "i8") != 0 && strcmp(out_dtype, "fp8e4m3") != 0
-           && strcmp(out_dtype, "bf8e5m2") != 0))
+    /* ok, why = validate_quant_out_dtype(spec.out_dtype, arch) */
+    if(!rocke_validate_quant_out_dtype(spec->out_dtype, arch, reason, reason_cap))
     {
-        if(reason != NULL && reason_cap > 0)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "unsupported out_dtype %s",
-                     spec->out_dtype ? spec->out_dtype : "(null)");
-        }
         return false;
-    }
-
-    /* fp8/bf8 need the CDNA-only v_cvt_pk_{fp8,bf8}_f32 op. */
-    if((strcmp(out_dtype, "fp8e4m3") == 0 || strcmp(out_dtype, "bf8e5m2") == 0)
-       && (target->family == NULL || strcmp(target->family, "cdna") != 0))
-    {
-        if(reason != NULL && reason_cap > 0)
-        {
-            snprintf(reason,
-                     reason_cap,
-                     "out_dtype %s needs the CDNA-only v_cvt_pk_{fp8,bf8}_f32 "
-                     "conversion; %s (family %s) has no fp8/bf8 pack op -- use "
-                     "out_dtype='i8'",
-                     spec->out_dtype,
-                     arch,
-                     target->family ? target->family : "(null)");
-        }
-        return false;
-    }
-
-    /* quant_max_abs(out_dtype, arch=arch) refuses an fp8 / bf8 dtype on a
-     * target with no known encoding: (False, str(error)). */
-    {
-        double bound;
-        char why[ROCKE_ERR_MSG_CAP];
-        if(rocke_quant_max_abs(spec->out_dtype, arch, &bound, why, sizeof(why)) != ROCKE_OK)
-        {
-            if(reason != NULL && reason_cap > 0)
-            {
-                snprintf(reason, reason_cap, "%s", why);
-            }
-            return false;
-        }
     }
 
     /* topk < 1 / experts < 1. */

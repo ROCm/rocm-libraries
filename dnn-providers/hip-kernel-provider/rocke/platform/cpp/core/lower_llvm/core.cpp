@@ -763,7 +763,7 @@ const char* rocke_ll_smem_storage_type(rocke_lower_t* L, const rocke_type_t* sme
 }
 
 /* ====================================================================== */
-/* FP hex constants (Python _fp64_hex / _fp32_hex / _fp16_hex)            */
+/* FP hex constants (Python _fp64_hex / llvm_f32_literal / _fp16_hex)     */
 /* ====================================================================== */
 
 const char* rocke_ll_fp64_hex(rocke_lower_t* L, double x)

@@ -9,6 +9,7 @@
  *   quant_ir_type(qdtype)                         ->  rocke_quant_ir_type() /
  *                                                     rocke_b_quant_ir_type()
  *   quant_max_abs(qdtype, arch=arch)              ->  rocke_quant_max_abs()
+ *   validate_quant_out_dtype(out_dtype, arch)     ->  rocke_validate_quant_out_dtype()
  *   quantize_scalar_f32(b, x, inv_scale=,
  *                       qdtype=, arch=)           ->  rocke_b_quantize_scalar_f32()
  *
@@ -68,6 +69,19 @@ const rocke_type_t* rocke_b_quant_ir_type(rocke_ir_builder_t* b, const char* qdt
  * unsupported dtype or an fp8 / bf8 dtype on a target with no known encoding. */
 rocke_status_t rocke_quant_max_abs(
     const char* qdtype, const char* arch, double* out, char* err, size_t err_cap);
+
+/* Python validate_quant_out_dtype(out_dtype, arch): whether a quantizing
+ * kernel can write `out_dtype` on `arch`. `out_dtype` must be "i8", "fp8e4m3"
+ * or "bf8e5m2" (no aliases); fp8 / bf8 need a CDNA target (the
+ * v_cvt_pk_{fp8,bf8}_f32 conversion) with a known encoding
+ * (rocke_quant_max_abs). Returns true, or false with the Python-matching reason
+ * in `reason` (capacity reason_cap, may be NULL). `arch` must be a known
+ * target: Python raises KeyError for any other, and this returns false with
+ * "unknown arch <arch>". */
+bool rocke_validate_quant_out_dtype(const char* out_dtype,
+                                    const char* arch,
+                                    char* reason,
+                                    size_t reason_cap);
 
 /* Python quantize_scalar_f32(b, x_f32, inv_scale=inv_scale, qdtype=qdtype,
  * arch=arch): x_f32 * inv_scale, clamped to rocke_quant_max_abs and converted

@@ -54,6 +54,7 @@ from rocke.helpers.quant import (
     quant_max_abs,
     quantize_scalar_f32,
     quantize_prescaled_f32,
+    validate_quant_out_dtype,
 )
 
 
@@ -272,8 +273,12 @@ def test_quant_type_diagnostic_lists_every_accepted_spelling():
 )
 def test_type_alias_does_not_enable_scalar_quantization(dtype):
     assert quant_ir_type(dtype) is not None
-    with pytest.raises(ValueError, match="unsupported quant dtype"):
+    with pytest.raises(ValueError) as error:
         quant_max_abs(dtype, arch="gfx950")
+    assert str(error.value) == (
+        f"unsupported quant dtype {dtype!r}; expected one of ['bf8', 'bf8e5m2', "
+        "'e4m3', 'fp8', 'fp8_e4m3', 'fp8_e5m2', 'fp8e4m3', 'i8', 'int8']"
+    )
 
 
 def test_quant_dtype_annotations_match_scalar_and_logical_contracts():
@@ -518,23 +523,44 @@ def test_quant_instances_scale_to_the_target_fp8_bound(case, vec, arch, other_ar
     assert other not in text
 
 
+@pytest.mark.parametrize(
+    "out_dtype, arch, reason",
+    [
+        ("fp4", "gfx950", "unsupported out_dtype 'fp4'"),
+        (
+            "fp8e4m3",
+            "gfx1151",
+            (
+                "out_dtype 'fp8e4m3' needs the CDNA-only v_cvt_pk_{fp8,bf8}_f32 "
+                "conversion; gfx1151 (family 'rdna') has no fp8/bf8 pack op -- "
+                "use out_dtype='i8'"
+            ),
+        ),
+        # gfx90a is CDNA but has no fp8 conversion.
+        ("fp8e4m3", "gfx90a", _NO_GFX90A_ENCODING),
+    ],
+)
 @pytest.mark.parametrize("case", _quant_instances(), ids=lambda case: case[0])
-def test_quant_instances_refuse_fp8_on_a_target_without_an_encoding(case):
-    """gfx90a is CDNA but has no fp8 conversion: ``is_valid_spec`` says so, and
-    both engines' builders refuse with that reason."""
+def test_quant_instances_refuse_an_out_dtype_the_target_cannot_write(
+    case, out_dtype, arch, reason
+):
+    """``is_valid_spec`` refuses with the reason
+    :func:`~rocke.helpers.quant.validate_quant_out_dtype` gives, and both
+    engines' builders refuse with that reason."""
     family, build, is_valid_spec, _, _ = case
-    spec = _quant_spec(case, vec=4)
-    assert is_valid_spec(spec, "gfx90a") == (False, _NO_GFX90A_ENCODING)
-    message = f"invalid {family} spec: {_NO_GFX90A_ENCODING}"
+    spec = dataclasses.replace(_quant_spec(case, vec=4), out_dtype=out_dtype)
+    assert validate_quant_out_dtype(out_dtype, arch) == (False, reason)
+    assert is_valid_spec(spec, arch) == (False, reason)
+    message = f"invalid {family} spec: {reason}"
     with pytest.raises(ValueError) as error:
-        build(spec, arch="gfx90a")
+        build(spec, arch=arch)
     assert str(error.value) == message
     if "cpp" in available_engines():
         from rocke.core.backend import import_engine
 
         fields = {k: v for k, v in dataclasses.asdict(spec).items() if v is not None}
         with pytest.raises(RuntimeError) as native_error:
-            getattr(import_engine(), f"{family}_lower_llvm")(fields, arch="gfx90a")
+            getattr(import_engine(), f"{family}_lower_llvm")(fields, arch=arch)
         assert str(native_error.value).endswith(message)
 
 

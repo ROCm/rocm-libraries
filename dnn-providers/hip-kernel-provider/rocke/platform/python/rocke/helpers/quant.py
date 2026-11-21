@@ -26,6 +26,8 @@ This module exposes the small set of helpers every quantised op needs:
 * :class:`LogicalQDType` — recognized types, including FP4/FP6 without scalar conversion.
 * :func:`quant_ir_type` — map a recognized dtype string to the IR :class:`Type`.
 * :func:`quant_max_abs` — that clamp bound for a dtype on a target.
+* :func:`validate_quant_out_dtype` — whether a quantizing kernel can write a
+  dtype on a target.
 * :func:`quantize_scalar_f32` — the one-element quant fast path
   (``cvt_f32_to_<qd>(clamp(x * inv_scale, -max, max))``, NaN kept for
   fp8 / bf8).
@@ -60,8 +62,9 @@ the dtype as a *string* alias so call sites read naturally
 
 from __future__ import annotations
 
-from typing import List, Literal, TypeAlias
+from typing import List, Literal, TypeAlias, get_args
 
+from ..core.arch import ArchTarget
 from ..core.ir import (
     BF8E5M2,
     F32,
@@ -88,6 +91,7 @@ __all__ = [
     "quantize_scalar_f32",
     "quantize_prescaled_f32",
     "store_packed_chunk_local",
+    "validate_quant_out_dtype",
 ]
 
 
@@ -176,6 +180,35 @@ def quant_max_abs(qdtype: str, *, arch: str) -> float:
     if canon == "i8":
         return _I8_MAX_ABS
     return fp8_element_format(canon, arch).largest_value
+
+
+def validate_quant_out_dtype(out_dtype: str, arch: str) -> tuple[bool, str]:
+    """Whether a quantizing kernel can write ``out_dtype`` on ``arch``:
+    ``(True, "")``, else ``(False, reason)``.
+
+    ``out_dtype`` must be a canonical :data:`QDType` name (no aliases). An
+    fp8e4m3 / bf8e5m2 output needs the CDNA-only ``v_cvt_pk_{fp8,bf8}_f32``
+    conversion (an RDNA target has none, and selecting it would abort with an
+    uncatchable ``LLVM ERROR: Cannot select``) and a target with a known
+    encoding (:func:`quant_max_abs`). ``arch`` must be a known target. The C++
+    engine's twin is ``rocke_validate_quant_out_dtype``.
+    """
+    if out_dtype not in get_args(QDType):
+        return False, f"unsupported out_dtype {out_dtype!r}"
+    if out_dtype == "i8":
+        return True, ""
+    family = ArchTarget.from_gfx(arch).family
+    if family != "cdna":
+        return False, (
+            f"out_dtype {out_dtype!r} needs the CDNA-only "
+            f"v_cvt_pk_{{fp8,bf8}}_f32 conversion; {arch} (family "
+            f"{family!r}) has no fp8/bf8 pack op -- use out_dtype='i8'"
+        )
+    try:
+        quant_max_abs(out_dtype, arch=arch)
+    except ValueError as error:
+        return False, str(error)
+    return True, ""
 
 
 def ir_to_qdtype(t: Type) -> LogicalQDType:

@@ -174,12 +174,13 @@ def dequant_i4_byte_to_fp8_pair(
 
     i32 = sext(sign_extract(byte, 4-bit field))
     f32 = sitofp(i32)
-    fp8 = quantize_scalar_f32(f32, inv_scale, "fp8e4m3", arch)
+    fp8 = quantize_scalar_f32(b, f32, inv_scale=inv_scale,
+                              qdtype="fp8e4m3", arch=arch)
           # clamp to arch's fp8 bound, NaN kept, convert
 
     Returns ``(low_fp8, high_fp8)``. Composes the dequant + quant
     pipeline via :func:`rocke.helpers.quantize_scalar_f32`, which owns the
-    clamp bound of ``arch``'s encoding (``fp8_max``).
+    clamp bound of ``arch``'s encoding (:func:`~rocke.helpers.quant_max_abs`).
     """
     low_f32, high_f32 = unpack_i4_byte_to_pair_f32(b, packed_byte)
     low_fp8 = quantize_scalar_f32(

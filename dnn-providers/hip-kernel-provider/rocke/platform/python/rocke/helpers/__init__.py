@@ -353,6 +353,7 @@ from .quant import (
     quant_max_abs,
     quantize_scalar_f32,
     quantize_prescaled_f32,
+    validate_quant_out_dtype,
 )
 from .reduction import (
     ReduceCombine,
@@ -678,6 +679,7 @@ __all__ = [
     "quant_max_abs",
     "quantize_scalar_f32",
     "quantize_prescaled_f32",
+    "validate_quant_out_dtype",
     # i4 packed-weight dequant
     "dequant_i4_byte_to_bf8_pair",
     "dequant_i4_byte_to_f16_pair",

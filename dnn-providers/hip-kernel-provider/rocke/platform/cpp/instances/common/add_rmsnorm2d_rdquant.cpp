@@ -349,7 +349,6 @@ bool rocke_add_rmsnorm2d_rdquant_is_valid_spec(const rocke_add_rmsnorm2d_rdquant
 {
     const rocke_arch_target_t* target;
     char buf[ROCKE_ERR_MSG_CAP];
-    bool is_fp8;
 
     if(spec == NULL)
     {
@@ -375,50 +374,11 @@ bool rocke_add_rmsnorm2d_rdquant_is_valid_spec(const rocke_add_rmsnorm2d_rdquant
         return false;
     }
 
-    /* if spec.out_dtype not in ("i8", "fp8e4m3", "bf8e5m2"): ... */
+    /* ok, why = validate_quant_out_dtype(spec.out_dtype, arch) */
+    if(!rocke_validate_quant_out_dtype(spec->out_dtype, arch, buf, sizeof(buf)))
     {
-        const char* od = spec->out_dtype;
-        bool ok_od = od != NULL
-                     && (strcmp(od, "i8") == 0 || strcmp(od, "fp8e4m3") == 0
-                         || strcmp(od, "bf8e5m2") == 0);
-        if(!ok_od)
-        {
-            snprintf(buf,
-                     sizeof(buf),
-                     "unsupported out_dtype %s%s%s",
-                     od ? "'" : "",
-                     od ? od : "None",
-                     od ? "'" : "");
-            rocke_arn_set_reason(reason, reason_cap, buf);
-            return false;
-        }
-    }
-
-    /* if out_dtype in ("fp8e4m3","bf8e5m2") and target.family != "cdna": ... */
-    is_fp8 = (strcmp(spec->out_dtype, "fp8e4m3") == 0 || strcmp(spec->out_dtype, "bf8e5m2") == 0);
-    if(is_fp8 && (target->family == NULL || strcmp(target->family, "cdna") != 0))
-    {
-        snprintf(buf,
-                 sizeof(buf),
-                 "out_dtype '%s' needs the CDNA-only v_cvt_pk_{fp8,bf8}_f32 "
-                 "conversion; %s (family '%s') has no fp8/bf8 pack op -- use "
-                 "out_dtype='i8'",
-                 spec->out_dtype,
-                 arch,
-                 target->family ? target->family : "None");
         rocke_arn_set_reason(reason, reason_cap, buf);
         return false;
-    }
-
-    /* quant_max_abs(out_dtype, arch=arch) refuses an fp8 / bf8 dtype on a
-     * target with no known encoding: (False, str(error)). */
-    {
-        double bound;
-        if(rocke_quant_max_abs(spec->out_dtype, arch, &bound, buf, sizeof(buf)) != ROCKE_OK)
-        {
-            rocke_arn_set_reason(reason, reason_cap, buf);
-            return false;
-        }
     }
 
     /* ok, why = validate_io(IOSpecRule(dtype, block_size, vec, n_per_block,

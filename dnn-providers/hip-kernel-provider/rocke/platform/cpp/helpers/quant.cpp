@@ -1,11 +1,11 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-/* Mirrors helpers/quant.py: _canon, quant_ir_type, quant_max_abs and
- * quantize_scalar_f32. One alias table answers both of Python's alias maps
- * (_QDTYPE_ALIAS for scalar quantization, _QUANT_TYPE_ALIAS for type
- * recognition, which adds the FP4/FP6 names) and spells both refusal messages.
- * FP4/FP6 recognition is independent of scalar quantization/conversion
- * support.
+/* Mirrors helpers/quant.py: _canon, quant_ir_type, quant_max_abs,
+ * validate_quant_out_dtype and quantize_scalar_f32. One alias table answers
+ * both of Python's alias maps (_QDTYPE_ALIAS for scalar quantization,
+ * _QUANT_TYPE_ALIAS for type recognition, which adds the FP4/FP6 names) and
+ * spells both refusal messages. FP4/FP6 recognition is independent of scalar
+ * quantization/conversion support.
  */
 
 #include "rocke/helper_rocke.helpers.quant.h"
@@ -13,6 +13,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "rocke/arch_target.h" /* rocke_arch_target_from_gfx */
 #include "rocke/helper_rocke.helpers.fp8_encoding.h" /* rocke_fp8_element_format */
 #include "rocke/ir_internal.h" /* rocke_i_set_err, rocke_i_live */
 
@@ -162,6 +163,71 @@ rocke_status_t rocke_quant_max_abs(
     }
     *out = format->largest_value;
     return ROCKE_OK;
+}
+
+bool rocke_validate_quant_out_dtype(const char* out_dtype,
+                                    const char* arch,
+                                    char* reason,
+                                    size_t reason_cap)
+{
+    const rocke_arch_target_t* target;
+    const char* canon;
+    double bound;
+
+    if(reason != NULL && reason_cap > 0)
+    {
+        reason[0] = '\0';
+    }
+    /* Python: out_dtype not in get_args(QDType). A canonical name is the
+     * canonical form of itself; an alias is not. */
+    canon = rocke_quant_canon(out_dtype);
+    if(canon == NULL || strcmp(canon, out_dtype) != 0)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "unsupported out_dtype %s%s%s",
+                     out_dtype != NULL ? "'" : "",
+                     out_dtype != NULL ? out_dtype : "None",
+                     out_dtype != NULL ? "'" : "");
+        }
+        return false;
+    }
+    if(strcmp(out_dtype, "i8") == 0)
+    {
+        return true;
+    }
+    target = rocke_arch_target_from_gfx(arch);
+    if(target == NULL)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason, reason_cap, "unknown arch %s", arch != NULL ? arch : "(null)");
+        }
+        return false;
+    }
+    /* fp8 / bf8 need the CDNA-only v_cvt_pk_{fp8,bf8}_f32 conversion. */
+    if(target->family == NULL || strcmp(target->family, "cdna") != 0)
+    {
+        if(reason != NULL && reason_cap > 0)
+        {
+            snprintf(reason,
+                     reason_cap,
+                     "out_dtype '%s' needs the CDNA-only v_cvt_pk_{fp8,bf8}_f32 "
+                     "conversion; %s (family %s%s%s) has no fp8/bf8 pack op -- use "
+                     "out_dtype='i8'",
+                     out_dtype,
+                     arch,
+                     target->family != NULL ? "'" : "",
+                     target->family != NULL ? target->family : "None",
+                     target->family != NULL ? "'" : "");
+        }
+        return false;
+    }
+    /* Python: quant_max_abs(out_dtype, arch=arch) refuses a target with no
+     * known encoding; its message is the reason. */
+    return rocke_quant_max_abs(out_dtype, arch, &bound, reason, reason_cap) == ROCKE_OK;
 }
 
 rocke_value_t* rocke_b_quantize_scalar_f32(rocke_ir_builder_t* b,
