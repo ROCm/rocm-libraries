@@ -11,6 +11,8 @@ PLOT=true
 VS_THEO_MAX=false
 VS_PERF=false
 GBPS=
+SIZES=default
+BENCH_EXTRA_ARGS=()
 TAG_PARENT=false
 A_BLAS_SUBDIR=
 B_BLAS_SUBDIR=
@@ -56,6 +58,12 @@ usage()
     echo ""
     echo "--gbps <value>:  memory bandwidth in GB/s for theoretical max,"
     echo "                 overrides built-in per-arch value"
+    echo ""
+    echo "--sizes default|large:  sweep sizes; large uses blasL/large/*.yaml (footprints of about 0.8 GB and up)"
+    echo "                        default: $SIZES"
+    echo ""
+    echo "--flush-mb <MiB>:  hipblas-bench rotates through copies of the operands totalling MiB,"
+    echo "                   so they are evicted from cache between calls"
     echo ""
     echo "--tag-parent true:  tag1 CSVs under {tag1}/blasL/ (no NAME subfolder)"
     echo ""
@@ -133,6 +141,16 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       shift # past value
       ;;
+    --sizes)
+      SIZES="$2"
+      shift
+      shift
+      ;;
+    --flush-mb)
+      BENCH_EXTRA_ARGS+=("$1" "$2")
+      shift
+      shift
+      ;;
     --tag-parent)
       TAG_PARENT="$2"
       shift
@@ -192,6 +210,7 @@ echo "tag1               = $TAG1"
 echo "tag2               = $TAG2"
 echo "theo_max           = $VS_THEO_MAX"
 echo "perf_vs_perf       = $VS_PERF"
+echo "sizes              = $SIZES"
 echo ""
 echo "benchmark          = $BENCHMARK"
 echo "plot               = $PLOT"
@@ -225,6 +244,7 @@ if [ -n "$GBPS" ]; then
 else
     GBPS_ARG=""
 fi
+BENCH_EXTRA_ARGS+=("--sizes" "$SIZES")
 
 LAYOUT_ARGS=""
 if [ "$TAG_PARENT" == "true" ]; then
@@ -248,7 +268,7 @@ fi
 
 if [ "$LEVEL1" == "true" ]; then
   if [ "$BENCHMARK" == "true" ]; then
-    python3 benchmark.py -l blas1 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f dot -f axpy -f scal -f nrm2
+    python3 benchmark.py -l blas1 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f dot -f axpy -f scal -f nrm2
   fi
   if [ "$PLOT" == "true" ]; then
     python3 plot.py -l blas1 --tag1 $TAG1 --tag2  $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS -f dot -f axpy -f scal -f nrm2
@@ -257,10 +277,10 @@ fi
 
 if [ "$LEVEL2" == "true" ]; then
   if [ "$BENCHMARK" == "true" ]; then
-    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv -f hbmv
-    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f gemv -f symv -f trmv -f tpmv -f spmv -f gbmv -f sbmv -f tbmv
-    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f ger -f syr -f spr -f syr2 -f spr2
-    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f trsv -f tbsv -f tpsv
+    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv -f hbmv
+    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f gemv -f symv -f trmv -f tpmv -f spmv -f gbmv -f sbmv -f tbmv
+    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f ger -f syr -f spr -f syr2 -f spr2
+    python3 benchmark.py -l blas2 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f trsv -f tbsv -f tpsv
   fi
   if [ "$PLOT" == "true" ]; then
     python3 plot.py -l blas2 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f hemv -f her2 -f hpr2 -f her -f hpr -f hpmv
@@ -278,10 +298,10 @@ if [ "$LEVEL3" == "true" ]; then
   fi
 
   if [ "$BENCHMARK" == "true" ]; then
-    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f gemm
-    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f trmm -f symm -f trsm
-    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f syrk -f syrkx -f syr2k
-    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG -f hemm -f herk -f herkx -f her2k
+    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f gemm
+    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f trmm -f symm -f trsm
+    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f syrk -f syrkx -f syr2k
+    python3 benchmark.py -l blas3 -t $TAG1 -b $ROCBLAS_BENCH $GBPS_ARG "${BENCH_EXTRA_ARGS[@]}" -f hemm -f herk -f herkx -f her2k
   fi
   if [ "$PLOT" == "true" ]; then
     python3 plot.py -l blas3 --tag1 $TAG1 --tag2 $TAG2 $THEO_MAX $PERF_VS_PERF $LAYOUT_ARGS --label1 "M" --label2 "N" -f gemm -f trmm -f symm # missing trsm, need to speed up triangle solve initialization
