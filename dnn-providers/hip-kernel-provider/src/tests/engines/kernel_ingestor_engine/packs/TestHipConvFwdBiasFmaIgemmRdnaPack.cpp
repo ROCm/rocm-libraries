@@ -62,6 +62,7 @@ constexpr int64_t RELU_OUT_UID = 6;
 struct GraphSpec
 {
     data_objects::DataType dtype = data_objects::DataType::FLOAT;
+    data_objects::DataType computeType = data_objects::DataType::FLOAT;
     bool channelsLast = false;
     int64_t n = 2;
     int64_t c = 8;
@@ -194,7 +195,7 @@ flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
     nodes.push_back(
         data_objects::CreateNodeDirect(builder,
                                        "conv_fwd",
-                                       data_objects::DataType::FLOAT,
+                                       spec.computeType,
                                        data_objects::NodeAttributes::ConvolutionFwdAttributes,
                                        conv.Union()));
     if(!spec.convOnly)
@@ -307,6 +308,11 @@ TEST(TestHipConvFwdBiasFmaIgemmRdnaGraphMatcher, AcceptsEveryServedShape)
 
 TEST(TestHipConvFwdBiasFmaIgemmRdnaGraphMatcher, RefusesWhatItCannotServe)
 {
+    GraphSpec halfCompute;
+    halfCompute.dtype = data_objects::DataType::HALF;
+    halfCompute.computeType = data_objects::DataType::HALF;
+    EXPECT_FALSE(matches(halfCompute)) << "half compute type";
+
     GraphSpec depthwise;
     depthwise.k = 8;
     depthwise.groups = 8;

@@ -159,7 +159,10 @@ std::optional<MatchedConvBias> matchConvBias(const MatchContext& context)
     for(uint32_t i = 0; i < 2; ++i)
     {
         const auto& node = context.graph.getNodeWrapper(i);
-        if(node.attributesType() == data_objects::NodeAttributes::ConvolutionFwdAttributes)
+        // The kernel accumulates in fp32, so a convolution that asks for another compute type
+        // (half, int32, double) is declined rather than computed at a different precision.
+        if(node.attributesType() == data_objects::NodeAttributes::ConvolutionFwdAttributes
+           && node.computeDataType() == data_objects::DataType::FLOAT)
         {
             conv = &node.attributesAs<data_objects::ConvolutionFwdAttributes>();
         }
