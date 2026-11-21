@@ -97,6 +97,7 @@
 
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <gtest/gtest.h>
 #include <numeric>
 #include <sstream>
@@ -708,6 +709,75 @@ TEST_F(ConversionGrids, convert_array_data_widening_grid_stride)
         << " items with grid.x clamped to " << clamped_grid_x << " blocks";
 }
 
+// The shared real-widening kernel of convert_array, real target: bf16 -> f32.
+// Item i holds the bf16 bit pattern i, so every item is a distinct finite value
+// and its f32 widening has the bit pattern i << 16.
+TEST_F(ConversionGrids, convert_array_data_bf16_to_f32_grid_stride)
+{
+    std::vector<rocsparse_bfloat16> source(convert_nitems);
+    std::vector<float>              expected(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        const uint16_t bits16 = static_cast<uint16_t>(i);
+        const uint32_t bits32 = static_cast<uint32_t>(bits16) << 16;
+        std::memcpy(&source[i], &bits16, sizeof(bits16));
+        std::memcpy(&expected[i], &bits32, sizeof(bits32));
+    }
+
+    device_vector<rocsparse_bfloat16> d_source(source);
+    device_vector<float>              d_target(std::vector<float>(convert_nitems, -1.0f));
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse::convert_array(handle,
+                                           convert_nitems,
+                                           rocsparse_datatype_f32_r,
+                                           d_target.ptr,
+                                           rocsparse_datatype_bf16_r,
+                                           d_source.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
+        << "convert_array (bf16 -> f32) did not cover all " << convert_nitems
+        << " items with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
+// The shared real-widening kernel of convert_array, complex target: f32 -> f64_c.
+// The target starts at (-1, -1), so an item whose real or imaginary part is not
+// written does not match its expected (source, 0).
+TEST_F(ConversionGrids, convert_array_data_f32_to_f64_c_grid_stride)
+{
+    std::vector<float>                    source(convert_nitems);
+    std::vector<rocsparse_double_complex> expected(convert_nitems);
+    for(size_t i = 0; i < convert_nitems; ++i)
+    {
+        source[i]   = static_cast<float>(i) + 0.25f;
+        expected[i] = rocsparse_double_complex(static_cast<double>(source[i]), 0.0);
+    }
+
+    device_vector<float>                    d_source(source);
+    device_vector<rocsparse_double_complex> d_target(std::vector<rocsparse_double_complex>(
+        convert_nitems, rocsparse_double_complex(-1.0, -1.0)));
+
+    {
+        ScopedMaxGridSizeX clamp(handle, clamped_grid_x);
+        ASSERT_EQ(rocsparse::convert_array(handle,
+                                           convert_nitems,
+                                           rocsparse_datatype_f64_c,
+                                           d_target.ptr,
+                                           rocsparse_datatype_f32_r,
+                                           d_source.ptr),
+                  rocsparse_status_success);
+        UT_CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    EXPECT_EQ(first_mismatch(to_host(d_target), expected), -1)
+        << "convert_array (f32 -> f64_c) did not cover all " << convert_nitems
+        << " items with grid.x clamped to " << clamped_grid_x << " blocks";
+}
+
 // copy_farray_mix_safe_kernel_t<float, double>: the narrowing copy, which is one
 // of the kernels carrying a block-wide max reduction of the conversion error.
 // Every element is exactly representable in float, so the values must all match
@@ -788,6 +858,24 @@ TEST_F(ConversionGrids, convert_array_data_narrowing_reports_error)
     ASSERT_EQ(status, rocsparse_status_success);
     EXPECT_EQ(printed, "");
     EXPECT_NE(log.sink.str().find(expected.str()), std::string::npos) << log.sink.str();
+
+    // f64 into f32 complex rounds the real part the same way. The error is the
+    // distance between the source and that rounded real part.
+    device_vector<rocsparse_float_complex> d_complex(std::vector<rocsparse_float_complex>(
+        convert_nitems, rocsparse_float_complex(-1.0f, -1.0f)));
+    ScopedDebugLog                         log_complex(handle);
+    testing::internal::CaptureStdout();
+    const rocsparse_status complex_status  = rocsparse::convert_array(handle,
+                                                                     convert_nitems,
+                                                                     rocsparse_datatype_f32_c,
+                                                                     d_complex.ptr,
+                                                                     rocsparse_datatype_f64_r,
+                                                                     d_source.ptr);
+    const std::string      complex_printed = testing::internal::GetCapturedStdout();
+    ASSERT_EQ(complex_status, rocsparse_status_success);
+    EXPECT_EQ(complex_printed, "");
+    EXPECT_NE(log_complex.sink.str().find(expected.str()), std::string::npos)
+        << log_complex.sink.str();
 }
 
 // ===========================================================================
