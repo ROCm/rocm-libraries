@@ -457,11 +457,16 @@ void runCase(ConvShape shape, ConvDirection direction)
     }
     // Forward fp32 has FMA configs everywhere; 16-bit has MMA configs on the matrix-core GPUs
     // (bf16 on gfx908's half-rate atom). Backward ships to the matrix-core GPUs only (fp32 by
-    // MFMA on CDNA, by FMA on gfx11 / gfx12).
+    // MFMA on CDNA, by FMA on gfx11 / gfx12); 1x1 heads' backward data ships to gfx942 only.
     const auto arch = std::string(currentDeviceProperties().gcnArchName);
     const bool mma = (arch.rfind("gfx9", 0) == 0 && arch.rfind("gfx906", 0) != 0)
                      || arch.rfind("gfx11", 0) == 0 || arch.rfind("gfx12", 0) == 0;
-    if(mma || (std::is_same_v<T, float> && !backward))
+    const bool pointwiseBackward
+        = backward && std::all_of(shape.filter.begin(), shape.filter.end(), [](int64_t f) {
+              return f == 1;
+          });
+    if(pointwiseBackward ? arch.rfind("gfx942", 0) == 0
+                         : mma || (std::is_same_v<T, float> && !backward))
     {
         EXPECT_GE(ran, 1) << "no catalog config serves this case";
     }
