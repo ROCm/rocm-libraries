@@ -2479,6 +2479,7 @@ namespace
 
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
+        tensileProblem.setOutputPeerD(prob.dPeer != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
 
         if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -2844,6 +2845,7 @@ namespace
 
         // set AmaxD
         tensileProblem.setOutputAmaxD(prob.amaxD != nullptr);
+        tensileProblem.setOutputPeerD(prob.dPeer != nullptr);
         tensileProblem.setAmaxD(compute_type, true);
 
         if(prob.compute_type == rocblaslt_compute_f32_fast_xf32)
@@ -3012,6 +3014,7 @@ namespace
         inputs.scaleD        = reinterpret_cast<const void*>(prob.scaleD);
         inputs.scaleAlphaVec = reinterpret_cast<const void*>(prob.scaleAlphaVec);
         inputs.amaxD         = reinterpret_cast<void*>(prob.amaxD);
+        inputs.peerD         = prob.dPeer;
 
         static const std::map<rocisa::DataType, TensileLite::ConstantVariant> argument_vals = {
             {rocisa::DataType::Float, 0.0f},
@@ -3867,6 +3870,26 @@ namespace
         return rocblaslt_status_invalid_value;
     }
 
+    // A device library built before OutputPeerD has no PeerDCheck predicate, so its
+    // plain kernels match a problem that asks for a second D and would never write it.
+    // Those libraries also read the flag as false, so it tells them apart.
+    bool peerDKernelFits(bool problemWantsPeerD, const TensileLite::ContractionSolution& solution)
+    {
+        return !problemWantsPeerD || solution.problemType.outputPeerD;
+    }
+
+    rocblaslt_status checkPeerDKernelMatch(const char* caller,
+                                           bool        problemWantsPeerD,
+                                           const TensileLite::ContractionSolution& solution)
+    {
+        if(peerDKernelFits(problemWantsPeerD, solution))
+            return rocblaslt_status_success;
+        log_error(caller,
+                  "the problem has a peer D, but the algo's solution does not store one "
+                  "(device library built without OutputPeerD?)");
+        return rocblaslt_status_invalid_value;
+    }
+
     // An algo index can name a solution of the other kind, grouped or not, whose
     // kernel takes different arguments.
     rocblaslt_status checkGroupedGemmMatch(const char*                             caller,
@@ -4032,6 +4055,7 @@ TensileLite::ProblemOverride
     po.hasScaleE        = problem.scaleE != nullptr;
     po.hasScaleAlphaVec = problem.scaleAlphaVec != nullptr;
     po.hasAmaxD         = problem.amaxD != nullptr;
+    po.hasPeerD         = problem.dPeer != nullptr;
 
     po.swizzleA              = problem.swizzleA;
     po.swizzleB              = problem.swizzleB;
@@ -4407,6 +4431,26 @@ namespace
         }
     };
 
+    // Where a test makes later tuning attempts go wrong on purpose. Without the
+    // test hooks nothing can set one, and every check below is constant false.
+    enum class TuningFailureStage : int
+    {
+        None               = 0,
+        Setup              = 1,
+        Enumeration        = 2,
+        MidSearch          = 3,
+        TruncateAfterFirst = 4,
+        BudgetSpent        = 5,
+        ScratchAlloc       = 6,
+    };
+
+    std::atomic<int> g_injectedTuningFailure{0};
+
+    bool tuningFailureInjected(TuningFailureStage stage)
+    {
+        return g_injectedTuningFailure.load(std::memory_order_relaxed) == static_cast<int>(stage);
+    }
+
     /**
      * Device memory owned by the tuning path.
      *
@@ -4482,7 +4526,10 @@ namespace
 
             Slot& slot = m_slots[device];
 
-            if(bytes <= slot.size)
+            // A test's refusal goes through hipMalloc too, past a buffer that
+            // would fit, so HIP records the failure as it does for a full device.
+            const bool refuse = tuningFailureInjected(TuningFailureStage::ScratchAlloc);
+            if(bytes <= slot.size && !refuse)
                 return slot.ptr;
 
             if(slot.ptr)
@@ -4491,8 +4538,13 @@ namespace
             slot.size = 0;
 
             void* fresh = nullptr;
-            if(hipMalloc(&fresh, bytes) != hipSuccess)
+            if(hipMalloc(&fresh, refuse ? SIZE_MAX : bytes) != hipSuccess)
+            {
+                // The matmul goes on without this search and succeeds, so this
+                // error must not reach the caller's next hipGetLastError.
+                static_cast<void>(hipGetLastError());
                 return deny(Denial::Unavailable);
+            }
 
             slot.ptr  = fresh;
             slot.size = bytes;
@@ -5057,25 +5109,6 @@ namespace
     {
         static std::mutex gLock;
         return gLock;
-    }
-
-    // Where a test makes later tuning attempts go wrong on purpose. Without the
-    // test hooks nothing can set one, and every check below is constant false.
-    enum class TuningFailureStage : int
-    {
-        None               = 0,
-        Setup              = 1,
-        Enumeration        = 2,
-        MidSearch          = 3,
-        TruncateAfterFirst = 4,
-        BudgetSpent        = 5,
-    };
-
-    std::atomic<int> g_injectedTuningFailure{0};
-
-    bool tuningFailureInjected(TuningFailureStage stage)
-    {
-        return g_injectedTuningFailure.load(std::memory_order_relaxed) == static_cast<int>(stage);
     }
 
     bool streamIsCapturing(hipStream_t stream)
@@ -6914,6 +6947,9 @@ rocblaslt_status makeArgument(rocblaslt_handle             handle,
             if(auto st = checkMxScaleLayout(__func__, data->mxScaleNeed, *solution);
                st != rocblaslt_status_success)
                 return st;
+            if(auto st = checkPeerDKernelMatch(__func__, data->problem.outputPeerD(), *solution);
+               st != rocblaslt_status_success)
+                return st;
             data->algoIndex = *solutionIndex;
 
             if(data->problem.getParams().uniformSummationOrder() == 1)
@@ -7695,6 +7731,8 @@ inline auto getSolutions(
     auto drop          = [&](auto const& s) {
         if(isCustomKernelForPointerArray(tensile_prob, *s))
             return true;
+        if(!peerDKernelFits(tensile_prob.outputPeerD(), *s))
+            return true;
         if(mxScaleLayoutFits(mxScaleNeed, *s))
             return false;
         layoutDropped = true;
@@ -8106,6 +8144,8 @@ rocblaslt_status getAllSolutions(MyProblem&                                     
                 }
                 continue;
             }
+            if(!peerDKernelFits(prob.outputPeerD(), *solution))
+                continue;
         }
 
         //workaround: findAllSolutions should get all solutions without duplications.
@@ -8349,6 +8389,9 @@ rocblaslt_status isSolutionSupported(rocblaslt_handle        handle,
         }
 
         if(auto st = checkMxScaleLayout(__func__, mxScaleNeed, *solution);
+           st != rocblaslt_status_success)
+            return st;
+        if(auto st = checkPeerDKernelMatch(__func__, tensile_prob.outputPeerD(), *solution);
            st != rocblaslt_status_success)
             return st;
 

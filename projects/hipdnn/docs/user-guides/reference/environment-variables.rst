@@ -119,7 +119,7 @@ Selects where hipDNN loads heuristic plugins from. The default is ``./hipdnn_plu
 ``HIPDNN_DISABLE_ENGINES``
 --------------------------
 
-A comma-separated list of engines to skip when plugins register engines through the kernel ingestor. Each entry can be an engine name, a 64-bit engine ID (formatted as decimal or ``0x`` hex), or the engine descriptor UUID. Engine names and decimal IDs are matched exactly. Hex IDs and UUIDs are matched case-insensitively. Entries that match nothing are ignored. This variable has effect only in builds with ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON``.
+A comma-separated list of engines to skip when plugins register engines through the kernel ingestor. Each entry can be an engine name, a 64-bit engine ID (formatted as decimal or ``0x`` hex), or the engine descriptor UUID. Engine names and decimal IDs are matched exactly. Hex IDs and UUIDs are matched case-insensitively. Entries that match nothing are ignored. Prefer the engine name or the 64-bit ID: a descriptor UUID can change between releases (a FlyDSL engine's UUID changes whenever its kernel metadata fields do), and an entry naming an old UUID then matches nothing. This variable has effect only in builds with ``HIPDNN_ENABLE_KERNEL_INGESTOR=ON``.
 
 .. _engine-selection-variables:
 

@@ -75,6 +75,7 @@ license = {text = "MIT"}
 
 [project.scripts]
 tensilelite = "tensilelite.cli:main"
+tensilelite-configure-client = "tensilelite_configure_client:main"
 Tensile = "tensilelite.run:main"
 TensileCreateLibrary = "tensilelite.create_library:main"
 TensileVerifyStinkyElfText = "tensilelite.verify_stinky_comment_vs_elf_text:main"
@@ -99,12 +100,14 @@ dev = [
 
 [build-system]
 requires = ["setuptools>=68"]
-build-backend = "setuptools.build_meta"
+build-backend = "_tensilelite_build_backend"
+backend-path = ["packaging_backend"]
 
 [tool.setuptools]
 # package-data below is the only list of non-Python files in the wheel.
 # MANIFEST.in only adds sdist-only build inputs; it must not add wheel files.
 include-package-data = false
+py-modules = ["_tensilelite_client_binding", "tensilelite_configure_client"]
 
 [tool.setuptools.packages.find]
 include = ["tensilelite*"]

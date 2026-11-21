@@ -228,7 +228,6 @@ def main(argv: list[str] | None = None) -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     add_restamp_arguments(restamp)
-
     from .rewrite import add_rewrite_arguments, run_rewrite
 
     rewrite = subparsers.add_parser(

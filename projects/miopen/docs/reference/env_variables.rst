@@ -800,9 +800,9 @@ following table. For more information, see :doc:`Logging and debugging <../how-t
         | 1: Enable
 
     * - | ``MIOPEN_DEBUG_3D_CONV_IMPLICIT_GEMM_HIP_FWD_XDLOPS_HARDCODE``
-        | Opts out of the gfx942/gfx950 FP16/BF16 large-tensor (in_depth >= 3 and in_width >= 256)
-        | hard-coded override for 3D ConvHipImplicitGemmGroupFwdXdlops, so selection uses the AI
-        | heuristic instead of the hard-coded config.
+        | Opts out of the gfx942 FP16/BF16 hard-coded kernel picks for 3D
+        | ConvHipImplicitGemm3DGroupFwdXdlops, so selection uses the AI heuristic instead. gfx950
+        | has no hard-coded picks and always uses the AI heuristic.
       - | 0: Skip the override and use the AI heuristic
         | unset or 1: Hard-coded override active (default)
 
