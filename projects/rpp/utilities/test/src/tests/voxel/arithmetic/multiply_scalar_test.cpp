@@ -84,7 +84,7 @@ void run_multiply_scalar(const VoxelConfig& cfg, const MultiplyScalarParams& p) 
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(
         rppt_multiply_scalar(src.ptr(), desc.get(), dst.ptr(), desc.get(), mul.data(), roi.data(),
                              to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend),

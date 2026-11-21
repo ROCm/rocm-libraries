@@ -63,7 +63,7 @@ void run_copy(const TestConfig& cfg) {
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_copy(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, handle.get(), cfg.backend),
               RPP_SUCCESS);
 

@@ -59,7 +59,7 @@ void run_bitwise_not(const TestConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_bitwise_not(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, roi.data(), XYWH,
                                handle.get(), cfg.backend),
               RPP_SUCCESS);

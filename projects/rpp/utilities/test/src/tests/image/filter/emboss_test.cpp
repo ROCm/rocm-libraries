@@ -89,7 +89,7 @@ void run_emboss(const TestConfig& cfg, const EmbossParams& op) {
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(
         rppt_emboss(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc, strength.data(), op.kernelSize,
                     RpptImageBorderType::REPLICATE, roi.data(), XYWH, handle.get(), cfg.backend),

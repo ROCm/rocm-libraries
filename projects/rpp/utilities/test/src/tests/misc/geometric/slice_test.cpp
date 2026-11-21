@@ -189,7 +189,7 @@ void run_slice(const NdConfig& cfg, const SliceParams& p) {
     src.write(input.data(), srcBytes);
     dst.write(actual.data(), dstBytes);  // seed the destination with the sentinel
 
-    RppHandle handle(cfg.backend, batch);
+    RppHandle handle(cfg, batch);
     ASSERT_EQ(rppt_slice(src.ptr(), srcDesc.get(), dst.ptr(), dstDesc.get(), anchor.data(),
                          shape.data(), fillValue.data(), p.kind != SliceKind::Inside, roi.data(),
                          handle.get(), cfg.backend),

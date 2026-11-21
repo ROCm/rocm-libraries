@@ -78,7 +78,7 @@ void run_median_filter(const TestConfig& cfg, const MedianFilterParams& op) {
     srcDev.write(src.data(), src.size() * dtype_size(cfg.dtype));
     dst.write(image, imageBytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, shape.n);
+    RppHandle handle(cfg, shape.n);
     RppStatus status = rppt_median_filter(srcDev.ptr(), &srcDesc, dst.ptr(), &dstDesc,
                                           op.kernelSize, RpptImageBorderType::REPLICATE, roi.data(),
                                           XYWH, handle.get(), cfg.backend);

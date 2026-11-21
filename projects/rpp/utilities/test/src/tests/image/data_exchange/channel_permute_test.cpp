@@ -80,7 +80,7 @@ void run_channel_permute(const TestConfig& cfg, const ChannelPermuteParams& op) 
     fill_input<T>(dstInit.data(), count, cfg.dtype, /*salt=*/1);
     dst.write(dstInit.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_channel_permute(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, perm.data(),
                                    handle.get(), cfg.backend),
               RPP_SUCCESS);

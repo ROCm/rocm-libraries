@@ -75,7 +75,7 @@ void run_tensor_xor_tensor(const NdConfig& cfg, Broadcast broadcast) {
     src1.write(input1.data(), bytes1);
     src2.write(input2.data(), bytes2);
 
-    RppHandle handle(cfg.backend, outDims[0]);
+    RppHandle handle(cfg, outDims[0]);
     ASSERT_EQ(rppt_tensor_xor_tensor(src1.ptr(), src2.ptr(), desc1.get(), desc2.get(), dst.ptr(),
                                      descOut.get(), to_rpp_broadcast(broadcast), roi1.data(),
                                      roi2.data(), handle.get(), cfg.backend),

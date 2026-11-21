@@ -86,7 +86,7 @@ void run_jitter_identity(const TestConfig& cfg, const JitterParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);  // define outside-ROI dst to mirror the golden
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_jitter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, kernelSize.data(), /*seed=*/42u,
                           roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -123,7 +123,7 @@ void run_jitter_window(const TestConfig& cfg, const JitterParams& op) {
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_jitter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, kernelSize.data(),
                           /*seed=*/123u, roi.data(), XYWH, handle.get(), cfg.backend),
               RPP_SUCCESS);
@@ -198,7 +198,7 @@ void run_jitter_seed_invariant(const TestConfig& cfg, const JitterParams& op) {
         DeviceTensor src(cfg.backend, bytes), dst(cfg.backend, bytes);
         src.write(input.data(), bytes);
         dst.write(input.data(), bytes);
-        RppHandle handle(cfg.backend, cfg.size.n);
+        RppHandle handle(cfg, cfg.size.n);
         const RppStatus status = rppt_jitter(src.ptr(), &desc, dst.ptr(), &desc, kernelSize.data(),
                                              seed, roi.data(), XYWH, handle.get(), cfg.backend);
         if (status != RPP_SUCCESS) return status;

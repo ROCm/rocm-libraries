@@ -90,7 +90,7 @@ void run_color_jitter(const TestConfig& cfg, const ColorJitterParams& op) {
     src.write(input.data(), bytes);
     dst.write(dstSeed.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_color_jitter(src.ptr(), &srcDesc, dst.ptr(), &dstDesc, brightness.data(),
                                 contrast.data(), hue.data(), saturation.data(), roi.data(), XYWH,
                                 handle.get(), cfg.backend),

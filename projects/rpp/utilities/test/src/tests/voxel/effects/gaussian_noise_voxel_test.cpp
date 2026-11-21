@@ -77,7 +77,7 @@ void run_gaussian_noise_voxel(const VoxelConfig& cfg) {
     src.write(input.data(), bytes);
     dst.write(actual.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     ASSERT_EQ(rppt_gaussian_noise_voxel(src.ptr(), desc.get(), dst.ptr(), desc.get(), mean.data(),
                                         stdDev.data(), kSeed, roi.data(),
                                         to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend),
@@ -127,7 +127,7 @@ void run_gaussian_noise_voxel_negative(const VoxelConfig& cfg,
     src.write(input.data(), bytes);
     dst.write(input.data(), bytes);
 
-    RppHandle handle(cfg.backend, cfg.size.n);
+    RppHandle handle(cfg, cfg.size.n);
     const RppStatus status = rppt_gaussian_noise_voxel(
         src.ptr(), desc.get(), dst.ptr(), desc.get(), mean.data(), stdDev.data(), kSeed, roi.data(),
         to_rpp_roi3d_type(cfg.roiType), handle.get(), cfg.backend);
