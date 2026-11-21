@@ -1640,13 +1640,13 @@ struct UniversalGemmKernel
      * @param barriers The token from InitBarriers(); may be omitted without named barriers.
      *
      */
-    template <typename BarrierToken = NoBarriers>
+    template <typename BarrierToken = NoBarriers, typename KArgs = KernelArgs>
     CK_TILE_DEVICE static void RunGemm(const std::array<const ADataType*, NumATensor>& as_ptr,
                                        const std::array<const BDataType*, NumBTensor>& bs_ptr,
                                        const std::array<const void*, NumDTensor>& ds_ptr,
                                        EDataType* e_ptr,
                                        void* smem_ptr,
-                                       const KernelArgs& kargs,
+                                       const KArgs& kargs,
                                        const SplitKBatchOffset& splitk_batch_offset,
                                        const index_t block_idx_m,
                                        const index_t block_idx_n,
@@ -1686,8 +1686,10 @@ struct UniversalGemmKernel
         if(k_batch == 1)
         {
             RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
-                auto c_block_window = MakeCBlockWindows<memory_operation_enum::set>(
-                    e_ptr, kargs, block_idx_m, block_idx_n);
+                // A derived kernel may hide MakeCBlockWindows to store E through another layout.
+                auto c_block_window =
+                    SelfType::template MakeCBlockWindows<memory_operation_enum::set>(
+                        e_ptr, kargs, block_idx_m, block_idx_n);
                 EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
             });
         }
@@ -1702,8 +1704,9 @@ struct UniversalGemmKernel
             if constexpr(EpilogueSupportsSplitK)
             {
                 RunWaveletAwareEpilogue<GemmPipeline, EpiloguePipeline>([&]() {
-                    auto c_block_window = MakeCBlockWindows<memory_operation_enum::atomic_add>(
-                        e_ptr, kargs, block_idx_m, block_idx_n);
+                    auto c_block_window =
+                        SelfType::template MakeCBlockWindows<memory_operation_enum::atomic_add>(
+                            e_ptr, kargs, block_idx_m, block_idx_n);
                     EpiloguePipeline{}(c_block_window, c_block_tile, ds_block_window, smem_ptr);
                 });
             }
