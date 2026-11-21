@@ -73,6 +73,7 @@ const vector<int> large_n_size_range = {64, 98, 130, 220, 400};
 // for weekly_lapack tests (form problems directly)
 const static vector<gelqf_tuple> very_large_problem_range = {
     {{16384, 16384}, 220},
+    {{220, 220}, 16384},
 };
 
 Arguments gelqf_setup_arguments(gelqf_tuple tup)
