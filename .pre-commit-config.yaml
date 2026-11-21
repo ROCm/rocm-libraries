@@ -130,7 +130,7 @@ repos:
           ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/rocKE/gfx950_conv_fwd_aot/gfx950_conv_fwd_aot_(fp16|bf16)_(mem_(plain|unroll|async)|compv[34]_(plain|unroll)|direct)\.kdp\.json$|
           ^dnn-providers/hip-kernel-provider/src/tests/engines/kernel_ingestor_engine/packs/TestGfx950ConvFwdAotPacks\.cpp$|
           ^dnn-providers/hip-kernel-provider/src/engines/kernel_ingestor_engine/descriptors/.*/heuristics/.*/model\.bin$|
-          ^dnn-providers/hip-kernel-provider/src/engines/asm_sdpa_engine/descriptors/.*\.bin$
+          ^dnn-providers/hip-kernel-provider/src/engines/(asm_sdpa|hip_mlops)_engine/descriptors/.*\.bin$
 
   - repo: https://github.com/psf/black
     rev: 25.12.0
