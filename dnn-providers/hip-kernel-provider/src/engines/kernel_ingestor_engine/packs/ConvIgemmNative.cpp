@@ -1078,7 +1078,7 @@ std::optional<K1BoxArgs> boxArgsFor(const IgemmProblem& problem)
     const std::array<int, 3> stride{a.sd, a.sh, a.sw};
     const std::array<int, 3> dil{a.dd, a.dh, a.dw};
     K1BoxArgs box{};
-    for(int ax = 0; ax < 3; ++ax)
+    for(size_t ax = 0; ax < in.size(); ++ax)
     {
         if(stride[ax] != 1 || dil[ax] != 1)
         {
