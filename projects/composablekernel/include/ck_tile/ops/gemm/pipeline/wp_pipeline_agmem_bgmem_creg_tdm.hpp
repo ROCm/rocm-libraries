@@ -423,9 +423,9 @@ struct WeightPreshufflePipelineAGmemBGmemCRegTDM
                 dim3 block_id_in_cluster{amd_wave_read_first_lane(get_cluster_workgroup_id_x()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_y()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_z())};
-                tdm_config_a.workgroup_mask =
+                tdm_config_a.workgroup_mask = TDMWorkgroupMask::checked(
                     PipelinePolicy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
+                        block_id_in_cluster));
             }
 
             // A tile in LDS
@@ -660,9 +660,9 @@ struct WeightPreshufflePipelineAGmemBGmemCRegTDM
                 dim3 block_id_in_cluster{amd_wave_read_first_lane(get_cluster_workgroup_id_x()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_y()),
                                          amd_wave_read_first_lane(get_cluster_workgroup_id_z())};
-                tdm_config_a.workgroup_mask =
+                tdm_config_a.workgroup_mask = TDMWorkgroupMask::checked(
                     PipelinePolicy::template GetTDMWorkgroupMask<MultiCastDirection::kM, Problem>(
-                        block_id_in_cluster);
+                        block_id_in_cluster));
             }
 
             // A tile in LDS
