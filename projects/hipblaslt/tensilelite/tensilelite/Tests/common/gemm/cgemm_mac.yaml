@@ -1,0 +1,427 @@
+# Complex float (cgemm) source kernels, no matrix instructions. Every transpose/conjugate combination of A and B
+# (N normal, T transpose, C conjugate transpose), each with UseDualFMAC off and on. With it on, every
+# complex multiply-add issues as two v_dual_fmac_f32 pairs; where the flag turns itself off (1x1 tile, no VOPD)
+# the kernels are plain FMAs. Split-K and an odd size (tail loop) are included; full validation must PASS.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1250, skip-gfx1250-strict] # source kernels validated on gfx11/gfx12
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: True
+  PrintWinnersOnly: True
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 0
+
+BenchmarkProblems:
+
+  ########################################
+  # NN - A normal, B normal
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: False
+      TransposeB: False
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
+
+  ########################################
+  # NT - A normal, B transpose
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: False
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
+
+  ########################################
+  # NC - A normal, B conjugate transpose
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: False
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
+
+  ########################################
+  # TN - A transpose, B normal
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: True
+      TransposeB: False
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
+
+  ########################################
+  # TT - A transpose, B transpose
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: True
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
+
+  ########################################
+  # TC - A transpose, B conjugate transpose
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: True
+      TransposeB: True
+      ComplexConjugateA: False
+      ComplexConjugateB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
+
+  ########################################
+  # CN - A conjugate transpose, B normal
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: True
+      TransposeB: False
+      ComplexConjugateA: True
+      ComplexConjugateB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
+
+  ########################################
+  # CT - A conjugate transpose, B transpose
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: True
+      TransposeB: True
+      ComplexConjugateA: True
+      ComplexConjugateB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
+
+  ########################################
+  # CC - A conjugate transpose, B conjugate transpose
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: C
+      DestDataType: C
+      ComputeDataType: C
+      TransposeA: True
+      TransposeB: True
+      ComplexConjugateA: True
+      ComplexConjugateB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [False, True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [1, 1]
+          - [2, 2]
+          - [4, 2]
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1, 4]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 255]   # odd sizes exercise the tail loop
