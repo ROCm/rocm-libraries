@@ -27,7 +27,10 @@ from rocke.tests.compiler_tools import REQUIRE_COMPILER_TOOLS_ENV
 
 from . import _attention_bwd_resources
 from ._attention_bwd_resources import compile_or_skip
-from ._compiler_test_utils import skip_where_compiler_refuses_option
+from ._compiler_test_utils import (
+    skip_where_compiler_refuses_option,
+    skip_where_compiler_refuses_processor,
+)
 
 OPTION = "-amdgpu-mfma-vgpr-form"
 # How the refusal starts, and how the policy introduces it.

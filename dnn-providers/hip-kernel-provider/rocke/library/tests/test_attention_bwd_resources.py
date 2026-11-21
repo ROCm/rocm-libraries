@@ -16,9 +16,9 @@ import os
 import struct
 
 import pytest
+from rocke.tests.compiler_tools import require_tools_or_skip
 
 from tests import _attention_bwd_resources as res
-from tests._compiler_test_utils import require_tools_or_skip
 
 # Flavors measured to compile ``agpr_alloc=(128, 128)`` to zero AGPRs. Measured
 # 2026-11-18: llvm20 (comgr3.0, ROCm 7.1) gives agpr == 0, and its plain build

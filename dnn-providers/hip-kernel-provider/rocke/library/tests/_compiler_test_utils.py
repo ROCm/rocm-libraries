@@ -8,10 +8,13 @@ installed, and the loaded compiler must accept every ``-mllvm`` option the
 kernel needs. The policy itself, skip or fail under
 ``ROCKE_REQUIRE_COMPILER_TOOLS=1``, is the platform's
 (:func:`rocke.tests.compiler_tools.require_tools_or_skip`); this module applies
-it to the one compiler error the library's tests turn into a skip.
+it to the compiler errors the library's tests turn into a skip.
 
 * :func:`skip_where_compiler_refuses_option`: apply that policy when the body
   raises ``CompilerOptionNotAccepted``.
+* :func:`skip_where_compiler_refuses_processor`: apply that policy when the body
+  raises the ``ValueError`` that names a processor the loaded compiler does not
+  accept (a ``gfx1250`` kernel on ``llvm20``).
 """
 
 from __future__ import annotations
@@ -22,7 +25,18 @@ from contextlib import contextmanager
 from rocke.runtime import CompilerOptionNotAccepted
 from rocke.tests.compiler_tools import require_tools_or_skip
 
-__all__ = ["skip_where_compiler_refuses_option"]
+__all__ = [
+    "skip_where_compiler_refuses_option",
+    "skip_where_compiler_refuses_processor",
+]
+
+# The two phrases of the ``ValueError`` that ``rocke.core.arch.target`` raises
+# when the loaded compiler accepts neither the processor nor a generic target
+# its ``arch_specs.json`` row names. Pinned by test_arch_target_identity.py.
+_PROCESSOR_REFUSAL = (
+    "compiler does not accept the processor",
+    "points at no generic target",
+)
 
 
 @contextmanager

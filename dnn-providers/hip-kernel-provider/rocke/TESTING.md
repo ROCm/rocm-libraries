@@ -1176,14 +1176,15 @@ and run in four entries of their own:
 
 | Entry | Runs | Tier | CI jobs that run it |
 |---|---|---|---|
-| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | pull-request, develop push and nightly |
-| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | pull-request, develop push and nightly |
-| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | nightly only |
-| `rocke_tiling_backend_width_pytest` | `check_backend_access_width.py`, a compile check outside discovery (section 5.0.1) | standard | pull-request when it runs the standard tier, and nightly |
+| `rocke_tiling_pytest` | every test without the `gpu` marker, except `visualization/` | quick | every TheRock job that builds rocKE |
+| `rocke_tiling_gpu_pytest` | every test with the `gpu` marker | quick | every TheRock job that builds rocKE |
+| `rocke_tiling_visualization_pytest` | `visualization/`, without the `gpu` marker | comprehensive | none today |
+| `rocke_tiling_backend_width_pytest` | `check_backend_access_width.py`, a compile check outside discovery (section 5.0.1) | standard | a TheRock job that runs the standard tier |
 
 The tree's `conftest.py` says which tests carry the `gpu` marker.
 `ROCKE_ENGINE_test_categories_external.yaml` lists both quick tiling entries
-under quick and the visualization entry under comprehensive;
+under quick, the backend width entry under standard and the visualization entry
+under comprehensive;
 [§5.0.2](#502-ci-shards-and-rocke-item-sharding) says which labels that gives
 each entry and which CI jobs run each tier. A quick entry that the YAML matches,
 as both quick tiling entries are, carries every tier's label, so every TheRock
