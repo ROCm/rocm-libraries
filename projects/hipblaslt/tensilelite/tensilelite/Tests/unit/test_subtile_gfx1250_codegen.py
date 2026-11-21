@@ -209,8 +209,16 @@ class TestGfx1250SubtileCodegen:
     @pytest.mark.parametrize("mt_a,mt_b,wg", CONFIGS_1x1,
                              ids=[f"{a}x{b}" for a, b, _ in CONFIGS_1x1])
     def test_ds_read_dual_load(self, mt_a, mt_b, wg):
-        """Wave32 8-VGPR tiles emit two DSLoadB128 (lo + hi K-halves)."""
+        """Wave32 8-VGPR tiles emit two DSLoadB128 (lo + hi K-halves).
+
+        Critical: each load must use its corresponding sharedVgprLROffset entry.
+        The address VGPR for readIdx is: sharedVgprLROffset[mfmaId * numReadsForTile + readIdx].
+        Incorrectly using sharedVgprLROffset[mfmaId * numReadsForTile] for both loads
+        would load the same K-half twice, but would still emit "read=0" and "read=1"
+        comments, so we must validate the actual source operands.
+        """
         from tensilelite.Components.Subtile.SubtileLREmit import emitSingleDsRead
+        import re
         kernel = _create_gfx1250_kernel(mt_a, mt_b)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
@@ -221,9 +229,210 @@ class TestGfx1250SubtileCodegen:
         assert len(tile.regList.indices) == 8
         result = emitSingleDsRead(tiA, 0, 0, 0, tile)
         asm = str(result)
-        assert asm.count("ds_load_b128") == 2
+        # Verify two ds_load_b128 instructions
+        assert asm.count("ds_load_b128") == 2, f"Expected 2 ds_load_b128, got:\n{asm}"
+
+        # Extract all ds_load_b128 instructions with their source operands
+        # The DSLoadB128 instruction format in rocisa might vary, so try multiple patterns
+        # Common patterns: "ds_load_b128 v[X:Y], v[Z]" or "ds_load_b128 v[X:Y], vZ"
+        # We want to capture the source VGPR (the address register, second operand)
+
+        # Try pattern 1: ds_load_b128 v[...], v[N] or v[...], vN
+        pattern1 = r'ds_load_b128\s+v\[\d+:\d+\],\s*v\[?(\d+)\]?'
+        ds_loads = re.findall(pattern1, asm)
+
+        if len(ds_loads) == 0:
+            # Try pattern 2: maybe without brackets on source
+            pattern2 = r'ds_load_b128.*?v(\d+)'
+            matches = re.findall(pattern2, asm)
+            # The source vgpr should be the second match per instruction
+            # This is fragile, so let's try a different approach
+
+            # DEBUG: print assembly to understand format
+            pytest.fail(f"Could not parse ds_load_b128 source VGPRs. Assembly output:\n{asm}")
+
+        # Compute expected address VGPRs for readIdx=0 and readIdx=1
+        # mfmaId = 0 (subIterK=0, sId0=0), numReadsForTile = 8 / 4 = 2
+        mfmaId = tiA.getSubtileShapeLinearId(0, 0)  # subIterK=0, sId0=0
+        numRegs = len(tile.regList.indices)
+        REGS_PER_DS_READ = tiA.loadWidthLR // 4
+        numReadsForTile = numRegs // REGS_PER_DS_READ
+
+        expected_addr_vgpr_read0 = tiA.sharedVgprLROffset[mfmaId * numReadsForTile + 0]
+        expected_addr_vgpr_read1 = tiA.sharedVgprLROffset[mfmaId * numReadsForTile + 1]
+
+        # Validate each load uses the correct address VGPR
+        actual_vgpr_read0 = int(ds_loads[0])
+        actual_vgpr_read1 = int(ds_loads[1])
+
+        assert actual_vgpr_read0 == expected_addr_vgpr_read0, (
+            f"First ds_load_b128 (read=0): expected address v{expected_addr_vgpr_read0}, "
+            f"got v{actual_vgpr_read0}\nasm:\n{asm}"
+        )
+        assert actual_vgpr_read1 == expected_addr_vgpr_read1, (
+            f"Second ds_load_b128 (read=1): expected address v{expected_addr_vgpr_read1}, "
+            f"got v{actual_vgpr_read1}\nasm:\n{asm}"
+        )
+
+        # Also verify the comments exist (as before)
         assert "read=0" in asm
         assert "read=1" in asm
+
+    def test_ds_read_offset_swizzled(self):
+        """emitSingleDsRead swizzled=True uses subtileSize-based offset formula.
+
+        Covers SubtileLREmit.py:824-827 — swizzled offset calculation:
+            offsetStride = int(tileInfo.subtileSize)
+            offset = sId0 * offsetStride + sId1 * int(tileInfo.globalSubtileGrid[0]) * offsetStride
+
+        Critical: nonzero sId0/sId1 must produce correct LDS offset in the emitted ds_load_b128.
+        The existing test only checks sId0=sId1=0 (offset=0) and never validates the offset value.
+        """
+        from tensilelite.Components.Subtile.SubtileLREmit import emitSingleDsRead
+        kernel = _create_gfx1250_kernel(64, 64)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiA.allocVgprTileRegisters_legacy(writer, kernel)
+        tile = tiA.vgprTiles[0]
+
+        # Test nonzero sId0, sId1 with swizzled=True
+        sId0, sId1 = 1, 2
+        result = emitSingleDsRead(tiA, sId0, sId1, 0, tile, swizzled=True)
+        asm = str(result)
+
+        # Compute expected offset
+        offsetStride = int(tiA.subtileSize)
+        expected_offset = sId0 * offsetStride + sId1 * int(tiA.globalSubtileGrid[0]) * offsetStride
+
+        assert f"offset:{expected_offset}" in asm, (
+            f"Expected offset:{expected_offset} in swizzled ds_load_b128, got:\n{asm}"
+        )
+        assert "ds_load_b128" in asm
+
+    def test_ds_read_offset_non_swizzled_no_pad(self):
+        """emitSingleDsRead swizzled=False uses row-major offset formula without padding.
+
+        Covers SubtileLREmit.py:828-841 — non-swizzled offset calculation:
+            offsetStride = subtileShapeM * instM * rowStride
+            offset = sId0 * offsetStride + sId1 * subtileShapeK * instK * bpe
+            (with rowStride = depthUBytes + ldsRowPadBytes, padding=0 here)
+
+        Critical: without padding, rowStride = depthUBytes. The existing test never exercises
+        the non-swizzled path or validates offset values.
+        """
+        from tensilelite.Components.Subtile.SubtileLREmit import emitSingleDsRead
+        kernel = _create_gfx1250_kernel(64, 64)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiA.allocVgprTileRegisters_legacy(writer, kernel)
+        tile = tiA.vgprTiles[0]
+
+        # Ensure no padding
+        tiA.ldsRowPadBytes = 0
+
+        # Test nonzero sId0, sId1 with swizzled=False
+        sId0, sId1 = 1, 1
+        result = emitSingleDsRead(tiA, sId0, sId1, 0, tile, swizzled=False)
+        asm = str(result)
+
+        # Compute expected offset (non-swizzled, no padding)
+        instM = int(tiA.mmaTileShape[0])
+        instK = int(tiA.mmaTileShape[1])
+        subtileShapeM = int(tiA.subtileShape[0])
+        subtileShapeK = int(tiA.subtileShape[1])
+        depthUBytes = int(tiA.depthUBytes)
+        rowPadBytes = tiA.ldsRowPadBytes
+        rowStride = depthUBytes + rowPadBytes  # = depthUBytes since padding=0
+        offsetStride = subtileShapeM * instM * rowStride
+        expected_offset = sId0 * offsetStride + sId1 * subtileShapeK * instK * int(tiA.bpe)
+
+        assert f"offset:{expected_offset}" in asm, (
+            f"Expected offset:{expected_offset} in non-swizzled ds_load_b128, got:\n{asm}"
+        )
+        assert "ds_load_b128" in asm
+
+    def test_ds_read_offset_non_swizzled_with_pad(self):
+        """emitSingleDsRead swizzled=False includes ldsRowPadBytes in offset calculation.
+
+        Covers SubtileLREmit.py:838-841 — row padding in non-swizzled layout:
+            rowPadBytes = tileInfo.ldsRowPadBytes
+            rowStride = depthUBytes + rowPadBytes
+            offsetStride = subtileShapeM * instM * rowStride
+
+        Critical: when ldsRowPadBytes > 0, the row stride increases and offsets must account
+        for the padding. The existing test never sets ldsRowPadBytes or validates offset values.
+        """
+        from tensilelite.Components.Subtile.SubtileLREmit import emitSingleDsRead
+        kernel = _create_gfx1250_kernel(64, 64)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiA.allocVgprTileRegisters_legacy(writer, kernel)
+        tile = tiA.vgprTiles[0]
+
+        # Set padding
+        tiA.ldsRowPadBytes = 16
+
+        # Test with swizzled=False and padding
+        sId0, sId1 = 2, 1
+        result = emitSingleDsRead(tiA, sId0, sId1, 0, tile, swizzled=False)
+        asm = str(result)
+
+        # Compute expected offset (non-swizzled, with padding)
+        instM = int(tiA.mmaTileShape[0])
+        instK = int(tiA.mmaTileShape[1])
+        subtileShapeM = int(tiA.subtileShape[0])
+        subtileShapeK = int(tiA.subtileShape[1])
+        depthUBytes = int(tiA.depthUBytes)
+        rowPadBytes = tiA.ldsRowPadBytes  # = 16
+        rowStride = depthUBytes + rowPadBytes
+        offsetStride = subtileShapeM * instM * rowStride
+        expected_offset = sId0 * offsetStride + sId1 * subtileShapeK * instK * int(tiA.bpe)
+
+        assert f"offset:{expected_offset}" in asm, (
+            f"Expected offset:{expected_offset} with padding in non-swizzled ds_load_b128, got:\n{asm}"
+        )
+        assert "ds_load_b128" in asm
+
+    def test_ds_read_address_vgpr_for_subiterK(self):
+        """emitSingleDsRead selects correct sharedVgprLROffset for nonzero subIterK.
+
+        Covers SubtileLREmit.py:849 — address VGPR selection:
+            addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
+            (where mfmaId = tileInfo.getSubtileShapeLinearId(subIterK, 0))
+
+        Critical: when subIterK > 0, the address VGPR index must follow the mfmaId indexing
+        formula. The existing test only uses subIterK=0 and never validates address VGPRs.
+        """
+        from tensilelite.Components.Subtile.SubtileLREmit import emitSingleDsRead
+        kernel = _create_gfx1250_kernel(64, 64)
+        writer, tiA, tiB = _create_writer_gfx1250(kernel)
+        _setup_sgprs(writer)
+        tiA.allocOffsetRegisters(writer, kernel)
+        tiA.allocVgprTileRegisters_legacy(writer, kernel)
+        tile = tiA.vgprTiles[0]
+
+        # Test with nonzero subIterK
+        subIterK = 1
+        result = emitSingleDsRead(tiA, 0, 0, subIterK, tile, swizzled=True)
+        asm = str(result)
+
+        # Compute expected mfmaId and address VGPR index
+        mfmaId = tiA.getSubtileShapeLinearId(subIterK, 0)
+        numRegs = len(tile.regList.indices)
+        REGS_PER_DS_READ = tiA.loadWidthLR // 4
+        numReadsForTile = numRegs // REGS_PER_DS_READ
+
+        # For the first read (readIdx=0), the address VGPR should be at index mfmaId * numReadsForTile
+        expected_addr_vgpr_idx = tiA.sharedVgprLROffset[mfmaId * numReadsForTile + 0]
+
+        # Verify the emitted instruction uses the correct address VGPR
+        assert f"v[{expected_addr_vgpr_idx}]" in asm or f"v{expected_addr_vgpr_idx}" in asm, (
+            f"Expected address VGPR v{expected_addr_vgpr_idx} for subIterK={subIterK}, got:\n{asm}"
+        )
+        assert "ds_load_b128" in asm
 
     # -- selectDGeometry wave32 --
 
