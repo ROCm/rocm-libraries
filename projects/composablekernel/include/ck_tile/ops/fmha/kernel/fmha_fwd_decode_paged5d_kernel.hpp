@@ -249,6 +249,23 @@ struct FmhaDecodePaged5dKernel
         return f32_to_bf16(a) | (f32_to_bf16(b) << 16);
     }
     CK_TILE_DEVICE static float exp2(float x) { return __builtin_amdgcn_exp2f(x); }
+    // pairwise: shorter dependency chains than a running max or sum
+    template <index_t N>
+    CK_TILE_DEVICE static float tree_max(const float* x)
+    {
+        if constexpr(N == 1)
+            return x[0];
+        else
+            return fmaxf(tree_max<N / 2>(x), tree_max<N / 2>(x + N / 2));
+    }
+    template <index_t N>
+    CK_TILE_DEVICE static float tree_sum(const float* x)
+    {
+        if constexpr(N == 1)
+            return x[0];
+        else
+            return tree_sum<N / 2>(x) + tree_sum<N / 2>(x + N / 2);
+    }
 
     CK_TILE_DEVICE void operator()(const Kargs& a) const
     {
@@ -444,26 +461,43 @@ struct FmhaDecodePaged5dKernel
         for(index_t i = 0; i < kAcc; ++i)
             acc[i] = v8f{0, 0, 0, 0, 0, 0, 0, 0};
 
-        // S^T of one page: lane (n, h) gets tokens h*8 + r of row n, masked to the range
-        const auto qk_page = [&](const uint8_t* kb, index_t pg, float(&sv)[8], float& mx) {
+        // S^T of 16 key rows of stage st (row m: page kq(m), token kt(m) of this wave's pages);
+        // lane (n, h) gets rows h*8 + r of column n, unscaled, -inf outside the range when
+        // masked (first page pg_first)
+        const auto qk_tile = [&](index_t st,
+                                 index_t kq,
+                                 index_t kt,
+                                 index_t pg_first,
+                                 index_t tok_h,
+                                 float(&sv)[8],
+                                 auto masked) {
+            const uint8_t* kb = kbuf(st, kq) + kt * 16;
             v16i kf{};
             for(index_t i = 0; i < 4; ++i)
             {
-                const v4i x = *ptr_as<v4i>(kb + (2 * i + h) * 256 + n * 16);
+                const v4i x = *ptr_as<v4i>(kb + (2 * i + h) * 256);
                 for(index_t e = 0; e < 4; ++e)
                     kf[4 * i + e] = x[e];
             }
             const v8f st8 = __builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(
                 kf, qf, 0, v8f{0, 0, 0, 0, 0, 0, 0, 0}, false, false);
-            const index_t tok0 = pg * kPage + h * 8;
             for(index_t r = 0; r < 8; ++r)
             {
-                const index_t pos = tok0 + r;
-                const bool ok     = pos >= lo && pos < ctx && pos < pend * kPage;
-                sv[r]             = ok ? st8[r] * scl : -numeric<float>::infinity();
-                mx                = fmaxf(mx, sv[r]);
+                sv[r] = st8[r];
+                if constexpr(decltype(masked)::value)
+                {
+                    const index_t pos = pg_first * kPage + tok_h + r;
+                    if(!(pos >= lo && pos < ctx && pos < pend * kPage))
+                        sv[r] = -numeric<float>::infinity();
+                }
             }
         };
+        // pages [pg, pg + count) need no mask
+        const auto inside = [&](index_t pg, index_t count) {
+            return pg * kPage >= lo && (pg + count) * kPage <= ctx && pg + count <= pend;
+        };
+        // P scaled by 448 (the row max lands on e4m3's largest normal): exp2(s * scl + c)
+        constexpr float kLog2P = 8.807354922057604f; // log2(448)
 
         if constexpr(kWaveSplit)
         {
@@ -471,45 +505,65 @@ struct FmhaDecodePaged5dKernel
             {
                 const index_t st = t % kStages;
                 land(t);
+                // tile j: rows 0-7 are tokens (j%2)*8 + m of page j/2, rows 8-15 those of page
+                // 2 + j/2, so lane (n, h) gets all tokens of pages 2h and 2h + 1: byte j*8 + r of
+                // its P^T operand is token (j%2)*8 + r of page 2h + j/2, as on the V^T operand
+                const index_t pgw = pg0 + page_idx(t, 0);
                 float sv[kWavePages][8];
-                float mx = -numeric<float>::infinity();
-                for(index_t q = 0; q < kWavePages; ++q)
-                    qk_page(kbuf(st, q), pg0 + page_idx(t, q), sv[q], mx);
-                mx                = fmaxf(mx, __shfl_xor(mx, 16, 32));
+                const auto qk4 = [&](auto masked) {
+                    for(index_t j = 0; j < kWavePages; ++j)
+                        qk_tile(st,
+                                (n < 8 ? 0 : 2) + j / 2,
+                                (j % 2) * 8 + (n & 7),
+                                pgw + 2 * h + j / 2,
+                                (j % 2) * 8,
+                                sv[j],
+                                masked);
+                };
+                if(inside(pgw, kWavePages))
+                    qk4(bool_constant<false>{});
+                else
+                    qk4(bool_constant<true>{});
+                float mx          = tree_max<kWavePages * 8>(&sv[0][0]);
+                mx                = fmaxf(mx, __shfl_xor(mx, 16, 32)) * scl;
                 const float m_new = fmaxf(m_run, mx);
                 const float m_use = is_neg_inf(m_new) ? 0.f : m_new;
-                const float alpha = exp2(m_run - m_use);
-                // P scaled by 448: the row max lands on e4m3's largest normal; byte q*8 + r of
-                // the P^T operand is token q*16 + h*8 + r, as on the V^T operand below
-                float ps = 0.f;
+                const float c     = kLog2P - m_use;
+                float pv[kWavePages][8];
                 int32_t pk[8];
-                for(index_t q = 0; q < kWavePages; ++q)
+                for(index_t j = 0; j < kWavePages; ++j)
                     for(index_t r2 = 0; r2 < 4; ++r2)
                     {
-                        const float p0 = exp2(sv[q][2 * r2] - m_use) * 448.f;
-                        const float p1 = exp2(sv[q][2 * r2 + 1] - m_use) * 448.f;
-                        ps += p0 + p1;
-                        const index_t j = q * 8 + 2 * r2;
-                        pk[j / 4]       = (j & 3) == 0
-                                              ? __builtin_amdgcn_cvt_pk_fp8_f32(p0, p1, 0, false)
-                                              : __builtin_amdgcn_cvt_pk_fp8_f32(p0, p1, pk[j / 4], true);
+                        const float p0    = exp2(fmaf(sv[j][2 * r2], scl, c));
+                        const float p1    = exp2(fmaf(sv[j][2 * r2 + 1], scl, c));
+                        pv[j][2 * r2]     = p0;
+                        pv[j][2 * r2 + 1] = p1;
+                        const index_t e   = j * 8 + 2 * r2; // operand byte
+                        pk[e / 4]         = (e & 3) == 0
+                                                ? __builtin_amdgcn_cvt_pk_fp8_f32(p0, p1, 0, false)
+                                                : __builtin_amdgcn_cvt_pk_fp8_f32(p0, p1, pk[e / 4], true);
                     }
-                ps    = ps + __shfl_xor(ps, 16, 32);
-                l_run = l_run * alpha + ps;
+                float ps = tree_sum<kWavePages * 8>(&pv[0][0]);
+                ps       = ps + __shfl_xor(ps, 16, 32);
+                // rescale only when a row max grew
+                if(__builtin_amdgcn_ballot_w32(m_new > m_run) != 0)
+                {
+                    const float alpha = exp2(m_run - m_use);
+                    l_run *= alpha;
+                    for(index_t db = 0; db < 8; ++db)
+                        acc[db] *= alpha;
+                }
+                l_run += ps;
                 m_run = m_new;
                 const v8i pf{pk[0], pk[1], pk[2], pk[3], pk[4], pk[5], pk[6], pk[7]};
                 for(index_t db = 0; db < 8; ++db)
                 {
-                    v8i vf{};
-                    for(index_t q = 0; q < kWavePages; ++q)
-                    {
-                        const int2 x =
-                            *ptr_as<int2>(&sm.kv.v[st][w][q][(db * 16 + n) * 16 + h * 8]);
-                        vf[2 * q]     = x.x;
-                        vf[2 * q + 1] = x.y;
-                    }
+                    const index_t off = (db * 16 + n) * 16;
+                    const v4i x       = *ptr_as<v4i>(&sm.kv.v[st][w][2 * h][off]);
+                    const v4i y       = *ptr_as<v4i>(&sm.kv.v[st][w][2 * h + 1][off]);
+                    const v8i vf{x[0], x[1], x[2], x[3], y[0], y[1], y[2], y[3]};
                     acc[db] = __builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(
-                        vf, pf, 0, acc[db] * alpha, false, false);
+                        vf, pf, 0, acc[db], false, false);
                 }
                 // this wave is done with stage st: it takes step t + kStages
                 if(t + kStages < steps)
@@ -528,10 +582,14 @@ struct FmhaDecodePaged5dKernel
             for(index_t t = 0; t < steps; ++t)
             {
                 const index_t st = t % kStages;
+                const index_t pg = pg0 + page_idx(t, 0);
                 float sv[8];
-                float mx = -numeric<float>::infinity();
-                qk_page(kbuf(st, 0), pg0 + page_idx(t, 0), sv, mx);
-                mx = fmaxf(mx, __shfl_xor(mx, 16, 32));
+                if(inside(pg, 1))
+                    qk_tile(st, 0, n, pg, h * 8, sv, bool_constant<false>{});
+                else
+                    qk_tile(st, 0, n, pg, h * 8, sv, bool_constant<true>{});
+                float mx = tree_max<8>(sv);
+                mx       = fmaxf(mx, __shfl_xor(mx, 16, 32)) * scl;
                 if(h == 0)
                     sm.red[0][w][n] = mx;
                 __syncthreads();
@@ -547,14 +605,11 @@ struct FmhaDecodePaged5dKernel
                     m_step = fmaxf(m_step, sm.red[0][i][n]);
                 const float m_new = fmaxf(m_run, m_step);
                 const float m_use = is_neg_inf(m_new) ? 0.f : m_new;
-                const float alpha = exp2(m_run - m_use);
-                float ps          = 0.f;
+                const float c     = kLog2P - m_use;
                 float pv[8];
                 for(index_t r = 0; r < 8; ++r)
-                {
-                    pv[r] = exp2(sv[r] - m_use) * 448.f;
-                    ps += pv[r];
-                }
+                    pv[r] = exp2(fmaf(sv[r], scl, c));
+                float ps   = tree_sum<8>(pv);
                 ps         = ps + __shfl_xor(ps, 16, 32);
                 int32_t p0 = __builtin_amdgcn_cvt_pk_fp8_f32(pv[0], pv[1], 0, false);
                 p0         = __builtin_amdgcn_cvt_pk_fp8_f32(pv[2], pv[3], p0, true);
@@ -569,8 +624,9 @@ struct FmhaDecodePaged5dKernel
                 float psum = 0.f;
                 for(index_t i = 0; i < kNumWaves; ++i)
                     psum += sm.red[1][i][n];
-                l_run = l_run * alpha + psum;
-                m_run = m_new;
+                const float alpha = exp2(m_run - m_use);
+                l_run             = l_run * alpha + psum;
+                m_run             = m_new;
                 // O^T += V^T P^T for head-dim blocks w and w + 4; tokens of pages h and h + 2 on
                 // both operands
                 const v4i px = *ptr_as<v4i>(&sm.p[n][h * kPage]);
