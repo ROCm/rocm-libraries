@@ -440,20 +440,14 @@ class TestFp8DenseGuards(unittest.TestCase):
     def test_fp8_request_flags_must_be_bools(self):
         """``bool("false")`` is True and ``bool(None)`` is False, so coercing
         these flags before checking them would let a string select an fp8 kernel
-        and a missing encoding pass as OCP. ``_request_errors`` checks the types,
-        so the refusal names the flag."""
-        from dispatch.attention.common import _request_errors
-
+        and a missing encoding pass as OCP. The request refuses them when it is
+        built, so the refusal names the flag."""
         for flag, bad in (("use_fp8", "false"), ("fp8_fnuz", None)):
             with self.subTest(flag=flag):
-                req = self._fp8_req(**{flag: bad})
-                self.assertIn(
-                    f"{flag} must be a bool",
-                    " ".join(_request_errors(req)),
-                )
-                # And it is fatal through dispatch, not merely reported.
-                with self.assertRaises(ValueError):
-                    attention_tuning_spec(req, "gfx950_dense_grid")
+                with self.assertRaisesRegex(
+                    ValueError, rf"{flag}={bad!r}, expected a bool"
+                ):
+                    self._fp8_req(**{flag: bad})
 
     def test_runner_rejects_non_ocp_kv_for_an_fp8_spec(self):
         # The binding guard only covers dispatch callers; a direct call to the
