@@ -63,6 +63,10 @@ ORIGAMI_EXPORT reduction_t select_reduction(const problem_t& problem,
 /**
  * @brief Based on the provided kernel config, select the best grid dimension.
  *
+ * For grid_selection_t::k_split_aware, the reduction strategy is taken from
+ * config.reduction_strategy if it is set (not reduction_t::none). Otherwise it is chosen
+ * with select_reduction().
+ *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param config Kernel configuration.

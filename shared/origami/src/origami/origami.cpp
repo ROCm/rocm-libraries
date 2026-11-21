@@ -25,14 +25,16 @@ std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
                                                      const std::vector<config_t>& configs,
                                                      std::size_t topk,
                                                      model_t model) {
-  // Use rank_configs to get configurations with latencies ranked by performance
-  auto ranked_configs = rank_configs(problem, hardware, configs, model);
+  // Rank by index so only the top K configurations are ever copied.
+  const auto sorted = argsort_configs(problem, hardware, configs, model);
 
   // Return only the top K configurations
   std::vector<prediction_result_t> topk_configs;
-  size_t count = std::min(topk, ranked_configs.size());
+  size_t count = std::min(topk, sorted.size());
   topk_configs.reserve(count);
-  for (size_t i = 0; i < count; ++i) { topk_configs.push_back(ranked_configs[i]); }
+  for (size_t i = 0; i < count; ++i) {
+    topk_configs.push_back({sorted[i].latency, configs[sorted[i].index]});
+  }
   return topk_configs;
 }
 
@@ -708,46 +710,35 @@ double compute_ranked_latency(const problem_t& problem,
 
 }  // namespace
 
-std::vector<prediction_result_t> rank_configs(const problem_t& problem,
+std::vector<argsort_result_t> argsort_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs,
                                               model_t model) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
-  struct prediction_result_wrapper_t {
-    double latency;
-    std::reference_wrapper<const config_t> config;
-  };
-
-  std::vector<prediction_result_wrapper_t> valid_configs;
-  std::vector<prediction_result_wrapper_t> invalid_configs;
-  valid_configs.reserve(configs.size());
+  // Entries refer to configs by position; config_t objects are never copied here.
+  std::vector<argsort_result_t> results;
+  std::vector<argsort_result_t> invalid_configs;
+  results.reserve(configs.size());
   invalid_configs.reserve(configs.size());
 
-  for (const auto& config : configs) {
-    const double latency = compute_ranked_latency(problem, hardware, config, model);
+  for (std::size_t i = 0; i < configs.size(); ++i) {
+    const double latency = compute_ranked_latency(problem, hardware, configs[i], model);
 
     if (latency != kRejectedLatency) {
-      valid_configs.push_back({latency, std::cref(config)});
+      results.push_back({latency, i});
     } else {
-      invalid_configs.push_back({latency, std::cref(config)});
+      invalid_configs.push_back({latency, i});
     }
   }
 
   // Fallback: when the analytical model rejected every candidate, rank the
   // invalid configs so the caller still gets a usable kernel rather than failing.
-  if (valid_configs.empty()) { valid_configs = std::move(invalid_configs); }
+  if (results.empty()) { results = std::move(invalid_configs); }
 
-  std::stable_sort(valid_configs.begin(), valid_configs.end(), [](const auto& a, const auto& b) {
+  std::stable_sort(results.begin(), results.end(), [](const auto& a, const auto& b) {
     return a.latency < b.latency;
   });
-
-  std::vector<prediction_result_t> results;
-  results.reserve(valid_configs.size());
-  std::transform(valid_configs.begin(),
-                 valid_configs.end(),
-                 std::back_inserter(results),
-                 [&](const auto& r) -> prediction_result_t { return {r.latency, r.config.get()}; });
 
   // Compute arithmetic intensity for tie-breaking
   // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N
@@ -813,34 +804,36 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
     // will preserve this ordering among configs that remain tied on those higher
     // priority criteria, effectively applying the buffer preference within every
     // tied subgroup (not just the leading one).
-    if (results.front().config.has_tensile_params()) {
+    if (configs[results.front().index].has_tensile_params()) {
       std::stable_sort(
           results.begin(),
           results.begin() + num_the_same,
-          [](const prediction_result_t& a, const prediction_result_t& b) {
+          [&configs](const argsort_result_t& ra, const argsort_result_t& rb) {
+            const config_t& a = configs[ra.index];
+            const config_t& b = configs[rb.index];
             auto rank = [](bool bufferLoad, bool bufferStore) {
               return (static_cast<int>(!bufferLoad) << 1) | static_cast<int>(!bufferStore);
             };
-            return rank(a.config.tensile().buffer_load, a.config.tensile().buffer_store) <
-                   rank(b.config.tensile().buffer_load, b.config.tensile().buffer_store);
+            return rank(a.tensile().buffer_load, a.tensile().buffer_store) <
+                   rank(b.tensile().buffer_load, b.tensile().buffer_store);
           });
     }
 
     std::stable_sort(results.begin(),
                      results.begin() + num_the_same,
-                     [&compute_arithmetic_intensity](const prediction_result_t& a,
-                                                     const prediction_result_t& b) {
-                       return compute_arithmetic_intensity(a.config) >
-                              compute_arithmetic_intensity(b.config);
+                     [&compute_arithmetic_intensity, &configs](const argsort_result_t& a,
+                                                               const argsort_result_t& b) {
+                       return compute_arithmetic_intensity(configs[a.index]) >
+                              compute_arithmetic_intensity(configs[b.index]);
                      });
 
     // After arithmetic intensity tie-breaking, check if we still have ties
     // among the top results (those with same latency and arithmetic intensity)
     // Check if the top tiles still have the same arithmetic intensity
-    double first_ai    = compute_arithmetic_intensity(results.front().config);
+    double first_ai    = compute_arithmetic_intensity(configs[results.front().index]);
     size_t num_same_ai = 1;
     for (size_t i = 1; i < num_the_same; ++i) {
-      double current_ai = compute_arithmetic_intensity(results[i].config);
+      double current_ai = compute_arithmetic_intensity(configs[results[i].index]);
       if (std::abs(current_ai - first_ai) < 1e-6) {
         num_same_ai++;
       } else {
@@ -858,20 +851,21 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
       if (problem.size.m != problem.size.n) {
         std::stable_sort(results.begin(),
                          results.begin() + num_same_ai,
-                         [problem](const prediction_result_t& a, const prediction_result_t& b) {
+                         [&problem, &configs](const argsort_result_t& ra,
+                                              const argsort_result_t& rb) {
+                           const config_t& a = configs[ra.index];
+                           const config_t& b = configs[rb.index];
                            if (problem.size.m > problem.size.n) {
                              // M-dominant: prefer larger MT_M
-                             if (a.config.mt.m != b.config.mt.m)
-                               return a.config.mt.m > b.config.mt.m;
+                             if (a.mt.m != b.mt.m) return a.mt.m > b.mt.m;
                              // If MT_M is same, prefer larger MT_N as secondary
-                             return a.config.mt.n > b.config.mt.n;
+                             return a.mt.n > b.mt.n;
                            } else  // N > M
                            {
                              // N-dominant: prefer larger MT_N
-                             if (a.config.mt.n != b.config.mt.n)
-                               return a.config.mt.n > b.config.mt.n;
+                             if (a.mt.n != b.mt.n) return a.mt.n > b.mt.n;
                              // If MT_N is same, prefer larger MT_M as secondary
-                             return a.config.mt.m > b.config.mt.m;
+                             return a.mt.m > b.mt.m;
                            }
                          });
       }
@@ -881,26 +875,44 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
       // This ensures deterministic selection regardless of input order
       std::stable_sort(results.begin(),
                        results.begin() + num_same_ai,
-                       [&occ_need](const prediction_result_t& a, const prediction_result_t& b) {
+                       [&occ_need, &configs](const argsort_result_t& ra,
+                                             const argsort_result_t& rb) {
+                         const config_t& a = configs[ra.index];
+                         const config_t& b = configs[rb.index];
                          // Prefer larger MT_M first
-                         if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
+                         if (a.mt.m != b.mt.m) return a.mt.m > b.mt.m;
                          // If MT_M is same, prefer larger MT_N
-                         if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
+                         if (a.mt.n != b.mt.n) return a.mt.n > b.mt.n;
                          // If MT_M and MT_N are same, prefer larger MT_K
-                         if (a.config.mt.k != b.config.mt.k) return a.config.mt.k > b.config.mt.k;
+                         if (a.mt.k != b.mt.k) return a.mt.k > b.mt.k;
                          // Bit-identical macrotile: prefer the occupancy variant that
                          // best matches the workload (never changes which tile wins).
-                         const double need = occ_need(a.config);  // == occ_need(b): same MT
-                         return std::abs(static_cast<double>(a.config.occupancy) - need) <
-                                std::abs(static_cast<double>(b.config.occupancy) - need);
+                         const double need = occ_need(a);  // == occ_need(b): same MT
+                         return std::abs(static_cast<double>(a.occupancy) - need) <
+                                std::abs(static_cast<double>(b.occupancy) - need);
                        });
     }
   }
 
-  OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << "," << results[0].config.mt.n
-                                          << "," << results[0].config.mt.k << ")"
-                                          << " latency=" << results[0].latency);
+  {
+    const config_t& best = configs[results[0].index];
+    OLOG_DEBUG("rank_configs selected MT=(" << best.mt.m << "," << best.mt.n << "," << best.mt.k
+                                            << ")"
+                                            << " latency=" << results[0].latency);
+  }
 
+  return results;
+}
+
+std::vector<prediction_result_t> rank_configs(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const std::vector<config_t>& configs,
+                                              model_t model) {
+  const auto sorted = argsort_configs(problem, hardware, configs, model);
+
+  std::vector<prediction_result_t> results;
+  results.reserve(sorted.size());
+  for (const auto& r : sorted) { results.push_back({r.latency, configs[r.index]}); }
   return results;
 }
 
@@ -933,10 +945,11 @@ prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const std::vector<config_t>& configs,
                                   model_t model) {
-  auto ranked_configs = rank_configs(problem, hardware, configs, model);
+  // Only the winning config is copied.
+  const auto sorted = argsort_configs(problem, hardware, configs, model);
 
   // Return the top configuration
-  return ranked_configs[0];
+  return {sorted[0].latency, configs[sorted[0].index]};
 }
 
 double compute_perf_gflops(const hardware_t& hardware,

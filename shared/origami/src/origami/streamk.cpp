@@ -2,6 +2,9 @@
 // SPDX-License-Identifier:  MIT
 
 #include "origami/streamk.hpp"
+
+#include <array>
+
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/heuristics.hpp"
@@ -365,6 +368,7 @@ static size_t correct_sk_grid_for_partial_tiles(size_t sk_grid,
 //        by select_grid_size so this file-local helper keeps its original
 //        max_cus-driven grid-cap and occupancy-multiplier semantics.
 size_t grid_k_split_aware(const problem_t& problem,
+                          const hardware_t& hardware,
                           const config_t& config,
                           size_t cu_count,
                           size_t cu_budget) {
@@ -385,7 +389,7 @@ size_t grid_k_split_aware(const problem_t& problem,
     size_t virt_cu_count = cu_count;
     if (config.occupancy > 1) virt_cu_count *= config.occupancy;
 
-    const std::vector<double> tile_fractions = {
+    constexpr std::array<double, 6> tile_fractions = {
         0.0, 1.0 / 2.0, 1.0 / 8.0, 1.0 / 5.0, 1.0 / 4.0, 1.0 / 3.0};
     // When virt_cu_count is greater than tiles, min_even_tiles is 0 which enforces partial tiles.
     const size_t min_even_tiles = std::max<size_t>(1, tiles / virt_cu_count);
@@ -415,7 +419,12 @@ size_t grid_k_split_aware(const problem_t& problem,
     // constexpr int MaxTilesForParallel = 16;
     constexpr int MinItersPerCU = 8;
 
-    if (config.reduction_strategy == reduction_t::parallel) {
+    const reduction_t reduction_strategy =
+        (config.reduction_strategy != reduction_t::none)
+            ? config.reduction_strategy
+            : select_reduction(problem, hardware, config, grid_selection_t::k_split_aware);
+
+    if (reduction_strategy == reduction_t::parallel) {
       size_t virt_cu_count = cu_count;
       // TODO check if using occupancy info makes workspace too large
       // if (occupancy > 1)
@@ -430,7 +439,7 @@ size_t grid_k_split_aware(const problem_t& problem,
       const size_t maxSplits = std::min(maxSplitsForTiles, maxSplitsForIters);
       sk_grid                = tiles * maxSplits;
     } else {
-      const std::vector<size_t> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
+      constexpr std::array<size_t, 8> tile_fractions = {16, 12, 8, 6, 4, 3, 2, 1};
       for (size_t frac : tile_fractions) {
         const size_t splitGrid  = tiles * frac;
         const size_t itersPerCU = iters_per_tile / frac;
@@ -483,7 +492,7 @@ size_t select_grid_size(const problem_t& problem,
       return streamk::grid_analytical(problem, hardware, config, 10);
 
     case grid_selection_t::k_split_aware:
-      return streamk::grid_k_split_aware(problem, config, cu_count, cu_budget);
+      return streamk::grid_k_split_aware(problem, hardware, config, cu_count, cu_budget);
 
     case grid_selection_t::number_of_cus:
     default: return cu_count;

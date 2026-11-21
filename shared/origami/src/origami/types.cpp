@@ -54,35 +54,6 @@ void runtime_options::update_from_env() {
   gemm_pick           = read_gemm_pick_from_env();
 }
 
-int datatype_to_bits(data_type_t type) {
-  switch (type) {
-    case data_type_t::Float: return 32;
-    case data_type_t::Double: return 64;
-    case data_type_t::ComplexFloat: return 64;
-    case data_type_t::ComplexDouble: return 128;
-    case data_type_t::Half: return 16;
-    case data_type_t::Int8x4: return 32;
-    case data_type_t::Int32: return 32;
-    case data_type_t::BFloat16: return 16;
-    case data_type_t::Int8: return 8;
-    case data_type_t::Int4: return 4;
-    case data_type_t::Int64: return 64;
-    case data_type_t::XFloat32: return 32;
-    case data_type_t::Float8_fnuz: return 8;
-    case data_type_t::BFloat8_fnuz: return 8;
-    case data_type_t::Float8BFloat8_fnuz: return 8;
-    case data_type_t::BFloat8Float8_fnuz: return 8;
-    case data_type_t::Float8: return 8;
-    case data_type_t::BFloat8: return 8;
-    case data_type_t::Float8BFloat8: return 8;
-    case data_type_t::BFloat8Float8: return 8;
-    case data_type_t::Float6: return 6;
-    case data_type_t::BFloat6: return 6;
-    case data_type_t::Float4: return 4;
-    default: return -1;  // Invalid type
-  }
-}
-
 std::string datatype_to_string(data_type_t type) {
   switch (type) {
     case data_type_t::Float: return "Float";
