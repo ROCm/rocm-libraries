@@ -1,0 +1,649 @@
+{
+  "builders": [
+    {
+      "module": "builders.common.convolution_forward",
+      "builder": "build_gfx950_conv_fwd_aot",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "optional"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "builders.common.convolution_forward.Gfx950ConvFwdAotSpec",
+      "predicates": {
+        "supports_gfx950_conv_fwd_aot": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_gfx950_conv_fwd_aot_problem": [
+          ["problem", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_gfx950_conv_fwd_aot_split_reduce": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ]
+      }
+    },
+    {
+      "module": "builders.common.convolution_forward",
+      "builder": "build_gfx950_conv_fwd_aot_split_reduce",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "optional"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "builders.common.convolution_forward.Gfx950ConvFwdAotSpec",
+      "predicates": {
+        "supports_gfx950_conv_fwd_aot": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_gfx950_conv_fwd_aot_problem": [
+          ["problem", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_gfx950_conv_fwd_aot_split_reduce": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ]
+      }
+    },
+    {
+      "module": "kernels.gfx1151.wmma_fmha_decode",
+      "builder": "build_wmma_fmha_decode",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "required"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec",
+      "predicates": {}
+    },
+    {
+      "module": "kernels.gfx1151.wmma_fmha_decode",
+      "builder": "build_wmma_fmha_decode_merge",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "required"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec",
+      "predicates": {}
+    },
+    {
+      "module": "kernels.gfx1151.wmma_fmha_decode",
+      "builder": "build_wmma_fmha_decode_module",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "required"]
+      ],
+      "returns": "unannotated",
+      "spec": "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec",
+      "predicates": {}
+    },
+    {
+      "module": "kernels.gfx1151.wmma_fmha_fwd_v2",
+      "builder": "build_wmma_fmha_fwd_v2",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "required"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "kernels.gfx1151.wmma_fmha_fwd_v2.WmmaFmhaFwdV2Spec",
+      "predicates": {}
+    },
+    {
+      "module": "kernels.gfx942.attention_dense",
+      "builder": "build_attention_dense",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "optional"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "kernels.gfx942.attention_dense.Gfx942AttentionDenseSpec",
+      "predicates": {
+        "supports_attention_dense": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ]
+      }
+    },
+    {
+      "module": "kernels.gfx942.attention_tiled_2d",
+      "builder": "build_unified_attention_2d_tiled",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "optional"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "kernels.gfx942.attention_tiled_2d.UnifiedAttention2DTiledSpec",
+      "predicates": {
+        "supports_gfx942_4warp_gqa_spec": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_tiled_2d": [
+          ["head_size", "KEYWORD_ONLY", "required"],
+          ["block_size", "KEYWORD_ONLY", "required"],
+          ["dtype", "KEYWORD_ONLY", "required"],
+          ["num_queries_per_kv", "KEYWORD_ONLY", "required"],
+          ["use_alibi", "KEYWORD_ONLY", "required"],
+          ["use_qq_bias", "KEYWORD_ONLY", "required"],
+          ["use_fp8", "KEYWORD_ONLY", "required"],
+          ["q_dtype", "KEYWORD_ONLY", "required"],
+          ["num_warps", "KEYWORD_ONLY", "optional"],
+          ["block_m_per_warp", "KEYWORD_ONLY", "optional"],
+          ["kv_storage_dtype", "KEYWORD_ONLY", "optional"],
+          ["tile_size", "KEYWORD_ONLY", "optional"],
+          ["arch", "KEYWORD_ONLY", "optional"],
+          ["use_mfma_32x32x8", "KEYWORD_ONLY", "optional"],
+          ["use_transposed_qk_32x32", "KEYWORD_ONLY", "optional"],
+          ["use_k_single_buffer", "KEYWORD_ONLY", "optional"],
+          ["use_conflict_free_v_store", "KEYWORD_ONLY", "optional"],
+          ["use_k_sliced_ring", "KEYWORD_ONLY", "optional"],
+          ["ring_depth", "KEYWORD_ONLY", "optional"],
+          ["k_slice_hd", "KEYWORD_ONLY", "optional"],
+          ["use_d256_fast", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_tiled_2d_spec": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ]
+      }
+    },
+    {
+      "module": "kernels.gfx942.attention_tiled_3d",
+      "builder": "build_unified_attention_3d_tiled_module",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "optional"]
+      ],
+      "returns": "unannotated",
+      "spec": "kernels.gfx942.attention_tiled_3d.UnifiedAttention3DTiledSpec",
+      "predicates": {
+        "supports_tiled_3d": [
+          ["head_size", "KEYWORD_ONLY", "required"],
+          ["block_size", "KEYWORD_ONLY", "required"],
+          ["dtype", "KEYWORD_ONLY", "required"],
+          ["num_queries_per_kv", "KEYWORD_ONLY", "required"],
+          ["use_alibi", "KEYWORD_ONLY", "required"],
+          ["use_qq_bias", "KEYWORD_ONLY", "required"],
+          ["use_fp8", "KEYWORD_ONLY", "required"],
+          ["q_dtype", "KEYWORD_ONLY", "required"],
+          ["kv_storage_dtype", "KEYWORD_ONLY", "optional"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_tiled_3d_spec": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_tiled_reduce_spec": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_unified_attention_3d_tiled_module": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ]
+      }
+    },
+    {
+      "module": "kernels.gfx950.attention_dense",
+      "builder": "build_attention_dense",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "optional"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "kernels.gfx950.attention_dense.Gfx950AttentionDenseSpec",
+      "predicates": {
+        "supports_attention_dense": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ]
+      }
+    },
+    {
+      "module": "kernels.gfx950.attention_tiled_2d",
+      "builder": "build_unified_attention_2d_tiled",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "optional"]
+      ],
+      "returns": "rocke.core.ir.KernelDef",
+      "spec": "kernels.gfx950.attention_tiled_2d.UnifiedAttention2DTiledSpec",
+      "predicates": {
+        "supports_tiled_2d": [
+          ["head_size", "KEYWORD_ONLY", "required"],
+          ["block_size", "KEYWORD_ONLY", "required"],
+          ["dtype", "KEYWORD_ONLY", "required"],
+          ["num_queries_per_kv", "KEYWORD_ONLY", "required"],
+          ["use_alibi", "KEYWORD_ONLY", "required"],
+          ["use_qq_bias", "KEYWORD_ONLY", "required"],
+          ["use_additive_bias", "KEYWORD_ONLY", "optional"],
+          ["use_fp8", "KEYWORD_ONLY", "optional"],
+          ["q_dtype", "KEYWORD_ONLY", "optional"],
+          ["num_warps", "KEYWORD_ONLY", "optional"],
+          ["block_m_per_warp", "KEYWORD_ONLY", "optional"],
+          ["kv_storage_dtype", "KEYWORD_ONLY", "optional"],
+          ["tile_size", "KEYWORD_ONLY", "optional"],
+          ["arch", "KEYWORD_ONLY", "optional"],
+          ["use_mfma_32x32x8", "KEYWORD_ONLY", "optional"],
+          ["use_transposed_qk_32x32", "KEYWORD_ONLY", "optional"],
+          ["use_k_single_buffer", "KEYWORD_ONLY", "optional"],
+          ["use_conflict_free_v_store", "KEYWORD_ONLY", "optional"],
+          ["use_k_sliced_ring", "KEYWORD_ONLY", "optional"],
+          ["use_d256_fast", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_tiled_2d_spec": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ]
+      }
+    },
+    {
+      "module": "kernels.gfx950.attention_tiled_3d",
+      "builder": "build_unified_attention_3d_tiled_module",
+      "parameters": [
+        ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+        ["arch", "KEYWORD_ONLY", "optional"]
+      ],
+      "returns": "unannotated",
+      "spec": "kernels.gfx950.attention_tiled_3d.UnifiedAttention3DTiledSpec",
+      "predicates": {
+        "supports_tiled_3d": [
+          ["head_size", "KEYWORD_ONLY", "required"],
+          ["block_size", "KEYWORD_ONLY", "required"],
+          ["dtype", "KEYWORD_ONLY", "required"],
+          ["num_queries_per_kv", "KEYWORD_ONLY", "required"],
+          ["use_alibi", "KEYWORD_ONLY", "required"],
+          ["use_qq_bias", "KEYWORD_ONLY", "required"],
+          ["use_additive_bias", "KEYWORD_ONLY", "optional"],
+          ["use_fp8", "KEYWORD_ONLY", "optional"],
+          ["q_dtype", "KEYWORD_ONLY", "optional"],
+          ["kv_storage_dtype", "KEYWORD_ONLY", "optional"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_tiled_3d_spec": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_tiled_reduce_spec": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ],
+        "supports_unified_attention_3d_tiled_module": [
+          ["spec", "POSITIONAL_OR_KEYWORD", "required"],
+          ["arch", "KEYWORD_ONLY", "optional"]
+        ]
+      }
+    }
+  ],
+  "specs": {
+    "builders.common.convolution_forward.Gfx950ConvFwdAotSpec": {
+      "dtype": ["str", "required"],
+      "tile_m": ["int", "required"],
+      "tile_n": ["int", "required"],
+      "tile_k": ["int", "required"],
+      "warp_m": ["int", "required"],
+      "warp_n": ["int", "required"],
+      "warp_tile_m": ["int", "required"],
+      "warp_tile_n": ["int", "required"],
+      "warp_tile_k": ["int", "required"],
+      "wave_size": ["int", "required"],
+      "pipeline": ["str", "required"],
+      "epilogue": ["str", "required"],
+      "vector_size_a": ["int", "required"],
+      "vector_size_b": ["int", "required"],
+      "vector_size_c": ["int", "required"],
+      "unroll_k": ["int", "required"],
+      "async_dma": ["int", "required"],
+      "async_chunk_a": ["int", "required"],
+      "async_chunk_b": ["int", "required"],
+      "grouped": ["int", "required"],
+      "instance_id": ["str", "required"],
+      "layout": ["str", "optional"],
+      "kernel_family": ["int", "optional"],
+      "direct_variant": ["str", "optional"],
+      "filter_h": ["int", "optional"],
+      "filter_w": ["int", "optional"],
+      "stride_h": ["int", "optional"],
+      "stride_w": ["int", "optional"],
+      "pad_h": ["int", "optional"],
+      "pad_w": ["int", "optional"],
+      "dilation_h": ["int", "optional"],
+      "dilation_w": ["int", "optional"],
+      "block_w": ["int", "optional"],
+      "block_waves": ["int", "optional"],
+      "block_h": ["int", "optional"],
+      "unroll_rows": ["int", "optional"],
+      "block_q": ["int", "optional"],
+      "block_groups": ["int", "optional"],
+      "double_buffer": ["int", "optional"],
+      "cpg": ["int", "optional"],
+      "kpg": ["int", "optional"],
+      "tile_h": ["int", "optional"],
+      "tile_w": ["int", "optional"],
+      "tile_k_out": ["int", "optional"],
+      "ck": ["int", "optional"],
+      "waves_m": ["int", "optional"],
+      "waves_n": ["int", "optional"],
+      "atom": ["str", "optional"],
+      "swizzle_wgm": ["int", "optional"],
+      "iglp": ["int", "optional"],
+      "waves_per_eu": ["int", "optional"],
+      "group_merge": ["int", "optional"],
+      "split_c": ["int", "optional"],
+      "prefetch_rows": ["int", "optional"],
+      "w_fold": ["int", "optional"]
+    },
+    "kernels.gfx1151.wmma_fmha_decode.WmmaFmhaDecodeSpec": {
+      "head_size": ["int", "required"],
+      "dtype": ["str", "optional"],
+      "bias": ["str", "optional"],
+      "softcap": ["bool", "optional"],
+      "sinks": ["bool", "optional"],
+      "alibi": ["bool", "optional"],
+      "qq_bias": ["bool", "optional"],
+      "kv_dtype": ["str", "optional"],
+      "layout": ["str", "optional"],
+      "page_block_size": ["int", "optional"],
+      "num_waves": ["int", "optional"],
+      "dv_split": ["int", "optional"],
+      "q_mode": ["str", "optional"],
+      "v_store_early": ["bool | None", "optional"],
+      "prefetch": ["bool | None", "optional"],
+      "lockstep": ["bool | None", "optional"],
+      "scheduler_strategy": ["str | None", "optional"],
+      "waves_per_eu": ["int", "optional"],
+      "fp8_cvt": ["bool | None", "optional"],
+      "tanh_fast": ["bool | None", "optional"],
+      "wmma_family": ["str", "optional"],
+      "name": ["str", "optional"]
+    },
+    "kernels.gfx1151.wmma_fmha_fwd_v2.WmmaFmhaFwdV2Spec": {
+      "dtype": ["str", "optional"],
+      "head_dim": ["int", "optional"],
+      "head_dim_v": ["int", "optional"],
+      "mask": ["str", "optional"],
+      "bias": ["str | None", "optional"],
+      "use_softcap": ["bool", "optional"],
+      "use_sinks": ["bool", "optional"],
+      "use_alibi": ["bool", "optional"],
+      "use_qq_bias": ["bool", "optional"],
+      "layout": ["str", "optional"],
+      "page_block_size": ["int", "optional"],
+      "dense_q": ["bool", "optional"],
+      "seqused_q": ["bool", "optional"],
+      "kv_dtype": ["str", "optional"],
+      "block_m": ["int", "optional"],
+      "block_n": ["int", "optional"],
+      "waves_per_eu": ["int", "optional"],
+      "scheduler_strategy": ["str | None", "optional"],
+      "lazy_rescale": ["bool", "optional"],
+      "k_pad": ["int", "optional"],
+      "v_pad": ["int", "optional"],
+      "wave_pair": ["bool | None", "optional"],
+      "cta_order": ["str", "optional"],
+      "name": ["str", "optional"]
+    },
+    "kernels.gfx942.attention_dense.Gfx942AttentionDenseSpec": {
+      "batch": ["int", "required"],
+      "seqlen_q": ["int", "required"],
+      "seqlen_kv": ["int", "required"],
+      "num_query_heads": ["int", "required"],
+      "num_kv_heads": ["int", "required"],
+      "head_size": ["int", "required"],
+      "causal": ["bool", "optional"],
+      "dtype": ["str", "optional"],
+      "sliding_window": ["int", "optional"],
+      "ragged": ["bool", "optional"],
+      "varlen": ["bool", "optional"],
+      "block_m": ["int", "optional"],
+      "block_n": ["int", "optional"],
+      "waves_per_eu": ["int", "optional"],
+      "lds_k_group_pad": ["int", "optional"],
+      "persistent": ["bool", "optional"],
+      "num_persistent": ["int", "optional"],
+      "interleave": ["bool", "optional"],
+      "persist_decode": ["str", "optional"],
+      "lazy_rescale": ["bool", "optional"],
+      "paged": ["bool", "optional"],
+      "block_size": ["int", "optional"],
+      "num_kv_blocks": ["int", "optional"],
+      "use_sinks": ["bool", "optional"],
+      "causal_bottom_right": ["bool", "optional"],
+      "nonpersist_decode": ["str", "optional"],
+      "chiplet_num_xcds": ["int", "optional"],
+      "lds_row_pad": ["int", "optional"],
+      "v_row_pad": ["int | None", "optional"],
+      "use_cfvst": ["bool | None", "optional"],
+      "use_v_swizzle": ["bool | None", "optional"],
+      "use_exp2_fast": ["bool | None", "optional"],
+      "iglp": ["bool", "optional"],
+      "lds_num_buffers": ["int", "optional"],
+      "v_reg_prefetch": ["bool", "optional"],
+      "iglp_mode": ["int", "optional"],
+      "pv_loop_order": ["str", "optional"],
+      "o_store_width": ["int", "optional"],
+      "pv_priority": ["int", "optional"],
+      "pv_sched_fence_mask": ["int | None", "optional"],
+      "causal_diag_split": ["bool", "optional"],
+      "window_wave_skip": ["bool", "optional"],
+      "emit_lse": ["bool", "optional"],
+      "kv_segments": ["int", "optional"]
+    },
+    "kernels.gfx942.attention_tiled_2d.UnifiedAttention2DTiledSpec": {
+      "head_size": ["int", "required"],
+      "block_size": ["int", "required"],
+      "num_query_heads": ["int", "required"],
+      "num_kv_heads": ["int", "required"],
+      "dtype": ["str", "required"],
+      "use_sinks": ["bool", "required"],
+      "sliding_window": ["int", "required"],
+      "has_softcap": ["bool", "required"],
+      "use_alibi": ["bool", "optional"],
+      "use_qq_bias": ["bool", "optional"],
+      "num_seqs": ["int", "optional"],
+      "num_warps": ["int", "optional"],
+      "waves_per_eu": ["int | None", "optional"],
+      "kv_storage_dtype": ["str | None", "optional"],
+      "use_fp8_mfma_qk": ["bool", "optional"],
+      "use_fp8_mfma_pv": ["bool", "optional"],
+      "use_register_pv": ["bool", "optional"],
+      "tile_size": ["int | None", "optional"],
+      "block_m_per_warp": ["int", "optional"],
+      "use_mfma_32x32": ["bool", "optional"],
+      "use_mfma_32x32x8": ["bool", "optional"],
+      "use_transposed_qk_32x32": ["bool", "optional"],
+      "use_transposed_scalar_state": ["bool", "optional"],
+      "use_transposed_invariant_hoist": ["bool", "optional"],
+      "use_transposed_mask_once": ["bool", "optional"],
+      "use_transposed_half_local_pv": ["bool", "optional"],
+      "use_mfma32_skip_legacy_qreg": ["bool", "optional"],
+      "use_transposed_mask_limit": ["bool", "optional"],
+      "use_grouped_kv2_softmax": ["bool", "optional"],
+      "use_fast_paged_kv_desc": ["bool", "optional"],
+      "use_i64_kv_addr": ["bool", "optional"],
+      "use_early_v_schedule": ["bool", "optional"],
+      "use_agpr_alloc_zero": ["bool", "optional"],
+      "use_conflict_free_v": ["bool", "optional"],
+      "use_conflict_free_v_store": ["bool", "optional"],
+      "use_conflict_free_v_store_split": ["bool", "optional"],
+      "use_conflict_free_v_ck_vlds": ["bool", "optional"],
+      "use_k_single_buffer": ["bool", "optional"],
+      "use_k_sliced_ring": ["bool", "optional"],
+      "ring_depth": ["int", "optional"],
+      "k_slice_hd": ["int", "optional"],
+      "use_k_sliced_ldsseq": ["bool", "optional"],
+      "use_iglp_opt": ["bool", "optional"],
+      "use_qk_pv_sched_group_barrier": ["bool", "optional"],
+      "use_q_direct_global": ["bool", "optional"],
+      "use_v_hbm_direct": ["bool", "optional"],
+      "use_k_hbm_direct": ["bool", "optional"],
+      "kv_cache_policy": ["str", "optional"],
+      "use_global_load_lds_k": ["bool", "optional"],
+      "use_q_major_grid": ["bool", "optional"],
+      "use_causal_mask_phase_split": ["bool", "optional"],
+      "emit_lse": ["bool", "optional"]
+    },
+    "kernels.gfx942.attention_tiled_3d.UnifiedAttention3DTiledSpec": {
+      "head_size": ["int", "required"],
+      "block_size": ["int", "required"],
+      "num_query_heads": ["int", "required"],
+      "num_kv_heads": ["int", "required"],
+      "dtype": ["str", "required"],
+      "use_sinks": ["bool", "required"],
+      "sliding_window": ["int", "required"],
+      "has_softcap": ["bool", "required"],
+      "num_segments": ["int", "required"],
+      "use_alibi": ["bool", "optional"],
+      "use_qq_bias": ["bool", "optional"],
+      "num_seqs": ["int", "optional"],
+      "waves_per_eu": ["int | None", "optional"],
+      "kv_storage_dtype": ["str | None", "optional"],
+      "tile_size_override": ["int | None", "optional"],
+      "use_invariant_hoist": ["bool", "optional"],
+      "use_wide_kv_load": ["bool", "optional"],
+      "use_i64_kv_addr": ["bool", "optional"],
+      "kv_layout": ["str", "optional"],
+      "use_decode_grid": ["bool", "optional"],
+      "kv_cache_policy": ["str", "optional"],
+      "use_kv_lds_swizzle": ["bool", "optional"],
+      "use_wave_page_id_load": ["bool", "optional"]
+    },
+    "kernels.gfx950.attention_dense.Gfx950AttentionDenseSpec": {
+      "batch": ["int", "required"],
+      "seqlen_q": ["int", "required"],
+      "seqlen_kv": ["int", "required"],
+      "num_query_heads": ["int", "required"],
+      "num_kv_heads": ["int", "required"],
+      "head_size": ["int", "required"],
+      "causal": ["bool", "optional"],
+      "dtype": ["str", "optional"],
+      "sliding_window": ["int", "optional"],
+      "ragged": ["bool", "optional"],
+      "varlen": ["bool", "optional"],
+      "block_m": ["int", "optional"],
+      "block_n": ["int", "optional"],
+      "waves_per_eu": ["int", "optional"],
+      "lds_k_group_pad": ["int", "optional"],
+      "persistent": ["bool", "optional"],
+      "num_persistent": ["int", "optional"],
+      "interleave": ["bool", "optional"],
+      "persist_decode": ["str", "optional"],
+      "lazy_rescale": ["bool", "optional"],
+      "paged": ["bool", "optional"],
+      "block_size": ["int", "optional"],
+      "num_kv_blocks": ["int", "optional"],
+      "use_sinks": ["bool", "optional"],
+      "causal_bottom_right": ["bool", "optional"],
+      "nonpersist_decode": ["str", "optional"],
+      "chiplet_num_xcds": ["int", "optional"],
+      "lds_v_row_pad": ["int", "optional"],
+      "wide_lds_dma": ["bool", "optional"],
+      "emit_lse": ["bool", "optional"],
+      "right_bound": ["int", "optional"],
+      "kv_segments": ["int", "optional"],
+      "kv_storage_dtype": ["str | None", "optional"],
+      "lds_num_buffers": ["int", "optional"],
+      "lds_k_row_pad": ["int", "optional"],
+      "lazy_rescale_threshold": ["float", "optional"],
+      "use_exp2_fast": ["bool", "optional"],
+      "exp_per_pv_step": ["int | None", "optional"],
+      "partial_vmcnt_prefetch": ["bool", "optional"],
+      "pv_priority": ["int", "optional"],
+      "pv_sched_fence": ["bool | None", "optional"],
+      "pv_sched_fence_mask": ["int", "optional"],
+      "pv_sched_group_template": ["bool | None", "optional"],
+      "pv_sched_group_ds_read": ["int", "optional"],
+      "iglp_mode": ["int | None", "optional"],
+      "pv_loop_order": ["str | None", "optional"],
+      "causal_diag_split": ["bool", "optional"],
+      "o_store_width": ["int", "optional"]
+    },
+    "kernels.gfx950.attention_tiled_2d.UnifiedAttention2DTiledSpec": {
+      "head_size": ["int", "required"],
+      "block_size": ["int", "required"],
+      "num_query_heads": ["int", "required"],
+      "num_kv_heads": ["int", "required"],
+      "dtype": ["str", "required"],
+      "use_sinks": ["bool", "required"],
+      "sliding_window": ["int", "required"],
+      "has_softcap": ["bool", "required"],
+      "use_alibi": ["bool", "optional"],
+      "use_qq_bias": ["bool", "optional"],
+      "use_additive_bias": ["bool", "optional"],
+      "num_seqs": ["int", "optional"],
+      "num_warps": ["int", "optional"],
+      "waves_per_eu": ["int | None", "optional"],
+      "kv_storage_dtype": ["str | None", "optional"],
+      "use_fp8_mfma_qk": ["bool", "optional"],
+      "use_fp8_mfma_pv": ["bool", "optional"],
+      "use_v_double_buffer": ["bool", "optional"],
+      "kv_ring_depth": ["int", "optional"],
+      "use_staggered_iter_wait": ["bool", "optional"],
+      "use_sched_barrier": ["bool", "optional"],
+      "sched_barrier_mask": ["int", "optional"],
+      "use_q_reread": ["bool", "optional"],
+      "use_register_pv": ["bool", "optional"],
+      "use_qblock_reverse": ["bool", "optional"],
+      "tile_size": ["int | None", "optional"],
+      "block_m_per_warp": ["int", "optional"],
+      "use_mfma_32x32": ["bool", "optional"],
+      "use_transposed_qk_32x32": ["bool", "optional"],
+      "use_kq_lds_pad": ["bool", "optional"],
+      "kq_lds_pad_halves": ["int", "optional"],
+      "use_transposed_scalar_state": ["bool", "optional"],
+      "use_transposed_invariant_hoist": ["bool", "optional"],
+      "use_transposed_mask_once": ["bool", "optional"],
+      "use_transposed_half_local_pv": ["bool", "optional"],
+      "use_mfma32_skip_legacy_qreg": ["bool", "optional"],
+      "use_transposed_mask_limit": ["bool", "optional"],
+      "use_grouped_kv2_softmax": ["bool", "optional"],
+      "use_fast_paged_kv_desc": ["bool", "optional"],
+      "use_i64_kv_addr": ["bool", "optional"],
+      "use_early_v_schedule": ["bool", "optional"],
+      "use_agpr_alloc_zero": ["bool", "optional"],
+      "use_k_single_buffer": ["bool", "optional"],
+      "use_q_direct_reg": ["bool", "optional"],
+      "use_softmax_mfma_interleave": ["bool", "optional"],
+      "softmax_interleave_mode": ["int", "optional"],
+      "softmax_interleave_groups": ["int", "optional"],
+      "use_mask_phase_split": ["bool", "optional"],
+      "causal_top_left": ["bool", "optional"],
+      "right_bound": ["int", "optional"],
+      "emit_lse": ["bool", "optional"],
+      "lse_layout": ["str", "optional"]
+    },
+    "kernels.gfx950.attention_tiled_3d.UnifiedAttention3DTiledSpec": {
+      "head_size": ["int", "required"],
+      "block_size": ["int", "required"],
+      "num_query_heads": ["int", "required"],
+      "num_kv_heads": ["int", "required"],
+      "dtype": ["str", "required"],
+      "use_sinks": ["bool", "required"],
+      "sliding_window": ["int", "required"],
+      "has_softcap": ["bool", "required"],
+      "num_segments": ["int", "required"],
+      "use_alibi": ["bool", "optional"],
+      "use_qq_bias": ["bool", "optional"],
+      "use_additive_bias": ["bool", "optional"],
+      "num_seqs": ["int", "optional"],
+      "waves_per_eu": ["int | None", "optional"],
+      "kv_storage_dtype": ["str | None", "optional"],
+      "tile_size_override": ["int | None", "optional"],
+      "use_invariant_hoist": ["bool", "optional"],
+      "use_wide_kv_load": ["bool", "optional"],
+      "use_i64_kv_addr": ["bool", "optional"],
+      "kv_layout": ["str", "optional"],
+      "use_decode_grid": ["bool", "optional"],
+      "kv_cache_policy": ["str", "optional"],
+      "use_kv_lds_swizzle": ["bool", "optional"],
+      "use_wave_page_id_load": ["bool", "optional"],
+      "causal_top_left": ["bool", "optional"],
+      "right_bound": ["int", "optional"],
+      "emit_lse": ["bool", "optional"]
+    }
+  }
+}
