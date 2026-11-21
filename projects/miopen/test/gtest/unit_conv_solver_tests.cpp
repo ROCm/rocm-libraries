@@ -28,6 +28,8 @@
 #include <miopen/miopen.h>
 #include <miopen/errors.hpp>
 #include <miopen/float_equal.hpp>
+#include <miopen/gemm_v2.hpp>
+#include <miopen/solver/static_ck_common.hpp>
 
 #include "gtest_common.hpp"
 #include "unit_conv_solver.hpp"
@@ -160,4 +162,47 @@ TEST(CPU_UnitConvSolverToleranceTests_NONE, testSetMulti)
     EXPECT_EQ(all, tol.Get(Gpu::gfx110X, miopenFloat));
     EXPECT_EQ(all, tol.Get(Gpu::gfx115X, miopenFloat));
     EXPECT_EQ(all, tol.Get(Gpu::gfx120X, miopenFloat));
+}
+
+// =============================================================================
+// Architecture guard unit tests
+// =============================================================================
+
+// gfx12 (RDNA4) lacks v_mac_f32 — GfxHasMissingFp32Intrinsics must return true
+TEST(CPU_UnitArchGuardTests_NONE, GfxHasMissingFp32Intrinsics)
+{
+    auto& GfxHasMissingFp32Intrinsics = miopen::solver::static_ck::GfxHasMissingFp32Intrinsics;
+
+    // GPUs that lack v_mac_f32
+    EXPECT_TRUE(GfxHasMissingFp32Intrinsics("gfx942"));
+    EXPECT_TRUE(GfxHasMissingFp32Intrinsics("gfx950"));
+    EXPECT_TRUE(GfxHasMissingFp32Intrinsics("gfx1200"));
+    EXPECT_TRUE(GfxHasMissingFp32Intrinsics("gfx1201"));
+
+    // GPUs that have v_mac_f32
+    EXPECT_FALSE(GfxHasMissingFp32Intrinsics("gfx900"));
+    EXPECT_FALSE(GfxHasMissingFp32Intrinsics("gfx906"));
+    EXPECT_FALSE(GfxHasMissingFp32Intrinsics("gfx908"));
+    EXPECT_FALSE(GfxHasMissingFp32Intrinsics("gfx90a"));
+    EXPECT_FALSE(GfxHasMissingFp32Intrinsics("gfx1030"));
+}
+
+// gfx12 supports FP8 (OCP E4M3FN) — IsFP8Supported must return true
+// Only meaningful when USE_ROCBLAS_GEMM_EX3 is defined; otherwise always false.
+TEST(CPU_UnitArchGuardTests_NONE, IsFP8Supported)
+{
+#if defined(USE_ROCBLAS_GEMM_EX3) && USE_ROCBLAS_GEMM_EX3
+    // GPUs with FP8 support
+    EXPECT_TRUE(miopen::IsFP8Supported("gfx942"));
+    EXPECT_TRUE(miopen::IsFP8Supported("gfx950"));
+    EXPECT_TRUE(miopen::IsFP8Supported("gfx1200"));
+    EXPECT_TRUE(miopen::IsFP8Supported("gfx1201"));
+#endif
+
+    // GPUs without FP8 support (unconditional — always false regardless of backend)
+    EXPECT_FALSE(miopen::IsFP8Supported("gfx900"));
+    EXPECT_FALSE(miopen::IsFP8Supported("gfx906"));
+    EXPECT_FALSE(miopen::IsFP8Supported("gfx908"));
+    EXPECT_FALSE(miopen::IsFP8Supported("gfx90a"));
+    EXPECT_FALSE(miopen::IsFP8Supported("gfx1030"));
 }
