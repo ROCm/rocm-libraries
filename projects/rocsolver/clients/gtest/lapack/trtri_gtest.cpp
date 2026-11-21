@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -193,3 +193,23 @@ INSTANTIATE_TEST_SUITE_P(daily_lapack,
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          TRTRI,
                          Combine(ValuesIn(matrix_size_range), ValuesIn(uplo_range)));
+
+// At n = 2^16 the workspace tmpcopy array needs n*n*sizeof(T) = 16 GiB, which
+// does not fit in 32 bits. A regression to 32-bit size arithmetic wraps this to
+// a tiny value and under-allocates the workspace, so query the workspace size
+// (no allocation) and assert it reflects the true, > 4 GiB requirement.
+TEST(checkin_lapack, TRTRI_workspace_no_overflow)
+{
+    rocblas_local_handle handle;
+    const rocblas_int n = 1 << 16;
+    const rocblas_int lda = n;
+
+    CHECK_ROCBLAS_ERROR(rocblas_start_device_memory_size_query(handle));
+    CHECK_ALLOC_QUERY(rocsolver_trtri(false, handle, rocblas_fill_upper, rocblas_diagonal_non_unit,
+                                      n, (float*)nullptr, lda, rocblas_stride(0),
+                                      (rocblas_int*)nullptr, 1));
+    size_t size = 0;
+    CHECK_ROCBLAS_ERROR(rocblas_stop_device_memory_size_query(handle, &size));
+
+    EXPECT_GT(size, size_t(UINT32_MAX));
+}
