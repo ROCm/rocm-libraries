@@ -1,0 +1,82 @@
+From: David Peabody <david.peabody@amd.com>
+Subject: [PATCH] [Attention] Check chunk_lookback support by backend capability
+
+Attention.__init__ asserted attn_backend.get_name() == "TRITON_ATTN" for
+layers with chunk_lookback > -1. The name check stands in for a
+capability: only the Triton unified kernel implements chunked attention
+with lookback. It rejects out-of-tree backends that subclass
+TritonAttentionBackend and serve such layers through it.
+
+Add AttentionBackend.supports_chunk_lookback() (default False), return
+True from TritonAttentionBackend, False from TritonAttentionDiffKVBackend
+(its impl raises NotImplementedError), and assert on the capability.
+Behaviour for in-tree backends is unchanged.
+
+Base: vllm df3bd094aeea829f27baa0a5282830464f601d9f
+---
+diff --git a/vllm/model_executor/layers/attention/attention.py b/vllm/model_executor/layers/attention/attention.py
+index bec1856..da612c3 100644
+--- a/vllm/model_executor/layers/attention/attention.py
++++ b/vllm/model_executor/layers/attention/attention.py
+@@ -388,9 +388,10 @@ class Attention(nn.Module, AttentionLayerBase):
+             cache_config.enable_prefix_caching = False
+ 
+         if extra_impl_args.get("chunk_lookback", -1) > -1:
+-            assert self.attn_backend.get_name() == "TRITON_ATTN", (
+-                f"Chunked attention with lookback requires the Triton backend, "
+-                f"but got {self.attn_backend.get_name()}."
++            assert self.attn_backend.supports_chunk_lookback(), (
++                f"Chunked attention with lookback requires a backend that "
++                f"supports it (e.g. TRITON_ATTN), but got "
++                f"{self.attn_backend.get_name()}."
+             )
+ 
+         if self.attn_backend.get_name() == "FLEX_ATTENTION":
+diff --git a/vllm/v1/attention/backend.py b/vllm/v1/attention/backend.py
+index 7982ae2..9f6a4a8 100644
+--- a/vllm/v1/attention/backend.py
++++ b/vllm/v1/attention/backend.py
+@@ -191,6 +191,12 @@ class AttentionBackend(ABC):
+     def supports_rswa(cls) -> bool:
+         return False
+ 
++    @classmethod
++    def supports_chunk_lookback(cls) -> bool:
++        """Check if the backend implements chunked local attention with
++        lookback (the ``chunk_lookback`` impl argument)."""
++        return False
++
+     @classmethod
+     def supports_non_causal(cls) -> bool:
+         """Check if backend supports non-causal (bidirectional) attention
+diff --git a/vllm/v1/attention/backends/triton_attn.py b/vllm/v1/attention/backends/triton_attn.py
+index 42504c7..96ffe6b 100644
+--- a/vllm/v1/attention/backends/triton_attn.py
++++ b/vllm/v1/attention/backends/triton_attn.py
+@@ -362,6 +362,10 @@ class TritonAttentionBackend(AttentionBackend):
+     def supports_sliding_window(cls) -> bool:
+         return True
+ 
++    @classmethod
++    def supports_chunk_lookback(cls) -> bool:
++        return True
++
+     @classmethod
+     def supports_batch_invariance(cls) -> bool:
+         return True
+diff --git a/vllm/v1/attention/backends/triton_attn_diffkv.py b/vllm/v1/attention/backends/triton_attn_diffkv.py
+index 2fff322..5dc4533 100644
+--- a/vllm/v1/attention/backends/triton_attn_diffkv.py
++++ b/vllm/v1/attention/backends/triton_attn_diffkv.py
+@@ -76,6 +76,11 @@ class TritonAttentionDiffKVBackend(TritonAttentionBackend):
+         "fp8_e4m3",
+     ]
+ 
++    @classmethod
++    def supports_chunk_lookback(cls) -> bool:
++        # The diff-KV impl raises NotImplementedError for chunk_lookback.
++        return False
++
+     @classmethod
+     def set_head_size_v(cls, head_size_v: int) -> None:
+         cls.head_size_v = head_size_v
