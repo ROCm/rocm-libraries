@@ -40,9 +40,13 @@ namespace internal
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 
 template <typename Tp>
-using is_cpp17_input_iterator = _THRUST_STD::__is_cpp17_input_iterator<Tp>;
+using is_cpp17_input_iterator =
+  _THRUST_STD::is_base_of<_THRUST_STD::input_iterator_tag, typename _THRUST_STD::iterator_traits<Tp>::iterator_category>;
+
 template <typename Tp>
-using is_cpp17_random_access_iterator = _THRUST_STD::__is_cpp17_random_access_iterator<Tp>;
+using is_cpp17_random_access_iterator =
+  _THRUST_STD::is_base_of<_THRUST_STD::random_access_iterator_tag,
+                          typename _THRUST_STD::iterator_traits<Tp>::iterator_category>;
 
 #else
 
