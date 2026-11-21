@@ -310,7 +310,6 @@ TEST(TestAsmSdpaEngineDeclaration, ShippedL1ModelsRecordTheRevisionThisBuildComp
         AsmSdpaEngine::engineName(),
         "asm_sdpa_fwd",
         shipped_models::MODELS,
-        HKP_SELECTOR_DUMP_DIR,
         AsmSdpaEngine::L1_MODEL_IDS,
         AsmSdpaEngine::selectorRevision()));
 }

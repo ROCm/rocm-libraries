@@ -40,17 +40,20 @@ inline std::string lowercase(std::string text)
 
 /// Every L1 model an engine declares by id (`declaredIds`: (architecture, UUID) pairs) that
 /// its source tree ships (`shipped`, embedded at configure time so the test needs no
-/// checkout at run time) must record the selector revision this build computes.
+/// checkout at run time) must ship for the architecture that declares it and record the
+/// selector revision this build computes.
 ///
-/// A model whose recorded revision differs is refused at load (RFC 0019 §4.1) with a log
-/// line, and engine selection then falls back to priority as if no model shipped; nothing
-/// else fails. So a change to the engine's selector inputs, or a rebase onto one, must
-/// fail the build here instead, at the model that no longer binds.
+/// The loader binds a declared id under the declaring architecture whatever directory the
+/// model ships in, so an id declared for the wrong architecture would answer for a device
+/// it was never measured on. A model whose recorded revision differs is refused at load
+/// (RFC 0019 §8.1) with a log line, and engine selection then falls back to priority as if
+/// no model shipped; nothing else fails. So a change to the engine's selector inputs, or a
+/// rebase onto one, must fail the build here instead, at the model that no longer binds.
 ///
-/// @param engineName   The engine's registered name; it names this build's selector dump.
+/// @param engineName   The engine's registered name.
 /// @param dumpEngine   The `HKP_ENGINE` value of HkpSelectorManifest.cmake for it.
-/// @param shipped      The embedded table of the engine's shipped models.
-/// @param dumpDir      Where the build writes `<engineName>.selector.json`.
+/// @param shipped      The embedded table of the engine's shipped models; each one's
+///                     architecture is the directory it ships in.
 /// @param declaredIds  The engine's declared (architecture, model id) table.
 /// @param revision     The engine's `selectorRevision()`.
 ///
@@ -60,20 +63,41 @@ template <typename ShippedModels, typename DeclaredIds>
 ::testing::AssertionResult shippedL1ModelsBindThisBuild(std::string_view engineName,
                                                         std::string_view dumpEngine,
                                                         const ShippedModels& shipped,
-                                                        const std::filesystem::path& dumpDir,
                                                         const DeclaredIds& declaredIds,
                                                         std::string_view revision)
 {
-    const auto dump = (dumpDir / (std::string(engineName) + ".selector.json")).string();
     size_t checked = 0;
     std::string failures;
     for(const ShippedModel& model : shipped)
     {
         const auto id = detail::lowercase(model.id);
-        const bool declared
-            = std::any_of(declaredIds.begin(), declaredIds.end(), [&](const auto& declaration) {
-                  return detail::lowercase(std::string(declaration.second)) == id;
-              });
+        const auto shippedArch
+            = std::filesystem::path(model.path).parent_path().filename().string();
+        bool declared = false;
+        for(const auto& [arch, declaredId] : declaredIds)
+        {
+            if(detail::lowercase(std::string(declaredId)) != id)
+            {
+                continue;
+            }
+            declared = true;
+            if(arch != shippedArch)
+            {
+                failures.append("\n")
+                    .append(engineName)
+                    .append(" declares the model ")
+                    .append(id)
+                    .append(" for ")
+                    .append(arch)
+                    .append(", but it ships as ")
+                    .append(model.path)
+                    .append(", for ")
+                    .append(shippedArch)
+                    .append(". The loader binds it to ")
+                    .append(arch)
+                    .append(" all the same.\n");
+            }
+        }
         if(!declared)
         {
             continue;
@@ -98,10 +122,9 @@ template <typename ShippedModels, typename DeclaredIds>
             .append("'. The loader refuses it and engine selection falls back as if no model "
                     "shipped.\n  Restamp it only with proof:\n    python -m uhd_gen restamp ")
             .append(model.path)
-            .append(" --selector-before <dump at the training build> --selector-after ")
-            .append(dump)
-            .append(" [--rows-before <L1 corpus at the old revision> --rows-after <L1 corpus "
-                    "at the new revision>] --write\n");
+            .append(" --selector-before <dump at the training commit> --selector-after <dump "
+                    "at this commit> [--rows-before <L1 corpus at the old revision> "
+                    "--rows-after <L1 corpus at the new revision>] --write\n");
     }
     if(checked == 0)
     {
@@ -117,7 +140,7 @@ template <typename ShippedModels, typename DeclaredIds>
     }
     return ::testing::AssertionFailure()
            << failures
-           << "\nMake the before-dump at the training commit with\n  cmake -DHKP_ENGINE="
+           << "\nMake each dump in the checkout it describes with\n  cmake -DHKP_ENGINE="
            << dumpEngine
            << " -DHKP_PROVIDER_DIR=<checkout>/dnn-providers/hip-kernel-provider -DHKP_OUT=<file> "
               "-P <checkout>/dnn-providers/hip-kernel-provider/cmake/HkpSelectorManifest.cmake\n"
