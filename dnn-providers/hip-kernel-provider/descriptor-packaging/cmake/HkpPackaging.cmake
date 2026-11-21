@@ -1897,8 +1897,7 @@ endfunction()
 #   is empty, or when the packer, asked at configure with the same filters, would ship
 #   nothing for any architecture this build packs for -- a clean skip, not an error,
 #   whether the root was named or inherited. Production root set but not a directory =
-#   fatal. The one exception is pointwise_model, whose root the build fills
-#   (_hkp_wire_pointwise_model_pack).
+#   fatal.
 #
 #   HIPKERNELPROVIDER_PRODUCT_STAGE_FILES is the product pack's STAGE_FILES list. A
 #   dormant product pack stages nothing, so the caller then delivers that content itself.
