@@ -132,6 +132,7 @@ set(test_sources ${test_sources}
     DecisionTree_test.cpp
     TensorDescriptor_test.cpp
     TestData_test.cpp
+    PlaceholderLibraryFallbackArch_test.cpp
     Utils_test.cpp
 )
 

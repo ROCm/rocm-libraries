@@ -236,6 +236,29 @@ namespace
         }
     }
 
+    /*****************************************************************************
+     * Generic code-object family of a GPU architecture (LLVM "generic" targets).  *
+     * Used when no Tensile library exists for the exact architecture, e.g. gfx90c *
+     * (Vega APU) can use the gfx9-generic library. Returns "" if there is none.   *
+     *****************************************************************************/
+    std::string rocblas_tensile_generic_arch(const std::string& arch)
+    {
+        // generic target and its members, each member enclosed in spaces
+        static constexpr const char* families[][2] = {
+            {"gfx9-generic", " gfx900 gfx902 gfx904 gfx906 gfx909 gfx90c "},
+            {"gfx9-4-generic", " gfx940 gfx941 gfx942 gfx950 "},
+            {"gfx10-1-generic", " gfx1010 gfx1011 gfx1012 gfx1013 "},
+            {"gfx10-3-generic", " gfx1030 gfx1031 gfx1032 gfx1033 gfx1034 gfx1035 gfx1036 "},
+            {"gfx11-generic", " gfx1100 gfx1101 gfx1102 gfx1103 gfx1150 gfx1151 gfx1152 gfx1153 "},
+            {"gfx12-generic", " gfx1200 gfx1201 "},
+        };
+        const std::string token = " " + arch.substr(0, arch.find(':')) + " ";
+        for(const auto& family : families)
+            if(std::string_view(family[1]).find(token) != std::string_view::npos)
+                return family[0];
+        return "";
+    }
+
     Tensile::LazyLoadingInit getLazyLoadingArch(const std::string& deviceString)
     {
         if(deviceString.find("gfx803") != std::string::npos)
@@ -943,6 +966,41 @@ namespace
                && TestPath(base_path + "/" + strict_catalog))
             {
                 catalog_key = strict_catalog;
+            }
+
+            // No Tensile library for the exact architecture (e.g. gfx90c): use the
+            // library of its LLVM generic family (e.g. gfx9-generic), whose code
+            // objects the runtime can load on this GPU. Library maps stay keyed by
+            // `processor`; the catalog key selects library path, code objects and
+            // the helper kernel.
+            auto has_arch_library = [&](const std::string& arch) {
+#ifdef TENSILE_YAML
+                const std::string ext = ".yaml";
+#else
+                const std::string ext = ".dat";
+#endif
+                const std::string        xnack = rocblas_internal_get_xnack_mode();
+                std::vector<std::string> dirs;
+                if(!xnack.empty())
+                    dirs.push_back(base_path + "/" + arch + "-" + xnack);
+                dirs.push_back(base_path + "/" + arch);
+                dirs.push_back(base_path);
+                for(const auto& dir : dirs)
+                    if(TestPath(dir + "/TensileLibrary_lazy_" + arch + ext)
+                       || TestPath(dir + "/TensileLibrary_" + arch + ext))
+                        return true;
+                return false;
+            };
+            if(!has_arch_library(catalog_key))
+            {
+                std::string generic = rocblas_tensile_generic_arch(processor);
+                if(!generic.empty() && has_arch_library(generic))
+                {
+                    rocblas_internal_ostream msg;
+                    print_if_verbose(msg << "No Tensile library for GPU architecture '" << processor
+                                         << "'; using the '" << generic << "' library.");
+                    catalog_key = generic;
+                }
             }
 
             path = base_path;
