@@ -1,0 +1,136 @@
+========================================================================================================================
+PARAMETERS NOT USED IN ANY YAML FILE
+========================================================================================================================
+
+Total Trackable Parameters: 164
+Parameters NOT Used: 20
+Percentage: 12%
+
+========================================================================================================================
+GLOBAL PARAMETERS (12 unused)
+========================================================================================================================
+
+Parameter: CheckASMCodeSize
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: CpuOnly
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: DisableSTWaitCnt
+  Category: global
+  Default: True
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: EmitMainloopTraceMarker
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: EnableMarker
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: GenerateSourcesAndExit
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: PinClocks
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: PythonProfile
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: SaveTemps
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: SplitGSU
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: StinkyTofuEnableRemarks
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: TimingInstrumentation
+  Category: global
+  Default: False
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+========================================================================================================================
+SOLUTION PARAMETERS (8 unused)
+========================================================================================================================
+
+Parameter: DebugPersistentKernelLoopForever
+  Category: solution
+  Default: None
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: NonVolatileB
+  Category: solution
+  Default: None
+  Valid Values: [0, 1]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: NonVolatileC
+  Category: solution
+  Default: None
+  Valid Values: [0, 1]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: NonVolatileE
+  Category: solution
+  Default: None
+  Valid Values: [0, 1]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: NonVolatileMXSA
+  Category: solution
+  Default: None
+  Valid Values: [0, 1]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: NonVolatileMXSB
+  Category: solution
+  Default: None
+  Valid Values: [0, 1]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: NonVolatileMetadata
+  Category: solution
+  Default: None
+  Valid Values: [0, 1]
+  Status: ✗ NOT USED in any YAML file
+
+Parameter: SwInstructionPrefetch
+  Category: solution
+  Default: None
+  Valid Values: [False, True]
+  Status: ✗ NOT USED in any YAML file
+
