@@ -31,6 +31,7 @@ from .Common import state, IsaInfo
 from .Common.Architectures import gfxToIsa, supportsChipIdPredicate
 from .SolutionStructs.Naming import getSolutionNameMin, getKernelNameMin
 from .SolutionStructs.CompactSolution import hydrateSolution
+from .MatchingTable import MatchingTable
 from .SolutionStructs.Problem import isFusedA2A, splitFusedA2ARow
 
 class SingleSolutionLibrary:
@@ -126,31 +127,46 @@ class MatchingLibrary:
         if fusedA2A:
             properties += [Properties.Property("World"), Properties.Property("FusedA2AExtent")]
 
-        table = []
-        # Rows typically outnumber solutions by orders of magnitude; the wrapper
-        # is immutable, so share one per solution (keeps the pickled result that
-        # workers send back to the parent small).
-        wrappers = {}
-
+        # Build the columns directly: an int64 key matrix, a float64 speed
+        # vector and solution references are about a tenth of the memory of
+        # one dict per row, and the parent keeps every table from logic
+        # loading until the libraries are written. The row dicts are built
+        # only when the columns cannot hold a value exactly (or NumPy is not
+        # installed), in which case the legacy form is kept.
+        hasSpeed = distance not in ("GridBased", "MeshBased")
+        keys = []
+        sols = []
+        speeds = [] if hasSpeed else None
         for row in origTable:
             try:
                 index = row[1][0]
-                value = wrappers.get(index)
-                if value is None:
-                    value = wrappers[index] = IndexSolutionLibrary(solutions[index])
+                solution = solutions[index]
                 key = list([row[0][i] for i in keyOrder])
                 if fusedA2A:
                     key += splitFusedA2ARow(row[0], problemType)[2]
-                if distance in ("GridBased", "MeshBased"):
-                    entry = {"key": key, "index": value}
-                else:
-                    entry = {"key": key, "index": value, "speed": row[1][1]}
-
-                table.append(entry)
+                if hasSpeed:
+                    speed = row[1][1]
             except KeyError:
-                pass
-
-        table.sort(key=lambda r: r["key"])
+                continue
+            keys.append(key)
+            sols.append(solution)
+            if hasSpeed:
+                speeds.append(speed)
+        table = MatchingTable.fromColumns(keys, sols, speeds)
+        if table is None:
+            # Rows typically outnumber solutions by orders of magnitude; the
+            # wrapper is immutable, so share one per solution.
+            wrappers = {}
+            table = []
+            for i, key in enumerate(keys):
+                value = wrappers.get(id(sols[i]))
+                if value is None:
+                    value = wrappers[id(sols[i])] = IndexSolutionLibrary(sols[i])
+                entry = {"key": key, "index": value}
+                if hasSpeed:
+                    entry["speed"] = speeds[i]
+                table.append(entry)
+            table.sort(key=lambda r: r["key"])
 
         return cls(properties, table, distance, d.get("useKdTree", False))
 
@@ -163,7 +179,17 @@ class MatchingLibrary:
                 and self.properties == other.properties \
                 and self.distance == other.distance
 
-        self.table += other.table
+        if isinstance(self.table, MatchingTable) and isinstance(other.table, MatchingTable):
+            self.table += other.table
+        elif len(other.table) == 0:
+            pass
+        elif len(self.table) == 0:
+            self.table = other.table
+        else:
+            # Mixed or legacy forms merge as row dicts, as before.
+            mine = self.table.toRows() if isinstance(self.table, MatchingTable) else self.table
+            theirs = other.table.toRows() if isinstance(other.table, MatchingTable) else other.table
+            self.table = mine + theirs
 
         # useKdTree is a property of the merged table, not of either contributor. OR rather
         # than assert: logic files that share a key are written independently, and requiring
