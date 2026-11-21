@@ -925,6 +925,27 @@ def _usesFp8LdsConfig(dtype, state):
     return dtype.is8bitFloat() or (bool(state["ProblemType"]["Sparse"]) and dtype.isInt8())
 
 
+def statedCustomKernelOccupancy(state: dict) -> int:
+  """The CUOccupancy a non-gfx9 custom kernel's solution states, else -1.
+
+  Codegen computes CUOccupancy for generated kernels and for gfx9 custom
+  kernels (KernelWriterAssembly.getSourceFileString), but has no formula for a
+  non-gfx9 custom kernel, which would otherwise reach the library as -1; such a
+  kernel's logic file may state its occupancy instead.
+
+  Args:
+    state: Solution state, before derived parameters are assigned.
+
+  Returns:
+    The stated positive CUOccupancy of a non-gfx9 custom kernel, else -1.
+  """
+  stated = state.get("CUOccupancy", -1)
+  if (isCustomKernelConfig(state) and list(state.get("ISA", [9]))[0] != 9
+      and isinstance(stated, int) and stated > 0):
+    return stated
+  return -1
+
+
 class Solution(collections.abc.Mapping):
   MAX_NUM_DS_LOAD_VGPRS: int = 4
   MAX_NUM_DS_LOAD_BYTES: int = 4 * MAX_NUM_DS_LOAD_VGPRS
@@ -2294,7 +2315,7 @@ class Solution(collections.abc.Mapping):
       state["_GlobalAccumulation"] = 'MultipleBuffer'
     elif state.get("GlobalSplitUAlgorithm", "") == 'MultipleBufferSingleKernel':
       state["_GlobalAccumulation"] = 'MultipleBufferSingleKernel'
-    state["CUOccupancy"]            = -1
+    state["CUOccupancy"]            = statedCustomKernelOccupancy(state)
     state["MathClocksUnrolledLoop"] = 0
     state["PackedC0IndicesX"] = []
     state["ThreadTile0"] = 0
@@ -2598,7 +2619,7 @@ class Solution(collections.abc.Mapping):
 
 
     # initial info to be exported for solution prediction
-    state["CUOccupancy"]            = -1
+    state["CUOccupancy"]            = statedCustomKernelOccupancy(state)
     state["MathClocksUnrolledLoop"] = 0
 
     # Pin PrefetchGlobalReadA/B before later rules read the scalar loop depth.

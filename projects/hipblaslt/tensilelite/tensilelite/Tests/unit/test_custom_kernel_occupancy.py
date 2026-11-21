@@ -362,6 +362,38 @@ class TestNonGfx9OccupancyNotComputed:
             f"CUOccupancy must stay -1 for non-gfx9; got {kernel['CUOccupancy']}"
 
 
+
+class TestStatedCustomKernelOccupancy:
+    """A non-gfx9 custom kernel keeps the CUOccupancy its logic file states."""
+
+    def _state(self, isa, occ=3, custom=True):
+        state = {"ISA": list(isa), "CUOccupancy": occ}
+        if custom:
+            state["CustomKernelName"] = "k"
+        return state
+
+    def test_non_gfx9_custom_kernel_keeps_stated(self):
+        from tensilelite.SolutionStructs.Solution import statedCustomKernelOccupancy
+        assert statedCustomKernelOccupancy(self._state((12, 5, 0))) == 3
+
+    def test_gfx9_custom_kernel_resets(self):
+        # Codegen computes a gfx9 custom kernel's occupancy from its .s.
+        from tensilelite.SolutionStructs.Solution import statedCustomKernelOccupancy
+        assert statedCustomKernelOccupancy(self._state((9, 5, 0))) == -1
+
+    def test_generated_kernel_resets(self):
+        from tensilelite.SolutionStructs.Solution import statedCustomKernelOccupancy
+        assert statedCustomKernelOccupancy(self._state((12, 5, 0), custom=False)) == -1
+        generated = {"ISA": [12, 5, 0], "CUOccupancy": 3,
+                     "CustomKernel": {"name": "k", "generated": True}}
+        assert statedCustomKernelOccupancy(generated) == -1
+
+    def test_unstated_or_invalid_resets(self):
+        from tensilelite.SolutionStructs.Solution import statedCustomKernelOccupancy
+        for occ in (-1, 0, None, "2"):
+            assert statedCustomKernelOccupancy(self._state((12, 5, 0), occ)) == -1
+        assert statedCustomKernelOccupancy({"ISA": [12, 5, 0], "CustomKernelName": "k"}) == -1
+
 class TestPythonDebugWarning:
     """Verify the print2-gated CUOccupancy<=0 warning in processKernelSource (create_library/run.py).
 
