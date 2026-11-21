@@ -40,7 +40,9 @@ jobs:
       # Limit GPU families for nightly CI: gfx94X, gfx950 (Linux) and gfx1151 (Windows).
       # gfx125X (CDNA5/gfx1250) is included build-only on Linux: no test hardware
       # exists for it yet, but this still catches build breaks in math-libs/stinkytofu
-      # gfx1250 codegen ahead of hardware becoming available.
+      # gfx1250 codegen ahead of hardware becoming available. Its CPU-only
+      # tensilelite-rocjitsu job (TensileLite under the rocjitsu emulator) also
+      # covers develop changes that per-PR selection does not route to it.
       linux_amdgpu_families: 'gfx94X,gfx950,gfx125X'
       windows_amdgpu_families: 'gfx1151'
       pr_labels: ''
@@ -60,7 +62,7 @@ jobs:
             "gfx125x": {
               "linux": {
                 "test-runs-on": "",
-                "test_labels_for_family": ["test:hip-tests", "test:rocrtst"],
+                "test_labels_for_family": ["test:hip-tests", "test:rocrtst", "test:tensilelite-rocjitsu"],
                 "fetch-gfx-targets": ["gfx1250"]
               }
             }
