@@ -469,8 +469,35 @@
   ],
   "features_hash": "sha256:338ab8d3ecc3126f",
   "trained_against": {
-    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/3e14e0ee3c968bb9",
-    "feature_semantics_revision": 1
+    "selector_revision": "hip-kernel-provider/asm-sdpa-fwd/348366139c131336",
+    "feature_semantics_revision": 1,
+    "x-restamps": [
+      {
+        "from": "hip-kernel-provider/asm-sdpa-fwd/3e14e0ee3c968bb9",
+        "to": "hip-kernel-provider/asm-sdpa-fwd/348366139c131336",
+        "proof": "measured-parity",
+        "changes": [
+          "plans/SdpaFwdArgsBuilder.hpp",
+          "plans/SdpaFwdParams.hpp",
+          "plans/SdpaFwdPlanBuilder.cpp",
+          "plans/SdpaFwdPlanBuilder.hpp"
+        ],
+        "parity": {
+          "graphs": 2000,
+          "median_change": 0.010356748976257307,
+          "outlier_fraction": 0.05,
+          "newly_declined": 0,
+          "newly_served": 0,
+          "unmatched": 0,
+          "thresholds": {
+            "max_median_change": 0.03,
+            "outlier_change": 0.1,
+            "max_outlier_fraction": 0.05,
+            "min_graphs": 30
+          }
+        }
+      }
+    ]
   },
   "objective": "max",
   "score": {
