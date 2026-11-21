@@ -41,14 +41,68 @@ import glob
 import os
 import re
 import sys
+from collections.abc import Iterable, Iterator
 from typing import Any, List, Optional
 
 
 _IS_WINDOWS = sys.platform == "win32"
 
 
-# Read by :func:`_mapped_lib`; a module constant so tests can point it at a fixture.
+# A module constant so tests can point it at a fixture.
 _PROC_MAPS = "/proc/self/maps"
+
+
+def _iter_proc_maps_rows(lines: Iterable[str]) -> Iterator[tuple[str, str, str, str]]:
+    """Yield permissions, device, inode and path for rows with a pathname."""
+    for line in lines:
+        # address perms offset dev inode [path]; the path may hold spaces.
+        fields = line.rstrip("\n").split(maxsplit=5)
+        if len(fields) == 6:
+            _, permissions, _, dev, inode, path = fields
+            yield permissions, dev, inode, path
+
+
+def _so_basename(stem: str) -> str:
+    return f"lib{stem}.so"
+
+
+def _dll_basename(stem: str) -> str:
+    return f"{stem}.dll"
+
+
+def _runtime_name_patterns(stem: str) -> dict[str, str]:
+    so = re.escape(_so_basename(stem))
+    dll_stem = re.escape(_dll_basename(stem).removesuffix(".dll"))
+    return {
+        "linux": rf"{so}(?:\..+)?",
+        "win32": rf"{dll_stem}(?:_?\d+)*\.dll",
+    }
+
+
+# Inventory classification does not select a library. A loader candidate can
+# intentionally use narrower SONAME rules or broader on-disk filename globs.
+_MAPPED_LIBRARY_NAMES = {
+    "hip": _runtime_name_patterns("amdhip64"),
+    "comgr": _runtime_name_patterns("amd_comgr"),
+    # Require a numeric version prefix so LLVM-C is not treated as LLVM.
+    "llvm": {
+        "linux": r"libLLVM(?:-[0-9][\w.]*)?\.so(?:\..+)?",
+        "win32": r"(?:lib)?LLVM(?:-[0-9][\w.]*)?\.dll",
+    },
+    # Compare clang-cpp, not the separate libclang C API, on both platforms.
+    "clang": {
+        "linux": r"libclang-cpp(?:-[\w.]+)?\.so(?:\..+)?",
+        "win32": r"(?:lib)?clang-cpp(?:-[\w.]+)?\.dll",
+    },
+}
+
+
+def _mapped_library_kind(basename: str, *, platform: str) -> str | None:
+    for kind, names in _MAPPED_LIBRARY_NAMES.items():
+        pattern = names.get(platform)
+        if pattern and re.fullmatch(pattern, basename, re.IGNORECASE):
+            return kind
+    return None
 
 
 def _mapped_lib(stem: str, *, require_unique: bool = False) -> Optional[str]:
@@ -62,16 +116,11 @@ def _mapped_lib(stem: str, *, require_unique: bool = False) -> Optional[str]:
     """
     if _IS_WINDOWS:
         return None
-    name_re = re.compile(rf"lib{re.escape(stem)}\.so(\.\d+)*")
+    name_re = re.compile(rf"{re.escape(_so_basename(stem))}(\.\d+)*")
     mapped: List[str] = []
     try:
         with open(_PROC_MAPS) as fh:
-            for line in fh:
-                # address perms offset dev inode [path]; the path may hold spaces.
-                fields = line.rstrip("\n").split(maxsplit=5)
-                if len(fields) < 6:
-                    continue
-                path = fields[5]
+            for _, _, _, path in _iter_proc_maps_rows(fh):
                 if name_re.fullmatch(os.path.basename(path)) and path not in mapped:
                     mapped.append(path)
     except OSError:
@@ -201,7 +250,7 @@ def _torch_bundled_lib(stem: str) -> Optional[str]:
         # ``amdhip64.dll`` and a version-stamped ``amd_comgr*.dll`` (no
         # ``lib`` prefix). Prefer an exact match, else glob the versioned
         # comgr name.
-        direct = os.path.join(libdir, f"{stem}.dll")
+        direct = os.path.join(libdir, _dll_basename(stem))
         if os.path.exists(direct):
             return direct
         matches = sorted(glob.glob(os.path.join(libdir, f"{stem}*.dll")))
@@ -209,7 +258,7 @@ def _torch_bundled_lib(stem: str) -> Optional[str]:
     mapped = _mapped_lib(stem)
     if mapped is not None:
         return mapped
-    candidate = os.path.join(libdir, f"lib{stem}.so")
+    candidate = os.path.join(libdir, _so_basename(stem))
     if os.path.exists(candidate):
         return candidate
     if "rocm_sdk" not in sys.modules:
@@ -229,7 +278,7 @@ def _rocm_sdk_dll(stem: str) -> Optional[str]:
         return None
     for loc in _rocm_sdk_core_dirs():
         bindir = os.path.join(loc, "bin")
-        direct = os.path.join(bindir, f"{stem}.dll")
+        direct = os.path.join(bindir, _dll_basename(stem))
         if os.path.exists(direct):
             return direct
         matches = sorted(glob.glob(os.path.join(bindir, f"{stem}*.dll")))
