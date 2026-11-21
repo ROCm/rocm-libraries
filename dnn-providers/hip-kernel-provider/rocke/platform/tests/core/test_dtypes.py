@@ -15,7 +15,7 @@ import dataclasses
 import os
 import re
 import subprocess
-from typing import get_args, get_type_hints
+from typing import Literal, get_args, get_type_hints
 
 import numpy as np
 import pytest
@@ -52,8 +52,8 @@ from rocke.helpers.quant import (
     ir_to_qdtype,
     dequantize_scalar_to_f32,
     quant_max_abs,
-    quantize_scalar_f32,
     quantize_prescaled_f32,
+    quantize_scalar_f32,
     validate_quant_out_dtype,
 )
 
@@ -370,17 +370,25 @@ def test_quant_max_abs_refuses_fp8_on_a_target_without_an_encoding():
     assert str(error.value) == _NO_GFX90A_ENCODING
 
 
-def _quantize_kernel(qdtype: str, arch: str, *, quantize: bool = True):
+def _quantize_kernel(
+    qdtype: str,
+    arch: str,
+    *,
+    mode: Literal["scalar", "prescaled", "convert"] = "scalar",
+):
     """Y[i] = quantize_scalar_f32(X[i], inv_scale=1, qdtype, arch), one lane
-    per element; or, with ``quantize=False``, the bare f32 -> fp8 / bf8
+    per element; with ``mode="prescaled"``, quantize_prescaled_f32(X[i],
+    qdtype, arch); with ``mode="convert"``, the bare f32 -> fp8 / bf8
     conversion of X[i]."""
-    b = IRBuilder(f"{'quantize' if quantize else 'convert'}_{qdtype}_{arch}")
+    b = IRBuilder(f"{mode}_{qdtype}_{arch}")
     b.kernel.attrs["max_workgroup_size"] = 64
     x = b.param("X", PtrType(ir.F32, "global"))
     y = b.param("Y", PtrType(quant_ir_type(qdtype), "global"))
     lane = b.thread_id_x()
     value = b.global_load_f32(x, lane)
-    if quantize:
+    if mode == "prescaled":
+        result = quantize_prescaled_f32(b, value, qdtype=qdtype, arch=arch)
+    elif mode == "scalar":
         result = quantize_scalar_f32(
             b, value, inv_scale=b.const_f32(1.0), qdtype=qdtype, arch=arch
         )
@@ -393,7 +401,16 @@ def _quantize_kernel(qdtype: str, arch: str, *, quantize: bool = True):
     return b.kernel
 
 
+# Each quantize helper as (its _quantize_kernel mode, the value its clamp
+# reads, the number of the clamp's first register): quantize_scalar_f32 clamps
+# its multiply, quantize_prescaled_f32 the loaded value itself.
+_QUANTIZE_HELPERS = [("scalar", "%fmul6", 7), ("prescaled", "%gl2", 5)]
+
+
 @pytest.mark.parametrize("engine", ENGINES)
+@pytest.mark.parametrize(
+    "mode, scaled, first", _QUANTIZE_HELPERS, ids=["scalar", "prescaled"]
+)
 @pytest.mark.parametrize(
     "qdtype, arch, cvt",
     [
@@ -402,30 +419,41 @@ def _quantize_kernel(qdtype: str, arch: str, *, quantize: bool = True):
         ("bf8e5m2", "gfx942", "@llvm.amdgcn.cvt.pk.bf8.f32"),
     ],
 )
-def test_quantize_scalar_f32_clamps_to_the_target_bound_and_keeps_nan(
-    engine, qdtype, arch, cvt
+def test_quantize_helpers_clamp_to_the_target_bound_and_keep_nan(
+    engine, qdtype, arch, cvt, mode, scaled, first
 ):
-    """The clamp uses the bound of ``arch``'s encoding, and a NaN bypasses it:
-    the conversion reads ``isnan(scaled) ? scaled : clamped``."""
+    """The clamp of quantize_scalar_f32 and quantize_prescaled_f32 uses the
+    bound of ``arch``'s encoding, and a NaN bypasses it: the conversion reads
+    ``isnan(scaled) ? scaled : clamped``."""
     bound = quant_max_abs(qdtype, arch=arch)
-    text = lower_with_engine(_quantize_kernel(qdtype, arch), arch, engine=engine)
+    kernel = _quantize_kernel(qdtype, arch, mode=mode)
+    text = lower_with_engine(kernel, arch, engine=engine)
+    fmax, fmin, fcmp, sel = (
+        f"%{name}{first + offset}"
+        for offset, name in enumerate(("fmax", "fmin", "fcmp", "sel"))
+    )
     assert (
-        "  %fmax7 = call float @llvm.maxnum.f32("
-        f"float {llvm_f32_literal(-bound)}, float %fmul6)\n"
-        f"  %fmin8 = call float @llvm.minnum.f32(float {llvm_f32_literal(bound)}, "
-        "float %fmax7)\n"
-        "  %fcmp9 = fcmp uno float %fmul6, %fmul6\n"
-        "  %sel10 = select i1 %fcmp9, float %fmul6, float %fmin8\n"
+        f"  {fmax} = call float @llvm.maxnum.f32("
+        f"float {llvm_f32_literal(-bound)}, float {scaled})\n"
+        f"  {fmin} = call float @llvm.minnum.f32(float {llvm_f32_literal(bound)}, "
+        f"float {fmax})\n"
+        f"  {fcmp} = fcmp uno float {scaled}, {scaled}\n"
+        f"  {sel} = select i1 {fcmp}, float {scaled}, float {fmin}\n"
     ) in text
-    assert f"call i32 {cvt}(float %sel10, " in text
+    assert f"call i32 {cvt}(float {sel}, " in text
 
 
 @pytest.mark.parametrize("engine", ENGINES)
-def test_quantize_scalar_f32_i8_clamps_without_a_nan_select(engine):
-    """i8 has no NaN: the clamp alone feeds the conversion (a NaN gives -127)."""
-    text = lower_with_engine(_quantize_kernel("i8", "gfx942"), "gfx942", engine=engine)
+@pytest.mark.parametrize(
+    "mode, scaled, first", _QUANTIZE_HELPERS, ids=["scalar", "prescaled"]
+)
+def test_quantize_helpers_clamp_i8_without_a_nan_select(engine, mode, scaled, first):
+    """i8 has no NaN: the clamp alone feeds the conversion (a NaN gives -127),
+    in quantize_scalar_f32 and quantize_prescaled_f32."""
+    kernel = _quantize_kernel("i8", "gfx942", mode=mode)
+    text = lower_with_engine(kernel, "gfx942", engine=engine)
     assert "fcmp uno" not in text
-    assert "call float @llvm.rint.f32(float %fmin8)" in text
+    assert f"call float @llvm.rint.f32(float %fmin{first + 1})" in text
 
 
 @pytest.mark.parametrize(
@@ -616,7 +644,7 @@ def test_fp8_conversion_does_not_saturate_on_gpu(qdtype):
     above = bound + 0.6 * step
     values = np.array([above, -above, np.inf, -np.inf, np.nan], np.float32)
     codes = _run_one_lane_per_value(
-        _quantize_kernel(qdtype, arch, quantize=False), arch, values
+        _quantize_kernel(qdtype, arch, mode="convert"), arch, values
     )
     if qdtype == "bf8e5m2" and arch == "gfx950":
         # OCP e5m2 infinities: 0x7c / 0xfc; NaN: exponent all ones, mantissa != 0.

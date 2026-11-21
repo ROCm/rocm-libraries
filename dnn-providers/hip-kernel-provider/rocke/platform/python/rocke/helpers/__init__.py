@@ -351,8 +351,8 @@ from .quant import (
     ir_to_qdtype,
     quant_ir_type,
     quant_max_abs,
-    quantize_scalar_f32,
     quantize_prescaled_f32,
+    quantize_scalar_f32,
     validate_quant_out_dtype,
 )
 from .reduction import (
@@ -677,8 +677,8 @@ __all__ = [
     "ir_to_qdtype",
     "quant_ir_type",
     "quant_max_abs",
-    "quantize_scalar_f32",
     "quantize_prescaled_f32",
+    "quantize_scalar_f32",
     "validate_quant_out_dtype",
     # i4 packed-weight dequant
     "dequant_i4_byte_to_bf8_pair",

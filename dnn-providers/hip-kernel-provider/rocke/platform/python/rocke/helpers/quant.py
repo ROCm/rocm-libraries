@@ -48,8 +48,9 @@ MoE), whatever the clamp does:
   Dequantizing with the stored +inf scale gives NaN for all of them.
 * add + RMSNorm + RDQuant: ``1 / rms`` is 0, which multiplies every element
   of the row, so again the inf element becomes NaN (-127 for i8) and the
-  finite ones 0, as long as ``eps_q / quant_max`` is a normal f32 (a zero or
-  subnormal one makes every element of the row NaN).
+  finite ones 0, as long as ``1 / (eps_q / quant_max)`` is finite (an
+  ``eps_q / quant_max`` so small that its reciprocal is +inf makes every
+  element of the row NaN).
 
 ``platform/dsl_docs/numerics/`` describes each dtype's NaN and infinity
 handling.
@@ -88,8 +89,8 @@ __all__ = [
     "pack_quant_chunk_local_f32",
     "quant_ir_type",
     "quant_max_abs",
-    "quantize_scalar_f32",
     "quantize_prescaled_f32",
+    "quantize_scalar_f32",
     "store_packed_chunk_local",
     "validate_quant_out_dtype",
 ]
