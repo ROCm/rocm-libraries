@@ -204,10 +204,10 @@ TEST(LaunchDimGuard, ClusterDimensionsValidatedBeforeKernelLookup)
 #endif
 
 #ifdef HIP_HAS_CLUSTER_LAUNCH
-// A cluster launch delivers the cluster id in z to the kernel as a 16-bit
-// value. A grid z beyond 65535 used to launch successfully and wrap on the
-// device, leaving part of D unwritten.
-TEST(LaunchDimGuard, ClusterLaunchGridZBeyond16Bits_Refused)
+// A cluster launch delivers the cluster id in y and z to the kernel as 16-bit
+// values. A grid beyond 65535 clusters in either dimension used to launch
+// successfully and wrap on the device, leaving part of D unwritten.
+TEST(LaunchDimGuard, ClusterLaunchGridYZBeyond16Bits_Refused)
 {
     using namespace TensileLite;
     const struct
@@ -218,6 +218,9 @@ TEST(LaunchDimGuard, ClusterLaunchGridZBeyond16Bits_Refused)
         {{2, 2, 65535}, false},
         {{2, 2, 65536}, true},
         {{2, 2, 98666}, true},
+        // y counts clusters of clusterDim.y = 2 workgroups.
+        {{2, 2 * 65535, 1}, false},
+        {{2, 2 * 65536, 1}, true},
     };
     hip::SolutionAdapter adapter;
     for(auto const& test : cases)
@@ -263,8 +266,8 @@ namespace
 }
 
 // Selection must not pick a cluster solution whose launch would exceed the
-// cluster grid z limit, so another solution serves the problem instead.
-TEST(LaunchDimGuard, LaunchLimitsRejectsClusterGridZBeyond16Bits)
+// cluster count limit in y or z, so another solution serves the problem instead.
+TEST(LaunchDimGuard, LaunchLimitsRejectsClusterGridBeyond16Bits)
 {
     TensileLite::ContractionSolution cluster, linear;
     initClusterSolution(cluster, {2, 2, 1});
@@ -275,4 +278,10 @@ TEST(LaunchDimGuard, LaunchLimitsRejectsClusterGridZBeyond16Bits)
     EXPECT_FALSE(launchLimitsAccept(cluster, 224, 128, 65536));
     EXPECT_FALSE(launchLimitsAccept(cluster, 224, 128, 98666));
     EXPECT_TRUE(launchLimitsAccept(linear, 224, 128, 98666));
+
+    // y carries the N tiles, rounded up to whole clusters of clusterDim.y = 2.
+    // 2 * 65535 tiles fill 65535 clusters; one more tile needs cluster 65536.
+    EXPECT_TRUE(launchLimitsAccept(cluster, 192, 192 * (2 * 65535), 1));
+    EXPECT_FALSE(launchLimitsAccept(cluster, 192, 192 * (2 * 65535 + 1), 1));
+    EXPECT_TRUE(launchLimitsAccept(linear, 192, 192 * (2 * 65535 + 1), 1));
 }

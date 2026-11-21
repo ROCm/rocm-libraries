@@ -12,7 +12,7 @@ matrix into each lane's registers.
 
 from __future__ import annotations
 
-__all__ = ["lane_placements"]
+__all__ = ["lane_coord", "lane_placements"]
 
 
 class _Evaluate:
@@ -23,6 +23,15 @@ class _Evaluate:
     div = staticmethod(lambda a, b: a // b)
     add = staticmethod(lambda a, b: a + b)
     mul = staticmethod(lambda a, b: a * b)
+
+
+def lane_coord(fn, lane: int, slot: int) -> tuple[int, int]:
+    """Evaluate one raw ``(builder, lane, slot) -> coordinate`` lane function.
+
+    For the per-op map functions themselves (``_MMA_FRAGMENT_INFO`` entries),
+    which a test checks before they are wrapped in a :class:`LayoutMap`.
+    """
+    return tuple(fn(_Evaluate, lane, slot))
 
 
 def lane_placements(layout, wave_size: int) -> list[tuple[int, int]]:

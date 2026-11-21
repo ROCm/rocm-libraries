@@ -64,6 +64,7 @@ inline constexpr std::string_view MASK_TOKEN = "gfx950_attention_unified_3d.mask
 inline constexpr std::string_view SLIDING_WINDOW_TOKEN
     = "gfx950_attention_unified_3d.sliding_window";
 inline constexpr std::string_view SCALE_BITS_TOKEN = "gfx950_attention_unified_3d.scale_bits";
+inline constexpr std::string_view STATS_TOKEN = "gfx950_attention_unified_3d.stats.uid";
 
 using namespace unified_attention;
 
@@ -100,6 +101,8 @@ struct KernelSpec
     int64_t slidingWindow = 0;
     int64_t numSegments = 16;
     int64_t useDecodeGrid = 1;
+    /// 1 for an LSE-on kernel, which serves only graphs that ask for stats.
+    int64_t emitLse = 0;
     /// The launch names the record's `sources` carries; the engine needs exactly `segment`
     /// and `reduce`. Empty is a single-launch record.
     std::vector<std::string> launches = {"segment", "reduce"};
@@ -120,6 +123,7 @@ inline hipdnn_plugin_sdk::ingestor::MetadataValues metadataOf(const KernelSpec& 
         {std::string("sliding_window"), spec.slidingWindow},
         {std::string("num_segments"), spec.numSegments},
         {std::string("use_decode_grid"), spec.useDecodeGrid},
+        {std::string("emit_lse"), spec.emitLse},
     };
 }
 

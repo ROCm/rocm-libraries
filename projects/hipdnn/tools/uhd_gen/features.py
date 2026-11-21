@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import shutil
@@ -221,6 +222,11 @@ def _is_absent(value) -> bool:
     return bool(pd.isna(value))
 
 
+logger = logging.getLogger(__name__)
+
+#: Inherited evaluator paths already warned about, so a run says it once.
+_warned_inherited: set[str] = set()
+
 EVALUATOR_NAME = "hipdnn_uhd_features"
 EVALUATOR_ENV_VAR = "HIPDNN_UHD_FEATURE_EVALUATOR"
 
@@ -240,19 +246,32 @@ def _evaluator_search_roots() -> list[Path]:
 def resolve_feature_evaluator(executable: str | Path | None = None) -> str:
     """Locate the shared evaluator: explicit path, then environment, then build, then PATH.
 
-    An explicitly requested executable that cannot run is an error, not a fall-through.
+    An explicitly requested executable that cannot run is an error, not a fall-through. The
+    environment is inherited, not requested: a host path that a container does not hold is
+    warned about and the search continues.
     """
-    for source, requested in (
-        (" (--feature-evaluator)", str(executable) if executable else None),
-        (f" ({EVALUATOR_ENV_VAR})", os.environ.get(EVALUATOR_ENV_VAR)),
-    ):
-        if requested:
-            resolved = shutil.which(requested)
-            if resolved is None:
-                raise ValueError(
-                    f"feature evaluator {requested!r}{source} is not a runnable executable"
-                )
+    if executable:
+        resolved = shutil.which(str(executable))
+        if resolved is None:
+            raise ValueError(
+                f"feature evaluator {str(executable)!r} (--feature-evaluator) is not a "
+                "runnable executable"
+            )
+        return resolved
+    inherited = os.environ.get(EVALUATOR_ENV_VAR)
+    if inherited:
+        resolved = shutil.which(inherited)
+        if resolved is not None:
             return resolved
+        if inherited not in _warned_inherited:
+            _warned_inherited.add(inherited)
+            logger.warning(
+                "feature evaluator %r (%s) is not a runnable executable here; "
+                "searching for %s",
+                inherited,
+                EVALUATOR_ENV_VAR,
+                EVALUATOR_NAME,
+            )
     searched = []
     for root in _evaluator_search_roots():
         for relative in _EVALUATOR_RELATIVE_DIRS:
@@ -267,6 +286,11 @@ def resolve_feature_evaluator(executable: str | Path | None = None) -> str:
             f"{EVALUATOR_NAME} was not found and features_hash has no Python implementation "
             f"to fall back on; set {EVALUATOR_ENV_VAR} to the built executable, pass "
             f"--feature-evaluator, or put it on PATH. Searched: {', '.join(searched)}"
+            + (
+                f"; {EVALUATOR_ENV_VAR}={inherited!r} is not runnable"
+                if inherited
+                else ""
+            )
         )
     return resolved
 
@@ -279,13 +303,46 @@ def evaluator_feature_semantics_revision(executable: str | Path | None = None) -
     return _run_feature_evaluator([], None, [], executable)[2]
 
 
+def run_evaluator(
+    request: dict | None,
+    executable: str | Path | None = None,
+    mode: str | None = None,
+) -> dict:
+    """The only crossing into hipdnn_uhd_features: resolve it, send `request` (None: nothing)
+    and return its parsed answer, whatever the mode (`--lint`, `--optional-features`, or the
+    default feature extraction). A nonzero exit or an unparsable answer is a ValueError.
+    """
+    flags = [] if mode is None else [mode]
+    result = subprocess.run(
+        [resolve_feature_evaluator(executable), *flags],
+        input=(
+            ""
+            if request is None
+            else json.dumps(request, ensure_ascii=False, allow_nan=False)
+        ),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+    )
+    if result.returncode:
+        raise ValueError(
+            f"{' '.join([EVALUATOR_NAME, *flags])} failed ({result.returncode}): "
+            f"{result.stderr.strip()}"
+        )
+    try:
+        return json.loads(result.stdout)
+    except ValueError as error:
+        raise ValueError(f"invalid {EVALUATOR_NAME} response: {error}") from error
+
+
 def _run_feature_evaluator(
     signature: list,
     categorical_encoding: dict | None,
     rows: list,
     executable: str | Path | None,
 ) -> tuple[str, list[list[float]], int]:
-    """The only crossing into FeatureExtractor, which owns both the digest and the values.
+    """Features and digest of `signature` over `rows`, from FeatureExtractor, which owns both.
 
     Entries are parsed first only for a readable error; the evaluator does the hashing.
     """
@@ -295,20 +352,8 @@ def _run_feature_evaluator(
         "categorical_encoding": categorical_encoding or {},
         "rows": rows,
     }
-    result = subprocess.run(
-        [resolve_feature_evaluator(executable)],
-        input=json.dumps(request, ensure_ascii=False, allow_nan=False),
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        check=False,
-    )
-    if result.returncode:
-        raise ValueError(
-            f"{EVALUATOR_NAME} failed ({result.returncode}): {result.stderr.strip()}"
-        )
+    response = run_evaluator(request, executable)
     try:
-        response = json.loads(result.stdout)
         digest, values = response["features_hash"], response["values"]
         # An evaluator that omits it predates the field: revision 1 by definition.
         revision = response.get("feature_semantics_revision", 1)

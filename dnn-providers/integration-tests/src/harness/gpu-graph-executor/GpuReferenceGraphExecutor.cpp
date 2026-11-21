@@ -94,10 +94,20 @@ detail::GpuPlanRegistrySignatureKey buildSignatureKey(
 
     switch(node.attributes_type())
     {
+    case NodeAttrs::BatchnormBackwardAttributes:
+        return detail::GpuBatchnormBwdSignatureKey(node, tensorMap);
     case NodeAttrs::BatchnormAttributes:
         return detail::GpuBatchnormFwdTrainSignatureKey(node, tensorMap, node.compute_data_type());
+    case NodeAttrs::BlockScaleQuantizeAttributes:
+        return detail::GpuBlockScaleQuantizeSignatureKey(node, tensorMap);
+    case NodeAttrs::BlockScaleDequantizeAttributes:
+        return detail::GpuBlockScaleDequantizeSignatureKey(node, tensorMap);
     case NodeAttrs::ConvolutionFwdAttributes:
         return detail::GpuConvolutionFwdSignatureKey(node, tensorMap, node.compute_data_type());
+    case NodeAttrs::ConvolutionBwdAttributes:
+        return detail::GpuConvolutionBwdSignatureKey(node, tensorMap, node.compute_data_type());
+    case NodeAttrs::ConvolutionWrwAttributes:
+        return detail::GpuConvolutionWrwSignatureKey(node, tensorMap, node.compute_data_type());
     case NodeAttrs::LayernormAttributes:
         return detail::GpuLayernormFwdSignatureKey(node, tensorMap, node.compute_data_type());
     case NodeAttrs::LayernormBackwardAttributes:
@@ -136,18 +146,6 @@ detail::GpuPlanRegistrySignatureKey buildSignatureKey(
     }
     case NodeAttrs::SdpaBackwardAttributes:
         return detail::GpuSdpaBwdSignatureKey(node, tensorMap);
-
-    // Node types with no GPU plan yet - throw descriptive error
-    case NodeAttrs::BatchnormBackwardAttributes:
-    case NodeAttrs::ConvolutionBwdAttributes:
-    case NodeAttrs::ConvolutionWrwAttributes:
-    case NodeAttrs::BlockScaleDequantizeAttributes:
-    case NodeAttrs::BlockScaleQuantizeAttributes:
-    {
-        const std::string nodeName = node.name() == nullptr ? "unknown" : node.name()->str();
-        throw ReferenceCapabilityError("GPU plan not yet implemented for node '" + nodeName
-                                       + "'. Register a GPU plan for this operation type.");
-    }
 
     case NodeAttrs::CustomOpAttributes:
         throw ReferenceCapabilityError("GPU reference executor does not support custom operations");

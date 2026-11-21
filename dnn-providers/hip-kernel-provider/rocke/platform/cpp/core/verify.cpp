@@ -392,67 +392,25 @@ static void check_sync_attrs(verifier_t* v, const rocke_op_t* op, const char* co
 }
 
 /* Python ir._assume_range_errors: every rule an arith.assume_range marker's
- * attrs break, in order, with the same texts. */
+ * attrs break, in order, with the same texts (one home:
+ * cpp/core/ir/range_marker.cpp). */
+struct marker_sink_t
+{
+    verifier_t* v;
+    const rocke_op_t* op;
+};
+
+static void report_marker_error(void* ctx, const char* message)
+{
+    marker_sink_t* sink = (marker_sink_t*)ctx;
+    v_errf(sink->v, sink->op, "%s", message);
+}
+
 static void check_assume_range_attrs(verifier_t* v, const rocke_op_t* op)
 {
-    /* ir._ASSUME_RANGE_INT_ATTRS: every present attr must be an integer before
-     * the value rules below compare it. */
-    static const char* const int_attrs[] = {"multiple_of", "residue", "lo", "hi", "hi_plus"};
-    bool typed = true;
-    for(const char* key : int_attrs)
-    {
-        const rocke_attr_value_t* value = rocke_attr_get(&op->attrs, key);
-        if(value && value->kind != ROCKE_ATTR_INT)
-        {
-            v_errf(v, op, "arith.assume_range: %s must be an integer", key);
-            typed = false;
-        }
-    }
-    if(!typed)
-    {
-        return;
-    }
-    int64_t multiple_of = 1;
-    int64_t residue = 0;
-    int64_t lo = 0;
-    int64_t hi = 0;
-    int64_t unused = 0;
-    rocke_attr_get_int(&op->attrs, "multiple_of", &multiple_of);
-    rocke_attr_get_int(&op->attrs, "residue", &residue);
-    if(multiple_of < 1)
-    {
-        v_errf(v,
-               op,
-               "arith.assume_range: multiple_of must be >= 1, got %lld",
-               (long long)multiple_of);
-    }
-    else if(!(residue >= 0 && residue < multiple_of))
-    {
-        v_errf(v,
-               op,
-               "arith.assume_range: residue must be in [0, %lld), got %lld",
-               (long long)multiple_of,
-               (long long)residue);
-    }
-    const bool has_hi_value = op->num_operands == 2;
-    const bool has_lo = rocke_attr_get_int(&op->attrs, "lo", &lo);
-    const bool has_hi = rocke_attr_get_int(&op->attrs, "hi", &hi);
-    if(has_hi && has_hi_value)
-    {
-        v_errf(v, op, "arith.assume_range: hi and hi_value are both given; state at most one end");
-    }
-    if(rocke_attr_get_int(&op->attrs, "hi_plus", &unused) && !has_hi_value)
-    {
-        v_errf(v, op, "arith.assume_range: hi_plus is given without hi_value");
-    }
-    if(has_lo && has_hi && lo >= hi)
-    {
-        v_errf(v,
-               op,
-               "arith.assume_range: lo (%lld) must be below hi (%lld)",
-               (long long)lo,
-               (long long)hi);
-    }
+    marker_sink_t sink{v, op};
+    rocke_assume_range_errors(
+        &op->attrs, op->operands, op->num_operands, report_marker_error, &sink);
 }
 
 static void check_contract(verifier_t* v, const rocke_op_t* op)
@@ -559,11 +517,11 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     }
     else if(o == ROCKE_OP_ARITH_ASSUME_RANGE)
     {
-        if((op->num_operands != 1 && op->num_operands != 2) || op->num_results != 1)
+        if(op->num_operands < 1 || op->num_operands > 3 || op->num_results != 1)
         {
             v_errf(v,
                    op,
-                   "%s: expected 1 or 2 operands / 1 result, got %d / %d",
+                   "%s: expected 1 to 3 operands / 1 result, got %d / %d",
                    name,
                    op->num_operands,
                    op->num_results);
@@ -577,15 +535,6 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
                    "%s: result type %s != operand type %s",
                    name,
                    tn(op->results[0]->type),
-                   tn(t));
-        }
-        if(op->num_operands == 2 && !rocke_type_eq(op->operands[1]->type, t))
-        {
-            v_errf(v,
-                   op,
-                   "%s: hi_value type %s != operand type %s",
-                   name,
-                   tn(op->operands[1]->type),
                    tn(t));
         }
         check_assume_range_attrs(v, op);
@@ -665,14 +614,10 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
     else if(o == ROCKE_OP_SCF_IF_ELSE)
     {
         char err[ROCKE_ERR_MSG_CAP];
-        const rocke_op_t* yld = NULL;
-        for(int branch = 0; branch < 2; ++branch)
+        const rocke_op_t* yields[2];
+        if(rocke_i_if_else_yields(op, yields, err, sizeof err) != ROCKE_OK)
         {
-            if(!rocke_i_if_else_branch_yield(op, branch, &yld, err, sizeof err))
-            {
-                v_errf(v, op, "%s", err);
-                break;
-            }
+            v_errf(v, op, "%s", err);
         }
     }
     else if(o == ROCKE_OP_TILE_BUFFER_LOAD_VN || o == ROCKE_OP_TILE_BUFFER_STORE_VN)
@@ -745,10 +690,26 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
             v_errf(v, op, "%s", error);
         }
     }
+    else if(o == ROCKE_OP_MATH_LDEXP)
+    {
+        char err[256];
+        if(const char* error = rocke_i_ldexp_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
     else if(o == ROCKE_OP_TILE_TRAP)
     {
         char err[64];
         if(const char* error = rocke_i_trap_op_error(op, err, sizeof err))
+        {
+            v_errf(v, op, "%s", error);
+        }
+    }
+    else if(o == ROCKE_OP_TILE_GPU_CHECK_FAILED)
+    {
+        char err[64];
+        if(const char* error = rocke_i_gpu_check_failed_op_error(op, err, sizeof err))
         {
             v_errf(v, op, "%s", error);
         }
@@ -759,10 +720,13 @@ static void check_contract(verifier_t* v, const rocke_op_t* op)
 
 static void check_scf_for(verifier_t* v, const rocke_op_t* op)
 {
-    if(op->num_regions <= 0)
     {
-        v_errf(v, op, "scf.for missing its body region");
-        return;
+        char region_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_region_error(op, region_error, sizeof region_error))
+        {
+            v_errf(v, op, "%s", region_error);
+            return;
+        }
     }
     if(!rocke_attr_get(&op->attrs, "iv") || !rocke_attr_get(&op->attrs, "iv_type"))
     {
@@ -785,50 +749,15 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
     int num_iter_inits = op->num_operands - 3;
 
     const rocke_attr_value_t* iter_meta = rocke_attr_get(&op->attrs, "iter_args");
-    int iter_meta_count = 0;
-    int have_iter_meta = 0;
-    if(iter_meta && iter_meta->kind == ROCKE_ATTR_LIST)
-    {
-        have_iter_meta = 1;
-        iter_meta_count = iter_meta->u.list.count < 0 ? 0 : iter_meta->u.list.count;
-    }
-    else if(!iter_meta)
-    {
-        /* attrs.get("iter_args", []) -> [] ; treat as empty list */
-        have_iter_meta = 1;
-        iter_meta_count = 0;
-    }
+    const int iter_meta_count = rocke_i_attr_is_list(iter_meta) ? iter_meta->u.list.count : 0;
 
-    if(have_iter_meta)
+    /* The carried values (their counts, metadata and result types) and the
+     * body's yields: one rule for the verifier and every lowering. */
     {
-        if(iter_meta_count != num_iter_inits)
+        char loop_error[ROCKE_ERR_MSG_CAP];
+        if(rocke_i_scf_for_error(op, loop_error, sizeof loop_error))
         {
-            v_errf(v,
-                   op,
-                   "scf.for: %d iter_args declared but %d init operands",
-                   iter_meta_count,
-                   num_iter_inits);
-        }
-        if(op->num_results != num_iter_inits)
-        {
-            v_errf(v, op, "scf.for: %d results but %d iter-args", op->num_results, num_iter_inits);
-        }
-        int lim = op->num_results < num_iter_inits ? op->num_results : num_iter_inits;
-        for(int i = 0; i < lim; ++i)
-        {
-            const rocke_type_t* res = op->results[i]->type;
-            const rocke_type_t* init = op->operands[3 + i]->type;
-            if(!rocke_type_eq(res, init))
-            {
-                v_errf(v, op, "scf.for: result type %s != iter init type %s", tn(res), tn(init));
-            }
-        }
-    }
-    {
-        char descriptor_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_i_scf_for_carried_descriptor_error(op, descriptor_error, sizeof descriptor_error))
-        {
-            v_errf(v, op, "%s", descriptor_error);
+            v_errf(v, op, "%s", loop_error);
         }
     }
 
@@ -838,12 +767,8 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
     const char* iv = rocke_attr_get_str(&op->attrs, "iv");
     if(iv)
     {
-        /* iv type comes from the operands' lower type per Python only for the
-         * yield check; for scope we register iv with its declared iv_type. The
-         * Python body scope uses Type(iv_type); type identity does not feed
-         * further checks beyond presence, so use lower's type as a stand-in is
-         * NOT done -- register with lower (operands share type). Use iv_type if
-         * resolvable to a scalar singleton, else lower. */
+        /* Register iv with its iv_type when that is a scalar, else with the
+         * loop bound type. */
         const char* ivt = rocke_attr_get_str(&op->attrs, "iv_type");
         const rocke_type_t* t = ivt ? rocke_scalar_by_name(ivt) : NULL;
         if(!t)
@@ -852,12 +777,13 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
         }
         scope_put(v, iv, t);
     }
-    if(have_iter_meta && iter_meta_count > 0)
+    if(iter_meta_count > 0)
     {
         int lim = iter_meta_count < num_iter_inits ? iter_meta_count : num_iter_inits;
         for(int i = 0; i < lim; ++i)
         {
-            const char* nm = rocke_attr_get_str(iter_meta->u.list.items[i], "name");
+            const rocke_attr_map_t* entry = iter_meta->u.list.items[i];
+            const char* nm = entry ? rocke_attr_get_str(entry, "name") : NULL;
             if(nm)
             {
                 scope_put(v, nm, op->operands[3 + i]->type);
@@ -885,41 +811,6 @@ static void check_scf_for(verifier_t* v, const rocke_op_t* op)
     const rocke_region_t* body = op->regions[0];
     check_region(v, body, 0);
     v->loop_name_count = enclosing_loop_names;
-
-    /* body should end in scf.yield matching iter-arg types (if any iter-args) */
-    if(num_iter_inits > 0)
-    {
-        if(body->num_ops == 0 || body->ops[body->num_ops - 1]->opcode != ROCKE_OP_SCF_YIELD)
-        {
-            v_errf(v, op, "scf.for with iter-args: body must end in scf.yield");
-        }
-        else
-        {
-            const rocke_op_t* yld = body->ops[body->num_ops - 1];
-            if(yld->num_operands != num_iter_inits)
-            {
-                v_errf(v,
-                       yld,
-                       "scf.yield yields %d values but loop carries %d iter-args",
-                       yld->num_operands,
-                       num_iter_inits);
-            }
-            else
-            {
-                for(int i = 0; i < num_iter_inits; ++i)
-                {
-                    if(!rocke_type_eq(yld->operands[i]->type, op->operands[3 + i]->type))
-                    {
-                        v_errf(v,
-                               yld,
-                               "scf.yield type %s != iter-arg type %s",
-                               tn(yld->operands[i]->type),
-                               tn(op->operands[3 + i]->type));
-                    }
-                }
-            }
-        }
-    }
 
     v->scope_count = saved; /* drop body scope */
 }
@@ -1003,8 +894,9 @@ static void check_op(verifier_t* v, const rocke_op_t* op)
         }
     }
 
-    /* 5) nested regions, with block-defined values registered first. */
-    if(op->num_regions > 0)
+    /* 5) nested regions, with block-defined values registered first. An scf.for
+     * is checked even with no region, so a loop without its body is refused. */
+    if(op->num_regions > 0 || op->opcode == ROCKE_OP_SCF_FOR)
     {
         if(op->opcode == ROCKE_OP_SCF_FOR)
         {
@@ -1042,6 +934,12 @@ static void check_region(verifier_t* v, const rocke_region_t* region, int is_ker
     }
 }
 
+/* A rocke_param_fact_errors message, reported as a kernel-level error. */
+static void v_param_fact_error(void* ctx, const char* message)
+{
+    v_errf((verifier_t*)ctx, NULL, "%s", message);
+}
+
 /* ---- entry ---- */
 
 rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, size_t* n)
@@ -1062,6 +960,18 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
     verifier_t v;
     memset(&v, 0, sizeof(v));
 
+    /* The two block-size kernel attrs state one fact two ways; a kernel sets
+     * one. Same text as Python verify.py _BOTH_WORKGROUP_SIZES. */
+    if(rocke_attr_get(&k->attrs, "workgroup_size") != NULL
+       && rocke_attr_get(&k->attrs, "max_workgroup_size") != NULL)
+    {
+        v_errf(&v,
+               NULL,
+               "kernel sets both workgroup_size and max_workgroup_size -- set one: "
+               "workgroup_size is the exact launch block size, max_workgroup_size an upper "
+               "bound on it");
+    }
+
     /* top-level scope: kernel params */
     for(int i = 0; i < k->num_params; ++i)
     {
@@ -1069,6 +979,8 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
         char where[160];
         snprintf(where, sizeof(where), "param '%s'", p->name ? p->name : "");
         check_type(&v, p->type, where, NULL);
+        rocke_param_fact_errors(
+            (const rocke_param_t* const*)k->params, k->num_params, i, v_param_fact_error, &v);
         char vname[160];
         snprintf(vname, sizeof(vname), "%%%s", p->name ? p->name : "");
         if(scope_has(&v, vname))
@@ -1093,6 +1005,16 @@ rocke_status_t rocke_verify(const rocke_kernel_def_t* k, rocke_diag_t** out, siz
     }
 
     check_region(&v, k->body, 1);
+    /* The kernel body takes no yields; an scf.for or scf.if_else checks the
+     * yields its own regions hold. */
+    if(k->body)
+    {
+        const rocke_op_t* orphan = rocke_i_orphan_yield(k->body->ops, k->body->num_ops);
+        if(orphan)
+        {
+            v_errf(&v, orphan, "%s", ROCKE_ORPHAN_YIELD_ERROR);
+        }
+    }
 
     /* The scope holds pointers; param ids were heap-strdup'd above (leak: the
      * scope table is freed below but the strings would leak). Free those before

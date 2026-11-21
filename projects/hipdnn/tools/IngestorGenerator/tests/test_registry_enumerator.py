@@ -102,6 +102,124 @@ def test_the_synthetic_manifest_enumerates(probe):
     assert len({k["name"] for k in kernels}) == len(kernels) > 0
 
 
+def test_a_pin_list_adds_each_later_candidates_specs_to_the_cells_it_admits(probe):
+    """The first pin gives each cell its default spec; a later one adds its sweep specs
+    where it admits the cell, each spec once."""
+    single = re_.Registry(probe.manifest)
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    listed = re_.Registry(probe.manifest)
+    assert listed.candidate.name == "probe_grid"
+    assert [c.name for _, c in listed.extra_pins] == ["probe_persist_a"]
+    cell = listed.cells()[0]
+    # The probe candidates sweep the same specs: the union holds each once.
+    assert listed.space(cell) == single.space(cell)
+
+    extra = listed.extra_pins[0][1]
+    base = listed.candidate.select_spec(listed.request(cell))
+    added = dataclasses.replace(base, tile_m=256)
+    extra.sweep_space = lambda request: [added]
+    _, specs = listed.space(cell)
+    assert specs == single.space(cell)[1] + [added]
+
+    extra.admits = lambda request: (False, "declined")
+    assert listed.space(cell) == single.space(cell)
+
+
+@dataclasses.dataclass(frozen=True)
+class _Tuned:
+    """A registry spec wrapped with its tuning id, as rocKE's dispatcher hands back."""
+
+    kernel_spec: object
+    tuning_id: str
+
+
+def test_a_pin_lists_kernels_trace_to_the_pin_that_supplied_them(probe):
+    """A spec only a later pin sweeps carries that pin's spec_id and tuning id; a
+    spec both pins sweep stays the first pin's."""
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    registry = re_.Registry(probe.manifest)
+    first, later = registry.candidate, registry.extra_pins[0][1]
+    sweep = synth.ProbeCandidate.sweep_space
+    added = dataclasses.replace(
+        first.select_spec(registry.request(registry.cells()[0])), tile_n=256
+    )
+    # Both pins sweep the probe specs; only the later one adds tile_n 256.
+    first.sweep_space = lambda r: [
+        _Tuned(s, f"grid@{s.tile_n}") for s in sweep(first, r)
+    ]
+    later.sweep_space = lambda r: [
+        _Tuned(s, f"a@{s.tile_n}") for s in [*sweep(later, r), added]
+    ]
+
+    kernels = re_.build_config(probe.manifest, registry)["packs"][0]["kernels"]
+    provenance = {k["name"]: k["provenance"] for k in kernels}
+    assert provenance["probe.bf16_d64_h8_c0_tn32"] == {
+        "rocke_spec_id": "grid",
+        "rocke_tuning_id": "grid@32",
+    }
+    assert provenance["probe.bf16_d64_h8_c0_tn256"] == {
+        "rocke_spec_id": "a",
+        "rocke_tuning_id": "a@256",
+    }
+
+
+def test_base_spec_is_the_named_pins_select_spec(probe):
+    """The first pin's by default; a later pin's own, unwrapped; a pin the manifest
+    does not list is refused."""
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist", "spec_id": "a"},
+    ]
+    registry = re_.Registry(probe.manifest)
+    cell = registry.cells()[0]
+    later_pin, later = registry.extra_pins[0]
+    first = registry.space(cell)[0]
+    own = dataclasses.replace(first, tile_m=256)
+    later.select_spec = lambda request: _Tuned(own, "a@own")
+    later.sweep_space = lambda request: [own]
+
+    assert registry.base_spec(cell) == registry.base_spec(cell, registry.pin) == first
+    assert registry.base_spec(cell, later_pin) == own
+    with pytest.raises(re_.EnumerationError, match="not one of"):
+        registry.base_spec(cell, {"algorithm": "persist", "spec_id": "b"})
+
+
+@pytest.mark.parametrize(
+    "key, value",
+    [
+        ("spec_overrides", {"tile_m": 128}),
+        ("neutral_fields", ["tile_m"]),
+        ("selector_fields", ["heads"]),
+        ("cell_keyed_by", ["tile_m"]),
+    ],
+)
+def test_base_spec_refuses_a_section_that_reshapes_its_cells(probe, key, value):
+    """cell_spaces rewrites or merges such a section's specs, so a raw request combo's
+    select_spec is not its cell's default kernel: base_spec names the key instead."""
+    probe.manifest["enumerate"][key] = value
+    registry = re_.Registry(probe.manifest)
+    with pytest.raises(re_.EnumerationError, match=rf"enumerate sets \['{key}'\]"):
+        registry.base_spec(registry.cells()[0])
+
+
+def test_each_pin_of_a_list_must_match_one_candidate(probe, capsys):
+    probe.manifest["enumerate"]["pin"] = [
+        {"algorithm": "probe", "spec_id": "grid"},
+        {"algorithm": "persist"},
+    ]
+    assert _run_probe(probe) == 2
+    assert "matches 2 registry candidates" in capsys.readouterr().err
+    probe.manifest["enumerate"]["pin"] = []
+    assert _run_probe(probe) == 2
+    assert "non-empty list of mappings" in capsys.readouterr().err
+
+
 _SEGMENT_LAUNCHES = {"segment": {}, "reduce": {"role": "reduce"}}
 
 
@@ -693,8 +811,8 @@ def _also_performance(m):
             ["spec_overrides", "no_such"],
         ),
         (
-            lambda m: m["enumerate"].update(spec_overrides={"num_segments": 2}),
-            ["spec_overrides", "num_segments", "performance"],
+            lambda m: m["enumerate"].update(spec_overrides={"hdim": 128}),
+            ["spec_overrides", "hdim", "feature"],
         ),
         (_override_and_neutral, ["spec_overrides", "neutral_fields", "num_seqs"]),
     ],
@@ -708,7 +826,7 @@ def _also_performance(m):
         "neutral-is-performance",
         "overrides-not-a-mapping",
         "overrides-unknown",
-        "overrides-is-performance",
+        "overrides-is-feature",
         "overrides-is-neutral",
     ],
 )
@@ -966,6 +1084,106 @@ def test_an_also_section_must_cross_the_same_cell_fields(probe):
     assert _run_probe(probe, manifest) == 2
 
 
+# ---------------------------------------------------------------------------
+# enumerate.also spec_overrides: twins of the primary's kernels with one spec field
+# the registry never selects (e.g. an LSE output) set on
+# ---------------------------------------------------------------------------
+
+
+def _twin_section(**overrides) -> dict:
+    """The primary's own pin and cells, one kernel per cell (no free fields), with
+    ``order`` overridden and a template of its own."""
+    section = {
+        "pin": {"algorithm": "probe", "spec_id": "grid"},
+        "fixed": {"arch": synth.ARCH, "dtype": "bf16"},
+        "cells": copy.deepcopy(synth.probe_manifest("unused")["enumerate"]["cells"]),
+        "free_fields": [],
+        "spec_overrides": {"order": "col"},
+        "kernel_name_template": "probe.{dtype}_d{hdim}_h{heads}_c{causal}_tn{tile_n}_col",
+    }
+    section.update(overrides)
+    return section
+
+
+def _with_twins(probe, **overrides) -> dict:
+    manifest = copy.deepcopy(probe.manifest)
+    manifest["enumerate"]["also"] = [_twin_section(**overrides)]
+    return manifest
+
+
+def test_spec_overrides_add_twins_and_leave_the_primary_unchanged(probe):
+    """One twin per cell, named by the section's template and built with the
+    override; every primary kernel keeps its name, spec and default marker."""
+    assert _run_probe(probe) == 0
+    primary = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert _run_probe(probe, _with_twins(probe)) == 0
+    both = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert both[: len(primary)] == primary
+    twins = both[len(primary) :]
+    assert len(twins) == 4
+    assert all(k["name"].endswith("_col") for k in twins)
+    assert all(k["kernel_source"]["spec"]["order"] == "col" for k in twins)
+
+
+def test_a_twin_section_keeps_its_own_default_floor(probe):
+    """The twins are their own (cell, overrides) group, so each cell's twin is a
+    default that variant reduction keeps, beside the primary's default."""
+    assert _run_probe(probe, _with_twins(probe)) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    twins = [k for k in kernels if k["name"].endswith("_col")]
+    assert all(k.get("default") for k in twins)
+    assert sum(1 for k in kernels if k.get("default")) == 2 * len(twins)
+
+
+def test_an_override_ships_even_when_spec_fields_omit_it(probe):
+    """The override is what sets the twin apart, so its spec always carries it."""
+    manifest = _with_twins(probe, spec_fields=["dtype", "tile_m", "tile_n", "causal"])
+    assert _run_probe(probe, manifest) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert kernels[-1]["kernel_source"]["spec"]["order"] == "col"
+
+
+def test_twins_without_their_own_template_collide(probe):
+    """The primary's template renders no override slot here, so twin names repeat
+    primary names: refused rather than shipped as duplicates."""
+    manifest = _with_twins(probe)
+    del manifest["enumerate"]["also"][0]["kernel_name_template"]
+    assert _run_probe(probe, manifest) == 2
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{"no_such_field": 1}, {}, ["order"], {"order": ["col"]}],
+    ids=["unknown-field", "empty", "not-a-mapping", "non-scalar"],
+)
+def test_bad_spec_overrides_are_refused(probe, overrides):
+    assert _run_probe(probe, _with_twins(probe, spec_overrides=overrides)) == 2
+
+
+def _feature_order(manifest: dict) -> dict:
+    """``manifest`` with ``order`` a feature field, as an LSE flag the twins set is."""
+    manifest["reduction"] = {
+        "fields": {"feature": ["order"], "performance": [], "ignored": []}
+    }
+    return manifest
+
+
+def test_a_twin_override_may_be_a_feature_axis_across_sections(probe):
+    """The primary keeps the registry's ``order`` and the twins pin ``col``, so the
+    engine's kernels take both values: a feature axis, not a pinned field."""
+    assert _run_probe(probe, _feature_order(_with_twins(probe))) == 0
+    kernels = yaml.safe_load(probe.out.read_text())["packs"][0]["kernels"]
+    assert len([k for k in kernels if k["name"].endswith("_col")]) == 4
+
+
+def test_an_override_every_section_pins_alike_is_no_feature_axis(probe, capsys):
+    """Pinned to ``col`` in every section, ``order`` takes one value engine-wide."""
+    manifest = _feature_order(_with_twins(probe))
+    manifest["enumerate"]["spec_overrides"] = {"order": "col"}
+    assert _run_probe(probe, manifest) == 2
+    assert "a pinned field takes one value" in capsys.readouterr().err
+
+
 def _split_also(split, **overrides) -> dict:
     """``split`` merged on its selector fields, plus a section over hdim 256."""
     manifest = _dedup(split)
@@ -999,6 +1217,42 @@ def test_an_also_section_inherits_selector_fields_and_cell_keyed_by(split):
 def test_an_also_section_with_different_keying_is_refused(split, key, value):
     with pytest.raises(re_.EnumerationError, match=rf"enumerate.also\[0\] sets {key}"):
         _kernels(_split_also(split, **{key: value}))
+
+
+def _gqa_also(gqa, **overrides) -> dict:
+    """``gqa`` plus a section over head pairs (6, 2) and (3, 1), both ratio 3."""
+    manifest = copy.deepcopy(gqa)
+    primary = manifest["enumerate"]
+    primary["also"] = [
+        {
+            "pin": primary["pin"],
+            "fixed": primary["fixed"],
+            "cells": [
+                {"fields": ["nhead_q", "nhead_k"], "values": [[6, 2], [3, 1]]},
+                {"fields": ["batch"], "values": [1, 2]},
+            ],
+            "neutral_fields": primary["neutral_fields"],
+            **overrides,
+        }
+    ]
+    return manifest
+
+
+def test_an_also_section_inherits_cell_keyed_by_when_the_primary_sets_it(gqa):
+    """The ``gqa`` primary keys cells by ratio, so an omitted ``cell_keyed_by`` must
+    be copied down: stating it by hand gives the same kernels, and the section's
+    head pairs merge into one ratio-3 cell."""
+    kernels = _kernels(_gqa_also(gqa))
+    ratio3 = [k for k in kernels if k["metadata"]["num_queries_per_kv"] == 3]
+    # (6, 2) picks segments 4 and 2, (3, 1) picks 8 and 4; the shared 4 merges.
+    segments = [k["kernel_source"]["spec"]["num_segments"] for k in ratio3]
+    assert sorted(segments) == [2, 4, 8]
+    restated = _gqa_also(
+        gqa,
+        selector_fields=["nhead_q", "nhead_k", "batch"],
+        cell_keyed_by=["num_queries_per_kv"],
+    )
+    assert _kernels(restated) == kernels
 
 
 def _full(manifest: dict) -> dict:
@@ -1137,3 +1391,141 @@ def test_manifest_heuristics_reach_the_generated_engine_and_its_ued(probe):
     catalog = build_ued(config, mint_ids(config))["sort_kernel_catalog"]
     assert list(catalog) == ["default", "gfx942"]
     assert catalog["gfx942"] == [model]
+
+
+# hold_fields / performance overrides: a section pins a performance field to one value (a
+# production stack the registry's sweep never combines) and the others hold it.
+
+
+def _conv_hold(tmp_path, monkeypatch, **enumerate_keys):
+    manifest = synth.conv_probe_manifest(synth.provider(tmp_path, monkeypatch))
+    manifest["reduction"]["fields"] = {
+        "feature": ["direction", "dtype", "arch"],
+        "performance": [{"name": "tile_m"}],
+        "ignored": ["tile_n", "tile_k"],
+    }
+    manifest["enumerate"].update(enumerate_keys)
+    return manifest
+
+
+def _tile_ms(manifest) -> list:
+    return [k["kernel_source"]["spec"]["tile_m"] for k in _kernels(manifest)]
+
+
+def test_a_performance_field_varies_unless_the_section_holds_it(tmp_path, monkeypatch):
+    manifest = _conv_hold(tmp_path, monkeypatch)
+    assert _tile_ms(manifest) == [64, 128, 64, 128, 64, 128, 64, 128]
+    manifest["enumerate"]["hold_fields"] = ["tile_m"]
+    assert _tile_ms(manifest) == [64, 64, 64, 64]
+
+
+def test_a_section_may_override_a_performance_field_it_also_holds(
+    tmp_path, monkeypatch
+):
+    """The override moves the section's default spec; holding then keeps every spec of the
+    section there, so the performance field is one value per section."""
+    manifest = _conv_hold(
+        tmp_path, monkeypatch, hold_fields=["tile_m"], spec_overrides={"tile_m": 128}
+    )
+    assert _tile_ms(manifest) == [128, 128, 128, 128]
+
+
+def test_an_also_section_inherits_hold_fields_and_pins_its_own_value(
+    tmp_path, monkeypatch
+):
+    """The production-stack pattern: the primary holds the performance field at its
+    default and an `also` section, inheriting the hold, overrides it to another value, so
+    every cell ships one kernel per value."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["spec_overrides"] = {"tile_m": 128}
+    del section["hold_fields"]
+    manifest["enumerate"]["also"] = [section]
+    assert _tile_ms(manifest) == [64] * 4 + [128] * 4
+
+
+def test_one_rule_admits_a_pinned_performance_field_and_a_feature_axis(
+    tmp_path, monkeypatch
+):
+    """The two things a section may pin in one manifest: `tile_m` (performance) in one
+    `also` section, and `tile_n` (feature) in another that no other section pins alike. A
+    feature field every section leaves alone, or pins alike, is still refused (see
+    test_an_override_every_section_pins_alike_is_no_feature_axis)."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    manifest["reduction"]["fields"] = {
+        "feature": ["direction", "dtype", "arch", "tile_n"],
+        "performance": [{"name": "tile_m"}],
+        "ignored": ["tile_k"],
+    }
+    pinned_performance = copy.deepcopy(manifest["enumerate"])
+    pinned_performance["spec_overrides"] = {"tile_m": 128}
+    pinned_feature = copy.deepcopy(manifest["enumerate"])
+    pinned_feature["spec_overrides"] = {"tile_n": 128}
+    manifest["enumerate"]["also"] = [pinned_performance, pinned_feature]
+    kernels = _kernels(manifest)
+    tiles = [
+        (k["kernel_source"]["spec"]["tile_m"], k["kernel_source"]["spec"]["tile_n"])
+        for k in kernels
+    ]
+    assert tiles == [(64, 64)] * 4 + [(128, 64)] * 4 + [(64, 128)] * 4
+    # The pinned performance field changes how a kernel runs, not what it serves, so the
+    # cell's one floor covers it; the feature override serves other graphs, so it has its own.
+    assert [bool(k.get("default")) for k in kernels] == (
+        [True] * 4 + [False] * 4 + [True] * 4
+    )
+
+
+def test_hold_fields_naming_a_field_the_spec_lacks_is_exit_2(
+    tmp_path, monkeypatch, capsys
+):
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["no_such"])
+    path = synth.write_manifest(tmp_path / "m.engine.yaml", manifest)
+    assert re_.main(["--manifest", str(path), "--plan-space"]) == 2
+    err = capsys.readouterr().err
+    assert "hold_fields" in err and "no_such" in err, err
+
+
+def test_registry_refuses_hold_fields_the_spec_lacks_when_it_reads_them(
+    tmp_path, monkeypatch
+):
+    """The names are checked as the section is read, not only once a full-space
+    enumeration reaches `select_full`, and in every `also` section."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["no_such"])
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*no_such"):
+        re_.Registry(manifest)
+
+    manifest = _conv_hold(tmp_path / "also", monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["hold_fields"] = ["no_such"]
+    manifest["enumerate"]["also"] = [section]
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*no_such"):
+        re_.Registry(manifest)
+
+
+def test_hold_fields_on_a_slice_section_is_refused(probe, capsys):
+    """A slice section projects no performance field, so `hold_fields` there could hold
+    nothing: refused by name rather than ignored, as only `select_full` read it."""
+    probe.manifest["enumerate"]["hold_fields"] = ["tile_n"]
+    with pytest.raises(re_.EnumerationError, match=r"hold_fields.*'slice'"):
+        re_.Registry(probe.manifest)
+
+    assert _run_probe(probe) == 2
+    err = capsys.readouterr().err
+    assert "hold_fields" in err and "slice" in err, err
+
+
+def test_an_also_slice_section_must_not_inherit_hold_fields(tmp_path, monkeypatch):
+    """`hold_fields` is inherited by an `also` section; a slice one that inherits it is
+    refused too, and `hold_fields: []` opts that section out."""
+    manifest = _conv_hold(tmp_path, monkeypatch, hold_fields=["tile_m"])
+    section = copy.deepcopy(manifest["enumerate"])
+    section["space"] = "slice"
+    del section["hold_fields"]
+    manifest["enumerate"]["also"] = [section]
+    with pytest.raises(
+        re_.EnumerationError, match=r"an enumerate.also section sets hold_fields"
+    ):
+        re_.Registry(manifest)
+
+    section["hold_fields"] = []
+    re_.Registry(manifest)

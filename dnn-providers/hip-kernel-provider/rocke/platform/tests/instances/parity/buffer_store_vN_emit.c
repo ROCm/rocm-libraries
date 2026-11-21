@@ -44,6 +44,10 @@ static const case_t CASES[] = {
 };
 static const int NUM_CASES = sizeof(CASES) / sizeof(CASES[0]);
 
+/* buffer_store_vN_f32 dword counts, after CASES (Python F32_CASES). */
+static const int F32_CASES[] = {1, 2, 4};
+static const int NUM_F32_CASES = sizeof(F32_CASES) / sizeof(F32_CASES[0]);
+
 static const rocke_type_t* type_by_name(const char* name)
 {
     static const struct
@@ -87,9 +91,25 @@ static void build_buffer_store_vN(rocke_ir_builder_t* b, const case_t* c)
     rocke_b_ret(b);
 }
 
+static void build_buffer_store_vN_f32(rocke_ir_builder_t* b, int n)
+{
+    const rocke_type_t* f32 = rocke_f32();
+    rocke_value_t* x = rocke_b_param(b, "X", rocke_ptr_type(b, f32, "global"), NULL);
+    rocke_value_t* y = rocke_b_param(b, "Y", rocke_ptr_type(b, f32, "global"), NULL);
+    rocke_value_t* n_bytes = rocke_b_param(b, "N_bytes", rocke_i32(), NULL);
+    rocke_value_t* rsrc = rocke_b_buffer_rsrc(b, y, n_bytes);
+    rocke_value_t* tid = rocke_b_thread_id_x(b);
+    rocke_value_t* elem = rocke_b_global_load(b, x, tid, f32, 1);
+    rocke_value_t* value = rocke_b_vector_splat(b, elem, n);
+    rocke_value_t* voffset = rocke_b_mul(b, tid, rocke_b_const_i32(b, 16));
+    rocke_value_t* soffset = rocke_b_const_i32(b, 0);
+    rocke_b_buffer_store_vN_f32(b, rsrc, voffset, soffset, value, n);
+    rocke_b_ret(b);
+}
+
 int main(int argc, char** argv)
 {
-    int num_configs = NUM_CASES * NUM_ARCHES;
+    int num_configs = (NUM_CASES + NUM_F32_CASES) * NUM_ARCHES;
     if(argc < 2)
     {
         fprintf(
@@ -109,7 +129,7 @@ int main(int argc, char** argv)
         fprintf(stderr, "unknown config index %d\n", idx);
         return 2;
     }
-    const case_t* c = &CASES[idx / NUM_ARCHES];
+    int case_idx = idx / NUM_ARCHES;
     const char* arch = ARCHES[idx % NUM_ARCHES];
 
     rocke_ir_builder_t b;
@@ -122,7 +142,10 @@ int main(int argc, char** argv)
     rocke_attr_set_int(&b, &b.kernel->attrs, "max_workgroup_size", 64);
     try
     {
-        build_buffer_store_vN(&b, c);
+        if(case_idx < NUM_CASES)
+            build_buffer_store_vN(&b, &CASES[case_idx]);
+        else
+            build_buffer_store_vN_f32(&b, F32_CASES[case_idx - NUM_CASES]);
     }
     catch(const std::exception& e)
     {

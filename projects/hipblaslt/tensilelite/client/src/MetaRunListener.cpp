@@ -32,13 +32,47 @@
 #include "ClientConfig.hpp"
 #include "ResultReporter.hpp"
 #include "RunListener.hpp"
+#include "TimingInstrumentation.hpp"
 
+#include <cxxabi.h>
 #include <cstddef>
+#include <cstdlib>
+#include <string>
+#include <typeindex>
+#include <typeinfo>
+#include <unordered_map>
 
 namespace TensileLite
 {
     namespace Client
     {
+        namespace
+        {
+            // Returns a stable "<prefix><ListenerType>" category string (ScopedTimer needs
+            // storage that outlives the timing buffer). Only called when timing is enabled.
+            // One cache per Tag so each call site only does a type_index lookup.
+            template <int Tag>
+            const char* listenerCategory(char const* prefix, RunListener const& listener)
+            {
+                static std::unordered_map<std::type_index, std::string> names;
+                auto idx = std::type_index(typeid(listener));
+                auto it  = names.find(idx);
+                if(it == names.end())
+                {
+                    int         status = 0;
+                    char*       dem    = abi::__cxa_demangle(typeid(listener).name(), nullptr, nullptr, &status);
+                    std::string name   = (status == 0 && dem) ? dem : typeid(listener).name();
+                    std::free(dem);
+                    // Strip the namespace: ':' is the field separator of the TIMING: lines.
+                    auto pos = name.rfind("::");
+                    if(pos != std::string::npos)
+                        name = name.substr(pos + 2);
+                    it = names.emplace(idx, std::string(prefix) + name).first;
+                }
+                return it->second.c_str();
+            }
+        }
+
         void MetaRunListener::addListener(std::shared_ptr<RunListener> listener)
         {
             if(!m_firstProblem)
@@ -107,7 +141,15 @@ namespace TensileLite
         void MetaRunListener::preSolution(ContractionSolution* const solution)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->preSolution(solution);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(listenerCategory<0>("pre_solution_listener.", **iter));
+                    (*iter)->preSolution(solution);
+                }
+                else
+                    (*iter)->preSolution(solution);
+            }
         }
 
         void MetaRunListener::postSolution()
@@ -160,7 +202,15 @@ namespace TensileLite
                                               TimingEvents const&        stopEvents)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->validateWarmups(slots, startEvents, stopEvents);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(listenerCategory<1>("validate_warmups_listener.", **iter));
+                    (*iter)->validateWarmups(slots, startEvents, stopEvents);
+                }
+                else
+                    (*iter)->validateWarmups(slots, startEvents, stopEvents);
+            }
         }
 
 #if TENSILELITE_CLIENT_ENABLE_ROCPROFSDK
@@ -241,7 +291,15 @@ namespace TensileLite
                                                TimingEvents const&        stopEvents)
         {
             for(auto iter = m_listeners.begin(); iter != m_listeners.end(); iter++)
-                (*iter)->validateEnqueues(slots, startEvents, stopEvents);
+            {
+                if(g_timingInstrumentationEnabled)
+                {
+                    ScopedTimer timer(listenerCategory<2>("validate_enqueues_listener.", **iter));
+                    (*iter)->validateEnqueues(slots, startEvents, stopEvents);
+                }
+                else
+                    (*iter)->validateEnqueues(slots, startEvents, stopEvents);
+            }
         }
 
         void MetaRunListener::finalizeReport()

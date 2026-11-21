@@ -130,10 +130,6 @@ function(hipblaslt_detect_sanitizer_runtime out_options out_lib_dirs)
     set(${out_lib_dirs} "${_lib_dirs}" PARENT_SCOPE)
 endfunction()
 
-# When ON, a build that requests gfx1250 also produces library/gfx1250v0/
-# (gfx1250-strict's kernels built for gfx1250). Never add gfx1250v0 to GPU_TARGETS.
-option(HIPBLASLT_BUILD_GFX1250V0 "Build library/gfx1250v0/ alongside gfx1250 for A0 parts reporting gfx1250." ON)
-
 function(create_device_library)
     set(_opts HOST_ASAN HOST_TSAN)
     set(_one
@@ -162,10 +158,12 @@ function(create_device_library)
             "create_device_library: CODEGEN_ROOT is required; pass the TensileLite source root "
             "or set HIPBLASLT_CODEGEN_ROOT.")
     endif()
-    set(_known_bugs_resource "${_codegen_dir}/tensilelite/TensileLogic/known_bugs.yaml")
+    set(_known_bugs_resource "${_codegen_dir}/tensilelite/logic/known_bugs.yaml")
     foreach(_required_path
-            "${_codegen_dir}/tensilelite/bin/TensileLogic"
-            "${_codegen_dir}/tensilelite/TensileCreateLibrary/__main__.py"
+            "${_codegen_dir}/tensilelite/__main__.py"
+            "${_codegen_dir}/tensilelite/cli.py"
+            "${_codegen_dir}/tensilelite/logic/run.py"
+            "${_codegen_dir}/tensilelite/create_library/run.py"
             "${_known_bugs_resource}")
         if(NOT EXISTS "${_required_path}")
             message(FATAL_ERROR "create_device_library: required codegen resource not found: ${_required_path}")
@@ -318,32 +316,17 @@ function(create_device_library)
     if(_cdl_EMIT_OCCUPANCY_PROBE)
         list(APPEND _opts_list "--emit-occupancy-probe")
     endif()
-    set(_logic_arches ${_cdl_ARCHES})
-    if(HIPBLASLT_BUILD_GFX1250V0)
-        list(APPEND _opts_list "--gfx1250v0")
-        # gfx1250v0 is built from gfx1250-strict's logic, so validate that too.
-        # Matched on base names: an arch arrives qualified (gfx1250:xnack-) or
-        # predicated (gfx1250[cu=64]), and comparing whole strings would miss it
-        # and quietly leave gfx1250-strict's logic unchecked.
-        set(_arch_bases "")
-        foreach(_arch IN LISTS _cdl_ARCHES)
-            string(REGEX REPLACE ":.*$" "" _arch_base "${_arch}")
-            string(REGEX REPLACE "\\[.*$" "" _arch_base "${_arch_base}")
-            list(APPEND _arch_bases "${_arch_base}")
-        endforeach()
-        if("gfx1250" IN_LIST _arch_bases AND NOT "gfx1250-strict" IN_LIST _arch_bases)
-            list(APPEND _logic_arches "gfx1250-strict")
-        endif()
-    endif()
-    list(JOIN _logic_arches "$<SEMICOLON>" _logic_arches_semi)
 
     set(_tensile_logic_args
         "${_cdl_LOGIC_PATH}"
         --architecture
-        "${_logic_arches_semi}"
+        "${_arches_semi}"
         --use-bundled-known-bugs
         --check-all
     )
+    if(_cdl_LOGIC_FILTER)
+        list(APPEND _tensile_logic_args "--logic-filter=**/${_cdl_LOGIC_FILTER}.yaml")
+    endif()
     set(_codegen_dependencies "${_known_bugs_resource}")
     if(TARGET _rocisa)
         list(APPEND _codegen_dependencies _rocisa)
@@ -355,7 +338,8 @@ function(create_device_library)
     # file list nothing invalidates the stamps and edits ship stale kernels.
     # CONFIGURE_DEPENDS catches added/removed files, DEPENDS catches edits.
     file(GLOB_RECURSE _logic_files LIST_DIRECTORIES false CONFIGURE_DEPENDS
-         "${_cdl_LOGIC_PATH}/*.yaml")
+         "${_cdl_LOGIC_PATH}/*.yaml"
+         "${_cdl_LOGIC_PATH}/*.csv.xz")
     # .py generators, plus the packaged static headers (resources.py) and the
     # custom-kernel assembly (CustomKernels.py) that codegen reads as data.
     file(GLOB_RECURSE _codegen_sources LIST_DIRECTORIES false CONFIGURE_DEPENDS
@@ -365,8 +349,7 @@ function(create_device_library)
     list(FILTER _codegen_sources EXCLUDE REGEX "/tensilelite/Tests/")
     list(APPEND _codegen_dependencies
          ${_logic_files}
-         ${_codegen_sources}
-         "${_codegen_dir}/tensilelite/bin/TensileLogic")
+         ${_codegen_sources})
 
     # ninja only compares mtimes of inputs that still exist, so a *removed* file
     # leaves the stamp clean (nothing is newer), as does a file added with an
@@ -383,9 +366,8 @@ function(create_device_library)
     set(_logic_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}-TensileLogic.stamp")
     add_custom_command(
         OUTPUT "${_logic_stamp}"
-        COMMENT "Validating library logic (TensileLogic --check-all) for ${_cdl_TARGET} ..."
-        COMMAND ${_python_command}
-            "${_codegen_dir}/tensilelite/bin/TensileLogic"
+        COMMENT "Validating library logic (tensilelite logic --check-all) for ${_cdl_TARGET} ..."
+        COMMAND ${_python_command} -m tensilelite logic
             ${_tensile_logic_args}
         COMMAND ${CMAKE_COMMAND} -E touch "${_logic_stamp}"
         DEPENDS ${_codegen_dependencies}
@@ -400,7 +382,7 @@ function(create_device_library)
     # Tensile is not yet importable.
     set(_output_stamp "${CMAKE_CURRENT_BINARY_DIR}/${_cdl_TARGET}.stamp")
     set(_tcl_command
-        ${_python_command} -m tensilelite.TensileCreateLibrary
+        ${_python_command} -m tensilelite create-library
         ${_opts_list}
         "${_cdl_LOGIC_PATH}"
         "${_cdl_OUTPUT_DIR}"

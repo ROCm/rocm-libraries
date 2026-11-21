@@ -1705,7 +1705,8 @@ def store_wmma_acc(
     """Scatter one lane's ``<c_per_lane x f32>`` WMMA accumulator to a window.
 
     Walks the ``c_per_lane`` accumulator slots, resolves each slot's
-    ``(row, col)`` from the atom's verified ``c_layout`` map, optionally applies
+    ``(row, col)`` from the resolved MMA op's verified ``dst_layout`` map,
+    optionally applies
     ``transform(b, value_f32, slot, row, col)`` (e.g. the online-softmax
     ``* inv_l[row]`` rescale), demotes f32 -> the window dtype, and issues one
     scalar store per slot — the same per-element epilogue the hand-rolled
@@ -1715,7 +1716,7 @@ def store_wmma_acc(
     block). The accumulator layout naturally places adjacent slots so the
     AMDGPU backend coalesces neighbouring stores.
     """
-    cmap = atom.c_layout(arch)
+    cmap = atom.mma_op(arch).dst_layout()
     c_off = b.const_i32(col_offset)
     lead = list(lead)
     for r in range(atom.c_per_lane):
@@ -1779,7 +1780,7 @@ class WmmaTensor:
             return self.atom.a_layout(self.arch)
         if self.role == "b":
             return self.atom.b_layout(self.arch)
-        return self.atom.c_layout(self.arch)
+        return self.atom.mma_op(self.arch).dst_layout()
 
     def coord(self, b: IRBuilder, lane: Value, slot: int):
         """``(row, col)`` of accumulator ``slot`` for ``lane`` (role ``"c"``)."""

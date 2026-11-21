@@ -84,6 +84,26 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>>
     return createShallowTensor<T>(tensorDetails, variantPack.at(tensorDetails.uid));
 }
 
+/// Binds an input operand of type T. A pass-by-value scalar (baked, runtime with a default, or
+/// pure runtime) is copied into a one-element tensor so it broadcasts like any other operand; an
+/// ordinary tensor is viewed in place.
+template <typename T>
+inline std::unique_ptr<hipdnn_data_sdk::utilities::TensorBase<T>>
+    bindOperandOrScalar(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT& operand,
+                        const std::unordered_map<int64_t, void*>& variantPack)
+{
+    if(hipdnn_flatbuffers_sdk::utilities::isPassByValueTensor(operand))
+    {
+        auto staged
+            = std::make_unique<hipdnn_data_sdk::utilities::Tensor<T>>(std::vector<int64_t>{1});
+        staged->fillWithValue(
+            static_cast<T>(hipdnn_flatbuffers_sdk::utilities::resolveScalarFromVariantPack<double>(
+                operand, variantPack, "Pointwise scalar operand")));
+        return staged;
+    }
+    return bindShallowTensor<T>(operand, variantPack);
+}
+
 /// Binds an optional tensor; returns nullptr when the operand is not present.
 template <typename T>
 inline std::unique_ptr<hipdnn_data_sdk::utilities::ShallowTensor<T>> bindOptionalShallowTensor(
@@ -170,6 +190,10 @@ inline std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>
         return visitor(TypeTag<fp8_e4m3>{});
     case DataType::FP8_E5M2:
         return visitor(TypeTag<fp8_e5m2>{});
+    case DataType::FP8_E4M3_FNUZ:
+        return visitor(TypeTag<fp8_e4m3_fnuz>{});
+    case DataType::FP8_E5M2_FNUZ:
+        return visitor(TypeTag<fp8_e5m2_fnuz>{});
     case DataType::INT64:
         return visitor(TypeTag<int64_t>{});
     case DataType::FP8_E8M0:

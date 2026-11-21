@@ -62,6 +62,7 @@ from rocke.helpers.transforms import (
 
 from ._attention_additive_bias import append_additive_bias_signature
 from ._lse_store import validate_unified_lse
+from ._spec_checks import require_bool
 
 # Alias the promoted log2-domain softcap helper under the local name used by
 # the scalar reference kernels (matches the gfx950 tiled modules' convention).
@@ -154,10 +155,7 @@ class UnifiedAttentionProblem:
     emit_lse: bool = False
 
     def __post_init__(self):
-        if type(self.emit_lse) is not bool:
-            raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
-            )
+        require_bool("emit_lse", self.emit_lse)
         if self.right_bound < -1:
             raise ValueError(
                 f"right_bound must be >= -1 (-1 = unbounded), got {self.right_bound}"
@@ -794,6 +792,29 @@ def supports_native_unified_attention_3d_tiled(
             {"use_additive_bias": problem.use_additive_bias} if arch == "gfx950" else {}
         ),
     )
+
+
+def supports_native_unified_attention_coverage(
+    problem: UnifiedAttentionProblem,
+    arch: str,
+) -> Tuple[bool, str]:
+    """The scalar coverage gate (head size, block size, dtype, features), asked
+    about the LSE-off problem.
+
+    The scalar kernel writes no LSE, so the scalar gate refuses ``emit_lse``. The
+    path's own gate (:func:`unified_lse_path_gate`) rules on LSE; this one never does.
+    """
+    if problem.emit_lse:
+        problem = replace(problem, emit_lse=False)
+    return supports_native_unified_attention(problem, arch=arch)
+
+
+def unified_lse_path_gate(path: str) -> Callable[..., Tuple[bool, str]]:
+    """The gate of ``path`` (``"3d"`` split-KV, else tiled 2D). It owns which
+    arches and features can write LSE."""
+    if path == "3d":
+        return supports_native_unified_attention_3d_tiled
+    return supports_native_unified_attention_tiled
 
 
 _ATTN_CACHE: Dict[Tuple, bytes] = {}
@@ -3129,7 +3150,6 @@ def _kv_addr_limit(
 _I32_KV_FLAT_BYTES = 0x8000_0000
 _I32_ONLY_KV_LOADERS = {
     "use_conflict_free_v": _I32_KV_FLAT_BYTES,  # gfx942 _issue_v_transposed
-    "use_conflict_free_v_store": _I32_KV_FLAT_BYTES,  # gfx942 _cfvst_load_v_regs
     "use_v_hbm_direct": _I32_KV_FLAT_BYTES,  # gfx942 _v_hbm_elem
     "use_k_hbm_direct": _I32_KV_BUFFER_BYTES,  # gfx942 _read_k8_mfma_operand
     # _issue_v_fp8_mfma_async is a buffer load, _issue_v_fp8_mfma_stripe a flat
