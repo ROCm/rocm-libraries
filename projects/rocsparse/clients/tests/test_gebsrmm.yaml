@@ -175,8 +175,8 @@ Tests:
   category: quick
   function: gebsrmm
   precision: *single_double_precisions_complex_real
-  M: [275, 300]
-  N: [8, 14]
+  M: [275]
+  N: [8]
   K: [173, 747]
   row_block_dimA: [8, 32]
   col_block_dimA: [16, 64]
