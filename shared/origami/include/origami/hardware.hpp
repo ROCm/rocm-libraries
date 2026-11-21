@@ -170,6 +170,15 @@ class ORIGAMI_EXPORT hardware_t {
   }
 
   /**
+   * @brief SIMDs whose workgroups a kernel's CUOccupancy counts.
+   *
+   * TensileLite's occupancy (and hipModuleOccupancyMaxActiveBlocksPerMultiprocessor) is per
+   * CU on CDNA and per WGP on RDNA: 4 SIMDs and one LDS pool either way.  N_CU counts
+   * physical CUs, and an RDNA WGP is two of them (simds_per_cu() is 2 there).
+   */
+  static constexpr size_t OCCUPANCY_SIMDS = 4;
+
+  /**
    * @brief SIMD units per Compute Unit for this hardware instance's architecture.
    */
   constexpr size_t simds_per_cu() const noexcept { return get_simds_per_cu(arch); }
