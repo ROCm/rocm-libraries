@@ -3032,6 +3032,36 @@ TEST(TestConvIgemmSplitPlan, FlexTailSplitSplitsTheRowTilesPastTheWholeRounds)
     EXPECT_EQ(explicitPlan.partialElems, explicitPlan.outElems);
 }
 
+TEST(TestConvIgemmCatalog, FlexWideRegisterTileDeclinesGridsOfFewerTilesThanUnits)
+{
+    // 320 row tiles of one 256-wide column tile: served on 304 and 320 units, declined on 400.
+    auto wide = dense(32, 48, {5, 64, 256}, {3, 3, 3}, {1, 1, 1}, true);
+    wide.dataType = DataType::HALF;
+    const auto pack = packFor(ConvDirection::FORWARD);
+    int checked = 0;
+    for(const auto& kernel : catalog(ConvDirection::FORWARD))
+    {
+        if(kernel.getIntMetadata("flex") == 0 || kernel.getIntMetadata("bn") != 256
+           || kernel.getStringMetadata("atom") != "mfma16_f16"
+           || kernel.getIntMetadata("split_policy") != 0)
+        {
+            continue;
+        }
+        ++checked;
+        for(const auto& [units, served] :
+            std::initializer_list<std::pair<int, bool>>{{304, true}, {320, true}, {400, false}})
+        {
+            SCOPED_TRACE(units);
+            const GraphFixture fixture(buildGraph(specFor(wide, ConvDirection::FORWARD)),
+                                       deviceOf("gfx942:sramecc+:xnack-", units));
+            const auto bound = matchesGraph(pack, fixture.context());
+            ASSERT_TRUE(bound.has_value());
+            EXPECT_EQ(matchesKernel(pack, fixture.context(), kernel, *bound), served);
+        }
+    }
+    EXPECT_EQ(checked, 1);
+}
+
 TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOtherKnob)
 {
     auto shape = dense(32, 48, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
@@ -3043,9 +3073,16 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOthe
         const GraphFixture gfx950(buildGraph(specFor(shape, direction)), deviceOf("gfx950", 256));
         const GraphFixture gfx942(buildGraph(specFor(shape, direction)),
                                   deviceOf("gfx942:sramecc+:xnack-", 304));
+        // The register-staged 256 x 256 tile serves grids of a block a unit or more: 320 row
+        // tiles.
+        auto wide = dense(32, 48, {5, 64, 256}, {3, 3, 3}, {1, 1, 1}, true);
+        wide.dataType = DataType::HALF;
+        const GraphFixture gfx942Wide(buildGraph(specFor(wide, direction)),
+                                      deviceOf("gfx942:sramecc+:xnack-", 304));
         const auto bound950 = matchesGraph(pack, gfx950.context());
         const auto bound942 = matchesGraph(pack, gfx942.context());
-        ASSERT_TRUE(bound950.has_value() && bound942.has_value());
+        const auto bound942Wide = matchesGraph(pack, gfx942Wide.context());
+        ASSERT_TRUE(bound950.has_value() && bound942.has_value() && bound942Wide.has_value());
         for(const auto& kernel : catalog(direction))
         {
             // Split-policy twins are served only where their plan differs from the default's.
@@ -3073,8 +3110,8 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOthe
                 continue;
             }
             ++flex;
-            const auto& home = dma ? gfx950 : gfx942;
-            const auto& homeBound = dma ? *bound950 : *bound942;
+            const auto& home = dma ? gfx950 : wideReg ? gfx942Wide : gfx942;
+            const auto& homeBound = dma ? *bound950 : wideReg ? *bound942Wide : *bound942;
             EXPECT_TRUE(matchesKernel(pack, home.context(), kernel, homeBound));
             EXPECT_FALSE(matchesKernel(
                 pack, (dma ? gfx942 : gfx950).context(), kernel, dma ? *bound942 : *bound950));

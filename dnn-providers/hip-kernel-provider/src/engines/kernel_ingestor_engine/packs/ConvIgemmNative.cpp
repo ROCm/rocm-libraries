@@ -1776,6 +1776,14 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
+    // The register-staged 256 x 256 tile serves grids of at least a block a unit: on fewer
+    // tiles its splits are twice as deep as the 256 x 128 tile's, which measured slower.
+    if(flexForm(*tile) == 2 && tile->bn == 256
+       && static_cast<long long>(grid->x) * grid->y * grid->z
+              < device_units::dispatchUnits(context.deviceProperties))
+    {
+        return false;
+    }
     // The XCD block order numbers a launch's blocks in 32 bits.
     const long long launchTiles = conv_igemm::launchTilesFor(grid->x, tile->blockThreads());
     if(tile->xcd != 0
