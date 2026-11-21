@@ -17,12 +17,13 @@ We do **not** scatter `sys.path` surgery across scripts. Instead both roots are
 runs, and `pytest` — from any working directory, with no `PYTHONPATH`.
 
 The only remaining filesystem lookups in the tree are for genuine *non-package*
-data (the `dsl_docs/` tree, the platform `tools/` scripts and the loose
-`_ua_shape_utils` benchmark helper). Those resolve through `rocke.assets`
-(`platform_root()`, `dsl_docs_dir()`, `platform_tools_dir()`,
-`shape_utils_dir()`), with the roots overridable via `ROCKE_PLATFORM_ROOT` /
-`ROCKE_DSL_DOCS` / `ROCKE_PLATFORM_TOOLS_DIR` (`shape_utils_dir()` derives from
-`dsl_docs_dir()`) — never via per-file `parents[N]` math.
+data (the `dsl_docs/` tree, the platform `tools/` scripts, the platform parity
+emitters and the loose `_ua_shape_utils` benchmark helper). Those resolve
+through `rocke.assets` (`platform_root()`, `dsl_docs_dir()`,
+`platform_tools_dir()`, `platform_parity_dir()`, `shape_utils_dir()`), with the
+roots overridable via `ROCKE_PLATFORM_ROOT` / `ROCKE_DSL_DOCS` /
+`ROCKE_PLATFORM_TOOLS_DIR` / `ROCKE_PLATFORM_PARITY_DIR` (`shape_utils_dir()`
+derives from `dsl_docs_dir()`) — never via per-file `parents[N]` math.
 
 ## Quick start (CMake-managed environment)
 
@@ -135,11 +136,17 @@ Everything else is green; GPU-only tests skip without a device.
 Non-package assets are located through `rocke.assets`, not path math:
 
 ```python
-from rocke.assets import platform_root, dsl_docs_dir, platform_tools_dir, shape_utils_dir
+from rocke.assets import (
+    dsl_docs_dir,
+    platform_parity_dir,
+    platform_root,
+    platform_tools_dir,
+    shape_utils_dir,
+)
 ```
 
 Override the roots for out-of-tree consumption with `ROCKE_PLATFORM_ROOT`,
-`ROCKE_DSL_DOCS`, `ROCKE_PLATFORM_TOOLS_DIR`.
+`ROCKE_DSL_DOCS`, `ROCKE_PLATFORM_TOOLS_DIR`, `ROCKE_PLATFORM_PARITY_DIR`.
 
 ## C++ engine
 
