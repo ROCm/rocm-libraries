@@ -34,7 +34,7 @@ namespace rocsparse
     rocsparse_status bellmm_template_general(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
-                                             I                         mb,
+                                             I                         m,
                                              I                         n,
                                              I                         kb,
                                              I                         bell_cols,
@@ -55,7 +55,7 @@ namespace rocsparse
     rocsparse_status bellmm_template_dispatch(rocsparse_handle          handle,
                                               rocsparse_operation       trans_A,
                                               rocsparse_operation       trans_B,
-                                              I                         mb,
+                                              I                         m,
                                               I                         n,
                                               I                         kb,
                                               I                         bell_cols,
@@ -77,7 +77,7 @@ namespace rocsparse
         RETURN_IF_ROCSPARSE_ERROR(rocsparse::bellmm_template_general(handle,
                                                                      trans_A,
                                                                      trans_B,
-                                                                     mb,
+                                                                     m,
                                                                      n,
                                                                      kb,
                                                                      bell_cols,
@@ -100,7 +100,7 @@ namespace rocsparse
 rocsparse_status rocsparse::bellmm_buffer_size(rocsparse_handle          handle,
                                                rocsparse_operation       trans_A,
                                                rocsparse_operation       trans_B,
-                                               int64_t                   mb,
+                                               int64_t                   m,
                                                int64_t                   n,
                                                int64_t                   kb,
                                                int64_t                   bell_cols,
@@ -126,6 +126,11 @@ rocsparse_status rocsparse::bellmm_buffer_size(rocsparse_handle          handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    // Same contract as compute: transposed blocked ELL is not implemented,
+    // including when the later compute stage would have taken the quick return.
+    ROCSPARSE_CHECKARG(
+        1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
+
     *buffer_size = 0;
     return rocsparse_status_success;
 }
@@ -133,7 +138,7 @@ rocsparse_status rocsparse::bellmm_buffer_size(rocsparse_handle          handle,
 rocsparse_status rocsparse::bellmm_preprocess(rocsparse_handle          handle,
                                               rocsparse_operation       trans_A,
                                               rocsparse_operation       trans_B,
-                                              int64_t                   mb,
+                                              int64_t                   m,
                                               int64_t                   n,
                                               int64_t                   kb,
                                               int64_t                   bell_cols,
@@ -159,6 +164,9 @@ rocsparse_status rocsparse::bellmm_preprocess(rocsparse_handle          handle,
 {
     ROCSPARSE_ROUTINE_TRACE;
 
+    ROCSPARSE_CHECKARG(
+        1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
+
     return rocsparse_status_success;
 }
 
@@ -168,7 +176,7 @@ namespace rocsparse
     static rocsparse_status bellmm_quickreturn(rocsparse_handle          handle,
                                                rocsparse_operation       trans_A,
                                                rocsparse_operation       trans_B,
-                                               int64_t                   mb,
+                                               int64_t                   m,
                                                int64_t                   n,
                                                int64_t                   kb,
                                                int64_t                   bell_cols,
@@ -194,29 +202,20 @@ namespace rocsparse
     {
         ROCSPARSE_ROUTINE_TRACE;
 
-        if(mb == 0 || n == 0 || kb == 0 || bell_cols == 0)
+        if(m == 0 || n == 0 || kb == 0 || bell_cols == 0)
         {
-            const int64_t m = mb * bell_block_dim;
-            const int64_t k = kb * bell_block_dim;
-
+            // Only trans_A == none reaches here. m is the row count of C, which
+            // need not be a multiple of block_dim.
             // matrix never accessed however still need to update C matrix
-            const int64_t Csize = (trans_A == rocsparse_operation_none) ? m * n : k * n;
+            const int64_t Csize = m * n;
             if(Csize > 0)
             {
                 if(dense_C == nullptr || beta == nullptr)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
                 }
-                RETURN_IF_ROCSPARSE_ERROR(
-                    rocsparse::scale_2d_array(handle,
-                                              (trans_A == rocsparse_operation_none) ? m : k,
-                                              n,
-                                              ldc,
-                                              batch_count_C,
-                                              batch_stride_C,
-                                              beta,
-                                              dense_C,
-                                              order_C));
+                RETURN_IF_ROCSPARSE_ERROR(rocsparse::scale_2d_array(
+                    handle, m, n, ldc, batch_count_C, batch_stride_C, beta, dense_C, order_C));
             }
 
             return rocsparse_status_success;
@@ -228,7 +227,7 @@ namespace rocsparse
     static rocsparse_status bellmm_checkarg(rocsparse_handle          handle, //0
                                             rocsparse_operation       trans_A, //1
                                             rocsparse_operation       trans_B, //2
-                                            int64_t                   mb, //3
+                                            int64_t                   m, //3
                                             int64_t                   n, //4
                                             int64_t                   kb, //5
                                             int64_t                   bell_cols, //6
@@ -269,17 +268,31 @@ namespace rocsparse
                            (descr->storage_mode != rocsparse_storage_mode_sorted),
                            rocsparse_status_requires_sorted_storage);
 
-        ROCSPARSE_CHECKARG_SIZE(3, mb);
+        ROCSPARSE_CHECKARG_SIZE(3, m);
         ROCSPARSE_CHECKARG_SIZE(4, n);
         ROCSPARSE_CHECKARG_SIZE(5, kb);
         ROCSPARSE_CHECKARG_SIZE(6, bell_cols);
         ROCSPARSE_CHECKARG_SIZE(7, bell_block_dim);
         ROCSPARSE_CHECKARG(7, bell_block_dim, (bell_block_dim == 0), rocsparse_status_invalid_size);
 
+        // Blocked ELL supports only trans_A == none, including the quick return.
+        // Checking it here keeps an empty product from succeeding when a product
+        // with stored blocks would return not_implemented.
+        ROCSPARSE_CHECKARG(
+            1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
+
+        // The batch counts are checked before the quick return for the same reason,
+        // and they must stay in front of it. scale_2d_array in the quick return walks
+        // batch_count_C at batch_stride_C, so an empty product with a batch count other
+        // than 1 would scale C, and a zero stride would let every batch scale the same C.
+        ROCSPARSE_CHECKARG(8, batch_count_A, (batch_count_A != 1), rocsparse_status_invalid_value);
+        ROCSPARSE_CHECKARG(16, batch_count_B, (batch_count_B != 1), rocsparse_status_invalid_value);
+        ROCSPARSE_CHECKARG(22, batch_count_C, (batch_count_C != 1), rocsparse_status_invalid_value);
+
         const rocsparse_status status = rocsparse::bellmm_quickreturn(handle,
                                                                       trans_A,
                                                                       trans_B,
-                                                                      mb,
+                                                                      m,
                                                                       n,
                                                                       kb,
                                                                       bell_cols,
@@ -316,11 +329,6 @@ namespace rocsparse
         ROCSPARSE_CHECKARG_POINTER(20, dense_C);
 
         ROCSPARSE_CHECKARG(
-            1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
-        ROCSPARSE_CHECKARG(
-            1, trans_A, (trans_A != rocsparse_operation_none), rocsparse_status_not_implemented);
-
-        ROCSPARSE_CHECKARG(
             15,
             ldb,
             ((trans_B == rocsparse_operation_none && order_B == rocsparse_order_column)
@@ -335,18 +343,10 @@ namespace rocsparse
                 && (ldb < n),
             rocsparse_status_invalid_size);
 
-        ROCSPARSE_CHECKARG(21,
-                           ldc,
-                           (ldc < mb * bell_block_dim && order_C == rocsparse_order_column),
-                           rocsparse_status_invalid_size);
+        ROCSPARSE_CHECKARG(
+            21, ldc, (ldc < m && order_C == rocsparse_order_column), rocsparse_status_invalid_size);
         ROCSPARSE_CHECKARG(
             21, ldc, (ldc < n && order_C == rocsparse_order_row), rocsparse_status_invalid_size);
-
-        ROCSPARSE_CHECKARG(8, batch_count_A, (batch_count_A != 1), rocsparse_status_invalid_value);
-
-        ROCSPARSE_CHECKARG(16, batch_count_B, (batch_count_B != 1), rocsparse_status_invalid_value);
-
-        ROCSPARSE_CHECKARG(22, batch_count_C, (batch_count_C != 1), rocsparse_status_invalid_value);
 
         return rocsparse_status_continue;
     }
@@ -356,7 +356,7 @@ template <typename T, typename I, typename A, typename B, typename C>
 rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
                                             rocsparse_operation       trans_A,
                                             rocsparse_operation       trans_B,
-                                            int64_t                   mb,
+                                            int64_t                   m,
                                             int64_t                   n,
                                             int64_t                   kb,
                                             int64_t                   bell_cols,
@@ -386,7 +386,7 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
                          rocsparse::replaceX<T>("rocsparse_Xbellmm"),
                          trans_A,
                          trans_B,
-                         mb,
+                         m,
                          n,
                          kb,
                          bell_cols,
@@ -413,7 +413,7 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
     const rocsparse_status status = rocsparse::bellmm_checkarg<T, C>(handle,
                                                                      trans_A,
                                                                      trans_B,
-                                                                     mb,
+                                                                     m,
                                                                      n,
                                                                      kb,
                                                                      bell_cols,
@@ -446,7 +446,7 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
         (rocsparse::bellmm_template_dispatch<T, I, A, B, C>(handle,
                                                             trans_A,
                                                             trans_B,
-                                                            mb,
+                                                            m,
                                                             n,
                                                             kb,
                                                             bell_cols,
@@ -470,7 +470,7 @@ rocsparse_status rocsparse::bellmm_template(rocsparse_handle          handle,
         rocsparse_handle          handle,                                \
         rocsparse_operation       trans_A,                               \
         rocsparse_operation       trans_B,                               \
-        int64_t                   mb,                                    \
+        int64_t                   m,                                     \
         int64_t                   n,                                     \
         int64_t                   kb,                                    \
         int64_t                   bell_cols,                             \

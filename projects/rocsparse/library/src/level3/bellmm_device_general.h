@@ -41,7 +41,7 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void bellmm_general_blockdim_device(I                   col_offset,
                                                              rocsparse_operation trans_A,
                                                              rocsparse_operation trans_B,
-                                                             I                   Mb,
+                                                             I                   M,
                                                              I                   N,
                                                              T                   alpha,
                                                              I                   bell_cols,
@@ -63,7 +63,7 @@ namespace rocsparse
         // block dimensions larger than the thread block) and hipThreadIdx_y selects the dense
         // column.
         const I block_row = hipBlockIdx_x;
-        if(block_row >= Mb)
+        if(static_cast<int64_t>(block_row) * bell_block_dim >= M)
         {
             return;
         }
@@ -75,6 +75,10 @@ namespace rocsparse
         const I block_dim       = bell_block_dim;
         const I ell_block_width = bell_cols / block_dim;
 
+        // Rows of this block row that lie in C. When block_dim does not divide M the
+        // last block row is partial, and neither A nor C stores its remaining rows.
+        const I rows = rocsparse::min(block_dim, M - block_row * block_dim);
+
         // Dense column handled by this thread.
         const I n = hipThreadIdx_y + col_offset;
 
@@ -83,7 +87,7 @@ namespace rocsparse
             // Local row inside the A block.
             const I r = hipThreadIdx_x + x;
 
-            if(r >= block_dim || n >= N)
+            if(r >= rows || n >= N)
             {
                 continue;
             }

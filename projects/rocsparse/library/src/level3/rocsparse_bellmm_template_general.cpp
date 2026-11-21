@@ -37,8 +37,8 @@ namespace rocsparse
     // BELL_BLOCK_DIM to cover block dimensions larger than the thread block)
     // and hipThreadIdx_y selects the dense column (tiled by BLK_SIZE_Y). There
     // is no cross-thread reduction, so the kernel is correct for any square
-    // TILE x TILE workgroup: rows beyond block_dim and columns beyond N are
-    // simply skipped by the in-kernel guards.
+    // TILE x TILE workgroup: rows beyond block_dim or past the last row of C,
+    // and columns beyond N, are simply skipped by the in-kernel guards.
     //
     // Historically TILE was the fixed magic number 32 (=> 32x32 = 1024 threads).
     // That is a poor fit for small ELL block dimensions: a block_dim of 8 still
@@ -99,7 +99,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BELL_BLOCK_DIM* BLK_SIZE_Y)
     void bellmm_general_blockdim_kernel(rocsparse_operation trans_A,
                                         rocsparse_operation trans_B,
-                                        I                   Mb,
+                                        I                   M,
                                         I                   N,
                                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                         I bell_cols,
@@ -137,7 +137,7 @@ namespace rocsparse
                 static_cast<I>(col_offset),
                 trans_A,
                 trans_B,
-                Mb,
+                M,
                 N,
                 alpha,
                 bell_cols,
@@ -167,7 +167,7 @@ namespace rocsparse
     rocsparse_status bellmm_template_general(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
-                                             I                         mb,
+                                             I                         m,
                                              I                         n,
                                              I                         kb,
                                              I                         bell_cols,
@@ -200,6 +200,10 @@ namespace rocsparse
         // 32; on wave32 it shrinks to fit small block dimensions.
         const rocsparse_int tile = rocsparse::bellmm_general_tile_size(handle, bell_block_dim);
 
+        // One thread block per block row. When block_dim does not divide m, the last
+        // block row is partial and the kernel skips its rows past m.
+        const I mb = (m - 1) / bell_block_dim + 1;
+
 #define ROCSPARSE_LAUNCH_BELLMM_GENERAL_IMPL(TILE, GRID_STRIDE, BLOCKS, THREADS)       \
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(                                                \
         (rocsparse::bellmm_general_blockdim_kernel<(TILE), (TILE), (GRID_STRIDE), T>), \
@@ -209,7 +213,7 @@ namespace rocsparse
         stream,                                                                        \
         trans_A,                                                                       \
         trans_B,                                                                       \
-        mb,                                                                            \
+        m,                                                                             \
         n,                                                                             \
         ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),                              \
         bell_cols,                                                                     \
@@ -265,7 +269,7 @@ namespace rocsparse
     template rocsparse_status rocsparse::bellmm_template_general(rocsparse_handle    handle,         \
                                                                  rocsparse_operation trans_A,        \
                                                                  rocsparse_operation trans_B,        \
-                                                                 ITYPE               mb,             \
+                                                                 ITYPE               m,              \
                                                                  ITYPE               n,              \
                                                                  ITYPE               kb,             \
                                                                  ITYPE               bell_cols,      \
