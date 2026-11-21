@@ -1894,6 +1894,7 @@ collected under the umbrella epic AIHPBLAS-5028.
 | What Math CI runs, and which of its jobs gate, is not visible from this repository | Medium | Medium | This document, which is a snapshot and will drift. The gap closes as hipBLASLt's testing moves to TheRock CI | ROCM-31467 |
 | The list of checks required to merge is maintained by hand in `docs/gardening.md`, and it has drifted from the repository ruleset | Medium | Medium | Anyone can read the ruleset with `gh api` (see [Validation Gates and Ownership](#validation-gates-and-ownership)) | [#12996](https://github.com/ROCm/rocm-libraries/issues/12996) |
 | No sanitizer lane is a required check, so an ASAN failure does not block a merge | Medium | High if hit | The ASAN lanes run on every hipBLASLt pull request, and reviewers can see their results | AIHPBLAS-1079 |
+| A case that stops for memory is a skip, and the job stays green, everywhere except gfx1250-strict's large-memory groups. A client bug that fakes a shortage shows up only as a longer skip list: in [#15973](https://github.com/ROCm/rocm-libraries/pull/15973)'s CI, 161 grouped GEMM cases on gfx94X skipped this way | Medium | High if hit: the CPU check of those cases is lost without a failure | The end of each run lists every memory stop under `[ MEMORY   ]`. A host buffer counts as short of memory only when its allocation failed, and `MatmulMemory_pre_checkin` fails a small grouped case that stops for memory | AIHPBLAS-5352, [#16017](https://github.com/ROCm/rocm-libraries/issues/16017) |
 
 ### Known bugs and flaky tests
 

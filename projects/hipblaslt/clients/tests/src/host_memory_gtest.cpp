@@ -255,6 +255,21 @@ namespace
             << why;
     }
 
+    TEST(HostMemory_pre_checkin, buffer_emptied_after_allocating_is_not_a_failure)
+    {
+        // A test that hands a buffer's memory on early leaves a null buffer in its vector, and a
+        // later allocation check of that vector must not report it as a memory shortage.
+        std::vector<HipHostBuffer> group;
+        group.emplace_back(HIP_R_8I, 4096);
+        ASSERT_EQ(group[0].memcheck(), hipSuccess);
+        HipHostBuffer taken = std::move(group[0]);
+        ASSERT_EQ(group[0].buf(), nullptr);
+        EXPECT_FALSE(group[0].allocation_failed());
+        EXPECT_EQ(host_allocation_failure(group[0]), "");
+        EXPECT_EQ(host_allocation_failure({&group}), "");
+        EXPECT_EQ(taken.memcheck(), hipSuccess);
+    }
+
     TEST(HostMemory_pre_checkin, memory_shortages_are_listed_with_their_reasons)
     {
         MemoryShortageLog log;
