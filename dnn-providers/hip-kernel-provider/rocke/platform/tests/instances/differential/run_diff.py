@@ -861,11 +861,9 @@ def _run_family_hashed(name, binpath, mode, canonical, src_dir):
                 verdict = "CANON_EQUAL"
             else:
                 verdict = "STRUCT_DRIFT"
-        ref_sha = (
-            p_emission.canonical_sha or p_emission.output_sha
-            if canonical
-            else p_emission.output_sha
-        )
+        # Without a canonical form there is no canonical hash to record or
+        # check; the config then reads as missing, never as its raw bytes.
+        ref_sha = p_emission.canonical_sha if canonical else p_emission.output_sha
         configs.append(
             _config_record(
                 idx,
@@ -1044,7 +1042,8 @@ def _default_family_workers(family_count: int, _mode: str) -> int:
 def python_reference_shas(name, mode, canonical, src_dir):
     """One family's Python reference hashes, {config index: sha}, without the
     C++ engine: what a golden records. Returns (shas, error); a family whose
-    emitter does not accept the mode yields ({}, None)."""
+    emitter does not accept the mode yields ({}, None). With ``canonical``, an
+    output without a canonical form is an error: no hash stands in for it."""
     limit = config_limit(name)
     batch = _run_python_batch(
         name,
@@ -1068,12 +1067,11 @@ def python_reference_shas(name, mode, canonical, src_dir):
             break
         if emission.returncode < 0 or emission.returncode == 124:
             return shas, f"config {idx}: {emission.error or 'crashed'}"
-        if emission.has_output:
-            shas[str(idx)] = (
-                emission.canonical_sha or emission.output_sha
-                if canonical
-                else emission.output_sha
-            )
+        if not emission.has_output:
+            continue
+        if canonical and emission.canonical_error:
+            return shas, f"config {idx}: no canonical form: {emission.canonical_error}"
+        shas[str(idx)] = emission.canonical_sha if canonical else emission.output_sha
     return shas, None
 
 
@@ -1492,18 +1490,23 @@ def _golden_step_file(args, kind, flavor, golden_file, cur, scope, failures):
     print(f"  UNBLESSED CHANGE: {len(result.changed)}")
     print(f"  MISSING (gone)  : {len(result.missing)}")
     print(f"  NEW (unblessed) : {len(result.new)}")
-    for fam, idx in (result.changed + result.missing)[:30]:
+    for fam, idx in (result.changed + result.missing + result.new)[:30]:
         print(f"    {fam}[{idx}]")
-    if not result.ok:
+    if result.changed or result.missing:
         drifting = {family for family, _ in result.changed + result.missing}
         print(
             "\nGOLDEN MISMATCH: emitted output changed vs the committed anchor; "
             "unless the change is intended, it is a regression.\n"
             + rerecord_hint(GOLDEN_NAME, drifting)
         )
-        return 1
     if result.new:
-        print("\nNew configs not in golden (informational; re-bless to add).")
+        print(
+            "\nGOLDEN UNBLESSED: configs with output and no blessed hash are not "
+            "checked; bless them.\n"
+            + rerecord_hint(GOLDEN_NAME, {family for family, _ in result.new})
+        )
+    if not result.ok:
+        return 1
     print("GOLDEN OK")
     return 0
 

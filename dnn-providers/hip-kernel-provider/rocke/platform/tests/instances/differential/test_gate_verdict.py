@@ -317,7 +317,9 @@ class TestDifferentialConcurrency(unittest.TestCase):
         self.assertEqual(result["status"], "BATCH_INCOMPLETE")
         self.assertIn("native returned 1 records", result["error"])
 
-    def test_noncanonicalizable_equal_output_retains_raw_reference_sha(self):
+    def test_noncanonicalizable_equal_output_records_no_reference_sha(self):
+        # Its raw bytes are not a canonical hash: recorded in their place they
+        # would anchor a value the canonical check never computes.
         raw_sha = run_diff.sh(b"identical but not canonicalizable")
         invalid = run_diff.Emission(
             0,
@@ -340,7 +342,8 @@ class TestDifferentialConcurrency(unittest.TestCase):
                         "gemm", Path("archive.a"), "ir", canonical=True
                     )
         self.assertEqual(result["status"], "GREEN")
-        self.assertEqual(run_diff.collect_ref_shas([result]), {"gemm": {"0": raw_sha}})
+        self.assertEqual(result["configs"][0]["ref_sha"], None)
+        self.assertEqual(run_diff.collect_ref_shas([result]), {})
 
     def test_noncanonicalizable_differing_output_is_canon_error(self):
         c_invalid = run_diff.Emission(
@@ -647,6 +650,20 @@ class TestModeRejection(unittest.TestCase):
         )
         self.assertIsNone(error)
         self.assertEqual(shas, {"0": "canon0"})
+
+    def test_an_output_without_a_canonical_form_fails_the_family(self):
+        # Its raw hash is not recorded or checked in place of a canonical one.
+        shas, error = self.reference_shas(
+            [
+                run_diff.Emission(0, True, "out0", "", canonical_sha="canon0"),
+                run_diff.Emission(
+                    0, True, "out1", "", canonical_error="ValueError: bad header"
+                ),
+                run_diff.Emission(1, False, None, "unknown config 2\n"),
+            ]
+        )
+        self.assertEqual(shas, {"0": "canon0"})
+        self.assertEqual(error, "config 1: no canonical form: ValueError: bad header")
 
     def test_a_refused_mode_records_nothing_for_the_family(self):
         shas, error = self.reference_shas(

@@ -239,7 +239,8 @@ class GoldenStore:
 
 @dataclass(frozen=True)
 class Comparison:
-    """A golden check: configs whose hash changed, vanished or is new."""
+    """A golden check: configs whose hash changed, vanished or is new (has
+    output and no blessed hash)."""
 
     blessed: int
     changed: tuple[tuple[str, str], ...]
@@ -248,8 +249,9 @@ class Comparison:
 
     @property
     def ok(self) -> bool:
-        """New configs are informational; changed or missing ones fail."""
-        return not self.changed and not self.missing
+        """Changed, missing and new configs all fail: a new config is output
+        that no golden checks until it is blessed."""
+        return not self.changed and not self.missing and not self.new
 
 
 def compare(

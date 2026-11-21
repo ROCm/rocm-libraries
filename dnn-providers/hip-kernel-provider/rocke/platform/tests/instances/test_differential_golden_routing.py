@@ -85,9 +85,9 @@ class TestGoldenRouting(unittest.TestCase):
                     self.assertNotIn(name, blessed)
 
 
-class TestGoldenRoutingGates(unittest.TestCase):
+class GoldenGateTree(unittest.TestCase):
     """main()'s golden step over a temp tree: a platform family ``plat`` and a
-    library family ``libfam``, each with its own golden file."""
+    library family ``libfam``, each with its own golden file. Holds no tests."""
 
     def setUp(self):
         tmp = TemporaryDirectory()
@@ -123,14 +123,20 @@ class TestGoldenRoutingGates(unittest.TestCase):
         argv = ["run_diff.py", "--python-only", step, "--flavor", "llvm23", *extra]
         out = io.StringIO()
         reference = mock.patch.object(
-            run_diff,
-            "python_reference_families",
-            side_effect=lambda fams, *a: ({n: self.current[n] for n, _ in fams}, []),
+            run_diff, "python_reference_families", side_effect=self.reference_families
         )
         argv_patch = mock.patch.object(sys, "argv", argv)
         with reference, argv_patch, contextlib.redirect_stdout(out):
             code = run_diff.main()
         return code, out.getvalue()
+
+    def reference_families(self, fams, *_):
+        """The stand-in for the Python emitters: ``self.current``'s hashes."""
+        return {name: self.current[name] for name, _ in fams}, []
+
+
+class TestGoldenRoutingGates(GoldenGateTree):
+    """The golden step routes each family to the file beside its emitters."""
 
     def test_a_fixture_family_routes_by_its_emitter_directory(self):
         self.assertEqual(
@@ -228,3 +234,19 @@ class TestGoldenRoutingGates(unittest.TestCase):
         ):
             section = run_diff.GoldenStore.load(path).section(run_diff.LL, "llvm23")
             self.assertEqual(section, expected)
+
+
+class TestUnblessedConfigs(GoldenGateTree):
+    """Output with no blessed hash is checked by nothing, so it fails."""
+
+    def test_an_unblessed_config_fails_with_its_rerecord_command(self):
+        self.bless(self.golden, {"plat": {"0": "p0"}})
+        self.bless(self.lib_golden, {"libfam": {"0": "l0"}})
+        self.current["libfam"] = {"0": "l0", "1": "l1"}
+        code, out = self.main("--check-golden")
+        self.assertEqual(code, 1)
+        self.assertIn("GOLDEN UNBLESSED", out)
+        self.assertIn("    libfam[1]\n", out)
+        self.assertIn(
+            "\n    python tools/golden.py rerecord differential --only libfam\n", out
+        )

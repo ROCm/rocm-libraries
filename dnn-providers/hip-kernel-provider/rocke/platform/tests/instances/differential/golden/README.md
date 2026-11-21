@@ -17,7 +17,10 @@ It holds two kinds of hash (format: `golden_store.py`):
   named-barrier pointer ABI makes its output structurally distinct from LLVM23.
 - `ir_canonical` -- the canonical `ck.dsl.ir/v1` serialization (stable across SSA-id
   renumbering). It is produced before lowering and is the same in every flavor, so it has one
-  section.
+  section. An output with several kernels (each starting at its `ckdsl.ir` header, with
+  `;` banner lines such as fused_moe_e2e's stage banners between them) canonicalizes each
+  kernel and keeps the banners (`python_batch_worker.canonical_text`). An output with no
+  canonical form fails the check and the record; its raw bytes never stand in.
 
 Beside them, `fingerprint` holds one checksum per family over that family's hashes, written by
 every record. Two changes that re-record the same family both rewrite its line, so git reports
@@ -34,8 +37,11 @@ python3 run_diff.py --mode ir --canonical --python-only --check-golden
 
 `--python-only` runs only the Python reference emitters: no C++ build, and any host checks
 every flavor (the flavor is an argument to lowering). Both commands must print `GOLDEN OK`
-(exit 0). CI runs exactly these from the installed test tree, as the quick-tier CTest
-entries `rocke_differential_golden_ll` and `rocke_differential_golden_canonical`.
+(exit 0). A config whose hash changed or is gone fails (`GOLDEN MISMATCH`), and so does a
+config with output and no blessed hash (`GOLDEN UNBLESSED`), since no check covers it until
+it is blessed; each prints the re-record command for its families. CI runs exactly these
+from the installed test tree, as the quick-tier CTest entries `rocke_differential_golden_ll`
+and `rocke_differential_golden_canonical`.
 
 `GOLDEN OK` answers *"does output match the blessed hashes"* and nothing else; it is not the
 parity verdict. The byte-identity gate (`tools/check_byte_identity.py`, or `run_diff.py`

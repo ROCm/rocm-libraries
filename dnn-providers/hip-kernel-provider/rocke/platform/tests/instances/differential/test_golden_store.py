@@ -152,10 +152,13 @@ def test_a_filtered_check_ignores_unselected_families():
     assert result.blessed == 1
 
 
-def test_new_configs_alone_pass():
+def test_new_configs_alone_fail():
+    # Output with no blessed hash is not checked, so a check that passed it
+    # would anchor nothing for it.
     result = compare({"conv": {"0": "a"}}, {"conv": {"0": "a", "1": "b"}})
-    assert result.ok
+    assert not result.ok
     assert result.new == (("conv", "1"),)
+    assert not result.changed and not result.missing
 
 
 def test_configs_are_reported_in_numeric_order():
