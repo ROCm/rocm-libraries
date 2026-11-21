@@ -5,11 +5,13 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
     add_custom_target(test_ck_tile_batched_gemm)
 
     add_gtest_executable(test_ck_tile_batched_gemm_f16 test_batched_gemm_f16.cpp)
+    if(TARGET test_ck_tile_batched_gemm_f16)
+        add_dependencies(test_ck_tile_batched_gemm test_ck_tile_batched_gemm_f16)
+    endif()
     add_gtest_executable(test_ck_tile_batched_gemm_bf16 test_batched_gemm_bf16.cpp)
-
-    add_dependencies(test_ck_tile_batched_gemm
-        test_ck_tile_batched_gemm_f16
-        test_ck_tile_batched_gemm_bf16)
+    if(TARGET test_ck_tile_batched_gemm_bf16)
+        add_dependencies(test_ck_tile_batched_gemm test_ck_tile_batched_gemm_bf16)
+    endif()
 
     # FP8 / BF8 batched GEMM relies on the fp8/bf8 MFMA or WMMA paths.
     # - gfx908 / gfx90a use the scalar f32 fallback in
@@ -39,14 +41,14 @@ if(GPU_TARGETS MATCHES "gfx9|gfx11|gfx12|amdgcnspirv")
         endif()
         add_gtest_executable(test_ck_tile_batched_gemm_f8 test_batched_gemm_f8.cpp)
         add_gtest_executable(test_ck_tile_batched_gemm_bf8 test_batched_gemm_bf8.cpp)
-        target_compile_options(test_ck_tile_batched_gemm_f8
-            PRIVATE ${CK_TILE_BATCHED_GEMM_F8_COMPILE_OPTIONS})
-        target_compile_options(test_ck_tile_batched_gemm_bf8
-            PRIVATE ${CK_TILE_BATCHED_GEMM_F8_COMPILE_OPTIONS})
         if(TARGET test_ck_tile_batched_gemm_f8)
+            target_compile_options(test_ck_tile_batched_gemm_f8
+                PRIVATE ${CK_TILE_BATCHED_GEMM_F8_COMPILE_OPTIONS})
             add_dependencies(test_ck_tile_batched_gemm test_ck_tile_batched_gemm_f8)
         endif()
         if(TARGET test_ck_tile_batched_gemm_bf8)
+            target_compile_options(test_ck_tile_batched_gemm_bf8
+                PRIVATE ${CK_TILE_BATCHED_GEMM_F8_COMPILE_OPTIONS})
             add_dependencies(test_ck_tile_batched_gemm test_ck_tile_batched_gemm_bf8)
         endif()
     endif()
