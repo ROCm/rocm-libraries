@@ -37,7 +37,8 @@ enabled it links against **rocSPARSE**, **rocBLAS**, **rocPRIM**, and **rocRAND*
 algorithms across host, OpenMP, and HIP backends. Correctness is therefore validated by running each
 algorithm on each available backend and cross-checking, which makes the suite backend-parameterized
 rather than GPU-specific. Much of the solver logic *can* run on the host backend without a GPU, but the
-GPU paths and the low-level `local_matrix`/`local_vector` structures require real hardware.
+GPU paths, including those of the low-level `LocalMatrix` and `LocalVector` structures, require real
+hardware.
 
 ---
 
@@ -76,8 +77,8 @@ ROCALUTION_EMULATION_REGRESSION=1 HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-tes
 HIP_VISIBLE_DEVICES=0 gpu-run ./rocalution-unit-test
 ```
 
-> When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`local_matrix_*`,
-> `backend`, `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
+> When any `ROCALUTION_EMULATION_*` var is set, GPU-heavy infrastructure suites (`backend`,
+> `preconditioner` except its repeated-move test, MPI infra) call `GTEST_SKIP()`, and
 > solver suites shrink their parameter lists. If no emulation variables are set, the full set of parameter combinations is exercised.
 
 **3. Add the right kind of test:** see [Choosing the Right Test Type](#choosing-the-right-test-type).
@@ -251,7 +252,6 @@ transfers and multi-node communication behave as expected.
 | Direct solvers | LU, QR, inversion |
 | Algebraic multigrid | pairwise AMG, Ruge–Stüben AMG, smoothed-aggregation (SA-AMG), unsmoothed-aggregation (UA-AMG) |
 | Preconditioners | Jacobi, GS/SGS, ILU/ILUT/IC, ItILU0, (AI)Chebyshev, FSAI, SPAI, TNS, AS/RAS, multi-colored GS/SGS/ILU, multi-elimination, variable |
-| Structures (GPU) | `local_matrix` ops / conversions |
 | Other | Chebyshev iteration, mixed precision, iterative-solver integration (`test_itersolver`, coverage-only) |
 | MPI (`SUPPORT_MPI`) | `global_matrix`, `global_vector`, `parallel_manager`, `global_amg` (multi-rank AMG setup, and `ReBuildNumeric()` with host levels) |
 
@@ -272,8 +272,7 @@ env vars. The legacy `*checkin*` / `*nightly*` filters in `rtest.xml` and Jenkin
 current test names. The unit-test binaries are in every category and run whole; the emulation
 variables do not apply to them.
 
-**What requires GPU hardware:** the HIP-backend runs of every suite and the `local_*` structure
-suites.
+**What requires GPU hardware:** the HIP-backend runs of every suite and of the unit tests.
 
 **What runs on CPU-only:** the host-backend runs (build `--host`).
 
@@ -296,18 +295,21 @@ mpirun -np 2 ./rocalution-test --gtest_filter='global_amg/*:global_matrix/*'
 Laplacian) across backends and both precisions; the emulation tiers shrink parameter lists rather than
 running exhaustive size sweeps. The strategy prefers cross-backend correctness over large problem sizes.
 
-**Overlap with the unit tests:** the `local_matrix*` and `backend` suites skip in the `quick`, `standard` and `comprehensive` categories and run in `full`, except
+**Overlap with the unit tests:** the `backend` suites skip in the `quick`, `standard` and `comprehensive` categories and run in `full`, except
 `backend_omp_parallel_region` and `backend_omp_restore_state`, which run in every category. They
 test operations that the unit tests now check against independent references. They are kept until
 a review of each suite confirms that the unit tests cover all of its checks, on every platform and
 in every CI job that runs the suite. A suite that is covered is then deleted, not maintained next to
 the unit tests. The `local_matrix_allocations`, `local_matrix_zero`, `local_matrix_set_data_ptr`,
 `local_matrix_multicoloring`, `local_matrix_itsolve`, `local_matrix_solve`, `local_stencil_bad_args`,
-`local_vector_bad_args`, `local_vector_test` and `local_vector/parameterized_local_vector_test`
-suites have been deleted on that basis. The Jenkins test command runs both unit-test binaries after
-`rocalution-test`, so the Jenkins lanes still run these checks. A clients-only build (`install.sh
---clients-only`) doesn't build the unit tests, and the `rtest.xml` sets run only
-`rocalution-test`, so clients-only builds and `rtest.xml` runs no longer run these checks.
+`local_matrix_bad_args`, `local_matrix_test`,
+`local_matrix_conversions/parameterized_local_matrix_conversions`,
+`local_matrix_test/parameterized_local_matrix_test`, `local_vector_bad_args`, `local_vector_test`
+and `local_vector/parameterized_local_vector_test` suites have been deleted on that basis. The
+Jenkins test command runs both unit-test binaries after `rocalution-test`, so the Jenkins lanes
+still run these checks. A clients-only build (`install.sh --clients-only`) doesn't build the unit
+tests, and the `rtest.xml` sets run only `rocalution-test`, so clients-only builds and `rtest.xml`
+runs no longer run these checks.
 `local_vector_amax_ties` is kept for that reason: it runs in every category and every `rtest.xml`
 set, including the emulation sets. The solver, preconditioner and AMG suites stay as the
 integration layer.
@@ -351,7 +353,7 @@ is right, not only that two implementations agree. Cross-backend agreement, runn
 the host and on the GPU and requiring the same answer, is the secondary signal. It is cheap and
 catches bugs of one backend, but not a design error that both backends share, and a disagreement does
 not say which backend is wrong. A large share of the suite is host-testable (build `--host`), while
-the GPU and `local_*` structure paths need hardware.
+the GPU paths need hardware.
 
 Tiering is driven by environment variables (`ROCALUTION_EMULATION_*`) rather than GTest name prefixes
 because the same test bodies serve every tier — the tier just shrinks parameter lists and skips the
@@ -367,7 +369,7 @@ The presubmit gate is the monorepo **TheRock CI** GitHub Actions workflow
 (`.github/scripts/therock_configure_ci.py`) and tests only changed projects
 (`-DTHEROCK_ENABLE_ROCALUTION=ON` + sparse + rand). By default it runs the CTest **`standard`**
 category, which sets `ROCALUTION_EMULATION_REGRESSION=1` — the regression subset in which GPU-heavy
-infrastructure suites (`local_matrix_*`, `backend`, MPI infra) skip
+infrastructure suites (`backend`, MPI infra) skip
 themselves and solver suites use reduced parameter sets. The other categories map to the emulation
 vars: `quick` → `ROCALUTION_EMULATION_SMOKE=1`, `comprehensive` → `ROCALUTION_EMULATION_EXTENDED=1`,
 `full` → complete parameter sweep (no emulation var). Scope widens per PR via labels
@@ -537,7 +539,6 @@ device configurations are not ASAN-covered.
 | New host-backend algorithm or fix (solver/preconditioner logic) | A parameterized host-backend case in `test_<component>.cpp`; runnable with `--host`, no GPU |
 | New or changed GPU-backend behavior | A parameterized case exercised on the HIP backend, cross-checked against the host reference |
 | New solver / preconditioner / AMG variant | A `test_<name>.cpp` with float and double `TEST_P` cases across backends; add matching sample if useful |
-| New `local_matrix` operation | A `TEST_F` structure case (GPU; skipped under emulation tiers) |
 | MPI / multi-node change | A `global_*` or `parallel_manager` case (guarded by `SUPPORT_MPI`) |
 | Bug fix | A regression case that fails before the fix |
 | Performance-sensitive change | Run `rocalution-bench` before/after; render with `scripts/rocalution_bench_gnuplot_helper.py`; note the delta in the PR |
