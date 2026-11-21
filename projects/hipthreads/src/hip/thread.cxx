@@ -28,6 +28,8 @@
 #include <hip/atomic>
 // For cuda::std::__cccl_thread_sleep_for / cuda::std::__libcpp_thread_sleep_for(__ns)
 #include <hip/std/atomic>
+// For hip::std::unique_ptr in device code
+#include <hip/std/memory>
 
 // Workaround: On Windows, the HIP runtime does not dispatch kernels to the GPU
 // until hipStreamSynchronize is called on the stream. We spawn a detached
@@ -66,26 +68,27 @@ struct WorkQueue {
     // Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
     // someone else got to it first, returns nullptr.
     [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount) {
-        return tryPop(shouldIncrementActiveCount, atomicAdd(&popCount, 0) % queueSize);
+        return tryPop(shouldIncrementActiveCount, atomicAdd(&popCount, 0));
     }
     // Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
     // someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
     // hipMemcpy.
     [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount) {
-        return tryPop_cpuSafe(shouldIncrementActiveCount, atomicAdd(&popCount, 0) % queueSize);
+        return tryPop_cpuSafe(shouldIncrementActiveCount, atomicAdd(&popCount, 0));
     }
     // Fetches and simultaneously lock the next waiting worknode. If the queue is empty, returns nullptr.
     [[nodiscard]] __device__ WorkNode_Header *pop(bool shouldIncrementActiveCount);
 
   private:
     __device__ void waitForSpace(uint32_t myPushCount);
-    // Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or
-    // someone else got to it first, returns nullptr.
-    [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount, uint32_t index);
-    // Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or
-    // someone else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using
-    // hipMemcpy.
-    [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t index);
+    // Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
+    // someone else got to it first, returns nullptr. cachedPopCount must be a value the caller has read from popCount,
+    // which may be out of date by now; this can't pop from anywhere but the head of the queue. It's only a parameter so
+    // tryPop_cpuSafe can reuse its own read of popCount instead of doing another one.
+    [[nodiscard]] __device__ WorkNode_Header *tryPop(bool shouldIncrementActiveCount, uint32_t cachedPopCount);
+    // Same as tryPop(shouldIncrementActiveCount, cachedPopCount), but safe to use with a queue which is written to by
+    // the CPU using hipMemcpy.
+    [[nodiscard]] __device__ WorkNode_Header *tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t cachedPopCount);
 };
 
 // TODO: should these be static members of WorkNode_Header?
@@ -163,11 +166,16 @@ __device__ WorkNode_Header **WorkNode_Header::lock() {
     return copy_of_lts;
 }
 
-// For use in functions like get_width where the WorkNode hasn't moved anywhere, and we know *link_to_self == nullptr.
-__device__ void WorkNode_Header::unlockActive() {
+// Unlock a WorkNode by putting it at location without updating link_to_self. For use when the WorkNode goes back to
+// where it was locked from (e.g. get_width), or when link_to_self must not change (e.g. a detached WorkNode). Use
+// moveAndUnlock instead when the WorkNode is moving somewhere new.
+__device__ void WorkNode_Header::restoreAndUnlock(WorkNode_Header **location) {
+    // assert(location != nullptr);
+    // Make everything that was written while holding the lock visible before anyone else can lock the WorkNode again.
     __threadfence();
     // I think this might be a strict aliasing violation, but it's kind of unavoidable
-    atomicExch(reinterpret_cast<uintptr_t*>(&currentWorkNode[blockIdx.x]), reinterpret_cast<uintptr_t>(this));
+    [[maybe_unused]] WorkNode_Header *oldValue = reinterpret_cast<WorkNode_Header*>(
+        atomicExch(reinterpret_cast<uintptr_t*>(location), reinterpret_cast<uintptr_t>(this)));
     // assert(oldValue == nullptr);
 }
 __device__ void WorkNode_Header::moveAndUnlock(WorkNode_Header **new_location) {
@@ -179,9 +187,8 @@ __device__ void WorkNode_Header::moveAndUnlock(WorkNode_Header **new_location) {
     if (atomicAdd(reinterpret_cast<uintptr_t*>(&this->link_to_self), 0) != 0)
         atomicExch(reinterpret_cast<uintptr_t*>(&this->link_to_self), reinterpret_cast<uintptr_t>(new_location));
 
-    __threadfence();
     // Complete the unlock process by setting *new_location = this;
-    atomicExch(reinterpret_cast<uintptr_t*>(new_location), reinterpret_cast<uintptr_t>(this));
+    restoreAndUnlock(new_location);
 }
 // Signal that the caller is abdicating any responsability for freeing the WorkNode, unless the caller is the last one
 // to do so, in which case, in which case, we free ourself. Note that it is legal to call `delete this`:
@@ -240,26 +247,57 @@ __device__ void WorkQueue<queueSize>::waitForSpace(uint32_t myPushCount) {
     }
 }
 
-// Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or someone
-// else got to it first, returns nullptr.
+// Tries to fetch and simultaneously lock the next waiting worknode. If none exists, or it's currently locked, or
+// someone else got to it first, returns nullptr. cachedPopCount must be a value the caller has read from popCount (see
+// the declaration).
 template <size_t queueSize>
-[[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t index) {
+[[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop(bool shouldIncrementActiveCount, uint32_t cachedPopCount) {
+    const uint32_t index = cachedPopCount % queueSize;
     WorkNode_Header *work = WorkNode_Header::tryLockAndFetch(&queue[index]);
     if (work == nullptr) {
         return nullptr;
     }
+    // work is now locked and queue[index] is empty. If for whatever reason we're unable to successfully return work to
+    // the caller, we need to put it back where we found it. Re-inserting it is safe because nobody else can write to
+    // queue[index] in the meantime:
+    // Let q be the position work was pushed at, so index == q % queueSize. The next push into queue[index] is
+    // position q + queueSize, and waitForSpace (or waitForSpaceInCPUQueue) makes that pusher wait until popCount > q.
+    // popCount only goes from q to q + 1 through the atomicCAS below, made by a caller that read popCount == q and
+    // then took a worknode from queue[index]. That worknode can only be the one at q: the push of q + queueSize is
+    // still waiting for exactly this CAS, and the worknode at q - queueSize was taken and returned from tryPop before
+    // q was pushed (its pusher waited for popCount > q - queueSize, which by the same argument one lap earlier means
+    // that worknode was returned). A caller that succeeds at this CAS returns the worknode at q from tryPop instead of
+    // putting it back, so since we just took work from queue[index], nobody has made this CAS yet. And since we hold
+    // the worknode at q and queue[index] is empty, nobody else can make it. So popCount stays <= q, and queue[index]
+    // stays empty until we put work back.
+    // To everyone else this looks the same as detachWorkNode locking a worknode that is still in the queue and later
+    // unlocking it back into the same entry: popCount doesn't move, and other callers find the entry empty (locked) and
+    // try again later.
+    auto putBack = [location = &queue[index]](WorkNode_Header *node) { node->restoreAndUnlock(location); };
+    hip::std::unique_ptr<WorkNode_Header, decltype(putBack)> guard(work, putBack);
     if (shouldIncrementActiveCount) {
         atomicAdd(&activeVcoreCount, 1);
     }
     __threadfence();
-    atomicAdd(&popCount, 1);
-    return work;
+    // Only the caller holding the worknode at cachedPopCount may advance popCount. If popCount has moved on since
+    // cachedPopCount was read, another vcore popped that worknode and a pusher refilled the entry with one from a later
+    // lap. Taking it would skip a position, and the queue would hang on the entry left empty, so let guard put it back
+    // (see above for why that's safe). activeVcoreCount is incremented before popCount, as shouldKeepPollingForWork
+    // expects, so undo that too.
+    if (atomicCAS(&popCount, cachedPopCount, cachedPopCount + 1) != cachedPopCount) {
+        if (shouldIncrementActiveCount) {
+            atomicSub(&activeVcoreCount, 1);
+        }
+        return nullptr;
+    }
+    return guard.release();
 }
 
-// Tries to fetch and simultaneously lock the worknode at index. If none exists, or it's currently locked, or someone
-// else got to it first, returns nullptr. Safe to use with a queue which is written to by the CPU using hipMemcpy.
+// Same as tryPop(shouldIncrementActiveCount, cachedPopCount), but safe to use with a queue which is written to by the
+// CPU using hipMemcpy.
 template <size_t queueSize>
-__device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t index) {
+__device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncrementActiveCount, uint32_t cachedPopCount) {
+    const uint32_t index = cachedPopCount % queueSize;
     // Atomic ops on device memory are only atomic with respect to the actions of other GPU cores, not the
     // asyncEngine/copy engine. In other words, the copy engine can execute a write in the middle of an atomic op. Thus,
     // if we don't have this 'if' guarding the tryPop call, it's possible for the atomicExch in tryPop to load nullptr
@@ -268,7 +306,7 @@ __device__ WorkNode_Header *WorkQueue<queueSize>::tryPop_cpuSafe(bool shouldIncr
     if (atomicAdd(reinterpret_cast<uintptr_t *>(&queue[index]), 0) == 0) {
         return nullptr;
     }
-    return tryPop(shouldIncrementActiveCount, index);
+    return tryPop(shouldIncrementActiveCount, cachedPopCount);
 
     // TODO: Are we certain that we won't see individual bytes as they get written?
     // If we do see them, then we can use the least significant bit of the pointer as a flag to indicate the write is
@@ -285,7 +323,7 @@ template <size_t queueSize>
 [[nodiscard]] __device__ WorkNode_Header *WorkQueue<queueSize>::pop(bool shouldIncrementActiveCount) {
     for (uint32_t curPopCount = atomicAdd(&popCount, 0); curPopCount < atomicAdd(&pushCount, 0);
                   curPopCount = atomicAdd(&popCount, 0)) {
-        WorkNode_Header *work = tryPop(shouldIncrementActiveCount, curPopCount % queueSize);
+        WorkNode_Header *work = tryPop(shouldIncrementActiveCount, curPopCount);
         if (work != nullptr) {
             return work;
         }
@@ -525,20 +563,27 @@ static __global__ void detachWorkNode(WorkNode_Header *oldWorkNode) {
     }
 
     oldWorkNode->link_to_self = nullptr;
+
+    // If there is a waiting worknode, lock it before the memcpy. That way oldWorkNode->next is already nullptr when
+    // it's copied, so the waiting worknode is never reachable from both oldWorkNode->next and newWorkNode->next.
+    WorkNode_Header *next = nullptr;
+    if (oldWorkNode->hasWaiting) {
+        // Lock next in case it's also in the middle of being detached.
+        next = WorkNode_Header::lockAndFetch(&oldWorkNode->next);
+    }
+
     // TODO: Technically this is not standards compliant. Even though WorkNode<T> is TriviallyCopyable, it is not a
     // StandardLayoutType, so WorkNode_Header and WorkNode<T> pointers are not interchangeable.
     hip::memcpy(newWorkNode, oldWorkNode, oldWorkNode->worknodeSize);
 
     // If there is a waiting worknode, update its link_to_self value so it points at newWorkNode->next.
     if (oldWorkNode->hasWaiting) {
-        // Lock next in case it's also in the middle of being detached.
-        WorkNode_Header *next = WorkNode_Header::lockAndFetch(&oldWorkNode->next);
         next->moveAndUnlock(&newWorkNode->next);
     }
 
-    // This does an extra unnecessary load of newWorkNode->link_to_self to check if it's null, but that's unlikely to
-    // have a major performance impact.
-    newWorkNode->moveAndUnlock(link_to_self);
+    // newWorkNode->link_to_self was copied after oldWorkNode->link_to_self was set to nullptr, which marks newWorkNode
+    // as detached. Put it where oldWorkNode was without touching link_to_self.
+    newWorkNode->restoreAndUnlock(link_to_self);
 }
 
 } // namespace internal
@@ -562,7 +607,7 @@ __device__ hip::wthread::id get_id() noexcept {
     if (threadIdx.x == 0) {
         WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
         base_vtid = current->tdata.vthread_id;
-        current->unlockActive();
+        current->restoreAndUnlock(&currentWorkNode[blockIdx.x]);
     }
     // TODO: What if only some of the fibers call this_thread::get_id()? This could deadlock. Also, what if the fiber
     // with threadIdx.x == 0 isn't one of the calling fibers?
@@ -578,7 +623,7 @@ __device__ hip::wthread::id get_id() noexcept {
     //     WorkNode_Header *current = WorkNode_Header::tryLockAndFetch(&currentWorkNode[blockIdx.x]);
     //     if (current != nullptr) {
     //         base_vtid = current->tdata.vthread_id;
-    //         current->unlockActive();
+    //         current->restoreAndUnlock(&currentWorkNode[blockIdx.x]);
     //     }
     //     __syncthreads();
     // } while (base_vtid == 0);
@@ -602,7 +647,7 @@ __device__ unsigned int get_width() noexcept {
     if (threadIdx.x == 0) {
         WorkNode_Header *current = WorkNode_Header::lockAndFetch(&currentWorkNode[blockIdx.x]);
         width = current->tdata.width;
-        current->unlockActive();
+        current->restoreAndUnlock(&currentWorkNode[blockIdx.x]);
     }
     // TODO: What if only some of the fibers call this_thread::get_width()? This could deadlock. Also, what if the fiber
     // with threadIdx.x == 0 isn't one of the calling fibers?
