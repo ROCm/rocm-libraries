@@ -42,7 +42,8 @@ def runCI =
         platform, project->
 
         def gfilter = "*checkin*"
-        commonGroovy.runTestCommand(platform, project, gfilter)
+        // Host and MPI builds are CPU-only, so the gfx90a XNACK runs add nothing there.
+        commonGroovy.runTestCommand(platform, project, gfilter, label == '')
     }
 
     def packageCommand =
@@ -55,11 +56,43 @@ def runCI =
     buildProject(prj, formatCheck, nodes.dockerArray, compileCommand, testCommand, packageCommand)
 }
 
+// math-ci replaces the arch list with every architecture. A CPU-only build needs
+// one agent, so fold the list into a single label expression. The library joins
+// os and arch with &&, which yields ubuntu24-therock&&(gfx90a||gfx942||gfx950)
+// and lets the scheduler take whichever of those agents is free.
+def anySingleArch(jobNameList)
+{
+    def collapsed = [:]
+    jobNameList.each { jobName, nodeDetails ->
+        def platforms = [:]
+        nodeDetails.each { os, archs ->
+            // The machine-config value is not always a Collection (it can be an
+            // array), so instanceof Collection let the three-arch list through.
+            def items = []
+            if (archs instanceof CharSequence)
+                items << archs.toString()
+            else
+                archs.each { items << it.toString() }
+            if (items.size() > 1)
+                platforms[os] = ["(${items.join('||')})"]
+            else
+                platforms[os] = items
+        }
+        collapsed[jobName] = platforms
+    }
+    echo "CPU-only agents: ${collapsed}"
+    return collapsed
+}
+
 def setupCI(urlJobName, jobNameList, buildCommand, runCI, label)
 {
     jobNameList = auxiliary.appendJobNameList(jobNameList)
 
-    jobNameList.each
+    // Host and MPI builds are CPU-only. Queue one agent, whichever configured
+    // architecture is free, instead of one run per architecture.
+    def nodesForRun = (label == 'Host' || label == 'MPI') ? anySingleArch(jobNameList) : jobNameList
+
+    nodesForRun.each
     {
         jobName, nodeDetails->
         if (urlJobName == jobName)
@@ -106,7 +139,17 @@ ci: {
     String hostBuildCommand = './install.sh -c --host --static'
     String mpiBuildCommand = './install.sh -c --host --mpi=on --no-openmp --static'
 
-    setupCI(urlJobName, defaultJobNameList, defaultBuildCommand, runCI, '')
-    setupCI(urlJobName, hostJobNameList, hostBuildCommand, runCI, 'Host')
-    setupCI(urlJobName, mpiJobNameList, mpiBuildCommand, runCI, 'MPI')
+    // Queue the GPU, Host, and MPI builds together so later jobs cannot
+    // slip in between them.
+    parallel(
+        'gpu': {
+            setupCI(urlJobName, defaultJobNameList, defaultBuildCommand, runCI, '')
+        },
+        'host': {
+            setupCI(urlJobName, hostJobNameList, hostBuildCommand, runCI, 'Host')
+        },
+        'mpi': {
+            setupCI(urlJobName, mpiJobNameList, mpiBuildCommand, runCI, 'MPI')
+        }
+    )
 }
