@@ -18,6 +18,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Resolved issues
 
+* Fixed CK `ck::math` `exp`, `log`, `pow`, `expm1` and `cos`, and CK Tile `exp`, `log`, `pow` and `expm1`, on `double` in device code: each called itself instead of HIP's function, so from `-O1` up kernels using them stored no output ([#15813](https://github.com/ROCm/rocm-libraries/issues/15813)).
+
 ### Known issues
 
 ### Upcoming changes

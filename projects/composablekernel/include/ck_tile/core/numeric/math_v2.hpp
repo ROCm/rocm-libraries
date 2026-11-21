@@ -886,7 +886,7 @@ CK_TILE_DEVICE float exp<float>(float x)
 template <>
 CK_TILE_DEVICE double exp<double>(double x)
 {
-    return exp(x);
+    return ::exp(x);
 };
 
 template <typename T>
@@ -948,7 +948,7 @@ CK_TILE_DEVICE float log<float>(float x)
 template <>
 CK_TILE_DEVICE double log<double>(double x)
 {
-    return log(x);
+    return ::log(x);
 };
 
 template <typename T>
@@ -966,7 +966,7 @@ CK_TILE_DEVICE float pow<float>(float x, float gamma)
 template <>
 CK_TILE_DEVICE double pow<double>(double x, double gamma)
 {
-    return pow(x, gamma);
+    return ::pow(x, gamma);
 };
 
 template <typename T>
@@ -984,7 +984,7 @@ CK_TILE_DEVICE float expm1<float>(float x)
 template <>
 CK_TILE_DEVICE double expm1<double>(double x)
 {
-    return expm1(x);
+    return ::expm1(x);
 };
 
 } // namespace ck_tile
