@@ -4552,14 +4552,11 @@ int host_csrilu0(int                  m,
                     diag_val    = (boost_tol >= testing_abs(diag_val)) ? boost_val : diag_val;
                     val[diag_j] = diag_val;
                 }
-                else
+
+                // A pivot that is still zero after the optional boost is a numerical zero.
+                if(diag_val == make_DataType<T>(0.0))
                 {
-                    // Check for numeric pivot
-                    if(diag_val == make_DataType<T>(0.0))
-                    {
-                        // Numerical zero diagonal
-                        return col_j + idx_base;
-                    }
+                    return col_j + idx_base;
                 }
 
                 // multiplication factor
@@ -4604,17 +4601,11 @@ int host_csrilu0(int                  m,
                     val[j] = boost_val;
                 }
             }
-            else
+
+            // A pivot that is still zero after the optional boost is a numerical zero.
+            if(val[j] == make_DataType<T>(0))
             {
-                const bool is_diag = (j >= 0) && (col[j] == (ai + idx_base));
-
-                const bool is_zero_diag = is_diag && (val[j] == make_DataType<T>(0));
-
-                // check for zero diagonal
-                if(is_zero_diag)
-                {
-                    return ai + idx_base;
-                }
+                return ai + idx_base;
             }
         }
 
@@ -4779,14 +4770,12 @@ inline void host_bsrilu02(hipsparseDirection_t    dir,
                     diag = (boost_tol >= testing_abs(diag)) ? boost_val : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
-                else
+
+                // A pivot that is still zero after the optional boost is a numerical zero.
+                if(diag == make_DataType<T>(0))
                 {
-                    // Check for numeric pivot
-                    if(diag == make_DataType<T>(0))
-                    {
-                        *numeric_pivot = std::min(*numeric_pivot, bsr_col_ind[j]);
-                        continue;
-                    }
+                    *numeric_pivot = std::min(*numeric_pivot, bsr_col_ind[j]);
+                    continue;
                 }
 
                 // Process all rows within the BSR block after bi-th row
