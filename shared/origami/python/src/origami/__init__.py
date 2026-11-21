@@ -8,8 +8,12 @@ Python bindings for the Origami C++ library.
 """
 
 try:
-    # Import the compiled extension module
-    from .origami import (
+    from ._rocm_init import initialize as _initialize_rocm
+
+    _initialize_rocm()
+    del _initialize_rocm
+
+    from ._pyorigami import (
         # Enums
         architecture_t,
         data_type_t,
@@ -93,8 +97,8 @@ try:
     )
 except ImportError as e:
     raise ImportError(
-        f"Failed to import origami extension module: {e}. "
-        "Please ensure the package is properly installed."
+        "Failed to import the origami compiled extension or one of its "
+        f"native dependencies.\nOriginal error: {e}"
     ) from e
 
 __version__ = "0.1.0"
@@ -191,4 +195,3 @@ except ImportError:
     # Do not raise this error if import fails - compiled Origami bindings still
     # work without the dedicated Python selectors
     pass
-
