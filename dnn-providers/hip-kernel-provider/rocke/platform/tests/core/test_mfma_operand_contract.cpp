@@ -38,19 +38,19 @@ static const mfma_case_t cases[] = {
     {"mfma_f32_32x32x2_f32", "f32", 1, 16, 0, 0, 1},
     {"mfma_f32_16x16x8_xf32", "tf32", 2, 4, 0, 0, 1},
     {"mfma_f32_32x32x4_xf32", "tf32", 2, 16, 0, 0, 1},
-    {"mfma_f32_16x16x16_f16", "f16", 4, 4, 0, 0, 0},
-    {"mfma_f32_16x16x32_f16", "f16", 8, 4, 0, 0, 0},
-    {"mfma_f32_16x16x16_bf16", "bf16", 4, 4, 0, 0, 0},
-    {"mfma_f32_16x16x32_bf16", "bf16", 8, 4, 0, 0, 0},
-    {"mfma_f32_32x32x8_f16", "f16", 4, 16, 0, 0, 0},
-    {"mfma_f32_32x32x8_bf16", "bf16", 4, 16, 0, 0, 0},
-    {"mfma_f32_32x32x16_f16", "f16", 8, 16, 0, 0, 0},
-    {"mfma_f32_32x32x16_bf16", "bf16", 8, 16, 0, 0, 0},
+    {"mfma_f32_16x16x16_f16", "f16", 4, 4, 0, 0, 1},
+    {"mfma_f32_16x16x32_f16", "f16", 8, 4, 0, 0, 1},
+    {"mfma_f32_16x16x16_bf16", "bf16", 4, 4, 0, 0, 1},
+    {"mfma_f32_16x16x32_bf16", "bf16", 8, 4, 0, 0, 1},
+    {"mfma_f32_32x32x8_f16", "f16", 4, 16, 0, 0, 1},
+    {"mfma_f32_32x32x8_bf16", "bf16", 4, 16, 0, 0, 1},
+    {"mfma_f32_32x32x16_f16", "f16", 8, 16, 0, 0, 1},
+    {"mfma_f32_32x32x16_bf16", "bf16", 8, 16, 0, 0, 1},
     {"mfma_f32_4x4x4_f16", "f16", 4, 4, 0, 0, 1},
-    {"mfma_f32_16x16x32_fp8", "fp8e4m3", 8, 4, 0, 0, 0},
-    {"mfma_f32_16x16x32_bf8", "bf8e5m2", 8, 4, 0, 0, 0},
-    {"mfma_f32_32x32x16_fp8", "fp8e4m3", 8, 16, 0, 0, 0},
-    {"mfma_f32_32x32x16_bf8", "bf8e5m2", 8, 16, 0, 0, 0},
+    {"mfma_f32_16x16x32_fp8", "fp8e4m3", 8, 4, 0, 0, 1},
+    {"mfma_f32_16x16x32_bf8", "bf8e5m2", 8, 4, 0, 0, 1},
+    {"mfma_f32_32x32x16_fp8", "fp8e4m3", 8, 16, 0, 0, 1},
+    {"mfma_f32_32x32x16_bf8", "bf8e5m2", 8, 16, 0, 0, 1},
     {"mfma_f32_16x16x128_fp4fp6fp8", "i32", 8, 4, 256, 0, 0},
     {"mfma_f32_16x16x128_fp8", "i32", 8, 4, 256, 0, 0},
     {"mfma_scale_f32_16x16x128_f8f6f4", "i32", 8, 4, 256, 1, 0},
@@ -232,7 +232,10 @@ static int check_case(const mfma_case_t* spec, int variant, int generic)
     rocke_lower_hip_opts_t opts = {};
     opts.arch = "gfx942";
     const auto status = rocke_lower_kernel_to_hip(&builder, builder.kernel, &opts, &hip);
-    if(spec->hip_supported)
+    // HIP declares no vec<u8xN> type, so an atom it lowers still refuses that
+    // carrier as an unsupported type, as the Python HIP lowering does.
+    const bool hip_has_source_type = strcmp(spec->source, "u8") != 0;
+    if(spec->hip_supported && hip_has_source_type)
     {
         CHECK(status == (variant ? ROCKE_ERR_VALUE : ROCKE_OK));
         if(variant)

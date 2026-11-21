@@ -231,6 +231,8 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
     }
     if has_library:
         expected_names.add("rocke_library_sdpa_pytest")
+    if os.name != "nt":
+        expected_names |= {"rocke_hip_source_identity", "rocke_hip_lowering_parity"}
     assert expected_names <= pytest_entries.keys(), sorted(pytest_entries)
     gpu_reference_names = {
         name
@@ -369,6 +371,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
         ),
         "ROCKE_STORAGE_TEST": native_artifact("rocke_storage"),
         "ROCKE_IR_TYPES_TEST": native_artifact("rocke_ir_types"),
+        "ROCKE_FLOAT_FORMAT_TEST": native_artifact("rocke_float_format"),
         "ROCKE_NONTEMPORAL_HIP_TEST": native_artifact("rocke_nontemporal_hip"),
         "ROCKE_UNSIGNED_INT_OPS_CLI": native_artifact("rocke_unsigned_int_ops"),
         "ROCKE_INTEXPR_CLI": native_artifact("rocke_intexpr"),
@@ -548,6 +551,50 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             environment_for(tests, "rocke_compiler_options_reproducibility")
             == comgr_only_environment
         )
+
+        # The C++ HIP lowering entries are not registered on Windows. On every
+        # platform the platform pytest part that holds each of their files
+        # leaves it out. Elsewhere each entry names the installed
+        # rocke_ir_lower_cli, and the parity entry also gets the compiler tools
+        # for its hipcc checks.
+        files_by_entry = {
+            "rocke_hip_lowering_parity": (
+                ("core", "tests/core/test_hip_lowering_parity.py"),
+                ("core", "tests/core/test_mma_operand_register_type.py"),
+                ("core", "tests/core/test_serialized_ir_name_scopes.py"),
+            ),
+            "rocke_hip_source_identity": (
+                (
+                    "instances_dispatch",
+                    "tests/instances/differential/test_hip_source_identity.py",
+                ),
+            ),
+        }
+        for entry_name, files in files_by_entry.items():
+            entry = next((test for test in tests if test["name"] == entry_name), None)
+            assert (entry is None) == (os.name == "nt"), entry_name
+            for part, test_file in files:
+                path = f"{test_ctest_rel}{test_file}"
+                if entry is not None:
+                    assert path in entry["command"]
+                platform_part = next(
+                    test for test in tests if test["name"] == f"rocke_pytest_{part}"
+                )
+                ignored = platform_part["command"].index(path)
+                assert platform_part["command"][ignored - 1] == "--ignore"
+        if os.name != "nt":
+            ir_lower_cli = native_artifact("rocke_ir_lower_cli")
+            identity_environment = environment_for(tests, "rocke_hip_source_identity")
+            assert identity_environment["ROCKE_IR_LOWER_CLI"] == ir_lower_cli
+            parity_environment = environment_for(tests, "rocke_hip_lowering_parity")
+            assert (
+                parity_environment.pop("PYTHONPATH")
+                == identity_environment["PYTHONPATH"]
+            )
+            expected_parity_environment = {"ROCKE_IR_LOWER_CLI": ir_lower_cli}
+            if sys.platform == "linux" and rocm_path is not None:
+                expected_parity_environment.update(compiler_environment)
+            assert parity_environment == expected_parity_environment
 
 
 def split_ignored_files(selection):

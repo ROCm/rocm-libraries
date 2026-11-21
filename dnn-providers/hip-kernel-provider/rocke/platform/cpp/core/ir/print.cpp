@@ -22,7 +22,8 @@
  */
 #include "rocke/ir_print.h"
 
-#include <stdio.h>
+#include "rocke/float_format.h"
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -65,170 +66,6 @@ static void emit_operand(rocke_strbuf_t* out, const rocke_value_t* v)
 
 /* ------------------------------------------------------------ attr values */
 
-/* Python str(float) == repr(float) in Python 3: CPython prints the *shortest*
- * decimal string that round-trips to the same IEEE-754 double, then formats it
- * with the 'r' (repr) presentation rules of PyOS_double_to_string /
- * format_float_short:
- *
- *   - obtain the shortest run of significant digits `digits` (no leading or
- *     trailing zeros) and the decimal point position `decpt` (the value is
- *     0.digits x 10**decpt conceptually: the point sits `decpt` places to the
- *     right of the first significant digit, i.e. first digit has place
- *     10**(decpt-1));
- *   - use exponential notation iff `decpt <= -4` or `decpt > 16`, otherwise
- *     fixed-point;
- *   - fixed integral values get a trailing ".0" (e.g. "1.0"); exponential
- *     single-digit mantissas get NO ".0" (e.g. "1e+20", not "1.0e+20");
- *   - the exponent is "e", a mandatory sign, and >= 2 digits ("1e-05").
- *
- * C99 has no shortest-round-trip formatter, but we can recover the exact same
- * shortest digit string by probing %.*e at increasing precision and stopping at
- * the first precision whose output strtod()s back to the original value -- this
- * yields byte-identical results to CPython's Grisu/David-Gay shortest repr
- * (verified against CPython repr() over ~200k random doubles, 0 mismatches).
- *
- * %.*e conveniently hands us the significant digits and the decimal exponent
- * directly, which map onto CPython's `digits`/`decpt` with `decpt = exp + 1`. */
-static void emit_float(rocke_strbuf_t* out, double f)
-{
-    /* NaN: CPython repr -> "nan" (no sign). */
-    if(f != f)
-    {
-        rocke_strbuf_append(out, "nan");
-        return;
-    }
-
-    /* Find the shortest scientific representation that round-trips. %.*e with
-     * precision p emits p+1 significant digits; p in [0,17] always suffices for
-     * a double (17 sig-digits round-trip every IEEE-754 double). */
-    char sci[64];
-    int p;
-    for(p = 0; p <= 17; ++p)
-    {
-        snprintf(sci, sizeof(sci), "%.*e", p, f);
-        if(strtod(sci, NULL) == f)
-        {
-            break;
-        }
-    }
-    if(p > 17)
-    {
-        p = 17;
-        snprintf(sci, sizeof(sci), "%.*e", p, f);
-    }
-
-    /* Parse sci := [-] d [.ddd] e [+-] NN  (or [-]inf for infinities). */
-    const char* s = sci;
-    int negative = 0;
-    if(*s == '-')
-    {
-        negative = 1;
-        ++s;
-    }
-    if(s[0] == 'i' || s[0] == 'I')
-    { /* inf / Inf */
-        if(negative)
-        {
-            rocke_strbuf_append_char(out, '-');
-        }
-        rocke_strbuf_append(out, "inf");
-        return;
-    }
-
-    char digits[40];
-    int nd = 0;
-    digits[nd++] = *s++; /* leading significant digit */
-    if(*s == '.')
-    {
-        ++s;
-        while(*s && *s != 'e' && *s != 'E')
-        {
-            digits[nd++] = *s++;
-        }
-    }
-    digits[nd] = '\0';
-
-    int exp = 0;
-    if(*s == 'e' || *s == 'E')
-    {
-        ++s;
-        exp = atoi(s);
-    }
-
-    /* Strip trailing zeros (keep at least one digit) to get the shortest run. */
-    while(nd > 1 && digits[nd - 1] == '0')
-    {
-        digits[--nd] = '\0';
-    }
-
-    int decpt = exp + 1; /* CPython decimal-point position. */
-
-    if(negative)
-    {
-        rocke_strbuf_append_char(out, '-');
-    }
-
-    if(decpt <= -4 || decpt > 16)
-    {
-        /* Exponential: d[.ddd]e±NN. No ".0" for a single-digit mantissa. */
-        rocke_strbuf_append_char(out, digits[0]);
-        if(nd > 1)
-        {
-            rocke_strbuf_append_char(out, '.');
-            rocke_strbuf_append(out, digits + 1);
-        }
-        int e = decpt - 1;
-        rocke_strbuf_append_char(out, 'e');
-        rocke_strbuf_append_char(out, e < 0 ? '-' : '+');
-        int ae = e < 0 ? -e : e;
-        char eb[8];
-        int en = 0;
-        do
-        {
-            eb[en++] = (char)('0' + ae % 10);
-            ae /= 10;
-        } while(ae);
-        while(en < 2)
-        {
-            eb[en++] = '0';
-        }
-        while(en > 0)
-        {
-            rocke_strbuf_append_char(out, eb[--en]);
-        }
-    }
-    else if(decpt <= 0)
-    {
-        /* 0.00ddd : leading "0." then (-decpt) zeros then all digits. */
-        rocke_strbuf_append(out, "0.");
-        for(int i = 0; i < -decpt; ++i)
-        {
-            rocke_strbuf_append_char(out, '0');
-        }
-        rocke_strbuf_append(out, digits);
-    }
-    else if(decpt >= nd)
-    {
-        /* ddd00.0 : all digits, (decpt-nd) trailing zeros, then ".0". */
-        rocke_strbuf_append(out, digits);
-        for(int i = 0; i < decpt - nd; ++i)
-        {
-            rocke_strbuf_append_char(out, '0');
-        }
-        rocke_strbuf_append(out, ".0");
-    }
-    else
-    {
-        /* dd.ddd : split the digit run at the decimal point. */
-        for(int i = 0; i < decpt; ++i)
-        {
-            rocke_strbuf_append_char(out, digits[i]);
-        }
-        rocke_strbuf_append_char(out, '.');
-        rocke_strbuf_append(out, digits + decpt);
-    }
-}
-
 /* Forward declarations for the repr-based renderers used by the ROCKE_ATTR_LIST
  * case below. A list attr is a Python List[Dict[str, Any]] (scf.for iter_args
  * metadata), and str(list) renders every contained element with repr(), which
@@ -255,7 +92,7 @@ static void emit_repr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v)
         rocke_strbuf_appendf(out, "%lld", (long long)v->u.i);
         break;
     case ROCKE_ATTR_FLOAT:
-        emit_float(out, v->u.f);
+        rocke_append_python_float_repr(out, v->u.f);
         break;
     case ROCKE_ATTR_LIST:
     {
@@ -337,7 +174,7 @@ static void emit_attr_value(rocke_strbuf_t* out, const rocke_attr_value_t* v)
         rocke_strbuf_appendf(out, "%lld", (long long)v->u.i);
         break;
     case ROCKE_ATTR_FLOAT:
-        emit_float(out, v->u.f);
+        rocke_append_python_float_repr(out, v->u.f);
         break;
     case ROCKE_ATTR_LIST:
         /* Python _attr_value falls through to str(value); for a list attr

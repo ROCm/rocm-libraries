@@ -32,6 +32,7 @@
 #include "rocke/mfma_scale_internal.h"
 #include "rocke/mma_operand_internal.h"
 #include "rocke/tf32_internal.h"
+#include "rocke/wmma_internal.h"
 #include "rocke/wmma_scale_internal.h"
 
 namespace ckc
@@ -100,6 +101,16 @@ static void validate_mfma(rocke_lower_t* L,
                                                  scaled,
                                                  message,
                                                  sizeof(message));
+    if(error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
+}
+
+/* Python validate_mfma for a fixed-signature MFMA `op_id`
+ * (rocke_fixed_mfma_operand_error), failing `L` with its text. */
+static void validate_fixed_mfma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
+{
+    char message[160];
+    const char* error = rocke_fixed_mfma_operand_error(op, op_id, message, sizeof(message));
     if(error)
         rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
 }
@@ -889,8 +900,8 @@ static const _wmma_spec_t WMMA_SPECS[] = {
 };
 static const int WMMA_SPECS_N = (int)(sizeof(WMMA_SPECS) / sizeof(WMMA_SPECS[0]));
 
-/* Mirrors core/wmma.py::validate_unscaled_wmma. Validate actual SSA types;
- * re-resolving the catalog cannot check a caller's independent src2/dst values. */
+/* core/wmma.py::validate_unscaled_wmma (rocke_unscaled_wmma_operand_error),
+ * failing `L` with its text. */
 static void _validate_unscaled_wmma(rocke_lower_t* L,
                                     const rocke_op_t* op,
                                     const rocke_type_t* elem,
@@ -898,41 +909,17 @@ static void _validate_unscaled_wmma(rocke_lower_t* L,
                                     const rocke_type_t* source_elem,
                                     int source_count)
 {
-    if(op->num_operands != 3 || op->num_results != 1)
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "unscaled WMMA expects 3 operands and 1 result");
-    const rocke_type_t* types[] = {op->operands[2]->type, op->results[0]->type};
-    for(const auto* type : types)
-        if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != count
-           || !rocke_type_eq(type->elem, elem))
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "unscaled WMMA requires src2 and dst to be vec<%sx%d>",
-                          elem->name,
-                          count);
-    for(int role = 0; role < 2; ++role)
-    {
-        const auto* type = op->operands[role]->type;
-        if(rocke_type_eq(source_elem, rocke_i32()))
-        {
-            const char* op_id = rocke_attr_get_str(&op->attrs, "op_id");
-            if(!op_id)
-                op_id = op->name + 5;
-            rocke_mma_operand_needs_reinterpret(op_id,
-                                                role == 0 ? ROCKE_MMA_ROLE_SRC0
-                                                          : ROCKE_MMA_ROLE_SRC1,
-                                                type,
-                                                mma_register_vector(L, source_elem, source_count),
-                                                L->backend->gfx);
-        }
-        else if(!type || type->kind != ROCKE_TYPE_VECTOR || type->count != source_count
-                || !rocke_type_eq(type->elem, source_elem))
-            rocke_ll_fail(L,
-                          ROCKE_ERR_VALUE,
-                          "unscaled WMMA requires src%d to be vec<%sx%d>",
-                          role,
-                          source_elem->name,
-                          source_count);
-    }
+    char message[160];
+    const char* error
+        = rocke_unscaled_wmma_operand_error(op,
+                                            elem,
+                                            count,
+                                            mma_register_vector(L, source_elem, source_count),
+                                            L->backend->gfx,
+                                            message,
+                                            sizeof(message));
+    if(error)
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
 }
 
 static void _emit_wmma(rocke_lower_t* L, const rocke_op_t* op, const char* op_id)
@@ -1231,14 +1218,15 @@ static void _emit_mfma(rocke_lower_t* L, const rocke_op_t* op, const _mfma_spec_
 
     if(!rocke_ll_live(L))
         return;
-    char source_type[48], accumulator_type[48], result_type[48];
-    rocke_mfma_ssa_type(spec->src01_ty, source_type, sizeof(source_type));
-    rocke_mfma_ssa_type(spec->src2_ty, accumulator_type, sizeof(accumulator_type));
-    rocke_mfma_ssa_type(spec->dst_ty, result_type, sizeof(result_type));
-    // XF32 SSA values retain their logical type before the fixed carrier cast.
     if(rocke_tf32_mma_count(spec->op_id))
-        snprintf(source_type, sizeof(source_type), "vec<tf32x2>");
-    validate_mfma(L, op, source_type, accumulator_type, result_type);
+    {
+        // XF32 SSA values retain their logical type before the fixed carrier cast.
+        char accumulator_type[32];
+        rocke_mfma_accumulator_type(spec->op_id, accumulator_type, sizeof(accumulator_type));
+        validate_mfma(L, op, "vec<tf32x2>", accumulator_type, accumulator_type);
+    }
+    else
+        validate_fixed_mfma(L, op, spec->op_id);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1327,10 +1315,6 @@ void rocke_ll_lower_mfma_fp8_bf8(
     {
         return;
     }
-    char accumulator_type[48];
-    snprintf(accumulator_type, sizeof(accumulator_type), "vec<f32x%d>", out_vec);
-    const char* source_type = strcmp(dtype, "fp8") == 0 ? "vec<fp8e4m3x8>" : "vec<bf8e5m2x8>";
-    validate_mfma(L, op, source_type, accumulator_type, accumulator_type);
     a = op->operands[0];
     b = op->operands[1];
     c = op->operands[2];
@@ -1369,7 +1353,7 @@ static void _op_tile_mfma_f64_4x4x4_f64(rocke_lower_t* L, const rocke_op_t* op)
     const char *a_arg, *b_arg, *c_elem, *d_elem;
     if(!rocke_ll_live(L))
         return;
-    validate_mfma(L, op, "f64", "vec<f64x1>", "vec<f64x1>");
+    validate_fixed_mfma(L, op, "mfma_f64_4x4x4_f64");
     rocke_ll_need(L, "mfma.f64.4x4x4f64");
     a_arg = mma_operand(L, op, "mfma_f64_4x4x4_f64", ROCKE_MMA_ROLE_SRC0, rocke_f64());
     b_arg = mma_operand(L, op, "mfma_f64_4x4x4_f64", ROCKE_MMA_ROLE_SRC1, rocke_f64());
@@ -1394,21 +1378,33 @@ static void _op_tile_mfma_f64_4x4x4_f64(rocke_lower_t* L, const rocke_op_t* op)
 
 static void _op_tile_mfma_f32_16x16x32_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_16x16x32_fp8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "fp8", 4, "16x16x32.fp8.fp8");
 }
 
 static void _op_tile_mfma_f32_16x16x32_bf8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_16x16x32_bf8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "bf8", 4, "16x16x32.bf8.bf8");
 }
 
 static void _op_tile_mfma_f32_32x32x16_fp8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_32x32x16_fp8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "fp8", 16, "32x32x16.fp8.fp8");
 }
 
 static void _op_tile_mfma_f32_32x32x16_bf8(rocke_lower_t* L, const rocke_op_t* op)
 {
+    if(!rocke_ll_live(L))
+        return;
+    validate_fixed_mfma(L, op, "mfma_f32_32x32x16_bf8");
     rocke_ll_lower_mfma_fp8_bf8(L, op, "bf8", 16, "32x32x16.bf8.bf8");
 }
 

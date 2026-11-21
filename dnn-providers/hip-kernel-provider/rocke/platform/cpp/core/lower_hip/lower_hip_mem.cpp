@@ -55,7 +55,7 @@ static const char* mem_idx_join(rocke_h_lowerer_t* lw, rocke_value_t* const* val
 
 /* Resolve the `_storage` symbol for a tile.smem_alloc result Value via the
  * lowerer side table. NULL on a miss (the Python "before smem_alloc was
- * lowered" RuntimeError case). */
+ * lowered" ValueError case). */
 static const char* mem_storage_of(rocke_h_lowerer_t* lw, const rocke_value_t* smem)
 {
     return rocke_h_smem_storage(lw, smem);
@@ -1785,11 +1785,15 @@ static rocke_status_t _op_tile_async_buffer_load_lds_addr(rocke_h_lowerer_t* lw,
     return lw->status;
 }
 
-/* Python _op_tile_async_buffer_load_lds (typed-LDS variant) */
+/* Python _op_tile_async_buffer_load_lds: the LDS operand is a smem value
+ * (its __shared__ storage) or an i64 LDS address, cast as in the addr variant. */
 static rocke_status_t _op_tile_async_buffer_load_lds(rocke_h_lowerer_t* lw, const rocke_op_t* op)
 {
     rocke_value_t *rsrc, *lds_val, *voff, *soff;
-    const char* storage;
+    const rocke_type_t* lds_type;
+    /* The pointer text is lds_open, lds_base, lds_close: "(" addr ")" or
+     * "&" storage "[0]". */
+    const char *lds_open, *lds_base, *lds_close;
     int64_t dwords, aux, size_bytes;
     if(!rocke_h_live(lw))
     {
@@ -1806,18 +1810,32 @@ static rocke_status_t _op_tile_async_buffer_load_lds(rocke_h_lowerer_t* lw, cons
     dwords = mem_attr_int(op, "dwords", 0);
     aux = mem_attr_int(op, "aux", 0);
     size_bytes = dwords * 4;
-    storage = mem_storage_of(lw, lds_val);
-    if(!storage)
+    lds_type = lds_val->type;
+    if(lds_type && lds_type->kind == ROCKE_TYPE_SCALAR && lds_type->scalar == ROCKE_SCALAR_I64)
     {
-        return rocke_h_fail(
-            lw, ROCKE_ERR_VALUE, "async_buffer_load_lds before smem_alloc was lowered");
+        lds_open = "(";
+        lds_base = rocke_h_name(lw, lds_val);
+        lds_close = ")";
+    }
+    else
+    {
+        lds_open = "&";
+        lds_base = mem_storage_of(lw, lds_val);
+        lds_close = "[0]";
+        if(!lds_base)
+        {
+            return rocke_h_fail(
+                lw, ROCKE_ERR_VALUE, "async_buffer_load_lds before smem_alloc was lowered");
+        }
     }
     rocke_h_emitf(lw,
                   "_llvm_amdgcn_raw_ptr_buffer_load_lds(%s, "
-                  "(__attribute__((address_space(3))) void*)&%s[0], "
+                  "(__attribute__((address_space(3))) void*)%s%s%s, "
                   "%lld, %s, %s, 0, %lld);",
                   rocke_h_name(lw, rsrc),
-                  storage,
+                  lds_open,
+                  lds_base,
+                  lds_close,
                   (long long)size_bytes,
                   rocke_h_name(lw, voff),
                   rocke_h_name(lw, soff),
