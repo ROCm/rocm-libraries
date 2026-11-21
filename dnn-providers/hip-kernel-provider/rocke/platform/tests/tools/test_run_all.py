@@ -16,6 +16,7 @@ import shutil
 import sys
 
 import pytest
+from rocke.tests.ctest_listing import list_ctest_entries
 
 from rocke.tests.engines import IR_LOWER_CLI_ENV
 
@@ -574,7 +575,9 @@ def test_arch_domain_ctest_registration_contract(runner, tmp_path):
 
     build = tmp_path / "build"
     runner.configure_pytest_build(build, "Release")
-    tests = runner.ctest_tests(build, "Release", "^rocke_arch_domain_reproducibility$")
+    tests = list_ctest_entries(
+        build, config="Release", name_pattern="^rocke_arch_domain_reproducibility$"
+    )
     assert len(tests) == 1
     test = tests[0]
     assert test["name"] == "rocke_arch_domain_reproducibility"

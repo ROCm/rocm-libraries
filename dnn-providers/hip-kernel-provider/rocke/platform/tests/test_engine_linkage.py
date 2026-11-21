@@ -4,7 +4,6 @@
 """Archive consumers carry the loader and thread dependencies of the lowerer."""
 
 import importlib.util
-import json
 import os
 import re
 import shutil
@@ -16,6 +15,7 @@ from unittest.mock import Mock
 
 import pytest
 from rocke.portable_ir.src import online
+from rocke.tests.ctest_listing import list_ctest_entries
 from rocke.tests.provider_categories import provider_category_labels
 
 PLATFORM = Path(__file__).resolve().parents[1]
@@ -145,18 +145,6 @@ def configure_installed_ctest(tmp_path, *cmake_arguments):
     return build, ctest_dir
 
 
-def list_installed_ctests(ctest_dir, env=None):
-    """The tests CTest lists for ``ctest_dir``, in its json-v1 form."""
-    listed = subprocess.run(
-        ["ctest", "--show-only=json-v1", "--test-dir", str(ctest_dir)],
-        check=True,
-        capture_output=True,
-        text=True,
-        env=env,
-    )
-    return json.loads(listed.stdout)["tests"]
-
-
 # How every installed pytest entry other than an explicit gate starts its
 # command, after the interpreter.
 PYTEST_WITH_SHARD_PLUGIN = [
@@ -221,7 +209,7 @@ def test_installed_pytest_entries_run_the_ctest_shard_plugin(
     has_library = (
         PLATFORM.parent / "library" / "tests" / "ctest_lists.cmake"
     ).is_file()
-    tests = list_installed_ctests(ctest_dir)
+    tests = list_ctest_entries(ctest_dir)
     pytest_entries = {test["name"]: test for test in tests if runs_pytest(test)}
 
     expected_names = {
@@ -480,7 +468,7 @@ def test_installed_ctest_entries_get_scoped_environment_contracts(
             ctest_env.pop("ROCM_PATH", None)
         else:
             ctest_env["ROCM_PATH"] = str(rocm_path)
-        tests = list_installed_ctests(ctest_dir, env=ctest_env)
+        tests = list_ctest_entries(ctest_dir, env=ctest_env)
         pair = next(
             test
             for test in tests
@@ -745,7 +733,7 @@ def test_installed_platform_pytest_parts_partition_the_suite(
             for part, path in ignored_files.items()
         ),
     )
-    tests = list_installed_ctests(ctest_dir)
+    tests = list_ctest_entries(ctest_dir)
     parts = [test for test in tests if test["name"].startswith("rocke_pytest_")]
     plugin_tests = [
         test for test in tests if test["name"] == "rocke_ctest_shard_pytest"
@@ -856,7 +844,7 @@ def test_installed_platform_pytest_parts_keep_the_suite_tier_labels(tmp_path):
     the quick tier. Another category keeps rocke_library_gdn_pytest and
     rocke_library_conv_fwd_aot_packaging_pytest in the ffm-quick tier."""
     _, ctest_dir = configure_installed_ctest(tmp_path)
-    names = [test["name"] for test in list_installed_ctests(ctest_dir)]
+    names = [test["name"] for test in list_ctest_entries(ctest_dir)]
     parts = [name for name in names if name.startswith("rocke_pytest_")]
     assert parts, "no rocke_pytest_ parts are registered"
     tiling_entries = [

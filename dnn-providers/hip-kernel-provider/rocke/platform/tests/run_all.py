@@ -31,7 +31,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import subprocess
@@ -112,23 +111,6 @@ def relative_path_guard() -> int:
     return 0
 
 
-def ctest_tests(
-    build_root: Path, config: str, pattern: str | None = None
-) -> list[dict]:
-    command = [
-        "ctest",
-        "--test-dir",
-        str(build_root),
-        "-C",
-        config,
-        "--show-only=json-v1",
-    ]
-    if pattern:
-        command += ["-R", pattern]
-    listing = subprocess.run(command, check=True, capture_output=True, text=True)
-    return json.loads(listing.stdout)["tests"]
-
-
 _CTEST_READINESS_EXEMPT = frozenset({"rocke_arch_domain_reproducibility"})
 
 
@@ -136,12 +118,16 @@ def ctest_ready(build_root: Path, config: str) -> bool:
     if not (build_root / "CTestTestfile.cmake").is_file():
         print("\n== ctest: SKIPPED (no configured test build) ==")
         return False
+    # Imported here, not at the top: the runner must start where rocke is not
+    # importable (an isolated `--help`).
+    from rocke.tests.ctest_listing import list_ctest_entries
+
     # A configured source-script test is immediately executable, but does not
     # mean the registered native suite was built. Preserve run_all's contract:
     # only launch the entire CTest suite once at least one build product exists.
     commands = [
         test.get("command", [])
-        for test in ctest_tests(build_root, config)
+        for test in list_ctest_entries(build_root, config=config)
         if test.get("name") not in _CTEST_READINESS_EXEMPT
     ]
     if any(command and Path(command[0]).is_file() for command in commands):
