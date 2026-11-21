@@ -15,9 +15,9 @@
 #include <rocRoller/Parameters/Solution/StoreOption.hpp>
 #include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
+#include <rocRoller/hostnumerics/HostDataGeneration.hpp>
 
 #include "client/BenchmarkSolution.hpp"
-#include <mxDataGenerator/DataGenerator.hpp>
 
 namespace rocRoller
 {
@@ -119,7 +119,7 @@ namespace rocRoller
                 // When scaleA/B is ScaleMode::SingleScale
                 float scaleValueA, scaleValueB;
 
-                DGen::DataInitMode initModeA, initModeB, initModeC;
+                hostnumerics::DataInitialization initModeA{}, initModeB{}, initModeC{};
 
                 int workgroupMappingDim;
             };
@@ -209,6 +209,7 @@ namespace rocRoller
             std::ostream& operator<<(std::ostream& s, MNKBTuple const& x);
             std::ostream& operator<<(std::ostream& s, MKNLTuple const& x);
             std::ostream& operator<<(std::ostream& s, TransposeType const& x);
+            std::ostream& operator<<(std::ostream& s, hostnumerics::DataInitialization const& x);
             std::ostream& operator<<(std::ostream& s, TypeParameters const& x);
             std::ostream& operator<<(std::ostream& s, ProblemParameters const& x);
             std::ostream& operator<<(std::ostream& s, SolutionParameters const& x);
@@ -259,5 +260,5 @@ namespace rocRoller::Client::GEMMClient::CLI
      *
      * Asserts that argument is well-formed.
      */
-    bool ParseInitMode(const std::string& arg, DGen::DataInitMode& result);
+    bool ParseInitMode(const std::string& arg, hostnumerics::DataInitialization& result);
 }

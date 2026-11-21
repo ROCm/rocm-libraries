@@ -262,6 +262,7 @@ namespace TensileLite
             m_constantTypes.resize(constants.size());
             m_constantValues.resize(constants.size());
             m_constantRandom.assign(constants.size(), false);
+            const auto initializationSeed = args["init-seed"].as<unsigned int>();
             // Get types and values from the information from ContractionProblem
             // May contain useless information for ClientProblemFactory
             // Get tensor types
@@ -311,7 +312,10 @@ namespace TensileLite
                 if(args.count(valueName))
                 {
                     auto mode           = args[valueName].as<InitMode>();
-                    m_constantValues[i] = DataInitialization::getValue<double>(mode);
+                    m_constantValues[i] = hostnumericsDoubleValue(
+                        mode,
+                        DataInitializationKey{initializationSeed,
+                                              stableDataInitializationStream(valueName)});
                     m_constantRandom[i] = IsRandomLike(mode);
                 }
                 else

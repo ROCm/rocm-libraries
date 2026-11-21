@@ -619,9 +619,11 @@ change; see the corrected rows in Known Risks and Gaps below.
 ### CPU reference GEMM tests
 
 The C++ reference has two numerical suites: gtests in `tensilelite-tests` and
-the `CPUGemm.*` cases registered for `cpu-gemm-driver`. The driver validates D
-and AMAX-D against its own scalar GEMM. Its cases cover fast and slow paths,
-data types, transposes, scaling, bias, activation and batching.
+the `CPUGemm.*` cases registered for `cpu-gemm-driver`. The driver validates the
+HostNumerics reference's D and AMAX-D against its own scalar GEMM. Its cases
+cover data types, transposes, scaling, bias, activation and batching; the
+`fast_` and `slow_` variants select the Blocked backend or automatic backend
+selection with `--tryFastPath`.
 
 Both executables and their CTest registrations install under
 `bin/hipblaslt-tensilelite/`. TheRock's TensileLite job runs that installed suite
@@ -644,8 +646,8 @@ Each ordinary driver case has one registration, with an OpenMP thread limit of
 and `_Threads1` and `_Threads3` select limits 1 and 3. CTest sets both
 `OMP_THREAD_LIMIT` and `OMP_NUM_THREADS`, disables dynamic teams, and accounts
 for the requested processors when scheduling tests. Limits constrain the
-reference's explicit request for 64 threads; they are numerical test settings,
-not measurements of the team used by every reference call.
+OpenMP threads the reference uses; they are numerical test settings, not
+measurements of the team used by every reference call.
 
 The Int8 option-rejection cases require exit code 1 and their expected diagnostic
 through [`CheckCpuGemmFailure.cmake`](tests/cmake/CheckCpuGemmFailure.cmake).

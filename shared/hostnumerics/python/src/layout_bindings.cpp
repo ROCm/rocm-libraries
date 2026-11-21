@@ -36,7 +36,7 @@ Examples:
     >>> reversed_rows.element_offset([1, 2])
     2
 
-Layout() is a scalar with zero offset. Orders are Permutations. Invalid ranks,
+A scalar layout is Layout(Shape(), [], offset). Orders are Permutations. Invalid ranks,
 coordinates, order ranks, and arithmetic overflow raise RuntimeError. Negative
 axes or coordinates, and other values that do not fit size_t or ptrdiff_t,
 raise TypeError. Layouts are immutable and compare and hash by shape, strides,
@@ -45,7 +45,6 @@ Contiguous factories require each extent and running stride product, including
 the final element count, to fit ptrdiff_t. Even empty shapes can overflow before
 the traversal reaches a zero extent.
 )doc")
-        .def(nb::init<>())
         .def(nb::init<Shape, std::vector<ptrdiff_t>, ptrdiff_t>(), "shape"_a, "strides"_a,
              "offset"_a)
         .def_static(
@@ -76,11 +75,12 @@ the traversal reaches a zero extent.
             [](const Layout& layout) {
                 const auto result = layout.getElementBounds();
                 if (!result) throw std::runtime_error(result.error().message());
-                return nb::make_tuple(result->first, result->second);
+                if (!*result) return nb::object(nb::none());
+                return nb::object(nb::make_tuple((*result)->lowest, (*result)->highest));
             },
             "Return inclusive minimum and maximum reachable element offsets. Empty shapes "
-            "return (0, -1), and scalars return (offset, offset). Raises RuntimeError if "
-            "an intermediate product or sum does not fit ptrdiff_t.")
+            "address no element and return None; scalars return (offset, offset). Raises "
+            "RuntimeError if an intermediate product or sum does not fit ptrdiff_t.")
         .def(
             "element_offset",
             [](const Layout& layout, const std::vector<size_t>& indices) {

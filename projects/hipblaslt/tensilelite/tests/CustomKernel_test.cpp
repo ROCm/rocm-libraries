@@ -112,9 +112,8 @@ namespace
 
     AMDGPU probeDevice()
     {
-        return makeDevice(TensileLite::testing::_MI350_CHIP_ID,
-                          TensileLite::testing::_SPX_CU,
-                          "mi350spx");
+        return makeDevice(
+            TensileLite::testing::_MI350_CHIP_ID, TensileLite::testing::_SPX_CU, "mi350spx");
     }
 
     KernelInvocation splitKProbeCall(int16_t        compiledGsu,
@@ -226,8 +225,7 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
 {
     for(auto semantic : {CustomArgSemantic::Alpha, CustomArgSemantic::Beta})
     {
-        EXPECT_EQ(emittedScalar(semantic, rocisa::DataType::Float, 1.5f).size(),
-                  sizeof(float));
+        EXPECT_EQ(emittedScalar(semantic, rocisa::DataType::Float, 1.5f).size(), sizeof(float));
 
         auto const fromHalf
             = emittedScalar(semantic, rocisa::DataType::Half, static_cast<Half>(1.5f));
@@ -238,8 +236,7 @@ TEST(CustomKernelTest, ScalarsFillTheDeclaredThirtyTwoBitSlot)
         EXPECT_EQ(widened, 1.5f);
 
         EXPECT_EQ(
-            emittedScalar(semantic, rocisa::DataType::BFloat16, static_cast<BFloat16>(1.5f))
-                .size(),
+            emittedScalar(semantic, rocisa::DataType::BFloat16, static_cast<BFloat16>(1.5f)).size(),
             sizeof(float));
     }
 }
@@ -800,6 +797,45 @@ TEST(CustomKernelTest, ByteStridesNeedAnIntegerKernelArgument)
             EXPECT_NE(std::string(e.what()).find("needs an integer kernel argument"),
                       std::string::npos)
                 << e.what();
+        }
+    }
+}
+
+TEST(CustomKernelTest, Gfx950ScaleBatchStridesFollowTheBoundDimension)
+{
+    for(bool transA : {false, true})
+    {
+        for(bool transB : {false, true})
+        {
+            SCOPED_TRACE(::testing::Message() << "transA=" << transA << " transB=" << transB);
+            auto problem = ContractionProblemGemm::GEMM(transA,
+                                                        transB,
+                                                        17,
+                                                        33,
+                                                        256,
+                                                        transA ? 256 : 17,
+                                                        transB ? 33 : 256,
+                                                        17,
+                                                        1.0,
+                                                        false,
+                                                        2);
+            problem.setMXScaleA(rocisa::DataType::E8, 32);
+            problem.setMXScaleB(rocisa::DataType::E8, 32);
+            for(auto semantic :
+                {CustomArgSemantic::StrideScaleA1, CustomArgSemantic::StrideScaleB1})
+            {
+                ContractionSolution solution;
+                configureProbeKernel(solution, {CustomArgType::uint32, semantic});
+                solution.sizeMapping.globalSplitU = 1;
+                auto       device                 = probeDevice();
+                const auto invocation             = solution.generateCustomCall<false>(
+                    problem, ContractionInputs{}, device, StreamKSettings{});
+                ASSERT_EQ(invocation.args.size(), sizeof(uint32_t));
+                uint32_t stride = 0;
+                std::memcpy(&stride, invocation.args.data(), sizeof(stride));
+                // gfx950 pads MN to 32 and K/32 to 8 for every transpose combination.
+                EXPECT_EQ(stride, semantic == CustomArgSemantic::StrideScaleA1 ? 256u : 512u);
+            }
         }
     }
 }

@@ -7,7 +7,6 @@ target_sources(common-test-utilities
         "${CMAKE_CURRENT_SOURCE_DIR}/common/CommonGraphs_impl.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/common/F8Values.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/common/GEMMProblem.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/common/mxDataGen.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/common/Scheduling.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/common/SourceMatcher.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/common/TestValues.hpp"

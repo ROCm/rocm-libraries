@@ -1,14 +1,12 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Host-only unit tests for the maf2_0 and maf2_0_unit_scale methods of generateMXInput
-// (mxDataGen.cpp): which block-scale distribution each scale format gets, and the unit-scale rows.
+// Host-only unit tests for maf2_0 and maf2_0_unit_scale block-scaled (MX) data from
+// generateMxData: which block-scale distribution each scale format gets, and the unit-scale rows.
 // The draws are random, so these check the scale bytes exactly and the data statistically. See
 // README.md in this directory for the HostUnit/smoke_ naming.
 
-#if HIPBLASLT_ENABLE_MXDATAGENERATOR
-
-#include "mxDataGen.hpp"
+#include <hipblaslt/hostnumerics/HipblasltDataInitialization.hpp>
 
 #include <gtest/gtest.h>
 
@@ -16,12 +14,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace
 {
+    namespace hn     = roc::hostnumerics;
+    namespace client = hipblaslt::hostnumerics;
+
     // Unsigned UE4M3 (bias 7) and UE5M3 (bias 15) scales, 3 mantissa bits each.
     double decodeScale(uint8_t code, int exponentBits)
     {
@@ -32,50 +33,47 @@ namespace
                              : std::ldexp(1.0 + mantissa / 8.0, exponent - bias);
     }
 
-    constexpr uint8_t kUnwritten = 0xAA;
-
     struct Generated
     {
         std::vector<uint8_t> data;
-        std::vector<uint8_t> scales; // every scale byte written
+        std::vector<uint8_t> scales;
         std::vector<float>   ref;
     };
 
-    // A transposed A (K x M stored, K along the rows) of K = 256, M = 64.
-    Generated generate(hipDataType dataType,
-                       hipDataType scaleType,
-                       int         block,
-                       char const* method,
-                       uint32_t    seedIndex = 0)
+    std::vector<uint8_t> bytesOf(hn::Tensor const& tensor)
     {
-        constexpr uint64_t   rows = 256, cols = 64, count = rows * cols;
-        const bool           fp4 = dataType == static_cast<hipDataType>(HIP_R_4F_E2M1);
-        std::vector<uint8_t> data(fp4 ? count / 2 : count);
-        std::vector<uint8_t> scale(count, kUnwritten);
-        Generated            g;
-        g.ref  = generateMXInput(dataType,
-                                scaleType,
-                                data.data(),
-                                scale.data(),
-                                rows,
-                                cols,
-                                rows,
-                                /*isTranspose=*/true,
-                                block,
-                                1,
-                                /*isMatrixA=*/true,
-                                MXScaleLayout::None,
-                                method,
-                                -1.0f,
-                                1.0f,
-                                "",
-                                seedIndex);
-        g.data = std::move(data);
-        for(uint8_t s : scale)
-            if(s != kUnwritten)
-                g.scales.push_back(s);
-        EXPECT_EQ(g.ref.size(), count);
-        EXPECT_GE(g.scales.size(), count / block);
+        std::vector<uint8_t> bytes;
+        for(std::byte b : tensor.rawEncodedBackingStorage())
+            bytes.push_back(std::to_integer<uint8_t>(b));
+        return bytes;
+    }
+
+    // A transposed A (K x M stored, K along the rows) of K = 256, M = 64, in batch `batch`.
+    Generated generate(hipDataType              dataType,
+                       hipDataType              scaleType,
+                       int                      block,
+                       hipblaslt_initialization method,
+                       client::MatrixRole       role  = client::MatrixRole::A,
+                       size_t                   batch = 0)
+    {
+        constexpr uint64_t rows = 256, cols = 64;
+        const auto         mx = client::generateMxData(dataType,
+                                               scaleType,
+                                               hn::Shape{rows, cols},
+                                               rows,
+                                               /*blockAxis=*/0,
+                                               block,
+                                               method,
+                                               client::mxDefaultSeed,
+                                               role,
+                                               batch);
+        Generated          g;
+        g.data   = bytesOf(mx.data);
+        g.scales = bytesOf(mx.scales);
+        for(uint64_t j = 0; j < cols; j++)
+            for(uint64_t i = 0; i < rows; i++)
+                g.ref.push_back(mx.reference.loadAs<float>({i, j}));
+        EXPECT_EQ(g.scales.size(), cols * rows / block);
         return g;
     }
 
@@ -83,8 +81,10 @@ namespace
     // mean 126.5. A normal N(0.34375, 0.08) scale would round to only 2^-3..2^-1 under E8M0.
     TEST(HostUnitMXDataGenMaf2_0, smoke_fp4_e8m0_scales_are_binomial)
     {
-        const auto g
-            = generate(static_cast<hipDataType>(HIP_R_4F_E2M1), HIP_R_8F_UE8M0, 32, "maf2_0");
+        const auto        g   = generate(static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                HIP_R_8F_UE8M0,
+                                32,
+                                hipblaslt_initialization::maf2_0);
         double            sum = 0;
         std::set<uint8_t> distinct;
         for(uint8_t s : g.scales)
@@ -115,8 +115,11 @@ namespace
         for(auto const& f : formats)
         {
             SCOPED_TRACE("scale type " + std::to_string(f.type));
-            const auto g = generate(static_cast<hipDataType>(HIP_R_4F_E2M1), f.type, 16, "maf2_0");
-            double     sum = 0, sumSq = 0;
+            const auto        g   = generate(static_cast<hipDataType>(HIP_R_4F_E2M1),
+                                    f.type,
+                                    16,
+                                    hipblaslt_initialization::maf2_0);
+            double            sum = 0, sumSq = 0;
             std::set<uint8_t> distinct;
             for(uint8_t s : g.scales)
             {
@@ -133,17 +136,21 @@ namespace
         }
     }
 
-    // maf2_0 salts its seed with seedIndex = abc + 3 * batch: the same index repeats the data and
-    // scales exactly, while A of batch 0 (0), B of batch 0 (1) and A of batch 1 (3) all differ.
-    TEST(HostUnitMXDataGenMaf2_0, smoke_seed_index_selects_the_stream)
+    // The data and scale streams depend on the matrix role and batch: the same matrix repeats
+    // exactly, while A of batch 0, B of batch 0 and A of batch 1 all differ.
+    TEST(HostUnitMXDataGenMaf2_0, smoke_role_and_batch_select_the_stream)
     {
-        for(auto const* method : {"maf2_0", "maf2_0_unit_scale"})
+        for(auto method :
+            {hipblaslt_initialization::maf2_0, hipblaslt_initialization::maf2_0_unit_scale})
         {
-            SCOPED_TRACE(method);
-            auto run = [&](uint32_t seedIndex) {
-                return generate(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 32, method, seedIndex);
+            SCOPED_TRACE(hipblaslt_initialization2string(method));
+            auto run = [&](client::MatrixRole role, size_t batch) {
+                return generate(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 32, method, role, batch);
             };
-            const auto a0 = run(0), again = run(0), b0 = run(1), a1 = run(3);
+            const auto a0    = run(client::MatrixRole::A, 0);
+            const auto again = run(client::MatrixRole::A, 0);
+            const auto b0    = run(client::MatrixRole::B, 0);
+            const auto a1    = run(client::MatrixRole::A, 1);
             EXPECT_EQ(a0.data, again.data);
             EXPECT_EQ(a0.scales, again.scales);
             EXPECT_NE(a0.data, b0.data);
@@ -151,23 +158,17 @@ namespace
             EXPECT_NE(b0.data, a1.data);
         }
         // Binomial scales differ too; unit scales are all 1.0 by design.
-        auto scales = [](uint32_t seedIndex) {
-            return generate(HIP_R_8F_E4M3, HIP_R_8F_UE8M0, 32, "maf2_0", seedIndex).scales;
+        auto scales = [](client::MatrixRole role, size_t batch) {
+            return generate(HIP_R_8F_E4M3,
+                            HIP_R_8F_UE8M0,
+                            32,
+                            hipblaslt_initialization::maf2_0,
+                            role,
+                            batch)
+                .scales;
         };
-        EXPECT_NE(scales(0), scales(1));
-        EXPECT_NE(scales(0), scales(3));
-    }
-
-    // testing_matmul passes mxSeedIndex: abc + 3 * batch, and batch 0's index for every batch of
-    // a broadcast (stride 0) matrix, so all its batches regenerate the same data.
-    TEST(HostUnitMXDataGenMaf2_0, smoke_seed_index_of_each_matrix)
-    {
-        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/true, 0, 4096), 0u);
-        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/false, 0, 4096), 1u);
-        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/true, 2, 4096), 6u);
-        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/false, 2, 4096), 7u);
-        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/true, 2, 0), 0u);
-        EXPECT_EQ(mxSeedIndex(/*isMatrixA=*/false, 2, 0), 1u);
+        EXPECT_NE(scales(client::MatrixRole::A, 0), scales(client::MatrixRole::B, 0));
+        EXPECT_NE(scales(client::MatrixRole::A, 0), scales(client::MatrixRole::A, 1));
     }
 
     // maf2_0_unit_scale (the MXFP8 and FP4 X=1 rows): every block scale is 1.0 and the data is
@@ -195,7 +196,8 @@ namespace
         {
             SCOPED_TRACE("data type " + std::to_string(c.data) + " scale type "
                          + std::to_string(c.scale));
-            const auto g = generate(c.data, c.scale, c.block, "maf2_0_unit_scale");
+            const auto g
+                = generate(c.data, c.scale, c.block, hipblaslt_initialization::maf2_0_unit_scale);
             for(uint8_t s : g.scales)
                 ASSERT_EQ(s, c.one);
             double sum = 0, sumSq = 0;
@@ -209,6 +211,14 @@ namespace
             EXPECT_NEAR(std::sqrt(sumSq / g.ref.size() - mean * mean), 1.0, 0.1);
         }
     }
-} // namespace
 
-#endif // HIPBLASLT_ENABLE_MXDATAGENERATOR
+    // maf2_0_unit_scale covers block-scaled FP8 and FP4 only; FP6 is refused before writing.
+    TEST(HostUnitMXDataGenMaf2_0, smoke_unit_scale_refuses_fp6)
+    {
+        for(hipDataType type : {HIP_R_6F_E2M3, HIP_R_6F_E3M2})
+            EXPECT_THROW(
+                generate(type, HIP_R_8F_UE8M0, 32, hipblaslt_initialization::maf2_0_unit_scale),
+                std::runtime_error)
+                << "type " << int(type);
+    }
+} // namespace

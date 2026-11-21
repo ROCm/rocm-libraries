@@ -22,9 +22,9 @@ namespace TensileLite
         // Single-threaded — no atomic needed.
         inline double g_calibratedPerCallOverheadMs = 0;
 
-        // Set while the per-solution CPU reference recompute runs, so the SolveCPU timers
-        // ("solve_cpu_fast"/"solve_cpu_slow") are reported under *_per_solution names and
-        // do not get attributed to the per-problem cpu_reference_gemm timer.
+        // Set while the per-solution CPU reference recompute runs, so the SolveCPU timer
+        // ("solve_cpu_reference") is reported under its *_per_solution name and
+        // is not attributed to the per-problem cpu_reference_gemm timer.
         inline thread_local bool g_inPerSolutionReference = false;
 
         // Set by main() around the per-run "gpu_input_reset" call of prepareGPUInputs() so the

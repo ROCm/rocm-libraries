@@ -158,8 +158,8 @@ namespace TileTransposeAddTest
         auto tol = AcceptableError{epsilon<double>(), "Should be exact."};
         auto res = compare(r, x, tol);
 
-        Log::info("RNorm is {}", res.relativeNormL2);
-        ASSERT_TRUE(res.ok) << res.message();
+        Log::info("RNorm is {}", res.statistics.relativeFrobeniusError);
+        ASSERT_TRUE(res.ok()) << res.message();
     }
 
     TEST_P(GPU_TileTransposeAddTest, GPU_TileTransposeAddTest)

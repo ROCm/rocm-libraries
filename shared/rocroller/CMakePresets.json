@@ -58,7 +58,9 @@
       "description": "Build documentation",
       "inherits": "default:release",
       "cacheVariables": {
-        "ROCROLLER_ENABLE_DOCS": "ON"
+        "ROCROLLER_ENABLE_DOCS": "ON",
+        "ROCROLLER_ENABLE_CLIENT": "OFF",
+        "ROCROLLER_BUILD_TESTING": "OFF"
       }
     },
     {

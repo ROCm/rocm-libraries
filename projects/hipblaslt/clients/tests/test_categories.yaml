@@ -14,13 +14,13 @@
 #   so "*pre_checkin*" selects the tests whose category is pre_checkin.
 #
 #   Categories present in clients/tests/data today: smoke, quick, pre_checkin,
-#   nightly, stress, HMM, sdc_hunt (on demand, deliberately in no tier; see
-#   clients/scripts/sdc_hunt), plus known_bug (assigned by the test generator to
+#   nightly, stress, HMM, sdc_hunt (on demand, deliberately in no tier), plus
+#   known_bug (assigned by the test generator to
 #   known_bugs.yaml entries with no known_bug_platforms). hipblaslt-test drops every
 #   known-bug case before registration, including per-GPU ones, so no registered test
 #   carries the known_bug token; the tiers below still exclude it.
 #
-#   The fast_check cases in stress and sdc_hunt also check the filter themselves
+#   The freivalds cases in stress and sdc_hunt also check the filter themselves
 #   (SKIP_UNLESS_SELECTED_BY_FILTER): both skip under a filter that selects
 #   nothing in particular (none, "*", or exclusions only), and the sdc_hunt ones
 #   also skip unless a positive pattern contains "sdc_hunt".

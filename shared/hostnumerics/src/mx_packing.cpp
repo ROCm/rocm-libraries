@@ -1,0 +1,55 @@
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
+#include "detail/mx_packing.hpp"
+
+#include <cstddef>
+#include <iterator>
+#include <roc/hostnumerics/scalar_storage.hpp>
+
+#include "detail/checked_arithmetic.hpp"
+
+namespace roc::hostnumerics::detail {
+std::vector<std::byte> packRawValues(std::span<const uint8_t> rawValues, uint16_t bitsPerValue,
+                                     int threadCount) {
+    const size_t totalBits = checkedMultiply(rawValues.size(), static_cast<size_t>(bitsPerValue),
+                                             "MX packed storage size overflow.");
+    std::vector<std::byte> storage(ceilDivide(totalBits, size_t{8}), std::byte{0});
+    if (bitsPerValue == 8) {
+#pragma omp parallel for schedule(static) num_threads(threadCount)
+        for (ptrdiff_t signedIndex = 0; signedIndex < std::ssize(rawValues); ++signedIndex) {
+            const auto index = static_cast<size_t>(signedIndex);
+            storage[index] = static_cast<std::byte>(rawValues[index]);
+        }
+    } else if (bitsPerValue == 4) {
+#pragma omp parallel for schedule(static) num_threads(threadCount)
+        for (ptrdiff_t signedByte = 0; signedByte < std::ssize(storage); ++signedByte) {
+            const auto byteIndex = static_cast<size_t>(signedByte);
+            const size_t firstIndex = byteIndex * 2;
+            const uint8_t first = rawValues[firstIndex] & 0x0fU;
+            const uint8_t second =
+                firstIndex + 1 < rawValues.size() ? rawValues[firstIndex + 1] & 0x0fU : 0;
+            storage[byteIndex] = static_cast<std::byte>(first | (second << 4));
+        }
+    } else if (bitsPerValue == 6) {
+        const auto groups = static_cast<ptrdiff_t>((rawValues.size() + 3U) / 4U);
+#pragma omp parallel for schedule(static) num_threads(threadCount)
+        for (ptrdiff_t signedGroup = 0; signedGroup < groups; ++signedGroup) {
+            const auto group = static_cast<size_t>(signedGroup);
+            const size_t firstIndex = group * 4U;
+            uint32_t word = 0;
+            for (size_t offset = 0; offset < 4U && firstIndex + offset < rawValues.size(); ++offset)
+                word |= static_cast<uint32_t>(rawValues[firstIndex + offset] & 0x3fU)
+                        << (offset * 6U);
+            const size_t byteOffset = group * 3U;
+            for (size_t byte = 0; byte < 3U && byteOffset + byte < storage.size(); ++byte)
+                storage[byteOffset + byte] = static_cast<std::byte>((word >> (byte * 8U)) & 0xffU);
+        }
+    } else {
+        for (size_t index = 0; index < rawValues.size(); ++index)
+            writePackedBits(storage, index * static_cast<size_t>(bitsPerValue), bitsPerValue,
+                            rawValues[index]);
+    }
+    return storage;
+}
+}  // namespace roc::hostnumerics::detail
