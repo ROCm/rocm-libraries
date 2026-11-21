@@ -737,7 +737,7 @@ TEST_F(TestGfx950ConvDgradAotPacks, RanksThroughItsRegisteredScoreSymbol)
 /// HasAGraphMatchAndOneKernelMatcher.
 TEST_F(TestGfx950ConvDgradAotPacks, CarriesNoGraphScopedMatcher)
 {
-    EXPECT_FALSE(_set->engine.graphMatchNativeSymbol.empty());
+    EXPECT_FALSE(nativeGraphMatchSymbol(_set->engine).empty());
     const auto graphScoped
         = std::count_if(_set->matchers.begin(), _set->matchers.end(), [](const auto& matcher) {
               return matcher.scope == ingestor::MatchScope::GRAPH;

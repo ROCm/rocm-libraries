@@ -52,7 +52,7 @@ TEST(TestFlydslRmsNormPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
     const auto& set = loadedSet(FLYDSL_RMSNORM.engineName);
 
     EXPECT_EQ(distinctPackIdCount(set), 1U);
-    EXPECT_EQ(set.engine.graphMatchNativeSymbol, FLYDSL_RMSNORM.graphMatcher);
+    EXPECT_EQ(nativeGraphMatchSymbol(set.engine), FLYDSL_RMSNORM.graphMatcher);
 
     // RMSNormAttributes is its own union arm, so admitting the node type IS the operation
     // test: there is no graph-scoped matcher to do it a second time.

@@ -180,7 +180,7 @@ std::unique_ptr<Manager> makeManager(std::vector<KernelSlotInput> slots = defaul
     return std::make_unique<Manager>(std::move(slots),
                                      std::vector<MatchDescriptor>{},
                                      makeStubDispatches(),
-                                     GRAPH_MATCH,
+                                     NativeGraphMatch{GRAPH_MATCH},
                                      sharedWorkspaceToken,
                                      "engine 'slotted fixture'",
                                      cacheCapacity);
@@ -338,7 +338,7 @@ TEST_F(TestSlottedStateManagerDefault, AnUnslottedEngineIsOneImplicitSlot)
                           makeStubDispatches(),
                           {slotPack(0x24, "", {{0x25, "one", 64, 64}, {0x26, "two", 128, 64}})},
                           std::make_shared<UnrankedKernelHeuristic>(),
-                          GRAPH_MATCH);
+                          NativeGraphMatch{GRAPH_MATCH});
     EXPECT_FALSE(manager.isSlotted());
     EXPECT_EQ(manager.slotCount(), 1U);
     EXPECT_EQ(namesOf(manager.unsortedCatalog(_context)), (Names{"one", "two"}));
@@ -662,7 +662,7 @@ DescriptorSet makeSlottedSet()
     DescriptorSet set;
     set.engine.id = testId(0xE0);
     set.engine.name = "test:slotted";
-    set.engine.graphMatchNativeSymbol = GRAPH_MATCH;
+    set.engine.graphMatch = NativeGraphMatch{GRAPH_MATCH};
     set.engine.sharedWorkspaceToken = WS_BYTES;
     set.dispatches = makeStubDispatches();
     struct SlotSpec
@@ -735,14 +735,15 @@ TEST(TestSlottedStateManager, ASlotRankerNeverSeesWorkspaceTokensButAnUnslottedO
     // the model never scores.
     auto slottedSet = makeSlottedSet();
     slottedSet.slots[1].heuristic = wsReadingRanker();
-    const auto slotted = makeStateManager<StubHandle>(std::move(slottedSet), GRAPH_MATCH);
+    const auto slotted
+        = makeStateManager<StubHandle>(std::move(slottedSet), NativeGraphMatch{GRAPH_MATCH});
     capturedRows().clear();
     const auto ranked = slotted->sortedCatalog(1, context);
     EXPECT_TRUE(capturedRows().empty());
     EXPECT_EQ(namesOf(ranked), (Names{"dkdv_a", "dkdv_b", "dkdv_c"}));
 
     DescriptorSet unslottedSet;
-    unslottedSet.engine.graphMatchNativeSymbol = GRAPH_MATCH;
+    unslottedSet.engine.graphMatch = NativeGraphMatch{GRAPH_MATCH};
     unslottedSet.engine.knobs = {BLOCK_M, BLOCK_N};
     unslottedSet.schema = slotSchema(0xA2, "dkdv kmd");
     unslottedSet.dispatches = makeStubDispatches();
@@ -750,7 +751,8 @@ TEST(TestSlottedStateManager, ASlotRankerNeverSeesWorkspaceTokensButAnUnslottedO
     unslottedSet.packs = dkdvPacks();
     unslottedSet.packs.front().slot.clear();
     // No engine name: no on-disk winner cache is consulted.
-    const auto unslotted = makeStateManager<StubHandle>(std::move(unslottedSet), GRAPH_MATCH);
+    const auto unslotted
+        = makeStateManager<StubHandle>(std::move(unslottedSet), NativeGraphMatch{GRAPH_MATCH});
     capturedRows().clear();
     (void)unslotted->sortedCatalog(context);
     ASSERT_EQ(capturedRows().size(), 3U) << "an unslotted engine's ranker must still bind ws.*";
@@ -1035,7 +1037,7 @@ std::unique_ptr<Manager> makeLaunchManager(std::vector<KernelDescriptor> prep,
     return std::make_unique<Manager>(std::move(slots),
                                      std::vector<MatchDescriptor>{},
                                      ScopedLaunchDispatches::descriptors(),
-                                     GRAPH_MATCH,
+                                     NativeGraphMatch{GRAPH_MATCH},
                                      WS_BYTES,
                                      "engine 'launch fixture'");
 }

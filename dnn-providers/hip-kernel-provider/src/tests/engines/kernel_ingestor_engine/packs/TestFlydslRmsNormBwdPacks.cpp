@@ -36,7 +36,7 @@ TEST(TestFlydslRmsNormBwdPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatche
     const auto& set = loadedSet(FLYDSL_RMSNORM_BWD.engineName);
 
     EXPECT_EQ(distinctPackIdCount(set), 1U);
-    EXPECT_EQ(set.engine.graphMatchNativeSymbol, FLYDSL_RMSNORM_BWD.graphMatcher);
+    EXPECT_EQ(nativeGraphMatchSymbol(set.engine), FLYDSL_RMSNORM_BWD.graphMatcher);
     size_t graphScoped = 0;
     size_t kernelScoped = 0;
     for(const auto& matcher : set.matchers)

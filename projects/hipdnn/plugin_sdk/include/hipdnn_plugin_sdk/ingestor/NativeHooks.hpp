@@ -40,6 +40,9 @@ using CandidateFilterFn = std::vector<bool> (*)(const MatchContext&,
                                                 const BoundTokens&,
                                                 const std::vector<const KernelDefinition*>&);
 
+/// Resolves the symbol a UED's `graph_match.native` arm names (RFC 0020 §4.5). Register a
+/// GraphMatchFn here only for that arm. A `graph_match.nodes` pattern (RFC 0020 §4.3) is
+/// compiled from the descriptor against the op-schema registry and needs no registration.
 using GraphMatchRegistry = NativeRegistry<GraphMatchFn>;
 using GraphCriterionRegistry = NativeRegistry<GraphCriterionFn>;
 using KernelMatcherRegistry = NativeRegistry<KernelMatcherFn>;

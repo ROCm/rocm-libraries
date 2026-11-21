@@ -3,8 +3,12 @@
 
 include "data_types.fbs";
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
@@ -21,9 +25,9 @@ enum ReductionMode : byte {
     MUL_NO_ZEROS = 9
 }
 
-table ReductionAttributes {
+table ReductionAttributes (matcher_opcode: "reduction") {
     mode: ReductionMode;
-    in_tensor_uid: long (cache_uid);
-    out_tensor_uid: long (cache_uid);
+    in_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "in");
+    out_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "out");
     is_deterministic: bool = false;
 }

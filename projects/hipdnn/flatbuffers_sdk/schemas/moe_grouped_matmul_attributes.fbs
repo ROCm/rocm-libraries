@@ -3,6 +3,10 @@
 
 // See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 attribute "work_data_dependent";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
@@ -13,23 +17,23 @@ enum MoeGroupedMatmulMode : byte {
     SCATTER = 2,
 }
 
-table MoeGroupedMatmulAttributes {
+table MoeGroupedMatmulAttributes (matcher_opcode: "moe_grouped_matmul") {
     // Required input tensor UIDs
-    token_tensor_uid:              long (cache_uid);
-    weight_tensor_uid:             long (cache_uid);
+    token_tensor_uid:              long (cache_uid, matcher_input_tensor, matcher_name: "token");
+    weight_tensor_uid:             long (cache_uid, matcher_input_tensor, matcher_name: "weight");
     // Group boundaries: rows outside every [offset[g], offset[g+1]) range are never
     // multiplied, so the values decide how many rows are computed.
-    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent);
+    first_token_offset_tensor_uid: long (cache_uid, work_data_dependent, matcher_input_tensor, matcher_name: "first_token_offset");
 
     // Optional input tensor UIDs
     // Not work_data_dependent: they pick each routed row's source/destination, not how
     // many rows are routed -- that count is fixed by first_token_offset and the dims
     // (CpuFpReferenceMoeGroupedMatmul.hpp).
-    token_index_tensor_uid:        long = null (cache_uid);
-    token_ks_tensor_uid:           long = null (cache_uid);
+    token_index_tensor_uid:        long = null (cache_uid, matcher_input_tensor, matcher_name: "token_index");
+    token_ks_tensor_uid:           long = null (cache_uid, matcher_input_tensor, matcher_name: "token_ks");
 
     // Required output tensor UID
-    output_tensor_uid:             long (cache_uid);
+    output_tensor_uid:             long (cache_uid, matcher_output_tensor, matcher_name: "output");
 
     // Routing attributes
     mode: MoeGroupedMatmulMode = NONE;

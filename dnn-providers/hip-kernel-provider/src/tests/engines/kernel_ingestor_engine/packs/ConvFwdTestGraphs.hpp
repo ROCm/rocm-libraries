@@ -26,9 +26,9 @@ inline constexpr PackSymbols CONV_FWD{"hipkernel:ConvFwd",
                                       "hipkernel.conv_fwd.kernel_match",
                                       "hipkernel.conv_fwd.score",
                                       "hipkernel.conv_fwd.dispatch",
-                                      "conv_fwd.x.uid",
-                                      "conv_fwd.w.uid",
-                                      "conv_fwd.y.uid"};
+                                      "x",
+                                      "w",
+                                      "y"};
 
 /// @brief Row-major packed strides for @p dims -- the layout the conv kernel's flat
 /// index arithmetic assumes, since it takes no stride arguments of its own.

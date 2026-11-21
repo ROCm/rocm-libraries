@@ -106,7 +106,7 @@ void expectOnePackWithAGraphMatchAndOneKernelScopedMatcher(const CdnaEngine& eng
     const auto& set = loadedSet(engine.name);
 
     EXPECT_EQ(distinctPackIdCount(set), 1U);
-    EXPECT_EQ(set.engine.graphMatchNativeSymbol, engine.graphMatcher);
+    EXPECT_EQ(nativeGraphMatchSymbol(set.engine), engine.graphMatcher);
 
     size_t graphScoped = 0;
     size_t kernelScoped = 0;

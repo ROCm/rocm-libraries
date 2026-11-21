@@ -1,20 +1,29 @@
-// Tensor-reference fields of table {{ op.fbs_table }} in
-// flatbuffers_sdk/schemas/{{ op.fbs_schema_filename }}, with their annotations (semantics in
+// Table {{ op.fbs_table }} in flatbuffers_sdk/schemas/{{ op.fbs_schema_filename }}: its
+// matcher_opcode and the annotations of its tensor-reference fields (semantics in
 // graph.fbs). Make the schema's declarations match, keeping its field order.
-//   cache_uid            every tensor reference.
-//   work_data_dependent  the tensor's contents, not its shape, decide how much work the
-//                        node does (YAML: tensor_fields[].work_data_dependent: true).
-// Then run the cache-key-hipdnn and node-operands-hipdnn pre-commit hooks (or
-// scripts/gen_cache_key.py and scripts/gen_node_operands.py) and commit the regenerated
-// cachekey_generated.h and node_operands_generated.h.
+//   cache_uid              every tensor reference.
+//   work_data_dependent    the tensor's contents, not its shape, decide how much work the
+//                          node does (YAML: tensor_fields[].work_data_dependent: true).
+//   matcher_input_tensor   the node reads the tensor (YAML: direction: input).
+//   matcher_output_tensor  the node writes the tensor (YAML: direction: output).
+//   matcher_name           the edge name a UED pattern binds a scalar field by.
+// Annotate every other scalar field as graph.fbs describes. Then run the
+// op-schema-registry-hipdnn, cache-key-hipdnn and node-operands-hipdnn pre-commit hooks
+// (or scripts/gen_op_schema_registry.py, scripts/gen_cache_key.py and
+// scripts/gen_node_operands.py) and commit the regenerated op_schema_registry.json,
+// op_schema_registry_generated.h, cachekey_generated.h and node_operands_generated.h.
 
 // Declare at file scope each attribute the schema uses:
 attribute "cache_uid";
 {% if op.work_data_dependent_fields %}
 attribute "work_data_dependent";
 {% endif %}
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
-table {{ op.fbs_table }} {
+table {{ op.fbs_table }} (matcher_opcode: "{{ op.matcher_opcode }}") {
 {% for declaration in op.fbs_tensor_declarations %}
     {{ declaration }};
 {% endfor %}

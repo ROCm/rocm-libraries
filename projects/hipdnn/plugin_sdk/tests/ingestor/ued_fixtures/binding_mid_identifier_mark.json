@@ -1,0 +1,16 @@
+{
+  "description": "An operand binding with '?' inside the identifier rather than at its end.",
+  "valid": false,
+  "error": "has malformed binding '$input_a?b'",
+  "ued": {
+    "version": "1.0",
+    "id": "195bfdc9-07ab-544c-b7d9-dee83f463afa",
+    "name": "ued_fixture:binding_mid_identifier_mark",
+    "metadata": "3c0d1be8-46a8-5f0b-b312-1f306fccf1f2",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pointwise", "op": "pointwise", "operands": {"in_0": "$input_a?b"}, "results": {"out_0": "$output"}}
+      ]
+    }
+  }
+}

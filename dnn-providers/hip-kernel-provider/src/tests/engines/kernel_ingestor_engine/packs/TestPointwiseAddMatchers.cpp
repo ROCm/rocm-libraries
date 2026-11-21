@@ -3,6 +3,8 @@
 
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
 
+#include <array>
+#include <limits>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -74,6 +76,75 @@ TEST(TestPointwiseAddGraphMatcher, AcceptsTheUpperSupportedRank)
         data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 1, 1, 1}));
 
     EXPECT_TRUE(matches(fixture.context()));
+}
+
+TEST(TestPointwiseAddGraphMatcher, AdmitsZeroSingletonStridesAndDefersDtypeToTheKernel)
+{
+    const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::ADD,
+                                                   data_objects::DataType::INT32,
+                                                   {1, 1, 1, 1},
+                                                   std::nullopt,
+                                                   true,
+                                                   std::vector<int64_t>{0, 0, 0, 0}));
+    EXPECT_TRUE(matches(fixture.context()));
+    EXPECT_FALSE(matchesKernel(POINTWISE_ADD, fixture.context(), makeKernel(64, "FLOAT")));
+}
+
+TEST(TestPointwiseAddGraphMatcher, RejectsScalarAndVirtualStateOnEveryOperand)
+{
+    // The baseline must match, or the refusals below prove nothing.
+    EXPECT_TRUE(matches(GraphFixture(buildPointwiseGraph()).context()));
+
+    const std::array<const char*, 3> operandNames{"input_a", "input_b", "output"};
+    for(size_t operand = 0; operand < operandNames.size(); ++operand)
+    {
+        for(const auto& state : UNSERVABLE_OPERAND_STATES)
+        {
+            SCOPED_TRACE(std::string(operandNames[operand]) + " " + state.name);
+            const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [&](auto& graph) {
+                applyOperandState(*graph.tensors[operand], state);
+            }));
+            EXPECT_FALSE(matches(fixture.context()));
+        }
+    }
+}
+
+TEST(TestPointwiseAddBinding, RejectsInvalidOptionalNodeScalarRatherThanOmittingIt)
+{
+    const GraphFixture fixture(transformGraph(buildPointwiseGraph(), [](auto& graph) {
+        graph.nodes[0]->attributes.AsPointwiseAttributes()->swish_beta
+            = std::numeric_limits<float>::quiet_NaN();
+    }));
+    EXPECT_FALSE(matches(fixture.context()));
+}
+
+TEST(TestPointwiseAddBinding, BindsAZeroUidOperandInTheNodesOperandOrder)
+{
+    const GraphFixture fixture(
+        transformGraph(buildPointwiseGraph(data_objects::PointwiseMode::SUB), [](auto& graph) {
+            graph.tensors[0]->uid = 0;
+            auto* attributes = graph.nodes[0]->attributes.AsPointwiseAttributes();
+            attributes->in_0_tensor_uid = INPUT_B_UID;
+            attributes->in_1_tensor_uid = 0;
+        }));
+    const auto bound = matchesGraph(POINTWISE_SUB, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_a"), INPUT_B_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_a.uid"), INPUT_B_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_b"), 0);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_b.uid"), 0);
+    EXPECT_EQ(std::get<std::vector<int64_t>>(bound->at("input_b.stride_order")),
+              (std::vector<int64_t>{3, 2, 1, 0}));
+
+    EXPECT_TRUE(matchesOperation(POINTWISE_SUB, fixture.context(), *bound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_MUL, fixture.context(), *bound));
+    EXPECT_TRUE(kernelMatcher(POINTWISE_SUB)(fixture.context(), *bound, makeKernel(64, "FLOAT")));
+    EXPECT_FALSE(kernelMatcher(POINTWISE_SUB)(fixture.context(), *bound, makeKernel(64, "HALF")));
+    EXPECT_EQ(bound->count("pointwise.swish_beta"), 0U);
+    for(const auto* root : {"input_a", "input_b", "output"})
+    {
+        EXPECT_EQ(bound->count(std::string(root) + ".value_f32"), 0U);
+    }
 }
 
 // Graph-scoped matcher: refusals
@@ -246,12 +317,31 @@ TEST(TestPointwiseOperationMatchers, EachPackAdmitsOnlyItsOwnOperation)
     const GraphFixture add(buildPointwiseGraph(data_objects::PointwiseMode::ADD));
     const GraphFixture mul(buildPointwiseGraph(data_objects::PointwiseMode::MUL));
 
-    const BoundTokens bound;
-    EXPECT_TRUE(matchesOperation(POINTWISE_ADD, add.context(), bound));
-    EXPECT_FALSE(matchesOperation(POINTWISE_ADD, mul.context(), bound));
+    const auto addBound = matchesGraph(POINTWISE_ADD, add.context());
+    const auto mulBound = matchesGraph(POINTWISE_MUL, mul.context());
+    ASSERT_TRUE(addBound.has_value());
+    ASSERT_TRUE(mulBound.has_value());
+    EXPECT_TRUE(matchesOperation(POINTWISE_ADD, add.context(), *addBound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_ADD, mul.context(), *mulBound));
 
-    EXPECT_TRUE(matchesOperation(POINTWISE_MUL, mul.context(), bound));
-    EXPECT_FALSE(matchesOperation(POINTWISE_MUL, add.context(), bound));
+    EXPECT_TRUE(matchesOperation(POINTWISE_MUL, mul.context(), *mulBound));
+    EXPECT_FALSE(matchesOperation(POINTWISE_MUL, add.context(), *addBound));
+}
+
+/// Swapped roles pass every operand check, since both inputs share shape and dtype. Sub
+/// is asymmetric, so admitting the swapped binding would compute b - a.
+TEST(TestPointwiseOperationMatchers, SubDeclinesABindingWithSwappedInputRoles)
+{
+    const GraphFixture fixture(buildPointwiseGraph(data_objects::PointwiseMode::SUB));
+    const auto ordered = matchPattern(pointwisePattern(), fixture.context());
+    const auto swapped = matchPattern(pointwisePattern(/*swapInputs=*/true), fixture.context());
+    ASSERT_TRUE(ordered.has_value());
+    ASSERT_TRUE(swapped.has_value());
+    ASSERT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*swapped, "input_a"), INPUT_B_UID);
+    ASSERT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*swapped, "input_b"), INPUT_A_UID);
+
+    EXPECT_TRUE(matchesOperation(POINTWISE_SUB, fixture.context(), *ordered));
+    EXPECT_FALSE(matchesOperation(POINTWISE_SUB, fixture.context(), *swapped));
 }
 
 /// The shared half of the split, stated as its own claim: the expensive checks do not
@@ -300,6 +390,24 @@ TEST(TestPointwiseAddKernelMatcher, IgnoresBlockSizeWhichTheGraphDoesNotConstrai
     EXPECT_TRUE(matchesKernel(POINTWISE_ADD, fixture.context(), makeKernel(256, "FLOAT")));
 }
 
+/// The kernel criterion can be a KDP's only criterion, under a declarative `graph_match`
+/// that admits graphs the native match refuses. It must decline those on its own.
+TEST(TestPointwiseAddKernelMatcher, DeclinesAPatternBindingTheDispatchCannotServe)
+{
+    const GraphFixture servable(buildPointwiseGraph());
+    const GraphFixture multiElement(buildPointwiseGraph(
+        data_objects::PointwiseMode::ADD, data_objects::DataType::FLOAT, {1, 1, 2, 2}));
+    const auto servableBound = matchPattern(pointwisePattern(), servable.context());
+    const auto multiElementBound = matchPattern(pointwisePattern(), multiElement.context());
+    ASSERT_TRUE(servableBound.has_value());
+    ASSERT_TRUE(multiElementBound.has_value());
+
+    const auto kernelMatches = kernelMatcher(POINTWISE_ADD);
+    const auto kernel = makeKernel(64, "FLOAT");
+    EXPECT_TRUE(kernelMatches(servable.context(), *servableBound, kernel));
+    EXPECT_FALSE(kernelMatches(multiElement.context(), *multiElementBound, kernel));
+}
+
 // Score and binding
 
 TEST(TestPointwiseAddScore, PrefersTheLargerBlockSize)
@@ -324,6 +432,13 @@ TEST(TestPointwiseAddBinding, TheGraphMatchBindsTheOperandUidsItResolved)
               INPUT_B_UID);
     EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, POINTWISE_ADD.outputToken),
               OUTPUT_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_a.uid"), INPUT_A_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "input_b.uid"), INPUT_B_UID);
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, "output.uid"), OUTPUT_UID);
+    for(const auto* root : {"input_a", "input_b", "output"})
+    {
+        EXPECT_EQ(bound->count(std::string(root) + ".value_f32"), 0U);
+    }
 }
 
 TEST(TestPointwiseAddBinding, ARejectedGraphBindsNothingToDispatchFrom)

@@ -89,7 +89,7 @@ std::unique_ptr<StagedEngine> makeEngine(const IDeviceResolver<StubHandle>& reso
         makeStubDispatches(),
         std::move(packs),
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        GRAPH_SYMBOL,
+        NativeGraphMatch{GRAPH_SYMBOL},
         "engine 'staged fixture'");
     return std::make_unique<StagedEngine>(
         makeEngineWithKnobs({BLOCK_SIZE}), std::move(manager), resolver);
@@ -952,7 +952,7 @@ std::unique_ptr<StagedEngine> makeSlottedEngine(const IDeviceResolver<StubHandle
                      std::make_shared<UnrankedKernelHeuristic>()});
 
     auto engine = makeEngineWithKnobs({});
-    engine.graphMatchNativeSymbol = GRAPH_SYMBOL;
+    engine.graphMatch = NativeGraphMatch{GRAPH_SYMBOL};
     engine.sharedWorkspaceToken = WS_BYTES;
     for(const char* name : {"first", "second"})
     {
@@ -966,7 +966,7 @@ std::unique_ptr<StagedEngine> makeSlottedEngine(const IDeviceResolver<StubHandle
     auto owned = std::make_unique<Manager>(std::move(slots),
                                            std::move(matchers),
                                            makeStubDispatches(),
-                                           GRAPH_SYMBOL,
+                                           NativeGraphMatch{GRAPH_SYMBOL},
                                            WS_BYTES,
                                            "engine 'slotted staged fixture'");
     if(manager != nullptr)

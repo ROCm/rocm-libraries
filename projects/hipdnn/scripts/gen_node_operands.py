@@ -20,8 +20,8 @@ from gen_cache_key import (
     SDK_DIR,
     UID_ATTRIBUTE,
     UID_DOMAIN_ATTRIBUTE,
-    _HIPDNN_DIR,
-    _resolve_flatc,
+    HIPDNN_DIR,
+    resolve_flatc,
     accessor,
     load_schema,
     short_name,
@@ -585,7 +585,7 @@ class OperandsEmitter:
 
 def sdk_emitter(flatc_path):
     """The emitter over the SDK's own graph.fbs."""
-    schemas_dir = os.path.join(_HIPDNN_DIR, SDK_DIR, "schemas")
+    schemas_dir = os.path.join(HIPDNN_DIR, SDK_DIR, "schemas")
     with tempfile.TemporaryDirectory() as work_dir:
         schema = load_schema(flatc_path, schemas_dir, SCHEMA_FILE, work_dir)
     return OperandsEmitter(schema)
@@ -597,12 +597,12 @@ def generated_headers(emitter):
     return (
         (
             os.path.join(
-                _HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects", HEADER_NAME
+                HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects", HEADER_NAME
             ),
             emitter.emit(),
         ),
         (
-            os.path.join(_HIPDNN_DIR, TABLE_DIR, TABLE_HEADER_NAME),
+            os.path.join(HIPDNN_DIR, TABLE_DIR, TABLE_HEADER_NAME),
             emitter.emit_table(),
         ),
     )
@@ -616,7 +616,7 @@ def main():
         help="flatc binary to use; defaults to the one on PATH. The build passes the "
         "binary CMake already resolved, which need not be on PATH.",
     )
-    flatc_path = _resolve_flatc(parser.parse_args().flatc)
+    flatc_path = resolve_flatc(parser.parse_args().flatc)
     for path, text in generated_headers(sdk_emitter(flatc_path)):
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8", newline="\n") as f:

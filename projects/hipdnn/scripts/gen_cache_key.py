@@ -22,7 +22,7 @@ import subprocess
 import sys
 import tempfile
 
-_HIPDNN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HIPDNN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Opt-out: an unannotated field always participates in the hash and comparison.
 IGNORE_ATTRIBUTE = "cache_ignore"
@@ -94,13 +94,13 @@ CPP_KEYWORDS = frozenset(
 
 def _read_required_version():
     with open(
-        os.path.join(_HIPDNN_DIR, "cmake", "default_flatc_version.txt"),
+        os.path.join(HIPDNN_DIR, "cmake", "default_flatc_version.txt"),
         encoding="utf-8",
     ) as f:
         return f.read().strip()
 
 
-def _resolve_flatc(flatc_path=None):
+def resolve_flatc(flatc_path=None):
     """Locate flatc and gate on the pinned version, as run_flatc.py does.
 
     @p flatc_path names the binary explicitly, for a build that resolves flatc as a
@@ -1104,11 +1104,9 @@ def main():
         help="flatc binary to use; defaults to the one on PATH. The build passes the "
         "binary CMake already resolved, which need not be on PATH.",
     )
-    flatc_path = _resolve_flatc(parser.parse_args().flatc)
-    schemas_dir = os.path.join(_HIPDNN_DIR, SDK_DIR, "schemas")
-    output_dir = os.path.join(
-        _HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects"
-    )
+    flatc_path = resolve_flatc(parser.parse_args().flatc)
+    schemas_dir = os.path.join(HIPDNN_DIR, SDK_DIR, "schemas")
+    output_dir = os.path.join(HIPDNN_DIR, SDK_DIR, "include", NAMESPACE, "data_objects")
 
     for schema_file, root_name, header_name in TARGETS:
         with tempfile.TemporaryDirectory() as work_dir:

@@ -58,8 +58,8 @@ Deciding whether a kernel applies to an incoming problem graph is two questions,
 gives each its own descriptor. The first question is: does this engine serve graphs of this shape,
 and what are the pieces called? That is the **UED (Universal Engine Descriptor)**, specified in
 [RFC 0020](0020_UniversalEngineDescriptor.md). Its `graph_match` binds every tensor and attribute
-the graph supplies. A `graph_match` is either a structural pattern over the op DAG (directed acyclic
-graph), or the native escape hatch standing in for one. The second question is: given those pieces,
+the graph supplies. A `graph_match` takes one of two arms: `nodes`, a structural pattern over the
+op DAG (directed acyclic graph), or `native`, a C++ function the provider registers. The second question is: given those pieces,
 can this kernel take the problem? That is the **UMD (Universal Match Descriptor)**, one JsonLogic
 boolean over the symbols the pattern bound, and it is what this RFC specifies. Together the two
 replace a hand-coded `IPlanBuilder::isApplicable`
@@ -88,7 +88,7 @@ pruned before a single criterion is read.
 One pattern per engine also gives the bound-symbol set one owner. A UED names one heuristic and one
 metadata schema ([RFC 0017 §2](0017_UniversalKernelDescriptor.md#2-the-descriptors)), and that
 heuristic's `features_signature` reads graph tokens such as `$q.dims[2]` and
-`$sdpa_fwd.dropout_probability`. Something the engine owns has to bind those symbols. Otherwise an
+`$sdpa.dropout_probability`. Something the engine owns has to bind those symbols. Otherwise an
 engine-wide model is written against names only some pack happens to supply. The UED publishes the
 bound-symbol set, and every consumer is checked against that one source: a UMD's criteria, its
 pack's UDD formulas, and the engine's own UHD `features_signature`. A reference none of them can
@@ -146,7 +146,7 @@ Criteria may name five namespace roots. The engine's pattern binds three of them
 |---|---|---|
 | a pattern variable (`$q`) | the matched tensor and its fields: dims and strides positionally, plus derived facts such as rank, dtype, stride order, and packedness | the engine's pattern |
 | `$graph` | structural and graph-level facts of the matched graph, such as its node count and its override-shape opt-in | the engine's pattern |
-| a node `id` (`$sdpa_fwd`) | that matched node's scalar attributes, named as the schema declares them | the engine's pattern |
+| a node `id` (`$sdpa`) | that matched node's scalar attributes, named as the schema declares them | the engine's pattern |
 | `$kernel` | the values a candidate UKD supplies for the fields the engine's KMD declares | the UKD, per candidate |
 | `$device` | device properties read from the `Handle`, such as `$device.lds_size` | the runtime |
 
@@ -157,7 +157,7 @@ needs on top of it: reference syntax, and what a read yields when the thing read
 
 Any JSON string beginning with `$` is a reference into that table. Every other JSON scalar is a
 literal: numbers, enum values (`"BFLOAT16"`), and layout aliases. The node id in an attribute
-reference is bare, and the reference carries the `$` (`$sdpa_fwd.dropout_probability`).
+reference is bare, and the reference carries the `$` (`$sdpa.dropout_probability`).
 
 Three properties of the binding shape everything below.
 
@@ -205,8 +205,8 @@ operators at all. Each is a **native matcher** the pack lists beside the descrip
 | **Layout** | `{"==": ["$q.stride_order", [3, 2, 1, 0]]}` ([§5](#5-layout-and-stride-order-criteria)) | `validateSupportedLayout` |
 | **Packing** | `"$q.packed"` (a bound boolean) | `validatePackedTensors` |
 | **Cross-tensor layout** | `{"==": ["$x.stride_order", "$y.stride_order"]}` (per pair), or the per-axis form where the two tensors may differ in which axes are unit-extent ([§5](#5-layout-and-stride-order-criteria)) | `validateConsistentLayouts` |
-| **Attribute (value)** | `{"==": ["$sdpa_fwd.causal_mask", false]}`; absent-or `{"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]}, {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]}` | per-attr value gates |
-| **Attribute (one_of)** | `{"in": ["$sdpa_fwd.diagonal_alignment", ["TOP_LEFT", "BOTTOM_RIGHT"]]}` | enum-attribute set gates |
+| **Attribute (value)** | `{"==": ["$sdpa.causal_mask", false]}`; absent-or `{"or": [{"not_present": ["$sdpa.dropout_probability"]}, {"==": ["$sdpa.dropout_probability", 0.0]}]}` | per-attr value gates |
+| **Attribute (one_of)** | `{"in": ["$sdpa.diagonal_alignment", ["TOP_LEFT", "BOTTOM_RIGHT"]]}` | enum-attribute set gates |
 | **Optional operand present/absent** | the operand is declared optional in the engine's pattern ([RFC 0020 § 4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)); `{"not_present": ["$attn_mask"]}` (absent) / `{"present": ["$bias"]}` (present); one call takes a list, so a pack declines every optional operand it cannot serve at once | `attn_mask_tensor_uid()` absent gate |
 | **Graph structure (exact / fusion)** | `{"==": ["$graph.node_count", 3]}`, and each intermediate `"$conv_out.virtual"` | node-count gate, fusion legality |
 | **Cross-tensor / arithmetic** | `{"==": ["$q.dims[1]", "$k.dims[2]"]}`, `{"<": ["$q.dims[3]", 129]}`, `{"==": [{"%": ["$q.dims[1]", "$k.dims[1]"]}, 0]}` | arithmetic and comparison gates |
@@ -403,7 +403,7 @@ language to grow a registry, a signature table, and a per-argument type contract
 mechanism differing only in grain from the closed operator set
 ([Appendix A.3](#a3-the-expression-language)).
 
-This is the pack-scoped half of a two-part hatch. The engine-scoped half is the UED's
+This is the pack-scoped counterpart of the UED's
 `graph_match.native` ([RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative)),
 which *produces* the binding at stage one by declining the graph or returning the bound tokens. A
 native criterion *reads* that binding and returns a verdict; it cannot add to it. The two use
@@ -447,7 +447,7 @@ else, while the C++ behind it reads ten KMD fields. The descriptor therefore dec
 uses. Declaring it is optional; a criterion that does not is evaluated once per candidate and its
 metadata reads are unchecked until a live graph reaches them. This is the same trade
 [RFC 0020 § 4.5](0020_UniversalEngineDescriptor.md#45-the-native-arm-normative) records for the
-engine-scoped hatch, one scope down.
+UED's `native` arm, one scope down.
 
 **A native criterion owes totality itself.** The bounded, fail-closed guarantees of
 [§11](#11-security-and-hostile-input) — depth and step caps, checked arithmetic, a decline on any
@@ -845,7 +845,7 @@ reaches parity on the graphs that engine covers, at which point the hand-written
 The **SDPA-forward** `isApplicable` (`SdpaFwdPlanBuilder.cpp:234`) is the first conversion. It
 exercises nearly the whole vocabulary (opcode, attribute gates, optional-operand absence, rank, dtype
 relations, and cross-tensor dim relations) in one node, with its two non-declarative gates in the
-paired native matcher. It splits cleanly: the single `sdpa_fwd` node and its operands are the
+paired native matcher. It splits cleanly: the single `sdpa` node and its operands are the
 engine's pattern, and every gate is criteria. Its match-equivalence
 test ([§13](#13-testing-and-performance)) gates the cutover. The mlops builders follow, reusing the
 `IValidator` primitives (`dnn-providers/hip-kernel-provider/src/engines/hip_mlops_engine/plans/ApplicabilityChecks.cpp`) as the reference for their criteria
@@ -872,7 +872,7 @@ deliberately a different example from
 in the context of a full UKD; this one shows one hand-written `isApplicable` becoming one pattern plus
 one criteria set.
 
-The engine's pattern is a single `sdpa_fwd` node binding `$q`, `$k`, `$v` and the result `$o`. It also
+The engine's pattern is a single `sdpa` node binding `$q`, `$k`, `$v` and the result `$o`. It also
 binds the optional operands this kernel intends to decline: `attn_mask`, `page_table_k`, and
 `page_table_v`, each declared optional
 ([RFC 0020 § 4.3](0020_UniversalEngineDescriptor.md#43-the-nodes-pattern-normative)). An operand the
@@ -895,9 +895,9 @@ pin them per candidate. The pack's matcher then constrains what that pattern bou
     {"==": ["$v.dims[3]", "$q.dims[3]"]},
     {"==": ["$v.dims[1]", "$k.dims[1]"]},                          // same KV head count on k and v
     {"==": ["$q.dims[3]", "$kernel.head_size"]},                   // the head dim this binary baked
-    {"or": [{"not_present": ["$sdpa_fwd.dropout_probability"]}, {"==": ["$sdpa_fwd.dropout_probability", 0.0]}]},
-    {"==": ["$sdpa_fwd.alibi_mask", false]},
-    {"==": ["$sdpa_fwd.padding_mask", false]},
+    {"or": [{"not_present": ["$sdpa.dropout_probability"]}, {"==": ["$sdpa.dropout_probability", 0.0]}]},
+    {"==": ["$sdpa.alibi_mask", false]},
+    {"==": ["$sdpa.padding_mask", false]},
     // generate_stats is allowed; causal + stats is declined by the native matcher
     // unsupported optional operands declined together; `not_present` always evaluates,
     // unlike a field read on an absent operand
@@ -917,8 +917,8 @@ Mapping to the hand-written code:
 |---|---|
 | `getDeviceString` gfx942/gfx950 (:253-256) | pack `arch` property (KDP), gated at selection |
 | `nodeWrappers().size() != 1` (:264) | UMD `{"==": ["$graph.node_count", 1]}` |
-| `attributesType() != SdpaAttributes` (:265-267) | UED pattern node matching `sdpa_fwd` |
-| dropout / alibi / padding gates (:273-278) | UMD `$sdpa_fwd.*` criteria |
+| `attributesType() != SdpaAttributes` (:265-267) | UED pattern node matching `sdpa` |
+| dropout / alibi / padding gates (:273-278) | UMD `$sdpa.*` criteria |
 | `attn_mask` / `page_table_*` absent (:279-285) | UED optional operands + one UMD `{"not_present": [...]}` over all three |
 | rank == 4 (:316-327) | UMD `{"==": ["$q.rank", 4]}`, one per bound tensor |
 | `q == k == v` dtype (:373-378) | UMD `{"==": ["$k.dtype", "$q.dtype"]}` |

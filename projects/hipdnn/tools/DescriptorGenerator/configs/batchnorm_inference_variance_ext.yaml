@@ -2,6 +2,7 @@ operation:
   name: "BatchnormInferenceVarianceExt"
   class_name: "BatchnormInferenceVarianceExtOperationDescriptor"
   fbs_table: "BatchnormInferenceAttributesVarianceExt"
+  matcher_opcode: "batchnorm_inference_variance_ext"
   fbs_generated_header: "batchnorm_inference_attributes_variance_ext_generated.h"
 
   descriptor_type:
@@ -75,36 +76,43 @@ operation:
   tensor_fields:
     - name: "x"
       fbs_field: "x_tensor_uid"
+      direction: "input"
       attr_suffix: "X_EXT"
       required: true
 
     - name: "mean"
       fbs_field: "mean_tensor_uid"
+      direction: "input"
       attr_suffix: "MEAN_EXT"
       required: true
 
     - name: "variance"
       fbs_field: "variance_tensor_uid"
+      direction: "input"
       attr_suffix: "VARIANCE_EXT"
       required: true
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
+      direction: "input"
       attr_suffix: "SCALE_EXT"
       required: true
 
     - name: "bias"
       fbs_field: "bias_tensor_uid"
+      direction: "input"
       attr_suffix: "BIAS_EXT"
       required: true
 
     - name: "y"
       fbs_field: "y_tensor_uid"
+      direction: "output"
       attr_suffix: "Y_EXT"
       required: true
 
     - name: "epsilon"
       fbs_field: "epsilon_tensor_uid"
+      direction: "input"
       attr_suffix: "EPSILON_EXT"
       required: true
 

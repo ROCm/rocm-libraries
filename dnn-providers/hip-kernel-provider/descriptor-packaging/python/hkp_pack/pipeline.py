@@ -2164,6 +2164,7 @@ def run_pipeline(
     source_label=None,
     exclude_folders=(),
     disabled_kinds=(),
+    op_schema_registry=None,
     require_dvc=False,
     log=print,
 ):
@@ -2191,6 +2192,8 @@ def run_pipeline(
     both are pruned at load (load_flat_input) exactly as arch pruning prunes, so
     nothing downstream sees them.
 
+    `op_schema_registry` is the registry a UED's `graph_match.nodes` pattern
+    resolves against (see load_flat_input).
     `require_dvc` makes a model file that is absent but tracked by a DVC pointer an
     error; otherwise its UHD is left out with a warning (load_flat_input).
     """
@@ -2207,6 +2210,7 @@ def run_pipeline(
         log=log,
         exclude_folders=exclude_folders,
         disabled_kinds=disabled_kinds,
+        op_schema_registry=op_schema_registry,
         require_dvc=require_dvc,
     )
 

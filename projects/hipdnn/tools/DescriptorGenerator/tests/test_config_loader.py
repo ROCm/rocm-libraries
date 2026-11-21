@@ -239,11 +239,13 @@ class TestTensorFieldParsing:
             '  class_name: "TestDescriptor"\n'
             '  fbs_table: "TestTable"\n'
             '  fbs_generated_header: "test_generated.h"\n'
+            '  matcher_opcode: "test"\n'
             "  has_compute_data_type: false\n"
             "  tensor_array_fields:\n"
             '    - name: "offsets"\n'
             '      fbs_field: "offsets_tensor_uid"\n'
             '      attr_name: "HIPDNN_ATTR_TEST_OFFSETS"\n'
+            '      direction: "input"\n'
             "      work_data_dependent: true\n"
         )
         config = load_config(config_file)
@@ -1023,11 +1025,13 @@ operation:
   class_name: "TestOpDescriptor"
   fbs_table: "TestOpAttributes"
   fbs_generated_header: "test_op_attributes_generated.h"
+  matcher_opcode: "test_op"
   has_compute_data_type: false
   tensor_fields:
     - name: "x"
       fbs_field: "x_tensor_uid"
       attr_suffix: "X"
+      direction: "input"
       required: true
 """
         if raw is not None:
@@ -1052,11 +1056,13 @@ operation:
   class_name: "TestOpDescriptor"
   fbs_table: "TestOpAttributes"
   fbs_generated_header: "test_op_attributes_generated.h"
+  matcher_opcode: "test_op"
   has_compute_data_type: false
   tensor_fields:
     - name: "x"
       fbs_field: "x_tensor_uid"
       attr_suffix: "X"
+      direction: "input"
       required: true
       frontend_getter: "get_x().nested()"
   test_data:
@@ -1272,7 +1278,13 @@ class TestLoadConfigErrors:
 
     @pytest.mark.parametrize(
         "missing_field",
-        ["name", "class_name", "fbs_table", "fbs_generated_header"],
+        [
+            "name",
+            "class_name",
+            "fbs_table",
+            "fbs_generated_header",
+            "matcher_opcode",
+        ],
     )
     def test_missing_required_field(self, tmp_path, missing_field):
         """Missing required field in operation raises ConfigError."""
@@ -1281,6 +1293,7 @@ class TestLoadConfigErrors:
             "class_name": "TestDescriptor",
             "fbs_table": "TestTable",
             "fbs_generated_header": "test_generated.h",
+            "matcher_opcode": "test",
         }
         del fields[missing_field]
         yaml_content = "operation:\n"
@@ -1313,6 +1326,7 @@ class TestLoadConfigErrors:
             '  class_name: "TestDescriptor"\n'
             '  fbs_table: "TestTable"\n'
             '  fbs_generated_header: "test_generated.h"\n'
+            '  matcher_opcode: "test"\n'
             "  has_compute_data_type: false\n"
             "  data_fields:\n"
             '    - name: "my_mode"\n'
@@ -1336,12 +1350,53 @@ class TestLoadConfigErrors:
             '  class_name: "TestDescriptor"\n'
             '  fbs_table: "TestTable"\n'
             '  fbs_generated_header: "test_generated.h"\n'
+            '  matcher_opcode: "test"\n'
             "  has_compute_data_type: false\n"
             "  tensor_fields:\n"
             '    - name: "x"\n'
             '      fbs_field: "x_tensor_uid"\n'
             '      attr_suffix: "X"\n'
+            '      direction: "input"\n'
             '      work_data_dependent: "false"\n'
         )
         with pytest.raises(ConfigError, match="work_data_dependent"):
+            load_config(config_file)
+
+    @pytest.mark.parametrize("direction", [None, "in", "Output"])
+    def test_tensor_field_direction_must_be_input_or_output(self, tmp_path, direction):
+        """Direction picks the matcher_*_tensor flag; a missing or misspelt one must
+        not silently default, or an output would be declared as an operand."""
+        config_file = tmp_path / "bad_direction.yaml"
+        content = (
+            "operation:\n"
+            '  name: "Test"\n'
+            '  class_name: "TestDescriptor"\n'
+            '  fbs_table: "TestTable"\n'
+            '  fbs_generated_header: "test_generated.h"\n'
+            '  matcher_opcode: "test"\n'
+            "  has_compute_data_type: false\n"
+            "  tensor_fields:\n"
+            '    - name: "x"\n'
+            '      fbs_field: "x_tensor_uid"\n'
+            '      attr_suffix: "X"\n'
+        )
+        if direction is not None:
+            content += f'      direction: "{direction}"\n'
+        config_file.write_text(content)
+        with pytest.raises(ConfigError, match="direction must be one of input, output"):
+            load_config(config_file)
+
+    @pytest.mark.parametrize("opcode", ["Conv", "conv-fwd", "_conv", "conv__fwd", ""])
+    def test_matcher_opcode_must_be_lowercase_snake_case(self, tmp_path, opcode):
+        config_file = tmp_path / "bad_opcode.yaml"
+        config_file.write_text(
+            "operation:\n"
+            '  name: "Test"\n'
+            '  class_name: "TestDescriptor"\n'
+            '  fbs_table: "TestTable"\n'
+            '  fbs_generated_header: "test_generated.h"\n'
+            f'  matcher_opcode: "{opcode}"\n'
+            "  has_compute_data_type: false\n"
+        )
+        with pytest.raises(ConfigError, match="matcher_opcode must be lowercase"):
             load_config(config_file)

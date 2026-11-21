@@ -825,7 +825,7 @@ TEST(TestIngestorGenericPlanBuilder, ContextForFoldsPerHandleDeviceResolutionInt
         makeStubDispatches(),
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        DEVICE_GATED_MATCH_SYMBOL);
+        NativeGraphMatch{DEVICE_GATED_MATCH_SYMBOL});
 
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE});
     const MockDeviceResolver resolver;
@@ -1039,7 +1039,7 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeThreeKernelWorkspace
         std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
-        "test.graph");
+        NativeGraphMatch{"test.graph"});
 }
 
 /// Same three kernels and priorities as makeThreeKernelWorkspaceStateManager() -- so
@@ -1071,7 +1071,7 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>>
         std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
         std::vector<KernelDescriptorPack>{std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(CONSTANT_SCORE_SYMBOL),
-        "test.graph");
+        NativeGraphMatch{"test.graph"});
 }
 
 /// KnobFilterContext narrows its stored plan to GenericPlan, which the benchmarking-on
@@ -2748,7 +2748,7 @@ TEST(TestIngestorCandidateEnumeration, SparsePagesEnrollExactlyTheirReportedCand
         makeTestDispatches(),
         {std::move(pack)},
         std::make_shared<NativeKernelHeuristic>(SCORE_SYMBOL),
-        "test.graph");
+        NativeGraphMatch{"test.graph"});
     const auto engine = makeEngineWithKnobs({BLOCK_SIZE, "vector_width"});
     const TestDeviceResolver resolver;
     const TestPlanBuilder builder(engine, manager, resolver);
@@ -3261,7 +3261,7 @@ std::unique_ptr<KernelIngestorStateManager<TestHandle>> makeOneSlotTwoKernelStat
         std::move(slots),
         std::vector<MatchDescriptor>{},
         std::vector<DispatchDescriptor>{{DISPATCH_ID, "test dispatch", "test.dispatch"}},
-        "test.graph",
+        NativeGraphMatch{"test.graph"},
         std::string{},
         "engine 'slot fixture'");
 }

@@ -9,7 +9,7 @@ import re
 import shutil
 import unittest
 
-from gen_cache_key import _HIPDNN_DIR, SDK_DIR, _resolve_flatc
+from gen_cache_key import HIPDNN_DIR, SDK_DIR, resolve_flatc
 from gen_node_operands import OperandsEmitter, generated_headers, sdk_emitter
 from test_gen_cache_key import field, schema, table
 
@@ -355,7 +355,7 @@ class TestGeneratedHeaders(unittest.TestCase):
     @staticmethod
     def declared_outputs():
         with open(
-            os.path.join(_HIPDNN_DIR, SDK_DIR, "CMakeLists.txt"), encoding="utf-8"
+            os.path.join(HIPDNN_DIR, SDK_DIR, "CMakeLists.txt"), encoding="utf-8"
         ) as f:
             text = f.read()
         paths = {}
@@ -368,7 +368,7 @@ class TestGeneratedHeaders(unittest.TestCase):
                     f"flatbuffers_sdk/CMakeLists.txt does not set {variable}"
                 )
             paths[variable] = os.path.normpath(
-                os.path.join(_HIPDNN_DIR, SDK_DIR, match.group(1))
+                os.path.join(HIPDNN_DIR, SDK_DIR, match.group(1))
             )
         return paths
 
@@ -393,7 +393,7 @@ class TestGeneratedHeaders(unittest.TestCase):
         if shutil.which("flatc") is None:
             self.skipTest("flatc is not on PATH")
         try:
-            flatc_path = _resolve_flatc()
+            flatc_path = resolve_flatc()
         except SystemExit:
             self.skipTest("flatc is not the pinned version")
         for path, text in generated_headers(sdk_emitter(flatc_path)):

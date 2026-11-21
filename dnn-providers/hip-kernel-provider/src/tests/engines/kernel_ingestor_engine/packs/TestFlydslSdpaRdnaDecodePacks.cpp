@@ -45,7 +45,7 @@ TEST(TestFlydslSdpaRdnaDecodePacks, IsOnePackWithAGraphMatchAndOneKernelScopedMa
     const auto& set = loadedSet(FLYDSL_SDPA_RDNA_DECODE.engineName);
 
     EXPECT_EQ(distinctPackIdCount(set), 1U);
-    EXPECT_EQ(set.engine.graphMatchNativeSymbol, FLYDSL_SDPA_RDNA_DECODE.graphMatcher);
+    EXPECT_EQ(nativeGraphMatchSymbol(set.engine), FLYDSL_SDPA_RDNA_DECODE.graphMatcher);
 
     size_t graphScoped = 0;
     size_t kernelScoped = 0;

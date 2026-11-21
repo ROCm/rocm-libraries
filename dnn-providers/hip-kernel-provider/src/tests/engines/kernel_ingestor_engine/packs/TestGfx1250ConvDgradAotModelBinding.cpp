@@ -138,7 +138,7 @@ TEST(TestGfx1250ConvDgradAotModelBinding, TheBoundL2KernelRankerScoresEveryShipp
 
     registerNativeIngestorSymbols();
     const auto graphMatch
-        = ingestor::GraphMatchRegistry::resolve(set.engine.graphMatchNativeSymbol);
+        = ingestor::GraphMatchRegistry::resolve(nativeGraphMatchSymbol(set.engine));
     const auto byDtype = shippedKernelsByDtype(set);
     ASSERT_EQ(byDtype.size(), 2U) << "the catalog ships fp16 and bf16 kernels";
     for(const auto& [dtype, kernels] : byDtype)

@@ -1,0 +1,16 @@
+{
+  "description": "A node whose 'results' is an array instead of an object.",
+  "valid": false,
+  "error": "must be an object mapping edge names to bindings",
+  "ued": {
+    "version": "1.0",
+    "id": "370b5fd8-489c-5532-8e86-5ebffc21602b",
+    "name": "ued_fixture:results_not_object",
+    "metadata": "52003cb4-ce86-5e52-a970-d34c2c47451e",
+    "graph_match": {
+      "nodes": [
+        {"kind": "op", "id": "pw", "op": "pointwise", "operands": {"in_0": "$input_a", "in_1": "$input_b"}, "results": ["$output"]}
+      ]
+    }
+  }
+}

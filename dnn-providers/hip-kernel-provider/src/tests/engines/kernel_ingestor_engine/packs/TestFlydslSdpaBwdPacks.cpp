@@ -75,7 +75,7 @@ TEST(TestFlydslSdpaBwdPacks, IsOnePackWithAGraphMatchAndOneKernelScopedMatcher)
 
     // One engine, two KDPs: the rows that launch the dBias reduce share a launch set, so they are a pack of their own.
     EXPECT_EQ(distinctPackIdCount(set), 2U);
-    EXPECT_EQ(set.engine.graphMatchNativeSymbol, GRAPH_MATCHER);
+    EXPECT_EQ(nativeGraphMatchSymbol(set.engine), GRAPH_MATCHER);
     size_t graphScoped = 0;
     size_t kernelScoped = 0;
     for(const auto& matcher : set.matchers)

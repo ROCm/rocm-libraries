@@ -14,6 +14,11 @@ ship for a pass `p` is the packer's `kdp_survives(kdp, flat, p)`, and which of t
 ship is the packer's `arch_matches`: an empty or absent `arch` list is a wildcard. A KDP
 that ships for the generic pass is trimmed like one that ships for `m`.
 
+A UED's `graph_match.nodes` pattern resolves against the op-schema registry the loader
+finds: the `HKP_OP_SCHEMA_REGISTRY` environment variable, which the build sets to the
+registry the pack step gets, else the repository's copy. A pattern the registry cannot
+resolve rejects the root, as it fails the pack.
+
 `--exclude-folder` and `--disable-kind` are the packer's `exclude_folders` and
 `disabled_kinds`: the filters of a build that lacks a producer (rocKE OFF). Derive reads
 the root under them, so a UKD of a disabled kind is neither kept nor expected, and a KDP

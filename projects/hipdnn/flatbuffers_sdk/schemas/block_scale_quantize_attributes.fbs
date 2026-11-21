@@ -1,15 +1,19 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// See graph.fbs for the semantics of this annotation.
+// See graph.fbs for the semantics of these annotations.
 attribute "cache_uid";
+attribute "matcher_opcode";
+attribute "matcher_input_tensor";
+attribute "matcher_output_tensor";
+attribute "matcher_name";
 
 namespace hipdnn_flatbuffers_sdk.data_objects;
 
-table BlockScaleQuantizeAttributes {
-    x_tensor_uid: long (cache_uid);
-    y_tensor_uid: long (cache_uid);
-    scale_tensor_uid: long (cache_uid);
+table BlockScaleQuantizeAttributes (matcher_opcode: "block_scale_quantize") {
+    x_tensor_uid: long (cache_uid, matcher_input_tensor, matcher_name: "x");
+    y_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "y");
+    scale_tensor_uid: long (cache_uid, matcher_output_tensor, matcher_name: "scale");
     block_size: int;
     axis: long = null;
     transpose: bool = false;

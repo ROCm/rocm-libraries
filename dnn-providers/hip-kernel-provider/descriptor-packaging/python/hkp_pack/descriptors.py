@@ -8,6 +8,13 @@ from . import agreement
 from . import generic_targets as gtmod
 from . import sources as sourcesmod
 from .errors import HkpPackError
+from .graph_pattern import validate_graph_pattern
+from .json_rules import (
+    DuplicateKeyError,
+    NonStandardLiteralError,
+    UnrepresentableValueError,
+    loads_strict,
+)
 from .rocke_compile import ROCKE_TARGETS
 
 KDP_TYPE = "kdp"
@@ -45,6 +52,10 @@ def canonical_id(value):
     if isinstance(value, str) and _UUID_RE.fullmatch(value):
         return value.lower()
     return value
+
+
+# A UED's `graph_match` carries exactly one of these arms.
+GRAPH_MATCH_ARMS = ("nodes", "native")
 
 
 def type_from_filename(path):
@@ -139,7 +150,17 @@ def _read_json(path):
     except OSError as exc:
         raise HkpPackError(f"cannot read descriptor {path}: {exc}") from exc
     try:
-        return json.loads(text)
+        return loads_strict(text)
+    except DuplicateKeyError as exc:
+        raise HkpPackError(
+            f"descriptor JSON in {path.name} has duplicate key '{exc.key}'"
+        ) from exc
+    except NonStandardLiteralError as exc:
+        raise HkpPackError(
+            f"descriptor JSON in {path.name} has non-standard literal '{exc.literal}'"
+        ) from exc
+    except UnrepresentableValueError as exc:
+        raise HkpPackError(f"descriptor JSON in {path.name}: {exc}") from exc
     except json.JSONDecodeError as exc:
         raise HkpPackError(f"malformed descriptor JSON in {path.name}: {exc}") from exc
 
@@ -650,9 +671,14 @@ def _validate_kdp(desc, log=print):
         _validate_inline_ukd(ukd, path, log)
 
 
-def _validate_ued(desc):
+def _validate_ued(desc, op_schema_registry=None):
     """Mirrors parseEngineDescriptor; knobs are checked against the KMD in
-    _validate_references, once every file is loaded."""
+    _validate_references, once every file is loaded.
+
+    A `nodes` pattern is resolved against the op-schema registry. See
+    graph_pattern.resolve_op_schema_registry for the default path. Only the
+    runtime checks that a native symbol is registered.
+    """
     doc = desc.doc
     where = f"UED {desc.path.name}"
     if "heuristic" in doc:
@@ -660,7 +686,7 @@ def _validate_ued(desc):
             f"{where}: a top-level 'heuristic' field is not supported; use role/arch maps"
         )
     # The loader's requireKnownKeys also admits an unprefixed `provenance`.
-    _known_keys(doc, (*_UED_KEYS, "provenance"), where)
+    _known_keys(doc, (*UED_KEYS, "provenance"), where)
     _validate_uuid(doc["id"], f"{where}.id")
     name = doc.get("name")
     if not isinstance(name, str) or not _UED_NAME_RE.fullmatch(name):
@@ -703,8 +729,22 @@ def _validate_ued(desc):
             )
     if "graph_match" in doc:
         graph_match = doc["graph_match"]
-        _known_keys(graph_match, ("native", "provenance"), f"{where}.graph_match")
-        _string(graph_match.get("native"), f"{where}.graph_match.native")
+        graph_where = f"{where} graph_match"
+        if not isinstance(graph_match, dict):
+            raise HkpPackError(f"{graph_where} must be a JSON object")
+        _known_keys(graph_match, (*GRAPH_MATCH_ARMS, "provenance"), graph_where)
+        if "nodes" in graph_match and "native" in graph_match:
+            raise HkpPackError(
+                f"{graph_where} carries both 'nodes' and 'native'; name exactly one"
+            )
+        if "nodes" not in graph_match and "native" not in graph_match:
+            raise HkpPackError(
+                f"{graph_where} carries neither 'nodes' nor 'native'; name exactly one"
+            )
+        if "native" in graph_match:
+            _string(graph_match["native"], f"{graph_where}.native")
+        else:
+            validate_graph_pattern(graph_match["nodes"], where, op_schema_registry)
     # RFC 0021 §6: the bound token holding the shared region's size. Only a native
     # graph match can publish it; the token's value is the runtime's to check.
     if "shared_workspace" in doc:
@@ -712,7 +752,7 @@ def _validate_ued(desc):
         if not slotted:
             raise HkpPackError(f"key 'shared_workspace' in {where} requires 'slots'")
         _string(doc["shared_workspace"], f"{where}.shared_workspace")
-        if "graph_match" not in doc:
+        if "native" not in doc.get("graph_match", {}):
             raise HkpPackError(
                 f"key 'shared_workspace' in {where} requires a native graph_match"
             )
@@ -840,7 +880,10 @@ _NUMERICAL_NOTES = (
 # ScoreTransform.hpp SUPPORTED_TRANSFORMS, less the empty name `text()` refuses.
 _SCORE_TRANSFORMS = ("identity", "log1p", "log", "exp", "sqrt")
 _UHD_ROLES = ("sort_kernel_catalog", "predict_engine", "predict_applicable_kernels")
-_UED_KEYS = (
+# Every top-level UED key the runtime loader accepts, and the ones every UED
+# requires (an unslotted one also requires `metadata`). The JSON Schema in
+# projects/hipdnn/plugin_sdk/schemas declares the same sets.
+UED_KEYS = (
     "version",
     "revision",
     "id",
@@ -855,6 +898,7 @@ _UED_KEYS = (
     "numerical_notes",
     "graph_match",
 )
+UED_REQUIRED_KEYS = ("version", "id", "name")
 # RFC 0019 §4.4 ranking-metric registry (RankingMetrics.hpp): metric -> required
 # UHD `objective`.
 _RANKING_METRIC_OBJECTIVES = {"tflops": "max", "time": "min"}
@@ -1283,7 +1327,9 @@ def _validate_kmd(desc):
         _require_enum(entry, "type", _METADATA_TYPES, entry_where)
 
 
-def _validate_shape(desc, source_root, log=print, *, require_dvc=False):
+def _validate_shape(
+    desc, source_root, log=print, op_schema_registry=None, *, require_dvc=False
+):
     doc = desc.doc
     path = desc.path
     if not isinstance(doc, dict):
@@ -1306,7 +1352,7 @@ def _validate_shape(desc, source_root, log=print, *, require_dvc=False):
     if dtype == KDP_TYPE:
         _validate_kdp(desc, log)
     if dtype == UED_TYPE:
-        _validate_ued(desc)
+        _validate_ued(desc, op_schema_registry)
     if dtype == "umd":
         _validate_umd(desc)
     if dtype == "udd":
@@ -1360,6 +1406,7 @@ def load_flat_input(
     *,
     exclude_folders=(),
     disabled_kinds=(),
+    op_schema_registry=None,
     require_dvc=False,
 ):
     """Load and structurally validate every *.json descriptor under a root.
@@ -1375,7 +1422,13 @@ def load_flat_input(
     dot-prefixed segment, or a dot-prefixed filename -- is warned and skipped
     the same way, so nothing the walk passes over is invisible. Raises
     HkpPackError on any malformed / missing-field / unknown-type /
-    dangling-reference descriptor that IS type-tagged.
+    dangling-reference descriptor that IS type-tagged. A duplicate JSON key at
+    any depth also raises, in every descriptor type. That is stricter than the
+    runtime loader, which keeps the last occurrence in a KDP.
+
+    `op_schema_registry` is the registry a UED's `graph_match.nodes` pattern
+    resolves against. graph_pattern.resolve_op_schema_registry supplies the
+    default. The registry is read only when a UED carries a pattern.
 
     `exclude_folders` names folders of the root that are not content in this
     build: nothing under one is read, validated or shipped. An entry is a
@@ -1463,7 +1516,7 @@ def load_flat_input(
             doc=_read_json(jp),
             rel_dir=rel_dir,
         )
-        _validate_shape(desc, root, log, require_dvc=require_dvc)
+        _validate_shape(desc, root, log, op_schema_registry, require_dvc=require_dvc)
         descriptors.append(desc)
 
     flat = FlatInput(descriptors=descriptors, generic_targets=generic_targets)

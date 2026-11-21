@@ -1753,7 +1753,7 @@ DescriptorSet engineSetRankingOnTileM(const std::filesystem::path& dir,
     set.engine.heuristicId = testId(0xEE);
     set.engine.metadataSchemaId = testing::SCHEMA_ID;
     set.engine.knobs = std::move(knobs);
-    set.engine.graphMatchNativeSymbol = testing::GRAPH_MATCH_SYMBOL;
+    set.engine.graphMatch = NativeGraphMatch{testing::GRAPH_MATCH_SYMBOL};
 
     set.schema.id = testing::SCHEMA_ID;
     set.schema.name = "test schema";
@@ -1942,10 +1942,9 @@ TEST(TestIngestorUhdEngineKnobContract, ABrokenModelReplacedIsUsedByTheNextEngin
     const testing::ScopedDispatchRegistration<testing::StubHandle> dispatch(
         "hipdnn.kernel_ingestor.test.dispatch", handler);
     const Gfx942DeviceResolver resolver;
-    const auto state
-        = makeStateManager<testing::StubHandle>(
-              set, set.engine.graphMatchNativeSymbol, {}, engineIdentity(set), set.engine.knobs)
-              ->sharedState();
+    const auto state = makeStateManager<testing::StubHandle>(
+                           set, set.engine.graphMatch, {}, engineIdentity(set), set.engine.knobs)
+                           ->sharedState();
     const auto containerEngine = [&] {
         return makeEngine<testing::StubHandle, testing::StubSettings, testing::StubContext>(
             set, state, resolver);
