@@ -292,6 +292,23 @@ set(hipblaslt_python_dev Development.Module)
 hipblaslt_find_python("${hipblaslt_python_dev}")
 hipblaslt_configure_bundled_python_command("${CMAKE_CURRENT_BINARY_DIR}/tensilelite/rocisa;${CMAKE_CURRENT_BINARY_DIR}/tensilelite" "${san_opts}")
 
+if(TENSILELITE_ENABLE_CLIENT)
+    set(_tensilelite_source_root "${CMAKE_CURRENT_SOURCE_DIR}/tensilelite")
+    set(TENSILELITE_SOURCE_REVISION "" CACHE STRING
+        "rocm-libraries commit to record when building from a tree without git")
+    hipblaslt_resolve_build_rocm_root(HIPBLASLT_BUILD_ROCM_ROOT)
+    include(cmake/TensileLiteMetadata.cmake)
+    hipblaslt_configure_tensilelite_metadata("${_tensilelite_source_root}"
+        "${CMAKE_CURRENT_BINARY_DIR}/tensilelite-client-generated")
+    if(TENSILELITE_CLIENT_SOURCE_REVISION STREQUAL "none")
+        message(WARNING "No source revision found; client pairing disabled. Build from a git "
+            "checkout or pass -DTENSILELITE_SOURCE_REVISION=<sha>.")
+    endif()
+    message(STATUS "TensileLite client: version ${TENSILELITE_DISTRIBUTION_VERSION}, "
+        "source revision ${TENSILELITE_CLIENT_SOURCE_REVISION}, "
+        "build ROCm ${TENSILELITE_CLIENT_BUILD_ROCM}")
+endif()
+
 if(HIPBLASLT_ENABLE_ROCROLLER)
     if(NOT ROCM_LIBS_SUPERBUILD)
         if(HIPBLASLT_ENABLE_THEROCK)
@@ -444,6 +461,19 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-opt-in-features.h"
 )
 
+# Experimental API registry: fails configure once a feature is past its deadline, and
+# generates hipblaslt-experimental-features.h and the library's private feature list.
+# Sets HIPBLASLT_EXPERIMENTAL_FRAGMENTS.
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocm_feature_releases.cmake")
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/hipblaslt_experimental.cmake")
+set(HIPBLASLT_EXPERIMENTAL_HEADER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt")
+include("${CMAKE_CURRENT_SOURCE_DIR}/library/experimental/features.cmake")
+hipblaslt_experimental_finalize(
+    TEMPLATE "${CMAKE_CURRENT_SOURCE_DIR}/library/include/hipblaslt-experimental-features.h.in"
+    OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-experimental-features.h"
+    REGISTRY "${CMAKE_CURRENT_BINARY_DIR}/library/src/hipblaslt-experimental-registry.inc"
+)
+
 # Configure the Windows version resource (PE VERSIONINFO) embedded into
 # libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
 # DLL reports file/product version metadata in its Windows file properties.
@@ -538,6 +568,15 @@ if(HIPBLASLT_ENABLE_HOST)
     endif()
     rocm_set_soversion(hipblaslt "${hipblaslt_SOVERSION}")
     add_library(roc::hipblaslt ALIAS hipblaslt)
+
+    # roc::hipblaslt plus ROCM_ENABLE_EXPERIMENTAL_APIS=1, the ROCm-wide switch that makes
+    # hipblaslt/hipblaslt-experimental.h declare the experimental API. Installed and exported
+    # with roc::hipblaslt, but not listed in hipblaslt_LIBRARIES, so nobody opts in by accident.
+    add_library(hipblaslt-experimental INTERFACE)
+    target_link_libraries(hipblaslt-experimental INTERFACE hipblaslt)
+    target_compile_definitions(hipblaslt-experimental INTERFACE ROCM_ENABLE_EXPERIMENTAL_APIS=1)
+    set_target_properties(hipblaslt-experimental PROPERTIES EXPORT_NAME hipblaslt_experimental)
+    add_library(roc::hipblaslt_experimental ALIAS hipblaslt-experimental)
 
     target_link_libraries(hipblaslt
         PUBLIC
@@ -645,7 +684,7 @@ if(HIPBLASLT_ENABLE_HOST)
         message(WARNING "llvm-strip not found, using default strip tool. This may cause stripping to fail during packaging.")
     endif()
 
-    rocm_install_targets(TARGETS hipblaslt)
+    rocm_install_targets(TARGETS hipblaslt hipblaslt-experimental)
 
     get_target_property(hipblaslt_public_headers roc::hipblaslt INTERFACE_SOURCES)
 
@@ -804,6 +843,22 @@ if(HIPBLASLT_ENABLE_CLIENT)
         COMPONENT benchmarks
     )
 
+    # Race check run under CPU rocjitsu by TheRock's hipblaslt-rocjitsu-race
+    # test; it locates the ROCm installation from this install location.
+    # rocjitsu is Linux-only.
+    if(NOT WIN32)
+        rocm_install(
+            PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/rocjitsu_race_smoke.py"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+            COMPONENT clients-common
+        )
+        rocm_install(
+            FILES "${CMAKE_CURRENT_SOURCE_DIR}/clients/scripts/rocjitsu/rocjitsu_race_smoke_tensilelite.yaml"
+            DESTINATION "${CMAKE_INSTALL_DATADIR}/hipblaslt/rocjitsu"
+            COMPONENT clients-common
+        )
+    endif()
+
     if(HIPBLASLT_ENABLE_GEMM_A2A_FUSION AND NOT WIN32)
         rocm_install(
             TARGETS hipblaslt-bench-a2a
@@ -895,6 +950,14 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
         PATTERN "source_only" EXCLUDE
     )
 
+    install(
+        FILES
+            "${_tensilelite_src}/_tensilelite_client_binding.py"
+            "${_tensilelite_src}/tensilelite_configure_client.py"
+        DESTINATION "${_tensilelite_install_dest}"
+        COMPONENT tests
+    )
+
     # Scripts used by unit tests
     install(
         FILES
@@ -902,6 +965,7 @@ if(HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS AND NOT WIN32)
             "${_tensilelite_src}/scripts/analyze_timing.py"
             "${_tensilelite_src}/scripts/check_no_absolute_imports.py"
             "${_tensilelite_src}/scripts/lcov_dir_summary.py"
+            "${_tensilelite_src}/scripts/memwatch.py"
             "${_tensilelite_src}/scripts/precommit_affected_tests.py"
         DESTINATION "${_tensilelite_install_dest}/scripts"
         COMPONENT tests
