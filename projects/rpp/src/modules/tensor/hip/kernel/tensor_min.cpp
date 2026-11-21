@@ -28,7 +28,8 @@ SOFTWARE.
 // -------------------- Set 0 - Reduction Stage 2 --------------------
 
 template <typename T>
-__global__ void tensor_min_grid_3channel_result_hip(float* srcPtr, uint xBufferLength, T* dstPtr) {
+__global__ void tensor_min_grid_3channel_result_hip(float* srcPtr, uint xBufferLength, T* dstPtr,
+                                                    float tailIdentity) {
     int id_x = hipThreadIdx_x * 8;
     int id_z = hipBlockIdx_z;
 
@@ -52,16 +53,24 @@ __global__ void tensor_min_grid_3channel_result_hip(float* srcPtr, uint xBufferL
 
     if (id_x >= xBufferLength) return;
 
+    int xAlignedLength = xBufferLength & ~7;  // alignedLength for vectorized global loads
+    int xDiff =
+        xBufferLength - xAlignedLength;  // difference between bufferLength and alignedLength
     srcIdx += id_x * 3;
-
-    if (id_x + 8 > xBufferLength)
-        srcIdx -= ((8 - (xBufferLength - (xBufferLength & ~7))) *
-                   3);  // using difference between bufferLength and alignedLength, where
-                        // alignedLength = (xBufferLength & ~7)
 
     d_float24 src_f24;
     rpp_hip_load24_pkd3_and_unpack_to_float24_pln3(srcPtr + srcIdx,
                                                    &src_f24);  // load 24 pixels to local memory
+
+    if (id_x + 8 > xBufferLength)  // pad invalid tail lanes (from the vectorized global load)
+                                   // with the reduction identity so they don't affect the min
+    {
+        for (int i = xDiff; i < 8; i++) {
+            src_f24.f8[0].f1[i] = tailIdentity;
+            src_f24.f8[1].f1[i] = tailIdentity;
+            src_f24.f8[2].f1[i] = tailIdentity;
+        }
+    }
 
     rpp_hip_math_min8(&src_f24.f8[0], &partialRMin_smem[hipThreadIdx_x]);
     rpp_hip_math_min8(&src_f24.f8[1], &partialGMin_smem[hipThreadIdx_x]);
@@ -93,7 +102,8 @@ __global__ void tensor_min_grid_3channel_result_hip(float* srcPtr, uint xBufferL
 }
 
 template <typename T>
-__global__ void tensor_min_grid_result_hip(float* srcPtr, uint xBufferLength, T* dstPtr) {
+__global__ void tensor_min_grid_result_hip(float* srcPtr, uint xBufferLength, T* dstPtr,
+                                           float tailIdentity) {
     int id_x = hipThreadIdx_x * 8;
     int id_z = hipBlockIdx_z;
 
@@ -106,16 +116,18 @@ __global__ void tensor_min_grid_result_hip(float* srcPtr, uint xBufferLength, T*
 
     if (id_x >= xBufferLength) return;
 
+    int xAlignedLength = xBufferLength & ~7;  // alignedLength for vectorized global loads
+    int xDiff =
+        xBufferLength - xAlignedLength;  // difference between bufferLength and alignedLength
     srcIdx += id_x;
-
-    if (id_x + 8 > xBufferLength)
-        srcIdx -= (8 - (xBufferLength -
-                        (xBufferLength &
-                         ~7)));  // using difference between bufferLength and alignedLength, where
-                                 // alignedLength = (xBufferLength & ~7)
 
     d_float8 src_f8;
     rpp_hip_load8_and_unpack_to_float8(srcPtr + srcIdx, &src_f8);  // load 8 pixels to local memory
+    if (id_x + 8 > xBufferLength)
+        for (int i = xDiff; i < 8; i++)
+            src_f8.f1[i] = tailIdentity;  // pad invalid tail lanes (from the vectorized global
+                                          // load) with the reduction identity so they don't
+                                          // affect the min
     rpp_hip_math_min8(&src_f8, &partialMin_smem[hipThreadIdx_x]);
     __syncthreads();  // syncthreads after min compute
 
@@ -409,7 +421,8 @@ RppStatus hip_exec_tensor_min(T* srcPtr, RpptDescPtr srcDescPtr, U* minArr,
         HIP_CHECK_LAUNCH_RETURN();
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         hipLaunchKernelGGL(tensor_min_grid_result_hip, dim3(1, 1, gridDim_z), dim3(256, 1, 1), 0,
-                           handle.GetStream(), partialMinArr, gridDim_x * gridDim_y, minArr);
+                           handle.GetStream(), partialMinArr, gridDim_x * gridDim_y, minArr,
+                           maximum);
         HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NCHW)) {
         Rpp32u partialMinArrLength = gridDim_x * gridDim_y * gridDim_z * 3;
@@ -427,7 +440,7 @@ RppStatus hip_exec_tensor_min(T* srcPtr, RpptDescPtr srcDescPtr, U* minArr,
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         hipLaunchKernelGGL(tensor_min_grid_3channel_result_hip, dim3(1, 1, gridDim_z),
                            dim3(256, 1, 1), 0, handle.GetStream(), partialMinArr,
-                           gridDim_x * gridDim_y, minArr);
+                           gridDim_x * gridDim_y, minArr, maximum);
         HIP_CHECK_LAUNCH_RETURN();
     } else if ((srcDescPtr->c == 3) && (srcDescPtr->layout == RpptLayout::NHWC)) {
         Rpp32u partialMinArrLength = gridDim_x * gridDim_y * gridDim_z * 3;
@@ -444,7 +457,7 @@ RppStatus hip_exec_tensor_min(T* srcPtr, RpptDescPtr srcDescPtr, U* minArr,
         RPP_HIP_RETURN_IF_ERROR(hipStreamSynchronize(handle.GetStream()));
         hipLaunchKernelGGL(tensor_min_grid_3channel_result_hip, dim3(1, 1, gridDim_z),
                            dim3(256, 1, 1), 0, handle.GetStream(), partialMinArr,
-                           gridDim_x * gridDim_y, minArr);
+                           gridDim_x * gridDim_y, minArr, maximum);
         HIP_CHECK_LAUNCH_RETURN();
     }
 
