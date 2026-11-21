@@ -40,6 +40,7 @@ Full documentation for hipBLASLt is available at [rocm.docs.amd.com/projects/hip
 * Fixed `hipblasLtMatrixLayoutSetAttribute` accepting a `HIPBLASLT_MATRIX_LAYOUT_BATCH_MODE` value that is not a `hipblasLtBatchMode_t`. A matmul with such a layout ran its main kernel in strided mode, but the GSU output-conversion kernel read C and D as pointer arrays. It now returns `HIPBLAS_STATUS_INVALID_VALUE`.
 * Fixed the extension API examples that passed `stream` as the `useUserArgs` argument of `initialize`, and the device user arguments examples that ran with an undefined buffer.
 * Fixed `hipblaslt.h`, `hipblaslt-ext-op.h`, and `hipblaslt-local-kernel.h` failing to compile in a C translation unit. The C++ standard library includes, the default member initializers in `hipblasLtMatmulHeuristicResult_t`, the `static_cast` in the `*_INVALID` macros, and the C++-only `hipblaslt_e8.h` and `hipblaslt_e5m3.h` types now apply only to C++. In C, the `HIP_R_*_EXT` type ids are enumeration constants, so two C files that include the headers no longer fail to link with duplicate symbols. C++ consumers see no change.
+* gfx1200 and gfx1201 GEMM kernels, and the amax, layer norm and softmax extension-op kernels, now include the `s_wait_alu` instructions these GPUs require, as LLVM does for compiled code. Once a vector instruction has read a scalar register, a later write to that register needs a wait before the next read, or the read can return the old value. Small GEMMs can run 1-4% slower.
 
 ## hipBLASLt 1.5.0 for ROCm 10.2.0
 
