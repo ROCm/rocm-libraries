@@ -48,7 +48,12 @@ rocfft_execution_info_internal::rocfft_execution_info_internal(
 
     // now ensure that each of the work buffers is big enough,
     // allocating if necessary
-    ensure_work_buffer_size(plan.tempBufferUserAllocs);
+    bool have_multigpu_plan
+        = std::any_of(plan.multiPlan.begin(), plan.multiPlan.end(), [](const auto& item) {
+              auto exec = dynamic_cast<const ExecPlan*>(item.get());
+              return exec && exec->mgpuPlan;
+          });
+    ensure_work_buffer_size(plan.tempBufferUserAllocs, have_multigpu_plan);
 
     // now that all of the work buffers is big enough, assign
     // concrete pointers to each of this rank's temp buffers
@@ -64,7 +69,7 @@ rocfft_execution_info_internal::rocfft_execution_info_internal(
 }
 
 void rocfft_execution_info_internal::ensure_work_buffer_size(
-    const std::vector<size_t>& sizes_bytes_per_device)
+    const std::vector<size_t>& sizes_bytes_per_device, bool have_multigpu_plan)
 {
     // assert that all our vectors are the same length
     if(execWorkBuffers.size() != sizes_bytes_per_device.size()
@@ -105,8 +110,33 @@ void rocfft_execution_info_internal::ensure_work_buffer_size(
                 << "user work buffer not specified for device " << device << ", allocating size "
                 << size_bytes << std::endl;
         rocfft_scoped_device dev(device);
-        if(execWorkBuffers[device].alloc(size_bytes) != hipSuccess)
-            throw std::runtime_error("work buffer allocation failure");
+
+        // Async stream-ordered allocation is preferred as it reduces
+        // host blocking, but it also requires device support.  So
+        // query that before attempting it and fall back to regular
+        // alloc if support is not there
+        int pool_supported = 0;
+
+        // NOTE: multi-GPU plans don't always respect the
+        // user-provided streams yet, so avoid stream-ordered allocs
+        // in that case.
+
+        // If query fails, assume pool is not supported
+        if(!have_multigpu_plan
+           && hipDeviceGetAttribute(&pool_supported, hipDeviceAttributeMemoryPoolsSupported, device)
+                  == hipSuccess
+           && pool_supported)
+        {
+            // Stream-ordered allocation can also work on the null stream
+            hipStream_t user_stream = user_info ? user_info->rocfft_streams[device] : nullptr;
+            if(execWorkBuffers[device].alloc_async(size_bytes, user_stream) != hipSuccess)
+                throw std::runtime_error("stream-ordered work buffer allocation failure");
+        }
+        else
+        {
+            if(execWorkBuffers[device].alloc(size_bytes) != hipSuccess)
+                throw std::runtime_error("work buffer allocation failure");
+        }
     }
 }
 
