@@ -64,6 +64,17 @@ inline std::string GetCurrentDeviceName()
 #endif
 }
 
+#ifndef _WIN32
+/// GPU name ("gfx90a") for a KFD gfx_target_version (major * 10000 + minor * 100 + stepping, so
+/// 90010 is gfx90a). The name spells minor and stepping as hex digits. Empty for 0, which is what
+/// CPU nodes report.
+MIOPEN_INTERNALS_EXPORT std::string GfxNameFromTargetVersion(unsigned long long target_version);
+
+/// Names ("gfx942") of the GPUs in the kernel driver (KFD) topology, read without starting the
+/// HIP runtime. Empty when the topology cannot be read.
+MIOPEN_INTERNALS_EXPORT std::vector<std::string> GetKfdDeviceNames();
+#endif
+
 class CkImplLibLoader
 {
 public:

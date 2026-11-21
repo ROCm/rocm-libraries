@@ -169,6 +169,15 @@ Full documentation for MIOpen is available [here](https://rocm.docs.amd.com/proj
   up to 50x over the GEMM and Winograd fallbacks. Every restored perf config carries an explicit
   split_k instead of auto split-K, so no entry depends on a runtime occupancy query that differs
   between builds.
+* [Conv] On Linux, MIOpen now loads the Composable Kernel (CK) dynamic library of each GPU
+  architecture in the system when MIOpen itself is loaded, if no GPU runtime has started yet.
+  The HIP runtime then extracts the CK code objects when a CK kernel is first used, instead of
+  extracting all of them for every device when `miopenCreate` loads the library. `miopenCreate`
+  no longer extracts them, and this stops a process that never runs a CK kernel from filling the
+  comgr cache with the CK code objects. When MIOpen is loaded after the GPU runtime has started,
+  or on Windows, handle creation still loads the library. A process that loads MIOpen but never
+  creates a handle now also maps the CK library. Set `MIOPEN_DEBUG_CK_EARLY_LOAD=0` to turn the
+  early load off and restore the previous behavior.
 
 ## MIOpen 3.6.2 for ROCm 10.2.0
 
