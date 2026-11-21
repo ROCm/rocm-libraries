@@ -36,7 +36,7 @@ the data type, and the problem. The architectures which default to hipBLASLt, an
     * - **Architecture**
       - **Data types defaulting to hipBLASLt**
 
-    * - gfx1170, gfx1171, gfx1200, gfx1201, gfx1250
+    * - gfx1150, gfx1151, gfx1152, gfx1153, gfx1170, gfx1171, gfx1200, gfx1201, gfx1250
       - All data types.
 
     * - gfx950

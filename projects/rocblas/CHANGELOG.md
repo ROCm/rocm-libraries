@@ -14,6 +14,7 @@ rocBLAS documentation is available at
 
 * On gfx950, hipBLASLt is now the default GEMM backend for all input types. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
 * On gfx942, Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM now default to the hipBLASLt backend for `f16_r`, `bf16_r`, `f32_r`, `f64_r`, and `i8_r` data on both MI300A (228 CU) and MI300X (304 CU). On the MI300A only, `f32_c` and `f64_c` also default to hipBLASLt. The remaining data types on gfx942 default to Tensile. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
+* On gfx1150, gfx1151, gfx1152, and gfx1153, Level 3 `gemm`, `gemm_ex`, and the functions that internally use GEMM now default to the hipBLASLt backend. `ROCBLAS_USE_HIPBLASLT` continues to force or disable the hipBLASLt backend.
 * `rocblas_clients_readme.txt` is installed under the rocBLAS data directory (`share/rocblas`) instead of `bin`.
 * A failed device-memory free in `rocblas_device_malloc` now prints the status to `stderr`.
 
