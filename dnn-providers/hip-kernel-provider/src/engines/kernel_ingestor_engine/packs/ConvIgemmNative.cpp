@@ -1064,69 +1064,6 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
         static_cast<unsigned int>(x), static_cast<unsigned int>(y), static_cast<unsigned int>(z)};
 }
 
-std::optional<K1BoxArgs> boxArgsFor(const IgemmProblem& problem)
-{
-    const auto& a = problem.args;
-    if(problem.direction != ConvDirection::BACKWARD_DATA || a.groups != 1 || problem.phases != 1)
-    {
-        return std::nullopt;
-    }
-    const std::array<int, 3> in{a.di, a.hi, a.wi}; // dx
-    const std::array<int, 3> out{a.dout, a.ho, a.wo}; // dy
-    const std::array<int, 3> pad{a.pd, a.ph, a.pw};
-    const std::array<int, 3> taps{a.ft, a.fr, a.fs};
-    const std::array<int, 3> stride{a.sd, a.sh, a.sw};
-    const std::array<int, 3> dil{a.dd, a.dh, a.dw};
-    K1BoxArgs box{};
-    for(size_t ax = 0; ax < in.size(); ++ax)
-    {
-        if(stride[ax] != 1 || dil[ax] != 1)
-        {
-            return std::nullopt;
-        }
-        struct Run
-        {
-            int begin, size, lo, hi;
-        };
-        std::vector<Run> runs;
-        for(int i = 0; i < in[ax]; ++i)
-        {
-            int lo = std::max(0, i + pad[ax] - out[ax] + 1);
-            int hi = std::min(taps[ax] - 1, i + pad[ax]);
-            if(lo > hi)
-            {
-                lo = hi = 0;
-            }
-            if(!runs.empty() && runs.back().lo == lo && runs.back().hi == hi
-               && runs.back().begin + runs.back().size == i)
-            {
-                ++runs.back().size;
-            }
-            else
-            {
-                runs.push_back({i, 1, lo, hi});
-            }
-        }
-        if(runs.empty() || runs.size() > K1_BOX_RUNS)
-        {
-            return std::nullopt;
-        }
-        // The longest run (the interior) first, the rest in coordinate order.
-        const auto longest = std::max_element(
-            runs.begin(), runs.end(), [](const Run& l, const Run& r) { return l.size < r.size; });
-        std::rotate(runs.begin(), longest, longest + 1);
-        box.runs[ax] = static_cast<int>(runs.size());
-        for(size_t j = 0; j < runs.size(); ++j)
-        {
-            box.begin[ax][j] = runs[j].begin;
-            box.size[ax][j] = runs[j].size;
-            box.lo[ax][j] = runs[j].lo;
-            box.hi[ax][j] = runs[j].hi;
-        }
-    }
-    return box;
-}
-
 FlexTailSplit flexTailSplit(long long rowTiles,
                             long long rowWidth,
                             long long kSteps,
@@ -1437,8 +1374,6 @@ struct Tile
     int64_t cfx = 0; ///< 1-D channels-first activations read in place (CONV_IGEMM_CFX)
     int64_t splitPolicy = 0; ///< 0 automatic split-K, 1 none, N >= 2 exactly N (splitPlanFor)
     int64_t flex = 0; ///< the flex tile (CONV_IGEMM_FLEX): gfx950, flattened positions, ping-pong
-    /// Register-staged flex tile, backward data: rows in box order (CONV_IGEMM_BOX, K1BoxArgs)
-    int64_t box = 0;
 
     int64_t blockThreads() const
     {
@@ -1487,13 +1422,6 @@ int64_t flexForm(const Tile& tile)
     return tile.atom.rfind("mfma16x32_", 0) == 0 ? 1 : 2;
 }
 
-/// The flex form the split plan takes: box-order configs split as plain tiles (every row tile
-/// split alike, the partials indexed by dx pixel), the other flex tiles by their form.
-int64_t splitFlexOf(const Tile& tile)
-{
-    return tile.box != 0 ? 0 : flexForm(tile);
-}
-
 std::optional<Tile> tileOf(const KernelDefinition& kernel)
 {
     Tile tile;
@@ -1527,7 +1455,6 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.splitPolicy = kernel.getIntMetadata("split_policy");
     tile.cfx = kernel.getIntMetadata("cfx");
     tile.flex = kernel.metadata.count("flex") != 0 ? kernel.getIntMetadata("flex") : 0;
-    tile.box = kernel.metadata.count("box") != 0 ? kernel.getIntMetadata("box") : 0;
     // The flex tile: 256 positions x 256, 192 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2
     // waves, 64-channel k-steps, 8-wide vectors, XCD order; any split policy; every other variant
     // knob off. The register-staged form (16x16x16 / 16x16x4 atoms, gfx942): one LDS stage, BN
@@ -1548,12 +1475,6 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
            || tile.xcd != 1 || tile.halo != 0 || (tile.wdirect != 0 && !flexReg) || tile.pack != 0
            || tile.cf != 0 || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0
            || tile.patch != 0 || tile.cfx != 0))
-    {
-        return std::nullopt;
-    }
-    // Box order: the register-staged flex tile (16x16x16 / 16x16x4 atoms) only.
-    if(tile.box != 0
-       && (tile.box != 1 || tile.flex == 0 || tile.atom.rfind("mfma16x32_", 0) == 0 || tile.split))
     {
         return std::nullopt;
     }
@@ -1850,17 +1771,6 @@ bool kernelMatches(const MatchContext& context,
     {
         return false;
     }
-    // Box order: backward data whose rows the box tables order (unit stride and dilation, one
-    // group, at most K1_BOX_RUNS runs an axis), the read dy addressed from its first image by
-    // 32-bit buffer offsets.
-    if(tile->box != 0
-       && (*direction != ConvDirection::BACKWARD_DATA
-           || !conv_igemm::boxArgsFor(*problem).has_value()
-           || a.m * a.k * static_cast<long long>(problem->elementBytes) >= BUFFER_LIMIT
-           || static_cast<long long>(a.n) * a.di * a.hi * a.wi >= conv_igemm::INT_LIMIT))
-    {
-        return false;
-    }
     const auto grid = conv_igemm::gridFor(*problem, tile->bm, tile->bn);
     if(!grid.has_value())
     {
@@ -1910,7 +1820,7 @@ bool kernelMatches(const MatchContext& context,
                                                         false,
                                                         0,
                                                         resident,
-                                                        splitFlexOf(*tile));
+                                                        flexForm(*tile));
         const auto chosen = conv_igemm::splitPlanFor(*problem,
                                                      tile->bm,
                                                      tile->bn,
@@ -1920,7 +1830,7 @@ bool kernelMatches(const MatchContext& context,
                                                      false,
                                                      tile->splitPolicy,
                                                      resident,
-                                                     splitFlexOf(*tile));
+                                                     flexForm(*tile));
         if((chosen.splits == automatic.splits && chosen.splitRowTile == automatic.splitRowTile)
            || (tile->splitPolicy >= 2 && chosen.splits != tile->splitPolicy))
         {
@@ -1967,18 +1877,14 @@ std::optional<IgemmProblem>
 
 /// The argument the kernels take, and a ConvEpiArgs after it when an epilogue is fused. Only
 /// consulted for a pre-built kernel.
-const std::vector<KernelArgument>& convSignature(bool fused, bool box = false)
+const std::vector<KernelArgument>& convSignature(bool fused)
 {
     static const std::vector<KernelArgument> s_signature{
         {"by_value", static_cast<uint32_t>(sizeof(K1Args)), 0, ""}};
     static const std::vector<KernelArgument> s_fusedSignature{
         {"by_value", static_cast<uint32_t>(sizeof(K1Args)), 0, ""},
         {"by_value", static_cast<uint32_t>(sizeof(ConvEpiArgs)), 0, ""}};
-    // Box-order configs (backward data, never fused): the box tables after the arguments.
-    static const std::vector<KernelArgument> s_boxSignature{
-        {"by_value", static_cast<uint32_t>(sizeof(K1Args)), 0, ""},
-        {"by_value", static_cast<uint32_t>(sizeof(K1BoxArgs)), 0, ""}};
-    return box ? s_boxSignature : fused ? s_fusedSignature : s_signature;
+    return fused ? s_fusedSignature : s_signature;
 }
 
 const std::vector<KernelArgument>& reduceSignature(bool fused)
@@ -2111,16 +2017,6 @@ public:
         return _plan;
     }
 
-    /// Box-order configs: the box tables the convolution takes after its arguments.
-    void setBox(const K1BoxArgs& box)
-    {
-        _box = box;
-    }
-    const std::optional<K1BoxArgs>& box() const
-    {
-        return _box;
-    }
-
 private:
     IngestorKernelCode _conv;
     std::optional<IngestorKernelCode> _convTail;
@@ -2130,7 +2026,6 @@ private:
     std::array<std::optional<IngestorKernelCode>, 3> _copies;
     IgemmProblem _problem;
     conv_igemm::SplitPlan _plan;
-    std::optional<K1BoxArgs> _box;
 };
 
 class ConvIgemmDispatchHandler : public IKernelDispatchHandler<Handle>
@@ -2173,7 +2068,7 @@ public:
                    tile->patch != 0,
                    tile->splitPolicy,
                    residentBlocksFor(*tile, *problem, context.deviceProperties),
-                   splitFlexOf(*tile))
+                   flexForm(*tile))
             .workspaceBytes;
     }
 
@@ -2242,11 +2137,6 @@ public:
         if(tile->flex != 0)
         {
             options.add("CONV_IGEMM_FLEX", std::to_string(flexForm(*tile)));
-            // Defined only when set, so every other flex config compiles as before.
-            if(tile->box != 0)
-            {
-                options.add("CONV_IGEMM_BOX", std::string("1"));
-            }
         }
         const int waves = conv_igemm::occupancyTarget(tile->atom,
                                                       tile->bm,
@@ -2272,19 +2162,15 @@ public:
                                        tile->patch != 0,
                                        tile->splitPolicy,
                                        residentBlocksFor(*tile, *problem, context.deviceProperties),
-                                       splitFlexOf(*tile));
+                                       flexForm(*tile));
         // The fused epilogue: in the convolution, and in the split-K reduce that writes the
         // output when the reduction is split. Fusion off adds no option, so the code is that of
         // an unfused build.
         const auto& epilogue = problem->base.epilogue;
         const bool fused = !epilogue.empty();
         conv_epilogue::addEpilogueDefines(options, epilogue);
-        auto conv = buildIngestorKernelCode(_kernelCompiler,
-                                            _kpackLoader,
-                                            context,
-                                            kernel,
-                                            options,
-                                            convSignature(fused, tile->box != 0));
+        auto conv = buildIngestorKernelCode(
+            _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused));
         const auto threads = static_cast<unsigned int>(tile->blockThreads());
         const unsigned int gridZ = grid->z * static_cast<unsigned int>(plan.splits);
         // One dispatch addresses at most 2^32 - 1 work items along x: more row tiles than that
@@ -2298,24 +2184,16 @@ public:
         {
             // The tail split: the leading row tiles unsplit, then the rest split (convTail).
             conv.setGridSize(static_cast<unsigned int>(plan.splitRowTile), grid->y, grid->z);
-            convTail.emplace(buildIngestorKernelCode(_kernelCompiler,
-                                                     _kpackLoader,
-                                                     context,
-                                                     kernel,
-                                                     options,
-                                                     convSignature(fused, tile->box != 0)));
+            convTail.emplace(buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused)));
             convTail->setBlockSize(threads, 1, 1);
             convTail->setGridSize(
                 static_cast<unsigned int>(rowTiles - plan.splitRowTile), grid->y, gridZ);
         }
         else if(rowTiles % launchTiles != 0)
         {
-            convTail.emplace(buildIngestorKernelCode(_kernelCompiler,
-                                                     _kpackLoader,
-                                                     context,
-                                                     kernel,
-                                                     options,
-                                                     convSignature(fused, tile->box != 0)));
+            convTail.emplace(buildIngestorKernelCode(
+                _kernelCompiler, _kpackLoader, context, kernel, options, convSignature(fused)));
             convTail->setBlockSize(threads, 1, 1);
             convTail->setGridSize(
                 static_cast<unsigned int>(rowTiles % launchTiles), grid->y, gridZ);
@@ -2407,26 +2285,14 @@ public:
             copy.setGridSize(static_cast<unsigned int>(blocks), 1, 1);
             copies[i].emplace(std::move(copy));
         }
-        auto prepared = std::make_unique<PreparedConvIgemm>(std::move(conv),
-                                                            std::move(convTail),
-                                                            launchTiles,
-                                                            rowTiles,
-                                                            std::move(reduce),
-                                                            std::move(copies),
-                                                            *problem,
-                                                            plan);
-        if(tile->box != 0)
-        {
-            const auto box = conv_igemm::boxArgsFor(*problem);
-            if(!box.has_value())
-            {
-                throw hipdnn_plugin_sdk::HipdnnPluginException(
-                    HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR,
-                    "conv_igemm box config was given a problem its kernel match declines");
-            }
-            prepared->setBox(*box);
-        }
-        return prepared;
+        return std::make_unique<PreparedConvIgemm>(std::move(conv),
+                                                   std::move(convTail),
+                                                   launchTiles,
+                                                   rowTiles,
+                                                   std::move(reduce),
+                                                   std::move(copies),
+                                                   *problem,
+                                                   plan);
     }
 
     void launch(const Handle& handle,
@@ -2529,11 +2395,7 @@ public:
                                                   a.k);
         }
         const auto launchConv = [&](compilation::IRunnableKernel& conv) {
-            if(dispatch.box().has_value())
-            {
-                conv.launch(stream, args, *dispatch.box());
-            }
-            else if(fused)
+            if(fused)
             {
                 conv.launch(stream, args, epiArgs);
             }

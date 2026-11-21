@@ -311,17 +311,6 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                        int64_t flex = 0);
 
 /**
- * @brief The box order of backward data's rows (K1BoxArgs, the register-staged flex tile's box
- *        configs), or nullopt where it does not apply.
- *
- * Unit stride and dilation on every axis, one group: per spatial axis the dx coordinates i fall
- * into runs reaching the same taps q (dy coordinate i + pad - q within dy), the longest run
- * first and the others in coordinate order (a coordinate no tap reaches takes tap 0, which reads
- * padding). Declines more than K1_BOX_RUNS runs on an axis.
- */
-std::optional<K1BoxArgs> boxArgsFor(const IgemmProblem& problem);
-
-/**
  * @brief Blocks of a matrix-core config of at least 8 waves (512 threads on gfx9) a CU holds at
  *        once, from its threads, its LDS and its accumulators; 0 for smaller blocks, the FMA
  *        kernel (wave 0) or a device whose dispatch units are not gfx9 CUs (the split plan's arch

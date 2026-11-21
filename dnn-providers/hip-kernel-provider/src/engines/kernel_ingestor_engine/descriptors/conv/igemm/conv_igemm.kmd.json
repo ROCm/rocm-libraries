@@ -102,10 +102,6 @@
     {
       "name": "flex",
       "type": "int"
-    },
-    {
-      "name": "box",
-      "type": "int"
     }
   ]
 }

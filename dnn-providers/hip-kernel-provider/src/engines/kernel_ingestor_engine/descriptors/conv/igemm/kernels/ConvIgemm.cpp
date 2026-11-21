@@ -28,9 +28,6 @@
 //                       (k1ConvFlexReg, ConvIgemmFlexReg.h; the pack picks the form by the atom;
 //                       CONV_IGEMM_WD reads the graph's filter in backward data); defined only
 //                       when set
-//   CONV_IGEMM_BOX      1 (CONV_IGEMM_FLEX 2, backward data): rows in box order, each block's
-//                       steps over the taps its rows' classes reach (K1BoxArgs, a second kernel
-//                       argument); defined only when set
 //   K1_BUFFER           0 when a block's rows could span 2^31 bytes (64-bit global loads)
 //   K1_LARGE            1: 64-bit positions within an image (large-image configs, images past
 //                       2^31 - 1 pixels)
@@ -91,18 +88,8 @@
 #define CONV_IGEMM_OCCUPANCY
 #endif
 
-#if defined(CONV_IGEMM_BOX) && CONV_IGEMM_BOX
-#define CONV_IGEMM_BOX_PARAM , K1BoxArgs box
-#define CONV_IGEMM_BOX_ARG , &box
-#define CONV_IGEMM_BOX_FLAG 1
-#else
-#define CONV_IGEMM_BOX_PARAM
-#define CONV_IGEMM_BOX_ARG
-#define CONV_IGEMM_BOX_FLAG 0
-#endif
-
 extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPANCY
-    ConvIgemm(K1Args a CONV_EPI_PARAM CONV_IGEMM_BOX_PARAM)
+    ConvIgemm(K1Args a CONV_EPI_PARAM)
 {
 #if K1_PATCH == 2
     k1PatchMma<CONV_IGEMM_T,
@@ -122,8 +109,7 @@ extern "C" __global__ void __launch_bounds__(CONV_IGEMM_BLOCK) CONV_IGEMM_OCCUPA
                   CONV_IGEMM_DIR,
                   CONV_IGEMM_BN,
                   CONV_IGEMM_WD,
-                  CONV_IGEMM_BK* static_cast<int>(sizeof(CONV_IGEMM_T)),
-                  CONV_IGEMM_BOX_FLAG>(a CONV_EPI_ARG CONV_IGEMM_BOX_ARG);
+                  CONV_IGEMM_BK* static_cast<int>(sizeof(CONV_IGEMM_T))>(a CONV_EPI_ARG);
 #else
     k1ConvFlex<CONV_IGEMM_T, CONV_IGEMM_ATOM, CONV_IGEMM_DIR, CONV_IGEMM_BN>(a CONV_EPI_ARG);
 #endif
