@@ -1015,6 +1015,64 @@ if(NOT WIN32)
     endforeach()
 endif()
 
+#################################################
+#     Complex tests (fast & slow)               #
+#################################################
+# ComplexFloat (c, the reference's C_C_C) and ComplexDouble (z, Z_Z_Z): A, B, C,
+# D and alpha/beta all of that type. --conjA/--conjB add TensorOp::ComplexConjugate
+# to A/B. A, B and C have +-1 real and imaginary parts, so a missing, misplaced or
+# extra conjugation changes D. Complex problems take no bias, ScaleAB,
+# scaleAlphaVec or activation (the fast path rejects them; the driver too).
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TYPE c z)
+        if("${TYPE}" STREQUAL "c")
+            set(SIZES ${F32_SIZES})
+        else()
+            set(SIZES ${F64_SIZES})
+        endif()
+        foreach(TRANS NN TN NT TT)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_${TYPE}_${TRANS}
+                ARGS ${SIZES} ${TFLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
+            )
+        endforeach()
+        # Each entry: NAME;transpose;conjugate flags.
+        foreach(CASE
+                "ConjA_NN;NN;--conjA"
+                "ConjB_NN;NN;--conjB"
+                "ConjA_TN;TN;--conjA"
+                "ConjB_NT;NT;--conjB"
+                "ConjAConjB_TT;TT;--conjA --conjB")
+            list(GET CASE 0 NAME)
+            list(GET CASE 1 TRANS)
+            list(GET CASE 2 CONJ_FLAGS)
+            separate_arguments(CONJ_FLAGS)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_${TYPE}_${NAME}
+                ARGS ${SIZES} ${TFLAGS} ${CONJ_FLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
+            )
+        endforeach()
+        add_cpu_gemm_test(${PATH}_${TYPE}_AlphaBeta
+            ARGS ${SIZES} --type ${TYPE} --alpha 0.3 --beta 0.5 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_Batched_ConjA_TN
+            ARGS ${SIZES} --transA --conjA --type ${TYPE} --beta 1.0 --batchCount 3 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+
+    add_test(
+        NAME "CPUGemm.${PATH}_c_InjectedFailure_Rejected"
+        COMMAND cpu-gemm-driver ${F32_SIZES} --type c --conjA --validate --injectValidationFailure ${PATH_FLAGS}
+    )
+    set_tests_properties("CPUGemm.${PATH}_c_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
+endforeach()
+
 # Option checks: these must be rejected.
 foreach(CASE
         "I8_MixedA;--typeA i8 --typeB f32;Error: mixed i8 / non-i8 input is not supported"
@@ -1028,7 +1086,14 @@ foreach(CASE
         "F8_F8CDOtherFamily;--type f8 --typeCD f8fnuz;Error: unsupported --typeCD f8fnuz for typeA=f8 typeB=f8"
         "F8_F8CDTypeAlpha;--type f8 --typeCD f8 --typeAlpha f64;Error: --typeCD f8 / --typeAlpha f64 is only supported for i8 inputs"
         "B8H_B8CD;--typeA bf8 --typeB f16 --computeInputA f16 --typeCD bf8;Error: unsupported --typeCD bf8 for typeA=bf8 typeB=f16"
-        "F8H_F8CDNoTypeId;--typeA f8 --typeB f16 --typeCD f8;Runtime Error: Data type not implemented. [typeA=f8, typeB=f16, computeInputA=f8, computeInputB=f16, typeCD=f8, typeAlpha=f32]")
+        "F8H_F8CDNoTypeId;--typeA f8 --typeB f16 --typeCD f8;Runtime Error: Data type not implemented. [typeA=f8, typeB=f16, computeInputA=f8, computeInputB=f16, typeCD=f8, typeAlpha=f32]"
+        "C_MixedZ;--typeA c --typeB z;Error: complex inputs need the same complex type for A and B"
+        "C_MixedF32;--typeA c --typeB f32;Error: complex inputs need the same complex type for A and B"
+        "C_TypeCD;--type c --typeCD f32;Error: --typeCD f32 / --typeAlpha c is only supported for i8 inputs"
+        "C_ComputeInput;--type c --computeInputA f32;Error: complex inputs do not support a computeInput override"
+        "C_Bias;--type c --bias;Error: complex inputs do not support --bias, --activation, --scaleAlphaVec, --useScaleAB or --outputAmaxD"
+        "Z_ScaleAB;--type z --useScaleAB Scalar;Error: complex inputs do not support --bias, --activation, --scaleAlphaVec, --useScaleAB or --outputAmaxD"
+        "F32_ConjA;--type f32 --conjA;Error: --conjA/--conjB need complex inputs (c or z)")
     list(GET CASE 0 NAME)
     list(GET CASE 1 FLAGS)
     list(GET CASE 2 EXPECTED_ERROR)
