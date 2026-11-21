@@ -325,6 +325,13 @@ std::vector<DeviceCase> deviceCases()
     auto bwdConvolution = stem(48, 3, {23, 17}, {3, 3}, {1, 1}, {1, 1}, true);
     bwdConvolution.mode = ConvMode::CONVOLUTION;
     cases.push_back({"BwdNhwc3x3ConvolutionMode", bwdConvolution, bwd});
+    // 1x1 heads' backward data: dy of 6 (and 8) channels into a wide channels-last dx, 3-D, and an
+    // output channel count that is not whole column blocks.
+    cases.push_back(
+        {"BwdNdhwc1x1x1K6", stem(64, 6, {6, 13, 21}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, true), bwd});
+    cases.push_back({"BwdNdhwc1x1x1K8C72",
+                     stem(72, 8, {3, 9, 17}, {1, 1, 1}, {1, 1, 1}, {0, 0, 0}, true),
+                     bwd});
     auto bwdMany = stem(128, 3, {70, 90}, {3, 3}, {1, 1}, {1, 1}, true);
     bwdMany.n = 3;
     cases.push_back({"BwdNhwc3x3ManyTiles", bwdMany, bwd});

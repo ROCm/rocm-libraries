@@ -287,6 +287,16 @@ mma_configs(
 )
 # fp32 FMA only where no fp32 matrix core exists and the backward kernels are validated (RDNA3/4).
 fma_configs(bwd_catalog, BWD_GEOMS, lambda g: BWD_CMAX[g], ["gfx11", "gfx12"])
+# Backward data of 1x1 output heads on gfx942 (dy of up to 8 channels into a wide channels-last
+# dx, a 3-D segmentation head's 6 channels into 64): the register-epilogue tiles, appended so
+# the configs above keep their names and priorities.
+mma_configs(
+    bwd_catalog,
+    [(1, 1, 1, 1, 1, 1)],
+    1,
+    lambda g: [8],
+    lambda a, g: EP1_TILES_OF[a] if a == "gfx942" else [],
+)
 
 kmd, umd, udd = U("kmd"), U("umd"), U("udd")
 write(
