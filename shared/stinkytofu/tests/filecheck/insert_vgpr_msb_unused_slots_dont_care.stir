@@ -1,0 +1,98 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb8 --vgpr-msb-unused-slots-dont-care --InsertVgprMsbPass --print-output
+#
+# VgprMsbUnusedSlotsDontCare: an instruction needs only the s_set_vgpr_msb slots
+# it uses, and the slots it does not use keep their bank. When none of the slots
+# that must change has been read since the last setter, that setter is
+# rewritten instead of being followed by a new one.
+#
+# Setter low byte, two bits per slot: dst, src2, src1, src0 (high to low).
+
+# An SGPR destination uses no dst slot, so it does not force dst back to bank 0.
+# CHECK-LABEL: @sgpr_dst_keeps_dst_bank
+# CHECK: "st.s_set_vgpr_msb"(69)
+# CHECK-NEXT: v257 = "st.v_add_f32"(v258, v259)
+# CHECK-NEXT: s28 = "st.v_cmp_eq_u32"(v260, v261)
+# CHECK-NEXT: v262 = "st.v_mul_f32"(v263, v264)
+st.func @sgpr_dst_keeps_dst_bank() {
+^entry:
+  v257 = "st.v_add_f32"(v258, v259) { issueCycles = 1, latencyCycles = 5 }
+  s28 = "st.v_cmp_eq_u32"(v260, v261) { issueCycles = 1, latencyCycles = 5 }
+  v262 = "st.v_mul_f32"(v263, v264) { issueCycles = 1, latencyCycles = 5 }
+}
+
+# The setter emitted for v_mov (65: dst and src0 in bank 1) is rewritten to 85
+# when v_fma needs src1 and src2 too: nothing read them since. The SALU in
+# between uses no slot.
+# CHECK-LABEL: @unread_slots_rewrite_setter
+# CHECK: "st.s_set_vgpr_msb"(85)
+# CHECK-NEXT: v257 = "st.v_mov_b32"(v258)
+# CHECK-NEXT: s12 = "st.s_mov_b32"(s13)
+# CHECK-NEXT: v259 = "st.v_fma_f32"(v260, v261, v262)
+st.func @unread_slots_rewrite_setter() {
+^entry:
+  v257 = "st.v_mov_b32"(v258) { issueCycles = 1, latencyCycles = 5 }
+  s12 = "st.s_mov_b32"(s13) { issueCycles = 1, latencyCycles = 2 }
+  v259 = "st.v_fma_f32"(v260, v261, v262) { issueCycles = 1, latencyCycles = 5 }
+}
+
+# The first v_add read src1 in bank 0, so the second one, which needs src1 in
+# bank 1, gets a new setter.
+# CHECK-LABEL: @read_slot_blocks_rewrite
+# CHECK: "st.s_set_vgpr_msb"(65)
+# CHECK-NEXT: v257 = "st.v_add_f32"(v258, v2)
+# CHECK-NEXT: "st.s_set_vgpr_msb"(69)
+# CHECK-NEXT: v259 = "st.v_add_f32"(v260, v261)
+st.func @read_slot_blocks_rewrite() {
+^entry:
+  v257 = "st.v_add_f32"(v258, v2) { issueCycles = 1, latencyCycles = 5 }
+  v259 = "st.v_add_f32"(v260, v261) { issueCycles = 1, latencyCycles = 5 }
+}
+
+# Two global-write epilogue elements: scale by alpha, clamp, convert. Comparing
+# whole words costs four setters per element; only the src1 flip for the alpha
+# multiply and back is a real conflict, so two remain per element.
+# CHECK-LABEL: @epilogue_two_elements
+# CHECK: "st.s_set_vgpr_msb"(64)
+# CHECK-NEXT: v257 = "st.v_mul_f32"(s20, v48)
+# CHECK-NEXT: "st.s_set_vgpr_msb"(85)
+# CHECK-NEXT: s28 = "st.v_cmp_class_f32"(v257, v264)
+# CHECK-NEXT: v263 = "st.v_med3_f32"(v257, v265, v266)
+# CHECK-NEXT: v257 = "st.v_cndmask_b32"(v263, v257, s28)
+# CHECK-NEXT: v272 = "st.v_cvt_pk_fp8_f32"(v257, v257)
+# CHECK-NEXT: "st.s_set_vgpr_msb"(81)
+# CHECK-NEXT: v258 = "st.v_mul_f32"(s20, v56)
+# CHECK-NEXT: "st.s_set_vgpr_msb"(85)
+# CHECK-NEXT: s28 = "st.v_cmp_class_f32"(v258, v264)
+# CHECK-NEXT: v263 = "st.v_med3_f32"(v258, v265, v266)
+# CHECK-NEXT: v258 = "st.v_cndmask_b32"(v263, v258, s28)
+st.func @epilogue_two_elements() {
+^entry:
+  v257 = "st.v_mul_f32"(s20, v48) { issueCycles = 1, latencyCycles = 5 }
+  s28 = "st.v_cmp_class_f32"(v257, v264) { issueCycles = 1, latencyCycles = 5 }
+  v263 = "st.v_med3_f32"(v257, v265, v266) { issueCycles = 1, latencyCycles = 5 }
+  v257 = "st.v_cndmask_b32"(v263, v257, s28) { issueCycles = 1, latencyCycles = 5 }
+  v272 = "st.v_cvt_pk_fp8_f32"(v257, v257) { issueCycles = 1, latencyCycles = 5 }
+  v258 = "st.v_mul_f32"(s20, v56) { issueCycles = 1, latencyCycles = 5 }
+  s28 = "st.v_cmp_class_f32"(v258, v264) { issueCycles = 1, latencyCycles = 5 }
+  v263 = "st.v_med3_f32"(v258, v265, v266) { issueCycles = 1, latencyCycles = 5 }
+  v258 = "st.v_cndmask_b32"(v263, v258, s28) { issueCycles = 1, latencyCycles = 5 }
+}
+
+# A WMMA -> ds_load -> WMMA window whose used slots agree needs one setter,
+# where the exact-word rule pays three. The WMMA reads A from bank 0 (src0), B
+# from bank 2 (src1) and C from bank 1 (src2), and writes D in bank 1 (dst):
+# word 88. The ds_load writes v[264:267], in bank 1 (dst), from the address in
+# v40, in bank 0 (src0); 88 already gives it what it reads.
+# CHECK-LABEL: @wmma_window_keeps_word
+# CHECK: "st.s_set_vgpr_msb"(88)
+# CHECK-NEXT: "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NEXT: "st.ds_load_b128"
+# CHECK-NEXT: "st.v_wmma_f32_16x16x32_bf16"
+# CHECK-NOT: s_set_vgpr_msb
+st.func @wmma_window_keeps_word() {
+^entry:
+  v[256:263] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[512:519], v[256:263])
+  v[264:267] = "st.ds_load_b128"(v40) { mod.ds = { na = 1, offset = 0, gds = false } }
+  v[256:263] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[512:519], v[256:263])
+  "st.s_endpgm"()
+}

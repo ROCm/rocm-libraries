@@ -1,0 +1,30 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --LiftAsmRegistersToSSAPass=classes=v --RegisterAllocationPass=allocator=greedy-compact,classes=v,apply,noRule=ProducerPinMatrix,rules=ProducerPinAccumulator+ProducerShapeMatrix --print-output
+#
+# gfx1250's ProducerPinAccumulator rule, with ProducerShapeMatrix, end to end.
+#
+# The kernel of allocation_rule_producer_shape_matrix_test.stir: an accumulator
+# chain in place on v[100:107], and A loaded into v[300:307] twice. Pinning the
+# accumulator fields alone keeps D and C where the producer put them, while
+# ProducerShapeMatrix keeps both rounds of A on one tuple that compaction then
+# moves down to v[0:7]. B, never written, is free and moves too.
+#
+# CHECK-LABEL: @allocation_rule_producer_pin_accumulator
+# CHECK: v[0:3] = "st.ds_load_b128"
+# CHECK-NEXT: v[4:7] = "st.ds_load_b128"
+# CHECK-NEXT: v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], v[100:107])
+# CHECK-NEXT: v[0:3] = "st.ds_load_b128"
+# CHECK-NEXT: v[4:7] = "st.ds_load_b128"
+# CHECK-NEXT: v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[0:7], v[8:15], v[100:107])
+# CHECK-NEXT: "st.v_add_f32"(v100, v101)
+
+st.func @allocation_rule_producer_pin_accumulator() {
+^entry:
+  v[300:303] = "st.ds_load_b128"(v50) { mod.ds = { na = 1, offset = 0, gds = false } }
+  v[304:307] = "st.ds_load_b128"(v50) { mod.ds = { na = 1, offset = 16, gds = false } }
+  v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[300:307], v[320:327], v[100:107])
+  v[300:303] = "st.ds_load_b128"(v51) { mod.ds = { na = 1, offset = 0, gds = false } }
+  v[304:307] = "st.ds_load_b128"(v51) { mod.ds = { na = 1, offset = 16, gds = false } }
+  v[100:107] = "st.v_wmma_f32_16x16x32_bf16"(v[300:307], v[320:327], v[100:107])
+  v40 = "st.v_add_f32"(v100, v101)
+  "st.s_endpgm"()
+}

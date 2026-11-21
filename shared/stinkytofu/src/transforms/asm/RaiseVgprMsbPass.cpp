@@ -107,9 +107,9 @@ class RaiseVgprMsbPassImpl : public Pass {
                                  << "\" ir_count=" << bb.size() << "\n");
 
             // MSB state at BB entry is unknown across arbitrary predecessors;
-            // assume MSB=0 (matching InsertVgprMsbPass's LABEL_BEGIN reset
-            // convention, which re-emits s_set_vgpr_msb after labels when a
-            // non-zero MSB is needed).
+            // assume MSB=0 (matching InsertVgprMsbPass, whose VgprMsbTracker
+            // forgets the word at a label and so re-emits s_set_vgpr_msb after
+            // labels when a non-zero MSB is needed).
             int currentMsb = 0;
 
             for (auto it = bb.begin(); it != bb.end();) {

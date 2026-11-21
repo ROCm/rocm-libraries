@@ -32,6 +32,7 @@
 #include <utility>
 #include <vector>
 
+#include "BankPlanner.hpp"
 #include "GreedyPlacement.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
 #include "stinkytofu/core/Function.hpp"
@@ -134,18 +135,40 @@ class Greedy {
     ///
     /// This names no rule and no architecture. Each rule answers for itself
     /// through its own satisfiedBy.
+    ///
+    /// \p mayPlan says whether this run gives blocks a bank against
+    /// AllocationContext::bankCost before placing them (planBanks).
     Greedy(const AllocationContext& context, bool followHints, const PlacementPolicy& policy,
-           bool mayFoldPairs)
+           bool mayFoldPairs, bool mayPlan)
         : context_(context),
           followHints_(followHints),
           policy_(policy),
-          mayFoldPairs_(mayFoldPairs) {}
+          mayFoldPairs_(mayFoldPairs),
+          mayPlan_(mayPlan) {}
 
     /// Did this run fold anything? Folding can make a colouring refuse that
     /// would otherwise have worked, so the caller needs to know whether a
     /// refusal is worth retrying without it.
     bool foldedAny() const {
         return foldedAny_;
+    }
+
+    /// Blocks the plan gave a bank. With none, this run was an unplanned one.
+    uint32_t plannedBlocks() const {
+        return plannedBlocks_;
+    }
+
+    /// Planned blocks that were placed wholly inside their bank.
+    uint32_t honouredBlocks() const {
+        uint32_t honoured = 0;
+        if (plannedBlocks_ == 0) return honoured;
+        for (const Block& block : blocks_) {
+            if (!block.plannedBank.has_value() || !block.placed) continue;
+            if (block.base / kVgprBankSize == *block.plannedBank &&
+                (block.base + block.width - 1) / kVgprBankSize == *block.plannedBank)
+                ++honoured;
+        }
+        return honoured;
     }
 
     Expected<AllocationResult> run() {
@@ -155,6 +178,7 @@ class Greedy {
         if (!buildBlocks()) return fail(error_);
         if (mayFoldPairs_) foldPairs();
         measure();
+        if (mayPlan_) plannedBlocks_ = planBanks(blocks_, context_);
         const bool placedAll = place();
         if (!context_.blockDumpPath.empty()) dumpBlocks();
         if (!placedAll) return fail(error_);
@@ -645,6 +669,9 @@ class Greedy {
             block.span = last > first ? last - first : 0;
             block.hintBase = hintBaseOf(block);
             block.pinReason = pinReasonOf(block);
+            if (context_.preferProducerQuadrant && block.regClass == RegType::V &&
+                block.hintBase.has_value())
+                block.plannedBank = *block.hintBase / kVgprBankSize;
         }
         indexPreferences();
     }
@@ -935,10 +962,37 @@ class Greedy {
                            " legal base(s) before occupancy)" + refusalDetail(block));
         }
 
+        // Planned blocks next, most register-time first. The plan gave each one
+        // room in its bank, and left in the queue it would find that bank filled
+        // by blocks that could have gone anywhere. One that fits nowhere waits
+        // at the front of the queue, where it may evict.
+        std::vector<size_t> planned;
+        if (plannedBlocks_ > 0) {
+            for (size_t index = 0; index < blocks_.size(); ++index) {
+                const Block& block = blocks_[index];
+                if (block.plannedBank.has_value() && block.pinReason == nullptr &&
+                    !policy_.placesEarly(block))
+                    planned.push_back(index);
+            }
+            std::sort(planned.begin(), planned.end(), [this](size_t a, size_t b) {
+                const uint64_t lhs = static_cast<uint64_t>(blocks_[a].width) * blocks_[a].span;
+                const uint64_t rhs = static_cast<uint64_t>(blocks_[b].width) * blocks_[b].span;
+                if (lhs != rhs) return lhs > rhs;
+                return blocks_[a].leader < blocks_[b].leader;
+            });
+        }
+        for (size_t index : planned) blocks_[index].rank = nextRank++;
+        std::vector<size_t> unplaced;
+        for (size_t index : planned) {
+            if (!tryPlace(blocks_[index])) unplaced.push_back(index);
+        }
+
         std::vector<size_t> queue;
         for (size_t index = 0; index < blocks_.size(); ++index) {
-            if (blocks_[index].pinReason == nullptr && !policy_.placesEarly(blocks_[index]))
-                queue.push_back(index);
+            const Block& block = blocks_[index];
+            if (block.pinReason != nullptr || policy_.placesEarly(block)) continue;
+            if (plannedBlocks_ > 0 && block.plannedBank.has_value()) continue;
+            queue.push_back(index);
         }
         std::sort(queue.begin(), queue.end(), [this](size_t a, size_t b) {
             return policy_.placesBefore(blocks_[a], blocks_[b]);
@@ -947,6 +1001,7 @@ class Greedy {
 
         uint32_t evictionBudget = static_cast<uint32_t>(blocks_.size()) * kMaxEvictionsPerBlock + 1;
         std::vector<size_t> worklist(queue.rbegin(), queue.rend());
+        worklist.insert(worklist.end(), unplaced.rbegin(), unplaced.rend());
         while (!worklist.empty()) {
             const size_t index = worklist.back();
             worklist.pop_back();
@@ -1042,12 +1097,11 @@ class Greedy {
     template <typename Acceptable>
     std::optional<uint32_t> pickBase(const Block& block, Acceptable acceptable) const {
         const uint32_t indexes = context_.target.indexCount(block.regClass);
-        // The producer's bank first, lowest base first, and the whole file only
+        // The planned bank first, lowest base first, and the whole file only
         // when it has no room. Staying in that bank outranks any pairing, so
         // nothing is scored inside it.
-        if (context_.preferProducerQuadrant && block.regClass == RegType::V &&
-            block.hintBase.has_value()) {
-            const uint32_t bankStart = *block.hintBase / kVgprBankSize * kVgprBankSize;
+        if (block.plannedBank.has_value()) {
+            const uint32_t bankStart = *block.plannedBank * kVgprBankSize;
             const uint32_t bankEnd = std::min(indexes, bankStart + kVgprBankSize);
             for (uint32_t base = bankStart; base + block.width <= bankEnd; ++base) {
                 if (acceptable(base)) return base;
@@ -1101,7 +1155,7 @@ class Greedy {
         std::ofstream out(context_.blockDumpPath);
         if (!out) return;
         out << "class\tleader\twidth\tmembers\tstart\tspan\tweight\tfreedom\tcapped\tpinned\thint"
-               "\tplaced\tbase\tevictions\trank\trefused\n";
+               "\tplannedBank\tplaced\tbase\tevictions\trank\trefused\n";
         for (const Block& block : blocks_) {
             out << regTypeToString(block.regClass) << '\t' << block.leader << '\t' << block.width
                 << '\t' << block.members.size() << '\t' << block.start << '\t' << block.span << '\t'
@@ -1109,8 +1163,9 @@ class Greedy {
                 << (block.maxIndex.has_value() ? 1 : 0) << '\t'
                 << (block.pinReason != nullptr ? 1 : 0) << '\t'
                 << (block.hintBase.has_value() ? static_cast<int64_t>(*block.hintBase) : -1) << '\t'
-                << (block.placed ? 1 : 0) << '\t' << block.base << '\t' << block.evictions << '\t'
-                << block.rank << '\t' << (&block == refused_ ? 1 : 0) << '\n';
+                << (block.plannedBank.has_value() ? static_cast<int64_t>(*block.plannedBank) : -1)
+                << '\t' << (block.placed ? 1 : 0) << '\t' << block.base << '\t' << block.evictions
+                << '\t' << block.rank << '\t' << (&block == refused_ ? 1 : 0) << '\n';
         }
     }
 
@@ -1122,6 +1177,8 @@ class Greedy {
     const PlacementPolicy& policy_;
     bool mayFoldPairs_ = false;
     bool foldedAny_ = false;
+    bool mayPlan_ = false;
+    uint32_t plannedBlocks_ = 0;
     std::vector<Block> blocks_;
     std::vector<size_t> blockIndexOf_;
     std::string error_;
@@ -1150,6 +1207,35 @@ bool weightMayEvict(const Block& evictor, const Block& occupant) {
     return occupant.weight < evictor.weight;
 }
 
+/// \p message without the "@function: " every refusal starts with, for quoting
+/// one refusal inside another.
+std::string withoutFunction(const AllocationContext& context, std::string message) {
+    const std::string prefix = "@" + context.function.getName() + ": ";
+    if (message.starts_with(prefix)) message.erase(0, prefix.size());
+    return message;
+}
+
+/// \p result, the unplanned run \p first made, or a retry without folding when
+/// a fold may be what refused it.
+Expected<AllocationResult> withoutFoldsIfNeeded(const AllocationContext& context, bool followHints,
+                                                const PlacementPolicy& policy, const Greedy& first,
+                                                Expected<AllocationResult> result) {
+    if (result.hasValue() || !first.foldedAny()) return result;
+
+    // Folding asks placement for one run of registers where two shorter runs
+    // would have done. If that is what refused the colouring, the preference
+    // gives way. A soft rule may not decide whether a kernel colours.
+    Expected<AllocationResult> unfolded =
+        Greedy(context, followHints, policy, /*mayFoldPairs=*/false, /*mayPlan=*/false).run();
+    if (unfolded.hasValue()) return unfolded;
+
+    // Both refused, so folding was not the reason. Say where the folded attempt
+    // stopped too: it is a different colouring, and without this line a reader
+    // cannot tell a fold that never happened from one that did and also failed.
+    return Expected<AllocationResult>::Error(
+        unfolded.getError() + "\n    with folding: " + withoutFunction(context, result.getError()));
+}
+
 }  // namespace
 
 Expected<AllocationResult> runGreedyPlacement(const AllocationContext& context, bool followHints,
@@ -1158,14 +1244,38 @@ Expected<AllocationResult> runGreedyPlacement(const AllocationContext& context, 
     // producer's numbering. Folding two blocks the producer kept apart leaves
     // them with no hint they agree on, so the run would stop reproducing
     // anything, which is the one thing it is for.
-    Greedy greedy(context, followHints, policy, /*mayFoldPairs=*/!followHints);
-    Expected<AllocationResult> result = greedy.run();
-    if (result.hasValue() || !greedy.foldedAny()) return result;
+    const bool mayFold = !followHints;
 
-    // Folding asks placement for one run of registers where two shorter runs
-    // would have done. If that is what refused the colouring, the preference
-    // gives way. A soft rule may not decide whether a kernel colours.
-    return Greedy(context, followHints, policy, /*mayFoldPairs=*/false).run();
+    // No plan while following hints either, for the same reason. Elsewhere the
+    // plan is a preference, tried first: placing by it can refuse where placing
+    // without it would not, and a soft choice may not decide whether a kernel
+    // colours.
+    std::string planRefusal;
+    if (!followHints && context.bankCost != nullptr) {
+        Greedy planned(context, followHints, policy, mayFold, /*mayPlan=*/true);
+        Expected<AllocationResult> result = planned.run();
+        // With nothing to plan, that was an unplanned run already.
+        if (planned.plannedBlocks() == 0)
+            return withoutFoldsIfNeeded(context, followHints, policy, planned, std::move(result));
+        if (context.planOutcome != nullptr) {
+            context.planOutcome->planned = planned.plannedBlocks();
+            context.planOutcome->honoured = planned.honouredBlocks();
+        }
+        if (result.hasValue()) return result;
+        planRefusal = withoutFunction(context, result.getError());
+    }
+
+    Greedy greedy(context, followHints, policy, mayFold, /*mayPlan=*/false);
+    Expected<AllocationResult> first = greedy.run();
+    Expected<AllocationResult> result =
+        withoutFoldsIfNeeded(context, followHints, policy, greedy, std::move(first));
+    if (planRefusal.empty()) return result;
+    if (result.hasValue()) {
+        if (context.planOutcome != nullptr) context.planOutcome->dropped = planRefusal;
+        return result;
+    }
+    return Expected<AllocationResult>::Error(result.getError() +
+                                             "\n    with the bank plan: " + planRefusal);
 }
 
 const PlacementPolicy& weightPolicy() {

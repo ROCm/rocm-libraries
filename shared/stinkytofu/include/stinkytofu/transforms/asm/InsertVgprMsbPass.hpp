@@ -23,10 +23,13 @@
 #pragma once
 
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "stinkytofu/Export.hpp"
 
 namespace stinkytofu {
+class Function;
 class Pass;
 
 /// Creates a pass that inserts s_set_vgpr_msb instructions before VOP instructions
@@ -39,6 +42,17 @@ class Pass;
 ///
 /// After a label (branch target), the pass conservatively resets MSB state and
 /// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
+///
+/// Under AsmCapsConfig::vgprMsbUnusedSlotsDontCare, a setter nothing has read
+/// since takes the banks a later instruction needs instead of that instruction
+/// getting its own (VgprMsbTracker).
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass();
+
+/// Replays the s_set_vgpr_msb setters in \p function, block by block, and
+/// describes the first instruction that runs with a bank other than one it
+/// names, in a slot it depends on; nothing when there is none. Labels, calls
+/// and block starts leave no word known. InsertVgprMsbPass asserts on it in
+/// debug builds.
+STINKYTOFU_EXPORT std::optional<std::string> firstVgprMsbMismatch(const Function& function);
 
 }  // namespace stinkytofu

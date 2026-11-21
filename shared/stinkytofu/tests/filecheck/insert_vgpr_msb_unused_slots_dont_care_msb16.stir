@@ -1,0 +1,27 @@
+# RUN: %stinkytofu-opt --arch gfx1250 %s --vgpr-msb-mode=msb16 --vgpr-msb-unused-slots-dont-care --InsertVgprMsbPass --print-output
+#
+# With Msb16 the setter's high byte is the low byte the hardware held before it.
+# Under VgprMsbUnusedSlotsDontCare a rewritten setter keeps its own high byte,
+# and the next setter's high byte is the rewritten low byte, not the one first
+# emitted.
+#
+# 1. v_mov emits 65 (dst, src0 in bank 1) with no word known before it (high 0).
+# 2. v_fma rewrites it to 85 (all four slots in bank 1).
+# 3. The second v_mov needs dst and src0 in bank 0: 85 << 8 | 20 = 21780.
+# 4. The second v_fma needs src1 and src2 in bank 0 too, unread since step 3, so
+#    that setter's low byte becomes 0 and its high byte stays 85: 21760.
+
+# CHECK-LABEL: @previous_byte_follows_rewrite
+# CHECK: "st.s_set_vgpr_msb"(85)
+# CHECK-NEXT: v257 = "st.v_mov_b32"(v258)
+# CHECK-NEXT: v259 = "st.v_fma_f32"(v260, v261, v262)
+# CHECK-NEXT: "st.s_set_vgpr_msb"(21760)
+# CHECK-NEXT: v2 = "st.v_mov_b32"(v3)
+# CHECK-NEXT: v4 = "st.v_fma_f32"(v5, v6, v7)
+st.func @previous_byte_follows_rewrite() {
+^entry:
+  v257 = "st.v_mov_b32"(v258) { issueCycles = 1, latencyCycles = 5 }
+  v259 = "st.v_fma_f32"(v260, v261, v262) { issueCycles = 1, latencyCycles = 5 }
+  v2 = "st.v_mov_b32"(v3) { issueCycles = 1, latencyCycles = 5 }
+  v4 = "st.v_fma_f32"(v5, v6, v7) { issueCycles = 1, latencyCycles = 5 }
+}

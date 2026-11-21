@@ -202,6 +202,14 @@ enum class VgprMsbMode : uint8_t {
 struct AsmCapsConfig {
     VgprMsbMode vgprMsbMode = VgprMsbMode::None;
 
+    /// Treat the VGPR bank slots an instruction does not use as don't-care
+    /// (VgprMsbPolicy::UnusedSlotsDontCare): a setter is needed only when a slot
+    /// it uses holds another bank, and a setter nothing has read since takes the
+    /// banks a later instruction needs. InsertVgprMsbPass emits by it, the
+    /// scheduler's bank tiebreak and the RA's switch prediction follow it.
+    /// Module option `VgprMsbUnusedSlotsDontCare`; off by default.
+    bool vgprMsbUnusedSlotsDontCare = false;
+
     /// rocisa archCaps `RequiresXCntForVolatileVMEM`. False on the standalone
     /// path, which has no rocisa to ask.
     /// When set alone (without `enableXnackReplay`), Gfx1250XnackHazardPass only

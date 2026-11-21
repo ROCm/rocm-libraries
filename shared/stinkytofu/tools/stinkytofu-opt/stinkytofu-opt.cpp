@@ -219,8 +219,8 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
                 arg == "--wait-alu-scoreboard" || arg.starts_with("--prefetch-lead-wmmas=") ||
                 arg.starts_with("--prefetch-lead-min-stage-wmmas=") ||
                 arg.starts_with("--war-gate-wmmas=") || arg == "--ds-slot-first" ||
-                arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
-                arg == "--to-label" || isKernelConfigArg(arg))
+                arg.starts_with("--vgpr-msb-mode=") || arg == "--vgpr-msb-unused-slots-dont-care" ||
+                arg == "--from-label" || arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
             // Two-arg flags: skip both the flag and its value so the value
             // doesn't get mistaken for a pass name and the flag doesn't get
@@ -599,8 +599,12 @@ int main(int argc, char** argv) {
     // Useful when running on a host whose comgr doesn't know the target ISA,
     // so the FileCheck/regression tests can pin the mode explicitly.
     std::optional<stinkytofu::VgprMsbMode> vgprMsbOverride;
+    // --vgpr-msb-unused-slots-dont-care: the bank slots an instruction does not
+    // use are don't-care (VgprMsbUnusedSlotsDontCare).
+    bool vgprMsbUnusedSlotsDontCare = false;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
+        if (a == "--vgpr-msb-unused-slots-dont-care") vgprMsbUnusedSlotsDontCare = true;
         if (a.starts_with("--vgpr-msb-mode=")) {
             std::string val = a.substr(std::string("--vgpr-msb-mode=").size());
             if (val == "none")
@@ -988,6 +992,7 @@ int main(int argc, char** argv) {
             const bool isGfx1250 = arch == std::array<int, 3>{12, 5, 0};
             moduleOpts.RequiresXCntForVolatileVMEM = isGfx1250;
             moduleOpts.EnableXnackReplay = isGfx1250 && !xnackReplayOff;
+            moduleOpts.VgprMsbUnusedSlotsDontCare = vgprMsbUnusedSlotsDontCare;
             stinkytofu::StinkyAsmModule module(parsedFunc->funcName, arch, moduleOpts);
 
             stinkytofu::Function& func = module.getFunction();
@@ -1029,6 +1034,7 @@ int main(int argc, char** argv) {
             passManager.setGemmTileConfig(gemmTileConfig);
             auto caps = stinkytofu::ToolchainCaps::probe(archID);
             if (vgprMsbOverride) caps.vgprMsbMode = *vgprMsbOverride;
+            caps.vgprMsbUnusedSlotsDontCare = vgprMsbUnusedSlotsDontCare;
             // Stand in for rocisa's archCaps, which only TensileLite can supply.
             caps.requiresXCntForVolatileVMEM = arch == std::array<int, 3>{12, 5, 0};
             caps.enableXnackReplay = arch == std::array<int, 3>{12, 5, 0} && !xnackReplayOff;

@@ -94,6 +94,17 @@ enum class RuleKind : uint8_t {
     Pairing,       ///< addPreferences, with satisfiedBy
 };
 
+/// Which way of placing matrix operands a rule implements, so a placement
+/// policy (RegisterAllocationOptions::Matrix) can choose rules by what they
+/// do rather than by an architecture's names for them. None for every rule
+/// that is not about matrix operands.
+enum class MatrixRole : uint8_t {
+    None,
+    Pin,             ///< Every matrix operand keeps the producer's register.
+    Shape,           ///< Matrix operands keep the producer's grouping, not its registers.
+    PinAccumulator,  ///< The accumulators keep the producer's registers; A and B do not.
+};
+
 /// One architecture rule.
 ///
 /// Fill in exactly one of the six functions. A rule that is both a veto and a
@@ -103,6 +114,10 @@ struct AllocationRule {
     std::string_view name;
     std::string_view description;
     RuleStatus status = RuleStatus::Off;
+
+    /// Set on the rules a matrix placement policy chooses between; the policy
+    /// decides their status (see AllocationRules::forceRole).
+    MatrixRole role = MatrixRole::None;
 
     /// May a \p width -wide block of \p regClass start at \p base? Return true
     /// to forbid it.
@@ -270,10 +285,23 @@ class AllocationRules {
     /// enables nothing still passes, which is the worst way to find out.
     std::vector<std::string> unknownNames(const RuleOverrides& overrides) const;
 
+    /// Names in \p overrides that this table tags with a matrix role. A matrix
+    /// placement policy sets those rules itself, so naming one as well would
+    /// leave one of the two requests silently undone.
+    std::vector<std::string> matrixRuleNames(const RuleOverrides& overrides) const;
+
+    /// True when some rule, whatever its status, carries \p role.
+    bool hasRole(MatrixRole role) const;
+
     /// Apply \p overrides. Precedence is disableAll, then activation, then
     /// auditAll. Just mutation -- being a value is what makes this a few lines
     /// instead of a forwarding wrapper.
     void force(const RuleOverrides& overrides);
+
+    /// Give every rule that carries \p role the status \p status, which is how
+    /// a matrix placement policy chooses among the rules for placing matrix
+    /// operands.
+    void forceRole(MatrixRole role, RuleStatus status);
 
     /// One row per rule: name, kind, status, description.
     std::string toString() const;

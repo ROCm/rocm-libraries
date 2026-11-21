@@ -97,6 +97,10 @@ STINKYTOFU_EXPORT bool kernelRewritesRegisters(int mode, std::string_view text, 
 STINKYTOFU_EXPORT const char* unbankableOperandsName(
     RegisterAllocationOptions::UnbankableOperands policy);
 
+/// How the configuration spells \p placement: "pin", "accumulators", "shape"
+/// or "auto".
+STINKYTOFU_EXPORT const char* matrixPlacementName(RegisterAllocationOptions::Matrix placement);
+
 /// Parse a class list such as "vs", "v" or "s". Empty, or any other letter,
 /// is nullopt, so a typo is reported rather than selecting something else.
 STINKYTOFU_EXPORT std::optional<RegClassSet> parseRegClasses(std::string_view spec);

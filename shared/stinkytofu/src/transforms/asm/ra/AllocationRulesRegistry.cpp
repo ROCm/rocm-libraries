@@ -78,6 +78,21 @@ std::vector<std::string> AllocationRulesRegistry::archKeys() {
     return keys;
 }
 
+std::vector<std::string> AllocationRulesRegistry::matrixRuleNames() {
+    registerAll();
+    std::vector<std::string> names;
+    for (const auto& kv : registry().factories) {
+        if (!kv.second) continue;
+        // Capabilities gate statuses, not rows, so the defaults name every rule.
+        for (const AllocationRule& rule : kv.second(AsmCapsConfig{}).all()) {
+            if (rule.role != MatrixRole::None) names.emplace_back(rule.name);
+        }
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    return names;
+}
+
 // Anchor declarations -- one per per-arch rules TU. Adding an architecture's
 // rules? Add its anchor here, the way registerAllBackends() does for pipelines.
 void anchorGfx1250AllocationRules();

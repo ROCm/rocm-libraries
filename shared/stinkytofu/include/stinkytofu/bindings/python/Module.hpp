@@ -68,6 +68,13 @@
  * @note TimePasses: print a per-pass wall-time report to stderr after the
  * pipeline runs (Tensile `StinkyTofuTimePasses`, stinkytofu-opt
  * `--time-passes`).
+ * @note VgprMsbUnusedSlotsDontCare: treat the VGPR bank slots an instruction
+ * does not use as don't-care, so an s_set_vgpr_msb is needed only when a slot
+ * it uses holds another bank, and a setter nothing has read since takes the
+ * banks a later instruction needs (AsmCapsConfig::vgprMsbUnusedSlotsDontCare).
+ * Off by default; set from TensileLite through `StinkyTofuModuleOptions` or
+ * `StinkyTofuParameters`, or with stinkytofu-opt
+ * `--vgpr-msb-unused-slots-dont-care`.
  */
 #define MODULE_OPTIONS_LIST(X)                    \
     X(DebugLevel, int)                            \
@@ -102,6 +109,7 @@
     X(EnableESM2, bool)                           \
     X(EnableESM2TrackValuVsrc, bool)              \
     X(VgprMsbMode, int)                           \
+    X(VgprMsbUnusedSlotsDontCare, bool)           \
     X(RequiresXCntForVolatileVMEM, bool)          \
     X(EnableXnackReplay, bool)                    \
     X(EnableSwInstructionPrefetchRelStatic, bool) \
