@@ -1793,6 +1793,79 @@ TEST_F(TestBundleDiscoveryFixture, ExpandTemplateResolvesPlaceholderFromGlobalCa
     EXPECT_EQ(expanded.at("io_data_type").get<std::string>(), "half");
 }
 
+// A placeholder path that ends in a dot names no value, even though the
+// segments before the dot resolve.
+TEST_F(TestBundleDiscoveryFixture, ExpandTemplateRejectsPlaceholderWithTrailingDot)
+{
+    const nlohmann::json templateJson = {{"io_data_type", "${case.io_data_type.}"}};
+    const nlohmann::json caseJson
+        = {{"id", "trailing_dot"}, {"values", {{"io_data_type", "half"}}}};
+
+    DiscoveredBundle discovered;
+    discovered.jsonPath = _tempDir / "sweep.json";
+
+    try
+    {
+        (void)detail::expandTemplateGraph(templateJson, caseJson, discovered);
+        ADD_FAILURE() << "a trailing-dot placeholder resolved";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_STREQ(e.what(), "Missing placeholder value");
+    }
+}
+
+// A per-tensor placeholder path that ends in a dot names no value in the
+// tensor's own entry, so it is reported as a missing per-tensor value.
+TEST_F(TestBundleDiscoveryFixture, ExpandTemplateRejectsPerTensorPlaceholderWithTrailingDot)
+{
+    const nlohmann::json templateJson
+        = {{"tensors", nlohmann::json::array({{{"uid", 0}, {"dims", "${case.dims.}"}}})}};
+    const nlohmann::json caseJson
+        = {{"id", "per_tensor_trailing_dot"},
+           {"values", {{"tensors", nlohmann::json::array({{{"uid", 0}, {"dims", {2, 3}}}})}}}};
+
+    DiscoveredBundle discovered;
+    discovered.jsonPath = _tempDir / "sweep.json";
+
+    try
+    {
+        (void)detail::expandTemplateGraph(templateJson, caseJson, discovered);
+        ADD_FAILURE() << "a trailing-dot per-tensor placeholder resolved";
+    }
+    catch(const std::runtime_error& e)
+    {
+        EXPECT_STREQ(e.what(), "Missing per-tensor placeholder value");
+    }
+}
+
+// A leading or doubled dot is an empty segment, which never matches, even
+// where the case values hold an empty key.
+TEST_F(TestBundleDiscoveryFixture, ExpandTemplateRejectsPlaceholderWithEmptySegment)
+{
+    const nlohmann::json caseJson
+        = {{"id", "empty_segment"},
+           {"values", {{"", {{"io_data_type", "half"}}}, {"io", {{"", {{"type", "half"}}}}}}}};
+
+    DiscoveredBundle discovered;
+    discovered.jsonPath = _tempDir / "sweep.json";
+
+    for(const std::string placeholder : {"${case..io_data_type}", "${case.io..type}"})
+    {
+        SCOPED_TRACE(placeholder);
+        const nlohmann::json templateJson = {{"io_data_type", placeholder}};
+        try
+        {
+            (void)detail::expandTemplateGraph(templateJson, caseJson, discovered);
+            ADD_FAILURE() << "an empty-segment placeholder resolved";
+        }
+        catch(const std::runtime_error& e)
+        {
+            EXPECT_STREQ(e.what(), "Missing placeholder value");
+        }
+    }
+}
+
 // An unused top-level sweep value triggers a warning (warnUnusedSweepValues),
 // not a load error. Assert the bundle still loads to keep the warning path
 // distinct from the INVALID_SWEEP_CASE error path.

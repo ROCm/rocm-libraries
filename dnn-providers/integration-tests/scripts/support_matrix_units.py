@@ -277,13 +277,13 @@ def lookup_json_path(node, path: str):
     while start < len(path):
         end = path.find(".", start)
         key = path[start:] if end == -1 else path[start:end]
-        if not isinstance(current, dict) or key not in current:
+        if not key or not isinstance(current, dict) or key not in current:
             return _MISSING
         current = current[key]
         if end == -1:
             return current
         start = end + 1
-    return current
+    return _MISSING
 
 
 def placeholder_field(node) -> str | None:

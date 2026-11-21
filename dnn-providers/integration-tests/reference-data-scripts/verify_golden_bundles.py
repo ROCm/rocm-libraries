@@ -1663,7 +1663,7 @@ def validate_sweep_case(
     }
 
     for field_name in sorted(scalar_fields):
-        if first_path_token(field_name) not in values:
+        if walk_dotted_path(values, field_name) is UNRESOLVED:
             result.error(
                 sweep_path,
                 f"case '{case_label}' is missing placeholder value for '{field_name}'",
@@ -1672,8 +1672,8 @@ def validate_sweep_case(
     # loader's resolvePlaceholder() does: first by walking the full (possibly
     # dotted) path through that tensor's own values.tensors[] entry, then -- if
     # that walk fails -- by walking the same path through the top-level values
-    # instead. There is no restriction on which field names may be looked up
-    # per-tensor.
+    # instead. A path whose first segment is dims, strides or data_type must
+    # resolve from the tensor's own entry and never falls back.
     raw_case_tensors = {}
     if isinstance(values.get("tensors"), list):
         for tensor in values["tensors"]:
@@ -1686,9 +1686,17 @@ def validate_sweep_case(
             if tensor_entry is not None
             else UNRESOLVED
         )
-        if resolved is UNRESOLVED:
-            resolved = walk_dotted_path(values, field_name)
-        if resolved is UNRESOLVED:
+        if resolved is not UNRESOLVED:
+            continue
+        if first_path_token(field_name) in TEMPLATE_TENSOR_FIELDS:
+            result.error(
+                sweep_path,
+                f"case '{case_label}' is missing per-tensor placeholder value for "
+                f"'{field_name}'; it does not fall back to top-level values",
+                uid,
+            )
+            continue
+        if walk_dotted_path(values, field_name) is UNRESOLVED:
             result.error(
                 sweep_path,
                 f"case '{case_label}' is missing placeholder value for '{field_name}'",
@@ -1714,13 +1722,14 @@ def validate_sweep_case(
         attributes = {}
     if isinstance(attributes, dict):
         for field_name in sorted(attribute_fields):
-            if field_name not in attributes:
+            if walk_dotted_path(attributes, field_name) is UNRESOLVED:
                 result.error(
                     sweep_path,
                     f"case '{case_label}' is missing placeholder value for 'attributes.{field_name}'",
                 )
+        used_attribute_keys = {first_path_token(f) for f in attribute_fields}
         for key in attributes:
-            if key not in attribute_fields:
+            if key not in used_attribute_keys:
                 result.warning(
                     sweep_path,
                     f"case '{case_label}' has unused values.attributes entry '{key}'",
