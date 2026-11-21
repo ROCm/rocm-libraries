@@ -11,7 +11,10 @@ golden test prints in its re-record command and what ``tools/golden.py`` takes::
     python tools/golden.py rerecord kda_gfx942
     python tools/golden.py rerecord representative --only attention_dense,gemm
 
-Paths are relative to the rocke directory, with ``/``.
+Every file under a ``golden/`` or ``_goldens/`` directory of the searched trees
+must belong to exactly one golden here, and each golden needs a test that checks
+it; ``python tools/golden.py check`` enforces both, and the fingerprint of every
+one-family JSON document. Paths are relative to the rocke directory, with ``/``.
 
 Adding a golden: add a :class:`Golden` with the files it owns, the tests that
 check it and the command that writes it, and have the test's failure message
@@ -26,7 +29,10 @@ from pathlib import PurePosixPath
 __all__ = [
     "DOCUMENT",
     "GOLDENS",
+    "GOLDEN_DIR_NAMES",
+    "NOT_GOLDEN_SUFFIXES",
     "PER_FAMILY",
+    "SEARCH_ROOTS",
     "UNFINGERPRINTED",
     "Golden",
     "RecordStep",
@@ -34,7 +40,8 @@ __all__ = [
 ]
 
 # How a golden records its fingerprint (rocke.core.golden_file):
-#: Each file is one family's JSON document with a top-level fingerprint.
+#: Each file is one family's JSON document with a top-level fingerprint;
+#: ``tools/golden.py check`` verifies it.
 DOCUMENT = "document"
 #: A file shared by several families records one fingerprint per family; the
 #: golden's own check verifies them (its format owner computes the entries).
@@ -43,6 +50,13 @@ PER_FAMILY = "per_family"
 #: file carries no fingerprint.
 UNFINGERPRINTED = "unfingerprinted"
 _FINGERPRINT_KINDS = (DOCUMENT, PER_FAMILY, UNFINGERPRINTED)
+
+#: Directories whose files are goldens, at any depth of a searched tree.
+GOLDEN_DIR_NAMES = ("golden", "_goldens")
+#: The trees searched for goldens.
+SEARCH_ROOTS = ("platform/tests", "platform/python/rocke", "library/tests")
+#: Files in a golden directory that are not goldens (code and notes).
+NOT_GOLDEN_SUFFIXES = (".py", ".md")
 
 # The placeholder a RecordStep's ``only`` arguments carry for the family list.
 _FAMILIES = "{families}"

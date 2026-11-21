@@ -2,8 +2,11 @@
 # SPDX-License-Identifier: MIT
 """The golden index and its tool (rocke/tools/golden.py).
 
-The re-record command a failing golden prints is one the tool accepts, and the
-index and the tool refuse a malformed entry or request.
+Every golden on disk is owned by an index entry with a test that checks it,
+every one-family JSON golden carries a current fingerprint, and the re-record
+command a failing golden prints is one the tool accepts. The first test checks
+the real tree (source checkout or installed payload); the rest build small trees
+to show each refusal.
 """
 
 from __future__ import annotations
@@ -18,7 +21,8 @@ from pathlib import Path
 from types import ModuleType
 
 import pytest
-from rocke.core.golden_file import rerecord_command
+import rocke
+from rocke.core.golden_file import rerecord_command, write_golden_json
 
 _TEST_FILE = Path(__file__).resolve()
 # Source: rocke/platform/tests/tools/<this>; the tool is rocke/tools/golden.py.
@@ -50,6 +54,119 @@ def tool() -> ModuleType:
 def index(tool) -> ModuleType:
     # The tool put its directory on sys.path to import the index beside it.
     return importlib.import_module("golden_index")
+
+
+def test_every_golden_on_disk_is_indexed_checked_and_fingerprinted(tool):
+    if (_SOURCE_ROCKE / "tools" / "golden.py").is_file():
+        layout = tool.TreeLayout.source(_SOURCE_ROCKE)
+    else:
+        # Installed: <root>/tests/tools/<this>, the rocke package beside it.
+        layout = tool.TreeLayout.installed(
+            _TEST_FILE.parents[2], Path(rocke.__file__).resolve().parent
+        )
+    assert tool.golden_problems(layout) == []
+
+
+# --- each refusal, on a small tree -----------------------------------------------
+
+
+@pytest.fixture
+def sample(tmp_path, tool, index):
+    """A rocke-shaped tree with one golden ("kept") and the index entry for it."""
+    write_golden_json(
+        tmp_path / "platform/tests/golden/kept/first.json",
+        {"cases": {"kept/first": {"sha256": "aa"}}},
+    )
+    (tmp_path / "platform/tests/golden/README.md").write_text("notes\n")
+    (tmp_path / "platform/tests/golden/helper.py").write_text("\n")
+    checker = tmp_path / "platform/tests/test_kept.py"
+    checker.write_text("\n")
+    golden = index.Golden(
+        name="kept",
+        files=("platform/tests/golden/kept/*.json",),
+        checked_by=("platform/tests/test_kept.py",),
+        record=(index.RecordStep(cwd="platform", argv=("tests/test_kept.py", "-w")),),
+        fingerprint=index.DOCUMENT,
+    )
+    return tmp_path, tool.TreeLayout.source(tmp_path), golden
+
+
+def test_a_clean_tree_has_no_problems(tool, sample):
+    _, layout, golden = sample
+    assert tool.golden_problems(layout, [golden]) == []
+
+
+def test_an_unreferenced_golden_fails(tool, sample):
+    root, layout, golden = sample
+    (root / "platform/tests/golden/stray.json").write_text("{}\n")
+    (root / "platform/tests/golden/kept/deep").mkdir()
+    (root / "platform/tests/golden/kept/deep/nested.json").write_text("{}\n")
+    assert tool.golden_problems(layout, [golden]) == [
+        f"{path}: no golden in tools/golden_index.py owns it, so no test checks "
+        "it; add it to the index with its test, or delete it"
+        for path in (
+            "platform/tests/golden/stray.json",
+            "platform/tests/golden/kept/deep/nested.json",
+        )
+    ]
+
+
+def test_a_golden_whose_tests_are_gone_fails(tool, sample):
+    root, layout, golden = sample
+    (root / "platform/tests/test_kept.py").unlink()
+    (problem,) = tool.golden_problems(layout, [golden])
+    assert problem == (
+        "golden kept: no test checks it - none of "
+        "['platform/tests/test_kept.py'] exists"
+    )
+
+
+def test_a_golden_whose_files_are_gone_fails(tool, sample):
+    root, layout, golden = sample
+    (root / "platform/tests/golden/kept/first.json").unlink()
+    assert tool.golden_problems(layout, [golden]) == [
+        "golden kept: no file matches platform/tests/golden/kept/*.json"
+    ]
+
+
+def test_a_stale_fingerprint_fails_with_the_rerecord_command(tool, sample):
+    root, layout, golden = sample
+    path = root / "platform/tests/golden/kept/first.json"
+    document = json.loads(path.read_text())
+    document["cases"]["kept/first"]["sha256"] = "edited"
+    path.write_text(json.dumps(document))
+    (problem,) = tool.golden_problems(layout, [golden])
+    assert problem.startswith(
+        "golden kept: 1 file(s) need a re-record:\n"
+        "  platform/tests/golden/kept/first.json: stale 'fingerprint'"
+    )
+    assert problem.endswith("\n    python tools/golden.py rerecord kept")
+
+
+def test_installed_layout_maps_each_tree(tool, tmp_path):
+    package = tmp_path / "site" / "rocke"
+    layout = tool.TreeLayout.installed(tmp_path, package)
+    assert layout.locate("library/tests/golden/a.json") == (
+        tmp_path / "tests/library/tests/golden/a.json"
+    )
+    assert layout.locate("platform/tests/golden/a.json") == (
+        tmp_path / "tests/golden/a.json"
+    )
+    assert layout.locate("platform/python/rocke/examples/_goldens/a.json") == (
+        package / "examples/_goldens/a.json"
+    )
+    with pytest.raises(ValueError, match="is in no tree of this layout"):
+        layout.locate("tools/golden.py")
+
+
+def test_installed_walk_reports_the_library_tree_once(tool, tmp_path):
+    write_golden_json(tmp_path / "tests/library/tests/golden/lib.json", {})
+    write_golden_json(tmp_path / "tests/golden/plat.json", {})
+    layout = tool.TreeLayout.installed(tmp_path, tmp_path / "absent")
+    assert sorted(layout.golden_files()) == [
+        "library/tests/golden/lib.json",
+        "platform/tests/golden/plat.json",
+    ]
 
 
 # --- the printed command is the tool's -------------------------------------------
