@@ -191,7 +191,7 @@ namespace hiptensor
             auto* planCache = handle->getPlanCache();
             return {autotuneType,
                     reinterpret_cast<std::uintptr_t>(planCache),
-                    planCache->getHashID(plan->mOpDesc),
+                    planCache->getHashID(plan->mOpDesc, backend::kCkBackendName),
                     candidateSetId(plan)};
         }
 
@@ -390,7 +390,8 @@ namespace hiptensor
             // Look for solution from memory cache (Plan Cache) or do autotuning for Plan Cache.
             // The plan cache has its own lock, and the plan's solution is atomic, so this
             // lookup does not take mMutex: holding it here would serialize every call.
-            auto Uid = handle->getPlanCache()->querySolutionUid(plan->mOpDesc);
+            auto Uid
+                = handle->getPlanCache()->querySolutionUid(plan->mOpDesc, backend::kCkBackendName);
             if(Uid > 0ull)
             {
                 useCachedSolution(trial, plan, Uid);
@@ -411,7 +412,8 @@ namespace hiptensor
                     // the lookup above is then either found here, or its writer sees the count
                     // and closes the round (see cacheAndCloseRounds).
                     mRoundCount++;
-                    Uid = handle->getPlanCache()->querySolutionUid(plan->mOpDesc);
+                    Uid = handle->getPlanCache()->querySolutionUid(plan->mOpDesc,
+                                                                   backend::kCkBackendName);
                     if(Uid > 0ull)
                     {
                         mRoundCount--;
@@ -497,7 +499,10 @@ namespace hiptensor
             //Later calls use this kernel and reserve no more candidates: close any open round.
             auto* planCache = mHandle->getPlanCache();
             PlancacheAutotuneMgr::instance()->cacheAndCloseRounds(
-                mType, planCache, planCache->getHashID(mPlan->mOpDesc), solution->uid());
+                mType,
+                planCache,
+                planCache->getHashID(mPlan->mOpDesc, backend::kCkBackendName),
+                solution->uid());
         }
         else
         {

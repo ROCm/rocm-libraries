@@ -25,6 +25,8 @@
  *******************************************************************************/
 #include <hiptensor/hiptensor.h>
 
+#include "backends/ck/ck_backend.hpp"
+#include "backends/common/registry.hpp"
 #include "elementwise_solution.hpp"
 #include "elementwise_solution_instances.hpp"
 #include "elementwise_solution_registry.hpp"
@@ -46,6 +48,43 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
                                                      void*                   D,
                                                      hipStream_t             stream)
 {
+    hiptensor::backend::LaunchConfig cfg;
+    cfg.stream = stream;
+
+    // Plans run on the backend selected when they were created.
+    if(handle == nullptr || plan == nullptr || plan->mBackend == nullptr)
+    {
+        return hiptensor::ckbackend::elementwiseTrinary(
+            handle, plan, alpha, A, beta, B, gamma, C, D, cfg);
+    }
+
+    hiptensor::backend::Scalars scalars;
+    scalars.alpha = alpha;
+    scalars.beta  = beta;
+    scalars.gamma = gamma;
+
+    hiptensor::backend::Buffers buffers;
+    buffers.A   = A;
+    buffers.B   = B;
+    buffers.C   = C;
+    buffers.out = D;
+
+    return hiptensor::backend::executePlan(handle, plan, scalars, buffers, nullptr, 0, cfg);
+}
+
+hiptensorStatus_t hiptensor::ckbackend::elementwiseTrinary(hiptensorHandle_t            handle,
+                                                           hiptensorPlan_t              plan,
+                                                           void const*                  alpha,
+                                                           void const*                  A,
+                                                           void const*                  beta,
+                                                           void const*                  B,
+                                                           void const*                  gamma,
+                                                           void const*                  C,
+                                                           void*                        D,
+                                                           backend::LaunchConfig const& cfg)
+{
+    hipStream_t const stream = cfg.stream;
+
     using hiptensor::Logger;
     auto& logger = Logger::instance();
 
@@ -206,17 +245,7 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
             // Perform elementwise trinary with timing if LOG_LEVEL_PERF_TRACE
             if(logger->getLogMask() & HIPTENSOR_LOG_LEVEL_PERF_TRACE)
             {
-                using hiptensor::HiptensorOptions;
-                auto& options = HiptensorOptions::instance();
-
-                time = pSolution->run(args,
-                                      StreamConfig{
-                                          stream, // stream id
-                                          true, // time_kernel
-                                          0, // log_level
-                                          options->coldRuns(), // cold_niters
-                                          options->hotRuns(), // nrepeat
-                                      });
+                time = pSolution->run(args, toStreamConfig(timedLaunch(cfg)));
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;
@@ -251,7 +280,7 @@ hiptensorStatus_t hiptensorElementwiseTrinaryExecute(const hiptensorHandle_t han
             // Perform elementwise trinary without timing
             else
             {
-                time = pSolution->run(args, StreamConfig{stream, false});
+                time = pSolution->run(args, toStreamConfig(cfg));
                 if(time < 0)
                 {
                     return HIPTENSOR_STATUS_CK_ERROR;

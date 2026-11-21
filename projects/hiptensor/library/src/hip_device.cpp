@@ -158,6 +158,16 @@ namespace hiptensor
         return mGcnArch;
     }
 
+    std::string HipDevice::getArchName() const
+    {
+        return std::string(mProps.gcnArchName);
+    }
+
+    int HipDevice::getCuCount() const
+    {
+        return mCuCount;
+    }
+
     int HipDevice::warpSize() const
     {
         return mWarpSize;
