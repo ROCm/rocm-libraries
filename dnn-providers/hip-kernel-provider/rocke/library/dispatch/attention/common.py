@@ -237,16 +237,12 @@ class AttentionRequest(OperatorRequest):
         # Exact values, refused rather than coerced, and here rather than in a
         # factory: requests key the selection caches, and ``1 == True`` with the
         # same hash, so a later check is skipped by a cache hit; ``bool("false")``
-        # is True, so coercing where a flag is read turns it on. ValueError, like
-        # every other refusal of this request. ``_BOOL_FIELDS`` is defined below
-        # the class because ``get_type_hints`` needs the finished class.
+        # is True, so coercing where a flag is read turns it on. ``require_bool``
+        # is the library's one refusal of a non-bool flag. ``_BOOL_FIELDS`` is
+        # defined below the class because ``get_type_hints`` needs the finished
+        # class.
         for name in _BOOL_FIELDS:
-            value = getattr(self, name)
-            if type(value) is not bool:
-                raise ValueError(
-                    f"AttentionRequest rejected - {name}={value!r}, "
-                    "expected a bool (True or False)"
-                )
+            require_bool(name, getattr(self, name))
         if self.attn_bias_dtype not in ATTN_BIAS_DTYPES:
             raise ValueError(
                 "AttentionRequest rejected - "

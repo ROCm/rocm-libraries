@@ -324,8 +324,7 @@ class TestAttentionRequestFieldValues(unittest.TestCase):
                         _attn(**{flag: bad})
                     self.assertEqual(
                         str(caught.exception),
-                        f"AttentionRequest rejected - {flag}={bad!r}, "
-                        "expected a bool (True or False)",
+                        f"{flag} must be a bool, got {type(bad).__name__}",
                     )
 
     def test_a_flag_is_refused_after_the_same_request_with_true_was_selected(self):
@@ -333,7 +332,7 @@ class TestAttentionRequestFieldValues(unittest.TestCase):
         self.assertIn("sinks", selected.request.features())
         for bad in (1, "true"):
             with self.subTest(value=bad), self.assertRaisesRegex(
-                ValueError, rf"use_sinks={bad!r}, expected a bool"
+                ValueError, "use_sinks must be a bool"
             ):
                 dispatch_attention(_attn(use_sinks=bad))
 

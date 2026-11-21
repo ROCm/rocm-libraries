@@ -443,11 +443,10 @@ class TestFp8DenseGuards(unittest.TestCase):
         and a missing encoding pass as OCP. The request refuses them when it is
         built, so the refusal names the flag."""
         for flag, bad in (("use_fp8", "false"), ("fp8_fnuz", None)):
-            with self.subTest(flag=flag):
-                with self.assertRaisesRegex(
-                    ValueError, rf"{flag}={bad!r}, expected a bool"
-                ):
-                    self._fp8_req(**{flag: bad})
+            with self.subTest(flag=flag), self.assertRaisesRegex(
+                ValueError, f"{flag} must be a bool"
+            ):
+                self._fp8_req(**{flag: bad})
 
     def test_runner_rejects_non_ocp_kv_for_an_fp8_spec(self):
         # The binding guard only covers dispatch callers; a direct call to the
