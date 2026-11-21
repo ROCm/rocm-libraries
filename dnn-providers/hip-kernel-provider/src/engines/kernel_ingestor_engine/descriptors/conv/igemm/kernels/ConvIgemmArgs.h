@@ -53,9 +53,6 @@ struct K1Args
     /// Flex tile (CONV_IGEMM_FLEX) with splits > 1: the row tile the partials start at (a split
     /// launch of the trailing row tiles); 0 otherwise.
     int partialTile;
-    /// Flex tile, forward: the blocks a stream split shares the (tile, step) pairs over; 0 off.
-    int streamUnits;
-    int padding0;
 };
 
 /// Adds the splits' fp32 partials in split order into the output's element type.

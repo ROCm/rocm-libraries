@@ -985,12 +985,6 @@ std::vector<FlexCase> flexCases()
         tail.n = 1;
         cases.push_back({"Nhwc3x3TailSplit" + std::to_string(rows) + "RowTiles", tail, false});
     }
-    // 2 x 2 tiles of a deep reduction (216 k-steps at 16 bits) under one round: the
-    // register-staged form's forward stream split over every unit, border tiles skipping their
-    // out-of-image taps.
-    auto stream = dense(512, 256, {3, 10, 10}, {3, 3, 3}, {1, 1, 1}, true);
-    stream.n = 1;
-    cases.push_back({"Ndhwc3x3x3StreamSplit", stream, true});
     // 300 row tiles past one round of 256 units (MI355X) with a reduction deep enough to pay a
     // split: the LDS-DMA form splits only the last 44.
     auto deepTail = dense(2048, 16, {300, 256}, {1, 1}, {0, 0}, true);
@@ -3038,73 +3032,6 @@ TEST(TestConvIgemmSplitPlan, FlexTailSplitSplitsTheRowTilesPastTheWholeRounds)
     EXPECT_EQ(explicitPlan.partialElems, explicitPlan.outElems);
 }
 
-TEST(TestConvIgemmSplitPlan, FlexStreamSplitSharesFewTilesOverEveryUnit)
-{
-    // 128 tiles of 216 k-steps on 228 units: every block runs 121-122 k-steps of at most two
-    // tiles (122 + 14 + 7), every tile spans at most three blocks.
-    const auto stream = conv_igemm::flexStreamSplit(128, 216, 228, conv_igemm::flexSplitCost(2));
-    EXPECT_EQ(stream.slots, 3);
-    EXPECT_EQ(stream.cost, 143);
-    // The tail split's best plan there: 3 splits in two rounds of 72 + 14.
-    const auto tail
-        = conv_igemm::flexTailSplit(32, 4, 216, 228, true, conv_igemm::flexSplitCost(2));
-    EXPECT_EQ(conv_igemm::flexTailSplitCost(32, 4, 216, 228, tail, conv_igemm::flexSplitCost(2)),
-              172);
-    // As many tiles as units, or under two k-steps a block: none.
-    EXPECT_EQ(conv_igemm::flexStreamSplit(228, 216, 228, 14).slots, 0);
-    EXPECT_EQ(conv_igemm::flexStreamSplit(100, 4, 228, 14).slots, 0);
-
-    // Forward 512 -> 512 channels over small 3-D (small 3-D outputs): 32 row tiles of 4
-    // column tiles on 228 units take the stream split, its partials 3 slots of the output.
-    auto few = dense(512, 512, {34, 18, 18}, {3, 3, 3}, {0, 0, 0}, true);
-    few.n = 1;
-    const auto device = deviceOf("gfx942", 228);
-    const auto plan = conv_igemm::splitPlanFor(
-        parsedProblem(few, ConvDirection::FORWARD), 256, 128, 64, device, 0, false, 0, 1, 2);
-    EXPECT_EQ(plan.streamUnits, 228);
-    EXPECT_EQ(plan.splits, 3);
-    EXPECT_EQ(plan.splitRowTile, 0);
-    EXPECT_EQ(plan.partialElems, plan.outElems);
-    EXPECT_EQ(plan.workspaceBytes - plan.partialOffset,
-              static_cast<size_t>(3 * plan.outElems) * sizeof(float));
-    // The same plan every time (a pure function of the grid, the k-steps and the units).
-    const auto again = conv_igemm::splitPlanFor(
-        parsedProblem(few, ConvDirection::FORWARD), 256, 128, 64, device, 0, false, 0, 1, 2);
-    EXPECT_EQ(again.streamUnits, plan.streamUnits);
-    EXPECT_EQ(again.splits, plan.splits);
-    // Backward data, the LDS-DMA form and explicit policies keep their plans.
-    EXPECT_EQ(conv_igemm::splitPlanFor(parsedProblem(few, ConvDirection::BACKWARD_DATA),
-                                       256,
-                                       128,
-                                       64,
-                                       device,
-                                       0,
-                                       false,
-                                       0,
-                                       1,
-                                       2)
-                  .streamUnits,
-              0);
-    EXPECT_EQ(
-        conv_igemm::splitPlanFor(
-            parsedProblem(few, ConvDirection::FORWARD), 256, 128, 64, device, 0, false, 0, 1, 1)
-            .streamUnits,
-        0);
-    EXPECT_EQ(
-        conv_igemm::splitPlanFor(
-            parsedProblem(few, ConvDirection::FORWARD), 256, 128, 64, device, 0, false, 3, 1, 2)
-            .streamUnits,
-        0);
-    // 32 tiles of 432 k-steps: the 7-way split's single round (62 + 14) beats the stream's
-    // 61 + 14 + 7.
-    auto deep = dense(1024, 1024, {18, 10, 10}, {3, 3, 3}, {0, 0, 0}, true);
-    deep.n = 1;
-    const auto deepPlan = conv_igemm::splitPlanFor(
-        parsedProblem(deep, ConvDirection::FORWARD), 256, 128, 64, device, 0, false, 0, 1, 2);
-    EXPECT_EQ(deepPlan.streamUnits, 0);
-    EXPECT_EQ(deepPlan.splits, 7);
-}
-
 TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOtherKnob)
 {
     auto shape = dense(32, 48, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
@@ -3128,12 +3055,15 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOthe
             }
             SCOPED_TRACE(kernel.name);
             // The LDS-DMA form (16x16x32 atoms) is gfx950's, the register-staged form gfx942's:
-            // 128-byte k-steps either way.
+            // 128-byte k-steps, or 64-byte ones on the register-staged 16-bit forward 256-wide
+            // tile.
             const bool dma = kernel.getStringMetadata("atom").rfind("mfma16x32_", 0) == 0;
             const bool fp32 = kernel.getStringMetadata("dtype") == "FLOAT";
+            const bool wideReg = !dma && kernel.getIntMetadata("bn") == 256;
             EXPECT_EQ(kernel.getIntMetadata("flex"), 1);
             EXPECT_EQ(kernel.getIntMetadata("bm"), 256);
-            EXPECT_EQ(kernel.getIntMetadata("bk"), fp32 ? 32 : 64);
+            EXPECT_EQ(kernel.getIntMetadata("bk"), wideReg || fp32 ? 32 : 64);
+            EXPECT_TRUE(!wideReg || (!fp32 && direction == ConvDirection::FORWARD));
             EXPECT_EQ(kernel.getIntMetadata("xcd"), 1);
             // The register-staged form's backward data may read the graph's filter in place.
             const bool direct = kernel.getIntMetadata("wdirect") != 0;
@@ -3152,7 +3082,7 @@ TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOthe
                 std::initializer_list<std::pair<const char*, int64_t>>{{"flex", 2},
                                                                        {"bm", 128},
                                                                        {"bn", 64},
-                                                                       {"bk", 32},
+                                                                       {"bk", 16},
                                                                        {"wm", 2},
                                                                        {"wn", 4},
                                                                        {"vec", 4},

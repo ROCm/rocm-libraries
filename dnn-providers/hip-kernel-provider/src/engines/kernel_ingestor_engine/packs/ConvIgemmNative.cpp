@@ -1064,23 +1064,6 @@ std::optional<Grid> gridFor(const IgemmProblem& problem, int64_t bm, int64_t bn)
         static_cast<unsigned int>(x), static_cast<unsigned int>(y), static_cast<unsigned int>(z)};
 }
 
-long long flexTailSplitCost(long long rowTiles,
-                            long long rowWidth,
-                            long long kSteps,
-                            long long units,
-                            const FlexTailSplit& split,
-                            long long splitCost)
-{
-    const long long tiles = rowTiles * rowWidth;
-    if(split.splits <= 1)
-    {
-        return divUp(tiles, units) * kSteps;
-    }
-    const long long tail = (rowTiles - split.splitRowTile) * rowWidth;
-    return divUp(split.splitRowTile * rowWidth, units) * kSteps
-           + divUp(tail * split.splits, units) * (divUp(kSteps, split.splits) + splitCost);
-}
-
 FlexTailSplit flexTailSplit(long long rowTiles,
                             long long rowWidth,
                             long long kSteps,
@@ -1118,32 +1101,6 @@ FlexTailSplit flexTailSplit(long long rowTiles,
         consider(full);
     }
     consider(0);
-    return best;
-}
-
-FlexStreamSplit
-    flexStreamSplit(long long tiles, long long kSteps, long long units, long long splitCost)
-{
-    FlexStreamSplit best;
-    if(tiles < 1 || kSteps < 1 || tiles >= units || tiles * kSteps < 2 * units)
-    {
-        return best;
-    }
-    const long long total = tiles * kSteps;
-    // The block whose range holds pair p.
-    const auto blockOf = [&](long long p) { return ((p + 1) * units - 1) / total; };
-    for(long long t = 0; t < tiles; ++t)
-    {
-        best.slots = std::max(best.slots, blockOf((t + 1) * kSteps - 1) - blockOf(t * kSteps) + 1);
-    }
-    long long longest = 0;
-    for(long long b = 0; b < units; ++b)
-    {
-        const long long start = b * total / units, end = (b + 1) * total / units;
-        const long long reached = (end - 1) / kSteps - start / kSteps + 1;
-        longest = std::max(longest, end - start + splitCost + (reached - 1) * splitCost / 2);
-    }
-    best.cost = longest;
     return best;
 }
 
@@ -1275,13 +1232,6 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
     }
     long long splits = 1;
     long long splitRowTile = 0;
-    // The stream split: the register-staged flex tile's forward grids of one group and fewer
-    // tiles than units, when it beats the tail split's rounds.
-    FlexStreamSplit stream;
-    if(flex == 2 && forward && a.groups == 1 && problem.phases == 1)
-    {
-        stream = flexStreamSplit(tiles, iterations, wanted, flexSplitCost(flex));
-    }
     if(flex != 0)
     {
         // One launch of the whole grid (rows within one dispatch) for the tail split.
@@ -1295,21 +1245,6 @@ SplitPlan splitPlanFor(const IgemmProblem& problem,
                                          flexSplitCost(flex));
         splits = split.splits;
         splitRowTile = split.splitRowTile;
-        const long long tailCost
-            = flexTailSplitCost(grid->x, rowWidth, iterations, wanted, split, flexSplitCost(flex));
-        if(stream.slots > 1 && stream.cost < tailCost
-           && stream.slots * plan.outElems * static_cast<long long>(sizeof(float))
-                  <= MAX_PARTIAL_BYTES)
-        {
-            plan.streamUnits = wanted;
-            plan.splits = static_cast<int>(stream.slots);
-            plan.partialElems = plan.outElems;
-            plan.partialOffset = alignUp(problem.workspaceBytes);
-            plan.workspaceBytes
-                = plan.partialOffset
-                  + static_cast<size_t>(stream.slots * plan.outElems) * sizeof(float);
-            return plan;
-        }
     }
     else if(underFilled)
     {
@@ -1522,9 +1457,10 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
     tile.flex = kernel.metadata.count("flex") != 0 ? kernel.getIntMetadata("flex") : 0;
     // The flex tile: 256 positions x 256, 192 or 128 channels of 16-bit 16x16x32 atoms on 4 x 2
     // waves, 64-channel k-steps, 8-wide vectors, XCD order; any split policy; every other variant
-    // knob off. The register-staged form (16x16x16 / 16x16x4 atoms, gfx942): one 64 KiB-class LDS
-    // stage, BN 128, 128-byte reduction steps (64 16-bit or 32 fp32 channels, 16-byte vectors),
-    // and backward data may read the graph's filter in place (wdirect).
+    // knob off. The register-staged form (16x16x16 / 16x16x4 atoms, gfx942): one LDS stage, BN
+    // 128 on 128-byte reduction steps (64 16-bit or 32 fp32 channels) or, 16-bit, BN 256 on
+    // 64-byte steps; 16-byte vectors; backward data may read the graph's filter in place
+    // (wdirect, BN 128).
     const bool flexReg
         = tile.atom == "mfma16_f16" || tile.atom == "mfma16_bf16" || tile.atom == "mfma16_f32";
     const int64_t flexElem = tile.atom == "mfma16_f32" ? 4 : 2;
@@ -1532,11 +1468,13 @@ std::optional<Tile> tileOf(const KernelDefinition& kernel)
        && (tile.flex != 1
            || (tile.atom != "mfma16x32_f16" && tile.atom != "mfma16x32_bf16" && !flexReg)
            || tile.split || tile.bm != 256 || (tile.bn != 256 && tile.bn != 192 && tile.bn != 128)
-           || (flexReg && tile.bn != 128) || tile.bk != 128 / flexElem || tile.wm != 4
-           || tile.wn != 2 || tile.vec != 16 / flexElem || tile.stages != 1 || tile.xcd != 1
-           || tile.halo != 0 || (tile.wdirect != 0 && !flexReg) || tile.pack != 0 || tile.cf != 0
-           || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0 || tile.patch != 0
-           || tile.cfx != 0))
+           || (flexReg && tile.bn == 128   ? tile.bk != 128 / flexElem
+               : flexReg && tile.bn == 256 ? tile.bk != 32 || flexElem != 2 || tile.wdirect != 0
+                                           : flexReg || tile.bk != 128 / flexElem)
+           || tile.wm != 4 || tile.wn != 2 || tile.vec != 16 / flexElem || tile.stages != 1
+           || tile.xcd != 1 || tile.halo != 0 || (tile.wdirect != 0 && !flexReg) || tile.pack != 0
+           || tile.cf != 0 || tile.swz != 0 || tile.dma != 0 || tile.fuse != 0 || tile.large != 0
+           || tile.patch != 0 || tile.cfx != 0))
     {
         return std::nullopt;
     }
@@ -1620,7 +1558,8 @@ int64_t residentBlocksFor(const Tile& tile,
                           const hipdnn_plugin_sdk::ingestor::DeviceProperties& device)
 {
     // The flex tile runs one block a CU: the LDS-DMA form's two activation and three filter
-    // stages fill a gfx950 CU's LDS, the register-staged form's 48 KiB stage a gfx942 one's.
+    // stages fill a gfx950 CU's LDS, the register-staged form's stage (48 or 32 KiB) and
+    // registers a gfx942 one's.
     if(tile.flex != 0)
     {
         return 1;
@@ -1892,8 +1831,7 @@ bool kernelMatches(const MatchContext& context,
                                                      tile->splitPolicy,
                                                      resident,
                                                      flexForm(*tile));
-        if((chosen.splits == automatic.splits && chosen.splitRowTile == automatic.splitRowTile
-            && chosen.streamUnits == automatic.streamUnits)
+        if((chosen.splits == automatic.splits && chosen.splitRowTile == automatic.splitRowTile)
            || (tile->splitPolicy >= 2 && chosen.splits != tile->splitPolicy))
         {
             return false;
@@ -2242,12 +2180,7 @@ public:
         conv.setBlockSize(threads, 1, 1);
         conv.setGridSize(static_cast<unsigned int>(launchTiles), grid->y, gridZ);
         std::optional<IngestorKernelCode> convTail;
-        if(plan.streamUnits > 0)
-        {
-            // The stream split: one launch of streamUnits blocks.
-            conv.setGridSize(static_cast<unsigned int>(plan.streamUnits), 1, 1);
-        }
-        else if(plan.splitRowTile > 0)
+        if(plan.splitRowTile > 0)
         {
             // The tail split: the leading row tiles unsplit, then the rest split (convTail).
             conv.setGridSize(static_cast<unsigned int>(plan.splitRowTile), grid->y, grid->z);
@@ -2472,14 +2405,7 @@ public:
             }
         };
         args.partialTile = 0;
-        args.streamUnits = 0;
-        if(plan.streamUnits > 0)
-        {
-            args.tileBase = 0;
-            args.streamUnits = static_cast<int>(plan.streamUnits);
-            launchConv(dispatch.convForStream(stream));
-        }
-        else if(plan.splitRowTile > 0)
+        if(plan.splitRowTile > 0)
         {
             // The tail split: the leading row tiles unsplit, then the rest split into partials
             // of their rows only.

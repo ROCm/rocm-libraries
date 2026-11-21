@@ -269,9 +269,6 @@ struct SplitPlan
     long long splitRowTile = 0;
     /// Elements of one split's partials: the output's past row tile splitRowTile.
     long long partialElems = 0;
-    /// The stream split (register-staged flex tile, forward): this many blocks share the tiles'
-    /// k-steps evenly, each tile's ranges in `splits` partials slots; 0 otherwise.
-    long long streamUnits = 0;
 };
 
 /// The split policy's largest explicit split count (split_policy N, 2 <= N <= this).
@@ -353,29 +350,6 @@ FlexTailSplit flexTailSplit(long long rowTiles,
                             long long units,
                             bool tailAlone,
                             long long splitCost);
-
-/// The k-steps along the launch rounds of @p split (flexTailSplit's cost of a plan).
-long long flexTailSplitCost(long long rowTiles,
-                            long long rowWidth,
-                            long long kSteps,
-                            long long units,
-                            const FlexTailSplit& split,
-                            long long splitCost);
-
-struct FlexStreamSplit
-{
-    long long slots = 0; ///< partials slots: the most blocks one tile's k-steps span
-    long long cost = 0; ///< k-steps of the longest block, its tile switches priced
-};
-
-/// The flex tile's stream split of @p tiles tiles of @p kSteps k-steps over @p units blocks,
-/// one block a unit: block b runs the (tile, k-step) pairs [b W / units, (b + 1) W / units) of
-/// W = tiles x kSteps, tiles in order. Only for fewer tiles than units (every tile then spans
-/// two blocks or more, so every tile goes through the partials) with at least two k-steps a
-/// block; slots 0 otherwise. The cost is the longest block's k-steps plus @p splitCost for its
-/// first tile and half of it for each more tile it reaches.
-FlexStreamSplit
-    flexStreamSplit(long long tiles, long long kSteps, long long units, long long splitCost);
 
 /// The flex tile's fixed cost of one more split, in its k-steps (the partials' round trip and
 /// the reduce launch), by form: 1, the LDS-DMA form, runs a k-step in about half the time of 2,
