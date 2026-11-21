@@ -2118,7 +2118,7 @@ no descriptor decides what that engine does. What decides it is the provider bui
 what the model records:
 
 ```jsonc
-"trained_against": {"selector_revision": "hip-kernel-provider/0.2.0/asm-sdpa-untuned-v1"}
+"trained_against": {"selector_revision": "hip-kernel-provider/asm-sdpa-fwd/1e5ac89f5adeb209"}
 ```
 
 `selector_revision` is an opaque string, compared for **exact equality** against the revision the
@@ -2161,7 +2161,7 @@ selector's inputs, so a revision over itself would expire every ranker at every 
 features the model read. An integer `feature_semantics_revision` records that, beside either form:
 
 ```jsonc
-"trained_against": {"selector_revision": "hip-kernel-provider/0.2.0/asm-sdpa-untuned-v1",
+"trained_against": {"selector_revision": "hip-kernel-provider/asm-sdpa-fwd/1e5ac89f5adeb209",
                     "feature_semantics_revision": 1}
 ```
 

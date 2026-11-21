@@ -65,6 +65,11 @@ public:
     /// architecture may have one row per ranking metric (§4.4); each model answers in its
     /// own `score.metric`, and a second model for one (architecture, metric) disables it.
     /// An id nothing deploys leaves the engine UNAVAILABLE.
+    ///
+    /// A row matches every device whose `gcnArchName` starts with its architecture, so the
+    /// gfx942 model, measured on MI300X only, also answers on MI308X, where the engine
+    /// launches the MI308 code objects instead (AsmKernelPath.hpp). Those estimates are not
+    /// validated.
     static constexpr std::array<std::pair<std::string_view, std::string_view>, 2> L1_MODEL_IDS{{
         {"gfx942", "5f2a7c14-9d3b-4e86-b0a1-6c4f21d8e370"}, // tflops
         {"gfx950", "8b61d0c9-24af-4d17-9e52-3a7c06b8f145"}, // tflops
