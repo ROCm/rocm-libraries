@@ -26,9 +26,8 @@ using Traits  = ck_tile::TileGemmUniversalTraits<false, false, false, false, Row
 using Problem = ck_tile::UniversalGemmPipelineProblem<Bf16, Bf16, float, Shape, Traits>;
 
 // Contract: the weight is consumed pre-permuted, Wp[k,h,d] = W[k,d,h] (see prepermute_weight,
-// a one-time reorder of a model weight). A[t,b,k], Wp[k,h,d] -> Y[h,b,t,d]. A tile covers one h
-// and BN contiguous d, at fixed b, so it is a plain [rows, BN] window of Y with row stride D and
-// the stock CShuffleEpilogue stores it.
+// a one-time reorder of a model weight). A[t,b,k], Wp[k,h,d] -> Y[h,b,t,d]: GemmEPermuteKernel
+// stores C[t*B+b, h*D+d] through the [T, B, H, D] view of Y with strides (D, T*D, B*T*D, 1).
 using Epilogue =
     ck_tile::CShuffleEpilogue<ck_tile::CShuffleEpilogueProblem<Bf16,
                                                                Bf16,
@@ -48,7 +47,12 @@ using Epilogue =
                                                                Problem::TransposeC>>;
 
 using Partitioner = ck_tile::GemmSpatiallyLocalTilePartitioner<Shape, 8, 16>;
+using Pipeline    = ck_tile::GemmPipelineAgBgCrCompV3<Problem>;
+using Kernel      = ck_tile::GemmEPermuteKernel<Partitioner, Pipeline, Epilogue>;
 
+// TEMPORARY timing arm, to be deleted after the parity run: the hand-written kernel the library
+// kernel replaces. A tile covers one h and BN contiguous d at fixed b (t-major tile order), so it
+// is a plain [rows, BN] window of Y with row stride D.
 template <class Pipeline>
 __global__ void __launch_bounds__(Threads) kernel(const Bf16* __restrict__ a,
                                                   const Bf16* __restrict__ wp,
@@ -113,9 +117,28 @@ inline hipError_t prepermute_weight(const Bf16* w, Bf16* wp, hipStream_t stream)
     return hipGetLastError();
 }
 
-// All buffers are dense, 16-byte aligned, and non-overlapping.
+// All buffers are dense and non-overlapping.
 inline hipError_t
 launch(const Bf16* a, const Bf16* wp, Bf16* y, int time, int batch, hipStream_t stream)
+{
+    const auto kargs = Kernel::MakeKernelArgs(ck_tile::GemmEPermuteHostArgs(
+        a, wp, y, 1, K, K, N, {time, batch, H, D, D, time * D, batch * time * D}));
+    if(!Kernel::IsSupportedArgument(kargs))
+    {
+        std::fprintf(stderr, "gemm_permute: T=%d B=%d is not supported\n", time, batch);
+        return hipErrorInvalidValue;
+    }
+    ck_tile::launch_kernel(
+        ck_tile::stream_config{stream},
+        ck_tile::make_kernel<1>(
+            Kernel{}, Kernel::GridSize(time * batch, N, 1), Kernel::BlockSize(), 0, kargs));
+    return hipGetLastError();
+}
+
+// TEMPORARY: launches the hand-written kernel. All buffers are dense, 16-byte aligned, and
+// non-overlapping.
+inline hipError_t
+launch_hand_written(const Bf16* a, const Bf16* wp, Bf16* y, int time, int batch, hipStream_t stream)
 {
     const auto addresses = reinterpret_cast<uintptr_t>(a) | reinterpret_cast<uintptr_t>(wp) |
                            reinterpret_cast<uintptr_t>(y);
@@ -125,7 +148,6 @@ launch(const Bf16* a, const Bf16* wp, Bf16* y, int time, int batch, hipStream_t 
             stderr, "gemm_permute: need aligned buffers, T in [1,%d], B in [1,%d]\n", MaxT, MaxB);
         return hipErrorInvalidValue;
     }
-    using Pipeline = ck_tile::GemmPipelineAgBgCrCompV3<Problem>;
     const dim3 grid(Partitioner::GridSize((time + BM - 1) / BM * batch * BM, N));
     kernel<Pipeline><<<grid, Threads, 0, stream>>>(a, wp, y, time, batch);
     return hipGetLastError();

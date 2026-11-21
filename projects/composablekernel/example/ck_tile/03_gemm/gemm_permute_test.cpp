@@ -81,8 +81,8 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
     const size_t bytes = size_t(n) * sizeof(Bf16);
     ck_tile::DeviceMem a(size_t(m) * K * sizeof(Bf16)), w(size_t(K) * N * sizeof(Bf16));
     std::array<uint16_t, D> guard{};
-    ck_tile::DeviceMem dense(bytes), two_op_y(bytes), ref(bytes), out(bytes + 2 * sizeof(guard)),
-        first(sizeof(unsigned));
+    ck_tile::DeviceMem dense(bytes), two_op_y(bytes), hand_y(bytes), ref(bytes),
+        out(bytes + 2 * sizeof(guard)), first(sizeof(unsigned));
     Bf16* y = data(out) + guard.size();
     fill<<<512, 256, 0, stream>>>(data(a), m * K, 13);
     HIP_CHECK_ERROR(hipGetLastError());
@@ -110,6 +110,11 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
     auto fused = [&] {
         HIP_CHECK_ERROR(prepermute_weight(data(w), data(wp), stream));
         HIP_CHECK_ERROR(launch(data(a), data(wp), y, time, batch, stream));
+    };
+    // TEMPORARY arm: the hand-written fused kernel the library kernel replaces.
+    auto hand_written = [&] {
+        HIP_CHECK_ERROR(prepermute_weight(data(w), data(wp), stream));
+        HIP_CHECK_ERROR(launch_hand_written(data(a), data(wp), data(hand_y), time, batch, stream));
     };
     auto gemm_op = [&] {
         ck_tile::launch_kernel(
@@ -142,10 +147,14 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
     HIP_CHECK_ERROR(hipGetLastError());
     HIP_CHECK_ERROR(hipMemsetAsync(data(out), 0xff, out.GetBufferSize(), stream));
     HIP_CHECK_ERROR(hipMemsetAsync(data(two_op_y), 0xff, bytes, stream));
+    HIP_CHECK_ERROR(hipMemsetAsync(data(hand_y), 0xff, bytes, stream));
     HIP_CHECK_ERROR(hipMemsetAsync(data(dense), 0xff, bytes, stream));
     fused();
     two_ops();
-    for(const auto& [got, path] : {std::pair{y, "fused"}, std::pair{data(two_op_y), "two-op"}})
+    hand_written();
+    for(const auto& [got, path] : {std::pair{y, "fused"},
+                                   std::pair{data(two_op_y), "two-op"},
+                                   std::pair{data(hand_y), "hand-written"}})
     {
         HIP_CHECK_ERROR(hipMemsetAsync(first.GetDeviceBuffer(), 0xff, sizeof(unsigned), stream));
         compare<<<512, 256, 0, stream>>>(
@@ -174,8 +183,8 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
             return false;
         }
     }
-    std::printf("T=%d B=%d: fused and two-op outputs (%d BF16) match the reference bit-for-bit; "
-                "guards intact\n",
+    std::printf("T=%d B=%d: fused, two-op and hand-written outputs (%d BF16) match the reference "
+                "bit-for-bit; guards intact\n",
                 time,
                 batch,
                 n);
@@ -196,28 +205,32 @@ bool run(hipStream_t stream, int time, int batch, bool benchmark)
     {
         fused();
         two_ops();
+        hand_written();
     }
     // Rotate the order so no path always runs first in a sample.
-    std::array<std::array<float, 11>, 3> t{};
+    std::array<std::array<float, 11>, 4> t{};
     for(size_t i = 0; i < t[0].size(); ++i)
         for(size_t j = 0; j < t.size(); ++j)
-            switch((i + j) % 3)
+            switch((i + j) % t.size())
             {
             case 0: t[0][i] = measure(fused); break;
             case 1: t[1][i] = measure(two_ops); break;
-            default: t[2][i] = measure(gemm_op); break;
+            case 2: t[2][i] = measure(gemm_op); break;
+            default: t[3][i] = measure(hand_written); break;
             }
     for(auto& v : t)
         std::sort(v.begin(), v.end());
     const auto mid = t[0].size() / 2;
     std::printf("Median of %zu samples (%d launches each): fused %.1f us; CK-Tile GEMM + permute "
-                "%.1f us (%.2fx); CK-Tile GEMM alone %.1f us\n",
+                "%.1f us (%.2fx); CK-Tile GEMM alone %.1f us; hand-written fused %.1f us (%.3fx)\n",
                 t[0].size(),
                 Launches,
                 t[0][mid],
                 t[1][mid],
                 t[1][mid] / t[0][mid],
-                t[2][mid]);
+                t[2][mid],
+                t[3][mid],
+                t[3][mid] / t[0][mid]);
     return true;
 }
 } // namespace
