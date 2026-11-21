@@ -504,6 +504,7 @@ def test_impact_scope_is_the_ingestor_paths_and_plugin_sdk_headers(part):
             "projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/GpuGenericTargets.hpp",
         ),
         ("APPL", "projects/hipdnn/flatbuffers_sdk/schemas/tensor_attributes.fbs"),
+        ("TIER", "dnn-providers/integration-tests/tests/TestGpuPointwisePlan.cpp"),
     ],
 )
 def test_packets_concern_lane_takes_trigger_files_only(
@@ -547,6 +548,29 @@ def test_appl_scope_is_providers_engine_headers_and_schemas(part):
     assert {r[0] for r in part.concern_scope("APPL", rows)} == set(inside)
 
 
+def test_tier_scope_is_test_sources_bundles_and_tier_yaml(part):
+    # catches: an added test, bundle or tier YAML that never reaches TIER, or product
+    # code and documentation that does
+    inside = (
+        "dnn-providers/integration-tests/tests/TestGpuPointwisePlan.cpp",
+        "dnn-providers/integration-tests/tests/gpu-ref/PointwiseShapeCatalog.hpp",
+        "dnn-providers/integration-tests/integration-test-bundles/quick/SdpaFwd/a.json",
+        "dnn-providers/miopen-provider/test_categories_integration.yaml",
+        "projects/hipdnn/python/frontend_wheel_package/tests/test_x.py",
+        "dnn-providers/hip-kernel-provider/src/tests/GemmTests.cpp",
+        "projects/hipdnn/tools/DescriptorGenerator/foo_test.py",
+    )
+    outside = (
+        "projects/hipdnn/backend/src/Foo.cpp",
+        "projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp",
+        "projects/hipdnn/CMakeLists.txt",
+        "projects/hipdnn/docs/TESTING.md",
+        "dnn-providers/integration-tests/docs/adding-tests.md",
+    )
+    rows = [(p, 1, "") for p in inside + outside]
+    assert {r[0] for r in part.concern_scope("TIER", rows)} == set(inside)
+
+
 def test_leak_sweep_allowlist_covers_every_report_lane(part):
     # catches: a report lane missing from the LEAK sweep's finding-ID allow-list, so its
     # finding IDs are flagged as leaks
@@ -558,7 +582,7 @@ def test_leak_sweep_allowlist_covers_every_report_lane(part):
     assert sorted(match.group(1).split("|")) == sorted(part.REPORT_LANES)
 
 
-@pytest.mark.parametrize("lane", ["APPL", "IMPACT"])
+@pytest.mark.parametrize("lane", ["APPL", "IMPACT", "TIER"])
 def test_lane_id_is_a_provisional_id(part, lane):
     """A finding ID from a concern lane is recognised, like every other report lane."""
     # catches: the lane dropped from CONCERN_LANES/REPORT_LANES, so its findings are

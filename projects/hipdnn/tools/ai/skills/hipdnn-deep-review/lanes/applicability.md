@@ -46,6 +46,29 @@ no guard: it does not run on the raw backend API, deserialized or JSON graphs, o
    the device check that would settle it under **Approval requests**. Never lower the tier because
    the kernel cannot be read. Such a finding's verdict stays `UNVERIFIED` until the device check under **Approval requests**
    runs.
+9. **Launch geometry.** For every kernel launch the changed engine issues (each direction and each helper kernel: a second kernel of a
+   backward pass, a conversion, a workspace fill), read the launch code and write the grid and block formulas as functions of the
+   graph's dims. Evaluate them at the smallest legal graph that exceeds each launch limit of *Launch geometry* in the property
+   checklist, and compare with the bound applicability enforces. Each launch needs its own check: a second kernel with a different
+   block size reaches the limit at a different size. When a launch's thread count is a descriptor field the tree does not show (a
+   generated descriptor, a helper pack), treat `threads` as a free parameter: give the bound as a function of it and name the smallest
+   graph at the smallest block size and at the largest the engine can pick (the engine's own cap, else the device's `maxThreadsPerBlock`).
+   - The rule is the runtime's per-axis work-item limit (*Launch geometry* row), not the device's `maxGridSize`: the current runtime
+     reports y and z limits of 65535 and does not enforce them. Older runtimes that limited grid y and z are out of scope. A hardcoded
+     limit names its source in a comment: the HIP launch rule it mirrors.
+   - A bound that exists in plan build but not in applicability is `accept-then-fail`; one that is missing is the hazard.
+   - A refusal inside the kernel launcher (a launch-time guard that turns the runtime error into a named exception) is a backstop, not a
+     bound in applicability: the graph is still accepted and the plan built, so a missing per-engine bound stays `accept-then-fail` at the
+     same tier. A guard that checks only some of the launches or axes leaves the unchecked ones a
+     finding. In a plan with several launches, say when a late failure comes after earlier launches have already written outputs; the tier
+     does not change.
+   - A floor of `none` satisfies *Reachability first*: the finding's Proof states that a baseline graph passes every layer.
+   - A bound the change adds that an earlier bound already implies is a note under **Checked, no finding**, not a gate and not a finding.
+   - Kernel-argument extents narrowed to `int32` are the *Dims and extents* row's; this step covers values the launch itself uses (grid,
+     block, work-item counts).
+   - An engine family that the change does not touch and that shares the changed engine's op class or generator, with the same launch
+     shape, is `sibling-drift` at `FUTURE WORK`, or a `CORR` handoff when it is not an applicability question. Name the families you did
+     not audit under **Coverage**. "Code the change does not touch" is per function or hunk the change edits, not per file.
 
 ## Hazard classes
 
@@ -71,6 +94,7 @@ served graph change only the property, assert decline, and assert the unchanged 
 |---|---|---|---|
 | Tensor `data_type` | 1.0 | Every operand, aux and virtual intermediate dtype is in the served set and consistent; node `compute_data_type` supported | One row per unsupported dtype per role |
 | Dims and extents | 1.0 | Rank, cross-tensor relations (`Hq % Hkv`), head-dim tables, divisibility; 32-bit narrowing of dims, strides and products range-checked; backend does not check positivity | Faulting shape; rows at 2^31 and 2^32 |
+| Launch geometry | none | Every launch's grid and block size, derived from the graph's dims in width-safe (64-bit) arithmetic, are checked before accept against the runtime's per-axis work-item rule (`NDRange::IsValidConfig` in clr, reached from `hipModuleLaunchKernel`): on each axis separately `gridDim * blockDim <= UINT32_MAX`, so a one-dimensional launch of `blocks * threads >= 2^32` is rejected with `hipErrorInvalidValue` even though `blocks` fits (seen with layernorm, RMSNorm and resample plans that passed `check_support` and `build_plans`). Block size, dynamic LDS and kernarg size stay within the device limits for every accepted shape. A launch value narrowed to 32 bits is range-checked, never truncated | Per launch and per axis, the smallest legal graph over the limit: work-items at `floor((2^32 - 1) / threads)` and one above; a product of two dims that are each below the limit. Accept then launch failure is `accept-then-fail`; accept then a truncated grid that runs with part of the tensor unwritten is `loose-check` with wrong results. A multi-GB tensor needs host-level proof from the formula; the device run settles it and goes under **Approval requests**. A launch with no decline test at all is a `TESTB` handoff, and a bound another bound already implies needs none |
 | Strides and layout | 1.0 | The kernel's addressing formula: innermost stride, packing, order, 0 strides, pitch, derived strides, output overlap | Stride 0, short row, padded pitch, permuted order |
 | `alignment` | 1.3 if any `!= 16` | Declines every value that is not a multiple of what the kernel needs, including 0 and negatives, on every operand incl. aux | 1, 2, 4, 8, 24 decline; 16, 32, 256 serve |
 | `virtual` | 1.0 | Operands the engine reads or writes are non-virtual; intermediates it does not write are virtual | Flip per role |

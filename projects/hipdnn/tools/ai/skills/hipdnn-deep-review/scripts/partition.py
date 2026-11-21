@@ -73,11 +73,19 @@ APPL_PREFIXES = (
     "projects/hipdnn/flatbuffers_sdk/schemas/",
 )
 
+# Path segments that mark test code and data (lanes/test-tiers.md): a changed file under one of
+# them, a test source or a tier YAML is in the TIER lane's scope. Documentation never is.
+TIER_DIRS = ("test", "tests", "integration-test-bundles", "integration-tests")
+TIER_NAME = re.compile(
+    r"(?:.*test_categories.*\.yaml|test_.*\.py|.*_tests?\.(?:py|cpp|cc|cxx)|.*Tests?\.(?:cpp|cc|cxx))"
+)
+
 PROJECT_ROOTS = ("projects", "dnn-providers", "shared")
 LICENSE_STEMS = {"LICENSE", "CONTRIBUTING", "SECURITY", "README"}
 CONCERN_LANES = {
     "TESTQ",
     "TESTB",
+    "TIER",
     "AUTH",
     "BUILD",
     "DEPS",
@@ -371,6 +379,16 @@ def concern_scope(lane: str, rows):
         return [r for r in rows if r[0].startswith(IMPACT_PREFIXES)]
     if lane == "APPL":
         return [r for r in rows if r[0].startswith(APPL_PREFIXES)]
+    if lane == "TIER":
+        return [
+            r
+            for r in rows
+            if not is_docs(r[0])
+            and (
+                any(seg in TIER_DIRS for seg in r[0].split("/")[:-1])
+                or TIER_NAME.fullmatch(name(r[0]))
+            )
+        ]
     if lane == "DESIGN":
         return [r for r in rows if not is_docs(r[0])]
     return rows
@@ -451,7 +469,7 @@ def write_packet(rd: Path, lane: str, kind: str, rows, areas, sampled, parent) -
 def cmd_packets(args) -> None:
     """Write packets/<LANE>.md for each lane of owners.tsv (files with numstat rows, areas,
     Orient paths, `Sampled:`) and each concern lane named by --lanes (changed files in
-    scope). BUILD, DEPS, IMPACT and APPL scope to their trigger files, DESIGN to the
+    scope). BUILD, DEPS, IMPACT, APPL and TIER scope to their trigger files, DESIGN to the
     non-documentation files, other concern lanes take every changed file; DRIFT also lists
     drift.txt and is N/A when its Trigger is `no`. The diff is not read."""
     rd = Path(args.round_dir)
