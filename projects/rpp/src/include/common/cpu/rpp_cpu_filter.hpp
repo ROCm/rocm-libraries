@@ -1561,8 +1561,13 @@ struct MorphVecLoader<Rpp16f> {
 };
 
 struct MorphPad_Erode {
+    // identity element for min-reduction: type max (255 for U8, 127 for I8)
+    template <typename T>
     static inline __m256i pad_int() {
-        return _mm256_set1_epi8((char)255);
+        if constexpr (std::is_same_v<T, Rpp8s>)
+            return _mm256_set1_epi8((char)127);
+        else
+            return _mm256_set1_epi8((char)255);
     }
     static inline __m256 pad_float() {
         return avx_p1;
@@ -1570,8 +1575,13 @@ struct MorphPad_Erode {
 };
 
 struct MorphPad_Dilate {
+    // identity element for max-reduction: type min (0 for U8, -128 for I8)
+    template <typename T>
     static inline __m256i pad_int() {
-        return _mm256_set1_epi8((char)0);
+        if constexpr (std::is_same_v<T, Rpp8s>)
+            return _mm256_set1_epi8((char)-128);
+        else
+            return _mm256_set1_epi8((char)0);
     }
     static inline __m256 pad_float() {
         return avx_p0;
@@ -1595,7 +1605,7 @@ inline void rpp_morphological_load_NxN(typename MorphVecLoader<T>::VecType* pxRo
     // Pad beyond valid range
     for (int k = rowKernelLoopLimit; k < kernelSize; ++k) {
         if constexpr (std::is_same_v<Vec, __m256i>)
-            pxRow[k] = padPolicy::pad_int();
+            pxRow[k] = padPolicy::template pad_int<T>();
         else
             pxRow[k] = padPolicy::pad_float();
     }
