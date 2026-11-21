@@ -21,6 +21,7 @@ from rocke.core.ir import BF8E5M2, F32, FP8E4M3, IRBuilder, PtrType
 from rocke.core.ir_serialize import serialize
 from rocke.core.isa.backend import backend_for, wired_arches
 from rocke.core.lower_llvm import _lower_kernel_to_llvm_python
+from rocke.tests.arch_marks import arch_specific
 
 _FLAVOR = "llvm20"
 
@@ -73,6 +74,10 @@ def test_only_gfx950_backend_has_the_instruction():
         assert not backend_for(arch).has_fp8_scale_conversion, arch
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="only gfx950 has the scaled fp8 conversion instruction; test_other_targets_are_refused_with_one_message checks that every other wired arch refuses the op",
+)
 @pytest.mark.parametrize("elem,method,op,instruction,fallback", _VARIANTS)
 def test_gfx950_lowers_the_fused_op_in_both_engines(
     elem, method, op, instruction, fallback

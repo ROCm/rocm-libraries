@@ -8,6 +8,8 @@ from __future__ import annotations
 import re
 import unittest
 
+import pytest
+
 from rocke.core.ir import (
     BF8E5M2,
     FP8E4M3,
@@ -22,7 +24,12 @@ from rocke.core.ir import (
 )
 from rocke.core.ir_serialize import parse, serialize
 from rocke.core.lower_llvm import LLVM_FLAVORS, _lower_kernel_to_llvm_python
+from rocke.tests.arch_marks import COVERED_ARCHES, arch_specific
 
+
+pytestmark = pytest.mark.filterwarnings(
+    "error::rocke.core.lower_llvm.ArchDomainWarning"
+)
 
 _LOWBIT_TYPES = (
     ("i8", I8, "i8"),
@@ -67,6 +74,10 @@ def _build_loop(carry_types=_LOWBIT_TYPES, *, trip_count=None, unroll=False):
 
 
 class TestLowbitLoopTypes(unittest.TestCase):
+    @arch_specific(
+        ("gfx950",),
+        reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
+    )
     def test_unrolled_lowbit_carries_use_initial_or_final_yielded_values(self):
         for trip_count in (0, 1, 3):
             with self.subTest(trip_count=trip_count):
@@ -91,6 +102,10 @@ class TestLowbitLoopTypes(unittest.TestCase):
                         llvm,
                     )
 
+    @arch_specific(
+        ("gfx950",),
+        reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
+    )
     def test_phi_latch_and_exit_use_complete_lowbit_types(self):
         kernel, loop_op = _build_loop()
         llvm = _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor="llvm20")
@@ -125,6 +140,10 @@ class TestLowbitLoopTypes(unittest.TestCase):
             ),
         )
 
+    @arch_specific(
+        ("gfx950",),
+        reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
+    )
     def test_serialization_round_trip_is_stable(self):
         kernel, _ = _build_loop()
         encoded = serialize(kernel)
@@ -149,15 +168,16 @@ class TestLowbitLoopTypes(unittest.TestCase):
                 trip_count=trip_count, unroll=trip_count is not None
             )
             encoded = serialize(kernel)
-            for flavor in LLVM_FLAVORS:
-                with self.subTest(trip_count=trip_count, flavor=flavor):
-                    python_llvm = _lower_kernel_to_llvm_python(
-                        kernel, arch="gfx950", llvm_flavor=flavor
-                    )
-                    cpp_llvm = rocke_engine.lower_serialized_ir(
-                        encoded, arch="gfx950", flavor=flavor
-                    )
-                    self.assertEqual(cpp_llvm, python_llvm)
+            for arch in COVERED_ARCHES:
+                for flavor in LLVM_FLAVORS:
+                    with self.subTest(trip_count=trip_count, arch=arch, flavor=flavor):
+                        python_llvm = _lower_kernel_to_llvm_python(
+                            kernel, arch=arch, llvm_flavor=flavor
+                        )
+                        cpp_llvm = rocke_engine.lower_serialized_ir(
+                            encoded, arch=arch, flavor=flavor
+                        )
+                        self.assertEqual(cpp_llvm, python_llvm)
 
     def _check_metadata_counts(self, lower, error_type):
         for unroll in (False, True):
@@ -215,6 +235,10 @@ class TestLowbitLoopTypes(unittest.TestCase):
                         with self.assertRaisesRegex(error_type, re.escape(message)):
                             lower(kernel)
 
+    @arch_specific(
+        ("gfx950",),
+        reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
+    )
     def test_python_validates_metadata_counts_in_both_loop_paths(self):
         self._check_metadata_counts(
             lambda kernel: _lower_kernel_to_llvm_python(
@@ -223,6 +247,10 @@ class TestLowbitLoopTypes(unittest.TestCase):
             ValueError,
         )
 
+    @arch_specific(
+        ("gfx950",),
+        reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
+    )
     def test_cpp_validates_metadata_counts_in_both_loop_paths(self):
         try:
             import rocke_engine
@@ -235,6 +263,10 @@ class TestLowbitLoopTypes(unittest.TestCase):
             RuntimeError,
         )
 
+    @arch_specific(
+        ("gfx950",),
+        reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
+    )
     def test_illegal_loop_carried_types_are_rejected_clearly(self):
         illegal_types = (
             (Type("i7"), "has no LLVM mapping"),
@@ -256,6 +288,10 @@ class TestLowbitLoopTypes(unittest.TestCase):
                         kernel, arch="gfx950", llvm_flavor="llvm20"
                     )
 
+    @arch_specific(
+        ("gfx950",),
+        reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
+    )
     def test_malformed_serialized_type_metadata_is_rejected_clearly(self):
         kernel, loop_op = _build_loop((("i8", I8, "i8"),))
         loop_op.attrs["iter_args"][0]["type"] = "vec<i8x>"
@@ -264,6 +300,10 @@ class TestLowbitLoopTypes(unittest.TestCase):
         ):
             _lower_kernel_to_llvm_python(kernel, arch="gfx950", llvm_flavor="llvm20")
 
+    @arch_specific(
+        ("gfx950",),
+        reason="the lowering has no arch branch and the IR is identical on gfx942 and gfx950; test_python_cpp_bytes_match_for_each_llvm_flavor runs on every covered arch",
+    )
     def test_cpp_rejects_illegal_type_and_malformed_metadata_clearly(self):
         try:
             import rocke_engine

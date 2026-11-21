@@ -19,6 +19,8 @@ from __future__ import annotations
 import os
 import unittest
 
+from rocke.tests.arch_marks import arch_specific
+
 
 def _lower(kernel) -> str:
     # Pin the native Python lowerer + the host's autodetected llvm flavor so the
@@ -36,6 +38,10 @@ def _lower(kernel) -> str:
 _MFMA_BF16 = "llvm.amdgcn.mfma.f32.16x16x32.bf16"
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the instance builders exist for gfx950 only; instances/gfx942 has no grouped GEMM, ragged GEMM or ragged MoE family",
+)
 class TestGroupedGemmGfx950(unittest.TestCase):
     def test_builds_with_expected_geometry(self):
         from rocke.instances.gfx950.grouped_gemm import (
@@ -90,6 +96,10 @@ class TestGroupedGemmGfx950(unittest.TestCase):
         self.assertIn(_MFMA_BF16, ir)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the instance builders exist for gfx950 only; instances/gfx942 has no grouped GEMM, ragged GEMM or ragged MoE family",
+)
 class TestRaggedGemmGfx950(unittest.TestCase):
     def test_builds_and_lowers(self):
         from rocke.instances.gfx950.ragged_gemm import (
@@ -107,6 +117,10 @@ class TestRaggedGemmGfx950(unittest.TestCase):
         self.assertIn(_MFMA_BF16, ir)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the instance builders exist for gfx950 only; instances/gfx942 has no grouped GEMM, ragged GEMM or ragged MoE family",
+)
 class TestRaggedMoeGfx950(unittest.TestCase):
     def test_builds_and_lowers(self):
         from rocke.instances.gfx950.ragged_moe import (
@@ -126,6 +140,10 @@ class TestRaggedMoeGfx950(unittest.TestCase):
         self.assertIn(_MFMA_BF16, ir)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the instance builders exist for gfx950 only; instances/gfx942 has no grouped GEMM, ragged GEMM or ragged MoE family",
+)
 class TestRaggedGemmHarnessGfx950(unittest.TestCase):
     """Host-side scheduling helpers of the ragged_gemm workflow harness
     (``examples/gfx950/grouped_gemm/ragged_gemm_hip.py``).
@@ -190,6 +208,10 @@ class TestRaggedGemmHarnessGfx950(unittest.TestCase):
         self.assertEqual(int(m_starts[0].item()), 0)
 
 
+@arch_specific(
+    ("gfx950",),
+    reason="the instance builders exist for gfx950 only; instances/gfx942 has no grouped GEMM, ragged GEMM or ragged MoE family",
+)
 class TestGfx950GroupedGemmCppByteIdentity(unittest.TestCase):
     """Dual-engine byte-identity for the grouped/ragged/MoE kernels.
 
