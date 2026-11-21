@@ -78,7 +78,7 @@ sections. The first line is `# <LANE> (round <N>, <$HEAD_SHORT>)`. Sections, in 
 1. **Findings** in the format above (may be empty; **Checked, no finding** is then the
    content).
 2. **Coverage:** one row per examined file: repository-relative path (a changed file exactly as in `files.txt`; no braces or globs), read depth (`full`, `diff-only`,
-   `sampled`; nothing else in that cell), tests that reach it. `RUN` adds two literal non-file lines, and no other lane does: `Flag: <NAME>=<value> (<configure
+   `sampled`; nothing else in that cell), tests that reach it. `APPL` adds one literal non-file line, `Hazard knowledge: <directory read>` or `Hazard knowledge: none supplied`, and `RUN` adds two; no other lane adds any. `RUN`'s are `Flag: <NAME>=<value> (<configure
    line or preset>)` for each option enabled, and `Build: none (<missing>)` when nothing built. Ledger and Coverage parsing ignore
    them (a row counts only when its second cell is a read depth); keep them free of `|`.
 3. **Checked, no finding:** what was examined and found correct. A lane that owns an M-rule
