@@ -6,6 +6,7 @@
 
 #include <exception>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -169,6 +170,28 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
     hipdnnEnginePredictionKind_t kind,
     bool evaluate) const
 {
+    return getPredictionOn(
+        [&handle]() -> const hipDeviceProp_t& {
+#ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
+            return hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
+#else
+            static_cast<void>(handle);
+            throw std::logic_error("no device is asked without HIPDNN_ENABLE_KERNEL_INGESTOR");
+#endif
+        },
+        graph,
+        config,
+        kind,
+        evaluate);
+}
+
+hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredictionOn(
+    const std::function<const hipDeviceProp_t&()>& device,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IEngineConfig& config,
+    hipdnnEnginePredictionKind_t kind,
+    bool evaluate) const
+{
     using namespace hipdnn_flatbuffers_sdk::data_objects;
     EnginePredictionT result;
     result.engine_id = id();
@@ -193,13 +216,14 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
 #ifdef HIPDNN_ENABLE_KERNEL_INGESTOR
     try
     {
-        const auto& device = hipdnn_plugin_sdk::heuristics::predictionDevice(handle.getStream());
-        const auto features = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, device);
+        const auto& properties = device();
+        const auto features
+            = hipdnn_plugin_sdk::heuristics::engineFeatures(graph, config, properties);
         return _l1Models.predict(id(),
                                  engineName(),
                                  SELECTOR_REVISION,
                                  result.metric,
-                                 device.gcnArchName,
+                                 properties.gcnArchName,
                                  features,
                                  evaluate);
     }
@@ -211,7 +235,7 @@ hipdnn_flatbuffers_sdk::data_objects::EnginePredictionT AsmSdpaEngine::getPredic
         return result;
     }
 #else
-    static_cast<void>(handle);
+    static_cast<void>(device);
     static_cast<void>(graph);
     static_cast<void>(evaluate);
     result.reason = "UHD engine prediction requires a build with HIPDNN_ENABLE_KERNEL_INGESTOR";
