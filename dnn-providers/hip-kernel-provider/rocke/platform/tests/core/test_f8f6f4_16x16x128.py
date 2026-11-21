@@ -389,6 +389,27 @@ class TestEngineIdentity(unittest.TestCase):
                         serialize(_raw_kernel(*args, op=op)), "gfx950", "llvm23"
                     )
                 self.assertIn(text, str(ctx.exception))
+        # The builder-only op_ids have no catalog row of their own: both engines
+        # admit them only where the catalog lists the row of the same
+        # instruction, and gfx942 lists none.
+        for kind, op_id in (
+            ("mx", "mfma_scale_f32_16x16x128_f8f6f4"),
+            ("unscaled", "mfma_f32_16x16x128_fp4fp6fp8"),
+        ):
+            refusal = (
+                f"tile.{op_id} is not available on gfx942: "
+                "its MMA catalog does not list it"
+            )
+            kernel = _kernel(kind)
+            with self.subTest(kind=kind, arch="gfx942"):
+                with self.assertRaises(NotImplementedError) as python_error:
+                    _lower_kernel_to_llvm_python(
+                        kernel, arch="gfx942", llvm_flavor="llvm23"
+                    )
+                self.assertEqual(str(python_error.exception), refusal)
+                with self.assertRaises(RuntimeError) as cpp_error:
+                    _lower_via_cpp_engine(serialize(kernel), "gfx942", "llvm23")
+                self.assertTrue(str(cpp_error.exception).endswith(f": {refusal}"))
 
 
 class TestToolchain(unittest.TestCase):

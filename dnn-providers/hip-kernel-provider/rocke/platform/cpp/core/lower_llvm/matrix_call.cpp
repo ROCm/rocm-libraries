@@ -16,6 +16,7 @@
 #include "rocke/dtypes_internal.h"
 #include "rocke/error.hpp"
 #include "rocke/ir_internal.h"
+#include "rocke/isa_backend.h"
 #include "rocke/lower_llvm_internal.h"
 #include "rocke/mma_operand_internal.h"
 
@@ -305,16 +306,11 @@ const char* rocke_ll_matrix_operand(rocke_lower_t* L,
 const rocke_mma_op_t* rocke_ll_require_catalog_op(rocke_lower_t* L, const char* op_id)
 {
     const char* gfx = (L->backend && L->backend->gfx) ? L->backend->gfx : NULL;
+    char refusal[ROCKE_ERR_MSG_CAP];
+    if(rocke_isa_mma_catalog_refusal(gfx, op_id, refusal, sizeof refusal))
+        rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "%s", refusal);
     const rocke_arch_target_t* target = gfx ? rocke_arch_target_from_gfx(gfx) : NULL;
-    const rocke_mma_op_t* catalog_op
-        = target ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
-    if(!catalog_op)
-        rocke_ll_fail(L,
-                      ROCKE_ERR_NOTIMPL,
-                      "tile.%s is not available on %s: its MMA catalog does not list it",
-                      op_id,
-                      gfx ? gfx : "(unknown)");
-    return catalog_op;
+    return target ? rocke_mma_catalog_by_op_id(&target->mma, op_id) : NULL;
 }
 
 /* Python Signedness.argument: "i1 1" for a signed integer operand of the

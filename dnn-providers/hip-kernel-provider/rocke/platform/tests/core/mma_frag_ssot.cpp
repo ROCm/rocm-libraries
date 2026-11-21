@@ -230,15 +230,18 @@ int main(void)
     check_emulated_atom(&b, "mfma_f32_16x16x32_xf32", 8, 4);
     check_emulated_atom(&b, "mfma_f32_32x32x16_xf32", 8, 16);
 
-    /* No catalog row (fragment information only): accumulates in fp32. */
-    CHECK(rocke_arch_mma_op_id_dst_dtype("mfma_f32_4x4x4_f16") == NULL,
-          "mfma_f32_4x4x4_f16 has no catalog row");
+    /* MFMA batched 4x4x4: four f32 accumulator values per lane. */
     check_atom(&b, "mfma_f32_4x4x4_f16", 4, ROCKE_SCALAR_F32);
+    /* No catalog row (fragment information only, a builder-only K=128 op_id):
+     * accumulates in fp32. */
+    CHECK(rocke_arch_mma_op_id_dst_dtype("mfma_f32_16x16x128_fp4fp6fp8") == NULL,
+          "mfma_f32_16x16x128_fp4fp6fp8 has no catalog row");
+    check_atom(&b, "mfma_f32_16x16x128_fp4fp6fp8", 4, ROCKE_SCALAR_F32);
 
     CHECK(rocke_arch_mma_c_frag_len(NULL) == 0, "NULL source fragment ID");
     CHECK(rocke_arch_mma_c_frag_len("not_a_real_op_id") == 0, "unknown source fragment ID");
     CHECK(rocke_arch_mma_dst_frag_len(NULL) == 0, "NULL result fragment ID");
-    CHECK(rocke_arch_mma_c_frag_len("mfma_f32_4x4x4_f16") == 4, "fragment-only source");
+    CHECK(rocke_arch_mma_c_frag_len("mfma_f32_16x16x128_fp4fp6fp8") == 4, "fragment-only source");
     CHECK(rocke_arch_mma_c_frag_len("mfma_f32_16x16x32_xf32") == 4, "emulated source");
 
     /* Source2 and result metadata remain independent, including result typing. */

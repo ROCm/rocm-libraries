@@ -310,6 +310,15 @@ GPU node.
 
 - **Byte-identity**: mirror every emission change in both engines; re-run the gate.
   If you intend to change emitted output, re-bless the golden in the same change.
+- **MMA operands go through the shared operand layer**: an MMA operand or result
+  reaches the instruction's register type only through `core/mma_operand.py` and
+  the forms and rows of `core/isa/matrix_operand_forms.py` / `matrix_calls.py`
+  (C++ twins `mma_operand_internal.h` / `matrix_calls_internal.h`; HIP through
+  `_mma_operand` / `h_mma_operand`). Never hand-write a cast, `bit_cast` or
+  `memcpy` for an MMA operand in a handler; a new atom is a catalog row
+  (`arch_specs.json` and `cpp/core/arch/data.cpp`), which the catalog gate in front
+  of every MMA route requires. See
+  [`dsl_docs/development/extending.md`](dsl_docs/development/extending.md) section 5.1.
 - **Relative paths only**: no file under `rocke/platform/` may hardcode an absolute repo
   path or a path escaping `rocke/platform/`. `tests/run_all.py` enforces this with a grep
   guard; keep anchors derived from `__file__` / `CMAKE_CURRENT_SOURCE_DIR`.

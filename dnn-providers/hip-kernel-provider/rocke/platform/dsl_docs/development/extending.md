@@ -389,9 +389,15 @@ if __name__ == "__main__":
 
 ## 5. Adding A New MFMA Atom Or Dtype
 
-### 5.1 IR Builder method
+### 5.1 MMA catalog row
 
-Add a new `mfma_f32_<m>x<n>x<k>_<dt>` method to `IRBuilder` and the corresponding op name. Wire it through `core/lower_llvm.py::_op_tile_mfma_f32_...` and `_INTRINSIC_DECLS`.
+Add the atom as a row of each target's MMA catalog that has it
+(`core/arch/data/arch_specs.json` and `cpp/core/arch/data.cpp`); a kernel issues
+it with `IRBuilder.mma(op_id, ...)`. Every MMA lowering route refuses an op_id
+the target's catalog does not list (`ISABackend.require_catalog_lists`, C++
+`rocke_isa_mma_catalog_refusal`). Operands reach the instruction only through
+the shared operand layer (`platform/AGENTS.md`, Hard rules), never through a
+cast written in a handler.
 
 An instruction whose call is plain data -- the A, B and C operands in fixed
 register types plus literal immediates -- needs no handler. Describe it as a

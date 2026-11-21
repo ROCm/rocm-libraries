@@ -712,6 +712,18 @@ _MMA_RESULT_HINT: Dict[str, str] = {
 }
 
 
+# An MMA op may also be named for its atom, ``tile.<op_id>``: the legacy
+# ISA-named form the lowerers' hand-written MMA handlers answer to.
+_NAMED_MMA_PREFIXES = ("tile.mfma_", "tile.wmma_")
+
+
+def named_mma_op_id(op_name: str) -> str | None:
+    """The op_id of an MMA op named ``tile.<op_id>``, or None for any other op."""
+    if op_name.startswith(_NAMED_MMA_PREFIXES):
+        return op_name.removeprefix("tile.")
+    return None
+
+
 def _check_u16(op: str, field: str, value: int) -> int:
     """Range-check an immediate the intrinsic declares as ``i16``.
 

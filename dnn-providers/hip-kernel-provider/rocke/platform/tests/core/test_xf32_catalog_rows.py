@@ -149,6 +149,7 @@ class TestSelection(unittest.TestCase):
                 "mfma_f32_16x16x32_bf16",
                 "mfma_f32_32x32x8_bf16",
                 "mfma_f32_32x32x16_bf16",
+                "mfma_f32_4x4x4_bf16",
             },
         )
 

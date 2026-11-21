@@ -20,13 +20,76 @@ import ctypes
 
 import numpy as np
 import pytest
+from rocke.core.arch import ArchTarget, known_arches
+from rocke.core.arch import domain as arch_domain
 from rocke.core.ir import BF16, F16, F32, IRBuilder, PtrType
 from rocke.core.lower_llvm import lower_kernel_to_llvm
+from rocke.tests.engines import (
+    assert_engine_rejects,
+    assert_engine_rejects_hip,
+    available_engines,
+    lower_with_engine,
+)
 
 _INTRIN = {
     "f16": "@llvm.amdgcn.mfma.f32.4x4x4f16(",
     "bf16": "@llvm.amdgcn.mfma.f32.4x4x4bf16.1k(",
 }
+
+_BUILTIN = {
+    "f16": "__builtin_amdgcn_mfma_f32_4x4x4f16(",
+    "bf16": "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k(",
+}
+
+# The targets whose MMA catalog lists each atom: gfx908 has the f16 atom but
+# none of the bf16 _1k forms, and no RDNA target has an MFMA.
+_LISTED_ON = {
+    "f16": ["gfx908", "gfx90a", "gfx942", "gfx950"],
+    "bf16": ["gfx90a", "gfx942", "gfx950"],
+}
+
+# Each atom's intrinsic, as the declaration table and the arch domain key it.
+_INTRINSIC_KEY = {"f16": "mfma.f32.4x4x4f16", "bf16": "mfma.f32.4x4x4bf16.1k"}
+
+
+def _listing_targets(dtype: str) -> list[str]:
+    """The targets whose MMA catalog lists the 4x4x4 atom of ``dtype``."""
+    op_id = f"mfma_f32_4x4x4_{dtype}"
+    return [
+        arch for arch in known_arches() if ArchTarget.from_gfx(arch).mma.by_op_id(op_id)
+    ]
+
+
+def _selecting_targets(dtype: str) -> list[str]:
+    """The targets on which the compiler of every committed LLVM flavor links and
+    selects the atom's intrinsic, as the measured arch domain records it."""
+    columns = [arch_domain.load(flavor) for flavor in arch_domain.committed_flavors()]
+    return [
+        arch
+        for arch in known_arches()
+        if all(
+            (cell := column.lookup(_INTRINSIC_KEY[dtype], arch)) is not None
+            and cell.status == "ok"
+            for column in columns
+        )
+    ]
+
+
+def _named_for_its_atom(kernel):
+    """``kernel`` with its ``tile.mma`` op renamed ``tile.<op_id>``, the other
+    name the Python lowerers lower an MMA op under. The C++ engine's IR has no
+    such op: its parser refuses the name."""
+    for op in kernel.body.ops:
+        if op.name == "tile.mma":
+            op.name = f"tile.{op.attrs.pop('op_id')}"
+    return kernel
+
+
+def _catalog_refusal(dtype: str, arch: str) -> str:
+    return (
+        f"tile.mfma_f32_4x4x4_{dtype} is not available on {arch}: "
+        "its MMA catalog does not list it"
+    )
 
 
 def _build(dtype: str):
@@ -84,17 +147,64 @@ def test_lowering_emits_expected_intrinsic(dtype):
     if dtype == "bf16":
         assert "bitcast <4 x bfloat>" in ll
         assert "declare <4 x float> @llvm.amdgcn.mfma.f32.4x4x4bf16.1k(<4 x i16>" in ll
+    # The catalog lists the atom exactly where the compiler selects it. Each
+    # engine lowers it there, and refuses it with the catalog gate's text on
+    # every other target, under either name.
+    assert _listing_targets(dtype) == _LISTED_ON[dtype] == _selecting_targets(dtype)
+    for arch in known_arches():
+        for engine in available_engines():
+            if arch in _LISTED_ON[dtype]:
+                text = lower_with_engine(
+                    _build(dtype), arch, engine=engine, llvm_flavor="llvm22"
+                )
+                assert _INTRIN[dtype] in text, (arch, engine)
+            else:
+                assert_engine_rejects(
+                    _build(dtype),
+                    arch,
+                    engine=engine,
+                    error_type=NotImplementedError,
+                    message=_catalog_refusal(dtype, arch),
+                    llvm_flavor="llvm22",
+                )
+        if arch not in _LISTED_ON[dtype]:
+            assert_engine_rejects(
+                _named_for_its_atom(_build(dtype)),
+                arch,
+                engine="python",
+                error_type=NotImplementedError,
+                message=_catalog_refusal(dtype, arch),
+                llvm_flavor="llvm22",
+            )
 
 
 @pytest.mark.parametrize("dtype", ["f16", "bf16"])
 def test_hip_lowering_emits_expected_builtin(dtype):
     from rocke.core.lower_hip import lower_kernel_to_hip
 
-    builtin = {
-        "f16": "__builtin_amdgcn_mfma_f32_4x4x4f16(",
-        "bf16": "__builtin_amdgcn_mfma_f32_4x4x4bf16_1k(",
-    }[dtype]
-    assert builtin in lower_kernel_to_hip(_build(dtype))
+    assert _BUILTIN[dtype] in lower_kernel_to_hip(_build(dtype))
+    # The HIP lowering of each engine applies the same catalog gate. Both
+    # engines' HIP text for the listing targets is pinned by
+    # test_mma_operand_register_type.py (test_hip_batched_4x4x4_mfma_lowers_in_both_engines).
+    for arch in known_arches():
+        if arch in _LISTED_ON[dtype]:
+            assert _BUILTIN[dtype] in lower_kernel_to_hip(_build(dtype), arch=arch)
+            continue
+        for engine in available_engines():
+            assert_engine_rejects_hip(
+                _build(dtype),
+                arch,
+                engine=engine,
+                error_type=NotImplementedError,
+                message=_catalog_refusal(dtype, arch),
+            )
+        assert_engine_rejects_hip(
+            _named_for_its_atom(_build(dtype)),
+            arch,
+            engine="python",
+            error_type=NotImplementedError,
+            message=_catalog_refusal(dtype, arch),
+        )
 
 
 @pytest.mark.parametrize("dtype", ["f16", "bf16"])

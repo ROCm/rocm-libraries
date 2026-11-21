@@ -85,6 +85,7 @@ from .ir import (
     element_type,
     gpu_check_word_symbol,
     lane_count,
+    named_mma_op_id,
     require_streaming_arch,
     smem_vector_access_align,
     split_loc,
@@ -2561,6 +2562,9 @@ class _Lowerer:
         error = tf32_op_error(op)
         if error:
             raise ValueError(error)
+        named_op_id = named_mma_op_id(op.name)
+        if named_op_id is not None:
+            self._backend.require_mma_available(named_op_id)
         method = getattr(self, f"_op_{op.name.replace('.', '_')}", None)
         if method is None:
             raise NotImplementedError(f"no LLVM lowering for op {op.name!r}")
@@ -4014,9 +4018,7 @@ class _Lowerer:
         self._backend.emit_wmma(self, op)
 
     def _op_tile_mma(self, op: Op) -> None:
-        error = tf32_mma_target_error(op.attrs.get("op_id"), self._backend.arch)
-        if error:
-            raise ValueError(error)
+        self._backend.require_mma_available(op.attrs["op_id"])
         # Target-neutral MMA: the ISA backend maps ``op.attrs["op_id"]`` to the
         # matching MFMA (CDNA) or WMMA (RDNA) emission. CDNA backends reuse the
         # existing ``_op_tile_<op_id>`` handler verbatim, so the output is
@@ -4416,8 +4418,6 @@ class _Lowerer:
         )
 
         atom = gfx950_scaled_mfma(op.attrs["op_id"])
-        if self._backend.arch.gfx != "gfx950":
-            raise NotImplementedError("scaled MFMA requires gfx950")
         error = scaled_mfma_error(atom.op_id, op.operands, op.results)
         if error:
             raise ValueError(error)

@@ -156,10 +156,11 @@ const char* rocke_matrix_call_declaration(const rocke_matrix_call_t* call,
 
 typedef struct rocke_lower rocke_lower_t;
 
-/* The lowering target's catalog row for `op_id`; fails with
- * ROCKE_ERR_NOTIMPL "tile.<op_id> is not available on <gfx>: its MMA catalog
- * does not list it" where the catalog does not list it (Python
- * ISABackend._require_catalog_lists, same text). */
+/* The lowering target's catalog row for `op_id`; fails with ROCKE_ERR_NOTIMPL
+ * and the refusal of rocke_isa_mma_catalog_refusal (Python
+ * ISABackend.require_catalog_lists, same text) where the catalog does not list
+ * it. NULL, without failing, for a builder-only op_id the gate admits: no row
+ * names it. */
 const rocke_mma_op_t* rocke_ll_require_catalog_op(rocke_lower_t* L, const char* op_id);
 
 /* Check the complete operand form without recording declarations or emitting

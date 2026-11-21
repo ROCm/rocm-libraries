@@ -102,6 +102,8 @@ Non-package assets resolve through `rocke.assets` (`platform_root()`,
 ## Hard rules (digest)
 
 - **Byte-identity** — mirror every emission change in both engines; re-run the gate.
+- **MMA operands** — only through the shared operand layer, never a cast in a
+  handler; a new atom is a catalog row. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#hard-rules).
 - **Helpers** — reuse them, write the missing ones, fix the broken ones, each
   with a test, in the kernel's PR. New families too; the C++ mirror is not a
   reason to inline. Rule: [`platform/AGENTS.md`](platform/AGENTS.md#helpers-placement).

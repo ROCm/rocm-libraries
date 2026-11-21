@@ -34,6 +34,7 @@
 #include "rocke/arch_target.h"
 #include "rocke/ir.h"
 #include "rocke/ir_internal.h"
+#include "rocke/isa_backend.h"
 #include "rocke/lower_hip.h"
 #include "rocke/lower_hip_internal.h"
 #include "rocke/mfma_internal.h"
@@ -242,10 +243,18 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
     {
         return rocke_h_fail(lw, ROCKE_ERR_KEY, "tile.mma: missing 'op_id' attr");
     }
+    {
+        char refusal[ROCKE_ERR_MSG_CAP];
+        if(rocke_tf32_mma_target_error(op_id, lw->arch.gfx, refusal, sizeof(refusal)))
+            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", refusal);
+        /* The catalog gate (Python _op_tile_mma -> ISABackend.require_catalog_lists):
+         * an op_id the target's MMA catalog does not list is refused before any
+         * handler below emits. */
+        if(rocke_isa_mma_catalog_refusal(lw->arch.gfx, op_id, refusal, sizeof(refusal)))
+            return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "%s", refusal);
+    }
     if(const auto* atom = rocke_gfx950_scaled_mfma(op_id))
     {
-        if(strcmp(lw->arch.gfx, "gfx950") != 0)
-            return rocke_h_fail(lw, ROCKE_ERR_NOTIMPL, "scaled MFMA requires gfx950");
         if(const char* error = rocke_scaled_mfma_error(op_id, op->operands, op->num_operands))
             return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
         if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
@@ -272,9 +281,6 @@ static rocke_status_t rocke_h_op_tile_mma(rocke_h_lowerer_t* lw, const rocke_op_
             op, "vec<tf32x2>", accumulator_type, accumulator_type, 0, 0, message, sizeof(message));
         if(error)
             return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", error);
-        char tf32_error[ROCKE_ERR_MSG_CAP];
-        if(rocke_tf32_mma_target_error(op_id, lw->arch.gfx, tf32_error, sizeof tf32_error))
-            return rocke_h_fail(lw, ROCKE_ERR_VALUE, "%s", tf32_error);
         rocke_h_emitf(lw,
                       "f32x%d %s = __builtin_amdgcn_%s(__builtin_bit_cast(f32x2, %s), "
                       "__builtin_bit_cast(f32x2, %s), %s, 0, 0, 0);",

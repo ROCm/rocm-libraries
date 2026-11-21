@@ -128,6 +128,8 @@ _CATALOG_ORDER = {
         "mfma_i32_16x16x16_i8",
         "mfma_i32_32x32x8_i8",
         "mfma_f64_16x16x4_f64",
+        "mfma_f32_4x4x4_f16",
+        "mfma_f32_4x4x4_bf16",
     ),
     "gfx942": (
         "mfma_f32_16x16x8_xf32",
@@ -150,6 +152,8 @@ _CATALOG_ORDER = {
         "mfma_f32_16x16x32_bf8_fp8",
         "mfma_f32_32x32x16_fp8_bf8",
         "mfma_f32_32x32x16_bf8_fp8",
+        "mfma_f32_4x4x4_f16",
+        "mfma_f32_4x4x4_bf16",
     ),
     "gfx950": (
         "mfma_f32_16x16x4_f32",
@@ -252,6 +256,8 @@ _CATALOG_ORDER = {
         "mfma_gfx950_f32_32x32x64_fp4_fp4_scale_e8m0_e8m0_k32",
         "mfma_f32_16x16x32_xf32",
         "mfma_f32_32x32x16_xf32",
+        "mfma_f32_4x4x4_f16",
+        "mfma_f32_4x4x4_bf16",
     ),
     "gfx1151": (
         "wmma_f32_16x16x16_f16",

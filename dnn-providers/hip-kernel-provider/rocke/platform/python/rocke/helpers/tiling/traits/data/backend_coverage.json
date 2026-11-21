@@ -296,15 +296,15 @@
    "gfx90a": [{"class": "no_backend_op"}]
   },
   "mfma_f32_4x4x4bf16_1k": {
-   "gfx90a": [{"class": "no_backend_op"}],
-   "gfx942": [{"class": "no_backend_op"}],
-   "gfx950": [{"class": "no_backend_op"}]
+   "gfx90a": [{"class": "multi_block", "backend_op": "mfma_f32_4x4x4_bf16"}],
+   "gfx942": [{"class": "multi_block", "backend_op": "mfma_f32_4x4x4_bf16"}],
+   "gfx950": [{"class": "multi_block", "backend_op": "mfma_f32_4x4x4_bf16"}]
   },
   "mfma_f32_4x4x4f16": {
-   "gfx908": [{"class": "no_backend_op"}],
-   "gfx90a": [{"class": "no_backend_op"}],
-   "gfx942": [{"class": "no_backend_op"}],
-   "gfx950": [{"class": "no_backend_op"}]
+   "gfx908": [{"class": "multi_block", "backend_op": "mfma_f32_4x4x4_f16"}],
+   "gfx90a": [{"class": "multi_block", "backend_op": "mfma_f32_4x4x4_f16"}],
+   "gfx942": [{"class": "multi_block", "backend_op": "mfma_f32_4x4x4_f16"}],
+   "gfx950": [{"class": "multi_block", "backend_op": "mfma_f32_4x4x4_f16"}]
   },
   "mfma_f64_16x16x4f64": {
    "gfx90a": [{"class": "issuable", "backend_op": "mfma_f64_16x16x4_f64"}],

@@ -506,10 +506,15 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         rocke_ll_fail(L, ROCKE_ERR_KEY, "tile.mma: missing op_id attribute");
     }
 
+    char tf32_error[ROCKE_ERR_MSG_CAP];
+    if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof(tf32_error)))
+        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
+    /* The catalog gate (Python ISABackend.emit_mma): an op_id the target's MMA
+     * catalog does not list is refused before any handler below emits. */
+    rocke_ll_require_catalog_op(L, op_id);
+
     if(const auto* atom = rocke_gfx950_scaled_mfma(op_id))
     {
-        if(!L->backend || strcmp(L->backend->gfx, "gfx950") != 0)
-            rocke_ll_fail(L, ROCKE_ERR_NOTIMPL, "scaled MFMA requires gfx950");
         if(const char* error = rocke_scaled_mfma_error(op_id, op->operands, op->num_operands))
             rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", error);
         if(op->num_results != 1 || strcmp(op->results[0]->type->name, "vec<f32x16>") != 0)
@@ -530,9 +535,6 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
             rocke_ll_operand(L, op->operands[4]));
         return;
     }
-    char tf32_error[ROCKE_ERR_MSG_CAP];
-    if(rocke_tf32_mma_target_error(op_id, L->backend->gfx, tf32_error, sizeof tf32_error))
-        rocke_ll_fail(L, ROCKE_ERR_VALUE, "%s", tf32_error);
 
     /* An emulated atom is expanded here, before ISA dispatch, so the expansion
      * is written once rather than per ISA family. Native atoms -- every atom
@@ -543,12 +545,11 @@ static void _op_tile_mma(rocke_lower_t* L, const rocke_op_t* op)
         return;
     }
 
-    /* The backend's first step (Python ISABackend.emit_mma): an op_id described
-     * as data is lowered from its matrix call; every other op_id keeps its
-     * hand-written handler below. */
+    /* An op_id described as data is lowered from its matrix call (Python
+     * ISABackend.emit_mma); every other op_id keeps its hand-written handler
+     * below. */
     if(const rocke_matrix_call_t* call = rocke_matrix_call_for(op_id))
     {
-        rocke_ll_require_catalog_op(L, op_id);
         rocke_ll_emit_matrix_call(L, op, op_id, call);
         return;
     }
@@ -662,9 +663,6 @@ static void _emit_wmma_scale(rocke_lower_t* L, const rocke_op_t* op)
     char concrete_name[160];
     snprintf(concrete_name, sizeof(concrete_name), "tile.%s", spec->op_id);
     op_name = concrete_name;
-    /* Admitted on any target whose MMA catalog lists the atom (Python
-     * ISABackend.emit_scaled_wmma), never by the target's name. */
-    rocke_ll_require_catalog_op(L, spec->op_id);
     if(!rocke_ll_profile_has(L->flavor, ROCKE_LL_CAP_LLVM23_TARGET_OPS))
     {
         rocke_ll_fail(L,
