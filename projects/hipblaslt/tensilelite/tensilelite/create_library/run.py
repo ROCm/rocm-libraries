@@ -31,6 +31,7 @@ import gc
 import glob
 import itertools
 import os
+import random
 import shutil
 import subprocess
 import sys
@@ -994,6 +995,14 @@ def writeSolutionsAndKernelsTCL(
             cmdlineArchs,
         )
 
+        # Kernels arrive grouped by logic file, so the largest ones (GridBased
+        # libraries, 1+ GiB transient each) land on all workers at once and set
+        # the build's memory peak. A fixed-seed shuffle spreads them over the
+        # run; results stay aligned with this list, and nothing downstream
+        # depends on the order (code objects link sorted, kernel info is keyed
+        # by kernel name).
+        uniqueAsmKernels = list(uniqueAsmKernels)
+        random.Random(0x7E45).shuffle(uniqueAsmKernels)
         results = _mapKernels(
             compose(unaryAssemble, unaryWriteAssembly, unaryProcessKernelSource),
             uniqueAsmKernels,
