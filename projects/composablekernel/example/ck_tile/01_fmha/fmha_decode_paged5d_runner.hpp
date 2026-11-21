@@ -25,10 +25,10 @@ using ck_tile::index_t;
 constexpr index_t kHdim = 128;
 constexpr index_t kPage = 16;
 
-template <bool kWaveSplit, index_t kNumSplits, bool kGroups, index_t kPageSize>
+template <bool kWaveSplit, index_t kNumSplits, bool kGroups, index_t kPageSize, bool kQoFp16>
 hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t stream)
 {
-    using K    = ck_tile::FmhaDecodePaged5dKernel<kWaveSplit, kNumSplits, kGroups, kPageSize>;
+    using K = ck_tile::FmhaDecodePaged5dKernel<kWaveSplit, kNumSplits, kGroups, kPageSize, kQoFp16>;
     auto kargs = K::MakeKargs(h);
     hipLaunchConfig_t cfg{};
     cfg.gridDim  = K::GridSize(h.batch, h.nhead_k, h.num_groups);
@@ -45,7 +45,7 @@ hipError_t launch_one(const ck_tile::FmhaDecodePaged5dHostArgs& h, hipStream_t s
     return hipLaunchKernelEx(&cfg, ck_tile::fmha_decode_paged5d_entry<K>, kargs);
 }
 
-template <bool kWaveSplit, bool kGroups, index_t kPageSize, index_t... Ns>
+template <bool kWaveSplit, bool kGroups, index_t kPageSize, bool kQoFp16, index_t... Ns>
 hipError_t dispatch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                     index_t splits,
                     hipStream_t stream,
@@ -54,23 +54,38 @@ hipError_t dispatch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
     hipError_t e       = hipErrorInvalidValue;
     const auto try_one = [&](auto ns) {
         if(splits == decltype(ns)::value)
-            e = launch_one<kWaveSplit, decltype(ns)::value, kGroups, kPageSize>(h, stream);
+            e = launch_one<kWaveSplit, decltype(ns)::value, kGroups, kPageSize, kQoFp16>(h, stream);
     };
     (try_one(ck_tile::number<Ns + 1>{}), ...);
     return e;
 }
 
-template <index_t kPageSize>
+template <index_t kPageSize, bool kQoFp16>
 hipError_t launch_page(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                        const ck_tile::FmhaDecodePaged5dConfig& c,
                        hipStream_t stream)
 {
     const auto seq = std::make_integer_sequence<index_t, 15>{};
     if(c.num_groups > 1)
-        return c.wave_split ? dispatch<true, true, kPageSize>(h, c.num_splits, stream, seq)
-                            : dispatch<false, true, kPageSize>(h, c.num_splits, stream, seq);
-    return c.wave_split ? dispatch<true, false, kPageSize>(h, c.num_splits, stream, seq)
-                        : dispatch<false, false, kPageSize>(h, c.num_splits, stream, seq);
+        return c.wave_split
+                   ? dispatch<true, true, kPageSize, kQoFp16>(h, c.num_splits, stream, seq)
+                   : dispatch<false, true, kPageSize, kQoFp16>(h, c.num_splits, stream, seq);
+    return c.wave_split ? dispatch<true, false, kPageSize, kQoFp16>(h, c.num_splits, stream, seq)
+                        : dispatch<false, false, kPageSize, kQoFp16>(h, c.num_splits, stream, seq);
+}
+
+template <bool kQoFp16>
+hipError_t launch_type(const ck_tile::FmhaDecodePaged5dHostArgs& h,
+                       const ck_tile::FmhaDecodePaged5dConfig& c,
+                       hipStream_t stream)
+{
+    switch(h.page_size)
+    {
+    case 16: return launch_page<16, kQoFp16>(h, c, stream);
+    case 64: return launch_page<64, kQoFp16>(h, c, stream);
+    case 128: return launch_page<128, kQoFp16>(h, c, stream);
+    default: return hipErrorInvalidValue;
+    }
 }
 
 inline hipError_t launch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
@@ -80,18 +95,16 @@ inline hipError_t launch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
     // larger cache pages need whole 4-page groups per split (see fmha_decode_paged5d_config)
     if(h.page_size != 16 && c.pages_per_split % 4 != 0)
         return hipErrorInvalidValue;
-    switch(h.page_size)
-    {
-    case 16: return launch_page<16>(h, c, stream);
-    case 64: return launch_page<64>(h, c, stream);
-    case 128: return launch_page<128>(h, c, stream);
-    default: return hipErrorInvalidValue;
-    }
+    return h.qo_fp16 ? launch_type<true>(h, c, stream) : launch_type<false>(h, c, stream);
 }
 
 inline float bf16_to_float(uint16_t x)
 {
     return ck_tile::type_convert<float>(ck_tile::bit_cast<ck_tile::bf16_t>(x));
+}
+inline float fp16_to_float(uint16_t x)
+{
+    return ck_tile::type_convert<float>(ck_tile::bit_cast<ck_tile::fp16_t>(x));
 }
 inline float fp8_to_float(uint8_t x)
 {
@@ -110,6 +123,7 @@ struct Case
     std::string layout      = "auto";    // auto, coop, wave
     index_t max_seqlen_k    = 0;         // the bound the grid is sized for; 0 = longest seqlen_k
     index_t page_size       = 16;        // tokens per cache page: 16, 64 or 128
+    bool fp16               = false;     // fp16 Q and output instead of bf16
     unsigned seed           = 1;
 };
 
@@ -123,7 +137,7 @@ struct Result
     std::string error;
 };
 
-// Runs one case: random Q (bf16), K/V (finite fp8 in [-1, 1], pages in a random order, the
+// Runs one case: random Q (bf16 or fp16), K/V (finite fp8 in [-1, 1], pages in a random order, the
 // unused tail of each sequence's last page filled with NaN codes), a workspace filled with NaN
 // codes, then validates against a CPU reference and/or times stream and HIP-graph launches.
 inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
@@ -183,7 +197,13 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     };
     std::vector<uint16_t> q(static_cast<size_t>(batch) * c.nhead * kHdim);
     for(auto& x : q)
-        x = ck_tile::bit_cast<uint16_t>(ck_tile::type_convert<ck_tile::bf16_t>(2.f * uni(rng)));
+        x = c.fp16 ? ck_tile::bit_cast<uint16_t>(
+                         ck_tile::type_convert<ck_tile::fp16_t>(2.f * uni(rng)))
+                   : ck_tile::bit_cast<uint16_t>(
+                         ck_tile::type_convert<ck_tile::bf16_t>(2.f * uni(rng)));
+    const auto qo_to_float = [&](uint16_t x) {
+        return c.fp16 ? fp16_to_float(x) : bf16_to_float(x);
+    };
     std::vector<uint8_t> finite;
     for(int i = 0; i < 256; ++i)
         if((i & 0x7f) != 0x7f && std::fabs(fp8_to_float(static_cast<uint8_t>(i))) <= 1.f)
@@ -259,7 +279,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
         c.window,
         cfg.pages_per_split,
         cfg.num_groups,
-        scale_s};
+        scale_s,
+        c.fp16};
 
     hipStream_t stream;
     HIP_CHECK_ERROR(hipDeviceSynchronize()); // the fills above, before a non-blocking stream
@@ -291,9 +312,8 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                 {
                     double acc = 0;
                     for(index_t d = 0; d < kHdim; ++d)
-                        acc +=
-                            bf16_to_float(q[(static_cast<size_t>(b) * c.nhead + hq) * kHdim + d]) *
-                            fp8_to_float(k[page_base(t) + k_off(t % ps, d)]);
+                        acc += qo_to_float(q[(static_cast<size_t>(b) * c.nhead + hq) * kHdim + d]) *
+                               fp8_to_float(k[page_base(t) + k_off(t % ps, d)]);
                     sc[t - lo] = acc * k_descale * scale_s;
                     mx         = std::max(mx, sc[t - lo]);
                 }
@@ -310,7 +330,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
                 {
                     const double ref = l > 0 ? o[d] / l * v_descale : 0.0;
                     const double got =
-                        bf16_to_float(out[(static_cast<size_t>(b) * c.nhead + hq) * kHdim + d]);
+                        qo_to_float(out[(static_cast<size_t>(b) * c.nhead + hq) * kHdim + d]);
                     res.max_err = std::max(res.max_err, std::fabs(ref - got));
                     res.max_ref = std::max(res.max_ref, std::fabs(ref));
                     dot += ref * got;

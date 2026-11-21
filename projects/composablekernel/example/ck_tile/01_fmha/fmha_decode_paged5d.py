@@ -4,7 +4,7 @@
 """PyTorch wrapper of the gfx125 CK fp8 decode kernel over the SHUFFLE 5D paged KV cache.
 
 pa_decode takes the arguments of aiter's FlyDSL pa_decode for the case it covers: one query
-token, bf16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or 128
+token, bf16 or fp16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or 128
 tokens, at most 16 query heads per kv head. Load libck_fmha_decode_paged5d.so (target ck_fmha_decode_paged5d) from
 CK_FMHA_DECODE_PAGED5D_LIB or the library search path.
 """
@@ -37,7 +37,7 @@ def _load():
             [ctypes.c_void_p] * 4
             + [ctypes.c_int]
             + [ctypes.c_void_p] * 6
-            + [ctypes.c_int] * 6
+            + [ctypes.c_int] * 7
             + [ctypes.c_float, ctypes.c_void_p]
         )
         _lib = lib
@@ -84,8 +84,8 @@ def _scale_ptr(scale, device):
 
 
 def pa_decode(
-    output,  # [num_seqs, num_query_heads, 128] bf16
-    query,  # [num_seqs, num_query_heads, 128] bf16
+    output,  # [num_seqs, num_query_heads, 128], the type of query
+    query,  # [num_seqs, num_query_heads, 128] bf16 or fp16
     key_cache,  # [num_blocks, num_kv_heads, 128 // 16, page_size, 16] fp8 e4m3
     value_cache,  # [num_blocks, num_kv_heads, page_size // 16, 128, 16] fp8 e4m3
     context_lengths,  # [num_seqs] int32
@@ -116,8 +116,11 @@ def pa_decode(
     page = key_cache.shape[3] if key_cache.dim() == 5 else 0
     if hdim != HDIM or output.shape != query.shape:
         raise ValueError("query and output must be [num_seqs, num_query_heads, 128]")
-    if query.dtype != torch.bfloat16 or output.dtype != torch.bfloat16:
-        raise ValueError("query and output must be bf16")
+    if (
+        query.dtype not in (torch.bfloat16, torch.float16)
+        or output.dtype != query.dtype
+    ):
+        raise ValueError("query must be bf16 or fp16 and output of the same type")
     if key_cache.element_size() != 1 or value_cache.element_size() != 1:
         raise ValueError("key_cache and value_cache must be fp8 e4m3")
     if page not in PAGE_SIZES or tuple(key_cache.shape) != (
@@ -178,6 +181,7 @@ def pa_decode(
         max_context_length,
         sliding_window,
         page,
+        1 if query.dtype == torch.float16 else 0,
         float(softmax_scale),
         stream,
     )

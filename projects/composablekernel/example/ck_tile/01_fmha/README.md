@@ -471,8 +471,8 @@ Pass `-kname=1` to print which instance was dispatched.
 (`ck_tile/ops/fmha/kernel/fmha_fwd_decode_paged5d_kernel.hpp`): one query token per sequence over
 sglang's SHUFFLE 5D paged cache, K `[num_blocks][nhead_k][d / 16][page_size][16 B]` and
 V `[num_blocks][nhead_k][page_size / 16][d][16]`, page_size 16, 64 or 128, d 128, fp8 e4m3 K/V
-with per-tensor descales, bf16 Q and output, at most 16 query heads per kv head, an optional
-sliding window. It needs no codegen.
+with per-tensor descales, bf16 or fp16 Q and output (`-prec`), at most 16 query heads per kv head,
+an optional sliding window. It needs no codegen.
 
 ```
 ninja tile_example_fmha_decode_paged5d

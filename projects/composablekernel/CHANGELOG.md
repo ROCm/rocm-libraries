@@ -9,7 +9,7 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 * Added batched GEMM to CK Tile GEMM Stream-K: `StreamKHostArgs` takes a batch count and A, B and C batch strides, and the data-parallel and Stream-K work, persistent or not, is shared over the output tiles of all batches with every reduction strategy.
 * Added the gfx1250 comp_tdm_v3 pipeline to CK Tile batched GEMM, in the CK Tile dispatcher and the Tile Engine.
 * Added batched Stream-K to the CK Tile dispatcher batched GEMM bridge and its Tile Engine benchmark (`batched_gemm_full_benchmark.py`): Stream-K sweep configs for gfx9 and gfx1250 (compv3, compv4, mem, comp_tdm, comp_tdm_v2, comp_tdm_v3) and the `--reduction-strategy` and `--budget-pct` options.
-* Added a gfx1250 CK Tile fp8 decode attention kernel over sglang's SHUFFLE 5D paged KV cache (`FmhaDecodePaged5dKernel`): one query token, head dim 128, cache pages of 16, 64 or 128 tokens, per-tensor K/V descales, optional sliding window, with an example, a C API and a PyTorch wrapper whose arguments follow aiter's FlyDSL `pa_decode`.
+* Added a gfx1250 CK Tile fp8 decode attention kernel over sglang's SHUFFLE 5D paged KV cache (`FmhaDecodePaged5dKernel`): one query token, head dim 128, cache pages of 16, 64 or 128 tokens, bf16 or fp16 Q and output, per-tensor K/V descales, optional sliding window, with an example, a C API and a PyTorch wrapper whose arguments follow aiter's FlyDSL `pa_decode`.
 
 ### Changed
 

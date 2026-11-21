@@ -26,9 +26,9 @@ size_t ck_fmha_decode_paged5d_num_counters(int batch, int nhead_k)
     return ck_tile::fmha_decode_paged5d_num_counters(batch, nhead_k);
 }
 
-// q, o: [batch][nhead_q][128] bf16; k, v: SHUFFLE 5D fp8 e4m3 caches of page_size (16, 64 or
-// 128) tokens per page; block_table: int32 rows of block_table_stride entries; seqlen_k: int32
-// [batch], each <= max_seqlen_k; k/v descale: one float each. Returns a hipError_t.
+// q, o: [batch][nhead_q][128] bf16, or fp16 with qo_fp16 != 0; k, v: SHUFFLE 5D fp8 e4m3 caches of
+// page_size (16, 64 or 128) tokens per page; block_table: int32 rows of block_table_stride entries;
+// seqlen_k: int32 [batch], each <= max_seqlen_k; k/v descale: one float each. Returns a hipError_t.
 int ck_fmha_decode_paged5d(const void* q,
                            const void* k,
                            const void* v,
@@ -46,6 +46,7 @@ int ck_fmha_decode_paged5d(const void* q,
                            int max_seqlen_k,
                            int window,
                            int page_size,
+                           int qo_fp16,
                            float scale_s,
                            hipStream_t stream)
 {
@@ -71,7 +72,8 @@ int ck_fmha_decode_paged5d(const void* q,
                                                   window,
                                                   c.pages_per_split,
                                                   c.num_groups,
-                                                  scale_s};
+                                                  scale_s,
+                                                  qo_fp16 != 0};
     return fmha_decode_paged5d::launch(args, c, stream);
 }
 }

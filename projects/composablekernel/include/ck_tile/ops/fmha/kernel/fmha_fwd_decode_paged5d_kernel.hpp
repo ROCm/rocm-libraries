@@ -11,9 +11,10 @@
 // page_size = 16, 64 or 128 tokens:
 //   K [num_blocks][nhead_k][hdim / 16][page_size tokens][16 B]
 //   V [num_blocks][nhead_k][page_size / 16][hdim][16 tokens]
-// One query token per sequence, hdim 128, fp8 e4m3 K/V with per-tensor descales, bf16 Q
-// (quantized per row in the kernel) and bf16 output. The q heads of one kv head (at most 16) are
-// the 16 columns of S^T = K Q^T. Below, a page is 16 tokens; a cache page holds page_size / 16.
+// One query token per sequence, hdim 128, fp8 e4m3 K/V with per-tensor descales, bf16 or fp16 Q
+// (quantized per row in the kernel) and output of the same type. The q heads of one kv head (at
+// most 16) are the 16 columns of S^T = K Q^T. Below, a page is 16 tokens; a cache page holds
+// page_size / 16.
 //
 // Grid (kNumSplits * groups, nhead_k, batch). Each kNumSplits consecutive splits are one workgroup
 // cluster; each stores O / l in bf16 and (m, l), and after a cluster barrier every split merges
@@ -29,14 +30,14 @@ namespace ck_tile {
 
 struct FmhaDecodePaged5dHostArgs
 {
-    const void* q_ptr;           // [batch][nhead_q][hdim] bf16
+    const void* q_ptr;           // [batch][nhead_q][hdim] bf16, or fp16 with qo_fp16
     const void* k_ptr;           // 5D fp8
     const void* v_ptr;           // 5D fp8
     const int32_t* block_table;  // [batch][max_blocks_per_seq]
     const int32_t* seqlen_k_ptr; // [batch]
     const float* k_descale_ptr;  // one float
     const float* v_descale_ptr;  // one float
-    void* o_ptr;                 // [batch][nhead_q][hdim] bf16
+    void* o_ptr;                 // [batch][nhead_q][hdim], the type of Q
     void* workspace_ptr;         // fmha_decode_paged5d_workspace_bytes, no initialization needed
     // fmha_decode_paged5d_num_counters int32; zero them once, every launch leaves them zero, so
     // launches of any shape can share them as long as they do not run concurrently
@@ -50,6 +51,7 @@ struct FmhaDecodePaged5dHostArgs
     index_t pages_per_split; // the most a split takes
     index_t num_groups;      // clusters per (batch, kv head)
     float scale_s;
+    bool qo_fp16 = false; // Q and O are fp16 instead of bf16
 };
 
 // num_splits workgroups per cluster, num_groups clusters per (batch, kv head)
@@ -123,9 +125,14 @@ CK_TILE_HOST size_t fmha_decode_paged5d_num_counters(index_t batch, index_t nhea
     return static_cast<size_t>(batch) * nhead_k * 15;
 }
 
-template <bool kWaveSplit_, index_t kNumSplits_, bool kGroups_ = false, index_t kPageSize_ = 16>
+template <bool kWaveSplit_,
+          index_t kNumSplits_,
+          bool kGroups_      = false,
+          index_t kPageSize_ = 16,
+          bool kQoFp16_      = false>
 struct FmhaDecodePaged5dKernel
 {
+    static constexpr bool kQoFp16       = kQoFp16_; // Q and O are fp16 instead of bf16
     static constexpr bool kWaveSplit    = kWaveSplit_;
     static constexpr index_t kNumSplits = kNumSplits_;
     static constexpr index_t kPageSize  = kPageSize_; // tokens per cache page
@@ -268,6 +275,16 @@ struct FmhaDecodePaged5dKernel
     {
         return f32_to_bf16(a) | (f32_to_bf16(b) << 16);
     }
+    CK_TILE_DEVICE static float fp16_to_f32(uint32_t x)
+    {
+        return static_cast<float>(__builtin_bit_cast(_Float16, static_cast<uint16_t>(x)));
+    }
+    CK_TILE_DEVICE static uint32_t pack_fp16(float a, float b)
+    {
+        return __builtin_bit_cast(uint16_t, static_cast<_Float16>(a)) |
+               (static_cast<uint32_t>(__builtin_bit_cast(uint16_t, static_cast<_Float16>(b)))
+                << 16);
+    }
     CK_TILE_DEVICE static float exp2(float x) { return __builtin_amdgcn_exp2f(x); }
 
     // TDM gather of kCount rows of kRowBytes (row indices up to 2^31) to consecutive LDS rows
@@ -389,8 +406,8 @@ struct FmhaDecodePaged5dKernel
         // loads return in order: the block ids, which the first copies wait for, go out first
         __builtin_amdgcn_sched_barrier(0);
 
-        // Q^T operand of row n: 16-byte d chunks 2i + h, after a per-row absmax quantization
-        float qv[64];
+        // Q^T operand of row n: 16-byte d chunks 2i + h, quantized per row (absmax) below
+        v4i qraw[8];
         {
             const uint16_t* qrow =
                 a.q +
@@ -398,15 +415,8 @@ struct FmhaDecodePaged5dKernel
             for(index_t i = 0; i < 4; ++i)
             {
                 const index_t c = 2 * i + h;
-                const v4i x0    = *ptr_as<v4i>(qrow + c * 16);
-                const v4i x1    = *ptr_as<v4i>(qrow + c * 16 + 8);
-                for(index_t e = 0; e < 4; ++e)
-                {
-                    qv[i * 16 + 2 * e]         = bf16_to_f32(x0[e] & 0xffff);
-                    qv[i * 16 + 2 * e + 1]     = bf16_to_f32(static_cast<uint32_t>(x0[e]) >> 16);
-                    qv[i * 16 + 8 + 2 * e]     = bf16_to_f32(x1[e] & 0xffff);
-                    qv[i * 16 + 8 + 2 * e + 1] = bf16_to_f32(static_cast<uint32_t>(x1[e]) >> 16);
-                }
+                qraw[2 * i]     = *ptr_as<v4i>(qrow + c * 16);
+                qraw[2 * i + 1] = *ptr_as<v4i>(qrow + c * 16 + 8);
             }
         }
 
@@ -483,6 +493,25 @@ struct FmhaDecodePaged5dKernel
             issue(t);
         asm volatile("" ::"s"(kds), "s"(vd));
 
+        float qv[64];
+        const auto widen = [&](auto fp16) {
+            for(index_t j = 0; j < 8; ++j)
+                for(index_t e = 0; e < 4; ++e)
+                {
+                    const uint32_t u = static_cast<uint32_t>(qraw[j][e]);
+                    if constexpr(decltype(fp16)::value)
+                    {
+                        qv[j * 8 + 2 * e]     = fp16_to_f32(u & 0xffff);
+                        qv[j * 8 + 2 * e + 1] = fp16_to_f32(u >> 16);
+                    }
+                    else
+                    {
+                        qv[j * 8 + 2 * e]     = bf16_to_f32(u & 0xffff);
+                        qv[j * 8 + 2 * e + 1] = bf16_to_f32(u >> 16);
+                    }
+                }
+        };
+        widen(bool_constant<kQoFp16>{});
         float qmax = 1e-20f;
         for(index_t i = 0; i < 64; ++i)
             qmax = fmaxf(qmax, fabsf(qv[i]));
@@ -778,13 +807,17 @@ struct FmhaDecodePaged5dKernel
             d0    = 0; // unused: the lane holds d = (bk*4 + w)*16 + h*8 + r
         }
 
-        const auto store_rows = [&](uint16_t* base_ptr, float f) {
+        // O in the output type; partials stay bf16
+        const auto pack_out = [&](float x, float y) {
+            return kQoFp16 ? pack_fp16(x, y) : pack_bf16(x, y);
+        };
+        const auto store_rows = [&](uint16_t* base_ptr, float f, auto pack) {
             // base_ptr points at row 0 of this (batch, kv head) block, rows hdim apart
             if constexpr(kWaveSplit)
             {
                 uint32_t pk[8];
                 for(index_t e = 0; e < 8; ++e)
-                    pk[e] = pack_bf16(o[2 * e] * f, o[2 * e + 1] * f);
+                    pk[e] = pack(o[2 * e] * f, o[2 * e + 1] * f);
                 v4i* dst = ptr_as<v4i>(base_ptr + row * kHdim + d0);
                 dst[0]   = v4i{int32_t(pk[0]), int32_t(pk[1]), int32_t(pk[2]), int32_t(pk[3])};
                 dst[1]   = v4i{int32_t(pk[4]), int32_t(pk[5]), int32_t(pk[6]), int32_t(pk[7])};
@@ -795,7 +828,7 @@ struct FmhaDecodePaged5dKernel
                 {
                     uint32_t pk[4];
                     for(index_t e = 0; e < 4; ++e)
-                        pk[e] = pack_bf16(acc[bk][2 * e] * f, acc[bk][2 * e + 1] * f);
+                        pk[e] = pack(acc[bk][2 * e] * f, acc[bk][2 * e + 1] * f);
                     *ptr_as<v4i>(base_ptr + row * kHdim + (bk * kNumWaves + w) * 16 + h * 8) =
                         v4i{int32_t(pk[0]), int32_t(pk[1]), int32_t(pk[2]), int32_t(pk[3])};
                 }
@@ -807,7 +840,8 @@ struct FmhaDecodePaged5dKernel
         {
             if(row_ok)
                 store_rows(a.o + (static_cast<long_index_t>(b) * a.nhead_q + g * gqa) * kHdim,
-                           l_row > 0.f ? vd / l_row : 0.f);
+                           l_row > 0.f ? vd / l_row : 0.f,
+                           pack_out);
             return;
         }
         else
@@ -815,7 +849,9 @@ struct FmhaDecodePaged5dKernel
             const long_index_t head = static_cast<long_index_t>(b) * a.nhead_k + g;
             const long_index_t part0 =
                 ((head * (kGroups ? a.num_groups : 1) + gi) * kNumSplits) * kRows;
-            store_rows(a.ws_o + (part0 + s * kRows) * kHdim, l_row > 0.f ? 1.f / l_row : 0.f);
+            store_rows(a.ws_o + (part0 + s * kRows) * kHdim,
+                       l_row > 0.f ? 1.f / l_row : 0.f,
+                       [](float x, float y) { return pack_bf16(x, y); });
             const bool ml_writer = kWaveSplit ? (threadIdx.x % 8 == 0) : (w == 0 && h == 0);
             if(ml_writer)
                 *ptr_as<float2>(a.ws_ml + (part0 + s * kRows + row) * 2) =
@@ -855,7 +891,7 @@ struct FmhaDecodePaged5dKernel
                     const float f = ll > 0.f ? vd / ll : 0.f;
                     *ptr_as<uint32_t>(
                         a.o + (static_cast<long_index_t>(b) * a.nhead_q + g * gqa + mrow) * kHdim +
-                        d2) = pack_bf16(o0 * f, o1 * f);
+                        d2) = pack_out(o0 * f, o1 * f);
                 }
                 else
                 {
@@ -958,7 +994,7 @@ struct FmhaDecodePaged5dKernel
             const float f = ll > 0.f ? vd / ll : 0.f;
             *ptr_as<uint32_t>(
                 a.o + (static_cast<long_index_t>(b) * a.nhead_q + g * gqa + mrow) * kHdim + d2) =
-                pack_bf16(o0 * f, o1 * f);
+                kQoFp16 ? pack_fp16(o0 * f, o1 * f) : pack_bf16(o0 * f, o1 * f);
         }
     }
 #else

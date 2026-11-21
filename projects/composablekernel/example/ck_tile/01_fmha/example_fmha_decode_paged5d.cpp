@@ -19,6 +19,7 @@ int main(int argc, char* argv[])
         .insert("max_s_k", "0", "context length bound the launch is sized for; 0 = longest s_k")
         .insert("window", "2048", "keys attended, the query's own included; 0 = no window")
         .insert("page_size", "16", "tokens per cache page: 16, 64 or 128")
+        .insert("prec", "bf16", "Q and output type: bf16 or fp16")
         .insert("splits", "0", "workgroups per (batch, kv head); 0 = heuristic")
         .insert("pages_per_split", "0", "pages per split; 0 = heuristic")
         .insert("layout", "auto", "auto, coop or wave")
@@ -42,6 +43,7 @@ int main(int argc, char* argv[])
     c.layout            = arg_parser.get_str("layout");
     c.max_seqlen_k      = arg_parser.get_int("max_s_k");
     c.page_size         = arg_parser.get_int("page_size");
+    c.fp16              = arg_parser.get_str("prec") == "fp16";
     c.seed              = arg_parser.get_int("seed");
     const bool validate = arg_parser.get_bool("v");
 
@@ -56,8 +58,9 @@ int main(int argc, char* argv[])
         std::printf(
             "max abs err %.4g (max |ref| %.4g), cos %.6f, ", r.max_err, r.max_ref, r.cosine);
     std::printf(
-        "b:%d h:%d/%d s_k:%d page:%d window:%d layout:%s groups:%d splits:%d pages/split:%d, "
+        "%s b:%d h:%d/%d s_k:%d page:%d window:%d layout:%s groups:%d splits:%d pages/split:%d, "
         "stream %.2f us, graph %.2f us%s\n",
+        c.fp16 ? "fp16" : "bf16",
         c.batch,
         c.nhead,
         c.nhead_k,

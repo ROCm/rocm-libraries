@@ -80,6 +80,14 @@ std::vector<Param> params()
         add(name("gqa_32_4_wave"), {2, 32, 4, {999}, 2048, 0, 0, "wave", 0, ps}, "wave");
         add(name("bound_full_b8"), {8, 16, 1, {8192}, 0, 0, 0, "auto", 131072, ps}, "wave+groups");
     }
+    // fp16 Q and output: direct output, both layouts within a cluster, several clusters
+    add("fp16_one_split", {2, 16, 1, {700}, 2048, 1, 0, "auto", 0, 16, true});
+    add("fp16_swa_b8_s8192", {8, 16, 1, {8192}, 2048, 0, 0, "auto", 0, 16, true}, "coop");
+    add("fp16_full_b8_s8192", {8, 16, 1, {8192}, 0, 0, 0, "auto", 0, 16, true}, "wave");
+    add("fp16_full_b1_s20000", {1, 16, 1, {20000}, 0, 0, 0, "auto", 0, 16, true}, "coop+groups");
+    add("fp16_p64_bound_full_b8",
+        {8, 16, 1, {8192}, 0, 0, 0, "auto", 131072, 64, true},
+        "wave+groups");
     return p;
 }
 
