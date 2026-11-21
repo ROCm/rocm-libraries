@@ -94,7 +94,7 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
                          int P) // padding
 {
     const int c = static_cast<int>(blockIdx.y);
-    const long row = static_cast<long>(blockIdx.z) * C + c;
+    const long long row = static_cast<long long>(blockIdx.z) * C + c;
     const int q0
         = (static_cast<int>(blockIdx.x) * DW_BLOCK_SIZE + static_cast<int>(threadIdx.x)) * DW_TW;
     const int out0 = DW_S * q0 - P;
@@ -149,7 +149,7 @@ extern "C" __global__ void __launch_bounds__(DW_BLOCK_SIZE)
     const bool inside = out0 >= 0 && out0 + DW_S * DW_TW <= Lo;
 #if DW_LANE_BYTES == 4 || DW_LANE_BYTES == 8 || DW_LANE_BYTES == 16
     // One vector store per lane when its outputs are aligned: 16-bit types gain from it.
-    if(inside && reinterpret_cast<unsigned long>(out + out0) % DW_LANE_BYTES == 0)
+    if(inside && reinterpret_cast<unsigned long long>(out + out0) % DW_LANE_BYTES == 0)
     {
 #if DW_LANE_BYTES == 16
         typedef unsigned int vec_t __attribute__((ext_vector_type(4)));
