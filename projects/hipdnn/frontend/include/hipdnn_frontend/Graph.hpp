@@ -2852,9 +2852,10 @@ public:
      * @brief Get a ranked list of engine IDs based on heuristics
      *
      * @param rankedEngineIds Output vector of engine IDs, ranked by expected performance
-     * @param modes Heuristic modes to use for ranking
+     * @param modes Heuristic modes to use for ranking; see create_execution_plans()
      * @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE if the graph
-     *         has not been built; ErrorCode::GRAPH_NOT_SUPPORTED if no engine
+     *         has not been built or modes is empty;
+     *         ErrorCode::GRAPH_NOT_SUPPORTED if no engine
      *         has an applicable solution for this graph on the current device;
      *         ErrorCode::HIPDNN_BACKEND_ERROR on other backend failure.
      *         Call get_message() for the specific failure reason.
@@ -3075,9 +3076,15 @@ public:
      * deselect_workspace_greater_than()) are not reset: filters set before this call apply to
      * the plans it creates, and the creation drops the note verdicts read so far.
      *
-     * @param modes Heuristic modes to use for engine selection
+     * @param modes Heuristic modes to query, in order. The default is {HeuristicMode::A}. One
+     *        heuristic query runs per mode, for cuDNN parity (modes that select the same
+     *        backend mode run once), and the results are concatenated without repeating an
+     *        engine. An engine already returned keeps the earlier mode's configuration, so
+     *        {A, B} does not let B re-rank the engines A ranked. A mode whose query fails
+     *        stops the call with that error. An empty list returns ErrorCode::INVALID_VALUE.
      * @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE if the graph
-     *         has not been built; ErrorCode::GRAPH_NOT_SUPPORTED if no engine
+     *         has not been built or modes is empty;
+     *         ErrorCode::GRAPH_NOT_SUPPORTED if no engine
      *         has an applicable solution for this graph on the current device;
      *         ErrorCode::HIPDNN_BACKEND_ERROR on other backend failure. Call
      *         get_message() for the specific failure reason.
@@ -3225,8 +3232,9 @@ public:
     /**
      * @brief Check if the graph is supported by any available engine plugin
      * @param handle The hipDNN handle
-     * @param modes Heuristic modes for engine ranking
-     * @return Error with OK if supported; GRAPH_NOT_SUPPORTED if no engine
+     * @param modes Heuristic modes for engine ranking; see create_execution_plans()
+     * @return Error with OK if supported; INVALID_VALUE for an empty modes list;
+     *         GRAPH_NOT_SUPPORTED if no engine
      *         has an applicable solution for this graph on the current device;
      *         HIPDNN_BACKEND_ERROR on other backend failure
      *
@@ -3251,10 +3259,7 @@ public:
         }
 
         // Applicability does not depend on the mode, so one query answers for every mode.
-        if(modes.empty())
-        {
-            return {ErrorCode::INVALID_VALUE, "No heuristic mode was requested."};
-        }
+        HIPDNN_CHECK_ERROR(detail::requireHeuristicModes(modes));
         detail::ScopedHipdnnBackendDescriptor engineHeuristicDesc;
         HIPDNN_CHECK_ERROR(
             hipdnn_frontend::detail::createEngineHeuristicDescriptorForGraph(engineHeuristicDesc,
@@ -4061,14 +4066,15 @@ public:
      * @endcode
      *
      * @param handle The hipDNN handle
-     * @param modes Heuristic modes for engine selection
+     * @param modes Heuristic modes for engine selection; see create_execution_plans()
      * @param policy Build plan policy: HEURISTICS_CHOICE compiles the active plan
      *        (the preferred engine's plan when it is among the ranked candidates,
      *        otherwise the top-ranked plan) and, if that plan fails to finalize for
      *        any reason, tries the other ranked plans in order. See build_plans()
      *        for the details. ALL compiles every engine config
      * @param do_multithreaded_builds Reserved for future use
-     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE /
+     * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE (including an empty modes
+     *         list) /
      *         ErrorCode::ATTRIBUTE_NOT_SET / ErrorCode::HIPDNN_BACKEND_ERROR /
      *         ErrorCode::GRAPH_NOT_SUPPORTED (when no engine has an applicable
      *         solution on the current device) /
@@ -4128,9 +4134,9 @@ public:
      *               the query, leaving EngineConfigInfo::engineName resolved from the
      *               built-in registry alone.
      * @param[out] configs Output vector of EngineConfigInfo structs
-     * @param modes Heuristic modes for engine ranking
+     * @param modes Heuristic modes for engine ranking; see create_execution_plans()
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
-     *         if the graph has not been built.
+     *         if the graph has not been built or modes is empty.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_engine_configs(hipdnnHandle_t handle,
@@ -4203,9 +4209,9 @@ public:
      * the overload above to reach those.
      *
      * @param[out] configs Output vector of EngineConfigInfo structs
-     * @param modes Heuristic modes for engine ranking
+     * @param modes Heuristic modes for engine ranking; see create_execution_plans()
      * @return ErrorCode::OK on success, or ErrorCode::INVALID_VALUE
-     *         if the graph has not been built.
+     *         if the graph has not been built or modes is empty.
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error get_engine_configs(std::vector<EngineConfigInfo>& configs,
@@ -4507,8 +4513,9 @@ public:
      * add_engine_configs(). Equivalent to discovering all engines and
      * adding them all for autotuning.
      *
-     * @param modes Heuristic modes for engine ranking
-     * @return ErrorCode::OK on success
+     * @param modes Heuristic modes for engine ranking; see create_execution_plans()
+     * @return ErrorCode::OK on success; ErrorCode::INVALID_VALUE for an empty modes list,
+     *         among other failures
      */
     // NOLINTNEXTLINE(readability-identifier-naming)
     Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::A})
@@ -7454,7 +7461,7 @@ public:
      * @brief Choose the ranking metric engine selection and kernel choice optimize.
      *
      * @c "tflops" ranks higher first; @c "time" (milliseconds) lower first (RFC 0019 §4.4).
-     * Engine order follows it under every heuristic mode while an applicable engine has a
+     * Engine order follows it under heuristic modes A and B while an applicable engine has a
      * model for the metric; engines with none rank last. HeuristicMode A (the default) ranks
      * by ModeA, B by ModeB; FALLBACK is model-free and ignores the metric for engine order.
      * An engine that ranks its own kernels ranks them by it in every mode. Applies to later

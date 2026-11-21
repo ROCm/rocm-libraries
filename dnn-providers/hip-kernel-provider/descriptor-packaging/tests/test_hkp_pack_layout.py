@@ -1101,7 +1101,7 @@ def test_example_tree_cross_references_resolve_to_the_right_types():
             "predict_applicable_kernels",
         ):
             for value in doc.get(role, {}).values():
-                # The scoring roles take one id or a list of them, one per metric.
+                # Every role takes one id or a list of them, one per metric.
                 for ref in [value] if isinstance(value, str) else value:
                     expect(ref, "uhd", f"{path.name} {role}")
         expect(doc["metadata"], "kmd", f"{path.name} metadata")

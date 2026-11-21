@@ -322,6 +322,18 @@ inline std::optional<std::string>
     return *value;
 }
 
+/// @p values[field] when it is present and holds a T, else nullptr.
+///
+/// Looked up rather than indexed: a kernel missing the field is a finding for the case
+/// that checks the field, not an out_of_range from a helper three frames away.
+template <typename T>
+const T* tryGetMetadataField(const hipdnn_plugin_sdk::ingestor::MetadataValues& values,
+                             const char* field)
+{
+    const auto it = values.find(std::string(field));
+    return it == values.end() ? nullptr : std::get_if<T>(&it->second);
+}
+
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing
 
 #endif // HIPDNN_ENABLE_KERNEL_INGESTOR

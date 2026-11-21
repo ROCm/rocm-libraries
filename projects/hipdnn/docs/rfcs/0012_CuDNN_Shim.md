@@ -526,15 +526,12 @@ not present heuristic modes. Some of this surface is being filled in by the
 hipDNN auto-tuning work (PR #7217), which the shim should build on as it
 lands.
 
-**HeurMode.** Accept all `HeurMode_t` values; until real hipDNN heuristics
-exist, map every mode (`A`, `B`, `FALLBACK`, `OPENSOURCE`) to hipDNN's
-fallback/default selection and **log a WARN on first use per process** so a
-user debugging a perf regression sees that their heuristic choice was not
-honored. As hipDNN heuristics arrive, remap the modes properly: `A` and `B`
-to the backend's `HIPDNN_HEUR_MODE_A` / `HIPDNN_HEUR_MODE_B`, `FALLBACK` to
-`HIPDNN_HEUR_MODE_FALLBACK`, and `OPENSOURCE` to fallback with the WARN. The
-benchmarking and auto-tuning paths are explicit user choices and are handled
-separately.
+**HeurMode.** Accept all `HeurMode_t` values. `A` and `B` map to the backend's
+`HIPDNN_HEUR_MODE_A` / `HIPDNN_HEUR_MODE_B`, `FALLBACK` to
+`HIPDNN_HEUR_MODE_FALLBACK`, and `OPENSOURCE` to fallback with a WARN logged on
+first use per process, so a user debugging a perf regression sees that their
+heuristic choice was not honored. The benchmarking and auto-tuning paths are
+explicit user choices and are handled separately.
 
 **Notes — per-note triage, not blanket no-op.** A blanket "accept and
 ignore" is unsafe: silently running without a requested filter can be

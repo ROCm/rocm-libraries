@@ -16,8 +16,8 @@ namespace hipdnn_backend::test_utilities
 inline std::set<int64_t> builtInPolicyIds()
 {
     using hipdnn_data_sdk::utilities::policyNameToId;
-    return {policyNameToId("SelectionHeuristic::Config"),
-            policyNameToId("SelectionHeuristic::StaticOrdering"),
+    return {policyNameToId(hipdnn_data_sdk::utilities::CONFIG_POLICY_NAME),
+            policyNameToId(hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME),
             policyNameToId(hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME),
             policyNameToId(hipdnn_data_sdk::utilities::MODE_B_POLICY_NAME)};
 }

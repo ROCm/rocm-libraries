@@ -1349,18 +1349,31 @@ wins by default. The rule this provider follows:
 The measurements behind each decision are kept outside the repository; what is
 recorded here is the decision and the gate it passed.
 
-Trained UHD models are installed for the FlyDSL SDPA engines on these architectures
+Trained UHD models are installed for these FlyDSL engines on these architectures
 (under each op's `heuristics/`, bound per arch by `gen_descriptors.py`, see the
-[README](README.md)):
+[README](README.md)). The model's adapter, `mlp_data` or `tree_data`, is in parentheses:
 
 | Engine | Engine estimate (`predict_engine`) | Kernel ranker (`sort_kernel_catalog`) |
 |---|---|---|
-| `sdpa_aiw` | gfx1201 | gfx1201 |
-| `sdpa_cdna` | gfx90a, gfx942, gfx950 | gfx942 |
-| `sdpa_cdna_decode` | gfx90a, gfx942, gfx950 | -- |
-| `sdpa_cdna_dualwave` | gfx950 | -- |
-| `sdpa_rdna` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
-| `sdpa_rdna_decode` | gfx1100, gfx1101, gfx1151, gfx1201 | -- |
+| `rmsnorm` | gfx90a, gfx942, gfx950, gfx1100, gfx1151, gfx1201 (tree_data) | -- |
+| `rmsnorm_bwd` | gfx1101 (mlp_data); gfx90a, gfx942, gfx950, gfx1100, gfx1150, gfx1151, gfx1201 (tree_data) | -- |
+| `sdpa_aiw` | gfx1201 (mlp_data) | gfx1201 (tree_data) |
+| `sdpa_bwd_merged` | gfx950 (mlp_data) | gfx950 (tree_data) |
+| `sdpa_bwd_split` | gfx90a, gfx942, gfx950, gfx1100, gfx1101, gfx1151 (mlp_data); gfx1150 (tree_data) | -- |
+| `sdpa_cdna` | gfx90a, gfx942, gfx950 (mlp_data) | gfx942 (tree_data) |
+| `sdpa_cdna_decode` | gfx950 (mlp_data); gfx90a, gfx942 (tree_data) | -- |
+| `sdpa_cdna_dualwave` | gfx950 (mlp_data) | -- |
+| `sdpa_rdna` | gfx1100, gfx1101, gfx1151, gfx1201 (mlp_data) | -- |
+| `sdpa_rdna_decode` | gfx1100, gfx1101, gfx1151, gfx1201 (mlp_data) | -- |
+
+Validation: each `sdpa_bwd_split` and `sdpa_bwd_merged` engine estimate, and the
+`rmsnorm_bwd` estimates for gfx1101 and gfx1150, passed the UHD pipeline's Stage V
+gates (identity, available, metric, selector_revision and accuracy) on 200 graphs held
+out of its training, run on a GPU of its architecture (the gfx1151 `sdpa_bwd_split`
+estimate with hipDNN's local UHD tools). The `sdpa_bwd_merged` gfx950 ranker passed the
+L2 gates (available, read, winner_records, crashes and regret) on 1,000 measured graphs.
+The split estimates were validated at the engine revision they were trained against and
+re-stamped to the current one afterwards; `TestFlydslModelBinding` checks every stamp.
 
 Elsewhere an SDPA engine orders its kernels by descriptor `priority` (the native ranker),
 its engine estimate is the `default` slot the loader disables, and autotune measures the

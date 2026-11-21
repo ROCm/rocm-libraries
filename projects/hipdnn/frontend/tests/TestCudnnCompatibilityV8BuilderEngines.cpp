@@ -204,15 +204,49 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, ModeBQueriesHipdnnModeB)
     expectModeQuery(CUDNN_HEUR_MODE_B, HIPDNN_HEUR_MODE_B);
 }
 
+using BackendVersion = hipdnn_data_sdk::utilities::Version;
+
+std::string backendVersionName(const ::testing::TestParamInfo<BackendVersion>& info)
+{
+    return "v" + std::to_string(info.param.major) + "_" + std::to_string(info.param.minor) + "_"
+           + std::to_string(info.param.patch);
+}
+
+// The mode query against a backend that reports the parameter version.
+class TestCudnnCompatibilityV8BuilderEnginesByBackendVersion
+    : public TestCudnnCompatibilityV8BuilderEngines,
+      public ::testing::WithParamInterface<BackendVersion>
+{
+protected:
+    void SetUp() override
+    {
+        TestCudnnCompatibilityV8BuilderEngines::SetUp();
+        _versionString = GetParam().str();
+        EXPECT_CALL(*_mockBackend, version()).WillRepeatedly(::testing::Return(GetParam()));
+        EXPECT_CALL(*_mockBackend, versionString())
+            .WillRepeatedly(::testing::Return(_versionString.c_str()));
+        installHeuristicResults({5, -2});
+    }
+
+    std::string _versionString;
+};
+
+class TestCudnnCompatibilityV8BuilderEnginesOlderBackend
+    : public TestCudnnCompatibilityV8BuilderEnginesByBackendVersion
+{
+};
+
+class TestCudnnCompatibilityV8BuilderEnginesModeCapableBackend
+    : public TestCudnnCompatibilityV8BuilderEnginesByBackendVersion
+{
+};
+
 // A backend older than 0.5.0 rejects hipDNN modes A and B, so the mode query sends FALLBACK with
-// the mode's policy order instead (RFC 0005 §4.6.3).
-TEST_F(TestCudnnCompatibilityV8BuilderEngines, OlderBackendGetsFallbackModeWithThePolicyOrder)
+// the mode's policy order instead (RFC 0005 §4.6.3). 0.4.99 is the version just below the
+// threshold.
+TEST_P(TestCudnnCompatibilityV8BuilderEnginesOlderBackend, GetsFallbackModeWithThePolicyOrder)
 {
     using hipdnn_data_sdk::utilities::policyNameToId;
-    EXPECT_CALL(*_mockBackend, version())
-        .WillRepeatedly(::testing::Return(hipdnn_data_sdk::utilities::Version{0, 4, 0}));
-    EXPECT_CALL(*_mockBackend, versionString()).WillRepeatedly(::testing::Return("0.4.0"));
-    installHeuristicResults({5, -2});
 
     for(const auto& [mode, policy] :
         {std::pair{CUDNN_HEUR_MODE_A, hipdnn_data_sdk::utilities::MODE_A_POLICY_NAME},
@@ -227,11 +261,30 @@ TEST_F(TestCudnnCompatibilityV8BuilderEngines, OlderBackendGetsFallbackModeWithT
                   HIPDNN_HEUR_MODE_FALLBACK);
         EXPECT_EQ(
             attributeOn(query, HIPDNN_ATTR_ENGINEHEUR_POLICY_ORDER_EXT).values<std::int64_t>(),
-            (std::vector<std::int64_t>{policyNameToId("SelectionHeuristic::Config"),
-                                       policyNameToId(policy),
-                                       policyNameToId("SelectionHeuristic::StaticOrdering")}));
+            (std::vector<std::int64_t>{
+                policyNameToId(hipdnn_data_sdk::utilities::CONFIG_POLICY_NAME),
+                policyNameToId(policy),
+                policyNameToId(hipdnn_data_sdk::utilities::STATIC_ORDERING_POLICY_NAME)}));
     }
 }
+
+INSTANTIATE_TEST_SUITE_P(BelowTheThreshold,
+                         TestCudnnCompatibilityV8BuilderEnginesOlderBackend,
+                         ::testing::Values(BackendVersion{0, 4, 0}, BackendVersion{0, 4, 99}),
+                         backendVersionName);
+
+// A backend at 0.5.0 (the threshold) or newer takes modes A and B as they are, with no policy
+// order.
+TEST_P(TestCudnnCompatibilityV8BuilderEnginesModeCapableBackend, GetsModesAAndBWithNoPolicyOrder)
+{
+    expectModeQuery(CUDNN_HEUR_MODE_A, HIPDNN_HEUR_MODE_A);
+    expectModeQuery(CUDNN_HEUR_MODE_B, HIPDNN_HEUR_MODE_B);
+}
+
+INSTANTIATE_TEST_SUITE_P(AtOrAboveTheThreshold,
+                         TestCudnnCompatibilityV8BuilderEnginesModeCapableBackend,
+                         ::testing::Values(BackendVersion{0, 5, 0}, BackendVersion{0, 6, 0}),
+                         backendVersionName);
 
 TEST_F(TestCudnnCompatibilityV8BuilderEngines, FallbackModeQueriesHipdnnFallbackOnly)
 {

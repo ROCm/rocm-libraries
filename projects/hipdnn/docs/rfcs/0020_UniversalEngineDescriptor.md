@@ -227,7 +227,7 @@ structure, and it holds whichever of the two arms (§ 4.3, § 4.5) this engine m
 | `sdk_version` | no | string | `<major>.<minor>.<patch>`, the hipDNN graph schema version this engine's pattern was authored against (RFC 0017 § 4). Defaults to `1.0.0` when omitted. The loader parses and stores it. At match time it is compared numerically by `(major, minor, patch)` with the graph's reported floor: if the floor is above it, the whole engine declines the graph before binding, and so does every pack naming it ([RFC 0018 § 10](0018_UniversalMatchDescriptor.md#10-serialization-and-versioning)). The loader does not refuse a value newer than the runtime's own graph schema. This is the **only** graph-schema floor in the system: no UMD carries one, and a matcher runs under the floor of the engine of each pack that lists it, so raising this field is a review point for every matcher on the engine. Independent of `version`, which gates the UED *format*. |
 | `sort_kernel_catalog` | no | object (arch → UUID or [UUID]) | The **kernel-selection heuristic** map (§ 4.6): each key a plausible gfx arch base id or the literal `default`, each value a UHD UUID, or a non-empty list of them with no duplicates — at most one per ranking metric (RFC 0019 § 3.1, § 4.4). Each id must resolve at load (§ 13.2). Absent => the engine ships no kernel-selection heuristic and its catalog is ordered by the declared fallback, `priority` then descriptor `id` (§ 8, RFC 0017 § 5). An empty map or an empty list is a load error. |
 | `predict_engine` | no | object (arch → UUID or [UUID]) | Optional **engine-estimate** map (§ 4.6): cheap `f(graph) → expected metric value` UHDs, one per ranking metric, consulted at engine selection, before any catalog is ranked. Same arch-key form and resolution. Each UHD must declare a `score.metric`. |
-| `predict_applicable_kernels` | no | object (arch → UUID) | Optional **candidate-generator** map (§ 4.6): a UHD producing the applicable candidate set for a combinatorial/JIT space, which `sort_kernel_catalog` then ranks. Same arch-key form; one UUID per key. The loader validates it. No runtime component consumes it. |
+| `predict_applicable_kernels` | no | object (arch → UUID or [UUID]) | Optional **candidate-generator** map (§ 4.6): UHDs producing the applicable candidate set for a combinatorial/JIT space, which `sort_kernel_catalog` then ranks. Same arch-key form and list form: a UHD id, or a non-empty list with no duplicates, at most one per metric (a metric-less UHD counting as its own). The loader validates it. No runtime component consumes it. |
 | `metadata` | yes | string | UUID of this engine's one KMD. Must resolve to a loadable KMD at load (§ 13.2). |
 | `graph_match` | no | object | Stage one: how this engine decides a graph and binds the tokens every later stage reads (§ 6, § 7). Exactly one arm, and they are mutually exclusive: **`nodes`**, the declarative pattern of **§ 4.3** (not yet built; the loader rejects it as an unknown key), or **`native`**, the escape-hatch symbol of **§ 4.5**. Absent => the engine binds nothing, publishes an empty symbol table, and is admitted or declined by its packs' UMDs alone. |
 | `knobs` | no | array of string | Each element is a field name declared in the referenced KMD (§ 8). No duplicates. Absent or `[]` => engine exposes no descriptor knobs. Every element must match a KMD field or it is a load error (§ 13.2). |
@@ -322,13 +322,10 @@ provider's native registry (is this symbol registered) is semantic and runs in �
       "addedInVersion": "1.0"
     },
     "predict_applicable_kernels": {
-      "description": "Arch -> UHD id. Optional, future candidate generator; each value MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
+      "description": "Arch -> UHD id, or a list of UHD ids with at most one per metric (RFC 0019 section 3.1). Optional, future candidate generators; each id MUST resolve to a loadable UHD (semantic; see RFC 0020 section 13.2).",
       "type": "object",
       "propertyNames": { "type": "string", "minLength": 1 },
-      "additionalProperties": {
-        "type": "string",
-        "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
-      },
+      "additionalProperties": { "$ref": "#/definitions/uhd_ids" },
       "minProperties": 1,
       "addedInVersion": "1.0"
     },
@@ -674,15 +671,16 @@ mapped model still generalizes across a family of SKUs through its device featur
 splits only where architectures genuinely diverge in metadata or heuristic behavior. One `default`
 entry covering every arch is the degenerate, fully device-feature-driven case.
 
-**Several models per key, one per ranking metric.** For `sort_kernel_catalog` and `predict_engine`, a
-key's value may be a list of UHD ids; a single id is a one-element list. The loader rejects a list
-that names one id twice. The loader indexes the list by
+**Several models per key, one per metric.** A key's value may be a list of UHD ids, in every role; a
+single id is a one-element list. The loader rejects a list that names one id twice. For
+`sort_kernel_catalog` and `predict_engine` it indexes the list by
 the metric each UHD declares in its own `score.metric` (RFC 0019 § 4.4), so resolution above runs per
 metric: a lookup of `(gfx942, time)` falls back to `(default, time)`, never to a `gfx942` model of
 another metric. Two ids under one key that declare the same metric disable that metric on that key.
 A `predict_engine` UHD with no `score.metric` is disabled. The UED
-never names a metric itself; RFC 0019 § 3.1 gives the full rules. `predict_applicable_kernels` is
-single-valued.
+never names a metric itself; RFC 0019 § 3.1 gives the full rules. `predict_applicable_kernels` holds
+the candidate generators for future JIT spaces under the same rule, a metric-less UHD counting as its
+own metric; with no consumer yet, the loader only reports a second one.
 
 An empty map, or an empty list, is a load error: a role is either absent or names at least one model
 for at least one arch (§ 13.2).
@@ -1143,10 +1141,10 @@ performed at build time and run time alike:
   (`sort_kernel_catalog`, `predict_engine`, `predict_applicable_kernels`; § 4.6) must resolve to a
   loaded UHD. A dangling or unusable UHD disables that role for that arch key and metric, and the
   loader logs it. The engine stays available, with the declared fallback order.
-- **One model per metric per key.** Within one arch key of `sort_kernel_catalog` or `predict_engine`,
-  no two UHDs may declare the same `score.metric`, and at most one `sort_kernel_catalog` UHD may declare
-  none (the default ranker); every `predict_engine` UHD must declare one (RFC 0019 § 3.1, § 4.4). This
-  reads each UHD's `score` block, so those referents must be parsed, not merely resolvable. A violation
+- **One model per metric per key.** Within one arch key of any role, no two UHDs may declare the
+  same `score.metric`, and at most one may declare none (in `sort_kernel_catalog`, the default
+  ranker); every `predict_engine` UHD must declare one (RFC 0019 § 3.1, § 4.4). This reads each
+  UHD's `score` block, so those referents must be parsed, not merely resolvable. A violation
   disables that metric for that key and is reported, as any other unusable model is.
 - **`knobs` must be a subset of KMD field names.** A knob name no KMD field matches is an error
   (RFC 0017 § 4). Unlike reference resolution, this reads the KMD's declared field set, so the
