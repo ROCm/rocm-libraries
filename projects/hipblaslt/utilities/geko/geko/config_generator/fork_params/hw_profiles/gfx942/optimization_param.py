@@ -401,11 +401,16 @@ class GFX942GAParams(BaseOptimizationParams):
 
     @param
     def prefetch_global_read(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("PrefetchGlobalRead", [1, 2, 3, 4])
+        # PGR 3 and 4 do not work on MI300 (gfx942).
+        return self._make_param("PrefetchGlobalRead", [1, 2])
 
     @param
     def prefetch_local_read(self, ctx: SizeContext) -> ForkParameter:
         return self._make_param("PrefetchLocalRead", [1])
+
+    @param
+    def half_plr(self, ctx: SizeContext) -> ForkParameter:
+        return self._make_param("HalfPLR", [0, 1, 2, 3])
 
     @param
     def source_swap(self, ctx: SizeContext) -> ForkParameter:
@@ -464,11 +469,13 @@ class GFX942GAParams(BaseOptimizationParams):
 
     @param
     def schedule_gr_over_barrier(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("ScheduleGROverBarrier", [0, 1])
+        # ScheduleGROverBarrier does not work on MI300 (gfx942).
+        return self._make_param("ScheduleGROverBarrier", [0])
 
     @param
     def dtl_plus_lds_buf(self, ctx: SizeContext) -> ForkParameter:
-        return self._make_param("DtlPlusLdsBuf", [1])
+        # DtlPlusLdsBuf does not work on MI300 (gfx942).
+        return self._make_param("DtlPlusLdsBuf", [0])
 
     @param
     def unroll_loop_swap_global_read_order(self, ctx: SizeContext) -> ForkParameter:
