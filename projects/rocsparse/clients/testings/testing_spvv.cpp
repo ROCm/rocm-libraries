@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -232,4 +232,50 @@ INSTANTIATE_MIXED(int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(int64_t, int8_t, int8_t, float);
 
-void testing_spvv_extra(const Arguments& arg) {}
+void testing_spvv_extra(const Arguments& arg)
+{
+    // doti_kernel_part1 runs on a fixed grid and its 32-bit grid stride wraps once
+    // nnz exceeds 2147352576.
+    using I = int32_t;
+    using X = int8_t;
+    using Y = int8_t;
+    using T = int32_t;
+
+    const I nnz = std::numeric_limits<I>::max();
+
+    const rocsparse_operation  trans = rocsparse_operation_none;
+    const rocsparse_index_base base  = rocsparse_index_base_zero;
+    const rocsparse_datatype   ttype = get_datatype<T>();
+
+    rocsparse_local_handle handle(arg);
+
+    hipStream_t stream = handle.get_stream();
+
+    device_vector<I> dx_ind(nnz);
+    device_vector<X> dx_val(nnz);
+    device_vector<Y> dy(1);
+
+    // Every index is 0, so y only needs one entry.
+    CHECK_HIP_ERROR(hipMemset(dx_ind, 0, sizeof(I) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dx_val, 1, sizeof(X) * nnz));
+    CHECK_HIP_ERROR(hipMemset(dy, 1, sizeof(Y)));
+
+    rocsparse_local_spvec x(nnz, nnz, dx_ind, dx_val, get_indextype<I>(), base, get_datatype<X>());
+    rocsparse_local_dnvec y(1, dy, get_datatype<Y>());
+
+    T hdot = static_cast<T>(0);
+
+    size_t buffer_size;
+    void*  temp_buffer;
+    CHECK_ROCSPARSE_ERROR(rocsparse_spvv(handle, trans, x, y, &hdot, ttype, &buffer_size, nullptr));
+    CHECK_HIP_ERROR(rocsparse_hipMalloc(&temp_buffer, buffer_size));
+
+    CHECK_ROCSPARSE_ERROR(rocsparse_set_pointer_mode(handle, rocsparse_pointer_mode_host));
+    CHECK_ROCSPARSE_ERROR(
+        testing::rocsparse_spvv(handle, trans, x, y, &hdot, ttype, &buffer_size, temp_buffer));
+    CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+    CHECK_HIP_ERROR(rocsparse_hipFree(temp_buffer));
+
+    unit_check_scalar<T>(nnz, hdot);
+}
