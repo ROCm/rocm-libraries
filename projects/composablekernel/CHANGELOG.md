@@ -16,6 +16,8 @@ Documentation for Composable Kernel available at [https://rocm.docs.amd.com/proj
 
 ### Optimized
 
+* Improved CK Tile FMHA forward performance on gfx1151 for head dim 128 without dropout: tiles that stage the whole head dim of K in LDS once per key step, with 64 rows and 32-key steps for query lengths up to 384.
+
 ### Resolved issues
 
 ### Known issues

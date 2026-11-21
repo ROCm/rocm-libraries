@@ -1836,6 +1836,9 @@ struct gfx11_t
 struct gfx115_t
 {
 };
+struct gfx1151_t
+{
+};
 struct gfx117_t
 {
 };

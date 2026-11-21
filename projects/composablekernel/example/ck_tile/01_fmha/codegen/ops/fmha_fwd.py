@@ -1618,7 +1618,11 @@ class KernelComponentFactoryGfx11(CompatibilityRuleFactory):
 
 
 class KernelComponentFactoryGfx115(KernelComponentFactoryGfx11):
-    arch = ArchTrait("gfx115")
+    # gfx1151 has its own factory (KernelComponentFactoryGfx1151).
+    arch = ArchTrait(
+        "gfx115",
+        preprocessor_check="defined(__gfx115__) && !defined(__gfx1151__)",
+    )
 
     @staticmethod
     def check_d64_tile(tile, pipeline) -> bool:
@@ -1662,6 +1666,44 @@ class KernelComponentFactoryGfx115(KernelComponentFactoryGfx11):
             result[(128, 128)] = [FmhaFwdTileSize(128,  64,  32, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6),
                                  FmhaFwdTileSize(128,  64,  64, 128,  32,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6)]  # fmt: skip
             result[(256, 256)][0] = FmhaFwdTileSize(128,  64,  32, 256,  32,  256,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,  -1)  # fmt: skip
+        return result
+
+
+class KernelComponentFactoryGfx1151(KernelComponentFactoryGfx115):
+    arch = ArchTrait("gfx1151")
+
+    @staticmethod
+    def _stages_whole_k(tile) -> bool:
+        # One K LDS stage per key step (bk0 = head dim).
+        return tile.F_bk0 == tile.F_bk0max
+
+    @staticmethod
+    def _is_plain(pipeline) -> bool:
+        # Whole-K staging is validated with padded head dims, but not consistently
+        # faster there. Dropout is not measured.
+        return pipeline.F_dropout == "f" and pipeline.F_dpad == "f"
+
+    @classmethod
+    def check_d128_tile(cls, tile, pipeline) -> bool:
+        if cls._stages_whole_k(tile):
+            return cls._is_plain(pipeline)
+        return super().check_d128_tile(tile, pipeline)
+
+    @classmethod
+    def get_hdim_tile_size_dict(cls, dtype: str) -> Optional[dict]:
+        result = super().get_hdim_tile_size_dict(dtype)
+        if dtype in cls._DT_FP16_BF16:
+            # 64 rows and 32-key steps for short queries; 128 rows and 64-key steps (the
+            # gfx115 tile shape, K and V staged once per step) for longer ones. Short
+            # queries over long keys keep the gfx115 tiles.
+            m64_d128_constraint = "a.max_seqlen_q <= 384 && a.seqlen_k <= 4096"
+            # ALiBi already stages K in 64-dim chunks and loses 2-4% beyond 4096.
+            m128_d128_constraint = (
+                "a.max_seqlen_q > 384 && "
+                "(t.bias_type != bias_enum::alibi || a.max_seqlen_q <= 4096)"
+            )
+            result[(128, 128)] = [FmhaFwdTileSize( 64,  32, 128, 128,  32,  128,  4, 1, 1,  4, 1, 1,  16, 16, 16,  16, 16, 16,  -1, CppConstraint(m64_d128_constraint)),
+                                 FmhaFwdTileSize(128,  64, 128, 128,  64,  128,  8, 1, 1,  8, 1, 1,  16, 16, 16,  16, 16, 16,   6, CppConstraint(m128_d128_constraint))] + result[(128, 128)]  # fmt: skip
         return result
 
 
@@ -2645,6 +2687,8 @@ def _tune_config_pick_base(target: str):
         return KernelComponentFactoryGfx950
     if target.startswith("gfx9"):
         return KernelComponentFactoryGfx9
+    if target.startswith("gfx1151"):
+        return KernelComponentFactoryGfx1151
     if target.startswith("gfx115"):
         return KernelComponentFactoryGfx115
     if target.startswith(("gfx117", "gfx11-7-generic")):
@@ -2819,6 +2863,14 @@ def _build_custom_tune_factory(cfg: dict):
     return CustomTuneFactory
 
 
+def _expand_family_targets(targets: List[str]) -> List[str]:
+    # The gfx115 family target also covers gfx1151, which has its own factory.
+    expanded = list(targets)
+    if "gfx115" in expanded and "gfx1151" not in expanded:
+        expanded.append("gfx1151")
+    return expanded
+
+
 def get_factory(target: str):
     # Highest priority: JSON-driven tune-config factory.
     tune_cfg = _load_custom_tune_config()
@@ -2834,6 +2886,8 @@ def get_factory(target: str):
         return KernelComponentFactoryGfx950
     if target.startswith("gfx9"):
         return KernelComponentFactoryGfx9
+    if target.startswith("gfx1151"):
+        return KernelComponentFactoryGfx1151
     if target.startswith("gfx115"):
         return KernelComponentFactoryGfx115
     if target.startswith(("gfx117", "gfx11-7-generic")):
@@ -3035,7 +3089,7 @@ def get_fwd_blobs(
     gen = list()
     api_pool = FmhaFwdApiPool()
 
-    factories = get_factories_for_targets(targets, get_factory)
+    factories = get_factories_for_targets(_expand_family_targets(targets), get_factory)
 
     for factory, dtype in ((f, t) for f in factories for t in f.supported_dtypes()):
         d = factory.get_hdim_tile_size_dict(dtype)
