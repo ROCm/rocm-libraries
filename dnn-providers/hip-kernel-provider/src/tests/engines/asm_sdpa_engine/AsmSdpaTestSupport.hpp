@@ -8,6 +8,8 @@
 
 #pragma once
 
+#include "GraphTest.hpp"
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -20,8 +22,8 @@
 namespace asm_sdpa_engine
 {
 
-/// A packed SDPA backward graph: Q, K, dQ and dK take @p qkDims; V, O, dO and dV take
-/// @p voDims.
+/// A packed SDPA backward graph with FLOAT compute: Q, K, dQ and dK take @p qkDims; V, O,
+/// dO and dV take @p voDims.
 inline flatbuffers::FlatBufferBuilder
     createPackedSdpaBwdGraph(const std::vector<int64_t>& qkDims,
                              const std::vector<int64_t>& voDims,
@@ -30,8 +32,15 @@ inline flatbuffers::FlatBufferBuilder
 {
     const auto qkStrides = hipdnn_data_sdk::utilities::generateStrides(qkDims);
     const auto voStrides = hipdnn_data_sdk::utilities::generateStrides(voDims);
-    return hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
-        qkDims, qkStrides, qkDims, qkStrides, voDims, voStrides, voDims, voStrides, dataType);
+    // createValidSdpaBwdGraph stamps the I/O dtype into the node's compute_data_type;
+    // the engine requires FLOAT.
+    return mutateGraph(
+        hipdnn_test_sdk::utilities::createValidSdpaBwdGraph(
+            qkDims, qkStrides, qkDims, qkStrides, voDims, voStrides, voDims, voStrides, dataType),
+        [](hipdnn_flatbuffers_sdk::data_objects::GraphT& graph) {
+            graph.nodes.front()->compute_data_type
+                = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT;
+        });
 }
 
 /// A packed SDPA forward graph with FLOAT compute: Q and K take @p qkDims; V and O take

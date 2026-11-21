@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: MIT
 
 // Runs one GEMM on the partitions of a partitioned GPU (for example DPX) with
-// hipblaslt_ext::experimental::PartitionedGemm.
+// hipblaslt_experimental::PartitionedGemm, an experimental API: it is declared only when
+// ROCM_ENABLE_EXPERIMENTAL_APIS is 1, and the sample checks both the revision it was written
+// for (at compile time) and the revision of the loaded library (at run time).
 //
 //   - one hipBLASLt handle, stream, workspace and set of matrices per partition (device)
 //   - the problem is the full m x n x k GEMM; it is split along N, so partition i computes
@@ -20,8 +22,19 @@
 // its slice into the other partition's D). It needs OutputPeerD kernels in the device library;
 // with the current library algoGetHeuristic returns no algorithm for it.
 
+// A CMake target gets the switch by linking roc::hipblaslt_experimental, as this sample does;
+// other builds define it before the include.
+#ifndef ROCM_ENABLE_EXPERIMENTAL_APIS
+#define ROCM_ENABLE_EXPERIMENTAL_APIS 1
+#endif
+#include <hipblaslt/hipblaslt-experimental.h>
+
+#if !defined(HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM) \
+    || HIPBLASLT_EXPERIMENTAL_PARTITIONED_GEMM != 1
+#error "This sample is written for revision 1 of hipBLASLt PARTITIONED_GEMM; see the CHANGELOG"
+#endif
+
 #include <hip/hip_runtime.h>
-#include <hipblaslt/hipblaslt-ext.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -34,6 +47,15 @@
 
 int main(int argc, char** argv)
 {
+    // The header says revision 1; the loaded library must have the same one. A program with a
+    // non-experimental path would fall back to it here instead of stopping.
+    if(hipblasLtExperimentalGetFeatureRevision("PARTITIONED_GEMM") != 1)
+    {
+        std::cerr << "The loaded hipBLASLt does not have revision 1 of PARTITIONED_GEMM"
+                  << std::endl;
+        return EXIT_FAILURE;
+    }
+
     int deviceCount = 0;
     CHECK_HIP_ERROR(hipGetDeviceCount(&deviceCount));
     const int  partitions = argc > 1 ? std::atoi(argv[1]) : 2;
@@ -54,6 +76,10 @@ int main(int argc, char** argv)
     // ---- one handle, stream, workspace and set of matrices per partition ----
     std::vector<hipblasLtHandle_t> handles(partitions);
     std::vector<hipStream_t>       streams(partitions);
+    // One counter per partition, in host memory that every device can reach. A partition's stream
+    // writes the number of the launch into its counter after its slice.
+    std::vector<uint64_t*>         done(partitions);
+    uint64_t                       launch = 0;
     std::vector<void*>             workspaces(partitions);
     std::vector<const void*>       a(partitions), b(partitions), c(partitions);
     std::vector<void*>             d(partitions);
@@ -64,6 +90,11 @@ int main(int argc, char** argv)
         CHECK_HIP_ERROR(hipSetDevice(i)); // the handle belongs to the device that is current
         CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handles[i]));
         CHECK_HIP_ERROR(hipStreamCreate(&streams[i]));
+        // Created here, with the stream, so that nothing is allocated after run().
+        CHECK_HIP_ERROR(hipHostMalloc(reinterpret_cast<void**>(&done[i]),
+                                      sizeof(uint64_t),
+                                      hipHostMallocCoherent | hipHostMallocPortable));
+        *done[i] = 0;
         CHECK_HIP_ERROR(hipMalloc(&workspaces[i], workspaceBytes));
         void *dc, *dd;
         CHECK_HIP_ERROR(hipMalloc(&dc, ldc * n * 2));
@@ -93,15 +124,35 @@ int main(int argc, char** argv)
     CHECK_HIP_ERROR(hipSetDevice(0));
     CHECK_HIP_ERROR(hipDeviceSynchronize());
 
+    // The join of stream j, built once: write its own counter, then wait for every other one.
+    // After run() only the launch number is filled in.
+    std::vector<std::vector<hipStreamBatchMemOpParams>> join(partitions);
+    for(int j = 0; j < partitions; j++)
+    {
+        join[j].resize(partitions);
+        join[j][0].writeValue.operation = hipStreamMemOpWriteValue64;
+        join[j][0].writeValue.address   = done[j];
+        int at                          = 1;
+        for(int i = 0; i < partitions; i++)
+        {
+            if(i == j)
+                continue;
+            join[j][at].waitValue.operation = hipStreamMemOpWaitValue64;
+            join[j][at].waitValue.address   = done[i];
+            join[j][at].waitValue.flags     = hipStreamWaitValueGte;
+            at++;
+        }
+    }
+
     // ---- the partitioned GEMM ----
-    hipblaslt_ext::experimental::PartitionedGemm gemm(handles,
-                                        HIPBLAS_OP_N,
-                                        HIPBLAS_OP_N,
-                                        HIP_R_16F,
-                                        HIP_R_16F,
-                                        HIP_R_16F,
-                                        HIP_R_16F,
-                                        HIPBLAS_COMPUTE_32F);
+    hipblaslt_experimental::PartitionedGemm gemm(handles,
+                                                 HIPBLAS_OP_N,
+                                                 HIPBLAS_OP_N,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIP_R_16F,
+                                                 HIPBLAS_COMPUTE_32F);
 
     // One GemmInputs per partition. A matrix that is shared has the same pointer in every
     // element; a replicated one has its own copy in each.
@@ -116,20 +167,8 @@ int main(int argc, char** argv)
         inputs[i].setBeta(&beta);
     }
 
-    CHECK_HIPBLASLT_ERROR(gemm.setProblem(m,
-                                          n,
-                                          k,
-                                          1,
-                                          lda,
-                                          ldb,
-                                          ldc,
-                                          ldd,
-                                          0,
-                                          0,
-                                          0,
-                                          0,
-                                          hipblaslt_ext::experimental::SplitDim::N,
-                                          inputs));
+    CHECK_HIPBLASLT_ERROR(gemm.setProblem(
+        m, n, k, 1, lda, ldb, ldc, ldd, 0, 0, 0, 0, hipblaslt_experimental::SplitDim::N, inputs));
 
     // Only algorithms that every partition accepts for its slice come back.
     hipblaslt_ext::GemmPreference pref;
@@ -152,22 +191,19 @@ int main(int argc, char** argv)
 
     // ---- join the partitions ----
     // run() does not order anything after the partitions. To queue work on a partition's stream
-    // that needs the whole result, record an event on every stream after its slice and make the
-    // other streams wait for it. After this, work queued on any of the streams starts only when
-    // every partition has finished.
-    std::vector<hipEvent_t> done(partitions);
-    for(int i = 0; i < partitions; i++)
-    {
-        CHECK_HIP_ERROR(hipSetDevice(i));
-        CHECK_HIP_ERROR(hipEventCreateWithFlags(&done[i], hipEventDisableTiming));
-        CHECK_HIP_ERROR(hipEventRecord(done[i], streams[i]));
-    }
+    // that needs the whole result, every stream writes the launch number into its own counter
+    // after its slice, then waits until the other partitions' counters have reached it. After
+    // this, work queued on any of the streams starts only when every partition has finished.
+    // One hipStreamBatchMemOp per stream, built at setup; the write comes first, so no stream can
+    // block another.
+    // Both operations are recorded by stream capture, so the join also exists in a graph.
+    ++launch;
     for(int j = 0; j < partitions; j++)
     {
-        CHECK_HIP_ERROR(hipSetDevice(j));
-        for(int i = 0; i < partitions; i++)
-            if(i != j)
-                CHECK_HIP_ERROR(hipStreamWaitEvent(streams[j], done[i], 0));
+        join[j][0].writeValue.value64 = launch;
+        for(int i = 1; i < partitions; i++)
+            join[j][i].waitValue.value64 = launch;
+        CHECK_HIP_ERROR(hipStreamBatchMemOp(streams[j], partitions, join[j].data(), 0));
     }
 
     // The host reads D next, so it waits for the streams.
@@ -210,7 +246,7 @@ int main(int argc, char** argv)
         hipFree(const_cast<void*>(c[i]));
         hipFree(d[i]);
         hipFree(workspaces[i]);
-        hipEventDestroy(done[i]);
+        hipHostFree(done[i]);
         hipStreamDestroy(streams[i]);
         hipblasLtDestroy(handles[i]);
     }
