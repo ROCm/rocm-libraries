@@ -63,6 +63,16 @@ std::vector<Param> params()
     add("bound_coop_groups", {2, 16, 1, {2000}, 0, 0, 0, "auto", 30000}, "coop+groups");
     add("bound_one_cluster", {2, 16, 1, {300}, 0, 0, 0, "auto", 3840}, "coop");
     add("bound_swa_gqa", {4, 16, 2, {100, 7000}, 2048, 0, 0, "auto", 65536}, "coop");
+    // a window over a context just below the bound covers one page (64-token pages: four) more
+    // than the bound's own range; splits sized for the bound alone would drop the newest keys
+    add("bound_swa_b64_s8191", {64, 16, 1, {8191}, 2048, 0, 0, "auto", 8192}, "coop");
+    add("bound_groups_s29999", {1, 16, 1, {29999}, 23040, 0, 0, "auto", 30000}, "coop+groups");
+    for(const ck_tile::index_t ps : {16, 64, 128})
+        for(const ck_tile::index_t w : {1920, 2048})
+            for(const ck_tile::index_t ctx : {8191, 8180})
+                add("bound_p" + std::to_string(ps) + "_w" + std::to_string(w) + "_s" +
+                        std::to_string(ctx),
+                    {1, 16, 1, {ctx}, w, 0, 0, "auto", 8192, ps});
     // cache pages of 64 and 128 tokens: windows starting inside a cache page, partial last
     // cache pages, both layouts, several clusters, a longer launch bound
     for(const ck_tile::index_t ps : {64, 128})

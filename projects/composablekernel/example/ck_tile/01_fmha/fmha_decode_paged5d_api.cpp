@@ -50,7 +50,9 @@ int ck_fmha_decode_paged5d(const void* q,
                            float scale_s,
                            hipStream_t stream)
 {
-    if(nhead_k <= 0 || nhead_q % nhead_k != 0 || nhead_q / nhead_k > 16)
+    if(batch <= 0 || nhead_k <= 0 || nhead_q % nhead_k != 0 || nhead_q / nhead_k > 16)
+        return hipErrorInvalidValue;
+    if(workspace == nullptr || counters == nullptr)
         return hipErrorInvalidValue;
     const auto c =
         ck_tile::fmha_decode_paged5d_config(batch, nhead_k, max_seqlen_k, window, page_size);

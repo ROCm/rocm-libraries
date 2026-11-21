@@ -92,7 +92,7 @@ inline hipError_t launch(const ck_tile::FmhaDecodePaged5dHostArgs& h,
                          const ck_tile::FmhaDecodePaged5dConfig& c,
                          hipStream_t stream)
 {
-    // larger cache pages need whole 4-page groups per split (see fmha_decode_paged5d_config)
+    // larger cache pages need whole 4-page groups per split (see FmhaDecodePaged5dKernel::Run)
     if(h.page_size != 16 && c.pages_per_split % 4 != 0)
         return hipErrorInvalidValue;
     return h.qo_fp16 ? launch_type<true>(h, c, stream) : launch_type<false>(h, c, stream);
@@ -165,9 +165,7 @@ inline Result run(const Case& c, bool validate, int warmup = 0, int repeat = 0)
     if(c.layout == "coop" || c.layout == "wave")
         cfg.wave_split = c.layout == "wave";
     const index_t lo_align = ps > kPage ? 4 : 1;
-    const index_t lo_pages =
-        c.window > 0 ? std::max(0, max_seqlen - c.window) / kPage / lo_align * lo_align : 0;
-    const index_t span = std::max(1, (max_seqlen + kPage - 1) / kPage - lo_pages);
+    const index_t span     = ck_tile::fmha_decode_paged5d_max_span(max_seqlen, c.window, ps);
     if(c.pages_per_split > 0)
         cfg.pages_per_split = c.pages_per_split;
     if(c.splits > 0)

@@ -48,7 +48,7 @@ struct FmhaDecodePaged5dHostArgs
     index_t max_blocks_per_seq;
     index_t page_size;       // tokens per cache page: 16, 64 or 128
     index_t window;          // keys attended, the query's own included; 0 = no window
-    index_t pages_per_split; // the most a split takes
+    index_t pages_per_split; // lengthened in the kernel if the grid would not cover a range
     index_t num_groups;      // clusters per (batch, kv head)
     float scale_s;
     bool qo_fp16 = false; // Q and O are fp16 instead of bf16
@@ -63,24 +63,28 @@ struct FmhaDecodePaged5dConfig
     index_t num_groups = 1;
 };
 
-// A range that fits one cluster (at most 15 splits: the cluster size is a 4-bit compile-time
-// field) takes as many splits as it allows, each a whole number of 64-token steps, but at least 16
-// pages per split once the grid would exceed about 640 workgroups. Up to 960 pages, one cluster
-// of the wave-split layout (whose waves run their own pages without per-step barriers) while
-// the grid stays within 512 workgroups, and above 512 pages has at least 64 of them (fewer
-// lose to the parallelism of several clusters). A longer range takes several clusters (groups,
-// merged by the last split to finish a row block): the shortest of 8, 12 or 16 pages per split that
-// keeps at most 192 splits per (batch, kv head) and 512 workgroups, or else the wave-split layout
-// with about 384 workgroups.
+// The most 16-token pages the key range of any context up to max_seqlen_k covers: a window of W
+// keys touches up to ceil(W / 16) + 1 pages, and with larger cache pages the range starts on a
+// 4-page boundary (see FmhaDecodePaged5dKernel::Run), up to 3 pages earlier.
+CK_TILE_HOST index_t fmha_decode_paged5d_max_span(index_t max_seqlen_k,
+                                                  index_t window,
+                                                  index_t page_size = 16)
+{
+    index_t span = (max_seqlen_k + 15) / 16;
+    if(window > 0)
+        span = std::min<index_t>(span, (window + 15) / 16 + 1 + (page_size > 16 ? 3 : 0));
+    return std::max<index_t>(span, 1);
+}
+
+// Up to 240 pages: one cluster of cooperative splits, as many as 4-page steps allow (at most 15),
+// at least 16 pages each once the grid would exceed about 640 workgroups. Up to 960 pages: one
+// wave-split cluster while the grid has 64 to 512 workgroups. Longer: several clusters (groups)
+// of the shortest 8-, 12- or 16-page cooperative splits within 512 workgroups, else wave-split
+// splits for about 384 workgroups.
 CK_TILE_HOST FmhaDecodePaged5dConfig fmha_decode_paged5d_config(
     index_t batch, index_t nhead_k, index_t max_seqlen_k, index_t window, index_t page_size = 16)
 {
-    constexpr index_t kPage = 16;
-    // with larger cache pages the range starts on a 4-page boundary (see the kernel)
-    const index_t lo_align = page_size > kPage ? 4 : 1;
-    const index_t lo_pages =
-        window > 0 ? std::max<index_t>(0, max_seqlen_k - window) / kPage / lo_align * lo_align : 0;
-    const index_t span  = std::max<index_t>(1, (max_seqlen_k + kPage - 1) / kPage - lo_pages);
+    const index_t span  = fmha_decode_paged5d_max_span(max_seqlen_k, window, page_size);
     const auto round_up = [](index_t x, index_t m) { return (x + m - 1) / m * m; };
     const auto ceil_div = [](index_t x, index_t y) { return (x + y - 1) / y; };
     const index_t heads = batch * nhead_k;
@@ -382,9 +386,9 @@ struct FmhaDecodePaged5dKernel
                 __umulhi(static_cast<uint32_t>(span + kNumSplits * a.num_groups - 1), a.splits_rcp);
         else
             per_split = (span + kNumSplits - 1) / kNumSplits;
-        const index_t pps =
-            min(a.pages_per_split,
-                max(kMinPages, (per_split + kStepPages - 1) / kStepPages * kStepPages));
+        // the configured size, but never too short to cover the range with this grid
+        const index_t cover = (per_split + kStepPages - 1) / kStepPages * kStepPages;
+        const index_t pps   = max(cover, min(a.pages_per_split, max(kMinPages, cover)));
         // groups without pages take no part in the merge
         if(gi > 0 && gi * kNumSplits * pps >= span)
             return;

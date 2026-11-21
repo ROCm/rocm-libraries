@@ -4,9 +4,9 @@
 """PyTorch wrapper of the gfx125 CK fp8 decode kernel over the SHUFFLE 5D paged KV cache.
 
 pa_decode takes the arguments of aiter's FlyDSL pa_decode for the case it covers: one query
-token, bf16 or fp16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or 128
-tokens, at most 16 query heads per kv head. Load libck_fmha_decode_paged5d.so (target ck_fmha_decode_paged5d) from
-CK_FMHA_DECODE_PAGED5D_LIB or the library search path.
+token, bf16 or fp16 Q/O, head dim 128, fp8 e4m3 K/V with per-tensor scales, pages of 16, 64 or
+128 tokens, at most 16 query heads per kv head. Load libck_fmha_decode_paged5d.so (target
+ck_fmha_decode_paged5d) from CK_FMHA_DECODE_PAGED5D_LIB or the library search path.
 """
 
 import ctypes
@@ -107,7 +107,7 @@ def pa_decode(
     call can be captured in a HIP graph. max_context_length must bound every context length.
     """
     for name, value in unsupported.items():
-        if value is not None and value is not False and value != 0:
+        if isinstance(value, torch.Tensor) or value not in (None, False, 0):
             raise NotImplementedError(f"CK pa_decode does not support {name}")
     if query_length != 1:
         raise NotImplementedError("CK pa_decode supports query_length 1 only")
@@ -150,6 +150,12 @@ def pa_decode(
         raise ValueError("block_tables and context_lengths must be int32")
     if block_tables.stride(1) != 1 or block_tables.shape[0] < batch:
         raise ValueError("block_tables must have unit column stride and num_seqs rows")
+    if context_lengths.numel() < batch:
+        raise ValueError("context_lengths must have num_seqs entries")
+    tensors = [output, query, key_cache, value_cache, context_lengths, block_tables]
+    tensors += [s for s in (key_scale, value_scale) if isinstance(s, torch.Tensor)]
+    if any(t.device != query.device for t in tensors):
+        raise ValueError("all tensors must be on the query's device")
     if max_context_length is None:
         max_context_length = block_tables.shape[1] * page
 
