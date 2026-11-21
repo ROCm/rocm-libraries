@@ -6,16 +6,20 @@
 # rejects reset-time queue fill and restores baseline ordering: one WMMA, then the due loads and
 # their barrier. After the second wait the fill runs.
 #
+# The first pair is a loop-carried RAW fence (its LDS token is consumed by the ds_loads below and
+# reaches the pair after them), so the head rule clamps it to one queue depth and the whole run
+# sits one WMMA earlier than the plain estimator would put it.
+#
 # CHECK-LABEL: @wmma_fill_after_reset
 # CHECK: s_barrier_wait
-# CHECK-NEXT: v[252:259] = "st.v_wmma_f32_16x16x16_bf16"
+# CHECK-NEXT: v[244:251] = "st.v_wmma_f32_16x16x16_bf16"
 # CHECK-NEXT: v[20:23] = "st.ds_load_b128"
 # CHECK-NEXT: v[24:27] = "st.ds_load_b128"
 # CHECK-NEXT: v[30:33] = "st.ds_load_b128"
 # CHECK-NEXT: v[34:37] = "st.ds_load_b128"
 # CHECK-NEXT: s_barrier_signal
 # CHECK-NEXT: s_barrier_wait
-# CHECK-NEXT: v[260:267] = "st.v_wmma_f32_16x16x16_bf16"
+# CHECK-NEXT: v[252:259] = "st.v_wmma_f32_16x16x16_bf16"
 
 
 st.func @wmma_fill_after_reset() {

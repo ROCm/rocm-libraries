@@ -387,6 +387,8 @@ TEST(TestGfx950AttentionUnified2DMatchers, DeclinesEveryOptionalFeatureTheKernel
     withExtra("scale tensor", [](auto& b) { b.add_scale_tensor_uid(EXTRA_UID); });
     withExtra("seq_len_q tensor", [](auto& b) { b.add_seq_len_q_tensor_uid(EXTRA_UID); });
     withExtra("seq_len_kv tensor", [](auto& b) { b.add_seq_len_kv_tensor_uid(EXTRA_UID); });
+    withExtra("cu_seq_len_q tensor", [](auto& b) { b.add_cu_seq_len_q_tensor_uid(EXTRA_UID); });
+    withExtra("cu_seq_len_kv tensor", [](auto& b) { b.add_cu_seq_len_kv_tensor_uid(EXTRA_UID); });
     withExtra("seed tensor", [](auto& b) { b.add_seed_tensor_uid(EXTRA_UID); });
     withExtra("offset tensor", [](auto& b) { b.add_offset_tensor_uid(EXTRA_UID); });
     withExtra("dropout mask", [](auto& b) { b.add_dropout_mask_tensor_uid(EXTRA_UID); });
@@ -745,6 +747,105 @@ TEST(TestGfx950AttentionUnified2DMatchers, ScoreDependsOnlyOnTheGeometry)
     other.maskType = NO_MASK;
     other.dtype = "FP16";
     EXPECT_EQ(scoreOf(GraphSpec{}, other), scoreOf(GraphSpec{}, geometry(64, 4, 16)));
+}
+
+// =============================================================================
+// stats (generate_stats): served only by the LSE-on kernels
+// =============================================================================
+
+/// The pack's NO_STATS: the bound stats uid of a graph that asks for none.
+constexpr int64_t NO_STATS_UID = -1;
+
+/// A head-major FP32 stats output is served, and its uid is bound for kernelMatches and the
+/// launch; a graph without one binds NO_STATS.
+TEST(TestGfx950AttentionUnified2DMatchers, BindsAHeadMajorStatsOutput)
+{
+    GraphSpec spec;
+    spec.stats = true;
+    const auto bound = matchGraph(spec);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*bound, STATS_TOKEN), STATS_UID);
+
+    const auto plain = matchGraph(GraphSpec{});
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(hipdnn_plugin_sdk::ingestor::tryGetBoundInt(*plain, STATS_TOKEN), NO_STATS_UID);
+}
+
+/// The kernel writes FP32 head-major [B, Hq, Sq, 1] and takes no stride arguments, so any
+/// other stats tensor would be written wrong in bounds.
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesAStatsOutputTheKernelCannotWrite)
+{
+    std::vector<DeclineCase> cases;
+    GraphSpec tokenMajor;
+    tokenMajor.stats = true;
+    tokenMajor.statsTokenMajor = true;
+    cases.push_back({"token-major stats at Sq > 1", tokenMajor});
+    GraphSpec half;
+    half.stats = true;
+    half.statsDataType = data_objects::DataType::HALF;
+    cases.push_back({"fp16 stats", half});
+    GraphSpec heads;
+    heads.stats = true;
+    heads.statsHeads = 4;
+    cases.push_back({"stats with the KV head count", heads});
+    GraphSpec missing;
+    missing.extra = [](auto& b) {
+        b.add_generate_stats(true);
+        b.add_stats_tensor_uid(EXTRA_UID);
+    };
+    cases.push_back({"stats uid naming no tensor", missing});
+    expectEveryCaseDeclines(cases);
+}
+
+/// Only an LSE-on kernel serves a graph that asks for stats, and it serves no other: its
+/// kernarg list ends in lse_ptr.
+TEST(TestGfx950AttentionUnified2DMatchers, PairsTheLseOnKernelWithTheStatsGraph)
+{
+    GraphSpec stats;
+    stats.stats = true;
+    KernelSpec lse;
+    lse.emitLse = 1;
+
+    EXPECT_TRUE(matchesKernel(stats, lse));
+    EXPECT_FALSE(matchesKernel(stats, KernelSpec{}));
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, lse));
+    EXPECT_TRUE(matchesKernel(GraphSpec{}, KernelSpec{}));
+}
+
+/// A record without emit_lse, or with a value other than 0 or 1, is malformed.
+TEST(TestGfx950AttentionUnified2DMatchers, DeclinesARecordWithoutAValidEmitLse)
+{
+    KernelSpec bad;
+    bad.emitLse = 2;
+    EXPECT_FALSE(matchesKernel(GraphSpec{}, bad));
+
+    auto kernel = makeKernel(KernelSpec{});
+    kernel.metadata.erase("emit_lse");
+    EXPECT_FALSE(matchesKernel(Graph(GraphSpec{}), kernel));
+}
+
+TEST(TestGfx950AttentionUnified2DMatchers, ComputeDataTypeMustBeServedByFloatAccumulation)
+{
+    // The kernels accumulate and keep the softmax statistics in FLOAT, which meets an unset,
+    // FLOAT, HALF or BFLOAT16 compute type; a wider or non-floating one asks for a computation
+    // they do not perform.
+    for(const auto computeType : {data_objects::DataType::UNSET,
+                                  data_objects::DataType::FLOAT,
+                                  data_objects::DataType::HALF,
+                                  data_objects::DataType::BFLOAT16})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_TRUE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
+    for(const auto computeType : {data_objects::DataType::DOUBLE,
+                                  data_objects::DataType::INT32,
+                                  data_objects::DataType::FP8_E4M3})
+    {
+        auto spec = GraphSpec{};
+        spec.computeDataType = computeType;
+        EXPECT_FALSE(graphMatches(spec)) << data_objects::EnumNameDataType(computeType);
+    }
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine::testing

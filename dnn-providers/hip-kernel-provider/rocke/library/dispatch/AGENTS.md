@@ -69,15 +69,15 @@ field on the tiled kernel specs is a declared `KnobAxis` in `axes.py`
 (`_GFX950_2D_AXES`, `_GFX942_2D_AXES`, `_3D_AXES`); `test_tuning_space.py`
 fails if a kernel field is on no axis. Axes are ordered prerequisites-first,
 and the space is walked depth-first with the kernel's own spec validator
-pruning illegal prefixes, plus `UnifiedSpace.validate` on gfx950 2D (the LDS
-budget and the padded-K / aliased-Q rule, which the tiled 2D validator does
-not model). There is no size cap: the full space is millions of
-specs per shape on the transposed paths, so `sweep_space` is a lazy stream and
-`sample_space(req, n, seed)` draws `n` random legal specs per candidate. Held
-out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They reject
-any request that does not pin both `algorithm="unified_tuning"` and their own
-`spec_id` before constructing a spec, so normal dispatch does not pay the
-enumeration cost and the historical winner is unchanged. Sweeps probe them
+pruning illegal prefixes (on gfx950 2D it refuses a padded K slot that holds
+Q), plus `UnifiedSpace.validate` on gfx950 2D (the LDS budget, which the tiled
+2D validator does not model). There is no size cap: the full space is millions
+of specs per shape on the transposed paths, so `sweep_space` is a lazy stream
+and `sample_space(req, n, seed)` draws `n` random legal specs per candidate.
+Held out on purpose: `KNOWN_WRONG_KNOBS` (gfx942 `use_k_hbm_direct`). They
+reject any request that does not pin both `algorithm="unified_tuning"` and
+their own `spec_id` before constructing a spec, so normal dispatch does not pay
+the enumeration cost and the historical winner is unchanged. Sweeps probe them
 through `opt_in_probe` and execute the returned `AttentionTuningSpec`, which
 also owns its build, cache key, and launch grid.
 
@@ -149,8 +149,8 @@ configuration). Knobs that compile to the default are dropped (default
 values, restated policies, knobs the body does not read, a gfx950 KQ pad the
 kernel lays out as none); illegal ones are refused with the reason
 (`KNOWN_WRONG_KNOBS`, fields on no axis, codepath-fixed knobs,
-kernel-validator rejections, and on gfx950 2D the LDS budget and padded K with
-aliased Q). So one kernel has one id, and a knob pin cannot reach a
+kernel-validator rejections such as a padded K slot holding Q, and on gfx950
+2D the LDS budget). So one kernel has one id, and a knob pin cannot reach a
 configuration a sweep would not.
 
 gfx950 dense is two algorithms, one per kernel body: `attention_dense_grid`
@@ -158,9 +158,11 @@ gfx950 dense is two algorithms, one per kernel body: `attention_dense_grid`
 block order the hipDNN kernel ingestor launches) and `attention_dense_persist`
 (`gfx950_dense_persist` and `gfx950_dense_persist_widedma`). The grid and
 persistent bodies serve different requests (only the grid body runs a moving
-bottom-right diagonal), wide DMA needs the persistent body, and the ingestor
-needs a fixed block order, so those four are the only frozen choices. The tile is a knob. The gate is the kernel's own
-`supports_attention_dense`: dispatch adds no eligibility rule of its own, so
+bottom-right diagonal or takes the additive bias), wide DMA needs the persistent
+body, and the ingestor needs a fixed block order, so those four are the only
+frozen choices. The tile is a knob. The gate is the kernel's own
+`supports_attention_dense`: dispatch adds no eligibility rule of its own (except
+refusing a non-fp32 `attn_bias_dtype`, which the spec cannot express), so
 wide DMA is offered on every shape the kernel accepts, including non-causal,
 sinks and sliding-window masks; `TestWideDmaFeatures` in
 `test_attention_dense_gfx950_numeric.py` checks those numerically. Wide DMA
@@ -208,6 +210,24 @@ an otherwise invalid configuration can become valid before later knobs
 are considered. Only `lazy_rescale` is untunable on gfx942, because the
 kernel body does not read it.
 
+gfx942 dense also takes the additive bias (`use_attn_bias`, fp32 only) on both
+grids. The two spec fields it adds, `use_additive_bias` and `use_bias_x4` (the
+bias load width, which the kernel's policy resolves), are
+`DENSE_ARCH_PROBLEM_FIELDS`: sweeps never vary them and they stay out of the
+defaults fingerprint, so every `gfx942_dense` `tuning_id` is the one stored before
+they existed. Dispatch adds no eligibility rule beyond the fp32 refusal; the
+factory keeps the KV-segment split off a bias request's bottom-right chunk
+(the kernel refuses the combination), and the walk reaches only specs the kernel
+accepts, so a bias request is never offered the K double-buffer or V
+register-prefetch pipeline. It also gives a bias request over equal lengths (full or
+causal band, no sliding window, no sinks; not fp16 at D64 under a causal band, which
+keeps the default geometry) its own geometry
+(`gfx942_dense._bias_geometry_spec`): 128-row blocks on the non-persistent grid, a
+32-key tile at D128 and a 64-key tile at D64, a decode order that follows the mask
+and, at bf16 D64, the waves-per-eu of the other configs. That choice reads request
+fields only. The decode order is a recorded knob (`DenseSpace.recorded`) for those
+requests, so their tuning ids carry it; every other request's ids are unchanged.
+
 Two performance levers are **independent opt-ins** for supported BF16 D128
 causal attention (`sliding_window=0`, no sinks), with or without
 `causal_diag_split`: `lds_num_buffers=2` enables **K LDS double buffering
@@ -237,6 +257,26 @@ stored in this tree. A downstream tuning store must drop its old
 `gfx942_dense` ids and re-sweep. `TUNING_ID_VERSION` is not bumped: the
 defaults fingerprint already separates the old and new ids, and
 `lds_num_buffers` was untunable on gfx942 before, so no stored id names it.
+
+**Tuning-id migration for gfx950 2D fp8 K and the zero-width KQ pad.** Two
+gfx950 2D changes touch stored ids; no such id is stored in this tree.
+
+- fp8 K in LDS (`kv_storage_dtype="fp8e4m3"`, `use_fp8_mfma_qk`) on the 32x32
+  QK paths: ids hash the knobs, not the emitted kernel, so these ids keep
+  their value. The kernels behind them changed: the non-transposed path (both
+  engines) and the transposed path (C++ engine only) read the fp8 K bytes as
+  bf16 without `k_scale` and computed wrong scores, and now read fp8 and scale
+  it. A stored measurement of such a kernel is of the broken one: revalidate
+  and re-measure it.
+- A pin that sets `use_kq_lds_pad` with `kq_lds_pad_halves=0` has both knobs
+  dropped as inert: a zero-width pad builds the unpadded kernel, so it takes
+  that kernel's id. An id recorded with the two knobs kept is no longer
+  produced; replaying it raises `PinRefused` (its knobs canonicalize to the
+  unpadded id) instead of building anything. Replace it with the unpadded id.
+
+`TUNING_ID_VERSION` is not bumped: a bump re-keys every family's ids, while
+here the only kernels that changed under an unchanged id are ones that
+computed wrong output, and the dropped zero-width ids are refused already.
 
 `registered_attention_combos(req)` is the multi-engine bench
 entry: it probes `ATTENTION_EXECUTION_REGISTRY` for `req.arch` and flattens each

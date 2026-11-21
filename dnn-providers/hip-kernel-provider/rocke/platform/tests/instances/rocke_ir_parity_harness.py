@@ -1658,6 +1658,38 @@ def cases():
         ("bn128_sq512", {"block_n": 128}),
         ("noncausal_sq512", {"causal": False}),
         ("hqswz_sq512", {"nonpersist_decode": "hq_minor_swz"}),
+        # fp8 KV sync-dequant loader (aligned KV, default grid). Flash + SWA at
+        # D128 (unpacked LDS row) and D64 (K_GROUP>1 packed-row store) lock both
+        # loader layouts through the golden and the cpp byte-identity gate.
+        ("fp8_causal_sq512", {"kv_storage_dtype": "fp8e4m3"}),
+        (
+            "fp8_swa_w128_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "sliding_window": 128},
+        ),
+        ("fp8_d64_causal_sq512", {"kv_storage_dtype": "fp8e4m3", "head_size": 64}),
+        (
+            "fp8_d64_swa_w128_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "head_size": 64, "sliding_window": 128},
+        ),
+        # fp16 compute/output with fp8 KV. D128 + D64 lock the
+        # fp16 MFMA dequant path through the golden and cpp byte-identity gate.
+        ("fp8_fp16_causal_sq512", {"kv_storage_dtype": "fp8e4m3", "dtype": "fp16"}),
+        (
+            "fp8_fp16_d64_causal_sq512",
+            {"kv_storage_dtype": "fp8e4m3", "dtype": "fp16", "head_size": 64},
+        ),
+        # fp8 with the remaining masks the grid variant advertises: non-causal
+        # (full) and the moving bottom-right diagonal. The loader is mask-
+        # independent, so these lock that it stays byte-identical under each mask.
+        ("fp8_noncausal_sq512", {"kv_storage_dtype": "fp8e4m3", "causal": False}),
+        (
+            "fp8_bottom_right_sq512",
+            {
+                "kv_storage_dtype": "fp8e4m3",
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+            },
+        ),
         # --- bottom-right diagonal. Four cases pin the aligned and arbitrary
         # shifted-diagonal routes, the sink composition, and the BM128 geometry.
         (
@@ -1784,6 +1816,33 @@ def cases():
                 "sliding_window": 256,
             },
         ),
+        (
+            "paged_causal_fp16_sq512",
+            {"dtype": "fp16", "paged": True, "block_size": 16, "num_kv_blocks": 32},
+        ),
+        (
+            "paged_swa_fp16_d64_sq512",
+            {
+                "dtype": "fp16",
+                "head_size": 64,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        # Paged K/V on the sliding-window tile dispatch picks for small grids.
+        (
+            "paged_swa_fp16_bm128_sq512",
+            {
+                "geometry": "bm128",
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
         # --- Attention band: the cuDNN (left = sliding_window, right = right_bound)
         # band on the top-left diagonal. causal=False is the unbounded right side.
         # Non-causal (left-only) window: default + persistent grids.
@@ -1891,6 +1950,48 @@ def cases():
                 "use_sinks": True,
             },
         ),
+        # --- additive bias (grid body only): the aligned runtime-shape body with
+        # plain 16-byte loads (four keys each, element-aligned), the ragged body
+        # whose scalar loads are masked at the tails, and the
+        # windowed bodies that clamp the start tile because the bias load is plain
+        # (LSE on: baked tile count; varlen: per-sequence tile count). Numerics
+        # cannot observe that clamp (the window mask overwrites the read), so these
+        # hashes are its only CI pin. bias_catalog_tile is the configuration the
+        # hipDNN catalog ships (block_m 128 / block_n 64 at the qb_minor block
+        # order); the others run the spec's default 256/64 tile.
+        ("bias_sq512", {"use_additive_bias": True}),
+        (
+            "bias_catalog_tile_sq512",
+            {
+                "use_additive_bias": True,
+                "block_m": 128,
+                "block_n": 64,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_ragged_bottom_right_sq500",
+            {
+                "seqlen_q": 500,
+                "seqlen_kv": 1234,
+                "ragged": True,
+                "causal_bottom_right": True,
+                "use_additive_bias": True,
+            },
+        ),
+        (
+            "bias_lse_window_past_keys_sq512",
+            {
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "seqlen_kv": 128,
+                "sliding_window": 64,
+            },
+        ),
+        (
+            "bias_varlen_window_sq512",
+            {"use_additive_bias": True, "varlen": True, "sliding_window": 64},
+        ),
     ):
         add(
             "attention_dense",
@@ -1923,6 +2024,193 @@ def cases():
                 "causal_diag_split": True,
                 "kv_segments": 4,
                 "block_m": 128,
+            },
+        ),
+        # --- additive bias: one bias add per tile ahead of the mask, on the default
+        # and the persistent grid (the policy picks the 4-wide loads for every bias
+        # body, so a row names use_bias_x4 only to force the scalar loads or to pin
+        # the policy's pick); the epilogue's live-row test with and without LSE (sinks
+        # with LSE keep m = sink for a row whose keys are all -inf); a sliding window on
+        # the persistent grid and under wave skip; the diagonal split, whose unmasked
+        # tiles still take the bias; D64 fp16 without a mask; bf16 D64 with the policy's
+        # loads and with scalar ones forced; the 4-wide loads and the scalar ones at
+        # D128 on both grids; and the geometry the dispatch factory builds for a bias
+        # (128-row blocks, a 32-key tile at D128 and 64-key at D64, the decode order
+        # following the mask). The rows above pin that none of this emits IR when the
+        # bias is off.
+        ("bias_causal_sq512", {"use_additive_bias": True}),
+        ("bias_persist_causal_sq512", {**_persist942, "use_additive_bias": True}),
+        (
+            "bias_lse_window_sq512",
+            {"use_additive_bias": True, "emit_lse": True, "sliding_window": 128},
+        ),
+        (
+            "bias_persist_window_lse_sq512",
+            {
+                **_persist942,
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "sliding_window": 128,
+            },
+        ),
+        (
+            "bias_window_wave_skip_sq512",
+            {
+                "use_additive_bias": True,
+                "sliding_window": 128,
+                "block_m": 128,
+                "block_n": 32,
+                "window_wave_skip": True,
+            },
+        ),
+        (
+            "bias_bottom_right_dsplit_sq512",
+            {
+                "use_additive_bias": True,
+                "seqlen_kv": 1024,
+                "causal_bottom_right": True,
+                "causal_diag_split": True,
+            },
+        ),
+        (
+            "bias_d64_fp16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "dtype": "fp16",
+                "causal": False,
+            },
+        ),
+        ("bias_d64_bf16_sq512", {"use_additive_bias": True, "head_size": 64}),
+        (
+            "bias_d64_bf16_scalar_sq512",
+            {"use_additive_bias": True, "head_size": 64, "use_bias_x4": False},
+        ),
+        (
+            "bias_sinks_lse_sq512",
+            {"use_additive_bias": True, "use_sinks": True, "emit_lse": True},
+        ),
+        ("bias_x4_sq512", {"use_additive_bias": True, "use_bias_x4": True}),
+        ("bias_scalar_sq512", {"use_additive_bias": True, "use_bias_x4": False}),
+        (
+            "bias_persist_scalar_sq512",
+            {**_persist942, "use_additive_bias": True, "use_bias_x4": False},
+        ),
+        (
+            "bias_d128_fp16_no_mask_sq512",
+            {"use_additive_bias": True, "dtype": "fp16", "causal": False},
+        ),
+        (
+            "bias_geom_d128_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "bt_hkv_minor",
+            },
+        ),
+        (
+            "bias_geom_lse_d128_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "emit_lse": True,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "bt_hkv_minor",
+            },
+        ),
+        (
+            "bias_geom_d128_fp16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "dtype": "fp16",
+                "causal": False,
+                "block_m": 128,
+                "block_n": 32,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_geom_d64_bf16_no_mask_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "causal": False,
+                "block_m": 128,
+                "nonpersist_decode": "qb_minor",
+            },
+        ),
+        (
+            "bias_geom_lse_d64_bf16_causal_sq512",
+            {
+                "use_additive_bias": True,
+                "head_size": 64,
+                "emit_lse": True,
+                "block_m": 128,
+                "nonpersist_decode": "bt_hkv_minor",
+            },
+        ),
+        # Paged K/V, the same cohort as the gfx950 case of this name.
+        (
+            "paged_swa_fp16_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        (
+            "paged_causal_fp16_sq512",
+            {"dtype": "fp16", "paged": True, "block_size": 16, "num_kv_blocks": 32},
+        ),
+        (
+            "paged_swa_fp16_d64_sq512",
+            {
+                "dtype": "fp16",
+                "head_size": 64,
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+            },
+        ),
+        # Paged K/V on the smaller tiles dispatch picks: half-height (under-filled
+        # grid), narrow window with the wave skip (D128), narrow window (bf16 D64).
+        (
+            "paged_causal_fp16_bm128_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "block_m": 128,
+            },
+        ),
+        (
+            "paged_swa_fp16_bm128_bn32_wskip_sq512",
+            {
+                "dtype": "fp16",
+                "paged": True,
+                "block_size": 16,
+                "num_kv_blocks": 32,
+                "sliding_window": 256,
+                "block_m": 128,
+                "block_n": 32,
+                "window_wave_skip": True,
+            },
+        ),
+        (
+            "paged_swa_bf16_d64_bm64_sq512",
+            {
+                "head_size": 64,
+                "paged": True,
+                "block_size": 32,
+                "num_kv_blocks": 16,
+                "sliding_window": 256,
+                "block_m": 64,
+                "waves_per_eu": 4,
             },
         ),
     ):

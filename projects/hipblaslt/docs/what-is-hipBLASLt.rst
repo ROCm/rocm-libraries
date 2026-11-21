@@ -113,11 +113,14 @@ between consecutive columns. That lets a matrix be a window into a larger array.
 keeps that idea and adds three more:
 
 * A **memory order**. ``HIPBLASLT_ORDER_COL`` (column-major) is the default.
-  ``HIPBLASLT_ORDER_ROW`` (row-major) is accepted by ``hipblasLtMatrixTransform``, and by
-  ``hipblasLtMatmul`` for A and B. C and D must be column-major; ``hipblasLtOrder_t`` in the
-  datatypes reference lists every limit. The C++ extension API does not accept row-major layouts.
-  Some architectures additionally accept **swizzled**
-  orders, such as ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16``, in which the
+  ``HIPBLASLT_ORDER_ROW`` (row-major) is accepted only by ``hipblasLtMatrixTransform``; matmul returns
+  ``HIPBLAS_STATUS_NOT_SUPPORTED`` for it. To multiply row-major data, keep column-major layouts and
+  use the identity (A * B)\ :sup:`T` = B\ :sup:`T` * A\ :sup:`T`: swap A and B, swap M and N, and
+  describe each matrix as its column-major transpose. The column-major result is
+  (A * B)\ :sup:`T`, which is A * B in row-major order, so the output needs no transpose. Anything
+  applied per row of D, such as a bias or an alpha vector, then applies per column of A * B, and
+  the scale for A becomes the scale for the second operand. Some architectures additionally accept
+  **swizzled** orders, such as ``HIPBLASLT_ORDER_COL16_4R8`` and ``HIPBLASLT_ORDER_COL16_4R16``, in which the
   data is pre-arranged into the exact pattern the kernel reads. That saves the kernel from
   rearranging values itself. However, a swizzled order is valid only for particular type, transpose,
   and architecture combinations, which the :doc:`API reference <./reference/api-reference>` lists.
@@ -127,54 +130,6 @@ keeps that idea and adds three more:
   a sub-matrix inside a larger allocation. :doc:`Use general batched GEMM
   <./how-to/how-to-general-batched-gemm>` describes when offsets apply.
 * **Batch** information, which `Running many GEMMs at once`_ covers.
-
-For supported row-major A and B, matmul and the heuristic rewrite internal copies of the layouts:
-they swap the stored row and column counts and flip the transpose operations between N and T.
-This rewrite does not copy or reorder matrix data, launch a separate transpose kernel, or require
-workspace for layout conversion. The selected GEMM algorithm can still require its own workspace.
-Logs and generated benchmark commands describe the resulting column-major problem.
-
-An equivalent column-major description supplied by the caller reaches the same backend problem
-for selection and execution. The row-major rewrite adds host-side descriptor handling, but no GPU
-layout conversion. Performance can differ between physically different arrangements of the data,
-depending on the GPU, data type, transpose choices, dimensions, and available kernels. The default
-``HIPBLASLT_ORDER_COL`` does not identify the fastest arrangement for every problem.
-
-Each matmul entry point accepts these orders. Any other order returns
-``HIPBLAS_STATUS_NOT_SUPPORTED``, and ``matmulIsTuned`` returns ``-1``. Grouped layouts in the C
-API return ``HIPBLAS_STATUS_INVALID_VALUE`` instead, and so does a row-major D with a fused
-all-to-all epilogue.
-
-.. list-table::
-    :header-rows: 1
-    :widths: 34,40,26
-
-    * - **API**
-      - **A and B**
-      - **C and D**
-
-    * - ``hipblasLtMatmul`` and ``hipblasLtMatmulAlgoGetHeuristic``
-      - | ``HIPBLASLT_ORDER_COL``
-        | ``HIPBLASLT_ORDER_ROW``, with ``HIPBLAS_OP_N`` or ``HIPBLAS_OP_T``, no scale or a scalar
-          scale, and a type other than ``HIP_R_4I``
-        | Swizzled orders, for the combinations the API reference lists
-      - ``HIPBLASLT_ORDER_COL``
-
-    * - The same calls with a grouped layout (``HIPBLASLT_BATCH_MODE_GROUPED``)
-      - ``HIPBLASLT_ORDER_COL``
-      - ``HIPBLASLT_ORDER_COL``
-
-    * - ``hipblaslt_ext`` ``Gemm``, ``GroupedGemm``, ``matmulIsAlgoSupported``,
-        ``isSolutionSupported``, and ``matmulIsTuned``
-      - | ``HIPBLASLT_ORDER_COL``
-        | Swizzled orders, for the combinations the API reference lists
-      - ``HIPBLASLT_ORDER_COL``
-
-With row-major A or B, a bias epilogue, an alpha vector, strided and pointer-array batches, and
-layout offsets keep their usual meaning: a bias still applies per row of D. To use
-a row-major C or D, or row-major data in the extension API, keep column-major layouts and use the
-identity (A * B)\ :sup:`T` = B\ :sup:`T` * A\ :sup:`T`. A per-row vector of D then applies per
-column of A * B.
 
 Precision: types, compute modes, and scaling
 ============================================

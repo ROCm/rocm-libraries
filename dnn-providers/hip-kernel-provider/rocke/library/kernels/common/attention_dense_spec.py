@@ -17,6 +17,7 @@ from types import MappingProxyType
 from rocke.core.ir import BF16, F16
 from rocke.helpers.spec import kernel_name_join
 
+from kernels.common._attention_dense_paged import paged_cache_bytes, paged_tile_check
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
     PERSIST_DECODES,
@@ -285,6 +286,8 @@ class AttentionDenseSpec:
         if not 1 <= self.waves_per_eu <= 8:
             raise ValueError(f"waves_per_eu must be in [1, 8], got {self.waves_per_eu}")
 
+        if type(self.paged) is not bool:
+            raise ValueError(f"paged must be a bool, got {type(self.paged).__name__}")
         if self.paged:
             if self.block_size <= 0:
                 raise ValueError("paged=True requires block_size > 0")
@@ -292,26 +295,14 @@ class AttentionDenseSpec:
                 raise ValueError(
                     f"paged block_size ({self.block_size}) must be a power of two"
                 )
-            if self.block_n % self.block_size:
-                raise ValueError(
-                    f"block_n ({self.block_n}) must be a multiple of page "
-                    f"block_size ({self.block_size})"
-                )
-            rows_per_wave = self.block_n // self.num_waves
-            if self.block_size < rows_per_wave or self.block_size % rows_per_wave:
-                raise ValueError(
-                    f"paged block_size ({self.block_size}) must be >= and a "
-                    f"multiple of ROWS_PER_WAVE ({rows_per_wave})"
-                )
+            if self.block_size < 16:
+                raise ValueError(f"paged block_size ({self.block_size}) must be >= 16")
+            ok, why = paged_tile_check(self.block_size, self.block_m, self.block_n)
+            if not ok:
+                raise ValueError(why)
             if self.num_kv_blocks <= 0:
                 raise ValueError("paged=True requires num_kv_blocks > 0")
-            cache_bytes = (
-                self.num_kv_blocks
-                * self.block_size
-                * self.num_kv_heads
-                * self.head_size
-                * 2
-            )
+            cache_bytes = paged_cache_bytes(self)
             if cache_bytes > 2**31 - 1:
                 raise ValueError(
                     f"paged cache {cache_bytes} B exceeds i32 addressing (2 GiB)"
@@ -325,14 +316,21 @@ class AttentionDenseSpec:
                     "paged + persistent not yet implemented "
                     "(persistent builder is contiguous-only)"
                 )
-            if self.head_size != 128:
-                raise ValueError("paged not yet implemented for head_size != 128")
             if self.dtype not in ("fp16", "bf16"):
                 raise ValueError(f"paged not yet implemented for dtype={self.dtype}")
-            if self.sliding_window <= 0:
+            if self.seqlen_kv % self.block_n:
+                # The padded keys of a partial KV tile would read stale page rows
+                # (or block 0) instead of the zeros the contiguous bound gives.
                 raise ValueError(
-                    "paged not yet implemented for plain-causal "
-                    "(sliding_window>0 only)"
+                    f"paged needs whole KV tiles: seqlen_kv ({self.seqlen_kv}) must be "
+                    f"a multiple of block_n ({self.block_n})"
+                )
+            if not self.causal:
+                raise ValueError("paged attention is causal-only")
+            if self.causal_bottom_right:
+                # The shifted diagonal is untested with paged K/V on both arches.
+                raise ValueError(
+                    "causal_bottom_right is not yet supported with paged KV"
                 )
         if self.use_sinks and self.paged:
             raise ValueError("use_sinks is not yet supported with paged KV")
@@ -348,20 +346,38 @@ class AttentionDenseSpec:
         return _DTYPE_IR[self.dtype]
 
     @property
+    def kv_elem_bytes(self) -> int:
+        """Bytes per stored K/V element.
+
+        2 on the shared spec: KV is stored at the compute dtype. A narrower KV
+        format is an arch-specific knob, so the arch whose loader implements one
+        overrides this (gfx950 fp8).
+
+        This is the one arch override the SHARED checks read, via the KV extent
+        in :func:`check_dense_spec_preflight`. The C++ mirror of this spec has
+        no narrow-KV field, so it always computes that extent at 2 B, and a
+        narrow-KV spec would be sized as its wide twin there. Nothing hands the
+        mirror such a spec today: the field lives on the arch subclass, which
+        the mirror does not carry, exactly like ``kv_segments``, ``emit_lse``
+        and ``wide_lds_dma``. Giving the mirror a narrow KV format means giving
+        it the field and the width, not only this property.
+        """
+        return 2
+
+    @property
     def num_queries_per_kv(self) -> int:
         return self.num_query_heads // self.num_kv_heads
 
     @property
     def _aligned_causal(self) -> bool:
-        """Causal attention on the plain dense layout: where the auto block
-        orders were measured."""
+        """Causal attention on the plain dense or paged layout: where the auto
+        block orders were measured."""
         moving_diagonal = self.causal_bottom_right and self.seqlen_q != self.seqlen_kv
         return (
             balance_causal(self)
             and not moving_diagonal
             and not self.ragged
             and not self.varlen
-            and not self.paged
         )
 
     @property
@@ -408,7 +424,8 @@ class AttentionDenseSpec:
         nqb = (self.seqlen_q + self.block_m - 1) // self.block_m
         hq = self.num_query_heads
         if (
-            hq == self.num_kv_heads
+            not self.paged  # not measured with paged K/V
+            and hq == self.num_kv_heads
             and hq % self.chiplet_num_xcds == 0
             and nqb >= 16
             and self.batch * hq * nqb >= 8192
@@ -503,6 +520,15 @@ class AttentionDenseSpec:
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         return ("lazyrs",) if self.lazy_rescale else ()
 
+    def _kv_storage_name_parts(self) -> tuple[str, ...]:
+        """Name tokens for a narrow KV storage format, empty on the shared spec.
+
+        KV at the compute dtype needs no token. The arch whose loader decodes a
+        narrower format overrides this, so the shared spec never reads a field
+        it does not declare and its C++ mirror stays in step with it.
+        """
+        return ()
+
     def _persist_decode_name_part(self) -> str:
         return PERSIST_DECODES[self.resolved_persist_decode].tag
 
@@ -514,6 +540,9 @@ class AttentionDenseSpec:
             f"bn{self.block_n}",
             self.dtype,
         ]
+        # Kept in the shared name, at this position, so an fp8 kernel can never
+        # share a symbol with its bf16 twin. The arch spec supplies the token.
+        parts.extend(self._kv_storage_name_parts())
         if self.block_m != DEFAULT_DENSE_TILE_GEOMETRY["block_m"]:
             parts.append(f"bm{self.block_m}")
         if 128 // self.head_size > 1:
@@ -549,6 +578,49 @@ class AttentionDenseSpec:
         if self.chiplet_num_xcds != 8:
             parts.append(f"xcd{self.chiplet_num_xcds}")
         return kernel_name_join(*parts)
+
+
+#: The one dtype an fp8 KV loader decodes. The K/V pointers are declared OCP
+#: fp8e4m3, so a bf16 or FNUZ tensor is read as OCP and silently produces wrong
+#: output. Compared by name so no torch import is needed, which also rejects
+#: ``torch.float8_e4m3fnuz``.
+OCP_FP8_KV_DTYPE = "torch.float8_e4m3fn"
+
+
+def require_ocp_fp8_kv(named_tensors) -> None:
+    """Raise unless every ``(name, tensor)`` is OCP fp8 K/V.
+
+    The single home of the fp8 K/V dtype rule. It lives beside
+    :attr:`AttentionDenseSpec.kv_elem_bytes`, which is what makes the rule
+    load-bearing, so the dispatch binding and the runner enforce one wording
+    instead of two. ``kernels`` may not import ``dispatch``, so a checker that
+    both layers share has to live here.
+    """
+    for name, tensor in named_tensors:
+        dtype = getattr(tensor, "dtype", None)
+        if str(dtype) != OCP_FP8_KV_DTYPE:
+            raise ValueError(
+                f"fp8 dense expects OCP fp8 {name} ({OCP_FP8_KV_DTYPE}), got "
+                f"{dtype!r}; a bf16 or FNUZ tensor is read as OCP fp8 and "
+                "silently produces wrong output"
+            )
+
+
+def require_fp8_kv_scale(name: str, value, label: str) -> float:
+    """Return one per-tensor fp8 dequant scale as a float, or raise.
+
+    The companion of :func:`require_ocp_fp8_kv`, and the single home of the
+    missing-scale rule. Both the dispatch binding and the runner enforce it, so
+    it lives here for the same reason the dtype rule does: ``kernels`` may not
+    import ``dispatch``. Defaulting a missing scale to 1.0 would silently
+    dequantize at unit scale and produce wrong output, so it is refused.
+    """
+    if value is None:
+        raise ValueError(
+            f"{label} requires {name!r} (per-tensor dequant scale); pass "
+            f"{name}=1.0 explicitly for unit-scale KV"
+        )
+    return float(value)
 
 
 def attention_dense_cache_key(spec: AttentionDenseSpec, *, arch: str) -> tuple:
@@ -669,7 +741,13 @@ def check_dense_spec_preflight(spec: AttentionDenseSpec) -> tuple[bool, str]:
             f"n_per = {spec.block_m} // block_n floors and drops keys"
         )
 
-    kv_bytes = spec.batch * spec.seqlen_kv * spec.num_kv_heads * spec.head_size * 2
+    kv_bytes = (
+        spec.batch
+        * spec.seqlen_kv
+        * spec.num_kv_heads
+        * spec.head_size
+        * spec.kv_elem_bytes
+    )
     if kv_bytes >= INT32_LIMIT:
         return False, (
             f"K/V extent is {kv_bytes} B, at or past the 32-bit buffer-resource "

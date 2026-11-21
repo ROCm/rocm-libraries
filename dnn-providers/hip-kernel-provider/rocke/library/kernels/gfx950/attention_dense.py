@@ -75,6 +75,13 @@ The mask is the cuDNN band ``(left = sliding_window, right = right_bound)`` on t
   0 by default). A row whose band holds no key (``seqlen_q > seqlen_kv + window``)
   outputs zeros. Bottom-right alignment (``causal_bottom_right``) is plain causal only.
 
+Additive bias (``use_additive_bias``, grid body only): an fp32 ``[B|1, Hq|1, Sq|1,
+Skv]`` tensor added to the scaled scores before the mask. With it on, each score is
+moved into the log2 domain (``s * qk_scale + bias / ln2``) right after the QK MFMA,
+and the row max and exp2 use it as is; the bias-off body keeps the raw-score form
+and its IR is unchanged. The spec refuses the bias with fp8 KV storage: the pair
+has no numeric test.
+
 Experimental/negative levers from the sweep (step-2 8-cluster, K-staging, per-nsub
 staging, score truncation, PV V-prefetch) are intentionally NOT carried over — see
 the experiment's ``plan.md`` for their measured results.
@@ -86,8 +93,12 @@ from dataclasses import dataclass, field, fields as _dataclass_fields
 from types import MappingProxyType
 from typing import Optional, Tuple
 
-from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64
-from rocke.helpers.attention import mfma_32x32x16_for_dtype, pv32_v_load_paired
+from rocke.core.ir import IRBuilder, KernelDef, PtrType, F32, I32, I64, FP8E4M3
+from rocke.helpers.attention import (
+    mfma_32x32x16_for_dtype,
+    pv32_v_load_paired,
+    dequant_fp8x8_to_dtype,
+)
 from rocke.helpers.schedule import MFMA, VALU, TRANS, DS_READ
 from rocke.helpers.spec import align_up as _align_up
 from kernels.common.attention_dense_spec import (
@@ -96,6 +107,8 @@ from kernels.common.attention_dense_spec import (
     attention_dense_cache_key,
     check_dense_scale,
     check_dense_spec_preflight,
+    require_fp8_kv_scale,
+    require_ocp_fp8_kv,
 )
 from kernels.common.attention_dense_decode import (
     NONPERSIST_DECODES,
@@ -111,6 +124,15 @@ from kernels.common.attention_dense_decode import (
     make_fastdiv,
 )
 from kernels.gfx950.attention_tiled_2d import _mfma_32x32_c_row, _mfma_32x32_c_col
+from kernels.common._attention_dense_paged import (
+    declare_paged_params,
+    paged_cache_bytes,
+    paged_kv_row,
+    paged_launch_args,
+    paged_seq_setup,
+    paged_wave_row_base,
+    validate_paged_launch,
+)
 from kernels.common.attention_dense_kv_split import (
     SEGMENT_PARAMS,
     allocate_segment_workspace,
@@ -120,12 +142,28 @@ from kernels.common.attention_dense_kv_split import (
     launch_segment_combine,
     segment_tile_range,
 )
+from kernels.common._attention_additive_bias import (
+    BIAS_FLOOR,
+    BIAS_LIVE_ROW_MIN,
+    add_additive_bias_at,
+    add_additive_bias_x4_at,
+    additive_bias_elem_ptr,
+    additive_bias_launch_values,
+    additive_bias_row,
+    append_additive_bias_signature,
+    check_bias_constants,
+    declare_additive_bias_params,
+    make_bias_floor,
+    validate_dense_additive_bias,
+)
 from kernels.common._lse_store import (
     dense_row_has_key,
     lse_store,
     validate_dense_lse,
+    validate_dense_varlen_offsets,
     zero_keyless_row,
 )
+from kernels.common._spec_checks import require_bool
 
 LOG2E = 1.4426950408889634
 
@@ -142,6 +180,11 @@ _DEFAULT_GFX950_LAYOUT = GFX950_DENSE_LAYOUTS["default"]
 #     from the inherited D<128 lds_k_group_pad so neither re-sweep moves the other.
 _DEFAULT_LDS_NUM_BUFFERS = 2
 _DEFAULT_LDS_K_ROW_PAD = 8
+
+# KV-cache storage formats this body can dequantize on load. ``None`` keeps the
+# KV at the compute ``dtype`` (2 bytes); ``"fp8e4m3"`` stores K/V as 1-byte
+# float8_e4m3fn in HBM and dequants to bf16/fp16 in the loader.
+_KV_STORAGE_DTYPES = frozenset({"fp8e4m3"})
 # lds_v_row_pad: bf16 elements of V-row padding for the transposed PV read
 #   (ds_read_b64_tr_b16). The transpose read has a stricter bank pattern than
 #   K's ds_read_b128, so it needs a LARGER pad than the K pad (8): a measured
@@ -187,6 +230,17 @@ _IGLP_OFF = -1
 # scaled before the mask). Real maxima are far above both thresholds.
 _EMPTY_ROW_MAX_GRID = -(2.0**33)
 _EMPTY_ROW_MAX_PERSIST = -1e29
+# The grid body's mask sentinel, written into masked scores (see neg_inf in
+# build_attention_dense for why it is a power of two).
+_MASK_SENTINEL = -(2.0**99)
+# The bias floor and the live-row threshold are shared with the gfx942 dense kernel
+# (see _attention_additive_bias); here they sit between -2**99 and about -2.3e29 in log2
+# units. The order is checked against the sentinel this kernel really uses.
+# _EMPTY_ROW_MAX_GRID (-2**33) cannot serve as the threshold: a real bias of, say, -1e10
+# makes a legitimate row max far smaller than that.
+_BIAS_FLOOR = BIAS_FLOOR
+_BIAS_LIVE_ROW_MIN = BIAS_LIVE_ROW_MIN
+check_bias_constants(_MASK_SENTINEL, LOG2E)
 
 
 @dataclass(frozen=True)
@@ -207,6 +261,20 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
     # into this many contiguous chunks, one CTA each, merged by a combine kernel
     # (see kernels.common.attention_dense_kv_split). 1 (default) emits nothing new.
     kv_segments: int = field(default=1, kw_only=True)
+    # fp32 additive bias ``[B|1, Hq|1, Sq|1, Skv]`` added to the scaled scores
+    # (``QK * scale + bias``), indexed by query head. Appends four kernel params
+    # after all others (see ``_attention_additive_bias``). Grid body only.
+    use_additive_bias: bool = field(default=False, kw_only=True)
+    # KV-cache storage format. None keeps KV at the compute dtype; "fp8e4m3"
+    # reads 1-byte fp8 KV and dequants to dtype in the loader (Q stays dtype).
+    # Lives here, not on the shared spec: only this arch's loader decodes fp8,
+    # and the shared spec is the one the C++ engine mirrors.
+    kv_storage_dtype: str | None = field(default=None, kw_only=True)
+
+    @property
+    def kv_elem_bytes(self) -> int:
+        """1 byte per stored K/V element under fp8 KV, else the shared 2."""
+        return 1 if self.kv_storage_dtype == "fp8e4m3" else 2
 
     def _supports_noncausal_window(self) -> bool:
         return True
@@ -308,10 +376,15 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
 
     def __post_init__(self) -> None:
         super().__post_init__()
-        if type(self.emit_lse) is not bool:
+        if (
+            self.kv_storage_dtype is not None
+            and self.kv_storage_dtype not in _KV_STORAGE_DTYPES
+        ):
             raise ValueError(
-                f"emit_lse must be a bool, got {type(self.emit_lse).__name__}"
+                f"kv_storage_dtype must be None or one of "
+                f"{sorted(_KV_STORAGE_DTYPES)}, got {self.kv_storage_dtype}"
             )
+        require_bool("emit_lse", self.emit_lse)
         if self.lds_v_row_pad < 0 or self.lds_v_row_pad % 8 != 0:
             raise ValueError(
                 "lds_v_row_pad must be a non-negative multiple of 8 bf16 "
@@ -332,13 +405,50 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
                 )
             if self.paged or self.varlen:
                 raise ValueError("right_bound > 0 is not supported with paged / varlen")
-        if self.paged and not self.causal:
-            raise ValueError("paged attention is causal-only")
+        if type(self.use_additive_bias) is not bool:
+            raise ValueError(
+                "use_additive_bias must be a bool, got "
+                f"{type(self.use_additive_bias).__name__}"
+            )
+        if self.use_additive_bias:
+            # The persistent body declares no shape params and runs its own
+            # softmax; only the grid body adds the bias.
+            if self.persistent:
+                raise ValueError(
+                    "use_additive_bias is implemented on the grid body only "
+                    "(persistent=False)"
+                )
+            if self.paged:
+                raise ValueError("use_additive_bias is not supported with paged K/V")
+            # The KV-segment split writes partial rows for a combine kernel, so it
+            # would bypass the bias epilogue's keyless-row handling; refused like
+            # the other features without a segment rule (see check_kv_segments).
+            if self.kv_segments != 1:
+                raise ValueError(
+                    "use_additive_bias is not supported with kv_segments > 1"
+                )
+            # The fp8 loader dequantizes K/V and the epilogue adds the bias. Each
+            # is computed against a reference alone; no test computes the pair, so
+            # it is refused until one does.
+            if self.kv_storage_dtype is not None:
+                raise ValueError("use_additive_bias is not supported with fp8 KV")
+        if self.kv_storage_dtype == "fp8e4m3":
+            # First-cut fp8 KV lands on the default-grid, aligned contiguous builder.
+            # The sync-dequant loader uses a plain in-bounds global load, so ragged /
+            # varlen / paged (partial-tile or indirected KV) are follow-ups, as are
+            # the persistent-grid and paged paths.
+            if self.persistent:
+                raise ValueError("fp8 KV is not yet supported with persistent=True")
+            if self.paged:
+                raise ValueError("fp8 KV is not yet supported with paged KV")
+            if self.ragged:
+                raise ValueError("fp8 KV is not yet supported with ragged=True")
+            if self.varlen:
+                raise ValueError("fp8 KV is not yet supported with varlen=True")
         if self.causal_bottom_right:
             # The non-persistent contiguous builder is the only gfx950 path
-            # that implements the compile-time shifted diagonal.
-            if self.paged:
-                raise ValueError("causal_bottom_right is not supported with paged=True")
+            # that implements the compile-time shifted diagonal (paged: the shared
+            # spec).
             if self.persistent:
                 raise ValueError(
                     "causal_bottom_right is not supported with persistent=True"
@@ -511,6 +621,9 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
         # claim an hq/kv -- mirrors _shape_name_parts dropping sq/sk.
         return () if self.runtime_shape else super()._head_name_parts()
 
+    def _kv_storage_name_parts(self) -> tuple[str, ...]:
+        return (f"kv{self.kv_storage_dtype}",) if self.kv_storage_dtype else ()
+
     def _algorithm_name_parts(self) -> tuple[str, ...]:
         parts = list(super()._algorithm_name_parts())
         if self.wide_lds_dma:
@@ -526,6 +639,8 @@ class Gfx950AttentionDenseSpec(_AttentionDenseSpecBase):
             parts.append("lse")
         if self.kv_segments != 1:
             parts.append(f"kvs{self.kv_segments}")
+        if self.use_additive_bias:
+            parts.append("addb")
         return tuple(parts)
 
     def _codegen_name_part(self) -> str:
@@ -676,7 +791,7 @@ def gfx950_dense_tile_legality(*, head_size: int) -> Tuple[Tuple[int, int], ...]
 def supports_attention_dense(
     spec: AttentionDenseSpec, *, arch: str = "gfx950"
 ) -> Tuple[bool, str]:
-    """Return (ok, reason). The kernel is gfx950-only and dense (no paging/bias)."""
+    """Return (ok, reason). The kernel is gfx950-only and dense."""
     if arch != "gfx950":
         return False, f"attention_dense is gfx950-only (got {arch})"
     if not isinstance(spec, Gfx950AttentionDenseSpec):
@@ -730,6 +845,25 @@ def supports_attention_dense(
     ok, why = check_kv_segments(spec)
     if not ok:
         return False, why
+    if spec.kv_storage_dtype is not None:
+        # The fp8 loader streams KV in flat groups of 8 elems per thread, so the
+        # tile element count must divide evenly by threads*8. Without this gate
+        # the loader asserts at codegen (BN*D % (THREADS*8)). threads =
+        # num_waves*64.
+        threads = spec.num_waves * 64
+        if (spec.block_n * spec.head_size) % (threads * 8) != 0:
+            return False, (
+                f"fp8 dense requires block_n*head_size="
+                f"{spec.block_n * spec.head_size} divisible by threads*8="
+                f"{threads * 8} (block_n={spec.block_n}, "
+                f"head_size={spec.head_size}, num_waves={spec.num_waves})"
+            )
+        # fp8 KV dequant feeds a bf16 or fp16 MFMA (the base spec already limits
+        # dtype to those two). Sinks on dense are a separate ticket, and the fp8
+        # loader has no sink path yet, so gate that combination out here rather
+        # than silently admitting it.
+        if spec.use_sinks:
+            return False, "fp8 dense does not support attention sinks yet"
     return True, ""
 
 
@@ -813,6 +947,9 @@ def build_attention_dense(
     LAZY_RESCALE = spec.lazy_rescale
     LAZY_THRESHOLD = float(spec.lazy_rescale_threshold)
     use_sinks = spec.use_sinks
+    USE_BIAS = spec.use_additive_bias
+    KV_FP8 = spec.kv_storage_dtype == "fp8e4m3"
+    kv_dtype = FP8E4M3 if KV_FP8 else dtype
 
     K_STEPS = D // 16
     D_TILES = D // 32
@@ -844,15 +981,21 @@ def build_attention_dense(
         "q_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
     )
     k = b.param(
-        "k_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "k_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     v = b.param(
-        "v_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+        "v_ptr", PtrType(kv_dtype, "global"), noalias=True, readonly=True, align=16
     )
     o = b.param(
         "o_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
     )
     scale = b.param("scale", F32)
+    if KV_FP8:
+        # Per-tensor fp8 KV dequant scales, declared right after scale to fix their
+        # ABI position (mirrored in attention_dense_signature). Consumed by the fp8
+        # sync-dequant loader; absent from the bf16 ABI.
+        k_scale = b.param("k_scale", F32)
+        v_scale = b.param("v_scale", F32)
     # Problem shape as kernel params. Unconditional here: every spec reaching this
     # body takes them, so the base offsets below read params with no baked
     # alternative. Declared right after scale to fix their ABI position (mirrored in
@@ -911,13 +1054,7 @@ def build_attention_dense(
         )
     block_tables = kv_lens = bt_stride = None
     if spec.paged:
-        block_tables = b.param(
-            "block_tables", PtrType(I32, "global"), noalias=True, readonly=True, align=4
-        )
-        kv_lens = b.param(
-            "kv_lens", PtrType(I32, "global"), noalias=True, readonly=True, align=4
-        )
-        bt_stride = b.param("block_table_stride", I32)
+        block_tables, kv_lens, bt_stride = declare_paged_params(b)
     if spec.emit_lse:
         lse = b.param(
             "lse_ptr",
@@ -929,6 +1066,9 @@ def build_attention_dense(
     KVS = spec.kv_segments
     if KVS > 1:
         segment_params = declare_segment_params(b)
+    if USE_BIAS:
+        # After every other param; attention_dense_signature appends the same four.
+        additive_bias = declare_additive_bias_params(b)
     qk_scale = b.fmul(scale, b.const_f32(LOG2E))
 
     # native v_exp_f32 (softmax arg bounded; see the scale-range note above
@@ -950,7 +1090,11 @@ def build_attention_dense(
     # alpha = exp2(m_old - m_new) = 0, which clears it. A non-power-of-two
     # sentinel would instead leave a huge rounding residue whose sign depends on
     # the scale: exp2 of it is 0 when negative and inf (then NaN) when positive.
-    neg_inf = b.const_f32(-(2.0**99))
+    # With bias on, the scores are already scaled (add_bias), so the sentinel goes
+    # in unscaled and m seeds at it: a fully masked first tile gives P = exp2(0) = 1,
+    # cleared by the next real tile the same way. _BIAS_FLOOR keeps every finite biased
+    # score strictly above it; a -inf bias scores -inf, below it.
+    neg_inf = b.const_f32(_MASK_SENTINEL)
     if use_sinks:
         rcp_ln2 = b.const_f32(LOG2E)
         one_f = b.const_f32(1.0)
@@ -1007,6 +1151,24 @@ def build_attention_dense(
             b.mul(b.mul(bt, seqlen_kv_p), _stride_k()),
             b.mul(hkv, b.const_i32(D)),
         )
+
+    if USE_BIAS:
+        # This lane's bias row base: the element index of key 0 for its query, which
+        # is the lane's column of the QK output (the S tile is held transposed: keys
+        # along C rows, queries along C columns), in sequence bt and head hq.
+        # Loop-invariant, so it is computed once here. Varlen indexes by the
+        # in-sequence position, so the bias is [B, Hq, max Sq, max Skv].
+        bias_q_row = b.add(q_tok0, _mfma_32x32_c_col(b, lane, 0))
+        bias_row = additive_bias_row(
+            b, additive_bias, seq_idx=bt, q_head=hq, q_row=bias_q_row
+        )
+        bias_log2e = b.const_f32(LOG2E)
+        bias_floor = make_bias_floor(b, _BIAS_FLOOR, LOG2E)
+        # The bias load is masked only on the ragged body, the one body that visits
+        # rows and keys past the real extents (the partial last query block and KV
+        # tile). The others visit KV tiles below n_ktiles_val only: the loops stop
+        # at n_upper, and a sliding window's first tile is clamped (see start_tile).
+        bias_row_ok = b.cmp_lt(bias_q_row, b.const_i32(Sq)) if RAGGED else None
 
     # --- LDS allocation: PAD on K (bank-conflict fix), +PAD_V on V (transposed
     #     PV read bank-conflict pad). A per-ROW pad requires 1 row/instr (a
@@ -1083,39 +1245,69 @@ def build_attention_dense(
     zero_soff = b.const_i32(0)
     K_lds_addr = b.smem_addr_of(K_lds)
     V_lds_addr = b.smem_addr_of(V_lds)
+
+    # Per-(batch, token) K/V byte stride = Hkv*D*2, shared by the packed and
+    # contiguous bounds below. Runtime under runtime_shape (one binary serves every
+    # head count), baked otherwise. Emitted fresh at each buffer_rsrc so the baked
+    # case keeps its exact two-const node count.
+    def _kv_elem_bytes_ir():
+        return (
+            b.mul(_stride_k(), b.const_i32(2))
+            if spec.runtime_shape
+            else b.const_i32(Hkv * D * 2)
+        )
+
     # Emit a SEPARATE num_records IR node per buffer_rsrc (NOT one shared node):
     # develop emits two here, so sharing one silently breaks byte-identity (the
     # attention_dense representative-IR golden).
     #
-    # Gated on ``spec.paged``, not on ``spec.runtime_shape``: the two branches bound
-    # two DIFFERENT buffers, so this is not the removable bookkeeping split that the
-    # batch/seqlen param declaration was.
-    if spec.paged:
-        # The paged bound is the WHOLE page cache. Pages are addressed through
-        # block_tables at page_id*block_size, so any page id the table can name must
-        # be in range -- batch*seqlen_kv is only the logical KV length of one
-        # request and is <= (usually <<) the cache extent. Bounding by it would put
-        # legitimately-high page ids past num_records, where buffer loads return 0
-        # with no fault. ``num_kv_blocks`` is not a kernel param, so this stays baked.
-        _kv_cache_elems = spec.num_kv_blocks * spec.block_size * Hkv * D * 2
-        k_rsrc = b.buffer_rsrc(k, b.const_i32(_kv_cache_elems))
-        v_rsrc = b.buffer_rsrc(v, b.const_i32(_kv_cache_elems))
+    # Gated on ``spec.paged`` and ``varlen``, not on ``spec.runtime_shape``: the
+    # branches bound DIFFERENT extents (the whole page cache, the end of this
+    # workgroup's packed sequence, the contiguous batch*seqlen_kv rows), so this is
+    # not the removable bookkeeping split that the batch/seqlen param declaration
+    # was. Paged stays first among those: the spec rejects paged varlen, and a page
+    # cache is addressed through block_tables, never through packed offsets. fp8
+    # leads the chain only because the spec rejects it with paged AND varlen, so it
+    # can never contend with either.
+    if KV_FP8:
+        # The fp8 sync-dequant loader reads K/V with plain in-bounds global loads
+        # (aligned KV only), so no bounds-checked buffer resource is built here.
+        k_rsrc = v_rsrc = None
+    elif spec.paged:
+        # ``num_kv_blocks`` is not a kernel param, so the cache bound stays baked.
+        k_rsrc = b.buffer_rsrc(k, b.const_i32(paged_cache_bytes(spec)))
+        v_rsrc = b.buffer_rsrc(v, b.const_i32(paged_cache_bytes(spec)))
+    elif varlen:
+        # Packed K/V: bound each workgroup by the end of ITS sequence,
+        # cu_seqlens_kv[bt + 1] (kv_seq1, loaded above). The spec maxima
+        # batch*seqlen_kv overshoot the packed rows whenever a sequence is shorter
+        # than the maximum, so two loads read past the allocation under them: the
+        # last sequence's one-tile-ahead prefetch and a sliding-window start tile
+        # past a sequence's keys. The descriptor is raw (stride 0), so the hardware
+        # range-checks each lane's byte voffset against num_records. Every K/V DMA
+        # lane moves one dword; a lane at or past the bound reads no memory and
+        # writes 0 into its LDS slot. The bound is a whole number of rows, so the cut
+        # falls exactly at row kv_seq1, which also stops those loads from reading
+        # the next sequence's rows. Rows that have keys never see a zeroed row: the
+        # tiles they consume end at (seqlen_kv_b // BN) * BN <= seqlen_kv_b, the
+        # prefetched tile is never consumed, and a window start tile past the keys
+        # feeds only q-blocks that have no key (their P@V now runs over zero V
+        # rows, not the next sequence's).
+        #
+        # kv_seq1 <= batch*seqlen_kv for a well-formed cu_seqlens_kv, and the preflight
+        # keeps batch*seqlen_kv*Hkv*D*2 < 2**31, so the i32 product cannot overflow.
+        k_row_bytes = _kv_elem_bytes_ir()
+        k_num_records = b.mul(kv_seq1, k_row_bytes)
+        k_rsrc = b.buffer_rsrc(k, k_num_records)
+        v_row_bytes = _kv_elem_bytes_ir()
+        v_num_records = b.mul(kv_seq1, v_row_bytes)
+        v_rsrc = b.buffer_rsrc(v, v_num_records)
     else:
         # Contiguous K/V: num_records must track THIS launch's real extent, since
         # under runtime_shape one kernel serves every seqlen and a baked bound would
         # drop valid reads for a larger one. For the baked sub-modes the product is
         # exactly the B*Skv this used to bake -- run_attention_dense_torch fills the
         # params from the same spec -- so only the emitted IR changes.
-        # Per-(batch, token) K/V byte stride = Hkv*D*2. Runtime under runtime_shape
-        # (one binary serves every head count), baked otherwise. Emitted fresh at each
-        # buffer_rsrc so the baked branch keeps its exact two-const node count.
-        def _kv_elem_bytes_ir():
-            return (
-                b.mul(_stride_k(), b.const_i32(2))
-                if spec.runtime_shape
-                else b.const_i32(Hkv * D * 2)
-            )
-
         k_rsrc = b.buffer_rsrc(
             k, b.mul(b.mul(batch_p, seqlen_kv_p), _kv_elem_bytes_ir())
         )
@@ -1125,17 +1317,12 @@ def build_attention_dense(
     # Unused, but the lowering keeps dead ops, so dropping it moves every golden.
     b.zext(b.to_sgpr_u32(b.mul(wave, b.const_i32(64 * 16))), I64)
     if spec.paged:
-        # ROWS_PER_WAVE <= block_size and block_size % ROWS_PER_WAVE == 0 is
-        # enforced at spec construction (__post_init__ paged validation), so every
-        # wave's K/V rows fall within one page -- the per-wave block_tables hoist
-        # below relies on that.
+        # The spec's paged validation keeps every wave's K/V rows in one page; the
+        # per-wave block_tables hoist below relies on that.
         # Single-seq: seq_base folds to 0; the bt*bt_stride form keeps bt_stride
         # live and generalizes to multi-seq. kv_lens[bt] bounds the page index.
-        _pg_seq_base = b.mul(bt, bt_stride)
-        _pg_kv_len = b.global_load_i32(kv_lens, bt)
-        _pg_n_pages = b.div(
-            b.add(_pg_kv_len, b.const_i32(spec.block_size - 1)),
-            b.const_i32(spec.block_size),
+        _pg_seq_base, _pg_n_pages = paged_seq_setup(
+            b, bt, kv_lens, bt_stride, spec.block_size
         )
 
     def _async_load(rsrc, lds_base, buf_val, tile_key0, bytes_per_buf, group_bytes):
@@ -1150,38 +1337,21 @@ def build_attention_dense(
         group_bytes is the plain unpadded ROWS_PER_INSTR*D pitch, so its layout
         is unchanged."""
         buf_off = b.mul(b.zext(buf_val, I64), b.const_i64(bytes_per_buf))
+        if spec.paged:
+            # All ROWS_PER_WAVE rows of this wave fall in ONE page (spec paged
+            # validation), so the block_tables lookup is wave-uniform and hoisted out of
+            # the row loop; per row it is then an and-mask + add. Every key here is
+            # non-negative (start_tile is clamped at 0), so the page split is a
+            # shift and a mask.
+            _wphys_base = paged_wave_row_base(
+                b,
+                block_tables,
+                _pg_seq_base,
+                _pg_n_pages,
+                b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE))),
+                spec.block_size,
+            )
         if ROWS_PER_INSTR == 1:
-            if spec.paged:
-                # All ROWS_PER_WAVE rows of this wave fall in ONE page (asserted at
-                # setup), so the block_tables lookup is wave-uniform -- hoist it out
-                # of the row loop (was per-row: ~ROWS_PER_WAVE x fewer indirection
-                # loads + div/mask). Per-row cost is then just an and-mask + add.
-                _wg0 = b.add(tile_key0, b.mul(wave, b.const_i32(ROWS_PER_WAVE)))
-                # _wg0 = tile_key0 + wave*ROWS_PER_WAVE is non-negative (tile_key0 >= 0 since
-                # start_tile is clamped at 0), so page = _wg0 // block_size is a logical shift;
-                # block_size is enforced power-of-two at spec construction (attention_dense_spec.py),
-                # so shift = log2(block_size) is a compile-time constant. This drops the
-                # sdiv sign-bias fixup for a bare lshr.
-                _wpage = b.lshr(_wg0, b.const_i32(spec.block_size.bit_length() - 1))
-                _wphys = b.masked_global_load(
-                    block_tables,
-                    b.add(_pg_seq_base, _wpage),
-                    b.cmp_lt(_wpage, _pg_n_pages),
-                    b.const_i32(0),
-                    dtype=I32,
-                    align=4,
-                )
-                _wphys_base = b.mul(_wphys, b.const_i32(spec.block_size))
-                # NOTE: _wphys (the physical block id) is used raw -- intentionally
-                # NOT range-checked here. The K/V read goes through a bounds-checked
-                # CDNA buffer SRD (buffer_rsrc word3 0x00027000, num_records = whole
-                # cache = _kv_cache_elems), so an out-of-range id yields a voff beyond
-                # num_records and raw.ptr.buffer.load.lds drops it / fills 0 rather
-                # than reading OOB (contained, but SILENT wrong output on a malformed
-                # table). This backstop holds ONLY while the whole offset stays in the
-                # i32 voffset; the deferred i64 path folds physical_block into a
-                # 64-bit base (bypassing num_records) and MUST add an explicit id
-                # guard there.
             for r in range(ROWS_PER_WAVE):
                 row = b.add(b.mul(wave, b.const_i32(ROWS_PER_WAVE)), b.const_i32(r))
                 row_lds_off = b.add(
@@ -1191,13 +1361,7 @@ def build_attention_dense(
                 gkey = b.add(tile_key0, row)
                 gcol = b.mul(lane, b.const_i32(2))
                 if spec.paged:
-                    # gkey = tile_key0 + row is non-negative by construction, so
-                    # gkey % block_size is safe as a bitmask (block_size is pow2):
-                    # drops the srem sign-bias fixup for a single `and`.
-                    kv_row = b.add(
-                        _wphys_base,
-                        b.land(gkey, b.const_i32(spec.block_size - 1)),
-                    )
+                    kv_row = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                 else:
                     kv_row = gkey
                 voff = b.add(b.add(k_base, b.mul(kv_row, _stride_k())), gcol)
@@ -1220,6 +1384,10 @@ def build_attention_dense(
                 )
                 row_base = b.smem_ptr_add(lds_base, row_lds_off)
                 gkey = b.add(b.add(tile_key0, row0), sub_row)
+                if spec.paged:
+                    # A group's rows are a subset of the wave's rows, so they stay
+                    # in the wave's page.
+                    gkey = paged_kv_row(b, _wphys_base, gkey, spec.block_size)
                 voff = b.add(b.add(k_base, b.mul(gkey, _stride_k())), col)
                 b.async_buffer_load_lds_addr(
                     rsrc, row_base, b.mul(voff, b.const_i32(2)), zero_soff, 1
@@ -1235,10 +1403,60 @@ def build_attention_dense(
             v_rsrc, lds_base, buf_val, tile_key0, V_BYTES_PER_BUF, V_GROUP_BYTES
         )
 
+    THREADS = WAVES * 64
+
+    def _sync_fp8_load(ptr, lds, buf_val, tile_key0, scale_p, packed_k):
+        """Aligned fp8 KV: flat n=8 global load -> unfused-scale dequant -> bf16 LDS
+        store, into the same K_lds/V_lds layout the bf16 path fills. The global
+        load is unbounded, so OOB keys are clamped below (the pipeline
+        over-prefetches one tile past the last consumed KV tile)."""
+        total = BN * D
+        assert total % (THREADS * 8) == 0, (
+            f"fp8 sync loader: BN*D={total} must be divisible by THREADS*8="
+            f"{THREADS * 8}"
+        )
+        for it in range(total // (THREADS * 8)):
+            e0 = b.mul(b.add(b.const_i32(it * THREADS), tid), b.const_i32(8))
+            key = b.div(e0, b.const_i32(D))
+            d0 = b.mod(e0, b.const_i32(D))
+            # The software pipeline prefetches tile j+1 at the end of iter j; on the
+            # last iteration that tile can fall past seqlen_kv (its data is never
+            # consumed). Clamp OOB keys to row 0 so the unbounded global load stays
+            # in-bounds instead of faulting -- the bf16 path gets this for free from
+            # its bounds-checked buffer resource.
+            kv_row = b.add(tile_key0, key)
+            kv_row = b.select(b.cmp_lt(kv_row, seqlen_kv_p), kv_row, b.const_i32(0))
+            # _stride_k(), not the baked constant: on the runtime-shape path the
+            # head counts are kernargs, so two specs differing only in heads share
+            # a cache key and a symbol. Baking Hkv*D here made them lower to
+            # different IR under that one key, and the launcher cache then served
+            # whichever fp8 binary compiled first to both.
+            addr = b.add(
+                b.add(k_base, b.mul(kv_row, _stride_k())),
+                d0,
+            )
+            deq = dequant_fp8x8_to_dtype(
+                b, b.global_load_vN(ptr, addr, kv_dtype, 8), scale_p, dtype
+            )
+            if packed_k:
+                row = b.div(key, b.const_i32(K_GROUP))
+                col = b.add(b.mul(b.mod(key, b.const_i32(K_GROUP)), b.const_i32(D)), d0)
+            else:
+                row = key
+                col = d0
+            b.smem_store_vN(lds, [buf_val, row, col], deq, 8)
+
     def load_tile(buf_val, tile_idx):
         tk0 = b.mul(tile_idx, b.const_i32(BN))
-        async_load_k(K_lds_addr, buf_val, tk0)
-        async_load_v(V_lds_addr, buf_val, tk0)
+        if KV_FP8:
+            # Sync-dequant fp8: fill K_lds/V_lds with bf16, then drain the LDS stores
+            # so the following barrier publishes them before the compute reads.
+            _sync_fp8_load(k, K_lds, buf_val, tk0, k_scale, K_GROUP > 1)
+            _sync_fp8_load(v, V_lds, buf_val, tk0, v_scale, False)
+            b.s_waitcnt(lgkmcnt=0)
+        else:
+            async_load_k(K_lds_addr, buf_val, tk0)
+            async_load_v(V_lds_addr, buf_val, tk0)
 
     # ---- per-tile compute closures ----
 
@@ -1311,27 +1529,102 @@ def build_attention_dense(
                     b.cmp_lt(ktok, b.const_i32(Skv)), s_reg[nsub][i], neg_inf
                 )
 
+    def add_bias(s_reg, tile_idx):
+        """Bias on: replace each raw score in-place by its log2-domain biased score
+        ``s * qk_scale + bias * log2e``, before any mask. Same lane->ktok map as
+        do_mask.
+
+        Why the scale moves here: bias off, the row max is taken over raw scores and
+        scaled afterwards (``max * qk_scale``, then ``exp2(s * qk_scale - m)``), which
+        is right only while every element is ``raw * qk_scale``. A per-key bias in
+        natural-log units breaks that: the max has to be over the biased scores, and
+        exp2 needs the bias in log2 units. So each score is scaled and biased once,
+        here, and softmax_max and _p_exp skip the scale on this path."""
+        tile_key0 = b.mul(tile_idx, b.const_i32(BN))
+        # The x4 bias loads lift the D128 LSE kernels past the 256-VGPR budget
+        # (2 waves/SIMD) into a scratch spill; they keep the scalar loads.
+        x4 = not RAGGED and not (spec.emit_lse and D == 128)
+        if x4:
+            # One bias pointer per KV tile, at the lane's first key; the x4 loads
+            # below read at constant element offsets from it, which the backend
+            # folds into their immediates instead of extending and scaling an i32
+            # index per load.
+            c_row_lane = _mfma_32x32_c_row(b, lane, 0)
+            key0 = b.add(tile_key0, c_row_lane)
+            tile_ptr = additive_bias_elem_ptr(b, additive_bias, row=bias_row, col=key0)
+        for nsub in range(N_SUB):
+            if x4:
+                # C elements i0..i0+3 are keys c_row(i0)..c_row(i0)+3 of the
+                # lane's bias row (_mfma_32x32_c_row: c_row(i) = (i//4)*8 +
+                # (lane//32)*4 + i%4), so one 16-byte load per group replaces
+                # four scalar ones, at nsub*32 + c_row(i0) - c_row(0) =
+                # nsub*32 + (i0//4)*8 keys past the tile pointer. Every key is in
+                # range here, so the scalar path's per-key mask is not needed.
+                for i0 in range(0, 16, 4):
+                    scaled = [b.fmul(s_reg[nsub][i0 + j], qk_scale) for j in range(4)]
+                    s_reg[nsub][i0 : i0 + 4] = add_additive_bias_x4_at(
+                        b,
+                        scaled,
+                        tile_ptr,
+                        offset=nsub * 32 + (i0 // 4) * 8,
+                        rcp_ln2=bias_log2e,
+                        floor=bias_floor,
+                    )
+            else:
+                sub_base = b.add(tile_key0, b.const_i32(nsub * 32))
+                # Scalar loads: masked per key on the ragged body (the last tile
+                # and padded query rows can be out of range), plain otherwise.
+                for i in range(16):
+                    ktok = b.add(sub_base, _mfma_32x32_c_row(b, lane, i))
+                    in_range = None
+                    if RAGGED:
+                        skv_c = b.const_i32(Skv)
+                        key_ok = b.cmp_lt(ktok, skv_c)
+                        in_range = b.land(bias_row_ok, key_ok)
+                    scaled = b.fmul(s_reg[nsub][i], qk_scale)
+                    s_reg[nsub][i] = add_additive_bias_at(
+                        b,
+                        scaled,
+                        additive_bias,
+                        row=bias_row,
+                        col=ktok,
+                        mask=in_range,
+                        rcp_ln2=bias_log2e,
+                        floor=bias_floor,
+                    )
+
+    def _p_exp(s, neg_m):
+        """P = exp2(s * qk_scale - m); bias-on scores already carry the scale."""
+        if USE_BIAS:
+            return _exp2(b.fadd(s, neg_m))
+        return _exp2(b.fma(s, qk_scale, neg_m))
+
     def softmax_max(s_reg, m_i):
         local_max = neg_inf
         for nsub in range(N_SUB):
             for i in range(16):
                 local_max = b.fmax(local_max, s_reg[nsub][i])
         tile_max_raw = b.fmax(local_max, b.warp_shuffle_xor(local_max, 32))
-        # Into the log2 domain the running max, threshold, and sinks use.
-        tile_max = b.fmul(tile_max_raw, qk_scale)
+        # Into the log2 domain the running max, threshold, and sinks use (bias-on
+        # scores are already there).
+        tile_max = tile_max_raw if USE_BIAS else b.fmul(tile_max_raw, qk_scale)
         if LAZY_RESCALE:
+            # Each row keeps or moves its max on its own scores only (rows stay
+            # independent of the wave's other rows); the wave skips the O/l
+            # rescale when every row keeps it.
             m_diff = b.fsub(tile_max, m_i)
-            below_i32 = b.select(
-                b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD)),
-                b.const_i32(1),
-                b.const_i32(0),
-            )
+            within = b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD))
+            below_i32 = b.select(within, b.const_i32(1), b.const_i32(0))
             skip = b.cmp_ne(b.wave_all(below_i32), b.const_i32(0))
-            m_new = b.select(skip, m_i, b.fmax(m_i, tile_max))
+            m_new = b.select(within, m_i, b.fmax(m_i, tile_max))
         else:
-            skip = None
+            within = skip = None
             m_new = b.fmax(m_i, tile_max)
         alpha = _exp2(b.fsub(m_i, m_new))
+        if within is not None:
+            # Exactly 1 for a row that kept its max, so the wave's rescale
+            # leaves it unchanged.
+            alpha = b.select(within, b.const_f32(1.0), alpha)
         return m_new, alpha, skip
 
     def relayout_p(p):
@@ -1405,7 +1698,7 @@ def build_attention_dense(
                 if slot is None:
                     break
                 nsub, i = slot
-                p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+                p_vals[nsub][i] = _p_exp(s_reg[nsub][i], neg_m)
                 n_emit += 1
             if SCHED_GROUP:
                 b.sched_group_barrier(DS_READ, SCHED_GROUP_DS_READ, 0)
@@ -1414,7 +1707,7 @@ def build_attention_dense(
                 b.sched_group_barrier(TRANS, max(1, n_emit), 0)
         for slot in it:
             nsub, i = slot
-            p_vals[nsub][i] = _exp2(b.fma(s_reg[nsub][i], qk_scale, neg_m))
+            p_vals[nsub][i] = _p_exp(s_reg[nsub][i], neg_m)
         l_local = b.const_f32(0.0)
         for nsub in range(N_SUB):
             for i in range(16):
@@ -1470,6 +1763,22 @@ def build_attention_dense(
                 start_tile,
                 b.const_i32(n_ktiles - 1),
             )
+        elif USE_BIAS:
+            # Same clamp wherever EMPTY_ROWS is off (LSE or varlen on). The bias is a
+            # plain global load, so a start tile past the keys would read past the
+            # bias. Pinned to the last real tile (n_ktiles_val, per sequence under
+            # varlen; not below 0). The clamp only bites when q_block_start - W >=
+            # seqlen_kv, so every key of that tile fails the window compare: the rows
+            # stay dead and the epilogue zeroes them, and the loops after the prologue
+            # run zero trips (start_tile + 1 == n_upper). K/V buffer loads are bounded
+            # by batch * seqlen_kv, which is exact only without varlen.
+            last_tile = b.sub(n_ktiles_val, b.const_i32(1))
+            last_tile = b.select(
+                b.cmp_lt(last_tile, b.const_i32(0)), b.const_i32(0), last_tile
+            )
+            start_tile = b.select(
+                b.cmp_lt(start_tile, last_tile), start_tile, last_tile
+            )
     elif KVS > 1:
         # This CTA's segment [start_tile, seg_hi) of [0, n_upper). The prologue
         # always computes start_tile; an empty segment's result is discarded at
@@ -1492,6 +1801,8 @@ def build_attention_dense(
     # the spec, so they cannot see a partial last KV tile.
     RAG_KBOUND = RAGGED and (Skv % BN != 0) and ((not causal) or Sq + RIGHT > Skv)
     s0 = do_qk(start_buf)
+    if USE_BIAS:
+        add_bias(s0, start_tile)
     if W > 0:
         do_mask(s0, start_tile, lower=True, upper=causal)
     else:
@@ -1512,8 +1823,7 @@ def build_attention_dense(
     # tile-0 softmax exp + relayout only; PV lags by one tile (fused into the loop).
     neg_m0 = b.fneg(m0)  # unbounded-score limitation: see above _EMPTY_ROW_MAX_GRID
     p0_vals = [
-        [_exp2(b.fma(s0[nsub][i], qk_scale, neg_m0)) for i in range(16)]
-        for nsub in range(N_SUB)
+        [_p_exp(s0[nsub][i], neg_m0) for i in range(16)] for nsub in range(N_SUB)
     ]
     l0_local = b.const_f32(0.0)
     for nsub in range(N_SUB):
@@ -1551,6 +1861,8 @@ def build_attention_dense(
         b.s_waitcnt(vmcnt=LOOP_VMCNT)
         b.s_barrier_bare()
         s = do_qk(kbuf)
+        if USE_BIAS:
+            add_bias(s, j)
         if mask_lower or mask_upper:
             do_mask(s, j, lower=mask_lower, upper=mask_upper)
         if mask_kbound:
@@ -1737,7 +2049,9 @@ def build_attention_dense(
         rcp_l = b.rcp(b.select(positive_l, l_i, b.const_f32(1.0)))
     else:
         rcp_l = b.rcp(l_i)
-    if EMPTY_ROWS and not spec.runtime_shape:
+    # Bias on, the live-row test below replaces this one: _EMPTY_ROW_MAX_GRID is a
+    # threshold on unscaled maxima and would zero rows a large negative bias leaves live.
+    if EMPTY_ROWS and not USE_BIAS and not spec.runtime_shape:
         # A row whose band holds no key never sees a real score, so its running max is
         # still at the mask sentinel and its P is the exp2(0) = 1 of a fully masked tile
         # (the mean of V), not zero. Real maxima are bounded far above the threshold
@@ -1751,6 +2065,20 @@ def build_attention_dense(
             rcp_l,
             b.const_f32(0.0),
         )
+    if USE_BIAS:
+        # Bias on, a row with no live key (see _BIAS_LIVE_ROW_MIN) stores zeros, and
+        # with LSE on its LSE is -inf. That covers a window row with no key too, the
+        # case the EMPTY_ROWS test handles when bias is off. Without LSE the zeros
+        # come from rcp_l here; with LSE they come from row_has_key, which gains
+        # bias_row_live below and zeroes O in _emit_o_store.
+        bias_row_live = b.fcmp("ogt", m_i, b.const_f32(_BIAS_LIVE_ROW_MIN))
+        # A NaN bias on a visible key makes P and so l NaN, but the max ignores a NaN
+        # score (maxnum), so a row of NaN keys alone keeps the sentinel as its max and
+        # would read as dead: O = 0 and LSE = -inf with LSE on (without it O = NaN * 0
+        # is NaN anyway). A NaN l keeps such a row live, and its output and LSE NaN.
+        bias_row_live = b.lor(bias_row_live, b.fcmp("uno", l_i, l_i))
+        if not spec.emit_lse:
+            rcp_l = b.select(bias_row_live, rcp_l, b.const_f32(0.0))
     if varlen:
         o_base = b.add(b.mul(q_seq0, _stride_q()), b.mul(hq, b.const_i32(D)))
     else:
@@ -1776,6 +2104,8 @@ def build_attention_dense(
             window=W,
             right_bound=RIGHT,
         )
+        if USE_BIAS:
+            row_has_key = b.land(row_has_key, bias_row_live)
     if spec.emit_lse:
         if varlen:
             lse_index = b.add(b.mul(b.add(q_seq0, qtok), _hq_count()), hq)
@@ -2469,20 +2799,23 @@ def _build_attention_dense_persistent(spec: AttentionDenseSpec) -> KernelDef:
                 # max of the scaled scores up to one rounding.
                 tile_max = b.fmul(tile_max, qk_scale)
             if LAZY_RESCALE:
-                # Lazy max: only re-anchor when some lane's tile_max exceeds the
-                # running max by > threshold; else keep m_i (skip the rescale).
+                # Lazy max, per row: a row re-anchors only when its own tile_max
+                # exceeds its running max by > threshold, else keeps m_i (rows
+                # stay independent of the wave's other rows). The wave skips the
+                # O/l rescale when every row keeps its max.
                 m_diff = b.fsub(tile_max, m_i)
-                below_i32 = b.select(
-                    b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD)),
-                    b.const_i32(1),
-                    b.const_i32(0),
-                )
+                within = b.fcmp("ole", m_diff, b.const_f32(LAZY_THRESHOLD))
+                below_i32 = b.select(within, b.const_i32(1), b.const_i32(0))
                 skip = b.cmp_ne(b.wave_all(below_i32), b.const_i32(0))
-                m_new = b.select(skip, m_i, b.fmax(m_i, tile_max))
+                m_new = b.select(within, m_i, b.fmax(m_i, tile_max))
             else:
-                skip = None
+                within = skip = None
                 m_new = b.fmax(m_i, tile_max)
             alpha = _exp2(b.fsub(m_i, m_new))
+            if within is not None:
+                # Exactly 1 for a row that kept its max, so the wave's rescale
+                # leaves it unchanged.
+                alpha = b.select(within, b.const_f32(1.0), alpha)
             return m_new, alpha, skip
 
         def exp_arg(s_val, m_new, neg_m):
@@ -3032,18 +3365,25 @@ def attention_dense_runtime_args(spec: AttentionDenseSpec) -> dict[str, int]:
 
 def attention_dense_signature(spec: AttentionDenseSpec):
     """ABI signature for :class:`KernelLauncher`. q/k/v/o pointers + f32 scale,
-    plus optional sink_ptr when ``spec.use_sinks``, and the two ``cu_seqlens``
-    i32 pointers when ``spec.varlen`` (see :func:`build_attention_dense`)."""
+    plus optional sink_ptr when ``spec.use_sinks``, the two ``cu_seqlens``
+    i32 pointers when ``spec.varlen``, and the additive-bias pointer and its three
+    strides, last, when ``spec.use_additive_bias`` (see
+    :func:`build_attention_dense`)."""
     from rocke.helpers.spec import SignatureBuilder
 
+    kv_ptr_dtype = spec.kv_storage_dtype or spec.dtype
     sig = (
         SignatureBuilder()
         .ptr("q_ptr", spec.dtype)
-        .ptr("k_ptr", spec.dtype)
-        .ptr("v_ptr", spec.dtype)
+        .ptr("k_ptr", kv_ptr_dtype)
+        .ptr("v_ptr", kv_ptr_dtype)
         .ptr("o_ptr", spec.dtype)
         .scalar("scale", "f32")
     )
+    if spec.kv_storage_dtype == "fp8e4m3":
+        # Mirrors the k_scale/v_scale params declared right after scale in
+        # build_attention_dense (fp8 KV only), ahead of the shape kernargs.
+        sig = sig.scalar("k_scale", "f32").scalar("v_scale", "f32")
     # Mirrors the scalar params declared right after scale in build_attention_dense.
     for field in _shape_kernarg_fields(spec):
         sig = sig.scalar(field, "i32")
@@ -3062,6 +3402,8 @@ def attention_dense_signature(spec: AttentionDenseSpec):
     if getattr(spec, "kv_segments", 1) > 1:
         for name in SEGMENT_PARAMS:
             sig = sig.ptr(name, "f32")
+    if spec.use_additive_bias:
+        append_additive_bias_signature(sig)
     return sig.build()
 
 
@@ -3111,6 +3453,8 @@ def run_attention_dense_torch(
     v,
     out,
     scale: float,
+    k_scale: Optional[float] = None,
+    v_scale: Optional[float] = None,
     stream: int = 0,
     arch: str = "gfx950",
     cu_seqlens_q=None,
@@ -3119,7 +3463,9 @@ def run_attention_dense_torch(
     kv_lens=None,
     sinks=None,
     validate_paged: bool = True,
+    validate_varlen: bool = True,
     lse=None,
+    additive_bias=None,
 ):
     """High-level framework entry: compile (cached) + launch the dense prefill
     kernel on torch tensors. ``q``/``k``/``v``/``out`` are dense contiguous
@@ -3139,9 +3485,17 @@ def run_attention_dense_torch(
     Fully masked real rows write O=0 and LSE=-inf; with a finite attention sink,
     those rows instead write the sink logit as LSE. Invalid padded rows do not
     write. Supplying ``lse`` with ``emit_lse=False`` is an error.
-    The enabled varlen path checks cumulative offsets on the host (a device
-    sync): Q lengths must be block_m multiples, KV lengths positive block_n
-    multiples, and both must be within their spec maxima.
+    A varlen launch checks its cumulative offsets on the host (a device sync):
+    int32 ``[batch+1]`` on q's device, spanning the packed tensors, Q lengths
+    block_m multiples and KV lengths block_n multiples, both within their spec
+    maxima (``ValueError``). Two valid inputs are not implemented
+    (``NotImplementedError``): a sequence with queries and no keys, and, without LSE
+    or an additive bias, with a sliding window, a sequence that leaves query rows
+    without a key (only those epilogues zero such a row). A sequence with no
+    queries may have no keys. With LSE the check is part of the LSE contract and
+    always runs; without it, ``validate_varlen=False`` skips it on a hot or
+    graph-captured path, except for an additive-bias launch, which is always
+    checked (the bias is loaded unmasked, by in-sequence position).
 
     Arbitrary (non-256-multiple) sequence lengths are served WITHOUT host
     padding by the in-kernel ragged path: build ``spec`` with ``ragged=True``
@@ -3161,24 +3515,48 @@ def run_attention_dense_torch(
     ``ValueError`` is raised if either is missing (or is supplied when
     ``spec.paged`` is False). ``q``/``out`` stay dense/contiguous. Single-sequence
     only in this revision (``batch == 1``); ``spec.block_size`` is the cache page
-    size and ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``. ``validate_paged``
-    (default True) host-checks the paged CONTENTS (a device->host sync): the used
-    ``block_tables`` entries lie in ``[0, num_kv_blocks)``, and each
-    ``kv_lens[i] == seqlen_kv`` (the kernel visits all compile-time ``seqlen_kv``
-    tiles, so a shorter ``kv_len`` reads page 0 for the uncovered tiles ->
-    wrong output). Pass False on the hot / graph-captured path to skip the sync
-    (block ids then rely on the bounds-checked cache SRD reading 0, and the
-    ``kv_lens == seqlen_kv`` contract becomes the caller's responsibility).
+    size and ``spec.num_kv_blocks`` MUST equal ``k.shape[0]``. The structural checks
+    always run; ``validate_paged=False`` skips only the synchronized checks of the
+    table contents, whose contract then falls to the caller (see
+    :func:`kernels.common._attention_dense_paged.validate_paged_launch`).
 
     Sinks (``spec.use_sinks``): Attention sinks -- learned scalar
     logits that participate in the softmax denominator but have no value vector.
     Pass ``sinks`` (``spec.dtype`` ``[num_query_heads]``); a ``ValueError`` is
     raised if ``sinks`` is ``None`` when ``spec.use_sinks`` is True, or if
-    ``sinks`` is provided when ``spec.use_sinks`` is False."""
+    ``sinks`` is provided when ``spec.use_sinks`` is False.
+
+    Additive bias (``spec.use_additive_bias``): pass ``additive_bias``, an fp32
+    ``[B|1, Hq|1, Sq|1, Skv]`` tensor (``Sq``/``Skv`` the spec's, i.e. the maxima
+    for varlen, which indexes it by in-sequence position) on q's device,
+    contiguous along ``Skv``. It is added to the scaled scores before the mask,
+    ``softmax(QK * scale + bias)``; a size-1 axis broadcasts. ``-inf`` masks a key.
+    A row left with no unmasked key stores O = 0 and LSE = -inf (the sink logit with
+    ``use_sinks``): the hipDNN reference's answer for a row whose every score is
+    -inf. A finite bias is an ordinary score, with one exception: one below -2**97
+    (about -1.6e29) is raised to that, which keeps it above the kernel's mask
+    sentinel. A row whose every visible key is below it (e.g. ``finfo(float32).min``
+    padding) therefore gets the uniform softmax over them, as in the reference and
+    PyTorch, with an LSE of about -2**97 where the reference's is about the bias
+    itself; keys whose biases differ below it are not told apart. A NaN bias on a
+    visible key makes its row NaN (O and LSE), as in the reference; a NaN on a key
+    the mask removes is ignored. A varlen bias launch always checks its offsets, as
+    above. With LSE on, the LSE buffer may not overlap the bias. ``ValueError`` for
+    a missing, unexpected or malformed bias, ``NotImplementedError`` when its
+    largest element index reaches 2**31 (the kernel indexes it in i32)."""
     ok, why = supports_attention_dense(spec, arch=arch)
     if not ok:
         raise NotImplementedError(f"attention_dense unsupported for spec: {why}")
     check_dense_scale(scale)
+    if spec.kv_storage_dtype == "fp8e4m3":
+        # Validate here too, not only in the dispatch binding: direct callers of
+        # this runner bypass that guard. Both call the same checker, so the two
+        # entry points cannot drift apart.
+        require_ocp_fp8_kv((("k", k), ("v", v)))
+        # Same checker the dispatch binding uses, so a direct caller of this
+        # runner gets the identical refusal rather than a second wording.
+        for name, s in (("k_scale", k_scale), ("v_scale", v_scale)):
+            require_fp8_kv_scale(name, s, "fp8 dense")
     if spec.varlen and (cu_seqlens_q is None or cu_seqlens_kv is None):
         raise ValueError(
             "varlen=True requires cu_seqlens_q and cu_seqlens_kv (int32 [batch+1]); "
@@ -3186,71 +3564,7 @@ def run_attention_dense_torch(
         )
     if not spec.varlen and (cu_seqlens_q is not None or cu_seqlens_kv is not None):
         raise ValueError("cu_seqlens_* provided but spec.varlen is False")
-    if spec.paged and (block_tables is None or kv_lens is None):
-        raise ValueError("paged=True requires block_tables and kv_lens")
-    if not spec.paged and (block_tables is not None or kv_lens is not None):
-        raise ValueError("block_tables/kv_lens provided but spec.paged is False")
-    if spec.paged:
-        # Paged K/V shape guard: the paged buffer-resource bound is sized from the
-        # SPEC (num_kv_blocks*block_size*num_kv_heads*head_size -- see
-        # ``_kv_cache_elems`` in build_attention_dense), NOT from the tensor.
-        # If the passed cache is smaller than the spec claims, that bound
-        # over-reaches the real allocation, so the hardware bounds-check no longer
-        # guards it and a block-table entry can drive an out-of-bounds paged-cache
-        # read. Validate the cache shape against the spec that sizes the bound,
-        # before any compile/launch, so a mismatch fails loudly instead of reading
-        # OOB. (block_tables/kv_lens presence is already checked above.)
-        want = (
-            spec.num_kv_blocks,
-            spec.block_size,
-            spec.num_kv_heads,
-            spec.head_size,
-        )
-        for name, t in (("k", k), ("v", v)):
-            got = tuple(t.shape)
-            if got != want:
-                raise ValueError(
-                    f"paged {name} cache shape {got} != spec-derived "
-                    f"[num_kv_blocks, block_size, num_kv_heads, head_size]={want}; "
-                    "a mismatch mis-sizes the buffer-resource bound and can read OOB"
-                )
-        if validate_paged:
-            # Physical block-id bounds (a CONTENTS check, unlike the metadata checks
-            # above). An entry outside [0, num_kv_blocks) addresses a page outside the
-            # cache; the bounds-checked SRD (see _async_load) drops it to 0 rather
-            # than reading OOB, but that is silently WRONG output on a malformed
-            # table -- so reject it loudly. This reads the tensors (a device->host
-            # sync): pass validate_paged=False to skip on the hot/graph-captured path.
-            # Only the entries the kernel dereferences are checked -- pages
-            # [0, ceil(kv_len/block_size)) per seq; the rest are masked on device.
-            _kvl = kv_lens.tolist() if hasattr(kv_lens, "tolist") else list(kv_lens)
-            for _i in range(spec.batch):
-                _kl = int(_kvl[_i])
-                # Single-seq contract: the kernel visits ALL compile-time seqlen_kv
-                # tiles, but the page-bounds mask uses the runtime kv_len -- so a
-                # kv_len shorter than seqlen_kv leaves the uncovered tiles reading
-                # page 0 (the masked block-table default) and folds them into the
-                # softmax -> silently wrong output. Enforce the contract here.
-                if _kl != spec.seqlen_kv:
-                    raise ValueError(
-                        f"paged kv_lens[{_i}]={_kl} != seqlen_kv={spec.seqlen_kv}; the "
-                        "kernel reads all seqlen_kv tiles, so a shorter kv_len leaves "
-                        "uncovered tiles reading page 0 -> silently wrong output"
-                    )
-                _npages = (_kl + spec.block_size - 1) // spec.block_size
-                if _npages <= 0:
-                    continue
-                _used = block_tables[_i][:_npages]
-                _used = _used.tolist() if hasattr(_used, "tolist") else list(_used)
-                for _phys in _used:
-                    _p = int(_phys)
-                    if _p < 0 or _p >= spec.num_kv_blocks:
-                        raise ValueError(
-                            f"paged block_tables[{_i}] physical block id {_p} "
-                            f"outside [0, num_kv_blocks={spec.num_kv_blocks}); a "
-                            "malformed entry reads 0 via the bounds-checked cache "
-                            "SRD -> silently wrong output"
-                        )
+    validate_paged_launch(spec, k, v, block_tables, kv_lens, validate_paged)
     if not spec.use_sinks and sinks is not None:
         raise ValueError("sinks provided but spec.use_sinks is False")
     if spec.use_sinks:
@@ -3266,7 +3580,12 @@ def run_attention_dense_torch(
             raise ValueError("sinks must be contiguous")
         if not sinks.is_cuda:
             raise ValueError("sinks must be a CUDA tensor")
-
+    # q is read only for a bias launch: plain launches may pass placeholder operands.
+    bias_strides = validate_dense_additive_bias(
+        spec,
+        additive_bias,
+        device=q.device if spec.use_additive_bias else None,
+    )
     validate_dense_lse(
         spec,
         q,
@@ -3279,8 +3598,26 @@ def run_attention_dense_torch(
         block_tables=block_tables,
         kv_lens=kv_lens,
         sinks=sinks,
+        additive_bias=additive_bias,
     )
     # After the LSE presence checks, which must fail before any input is touched.
+    if (
+        spec.varlen
+        and not spec.emit_lse
+        and (validate_varlen or spec.use_additive_bias)
+    ):
+        # LSE off: the one host check of the packed offsets. With LSE it already ran
+        # inside validate_dense_lse, so no launch runs it twice. The additive bias is
+        # sized by the spec maxima and loaded unmasked, so a bias launch is checked
+        # even with validate_varlen=False.
+        validate_dense_varlen_offsets(
+            spec,
+            cu_seqlens_q,
+            cu_seqlens_kv,
+            q_tokens=q.shape[0],
+            kv_tokens=k.shape[0],
+            device=q.device,
+        )
     _check_head_dims(spec, q=q, k=k, v=v, out=out)
 
     from rocke.helpers.compile import compile_kernel
@@ -3306,14 +3643,15 @@ def run_attention_dense_torch(
         )
         _DENSE_LAUNCHER_CACHE[key] = launcher
     vals = {"q_ptr": q, "k_ptr": k, "v_ptr": v, "o_ptr": out, "scale": float(scale)}
+    if spec.kv_storage_dtype == "fp8e4m3":
+        vals["k_scale"] = float(k_scale)
+        vals["v_scale"] = float(v_scale)
     vals.update(attention_dense_runtime_args(spec))
     if spec.varlen:
         vals["cu_seqlens_q"] = cu_seqlens_q
         vals["cu_seqlens_kv"] = cu_seqlens_kv
     if spec.paged:
-        vals["block_tables"] = block_tables
-        vals["kv_lens"] = kv_lens
-        vals["block_table_stride"] = int(block_tables.stride(0))
+        vals.update(paged_launch_args(block_tables, kv_lens))
     if spec.use_sinks:
         vals["sink_ptr"] = sinks
     if spec.emit_lse:
@@ -3321,6 +3659,8 @@ def run_attention_dense_torch(
     if spec.kv_segments > 1:
         workspace = allocate_segment_workspace(spec, q.device)
         vals.update(workspace)
+    if spec.use_additive_bias:
+        vals.update(additive_bias_launch_values(additive_bias, bias_strides))
     launcher(
         vals,
         config=LaunchConfig(

@@ -61,8 +61,13 @@ inline constexpr int64_t K_UID = 2;
 inline constexpr int64_t V_UID = 3;
 inline constexpr int64_t O_UID = 4;
 inline constexpr int64_t STATS_UID = 5;
+/// The additive bias (attn_mask) tensor of a bias graph.
+inline constexpr int64_t BIAS_UID = 6;
 /// A uid no tensor carries.
 inline constexpr int64_t EXTRA_UID = 99;
+/// What tensor_attributes.fbs gives a tensor that declares no alignment, and what the dense
+/// packs require. Spelled out here so a graph that under-declares is visibly the exception.
+inline constexpr int64_t DEFAULT_ALIGNMENT_BYTES = 16;
 
 /// The default shape: bf16, D128, B2, Hq = Hkv = 4, Sq = Skv = 256.
 inline constexpr int64_t BATCH = 2;
@@ -108,6 +113,9 @@ struct TensorSpec
     std::vector<int64_t> strides;
     data_objects::DataType dataType = data_objects::DataType::FLOAT;
     bool isVirtual = false;
+    bool passByValue = false;
+    /// The ragged offset tensor the tensor names (packed sequences), if any.
+    std::optional<int64_t> raggedOffsetUid;
 };
 
 /// An SDPA-forward graph. The defaults are a top-left causal graph both arches serve; each
@@ -136,6 +144,10 @@ struct GraphSpec
     std::optional<int64_t> virtualUid;
     // The one operand that names a ragged offset tensor (packed sequences).
     std::optional<int64_t> raggedUid;
+    // The one operand that declares a base alignment of its own, and the value it declares.
+    // Every other operand keeps DEFAULT_ALIGNMENT_BYTES.
+    std::optional<int64_t> alignmentUid;
+    int64_t alignmentBytes = 8;
     std::optional<int64_t> passByValueUid;
 
     /// Tensors the node does not name, after the operands.
@@ -157,6 +169,8 @@ struct GraphSpec
     std::optional<int64_t> scaleTensorUid;
     std::optional<int64_t> seqLenQUid;
     std::optional<int64_t> seqLenKvUid;
+    std::optional<int64_t> cuSeqLenQUid;
+    std::optional<int64_t> cuSeqLenKvUid;
     std::optional<int64_t> seedUid;
     std::optional<int64_t> offsetUid;
     std::optional<int64_t> dropoutMaskUid;
@@ -254,6 +268,28 @@ struct GraphSpec
     }
 };
 
+/// The base graph with an fp32 bias of @p dims, packed unless @p strides is given: a tensor
+/// beside Q, K, V and O (the first of `unnamedTensors`) that the node names as its attn_mask.
+/// Only an arch that serves a bias (AttentionDenseTestArch::servesBias) matches one.
+inline GraphSpec withBias(std::vector<int64_t> dims,
+                          const std::optional<std::vector<int64_t>>& strides = {})
+{
+    GraphSpec spec;
+    TensorSpec bias;
+    bias.uid = BIAS_UID;
+    bias.strides = strides.value_or(packedStrides(dims));
+    bias.dims = std::move(dims);
+    spec.unnamedTensors.push_back(bias);
+    spec.attnMaskUid = BIAS_UID;
+    return spec;
+}
+
+/// The bias tensor of a graph made by withBias.
+inline TensorSpec& biasTensor(GraphSpec& spec)
+{
+    return spec.unnamedTensors.at(0);
+}
+
 /// @p spec with the stats output the frontend builds: a stats uid, generate_stats true,
 /// and a packed [B, Hq, Sq, 1] FLOAT tensor.
 inline GraphSpec withStats(GraphSpec spec, int64_t uid = STATS_UID)
@@ -292,7 +328,8 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
             0,
             spec.passByValueUid == uid,
             spec.raggedUid == uid ? ::flatbuffers::Optional<int64_t>(EXTRA_UID)
-                                  : ::flatbuffers::Optional<int64_t>()));
+                                  : ::flatbuffers::Optional<int64_t>(),
+            spec.alignmentUid == uid ? spec.alignmentBytes : DEFAULT_ALIGNMENT_BYTES));
     }
 
     const auto addTensor = [&](const TensorSpec& tensor) {
@@ -301,8 +338,18 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
                   ? std::vector<int64_t>{spec.batch, spec.numQueryHeads, spec.seqLenQ, 1}
                   : tensor.dims;
         const auto strides = tensor.strides.empty() ? packedStrides(dims) : tensor.strides;
-        tensors.push_back(data_objects::CreateTensorAttributesDirect(
-            builder, tensor.uid, nullptr, tensor.dataType, &strides, &dims, tensor.isVirtual));
+        tensors.push_back(
+            data_objects::CreateTensorAttributesDirect(builder,
+                                                       tensor.uid,
+                                                       nullptr,
+                                                       tensor.dataType,
+                                                       &strides,
+                                                       &dims,
+                                                       tensor.isVirtual,
+                                                       data_objects::TensorValue::NONE,
+                                                       0,
+                                                       tensor.passByValue,
+                                                       tensor.raggedOffsetUid));
     };
     for(const auto& tensor : spec.unnamedTensors)
     {
@@ -351,6 +398,14 @@ inline flatbuffers::FlatBufferBuilder buildGraph(const GraphSpec& spec)
         if(spec.seqLenKvUid.has_value())
         {
             attributesBuilder.add_seq_len_kv_tensor_uid(*spec.seqLenKvUid);
+        }
+        if(spec.cuSeqLenQUid.has_value())
+        {
+            attributesBuilder.add_cu_seq_len_q_tensor_uid(*spec.cuSeqLenQUid);
+        }
+        if(spec.cuSeqLenKvUid.has_value())
+        {
+            attributesBuilder.add_cu_seq_len_kv_tensor_uid(*spec.cuSeqLenKvUid);
         }
         if(spec.seedUid.has_value())
         {
@@ -643,6 +698,32 @@ inline std::vector<KernelArgument> pythonLseAbi()
     auto signature = pythonAbi();
     signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "lse_ptr"});
     return signature;
+}
+
+/// @p signature with the four arguments kernels/common/_attention_additive_bias.py appends
+/// to a use_additive_bias kernel, last.
+inline std::vector<KernelArgument> withBiasTail(std::vector<KernelArgument> signature)
+{
+    signature.push_back(KernelArgument{BUFFER_KIND, POINTER_BYTES, 0, "additive_bias_ptr"});
+    for(const char* name :
+        {"additive_bias_batch_stride", "additive_bias_head_stride", "additive_bias_sq_stride"})
+    {
+        signature.push_back(KernelArgument{BY_VALUE_KIND, SCALAR_BYTES, 0, name});
+    }
+    return signature;
+}
+
+/// The use_additive_bias form: the ten arguments, then the four of the bias tail.
+inline std::vector<KernelArgument> pythonBiasAbi()
+{
+    return withBiasTail(pythonAbi());
+}
+
+/// The emit_lse form of a bias kernel (gfx942): the ten arguments, lse_ptr, then the bias
+/// tail, which comes after everything else.
+inline std::vector<KernelArgument> pythonLseBiasAbi()
+{
+    return withBiasTail(pythonLseAbi());
 }
 
 /// A KPACK descriptor for @p arch's engine recording @p signature, carrying the completed

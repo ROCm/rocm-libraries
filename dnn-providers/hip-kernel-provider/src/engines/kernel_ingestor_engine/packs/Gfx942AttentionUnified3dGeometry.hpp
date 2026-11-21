@@ -5,7 +5,6 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <initializer_list>
 #include <optional>
 
 #include <hipdnn_plugin_sdk/PluginException.hpp>
@@ -105,7 +104,7 @@ inline int64_t gfx942SplitFormula(int64_t num2d, int64_t blockSize, int64_t targ
 }
 
 /// `select_3d`'s count: the split formula with the prefill upper bound
-/// `num_2d = UnifiedAttentionProblem.total_num_q_blocks_upper_bound * num_kv_heads`:
+/// `num_2d = UnifiedAttentionProblem.total_num_q_blocks_upper_bound * num_kv_heads` (rocKE):
 ///
 ///     block_m = 16 if qpk <= 16 else next_power_of_2(qpk)
 ///     num_2d = (total_q // (block_m // qpk) + num_seqs) * num_kv_heads
@@ -298,73 +297,69 @@ inline Gfx942AttentionUnified3dWorkspace gfx942AttentionUnified3dWorkspace(int64
                                                                            int64_t numSegments,
                                                                            int64_t headSize)
 {
-    if(batch <= 0 || hq <= 0 || numSegments <= 0 || headSize <= 0)
+    // total_q == batch: decode serves one query token per sequence.
+    const auto scratch = unifiedAttentionSegmentScratchLayout(0, batch, hq, numSegments, headSize);
+    if(!scratch.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "gfx942 unified 3d: workspace needs positive batch, heads, segments, head size");
+            "gfx942 unified 3d: workspace needs positive batch, heads, segments, head size, and "
+            "a segm_output the kernels' signed 32-bit element offsets can address");
     }
     constexpr std::size_t I32_BYTES = sizeof(int32_t);
-    const auto rows = static_cast<std::size_t>(batch * hq * numSegments); // total_q == batch
-    const auto scratch
-        = unifiedAttentionSegmentScratchLayout(0, rows, static_cast<std::size_t>(headSize));
     const std::size_t cuSeqlensQ
-        = scratch.endOffset
+        = scratch->endOffset
           + detail::alignWorkspaceSection(static_cast<std::size_t>(batch) * I32_BYTES);
     const std::size_t totalBytes
         = cuSeqlensQ
           + detail::alignWorkspaceSection(static_cast<std::size_t>(batch + 1) * I32_BYTES);
     Gfx942AttentionUnified3dWorkspace w;
-    w.segmOutput = static_cast<int64_t>(scratch.segmOutputOffset);
-    w.segmMax = static_cast<int64_t>(scratch.segmMaxOffset);
-    w.segmExpsum = static_cast<int64_t>(scratch.segmExpsumOffset);
-    w.sequsedK = static_cast<int64_t>(scratch.endOffset);
+    w.segmOutput = static_cast<int64_t>(scratch->segmOutputOffset);
+    w.segmMax = static_cast<int64_t>(scratch->segmMaxOffset);
+    w.segmExpsum = static_cast<int64_t>(scratch->segmExpsumOffset);
+    w.sequsedK = static_cast<int64_t>(scratch->endOffset);
     w.cuSeqlensQ = static_cast<int64_t>(cuSeqlensQ);
     w.totalBytes = static_cast<int64_t>(totalBytes);
     return w;
 }
 
-/// One past the largest element offset a signed 32-bit index reaches (2^31).
-constexpr int64_t GFX942_UNIFIED_3D_I32_INDEX_LIMIT = int64_t{1} << 31;
-
 /**
- * @brief Does every tensor the segment and reduce kernels index with signed 32-bit element
- *        offsets hold fewer than 2^31 elements?
+ * @brief Can the segment and reduce kernels address every tensor of this shape?
  *
- * The kernels compute these flat element offsets in i32 (`kernels/gfx942/attention_tiled_3d.py`,
- * `TensorDescriptor.naive(...).offset` in `rocke/helpers/transforms.py`, lowered to an i32
- * `getelementptr`, which sign-extends):
+ * The kernels compute flat element offsets in signed 32-bit integers
+ * (`kernels/gfx942/attention_tiled_3d.py`, `TensorDescriptor.naive(...).offset` in
+ * `rocke/helpers/transforms.py`, lowered to an i32 `getelementptr`, which sign-extends), so an
+ * offset past INT32_MAX wraps negative and the stores land before the buffer. The tensors are
+ * `segm_output` `[token, head, seg, dim]`, `segm_max` / `segm_expsum` `[token, head, seg]`,
+ * and Q and O `[token, head, dim]`; `segm_output` is the largest, so it is the one that binds.
  *
- *  - `segm_output[token, head, seg, dim]`: `((token * Hq + head) * nseg + seg) * D + dim`,
- *    B * Hq * nseg * D elements (segment store and reduce load);
- *  - `segm_max` / `segm_expsum[token, head, seg]`: B * Hq * nseg elements;
- *  - Q and O `[token, head, dim]`: `(token * Hq + head) * D + dim`, B * Hq * D elements.
+ * The rule lives in unifiedAttentionSegmentScratchLayout(), which the workspace function above
+ * also calls (total_q == batch here), so the matcher and the launch path cannot disagree.
+ * This matches `_check_3d_workspace_addr_width` on the Python launch path.
  *
- * At 2^31 elements or more the last offsets wrap negative and the stores land before the
- * buffer, silently. K and V are addressed through i64 bases and buffer resources instead
- * (stridedKvRefusal bounds them). False for non-positive inputs. Total: never throws.
+ * K and V are addressed through i64 bases and buffer resources instead (stridedKvRefusal
+ * bounds them). False for non-positive inputs. Total: never throws.
  */
 inline bool
     gfx942Unified3dIndicesFitInt32(int64_t batch, int64_t hq, int64_t numSegments, int64_t headSize)
 {
-    if(batch <= 0 || hq <= 0 || numSegments <= 0 || headSize <= 0)
-    {
-        return false;
-    }
-    const auto fits = [](std::initializer_list<int64_t> factors) {
-        int64_t elements = 1;
-        for(const int64_t factor : factors)
-        {
-            if(__builtin_mul_overflow(elements, factor, &elements))
-            {
-                return false;
-            }
-        }
-        return elements < GFX942_UNIFIED_3D_I32_INDEX_LIMIT;
-    };
-    return fits({batch, hq, numSegments, headSize}) // segm_output
-           && fits({batch, hq, numSegments}) // segm_max, segm_expsum
-           && fits({batch, hq, headSize}); // Q, O
+    return unifiedAttentionSegmentScratchFitsI32(batch, hq, numSegments, headSize);
+}
+
+/// The GQA ratios hipkernel:Gfx942AttentionUnified3d ships. rocKE's strided decode admits
+/// every ratio from 1 to 16 (it masks the unused rows of the 16-row query tile); v1 builds
+/// kernels for these five. hipkernel:Gfx942AttentionUnified2D declines decode at exactly
+/// these ratios, so both engines read this one rule.
+inline bool gfx942Unified3dServesGqaRatio(int64_t ratio)
+{
+    return ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
+}
+
+/// gfx942Unified3dServesGqaRatio for a head pair; a non-dividing pair has no ratio.
+inline bool gfx942Unified3dServesGqaGroup(int64_t numQueryHeads, int64_t numKvHeads)
+{
+    return numKvHeads > 0 && numQueryHeads % numKvHeads == 0
+           && gfx942Unified3dServesGqaRatio(numQueryHeads / numKvHeads);
 }
 
 } // namespace hip_kernel_provider::kernel_ingestor_engine

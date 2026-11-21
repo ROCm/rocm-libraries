@@ -381,7 +381,7 @@
 
 #ifndef CK_TILE_USE_OCP_FP8
 #if defined(__HIP_DEVICE_COMPILE__)
-#if defined(__gfx950__) || defined(__gfx12__)
+#if defined(__gfx950__) || defined(__gfx12__) || defined(__gfx117__)
 #define CK_TILE_USE_OCP_FP8 1
 #else
 #define CK_TILE_USE_OCP_FP8 0
@@ -450,7 +450,8 @@ namespace ck_tile::core {
  * @var CK_TILE_ARCH_GFX1200 Indicates if the compiler target architecture is GFX1200.
  * @var CK_TILE_ARCH_GFX1201 Indicates if the compiler target architecture is GFX1201.
  * @var CK_TILE_ARCH_GFX12_GENERIC Indicates if the compiler target architecture is GFX12 generic.
- * @var CK_TILE_ARCH_GFX1250 Indicates if the compiler target architecture is GFX1250.
+ * @var CK_TILE_ARCH_GFX1250 Indicates if the compiler target architecture is GFX1250 or
+ * gfx1250-strict.
  * @var CK_TILE_ARCH_GFX1251 Indicates if the compiler target architecture is GFX1251.
  */
 struct amdgcn_compiler_target_state
@@ -658,11 +659,11 @@ struct amdgcn_compiler_target_state
 #endif // __gfx12_generic__
 
     // GFX12.5
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
     static constexpr bool CK_TILE_ARCH_GFX1250 = true;
 #else
     static constexpr bool CK_TILE_ARCH_GFX1250 = false;
-#endif // __gfx1250__
+#endif // __gfx1250__ || __gfx1250_strict__
 
 #if defined(__gfx1251__)
     static constexpr bool CK_TILE_ARCH_GFX1251 = true;

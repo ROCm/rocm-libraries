@@ -36,7 +36,7 @@
  *     serves every other;
  *   - a causal sliding window of graph left_bound L (L keys, diagonal included) is the
  *     kernel's sliding_window L, and every other band is declined;
- *   - the sliding-window zero-trip guard and tile divisibility are per candidate;
+ *   - tile divisibility is per candidate, and a keyless window is served without stats;
  *   - the stats (LSE) output is bound, and served only by a candidate built with
  *     emit_lse, while the gfx950 twin still declines every stats output;
  *   - the cold ranking orders every knob combination, policy arms first.
@@ -114,6 +114,8 @@ struct KernelSpec
     int64_t useCfvst = 1;
     int64_t useExp2Fast = 0;
     int64_t ldsKGroupPad = 8;
+    /// The additive bias (an fp32 attn_mask) the candidate adds; its grid is qb_minor.
+    int64_t useAdditiveBias = 0;
 };
 
 KernelDefinition makeKernel(const KernelSpec& spec)
@@ -149,6 +151,7 @@ KernelDefinition makeKernel(const KernelSpec& spec)
         {std::string("use_cfvst"), spec.useCfvst},
         {std::string("use_exp2_fast"), spec.useExp2Fast},
         {std::string("lds_k_group_pad"), spec.ldsKGroupPad},
+        {std::string("use_additive_bias"), spec.useAdditiveBias},
     };
     return kernel;
 }
@@ -230,6 +233,7 @@ struct ScoreGolden
     int64_t useCfvst;
     int64_t useExp2Fast;
     int64_t ldsKGroupPad;
+    int64_t useAdditiveBias;
     bool gridPolicy;
     bool persistentPolicy;
 };
@@ -260,6 +264,7 @@ KernelSpec kernelSpecOf(const ScoreGolden& golden)
     spec.useCfvst = golden.useCfvst;
     spec.useExp2Fast = golden.useExp2Fast;
     spec.ldsKGroupPad = golden.ldsKGroupPad;
+    spec.useAdditiveBias = golden.useAdditiveBias;
     return spec;
 }
 
@@ -394,25 +399,26 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesARaggedOperand)
     }
 }
 
-TEST(TestGfx942AttentionDenseGraphMatch, DeclinesAWindowThatLeavesQueryRowsNoKey)
+// A window that leaves the last query rows no key is served without a stats output: the
+// kernel zeroes those rows. A graph that binds stats is declined (see
+// KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats; windowLeavesRowsWithoutKeys says why).
+TEST(TestGfx942AttentionDenseGraphMatch, ServesAWindowThatLeavesQueryRowsNoKeyWithoutStats)
 {
-    // Row q sees keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows see none,
-    // and only the kernel's LSE path zeroes them. One key short of that is served. 4096/512 is
-    // also supports_attention_dense's per-block refusal at 256/64 (the last block's window
-    // starts at key tile 58 of 8): on every tile-divisible shape, which kernel match
-    // checks first, a block-level failure is a row-level one, so the block guard is
-    // reached only through TestGfx942AttentionDenseGeometry.
-    for(const auto& [seqLenQ, seqLenKv, served] : {std::tuple{512, 256, false},
-                                                   std::tuple{4096, 512, false},
-                                                   std::tuple{512, 384, false},
-                                                   std::tuple{512, 385, true},
-                                                   std::tuple{512, 512, true}})
+    // Row q sees keys (q - W, q]; once seqlen_q - seqlen_kv >= W the last rows see none.
+    // 4096/512 also puts the last block's window past the final key tile at 256/64 (key
+    // tile 58 of 8): the kernel match must serve that too, see
+    // ServesAWindowWhoseLastBlockSeesNoKeyTileWithoutStats.
+    for(const auto& [seqLenQ, seqLenKv] : {std::pair{512, 256},
+                                           std::pair{4096, 512},
+                                           std::pair{512, 384},
+                                           std::pair{512, 385},
+                                           std::pair{512, 512}})
     {
         SCOPED_TRACE(std::to_string(seqLenQ) + "/" + std::to_string(seqLenKv));
         auto spec = windowGraph(128);
         spec.seqLenQ = seqLenQ;
         spec.seqLenKv = seqLenKv;
-        EXPECT_EQ(matchGraph(spec).has_value(), served);
+        EXPECT_TRUE(matchGraph(spec).has_value());
 
         // Without a window every row keeps key 0.
         auto causal = baseGraph();
@@ -432,13 +438,28 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesSinksADanglingStatsUidMaskTenso
     stats.statsUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(stats).has_value());
 
+    // This arch serves a bias, so the mask uid is declined for naming no tensor of the graph
+    // (the bias reader's own decline), not for an unserved mask ("is not supported").
     auto attnMask = baseGraph();
     attnMask.attnMaskUid = EXTRA_UID;
-    EXPECT_FALSE(matchGraph(attnMask).has_value());
+    const auto danglingMask = loggedDecline(attnMask);
+    EXPECT_EQ(danglingMask.cause, "attn_mask");
+    EXPECT_NE(danglingMask.detail.find("tensor in the graph"), std::string::npos)
+        << danglingMask.detail;
 
     auto varlen = baseGraph();
     varlen.seqLenQUid = EXTRA_UID;
     EXPECT_FALSE(matchGraph(varlen).has_value());
+
+    // Cumulative lengths, on each side alone. padding_mask stays false, so only the
+    // cu_seq_len decline can reject these.
+    auto cuQ = baseGraph();
+    cuQ.cuSeqLenQUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(cuQ).has_value());
+
+    auto cuKv = baseGraph();
+    cuKv.cuSeqLenKvUid = EXTRA_UID;
+    EXPECT_FALSE(matchGraph(cuKv).has_value());
 }
 
 // =============================================================================
@@ -589,15 +610,18 @@ TEST(TestGfx942AttentionDenseGraphMatch, DeclinesTheRowStatsOutputs)
     }
 }
 
-// The rows such a window leaves keyless are graded only against an infinite LSE, so the
-// empty-row decline stands for a graph that binds stats too.
+// The empty-row decline stands for a graph that binds stats too (windowLeavesRowsWithoutKeys
+// says why).
 TEST(TestGfx942AttentionDenseGraphMatch, KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats)
 {
     auto spec = statsGraph();
     spec.leftBound = 128;
     spec.seqLenQ = 512;
     spec.seqLenKv = 384;
-    EXPECT_EQ(loggedDecline(spec).cause, "mask");
+    const auto decline = loggedDecline(spec);
+    EXPECT_EQ(decline.cause, "mask");
+    EXPECT_NE(decline.detail.find("not yet supported with a stats output"), std::string::npos)
+        << decline.detail;
 
     spec.seqLenKv = 385;
     EXPECT_TRUE(matchGraph(spec).has_value());
@@ -700,6 +724,28 @@ TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowOnlyFromTheCandidateBuilt
     EXPECT_FALSE(matches(baseGraph(), w128));
     // left_bound 129 asks for 129 keys, which no block_n-aligned build carries.
     EXPECT_FALSE(matches(windowGraph(129), w128));
+}
+
+// A candidate serves a window whose last query block sees no key tile: at 256/64 tiles,
+// seqlen_q 4096 over seqlen_kv 512 with a 128-key window puts that block's window past the
+// final key tile. The kernel zeroes those rows, so a graph without stats is served by the
+// candidate built for the window, for the narrowest and a wide window. (A graph that binds
+// stats is declined by the graph match, see KeepsDecliningAWindowThatLeavesRowsNoKeyWithStats.)
+TEST(TestGfx942AttentionDenseKernelMatch, ServesAWindowWhoseLastBlockSeesNoKeyTileWithoutStats)
+{
+    KernelSpec w128;
+    w128.slidingWindow = 128;
+    auto spec = windowGraph(128);
+    spec.seqLenQ = 4096;
+    spec.seqLenKv = 512;
+    EXPECT_TRUE(matches(spec, w128));
+
+    KernelSpec w512;
+    w512.slidingWindow = 512;
+    auto wide = windowGraph(512);
+    wide.seqLenQ = 4096;
+    wide.seqLenKv = 1024;
+    EXPECT_TRUE(matches(wide, w512));
 }
 
 TEST(TestGfx942AttentionDenseKernelMatch, DivisibilityIsAgainstTheCandidatesOwnTile)
@@ -1121,7 +1167,8 @@ TEST(TestGfx942AttentionDenseScore, AMalformedBodyLeverScoresZero)
 // E2 over the manifest's full enumeration (SCORE_GOLDENS): in every cell each kernel scores
 // distinctly and positively, and the cell's policy arm scores strictly highest -- the
 // persistent base arm where persistent leads (D128 with no window or one wider than 256 keys,
-// 304 % CUs == 0), the cell default elsewhere.
+// 304 % CUs == 0), the cell default elsewhere. A bias cell ships no persistent kernel (the
+// persistent grid has no bias form), so its cell default leads at every CU count.
 TEST(TestGfx942AttentionDenseScore, ThePolicyArmLeadsEveryCellOfTheFullEnumeration)
 {
     const auto score
@@ -1135,7 +1182,7 @@ TEST(TestGfx942AttentionDenseScore, ThePolicyArmLeadsEveryCellOfTheFullEnumerati
             cells[golden.cell].emplace_back(
                 score(graph.context(), BoundTokens{}, makeKernel(kernelSpecOf(golden))), &golden);
         }
-        EXPECT_EQ(cells.size(), 48U);
+        EXPECT_EQ(cells.size(), 64U);
         for(const auto& [cell, scored] : cells)
         {
             std::set<double> distinct;
@@ -1153,6 +1200,7 @@ TEST(TestGfx942AttentionDenseScore, ThePolicyArmLeadsEveryCellOfTheFullEnumerati
             }
             EXPECT_EQ(distinct.size(), scored.size()) << "cell " << cell << " CUs " << cus;
             const bool persistentLeads = cus == 304 && best->headSize == 128
+                                         && best->useAdditiveBias == 0
                                          && (best->slidingWindow == 0 || best->slidingWindow > 256);
             EXPECT_TRUE(persistentLeads ? best->persistentPolicy : best->gridPolicy)
                 << "cell " << cell << " CUs " << cus << ": the best arm is block " << best->blockM

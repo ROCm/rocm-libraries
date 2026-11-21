@@ -289,7 +289,7 @@ std::ostream& operator<<(std::ostream& out, const Declined& declined)
                << declined.cause << "]: ";
 }
 
-using Unified3dProblem = sdpa_graph::UnifiedAttentionProblem;
+using Unified3dProblem = sdpa_graph::SdpaShape;
 using sdpa_graph::problemFor;
 
 /// The kernel's dtype spelling (the KMD `dtype` field) for a graph dtype, or nullopt.
@@ -381,13 +381,6 @@ bool maskAccepted(const data_objects::SdpaAttributes& attributes)
     }
 }
 
-/// The GQA ratios this engine ships. rocKE's strided decode admits every ratio from 1 to 16
-/// (it masks the unused rows of the 16-row query tile); v1 builds kernels for these five.
-bool isSupportedGqaRatio(int64_t ratio)
-{
-    return ratio == 1 || ratio == 2 || ratio == 4 || ratio == 8 || ratio == 16;
-}
-
 /**
  * @brief Graph-scoped applicability for the whole engine.
  *
@@ -408,8 +401,8 @@ bool isSupportedGqaRatio(int64_t ratio)
  * masks, block masks and a device scale tensor. The catalog holds no kernel for any of them.
  *
  * Batch and Skv are not limited here: the kernel takes both at run time (grid and
- * seq_lens). kernelMatches declines each candidate whose num_segments would take an
- * i32-indexed tensor to 2^31 elements at the graph's batch.
+ * seq_lens). kernelMatches declines each candidate whose num_segments would take segm_output
+ * past 2^31 elements at the graph's batch.
  *
  * @warning Returning std::nullopt empties this engine's WHOLE catalog.
  */
@@ -514,8 +507,7 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
                                << " is not served; this engine ships head sizes 64, 128 and 256");
         return std::nullopt;
     }
-    if(problem.numQueryHeads % problem.numKvHeads != 0
-       || !isSupportedGqaRatio(problem.numQueryHeads / problem.numKvHeads))
+    if(!gfx942Unified3dServesGqaGroup(problem.numQueryHeads, problem.numKvHeads))
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"gqa"}
                                << "query heads " << problem.numQueryHeads
@@ -569,11 +561,13 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
         return std::nullopt;
     }
     if(attributes.seq_len_q_tensor_uid().has_value()
-       || attributes.seq_len_kv_tensor_uid().has_value())
+       || attributes.seq_len_kv_tensor_uid().has_value()
+       || attributes.cu_seq_len_q_tensor_uid().has_value()
+       || attributes.cu_seq_len_kv_tensor_uid().has_value())
     {
         HIPDNN_PLUGIN_LOG_INFO(Declined{"varlen"}
-                               << "variable sequence lengths (seq_len_q/seq_len_kv tensors) are "
-                                  "not implemented in v1");
+                               << "variable sequence lengths (seq_len_q/seq_len_kv or "
+                                  "cu_seq_len_q/cu_seq_len_kv tensors) are not implemented in v1");
         return std::nullopt;
     }
     if(attributes.seed_tensor_uid().has_value() || attributes.offset_tensor_uid().has_value()
@@ -646,6 +640,15 @@ std::optional<BoundTokens> gfx942AttentionUnified3dGraphMatches(const MatchConte
         HIPDNN_PLUGIN_LOG_INFO(Declined{"mma_core_mode"}
                                << "mma_core_mode " << mmaCoreMode
                                << " is not supported; the kernel runs HALF or BFLOAT16 MFMA");
+        return std::nullopt;
+    }
+    // The kernel accumulates and keeps the softmax statistics in FLOAT.
+    if(!sdpa_graph::computesInFloat(context))
+    {
+        HIPDNN_PLUGIN_LOG_INFO(Declined{"compute_data_type"}
+                               << "compute data type "
+                               << context.graph.getNodeWrapper(0).computeDataType()
+                               << " is not supported; the kernel accumulates in FLOAT");
         return std::nullopt;
     }
     if(attributes.implementation() != data_objects::AttentionImplementation::AUTO)
@@ -752,7 +755,7 @@ struct Unified3dTraits
  *        launch.
  *
  * Every KMD field must be present. num_queries_per_kv is a supported GQA ratio
- * (isSupportedGqaRatio); block_size is one of the candidate's `kv_block_size` values
+ * (gfx942Unified3dServesGqaRatio); block_size is one of the candidate's `kv_block_size` values
  * {16, 32, 64}; num_segments is positive (the grid's z extent and the workspace's segment
  * axis); tile_size_override is the tile rocKE resolves from (head_size, block_size) on
  * gfx942 (gfx942ResolvedTileSize), so a record whose recorded tile disagrees -- a binary
@@ -773,7 +776,7 @@ std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
     {
         return std::nullopt;
     }
-    if(*headSize <= 0 || !isSupportedGqaRatio(*numQueriesPerKv) || *numSegments <= 0
+    if(*headSize <= 0 || !gfx942Unified3dServesGqaRatio(*numQueriesPerKv) || *numSegments <= 0
        || (*blockSize != 16 && *blockSize != 32 && *blockSize != 64)
        || *tileSize != gfx942ResolvedTileSize(*headSize, *blockSize))
     {
@@ -805,10 +808,11 @@ std::optional<Unified3dTraits> candidateTraits(const KernelDefinition& kernel)
  * segment, and segments with no keys contribute nothing), so they are the scorer's to
  * rank.
  *
- * One limit does depend on batch: the kernels index segm_output, segm_max/expsum, Q and O
- * with i32 element offsets, so a candidate whose num_segments takes any of them to 2^31
- * elements at the graph's batch is declined (gfx942Unified3dIndicesFitInt32). A candidate
- * with fewer segments may still match the same graph.
+ * One limit does depend on batch: the kernels index segm_output with i32 element offsets,
+ * and it is the largest tensor they index (segm_max/expsum, Q and O are never larger), so a
+ * candidate whose num_segments takes it past 2^31 elements at the graph's batch is declined
+ * (gfx942Unified3dIndicesFitInt32). A candidate with fewer segments may still match the same
+ * graph.
  */
 bool kernelMatches(const MatchContext& context,
                    const BoundTokens& /*bound*/,
@@ -841,8 +845,8 @@ bool kernelMatches(const MatchContext& context,
                                << " [i32_index]: batch " << problem->batch << " x query heads "
                                << problem->numQueryHeads << " x num_segments "
                                << traits->numSegments << " x head size " << problem->headSize
-                               << " reaches 2^31 elements; the kernels index segm_output, "
-                                  "segm_max/expsum, Q and O with signed 32-bit offsets");
+                               << " leaves no segm_output within 2^31 elements; the kernels "
+                                  "index it with signed 32-bit offsets");
         return false;
     }
     return true;
@@ -1153,8 +1157,7 @@ public:
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
                 "gfx942 unified 3d: kernel '" + toString(kernel.kernelId)
-                    + "' would index segm_output, segm_max/expsum, Q or O past 2^31 elements "
-                      "at batch "
+                    + "' would index segm_output past 2^31 elements at batch "
                     + std::to_string(problem.batch) + " with " + std::to_string(traits->numSegments)
                     + " segments (i32 offsets)");
         }
@@ -1182,8 +1185,9 @@ public:
         Unified3dLaunchState state;
         state.binding = binding;
         state.problem = problem;
-        // The i32-index check above bounds Hq (and so Hkv <= Hq) and batch; check the
-        // narrowing anyway so a future caller cannot truncate a head count silently.
+        // The scratch bound above keeps batch and Hq at or below 2^31 (exactly 2^31 elements
+        // is admitted), so this check is what refuses a count of exactly 2^31 for the kernels'
+        // i32 arguments; it also covers Hkv.
         if(state.problem.batch > std::numeric_limits<int32_t>::max()
            || state.problem.numQueryHeads > std::numeric_limits<int32_t>::max()
            || state.problem.numKvHeads > std::numeric_limits<int32_t>::max())

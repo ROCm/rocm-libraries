@@ -5,9 +5,9 @@ This file explains *what* the CK DSL `unified_attention` kernels compute and
 The [`README.md`](README.md) is the parity + optimization history; this file is
 the specification, the data layout, and the two kernel strategies (2D and 3D
 split-KV) the production dispatcher chooses between. §8 additionally documents the
-**dense prefill kernel** — a non-paged, compile-time-sized peak-TFLOPS sibling
+**dense prefill kernel** — a compile-time-sized peak-TFLOPS sibling
 (persistent grid-stride + on-chip ragged support) for the contiguous
-`[B, S, H, d]` prefill regime.
+`[B, S, H, d]` prefill regime, with a single-sequence paged K/V mode.
 
 > The harness in this folder benchmarks against AITER's Triton
 > `unified_attention`; the CK DSL kernels mirror that Triton reference 1:1 in

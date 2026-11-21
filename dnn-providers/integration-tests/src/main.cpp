@@ -194,6 +194,13 @@ int main(int argc, char** argv) noexcept
                   "change = zero git diff. Run one at a time: concurrent "
                   "--write-support-claims runs against the same bundle tree race "
                   "on the sidecars and the last writer wins.");
+        parser.add_argument("--benchmark-reference")
+            .default_value(false)
+            .implicit_value(true)
+            .help("Measure each bundle test's reference preparation, CPU/GPU compute or "
+                  "golden-output loading, and expected-output transfers, excluding engine "
+                  "execution and comparison (both still run). Print per-test wall times and "
+                  "reference_benchmark_* properties.");
         parser.add_argument("--benchmark")
             .default_value(false)
             .implicit_value(true)
@@ -466,10 +473,28 @@ int main(int argc, char** argv) noexcept
         opts.writeSupportClaims = writeSupportClaims;
         opts.benchmark = benchmark.settings;
         opts.graphCapture = graphCapture.settings;
+        opts.benchmarkReference = parser.get<bool>("--benchmark-reference");
         opts.enforceSupportClaims
             = claimMode.mode == hipdnn_integration_tests::bundle::ClaimMode::ENFORCE;
 
         hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
+
+        // Checked against the initialized config: HIPDNN_TEST_ALLOW_BUNDLES can override
+        // --no-bundles either way, and only initialize() settles which one wins.
+        const auto& initializedConfig = hipdnn_integration_tests::TestConfig::get();
+        hipdnn_integration_tests::ReferenceBenchmarkRequest referenceRequest;
+        referenceRequest.enabled = initializedConfig.benchmarkReference();
+        referenceRequest.skipGraphValidation = initializedConfig.skipGraphValidation();
+        referenceRequest.captureBundles = initializedConfig.hasCaptureDir();
+        referenceRequest.writeSupportClaims = initializedConfig.writeSupportClaims();
+        referenceRequest.bundlesDisabled = !initializedConfig.allowBundles();
+        const auto referenceError
+            = hipdnn_integration_tests::validateReferenceBenchmark(referenceRequest);
+        if(referenceError.has_value())
+        {
+            std::cerr << "Error: " << *referenceError << '\n';
+            return 1;
+        }
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.
@@ -501,6 +526,10 @@ int main(int argc, char** argv) noexcept
         // iteration too.
         listeners.Append(new hipdnn_integration_tests::bundle::VerifierTallyIterationReset);
         listeners.Append(new hipdnn_integration_tests::CaptureTallyIterationReset);
+        if(initializedConfig.benchmarkReference())
+        {
+            listeners.Append(new hipdnn_integration_tests::ReferenceBenchmarkSummary);
+        }
 
         // Create shared handle (triggers engine loading). The guards below own
         // teardown for every exit path from here on, including the outer catch,

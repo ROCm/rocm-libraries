@@ -199,7 +199,7 @@ inline bool operator!=(const MetadataField& lhs, const MetadataField& rhs)
 /// read fields as `$kernel.<field>`.
 struct MetadataSchema
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::vector<MetadataField> fields;
     /// Authored semantics; independent of the JSON file-format version.
@@ -238,6 +238,7 @@ enum class UhdAdapter
     TABLE, ///< Bucketed lookup table shipped as a data artifact.
     CUSTOM_LIBRARY, ///< An author-supplied shared library, loaded and called by symbol (§7.3).
     LINEAR_DATA, ///< Per-config linear ranker (log slowdown vs the best), a data artifact.
+    MLP_DATA, ///< Per-engine MLP ensemble estimating log(metric), a data artifact.
 };
 
 /// What a UHD's score measures, and whether it is comparable across engines (RFC 0019
@@ -266,7 +267,7 @@ inline bool operator!=(const UhdScore& lhs, const UhdScore& rhs)
 /// A semantic dependency, independent of the descriptor file-format version.
 struct DescriptorDependency
 {
-    DescriptorId id;
+    DescriptorId id{};
     hipdnn_data_sdk::utilities::Version revision{1, 0, 0};
 };
 
@@ -330,7 +331,7 @@ inline bool operator!=(const HeuristicProvenance& lhs, const HeuristicProvenance
 /// compare equal.
 struct HeuristicDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     UhdAdapter adapter = UhdAdapter::STATIC_ORDER;
 
@@ -354,7 +355,7 @@ struct HeuristicDescriptor
 
     /// NATIVE: the symbol the engine registered its scorer under.
     std::string nativeSymbol;
-    /// TREE_DATA / TABLE / LINEAR_DATA / CUSTOM_LIBRARY: the artifact path the adapter opens.
+    /// TREE_DATA / TABLE / LINEAR_DATA / MLP_DATA / CUSTOM_LIBRARY: the artifact path it opens.
     /// The loader stores it resolved and absolute; a descriptor built in memory may give it
     /// relative to @ref baseDir. Derived from the file's location; not part of operator==.
     std::string modelArtifactPath;
@@ -440,7 +441,7 @@ struct SlotDescriptor
 {
     /// `^[a-z][a-z0-9_]*$`, unique within the engine, never `global`.
     std::string name;
-    DescriptorId metadataSchemaId;
+    DescriptorId metadataSchemaId{};
     /// The slot's ranker by arch key. Metric-less (RFC 0021 §7).
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::vector<std::string> knobs;
@@ -464,7 +465,7 @@ inline bool operator!=(const SlotDescriptor& lhs, const SlotDescriptor& rhs)
 /// fills after parsing.
 struct EngineDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     /// The default catalog ranker for the `default` arch key (see DescriptorSet::heuristic).
     /// nullopt when the engine ships no UHD; selection then falls back to the
@@ -480,16 +481,17 @@ struct EngineDescriptor
     std::map<std::string, std::vector<DescriptorId>> sortKernelCatalog;
     std::map<std::string, std::vector<DescriptorId>> predictEngine;
     std::map<std::string, std::vector<DescriptorId>> predictApplicableKernels;
-    DescriptorId metadataSchemaId;
+    DescriptorId metadataSchemaId{};
     std::vector<std::string> knobs;
     /// `hipdnnBackendBehaviorNote_t` values; int32 so a newer note isn't truncated.
     std::vector<int32_t> behaviorNotes;
     /// Graph schema version this engine understands; a graph below this floor is
     /// declined rather than matched with an ignored field. Baseline by default.
     hipdnn_data_sdk::utilities::Version sdkVersion{K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-    /// RFC 0020 §4.2 numerical notes, held as authored; no hipDNN enum exists for them
-    /// yet, so nothing consumes the strings.
-    std::vector<std::string> numericalNotes;
+    /// `hipdnnBackendNumericalNote_t` values. nullopt means the descriptor authors no
+    /// claim (the backend then reports the engine as nondeterministic); a present
+    /// vector, even an empty one, is the provider's explicit claim.
+    std::optional<std::vector<int32_t>> numericalNotes;
     /// Resolved through GraphMatchRegistry; empty means this engine declares no
     /// graph-topology match.
     std::string graphMatchNativeSymbol;
@@ -550,7 +552,7 @@ enum class MatchScope
 /// UMD: one applicability check, shared by id across packs.
 struct MatchDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     MatchScope scope = MatchScope::GRAPH;
     std::string matchSymbol; ///< Resolved through NativeRegistry.
@@ -571,7 +573,7 @@ inline bool operator!=(const MatchDescriptor& lhs, const MatchDescriptor& rhs)
 /// UDD: how to invoke a kernel, shared by every kernel in a pack.
 struct DispatchDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::string dispatchSymbol; ///< Resolved through NativeRegistry.
 };
@@ -789,7 +791,7 @@ static_assert(detail::IS_BRACE_INITIALIZABLE_V<KernelSource,
 /// numerically across the integer and floating-point alternatives (`1` equals `1.0`).
 struct KernelDescriptor
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     KernelSource source;
     /// RFC 0017 §15.1: the launches of a multi-launch kernel, keyed by launch name, in place
@@ -893,11 +895,11 @@ bool allLaunchSources(const Kernel& kernel, Predicate predicate)
 /// a vector of child kernels.
 struct KernelDescriptorPack
 {
-    DescriptorId id;
+    DescriptorId id{};
     std::string name;
     std::vector<DescriptorId> matcherIds;
-    DescriptorId engineId;
-    DescriptorId dispatchId;
+    DescriptorId engineId{};
+    DescriptorId dispatchId{};
     /// GFX targets, e.g. `{"gfx942", "gfx950"}`; empty means arch-independent. A concrete
     /// entry is matched exactly against the device's base target id; a generic entry
     /// matches by membership in the generic target table. Part of the pack's catalog identity

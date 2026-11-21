@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <initializer_list>
+#include <map>
 #include <optional>
 #include <ostream>
 #include <set>
@@ -36,6 +37,7 @@
 #include "harness/bundle/SupportVerdict.hpp"
 #include "harness/bundle/VariantPackBuilder.hpp"
 #include "harness/input-init/FillInputs.hpp"
+#include "harness/tolerance/ConvFwdDynamicTolerance.hpp"
 #include "harness/tolerance/ToleranceResolver.hpp"
 
 namespace hipdnn_integration_tests::bundle
@@ -584,12 +586,23 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
                                                          ReferenceExecutorType type)
 {
     const std::string label = refLabel(type);
+    if(_deps.policy.benchmarkReference)
+    {
+        ReferenceBenchmarkResult result;
+        result.reference = type == ReferenceExecutorType::GPU ? "gpu" : "cpu";
+        _referenceBenchmarks.push_back(std::move(result));
+    }
     // Still null in the catch below if creating the executor is what threw.
     IReferenceGraphExecutor* executor = nullptr;
     try
     {
-        executor = &_deps.referenceExecutors->get(type);
-        if(executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size()))
+        bool applicable = false;
+        measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
+            executor = &_deps.referenceExecutors->get(type);
+            applicable
+                = executor->isApplicable(_bundle->graphBuffer.data(), _bundle->graphBuffer.size());
+        });
+        if(applicable)
         {
             return ResolvedReference{type, executor};
         }
@@ -598,6 +611,12 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
     catch(const ReferenceCapabilityError& e)
     {
         chain.declined(label + " (not applicable: " + e.what() + ")");
+    }
+    catch(const ReferenceBenchmarkError&)
+    {
+        // A failed synchronize is the harness's fault, not this reference's: let it
+        // fail the test rather than reach the catch below and fall back to the next.
+        throw;
     }
     catch(const std::exception& e)
     {
@@ -610,6 +629,12 @@ std::optional<IntegrationBundleVerificationHarness::ResolvedReference>
         error.append(" ").append(detail);
         referenceErrored(chain, std::move(entry), std::move(error));
     }
+    // Still pending means neither catch above settled it, so it was not applicable.
+    if(_deps.policy.benchmarkReference
+       && _referenceBenchmarks.back().status == ReferenceBenchmarkStatus::PENDING)
+    {
+        _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::DECLINED;
+    }
     return std::nullopt;
 }
 
@@ -617,6 +642,10 @@ void IntegrationBundleVerificationHarness::referenceErrored(OracleChain& chain,
                                                             std::string entry,
                                                             std::string error)
 {
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+    }
     recordRefError(error);
     chain.tried.push_back({std::move(entry), std::move(error)});
 }
@@ -758,10 +787,18 @@ VerificationOutcome
             return outcome;
         }
         case RefStatus::CAPABILITY_MISS:
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::DECLINED;
+            }
             chain.declined(label + " (cannot run this op: " + result.message + ")");
             break;
         case RefStatus::RUNTIME_ERROR:
         {
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+            }
             // "the next reference", not a name: the next candidate has not been probed
             // yet and may turn out not to be applicable.
             std::string context;
@@ -785,6 +822,10 @@ VerificationOutcome
             break;
         }
         case RefStatus::HARNESS_ERROR:
+            if(_deps.policy.benchmarkReference)
+            {
+                _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+            }
             // Not the reference's fault, so it neither falls through to the next one nor
             // goes in the reference-error report.
             return VerificationOutcome::failed(VerificationDepth::EXECUTED,
@@ -889,10 +930,13 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::prepare
 
     // Read here, not at registration, so a golden bundle holds its tensors only while
     // its own test runs. A blob that is unreadable or the wrong size fails this test
-    // instead of quietly dropping it from the run.
+    // instead of quietly dropping it from the run. Under --benchmark-reference the
+    // golden outputs are read later, inside the reference timing; see
+    // compareAgainstGolden().
     try
     {
-        _inputs = _bundle->loadTensors();
+        _inputs = _deps.policy.benchmarkReference ? _bundle->loadInputs() : _bundle->loadTensors();
+        _inputsFromRecipes = false;
     }
     catch(const std::exception& e)
     {
@@ -1003,8 +1047,13 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
         = [&](InputTensorMap& tensors, FillResult& result) -> std::optional<VerificationOutcome> {
         try
         {
-            result = hipdnn_integration_tests::fillInputs(
-                wrapper.getGraph(), tensors, leafInputUids, _inputFillRecipes, device, aliases);
+            result = hipdnn_integration_tests::fillInputs(wrapper.getGraph(),
+                                                          tensors,
+                                                          leafInputUids,
+                                                          _inputFillRecipes,
+                                                          *_deps.referenceExecutors,
+                                                          device,
+                                                          aliases);
         }
         catch(const DeviceInputError& e)
         {
@@ -1058,6 +1107,7 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::fillBun
     }
 
     _inputs = std::move(inputs);
+    _inputsFromRecipes = true;
     return checkRaggedLayouts(lengthUids);
 }
 
@@ -1101,6 +1151,19 @@ std::optional<VerificationOutcome> IntegrationBundleVerificationHarness::checkRa
 }
 
 // ---- engine + reference runs -----------------------------------------------
+
+void IntegrationBundleVerificationHarness::measureReference(double ReferenceBenchmarkResult::*phase,
+                                                            const std::function<void()>& work)
+{
+    if(_deps.policy.benchmarkReference)
+    {
+        _deps.referenceTimer.measure(_referenceBenchmarks.back().*phase, work);
+    }
+    else
+    {
+        work();
+    }
+}
 
 OutputTensors IntegrationBundleVerificationHarness::allocateSentinelOutputs(bool onDevice) const
 {
@@ -1234,34 +1297,49 @@ IntegrationBundleVerificationHarness::RefRunResult
     // to an executor that wants device memory — or the reverse — is a silent crash,
     // not an error, and the executor is the one that knows which it needs.
     bool useDevice = false;
+    std::optional<std::string> harnessError;
 
     // isApplicable() already said yes in probeReference(); execute() can
     // still throw a ReferenceCapabilityError for what that check could not see.
     try
     {
         IReferenceGraphExecutor& executor = *ref.executor;
-        useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
-        refOutputs = allocateSentinelOutputs(useDevice);
-        // Philox dropout: the reference runs on the engine's dumped keep mask (SEM-015).
-        if(const auto dump = bundle::findSdpaRngDump(_bundle->graphWrapper()); dump.has_value())
-        {
-            bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
-        }
         VariantPack variantPack;
-        try
+        measureReference(&ReferenceBenchmarkResult::prepareMs, [&] {
+            useDevice = _deps.policy.useDevice() && executor.requiresDeviceMemory();
+            refOutputs = allocateSentinelOutputs(useDevice);
+            // Philox dropout: the reference runs on the engine's dumped keep mask (SEM-015).
+            if(const auto dump = bundle::findSdpaRngDump(_bundle->graphWrapper()); dump.has_value())
+            {
+                bundle::copyRngDump(*engineOutputs.at(dump->uid), *refOutputs.at(dump->uid));
+            }
+            try
+            {
+                variantPack = buildVariantPack(refOutputs, useDevice);
+            }
+            catch(const std::invalid_argument& e)
+            {
+                // The variant pack is the harness's, so a fault in it is never the reference's.
+                harnessError = e.what();
+            }
+        });
+        if(harnessError.has_value())
         {
-            variantPack = buildVariantPack(refOutputs, useDevice);
+            return {RefStatus::HARNESS_ERROR, *harnessError};
         }
-        catch(const std::invalid_argument& e)
-        {
-            // The variant pack is the harness's, so a fault in it is never the reference's.
-            return {RefStatus::HARNESS_ERROR, e.what()};
-        }
-        executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+        measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
+            executor.execute(_bundle->graphBuffer.data(), _bundle->graphBuffer.size(), variantPack);
+        });
     }
     catch(const ReferenceCapabilityError& e)
     {
         return {RefStatus::CAPABILITY_MISS, e.what()};
+    }
+    catch(const ReferenceBenchmarkError& e)
+    {
+        // A failed synchronize: HARNESS_ERROR fails the test without a fallback,
+        // where the RUNTIME_ERROR the catch below gives would try the next reference.
+        return {RefStatus::HARNESS_ERROR, e.what()};
     }
     catch(const detail::DeviceOutputError& e)
     {
@@ -1379,6 +1457,37 @@ void IntegrationBundleVerificationHarness::captureIfVerified(GraphSession& sessi
 VerificationOutcome
     IntegrationBundleVerificationHarness::compareAgainstGolden(OutputTensors& engineOutputs)
 {
+    if(_deps.policy.benchmarkReference)
+    {
+        ReferenceBenchmarkResult result;
+        result.reference = "golden";
+        _referenceBenchmarks.push_back(std::move(result));
+        // prepareInputs() left the golden outputs unread, so reading them is the
+        // golden reference's execute phase.
+        std::optional<std::string> loadError;
+        measureReference(&ReferenceBenchmarkResult::executeMs, [&] {
+            try
+            {
+                _bundle->loadGoldenOutputs(_inputs);
+            }
+            catch(const std::exception& e)
+            {
+                loadError = e.what();
+            }
+        });
+        if(loadError.has_value())
+        {
+            // The same failure prepareInputs() reports for this blob without the flag.
+            // Under the flag only a golden reference reads its blobs, so a corrupt blob
+            // that a gpu or cpu run never compares against fails the test only without
+            // the flag.
+            _referenceBenchmarks.back().status = ReferenceBenchmarkStatus::ERRORED;
+            return VerificationOutcome::failed(VerificationDepth::NOT_REACHED,
+                                               FailureOrigin::HARNESS,
+                                               "tensor data failed to load: " + *loadError + " ("
+                                                   + _bundlePath.string() + ")");
+        }
+    }
     return compareAgainst(
         engineOutputs,
         [&](int64_t uid) -> hipdnn_data_sdk::utilities::ITensor& { return *_inputs.at(uid); },
@@ -1403,14 +1512,121 @@ VerificationOutcome
                                                          Verifier verifier)
 {
     auto wrapper = _bundle->graphWrapper();
+    const auto validationSite = resolveValidationSite(_deps.policy.validator, site);
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().validator
+            = validationSite == ValidationSite::DEVICE ? "gpu" : "cpu";
+        // The comparison below would make these copies anyway. Doing them here moves
+        // the transfer into the reference's timing and out of the comparison's.
+        measureReference(&ReferenceBenchmarkResult::materializeMs, [&] {
+            for(const auto uid : _bundle->outputTensorUids)
+            {
+                auto& expected = expectedFor(uid);
+                if(validationSite == ValidationSite::DEVICE)
+                {
+                    static_cast<void>(expected.rawDeviceData());
+                }
+                else
+                {
+                    static_cast<void>(expected.rawHostData());
+                }
+            }
+        });
+    }
     // defaultTolerance() rather than resolveTolerance(): the TOML tolerance override is
     // applied by gradingForTensor(), which reads the validator override first and so is
     // the only place that can log the check that actually graded this tensor.
-    const auto toleranceFor
-        = [&](const std::string& label, hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
-              const float value = tolerance::defaultTolerance(wrapper, dataType);
-              return gradingForTensor(currentTestName(), label, value, value);
-          };
+    //
+    // A half, bfloat16 or float output of a convolution-forward graph is graded with the dynamic
+    // tolerance computed from the graph and its input statistics instead of the fixed per-op
+    // default. Inputs filled from a recipe take their statistics from the recipe, at no cost;
+    // inputs read from golden blobs are scanned on the host, once; a scalar baked into the graph
+    // is read from the graph (convFwdErrorScale() asks this lookup only for the rest). The scale
+    // is that of one output, computed the first time the output is graded, and only when it
+    // needs it. The tolerance lookup gets the label of an output, not its uid (a uid is not
+    // stable between a C++ graph test and the bundle captured from it): the label names the
+    // output here, and an output that shares its label with another has the per-op default.
+    std::map<int64_t, std::optional<tolerance::InputMoments>> momentsCache;
+    const auto momentsFor = [&](int64_t uid) -> std::optional<tolerance::InputMoments> {
+        const auto cached = momentsCache.find(uid);
+        if(cached != momentsCache.end())
+        {
+            return cached->second;
+        }
+        std::optional<tolerance::InputMoments> moments;
+        if(_inputsFromRecipes)
+        {
+            moments = tolerance::recipeMoments(_inputFillRecipes.fill(uid));
+        }
+        else if(const auto it = _inputs.find(uid); it != _inputs.end())
+        {
+            moments
+                = tolerance::hostMoments(*it->second, wrapper.getTensorMap().at(uid)->data_type());
+        }
+        momentsCache.emplace(uid, moments);
+        return moments;
+    };
+    std::map<int64_t, std::optional<hipdnn_test_sdk::utilities::conv::ConvFpropErrorScale>>
+        convScales;
+    const auto outputUidOf = [&](const std::string& label) -> std::optional<int64_t> {
+        std::optional<int64_t> found;
+        for(const auto uid : _bundle->outputTensorUids)
+        {
+            if(bundle::tensorLabel(uid, *wrapper.getTensorMap().at(uid)) != label)
+            {
+                continue;
+            }
+            if(found.has_value())
+            {
+                return std::nullopt;
+            }
+            found = uid;
+        }
+        return found;
+    };
+    const auto toleranceFor = [&](const std::string& label,
+                                  hipdnn_flatbuffers_sdk::data_objects::DataType dataType) {
+        std::optional<hipdnn_test_sdk::utilities::conv::AbsRelTolerance> dynamic;
+        const auto outputUid = tolerance::hasDynamicToleranceFor(dataType)
+                                   ? outputUidOf(label)
+                                   : std::optional<int64_t>();
+        if(outputUid.has_value())
+        {
+            auto convScale = convScales.find(*outputUid);
+            if(convScale == convScales.end())
+            {
+                convScale
+                    = convScales
+                          .emplace(*outputUid,
+                                   tolerance::convFwdErrorScale(wrapper, momentsFor, *outputUid))
+                          .first;
+            }
+            if(convScale->second.has_value())
+            {
+                hipdnn_test_sdk::utilities::conv::ConvFpropCoefficients coefficients;
+                if(dataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT
+                   && _deps.policy.testSettings != nullptr)
+                {
+                    coefficients.summationOrder
+                        = _deps.policy.testSettings->convFwdSummationOrder("float");
+                }
+                dynamic
+                    = tolerance::convFwdOutputTolerance(*convScale->second, dataType, coefficients);
+            }
+        }
+        if(dynamic.has_value())
+        {
+            return gradingForTensor(currentTestName(),
+                                    label,
+                                    _deps.policy.testSettings,
+                                    static_cast<float>(dynamic->atol),
+                                    static_cast<float>(dynamic->rtol));
+        }
+        const auto value = tolerance::defaultTolerance(wrapper, dataType);
+        return gradingForTensor(
+            currentTestName(), label, _deps.policy.testSettings, value.atol, value.rtol);
+    };
 
     // A Philox rng_dump is the oracle's input, not a result: sanity-check it, do not compare it.
     const auto dump = bundle::findSdpaRngDump(wrapper);
@@ -1462,7 +1678,7 @@ VerificationOutcome
         engineOutputs,
         expectedFor,
         toleranceFor,
-        resolveValidationSite(_deps.policy.validator, site),
+        validationSite,
         "Bundle: " + _bundlePath.string() + inputFillNote(),
         liveRows,
         resolveValidationSite(_deps.policy.validator, ValidationSite::HOST));
@@ -1474,6 +1690,12 @@ VerificationOutcome
         ADD_FAILURE() << mismatch.report;
     }
 
+    if(_deps.policy.benchmarkReference)
+    {
+        _referenceBenchmarks.back().status = mismatches.empty()
+                                                 ? ReferenceBenchmarkStatus::VERIFIED
+                                                 : ReferenceBenchmarkStatus::MISMATCH;
+    }
     return comparisonOutcome(mismatches.empty(), verifier);
 }
 

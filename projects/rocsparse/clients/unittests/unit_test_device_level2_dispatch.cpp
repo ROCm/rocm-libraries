@@ -843,12 +843,10 @@ namespace
                                            sizeof(const void*),
                                            nullptr)
                     == rocsparse_status_success;
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         put(rocsparse_sptrsv_input_solve_mode,
             o.diagonal ? rocsparse_solve_mode_diagonal : rocsparse_solve_mode_triangular);
         if(o.diagonal)
             put(rocsparse_sptrsv_input_diagonal_modifier, rocsparse_diagonal_modifier_absolute);
-#endif
         return ok;
     }
 
@@ -926,16 +924,12 @@ namespace
         using F = mat_format;
         std::vector<sptrsv_case> v{{F::coo, lo, nu, reuse, op_c, false, true},
                                    {F::coo, up, un, force, op_t},
-                                   {F::csc, up, un, reuse, op_n}};
-#if defined(ROCSPARSE_WITH_ELL_TRSV)
-        v.push_back({F::ell, lo, nu, force, op_n});
-        v.push_back({F::ell, lo, un, reuse, op_n});
-        v.push_back({F::ell, up, nu, force, op_t, false, true});
-#endif
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-        for(const auto format : {F::csr, F::csc})
-            v.push_back({format, lo, nu, force, op_n, true});
-#endif
+                                   {F::csc, up, un, reuse, op_n},
+                                   {F::ell, lo, nu, force, op_n},
+                                   {F::ell, lo, un, reuse, op_n},
+                                   {F::ell, up, nu, force, op_t, false, true},
+                                   {F::csr, lo, nu, force, op_n, true},
+                                   {F::csc, lo, nu, force, op_n, true}};
         return v;
     }
 
@@ -1176,12 +1170,10 @@ namespace
                                            sizeof(const void*),
                                            nullptr)
                     == rocsparse_status_success;
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
         put(rocsparse_sptrsm_input_solve_mode,
             o.diagonal ? rocsparse_solve_mode_diagonal : rocsparse_solve_mode_triangular);
         if(o.diagonal)
             put(rocsparse_sptrsm_input_diagonal_modifier, rocsparse_diagonal_modifier_none);
-#endif
         return ok;
     }
 
@@ -1247,10 +1239,8 @@ namespace
                                    {F::coo, op_t, op_t, row, row, 3, force},
                                    {F::csc, op_n, op_t, col, col, 2, reuse},
                                    {F::csc, op_c, op_c, row, col, 2, force, false, true},
-                                   {F::csc, op_t, op_n, row, col, 3, reuse}};
-#if defined(ROCSPARSE_WITH_DIAGONAL_SOLVE)
-        v.push_back({F::csr, op_n, op_n, col, col, 2, force, true});
-#endif
+                                   {F::csc, op_t, op_n, row, col, 3, reuse},
+                                   {F::csr, op_n, op_n, col, col, 2, force, true}};
         return v;
     }
 

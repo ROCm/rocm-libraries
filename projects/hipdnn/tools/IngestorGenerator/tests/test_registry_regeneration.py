@@ -336,14 +336,18 @@ def test_g2_the_shipped_catalog_is_generated_from_the_selection(
 
     # The catalog diff covers the KDP's catalog; this covers every byte of every
     # file. The KDP's DVC object is LF; the git-tracked files are compared as text
-    # because an autocrlf checkout holds them as CRLF.
-    assert kdp.read_bytes() == shipped_kdp.read_bytes()
+    # because an autocrlf checkout holds them as CRLF. A mismatch fails with
+    # pytest.fail, not assert: pytest's diff of two MB-sized KDPs runs for longer
+    # than the ctest timeout.
+    if kdp.read_bytes() != shipped_kdp.read_bytes():
+        pytest.fail(f"{kdp.name}: bytes differ from the shipped {shipped_kdp}")
     others = sorted(p.name for p in descriptors.glob("*.json") if p != kdp)
     assert others == sorted(p.name for p in shipped_dir.glob("*.json"))
     for name in others:
-        assert (descriptors / name).read_text(encoding="utf-8") == (
+        if (descriptors / name).read_text(encoding="utf-8") != (
             shipped_dir / name
-        ).read_text(encoding="utf-8"), name
+        ).read_text(encoding="utf-8"):
+            pytest.fail(f"{name}: text differs from the shipped {shipped_dir / name}")
 
 
 @pytest.fixture(scope="module")
@@ -357,13 +361,35 @@ def bundle(manifest) -> Path:
     return directory
 
 
+#: `uhd_gen` imports its own dependency set (``tools/uhd_gen/requirements.txt``:
+#: flatbuffers, lightgbm, numpy, pandas, pyarrow, scikit-learn), which this generator's
+#: own ``requirements.txt`` deliberately does not carry. The gates below reach it only
+#: for a bundle that ships a model binary, so a venv built for this suite alone can lack
+#: it entirely.
+_NO_UHD_GEN = (
+    "uhd_gen is not importable ({error}). The gates that read a shipped model binary "
+    "need uhd_gen's dependencies (tools/uhd_gen/requirements.txt); install them to run "
+    "them. This suite's own requirements.txt does not carry them, the same way it does "
+    "not carry rocm_kpack."
+)
+
+
 def _uhd_gen():
     """`uhd_gen`'s promotion checks, run on the shipped files rather than reimplemented:
-    promote refuses a model the runtime would refuse, and so must a model that ships."""
+    promote refuses a model the runtime would refuse, and so must a model that ships.
+
+    Skips rather than fails when `uhd_gen` cannot be imported: its dependencies are not
+    this suite's, so an absent one is an unrun gate, not a broken bundle. A bundle that
+    ships no model never gets here, so the skip is only reachable where there is
+    something to check and no means to check it.
+    """
     tools = str(_ROOT.parent)
     if tools not in sys.path:
         sys.path.append(tools)
-    from uhd_gen import promote, provenance
+    try:
+        from uhd_gen import promote, provenance
+    except ImportError as error:  # pragma: no cover - depends on the venv
+        pytest.skip(_NO_UHD_GEN.format(error=error))
 
     return promote, provenance
 
@@ -504,6 +530,12 @@ def test_g8_every_shipped_model_binary_is_one_the_engine_loads(bundle):
             promote._verify_artifact(uhd.document, artifact, uhd.role)
         except promote.PromoteError as error:
             failures.append(f"{uhd.path.relative_to(bundle)}: {error}")
+        except ImportError as error:
+            # Reading the model parses its FlatBuffer, so this is the first point that
+            # needs uhd_gen's own dependencies rather than just its modules. Absent one,
+            # the gate is unrun rather than failed -- the same call the suite makes for
+            # rocm_kpack, and for a model dvc has not pulled below.
+            pytest.skip(_NO_UHD_GEN.format(error=error))
     assert not failures, "\n".join(failures)
     if unpulled:
         # The way g2 and g3 skip an un-pulled KDP: CI pulls, and a strict run fails the skip.
@@ -647,6 +679,46 @@ def test_g5_catches_a_misspelled_and_an_unclaimed_dtype(manifest):
     assert (missing, unclaimed) == ([], ["FP16"])
     with pytest.raises(AssertionError, match="no dtype spellings"):
         _vocabulary_gaps(vocabulary, "// no literals")
+
+
+#: The gfx950 dense pack's one statement of the additive-bias index bound (inclusive).
+_CPP_MAX_BIAS_INDEX = re.compile(
+    r"constexpr int64_t MAX_BIAS_INDEX\s*=\s*std::numeric_limits<(\w+)>::max\(\);"
+)
+_INT_MAX = {"int32_t": 2**31 - 1}
+
+
+def _cpp_max_bias_index(text: str) -> int:
+    found = _CPP_MAX_BIAS_INDEX.findall(text)
+    assert len(found) == 1, f"expected one MAX_BIAS_INDEX definition, found {found}"
+    assert found[0] in _INT_MAX, f"MAX_BIAS_INDEX bound by {found[0]}"
+    return _INT_MAX[found[0]]
+
+
+def test_the_bias_index_bound_is_the_same_in_both_engines():
+    """rocKE's dense kernel indexes the additive bias in i32 and its host validators
+    refuse an element index at ADDITIVE_BIAS_INDEX_LIMIT (exclusive); the hipDNN
+    gfx950 dense pack refuses a bias graph by MAX_BIAS_INDEX (inclusive). Neither
+    side can import the other, so this reads both."""
+    manifest = enumerator.load_manifest(
+        str(_ROOT / "configs" / "gfx950_attention_dense.engine.yaml")
+    )
+    if not _ROCKE_LIBRARY.is_dir():
+        pytest.skip(f"rocKE library not in this checkout: {_ROCKE_LIBRARY}")
+    enumerator.bind_provider(manifest.get("provider_root"))
+    bias = importlib.import_module("kernels.common._attention_additive_bias")
+    text = _matcher_source(manifest).read_text()
+    assert _cpp_max_bias_index(text) == bias.ADDITIVE_BIAS_INDEX_LIMIT - 1
+
+
+def test_the_bias_bound_tie_reads_one_definition():
+    """The positive control: a changed width, a missing and a repeated definition
+    each fail rather than reading some other value."""
+    line = "constexpr int64_t MAX_BIAS_INDEX = std::numeric_limits<int32_t>::max();"
+    assert _cpp_max_bias_index(line) == 2**31 - 1
+    for text in (line.replace("int32_t>", "int64_t>"), "// none", line + "\n" + line):
+        with pytest.raises(AssertionError, match="MAX_BIAS_INDEX"):
+            _cpp_max_bias_index(text)
 
 
 def _hydration_failures(manifest: dict, specs: list) -> list:
@@ -876,6 +948,74 @@ def test_g7_catches_a_missing_accessor_and_a_disagreeing_value(
     assert any("no_such_accessor" in f for f in failures), failures
 
 
+_UNIFIED_2D = "hipkernel:Gfx942AttentionUnified2D"
+
+
+@pytest.mark.parametrize(
+    "manifest_path",
+    [_ROOT / "configs" / "gfx942_attention_unified_2d.engine.yaml"],
+    indirect=True,
+    ids=lambda p: p.name,
+)
+def test_g9_each_production_kernel_is_rockes_own_prefill_spec(
+    manifest, registry_config
+):
+    """The unified 2D catalog's production kernels (the mask limit on) are the spec rocKE's
+    `_tiled_spec_from_problem` builds for a long prefill of their (dtype, head size, GQA
+    ratio), field for field, so a rocKE default or builder change that moves the production
+    spec fails here instead of leaving the catalog on a stale stack. Every (dtype, head size,
+    ratio) cell has one. Not a comparison of cold selection: the sweep ranks them. Only the
+    gfx942 unified 2D manifest enumerates production stacks, so it is the one case."""
+    assert manifest["engine"]["name"] == _UNIFIED_2D
+    enumerator.bind_provider(manifest.get("provider_root"))
+    from kernels.common.attention_unified import (
+        UnifiedAttentionProblem,
+        _tiled_spec_from_problem,
+    )
+
+    kernels = [k for pack in registry_config["packs"] for k in pack["kernels"]]
+    production = [k for k in kernels if k["metadata"]["use_transposed_mask_limit"]]
+    cells = collections.Counter(
+        (
+            k["metadata"]["dtype"],
+            k["metadata"]["head_size"],
+            k["metadata"]["num_queries_per_kv"],
+        )
+        for k in production
+    )
+    assert cells == {
+        (dtype, head, ratio): 1
+        for dtype in ("BF16", "FP16")
+        for head in (64, 128)
+        for ratio in (1, 2, 4, 8, 16)
+    }, cells
+    for kernel in production:
+        spec = kernel["kernel_source"]["spec"]
+        problem = UnifiedAttentionProblem(
+            total_q=2048,
+            num_seqs=1,
+            num_query_heads=spec["num_query_heads"],
+            num_kv_heads=spec["num_kv_heads"],
+            head_size=spec["head_size"],
+            block_size=spec["block_size"],
+            max_seqlen_q=2048,
+            max_seqlen_k=4096,
+            dtype=spec["dtype"],
+            num_cus=304,
+            num_kv_blocks=256,
+        )
+        rocke = dataclasses.asdict(_tiled_spec_from_problem(problem, manifest["arch"]))
+        # num_seqs is neutral: the kernel reads the batch at run time.
+        moved = {
+            f: (v, rocke[f])
+            for f, v in spec.items()
+            if f != "num_seqs" and rocke[f] != v
+        }
+        assert (
+            not moved
+        ), f"{kernel['name']} differs from rocKE's production spec: {moved}"
+
+
 def _knob_clashes(features, knobs, kernels) -> list:
     """Names of the kernels sharing one engine-knob tuple inside one cell, per clash.
     `kernels` is `(metadata, name)` pairs."""
@@ -893,7 +1033,7 @@ def _knob_clashes(features, knobs, kernels) -> list:
 
 # Bundles whose whole enumeration is a catalog a sweep installs: every kernel a reduction
 # may keep must already page and load without a collision, before any is chosen.
-_SWEPT_WHOLE = frozenset({"gfx942_attention_dense"})
+_SWEPT_WHOLE = frozenset({"gfx942_attention_dense", "gfx942_attention_unified_2d"})
 
 
 @pytest.mark.parametrize("name", sorted(_SWEPT_WHOLE))

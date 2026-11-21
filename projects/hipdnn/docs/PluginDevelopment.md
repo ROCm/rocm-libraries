@@ -15,6 +15,7 @@
     - [Plugin SDK Knob Utilities](#plugin-sdk-knob-utilities)
     - [Registering Knobs with the Plugin SDK](#registering-knobs-with-the-plugin-sdk)
     - [Accessing Knob Settings in Your Plugin](#accessing-knob-settings-in-your-plugin)
+  - [Reporting Numerical Notes](#reporting-numerical-notes)
   - [Saving Execution Plans from Ingestor Engines](#saving-execution-plans-from-ingestor-engines)
 - [Plugin Architecture](#plugin-architecture)
 - [Plugin Loading](#plugin-loading)
@@ -433,6 +434,15 @@ When a knob is no longer needed, mark it as deprecated rather than removing it. 
 2. **Update documentation** to indicate the deprecation and recommend alternatives.
 
 3. **Remove only during major version updates** to maintain backward compatibility.
+
+### Reporting Numerical Notes
+
+An engine reports numerical notes through the `numerical_notes` list of its `EngineDetails` (values from `<hipdnn_plugin_sdk/NumericalNote.h>`, see [RFC 0025](./rfcs/0025_NumericalNotes.md)). A plugin that does not set the field is reported `HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC`, so deterministic selection skips its engines. A UED declares notes by the ten lowercase cuDNN names; see [RFC 0020](./rfcs/0020_UniversalEngineDescriptor.md) §9.
+
+- **Claim determinism with an explicit empty list.** Create the details with `CreateEngineDetails` or `CreateEngineDetailsDirect` and pass an empty vector. An empty list is a claim that no numerical note applies to the engine; make it only when a test proves bitwise-reproducible results across repeated runs of the same plan and inputs. Do not build the details with `EngineDetailsT::Pack`, which drops an empty list and so turns the claim into an absent field.
+- **List the notes that apply.** An engine that is not deterministic lists `HIPDNN_NUMERICAL_NOTE_NONDETERMINISTIC` and any precision note that applies.
+- **Omit the field when no test proves determinism.** Every engine defaults to `NONDETERMINISTIC`: results are not guaranteed bitwise reproducible.
+- **Make the claim per engine ID.** Notes describe the engine for the finalized graph passed to `GetEngineDetails`, not a plan or a knob setting.
 
 ### Saving Execution Plans from Ingestor Engines
 

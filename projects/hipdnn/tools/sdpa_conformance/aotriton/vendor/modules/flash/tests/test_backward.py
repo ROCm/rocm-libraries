@@ -41,7 +41,20 @@ from _core_test_common_mistakes import (
     COMMON_MISTAKES_CASES,
     COMMON_MISTAKES_DTYPES,
 )
-from _common_test import ALL_LAYOUTS, StorageLayout
+from _common_test import (
+    ALL_LAYOUTS,
+    StorageLayout,
+    FA_WINDOWS,
+    FA_WINDOW_IDS,
+    PD_CHOICES,
+    PD_CHOICE_IDS,
+    PD_DENSE_SEQLENS,
+    PD_DENSE_SEQLEN_IDS,
+    PD_WINDOW_IDS,
+    PD_WINDOW_VALUES,
+    fa_window_to_aotriton,
+    pd_causal,
+)
 
 if FOR_RELEASE >= 0:
     @pytest.mark.parametrize('BATCH', [3])
@@ -320,6 +333,57 @@ def test_nonpositive_sm_scale(request, gpu_id, BWDOP, BATCH, N_HEADS, D_HEAD, se
 def test_bottom_right_fully_masked_rows(gpu_id):
     with torch.cuda.device(gpu_id):
         core_test_bottom_right_fully_masked_rows(f'cuda:{gpu_id}')
+
+# VarlenBits::principal_diagonal_choice (p), dense calls. With p = 1 a numeric
+# window is measured from the bottom-right diagonal j = i + (seqlen_k -
+# seqlen_q), flash-attention's convention; with p = 0 it is measured from
+# j = i and every existing result is unchanged. Sentinels ignore p.
+#
+# The window rides in the `causal` slot as (left, right, p): see
+# aotriton_flash.split_principal_diagonal. The reference is built from the
+# predicate directly (_common_test.windowed_sdpa_math), not from the kernel's
+# resolver, and a query row that keeps no key must give O = 0 (its LSE is a
+# placeholder and is not compared).
+#
+# Ungated (level 0), moderate on purpose: 4 shape relations x 5 windows x 2
+# choices x 2 dtypes. The BWD_IMPL == 'aiter' ASM backend has no window
+# support exposed here, so it takes none of these.
+#
+# Select with `-k principal_diagonal`; `-k PD1` for the bottom-right ones,
+# `-k Decode` for seqlen_q = 1, `-k FA_` for the flash-attention windows.
+if BWD_IMPL != 'aiter':
+    @pytest.mark.parametrize('BATCH', [2])
+    @pytest.mark.parametrize('N_HEADS', [3, (4, 2)], ids=fmt_nheads)
+    @pytest.mark.parametrize('D_HEAD', [64], ids=fmt_hdim)
+    @pytest.mark.parametrize('seqlen_q,seqlen_k', PD_DENSE_SEQLENS, ids=PD_DENSE_SEQLEN_IDS)
+    @pytest.mark.parametrize('window', PD_WINDOW_VALUES, ids=PD_WINDOW_IDS)
+    @pytest.mark.parametrize('principal_diagonal', PD_CHOICES, ids=PD_CHOICE_IDS)
+    @pytest.mark.parametrize('dtype', [torch.float16, torch.bfloat16])
+    @pytest.mark.parametrize('BWDOP', BWDOP_ids)
+    def test_principal_diagonal(request, gpu_id, BWDOP, BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k,
+                                window, principal_diagonal, dtype):
+        causal = pd_causal(window, principal_diagonal)
+        args = (BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, causal, 'l1', 0.0, dtype, False, None)
+        core_test_op_bwd(request, args, device=gpu_id)
+
+    # PyTorch's test_varlen_attention.py windows, translated by the "Matching
+    # flash-attention" table with p = 1. seqlen_q != seqlen_k throughout, which
+    # is where a wrong diagonal shows. max_seqlen_q is seqlen_q for a dense call.
+    @pytest.mark.parametrize('BATCH', [2])
+    @pytest.mark.parametrize('N_HEADS', [3], ids=fmt_nheads)
+    @pytest.mark.parametrize('D_HEAD', [64], ids=fmt_hdim)
+    @pytest.mark.parametrize('seqlen_q,seqlen_k', [PD_DENSE_SEQLENS[0], PD_DENSE_SEQLENS[2]],
+                             ids=[PD_DENSE_SEQLEN_IDS[0], PD_DENSE_SEQLEN_IDS[2]])
+    @pytest.mark.parametrize('fa_window', FA_WINDOWS, ids=FA_WINDOW_IDS)
+    @pytest.mark.parametrize('dtype', [torch.float16])
+    @pytest.mark.parametrize('BWDOP', BWDOP_ids)
+    def test_principal_diagonal_fa_windows(request, gpu_id, BWDOP, BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k,
+                                           fa_window, dtype):
+        window = fa_window_to_aotriton(fa_window[0], fa_window[1], seqlen_q)
+        assert window is not None  # None only for (-1, -1), which FA_WINDOWS does not contain
+        causal = pd_causal(window, 1)
+        args = (BATCH, N_HEADS, D_HEAD, seqlen_q, seqlen_k, causal, 'l1', 0.0, dtype, False, None)
+        core_test_op_bwd(request, args, device=gpu_id)
 
 if FOR_RELEASE >= 0:
     # The forward's precision as a function of `sm_scale`. See

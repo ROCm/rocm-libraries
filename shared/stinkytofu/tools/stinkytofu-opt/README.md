@@ -64,8 +64,8 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 **Options:**
 - `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
 - `--remarks`: Enable optimization remarks on stderr (e.g. loop region diagnostics)
-- `--tensor-load-wmma-space=<int>`: Scheduler tuning knob for tensor-load/WMMA spacing (`TensorLoadWmmaSpace`). `0` disables this adjustment; values `> 0` apply the CDNA5 barrier-threshold offset.
-- `--tensor-load-ds-load-gap-cycles=<int>`: Extra cycles between an after-barrier and the before-side ds_loads on gap placement (`TensorLoadDsLoadGapCycles`). Default `64`; `0` disables the extra gap.
+- `--tensor-load-wmma-space=<int>`: Scheduler tuning knob for tensor-load/WMMA spacing (`TensorLoadWmmaSpace`). In individual-pass mode (no `-O`) the flag writes `dagFeatures` directly; without it the value stays the `Types.hpp` default 0, and the scheduling policy does not run. A value `> 0` is the barrier-threshold offset. `0` is not applied and falls back to `CDNA5Config::tensorLoadWmmaSpace` (0), so the thresholds stay unshifted. Under `-O` this flag is not forwarded into `ModuleOptions`; an unset knob resolves to the policy (6 when the main loop has WMMA and ds_load counts, else 0).
+- `--tensor-load-ds-load-gap-cycles=<int>`: Extra cycles between an after-barrier and the before-side ds_loads on gap placement (`TensorLoadDsLoadGapCycles`). In individual-pass mode an absent flag leaves 64, and `0` disables the extra gap. Under `-O` the flag is not forwarded; an unset knob resolves to 64.
 - `--time-passes`: Report per-pass wall time on stderr (self / total / runs, slowest first)
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information

@@ -297,6 +297,108 @@ int rocke_i_type_bits(const rocke_type_t* t)
     return rocke_require_dtype_info(t->name)->encoded_bits;
 }
 
+/* Mirrors core/ir.py::type_bytes; the refusal text is the Python engine's. */
+int rocke_i_type_bytes(const rocke_type_t* t)
+{
+    const int bits = rocke_i_type_bits(t);
+    if(bits % 8 != 0)
+    {
+        throw ckc::ValueError(ckc::format_error(
+            "type_bytes failed - type=%s (%d bits), expected a whole number of bytes",
+            t->name,
+            bits));
+    }
+    return bits / 8;
+}
+
+/* Python type(value).__name__ for an attribute value that is not an int. */
+static const char* rocke_attr_kind_name(const rocke_attr_value_t* attr)
+{
+    switch(attr->kind)
+    {
+    case ROCKE_ATTR_FLOAT:
+        return "float";
+    case ROCKE_ATTR_STR:
+        return "str";
+    case ROCKE_ATTR_BOOL:
+        return "bool";
+    default:
+        return "list";
+    }
+}
+
+/* Mirrors core/ir.py::vector_access_align. */
+int64_t rocke_i_vector_access_align(int64_t lanes, const rocke_type_t* elem)
+{
+    const int64_t elem_bytes = rocke_i_type_bytes(elem);
+    const int64_t width = lanes * elem_bytes;
+    return (width & (width - 1)) == 0 ? width : elem_bytes;
+}
+
+/* Mirrors core/ir.py::smem_vector_access_align. */
+int64_t rocke_i_smem_vector_access_align(const rocke_type_t* smem_type,
+                                         int64_t lanes,
+                                         const rocke_type_t* elem)
+{
+    const int64_t natural = rocke_i_vector_access_align(lanes, elem);
+    const int64_t innermost = (smem_type != NULL && smem_type->shape != NULL && smem_type->rank > 0)
+                                  ? smem_type->shape[smem_type->rank - 1]
+                                  : 0;
+    if(innermost <= 0)
+    {
+        return natural;
+    }
+    int64_t row_start_elems = lanes; /* gcd(lanes, innermost), as Python math.gcd */
+    int64_t remainder = innermost;
+    while(remainder != 0)
+    {
+        const int64_t next = row_start_elems % remainder;
+        row_start_elems = remainder;
+        remainder = next;
+    }
+    const int64_t row_bound = row_start_elems * rocke_i_type_bytes(elem);
+    return natural < row_bound ? natural : row_bound;
+}
+
+/* Mirrors the value rule of core/ir.py::_checked_align. */
+bool rocke_i_is_valid_align(int64_t align)
+{
+    return align > 0 && (align & (align - 1)) == 0;
+}
+
+/* Mirrors core/ir.py::align_attr (0 stands for its None); the refusal texts are
+ * the Python engine's. */
+int64_t rocke_i_align_attr(const rocke_op_t* op)
+{
+    const rocke_attr_value_t* attr = rocke_attr_get(&op->attrs, "align");
+    if(!attr)
+    {
+        return 0;
+    }
+    /* A non-integer align (a bool, a float, ...) is refused, never read as
+     * missing. */
+    if(attr->kind != ROCKE_ATTR_INT)
+    {
+        throw ckc::TypeError(ckc::format_error("%s failed - align=%s, expected an integer",
+                                               rocke_opcode_name(op->opcode),
+                                               rocke_attr_kind_name(attr)));
+    }
+    const int64_t align = attr->u.i;
+    if(!rocke_i_is_valid_align(align))
+    {
+        throw ckc::ValueError(ckc::format_error(
+            ROCKE_I_ALIGN_NOT_POWER_OF_TWO_FMT, rocke_opcode_name(op->opcode), (long long)align));
+    }
+    return align;
+}
+
+/* Mirrors core/ir.py::claimed_align. */
+int64_t rocke_i_claimed_align(const rocke_op_t* op, int64_t lanes, const rocke_type_t* elem)
+{
+    const int64_t align = rocke_i_align_attr(op);
+    return align != 0 ? align : rocke_i_vector_access_align(lanes, elem);
+}
+
 /* Python core/ir.py::_buffer_access_bytes; the texts are the Python engine's. */
 int rocke_i_buffer_access_bytes(
     const char* op_name, const rocke_type_t* elem, int count, char* err, size_t err_cap)
@@ -487,6 +589,39 @@ const char* rocke_i_global_ptr_to_i64_op_error(const rocke_op_t* op, char* buf, 
         return buf;
     }
     return rocke_i_global_ptr_to_i64_error(op->operands[0]->type, op->results[0]->type, buf, cap);
+}
+
+/* Python core/ir.py::_ldexp_types_error; the text is the Python engine's. */
+const char* rocke_i_ldexp_types_error(const rocke_type_t* value_type,
+                                      const rocke_type_t* exponent_type,
+                                      const rocke_type_t* result_type,
+                                      char* buf,
+                                      size_t cap)
+{
+    if(!rocke_type_eq(value_type, rocke_f32()) || !rocke_type_eq(exponent_type, rocke_i32())
+       || !rocke_type_eq(result_type, rocke_f32()))
+    {
+        snprintf(buf,
+                 cap,
+                 "ldexp takes an f32 value and an i32 exponent and gives an f32, got %s, %s -> %s",
+                 value_type->name,
+                 exponent_type->name,
+                 result_type->name);
+        return buf;
+    }
+    return NULL;
+}
+
+/* Python core/ir.py::_ldexp_op_error; the texts are the Python engine's. */
+const char* rocke_i_ldexp_op_error(const rocke_op_t* op, char* buf, size_t cap)
+{
+    if(op->num_operands != 2 || op->num_results != 1 || op->num_regions != 0)
+    {
+        snprintf(buf, cap, "ldexp takes two operands and gives one result");
+        return buf;
+    }
+    return rocke_i_ldexp_types_error(
+        op->operands[0]->type, op->operands[1]->type, op->results[0]->type, buf, cap);
 }
 
 /* Python core/ir.py::_trap_op_error; the text is the Python engine's. */
@@ -864,6 +999,16 @@ const char* rocke_i_reused_loop_name_message(const char* name, char* buf, size_t
     return buf;
 }
 
+const char* rocke_i_untyped_loop_value_message(const char* name, char* buf, size_t cap)
+{
+    snprintf(buf,
+             cap,
+             "scf.for: the loop value '%s' has no type name; its iv_type attr or iter_args entry "
+             "must name its type",
+             name);
+    return buf;
+}
+
 int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out)
 {
     int count = 0;
@@ -875,7 +1020,7 @@ int rocke_i_scf_for_value_names(const rocke_op_t* loop, const char** out)
         ++count;
     }
     const rocke_attr_value_t* meta = rocke_attr_get(&loop->attrs, "iter_args");
-    if(!meta || meta->kind != ROCKE_ATTR_LIST)
+    if(!rocke_i_attr_is_list(meta))
         return count;
     for(int i = 0; i < meta->u.list.count; ++i)
     {
@@ -923,8 +1068,6 @@ const char* rocke_i_scf_for_carried_descriptor_error(const rocke_op_t* op, char*
         if(rocke_i_is_buffer_descriptor(op->operands[i]))
             return rocke_i_loop_carried_descriptor_message(i - 3, buf, cap);
     }
-    if(op->num_regions < 1 || !op->regions[0])
-        return NULL;
     {
         const rocke_region_t* body = op->regions[0];
         int k;
@@ -1333,7 +1476,10 @@ static const char* const rocke_opcode_names[ROCKE_OP__COUNT] = {
     "tile.global_addr_of",
 
     /* tile.* buffer f32 atomic add with a cache policy */
-    "tile.buffer_atomic_fadd_f32"};
+    "tile.buffer_atomic_fadd_f32",
+
+    /* math.* value * 2^exponent */
+    "math.ldexp"};
 
 const char* rocke_opcode_name(rocke_opcode_t op)
 {
@@ -1635,7 +1781,10 @@ static const bool rocke_opcode_pure[ROCKE_OP__COUNT] = {
     /* tile.global_addr_of        */ true,
 
     /* tile.* buffer f32 atomic add (effectful) */
-    /* buffer_atomic_fadd_f32     */ false};
+    /* buffer_atomic_fadd_f32     */ false,
+
+    /* math.* value * 2^exponent */
+    /* math.ldexp                 */ true};
 
 bool rocke_opcode_is_pure(rocke_opcode_t op)
 {

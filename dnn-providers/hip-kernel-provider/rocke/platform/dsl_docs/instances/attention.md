@@ -10,8 +10,11 @@ Production tiled matrix-core, paged-KV decode:
 - `library/kernels/gfx950/attention_tiled_2d.py`, `library/kernels/gfx942/attention_tiled_2d.py`, `library/kernels/gfx1250/attention_tiled_2d.py`
 - `library/kernels/gfx950/attention_tiled_3d.py`, `library/kernels/gfx942/attention_tiled_3d.py`, `library/kernels/gfx1250/attention_tiled_3d.py`
 - `library/kernels/gfx950/attention_tiled_2d_fastkv_regp.py` -- fast paged-KV + register-resident P (gfx950)
-- `library/kernels/gfx950/attention_dense.py` -- dense (non-paged) flash prefill; block orders and
-  grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md)
+- `library/kernels/gfx950/attention_dense.py` -- dense flash prefill (contiguous or paged K/V); block orders and
+  grid choice: [case study](../architecture/attention_thread_block_mapping_case_study.md).
+  Optional fp8 e4m3 (OCP) K/V (`kv_storage_dtype="fp8e4m3"`) with per-tensor `k_scale` /
+  `v_scale`, dequantized on load into the bf16/fp16 compute path; default-order grid body
+  only, aligned contiguous (non-paged) KV, no sinks
 - `library/kernels/common/fmha_mfma.py` (unified MFMA/WMMA forward, MFMA on CDNA / WMMA on RDNA).
   Opt-in `FmhaMfmaSpec.free_stride` adds per-tensor batch strides and rebases Q/K/V/O per batch
   (`global_ptr_add`), so one kernel reads BSHD, BHSD, general strides and packed QKV. Default off and
@@ -35,7 +38,10 @@ RDNA / gfx1250 WMMA forward:
   (one query row per lane, transposed S/PV, shared padded LDS K/V; runtime shapes,
   head counts incl. a separate V head count, head widths, masks and bias strides;
   baked features: softcap, attention sinks, ALiBi, QQ-bias, OCP E4M3FN K/V, ragged and
-  paged (power-of-two page) layouts; body in `platform/python/rocke/helpers/rdna_attention.py`)
+  paged (power-of-two page; separate K and V block tables, which may be one table) layouts,
+  a batch-strided Q against a paged cache (`dense_q`)
+  and per-sequence live query counts (`seqused_q`); body in
+  `platform/python/rocke/helpers/rdna_attention.py`)
 - `library/kernels/gfx1151/wmma_fmha_decode.py` -- gfx11 / gfx12 split-KV, GQA-packed WMMA
   decode (Sq up to a few 16-row tiles: decode, speculative decode, cross attention); runtime
   split count with a fused or separate merge (`build_wmma_fmha_decode_module` ships decode +
@@ -129,6 +135,48 @@ on-GPU numeric lane
 [test_attention_additive_bias_gfx950_numeric.py](../../../library/tests/test_attention_additive_bias_gfx950_numeric.py)
 rather than the parity scenario set above; knob semantics are in the
 [builders/common Knob reference](../../../library/builders/common/README.md#knob-reference).
+
+The gfx950 dense kernel (`Gfx950AttentionDenseSpec.use_additive_bias`) takes the
+same bias and ABI tail on its grid body (not persistent, not paged). It composes
+with every mask (the numeric lane runs none, top-left, bottom-right and the sliding
+window; lookahead is covered by host tests only), ragged lengths, varlen (indexed
+by in-sequence position), sinks and LSE.
+Its bias-on body scales each score into the log2 domain right after the QK MFMA
+(`s * qk_scale + bias * log2e`) instead of folding the scale into the row max and
+the exp2 FMA, which a per-key term would break; the bias-off IR is unchanged. Its
+semantics differ from the unified kernels' (knob reference above): the bias is
+added before the mask and raised to at least -2**97 (`-inf` and NaN pass through), and
+a row with no unmasked key writes zeros (see the [prefill builder README](../../../library/builders/gfx950/attention/prefill/README.md)).
+Numerics: [test_attention_dense_bias_gfx950_numeric.py](../../../library/tests/test_attention_dense_bias_gfx950_numeric.py)
+(needs torch) and its torch-free subset
+[test_attention_dense_bias_gfx950_gpu.py](../../../library/tests/test_attention_dense_bias_gfx950_gpu.py),
+which the CI GPU lane runs; four bias-on cases (including the windowed start-tile
+clamp) pin its IR in the representative golden. The hipDNN engine `hipkernel:Gfx950AttentionDense` serves an fp32
+`attn_mask` through its `use_additive_bias` variants (128/64 tile).
+
+The gfx942 dense kernel (`Gfx942AttentionDenseSpec.use_additive_bias`) takes the same
+bias and ABI tail on both its grids (default and persistent). It has no ragged or
+varlen body, so every row and key it visits lies inside the bias; it composes with
+every mask it serves (none, top-left, bottom-right, sliding window), sinks and LSE.
+It refuses the KV-segment split (the segment store skips the bias epilogue), the
+`lds_num_buffers=2` / `v_reg_prefetch=True` K/V pipeline (the bias load queues behind
+the next tile's loads) and paged K/V. Its scores are already in the log2 domain when
+the bias-on code adds the bias times log2e (a finite value raised to at least -2**97;
+`-inf` and NaN pass through), ahead of the mask, so unlike the gfx950 body it does not
+rescale them; the bias-off IR is unchanged. Semantics are the gfx950 dense kernel's
+(`-inf` masks a key, a finite value such as `finfo(float32).min` is an ordinary score,
+a NaN on a visible key makes its row NaN, a row with no unmasked key writes zeros).
+`use_bias_x4` chooses 4-wide or scalar bias loads; the policy
+(`_use_bias_x4`) picks 4-wide loads for every bias body (measured ahead of or level with
+the scalar form on every compiler generation checked), and the name tags only an explicit
+value that differs from it. Tests: the host contract
+[test_attention_dense_bias_gfx942.py](../../../library/tests/test_attention_dense_bias_gfx942.py)
+(CPU lane), the numerics
+[test_attention_dense_bias_gfx942_numeric.py](../../../library/tests/test_attention_dense_bias_gfx942_numeric.py)
+(needs torch) and its torch-free subset
+[test_attention_dense_bias_gfx942_gpu.py](../../../library/tests/test_attention_dense_bias_gfx942_gpu.py),
+which the CI GPU lane runs; bias-on cases pin its IR in the representative golden
+(see the [prefill builder README](../../../library/builders/gfx942/attention/prefill/README.md)).
 
 bf16 attention uses the `mfma_f32_16x16x16_bf16` op via the `_1k` LLVM variant (with `<4 x i16>` operands; the plain `bf16.16x16x16` intrinsic does not exist on this target).
 
