@@ -3066,6 +3066,34 @@ TEST(TestConvIgemmCatalog, FlexWideRegisterTileRunsUnsplitOnGridsOfFewerTilesTha
     EXPECT_EQ(checked, 2);
 }
 
+TEST(TestConvIgemmCatalog, FlexWideRegisterTileKeepsBothPlansInBackwardData)
+{
+    // Backward data of 512 into 256 channels over 200 x 256 rows on 400 units: the default plan
+    // splits and stays served, and so does its no-split twin.
+    auto wide = dense(256, 512, {5, 40, 256}, {3, 3, 3}, {1, 1, 1}, true);
+    wide.n = 1;
+    wide.dataType = DataType::HALF;
+    const auto pack = packFor(ConvDirection::BACKWARD_DATA);
+    const GraphFixture fixture(buildGraph(specFor(wide, ConvDirection::BACKWARD_DATA)),
+                               deviceOf("gfx942:sramecc+:xnack-", 400));
+    const auto bound = matchesGraph(pack, fixture.context());
+    ASSERT_TRUE(bound.has_value());
+    int checked = 0;
+    for(const auto& kernel : catalog(ConvDirection::BACKWARD_DATA))
+    {
+        const auto policy = kernel.getIntMetadata("split_policy");
+        if(kernel.getIntMetadata("flex") == 0 || kernel.getIntMetadata("bn") != 256
+           || kernel.getStringMetadata("atom") != "mfma16_f16" || policy > 1)
+        {
+            continue;
+        }
+        SCOPED_TRACE(policy);
+        ++checked;
+        EXPECT_TRUE(matchesKernel(pack, fixture.context(), kernel, *bound));
+    }
+    EXPECT_EQ(checked, 2);
+}
+
 TEST(TestConvIgemmCatalog, FlexConfigsAreGfx950OrGfx942TilesThatDeclineEveryOtherKnob)
 {
     auto shape = dense(32, 48, {5, 6, 7}, {3, 3, 3}, {1, 1, 1}, true);
