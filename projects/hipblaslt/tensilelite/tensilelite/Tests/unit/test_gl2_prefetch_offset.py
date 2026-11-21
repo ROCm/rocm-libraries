@@ -1457,8 +1457,9 @@ def _cover_kwa_gl2_hooks(cfg):
     w.states.mxsa = SimpleNamespace()
     w.states.mxsb = SimpleNamespace()
     w.states.m = SimpleNamespace()
-    w.states.rapDropAResidentLoads = False
-    for name in ("allocGL2PrefetchAddrVgprs", "gl2PrefetchClearIncrement", "gl2PrefetchTpList"):
+    w.states.rapDropResidentLoads = False
+    for name in ("allocGL2PrefetchAddrVgprs", "gl2PrefetchClearIncrement", "gl2PrefetchTpList",
+                 "rapSkipsResidentLoads"):
         setattr(w, name, types.MethodType(getattr(KWA, name), w))
 
     # Odd start: a 64-bit vaddr rounds up to an even VGPR, a 32-bit saddr offset does not.
