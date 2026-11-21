@@ -111,6 +111,10 @@ void copyReshapePermutationBytes(const std::byte* input, std::byte* output, size
 // std::runtime_error is thrown. Padding is left untouched, so the caller can
 // initialize it to any value before copying. The output has last-dimension-fastest
 // storage in the permuted factor order.
+// A copy that rearranges elements gives each OpenMP thread at least 4096 of
+// them, using up to 8 threads, or up to the OpenMP thread count when
+// OMP_NUM_THREADS is set. A call made inside an OpenMP parallel region runs on
+// the calling thread. The result does not depend on the thread count.
 //
 //   fill output with the chosen padding value
 //   for each natural index i:
