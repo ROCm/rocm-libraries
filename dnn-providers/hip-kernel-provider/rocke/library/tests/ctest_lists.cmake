@@ -425,6 +425,15 @@ string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "  ENVIRONMENT \"\${_rocke_library_mla_pytest_environment}\"\n"
        "  TIMEOUT ${ROCKE_TEST_TIMEOUT_TOOLCHAIN})\n")
 
+# The builder-surface contract: every builder another project names still
+# imports, takes (spec, *, arch) and carries its required fields.
+string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+       "add_test(rocke_contracts_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/contracts/test_builder_surface.py\" -v -rs --timeout=60)\n"
+       "set_tests_properties(rocke_contracts_pytest PROPERTIES\n"
+       "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
+       "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_LIBRARY_PYTHONPATH}\"\n"
+       "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
        "add_test(rocke_reference_common_pytest ${_ROCKE_INSTALLED_PYTEST} \"${ROCKE_TEST_CTEST_REL}tests/library/tests/test_reference_common.py\" -v -rs --timeout=30)\n")
 string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

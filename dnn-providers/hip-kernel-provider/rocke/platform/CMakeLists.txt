@@ -573,6 +573,26 @@ if(ROCKE_INSTALL_TESTS)
               "rocKE: top-level run_checks.py not found; skipping its test-only install")
     endif()
 
+    # The per-entry time check judges the installed registration against the CI
+    # shard budgets, from the entry times recorded beside it. Staged with the
+    # other test tools when the top-level tools/ sibling exists; the entry that
+    # runs it is registered below on the same condition.
+    # The golden tool and its index: tests/tools/test_golden_tool.py checks the
+    # installed tree's goldens with them.
+    set(_ROCKE_GOLDEN_TOOL "${CMAKE_CURRENT_SOURCE_DIR}/../tools/golden.py")
+    if(EXISTS "${_ROCKE_GOLDEN_TOOL}")
+      install(FILES "${_ROCKE_GOLDEN_TOOL}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/golden_index.py"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
+    endif()
+
+    set(_ROCKE_ENTRY_TIME_CHECK "${CMAKE_CURRENT_SOURCE_DIR}/../tools/check_entry_times.py")
+    if(EXISTS "${_ROCKE_ENTRY_TIME_CHECK}")
+      install(FILES "${_ROCKE_ENTRY_TIME_CHECK}"
+                    "${CMAKE_CURRENT_SOURCE_DIR}/../tools/entry_times.json"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests/tools")
+    endif()
+
     # Test-only implementation shared by the installed support-policy units and
     # arch-domain reproduction gate. Keep it outside the production package:
     # CTest owns the compiler sweep; pytest checks the policy without one.
@@ -665,6 +685,17 @@ if(ROCKE_INSTALL_TESTS)
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n"
            "${_rocke_barrier_parity_entries}")
 
+    # Would every entry of this registration fit its CI shard budget? Run
+    # from the CTest directory, the check lists the registration there.
+    if(EXISTS "${_ROCKE_ENTRY_TIME_CHECK}")
+      string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+             "add_test(rocke_entry_time_check python \"${ROCKE_TEST_CTEST_REL}tests/tools/check_entry_times.py\" check --ctest-dir .)\n"
+             "set_tests_properties(rocke_entry_time_check PROPERTIES\n"
+             "  LABELS \"ckc\\;python\\;host\\;quick\"\n"
+             "  ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\"\n"
+             "  TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
+    endif()
+
     # Compiler tool locations for Python entries that compile and disassemble
     # kernels: hipcc in ROCm's bin/, llvm-objdump and llvm-readelf in its
     # lib/llvm/bin/ (neither is on the CI image's PATH), and the device-library
@@ -716,7 +747,7 @@ if(ROCKE_INSTALL_TESTS)
     # checks all of them) and canonical IR. tests/instances/differential/golden/README.md.
     set(_ROCKE_RUN_DIFF "${ROCKE_TEST_CTEST_REL}tests/instances/differential/run_diff.py")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor llvm20,llvm22,llvm23,llvm24)\n")
+           "add_test(rocke_differential_golden_ll python \"${_ROCKE_RUN_DIFF}\" --mode ll --python-only --check-golden --flavor all)\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_differential_golden_ll PROPERTIES LABELS \"ckc;python;golden;host;quick\" ENVIRONMENT \"PYTHONPATH=${_ROCKE_INSTALLED_PYTHONPATH}\" TIMEOUT ${ROCKE_TEST_TIMEOUT_CPU})\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES

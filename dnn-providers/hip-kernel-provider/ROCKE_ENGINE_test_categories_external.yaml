@@ -162,6 +162,8 @@ test_categories:
       - "rocke_differential_golden_canonical"
       - "rocke_oracle_free_pytest"
       - "rocke_library_dsa_pytest"
+      - "rocke_contracts_pytest"
+      - "rocke_entry_time_check"
       - "rocke_reference_common_pytest"
       - "rocke_[a-z0-9_]+_reference_unit_pytest"
       - "rocke_[a-z0-9_]+_gpu_gfx[0-9a-z]+_pytest"
