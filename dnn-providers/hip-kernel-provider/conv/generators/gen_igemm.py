@@ -751,7 +751,7 @@ def kernels_for(catalog, direction, tag, priority=1000):
         # Forward's 16-bit 256 x 256 register-staged tile on 64-byte steps (32 channels): a
         # third fewer operand bytes per MMA than 256 x 128, for wide-channel layers over few
         # positions. (fp32's 16x16x4 form of it spills.)
-        if catalog is CATALOG and dtype in ("HALF", "BFLOAT16") and tag == "fwd":
+        if catalog is CATALOG and dtype in ("HALF", "BFLOAT16"):
             atom, eb = FLEX_REG_ATOMS[dtype]
             cfgs += withSplitPolicy(
                 [C(atom, 256, 256, 64 // eb, 4, 2, vec=16 // eb, xcd=1, flex=1)]
