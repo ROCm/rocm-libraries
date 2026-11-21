@@ -17,6 +17,10 @@ rocBLAS documentation is available at
 * `rocblas_clients_readme.txt` is installed under the rocBLAS data directory (`share/rocblas`) instead of `bin`.
 * A failed device-memory free in `rocblas_device_malloc` now prints the status to `stderr`.
 
+### Optimized
+
+* Improved the performance of Level 2 transposed `gemv` (`TransA != N`) when `n` fits in the launch grid. The fix for a large `n` walks several columns from each block, and that kernel was used for every `n`, including problems where each column already has its own block. Those problems now use the original single-column kernel again. The striding kernel is still used when the clamped grid cannot cover `n`.
+
 ### Resolved issues
 
 * Fix wrong results from `gemm_strided_batched_ex` when `batch_count > 1` and a batch stride is 2^32 elements or more (for example `int8` with `m = n = 65536` and `stride_c = m * n`). Tensile and hipBLASLt kernels receive batch strides as 32-bit values, so every batch after the first was read from or written to the wrong place while the call returned `rocblas_status_success`. Such problems are now issued one batch at a time.
@@ -30,6 +34,9 @@ rocBLAS documentation is available at
 * Fix a crash on Windows when rocBLAS cannot find its Tensile library file and the deployment directory name contains a regex escape, such as `x-deploy`. The diagnostic that lists the library files built a `std::regex` from that path and threw `std::regex_error` instead of returning a status. Library filenames are now matched directly, and a missing directory no longer throws from the diagnostic itself.
 * Fix the rocBLAS library build on Python 3.12 when setuptools is not installed. `library/src/merge_archives.py` imported `distutils.spawn`, which that Python release removed from the standard library, so the archive merge step failed before parsing its arguments. The script now locates `ar` with `shutil.which`.
 * Fix Level 3 `trsm`, including batched and strided-batched forms, returning `rocblas_status_success` when an internal kernel launch fails, for example with `hipErrorInvalidKernelFile` when rocBLAS cannot load its own device code. `B` was left unchanged or partly updated. The left-side `n` = 1 path discarded the status of the internal `trsv` substitution, and the blocked solver for large problems discarded the status of its `gemm_ex` updates; both now return it.
+* Fix incorrect results from pointer-batched Level 3 `gemm` and `gemm_ex` (`gemm_batched`, `gemm_batched_ex`) when a leading dimension and `k` are large enough that a column offset overflows a signed 32-bit value inside Tensile or hipBLASLt. Non-batched and strided-batched GEMM already split `k` to stay under that limit. The pointer-batched path issued the whole `k` in one launch. It now uses the same split, and chunks after the first accumulate into `D` with `beta = 1`.
+* Fix Level 3 `dgmm`, including batched and strided-batched forms, failing its kernel launch on gfx942 when `n` or `batch_count` exceeds the 16-bit grid limit (65535). The gfx942 kernel, used for `f32_r` and for `f64_r` and `f32_c` above an `m` threshold, launched with `grid.y = (n - 1) / 32 + 1` and `grid.z = batch_count`. HIP rejects a Y or Z dimension above 65535, so `n` above 2,097,120 or `batch_count` above 65535 never ran. Both dimensions are now capped, and the kernel strides the remaining rows and batches. The general `dgmm` kernel already did this.
+* Fix the hipBLASLt backend treating a workspace as almost unlimited when the extra allocation a solution needs is larger than the workspace still available on the handle. The limit passed to the heuristic was `available - extra`, and that subtraction wrapped. The heuristic could then select an algorithm the workspace cannot hold. The call now returns `rocblas_status_memory_error`, or `rocblas_status_invalid_value` when querying solutions.
 
 ## rocBLAS 5.8.0 for ROCm 10.2.0
 
